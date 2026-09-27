@@ -95,6 +95,8 @@ import { seededRng } from "$lib/sky.js";
  * @property {?string} mediaType  the raw stored kind, e.g. "application/pdf"
  * @property {boolean} ready      whether the content can be read at all yet
  * @property {?string} deleteAfter  "9 September 2026", when the file is on the clock
+ * @property {boolean} [staged]   a suggestion's paper (#1145): staged with the mail,
+ *                                attached on acceptance; no page and no download yet
  */
 
 /**
@@ -125,6 +127,8 @@ import { seededRng } from "$lib/sky.js";
  * @property {number[]}   remind
  * @property {BeltDoc[]}  docs
  * @property {ItemRecord} item         the raw record the commands write against
+ * @property {?object}    [suggestion] set on a mail-in suggestion's seat (#1145): the
+ *                                     receipt's own view, which the card's form reads
  */
 
 /**
@@ -622,7 +626,10 @@ export function bodiesOf(manifest, gapScale, { pocket = false } = {}) {
     bodies.push({
       kind: "item", id: row.id, item: row, itemIdx: i, off: itemOff[i],
       label: row.title, sub: `${row.t} · ${row.when}`,
-      tone: BAND_VAR[row.urg] ?? BAND_VAR.ok, urg: row.urg, days: row.days,
+      /* #1145: a suggestion's seat wears the accent, the tone of "not yet
+         accepted" on the dial and the manifest (CON-3's hollow body), never
+         an urgency -- nothing is owed on a thing that is not in orbit. */
+      tone: row.suggestion ? "var(--accent)" : (BAND_VAR[row.urg] ?? BAND_VAR.ok), urg: row.urg, days: row.days,
       r: pocket ? POCKET_R_ITEM : R_ITEM, sweep: pocket ? POCKET_SWEEP : SWEEP,
       seed: ROCK_SEED + i * ROCK_STEP,
       t: row.t, when: row.when, longWhen: row.longWhen,

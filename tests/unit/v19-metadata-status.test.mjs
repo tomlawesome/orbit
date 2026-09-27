@@ -24,7 +24,9 @@ import {
 
 const read = (path) => readFileSync(new URL(`../../web/src/${path}`, import.meta.url), "utf8");
 const ITEM_PAGE = read("routes/item/[[id]]/+page.svelte");
-const SUGGESTION = read("routes/item/[[id]]/Suggestion.svelte");
+/* #1145: the suggestion's card rides in the belt now, so its amend-then-accept
+   rules are the item page's own (the separate Suggestion.svelte retired). */
+const SUGGESTION = ITEM_PAGE;
 const INBOX = read("routes/inbox/+page.svelte");
 const ADMINISTRATION = read("routes/administration/+page.svelte");
 const HOME_DETAIL = read("routes/home/ItemView.svelte");
@@ -181,12 +183,12 @@ describe("the mail-in review surfaces", () => {
   it("leaves a damaged message every action, because re-forwarding is a real repair", () => {
     // `locked()` alone gates the two removals above, so damaged keeps them.
     expect(INBOX).toContain('fieldState(receipt.metadataStatus, "proposal") === LOCKED');
-    expect(SUGGESTION).toContain("disabled={busy || proposalLocked || !sform.title.trim()}");
+    expect(SUGGESTION).toContain("disabled={acceptBusy || proposalLocked || !sform.title.trim()}");
   });
 
   it("suppresses the READ marks when their evidence is damaged", () => {
     expect(INBOX).toContain("if (!evidenceReadable(receipt.metadataStatus)) return null;");
-    expect(SUGGESTION).toContain("const marked = (field) => evidenceShown && Boolean(item?.fieldEvidence?.[field]);");
+    expect(SUGGESTION).toContain("const marked = (field) => evidenceShown && Boolean(seatedSuggestion?.fieldEvidence?.[field]);");
   });
 });
 

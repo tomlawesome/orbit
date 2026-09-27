@@ -6,10 +6,14 @@
   import { mountTiledSky } from "$lib/sky.js";
   import { every, longDate, money, shortDate } from "$lib/format.js";
   import Chrome from "$lib/Chrome.svelte";
-  import { WorkspaceError, applyCommand, removeDocument, restoreDocument } from "$lib/data/workspace.js";
+  import {
+    WorkspaceError, applyCommand, approveReceipt, dismissReceipt, removeDocument, restoreDocument,
+  } from "$lib/data/workspace.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
   import Row from "$lib/pocket/Row.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
+  import ReviewSheet from "$lib/pocket/ReviewSheet.svelte";
+  import { burnsInOf, formReadingsOf, papersOf, readingsOf } from "$lib/pocket/review.js";
   import { POCKET_QUERY, isPocket } from "$lib/pocket/media.js";
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
   import Reader from "./Reader.svelte";
@@ -22,7 +26,7 @@
   } from "$lib/data/commands.js";
   import {
     COST_LOCKED, DAMAGED, DAMAGED_PLACEHOLDER, LOCKED, NOTES_WORDS, PANEL_LOCKED, REFERENCE_WORDS,
-    fieldState, itemLocked, saveProblem,
+    evidenceReadable, fieldState, itemLocked, receiptWords, saveProblem,
   } from "$lib/data/metadata-status.js";
   import { matchesOf, nearestMatchOf, reachableAt, stepFrom } from "./band.js";
   import { searchBelt } from "./pocket-find.js";
@@ -85,15 +89,17 @@
 
   let { data } = $props();
 
-  /* readBelt only ever sets `item` alongside kind: "suggestion" (workspace.js);
-     the union isn't discriminated at the type level because its `kind` values
-     come back as plain `string`, so this only asserts what data.kind === "suggestion"
-     already guarantees at runtime. The same goes for the reader, the
-     households and the primary household it carries beside the item for
-     the pocket's receipt page (round 3 §4). */
-  const suggestionItem = /** @type {import('$lib/data/workspace.js').ItemView} */ (data.item);
-  const suggestionData = $derived(/** @type {{ user?: import('$lib/data/workspace.js').SessionUser | null,
-    households?: import('../../create/entry.js').FormHousehold[], primary?: string | null }} */ (data));
+  /* #1145: the suggestion the belt is seating, if this arrival was a mail-in
+     receipt (workspace.js readBelt). `households` and `primary` ride beside
+     it for the phone's review sheet. Derived, not read once: this route's
+     component is reused across /item addresses, so an acceptance that lands
+     on the new item's address must find the visitor gone from the data, or
+     the belt would seat the accepted item beside its own ghost. */
+  const seatedSuggestion = $derived(
+    /** @type {import('$lib/data/workspace.js').ItemView | null} */ (data.suggestion ?? null));
+  const suggestionHouseholds = $derived(
+    /** @type {import('../../create/entry.js').FormHousehold[]} */ (data.households ?? []));
+  const primaryHousehold = $derived(/** @type {string | null} */ (data.primary ?? null));
 
   /** @type {HTMLDivElement | null} */
   let root = $state(null);
@@ -146,16 +152,175 @@
     return () => query.removeEventListener("change", follow);
   });
 
-  /* #434: an id that is a mail-in receipt is not an item and has no seat in
-     the band. It forks to its own component, imported lazily so the belt
-     does not run its code — see Suggestion.svelte. Its item.css still lands
-     in this route's CSS bundle, so every rule in it is scoped to the card.
-     Round 3 §4 (#1140): on a phone it is the kit's review card under the
-     top chrome instead (ReceiptPocket.svelte); the desk keeps its card. */
-  const suggestionView = $derived(
-    data.kind === "suggestion" && !pocket ? import("./Suggestion.svelte").then((m) => m.default) : null);
-  const receiptView = $derived(
-    data.kind === "suggestion" && pocket ? import("./ReceiptPocket.svelte").then((m) => m.default) : null);
+  /* ---- THE SUGGESTION IN THE BELT (#1145, owner 2026-09-27: "the same
+     familiar item belt just with a similar card to the suggested item screen,
+     but on the belt instead") --------------------------------------------
+     A mail-in receipt arrived at by its own address (#434) is seated in the
+     band, hollow, at the date the relay read, and its card is the
+     amend-then-accept card in the belt's own card position: on the desk the
+     proposed fields are editable in the card and `accept into orbit` is the
+     only path into the household; on a phone the card holds the readings and
+     the two decisions, and `review & amend →` raises the review sheet the
+     inbox and home raise (ReviewSheet.svelte). On acceptance it becomes an
+     ordinary seat, in place: the belt re-reads with the new item at the
+     apex. On dismissal it leaves the belt and the apex moves to the
+     neighbour it sat beside. The separate suggestion page is gone. */
+  /** @param {string} text */
+  const minorOfText = (text) => {
+    const value = Number.parseFloat(String(text).replace(",", "."));
+    return Number.isFinite(value) ? Math.round(value * 100) : undefined;
+  };
+  const proposal = $derived(seatedSuggestion?.proposal ?? {});
+  /** The desk card's form, from what the relay read.
+      @param {import('$lib/data/workspace.js').ItemView | null} one */
+  const formOf = (one) => {
+    const p = one?.proposal ?? {};
+    return {
+      title: p.title ?? one?.title ?? "Forwarded email",
+      provider: p.provider ?? "",
+      reference: p.reference ?? "",
+      cost: p.costMinor != null ? (p.costMinor / 100).toFixed(2) : "",
+      dueDate: p.dueDate ?? "",
+      recurrenceMonths: p.recurrenceMonths ?? "",
+    };
+  };
+  /* Initialised synchronously: the first render must already know its
+     values — an effect lands after render. */
+  let sform = $state(formOf(/** @type {import('$lib/data/workspace.js').ItemView | null} */ (data.suggestion ?? null)));
+  let acceptBusy = $state(false);
+  let acceptArmedDismiss = $state(false);
+  /** @type {string | null} */
+  let acceptProblem = $state(null);
+  /** One operation id across retries (approveReceipt's contract): a
+      double-tap can never create two items. */
+  /** @type {string | null} */
+  let acceptOpId = null;
+  /* A different receipt at this reused component (a link from one
+     suggestion's belt to another's) starts a fresh form and a fresh
+     decision; the same receipt across a re-read keeps what was typed. */
+  let formFor = seatedSuggestion?.id ?? null;
+  $effect(() => {
+    const id = seatedSuggestion?.id ?? null;
+    if (id === formFor) return;
+    formFor = id;
+    sform = formOf(seatedSuggestion);
+    acceptOpId = null;
+    acceptArmedDismiss = false;
+    acceptProblem = null;
+  });
+  /* #941: what Orbit cannot read about this message, if anything. A locked
+     proposal cannot be amended or accepted -- the whole card is a read of an
+     unreadable value -- while a damaged one has a real recovery path nothing
+     else on this screen has: the original is still in the member's mailbox. */
+  const unreadable = $derived(receiptWords(seatedSuggestion?.metadataStatus));
+  const proposalLocked = $derived(fieldState(seatedSuggestion?.metadataStatus, "proposal") === LOCKED);
+  /* fieldEvidence damaged on its own loses the provenance, not the values, so
+     the from-document accents go and nothing else does. */
+  const evidenceShown = $derived(evidenceReadable(seatedSuggestion?.metadataStatus));
+  /** @param {string} field */
+  const marked = (field) => evidenceShown && Boolean(seatedSuggestion?.fieldEvidence?.[field]);
+  /* The suggestion as approveReceipt takes it: readItem hands the receipt's
+     view, which carries every ReceiptSuggestion field. */
+  const receipt = /** @type {import('$lib/data/workspace.js').ReceiptSuggestion | null} */ (
+    /** @type {unknown} */ (seatedSuggestion));
+  const burnsIn = $derived(seatedSuggestion ? burnsInOf(seatedSuggestion, seatedSuggestion.today) : null);
+  const suggestedFrom = $derived(
+    [seatedSuggestion?.sourceDocument, burnsIn !== null ? `burns up in ${burnsIn}d` : null].filter(Boolean).join(" · "));
+
+  /**
+   * Accept, amended or as proposed. Accepted, it is an item now and has a
+   * seat of its own at the same date: the belt re-reads with that item at
+   * the apex -- the body simply stops being hollow.
+   * @param {import('$lib/data/workspace.js').ItemProposal | null} [amended]
+   * @param {string | null} [sectionId]
+   * @returns {Promise<boolean>} whether it entered the orbit
+   */
+  async function acceptSuggestion(amended = null, sectionId = null) {
+    if (!receipt || acceptBusy) return false;
+    acceptBusy = true;
+    acceptProblem = null;
+    try {
+      acceptOpId ??= crypto.randomUUID();
+      const result = await approveReceipt(receipt, primaryHousehold, acceptOpId, amended, sectionId);
+      if (result.outcome === "partial_success") {
+        acceptProblem = "The item is recorded, but its documents need another try — accept again to finish.";
+        return false;
+      }
+      acceptOpId = null;
+      const title = amended?.title ?? (sform.title.trim() || receipt.title);
+      if (pocket) wake(`added to your orbit · ${title}`);
+      await goto(result.itemId ? resolve("/item/[[id]]", { id: result.itemId }) : resolve("/home"),
+        { invalidateAll: true });
+      return true;
+    } catch (error) {
+      acceptProblem = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
+      return false;
+    } finally {
+      acceptBusy = false;
+    }
+  }
+  /** The desk card's own form, sent as the amended item. */
+  function acceptAmendedOnDesk() {
+    if (!receipt) return;
+    /** @type {import('$lib/data/workspace.js').ItemProposal} */
+    const amended = { title: sform.title.trim() || "Forwarded email", currency: receipt.currency };
+    if (proposal.subtype) amended.subtype = proposal.subtype;
+    if (sform.provider.trim()) amended.provider = sform.provider.trim();
+    if (sform.reference.trim()) amended.reference = sform.reference.trim();
+    const cost = minorOfText(sform.cost);
+    if (cost !== undefined) amended.costMinor = cost;
+    if (sform.dueDate) {
+      amended.dueDate = sform.dueDate;
+      if (proposal.scheduleKind) {
+        amended.scheduleKind = proposal.scheduleKind;
+        const months = Number(sform.recurrenceMonths);
+        if (months) amended.recurrenceMonths = months;
+      }
+    }
+    acceptSuggestion(amended);
+  }
+  /**
+   * Dismissed, it leaves the belt. The apex goes to the neighbour it sat
+   * beside -- the later one, else the sooner one -- so the reader stays
+   * where in time they were looking; a belt with nothing else on it goes
+   * home. On the desk the first press arms and the second fires, the
+   * protocol every irreversible act on this screen uses.
+   */
+  async function dismissSuggestion() {
+    if (!receipt || acceptBusy) return;
+    if (!pocket && !acceptArmedDismiss) { acceptArmedDismiss = true; return; }
+    acceptBusy = true;
+    acceptProblem = null;
+    try {
+      await dismissReceipt(receipt.receiptId);
+      const neighbour = [1, -1]
+        .map((d) => stepFrom(bodies, selected, bloom, d))
+        .map((i) => (i >= 0 ? bodies[i] : null))
+        .find((b) => b && !b.item.suggestion);
+      if (pocket) wake(`dismissed · ${receipt.title}`);
+      await goto(neighbour ? resolve("/item/[[id]]", { id: neighbour.item.id }) : resolve("/home"),
+        { invalidateAll: true });
+    } catch (error) {
+      acceptProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      acceptArmedDismiss = false;
+    } finally {
+      acceptBusy = false;
+    }
+  }
+  /* ---- review & amend on a phone: the sheet the inbox and home raise ---- */
+  let reviewOpen = $state(false);
+  /** @type {string | null} */
+  let reviewProblem = $state(null);
+  /**
+   * @param {import('$lib/data/workspace.js').ItemProposal} amended
+   * @param {string | null} sectionId
+   */
+  async function saveReview(amended, sectionId) {
+    reviewProblem = null;
+    const ok = await acceptSuggestion(amended, sectionId);
+    if (!ok) reviewProblem = acceptProblem ?? "not added — try again";
+    return ok;
+  }
 
   /** @typedef {PanelName | "docs" | "preview" | "search"} Face */
   /** @type {Record<Face, "callout" | "list" | "full">} */
@@ -478,6 +643,8 @@
          type level even though it always does at runtime. */
       today: /** @type {string} */ (data.today),
       keepId: data.selectedId,
+      /* #1145: the visitor, seated only on this arrival. */
+      suggestion: seatedSuggestion,
     });
     const focus = centredId ?? data.selectedId;
     const controller = mountBelt(root, {
@@ -580,7 +747,11 @@
   const nearest = $derived(
     query.trim() && bodies.length ? nearestMatchOf(bodies, matches, selected, bloom) : -1,
   );
-  const itemCount = $derived(bodies.filter((b) => b.kind === "item").length);
+  /* #1145: a seated suggestion is counted apart -- it is in the belt, not in
+     the orbit -- so the note never claims one more item than the household has. */
+  const itemCount = $derived(bodies.filter((b) => b.kind === "item" && !b.item.suggestion).length);
+  const suggestedCount = $derived(bodies.filter((b) => b.kind === "item" && b.item.suggestion).length);
+  const suggestedNote = $derived(suggestedCount ? ` · ${suggestedCount} suggested` : "");
   const findnote = $derived(
     !bodies.length
       ? "the belt is empty"
@@ -588,7 +759,7 @@
         /* #1062: the note says what ORDER the belt is in, not which keys move
            it. The end-caps are the visible way along it now, and the arrow
            keys keep working as the shortcut they always were. */
-        ? `${itemCount} items · in date order, sooner to later`
+        ? `${itemCount} items${suggestedNote} · in date order, sooner to later`
         : hitList.length
           ? `${hitList.length} of ${itemCount} lit · enter centres the nearest`
           : "nothing matches · the belt keeps its shape",
@@ -600,7 +771,7 @@
     !bodies.length
       ? "the belt is empty"
       : !query.trim()
-        ? `${itemCount} items · sooner to later`
+        ? `${itemCount} items${suggestedNote} · sooner to later`
         : hitList.length
           ? `${hitList.length} of ${itemCount} lit · enter centres the nearest`
           : "nothing matches · the belt keeps its shape",
@@ -665,12 +836,9 @@
 
   /** @param {KeyboardEvent} event */
   function onKeydown(event) {
-    /* A receipt has no belt to step or search (round 3 §4): its page's
-       sheet holds its own keys. */
-    if (data.kind === "suggestion") return;
     /* #1072: on a phone the sheets hold their own keys; the belt behind one
-       must not step while it is up. */
-    if (pocket && (sheetOpen || readerOpen)) return;
+       must not step while it is up. #1145: the review sheet is one of them. */
+    if (pocket && (sheetOpen || readerOpen || reviewOpen)) return;
     if (pocket && (event.key === "/" || ((event.metaKey || event.ctrlKey) && event.key === "k")) && !typing(event.target)) {
       event.preventDefault();
       raise("search");
@@ -836,24 +1004,9 @@
 <svelte:window onkeydown={onKeydown} onpointerdown={onDeadSpace} />
 
 <svelte:head>
-  <title>{data.kind === "belt" ? (row?.title ?? "Item") : "Suggestion"} — Orbit</title>
+  <title>{row?.title ?? "Item"} — Orbit</title>
 </svelte:head>
 
-{#if data.kind === "suggestion"}
-  {#if pocket}
-    <!-- Round 3 §4 rule 1: the top chrome is on every hop screen, the
-         review page too, with the orb; `← your sky` goes home. -->
-    <Chrome user={suggestionData.user ?? null} />
-    {#await receiptView then ReceiptPocket}
-      <ReceiptPocket item={suggestionItem} households={suggestionData.households ?? []}
-                     primary={suggestionData.primary ?? null} />
-    {/await}
-  {:else}
-    {#await suggestionView then Suggestion}
-      <Suggestion item={suggestionItem} />
-    {/await}
-  {/if}
-{:else}
 <!-- The shared chrome (#1010): the way back to the sky and the account menu.
      A sibling of the belt, not a child, so belt.css's own `.belt-page .back`
      (the in-card links) never reaches the chrome's link of the same name. -->
@@ -939,6 +1092,105 @@
           <button style="--act:var(--accent);--act-text:var(--accent-text)" onclick={() => goto(resolve("/create"))}>add an item</button>
           <button style="--act:var(--upcoming);--act-text:var(--upcoming-text)" onclick={() => goto(resolve("/inbox"))}>mail something in</button>
         </div>
+      </article>
+    {:else if cardBody && row && row.suggestion && seatedSuggestion}
+      <!-- #1145: THE SUGGESTION'S CARD, in the belt's card position. The
+           amend-then-accept card (#434) as it stood on its own page, now
+           riding at the apex like any other card: the name is the heading
+           and is editable, the proposed fields are the form, fields the
+           relay read from the document carry the from-document mark, and
+           acceptance is the only path into the household. The old promise
+           line is gone on the desk too (owner's 10b): the sub line says when
+           the suggestion burns up, and `accept into orbit` is the promise.
+           On a phone (round 3 §4) the card holds the readings and the two
+           decisions, and `review & amend →` raises the review sheet. -->
+      <article class="glass item-card sug-card" class:ip={pocket}
+               style="--act:var(--ok);--act-text:var(--ok-text)" aria-label="{row.title} — suggested, not yet in orbit">
+        {#if pocket}
+          <h2>{row.title}</h2>
+          <div class="sub">suggested from your documents · {suggestedFrom}</div>
+          {#each readingsOf(seatedSuggestion) as reading (reading.field)}
+            <div class="kv"><span>{reading.label}</span>
+              <b>{reading.value}{#if reading.sure !== null}<i class="sure" class:unsure={!reading.sure}>{reading.sure ? "sure" : "unsure"}</i>{/if}</b></div>
+          {/each}
+          {#if unreadable}<p class="ip-sentence">{unreadable}</p>{/if}
+          <h3>decide</h3>
+          <div class="ip-acts" role="group" aria-label="Suggestion decisions">
+            {#if acceptBusy}
+              <button class="p-pill wide ip-lead" disabled aria-busy="true">adding…</button>
+              <button class="p-pill wide" disabled>Dismiss</button>
+            {:else}
+              {#if proposalLocked}
+                <button class="p-pill wide ip-lead" disabled>Add to orbit</button>
+              {:else}
+                <ArmButton label="Add to orbit" armedLabel="tap again to add" danger={false} wide class="ip-lead"
+                           name="Add {row.title} to your orbit" onfire={() => acceptSuggestion()} />
+              {/if}
+              <ArmButton label="Dismiss" armedLabel="tap again to dismiss" wide name="Dismiss {row.title}"
+                         onfire={dismissSuggestion} />
+            {/if}
+          </div>
+          {#if acceptProblem}<div class="problem" role="alert">{acceptProblem}</div>{/if}
+          {#if !proposalLocked}
+            <button class="ip-amend" disabled={acceptBusy} aria-haspopup="dialog"
+                    onclick={() => { reviewProblem = null; reviewOpen = true; }}>review &amp; amend →</button>
+          {/if}
+          {#if row.docs.length}
+            <!-- The forwarded papers ride staged beside this card; the sheet
+                 lists them, and each opens the reading card's staged state. -->
+            <button class="ip-docs" onclick={() => raise("docs")}>
+              <span class="ip-paper" aria-hidden="true">◆</span>
+              <span class="ip-docs-title">{row.docs.length === 1 ? "1 forwarded document" : `${row.docs.length} forwarded documents`}</span>
+              <span class="ip-chev">attached on acceptance ›</span>
+            </button>
+          {/if}
+        {:else}
+          <input class="name-title" bind:value={sform.title} aria-label="name" class:sugg={marked("title")}
+                 disabled={proposalLocked}>
+          <div class="sub">suggested from your documents · {suggestedFrom}</div>
+          <div class="panel">
+            <div class="row2">
+              <div class="field" class:sugg={marked("dueDate")}>
+                <!-- #1005: a one-off ends; it does not renew and it is not owed. -->
+                <label for="s-due">{proposal.scheduleKind === "expiry" ? "ends" : "renews / due"}</label>
+                <input id="s-due" type="date" bind:value={sform.dueDate} disabled={proposalLocked}></div>
+              <div class="field" class:sugg={marked("recurrenceMonths")}>
+                <label for="s-recur">orbital period (months)</label>
+                <input id="s-recur" inputmode="numeric" bind:value={sform.recurrenceMonths} disabled={proposalLocked}></div>
+            </div>
+            <div class="row2">
+              <div class="field" class:sugg={marked("provider")}>
+                <label for="s-provider">provider</label>
+                <input id="s-provider" bind:value={sform.provider} placeholder="optional" disabled={proposalLocked}></div>
+              <div class="field" class:sugg={marked("reference")}>
+                <label for="s-reference">reference</label>
+                <input id="s-reference" bind:value={sform.reference} placeholder="optional" disabled={proposalLocked}></div>
+            </div>
+            <div class="field mono" class:sugg={marked("costMinor")}>
+              <label for="s-cost">cost</label>
+              <input id="s-cost" inputmode="decimal" bind:value={sform.cost} placeholder="optional" disabled={proposalLocked}></div>
+            {#if row.docs.length}
+              <!-- The forwarded paper rides in the belt beside this card, as an
+                   item's papers do -- ringed, staged, attached on acceptance. -->
+              <div class="note"><b>◆ {row.docs.map((doc) => doc.name).join(" · ")}</b>
+                {row.docs.length === 1 ? "rides" : "ride"} in the belt beside this card — attached on acceptance.</div>
+            {/if}
+            {#if unreadable}
+              <div class="note">{unreadable}</div>
+            {/if}
+            <div class="save-row">
+              <button class="btn-primary" disabled={acceptBusy || proposalLocked || !sform.title.trim()}
+                      onclick={acceptAmendedOnDesk}>accept into orbit</button>
+              <button class="btn-quiet" style="--act:var(--overdue);--act-text:var(--overdue-text)"
+                      disabled={acceptBusy} onclick={dismissSuggestion}>
+                {acceptArmedDismiss ? "tap again to dismiss" : "dismiss"}
+              </button>
+            </div>
+            {#if acceptProblem}
+              <div class="problem" role="alert">{acceptProblem}</div>
+            {/if}
+          </div>
+        {/if}
       </article>
     {:else if cardBody && row && record}
       <!-- An item shows the item screen as #424/#455 render it: what it is,
@@ -1245,6 +1497,16 @@
             <div class="focusline">Orbit could not draw a picture of this document.</div>
             <div class="why">the file is fine — scanned clean, and yours to download<br>orbit just could not turn it into a page to read here</div>
           </div>
+        {:else if state === "staged"}
+          <!-- #1145: a suggestion's paper, staged with the mail. The fifth
+               honest state, in §18's grammar: the plate held still, the line
+               says what is happening, and the foot holds nothing, because
+               nothing can be done with it until the suggestion is accepted. -->
+          <div class="focus">
+            <div class="plate" aria-hidden="true">{previewDoc.plate}</div>
+            <div class="focusline">Not yet in orbit.</div>
+            <div class="why">this paper came with the suggestion and is attached on acceptance<br>the page comes once it is yours</div>
+          </div>
         {/if}
 
         {#if state === "available"}
@@ -1380,7 +1642,7 @@
   {:else if face === "docs" && row}
     <div class="bp-list">
       {#each row.docs as doc (doc.id)}
-        <Row title={doc.name} meta={[doc.size, doc.plate, doc.added === "unknown" ? null : `added ${doc.added}`].filter(Boolean).join(" · ")}
+        <Row title={doc.name} meta={[doc.size, doc.plate, doc.staged ? "attached on acceptance" : (doc.added === "unknown" ? null : `added ${doc.added}`)].filter(Boolean).join(" · ")}
              onactivate={() => showPaper(doc)}>
           {#snippet mark()}<span class="bp-paper" aria-hidden="true">◆</span>{/snippet}
         </Row>
@@ -1417,6 +1679,9 @@
         {:else if state === "refused"}
           <p class="bp-line">Orbit refused this file.</p>
           <p class="bp-why">it did not pass what Orbit checks before keeping a file</p>
+        {:else if state === "staged"}
+          <p class="bp-line">Not yet in orbit.</p>
+          <p class="bp-why">attached once the suggestion is added</p>
         {:else}
           <p class="bp-line">Orbit could not draw a picture of this document.</p>
           <p class="bp-why">the file is fine and yours to download</p>
@@ -1490,4 +1755,13 @@
 {#if previewDoc && previewShowing && row}
   <Reader bind:open={readerOpen} doc={previewDoc} itemTitle={row.title} onremove={removePreviewDoc} />
 {/if}
+
+<!-- #1145, round 3 §4: on a phone the suggestion's `review & amend →` raises
+     the one review sheet the inbox and home raise too. Mounted only while a
+     suggestion is seated, so an ordinary belt carries no second dialog. -->
+{#if pocket && seatedSuggestion}
+  <ReviewSheet bind:open={reviewOpen} title={seatedSuggestion.proposal?.title ?? seatedSuggestion.title ?? ""}
+               proposal={seatedSuggestion.proposal} householdId={seatedSuggestion.householdId ?? primaryHousehold}
+               households={suggestionHouseholds} readings={formReadingsOf(seatedSuggestion)}
+               papers={papersOf(seatedSuggestion)} busy={acceptBusy} problem={reviewProblem} onsave={saveReview} />
 {/if}

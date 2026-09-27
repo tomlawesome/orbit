@@ -271,11 +271,13 @@ export const SIGNED_IN = [
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   } },
 
-  /* /item/<receiptId>: the receipt page (round 3 §4, #1140) */
+  /* /item/<receiptId>: the suggestion seated in the belt (#1145; round 3 §4's
+     receipt page merged into it) -- its card holds the decisions and
+     `review & amend →` raises the review sheet. */
   { route: "/item/r-insurance", state: "rest", reach: (page) => go(page, "/item/r-insurance") },
   { route: "/item/r-insurance", state: "review-sheet", reach: async (page) => {
     await go(page, "/item/r-insurance");
-    await page.locator(".rv-amend").first().click();
+    await page.locator(".ip-amend").first().click();
     await sheetUp(page);
   } },
   /* /item: the belt and its sheets */
