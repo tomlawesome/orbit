@@ -47,6 +47,27 @@ import path had to change. `imap-attachment-validation.ts`, `imap-recipient.ts`,
 and `imap-rotation.ts` had no consumers outside this module, so they moved
 outright with no stub.
 
+## Failure reasons (#1143)
+
+`failureReasonOf` (`core/review-state.ts`) folds the stored `failure_code`
+into one of nine short reasons a member can be shown; `reviewInboxState`
+returns it as `reason` beside `message`, and both `GET /api/imap-inbox` and
+`GET /api/imap-inbox/[receiptId]` carry it on every receipt. Labels
+(`REASON_WORDS`/`reasonWords`) live in `web/src/lib/pocket/words.js`, not
+here — this module stays free of display prose.
+
+| reason | `failure_code` it covers |
+| --- | --- |
+| `no_document` | `no_supported_pdf`; `document_type_unsupported`, `mime_type_mismatch`, `mime_structure_invalid`, `mime_part_count_exceeded`, `mime_nesting_too_deep` |
+| `too_large` | `message_too_large`; `document_too_large`, `attachment_total_too_large`, `attachment_count_exceeded` |
+| `malware` | `malware_detected` |
+| `scanner_off` | `scanner_disabled`, `scanner_unavailable` |
+| `not_kept` | `attachment_download_failed`, `staging_lease_lost`, `attachment_processing_failed`, `attachment_processing_exhausted`, `staging_purge_failed`, `discard_purge_failed`, `staging_purge_pending`, `staging_expiry_pending` |
+| `wrong_recipient` | `recipient_mismatch` |
+| `account_disabled` | `account_disabled` |
+| `older_review` | `legacy_review_item` |
+| `unknown` | null, or any code not listed above |
+
 ## Pending ownership question
 
 `sanitizeReviewDraftMetadata` stays in `src/server/reviewed-intake.ts` for
