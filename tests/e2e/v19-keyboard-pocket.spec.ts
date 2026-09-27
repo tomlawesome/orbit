@@ -112,11 +112,20 @@ async function signIn(page: Page, returnTo: string) {
  * files' own name prefixes must stay distinct on the shared acceptance
  * instance (#730).
  */
-async function seedHousehold(page: Page, options: { withItem?: boolean } = {}) {
+async function seedHousehold(page: Page, options: { withItem?: boolean; secondSection?: boolean } = {}) {
   const name = `keyboard-pocket-${randomUUID()}`;
   const householdId = randomUUID();
   const sectionId = randomUUID();
   const headers = { ...(await sessionHeaders(page)), "content-type": "application/json" };
+  /* #1122 follow-up: a lone section has nowhere to move to, so
+     sectionActs (household/[id]/pocket.svelte) omits both "move up" and
+     "move down" for it -- the boundary rule 733b2f27 gave the pocket
+     household page. The household-page keyboard test needs a second
+     section so its first row's "move down" act actually renders. */
+  const sections = [{ id: sectionId, name: "Home", icon: "home", accent: "sage", visible: true }];
+  if (options.secondSection) {
+    sections.push({ id: randomUUID(), name: "Garage", icon: "vehicle", accent: "blue", visible: true });
+  }
 
   const created = await page.request.post("/api/workspace/commands", {
     headers,
@@ -130,7 +139,7 @@ async function seedHousehold(page: Page, options: { withItem?: boolean } = {}) {
         memberCount: 1,
         canManage: true,
         onboardingComplete: true,
-        sections: [{ id: sectionId, name: "Home", icon: "home", accent: "sage", visible: true }],
+        sections,
         items: [],
       },
     },
@@ -428,7 +437,10 @@ test("household page (pocket): fully reachable by keyboard", async ({ page }) =>
   test.setTimeout(60_000);
   await installKeyboardAudit(page);
   await signIn(page, "/home");
-  const household = await seedHousehold(page);
+  /* sectionActs (household/[id]/pocket.svelte) omits "move down" for a
+     section with nothing after it, so a second section is needed for the
+     first row's move act to exist at all (#1122 follow-up). */
+  const household = await seedHousehold(page, { secondSection: true });
   try {
     await page.goto(`/household/${household.id}`);
     await expect(page.getByRole("heading", { level: 1, name: household.name })).toBeVisible({ timeout: 30_000 });
