@@ -130,7 +130,10 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .card.c-sections{grid-column:1;grid-row:2}
 .household-page .card.c-members {grid-column:2;grid-row:1 / span 2;align-self:stretch;
                  display:flex;flex-direction:column}
-.household-page .card.c-danger  {grid-column:1 / -1;grid-row:3}
+/* #1002: the archive, owner-only like sections and the danger line, spans
+   both columns between the ordinary cards and the red rule. */
+.household-page .card.c-archive {grid-column:1 / -1;grid-row:3}
+.household-page .card.c-danger  {grid-column:1 / -1;grid-row:4}
 /* the panel is taller than its content in a family this size, so the slack
    is SHARED between the blocks instead of collecting in one hole at the
    bottom: three auto margins, three even breaths, rules evenly spaced. */
@@ -141,7 +144,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 @media (max-width:880px){
   .household-page .cards{grid-template-columns:1fr}
   .household-page .card.c-system,.household-page .card.c-sections,
-  .household-page .card.c-members,
+  .household-page .card.c-members,.household-page .card.c-archive,
   .household-page .card.c-danger{grid-column:1;grid-row:auto;align-self:auto}
   .household-page .c-members .block{margin-top:16px}
 }
@@ -407,6 +410,73 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 /* 2f — the scheduled-for-deletion banner and its restore button are NOT here:
    the recovery window is an instance-admin affair, drawn on the admin panel.
    What lives on this screen is the request itself. */
+
+/* ── THE ARCHIVE (#1002) — portable export, import and preview ───────────
+   Owner-only, spanning both columns (placed above, .card.c-archive). Round
+   7's own tab grammar (ratified 2026-09-20): a joined pill pair at the far
+   end of the card head, in the page's ghost-button voice, the chosen one
+   filled with --accent. role=tablist/tab/tabpanel, ← → between them. */
+.household-page .c-archive .cardhead{gap:22px;align-items:center}
+.household-page .tabs{display:inline-flex;margin-left:auto;border:1px solid var(--line);
+      border-radius:999px;overflow:hidden}
+.household-page .tabs [role=tab]{font:11px var(--mono);letter-spacing:.04em;color:var(--ink-mid);
+      background:none;border:0;padding:6px 14px;cursor:pointer;line-height:1.2}
+.household-page .tabs [role=tab]+[role=tab]{border-left:1px solid var(--line)}
+.household-page .tabs [role=tab]:hover{color:var(--ink)}
+.household-page .tabs [role=tab][aria-selected=true]{background:var(--accent);color:var(--bg);font-weight:600}
+.household-page .tabs [role=tab]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.household-page .arch{max-width:600px}
+.household-page .arch p{margin:0 0 12px;font-size:13px;color:var(--ink-mid);line-height:1.62;max-width:52ch}
+.household-page .arch p b{color:var(--ink);font-weight:560}
+/* what a file holds is a manifest — a figure and a name per row (round 3:
+   "I'd rather it read more as a list"), never a sentence */
+.household-page .arch .man{margin:0 0 12px;padding:0;list-style:none;max-width:430px}
+.household-page .arch .man li{display:flex;align-items:baseline;gap:12px;padding:5px 2px;
+      border-top:1px solid var(--line-soft);font-size:13px;color:var(--ink-mid);line-height:1.4}
+.household-page .arch .man li:first-child{border-top:0}
+.household-page .arch .man li:last-child{border-bottom:1px solid var(--line-soft)}
+.household-page .arch .man b{flex:none;width:34px;text-align:right;font:600 13px var(--mono);color:var(--ink)}
+.household-page .arch .man .lab{color:var(--ink-mid)}
+.household-page .arch .man small{margin-left:auto;font:10.5px var(--mono);color:var(--ink-faint);
+      letter-spacing:.04em;text-align:right}
+.household-page .arch .man small.zero,.household-page .arch .man small.warm{color:var(--warm)}
+.household-page .arch .man li.head{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.06em;
+      padding-bottom:7px}
+.household-page .arch .act{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:0}
+/* the open step borrows the danger line's own confirm: a dashed rule, then
+   fields — the same shape administration.svelte's inline challenge uses */
+.household-page .arch .step{display:none;margin-top:13px;padding-top:13px;border-top:1px dashed var(--line)}
+.household-page .arch .step.open{display:block}
+.household-page .arch .step .field{max-width:430px}
+.household-page .arch .field input.pw{font-family:var(--mono);font-size:12.5px;letter-spacing:.14em}
+.household-page .arch .never{margin:0 0 13px;font:11px var(--mono);color:var(--warm);line-height:1.75;
+      max-width:60ch}
+.household-page .arch .never b{color:var(--warm);font-weight:600}
+.household-page .arch .fname{margin:0 0 12px;font-size:13px;color:var(--ink)}
+.household-page .arch .fname b{font-weight:530}
+.household-page .arch .fname small{margin-left:8px;font:10.5px var(--mono);color:var(--ink-quiet)}
+.household-page .arch .inside{margin-top:13px;padding-top:13px;border-top:1px dashed var(--line)}
+.household-page .arch .dup{margin:0 0 12px;padding:0;list-style:none}
+.household-page .arch .dup li{display:flex;align-items:center;gap:10px;padding:4px 2px;
+      font-size:13px;color:var(--ink)}
+.household-page .arch .dup li span{margin-left:auto;font:10.5px var(--mono);color:var(--warm);
+      letter-spacing:.06em;white-space:nowrap}
+.household-page .arch .refuse{margin:12px 0 0;font:11.5px var(--mono);color:var(--overdue-text);line-height:1.7}
+/* the reactive step-up challenge (#1132): the same "type your password,
+   confirm" shape administration.svelte and settings/+page.svelte already
+   use, held inline under the act it belongs to rather than in a dialog —
+   this route has no modal component. */
+.household-page .arch .challenge{margin-top:13px;padding-top:13px;border-top:1px dashed var(--accent)}
+.household-page .arch .challenge p{max-width:60ch}
+.household-page .arch .challenge .field{max-width:430px}
+@media (max-width:880px){
+  .household-page .arch{max-width:none}
+}
+@media (max-width:560px){
+  .household-page .c-archive .cardhead{flex-wrap:wrap;gap:10px 14px}
+  .household-page .tabs{margin-left:0}
+  .household-page .arch p,.household-page .arch .step .field{max-width:none}
+}
 
 @media (prefers-reduced-motion: reduce){
   .household-page .sky .far,.household-page .sky .near,
