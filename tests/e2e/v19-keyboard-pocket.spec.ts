@@ -581,6 +581,10 @@ test("inbox (pocket): fully reachable by keyboard", async ({ page }) => {
        (inbox/pocket.svelte, proposal §2.6): its lanes or its quiet card,
        where the desk's `.lanes`/`.quietnote` are display:none. */
     await expect(page.locator(".pk-inbox :is(.pki-lane, .pki-quiet)").first()).toBeVisible({ timeout: 30_000 });
+    /* The pocket's cards rise in; audit them drawn, or a pill still at
+       opacity 0 is left out of the visible snapshot and then met by Tab
+       (docs/flakes.md, "inbox (pocket)"). */
+    await entrancesSettled(page.locator(".pk-inbox"));
     await auditTabOrder(page, "inbox (pocket)");
   } finally {
     await cleanup(page, household);
