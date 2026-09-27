@@ -10,6 +10,7 @@ import {
   households,
   imapIngestionMessages,
   imapNotificationDeliveries,
+  mailProbeResults,
   notificationDeliveries,
   users,
 } from "@/db/schema";
@@ -192,6 +193,7 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
     jobs,
     historyRows,
     mailboxNotificationCountRows,
+    [mailProbeRow],
   ] = await Promise.all([
     getDb().select({
       status: notificationDeliveries.status,
@@ -238,6 +240,12 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
       status: imapNotificationDeliveries.status,
       count: sql<number>`count(*)::int`,
     }).from(imapNotificationDeliveries).groupBy(imapNotificationDeliveries.status),
+    getDb().select({
+      mailboxResult: mailProbeResults.mailboxResult,
+      mailboxCheckedAt: mailProbeResults.mailboxCheckedAt,
+      relayResult: mailProbeResults.relayResult,
+      relayCheckedAt: mailProbeResults.relayCheckedAt,
+    }).from(mailProbeResults).limit(1),
   ]);
   const history = historyRows.slice(0, 25);
   const mailboxCounts = boundedCounts(mailboxNotificationCountRows);
@@ -292,6 +300,16 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
       ...job,
       lastErrorCode: safeDocumentFailure(lastError),
     })),
+    /* The two mail tests' last answer (#1071): kept so the pill survives a
+       reload. Null on either half until that test has ever run. */
+    mailProbes: {
+      mailbox: mailProbeRow?.mailboxResult && mailProbeRow.mailboxCheckedAt
+        ? { result: mailProbeRow.mailboxResult, at: mailProbeRow.mailboxCheckedAt.toISOString() }
+        : null,
+      relay: mailProbeRow?.relayResult && mailProbeRow.relayCheckedAt
+        ? { result: mailProbeRow.relayResult, at: mailProbeRow.relayCheckedAt.toISOString() }
+        : null,
+    },
     audit: history.map((entry) => ({
       id: entry.id,
       actorName: entry.actorName ?? "Orbit system",
@@ -456,6 +474,22 @@ export async function updateDocumentJob(
   });
 }
 
+/**
+ * Persists the last answer of one of the two live mail tests (#1071), so the
+ * pill on the row survives a reload. A store-write failure never hides the
+ * live answer the caller just paid for — it is swallowed, not surfaced.
+ */
+async function recordMailProbeResult(which: "mailbox" | "relay", result: string): Promise<void> {
+  const now = new Date();
+  try {
+    await getDb().update(mailProbeResults)
+      .set(which === "mailbox"
+        ? { mailboxResult: result, mailboxCheckedAt: now, updatedAt: now }
+        : { relayResult: result, relayCheckedAt: now, updatedAt: now })
+      .where(eq(mailProbeResults.singleton, true));
+  } catch { /* the live answer still reaches the caller even if the store write fails */ }
+}
+
 /** Verifies SMTP connectivity/authentication without sending a message. */
 export async function verifySmtpProvider(actorUserId: string): Promise<{ result: string }> {
   await requireInstanceAdministrator(actorUserId);
@@ -471,7 +505,9 @@ export async function verifySmtpProvider(actorUserId: string): Promise<{ result:
   })();
   providerVerificationState.__orbitAdminSmtpVerification = { inFlight, lastStartedAt: now };
   try {
-    return { result: await inFlight };
+    const result = await inFlight;
+    await recordMailProbeResult("relay", result);
+    return { result };
   } finally {
     const state = providerVerificationState.__orbitAdminSmtpVerification;
     if (state?.inFlight === inFlight) providerVerificationState.__orbitAdminSmtpVerification = { lastStartedAt: now };
@@ -529,7 +565,9 @@ export async function verifyImapIngestionProvider(actorUserId: string): Promise<
   })();
   providerVerificationState.__orbitAdminImapVerification = { inFlight, lastStartedAt: now };
   try {
-    return { result: await inFlight };
+    const result = await inFlight;
+    await recordMailProbeResult("mailbox", result);
+    return { result };
   } catch {
     return { result: "unsafe_input" };
   } finally {

@@ -10,8 +10,10 @@
     readAdminScreen,
     readSignInMethods,
     restoreHousehold,
+    retryDocumentJob,
     sendSetupLink,
     startStepUp,
+    testMail,
   } from "$lib/data/workspace.js";
   import { deletionNameMatches } from "$lib/data/household.js";
   import { SETUP_LINK_FIXTURES } from "$lib/data/fixtures/admin.js";
@@ -19,10 +21,14 @@
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { mountStation } from "$lib/backdrops/station.js";
+  import { ago } from "$lib/format.js";
   import Chrome from "$lib/Chrome.svelte";
   import { isPocket } from "$lib/pocket/media.js";
   import Pocket from "./pocket.svelte";
-  import { SETUP_LINK_DAYS, initialsOf, lapses, openFor, plainly, sendWords, setupWords, stamp } from "./words.js";
+  import {
+    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, initialsOf, lapses, openFor, plainly,
+    sendWords, setupWords, stamp, testVerdict,
+  } from "./words.js";
   import "./administration.css";
 
   /**
@@ -488,6 +494,120 @@
     }
   }
 
+  /* DOCUMENT JOBS AND THE TWO MAIL TESTS (#1071, design/v19/administration-ops/
+     round-2/f-the-screens-grammar.html, owner 2026-09-19 "much better, good
+     job. approved"). One family of state pills, coloured like the ADMIN
+     pill: bad (failed), warm (retrying), run (running), ok (passed),
+     quiet-and-breathing (checking). */
+  /** @type {Record<string, string>} */
+  const ROLE_TONE = { over: "bad", soon: "warn", up: "run", "": "" };
+
+  /* Document jobs: a People row without an avatar, ordered by what needs the
+     reader, `retry` on FAILED rows only. Retrying flips the row to QUEUED at
+     once, the same optimistic update the phone's own retry makes — the next
+     screen re-read (any other admin act) settles it against the server. */
+  /** @type {Record<string, { status: string, at: string }>} */
+  let retriedJobs = $state({});
+  const jobs = $derived.by(() => {
+    const list = (view?.operations?.documentJobs ?? []).map((job) => retriedJobs[job.id]
+      ? { ...job, status: /** @type {typeof job.status} */ (retriedJobs[job.id].status), attempts: 0, updatedAt: retriedJobs[job.id].at }
+      : job);
+    return list.sort((a, b) => (JOB_STATES[a.status]?.rank ?? 9) - (JOB_STATES[b.status]?.rank ?? 9)
+      || Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  });
+  const jobCounts = $derived.by(() => {
+    /** @type {Record<string, number>} */
+    const by = {};
+    for (const job of jobs) by[job.status] = (by[job.status] ?? 0) + 1;
+    return ["failed", "retry", "processing", "pending", "completed"].filter((status) => by[status])
+      .map((status) => `${by[status]} ${JOB_STATES[status].word}`).join(" · ");
+  });
+  const jobsClock = $derived.by(() => view?.now ?? new Date().toISOString());
+  /** @param {(typeof jobs)[number]} job */
+  const jobMeta = (job) => {
+    /* The failed row's reason lives in its subtext permanently, with the
+       tries and when it was last tried alongside it (the issue's own
+       example: "couldn't reach the virus scanner · 5 of 5 tries · last
+       tried 6m ago"). The client has no per-kind maximum to print "of N"
+       against, so only the count travels, as the phone's own detail panel
+       already shows it. */
+    if (job.status === "failed") {
+      return `${JOB_REASONS[job.lastErrorCode ?? "unknown"] ?? JOB_REASONS.unknown} · ${count(job.attempts, "try", "tries")} · last tried ${ago(job.updatedAt, jobsClock)}`;
+    }
+    if (job.status === "retry") return job.lastErrorCode ? JOB_REASONS[job.lastErrorCode] ?? JOB_REASONS.unknown : `last tried ${ago(job.updatedAt, jobsClock)}`;
+    if (job.status === "pending") return retriedJobs[job.id] ? "attempt 1 · queued just now" : `queued ${ago(job.createdAt, jobsClock)}`;
+    if (job.status === "processing") return `started ${ago(job.updatedAt, jobsClock)}`;
+    return `${JOB_STATES[job.status]?.word ?? job.status} ${ago(job.updatedAt, jobsClock)}`;
+  };
+  /** @type {string | null} */
+  let jobsProblem = $state(null);
+  /** @param {(typeof jobs)[number]} job */
+  async function retryJob(job) {
+    jobsProblem = null;
+    try {
+      await retryDocumentJob(job.id, job.status);
+      retriedJobs[job.id] = { status: "pending", at: new Date().toISOString() };
+    } catch (error) {
+      jobsProblem = said(error);
+    }
+  }
+
+  /* The two live mail tests: "test this mailbox" (the IMAP verify and the
+     relay half together — it replaces "check connection") and "test the
+     relay". The server now keeps each one's last answer (owner, 2026-09-19:
+     "the server remembers the last mail-test result so the pill survives a
+     reload — Yes"), so the pill is read straight off the screen's own
+     re-read rather than kept in local state. */
+  const mailProbes = $derived.by(() => view?.operations?.mailProbes ?? { mailbox: null, relay: null });
+  const TEST_KINDS = /** @type {const} */ (["mailbox", "relay"]);
+  /** @type {"mailbox" | "relay" | null} */
+  let testingWhich = $state(null);
+  /** @type {string | null} */
+  let testProblem = $state(null);
+  /** @param {"mailbox" | "relay"} which */
+  async function runMailTest(which) {
+    if (testingWhich) return;
+    testingWhich = which;
+    testProblem = null;
+    try {
+      await testMail(which);
+      view = await readAdminScreen();
+    } catch (error) {
+      testProblem = said(error);
+    } finally {
+      testingWhich = null;
+    }
+  }
+  /** @param {"mailbox" | "relay"} which */
+  const testPill = (which) => {
+    if (testingWhich === which) return { word: "checking…", tone: "quiet" };
+    const probe = mailProbes[which];
+    if (!probe) return null;
+    const verdict = testVerdict(probe.result);
+    return { word: `${verdict.word} · ${ago(probe.at, jobsClock)}`, tone: ROLE_TONE[verdict.tone] ?? "" };
+  };
+  /** @param {"mailbox" | "relay"} which */
+  const testSubtext = (which) => {
+    if (testingWhich === which) return "checking now";
+    const probe = mailProbes[which];
+    if (!probe) return "not tested yet";
+    const verdict = testVerdict(probe.result);
+    return verdict.reason || plainly(probe.result);
+  };
+
+  /* The tell (page-head pills, under the subline): one per thing that needs
+     the reader, each a link down to its card — so a failure is visible from
+     the top of the page without scrolling. */
+  const tells = $derived.by(() => {
+    /** @type {{ href: string, text: string }[]} */
+    const items = [];
+    const failedJobs = jobs.filter((job) => job.status === "failed").length;
+    if (failedJobs) items.push({ href: "#jobs-card", text: `${count(failedJobs, "job")} failed` });
+    if (mailProbes.relay && testVerdict(mailProbes.relay.result).tone === "over") items.push({ href: "#mail-card", text: "relay failed" });
+    if (mailProbes.mailbox && testVerdict(mailProbes.mailbox.result).tone === "over") items.push({ href: "#mail-card", text: "mailbox failed" });
+    return items;
+  });
+
   /* The public contact address (#860): one field an administrator sets,
      changes or clears, never defaulted from any account's own email. Named
      plainly on the door's third state (#788) when it cannot open safely — so
@@ -614,6 +734,15 @@
     <div class="sub">{view
       ? `the instance from above · admins see everything by design · ${view.users.length} people · ${view.households.length} systems`
       : "the instance from above · admins see everything by design"}</div>
+    {#if tells.length}
+      <div class="tells" aria-label="needs attention">
+        {#each tells as tell (tell.text)}
+          <!-- A same-page anchor to the card below, not a route. -->
+          <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+          <a class="role bad" href={tell.href}>{tell.text}</a>
+        {/each}
+      </div>
+    {/if}
   </header>
 
   {#if view}
@@ -996,11 +1125,37 @@
         {/if}
       </div>
 
+      <!-- DOCUMENT JOBS (#1071, #1055 round 2): a People row without an
+           avatar, sibling to People and Systems, in the grid cell that was
+           empty beside Public contact. Kind only — never the document's name
+           (owner, 2026-09-19). -->
+      <div class="card" id="jobs-card">
+        <div class="cardhead"><h2>Document jobs</h2>
+          {#if jobCounts}<span class="count">{jobCounts}</span>{/if}</div>
+        {#each jobs as job (job.id)}
+          <div class="person">
+            <div class="who"><b>{JOB_KINDS[job.kind] ?? job.kind}</b><span>{jobMeta(job)}</span></div>
+            <span class="role {ROLE_TONE[JOB_STATES[job.status]?.tone ?? ''] ?? ''}">{JOB_STATES[job.status]?.word ?? job.status}</span>
+            {#if job.status === "failed"}
+              <button class="place" onclick={() => retryJob(job)}>retry</button>
+            {/if}
+          </div>
+        {:else}
+          <p class="jobfoot">no document jobs yet</p>
+        {/each}
+        <div class="jobfoot">the 25 most recently touched jobs are kept; older ones are not</div>
+        {#if jobsProblem}<div class="adminproblem">{jobsProblem}</div>{/if}
+      </div>
+
       <!-- §15: mail machinery sits WITH operations — one panel, two halves. -->
-      <div class="card wide machinery">
+      <div class="card wide machinery" id="mail-card">
         <div class="half">
           <div class="cardhead">
             <h2>Mail machinery</h2>
+            <button disabled={testingWhich !== null} class:busy={testingWhich === "mailbox"}
+                    onclick={() => runMailTest("mailbox")}>test this mailbox</button>
+            <button disabled={testingWhich !== null} class:busy={testingWhich === "relay"}
+                    onclick={() => runMailTest("relay")}>test the relay</button>
             {#if view.mailbox && !editing}
               <button onclick={openMailboxEditor}>{view.mailbox.configured ? "change mailbox…" : "set up mailbox…"}</button>
             {/if}
@@ -1012,6 +1167,23 @@
               {:else}<b>{value}</b>{/if}
             </div>
           {/each}
+
+          <!-- The two live tests' last answer (#1071): a pill on its own row
+               that stays until the next test, the server's own memory of it
+               rather than this screen's — no row among those above already
+               stands for "the outbound relay", so each test gets its own row
+               rather than a guessed-at home on an unrelated one. -->
+          {#each TEST_KINDS as which (which)}
+            {@const pill = testPill(which)}
+            <div class="person">
+              <div class="who">
+                <b>{which === "mailbox" ? "mailbox test" : "relay test"}</b>
+                <span>{testSubtext(which)}</span>
+              </div>
+              {#if pill}<span class="role {pill.tone}">{pill.word}</span>{/if}
+            </div>
+          {/each}
+          {#if testProblem}<div class="adminproblem">{testProblem}</div>{/if}
 
           {#if view.mailbox}
             {@const mailbox = view.mailbox}
@@ -1029,9 +1201,9 @@
             {/if}
 
             {#if mailbox.configured && !editing && !rotating}
+              <!-- "check connection" is gone (#1071): "test this mailbox"
+                   above runs the same IMAP verify, plus the relay half. -->
               <div class="placerow mailboxrow">
-                <button disabled={mailboxBusy !== null}
-                        onclick={() => mailboxAction("verify", { action: "verify" })}>check connection</button>
                 <button disabled={mailboxBusy !== null}
                         onclick={() => mailboxAction("probe", { action: "probe" })}>run setup probe</button>
                 <button disabled={mailboxBusy !== null}
