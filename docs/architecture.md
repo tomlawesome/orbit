@@ -43,6 +43,7 @@ The supported topology and deferred alternatives are recorded in
 | Persistence | Versioned Drizzle schema, migrations and transactional repositories | `src/db`, `drizzle`, repository modules |
 | Documents | Validation, scanning, encryption, storage, drafts and reconciliation | `src/server/documents`, document repositories/workers |
 | Integrations | OIDC, ClamAV, Tika, IMAP, SMTP and Web Push adapters | focused library/server modules |
+| Mail-in | IMAP receipt intake, review-inbox state and failure reasons (#1143) | `src/server/mail-in`, see its own `README.md` |
 | Operations | Health, safe administrator views, backup, restore and release scripts | administrator modules and `scripts` |
 
 Routes remain thin. Business rules and authorization must live in reusable
