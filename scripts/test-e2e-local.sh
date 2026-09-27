@@ -697,6 +697,17 @@ suite_status=0
 # variable is left off rather than set to a value that would be a lie.
 acceptance_oidc=()
 [[ "$profile" == "local-only" ]] || acceptance_oidc=(ORBIT_ACCEPTANCE_OIDC=true)
+# #1150: a --reuse (#947) stack is by definition already claimed, so the
+# one-time "unclaimed" project (#1039, tests/e2e/playwright.config.ts) --
+# whose one spec, bootstrap-protection.spec.ts, asserts the instance is NOT
+# yet claimed -- fails loudly against it, and "setup" depends on that
+# project, so nothing else runs either. tests/e2e/claim.setup.ts is already
+# idempotent against an already-claimed stack (its own comment), so that
+# project needs no change; the config reads this flag to drop only the
+# "unclaimed" project and "setup"'s dependency on it, leaving a fresh run
+# (this variable unset) with exactly the graph it has today.
+reuse_env=()
+[[ -z "$reuse_project" ]] || reuse_env=(ORBIT_E2E_REUSE=true)
 # COMPOSE_PROJECT_NAME is handed to the suite because a spec may need to ask
 # the stack's own database a question -- tests/e2e/v19-tour.spec.ts proves the
 # tour's example body is never written down, which only the database can
@@ -710,7 +721,7 @@ acceptance_oidc=()
 # in a worktree `pnpm exec` re-verifies node_modules against the lockfile and
 # can abort trying to repair a node_modules it does not own (#858, same
 # reasoning as install-test-browser.sh's header comment). Same binary.
-env PLAYWRIGHT_BASE_URL="$base_url" COMPOSE_PROJECT_NAME="$project_name" "${acceptance_oidc[@]}" \
+env PLAYWRIGHT_BASE_URL="$base_url" COMPOSE_PROJECT_NAME="$project_name" "${acceptance_oidc[@]}" "${reuse_env[@]}" \
   node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts \
   "${playwright_args[@]}" || suite_status=$?
 

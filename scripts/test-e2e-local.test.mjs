@@ -173,3 +173,28 @@ describe("the document parser the local stack runs", () => {
     expect(localE2eOverlay).toContain(`TIKA_URL: ${ciAppendedValue("TIKA_URL")}`);
   });
 });
+
+/*
+ * #1150: a --reuse (#947) stack is already claimed, so the one-time
+ * "unclaimed" project (tests/e2e/playwright.config.ts, #1039) -- whose one
+ * spec asserts the opposite -- fails loudly against it, and "setup" depends
+ * on that project, so nothing else runs either. The script tells the config
+ * which path a run is on with one flag; this proves the flag's name cannot
+ * drift between the two files, and that it is set only when a stack is
+ * actually being reused, the same "one source both lanes read" shape as the
+ * document-parser check above.
+ */
+describe("the --reuse path skips the one-time bootstrap project", () => {
+  const configSource = readFileSync(
+    fileURLToPath(new URL("../tests/e2e/playwright.config.ts", import.meta.url)),
+    "utf8",
+  );
+
+  it("sets the flag only when a stack is being reused", () => {
+    expect(scriptSource).toContain('[[ -z "$reuse_project" ]] || reuse_env=(ORBIT_E2E_REUSE=true)');
+  });
+
+  it("names the flag playwright.config.ts actually reads", () => {
+    expect(configSource).toContain('process.env.ORBIT_E2E_REUSE === "true"');
+  });
+});
