@@ -22,7 +22,7 @@
   import { searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
   import { tlabel } from "./bands.js";
-  import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
+  import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
   import CorridorRow from "./CorridorRow.svelte";
   import NorthStarMark from "$lib/NorthStarMark.svelte";
   import "./home.css";
@@ -776,9 +776,7 @@
         ...line,
         y: tier === 0 ? run - 5 - (n - 1 - k) * 13 : run + 12 + k * 13,
       }));
-      const stemY0 = tier === 0 ? AXIS_Y - r - 1 : AXIS_Y + r + 1;
-      const runX = flip ? m.x - m.width : m.x;
-      const leaderPath = `M${m.x} ${stemY0} V${run} H${runX}`;
+      const leaderPath = leaderPathOf({ x: m.x, width: m.width, r, tier, flip });
       return { ...m, r, tier, flip, showLabel, anchorX: flip ? m.x - 2 : m.x + 2, lineNodes, leaderPath };
     });
   });
@@ -1536,7 +1534,11 @@
                       >→ {a.title}</span>
               {/each}
             {:else}
-              <span>{searchResults.items.length} in your orbit{#if searchResults.documents.length}<span class="sep">·</span>{searchResults.documents.length} document{searchResults.documents.length === 1 ? "" : "s"}{/if}</span>
+              <span>{searchResults.items.length} in your orbit</span>
+              {#if searchResults.documents.length}
+                <span class="sep">·</span>
+                <span>{searchResults.documents.length} document{searchResults.documents.length === 1 ? "" : "s"}</span>
+              {/if}
               <span class="sep">·</span>
               <span class="hint">←→ step · ↵ open</span>
             {/if}
