@@ -126,6 +126,10 @@
   .hero-foot{position:absolute;top:calc(75vh + 160px);left:50%;
              transform:translate(-50%,-50%);
              display:flex;flex-direction:column;align-items:center;gap:13px}
+  /* Above the manifest, which follows it in the page: the search palette
+     hangs below the field, and the first manifest card drew over it (#1160).
+     Under the orb, account panel and drawers (6 and up). */
+  .hero-foot{z-index:5}
   .scrollcue{font:11px var(--mono);color:var(--ink-quiet);text-align:center;letter-spacing:.14em}
   .splash-search input{background:none;border:0;outline:0;
              border-bottom:1px solid var(--line);width:320px;text-align:center;
@@ -148,6 +152,11 @@
      find the field, so it earns the same ring every other focusable control
      on this screen gives (.body-link:focus-visible above). */
   .splash-search input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  /* The ring has rounded ends (owner, 2026-09-27, on the live build: "I would
+     like the search box to have rounded ends please"). The outline follows
+     the radius; the hairline is dropped while the ring shows, since a
+     bottom border under a full radius bends into a curve. */
+  .splash-search input:focus-visible{border-radius:999px;border-bottom-color:transparent}
 
   /* CON-7: the word IS the handle — attached to the drawer edge, riding the
      slide. v17: key is quiet ink, degraded is unmistakably orange, and the

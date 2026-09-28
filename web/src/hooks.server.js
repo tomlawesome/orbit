@@ -33,8 +33,20 @@ import { redirect } from "@sveltejs/kit";
  * it deliberately signs nobody in. It reads no session either -- the token in
  * the address is the whole authorisation -- and it is not in `DOORS`, for the
  * same reason `/setup/[token]` is not.
+ *
+ * `/auth/error` is open for the same reason `/login` is (#1056): it is where
+ * a failed OIDC callback lands a signed-out stranger, and a session-required
+ * screen a signed-out reader cannot reach defeats its own purpose. It reads
+ * no session either -- `code` off the query string is the whole of what it
+ * reads, client-side, in +page.svelte -- so there is nothing here for a gate
+ * to protect. Not in `DOORS`: unlike /login it is not an administrator's way
+ * to end a maintenance window, so maintenance closes it like /invite and
+ * /setup do.
  */
-const OPEN_ROUTES = new Set(["/", "/login", "/logout", "/maintenance", "/invite/[token]", "/setup/[token]", "/approve/[token]"]);
+const OPEN_ROUTES = new Set([
+  "/", "/login", "/logout", "/maintenance",
+  "/invite/[token]", "/setup/[token]", "/approve/[token]", "/auth/error",
+]);
 
 /**
  * The screens maintenance never closes (#526; ADR-0013 decision 3): the door
