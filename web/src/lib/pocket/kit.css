@@ -143,11 +143,13 @@
 .p-kv .ended{color:var(--ink-quiet)}
 
 /* THE OPENED ROW'S PANEL (review round §1.1; Row.svelte unfolds it): the
-   raised plane under the face, the same accent rail, the bottom corners.
-   Its text edge is the row's text edge. Inside, in order: the screen's
-   detail (.p-kv lines), the acts as pills (two share a line when each gets
-   150px, else they stack), then a quiet link line. */
-.p-row-open{background:var(--panel-raised);box-shadow:inset 2px 0 0 var(--accent);border-radius:0 0 12px 12px}
+   raised plane under the face, the bottom corners. No accent rail down the
+   leading edge, as the desk draws none (owner-decisions §29, #1142): a row
+   with an outline of its own turns that outline accent instead
+   (Row.svelte). Its text edge is the row's text edge. Inside, in order: the
+   screen's detail (.p-kv lines), the acts as pills (two share a line when
+   each gets 150px, else they stack), then a quiet link line. */
+.p-row-open{background:var(--panel-raised);border-radius:0 0 12px 12px}
 .p-row-in{padding:4px var(--p-gutter) 12px calc(var(--p-gutter) + var(--p-row-mark) + var(--p-row-gap))}
 .p-row-in > .p-pills:not(:first-child){margin-top:12px}
 .p-row-in > .p-pills > *{flex:1 1 150px}
