@@ -247,17 +247,25 @@ describe("the row opens on a tap (review round §1.1)", () => {
     expect(emma.control.isOpen).toBe(false);
     expect(document.activeElement).toBe(emma.face);
   });
-  it("closes on a tap outside, but not on scroll, and never on a timer", () => {
+  it("stays open once tapped: a tap elsewhere, a scroll or a timer never closes it", () => {
+    /* The desk's rule, and the owner's on the phone (2026-09-27, #1159):
+       "The drawer should just stay open once tapped like it does on
+       desktop". Only its own face, Escape, or another row in its group
+       closes it. */
     vi.useFakeTimers();
     const { emma } = rowFixture();
     const elsewhere = /** @type {HTMLElement} */ (document.getElementById("elsewhere"));
     emma.control.open();
     emma.last.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
-    expect(emma.control.isOpen).toBe(true);
+    elsewhere.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: 100, clientY: 400 }));
+    elsewhere.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true }));
     window.dispatchEvent(new Event("scroll"));
+    elsewhere.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: 100, clientY: 400 }));
+    elsewhere.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: 101, clientY: 401 }));
+    elsewhere.click();
     vi.advanceTimersByTime(60_000);
     expect(emma.control.isOpen).toBe(true);
-    elsewhere.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    emma.face.click();
     expect(emma.control.isOpen).toBe(false);
   });
   it("keeps one open per group: opening another row in the list closes the first", () => {
