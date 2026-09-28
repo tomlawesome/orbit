@@ -1,7 +1,7 @@
 <script>
   import { onMount, tick } from "svelte";
   import { browser } from "$app/environment";
-  import { afterNavigate, pushState, replaceState } from "$app/navigation";
+  import { afterNavigate, goto, pushState, replaceState } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
   import { mountAccount, mountEmptySky, mountHome } from "./home.behaviour.js";
@@ -12,7 +12,9 @@
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { approveReceipt, dismissReceipt, readHome, readItem, readItemDocuments, requestToJoin, signOut } from "$lib/data/workspace.js";
+  import { applyCommand, approveReceipt, dismissReceipt, readHome, readItem, readItemDocuments, requestToJoin, signOut } from "$lib/data/workspace.js";
+  import { completeCommand, nextDateAfter } from "$lib/data/commands.js";
+  import { createArm } from "$lib/pocket/arm.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
   import { ago, agoLong, money } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
@@ -20,6 +22,7 @@
   import { searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
   import { tlabel } from "./bands.js";
+  import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
   import CorridorRow from "./CorridorRow.svelte";
   import NorthStarMark from "$lib/NorthStarMark.svelte";
   import "./home.css";
@@ -403,7 +406,7 @@
    * @param {string} id
    */
   function openSearchResult(id) {
-    paletteOpen = false;
+    stripOpen = false;
     if (expanded === id) return;
     revealTarget = id;
     if (expanded === null) {
@@ -540,10 +543,30 @@
         : null;
     })(),
   );
-  // ---- the desk's own search palette (#1057, POL-9; §2.4's search shared
-  // with the phone via pocket-search.js rather than a second implementation)
+  // ---- the desk's own search strip (#1161, "C · unrolled"; §2.4's search
+  // shared with the phone via pocket-search.js rather than a second
+  // implementation — design/v19/search/round-1/BUILD.md)
 
-  let paletteOpen = $state(false);
+  /**
+   * @typedef {import('./pocket-search.js').SearchItem} SearchItem
+   * @typedef {import('./pocket-search.js').SearchDocument} SearchDoc
+   * @typedef {{ kind: string, paint: string, documentCount: number, suggestion?: boolean }} BodyPaint
+   * @typedef {BodyPaint & { days: number | null, size: number, costMinor: number | null,
+   *   currency: string, costIsEstimate: boolean }} DialBody
+   * @typedef {{ itemId: string, title: string, days: number | null, body: DialBody | null,
+   *   hitDocs: string[] }} StripMatch
+   */
+
+  /* `bodyMark`'s own neutral stand-in for an unscheduled match, which draws no
+     planet (BUILD.md §1) — and, doubling as the snippet parameter's default
+     value below, the only way to give `b` a real inferred shape rather than
+     `any`: a JSDoc annotation directly in a `{#snippet}` parameter list reads
+     fine to svelte-check but crashes the production rolldown build (see
+     scripts/check-rolldown-jsdoc-trap.mjs and CorridorRow.svelte's header). */
+  /** @type {BodyPaint} */
+  const EMPTY_BODY = { kind: "", paint: "", suggestion: false, documentCount: 0 };
+
+  let stripOpen = $state(false);
   let searchQuery = $state("");
   /** @type {import('./pocket-search.js').SearchDocument[]} */
   let searchDocuments = $state([]);
@@ -574,24 +597,210 @@
     searchPocket(searchQuery, { items: searchRows, attention: groups?.attention ?? [], documents: searchDocuments }),
   );
 
+  /* The raw item behind a manifest/search row, for the one command the strip
+     fires directly (#1162): completing the closest thing due. Same shape and
+     source as the pocket's own `rawItems` (home's pocket.svelte). */
+  const rawItems = $derived(new Map((view?.household?.items ?? []).map((item) => [item.id, item])));
+
+  /* #1162: the two note-line acts BUILD.md left inert. "complete" fires the
+     same completeCommand the item page and the pocket's own quick-complete
+     use, arm-then-fire (`$lib/pocket/arm.js`, the shared helper arm.js's own
+     header says the desk should reach for rather than a sixth inline copy).
+     "add" carries the typed name to /create exactly as the pocket's search
+     already does (#1120). Both show together at rest; a typed query with
+     real matches shows neither (BUILD.md §1). */
+  let completeArmed = $state(false);
+  const completeArm = createArm({ onchange: (next) => { completeArmed = next; } });
+  let stripProblem = $state(null);
+
+  const stripActs = $derived(stripActsOf({
+    searchQuery, nothing: searchResults.nothing, query: searchResults.query,
+    closest: groups?.closest ?? null, completeArmed,
+  }));
+
+  /** @param {{ id: string, title: string }} target */
+  async function fireCompleteAct(target) {
+    stripProblem = null;
+    if (!completeArm.tap()) return; // first tap only arms it
+    const raw = rawItems.get(target.id);
+    if (!raw || !view?.primary) return;
+    try {
+      const completedDate = asView(view).today;
+      await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId: view.primary }), {
+        completedDate,
+        nextDate: nextDateAfter(completedDate, raw.recurrenceMonths) ?? undefined,
+      }));
+      stripOpen = false;
+      view = await readHome();
+    } catch (error) {
+      stripProblem = /** @type {any} */ (error)?.message ?? "couldn't complete it — try again";
+    }
+  }
+
+  /** @param {string} name */
+  function goToCreate(name) {
+    stripOpen = false;
+    const query = name ? `?${new URLSearchParams({ name })}` : "";
+    goto(resolve(/** @type {any} */ (`/create${query}`)));
+  }
+
+  /** @param {{ kind: "complete" | "add", target?: any, name?: string }} a */
+  function fireAct(a) {
+    if (a.kind === "complete") fireCompleteAct(a.target);
+    else goToCreate(a.name ?? "");
+  }
+
   function onExploreFocus() {
-    paletteOpen = true;
+    stripOpen = true;
+    stripProblem = null;
     loadSearchDocuments();
   }
   function onExploreBlur() {
-    setTimeout(() => { paletteOpen = false; }, 150);
+    setTimeout(() => { stripOpen = false; completeArm.disarm(); }, 150);
   }
+
+  /* At rest (empty query) the strip shows the same two rows the palette
+     showed (BUILD.md §1): the attention group's own due-or-later two, not
+     searchPocket's unfiltered empty branch. */
+  const emptyStripRows = $derived((groups?.attention ?? []).filter(dueOrLater).slice(0, 2));
+  /** @param {SearchItem} row */
+  function dueOrLater(row) { return row.days !== null && row.days >= 0; }
+  const stripItems = $derived(searchQuery ? searchResults.items : emptyStripRows);
+  const stripDocuments = $derived(searchQuery ? searchResults.documents : []);
+
+  /* The one selectable list, in the order §1 names: items (manifest order,
+     soonest first), then documents, then the note line's own act(s) (#1162)
+     — trailing, since a query with real matches never shows one at all
+     (BUILD.md §1). The no-match sentence itself carries no act and is never
+     in this list. */
+  /* Typed as declarations, not inline arrow parameters: a JSDoc comment on
+     an arrow's parameter compiles to server output vite dev cannot run
+     (#1138). */
+  /** @param {SearchItem} item */
+  function itemEntry(item) {
+    return { kind: /** @type {const} */ ("item"), itemId: item.id, title: item.title, days: item.days };
+  }
+  /** @param {SearchDoc} doc */
+  function docEntry(doc) {
+    return { kind: /** @type {const} */ ("doc"), itemId: doc.itemId, title: doc.name, itemTitle: doc.itemTitle };
+  }
+  const selectable = $derived([
+    ...stripItems.map(itemEntry),
+    ...stripDocuments.map(docEntry),
+    ...stripActs,
+  ]);
+  let selectedIndex = $state(0);
+  const selectedPos = $derived(selectable.length ? Math.min(selectedIndex, selectable.length - 1) : null);
+  const selectedEntry = $derived(selectedPos === null ? null : selectable[selectedPos]);
+
+  /** @param {number} direction */
+  function stepSelection(direction) {
+    if (!selectable.length) return;
+    const current = Math.min(selectedIndex, selectable.length - 1);
+    selectedIndex = (current + direction + selectable.length) % selectable.length;
+  }
+  /** @param {{ itemId: string }} mark */
+  function selectMark(mark) {
+    const idx = selectable.findIndex((entry) => entry.itemId === mark.itemId);
+    if (idx >= 0) selectedIndex = idx;
+  }
+  /** @param {{ itemId: string }} mark */
+  function openMark(mark) {
+    selectMark(mark);
+    openSearchResult(mark.itemId);
+  }
+  /** @param {{ kind: "complete" | "add" }} a */
+  function selectAct(a) {
+    const idx = selectable.indexOf(a);
+    if (idx >= 0) selectedIndex = idx;
+  }
+
   /** @param {KeyboardEvent} event */
   function onExploreKeydown(event) {
     if (event.key === "Escape") {
+      completeArm.disarm();
       /** @type {HTMLElement} */ (event.currentTarget).blur();
       return;
     }
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") { event.preventDefault(); stepSelection(1); return; }
+    if (event.key === "ArrowLeft" || event.key === "ArrowUp") { event.preventDefault(); stepSelection(-1); return; }
     if (event.key !== "Enter") return;
     event.preventDefault();
-    const top = searchResults.items[0];
-    if (top) openSearchResult(top.id);
+    if (!selectedEntry) return;
+    if (selectedEntry.kind === "complete" || selectedEntry.kind === "add") { fireAct(selectedEntry); return; }
+    openSearchResult(selectedEntry.itemId);
   }
+
+  /* ---- the strip's own layout: the dial's bodies, never recomputed, plus
+     the pure geometry in strip-layout.js (BUILD.md §3/§4). ---- */
+  const bodiesById = $derived(new Map(bodies.map((b) => [b.id, b])));
+  const stripToday = $derived(view ? asView(view).today : new Date().toISOString().slice(0, 10));
+  const stripTodayX = $derived(xOfDays(0));
+  const stripMonthTicks = $derived(stripOpen ? monthTicks(stripToday) : []);
+  /** @param {number} days */
+  const stripDateOf = (days) =>
+    new Date(Date.parse(`${stripToday}T00:00:00Z`) + days * 86400000)
+      .toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+
+  const stripMarks = $derived.by(() => {
+    if (!stripOpen) return [];
+    /** @type {Map<string, StripMatch>} */
+    const byItem = new SvelteMap();
+    for (const row of stripItems) {
+      const b = bodiesById.get(row.id) ?? null;
+      byItem.set(row.id, { itemId: row.id, title: row.title, days: b ? b.days : row.days, body: b, hitDocs: [] });
+    }
+    for (const doc of stripDocuments) {
+      let m = byItem.get(doc.itemId);
+      if (!m) {
+        const b = bodiesById.get(doc.itemId) ?? null;
+        const row = searchRows.find((r) => r.id === doc.itemId);
+        m = { itemId: doc.itemId, title: doc.itemTitle, days: b ? b.days : (row?.days ?? null), body: b, hitDocs: [] };
+        byItem.set(doc.itemId, m);
+      }
+      m.hitDocs.push(doc.name);
+    }
+    const raw = [...byItem.values()].map((m) => {
+      /* `days` rather than `m.days` from here on: a ternary keyed on a
+         separately-computed `unscheduled` boolean does not narrow `m.days`
+         itself, only one keyed on `days === null` directly does. */
+      const days = m.days;
+      const unscheduled = days === null;
+      const x = days === null ? UNSCHEDULED_X : xOfDays(days);
+      const meta = days === null
+        ? `no date · ${m.body ? money(m.body.costMinor, m.body.currency, m.body.costIsEstimate) : ""}`
+        : `${tlabel({ days })} · ${stripDateOf(days)} · ${money(m.body?.costMinor ?? null, m.body?.currency ?? "GBP", m.body?.costIsEstimate ?? false)}`;
+      const lines = [
+        { cls: "title", text: m.title, size: 12.5 },
+        { cls: "meta", text: meta, size: 11 },
+        ...m.hitDocs.map((name) => ({ cls: "docs hitdoc", text: `◆ ${name}`, size: 11 })),
+      ];
+      const width = Math.max(...lines.map((l) => textWidth(l.text, l.size)));
+      return { ...m, unscheduled, x, lines, width };
+    });
+    return assignTiers(raw).map((m) => {
+      const r = m.body ? Math.max(3.5, m.body.size * 1.1) : 3.5;
+      const tier = m.unscheduled ? 0 : m.tier;
+      const flip = m.unscheduled ? true : m.flip;
+      const showLabel = m.unscheduled || m.labelled || selectedEntry?.itemId === m.itemId;
+      const run = TIER_RUN_Y[tier];
+      const n = m.lines.length;
+      const lineNodes = m.lines.map((line, k) => ({
+        ...line,
+        y: tier === 0 ? run - 5 - (n - 1 - k) * 13 : run + 12 + k * 13,
+      }));
+      const leaderPath = leaderPathOf({ x: m.x, width: m.width, r, tier, flip });
+      return { ...m, r, tier, flip, showLabel, anchorX: flip ? m.x - 2 : m.x + 2, lineNodes, leaderPath };
+    });
+  });
+  const stripBusyX = $derived(stripMarks.map((m) => m.x));
+  /** @param {{ itemId: string }} m */
+  const isMarkSelected = (m) => selectedEntry?.itemId === m.itemId;
+
+  $effect(() => {
+    document.body.classList.toggle("searching", stripOpen);
+    return () => document.body.classList.remove("searching");
+  });
 
   const todayLine = $derived(
     view
@@ -671,9 +880,6 @@
   );
   const closest = $derived(bodies.find((b) => b.closest) ?? null);
   const firstOverdue = $derived(bodies.find((b) => b.overdue) ?? null);
-  /** @type {(b: any) => string} */
-  const crescent = (b) =>
-    `M ${b.placement.x} ${b.placement.y - b.size} A ${b.size} ${b.size} 0 0 1 ${b.placement.x} ${b.placement.y + b.size} Z`;
   /* #1005: a one-off is a dashed ring in its own band's colour -- an outline
      with nothing inside it, because there is nothing coming round. Past its
      date it wears the quiet ink tone: ended, not owed. */
@@ -1102,6 +1308,37 @@
          tap one to ask to join, or follow the north star to start your own</p>
     </div>
     {:else}
+    <!-- #1161 (BUILD.md §2): the body-drawing chain lifted out of the dial's
+         own each-block so the strip below can draw the same matched planet
+         from the same tokens — never a second painting of the same body.
+         (b, cx, cy, r) rather than reading b.placement/b.size directly: the
+         strip's r is 1.1× the dial's own size, not the dial's own centre. -->
+    {#snippet bodyMark(b = EMPTY_BODY, cx = 0, cy = 0, r = 0)}
+      {#if b.suggestion}
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--accent)" stroke-width="1.6"/>
+      {:else if b.kind === "expiry"}
+        <!-- #1005: no fill, no core, no highlight -- the ring IS the body. -->
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke={expiryStroke(b)} stroke-width="2" stroke-dasharray="2.6 2.2"/>
+      {:else if b.paint === "ruby" || b.paint === "amber"}
+        <circle cx={cx} cy={cy} r={r} style="stroke:var(--bg);stroke-width:2" fill="url(#p-{b.paint})"/>
+      {:else if b.paint === "sky"}
+        <circle cx={cx} cy={cy} r={r} style="stroke:var(--upcoming);stroke-opacity:.25;stroke-width:2.6" fill="url(#p-sky)"/>
+      {:else if b.documentCount > 0}
+        <circle cx={cx} cy={cy} r={r} style="stroke:var(--ok);stroke-opacity:.25;stroke-width:3" fill="url(#p-jade)"/>
+      {:else}
+        <circle cx={cx} cy={cy} r={r} fill="url(#p-jade)"/>
+      {/if}
+      {#if !b.suggestion && b.kind === "inspection"}
+        <path d="M {cx} {cy - r} A {r} {r} 0 0 1 {cx} {cy + r} Z" fill="rgba(0,0,0,.42)"/>
+      {/if}
+      {#if !b.suggestion && b.kind === "renewal"}
+        <circle cx={cx} cy={cy} r={r * 0.57} style="fill:var(--bg)"/>
+        <circle cx={cx} cy={cy} r={r * 0.28} fill="url(#p-{b.paint})"/>
+      {/if}
+      {#if !b.suggestion && b.kind !== "expiry" && r >= 4}
+        <circle cx={cx - 0.2 * r} cy={cy + 0.25 * r} r={0.33 * r} fill="rgba(255,255,255,.38)"/>
+      {/if}
+    {/snippet}
     <!-- backdrop constellations are generated from the galaxy map -->
     <div class="dialwrap">
       <svg width="640" height="640" class="dial" viewBox="0 0 380 380" role="group"
@@ -1238,31 +1475,7 @@
              aria-label={`${b.title}, ${tlabel(b)} · ${money(b.costMinor, b.currency, b.costIsEstimate)}${b.documentCount > 0 ? `, ${b.documentCount} document${b.documentCount === 1 ? "" : "s"}` : ""}`}><g
              id={b.closest ? "b-closest" : undefined}
              class={b.overdue || b.paint === "amber" ? "breathe" : undefined}>
-            {#if b.kind === "expiry"}
-              <!-- #1005: no fill, no core, no highlight -- the ring IS the body. -->
-              <circle cx={b.placement.x} cy={b.placement.y} r={b.size} fill="none"
-                      stroke={expiryStroke(b)} stroke-width="2" stroke-dasharray="2.6 2.2"/>
-            {:else if b.paint === "ruby" || b.paint === "amber"}
-              <circle cx={b.placement.x} cy={b.placement.y} r={b.size}
-                      style="stroke:var(--bg);stroke-width:2" fill="url(#p-{b.paint})"/>
-            {:else if b.paint === "sky"}
-              <circle cx={b.placement.x} cy={b.placement.y} r={b.size}
-                      style="stroke:var(--upcoming);stroke-opacity:.25;stroke-width:2.6" fill="url(#p-sky)"/>
-            {:else if b.documentCount > 0}
-              <circle cx={b.placement.x} cy={b.placement.y} r={b.size}
-                      style="stroke:var(--ok);stroke-opacity:.25;stroke-width:3" fill="url(#p-jade)"/>
-            {:else}
-              <circle cx={b.placement.x} cy={b.placement.y} r={b.size} fill="url(#p-jade)"/>
-            {/if}
-            {#if b.kind === "inspection"}<path d={crescent(b)} fill="rgba(0,0,0,.42)"/>{/if}
-            {#if b.kind === "renewal"}
-              <circle cx={b.placement.x} cy={b.placement.y} r={b.size * 0.57} style="fill:var(--bg)"/>
-              <circle cx={b.placement.x} cy={b.placement.y} r={b.size * 0.28} fill="url(#p-{b.paint})"/>
-            {/if}
-            {#if b.kind !== "expiry" && b.size >= 4}
-              <circle cx={b.placement.x - 0.2 * b.size} cy={b.placement.y + 0.25 * b.size}
-                      r={0.33 * b.size} fill="rgba(255,255,255,.38)"/>
-            {/if}
+            {@render bodyMark(b, b.placement.x, b.placement.y, b.size)}
           </g></a>
         {/if}
       {/each}
@@ -1277,28 +1490,91 @@
     </div>
     <div class="hero-foot">
       <div class="splash-search" style="position:relative">
-        <input id="explore" placeholder="explore your world" aria-label="Search items and documents"
-               autocomplete="off" bind:value={searchQuery} onfocus={onExploreFocus} onblur={onExploreBlur}
-               onkeydown={onExploreKeydown}>
-        <div class="palette" data-polish="POL-9" id="palette" class:open={paletteOpen}>
-          {#if !searchResults.query}
-            {#each (groups?.attention ?? []).filter((/** @type {any} */ r) => r.days >= 0).slice(0, 2) as row (row.id)}
-              <div><b>{row.title}</b> <small>· {tlabel(row)}</small></div>
-            {/each}
-            {#if groups?.closest}<div class="act">→ complete "{groups.closest.title}"</div>{/if}
-            <div class="act">→ add an item</div>
-          {:else if searchResults.nothing}
-            <div>nothing in your orbit is called "{searchResults.query}"</div>
-            <div class="act">→ add "{searchResults.query}" as an item</div>
-          {:else}
-            {#each searchResults.items as row (row.id)}
-              <div><b>{row.title}</b> <small>· {tlabel(row)}</small></div>
-            {/each}
-            {#each searchResults.documents as doc (doc.id)}
-              <div>◆ <b>{doc.name}</b> <small>· {doc.itemTitle}</small></div>
-            {/each}
-          {/if}
+        <!-- #1161, "C · unrolled" (design/v19/search/round-1/BUILD.md): the
+             year drawn as a line above the field, replacing POL-9's command
+             palette. aria-hidden — #explore-results below is the accessible
+             read of the same results; the SVG is decoration. -->
+        <div class="strip" id="strip" aria-hidden="true" class:open={stripOpen}>
+          <svg id="stripsvg" width="820" height="150" viewBox="0 0 820 150">
+            {#if stripOpen}
+              <line class="past" x1={AXIS_X0} y1={AXIS_Y} x2={stripTodayX} y2={AXIS_Y}/>
+              <line class="axis" x1={stripTodayX} y1={AXIS_Y} x2={AXIS_X1} y2={AXIS_Y}/>
+              {#each stripMonthTicks as t (t.days)}
+                <line class="tick" x1={t.x} y1={AXIS_Y - 3} x2={t.x} y2={AXIS_Y + 3}/>
+                {#if !stripBusyX.some((bx) => Math.abs(bx - t.x) < 16)}
+                  <text class="month" x={t.x} y={AXIS_Y + 16} text-anchor="middle">{t.name}</text>
+                {/if}
+              {/each}
+              <path class="today" d="M{stripTodayX} {AXIS_Y + 4} l4.5 8 h-9 Z" style="fill:var(--accent)"/>
+              {#each stripMarks as m (m.itemId)}
+                <g class="match" class:sel={isMarkSelected(m)}
+                   role="presentation"
+                   onmouseenter={() => selectMark(m)}
+                   onmousedown={(event) => { event.preventDefault(); openMark(m); }}>
+                  {#if isMarkSelected(m)}
+                    <circle class="halo" cx={m.x} cy={AXIS_Y} r={m.r + 4} style="stroke:var(--accent)"/>
+                  {/if}
+                  {#if !m.unscheduled}
+                    <path class="lead" d={m.leaderPath} style={isMarkSelected(m) ? "stroke:var(--accent);stroke-opacity:.85" : undefined}/>
+                  {/if}
+                  {#if m.showLabel}
+                    {#each m.lineNodes as line, i (i)}
+                      <text class={line.cls} x={m.anchorX} text-anchor={m.flip ? "end" : undefined} y={line.y}>{line.text}</text>
+                    {/each}
+                  {/if}
+                  {#if !m.unscheduled}
+                    {@render bodyMark(m.body ?? EMPTY_BODY, m.x, AXIS_Y, m.r)}
+                  {/if}
+                </g>
+              {/each}
+            {/if}
+          </svg>
+          <div class="strip-note" id="strip-note">
+            {#if !searchQuery}
+              {#each stripActs as a, i (a.itemId)}
+                {#if i > 0}<span class="sep">·</span>{/if}
+                <span class="act" role="presentation"
+                      onmousedown={(event) => { event.preventDefault(); selectAct(a); fireAct(a); }}
+                      >{a.kind === "complete" && completeArmed ? a.title : `→ ${a.title}`}</span>
+              {/each}
+              {#if stripProblem}<span class="sep">·</span><span style="color:var(--overdue)">{stripProblem}</span>{/if}
+            {:else if searchResults.nothing}
+              <span>nothing in your orbit is called "{searchResults.query}"</span>
+              <span class="sep">·</span>
+              {#each stripActs as a (a.itemId)}
+                <span class="act" role="presentation"
+                      onmousedown={(event) => { event.preventDefault(); selectAct(a); fireAct(a); }}
+                      >→ {a.title}</span>
+              {/each}
+            {:else}
+              <span>{searchResults.items.length} in your orbit</span>
+              {#if searchResults.documents.length}
+                <span class="sep">·</span>
+                <span>{searchResults.documents.length} document{searchResults.documents.length === 1 ? "" : "s"}</span>
+              {/if}
+              <span class="sep">·</span>
+              <span class="hint">←→ step · ↵ open</span>
+            {/if}
+          </div>
         </div>
+        <input id="explore" placeholder="explore your world" aria-label="Search items and documents"
+               autocomplete="off" bind:value={searchQuery} role="combobox" aria-expanded={stripOpen}
+               aria-controls="explore-results" aria-autocomplete="list"
+               aria-activedescendant={!stripOpen || selectedPos === null ? undefined : `sr-opt-${selectedPos}`}
+               onfocus={onExploreFocus} onblur={onExploreBlur}
+               oninput={() => { selectedIndex = 0; stripProblem = null; }}
+               onkeydown={onExploreKeydown}>
+        {#if stripOpen}
+          <ul class="sr-only" id="explore-results" role="listbox" aria-label="Results">
+            {#each selectable as entry, i (i)}
+              <li id="sr-opt-{i}" role="option" aria-selected={i === selectedPos}>
+                {entry.kind === "item" ? `${entry.title} · ${tlabel({ days: entry.days })}`
+                  : entry.kind === "doc" ? `document ${entry.title} · ${entry.itemTitle}`
+                  : entry.title}
+              </li>
+            {/each}
+          </ul>
+        {/if}
       </div>
     </div>
     {/if}
