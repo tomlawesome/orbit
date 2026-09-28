@@ -6,7 +6,8 @@ import { describe, expect, it } from "vitest";
 // command both create and edit build from the same form.
 import {
   RECURRENCE_MAX, REMINDER_DEFAULT, blankEntry, createCommandOf, entryChanged, entryOf, entryOfProposal, fieldsOf,
-  kindOf, minorOf, recurrenceWords, refusalOf, reviewItemOf, scheduleOf, stepRecurrence, toggleReminder,
+  kindOf, minorOf, recurrenceOfChoice, recurrenceWords, refusalOf, reviewItemOf, scheduleOf, stepRecurrence,
+  toggleReminder,
 } from "../../web/src/routes/create/entry.js";
 import { upsertCommand } from "../../web/src/lib/data/commands.js";
 
@@ -65,6 +66,16 @@ describe("recurrence: once, or every 1 to 120 months (#1058)", () => {
 
   it("writes once as no recurrence at all", () => {
     expect(fieldsOf(filled({ recurrence: 0 })).recurrenceMonths).toBeUndefined();
+  });
+
+  it("the desk's own select reads the same range (#1069)", () => {
+    expect(recurrenceOfChoice("once", "")).toBe(0);
+    expect(recurrenceOfChoice("monthly", "")).toBe(1);
+    expect(recurrenceOfChoice("yearly", "")).toBe(12);
+    expect(recurrenceOfChoice("custom", "6")).toBe(6);
+    expect(recurrenceOfChoice("custom", "400")).toBe(RECURRENCE_MAX);
+    expect(recurrenceOfChoice("custom", "0")).toBe(1);
+    expect(recurrenceOfChoice("custom", "not a number")).toBe(1);
   });
 });
 

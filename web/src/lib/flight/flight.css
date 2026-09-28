@@ -171,22 +171,36 @@ body.lit .gate{opacity:1;transform:none}
       opacity:0;transition:opacity 1.6s ease 4.1s}
 body.lit .localopen{opacity:1}
 
-/* ══ THE THREE STATES WHERE THE DOOR CANNOT OPEN (#788) ═══════════════════
+/* ══ THE THREE STATES WHERE THE DOOR CANNOT OPEN (#788), AND THE CALLBACK'S
+   OWN TWO (#1056) ══════════════════════════════════════════════════════════
    design/v19/signin-states/round-1/, direction C ("the held dawn"),
    owner-ratified 2026-09-06. `SignIn.svelte` sets `data-state` on <body> —
    `unconfigured`, `starting` or `failed` while the door cannot open, `door`
    once (or if) it can; scoped to `#dawn` because `.dawnlayer`/`.rays`/
    `.sunpt`/`.shimmer`/`.rim` are vocabulary #dusk's own goodbye shares. The
    sign-in button is not merely hidden here: SignIn.svelte does not render it
-   into the DOM at all while unavailable, so no CSS rule below needs to. */
+   into the DOM at all while unavailable, so no CSS rule below needs to.
+
+   `/auth/error` (design/v19/auth-error/round-1/, direction B, owner-ratified
+   2026-09-19) sets the same attribute to `incomplete` or `refused`
+   (auth-error-state.js) for the failed OIDC callback — the mechanism this
+   round's own build note left open, rather than a second one. `refused`
+   wears this section's rules completely unchanged; `incomplete` is the one
+   state in the whole family with a pill on a held sky, so it alone gets the
+   two small overrides below the shared held-dawn block. */
 /* While sign-in is unavailable the button is dropped from layout AND the
    accessibility tree (unlike opacity/visibility, which would leave it
    focusable) — the round-1 README's own accessibility bar. Guarded on the
    attribute's presence, not merely its value, so a page that never sets
    `data-state` at all (SignIn.svelte is `#dawn`'s only consumer, but this
    is what keeps the rule inert if that ever changes) never hides the button
-   by accident. */
-body[data-state]:not([data-state="door"]) #dawn .gate-wrap{display:none}
+   by accident. `incomplete` is also excluded here, not only re-shown below:
+   `:not([data-state="door"])` alone out-specifies the `incomplete` override
+   two rules down (two attribute selectors plus the id and class beat that
+   override's one attribute selector plus id and class), so the pill stayed
+   display:none whatever the override said until this second exclusion was
+   added (#1056 shipped that way; caught in the m14 batch's own e2e run). */
+body[data-state]:not([data-state="door"]):not([data-state="incomplete"]) #dawn .gate-wrap{display:none}
 
 #dawn .state{grid-area:1/1;width:100%;height:100%;position:relative;pointer-events:none}
 #dawn .state-primary{position:absolute;left:50%;top:calc(50% + 64px);transform:translateX(-50%);
@@ -212,16 +226,26 @@ body.returning #dawn .state-primary,body.returning #dawn .state-sub{
 /* THE HELD DAWN: while the door cannot open, first light never fully
    breaks. Only opacities the lit sequence above already animates are
    touched, so holding and releasing the sky is always a slow change riding
-   those same transitions, never a cut. */
+   those same transitions, never a cut. `incomplete` and `refused` (#1056)
+   share it exactly with `unconfigured`/`failed`: the callback's door cannot
+   open any more than theirs can. */
 body.lit[data-state="unconfigured"] #dawn .dawnlayer,
-body.lit[data-state="failed"] #dawn .dawnlayer{opacity:.32}
+body.lit[data-state="failed"] #dawn .dawnlayer,
+body.lit[data-state="incomplete"] #dawn .dawnlayer,
+body.lit[data-state="refused"] #dawn .dawnlayer{opacity:.32}
 body.lit[data-state="unconfigured"] #dawn .rays,
 body.lit[data-state="failed"] #dawn .rays,
+body.lit[data-state="incomplete"] #dawn .rays,
+body.lit[data-state="refused"] #dawn .rays,
 body.lit[data-state="starting"] #dawn .rays{opacity:0}
 body.lit[data-state="unconfigured"] #dawn .sunpt,
-body.lit[data-state="failed"] #dawn .sunpt{opacity:.38}
+body.lit[data-state="failed"] #dawn .sunpt,
+body.lit[data-state="incomplete"] #dawn .sunpt,
+body.lit[data-state="refused"] #dawn .sunpt{opacity:.38}
 body.lit[data-state="unconfigured"] #dawn .shimmer,
-body.lit[data-state="failed"] #dawn .shimmer{opacity:.35}
+body.lit[data-state="failed"] #dawn .shimmer,
+body.lit[data-state="incomplete"] #dawn .shimmer,
+body.lit[data-state="refused"] #dawn .shimmer{opacity:.35}
 /* waking: the pre-dawn swells and ebbs — morning visibly trying, with no
    action from the reader */
 body.lit[data-state="starting"] #dawn .dawnlayer{opacity:.45;
@@ -231,6 +255,29 @@ body.lit[data-state="starting"] #dawn .sunpt{opacity:.6}
 /* ready: no override left standing — the sky simply continues on toward
    `body.lit .dawnlayer{opacity:1}` etc. above, so recovery is the ordinary
    first-light transition finishing what it started. */
+
+/* `incomplete` ALONE keeps the pill on a held sky (round-1's own honest
+   caution: "a held dawn with a handle") — the generic rule above now
+   excludes `incomplete` from being hidden, so `.gate-wrap` is already at
+   its default `display:block` by the time this rule runs. Kept anyway,
+   explicit rather than relying on the browser default, since that default
+   is exactly what let the specificity bug above ship unnoticed. Pressing
+   the pill plays the door's own sunrise, so the retry IS the recovery,
+   exactly as round-1 ratifies. */
+body[data-state="incomplete"] #dawn .gate-wrap{display:block}
+/* the pill's own entrance (opacity/transform on `.lit`, the delayed
+   1.6s-ease-3.6s transition) is the shared `.gate` rule above, unscoped by
+   state — this needs nothing of its own once the wrapper is visible. */
+
+/* the words, `incomplete` only: a 14px display line does not fit between
+   the pill (still in its ratified slot) and the ring's line — tried at
+   +111px first (round-1 README) — so on this state alone the primary line
+   takes the ratified subline's own slot and the subline follows 32px below
+   it. `refused` needs no override: it has no pill to clear, so it keeps
+   this section's own default slots above — the primary in the ring where
+   the handle stood. */
+body[data-state="incomplete"] #dawn .state-primary{top:calc(50% + 172px)}
+body[data-state="incomplete"] #dawn .state-sub{top:calc(50% + 204px)}
 
 /* ══ THE FLIGHT ══════════════════════════════════════════════════════════ */
 #warp{position:fixed;inset:0;z-index:5;opacity:0;pointer-events:none;

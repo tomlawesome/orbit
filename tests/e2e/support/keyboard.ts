@@ -406,7 +406,21 @@ export async function fillCreateForm(page: Page, name: string) {
   await page.keyboard.press("Tab"); // inspection
   await page.keyboard.press("Tab"); // suggestion
   await page.keyboard.press("Tab"); // document
-  await page.keyboard.press("Tab"); // dropzone — left un-activated; a native file picker isn't keyboard-scriptable here
+
+  /* #1069: the section row, one button per visible section and none chosen
+     by default; the entry cannot be saved until one is, so activate the
+     first as a keyboard user must, then Tab past the rest. */
+  await page.keyboard.press("Tab"); // first section
+  expect(
+    await page.evaluate(() => Boolean(document.activeElement?.closest("#sections"))),
+    "create: expected the section buttons after the type chips",
+  ).toBe(true);
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#sections button").first()).toHaveAttribute("aria-pressed", "true");
+  const sectionCount = await page.locator("#sections button").count();
+  for (let i = 0; i < sectionCount; i += 1) await page.keyboard.press("Tab"); // …the rest, then the dropzone
+  expect(await page.evaluate(() => document.activeElement?.id), "create: expected the dropzone after the sections").toBe("dropzone");
+  // dropzone — left un-activated; a native file picker isn't keyboard-scriptable here
 
   await page.keyboard.press("Tab"); // f-provider — left blank, optional
   await page.keyboard.press("Tab"); // f-ref — left blank, optional
@@ -431,7 +445,7 @@ export async function fillCreateForm(page: Page, name: string) {
   expect(await page.evaluate(() => document.activeElement?.id), "create: expected the recurrence select after the date").toBe("f-recur");
   await page.keyboard.press("Tab"); // f-cost — left blank, optional
   await page.keyboard.press("Tab"); // f-reminder select — left at its default
-  await page.keyboard.press("Tab"); // f-assign select — left at its default (household)
   await page.keyboard.press("Tab"); // f-notes
+  expect(await page.evaluate(() => document.activeElement?.id), "create: expected notes after the reminder").toBe("f-notes");
   await page.keyboard.type("added by the keyboard-only pass");
 }
