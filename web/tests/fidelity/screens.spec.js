@@ -543,6 +543,9 @@ const SCREENS = [
      * that sheet like every other ported screen. Back to PORTING.
      */
     name: "item",
+    /* Baseline re-cut 2026-09-28 with the owner's approval (#1169): the
+       belt's end-caps stand at the screen's middle since f5026445 (§26),
+       and the old baseline still drew them at the top. */
     path: "/item/i-mot",
     stage: "porting",
     mockup: "/design/v19/item-belt.html",
