@@ -448,7 +448,9 @@ const SCREENS = [
     /* Accepted by the owner after the #1120 review round, 2026-09-26: the
        phone home is done, not still being ported, so `/design/family/
        mobile-home.html` is now a historical record rather than a live
-       comparison target. */
+       comparison target. Re-cut 2026-09-28 with the owner's approval: each
+       signal its own dashed card (#1142) and no doubled top edge on a
+       group's second card (#1157). */
     stage: "owned",
     /* The dialect's own frame: `.mpage` is drawn at max-width 400 and the sky
        behind it at a 400×850 viewBox, so that is the sheet of glass to
