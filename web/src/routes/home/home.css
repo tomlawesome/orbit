@@ -590,7 +590,12 @@
   body.storm .dial g[fill="url(#p-jade)"],
   body.storm .dial [data-body="i-smoke"],body.storm .dial [data-body="i-svc"]{
     transform:scale(1.17)}
-  .dial .belt{transition:transform 2s cubic-bezier(.3,.6,.2,1);transform-origin:190px 190px}
+  /* the search dissolve's own opacity transition joins this rule rather than
+     `.dial :is(.chrome,.body-link,.ping,.belt)` below -- .belt already owns a
+     transform transition for POL-10's storm zoom, and that selector's own
+     specificity ties with this one, so a second bare rule would win the
+     cascade outright and silently drop the transform half. */
+  .dial .belt{transition:transform 2s cubic-bezier(.3,.6,.2,1),opacity .55s ease;transform-origin:190px 190px}
   body.storm .dial .belt{transform:scale(1.17)}
   body.storm circle[fill="url(#danger4)"]{opacity:1.6;transform:scale(1.35);transform-origin:190px 190px}
   body.storm .dial circle[stroke-dasharray="3 5"]{stroke:var(--overdue);stroke-opacity:.85;
@@ -606,15 +611,79 @@
   body.storm .meteor.m2{background:linear-gradient(90deg,transparent,#f87171)}
   body.storm .meteor.m3{animation-delay:1.7s !important;
     background:linear-gradient(90deg,transparent,#ffd166)}
-  /* POL-9: command palette on the explore field */
-  .palette{position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:10px;
-           width:340px;background:var(--panel-raised);backdrop-filter:blur(14px);
-           border:1px solid var(--line);border-radius:14px;padding:8px;display:none;text-align:left}
-  .palette.open{display:block}
-  .palette div{font:12.5px var(--mono);color:var(--ink-mid);padding:8px 10px;border-radius:8px}
-  .palette div b{color:var(--ink);font-weight:500}
-  .palette div:hover{background:var(--panel)}
-  .palette .act{color:var(--accent-text)}
+  /* #1161, "C · unrolled" (design/v19/search/round-1/BUILD.md §3): the desk
+     search strip replaces POL-9's command palette — the year drawn as a line
+     above the field, no box, no icon. `.strip`/`.strip-note` are scoped to
+     `.desk` because both bare class names already exist, unrelated, in
+     settings.css and administration.css, and SvelteKit does not unload a
+     visited route's CSS chunk on client-side navigation (the same reason
+     `.group`/`.item` are scoped above). */
+  .desk .strip{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);margin-bottom:6px;
+         width:820px;display:none;flex-direction:column;align-items:center;gap:6px}
+  .desk .strip.open{display:flex}
+  .desk .strip svg{display:block;overflow:visible;font-family:var(--mono)}
+  .desk .strip .axis{stroke:var(--chart-line);stroke-width:1}
+  .desk .strip .past{stroke:var(--overdue);stroke-opacity:.45;stroke-width:1;stroke-dasharray:3 5}
+  .desk .strip .tick{stroke:var(--chart-line);stroke-width:1}
+  .desk .strip .month{font-size:8.5px;fill:var(--chart-ink);letter-spacing:.08em}
+  /* today's mark and a selected mark's own accent bits carry their colour as
+     an inline style, the same convention the dial's own POL-3 pointer uses
+     (`<path style="fill:var(--accent)">`), so retrograde's bloom hook below
+     — `[style*="--accent"]` — reaches them the same way it reaches the dial. */
+  .desk .strip .lead{stroke:var(--chart-line);stroke-width:1;fill:none}
+  .desk .strip .title{font-size:12.5px;fill:var(--ink-mid)}
+  .desk .strip .match.sel .title{fill:var(--ink)}
+  .desk .strip .meta{font-size:11px;fill:var(--ink-mid)}
+  .desk .strip .docs{font-size:11px;fill:var(--ink-faint)}
+  .desk .strip .docs.hitdoc{fill:var(--ink)}
+  .desk .strip .halo{fill:none;stroke-width:1;stroke-opacity:.8}
+  .desk .strip .match{cursor:pointer}
+  .desk .strip .body{stroke:var(--bg);stroke-width:2}
+  .desk .strip .hollow{fill:none;stroke:var(--accent);stroke-width:1.6}
+  /* the axis draws once per open — its own DOM nodes never remount on a
+     keystroke, so baking the animation straight onto the rule (rather than a
+     one-shot class the mockup toggled by hand) already plays it exactly once
+     per open and holds at 0 (`forwards`) for every keystroke after. The past
+     segment can't share this: `stroke-dasharray:780` for the draw-on
+     overrides its own `3 5` dash (line above) for good, so it would never
+     end up dashed at rest. It fades in instead, keeping its `3 5` dash the
+     whole time — same one-shot-per-open timing as the ticks/marks below. */
+  .desk .strip .axis{stroke-dasharray:780;stroke-dashoffset:780;
+    animation:strip-unroll .7s cubic-bezier(.2,.7,.2,1) forwards}
+  .desk .strip .past{animation:strip-fade-in .5s ease .25s both}
+  @keyframes strip-unroll{to{stroke-dashoffset:0}}
+  /* ticks/today/month mount once per open too; a match remounts on every
+     keystroke that changes the matched set, so only marks actually fade
+     again — the axis does not redraw (BUILD.md §3) */
+  .desk .strip .match,.desk .strip .today,.desk .strip .month,.desk .strip .tick{animation:strip-fade-in .5s ease .25s both}
+  @keyframes strip-fade-in{from{opacity:0}to{opacity:1}}
+  @media (prefers-reduced-motion: reduce){
+    .desk .strip .axis,.desk .strip .past,.desk .strip .match,.desk .strip .today,.desk .strip .month,.desk .strip .tick{
+      animation:none;stroke-dashoffset:0}
+  }
+  .desk .strip-note{font:11px var(--mono);letter-spacing:.08em;color:var(--ink-mid);white-space:nowrap;
+              display:flex;gap:14px;align-items:baseline;min-height:16px}
+  .desk .strip-note .act{color:var(--accent-text);cursor:pointer}
+  .desk .strip-note .sep,.desk .strip-note .hint{color:var(--ink-faint)}
+  /* the ring dissolves as the line unrolls (POL-8's own move); the sun stays
+     — #dial-name and .sun-link are not in this selector. .belt's own opacity
+     transition lives on its own rule above, for the reason noted there;
+     .chrome/.body-link/.ping carry no other transition, so this one is safe
+     to declare outright. */
+  .dial :is(.chrome,.body-link,.ping){transition:opacity .55s ease}
+  body.searching .dial :is(.chrome,.body-link,.ping,.belt){opacity:.05}
+  /* .minisys already owns a transform+opacity transition for the household
+     flight (CON-6); re-declaring it bare here would drop the transform half
+     the same way .belt's would have, and unlike .belt there is no shared
+     selector to fold this into without also retuning the flight's own
+     opacity duration. Scoped to `.searching` instead: the .55s the brief
+     asks for while the dissolve is opening (the case that matters — a blur
+     closes the strip and this class together), falling back to the flight's
+     1.25s on the way out the rare moment the two overlap. */
+  body.searching .minisys{opacity:.2;transition:opacity .55s ease}
+  @media (prefers-reduced-motion: reduce){
+    .dial :is(.chrome,.body-link,.ping,.belt),.minisys{transition:none}
+  }
 
   /* CON-6 v17: households are fixed coordinates. The CAMERA flies: the
      starfield streams past with parallax, the destination holds its place
@@ -735,6 +804,9 @@
 .inbox-orb .count{position:absolute;top:-4px;right:-4px;width:16px;height:16px;border-radius:50%;
   background:var(--accent);color:var(--bg);font:600 9.5px var(--mono);font-style:normal;
   display:grid;place-items:center}
+/* #1166: --bg on --accent is 3.03:1 on dawn/clouds, same pair the pocket kit
+   measured on its own filled pill (74e7a491) — white clears 4.5:1 there too. */
+:is([data-theme=dawn],[data-theme=clouds]) .inbox-orb .count{color:#fff}
 
 /* ==========================================================================
    PACK REFRESH — RETROGRADE (§15, #480), WALLS ONLY. The treatment the owner
@@ -802,9 +874,9 @@
    neon classy instead of a light show. Small radius, low alpha, no animation,
    and every radius spends the one --bloom the pack defines. */
 [data-theme=retrograde] :is(.manifest .corridor .today span,.suggest .body span,
-  .palette .act,.callout .chip,.drawer-top.open .nstar span,.nstar:hover span){
+  .strip-note .act,.callout .chip,.drawer-top.open .nstar span,.nstar:hover span){
   text-shadow:0 0 9px var(--bloom)}
-[data-theme=retrograde] :is(.dial,.minisys) [style*="--accent"],
+[data-theme=retrograde] :is(.dial,.minisys,.strip) [style*="--accent"],
 [data-theme=retrograde] .celestial polyline,
 [data-theme=retrograde] .now-month{filter:drop-shadow(0 0 2.5px var(--bloom))}
 [data-theme=retrograde] :is(.inbox-orb.waiting,.suggestview .actions button.yes){
@@ -1067,16 +1139,16 @@
 /* Panels are cool morning glass: still translucent, because the gradient must
    show through or the story stops at the panel edge; lightly frosted; with one
    cold highlight along the top edge where the light lands. */
-[data-theme=dawn] :is(.item,.callout,.palette,.ctype,.orb),
-[data-theme=clouds] :is(.item,.callout,.palette,.ctype,.orb){
+[data-theme=dawn] :is(.item,.callout,.ctype,.orb),
+[data-theme=clouds] :is(.item,.callout,.ctype,.orb){
   backdrop-filter:blur(14px) saturate(1.06);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.72),0 8px 20px rgba(48,66,98,.07)}
 [data-theme=dawn] :is(.account,.docview,.drawer,.drawer-top,.itemview),
 [data-theme=clouds] :is(.account,.docview,.drawer,.drawer-top,.itemview){
   backdrop-filter:blur(20px) saturate(1.06);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.78),0 16px 36px rgba(48,66,98,.10)}
-[data-theme=dawn] :is(.item,.account,.docview,.drawer-top,.callout,.palette),
-[data-theme=clouds] :is(.item,.account,.docview,.drawer-top,.callout,.palette){
+[data-theme=dawn] :is(.item,.account,.docview,.drawer-top,.callout),
+[data-theme=clouds] :is(.item,.account,.docview,.drawer-top,.callout){
   border-top-color:rgba(255,255,255,.85)}
 [data-theme=dawn] .desk .scrim,[data-theme=clouds] .desk .scrim{background:rgba(196,206,222,.5)}
 /* The bodies are hazy pastels rather than flat ink (their stops are in

@@ -330,17 +330,25 @@ export function mountCreate() {
     }
   });
 
+  /* #1162: the desk search's "add "<query>" as an item" act carries the typed
+     name the same way the pocket's own create already does (#1120,
+     pocket.svelte's `?name=` read) — the one contract, read by both halves of
+     this route rather than a second one invented for the desk. */
+  const prefillName = new URLSearchParams(location.search).get("name")?.trim();
+  if (prefillName) nameInput.value = prefillName;
+
   /* #856: the panel opens from the `input` listener above, and `input` is
      one-shot — nothing replays it. So anything that writes to the name field
      before this module has mounted leaves the form stuck shut with no second
      chance: a reader typing fast on a slow device, or a test driving the
      keyboard as soon as the page loads. Two things follow.
 
-     First, catch up on what was typed while nobody was listening. The `value`
-     ATTRIBUTE is the default the markup ships ("New Entry"); `.value` is what
-     is in the field now. They differ only once something has written to it, so
-     this reveals for a real edit and never for the untouched default —
-     progressive disclosure is unchanged. */
+     First, catch up on what was typed while nobody was listening (the name
+     prefill above included). The `value` ATTRIBUTE is the default the markup
+     ships ("New Entry"); `.value` is what is in the field now. They differ
+     only once something has written to it, so this reveals for a real edit
+     and never for the untouched default — progressive disclosure is
+     unchanged. */
   if (nameInput.value.trim().length >= 3 && nameInput.value !== nameInput.getAttribute("value")) reveal();
 
   /* The section refusal (#1058b) holds the button disabled from the start,
