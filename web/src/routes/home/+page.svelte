@@ -662,7 +662,9 @@
   /* At rest (empty query) the strip shows the same two rows the palette
      showed (BUILD.md §1): the attention group's own due-or-later two, not
      searchPocket's unfiltered empty branch. */
-  const emptyStripRows = $derived(/** @type {SearchItem[]} */ (groups?.attention ?? []).filter((row) => row.days !== null && row.days >= 0).slice(0, 2));
+  const emptyStripRows = $derived((groups?.attention ?? []).filter(dueOrLater).slice(0, 2));
+  /** @param {SearchItem} row */
+  function dueOrLater(row) { return row.days !== null && row.days >= 0; }
   const stripItems = $derived(searchQuery ? searchResults.items : emptyStripRows);
   const stripDocuments = $derived(searchQuery ? searchResults.documents : []);
 
@@ -671,9 +673,20 @@
      — trailing, since a query with real matches never shows one at all
      (BUILD.md §1). The no-match sentence itself carries no act and is never
      in this list. */
+  /* Typed as declarations, not inline arrow parameters: a JSDoc comment on
+     an arrow's parameter compiles to server output vite dev cannot run
+     (#1138). */
+  /** @param {SearchItem} item */
+  function itemEntry(item) {
+    return { kind: /** @type {const} */ ("item"), itemId: item.id, title: item.title, days: item.days };
+  }
+  /** @param {SearchDoc} doc */
+  function docEntry(doc) {
+    return { kind: /** @type {const} */ ("doc"), itemId: doc.itemId, title: doc.name, itemTitle: doc.itemTitle };
+  }
   const selectable = $derived([
-    ...(/** @type {SearchItem[]} */ (stripItems)).map((item) => ({ kind: /** @type {const} */ ("item"), itemId: item.id, title: item.title, days: item.days })),
-    ...(/** @type {SearchDoc[]} */ (stripDocuments)).map((doc) => ({ kind: /** @type {const} */ ("doc"), itemId: doc.itemId, title: doc.name, itemTitle: doc.itemTitle })),
+    ...stripItems.map(itemEntry),
+    ...stripDocuments.map(docEntry),
     ...stripActs,
   ]);
   let selectedIndex = $state(0);
