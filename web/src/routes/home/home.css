@@ -643,9 +643,14 @@
   /* the axis draws once per open — its own DOM nodes never remount on a
      keystroke, so baking the animation straight onto the rule (rather than a
      one-shot class the mockup toggled by hand) already plays it exactly once
-     per open and holds at 0 (`forwards`) for every keystroke after */
-  .desk .strip .axis,.desk .strip .past{stroke-dasharray:780;stroke-dashoffset:780;
+     per open and holds at 0 (`forwards`) for every keystroke after. The past
+     segment can't share this: `stroke-dasharray:780` for the draw-on
+     overrides its own `3 5` dash (line above) for good, so it would never
+     end up dashed at rest. It fades in instead, keeping its `3 5` dash the
+     whole time — same one-shot-per-open timing as the ticks/marks below. */
+  .desk .strip .axis{stroke-dasharray:780;stroke-dashoffset:780;
     animation:strip-unroll .7s cubic-bezier(.2,.7,.2,1) forwards}
+  .desk .strip .past{animation:strip-fade-in .5s ease .25s both}
   @keyframes strip-unroll{to{stroke-dashoffset:0}}
   /* ticks/today/month mount once per open too; a match remounts on every
      keystroke that changes the matched set, so only marks actually fade

@@ -100,6 +100,20 @@ export function assignTiers(marks) {
 }
 
 /**
+ * The leader's own path (§3): a stem from the body's edge (`r + 1` out from
+ * the axis) to the run line, then a horizontal run the width of the label —
+ * from `x` to `x + width` normally, mirrored to `x - width` under a flipped
+ * (right-anchored) label so the run stays under the text either way.
+ * @param {{ x: number, width: number, r: number, tier: 0 | 1, flip: boolean }} m
+ */
+export function leaderPathOf({ x, width, r, tier, flip }) {
+  const stemY0 = tier === 0 ? AXIS_Y - r - 1 : AXIS_Y + r + 1;
+  const run = TIER_RUN_Y[tier];
+  const runX = flip ? x - width : x + width;
+  return `M${x} ${stemY0} V${run} H${runX}`;
+}
+
+/**
  * The note line's own act(s) (#1162, wiring the two rows BUILD.md §1 left
  * inert): "complete" the closest thing due, offered only at rest; "add" the
  * typed name (or nothing typed), offered at rest and again when a query
