@@ -83,7 +83,9 @@ test("row acts: Enter opens, Tab walks the pills, Escape closes and returns to t
   await expect(face).toBeFocused();
 });
 
-test("row acts: one open per list, and a tap outside closes it", async ({ page }) => {
+/* A tap elsewhere leaves it open, as the desk does (owner, 2026-09-27,
+   #1159); only its own face closes it. */
+test("row acts: one open per list, and it stays open until its own face is tapped", async ({ page }) => {
   await open(page);
   const rob = page.locator("[data-kit=members] [data-row]", { hasText: "Rob Lawson" });
   const ada = page.locator("[data-kit=members] [data-row]", { hasText: "Ada Lawson" });
@@ -93,6 +95,8 @@ test("row acts: one open per list, and a tap outside closes it", async ({ page }
   await expect(ada).toHaveAttribute("data-open", "");
   await expect(rob).not.toHaveAttribute("data-open", "");
   await page.mouse.click(195, 120);
+  await expect(ada).toHaveAttribute("data-open", "");
+  await ada.locator("[data-row-face]").tap();
   await expect(ada).not.toHaveAttribute("data-open", "");
 });
 

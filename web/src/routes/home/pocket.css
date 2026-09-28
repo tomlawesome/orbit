@@ -139,7 +139,10 @@
 /* ---- the manifest's rows: the kit's row grammar (§1.5) ----------------
  * Each row its own glass, as home has always drawn them. */
 .pocket .pk-list{display:flex;flex-direction:column;gap:6px}
-.pocket .pk-list .p-row{border:1px solid var(--line-soft)}
+/* :where() keeps this outline lighter than the kit's open-row rule
+   (Row.svelte's .p-row[data-open]), which turns it accent; the same weight
+   in a later sheet would win instead. */
+.pocket :where(.pk-list) .p-row{border:1px solid var(--line-soft)}
 .pk-dot{display:block;box-sizing:border-box;width:10px;height:10px;border-radius:50%}
 .pk-dot.quiet{background:var(--line)}
 .pk-dot.hollow{background:none;border:1.6px solid var(--accent)}
@@ -148,20 +151,31 @@
 @keyframes pocket-breathe{0%,100%{opacity:1}50%{opacity:.4}}
 .pk-paper{font:.875rem/1 var(--mono);color:var(--accent-text)}
 .pk-plus{font:var(--p-type-body)/1 var(--mono);color:var(--accent-text)}
-/* THE SIGNALS PEN (round 3 §2): the kit's dashed card of what Orbit
-   proposes, 32px of clear sky under the manifest's last row, its caps head
-   inside. Its rows are card rows: transparent faces, the hairline between
-   them at the text edge (Row.svelte); the hollow mark and the pen say
-   "proposed", and an open row keeps its accent rail. The summary row's
-   way on is the accent. */
-.pocket .pk-signals{margin:32px 0 0;padding:16px 0 4px;overflow:hidden}
-.pocket .pk-signals > .p-caps:first-child{margin:0 var(--p-gutter) 12px}
-.pocket .pk-pen{display:flex;flex-direction:column}
+/* THE SIGNALS (round 3 §2; owner-decisions §29, #1142): 32px of clear sky
+   under the manifest's last row, a caps head on the sky as NEEDS ATTENTION
+   is, then each signal as its own row-card, the way the desk seats a
+   suggestion (#1145). A suggestion wears the dashed pen at rest and, open,
+   one thin solid accent outline round its face and its drawer together --
+   the same 1px, turned accent by the kit's rule for any outlined row
+   (Row.svelte), the dashes made solid here -- and no rail, since a rail
+   along an outline reads as a card edge (the owner's words). No line
+   between the face and the drawer, as the desk's .itemview draws none. The
+   plate under the face and drawer is the manifest rows' own. The mail
+   summary row wears the manifest's hairline, and its way on is the
+   accent. */
+.pocket .pk-signals{margin:32px 0 0}
+.pocket .pk-signals > .p-caps:first-child{margin:0 4px var(--p-group-below)}
+.pocket .pk-pen{display:flex;flex-direction:column;gap:6px}
+/* :where(), as the manifest's outline above, so the kit's open-row rule
+   turns the dashes' colour full accent; the pen only makes them solid. */
+.pocket :where(.pk-pen) .p-row{border:1px dashed color-mix(in srgb, var(--accent) 45%, var(--line-soft))}
+.pocket :where(.pk-pen) [data-row-key=mail]{border:1px solid var(--line-soft)}
 .pocket .pk-pen [data-row-key=mail] .meta{color:var(--accent-text)}
-/* An opened row (review round §2.1, the desk's .item.open): its own glass
-   takes the accent's edge, its bottom corners handed to the panel. The
-   drawer's `copy link` is the desk's quiet .ivcopy. */
-.pocket .pk-list .p-row[data-open]{border-color:var(--accent)}
+.pocket .pk-pen .p-row[data-open]{border-style:solid}
+/* An opened manifest row (review round §2.1, the desk's .item.open): its
+   own outline turns accent, the kit's rule (Row.svelte, owner-decisions
+   §29), its bottom corners handed to the panel. The drawer's `copy link`
+   is the desk's quiet .ivcopy. */
 .pocket .pk-copy{color:var(--ink-quiet)}
 
 /* ---- §11 (#453): the labelled sky, at the same scale ------------------- */
