@@ -258,10 +258,11 @@ page's URL at failure, which this one has to infer.
 - 2026-09-27 · 7bf02998 (`feature/1161-unrolled-search`, desk home only) · local fidelity gate in the pinned Playwright image, beside pocket-measure · 1689 pixels (0.1056%); rerun alone: 678 pixels (0.0424%), passed. Third sighting: filed as #1163.
 - 2026-09-27 · 1ec4047a (!999; its shared-code changes are `/auth/error` states and a settings data call, neither on the item screen) · pipeline 1773 / fidelity (job 25919) · 1820 pixels (0.1138%). Job retried.
 
-## fidelity: pocket-home-drawers.spec.js:73 "the dial arrives on a forward arrival, never on Back"
+## fidelity: pocket-home-drawers.spec.js:73 "the dial arrives on a forward arrival, never on Back" (#1164)
 
 - 2026-09-27 · 667f28d8 (the M14 desk batch; its only home change is the desk's `+page.svelte` search wiring, not the pocket dial) · local fidelity gate in the pinned Playwright image on a loaded host · after Back to /home, `expect(dial).not.toHaveClass(/arrive/)` found no dial element within the timeout. Rerun alone in the same image straight after: passed in 4.8s. First sighting.
 - 2026-09-27 · b1157cd6 (#1142/#1159 pocket row changes on `fix/1142-opened-signal`, none in the dial's arrival) · local pocket fidelity in the pinned Playwright image, during the pocket-measure run and another agent's work · failed the same way; rerun alone in the same image: passed in 8.3s. Second sighting.
+- 2026-09-27 · ee496987 (`fix/1131-desk-contrast`, a desk filled-primary button colour change, none in the pocket dial) · local fidelity gate in the pinned Playwright image · failed the same way; rerun alone in the same image: passed in 41.1s (whole file) with test 7 of 13 clean at 3.1s. Third sighting: filed as #1164.
 
 ## sign-in-methods.spec.ts:158 "a reader changes their password from the helm, inline" — desktop-chromium
 
