@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { assignTiers, monthTicks, stripActsOf, UNSCHEDULED_X, xOfDays } from "../../web/src/routes/home/strip-layout.js";
+import { assignTiers, leaderPathOf, monthTicks, stripActsOf, UNSCHEDULED_X, xOfDays } from "../../web/src/routes/home/strip-layout.js";
 
 /* #1161, C · unrolled (design/v19/search/round-1/BUILD.md §3/§4): the desk
    search strip's pure geometry, tested the way pocket-dial.js's spacing law
@@ -66,6 +66,20 @@ describe("assignTiers", () => {
   it("does not flip a label that fits inside the strip", () => {
     const [a] = assignTiers([{ x: 200, width: 60 }]);
     expect(a.flip).toBe(false);
+  });
+});
+
+describe("leaderPathOf", () => {
+  it("runs the horizontal segment from x to x+width, tier 0, unflipped", () => {
+    expect(leaderPathOf({ x: 200, width: 80, r: 4, tier: 0, flip: false })).toBe("M200 71 V62 H280");
+  });
+
+  it("runs the horizontal segment from x to x+width, tier 1, unflipped", () => {
+    expect(leaderPathOf({ x: 200, width: 80, r: 4, tier: 1, flip: false })).toBe("M200 81 V102 H280");
+  });
+
+  it("mirrors the run to x-width under a flipped, right-anchored label", () => {
+    expect(leaderPathOf({ x: 780, width: 60, r: 4, tier: 0, flip: true })).toBe("M780 71 V62 H720");
   });
 });
 
