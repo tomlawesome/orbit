@@ -3,7 +3,7 @@ import type { Algorithm } from "@node-rs/argon2";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
-import { auditLog, instanceAuthority, localCredentials, users } from "@/db/schema";
+import { auditLog, instanceAuthority, instanceContact, localCredentials, users } from "@/db/schema";
 import { claimCookieName, sealClaimProof } from "@/lib/auth/bootstrap";
 import { sessionCookieName } from "@/lib/auth/cookies";
 import { hashPassword, needsRehash } from "@/lib/auth/password";
@@ -286,6 +286,36 @@ describe("local sign-in (ADR-0023 §4)", () => {
     const times = attempts.map((attempt) => attempt.elapsed);
     expect(Math.min(...times)).toBeGreaterThan(0);
     expect(Math.max(...times)).toBeLessThan(Math.min(...times) * 6);
+  });
+
+  it("never carries the public contact address into a disabled account's refusal, even when one is set (#788, #860, #1070)", async () => {
+    /* #1070: the owner kept the address on the door's own "couldn't open
+       safely" screen but ruled it must never reach a disabled or banned
+       account's refusal (owner, 2026-09-19) — a route that already answers
+       a disabled account identically to a wrong password (line ~344 above).
+       This pins that against a real `instance_contact.public_address`, so a
+       later change that wired the address into the refusal path would fail
+       here rather than only in a screen nobody re-checked. */
+    const disabled = await seedLocalUser("disabled-with-contact", { password: PASSWORD, disabled: true });
+    const db = getDb();
+    const [contact] = await db.select().from(instanceContact).limit(1);
+    const address = "ops@example.invalid";
+    await db.update(instanceContact).set({ publicAddress: address }).where(eq(instanceContact.singleton, true));
+    try {
+      const response = await signInWith({ email: disabled.email, password: PASSWORD });
+      expect(response.status).toBe(401);
+      const body = await response.text();
+      expect(body).not.toContain(address);
+      expect(JSON.parse(body).error.code).toBe("credentials_invalid");
+      // The card the sign-in route's error code renders is Orbit's own fixed
+      // sentence for `credentials_invalid` (door-state.js's cardMessageFor),
+      // which takes no address at all — asserted structurally alongside this
+      // in tests/unit/door-state.test.mjs.
+      expect(body).not.toContain("@");
+    } finally {
+      await db.update(instanceContact).set({ publicAddress: contact?.publicAddress ?? null })
+        .where(eq(instanceContact.singleton, true));
+    }
   });
 
   it("leaves five failures free, locks on the sixth, and keeps the count in the row", async () => {

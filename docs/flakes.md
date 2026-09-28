@@ -10,10 +10,36 @@ fixing the cause deletes the heading in the same commit.
 - 2026-09-19 · 3e855e2 (+ #1052's uncommitted administration work, none of it near this script) · local `scripts/test-backend.sh` · timed out at the 5s default. The whole file passed on a rerun immediately after on the same code, taking 1.9s for this test and 7.5s for the file — so it is the wall-clock budget under a loaded host, not the script. Every test here spawns real `git` subprocesses against temporary repositories.
 - 2026-09-24 · 8f05e163 (#1107, no change near this script) · local `./node_modules/.bin/vitest run` (full suite) · timed out at the 5s default alongside "falls back to fetching dev when it is not already present locally" below, both in the same file, both green on an immediate rerun of the file alone. Same wall-clock-under-load shape as the first sighting.
 - 2026-09-26 · a7dcd3d1 (#1125's phone settings, no change near this script) · local `scripts/test-backend.sh` · timed out at the 5s default; green on an immediate rerun of the file alone. Third sighting: #1134.
+- 2026-09-27 · 6420d955 (+ #1057's uncommitted desk search wiring, none of it near this script) · local `scripts/test-backend.sh` (worktree, seven parallel builds sharing the host) · timed out at the 5s default alongside the other two tests in this file's describe block, below and in the new heading below. All three green on an immediate rerun of the file alone (12.3s total, ~3s each). Still #1134.
+- 2026-09-27 · 6420d955 (+ #1003's uncommitted notification-history work, none of it near this script) · local `scripts/test-backend.sh`, worktree `1003-notification-history`, seven agents building in parallel on the same shared host · timed out at the 5s default; a solo rerun of just this file moments later still missed the 5s budget (5.3-6.2s each) while the other six agents' builds were still running, consistent with the wall-clock-under-load shape rather than a new cause.
 
-## check-base-image-current.test.mjs "falls back to fetching dev when it is not already present locally"
+## check-base-image-current.test.mjs "falls back to fetching dev when it is not already present locally" (#1134)
 
 - 2026-09-24 · 8f05e163 (#1107, no change near this script) · local `./node_modules/.bin/vitest run` (full suite) · timed out at the 5s default; green on an immediate rerun of the file alone. Same file and run as the sighting above; first sighting for this test.
+- 2026-09-27 · 6420d955 (+ #1057's uncommitted desk search wiring, none of it near this script) · local `scripts/test-backend.sh` (worktree, seven parallel builds sharing the host) · timed out at the 5s default in the same run as the heading above. Green on an immediate rerun of the file alone. Second sighting.
+- 2026-09-27 · 6420d955 (+ #1003's uncommitted notification-history work, none of it near this script) · local `scripts/test-backend.sh`, worktree `1003-notification-history`, seven agents building in parallel on the same shared host · timed out at the 5s default alongside "tells the reader…" and "keeps the re-pin advice…" above/below, all three in the same file, same run. Second sighting.
+- 2026-09-27 · 6420d955 (+ #1002's uncommitted desk archive card, none of it near this script; six other worktrees building in parallel on this host) · local `scripts/test-backend.sh` · timed out at the 5s default alongside "keeps the re-pin advice when dev has not re-pinned either" below, both in the same file, both green on an immediate rerun of the file alone. Same wall-clock-under-load shape.
+- 2026-09-27 · 6420d955 (+ #1002's uncommitted desk archive card, same worktree, same host load as the sighting above) · local `scripts/test-backend.sh` · timed out at the 5s default again on a second full run, green on an immediate rerun of the file alone. Third sighting: covered by #1134, which already names this whole file rather than one test in it.
+
+## check-base-image-current.test.mjs "keeps the re-pin advice when dev has not re-pinned either"
+
+- 2026-09-27 · 6420d955 (+ #1057's uncommitted desk search wiring, none of it near this script) · local `scripts/test-backend.sh` (worktree, seven parallel builds sharing the host) · timed out at the 5s default in the same run as the two headings above. Green on an immediate rerun of the file alone. First sighting for this test; same wall-clock-under-load shape as #1134.
+- 2026-09-27 · 6420d955 (+ #1003's uncommitted notification-history work, none of it near this script) · local `scripts/test-backend.sh`, worktree `1003-notification-history`, seven agents building in parallel on the same shared host · timed out at the 5s default alongside the other two tests in this file, same run. First sighting for this test.
+- 2026-09-27 · 6420d955 (same uncommitted work) · local `scripts/test-backend.sh`, same worktree, immediate rerun, same seven-agent host load · timed out again at the 5s default. Second sighting.
+- 2026-09-27 · 6420d955 (+ #1002's uncommitted desk archive card, none of it near this script; six other worktrees building in parallel on this host) · local `scripts/test-backend.sh` · timed out at the 5s default; green on an immediate rerun of the file alone. Same run as the sighting above; first sighting for this test.
+
+## check-base-image-current.test.mjs "falls back to the tag-moved advice when dev has no remote to resolve it from"
+
+- 2026-09-27 · 6420d955 (+ #1003's uncommitted notification-history work, none of it near this script) · local `scripts/test-backend.sh`, worktree `1003-notification-history`, seven agents building in parallel on the same shared host · timed out at the 5s default; this test had been green in the same file's own first, less-loaded run minutes earlier — the fourth and last git-spawning test in this file to fall, as load climbed further. First sighting.
+
+## availability-route.test.mjs "GET /api/auth/availability carries phase: starting straight from getBootPhase" (#869)
+
+- 2026-09-27 · 6420d955 (+ #1003's uncommitted notification-history work, nowhere near auth/availability) · local `scripts/test-backend.sh`, worktree `1003-notification-history`, seven agents building in parallel on the same shared host · timed out at the 5s default in a run that took 393s overall against 232s for the same file set minutes before, with unrelated files failing alongside it — wall-clock-under-load, not this test. First sighting.
+- 2026-09-27 · 6420d955 (+ #1002's uncommitted desk archive card, none of it near this route; six other worktrees building in parallel on this host) · local `scripts/test-backend.sh` · timed out at the 5s default; green on an immediate rerun of the file alone (2.1s for all 6 tests). Same wall-clock-under-load shape as the check-base-image-current.test.mjs headings above; first sighting for this test.
+
+## extraction-shortlist-recall.test.ts "countShortlistRecall over real corpus pages adds to the tallies it is given rather than replacing them"
+
+- 2026-09-27 · 6420d955 (+ #1003's uncommitted notification-history work, nowhere near document extraction) · local `scripts/test-backend.sh`, worktree `1003-notification-history`, seven agents building in parallel on the same shared host · timed out at the 5s default in the same heavily-loaded run as the sighting above. First sighting.
 
 ## document-lifecycle.test.ts:1335 "emits a bounded rejected lifecycle record when reconciliation finds an available document's ciphertext missing"
 
@@ -210,6 +236,7 @@ page's URL at failure, which this one has to infer.
 ## v19-keyboard-pocket.spec.ts:570 "inbox (pocket): fully reachable by keyboard" — mobile-chromium
 
 - 2026-09-27 · 7b812e69 (+ #1149's uncommitted home-dial Escape work, none of it near the inbox) · local `scripts/test-e2e-local.sh`, both projects, keyboard-pocket and mail-review specs together · `auditTabOrder` reported `Tab reached a control the screen does not show as visible: a "open the relay →"` — the empty queue's relay card (`.pki-quiet`, inbox/pocket.svelte) was on screen (the test's own `toBeVisible` wait had passed) but its pill was left out of the visible-controls snapshot, so the audit took it for an invisible stop. The same spec on the same code was green in the run before (one project, 18 of 19 passing) and in the run after (23 passed, 14 skipped). First sighting; the next one should record the pill's computed opacity at snapshot time, since the audit's `isReallyVisible` reads it.
+- 2026-09-27 · 2bc73418 · local `scripts/test-e2e-local.sh`, full suite, mobile-chromium · the same `a "open the relay →"` report, on a branch that does not touch the inbox. Opacity not captured. Attempted fix in the same commit as this line: the spec now waits for `.pk-inbox`'s entrance animations to finish before the audit, as the household (pocket) test already does; delete this heading once CI has run it green a few times.
 
 ## `sidecar_images` job: the dependency proxy answers 404 for a pinned manifest
 
@@ -227,7 +254,21 @@ page's URL at failure, which this one has to infer.
 ## fidelity: `item matches its approved appearance` — over budget under load
 
 - 2026-09-27 · 68c86337 (the `dev` merge of !995) · pipeline 1734 / fidelity (job 25068) · 1730 pixels differ (0.1081%) against the 0.1% budget. Passed in pipeline 1740 on d97cb335 (!997), which does not touch the item screen. Matches the known load sensitivity: the same screen measured 0.1056% and 0.115% with other runs on the host and 0.04% on a quiet one. First sighting in CI; an issue on the third.
+- 2026-09-27 · 667f28d8 (the M14 desk batch, which does not touch the item screen) · local fidelity gate in the pinned Playwright image, alongside the pocket-measure run and other agents' builds · 1689 pixels differ (0.1056%). Rerun alone in the same image: 645 pixels (0.0403%), passed. Second sighting.
+
+## fidelity: pocket-home-drawers.spec.js:73 "the dial arrives on a forward arrival, never on Back"
+
+- 2026-09-27 · 667f28d8 (the M14 desk batch; its only home change is the desk's `+page.svelte` search wiring, not the pocket dial) · local fidelity gate in the pinned Playwright image on a loaded host · after Back to /home, `expect(dial).not.toHaveClass(/arrive/)` found no dial element within the timeout. Rerun alone in the same image straight after: passed in 4.8s. First sighting.
+- 2026-09-27 · b1157cd6 (#1142/#1159 pocket row changes on `fix/1142-opened-signal`, none in the dial's arrival) · local pocket fidelity in the pinned Playwright image, during the pocket-measure run and another agent's work · failed the same way; rerun alone in the same image: passed in 8.3s. Second sighting.
 
 ## sign-in-methods.spec.ts:158 "a reader changes their password from the helm, inline" — desktop-chromium
 
 - 2026-09-27 · d97cb335 (!997) · pipeline 1740 / smoke (job 25230) · `.note.ok` never showed "password changed" within 5000ms at line 190. Retried as job 25322 on the same commit: green. !997 touches only mail-in failure reasons and cannot reach the password form. First sighting; an issue on the third.
+
+## backup-restore-cli.test.ts:337 "refuses (capacity-insufficient) before ever calling confirm(), when the document volume has no room"
+
+- 2026-09-27 · 6420d955 (+ #1069's uncommitted desk-create work, nowhere near backup/restore) · local `scripts/test-backend.sh`, seven worktrees running it at once · `Error: Test timed out in 5000ms`, alongside the sighting below in the same file. The whole file passed alone immediately after on the same code — 24 of 24, the two above included, 60s total — so it is the 5s default under a very loaded host, not the test. First sighting.
+
+## backup-restore-cli.test.ts:362 "refuses (restore-not-confirmed) and takes no checkpoint when confirm() returns false, only after preflight/capacity already passed"
+
+- 2026-09-27 · 6420d955 (+ #1069's uncommitted desk-create work, nowhere near backup/restore) · local `scripts/test-backend.sh`, seven worktrees running it at once · `Error: Test timed out in 5000ms`, alongside the sighting above in the same file. Same rerun, same result: green alone. First sighting.
