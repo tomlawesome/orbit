@@ -662,7 +662,7 @@
   /* At rest (empty query) the strip shows the same two rows the palette
      showed (BUILD.md §1): the attention group's own due-or-later two, not
      searchPocket's unfiltered empty branch. */
-  const emptyStripRows = $derived((groups?.attention ?? []).filter((/** @type {SearchItem} */ row) => row.days !== null && row.days >= 0).slice(0, 2));
+  const emptyStripRows = $derived(/** @type {SearchItem[]} */ (groups?.attention ?? []).filter((row) => row.days !== null && row.days >= 0).slice(0, 2));
   const stripItems = $derived(searchQuery ? searchResults.items : emptyStripRows);
   const stripDocuments = $derived(searchQuery ? searchResults.documents : []);
 
@@ -672,8 +672,8 @@
      (BUILD.md §1). The no-match sentence itself carries no act and is never
      in this list. */
   const selectable = $derived([
-    ...stripItems.map((/** @type {SearchItem} */ item) => ({ kind: /** @type {const} */ ("item"), itemId: item.id, title: item.title, days: item.days })),
-    ...stripDocuments.map((/** @type {SearchDoc} */ doc) => ({ kind: /** @type {const} */ ("doc"), itemId: doc.itemId, title: doc.name, itemTitle: doc.itemTitle })),
+    ...(/** @type {SearchItem[]} */ (stripItems)).map((item) => ({ kind: /** @type {const} */ ("item"), itemId: item.id, title: item.title, days: item.days })),
+    ...(/** @type {SearchDoc[]} */ (stripDocuments)).map((doc) => ({ kind: /** @type {const} */ ("doc"), itemId: doc.itemId, title: doc.name, itemTitle: doc.itemTitle })),
     ...stripActs,
   ]);
   let selectedIndex = $state(0);
