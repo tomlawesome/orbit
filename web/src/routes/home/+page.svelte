@@ -1560,7 +1560,7 @@
         <input id="explore" placeholder="explore your world" aria-label="Search items and documents"
                autocomplete="off" bind:value={searchQuery} role="combobox" aria-expanded={stripOpen}
                aria-controls="explore-results" aria-autocomplete="list"
-               aria-activedescendant={selectedPos === null ? undefined : `sr-opt-${selectedPos}`}
+               aria-activedescendant={!stripOpen || selectedPos === null ? undefined : `sr-opt-${selectedPos}`}
                onfocus={onExploreFocus} onblur={onExploreBlur}
                oninput={() => { selectedIndex = 0; stripProblem = null; }}
                onkeydown={onExploreKeydown}>
