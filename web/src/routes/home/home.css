@@ -799,6 +799,9 @@
 .inbox-orb .count{position:absolute;top:-4px;right:-4px;width:16px;height:16px;border-radius:50%;
   background:var(--accent);color:var(--bg);font:600 9.5px var(--mono);font-style:normal;
   display:grid;place-items:center}
+/* #1166: --bg on --accent is 3.03:1 on dawn/clouds, same pair the pocket kit
+   measured on its own filled pill (74e7a491) — white clears 4.5:1 there too. */
+:is([data-theme=dawn],[data-theme=clouds]) .inbox-orb .count{color:#fff}
 
 /* ==========================================================================
    PACK REFRESH — RETROGRADE (§15, #480), WALLS ONLY. The treatment the owner
