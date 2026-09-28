@@ -10,6 +10,7 @@
   import { agoLong } from "$lib/format.js";
   import { alertsSupported, currentSubscription, disableAlerts, enableAlerts } from "$lib/push/alerts.js";
   import {
+    readSentLately,
     readSignInMethods,
     removeLocalPassword,
     revokeSession,
@@ -198,10 +199,11 @@
     }
   }
 
-  /* SENT TO YOU LATELY (#1003, §20, proposal §2.8). Nothing on the server
-     reads a member's `notification_deliveries` back yet, so outside the
-     gate the list is `null` and the tab says so; under fixtures it is the
-     shape #1003 names. `?sent=none|off` picks the gate's other two states. */
+  /* SENT TO YOU LATELY (#1003, §20, proposal §2.8). `GET /api/settings/sent`
+     read in onMount below; `null` is the "couldn't load" state the panel
+     already draws, not a loading placeholder. Under fixtures it is the shape
+     #1003 names instead, so the gate never needs a database behind it;
+     `?sent=none|off` picks the gate's other two states. */
   let sent = $state(/** @type {SentRow[] | null} */ (null));
   let scene = $state("some");
 
@@ -385,6 +387,12 @@
       scene = parameters.get("sent") ?? "some";
       sent = scene === "none" ? [] : SENT_LATELY_FIXTURE;
       if (parameters.get("tab") === "sent") tab = "sent";
+    } else {
+      try {
+        sent = await readSentLately();
+      } catch {
+        sent = null;
+      }
     }
     alertsAvailable = alertsSupported();
     if (alertsAvailable) browserAlerts = Boolean(await currentSubscription());

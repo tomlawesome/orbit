@@ -246,7 +246,10 @@
   .card.c-sections{grid-column:1;grid-row:2}
   .card.c-members {grid-column:2;grid-row:1 / span 2;align-self:stretch;
                    display:flex;flex-direction:column}
-  .card.c-danger  {grid-column:1 / -1;grid-row:3}
+  /* #1002: the archive, owner-only like sections and the danger line, spans
+     both columns between the ordinary cards and the red rule. */
+  .card.c-archive {grid-column:1 / -1;grid-row:3}
+  .card.c-danger  {grid-column:1 / -1;grid-row:4}
   /* the panel is taller than its content in a family this size, so the slack
      is SHARED between the blocks instead of collecting in one hole at the
      bottom: three auto margins, three even breaths, rules evenly spaced. */
@@ -257,7 +260,7 @@
   body.member .card.c-members{align-self:start}
   @media (max-width:880px){
     .cards{grid-template-columns:1fr}
-    .card.c-system,.card.c-sections,.card.c-members,.card.c-danger{
+    .card.c-system,.card.c-sections,.card.c-members,.card.c-archive,.card.c-danger{
       grid-column:1;grid-row:auto;align-self:auto}
     .c-members .block{margin-top:16px}
   }
@@ -509,6 +512,73 @@
   .confirm .field input:focus{border-color:var(--overdue)}
   @media (max-width:880px){
     .dangerhead{flex-wrap:wrap}
+  }
+
+  /* ── THE ARCHIVE (#1002) — portable export, import and preview ───────────
+     Owner-only, spanning both columns (placed above, .card.c-archive). Round
+     7's own tab grammar (ratified 2026-09-20): a joined pill pair at the far
+     end of the card head, in the page's ghost-button voice, the chosen one
+     filled with --accent. role=tablist/tab/tabpanel, ← → between them. */
+  .c-archive .cardhead{gap:22px;align-items:center}
+  .tabs{display:inline-flex;margin-left:auto;border:1px solid var(--line);
+        border-radius:999px;overflow:hidden}
+  .tabs [role=tab]{font:11px var(--mono);letter-spacing:.04em;color:var(--ink-mid);
+        background:none;border:0;padding:6px 14px;cursor:pointer;line-height:1.2}
+  .tabs [role=tab]+[role=tab]{border-left:1px solid var(--line)}
+  .tabs [role=tab]:hover{color:var(--ink)}
+  .tabs [role=tab][aria-selected=true]{background:var(--accent);color:var(--bg);font-weight:600}
+  .tabs [role=tab]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .arch{max-width:600px}
+  .arch p{margin:0 0 12px;font-size:13px;color:var(--ink-mid);line-height:1.62;max-width:52ch}
+  .arch p b{color:var(--ink);font-weight:560}
+  /* what a file holds is a manifest — a figure and a name per row (round 3:
+     "I'd rather it read more as a list"), never a sentence */
+  .arch .man{margin:0 0 12px;padding:0;list-style:none;max-width:430px}
+  .arch .man li{display:flex;align-items:baseline;gap:12px;padding:5px 2px;
+        border-top:1px solid var(--line-soft);font-size:13px;color:var(--ink-mid);line-height:1.4}
+  .arch .man li:first-child{border-top:0}
+  .arch .man li:last-child{border-bottom:1px solid var(--line-soft)}
+  .arch .man b{flex:none;width:34px;text-align:right;font:600 13px var(--mono);color:var(--ink)}
+  .arch .man .lab{color:var(--ink-mid)}
+  .arch .man small{margin-left:auto;font:10.5px var(--mono);color:var(--ink-faint);
+        letter-spacing:.04em;text-align:right}
+  .arch .man small.zero,.arch .man small.warm{color:var(--warm)}
+  .arch .man li.head{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.06em;
+        padding-bottom:7px}
+  .arch .act{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:0}
+  /* the open step borrows the danger line's own confirm: a dashed rule, then
+     fields — the same shape administration.svelte's inline challenge uses */
+  .arch .step{display:none;margin-top:13px;padding-top:13px;border-top:1px dashed var(--line)}
+  .arch .step.open{display:block}
+  .arch .step .field{max-width:430px}
+  .arch .field input.pw{font-family:var(--mono);font-size:12.5px;letter-spacing:.14em}
+  .arch .never{margin:0 0 13px;font:11px var(--mono);color:var(--warm);line-height:1.75;
+        max-width:60ch}
+  .arch .never b{color:var(--warm);font-weight:600}
+  .arch .fname{margin:0 0 12px;font-size:13px;color:var(--ink)}
+  .arch .fname b{font-weight:530}
+  .arch .fname small{margin-left:8px;font:10.5px var(--mono);color:var(--ink-quiet)}
+  .arch .inside{margin-top:13px;padding-top:13px;border-top:1px dashed var(--line)}
+  .arch .dup{margin:0 0 12px;padding:0;list-style:none}
+  .arch .dup li{display:flex;align-items:center;gap:10px;padding:4px 2px;
+        font-size:13px;color:var(--ink)}
+  .arch .dup li span{margin-left:auto;font:10.5px var(--mono);color:var(--warm);
+        letter-spacing:.06em;white-space:nowrap}
+  .arch .refuse{margin:12px 0 0;font:11.5px var(--mono);color:var(--overdue);line-height:1.7}
+  /* the reactive step-up challenge (#1132): the same "type your password,
+     confirm" shape administration.svelte and settings/+page.svelte already
+     use, held inline under the act it belongs to rather than in a dialog —
+     this route has no modal component. */
+  .arch .challenge{margin-top:13px;padding-top:13px;border-top:1px dashed var(--accent)}
+  .arch .challenge p{max-width:60ch}
+  .arch .challenge .field{max-width:430px}
+  @media (max-width:880px){
+    .arch{max-width:none}
+  }
+  @media (max-width:560px){
+    .c-archive .cardhead{flex-wrap:wrap;gap:10px 14px}
+    .tabs{margin-left:0}
+    .arch p,.arch .step .field{max-width:none}
   }
 
   /* 2f — the scheduled-for-deletion banner and its restore button USED to
@@ -931,6 +1001,42 @@
 
     </div>
 
+    <!-- ── the archive (#1002): portable export, import and preview,
+         OWNER-ONLY like sections and the danger line. Between the ordinary
+         cards and the danger line, spanning both columns. One card, two tabs
+         as a joined pill pair in the card head (round 7, ratified
+         2026-09-20 — "Round 7 approved."). -->
+    <div class="card c-archive own-only" id="archcard">
+      <div class="cardhead">
+        <h3 id="arch-h">The archive</h3>
+        <div class="tabs" role="tablist" aria-labelledby="arch-h">
+          <button role="tab" id="arch-tab-out" aria-selected="true" aria-controls="arch-panel-out"
+                  tabindex="0" onclick="archTab('out')" onkeydown="archTabKey(event)">take it with you</button>
+          <button role="tab" id="arch-tab-in" aria-selected="false" aria-controls="arch-panel-in"
+                  tabindex="-1" onclick="archTab('in')" onkeydown="archTabKey(event)">bring one in</button>
+        </div>
+      </div>
+
+      <div class="arch">
+        <div id="arch-panel-out" role="tabpanel" aria-labelledby="arch-tab-out">
+          <ul class="man" aria-label="What the file holds">
+            <li><b>6</b><span class="lab">entries</span></li>
+            <li><b>5</b><span class="lab">sections</span></li>
+            <li><span class="lab">documents</span><small>travel with it</small></li>
+            <li><span class="lab">people</span><small class="zero">never in the file</small></li>
+          </ul>
+          <div class="act"><button class="ghost">write an archive →</button></div>
+        </div>
+
+        <div id="arch-panel-in" role="tabpanel" aria-labelledby="arch-tab-in" hidden>
+          <p>An archive from another Orbit — or an older one of this — merges into <b>Lawson Home</b>. Entries
+            and their documents come in; people never do, so nothing in a file can give anyone access here.</p>
+          <div class="act"><button class="ghost">bring in an archive →</button></div>
+          <p class="note top">an Orbit archive, up to 128 MB</p>
+        </div>
+      </div>
+    </div>
+
     <!-- ── THE DANGER ZONE ──────────────────────────────────────────────────
          Red rule, red wash, hazard ticks, red heading, and the button UP on
          the heading line at the right. The opener steps aside for the armed
@@ -1043,6 +1149,26 @@ function twoTap(btn, label, fire){
 function say(which){
   const line = document.getElementById("said-" + which);
   if (line) line.classList.add("show");
+}
+
+/* ── the archive's tabs (#1002, round 7): one joined pill pair, ← → between
+      them, one panel showing at a time. ─────────────────────────────────── */
+function archTab(which){
+  for (const side of ["out", "in"]) {
+    const tab = document.getElementById("arch-tab-" + side);
+    const panel = document.getElementById("arch-panel-" + side);
+    const on = side === which;
+    tab.setAttribute("aria-selected", String(on));
+    tab.tabIndex = on ? 0 : -1;
+    panel.hidden = !on;
+  }
+}
+function archTabKey(event){
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  event.preventDefault();
+  const which = event.target.id === "arch-tab-out" ? "in" : "out";
+  archTab(which);
+  document.getElementById("arch-tab-" + which).focus();
 }
 
 /* ── the identity fields (2c) ──────────────────────────────────────────────
