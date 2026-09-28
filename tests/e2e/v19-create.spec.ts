@@ -83,6 +83,9 @@ test("the create form saves a real item into the orbit", async ({ page }) => {
     } else {
       await page.locator("#f-name").fill("Gutter clearing proving");
       await page.locator('#types button[data-type="service"]').click();
+      // #1058b/#1069: the section has no default on the desk either — the
+      // save button stays disabled until one is chosen.
+      await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
       await page.locator("#f-date").fill(dueDate);
       await page.locator(".btn-primary").click();
 

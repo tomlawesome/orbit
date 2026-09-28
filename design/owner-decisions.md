@@ -1330,3 +1330,11 @@ The ruling follows the desk:
   (overturns round 3 §2 and §27, and puts a decision behind a second tap).
 - **Left as it is:** the desk suggestion card and the desk's open item.
 
+## 30. The desk search field's focus ring has rounded ends (owner, 2026-09-27)
+
+On the live build of #1057 the owner asked: *"I would like the search box to
+have rounded ends please."* The box they saw is the focus ring #847 gave the
+field. It is now a pill: the outline takes a full radius, and the hairline
+under the text is hidden while the ring shows, since a bottom border under a
+full radius bends into a curve. At rest the field is unchanged: a hairline
+under centred type, no box.
