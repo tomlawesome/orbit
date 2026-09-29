@@ -111,7 +111,10 @@ export async function scanAndHoldImapAttachment(input: {
   }
 }
 
-/** Opens holding bytes only for re-encryption into an explicitly selected household. */
+/** Opens holding bytes for re-encryption into an explicitly selected household,
+ * and (#1155) for a page-one render that never leaves memory: both callers
+ * decrypt the same ciphertext under the same recipient/receipt-bound context
+ * and the plaintext never reaches disk either way. */
 export async function readHeldImapAttachment(
   attachment: Pick<HeldImapAttachment, "id" | "mediaType" | "sizeBytes" | "storageKey" | "envelope">,
   owner: { recipientUserId: string; receiptId: string },

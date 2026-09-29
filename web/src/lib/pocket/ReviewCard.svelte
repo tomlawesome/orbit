@@ -10,11 +10,12 @@
    *
    * The dashed pen of "not yet in orbit", then: the title (18px), `caught
    * 11 Aug · burns up in 43d`, the readings as `.p-kv` lines with `sure` or
-   * `unsure`, the attachment line (`◆ name · scanned clean`), `Add to
-   * orbit` (filled, arms) and `Dismiss` (danger, arms) full width, then
-   * `review & amend →`, then whatever `after` draws (the receipt page's
-   * quiet way home). Locked (#941): nothing to add until an administrator
-   * restores the key, so the way in is shown, and shut.
+   * `unsure`, the attachment line (`◆ name · scanned clean`) -- a button
+   * that opens the page (#1155) -- `Add to orbit` (filled, arms) and
+   * `Dismiss` (danger, arms) full width, then `review & amend →`, then
+   * whatever `after` draws (the receipt page's quiet way home). Locked
+   * (#941): nothing to add until an administrator restores the key, so the
+   * way in is shown, and shut.
    *
    * It draws; the screen acts. `busy` names the act in flight.
    * @typedef {{ label: string, value: string, sure: boolean | null, field: string }} Reading
@@ -23,7 +24,7 @@
    *   caught: string,
    *   burnsIn?: number | null,
    *   readings?: Reading[],
-   *   papers?: { name: string }[],
+   *   papers?: { id: string | null, name: string, drawable: boolean }[],
    *   unreadable?: string | null,
    *   locked?: boolean,
    *   busy?: "approve" | "dismiss" | null,
@@ -33,13 +34,15 @@
    *   onapprove: () => unknown,
    *   ondismiss: () => unknown,
    *   onamend: () => unknown,
+   *   onpaper?: (paper: { id: string | null, name: string, drawable: boolean }) => void,
    *   after?: import('svelte').Snippet,
    * }} Props
    */
   /** @type {Props} */
   let {
     title, caught, burnsIn = null, readings = [], papers = [], unreadable = null, locked = false,
-    busy = null, problem = null, heading = 3, index = 0, onapprove, ondismiss, onamend, after = undefined,
+    busy = null, problem = null, heading = 3, index = 0, onapprove, ondismiss, onamend, onpaper = undefined,
+    after = undefined,
   } = $props();
 </script>
 
@@ -64,7 +67,10 @@
   {/if}
 
   {#each papers as paper, at (at)}
-    <p class="rv-paper"><span class="p-paper" aria-hidden="true">◆</span><span class="rv-pname">{paper.name}</span><span class="clean">scanned clean</span></p>
+    <button type="button" class="rv-paper" disabled={!paper.id} onclick={() => onpaper?.(paper)}>
+      <span class="p-paper" aria-hidden="true">◆</span><span class="rv-pname">{paper.name}</span><span class="clean">scanned clean</span>
+      {#if paper.id}<span class="rv-chev" aria-hidden="true">›</span>{/if}
+    </button>
   {/each}
 
   {#if unreadable}<p class="p-prose rv-unread">{unreadable}</p>{/if}
@@ -122,12 +128,18 @@
   .rv-reads i.unsure{color:var(--warm-text)}
 
   /* The attachment line: the paper's name, no size (review round §6.f), on
-     one line (round 3 §3.5); a long name is the part the guard trims (R5). */
+     one line (round 3 §3.5); a long name is the part the guard trims (R5).
+     A button that opens the page (#1155); the count-only fallback (no
+     attachment id) stays inert, with no chevron to press. */
   .rv-paper{display:flex;align-items:baseline;gap:8px;margin:8px 0 0;padding:10px 12px;
-    border:1px solid var(--line-soft);border-radius:12px;font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-mid)}
+    border:1px solid var(--line-soft);border-radius:12px;font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-mid);
+    min-height:var(--p-hit);width:100%;text-align:left;appearance:none;background:none;cursor:pointer}
+  .rv-paper:disabled{cursor:default}
+  .rv-paper:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:12px}
   .rv-pname{min-width:0;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .rv-paper .clean{flex:none;white-space:nowrap;color:var(--ok-text)}
   .rv-paper .clean::before{content:"· ";color:var(--ink-quiet)}
+  .rv-chev{flex:none;margin-left:auto;color:var(--accent-text)}
   .rv-unread{margin:10px 0 0;color:var(--ink-mid)}
 
   /* The acts that are the point of the card (§1.5): full width, stacked. */
