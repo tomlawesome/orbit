@@ -23,6 +23,7 @@ import { bandOfKind, daysUntil, kindOfItem } from "./chart.js";
 /* Relative, like chart.js's own imports: this module is pure and is exercised
    straight from node by the unit suite, which knows no SvelteKit aliases. */
 import { longDate, tminus } from "../format.js";
+import { stagedPreviewHref } from "../pocket/review.js";
 
 /**
  * chart.js's bands, in the belt's own four-letter vocabulary.
@@ -163,11 +164,18 @@ function documentRowOf(doc) {
  * @returns {"available" | "scanning" | "removed" | "refused" | "undrawable" | "staged"}
  */
 export function documentPreviewStateOf(doc) {
-  /* #1145: a suggestion's paper is staged with the mail, not stored -- there
-     is no page to draw until the suggestion is accepted, and nothing to
-     download, restore or refuse. Read first: a staged paper has no lifecycle
-     word of its own, so every test below would otherwise call it scanning. */
-  if (doc.staged) return "staged";
+  /* #1155: a suggestion's paper is staged with the mail, not stored -- there
+     is no document row until the suggestion is accepted, and no download or
+     restore. But its page one draws exactly where an accepted document's
+     does (owner-decisions §18) whenever the mail named it as a PDF and the
+     preview route can be built; "staged" is now only the one paper Orbit
+     genuinely cannot draw a page for. Read first: a staged paper has no
+     lifecycle word of its own, so every test below would otherwise call it
+     scanning. */
+  if (doc.staged) {
+    if (doc.previewHref) return "available";
+    return doc.mediaType && doc.mediaType !== "application/pdf" ? "undrawable" : "staged";
+  }
   if (doc.lifecycle === "pending_deletion") return "removed";
   if (doc.lifecycle === "rejected") return "refused";
   if (!doc.ready) return "scanning";
@@ -194,7 +202,11 @@ export function documentPreviewStateOf(doc) {
  * @property {boolean} ready
  * @property {?string} deleteAfter  "9 September 2026", when the file is on the clock
  * @property {boolean} [staged]  a suggestion's paper (#1145): it rides with the
- *   mail and is attached only on acceptance -- no page, no download
+ *   mail and is attached only on acceptance -- no `documents` row, and no
+ *   download -- but its page one draws the same as an accepted document's
+ *   wherever `previewHref` names one (#1155)
+ * @property {?string} [attachmentId]  the staged attachment's own id, for a
+ *   staged paper with a name (null for the count-only fallback)
  */
 
 /**
@@ -311,7 +323,7 @@ export function beltManifestOf({ household, documentsByItem = {}, today, keepId 
  * @param {string} name
  * @returns {string}
  */
-const plateOfName = (name) => {
+export const plateOfName = (name) => {
   const dot = name.lastIndexOf(".");
   const ext = dot > 0 ? name.slice(dot + 1) : "";
   return ext && ext.length <= 5 ? ext.toUpperCase() : "FILE";
@@ -320,7 +332,10 @@ const plateOfName = (name) => {
 /**
  * A suggestion's papers as they ride beside it (#1145): staged with the
  * mail, named where the list names them (#467; the fixture does, live data
- * gives the count), attached only on acceptance. No page, no download.
+ * gives the count), attached only on acceptance -- no `documents` row, no
+ * download. A named PDF gets a preview route (#1155): the same page-one
+ * reading card an accepted document opens, just answered from the mail's own
+ * staging rather than a stored document.
  *
  * @param {import('./workspace.js').ItemView} suggestion
  * @returns {BeltDocumentRow[]}
@@ -330,11 +345,14 @@ function stagedDocsOf(suggestion) {
   const named = suggestion.attachments?.map((a) => ({
     name: a.displayName ?? "forwarded document",
     size: sizeLabel(a.sizeBytes),
-    clean: /** @type {{ scanState?: "clean" | "unknown" }} */ (a).scanState === "clean",
+    clean: a.scanState === "clean",
+    attachmentId: a.id ?? null,
+    mediaType: a.mediaType ?? null,
   }));
   const count = suggestion.attachmentCount ?? 0;
   const papers = named ?? Array.from({ length: count }, (_, j) => ({
     name: count === 1 ? "forwarded document" : `forwarded document ${j + 1}`, size: "unknown size", clean: false,
+    attachmentId: null, mediaType: null,
   }));
   return papers.map((paper, j) => ({
     id: `${suggestion.id}-paper-${j + 1}`,
@@ -346,12 +364,17 @@ function stagedDocsOf(suggestion) {
     clean: paper.clean,
     scan: paper.clean ? "clean" : null,
     href: "",
-    previewHref: "",
+    // receiptId and id are the same value on a ReceiptSuggestion (used for
+    // clarity); the fallback only matters to the type checker; ItemView
+    // widens receiptId to optional through Partial<ReceiptSuggestion>.
+    previewHref: paper.attachmentId && paper.mediaType === "application/pdf"
+      ? stagedPreviewHref(suggestion.receiptId ?? suggestion.id, paper.attachmentId) : "",
     lifecycle: null,
-    mediaType: null,
+    mediaType: paper.mediaType,
     ready: false,
     deleteAfter: null,
     staged: true,
+    attachmentId: paper.attachmentId,
   }));
 }
 

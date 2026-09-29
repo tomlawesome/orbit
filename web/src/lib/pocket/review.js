@@ -13,7 +13,8 @@ import { money } from "$lib/format.js";
  *   proposal?: import('$lib/data/workspace.js').ItemProposal | null,
  *   fieldEvidence?: Record<string, { source: string, confidence: string }> | null,
  *   metadataStatus?: { proposal?: string, fieldEvidence?: string } | null,
- *   attachments?: { displayName?: string, sizeBytes?: number }[] | null,
+ *   attachments?: { id?: string, displayName?: string, sizeBytes?: number,
+ *     mediaType?: string, scanState?: "clean" | "unknown" }[] | null,
  *   attachmentCount?: number,
  *   receivedAt?: string | null,
  *   expiresAt?: string | null,
@@ -81,16 +82,33 @@ export const formReadingsOf = (mail) =>
   }));
 
 /**
- * The documents riding with the mail. The list API names no files yet
- * (#467): the fixture carries the design's names, live data the count. The
- * card prints the name alone (round 3 §3.5); the sheet's reading card keeps
- * the size.
+ * The preview route for a staged attachment (#1155): nested under the
+ * receipt, because the staging context binds the bytes to
+ * `(attachmentId, recipientUserId, receiptId)`
+ * (`src/server/mail-in/imap-attachment-holding.ts:41-53`).
+ * @param {string} receiptId
+ * @param {string} attachmentId
+ * @returns {string}
+ */
+export const stagedPreviewHref = (receiptId, attachmentId) =>
+  `/api/imap-inbox/${encodeURIComponent(receiptId)}/attachments/${encodeURIComponent(attachmentId)}/preview`;
+
+/**
+ * The documents riding with the mail, named since #467 where the list names
+ * them; a receipt with no `attachments` array degrades to the count alone.
+ * The card prints the name alone (round 3 §3.5); the sheet's reading card
+ * keeps the size. `drawable` is whether pressing the paper can open a page
+ * (#1155): only a named, PDF attachment has one.
  * @param {Reviewable} mail
- * @returns {{ name: string, meta: string }[]}
+ * @returns {{ id: string | null, name: string, meta: string, drawable: boolean, clean: boolean }[]}
  */
 export const papersOf = (mail) =>
   mail.attachments?.map((a) => ({
-    name: a.displayName ?? "document", meta: `${Math.round((a.sizeBytes ?? 0) / 1024)} KB`,
+    id: a.id ?? null,
+    name: a.displayName ?? "document",
+    meta: `${Math.round((a.sizeBytes ?? 0) / 1024)} KB`,
+    drawable: Boolean(a.id) && a.mediaType === "application/pdf",
+    clean: a.scanState === "clean",
   })) ?? (mail.attachmentCount
-    ? [{ name: `${mail.attachmentCount} document${mail.attachmentCount === 1 ? "" : "s"}`, meta: "" }]
+    ? [{ id: null, name: `${mail.attachmentCount} document${mail.attachmentCount === 1 ? "" : "s"}`, meta: "", drawable: false, clean: false }]
     : []);

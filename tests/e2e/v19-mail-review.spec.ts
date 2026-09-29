@@ -94,6 +94,12 @@ function readyReceipt(householdId: string) {
     message: "Ready for your review.",
     proposal: { title: "Reviewed intake 1786823446152", provider: "Reviewed Cover", costMinor: 12550, currency: "GBP", dueDate: "2031-01-10", scheduleKind: "renewal", recurrenceMonths: 12 },
     fieldEvidence: { title: { source: "parser", confidence: "medium" }, costMinor: { source: "parser", confidence: "low" } },
+    // #1155: the list answers the same named shape the detail route does, so
+    // the belt's staged paper (and the inbox chip) has a page to press into.
+    attachments: [{
+      id: attachmentId, ordinal: 1, displayName: "policy-schedule.pdf",
+      mediaType: "application/pdf", sizeBytes: 128, scanState: "clean",
+    }],
   };
 }
 
@@ -112,9 +118,22 @@ async function interceptMail(page: Page, householdId: string, approvals: Record<
         receipt,
         sections: [{ id: sectionId, name: "Documents" }],
         candidates: [],
-        attachments: [{ id: attachmentId, ordinal: 1, mediaType: "application/pdf", sizeBytes: 128 }],
+        attachments: [{
+          id: attachmentId, ordinal: 1, displayName: "policy-schedule.pdf",
+          mediaType: "application/pdf", sizeBytes: 128, scanState: "clean",
+        }],
       }),
     });
+  });
+  // #1155: a small, real PNG for the staged attachment's own preview route,
+  // so the belt's reading card, the inbox chip and the phone sheet all have
+  // a real page to land, not a stub standing in for one.
+  const stagedPagePng = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    "base64",
+  );
+  await page.route(`**/api/imap-inbox/${receiptId}/attachments/${attachmentId}/preview`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "image/png", body: stagedPagePng });
   });
   await page.route("**/api/reviewed-intake/approve", async (route) => {
     approvals.push(route.request().postDataJSON() as Record<string, unknown>);
@@ -294,6 +313,69 @@ test("a dismissal takes two taps and mail that failed is visible on the relay", 
     await expect(page.locator(".failures")).toContainText("arrived, but could not be read");
     await expect(page.locator(".failures")).toContainText("no longer available for review");
     await expect(page.locator(".failures")).toContainText("14 Aug");
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+test("the desk reads a staged paper's page one, on the receipt's own screen and from the inbox chip (#1155)", async ({ page }) => {
+  test.skip(test.info().project.name.startsWith("mobile"), "the desk reading card is desktop-only; see the phone test below");
+  await signInToHome(page);
+  const { householdId } = await seedHousehold(page);
+
+  try {
+    const approvals: Record<string, unknown>[] = [];
+    await interceptMail(page, householdId, approvals);
+
+    await page.goto(`/item/${receiptId}`);
+    /* §11: the suggestion card's note names the staged paper as a button;
+       pressing it is the same `showPaperById` an inbox chip or a home arrival
+       uses, so this covers all three doors into the same reading card. */
+    await page.locator(".note").getByRole("button", { name: /policy-schedule\.pdf/ }).click();
+
+    const readcard = page.locator("#readcard");
+    await expect(readcard).toHaveClass(/snap/);
+    await expect(readcard.locator(".sheet img")).toHaveAttribute("alt", "Page one of policy-schedule.pdf");
+    await expect(readcard.locator(".rcfoot .rcnote")).toHaveText("not yet in orbit · attached on acceptance");
+    // No download for a staged paper: the foot carries the note, never a link.
+    await expect(readcard.locator(".rcfoot a")).toHaveCount(0);
+
+    // The chip is a second door into the same reading card (§8, §10).
+    await page.goto("/inbox");
+    await page.getByRole("link", { name: /policy-schedule\.pdf/ }).click();
+    await expect(page).toHaveURL(new RegExp(`/item/${receiptId}$`));
+    await expect(page.locator("#readcard")).toHaveClass(/open/);
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+test("the phone sheet reads a staged paper's page one, and tells a gone mail apart from one it just cannot draw (#1155)", async ({ page }) => {
+  test.skip(!test.info().project.name.startsWith("mobile"), "the pocket paper sheet is phone-only; see the desk test above");
+  await signInToHome(page);
+  const { householdId } = await seedHousehold(page);
+
+  try {
+    const approvals: Record<string, unknown>[] = [];
+    await interceptMail(page, householdId, approvals);
+
+    await page.goto("/inbox");
+    await page.getByRole("button", { name: /policy-schedule\.pdf/ }).click();
+    const dialog = page.getByRole("dialog", { name: "policy-schedule.pdf" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator("img")).toHaveAttribute("alt", "Page one of policy-schedule.pdf");
+    await expect(dialog).toContainText("not yet in orbit · attached on acceptance");
+    await dialog.getByRole("button", { name: "close" }).click();
+    await expect(dialog).not.toBeVisible();
+
+    // The mail is decided or burns up between the belt listing it and the
+    // preview answering: the sheet must say so plainly, never "could not draw".
+    await page.route(`**/api/imap-inbox/${receiptId}/attachments/${attachmentId}/preview`, async (route) => {
+      await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: { code: "inbox_receipt_not_found", message: "That incoming document is not available" } }) });
+    });
+    await page.getByRole("button", { name: /policy-schedule\.pdf/ }).click();
+    const reopened = page.getByRole("dialog", { name: "policy-schedule.pdf" });
+    await expect(reopened).toContainText("This mail has gone.");
   } finally {
     await households.sweep(page);
   }
