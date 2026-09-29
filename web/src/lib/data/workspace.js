@@ -167,8 +167,8 @@
 
 /**
  * One piece of mail the relay caught, in the shape `GET /api/imap-inbox`
- * answers. `attachments` is not an API field yet (#467) — the fixture carries
- * it so the ratified design renders, and live data degrades to the count.
+ * answers. `attachments` names every held file since #467; a receipt with
+ * none yet named degrades to `attachmentCount` alone.
  *
  * @typedef {object} Receipt
  * @property {string} id
@@ -189,7 +189,9 @@
  *   Read-only (ADR-0024, #941): why the extract is absent rather than empty --
  *   `metadata_integrity_failed` for a draft that would not decrypt,
  *   `metadata_locked` while the instance holds no usable encryption key.
- * @property {{ displayName?: string, sizeBytes?: number, scannedClean?: boolean }[]} [attachments]
+ * @property {{ id: string, ordinal: number, displayName: string,
+ *              mediaType: "application/pdf" | "application/octet-stream",
+ *              sizeBytes: number, scanState: "clean" | "unknown" }[]} [attachments]
  * @property {string} reason
  */
 
@@ -223,7 +225,9 @@
  * @property {string} title
  * @property {string} currency
  * @property {string} sourceDocument
- * @property {?{ displayName?: string, sizeBytes?: number }[]} [attachments]  named papers, where the list names them (#467)
+ * @property {?{ id: string, ordinal: number, displayName: string,
+ *              mediaType: "application/pdf" | "application/octet-stream",
+ *              sizeBytes: number, scanState: "clean" | "unknown" }[]} [attachments]  named papers (#467)
  * @property {number} [draftVersion]
  * @property {?string} [renewsOn]
  * @property {?string} [scheduleKind]   renewal / service / expiry (#1005)
