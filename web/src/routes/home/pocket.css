@@ -76,6 +76,8 @@
 .pocket .porb .bead{position:absolute;right:-2px;bottom:-2px;box-sizing:border-box;min-width:20px;height:20px;
   padding:0 5px;border-radius:10px;background:var(--accent);color:var(--bg);
   font:600 var(--p-type-meta)/20px var(--mono);text-align:center}
+/* --bg on --accent is 3.03:1 on the light packs; white clears 4.5:1 (#1168). */
+:is([data-theme=dawn],[data-theme=clouds]) .pocket .porb .bead{color:#fff}
 .pocket .porb:focus-visible{outline:none}
 .pocket .porb:focus-visible .disc{outline:2px solid var(--accent);outline-offset:2px}
 
