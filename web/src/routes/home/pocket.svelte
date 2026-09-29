@@ -956,4 +956,5 @@
 <ReviewSheet bind:open={reviewOpen} title={reviewing?.title ?? ""} proposal={reviewing?.proposal}
              householdId={reviewing ? (reviewing.householdId ?? view?.primary ?? null) : null}
              households={view?.households ?? []} readings={reviewing ? formReadingsOf(reviewing) : []}
-             papers={reviewing ? reviewPapersOf(reviewing) : []} {busy} problem={reviewProblem} onsave={saveReview} />
+             papers={reviewing ? reviewPapersOf(reviewing) : []} receiptId={reviewing?.receiptId ?? null}
+             {busy} problem={reviewProblem} onsave={saveReview} />

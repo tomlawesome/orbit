@@ -117,7 +117,10 @@ describe("the suggestion's seat", () => {
     title: "Home insurance renewal", renewsOn: "2026-10-03", scheduleKind: "renewal",
     provider: "Harbour Mutual", expiresAt: "2026-09-25T12:00:00.000Z", receivedAt: "2026-08-11T09:24:00.000Z",
     costMinor: 40000, currency: "GBP", sourceDocument: "1 forwarded document",
-    attachments: [{ displayName: "policy-schedule.pdf", sizeBytes: 831488, scanState: "clean" }],
+    attachments: [{
+      id: "a-insurance-1", ordinal: 1, displayName: "policy-schedule.pdf",
+      mediaType: "application/pdf", sizeBytes: 831488, scanState: "clean",
+    }],
     suggestion: true, proposal: PROPOSAL, attachmentCount: 1, today: TODAY,
   };
   const RECEIPT = { proposal: PROPOSAL };
@@ -150,18 +153,42 @@ describe("the suggestion's seat", () => {
     expect(bodies.find((one) => one.id === "i-boiler").tone).toBe("var(--warm)");
   });
 
-  it("stages the forwarded paper beside it: named, dated by the mail, with no page and no download", () => {
+  it("stages the forwarded paper beside it: named, dated by the mail, no download -- but a page for a named PDF (#1155)", () => {
     const seat = manifestOf({ suggestion: SUGGESTION }).find((row) => row.id === "r-insurance");
     expect(seat.docs).toHaveLength(1);
     expect(seat.docs[0]).toMatchObject({
       id: "r-insurance-paper-1", name: "policy-schedule.pdf", size: "812 KB", added: "11 August 2026",
-      plate: "PDF", clean: true, href: "", previewHref: "", ready: false, staged: true,
+      plate: "PDF", clean: true, href: "", ready: false, staged: true, attachmentId: "a-insurance-1",
+      previewHref: "/api/imap-inbox/r-insurance/attachments/a-insurance-1/preview",
     });
-    expect(documentPreviewStateOf(seat.docs[0])).toBe("staged");
-    // Live data names no files yet (#467): the count stands in.
+    expect(documentPreviewStateOf(seat.docs[0])).toBe("available");
+
+    // A named attachment that is not a PDF has no page to ask for: undrawable
+    // -- "staged" is now only the count-only fallback below.
+    const nonPdf = manifestOf({
+      suggestion: {
+        ...SUGGESTION,
+        attachments: [{
+          id: "a-insurance-1", ordinal: 1, displayName: "policy.docx",
+          mediaType: "application/octet-stream", sizeBytes: 1000, scanState: "clean",
+        }],
+      },
+    }).find((row) => row.id === "r-insurance");
+    expect(nonPdf.docs[0].previewHref).toBe("");
+    expect(documentPreviewStateOf(nonPdf.docs[0])).toBe("undrawable");
+
+    // clean follows the API's own scanState, never a guess.
+    const unscanned = manifestOf({
+      suggestion: { ...SUGGESTION, attachments: [{ ...SUGGESTION.attachments[0], scanState: "unknown" }] },
+    }).find((row) => row.id === "r-insurance");
+    expect(unscanned.docs[0].clean).toBe(false);
+
+    // Named or not, an attachments-less receipt (the count-only fallback)
+    // still answers "staged": the one paper Orbit genuinely has no page for.
     const counted = manifestOf({ suggestion: { ...SUGGESTION, attachments: null, attachmentCount: 2 } })
       .find((row) => row.id === "r-insurance");
     expect(counted.docs.map((doc) => doc.name)).toEqual(["forwarded document 1", "forwarded document 2"]);
+    expect(documentPreviewStateOf(counted.docs[0])).toBe("staged");
   });
 
   it("falls to the later end when the relay read no date", () => {
