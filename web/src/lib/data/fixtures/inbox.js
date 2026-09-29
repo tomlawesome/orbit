@@ -45,7 +45,7 @@ export const INBOX_FIXTURE = {
         dueDate: { source: "parser", confidence: "high" },
         costMinor: { source: "parser", confidence: "low" },
       },
-      attachments: [{ displayName: "policy-schedule.pdf", sizeBytes: 831488, scannedClean: true }],
+      attachments: [{ displayName: "policy-schedule.pdf", sizeBytes: 831488, scanState: "clean" }],
     },
     {
       id: "r-reading",

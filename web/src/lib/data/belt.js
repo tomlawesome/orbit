@@ -330,7 +330,7 @@ function stagedDocsOf(suggestion) {
   const named = suggestion.attachments?.map((a) => ({
     name: a.displayName ?? "forwarded document",
     size: sizeLabel(a.sizeBytes),
-    clean: Boolean(/** @type {{ scannedClean?: boolean }} */ (a).scannedClean),
+    clean: /** @type {{ scanState?: "clean" | "unknown" }} */ (a).scanState === "clean",
   }));
   const count = suggestion.attachmentCount ?? 0;
   const papers = named ?? Array.from({ length: count }, (_, j) => ({
