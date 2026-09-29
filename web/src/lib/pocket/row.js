@@ -20,10 +20,12 @@ const openIn = new WeakMap();
  * THE ROW OPENS ON A TAP (#1120, review round §1.1; the desk's own grammar,
  * home.css "THE ROW IS THE ITEM", #424). Tapping the face grows the row in
  * place into a panel under it holding the row's detail and its acts; tapping
- * the face again closes it. A tap outside the row closes it, Escape closes it
- * and hands focus back to the face, and opening another row in the same
- * group (`data-row-group` on the list) closes the first. Scrolling does not
- * close it and there is no timer.
+ * the face again closes it, Escape closes it and hands focus back to the
+ * face, and opening another row in the same group (`data-row-group` on the
+ * list) closes the first. Nothing else closes it: not a tap elsewhere, not a
+ * scroll, not a timer. That is the desk's own rule (home's one `expanded`
+ * row), and the owner's on the phone (2026-09-27, #1159): "The drawer should
+ * just stay open once tapped like it does on desktop".
  *
  *   keyboard       the face is a button: Enter or Space toggles; the
  *                  panel's pills are in the Tab order only while open (the
@@ -54,11 +56,6 @@ export function mountRow(row, { closeMs, onchange } = {}) {
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let hiding;
 
-  /** @param {Event} event */
-  const onOutside = (event) => {
-    if (event.target instanceof Node && row.contains(event.target)) return;
-    close();
-  };
 
   function open() {
     if (!panel || isOpen) return;
@@ -72,7 +69,6 @@ export function mountRow(row, { closeMs, onchange } = {}) {
     void panel.offsetHeight;
     row.dataset.open = "";
     face.setAttribute("aria-expanded", "true");
-    win.addEventListener("pointerdown", onOutside, true);
     onchange?.(true);
   }
 
@@ -84,7 +80,6 @@ export function mountRow(row, { closeMs, onchange } = {}) {
     if (openIn.get(group()) === control) openIn.delete(group());
     delete row.dataset.open;
     face.setAttribute("aria-expanded", "false");
-    win.removeEventListener("pointerdown", onOutside, true);
     const ms = closeMs ?? (still() ? 0 : CLOSE_MS);
     clearTimeout(hiding);
     if (ms > 0) hiding = setTimeout(() => { if (!isOpen) panel.hidden = true; }, ms);
@@ -117,7 +112,6 @@ export function mountRow(row, { closeMs, onchange } = {}) {
     destroy() {
       clearTimeout(hiding);
       if (openIn.get(group()) === control) openIn.delete(group());
-      win.removeEventListener("pointerdown", onOutside, true);
       face.removeEventListener("click", onClick);
       row.removeEventListener("keydown", onKey);
       mounted.delete(row);

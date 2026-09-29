@@ -1262,3 +1262,98 @@ user standing on the dial had no way to close what they had just opened.
   listener would race it).
 - A reader whose focus is inside the row still closes it with Escape and
   lands on the row's face, as before.
+
+## 29. A signal is its own dashed card, and opens as the desk's does (Fable's call, 2026-09-27)
+
+Not the owner's ruling: a call made by Fable for #1142, for the owner to
+overturn. Three looks on the live phone build the same day:
+
+- First: the Home insurance signal opened inside home's signals pen (round
+  3 §2) with the kit's opened-row plate — fill, accent rail, 12px corners
+  — edge to edge inside the dashed card: **"a card inside the drawer"**.
+- Second, with the plate gone but the rail kept: the rail ran down the
+  pen's left edge on the dashed border: **"Then you haven't fixed
+  anything."**
+- Third, the owner set the target from the desk, where the suggestion is
+  its own dashed card seated in the manifest (#1145, §27): **"On the
+  desktop it's a dashed line that expands to a solid blue line. On
+  mobile, it's a dashed line with a random solid blue line with too much
+  line weight."**
+
+The ruling follows the desk:
+
+- **Each signal is its own row-card, as the manifest's rows are.** Under
+  32px of clear sky and the `SIGNALS` caps head, drawn on the sky as
+  `NEEDS ATTENTION` is, a suggestion wears the dashed accent pen at rest.
+  Opened, that same outline turns a thin solid accent line — the same 1px,
+  nothing heavier — round the face and the drawer together, with no line
+  between them, as the desk's row and `.itemview` join. **No rail**: a line
+  along an outline is a card edge, and nothing on a phone signal may look
+  like one. The plate under the face and drawer is the manifest rows' own.
+  The mail summary row (`reading 1 · 2 couldn't be read`, `inbox →`,
+  answer 12a) wears the manifest's plain hairline: it is not a proposal.
+- **The whole outline goes solid, which is one step past the desk's
+  code.** On the desk the opened row's own face keeps its dashes, turned
+  accent (`home.css`, `.desk .item.suggest.open`, #1145), and the drawer
+  that opens under it (`.itemview`) wears a solid accent outline: that is
+  the "dashed line that expands to a solid blue line" the owner saw. On
+  the phone the face and the drawer share one outline, so the whole of it
+  turns solid, as the owner asked. If the desk's face should go solid
+  too, that is a one-line desk change for its own issue, not made here.
+- **Nothing else moves.** The row's panel, `Add to orbit`, `Dismiss` and
+  `review & amend →` (raising the shared review sheet), the count bead,
+  the north star's stations and the foot pad are as round 3 §2 has them.
+- **Overturns, for the pen only:** round 3 §2's "the break is a pen" —
+  one `.p-card.proposed` holding every signal with its caps head inside,
+  rows as transparent card rows with hairlines between, the per-row
+  dashed border (`.pk-sugg .p-row`) gone, and "the open row keeps its
+  accent rail". The break survives as the 32px gap and the dashed
+  outlines against the manifest's plain ones; the per-row dashed border
+  returns because it is what the desk draws, on the owner's own
+  direction.
+- **The rail goes from every opened row on the phone, at the kit level
+  (owner, 2026-09-27).** Asked whether the blue side line should also go
+  from opened manifest items such as Boiler service, to match the desk:
+  **"yeah why not."** So `Row.svelte` and `kit.css` draw no inset accent
+  rail on the opened face or its panel anywhere — home's manifest,
+  household members, the inbox, settings, administration, create, the
+  item page — and a row with an outline of its own (the manifest's
+  hairline, a signal's dashed pen) turns it the desk's thin solid accent
+  line; a row on a card's glass keeps the plate and nothing else marks
+  it, as review round §1.1's plate did on the household card. This
+  overturns review round §1.1's "the same accent rail" for the phone.
+- **Not chosen:** the first cut, `4a933b3e`'s "no plate in the pen" (the
+  rail on the pen's edge was the second look above); a dashed accent
+  outline when open, the desk's literal code (the owner asked for solid);
+  a thinner or shorter rail (any rail along an outline is the fault); and
+  raising the review sheet from the face instead of opening in place
+  (overturns round 3 §2 and §27, and puts a decision behind a second tap).
+- **Left as it is:** the desk suggestion card and the desk's open item.
+
+## 30. The desk search field's focus ring has rounded ends (owner, 2026-09-27)
+
+On the live build of #1057 the owner asked: *"I would like the search box to
+have rounded ends please."* The box they saw is the focus ring #847 gave the
+field. It is now a pill: the outline takes a full radius, and the hairline
+under the text is hidden while the ring shows, since a bottom border under a
+full radius bends into a curve. At rest the field is unchanged: a hairline
+under centred type, no box.
+
+## 31. Searching unrolls the year (owner, 2026-09-27)
+
+Round 1 of #1161 drew three desk searches (`design/v19/search/round-1/`):
+A lifts the built palette above the field as bare rows; B lights the
+matching planets on the dial and hangs the chart's callout on the top
+match; C dissolves the ring on focus and draws the year as a line above
+the field, with the matches standing on it as their own planets at their
+due dates. The owner chose C: *"Great job Fable! Three really cool
+options, but I think the one that's going to give us the most going
+forward, has to be C - unrolled!"*
+
+What is fixed by that choice: the field stays where §3 put it, with no box
+and no icon; results never go below it; the ring gives way to the line on
+focus and comes back on blur (POL-8's own dissolve); a match is drawn by
+the same code and tokens as its planet on the dial; matching stays
+`pocket-search.js`'s, shared with the phone. Round 1's B survives as a
+feature idea (search that lights the dial); A is the fallback that was not
+needed. The build brief is `design/v19/search/round-1/BUILD.md`.

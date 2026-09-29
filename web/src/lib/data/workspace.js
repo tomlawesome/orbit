@@ -1751,6 +1751,18 @@ export async function readSessions() {
 }
 
 /**
+ * "Sent to you lately" (#1003): the signed-in user's own last five attempted
+ * reminder deliveries, newest first — `GET /api/settings/sent`.
+ *
+ * @returns {Promise<import('$lib/data/fixtures/settings.js').SentRow[]>}
+ */
+export async function readSentLately() {
+  /** @type {{ sent?: import('$lib/data/fixtures/settings.js').SentRow[] }} */
+  const body = await json(await fetch("/api/settings/sent", { credentials: "same-origin" }));
+  return body.sent ?? [];
+}
+
+/**
  * Signs out of exactly one device (#482) — the single-session counterpart to
  * `signOutEverywhere`. If the ended session is this browser's own, the
  * server has already cleared the cookie by the time this resolves, so a
