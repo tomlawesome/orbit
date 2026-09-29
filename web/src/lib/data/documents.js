@@ -68,7 +68,7 @@ export function archiveOf({ workspace, receipts = [], documentsByItem = {}, toda
         name: /** @type {string} */ (attachment.displayName),
         sizeBytes: attachment.sizeBytes ?? null,
         addedAt: /** @type {string} */ (receipt.receivedAt),
-        clean: attachment.scannedClean ?? null,
+        clean: attachment.scanState === "clean",
         suggestion: receipt.proposal?.title ?? "Forwarded email",
         receiptId: receipt.id,
         household: null,
