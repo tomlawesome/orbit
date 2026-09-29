@@ -147,6 +147,14 @@ test.describe("document jobs and the two mail tests (#1071)", () => {
     test.skip(testInfo.project.name.startsWith("mobile"), "#1071's server-side persistence was built for the desk half only");
 
     await signInAsWorkerAdministrator(page, "/administration");
+    // #840: a worker with no household anywhere in the instance yet is sent
+    // to "/" by the first-run door, not /administration -- v19-mail-review.
+    // spec.ts's own comment on the same gate says why household.create is
+    // what gets a reader past it reliably: the create sets the session's own
+    // activeHouseholdId, which the door's own fast path trusts. This test's
+    // own subject (the mail machinery card) needs no household at all; this
+    // one exists only to open the door.
+    await createHousehold(page, `Mail test door opener ${Date.now()}`);
     await page.goto("/administration");
 
     const relayRow = page.locator(".person").filter({ has: page.getByText("relay test", { exact: true }) });

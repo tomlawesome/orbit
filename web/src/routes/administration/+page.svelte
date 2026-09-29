@@ -1019,74 +1019,79 @@
         {#if systemProblem}<div class="adminproblem">{systemProblem}</div>{/if}
 
         {#each view.households as household (household.id)}
-          {@const doom = recoverable.find((row) => row.id === household.id)}
-          {#if doom}
-            {@const rowExpired = expired(doom)}
-            <div class="system" class:doomed={!rowExpired}>
-              <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
-                {#if rowExpired}
-                  <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
-                  <circle cx="17" cy="17" r="2.6" style="fill:var(--ink-mid)"/>
-                {:else}
-                  <circle cx="17" cy="17" r="13" class="ring" fill="none"/>
-                  <circle cx="17" cy="17" r="2.6" class="sun"/>
-                {/if}
-                {#each ringDots(household) as dot (dot.cx + "-" + dot.cy)}
-                  <circle cx={dot.cx} cy={dot.cy} r={dot.r} style="fill:var({dot.tone})" opacity=".8"/>
-                {/each}
-              </svg>
-              <div class="who">
-                <b>{household.name}</b>
-                <span>{rowExpired ? "past its window · removing"
-                  : `on the clock · ${count(daysLeft(doom.deleteAfter), "day")} left · gone for good ${goneOn(doom.deleteAfter)}`}</span>
-              </div>
-              {#if !rowExpired}
-                <div class="acts">
-                  <button class="rebtn" onclick={() => restoreRow(doom)}>restore</button>
-                  {#if !doomConfirming[doom.id]}
-                    <button class="dangerbtn" onclick={() => openDoomConfirm(doom)}>delete now →</button>
-                  {:else}
-                    <button class="dangerbtn" class:armed={doomArmed === doom.id} disabled={!doomNameOk(doom)}
-                            onclick={() => twoTapDoom(doom)}>
-                      {doomArmed === doom.id ? "tap again to delete for good" : "delete now"}</button>
-                  {/if}
-                </div>
-                {#if doomConfirming[doom.id]}
-                  <div class="confirm">
-                    <p class="stake">Deleting now skips the {count(daysLeft(doom.deleteAfter), "day")}. Nothing comes
-                      back after this — not for you, not for anyone.</p>
-                    <div class="field">
-                      <label for="doomname-{doom.id}">type the system’s name exactly to wake the button</label>
-                      <input id="doomname-{doom.id}" placeholder={doom.name} autocomplete="off"
-                             bind:value={doomTypedName[doom.id]} />
-                    </div>
-                    {#if doomProblem[doom.id]}<div class="adminproblem">{doomProblem[doom.id]}</div>{/if}
-                  </div>
-                {/if}
-              {/if}
-              {#if clockSaid[doom.id]}
-                <div class="adminproblem said" class:ok={clockSaid[doom.id].ok}>{clockSaid[doom.id].text}</div>
-              {/if}
+          <div class="system">
+            <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+              <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
+              <circle cx="17" cy="17" r="2.6" style="fill:var({household.id === view.primary ? "--sun" : "--ink-mid"})"/>
+              {#each ringDots(household) as dot (dot.cx + "-" + dot.cy)}
+                <circle cx={dot.cx} cy={dot.cy} r={dot.r} style="fill:var({dot.tone})" opacity=".8"/>
+              {/each}
+            </svg>
+            <div class="who">
+              <b>{household.name}</b>
+              <span>{[
+                `${household.memberCount} member${household.memberCount === 1 ? "" : "s"}`,
+                view.owners[household.id] ? `owner ${view.owners[household.id]}` : null,
+                `${(household.items ?? []).length} item${(household.items ?? []).length === 1 ? "" : "s"}`,
+              ].filter(Boolean).join(" · ")}</span>
             </div>
-          {:else}
-            <div class="system">
-              <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+          </div>
+        {/each}
+
+        <!-- ON THE CLOCK (#1001): readWorkspace excludes a household with a
+             deletion requested from `households` outright
+             (isNull(deletionRequestedAt), src/server/workspace-repository.ts)
+             -- it never appears in view.households, doomed or not -- so this
+             reads `recoverable` on its own rather than matching it against
+             the households list above. Same shape pocket.svelte's own clock
+             row already uses. It carries no items (id, name, deleteAfter
+             only), so its ring is plain -- no ringDots here either, exactly
+             as pocket.svelte draws it. -->
+        {#each recoverable.filter((doom) => !doomGone.some((line) => line.id === doom.id)) as doom (doom.id)}
+          {@const rowExpired = expired(doom)}
+          <div class="system" class:doomed={!rowExpired}>
+            <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+              {#if rowExpired}
                 <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
-                <circle cx="17" cy="17" r="2.6" style="fill:var({household.id === view.primary ? "--sun" : "--ink-mid"})"/>
-                {#each ringDots(household) as dot (dot.cx + "-" + dot.cy)}
-                  <circle cx={dot.cx} cy={dot.cy} r={dot.r} style="fill:var({dot.tone})" opacity=".8"/>
-                {/each}
-              </svg>
-              <div class="who">
-                <b>{household.name}</b>
-                <span>{[
-                  `${household.memberCount} member${household.memberCount === 1 ? "" : "s"}`,
-                  view.owners[household.id] ? `owner ${view.owners[household.id]}` : null,
-                  `${(household.items ?? []).length} item${(household.items ?? []).length === 1 ? "" : "s"}`,
-                ].filter(Boolean).join(" · ")}</span>
-              </div>
+                <circle cx="17" cy="17" r="2.6" style="fill:var(--ink-mid)"/>
+              {:else}
+                <circle cx="17" cy="17" r="13" class="ring" fill="none"/>
+                <circle cx="17" cy="17" r="2.6" class="sun"/>
+              {/if}
+            </svg>
+            <div class="who">
+              <b>{doom.name}</b>
+              <span>{rowExpired ? "past its window · removing"
+                : `on the clock · ${count(daysLeft(doom.deleteAfter), "day")} left · gone for good ${goneOn(doom.deleteAfter)}`}</span>
             </div>
-          {/if}
+            {#if !rowExpired}
+              <div class="acts">
+                <button class="rebtn" onclick={() => restoreRow(doom)}>restore</button>
+                {#if !doomConfirming[doom.id]}
+                  <button class="dangerbtn" onclick={() => openDoomConfirm(doom)}>delete now →</button>
+                {:else}
+                  <button class="dangerbtn" class:armed={doomArmed === doom.id} disabled={!doomNameOk(doom)}
+                          onclick={() => twoTapDoom(doom)}>
+                    {doomArmed === doom.id ? "tap again to delete for good" : "delete now"}</button>
+                {/if}
+              </div>
+              {#if doomConfirming[doom.id]}
+                <div class="confirm">
+                  <p class="stake">Deleting now skips the {count(daysLeft(doom.deleteAfter), "day")}. Nothing comes
+                    back after this — not for you, not for anyone.</p>
+                  <div class="field">
+                    <label for="doomname-{doom.id}">type the system’s name exactly to wake the button</label>
+                    <input id="doomname-{doom.id}" placeholder={doom.name} autocomplete="off"
+                           bind:value={doomTypedName[doom.id]} />
+                  </div>
+                  {#if doomProblem[doom.id]}<div class="adminproblem">{doomProblem[doom.id]}</div>{/if}
+                </div>
+              {/if}
+            {/if}
+            {#if clockSaid[doom.id]}
+              <div class="adminproblem said" class:ok={clockSaid[doom.id].ok}>{clockSaid[doom.id].text}</div>
+            {/if}
+          </div>
         {/each}
         {#each doomGone as line (line.id)}
           <div class="system settled"><div class="adminproblem gone">{line.text}</div></div>
