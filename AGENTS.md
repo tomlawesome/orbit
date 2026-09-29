@@ -141,11 +141,14 @@ group token or a second project token were not adopted.
 - Run fast checks before container and browser checks: this project's
   container and browser suites cost minutes each, and the fast suite catches
   most of what they would.
-- Nothing promotes to `main` before v1.3.0; #547 holds that promotion. So
-  `main` stays at v1.2.0 and is expected to be far behind. A Renovate-flagged
-  stale pin on `main` is not work: check `dev` first, and if `dev` is already
-  fixed it clears when v1.3.0 ships. Do not propose a promotion as available
-  work.
+- v1.3.0 is the current release, and it comes before everything else (owner,
+  2026-09-27). What is left: M14's open issues, then the release steps --
+  #1151 (audit, a Fable session), #1152 (`dev` to `preview`), #1153
+  (acceptance), #1154 (signed-release trial) -- then #885 (promote to
+  `main`). Each promotion merge still needs the owner's go-ahead.
+- Until v1.3.0 ships, `main` stays at v1.2.0 and is expected to be far
+  behind. A Renovate-flagged stale pin on `main` is not work: check `dev`
+  first; if `dev` is already fixed it clears when v1.3.0 ships.
 
 ## Harnesses that already exist
 

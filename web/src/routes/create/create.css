@@ -121,6 +121,18 @@ body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
 .create-page .types button:hover{color:var(--ink)}
 .create-page .types button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent);background:rgba(216,180,90,.08)}
 
+/* #1058b/#1069: the section row — none pre-selected, and the same chip the
+   type row already is. sec-dot echoes the section's own accent, the way
+   household-manage.html's section mark does, without pulling in that
+   screen's full icon set for a picker this small. */
+.create-page .sections{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
+.create-page .sections button{display:inline-flex;align-items:center;gap:7px;font:11px var(--mono);
+              color:var(--ink-mid);background:var(--panel);border:1px solid var(--line);
+              border-radius:99px;padding:7px 14px 7px 11px;cursor:pointer;letter-spacing:.02em}
+.create-page .sections button:hover{color:var(--ink)}
+.create-page .sections button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent);background:rgba(216,180,90,.08)}
+.create-page .sec-dot{width:7px;height:7px;border-radius:50%;flex:none}
+
 .create-page .dropzone{border:1.5px dashed var(--line);border-radius:12px;padding:19px;text-align:center;
           cursor:pointer;transition:border-color .2s,background .2s}
 .create-page .dropzone:hover,.create-page .dropzone:focus-visible{border-color:var(--accent);background:rgba(216,180,90,.04)}
@@ -149,6 +161,9 @@ body.doc .dz-held{display:block}
 .create-page .daterow{display:flex;gap:14px}
 .create-page .daterow .f-date{flex:1.4}
 .create-page .daterow .f-recur{flex:1}
+/* #1058d: the custom recurrence count, hidden until "every … months" is
+   picked (create.behaviour.js toggles the `hidden` attribute). */
+.create-page .recur-months{margin-top:8px}
 
 .create-page .prefix-wrap{position:relative}
 .create-page .prefix-wrap .prefix{position:absolute;left:12px;top:50%;transform:translateY(-50%);
@@ -161,12 +176,20 @@ body.doc .dz-held{display:block}
 .create-page .field.sugg .tag{display:flex}
 .create-page .field .tag button{font:10px var(--mono);color:var(--bg);background:var(--accent);border:0;
                    border-radius:6px;padding:2px 9px;cursor:pointer}
+/* #1131: --bg on --accent is 3.03:1 on dawn/clouds, same pair the pocket kit
+   measured on its own filled pill (74e7a491) — white clears 4.5:1 there too. */
+:is([data-theme=dawn],[data-theme=clouds]) .create-page .field .tag button{color:#fff}
 .create-page .field .tag button:hover{filter:brightness(1.12)}
 
-.create-page .save-row{display:flex;align-items:center;gap:18px;margin-top:20px}
+.create-page .save-row{display:flex;flex-direction:column;gap:10px;margin-top:20px}
+.create-page .save-buttons{display:flex;align-items:center;gap:18px}
 .create-page .btn-primary{flex:0 0 auto;padding:12px 26px;border-radius:11px;border:0;cursor:pointer;
              font:600 14px var(--display);color:var(--bg);background:var(--accent)}
+/* #1131: --bg on --accent is 3.03:1 on dawn/clouds, same pair the pocket kit
+   measured on its own filled pill (74e7a491) — white clears 4.5:1 there too. */
+:is([data-theme=dawn],[data-theme=clouds]) .create-page .btn-primary{color:#fff}
 .create-page .btn-primary:hover{filter:brightness(1.05)}
+.create-page .btn-primary:disabled{opacity:.5;cursor:default}
 .create-page .cancel-link{font:12px var(--mono);color:var(--ink-quiet);text-decoration:none}
 .create-page .cancel-link:hover{color:var(--ink-mid)}
 
@@ -234,10 +257,11 @@ body.snap .lit:nth-of-type(3){animation-delay:.95s}
   .create-page .lit{opacity:1}
 }
 
-/* Interim, and the only rule on this screen the design did not draw: the save
-   has no pending or failure state in design/family/create.html, and a form
-   that can fail silently is worse than one carrying a line of type. Typeset as
-   the form's own small print, not as an alarm — recorded as an open design
-   question rather than a decision taken here. */
+/* #1058e/#1069: the save note carries two registers, decided by the owner
+   where design/family/create.html drew neither. Quiet by default — the
+   refusal reason beside a disabled button, the same weight as any other
+   field hint. `.fail` is a save that was actually attempted and refused:
+   loud, not small print, and never a toast. */
 .create-page .save-note{font:10.5px var(--mono);color:var(--ink-mid);letter-spacing:.04em;line-height:1.5}
 .create-page .save-note:empty{display:none}
+.create-page .save-note.fail{font:600 12px var(--ui);color:var(--overdue-text);letter-spacing:0}

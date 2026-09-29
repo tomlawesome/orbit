@@ -12,6 +12,21 @@ import { APP, openRow, settle } from "./pocket-states.js";
  * Back (round 2, g). Fixture data, at the height a phone browser leaves.
  */
 test.use({ viewport: { width: 390, height: 664 }, hasTouch: true, isMobile: true });
+
+/**
+ * Whether a row's outline is the theme's accent (owner-decisions §29: an
+ * opened row with an outline of its own turns it accent, 1px, no rail).
+ * Compared through a probe so the check holds in any theme.
+ * @param {import("@playwright/test").Locator} row
+ */
+const wearsAccentOutline = (row) => row.evaluate((el) => {
+  const probe = document.createElement("i");
+  probe.style.color = "var(--accent)";
+  el.append(probe);
+  const accent = getComputedStyle(probe).color;
+  probe.remove();
+  return getComputedStyle(el).borderTopColor === accent;
+});
 test("complete goes to the record sheet", async ({ page }) => {
   await page.goto(`${APP}/home`, { waitUntil: "load" });
   await settle(page);
@@ -38,6 +53,13 @@ test("the address opens the row", async ({ page }) => {
   const boiler = page.locator(".pocket .pk-below [data-row]", { hasText: "Boiler service" }).first();
   await expect(boiler).toHaveAttribute("data-open", "");
   await expect(boiler).toBeInViewport();
+  /* owner-decisions §29: the opened manifest row's own outline turns the
+     accent, 1px solid, and no rail is drawn on its face or drawer. */
+  await expect(boiler).toHaveCSS("border-top-style", "solid");
+  await expect(boiler).toHaveCSS("border-top-width", "1px");
+  expect(await wearsAccentOutline(boiler)).toBe(true);
+  await expect(boiler.locator(":scope > .face")).toHaveCSS("box-shadow", "none");
+  await expect(boiler.locator(".p-row-open")).toHaveCSS("box-shadow", "none");
 });
 test("open → morphs to the belt", async ({ page }) => {
   await page.goto(`${APP}/home`, { waitUntil: "load" });
@@ -124,14 +146,28 @@ test.describe("at 390x844", () => {
    summary row to the inbox, and the north star rests in the dial's corner
    until the dial has scrolled off, then floats at the thumb, hiding while
    a row is open. */
-test("the signals are one pen under a clear gap, with mail as one summary row to the inbox", async ({ page }) => {
+test("the signals sit under a clear gap, each its own row-card, with mail as one summary row to the inbox", async ({ page }) => {
   await page.goto(`${APP}/home`, { waitUntil: "load" });
   await settle(page);
   const pen = page.locator(".pocket .pk-signals");
   await expect(pen).toHaveCount(1);
-  await expect(pen).toHaveClass(/proposed/);
+  /* owner-decisions §29: the section is not a card; the suggestion is its
+     own dashed one, solid accent once open, with no rail. */
+  await expect(pen).not.toHaveClass(/p-card/);
   await expect(pen.locator(".p-caps")).toHaveText(/^Signals\s*1$/);
   await expect(pen.locator("[data-row]")).toHaveCount(2);
+  const catch_ = pen.locator("[data-row]").first();
+  await expect(catch_).toHaveCSS("border-top-style", "dashed");
+  expect(await wearsAccentOutline(catch_)).toBe(false);
+  await openRow(page, catch_);
+  await expect(catch_).toHaveCSS("border-top-style", "solid");
+  await expect(catch_).toHaveCSS("border-top-width", "1px");
+  expect(await wearsAccentOutline(catch_)).toBe(true);
+  await expect(catch_.locator(":scope > .face")).toHaveCSS("box-shadow", "none");
+  await expect(catch_.locator(".p-row-open")).toHaveCSS("box-shadow", "none");
+  await expect(catch_.locator(".p-row-open")).toHaveCSS("border-top-style", "none");
+  await catch_.locator("[data-row-face]").first().tap();
+  await expect(catch_).not.toHaveAttribute("data-open", "");
   const summary = pen.locator("[data-row]").last();
   await expect(summary.locator(".title")).toHaveText("reading 1 · 2 couldn't be read");
   await expect(summary.locator("a[data-row-face]")).toHaveAttribute("href", "/inbox");

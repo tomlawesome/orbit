@@ -327,6 +327,11 @@
   .belt-page .acts button:hover{border-color:var(--act,var(--ink))}
   .belt-page .btn-primary{padding:9px 20px;border-radius:11px;border:0;cursor:pointer;
     font:600 12.5px var(--display);color:var(--bg);background:var(--act,var(--accent))}
+  /* #1131: --bg on --accent is 3.03:1 on dawn/clouds, same pair the pocket
+     kit measured on its own filled pill (74e7a491) — white clears 4.5:1
+     there too. --btn-primary never sets --act, so this is always the
+     --accent case. */
+  :is([data-theme=dawn],[data-theme=clouds]) .belt-page .btn-primary{color:#fff}
   .belt-page .btn-primary:hover{filter:brightness(1.05)}
   .belt-page .back{display:inline-block;margin-top:14px;font:11.5px var(--mono);
         color:var(--ink-mid);text-decoration:none;background:none;border:0;
