@@ -886,10 +886,10 @@ export const DOOR_STATES = [
     await page.goto(`${APP}/pocket-measure-no-such-page`, { waitUntil: "load" });
     await page.waitForSelector(".line-b a");
   } },
-  { name: "500 (another status)", slug: "500", state: "rest", reach: async (page) => {
+  { name: "500 (Orbit stumbled)", slug: "500", state: "rest", reach: async (page) => {
     await throughRouter(page, "/approve/pocket-measure-placeholder-token",
       { type: "error", error: { message: "Internal Error" }, status: 500 });
-    await page.waitForSelector(".stage .said");
+    await page.waitForSelector(".stumble .line-b .again");
   } },
   { name: "/maintenance", slug: "maintenance", state: "rest", reach: async (page) => {
     await page.goto(`${APP}/maintenance`, { waitUntil: "load" });
