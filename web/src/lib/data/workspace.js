@@ -189,7 +189,7 @@
  *   Read-only (ADR-0024, #941): why the extract is absent rather than empty --
  *   `metadata_integrity_failed` for a draft that would not decrypt,
  *   `metadata_locked` while the instance holds no usable encryption key.
- * @property {{ displayName?: string, sizeBytes?: number, scannedClean?: boolean }[]} [attachments]
+ * @property {{ displayName?: string, sizeBytes?: number, scanState?: "clean" | "unknown" }[]} [attachments]
  * @property {string} reason
  */
 

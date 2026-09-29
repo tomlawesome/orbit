@@ -117,7 +117,7 @@ describe("the suggestion's seat", () => {
     title: "Home insurance renewal", renewsOn: "2026-10-03", scheduleKind: "renewal",
     provider: "Harbour Mutual", expiresAt: "2026-09-25T12:00:00.000Z", receivedAt: "2026-08-11T09:24:00.000Z",
     costMinor: 40000, currency: "GBP", sourceDocument: "1 forwarded document",
-    attachments: [{ displayName: "policy-schedule.pdf", sizeBytes: 831488, scannedClean: true }],
+    attachments: [{ displayName: "policy-schedule.pdf", sizeBytes: 831488, scanState: "clean" }],
     suggestion: true, proposal: PROPOSAL, attachmentCount: 1, today: TODAY,
   };
   const RECEIPT = { proposal: PROPOSAL };
