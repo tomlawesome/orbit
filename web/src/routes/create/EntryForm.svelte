@@ -1,6 +1,8 @@
 <script>
   import Mark from "$lib/Mark.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
+  import StagedPage from "$lib/pocket/StagedPage.svelte";
+  import { stagedPreviewHref } from "$lib/pocket/review.js";
   import { DAMAGED, DAMAGED_PLACEHOLDER } from "$lib/data/metadata-status.js";
   import {
     KINDS, RECURRENCE_MAX, REMINDER_CHOICES, kindHasDate, kindRecurs, recurrenceWords, stepRecurrence, toggleReminder,
@@ -42,7 +44,8 @@
    *   notesState?: string | null,
    *   attachment?: File | null,
    *   readings?: Reading[],
-   *   papers?: { name: string, meta: string }[],
+   *   papers?: { id?: string | null, name: string, meta: string, drawable?: boolean }[],
+   *   receiptId?: string | null,
    * }} Props
    */
   /** @type {Props} */
@@ -57,7 +60,14 @@
     attachment = $bindable(null),
     readings = [],
     papers = [],
+    receiptId = null,
   } = $props();
+
+  /* #1155: the review row unfolds its page in place -- only one at a time,
+     and `reader={false}` on purpose: a reader over a full sheet is a third
+     layer, and the belt is one tap away for anyone who needs zoom. */
+  /** @type {string | null} */
+  let openPaperName = $state(null);
 
   const household = $derived(households.find((one) => one.id === entry.householdId) ?? households[0] ?? null);
   const sections = $derived((household?.sections ?? []).filter((one) => one.visible || one.id === entry.sectionId));
@@ -246,10 +256,17 @@
     <section class="p-card proposed pc-card pc-reading" style:--i="2" aria-labelledby="{uid}-reading">
       <h2 class="p-caps" id="{uid}-reading">what the relay read</h2>
       {#each papers as paper (paper.name)}
-        <div class="pc-paper">
+        <button type="button" class="pc-paper" disabled={!paper.id}
+                aria-expanded={openPaperName === paper.name}
+                onclick={() => { openPaperName = openPaperName === paper.name ? null : paper.name; }}>
           <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
           <span class="pc-paper-words"><b>{paper.name}</b><span>{paper.meta}</span></span>
-        </div>
+          {#if paper.id}<span class="pc-chev" aria-hidden="true">{openPaperName === paper.name ? "⌄" : "›"}</span>{/if}
+        </button>
+        {#if openPaperName === paper.name && paper.id}
+          <StagedPage href={receiptId ? stagedPreviewHref(receiptId, paper.id) : ""} name={paper.name}
+                      drawable={Boolean(paper.drawable)} reader={false} />
+        {/if}
       {/each}
       {@render readingRows()}
     </section>
@@ -391,8 +408,15 @@
   .pc-remind-pick{margin-top:10px}
   .pc-remind-choices{flex-wrap:wrap;overflow:visible;margin:0;padding:0}
 
-  /* The reading card: something Orbit proposes, so the desk's dashed pen. */
+  /* The reading card: something Orbit proposes, so the desk's dashed pen. In
+     review mode each row is a button (#1155) that unfolds its page in place;
+     the single-attachment (non-review) row below stays a plain div. */
   .pc-paper{display:flex;align-items:center;gap:var(--p-row-gap);min-height:var(--p-row-min)}
+  button.pc-paper{width:100%;text-align:left;appearance:none;background:none;border:0;padding:0;
+    cursor:pointer;color:inherit;font:inherit}
+  button.pc-paper:disabled{cursor:default}
+  button.pc-paper:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
+  .pc-chev{margin-left:auto;color:var(--accent-text)}
   .pc-paper-words{display:flex;flex-direction:column;gap:2px;min-width:0}
   .pc-paper-words b{font:500 var(--p-type-body)/1.3 var(--ui);color:var(--ink);overflow-wrap:anywhere}
   .pc-paper-words span{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
