@@ -1,5 +1,6 @@
 <script>
   import Grain from "$lib/Grain.svelte";
+  import Stumble from "./Stumble.svelte";
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
@@ -20,11 +21,14 @@
    * `body{overflow:hidden}` — to the whole app, which is exactly what stopped
    * home scrolling.
    *
-   * Only 404 has a drawn design. Any other status renders the bare fact rather
-   * than borrowing this page's copy, which would tell the user something untrue
-   * ("this page fell into a gravity well" for a failed request). Raised on #410.
+   * 404 and a server fault (status >= 500, "the stumble", #1139) each have a
+   * drawn design. Any other status renders the bare fact rather than
+   * borrowing either page's copy, which would tell the user something untrue
+   * ("this page fell into a gravity well" for a failed request). Raised on
+   * #410.
    */
   const isNotFound = $derived(page.status === 404);
+  const isServerFault = $derived(page.status >= 500);
 
   /**
    * #764 step 2 — the same rasterise-once mechanism as Grain/Dawn/Dusk
@@ -426,8 +430,12 @@
 
 <svelte:head>
   <link rel="stylesheet" href="/screens/family.css" />
+  {#if isServerFault}
+  <link rel="stylesheet" href="/screens/stumble.css" />
+  {:else}
   <link rel="stylesheet" href="/screens/notfound.css" />
-  <title>{isNotFound ? "Orbit — off the chart" : `Orbit — ${page.status}`}</title>
+  {/if}
+  <title>{isNotFound ? "Orbit — off the chart" : isServerFault ? "Orbit — something went wrong" : `Orbit — ${page.status}`}</title>
 </svelte:head>
 
 {#if isNotFound}
@@ -686,6 +694,8 @@
 <Grain slope={0.09} />
 
 <div class="vignette" style="background:radial-gradient(ellipse at 50% 45%,transparent 42%,rgba(0,0,0,.5) 100%)"></div>
+{:else if isServerFault}
+<Stumble status={page.status} />
 {:else}
   <div class="stage">
     <div class="lockup">
