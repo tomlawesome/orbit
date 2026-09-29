@@ -309,11 +309,10 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     homeHeader.addEventListener("mouseenter", () => document.body.classList.add("constellation-lit"));
     homeHeader.addEventListener("mouseleave", () => document.body.classList.remove("constellation-lit"));
   }
-  /* POL-9 */
-  /** @param {boolean} open */
-  function openPalette(open){
-    /** @type {HTMLElement} */ (document.getElementById("palette")).classList.toggle("open", open);
-  }
+  /* #1161: the strip's own open/close and focus/blur are Svelte's
+     (+page.svelte's `stripOpen` state) — only the ⌘K/Ctrl-K shortcut to
+     focus #explore stays imperative, since it is bound with the rest of
+     this screen's window-level keydown wiring. */
   addEventListener("keydown", (/** @type {KeyboardEvent} */ event) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "k") {
       event.preventDefault(); /** @type {HTMLElement} */ (document.getElementById("explore")).focus();
@@ -564,10 +563,6 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
      +page.svelte on every branch of its mount rather than here. */
   on(star, "click", (/** @type {MouseEvent} */ event) => toggleCreate(/** @type {HTMLElement} */ (event.currentTarget)));
   on(document.querySelector(".desk .scrim"), "click", () => toggleCreate(star));
-
-  const explore = /** @type {HTMLElement} */ (document.getElementById("explore"));
-  on(explore, "focus", () => openPalette(true));
-  on(explore, "blur", () => setTimeout(() => openPalette(false), 150));
 
   /* both drawer handles ride their own drawer, which is their parent */
   for (const handle of document.querySelectorAll(".drawer > button.handle")) {

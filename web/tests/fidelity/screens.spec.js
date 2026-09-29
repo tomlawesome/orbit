@@ -448,7 +448,9 @@ const SCREENS = [
     /* Accepted by the owner after the #1120 review round, 2026-09-26: the
        phone home is done, not still being ported, so `/design/family/
        mobile-home.html` is now a historical record rather than a live
-       comparison target. */
+       comparison target. Re-cut 2026-09-28 with the owner's approval: each
+       signal its own dashed card (#1142) and no doubled top edge on a
+       group's second card (#1157). */
     stage: "owned",
     /* The dialect's own frame: `.mpage` is drawn at max-width 400 and the sky
        behind it at a 400×850 viewBox, so that is the sheet of glass to
@@ -518,10 +520,13 @@ const SCREENS = [
      * sides, and both are photographed in it.
      */
     reducedMotion: "reduce",
-    /* Settled once the card is up and the households have been sown. */
+    /* Settled once the card is up, the households have been sown, and the
+       section row (#1058b/#1069, drawn once the household loads) has its
+       buttons — none pressed, as the mockup's own row never is. */
     settle: () =>
       Boolean(document.getElementById("card"))
-      && document.querySelectorAll(".chartback .csys").length > 0,
+      && document.querySelectorAll(".chartback .csys").length > 0
+      && document.querySelectorAll("#sections button").length > 0,
     /* The sheet's own scaffolding: the demos rail (re-roll, state switcher)
        and the footer naming the proposal. The account chrome the sheet
        draws was scaffolding too until #1010 -- the route renders it now, so
@@ -538,6 +543,9 @@ const SCREENS = [
      * that sheet like every other ported screen. Back to PORTING.
      */
     name: "item",
+    /* Baseline re-cut 2026-09-28 with the owner's approval (#1169): the
+       belt's end-caps stand at the screen's middle since f5026445 (§26),
+       and the old baseline still drew them at the top. */
     path: "/item/i-mot",
     stage: "porting",
     mockup: "/design/v19/item-belt.html",

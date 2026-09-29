@@ -106,6 +106,17 @@
       </div>
     </div>
 
+    <!-- #1058(b)/#1069: a section must be picked, with no default; the save
+         button stays disabled until one is chosen, and the reason sits beside
+         it (create.behaviour.js's refusal note), in entry.js's own vocabulary
+         (refusalOf). Populated from the household's sections once they load —
+         mountCreate() draws the buttons, the same pattern #types already
+         is, rather than a second, Svelte-reactive way of doing the same job. -->
+    <div class="field">
+      <label id="sections-label">section</label>
+      <div class="sections" id="sections" role="group" aria-labelledby="sections-label"></div>
+    </div>
+
     <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="drop a document, or press enter to choose one">
       <div class="dz-main">drop a document — we'll read what we can</div>
       <div class="dz-hint mono">PDF, email or photo &middot; dates, amounts &amp; reference numbers extracted automatically</div>
@@ -142,7 +153,10 @@
               <option value="once">one-off</option>
               <option value="monthly">monthly</option>
               <option value="yearly" selected>yearly</option>
+              <option value="custom">every &hellip; months</option>
             </select>
+            <input id="f-recur-months" class="recur-months" type="number" min="1" max="120"
+                   inputmode="numeric" placeholder="months" aria-label="months" hidden>
           </div>
         </div>
 
@@ -164,23 +178,20 @@
         </div>
 
         <div class="field">
-          <label for="f-assign">assign to</label>
-          <select id="f-assign">
-            <option value="">household &middot; shared</option>
-            <option>Tom</option>
-            <option>Sarah</option>
-            <option>Isla</option>
-          </select>
-        </div>
-
-        <div class="field">
           <label>notes</label>
           <textarea id="f-notes" rows="2" placeholder="anything else worth keeping"></textarea>
         </div>
 
+        <!-- #1058(e)/#1069: a failure is loud, not small print — the reason
+             sits here, the button goes back to "Add to orbit", nothing typed
+             is lost. No toast. create.behaviour.js also parks the refusal
+             reason here while the entry cannot yet be saved. -->
         <div class="save-row">
-          <button type="submit" class="btn-primary">Add to orbit</button>
-          <a href={resolve("/home")} class="cancel-link">cancel</a>
+          <div class="save-note" id="save-note" aria-live="polite"></div>
+          <div class="save-buttons">
+            <button type="submit" class="btn-primary">Add to orbit</button>
+            <a href={resolve("/home")} class="cancel-link">cancel</a>
+          </div>
         </div>
 
       </div></div>

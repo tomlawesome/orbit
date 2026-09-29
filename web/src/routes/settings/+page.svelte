@@ -5,6 +5,7 @@
   import {
     clearTourSeen,
     readAuthMethodsOffered,
+    readSentLately,
     readSessions,
     readSettingsScreen,
     readSignInMethods,
@@ -18,6 +19,7 @@
     writeReminders,
   } from "$lib/data/workspace.js";
   import { SIGN_IN_METHODS_FIXTURES } from "$lib/data/fixtures/admin.js";
+  import { SENT_LATELY_FIXTURE } from "$lib/data/fixtures/settings.js";
   import { agoLong } from "$lib/format.js";
   import { alertsSupported, currentSubscription, disableAlerts, enableAlerts } from "$lib/push/alerts.js";
   import { relaunchTour } from "$lib/tour/relaunch.js";
@@ -164,6 +166,44 @@
     } finally {
       alertsBusy = false;
     }
+  }
+
+  /* SENT TO YOU LATELY (#1003, §20; the desk equivalent of pocket.svelte's
+     own tab, #1125). The Reminders card's second tab: the signed-in user's
+     own last five attempted deliveries. `null` is "couldn't load", never a
+     loading placeholder — the panel says so plainly rather than sitting
+     empty. */
+  let tab = $state(/** @type {"reminders" | "sent"} */ ("reminders"));
+  /** @type {import('$lib/data/fixtures/settings.js').SentRow[] | null} */
+  let sent = $state(null);
+  const bothOff = $derived(view !== null && !emailReminders && !browserAlerts);
+
+  /** @param {string} iso */
+  function whenSent(iso) {
+    const date = new Date(iso);
+    const zone = data?.fixtures ? "UTC" : undefined;
+    const day = date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: zone });
+    const time = date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: zone });
+    return `${day} · ${time}`;
+  }
+
+  /** @param {import('$lib/data/fixtures/settings.js').SentRow} row */
+  const warningWord = (row) => (row.warning === "first" ? "first warning" : "final warning");
+  /** @param {import('$lib/data/fixtures/settings.js').SentRow} row */
+  const channelWordDesk = (row) => (row.channel === "email" ? "email" : "browser alert");
+  /** @param {import('$lib/data/fixtures/settings.js').SentRow} row */
+  const sentLabel = (row) =>
+    `${row.itemName}, ${warningWord(row)} · ${channelWordDesk(row)}, ${whenSent(row.at)}`
+    + (row.status === "failed" ? `, couldn’t send · ${row.reason ?? "no reason given"}`
+      : row.status === "retry" ? `, still trying · ${row.reason ?? "no reason given"}` : "");
+
+  /* §22's keyboard: one tab in the Tab order, ← → between them. */
+  /** @param {KeyboardEvent} event */
+  function remTabKey(event) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    tab = tab === "reminders" ? "sent" : "reminders";
+    queueMicrotask(() => document.getElementById(`rem-tab-${tab}`)?.focus());
   }
 
   /**
@@ -408,6 +448,20 @@
        the reader finishes where they left off rather than starting again. */
     const back = parameters.get("stepup");
     if (back && methods && !methods.local.set) armedMethod = resumedMethod = back;
+
+    /* "Sent to you lately" (#1003). `?sent=none|off` and `?tab=sent` pick the
+       gate's other scenes, the same query pocket.svelte's own tab answers to. */
+    if (data?.fixtures) {
+      const sentScene = parameters.get("sent") ?? "some";
+      sent = sentScene === "none" ? [] : SENT_LATELY_FIXTURE;
+      if (parameters.get("tab") === "sent") tab = "sent";
+    } else {
+      try {
+        sent = await readSentLately();
+      } catch {
+        sent = null;
+      }
+    }
   });
 </script>
 
@@ -567,14 +621,54 @@
     </div>
 
     <div class="card">
-      <h2>Reminders</h2>
-      <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed={emailReminders} aria-label="Email reminders" onclick={toggleEmailReminders}><i></i></button></div>
-      <div class="kv"><span>browser alerts · this device</span><button class="toggle" aria-pressed={browserAlerts} aria-label="Browser alerts on this device" disabled={alertsBusy || !alertsAvailable} onclick={toggleBrowserAlerts}><i></i></button></div>
-      <div class="kv"><span>first warning</span><b>{view.reminders.firstWarning}</b></div>
-      <div class="kv"><span>final warning</span><b>{view.reminders.finalWarning}</b></div>
-      <div class="kv"><span>outbound mail</span><span><b class="on">{view.reminders.outboundMail}</b> · by your administrator</span></div>
-      {#if reminderProblem}<div class="note">{reminderProblem}</div>{/if}
-      {#if alertsProblem}<div class="note">{alertsProblem}</div>{/if}
+      <!-- Two tabs (#1003 §20, §22; the grammar #1002 round 7 settles: heading
+           left, the pair at the far end of the card head, filled accent for
+           the chosen one, no underline). "reminders" is everything this card
+           already drew; "sent" is new. -->
+      <div class="cardhead">
+        <h2 id="rem-h">Reminders</h2>
+        <div class="tabs" role="tablist" aria-labelledby="rem-h">
+          <button role="tab" id="rem-tab-reminders" aria-selected={tab === "reminders"} aria-controls="rem-panel-reminders"
+                  tabindex={tab === "reminders" ? 0 : -1} onclick={() => (tab = "reminders")} onkeydown={remTabKey}>reminders</button>
+          <button role="tab" id="rem-tab-sent" aria-selected={tab === "sent"} aria-controls="rem-panel-sent"
+                  tabindex={tab === "sent" ? 0 : -1} onclick={() => (tab = "sent")} onkeydown={remTabKey}>sent to you lately</button>
+        </div>
+      </div>
+
+      <div role="tabpanel" id="rem-panel-reminders" aria-labelledby="rem-tab-reminders" hidden={tab !== "reminders"}>
+        <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed={emailReminders} aria-label="Email reminders" onclick={toggleEmailReminders}><i></i></button></div>
+        <div class="kv"><span>browser alerts · this device</span><button class="toggle" aria-pressed={browserAlerts} aria-label="Browser alerts on this device" disabled={alertsBusy || !alertsAvailable} onclick={toggleBrowserAlerts}><i></i></button></div>
+        <div class="kv"><span>first warning</span><b>{view.reminders.firstWarning}</b></div>
+        <div class="kv"><span>final warning</span><b>{view.reminders.finalWarning}</b></div>
+        <div class="kv"><span>outbound mail</span><span><b class="on">{view.reminders.outboundMail}</b> · by your administrator</span></div>
+        {#if reminderProblem}<div class="note">{reminderProblem}</div>{/if}
+        {#if alertsProblem}<div class="note">{alertsProblem}</div>{/if}
+      </div>
+
+      <!-- ROUND 1 (#1003): what Orbit has actually sent this person, read
+           from notification_deliveries. The last five, newest first; a
+           failed or still-trying send says so in the row rather than
+           hiding. Nothing here is a control — the two switches above are. -->
+      <div role="tabpanel" id="rem-panel-sent" aria-labelledby="rem-tab-sent" hidden={tab !== "sent"}>
+        {#if bothOff}<p class="sent-off">both switches are off · nothing more will be sent until one is on</p>{/if}
+        {#if sent === null}
+          <div class="note">not shown — Orbit could not reach what’s been sent</div>
+        {:else if sent.length === 0}
+          <p class="sent-none">nothing sent yet · the first warning goes out <b>{view.reminders.firstWarning}</b>, by email and by browser alert if they are on</p>
+        {:else}
+          {#each sent as row (row.id)}
+            <a class="sent" href={resolve("/item/[[id]]", { id: row.itemId })} aria-label={sentLabel(row)}>
+              {#if row.channel === "email"}
+                <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><rect x="2" y="4" width="14" height="10" rx="2"/><path d="m2.5 5 6.5 5 6.5-5"/></svg>
+              {:else}
+                <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M4.5 12.5V8.5a4.5 4.5 0 0 1 9 0v4l1 1.5h-11z"/><path d="M7.5 15a1.5 1.5 0 0 0 3 0"/></svg>
+              {/if}
+              <span class="what"><b>{row.itemName}</b><small>{warningWord(row)} · {channelWordDesk(row)}</small></span>
+              <span class="when">{whenSent(row.at)}{#if row.status === "failed"}<i class="bad">couldn’t send · {row.reason ?? "no reason given"}</i>{:else if row.status === "retry"}<i class="wait">still trying · {row.reason ?? "no reason given"}</i>{/if}</span>
+            </a>
+          {/each}
+        {/if}
+      </div>
     </div>
 
     <div class="card">
