@@ -21,6 +21,8 @@ import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
 
 const web = (path) => resolve(import.meta.dirname, "../../web", path);
 const HOME_SOURCE = readFileSync(web("src/routes/home/+page.svelte"), "utf8");
+/* #1083: the pocket's own dial and sun both live on pocket.svelte itself. */
+const POCKET_SOURCE = readFileSync(web("src/routes/home/pocket.svelte"), "utf8");
 
 function namesIn(source) {
   const names = new Set();
@@ -102,17 +104,29 @@ beforeEach(() => {
 });
 
 describe("the selectors chapter 3 names", () => {
-  it("the real one (.dial) exists in home's own markup", () => {
+  it("the real desk one (.dial) exists in home's own markup", () => {
     const rendered = namesIn(HOME_SOURCE);
-    for (const token of tokensOf(SELECTORS.dial)) {
-      expect(rendered.has(token), `chapter 3 names "${SELECTORS.dial}", but /home renders no "${token}"`).toBe(true);
+    for (const token of tokensOf(SELECTORS.DESK.dial)) {
+      expect(rendered.has(token), `chapter 3 names "${SELECTORS.DESK.dial}", but /home renders no "${token}"`).toBe(true);
     }
   });
 
-  it("the drawn one (.tourfilm-lands-body) is never real markup", () => {
-    const rendered = namesIn(HOME_SOURCE);
-    for (const token of tokensOf(SELECTORS.body)) {
-      expect(rendered.has(token)).toBe(false);
+  it("the real pocket ones (dial, dialSvg, sun) exist in pocket.svelte's own markup (#1083)", () => {
+    const rendered = namesIn(POCKET_SOURCE);
+    for (const beat of ["dial", "dialSvg", "sun"]) {
+      for (const token of tokensOf(SELECTORS.POCKET[beat])) {
+        expect(
+          rendered.has(token),
+          `chapter 3's pocket "${beat}" names "${SELECTORS.POCKET[beat]}", but pocket.svelte renders no "${token}"`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("the drawn one (.tourfilm-lands-body) is never real markup, desk or pocket", () => {
+    for (const token of tokensOf(SELECTORS.DESK.body)) {
+      expect(namesIn(HOME_SOURCE).has(token)).toBe(false);
+      expect(namesIn(POCKET_SOURCE).has(token)).toBe(false);
     }
   });
 });

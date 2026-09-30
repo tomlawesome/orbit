@@ -88,13 +88,28 @@ beforeEach(() => {
 });
 
 describe("the selectors chapter 6 names", () => {
-  it("every one of them exists in /settings/mail's own markup", () => {
+  it("every desk one of them exists in /settings/mail's own markup", () => {
     const rendered = namesIn(RELAY_SOURCE);
-    for (const [beat, selector] of Object.entries(SELECTORS)) {
+    for (const [beat, selector] of Object.entries(SELECTORS.DESK)) {
       for (const token of tokensOf(selector)) {
         expect(
           rendered.has(token),
-          `chapter 6's "${beat}" names "${selector}", but /settings/mail renders no "${token}"`,
+          `chapter 6's desk "${beat}" names "${selector}", but /settings/mail renders no "${token}"`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  /* #1083 §6: unchanged on the pocket — the relay page's own ≤620px rules
+     already lay the card full width, so DESK and POCKET are the same set,
+     and the pocket source is the very same file. */
+  it("every pocket one of them exists in /settings/mail's own markup too", () => {
+    const rendered = namesIn(RELAY_SOURCE);
+    for (const [beat, selector] of Object.entries(SELECTORS.POCKET)) {
+      for (const token of tokensOf(selector)) {
+        expect(
+          rendered.has(token),
+          `chapter 6's pocket "${beat}" names "${selector}", but /settings/mail renders no "${token}"`,
         ).toBe(true);
       }
     }
@@ -106,7 +121,8 @@ describe("the selectors chapter 6 names", () => {
     const stop = TOUR_STOPS.find((one) => one.id === "relay");
     expect(stop.route).toBe("/settings/mail");
     expect(stop.target).toContain(".relay-card");
-    expect(SELECTORS.card).toBe(".relay-card");
+    expect(SELECTORS.DESK.card).toBe(".relay-card");
+    expect(SELECTORS.POCKET.card).toBe(".relay-card");
   });
 
   it("says the same two lines the ratified walk already says", () => {
