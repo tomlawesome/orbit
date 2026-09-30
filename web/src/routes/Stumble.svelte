@@ -69,7 +69,7 @@
 
       <!-- The limb: the haze and the planet's body, tilted together. -->
       <g class="limb" transform="rotate(-9 800 500)">
-        <circle cx="800" cy="1960" r="1430" fill="url(#haze)" class="breathe"/>
+        <circle cx="800" cy="1960" r="1430" fill="url(#haze)" class="haze-breathe"/>
         <circle cx="800" cy="1960" r="1400" fill="url(#body)"/>
       </g>
 
