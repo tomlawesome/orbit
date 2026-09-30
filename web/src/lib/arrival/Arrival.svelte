@@ -441,17 +441,29 @@
          sibling of the dawn and of the card rather than a child of either,
          because it has to outlive the card on the way into the launch (the
          hand-over shrinks it to the login ring's own 302.4px in place,
-         `body.reclaimed` below) — see arrival.css for the ring itself. -->
-    <div class="bigring" aria-hidden="true">
-      <div class="ringglass"></div>
-      <!-- the ring's line, on its own unblurred box (#873): the glass
-           closes on the compositor, this closes by width/height so the
-           4.2px stroke never thins. See ringcard.css. -->
-      <div class="ringstroke"></div>
-      <div class="ringorbit"><i></i></div>
+         `body.reclaimed` below) — see arrival.css for the ring itself.
+
+         THE SAME COLUMN AS THE DOOR'S CARDS (#1175). On the desk `.ringcard`
+         changes nothing: every rule that reads it is `:where(.arrival,
+         .ringcard)` and already applied here. On a phone it is the column
+         door-phone.css lays every card on the door in — the ring at its
+         station at the login ring's own size, the card's heading standing
+         inside it, the fields in the column beneath, the ring closing while
+         you type — because a 500px ring cannot hold a 300px card on a 390px
+         screen, and did not: it stood at the left edge with 110px off the
+         right. Same wrapper SignIn.svelte draws. -->
+    <div class="ringcard">
+      <div class="bigring" aria-hidden="true">
+        <div class="ringglass"></div>
+        <!-- the ring's line, on its own unblurred box (#873): the glass
+             closes on the compositor, this closes by width/height so the
+             4.2px stroke never thins. See ringcard.css. -->
+        <div class="ringstroke"></div>
+        <div class="ringorbit"><i></i></div>
+      </div>
+      <CreateSystem bind:name bind:timezone bind:currency {rejected} {busy}
+                    onsubmit={submit} onnaming={naming} onask={askFromCard} />
     </div>
-    <CreateSystem bind:name bind:timezone bind:currency {rejected} {busy}
-                  onsubmit={submit} onnaming={naming} onask={askFromCard} />
   {/if}
 
   {#if stage === NEWCOMER || stage === INVITED}
