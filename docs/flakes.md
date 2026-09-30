@@ -291,3 +291,11 @@ page's URL at failure, which this one has to infer.
 ## backup-restore-cli.test.ts:362 "refuses (restore-not-confirmed) and takes no checkpoint when confirm() returns false, only after preflight/capacity already passed"
 
 - 2026-09-27 · 6420d955 (+ #1069's uncommitted desk-create work, nowhere near backup/restore) · local `scripts/test-backend.sh`, seven worktrees running it at once · `Error: Test timed out in 5000ms`, alongside the sighting above in the same file. Same rerun, same result: green alone. First sighting.
+
+## v19-archive.spec.ts:143 "write an archive, then bring it into a second household — a clash stays out" — desktop-chromium
+
+- 2026-09-30 · 0135f516 (!1006, M14 pocket-film batch plus `dev`'s base-image re-pin; nothing near archives) · pipeline 1855 / smoke (job 27172) · a `toHaveCount` assertion failed on the first attempt and on Playwright's in-job retry, so the job failed outright. Job retried as 27269 on the same commit: green, 221 passed. First sighting; an issue on the third.
+
+## pocket-measure.spec.js:540 "/home · film-create meets the pocket floors" — pocket-measure, 390x664
+
+- 2026-09-30 · 0135f516 (!1006, the batch that built this film chapter) · pipeline 1855 / fidelity (job 27168) · `page.waitForFunction` hit the 60000ms test timeout. The same test passed on pipeline 1836 (same film code), and the job retried as 27270 on the same commit was green. First sighting; an issue on the third.
