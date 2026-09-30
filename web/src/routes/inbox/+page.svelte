@@ -1,5 +1,6 @@
 <script>
   import { onMount } from "svelte";
+  import { goto } from "$app/navigation";
   import { readInboxScreen, approveReceipt, dismissReceipt } from "$lib/data/workspace.js";
   import { money, ago, agoLong } from "$lib/format.js";
   import { LOCKED, evidenceReadable, fieldState, receiptWords } from "$lib/data/metadata-status.js";
@@ -118,14 +119,20 @@
   const unreadable = (receipt) => receiptWords(receipt.metadataStatus);
   /** @param {import('$lib/data/workspace.js').Receipt} receipt */
   const locked = (receipt) => fieldState(receipt.metadataStatus, "proposal") === LOCKED;
-  /* The list API names no files yet (#467): the fixture carries the design's
-     names; live data degrades to the honest count. */
-  /** @param {import('$lib/data/workspace.js').Receipt} receipt */
+  /* Every held attachment is named since #467; a receipt with none yet
+     named degrades to the honest count. The chip is the way into the belt
+     with that paper open (#1155): only a named attachment has an id to
+     press through with. */
+  /** @param {import('$lib/data/workspace.js').Receipt} receipt
+   *  @returns {{ id: string | null, name: string, size: string, clean: boolean }[]} */
   const chips = (receipt) =>
-    receipt.attachments?.map(
-      (a) => `◆ ${a.displayName} · ${Math.round(/** @type {number} */ (a.sizeBytes) / 1024)} KB · scanned clean`,
-    ) ?? (receipt.attachmentCount
-      ? [`◆ ${receipt.attachmentCount} document${receipt.attachmentCount === 1 ? "" : "s"} · scanned clean`]
+    receipt.attachments?.map((a) => ({
+      id: a.id, name: a.displayName, size: `${Math.round(a.sizeBytes / 1024)} KB`, clean: a.scanState === "clean",
+    })) ?? (receipt.attachmentCount
+      ? [{
+          id: null, name: `${receipt.attachmentCount} document${receipt.attachmentCount === 1 ? "" : "s"}`,
+          size: "", clean: false,
+        }]
       : []);
   const emptyQueue = $derived.by(() => {
     if (!view) return null;
@@ -205,8 +212,16 @@
                 <div class="kv"><span>cost</span><b>{money(receipt.proposal.costMinor, receipt.proposal.currency ?? "GBP", true)}{#if mark(receipt, "costMinor")}<span class="conf">{mark(receipt, "costMinor")}</span>{/if}</b></div>
               {/if}
             </div>
-            {#each chips(receipt) as chip (chip)}
-              <span class="attach">{chip.split(" · scanned clean")[0]} · <span class="clean">scanned clean</span></span>
+            {#each chips(receipt) as chip (chip.id ?? chip.name)}
+              {@const itemHref = resolve("/item/[[id]]", { id: receipt.id })}
+              {#if chip.id}
+                <a class="attach" href={itemHref}
+                   onclick={(event) => { event.preventDefault(); goto(itemHref, { state: { pocketPaper: chip.id } }); }}>
+                  ◆ <span class="name">{chip.name}</span>{#if chip.size} · {chip.size}{/if}{#if chip.clean} · <span class="clean">scanned clean</span>{/if} · <span class="view">view →</span>
+                </a>
+              {:else}
+                <span class="attach">◆ {chip.name}{#if chip.clean} · <span class="clean">scanned clean</span>{/if}</span>
+              {/if}
             {/each}
             <!-- The card's own quiet mono (.twotap), not an alarm colour: one
                  of these two states is a wait and the other has a remedy the

@@ -140,7 +140,7 @@ test("the suggestion sits between its neighbours in time, and stepping lands on 
   expect(await apex(page)).toBe("Chimney sweep");
 });
 
-test("the staged paper rides beside the card and opens the reading card's honest state", async ({ page }) => {
+test("the staged paper rides beside the card and opens the reading card with its page one showing (#1155)", async ({ page }) => {
   await openSuggestion(page);
   /* The seat carries the paper's name and says it is staged. `force`: a
      paper's mark breathes forever (document-preview.spec.js). */
@@ -149,11 +149,14 @@ test("the staged paper rides beside the card and opens the reading card's honest
   await paper.click({ force: true });
   const readcard = page.locator("#readcard");
   await expect(readcard).toBeVisible();
-  await expect(readcard.locator(".focusline")).toHaveText("Not yet in orbit.");
-  await expect(readcard.locator(".plate")).toHaveText("PDF");
-  /* Nothing to do with it yet: no foot, no page, no download. */
-  await expect(readcard.locator(".rcfoot")).toHaveCount(0);
-  await expect(readcard.locator("img")).toHaveCount(0);
+  /* #1155: a named PDF's page draws exactly where an accepted document's
+     does -- the fifth honest state is retired for this case; the one
+     difference is the foot's note, not a stand-in "not yet" screen. */
+  await expect(readcard).toHaveClass(/snap/);
+  await expect(readcard.locator(".sheet img")).toHaveAttribute("alt", "Page one of policy-schedule.pdf");
+  await expect(readcard.locator(".rcfoot .rcnote")).toHaveText("not yet in orbit · attached on acceptance");
+  /* Nothing to download for a staged paper: the foot carries the note, never a link. */
+  await expect(readcard.locator(".rcfoot a")).toHaveCount(0);
   /* Esc closes it, the belt's own dead-space law (§18). */
   await page.keyboard.press("Escape");
   await expect(page.locator("#readcard")).toHaveCount(0);

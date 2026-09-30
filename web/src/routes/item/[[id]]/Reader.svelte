@@ -27,15 +27,25 @@
    * page one only and Orbit records no page count (#1088), which §18 leaves
    * open. So there are no arrows, and the foot says "page 1" rather than
    * inventing an "of N".
+   *
+   * `staged` (#1155): a waiting attachment's page opens here too, from
+   * StagedPage.svelte. There is nothing to download or remove -- the foot
+   * holds the same one-line note the reading card's does instead -- and its
+   * page comes from `previewSrc` (loadStagedPage's object URL), never a bare
+   * `doc.previewHref`, because only that loader can tell "gone" apart from
+   * "could not draw". `onremove` is never called for a staged doc: the arm
+   * button that would fire it is not rendered.
    * @typedef {{
    *   open?: boolean,
-   *   doc: import("./band.js").BeltDoc,
+   *   doc: { name: string, href?: string, previewHref?: string },
    *   itemTitle: string,
    *   onremove: () => Promise<unknown>,
+   *   staged?: boolean,
+   *   previewSrc?: string,
    * }} Props
    */
   /** @type {Props} */
-  let { open = $bindable(false), doc, itemTitle, onremove } = $props();
+  let { open = $bindable(false), doc, itemTitle, onremove, staged = false, previewSrc = "" } = $props();
 
   /** @type {HTMLElement | undefined} */
   let layer = $state();
@@ -171,7 +181,7 @@
   function up(event) { delete touches[event.pointerId]; }
 
   async function remove() {
-    if (removing) return;
+    if (removing || staged) return;
     removing = true;
     problem = null;
     try {
@@ -201,18 +211,22 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="rd-stage" class:zoomed={scale !== null} bind:this={stage} onwheel={onWheel}
          onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={up}>
-      <img bind:this={img} src={doc.previewHref} alt="Page one of {doc.name}"
+      <img bind:this={img} src={staged ? previewSrc : (doc.previewHref ?? "")} alt="Page one of {doc.name}"
            style:width={natural.w ? `${Math.round(natural.w * shownScale)}px` : undefined}
            onload={() => { if (img) natural = { w: img.naturalWidth, h: img.naturalHeight }; }} />
     </div>
     <footer class="rd-foot">
       <p class="rd-page">page 1</p>
-      <div class="p-pills rd-acts">
-        <!-- doc.href is the download endpoint, outside resolve()'s typed
-             routes; the same cast the desk's reading card uses. -->
-        <a class="p-pill rd-download" href={resolve(/** @type {"/home"} */ (doc.href))} download>download</a>
-        <ArmButton label="remove" armedLabel="tap again to remove" name="Remove {doc.name}" onfire={remove} />
-      </div>
+      {#if staged}
+        <p class="rcnote">not yet in orbit · attached on acceptance</p>
+      {:else}
+        <div class="p-pills rd-acts">
+          <!-- doc.href is the download endpoint, outside resolve()'s typed
+               routes; the same cast the desk's reading card uses. -->
+          <a class="p-pill rd-download" href={resolve(/** @type {"/home"} */ (doc.href))} download>download</a>
+          <ArmButton label="remove" armedLabel="tap again to remove" name="Remove {doc.name}" onfire={remove} />
+        </div>
+      {/if}
       {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
     </footer>
   </div>
@@ -243,6 +257,8 @@
   .rd-stage.zoomed img{max-width:none;max-height:none}
   .rd-foot{display:flex;flex-direction:column;align-items:center;gap:8px;padding-top:8px}
   .rd-page{margin:0;font:var(--p-type-meta) var(--mono);color:var(--ink-mid)}
+  /* #1155: the reading card's own one-line note, for a staged paper's foot. */
+  .rcnote{font:10.5px var(--mono);color:var(--ink-quiet);letter-spacing:.02em;margin:0}
   .rd-acts{justify-content:center}
   .rd-download{--act:var(--accent);--act-text:var(--accent-text);
     border-color:color-mix(in srgb, var(--accent) 40%, transparent);color:var(--accent-text)}
