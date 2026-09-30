@@ -12,6 +12,12 @@ governance decision is
 `ai/orbit-base-image` (GitLab) is part of this project, not a sibling: standing
 authorisation to raise issues and make changes there (owner, 2026-08-30).
 
+`orbit-site` (GitHub `tomlawesome/orbit-site`) is Orbit's website, built by
+another agent. It lives on GitHub only for now, to use cloud credit that
+works nowhere else, and will move to GitLab later. It is a sibling project,
+read-only from here: report what one needs from the other rather than
+changing it (owner, 2026-09-30).
+
 ## Where the work lives
 
 Orbit moved to the owner's own GitLab on 2026-09-04 (#801). **`ai/orbit` on
