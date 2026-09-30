@@ -105,13 +105,16 @@ permissions are refused before Docker or downloads begin. These pre-provisioned
 files are preserved byte-for-byte if configuration, OIDC discovery, or Compose
 preflight fails before transaction commit.
 
-It pulls the published image, resolves it to an immutable digest, and takes
-its deployment assets — the compose files, the Tika configuration and the
-operator scripts — out of that same image, which carries them. A compose file
-therefore cannot drift from the image it configures, and an install needs
-nothing but the registry. The resolved `registry/repository@sha256:...` digest
-is written to `.env-orbit`, and that digest is what runs. A tag is only ever read to resolve it; a mutable
-reference is never deployed.
+The installer downloads Orbit from the release registry, the server that
+publishes Orbit's builds. It records exactly which build it downloaded using
+the build's digest: a fingerprint that identifies one build and nothing else.
+That fingerprint is written to `.env-orbit`, and that build is what runs, so
+an update can't swap in something different behind your back. Everything
+needed to run Orbit, including its configuration files and operator scripts,
+is packed inside the same build. The files always match the version they came
+with, and the installer never downloads them separately. A version name like
+`preview` is only used to look up which build it points to today; what gets
+installed is always the fingerprint, never the name.
 
 It then creates or revalidates the Orbit-specific `.env-orbit` configuration,
 generates independent 256-bit session, PostgreSQL, and document-encryption
