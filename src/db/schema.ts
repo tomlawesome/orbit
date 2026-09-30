@@ -269,6 +269,26 @@ export const instanceContact = pgTable("instance_contact", {
   check("instance_contact_singleton", sql`${table.singleton}`),
 ]);
 
+/**
+ * The last answer of each of the two live mail tests (#1071): "test this
+ * mailbox" (the IMAP verify and the relay half together) and "test the
+ * relay". Follows `instance_contact`'s singleton shape (0033) — the 0047
+ * migration seeds the one row unconditionally, no version column, since a
+ * test result is only ever overwritten by the next run of the same test,
+ * never edited by two people at once.
+ */
+export const mailProbeResults = pgTable("mail_probe_results", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  id: uuid("id").notNull().defaultRandom(),
+  mailboxResult: text("mailbox_result"),
+  mailboxCheckedAt: timestamp("mailbox_checked_at", { withTimezone: true }),
+  relayResult: text("relay_result"),
+  relayCheckedAt: timestamp("relay_checked_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("mail_probe_results_singleton", sql`${table.singleton}`),
+]);
+
 export const externalIdentities = pgTable("external_identities", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
