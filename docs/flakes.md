@@ -272,6 +272,11 @@ page's URL at failure, which this one has to infer.
 ## sign-in-methods.spec.ts:158 "a reader changes their password from the helm, inline" — desktop-chromium
 
 - 2026-09-27 · d97cb335 (!997) · pipeline 1740 / smoke (job 25230) · `.note.ok` never showed "password changed" within 5000ms at line 190. Retried as job 25322 on the same commit: green. !997 touches only mail-in failure reasons and cannot reach the password form. First sighting; an issue on the third.
+- 2026-09-30 · 6f720bed (!1005, M14 batch: 500 page, staged attachment preview, contrast fixes; none reach the password form) · pipeline 1827 / smoke (job 26687) · same failure at line 190; the in-job retry then got "the password was refused (HTTP 403)" in 3.5s, consistent with the first attempt having changed it. Job retried as 26693: green. Second sighting.
+
+## v19-explore-search.spec.ts:314 "clicking the note line's add act, at rest, opens /create" — desktop-chromium
+
+- 2026-09-30 · 6f720bed (!1005, none of it in the search strip) · pipeline 1827 / smoke (job 26687) · `#strip-note .act` "add an item" resolved but stayed hidden for 5000ms; Playwright's in-job retry passed in 3.7s. First sighting.
 
 ## backup-restore-cli.test.ts:337 "refuses (capacity-insufficient) before ever calling confirm(), when the document volume has no room"
 
