@@ -52,7 +52,7 @@
  * verbatim — reading time is not motion — and the whole of why the film
  * measures 3:41 normally and 2:07 reduced.
  */
-import { hideVeil, showVeil, veilTargets } from "./veil.js";
+import { hideVeil, refreshVeil, showVeil, veilTargets } from "./veil.js";
 
 /**
  * The film's timings, verbatim from the mockup's own `T`. Motion values are
@@ -366,11 +366,23 @@ export function createFilmContext({
     for (const c of litControls) syncRings(c);
     for (const { ghost, el } of ghosts) placeGhost(ghost, el);
     if (livePlace) livePlace();
+    refreshVeil();
   }
   function onViewportChange() {
     if (syncRaf !== null || typeof requestAnimationFrame !== "function") return;
     syncRaf = requestAnimationFrame(syncChrome);
   }
+  /* And on every frame the film paints (clock.js's painters run whether the
+     film is playing or paused, driven by the transport's loop): an element
+     can move without any scroll — the belt turns to bring a pressed paper
+     to its apex and its captions cross the screen; a row unfolds above a
+     lit control — and the marks must go with it, as chapters 5, 9 and 12
+     already keep their ring on a body they move themselves. Cheap: a few
+     boxes measured, and nothing repainted unless one changed. */
+  const offFrame = clock.onFrame(() => {
+    if (dry() || (litControls.length === 0 && ghosts.length === 0 && !live)) return;
+    syncChrome();
+  });
 
   /** @param {Point} p */
   function placeDot(p) {
@@ -507,12 +519,27 @@ export function createFilmContext({
   async function setScreen(route) {
     if (dry()) return;
     if (routeOf() === route) return;
+    /* #1174: "/item" is the item screen, whichever item it shows — a chapter
+       asking for it while the film already stands on /item/<id> (chapter 9
+       after the pocket's chapter 8) stays where it is rather than cutting to
+       the apex item under the reader. */
+    if (route === "/item" && routeOf().startsWith("/item/")) return;
     /* The fields the film typed over are about to leave with the screen. */
     dropTyped();
     const release = clock.stall();
     try {
       await navigate(route);
       await settle(route);
+      /* #1174: a kit sheet closing pops its own history entry, and the
+         browser delivers that popstate a moment later — sometimes after the
+         walk to the next screen has begun, and the router then keeps the
+         screen the popstate names. One more walk, once the dust has
+         settled, lands where the chapter said. */
+      if (routeOf() !== route) {
+        await new Promise((res) => setTimeout(res, 150));
+        await navigate(route);
+        await settle(route);
+      }
     } finally {
       release();
     }
@@ -638,6 +665,7 @@ export function createFilmContext({
    *  panel, kept bright while a row inside it is ringed separately.
    *  @param {...Control} controls */
   function light(...controls) {
+    if (!dry()) dropGone();
     for (const c of controls) {
       if (dry() || c.els.length === 0) continue;
       if (!c.ringless) {
@@ -849,6 +877,11 @@ export function createFilmContext({
    * @param {{ willPress?: boolean }} [o]
    */
   async function goto(c, o = {}) {
+    /* #1174: a screen the PRODUCT changed under the film (a body's own tap
+       flying to its item, pocket.svelte's `tapBody`) is not a `setScreen`,
+       so whatever was lit on the old screen is dropped at the next word
+       that draws — its element is gone with the screen. */
+    if (!dry()) dropGone();
     await scrollIntoBand(c);
     await travel(c);
     await growInto(c);
@@ -1221,6 +1254,10 @@ export function createFilmContext({
       if (Date.now() >= deadline) break;
       await new Promise((res) => setTimeout(res, 16));
     }
+    /* #1174: the sheet's own history pop is delivered by the browser a tick
+       after the state reads clean; give it that tick so the next walk is
+       not raced by it (see setScreen). */
+    await new Promise((res) => setTimeout(res, 60));
   }
 
   /* ---- the callout ------------------------------------------------------ */
@@ -1325,6 +1362,13 @@ export function createFilmContext({
 
     function place() {
       const p = pointNow();
+      /* What this line points at, for the phone check (tour-pocket-webkit
+         .spec.js): the anchor's current box, or "none" when the control it
+         was pinned to matched nothing — a line pointing at nothing. */
+      const a = control && control.els.length > 0 ? boxOf(control.ringEls, control.pad) : null;
+      box.dataset.tourfilmAnchor = a ? `${a.x},${a.y},${a.w},${a.h}` : (control ? "none" : "point");
+      box.dataset.tourfilmSide = finalSide;
+      box.dataset.tourfilmDy = String(o.dy ?? 0);
       const band = pocket ? pocketBand() : null;
       let x;
       let y;
@@ -1390,6 +1434,7 @@ export function createFilmContext({
     if (dry() && !o.label) transcriptLines.push(text);
     await clock.w(T.calloutIn);
     if (!dry()) {
+      dropGone();
       const anchorBox = !Array.isArray(anchor) && anchor.els.length > 0
         ? boxOf(anchor.ringEls, anchor.pad)
         : null;
@@ -1514,6 +1559,7 @@ export function createFilmContext({
     hideVeil();
     veiled = false;
     unsubscribe();
+    offFrame();
     if (layer) layer.remove();
     window.removeEventListener("scroll", onViewportChange, { capture: true });
     window.removeEventListener("resize", onViewportChange);
@@ -1571,6 +1617,22 @@ export function createFilmContext({
     /* measurement, exposed for the chapters that need to place something */
     boxOf,
     lit: () => litControls.slice(),
+    /** #1174: every ring the film has up, beside the box of the element it
+     *  was drawn round as that element measures NOW — the phone check's
+     *  own account of "a spotlight in the right place": each ring's box
+     *  equals its element's, the element is in the document and shown. */
+    litBoxes: () => litControls.flatMap((c) => c.rings.map((ring, index) => {
+      const el = c.ringEls[index];
+      const r = ring.getBoundingClientRect();
+      const t = el ? boxOf([el], c.pad) : { x: 0, y: 0, w: 0, h: 0 };
+      return {
+        ring: { x: r.left, y: r.top, w: r.width, h: r.height },
+        target: { x: t.x, y: t.y, w: t.w, h: t.h },
+        connected: Boolean(el && el.isConnected),
+        shown: Boolean(el && el.isConnected && shown(el)),
+        sel: c.sel,
+      };
+    })),
     /* the script (round 7, #1097): read by player.js's measure() */
     transcript: () => transcriptLines.slice(),
     resetTranscript: () => { transcriptLines = []; },

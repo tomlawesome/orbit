@@ -134,11 +134,20 @@ export const SELECTORS = Object.freeze({
   POCKET: Object.freeze({
     /** The seated household's own body — the pocket dial's own round mark
      *  (pocket.svelte, `tapBody`/`openRow`). */
-    body: ".pocket .mdial .pk-body",
+    /** An item's body, never the relay's catch (#1174): a suggestion rides
+     *  the dial as a `.pk-body` too (`data-body-sugg`), first in the DOM,
+     *  and opening it opens the signals row — whose acts are "Add to orbit"
+     *  and "Dismiss", not a way to the item. */
+    body: ".pocket .mdial .pk-body:not([data-body-sugg])",
+    /** An item's body that carries documents (#1174): `data-papers` is the
+     *  body's own count (pocket.svelte). The chapter opens one of these
+     *  first, so the belt it lands in has papers to show; a sky where none
+     *  carries any falls back to the first body. */
+    bodyWithPapers: '.pocket .mdial .pk-body:not([data-body-sugg])[data-papers]:not([data-papers="0"])',
     /** The opened manifest row's own "open →" act (pocket.svelte's
      *  `itemActs`, Row.svelte's `data-row-acts`) — the real route from a
      *  body to `/item` (owner's 6a, #1119). */
-    openAct: '.pocket .pk-below [data-row-acts] a[aria-label^="Open"]',
+    openAct: '.pocket .pk-below .p-row[data-open] [data-row-acts] a[aria-label^="Open"]',
     /** A paper's whole caption seat on the pocket (#1174): its two-line name
      *  is two `.doclabel` texts inside one `.capseat`, so ringing the labels
      *  drew two nested rings per paper. The seat is one box. Resolved with
@@ -186,15 +195,28 @@ export default {
     await setScreen("/home");
     veil(false);
 
-    const body = ctl({ sel: S.body, round: true, optional: true });
+    /* #1174, pocket: a body that carries documents, so the belt the film
+       lands in has papers to teach with — the apex item may have none, and
+       the pocket folds every other item's papers away. The dry run and a
+       sky where no body carries any take the plain first body. */
+    let body = ctl({ sel: S.body, round: true, optional: true });
+    if (pocket) {
+      const carrying = ctl({ sel: SELECTORS.POCKET.bodyWithPapers, round: true, optional: true, visible: true });
+      if (carrying.els.length > 0) body = carrying;
+    }
     veil(true);
     await goto(body);
     await press(body);
+    /** Where the item screen is: the row's own `open →` act on the pocket
+     *  (its href names the item the body opened), the apex on the desk. */
+    let itemRoute = "/item";
     if (pocket) {
       open(body);
       await w(T.scroll);
       await mark("belt-arrive");
       const openAct = ctl({ sel: SELECTORS.POCKET.openAct, radius: 22, optional: true });
+      const href = openAct.els[0]?.getAttribute("href") ?? "";
+      if (/^\/item\/[^/?#]+$/u.test(href)) itemRoute = href;
       await goto(openAct);
       await press(openAct);
       unlight(openAct);
@@ -204,7 +226,7 @@ export default {
       unlight(body);
     }
 
-    await setScreen("/item");
+    await setScreen(itemRoute);
     await w(T.cross);
     /* #1174: the pocket's belt is drawn after its route has settled — real
        time the clock never budgeted, waited out under a stall the same way

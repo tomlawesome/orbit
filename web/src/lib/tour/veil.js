@@ -200,6 +200,18 @@ function onViewportChange() {
   if (updateHoles()) scheduleLoop();
 }
 
+/**
+ * #1174: re-measures the holes now, as a scroll would — for a lit element
+ * the PAGE moves without scrolling (the belt bringing a pressed paper to
+ * its apex, a row unfolding above a lit control). The loop above goes
+ * quiet once nothing has moved for a frame and only a scroll or a resize
+ * wakes it; the film's own per-frame sync (vocabulary.js) calls this so a
+ * hole follows its element whatever moved it. Repaints only on a change.
+ */
+export function refreshVeil() {
+  onViewportChange();
+}
+
 function addListeners() {
   // capture:true so a scroll inside any scrollable ancestor is caught, not
   // only a scroll of the window itself.

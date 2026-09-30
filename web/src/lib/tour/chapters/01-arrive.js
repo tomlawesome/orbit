@@ -108,8 +108,11 @@ export default {
     unlight(centreSun);
 
     /* One of the others, to say what the rest of the sky is for. On the
-       pocket this is the first chip in the strip, "by room" (§3.2's
-       resolution decides which side it actually lands on). */
+       pocket this is the first chip in the strip, ringed — and the line is
+       a sky line like the chapter's other three (#1174): "by room" it
+       landed on the dial's own month label above the strip, or on "explore
+       your world" below it, with no veil to dim either. Under the sun, the
+       ringed chip says which. */
     const gran = ctl({
       sel: S.others,
       round: pocket ? false : true,
@@ -120,9 +123,9 @@ export default {
     await goto(gran, { willPress: false });
     await callout(
       "The rest of the sky holds systems you don't belong to — tap one to fly there.",
-      gran,
-      "left",
-      { mark: "arrive-gran" },
+      pocket ? centreSun : gran,
+      pocket ? "bottom" : "left",
+      { ...skyOpts, mark: "arrive-gran" },
     );
     unlight(gran);
     dropCallout();
