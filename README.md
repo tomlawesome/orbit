@@ -18,8 +18,7 @@
 </p>
 
 <p align="center">
-  <img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-15162b?style=flat-square&logo=nextdotjs&logoColor=white" />
-  <img alt="React 19" src="https://img.shields.io/badge/React-19-715cff?style=flat-square&logo=react&logoColor=white" />
+  <img alt="SvelteKit" src="https://img.shields.io/badge/SvelteKit-ff3e00?style=flat-square&logo=svelte&logoColor=white" />
   <img alt="PostgreSQL 18" src="https://img.shields.io/badge/PostgreSQL-18-22b8a9?style=flat-square&logo=postgresql&logoColor=white" />
   <img alt="Docker ready" src="https://img.shields.io/badge/Docker-ready-2496ed?style=flat-square&logo=docker&logoColor=white" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-ff4fa3?style=flat-square&logo=typescript&logoColor=white" />
@@ -508,7 +507,7 @@ Orbit already includes:
 - SMTP and Web Push delivery through an atomic PostgreSQL-backed scheduler;
 - an authentication gate that reveals no workspace or cached household data to
   signed-out visitors;
-- production health checks, standalone Next.js output, a purpose-built browser
+- production health checks, a standalone server build, a purpose-built browser
   favicon, and version-controlled migrations.
 - bounded PDF/JPEG/PNG uploads, ClamAV malware rejection, per-document
   AES-256-GCM envelope encryption, quotas, audited downloads, soft deletion,
@@ -527,7 +526,7 @@ household items or seeded fake records.
 ### Requirements
 
 - Node.js 22 or later
-- pnpm 11
+- pnpm, at the version `package.json` pins under `packageManager`
 - PostgreSQL 18, or Docker for the database only
 
 ### Start the development stack
