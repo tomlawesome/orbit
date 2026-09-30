@@ -13,8 +13,8 @@ Three more words this document uses:
   the image, that anyone can check.
 - **cosign** is the tool that makes and checks those signatures.
 - **Keyless signing** is a cosign mode where, instead of a key file, the
-  signature is tied to who ran the signing job (here, the owner's GitHub
-  login) through a short-lived certificate.
+  signature is tied to the job that signed it (here, a workflow in the
+  `tomlawesome/orbit` GitHub repository) through a short-lived certificate.
 
 GitLab (`gitlab.tomlawson.io`, `ai/orbit`) is where Orbit is built, tested and
 merged. GitHub (`tomlawesome/orbit`) is a one-way push mirror: it carries the
