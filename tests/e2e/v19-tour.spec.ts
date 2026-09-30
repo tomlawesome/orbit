@@ -82,13 +82,28 @@ async function signInAwayFromHome(page: Page) {
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent("/inbox")}`);
   await page.getByRole("link", { name: READER() }).click();
   /* #1080: waits for the session, then holds administrator access — the
-     sweep's hard delete is an instance-admin power. */
+     sweep's hard delete is an instance-admin power. This polls the SESSION
+     through page.request, a separate context from the page's own frame, so
+     it can resolve before the browser's own redirect chain (the #840 door:
+     /inbox -> hooks.server.js's 303 to / -> the arrival's own load) has
+     actually landed. */
   await ensureWorkerAdministrator(page);
   /* Not always /inbox: an administrator with no household of their own may
      land on the arrival's newcomer screen instead (#840). Either is fine —
      what matters is that it is not /home, where the film's own trigger
      would otherwise run ahead of this file's own setup. */
   await expect(page).not.toHaveURL(/\/home$/, { timeout: 30_000 });
+  /* #1083: `not.toHaveURL` is satisfied by ANY non-/home URL, including one
+     partway through the #840 door's own redirect chain — the reader's own
+     account being freshly minted (no household of any kind yet), that
+     chain is real network time this assertion does not wait out. A reader
+     on the pocket meets the same chain the desk reader does, but the next
+     step (anEmptySky's own fetch) found it racing an in-flight navigation
+     there and not on desk — load timing, not a different route. Waiting
+     for the network to go quiet is what actually proves the redirect (and
+     whatever the landed screen's own onMount fetches) has settled, so the
+     next real fetch this file makes is not torn down mid-flight. */
+  await page.waitForLoadState("networkidle");
 }
 
 /** A household of the reader's own: empty, and this session's active one. */
