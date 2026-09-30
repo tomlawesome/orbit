@@ -210,6 +210,14 @@
   .pk-column{position:relative;z-index:2;box-sizing:border-box;max-width:var(--p-column);margin:0 auto;
     padding:calc(var(--p-chrome) + env(safe-area-inset-top) + 8px) var(--p-gutter)
       calc(var(--pc-bar, 120px) + var(--p-kb, 0px) + 24px)}
+  /* #1083 (owner's fix 2): while the tour's pill stands on this screen's own
+     save bar (`.pk-bar`), it raises 76px above the foot (the pill's 64px
+     height plus its 12px gap, transport.js's own `.raised`) — pad the column
+     by the same amount so the form's last field can still scroll clear of
+     it. `data-tour-pocket` is set on `<html>` only while the pocket
+     transport is mounted (transport.js). */
+  :global(html[data-tour-pocket]) .pk-column{
+    padding-bottom:calc(var(--pc-bar, 120px) + var(--p-kb, 0px) + 24px + 76px)}
   .pk-head{margin:0 0 20px;padding:0 2px}
   .pc-sub{margin:6px 0 0;font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet);letter-spacing:.02em}
 

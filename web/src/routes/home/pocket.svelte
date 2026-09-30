@@ -764,7 +764,7 @@
       <!-- The sun (the desk's #sun, scaled): a soft glow that breathes under
            the core, and the household's name beneath it. -->
       <circle class="pk-glow" cx="190" cy="190" r="16" style="fill:#fff6e6" fill-opacity=".28" filter="url(#pk-sun)"/>
-      <circle cx="190" cy="190" r="8" style="fill:#fff6e6"/>
+      <circle class="pk-sun" cx="190" cy="190" r="8" style="fill:#fff6e6"/>
       <text x="190" y="218" font-size="15" text-anchor="middle" style="fill:var(--ink-mid);font-family:var(--ui)">{view?.household?.name ?? ""}</text>
       {#if pinging}
         <circle class="pk-ping" cx={pinging.placement.x} cy={pinging.placement.y} r={bodyR(pinging) + 3} fill="none"
