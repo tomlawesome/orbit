@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import add, { SELECTORS } from "../../web/src/lib/tour/chapters/02-add.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
+import { KINDS } from "../../web/src/routes/create/entry.js";
 import { TOUR_STOPS } from "../../web/src/lib/tour/stops.js";
 import { createFilmContext, T } from "../../web/src/lib/tour/vocabulary.js";
 
@@ -31,10 +32,23 @@ const HOME_SOURCE = [
   "src/routes/home/home.behaviour.js",
 ].map((file) => readFileSync(web(file), "utf8")).join("\n");
 
-/* Every other control this chapter names lives on the considered form. */
+/* Every other desk control this chapter names lives on the considered form. */
 const CREATE_SOURCE = readFileSync(web("src/routes/create/+page.svelte"), "utf8");
 
 const ALL_SOURCE = `${HOME_SOURCE}\n${CREATE_SOURCE}`;
+
+/* #1083: the pocket's own screens. The account orb and the hatch's "Add an
+   item" row live on pocket.svelte itself, built from Sheet.svelte's own
+   layer/panel and Row.svelte's own face; the pocket form is create/
+   pocket.svelte's own #pocket-entry, built from EntryForm.svelte's fields
+   and kind chips. */
+const POCKET_SOURCE = [
+  "src/routes/home/pocket.svelte",
+  "src/lib/pocket/Sheet.svelte",
+  "src/lib/pocket/Row.svelte",
+  "src/routes/create/pocket.svelte",
+  "src/routes/create/EntryForm.svelte",
+].map((file) => readFileSync(web(file), "utf8")).join("\n");
 
 /** Every name the source assigns to a class or an id, however it writes it —
  *  literal, Svelte expression, or DOM assignment. Lifted from
@@ -143,27 +157,47 @@ beforeEach(() => {
 });
 
 describe("the selectors chapter 2 names", () => {
-  it("every plain class/id one of them depends on exists in the real markup", () => {
+  it("every plain desk class/id one of them depends on exists in the real markup", () => {
     const rendered = namesIn(ALL_SOURCE);
-    for (const [beat, selector] of Object.entries(SELECTORS)) {
+    for (const [beat, selector] of Object.entries(SELECTORS.DESK)) {
       for (const token of tokensOf(selector)) {
         expect(
           rendered.has(token),
-          `chapter 2's "${beat}" names "${selector}", but no real screen renders a "${token}"`,
+          `chapter 2's desk "${beat}" names "${selector}", but no real screen renders a "${token}"`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("every plain pocket class/id one of them depends on exists in the real markup (#1083)", () => {
+    const rendered = namesIn(POCKET_SOURCE);
+    for (const [beat, selector] of Object.entries(SELECTORS.POCKET)) {
+      for (const token of tokensOf(selector)) {
+        expect(
+          rendered.has(token),
+          `chapter 2's pocket "${beat}" names "${selector}", but no real pocket screen renders a "${token}"`,
         ).toBe(true);
       }
     }
   });
 
   it('names the real "inspection" type chip by its actual data-type attribute', () => {
-    expect(SELECTORS.inspection).toBe('#types button[data-type="inspection"]');
+    expect(SELECTORS.DESK.inspection).toBe('#types button[data-type="inspection"]');
     expect(CREATE_SOURCE).toContain('data-type="inspection"');
+  });
+
+  it("names the pocket's inspection chip assuming KINDS[2].id is \"inspection\" (#1083)", () => {
+    /* SELECTORS.POCKET.inspection's own comment: `.pc-kinds .pc-chip:nth-child(3)`
+       only lands on the inspection chip because entry.js's KINDS lists it
+       third. A reorder there would silently point this chip somewhere
+       else, so it is pinned here too. */
+    expect(KINDS[2].id).toBe("inspection");
   });
 
   it("names the same north star the ratified walk's create stop already points at", () => {
     const create = TOUR_STOPS.find((stop) => stop.id === "create");
     expect(create.target).toContain("#nstar");
-    expect(SELECTORS.star).toBe("#nstar");
+    expect(SELECTORS.DESK.star).toBe("#nstar");
     /* the ratified line this chapter's drawer callout says, verbatim */
     expect(create.copy[0]).toBe("Add anything here, by hand or by forwarding a document.");
   });
@@ -213,7 +247,7 @@ describe("the beats, in the mockup's order", () => {
     expect(log[0]).toEqual(["setScreen", "/home"]);
     expect(log[1]).toEqual(["veil", false]);
     const veilTrue = log.findIndex(([word, on]) => word === "veil" && on === true);
-    const gotoStar = log.findIndex(([word, sel]) => word === "goto" && sel === SELECTORS.star);
+    const gotoStar = log.findIndex(([word, sel]) => word === "goto" && sel === SELECTORS.DESK.star);
     expect(veilTrue).toBeGreaterThan(-1);
     expect(veilTrue).toBeLessThan(gotoStar);
   });
@@ -221,7 +255,7 @@ describe("the beats, in the mockup's order", () => {
   it("presses the star, marks it, then opens the considered form at /create", async () => {
     const { log, ctx } = recorder();
     await add.play(ctx);
-    const pressStar = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.star);
+    const pressStar = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.star);
     const markStar = log.findIndex(([word, name]) => word === "mark" && name === "add-star");
     const setCreate = log.findIndex(([word, route]) => word === "setScreen" && route === "/create");
     expect(pressStar).toBeGreaterThan(-1);
@@ -234,7 +268,7 @@ describe("the beats, in the mockup's order", () => {
     await add.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel, side, mark]) => [text, sel, side, mark]);
     expect(said).toEqual([
-      ["Add anything here, by hand or by forwarding a document.", SELECTORS.card, "top", "add-drawer"],
+      ["Add anything here, by hand or by forwarding a document.", SELECTORS.DESK.card, "top", "add-drawer"],
     ]);
   });
 
@@ -243,14 +277,14 @@ describe("the beats, in the mockup's order", () => {
     await add.play(ctx);
     const visited = log.filter(([word]) => word === "goto").map(([, sel]) => sel);
     expect(visited).toEqual([
-      SELECTORS.star,
-      SELECTORS.card,
-      SELECTORS.name,
-      SELECTORS.inspection,
-      SELECTORS.due,
-      SELECTORS.cost,
-      SELECTORS.recurrence,
-      SELECTORS.add,
+      SELECTORS.DESK.star,
+      SELECTORS.DESK.card,
+      SELECTORS.DESK.name,
+      SELECTORS.DESK.inspection,
+      SELECTORS.DESK.due,
+      SELECTORS.DESK.cost,
+      SELECTORS.DESK.recurrence,
+      SELECTORS.DESK.add,
     ]);
     /* Neither "add-drawer" nor "add-typing" is here: each travels as its
        own word's `mark` option (the drawer callout's, and the name field's
@@ -266,9 +300,9 @@ describe("the beats, in the mockup's order", () => {
     await add.play(ctx);
     const typed = log.filter(([word]) => word === "typeInto").map(([, sel, text]) => [sel, text]);
     expect(typed).toEqual([
-      [SELECTORS.name, "Car MOT \u2014 Volvo V60"],
-      [SELECTORS.due, "29 Aug 2027"],
-      [SELECTORS.cost, "54.85"],
+      [SELECTORS.DESK.name, "Car MOT \u2014 Volvo V60"],
+      [SELECTORS.DESK.due, "29 Aug 2027"],
+      [SELECTORS.DESK.cost, "54.85"],
     ]);
     /* Each one is typed into a field the chapter has just pressed. */
     for (const [sel] of typed) {
@@ -282,7 +316,7 @@ describe("the beats, in the mockup's order", () => {
   it("hands add-typing to the typing itself, so the mark lands on a half-typed name", async () => {
     const { log, ctx } = recorder();
     await add.play(ctx);
-    const name = log.find(([word, sel]) => word === "typeInto" && sel === SELECTORS.name);
+    const name = log.find(([word, sel]) => word === "typeInto" && sel === SELECTORS.DESK.name);
     expect(name[3]).toBe("add-typing");
   });
 
@@ -290,8 +324,8 @@ describe("the beats, in the mockup's order", () => {
     const { log, ctx } = recorder();
     await add.play(ctx);
     const lastGoto = log.filter(([word]) => word === "goto").at(-1);
-    expect(lastGoto).toEqual(["goto", SELECTORS.add, true]);
-    const unlitAdd = log.some(([word, sels]) => word === "unlight" && sels?.includes?.(SELECTORS.add));
+    expect(lastGoto).toEqual(["goto", SELECTORS.DESK.add, true]);
+    const unlitAdd = log.some(([word, sels]) => word === "unlight" && sels?.includes?.(SELECTORS.DESK.add));
     expect(unlitAdd).toBe(false);
   });
 });

@@ -26,6 +26,10 @@ import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
 const web = (path) => resolve(import.meta.dirname, "../../web", path);
 const HOME_SOURCE = readFileSync(web("src/routes/home/+page.svelte"), "utf8");
 
+/* #1083: the pocket's own home screen — the round dial and this household's
+   own sun. */
+const POCKET_SOURCE = readFileSync(web("src/routes/home/pocket.svelte"), "utf8");
+
 function namesIn(source) {
   const names = new Set();
   const attributes = /(?:class(?:Name)?|id)\s*[=:]\s*(?:"([^"]*)"|'([^']*)'|\{([^}]*)\})/gu;
@@ -114,25 +118,37 @@ beforeEach(() => {
 });
 
 describe("the selectors chapter 12 names", () => {
-  it("the real ones (.dial, .sun-link) exist in home's own markup", () => {
+  it("the real desk ones (.dial, .sun-link) exist in home's own markup", () => {
     const rendered = namesIn(HOME_SOURCE);
-    for (const [beat, selector] of [["dial", SELECTORS.dial], ["sun", SELECTORS.sun]]) {
+    for (const [beat, selector] of [["dial", SELECTORS.DESK.dial], ["sun", SELECTORS.DESK.sun]]) {
       for (const token of tokensOf(selector)) {
         expect(
           rendered.has(token),
-          `chapter 12's "${beat}" names "${selector}", but /home renders no "${token}"`,
+          `chapter 12's desk "${beat}" names "${selector}", but /home renders no "${token}"`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("the real pocket ones (.pocket .mdial, .pk-sun) exist in pocket.svelte's own markup (#1083)", () => {
+    const rendered = namesIn(POCKET_SOURCE);
+    for (const [beat, selector] of [["dial", SELECTORS.POCKET.dial], ["dialSvg", SELECTORS.POCKET.dialSvg], ["sun", SELECTORS.POCKET.sun]]) {
+      for (const token of tokensOf(selector)) {
+        expect(
+          rendered.has(token),
+          `chapter 12's pocket "${beat}" names "${selector}", but pocket.svelte renders no "${token}"`,
         ).toBe(true);
       }
     }
   });
 
   it("names the same sun the ratified walk and chapter 1 already point at", () => {
-    expect(SELECTORS.sun).toBe(".sun-link");
+    expect(SELECTORS.DESK.sun).toBe(".sun-link");
   });
 
   it("the drawn one (.tourfilm-year-body) is never real markup", () => {
     const rendered = namesIn(HOME_SOURCE);
-    for (const token of tokensOf(SELECTORS.body)) {
+    for (const token of tokensOf(SELECTORS.DESK.body)) {
       expect(rendered.has(token)).toBe(false);
     }
   });

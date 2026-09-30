@@ -20,6 +20,9 @@ import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
 
 const web = (path) => resolve(import.meta.dirname, "../../web", path);
 const HOME_SOURCE = readFileSync(web("src/routes/home/+page.svelte"), "utf8");
+/* The pocket dial, its `<svg>` and this household's own sun all live on the
+   pocket dialect of /home (chapter 5's own SELECTORS.POCKET comments). */
+const POCKET_SOURCE = readFileSync(web("src/routes/home/pocket.svelte"), "utf8");
 
 function namesIn(source) {
   const names = new Set();
@@ -104,14 +107,34 @@ beforeEach(() => {
 describe("the selectors chapter 5 names", () => {
   it("the real one (.dial) exists in home's own markup", () => {
     const rendered = namesIn(HOME_SOURCE);
-    for (const token of tokensOf(SELECTORS.dial)) {
-      expect(rendered.has(token), `chapter 5 names "${SELECTORS.dial}", but /home renders no "${token}"`).toBe(true);
+    for (const token of tokensOf(SELECTORS.DESK.dial)) {
+      expect(rendered.has(token), `chapter 5 names "${SELECTORS.DESK.dial}", but /home renders no "${token}"`).toBe(true);
     }
   });
 
   it("the drawn one (.tourfilm-time-body) is never real markup", () => {
     const rendered = namesIn(HOME_SOURCE);
-    for (const token of tokensOf(SELECTORS.body)) {
+    for (const token of tokensOf(SELECTORS.DESK.body)) {
+      expect(rendered.has(token)).toBe(false);
+    }
+  });
+
+  it("the pocket's real ones (the dial, its sun) exist in the pocket dial's own markup", () => {
+    const rendered = namesIn(POCKET_SOURCE);
+    for (const [name, selector] of Object.entries(SELECTORS.POCKET)) {
+      if (name === "body") continue;
+      for (const token of tokensOf(selector)) {
+        expect(
+          rendered.has(token),
+          `chapter 5's pocket "${name}" names "${selector}", but pocket.svelte renders no "${token}"`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("the pocket's drawn one (.tourfilm-time-body) is never real markup either", () => {
+    const rendered = namesIn(POCKET_SOURCE);
+    for (const token of tokensOf(SELECTORS.POCKET.body)) {
       expect(rendered.has(token)).toBe(false);
     }
   });
