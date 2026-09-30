@@ -1,5 +1,7 @@
 # Administration operations — round 1 (#1055)
 
+> **Superseded** by [round 2](../round-2/README.md): round 1's verdicts were small mono strings that appeared under a row and went away, which the owner reads as noise trained out of sight.
+
 Two composition calls on the ratified `/administration` sheet
 (`design/v19/administration.html`, §13, as changed by #1052): where the
 two mail tests sit and how they answer, and where document jobs live, how
