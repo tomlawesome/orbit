@@ -274,6 +274,10 @@ page's URL at failure, which this one has to infer.
 - 2026-09-27 · d97cb335 (!997) · pipeline 1740 / smoke (job 25230) · `.note.ok` never showed "password changed" within 5000ms at line 190. Retried as job 25322 on the same commit: green. !997 touches only mail-in failure reasons and cannot reach the password form. First sighting; an issue on the third.
 - 2026-09-30 · 6f720bed (!1005, M14 batch: 500 page, staged attachment preview, contrast fixes; none reach the password form) · pipeline 1827 / smoke (job 26687) · same failure at line 190; the in-job retry then got "the password was refused (HTTP 403)" in 3.5s, consistent with the first attempt having changed it. Job retried as 26693: green. Second sighting.
 
+## sign-in-methods.spec.ts:245 "an administrator sends a new setup link from somebody's row" — desktop-chromium
+
+- 2026-09-30 · 977a6cba (!1006, M14 pocket-film batch: `web/src/lib/tour/*`, `web/src/routes/home/pocket.svelte`, `web/src/routes/create/pocket.svelte`; none reach `/administration` or the setup-link mail route) · pipeline 1832 / smoke (job 26744) · `.adminproblem.ok` never showed "Setup link sent to" within 5000ms, on the file's only real attempt (the worker had already bailed out of this file over `sign-in-methods.spec.ts:158`'s failure just before it, so the whole file reran once). Same shape as the "send a new setup link" render-timing sighting under `v19-keyboard.spec.ts` above, in a different spec. Isolated rerun locally (`scripts/test-e2e-local.sh --spec tests/e2e/sign-in-methods.spec.ts --project desktop-chromium --ci-cap`, matching CI's cpu/memory cap): all 4 tests in the file passed, this one in 4.4s. First sighting; an issue on the third.
+
 ## v19-explore-search.spec.ts:314 "clicking the note line's add act, at rest, opens /create" — desktop-chromium
 
 - 2026-09-30 · 6f720bed (!1005, none of it in the search strip) · pipeline 1827 / smoke (job 26687) · `#strip-note .act` "add an item" resolved but stayed hidden for 5000ms; Playwright's in-job retry passed in 3.7s. First sighting.
