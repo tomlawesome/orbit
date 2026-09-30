@@ -129,6 +129,7 @@ const EXPECTED_ROUTES = [
   "/api/households/[householdId]/portable-archives",
   "/api/imap-inbox",
   "/api/imap-inbox/[receiptId]",
+  "/api/imap-inbox/[receiptId]/attachments/[attachmentId]/preview",
   "/api/join-requests",
   "/api/join-requests/[requestId]",
   "/api/portable-archives/[archiveId]/download",
@@ -188,7 +189,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 76 route families -- no fewer, no more", () => {
+  it("has exactly the expected 77 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });

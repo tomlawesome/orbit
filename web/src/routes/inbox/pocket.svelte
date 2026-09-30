@@ -8,8 +8,12 @@
   import FailedRow from "$lib/pocket/FailedRow.svelte";
   import ReviewCard from "$lib/pocket/ReviewCard.svelte";
   import ReviewSheet from "$lib/pocket/ReviewSheet.svelte";
-  import { burnsInOf, formReadingsOf, papersOf, readingsOf, reviewLockedOf, reviewTitleOf } from "$lib/pocket/review.js";
+  import {
+    burnsInOf, formReadingsOf, papersOf, readingsOf, reviewLockedOf, reviewTitleOf, stagedPreviewHref,
+  } from "$lib/pocket/review.js";
   import Row from "$lib/pocket/Row.svelte";
+  import Sheet from "$lib/pocket/Sheet.svelte";
+  import StagedPage from "$lib/pocket/StagedPage.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
 
@@ -165,6 +169,19 @@
     return ok;
   }
 
+  /* ---- the paper (#1155): a review card's attachment line opens the page
+     in a sheet of its own -- the decision (add / dismiss) stays on the card
+     behind it, so this sheet carries no foot. ---- */
+  let paperOpen = $state(false);
+  /** @type {{ receipt: Receipt, paper: { id: string | null, name: string, drawable: boolean } } | null} */
+  let openPaper = $state(null);
+  /** @param {Receipt} receipt @param {{ id: string | null, name: string, drawable: boolean }} paper */
+  function showPaper(receipt, paper) {
+    if (!paper.id) return;
+    openPaper = { receipt, paper };
+    paperOpen = true;
+  }
+
   /* ---- motion ---------------------------------------------------------- */
   const still = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
   /**
@@ -234,7 +251,7 @@
                           unreadable={receiptWords(receipt.metadataStatus)} locked={reviewLockedOf(receipt)} {index}
                           busy={busy === receipt.id ? busyAct : null} problem={problems.get(receipt.id) ?? null}
                           onapprove={() => approve(receipt)} ondismiss={() => dismiss(receipt)}
-                          onamend={() => openReview(receipt)} />
+                          onamend={() => openReview(receipt)} onpaper={(paper) => showPaper(receipt, paper)} />
             </div>
           {/each}
         </section>
@@ -308,8 +325,19 @@
   <ReviewSheet bind:open={reviewOpen} title={reviewing ? titleOf(reviewing) : ""} proposal={reviewing?.proposal}
                householdId={reviewing ? (reviewing.householdId ?? need().primary) : null}
                households={view?.households ?? []} readings={reviewing ? formReadingsOf(reviewing) : []}
-               papers={reviewing ? papersOf(reviewing) : []} busy={Boolean(reviewing && busy === reviewing.id)}
+               papers={reviewing ? papersOf(reviewing) : []} receiptId={reviewing?.id ?? null}
+               busy={Boolean(reviewing && busy === reviewing.id)}
                problem={reviewProblem} onsave={saveReview} />
+
+  <!-- #1155: the paper, opened from a review card's attachment line. No
+       foot -- the decision (add / dismiss) stays on the card behind it. -->
+  <Sheet bind:open={paperOpen} size="list" title={openPaper?.paper.name ?? ""}>
+    {#if openPaper}
+      <StagedPage href={stagedPreviewHref(openPaper.receipt.id, /** @type {string} */ (openPaper.paper.id))}
+                  name={openPaper.paper.name} drawable={openPaper.paper.drawable} reader
+                  itemTitle={titleOf(openPaper.receipt)} />
+    {/if}
+  </Sheet>
 </div>
 
 <style>

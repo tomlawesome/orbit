@@ -96,7 +96,10 @@ import { seededRng } from "$lib/sky.js";
  * @property {boolean} ready      whether the content can be read at all yet
  * @property {?string} deleteAfter  "9 September 2026", when the file is on the clock
  * @property {boolean} [staged]   a suggestion's paper (#1145): staged with the mail,
- *                                attached on acceptance; no page and no download yet
+ *                                no `documents` row and no download, but its page
+ *                                one draws wherever `previewHref` names one (#1155)
+ * @property {?string} [attachmentId]  the staged attachment's own id (null for the
+ *                                     count-only fallback)
  */
 
 /**

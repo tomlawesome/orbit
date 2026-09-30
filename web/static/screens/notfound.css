@@ -1,5 +1,9 @@
 
 body{background:#04070f}
+/* The ground is a fixed night on every pack, so the light packs' own inks
+   (#18202f, #343d51, #1f7ac2) all but vanish on it: 1.23-4.43:1 (#1171).
+   On those two, borrow the door's night inks, as the 500 page does (#1139). */
+:is([data-theme=dawn],[data-theme=clouds]) body{--ink:#e9edf8;--ink-mid:#8791b3;--accent:#d8b45a}
 /* the sky falls in (#790, see +error.svelte): three <canvas> copies of a band
    of stars, each spiralling in toward the hole and handing over to the next.
    Each copy is a 2200-unit square centred on the hole — the same 1600×1000
