@@ -28,7 +28,8 @@ PostgreSQL schema: users, preferences, external identities, sessions,
 households, owner/member memberships, sections, items and visible document
 metadata. Sessions are created through the production session implementation;
 tests use the production cookie name and CSRF derivation. Route tests invoke
-the actual Next.js route functions with `NextRequest`, not a development
+the actual SvelteKit route handlers with a `RequestEvent`
+(`tests/integration/support/request-event.ts`), not a development
 server or mocked authorization boundary.
 
 The initial examples cover a persisted `household.update` workspace mutation,
@@ -85,12 +86,13 @@ touched by an ordinary new migration.
 
 ## CI relationship
 
-Pull requests run planning governance, lint, type checking and the complete unit
-suite. Separate read-only workflows retain dependency-diff and CodeQL evidence.
-They do not run a production build, PostgreSQL integration, source secret scan
-or container build. Every push to protected `preview` (or a bounded
+Merge requests and pushes to `dev` run lint, type checking, the complete unit
+suite, the source secret scan, the licence-policy check over the whole
+installed dependency tree, PostgreSQL integration, the container build and the
+smoke, browser and recovery journeys. CodeQL runs separately on the GitHub
+mirror. Every push to protected `preview` (or a bounded
 `hotfix/**` source) runs the complete source-policy, PostgreSQL, exact-image,
-browser, security, recovery, installer and publication path. A pull request to
+browser, security, recovery, installer and publication path. A merge to
 `main` verifies the already-tested preview digest, embedded identity and
 attestations without rebuilding it.
 

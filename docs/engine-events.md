@@ -319,7 +319,7 @@ breaking change requiring a version bump and coordination with consumers.
 `scripts/configure.sh --check` (and `--check-rollback`, identical in every
 respect but the file it checks) emits a fixed-vocabulary readiness summary on
 stdout: one line per required field or optional group, from `run_check`
-(`scripts/configure.sh:972`). This is orbit-launcher's own machine interface
+(`scripts/configure.sh`). This is orbit-launcher's own machine interface
 onto configuration state — separate from the `phase=...` event stream and
 from the "Machine prompts (v0)" prompt grammar above, sharing neither their
 line shape nor `installer_ui_emit`. orbit-launcher's `RunConfigCheck`
@@ -487,7 +487,7 @@ read-then-confirm entry); `orbit import-recovery-bundle`'s own passphrase
 entry has no confirmation step (matching `import-recovery-bundle.sh`, which
 reads the recovery passphrase once). `IMPORT_CONFIRMATION` is
 `orbit import-recovery-bundle`'s literal `IMPORT RECOVERY` phrase
-(`import-recovery-bundle.sh` guarantee #19). `RESTORE_CONFIRMATION` is
+(`import-recovery-bundle.sh` guarantee #17). `RESTORE_CONFIRMATION` is
 `orbit restore`'s literal `RESTORE` phrase (`restore.sh` guarantee #46) —
 also collected a second time, independently, inside
 `orbit import-recovery-bundle` itself, because `import-recovery-bundle.sh`

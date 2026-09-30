@@ -7,8 +7,9 @@ writes them into this repository. The harness reads a directory you choose,
 prints a handful of numbers to your terminal, and writes nothing to disk
 itself.
 
-Every other extraction measurement in Orbit (`extraction-accuracy.test.ts`,
-`extraction-holdout-2.test.ts`) runs against invented documents committed to
+Every other extraction measurement in Orbit (the tuning corpus in
+`extraction-corpus.ts`, the hold-out in `extraction-holdout-2.test.ts`) runs
+against invented documents committed to
 the repository, because that is the only thing safe to share and run in CI.
 This tool exists because invented documents share blind spots with the code
 that invents them — real paperwork is the only way to find out whether
@@ -125,8 +126,8 @@ Private evaluation: 12 document(s)
 - **Overall**: the same earned/possible count summed across all three
   fields — one number for "how well does extraction do on my real
   paperwork", directly comparable in spirit (not in exact value — the
-  documents differ) to the floor `extraction-accuracy.test.ts` holds against
-  the synthetic corpus.
+  documents differ) to the score `extraction-holdout-2.test.ts` reports
+  against its synthetic hold-out corpus (which has no floor either).
 - There is no pass/fail threshold here, and none is enforced. This tool
   reports; it does not gate anything. If a number surprises you, that is a
   finding to act on (file an issue, add a synthetic fixture that reproduces

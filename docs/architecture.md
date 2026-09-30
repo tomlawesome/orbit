@@ -35,8 +35,8 @@ The supported topology and deferred alternatives are recorded in
 
 | Boundary | Responsibility | Current implementation |
 | --- | --- | --- |
-| Next.js routes | HTTP parsing, session/CSRF enforcement, cache policy, response mapping | `src/app/api` |
-| Web front end | Every signed-in and signed-out screen | **In transition.** Next.js and React (`src/app`, `src/components`) still serve the product. Its replacement is built from the ratified mockups on SvelteKit in `web/`, and is referenced by no Dockerfile, compose file or workflow until the cut. See [ADR-0012](adr/0012-front-end-leaves-react.md) |
+| API routes | HTTP parsing, session/CSRF enforcement, cache policy, response mapping | `web/src/routes/api` |
+| Web front end | Every signed-in and signed-out screen | SvelteKit in `web/`, built from the ratified mockups; the Dockerfile builds it as the product's front end. See [ADR-0012](adr/0012-front-end-leaves-react.md) |
 | Authentication | Local password credentials (always available) and optional OIDC discovery/callback, instance-claim validation, provisioning, sessions, recent-authentication step-up | `src/lib/auth`, `src/server/local-credentials.ts` |
 | Domain and workspace | Item, schedule, section, notification and household command contracts | `src/lib`, `src/server/workspace-*` |
 | Authorization | Instance, household, owner and document access decisions | `src/server/authorization.ts`, `workspace-access.ts`, document authorization |
@@ -160,7 +160,7 @@ evidence rather than starting with unproven mixed state.
 | Area | Current control | Principal v1 gap |
 | --- | --- | --- |
 | Installation | Idempotent configuration scripts and file-backed secrets | Prove clean install on the supported host and document failure recovery |
-| Migrations | 24 ordered migrations, optional migrate-on-start | Add fresh-schema and representative upgrade-path CI |
+| Migrations | Ordered migrations in `drizzle/`, optional migrate-on-start | Add fresh-schema and representative upgrade-path CI |
 | Health | Application and service health checks; administrator summaries | Exercise degraded optional providers and safe diagnostics |
 | Workers | PostgreSQL-backed state, retries and several lease boundaries | Integration-test concurrent claims, stale workers and restart recovery |
 | Backup/restore | Automated database plus encrypted-file round trip | Implement and prove staged correspondence, durable rollback checkpoints, corrupt/wrong-key cases and interrupted recovery |
