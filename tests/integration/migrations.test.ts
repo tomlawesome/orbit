@@ -91,6 +91,14 @@ describe("PostgreSQL migration evidence", () => {
        supported, working state rather than an absent row. */
     const contactRows = await database.client.unsafe(`SELECT "singleton", "public_address", "version" FROM "instance_contact"`);
     expect(contactRows).toEqual([{ singleton: true, public_address: null, version: "1" }]);
+
+    /* 0047 seeds the mail-probe singleton unconditionally too (#1071): every
+       fresh instance starts with neither test ever having run, a supported,
+       working state (a pill that says so, not an absent row). */
+    const mailProbeRows = await database.client.unsafe(
+      `SELECT "singleton", "mailbox_result", "relay_result" FROM "mail_probe_results"`,
+    );
+    expect(mailProbeRows).toEqual([{ singleton: true, mailbox_result: null, relay_result: null }]);
   });
 
   it("converts a live maintenance singleton and its pending notices into windows and updates", async () => {
