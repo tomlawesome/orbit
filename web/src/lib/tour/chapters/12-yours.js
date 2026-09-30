@@ -81,17 +81,32 @@ const CLOSE_MS = 600;
 /**
  * Every element this chapter names, so
  * tests/unit/v19-tour-chapter-yours.test.mjs can pin the real ones (`.dial`,
- * `.sun-link`) against home's own markup. `.tourfilm-year-body` is not real
- * markup — this chapter draws and removes it itself — so it is pinned by
- * running the chapter instead, same as chapter 5's own demo body.
+ * `.sun-link`) against home's own markup (desk) and pocket.svelte's
+ * (pocket). `.tourfilm-year-body` is not real markup — this chapter draws
+ * and removes it itself — so it is pinned by running the chapter instead,
+ * same as chapter 5's own demo body.
  */
 export const SELECTORS = Object.freeze({
-  /** The star chart, so the demo body has somewhere real to live. */
-  dial: ".dial",
-  /** This household's own sun — the same element chapter 1 opens on. */
-  sun: ".sun-link",
-  /** The demo body this chapter draws and removes; never a real item. */
-  body: ".tourfilm-year-body",
+  DESK: Object.freeze({
+    /** The star chart, so the demo body has somewhere real to live. */
+    dial: ".dial",
+    dialSvg: ".dial",
+    /** This household's own sun — the same element chapter 1 opens on. */
+    sun: ".sun-link",
+    /** The demo body this chapter draws and removes; never a real item. */
+    body: ".tourfilm-year-body",
+  }),
+  POCKET: Object.freeze({
+    /** The round dial. */
+    dial: ".pocket .mdial",
+    /** Its own `<svg>` — the demo body's real append target (§3.6). */
+    dialSvg: ".pocket .mdial svg",
+    /** This household's own sun — the same element chapter 1's pocket set
+     *  opens on. */
+    sun: ".pocket .mdial .pk-sun",
+    /** The demo body this chapter draws and removes; never a real item. */
+    body: ".tourfilm-year-body",
+  }),
 });
 
 /** Eased 0..1, matching chapter 5's own and the mockup's own `walk`.
@@ -135,15 +150,16 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { setScreen, veil, ctl, goto, light, unlight, callout, dropCallout, tween, w, mark, dry, doc } = ctx;
+    const { pocket, setScreen, veil, ctl, goto, light, unlight, callout, dropCallout, tween, w, mark, dry, doc } = ctx;
+    const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
     await setScreen("/home");
     veil(false);
 
     /* The demo body arrives far out, plain, before the year runs again. */
-    const dial = ctl({ sel: SELECTORS.dial });
+    const dialSvg = ctl({ sel: S.dialSvg });
     let bodyEl = null;
-    if (!dry() && dial.els[0]) bodyEl = drawYearBody(doc, dial.els[0], DAYS_FAR);
+    if (!dry() && dialSvg.els[0]) bodyEl = drawYearBody(doc, dialSvg.els[0], DAYS_FAR);
     await w(LEAD_MS);
 
     /* The year, once more, in one turn of the ring: in to 20 days, then back
@@ -159,7 +175,7 @@ export default {
        veil.js's comment about "chapters 5/9/12's travelling hole" describes
        the mask being able to FOLLOW a moving hole, not an instruction to
        raise one; it misled this chapter and chapter 5 once already. */
-    const body = ctl({ sel: SELECTORS.body, round: true, optional: true });
+    const body = ctl({ sel: S.body, round: true, optional: true });
     light(body);
     await tween(WALK_MS, (t) => {
       if (dry() || !bodyEl) return;
@@ -177,11 +193,17 @@ export default {
     unlight(body);
 
     /* The household's own sun, visited plainly, and the film's last two
-       lines read over it. */
-    const sun = ctl({ sel: SELECTORS.sun, round: true });
+       lines read over it — both sky lines on the pocket (§3.3): side
+       bottom, dy 30, rather than the desk's top/bottom pair. */
+    const sun = ctl({ sel: S.sun, round: true });
     await goto(sun, { willPress: false });
-    await callout("That was a year, in one turn of the ring.", sun, "top", { mark: "yours-year-line" });
-    await callout("Now it's yours.", sun, "bottom", { mark: "yours-close" });
+    if (pocket) {
+      await callout("That was a year, in one turn of the ring.", sun, "bottom", { dy: 30, mark: "yours-year-line" });
+      await callout("Now it's yours.", sun, "bottom", { dy: 30, mark: "yours-close" });
+    } else {
+      await callout("That was a year, in one turn of the ring.", sun, "top", { mark: "yours-year-line" });
+      await callout("Now it's yours.", sun, "bottom", { mark: "yours-close" });
+    }
     unlight(sun);
     dropCallout();
 

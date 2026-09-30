@@ -45,24 +45,42 @@
 /**
  * Every element this chapter names, in one place, so
  * tests/unit/v19-tour-chapter-your-sky.test.mjs can pin them against home's
- * real markup.
+ * real markup (desk) and the pocket hatch's (pocket.svelte's `#morb`,
+ * `lib/pocket/Hatch.svelte`).
  */
 export const SELECTORS = Object.freeze({
-  /** Home's own account orb (`web/src/routes/home/+page.svelte`) — distinct
-   *  from the inbox orb beside it, which is a plain link and shares the
-   *  `.orb` class but not the `button` tag. */
-  orb: "button.orb",
-  /** The "Settings" row inside the account menu the orb opens — named, and
-   *  never pressed, so the chapter can say what is behind it. */
-  settingsLink: '#account nav a[href$="/settings"]',
-  /** The five theme swatches, together — read out by name. */
-  swatches: "#account .swatches",
-  /** The dawn pack's own swatch, named by title the way the product's own
-   *  click handler (`packOf`, swatches.js) does. */
-  dawn: '#account .swatches button[title="dawn"]',
-  /** After dark — the mockup's own return, pressed here as the gesture while
-   *  `wear(null)` puts back whatever pack the reader actually arrived in. */
-  afterDark: '#account .swatches button[title="after dark"]',
+  DESK: Object.freeze({
+    /** Home's own account orb (`web/src/routes/home/+page.svelte`) — distinct
+     *  from the inbox orb beside it, which is a plain link and shares the
+     *  `.orb` class but not the `button` tag. */
+    orb: "button.orb",
+    /** The "Settings" row inside the account menu the orb opens — named, and
+     *  never pressed, so the chapter can say what is behind it. */
+    settingsLink: '#account nav a[href$="/settings"]',
+    /** The five theme swatches, together — read out by name. */
+    swatches: "#account .swatches",
+    /** The dawn pack's own swatch, named by title the way the product's own
+     *  click handler (`packOf`, swatches.js) does. */
+    dawn: '#account .swatches button[title="dawn"]',
+    /** After dark — the mockup's own return, pressed here as the gesture while
+     *  `wear(null)` puts back whatever pack the reader actually arrived in. */
+    afterDark: '#account .swatches button[title="after dark"]',
+  }),
+  POCKET: Object.freeze({
+    /** Home's own account orb — opens the hatch. */
+    orb: "#morb",
+    /** Any open sheet's own panel, lit `ringless` (§3.5) while the settings
+     *  row inside it is ringed separately. */
+    panel: ".p-sheet-layer.open .p-sheet-panel",
+    /** The hatch's own "Settings" row. */
+    settingsLink: '.p-sheet-layer.open [data-row-face][href$="/settings"]',
+    /** The hatch's own theme swatches, together. */
+    swatches: ".p-sheet-layer.open .swatches",
+    /** The dawn pack's own swatch, by title (theme-swatches.js's `SWATCHES`). */
+    dawn: '.p-sheet-layer.open .swatch[title="dawn"]',
+    /** After dark. */
+    afterDark: '.p-sheet-layer.open .swatch[title="after dark"]',
+  }),
 });
 
 /** @type {import("./index.js").Chapter} */
@@ -72,22 +90,35 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { setScreen, veil, ctl, goto, press, wear, unlight, callout, dropCallout, mark, hold, w, T } = ctx;
+    const {
+      pocket, setScreen, veil, ctl, goto, press, wear, light, unlight, callout, dropCallout, mark, hold, w, T,
+      open, close,
+    } = ctx;
+    const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
     await setScreen("/home");
     veil(false);
 
-    /* The orb opens this household's own settings menu. */
-    const orb = ctl({ sel: SELECTORS.orb, round: true });
+    /* The orb opens this household's own settings menu — a real kit Sheet on
+       the pocket, so it needs a real `open()` before its rows exist. */
+    const orb = ctl({ sel: S.orb, round: true });
     veil(true);
     await goto(orb);
     await press(orb);
     await mark("sky-orb");
     unlight(orb);
+    /** @type {import("../vocabulary.js").Control | null} */
+    let panel = null;
+    if (pocket) {
+      open(orb);
+      await w(T.sheet);
+      panel = ctl({ sel: SELECTORS.POCKET.panel, ringless: true });
+      light(panel);
+    }
     await w(T.cross);
 
     /* "Settings holds your sky, your relay and this walk" — named, not opened. */
-    const settingsLink = ctl({ sel: SELECTORS.settingsLink });
+    const settingsLink = ctl({ sel: S.settingsLink });
     await goto(settingsLink, { willPress: false });
     await callout(
       "Settings holds your sky, your relay and this walk — take it again anytime.",
@@ -98,7 +129,7 @@ export default {
     unlight(settingsLink);
 
     /* The five packs, read out by name. */
-    const swatches = ctl({ sel: SELECTORS.swatches });
+    const swatches = ctl({ sel: S.swatches });
     await goto(swatches, { willPress: false });
     await callout("star chart · after dark · clouds · dawn · retrograde", swatches, "left", {
       label: true,
@@ -109,7 +140,7 @@ export default {
     dropCallout();
 
     /* Dawn is pressed, and the whole sky wears it — for the film only. */
-    const dawn = ctl({ sel: SELECTORS.dawn, round: true });
+    const dawn = ctl({ sel: S.dawn, round: true });
     await goto(dawn);
     await press(dawn);
     wear("dawn");
@@ -121,7 +152,7 @@ export default {
 
     /* And back to the sky it came in on. */
     veil(true);
-    const afterDark = ctl({ sel: SELECTORS.afterDark, round: true });
+    const afterDark = ctl({ sel: S.afterDark, round: true });
     await goto(afterDark);
     await press(afterDark);
     wear(null);
@@ -129,5 +160,11 @@ export default {
     veil(false);
     await w(T.cross);
     await mark("sky-back");
+
+    /* The desk never opened anything; the pocket must fold the hatch. */
+    if (pocket) {
+      if (panel) unlight(panel);
+      await close();
+    }
   },
 };

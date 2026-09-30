@@ -34,6 +34,28 @@ const INBOX_SOURCE = readFileSync(web("src/routes/inbox/+page.svelte"), "utf8");
 
 const ALL_SOURCE = `${HOME_SOURCE}\n${INBOX_SOURCE}`;
 
+/* The pocket dialect's own screens, per chapter 7's own SELECTORS.POCKET
+   comments: the account orb lives on the pocket home, the hatch's "Inbox"
+   row is drawn by Row.svelte inside Hatch.svelte, an open sheet's own panel
+   is Sheet.svelte's, the three lanes are the pocket inbox route's own
+   `.pki-lane`s, and the one real "add to orbit" control is
+   ReviewCard.svelte's ArmButton. */
+const POCKET_HOME_SOURCE = readFileSync(web("src/routes/home/pocket.svelte"), "utf8");
+const POCKET_HATCH_SOURCE = readFileSync(web("src/lib/pocket/Hatch.svelte"), "utf8");
+const POCKET_ROW_SOURCE = readFileSync(web("src/lib/pocket/Row.svelte"), "utf8");
+const POCKET_SHEET_SOURCE = readFileSync(web("src/lib/pocket/Sheet.svelte"), "utf8");
+const POCKET_INBOX_SOURCE = readFileSync(web("src/routes/inbox/pocket.svelte"), "utf8");
+const POCKET_REVIEWCARD_SOURCE = readFileSync(web("src/lib/pocket/ReviewCard.svelte"), "utf8");
+
+const ALL_POCKET_SOURCE = [
+  POCKET_HOME_SOURCE,
+  POCKET_HATCH_SOURCE,
+  POCKET_ROW_SOURCE,
+  POCKET_SHEET_SOURCE,
+  POCKET_INBOX_SOURCE,
+  POCKET_REVIEWCARD_SOURCE,
+].join("\n");
+
 /** Every name the source assigns to a class or an id, however it writes it —
  *  literal, Svelte expression, or DOM assignment. Lifted from
  *  v19-tour-chapter-arrive.test.mjs, which lifted it from v19-tour-stops. */
@@ -129,28 +151,50 @@ beforeEach(() => {
 });
 
 describe("the selectors chapter 7 names", () => {
-  it("every plain class one of them depends on exists in the real markup", () => {
+  it("every desk plain class one of them depends on exists in the real markup", () => {
     const rendered = namesIn(ALL_SOURCE);
-    for (const [beat, selector] of Object.entries(SELECTORS)) {
+    for (const [beat, selector] of Object.entries(SELECTORS.DESK)) {
       for (const token of tokensOf(selector)) {
         expect(
           rendered.has(token),
-          `chapter 7's "${beat}" names "${selector}", but no real screen renders a "${token}"`,
+          `chapter 7's desk "${beat}" names "${selector}", but no real screen renders a "${token}"`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("every pocket plain class one of them depends on exists in the pocket dialect's own markup", () => {
+    const rendered = namesIn(ALL_POCKET_SOURCE);
+    for (const [beat, selector] of Object.entries(SELECTORS.POCKET)) {
+      for (const token of tokensOf(selector)) {
+        expect(
+          rendered.has(token),
+          `chapter 7's pocket "${beat}" names "${selector}", but no pocket screen renders a "${token}"`,
         ).toBe(true);
       }
     }
   });
 
   it("names the inbox orb the way home's own markup renders it, distinct from the account orb", () => {
-    expect(SELECTORS.orb).toBe(".inbox-orb");
+    expect(SELECTORS.DESK.orb).toBe(".inbox-orb");
     expect(HOME_SOURCE).toContain("inbox-orb");
     /* the account orb chapter 11 opens has no inbox-orb class */
     expect(HOME_SOURCE).toMatch(/<button class="orb"/u);
   });
 
+  it("names the pocket account orb the way pocket home's own markup renders it", () => {
+    expect(SELECTORS.POCKET.orb).toBe("#morb");
+    expect(POCKET_HOME_SOURCE).toContain('id="morb"');
+  });
+
   it("names the real \"add to orbit\" control by its actual class", () => {
-    expect(SELECTORS.add).toBe(".receipt .actions button.yes");
+    expect(SELECTORS.DESK.add).toBe(".receipt .actions button.yes");
     expect(INBOX_SOURCE).toContain('class="yes"');
+  });
+
+  it("names the pocket's real \"add to orbit\" control by its actual class", () => {
+    expect(SELECTORS.POCKET.add).toBe(".pki-lane .rv-yes");
+    expect(POCKET_REVIEWCARD_SOURCE).toContain("rv-yes");
   });
 
   it("has no #1046 tour hook to reach for: this branch's inbox renders no .lanes at all when the queue is empty", () => {
@@ -209,7 +253,7 @@ describe("the beats, in the mockup's order", () => {
     expect(log[0]).toEqual(["setScreen", "/home"]);
     expect(log[1]).toEqual(["veil", false]);
     const veilTrue = log.findIndex(([word, on]) => word === "veil" && on === true);
-    const gotoOrb = log.findIndex(([word, sel]) => word === "goto" && sel === SELECTORS.orb);
+    const gotoOrb = log.findIndex(([word, sel]) => word === "goto" && sel === SELECTORS.DESK.orb);
     expect(veilTrue).toBeGreaterThan(-1);
     expect(veilTrue).toBeLessThan(gotoOrb);
   });
@@ -221,11 +265,11 @@ describe("the beats, in the mockup's order", () => {
     expect(said).toEqual([
       "callout",
       "Mail lands here first — filed, waiting for review, or still being read.",
-      SELECTORS.orb,
+      SELECTORS.DESK.orb,
       "left",
       "inbox-orb",
     ]);
-    const pressOrb = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.orb);
+    const pressOrb = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.orb);
     const setInbox = log.findIndex(([word, route]) => word === "setScreen" && route === "/inbox");
     expect(pressOrb).toBeGreaterThan(-1);
     expect(setInbox).toBeGreaterThan(pressOrb);
@@ -246,9 +290,9 @@ describe("the beats, in the mockup's order", () => {
     await inbox.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel, side, mark]) => [text, sel, side, mark]);
     expect(said.slice(1, 4)).toEqual([
-      ["Filed", SELECTORS.filed, "bottom", "inbox-lane-filed"],
-      ["For your review", SELECTORS.review, "bottom", "inbox-lane-review"],
-      ["Still reading", SELECTORS.reading, "top", "inbox-lane-reading"],
+      ["Filed", SELECTORS.DESK.filed, "bottom", "inbox-lane-filed"],
+      ["For your review", SELECTORS.DESK.review, "bottom", "inbox-lane-review"],
+      ["Still reading", SELECTORS.DESK.reading, "top", "inbox-lane-reading"],
     ]);
     const lanesMark = log.findIndex(([word, name]) => word === "mark" && name === "inbox-lanes");
     const lastLaneCallout = log.findIndex(([word, text]) => word === "callout" && text === "Still reading");
@@ -259,25 +303,25 @@ describe("the beats, in the mockup's order", () => {
     const { log, ctx } = recorder();
     await inbox.play(ctx);
     const laneGotos = log.filter(([word, , willPress]) => word === "goto" && willPress === false);
-    expect(laneGotos.map(([, sel]) => sel)).toEqual([SELECTORS.filed, SELECTORS.review, SELECTORS.reading]);
+    expect(laneGotos.map(([, sel]) => sel)).toEqual([SELECTORS.DESK.filed, SELECTORS.DESK.review, SELECTORS.DESK.reading]);
   });
 
   it("marks the whole three lanes as optional controls, so a household with nothing waiting still plays the beat", async () => {
     const { log, ctx } = recorder();
     await inbox.play(ctx);
     const ctlCalls = log.filter(([word]) => word === "ctl").map(([, sel]) => sel);
-    expect(ctlCalls).toContain(SELECTORS.filed);
-    expect(ctlCalls).toContain(SELECTORS.review);
-    expect(ctlCalls).toContain(SELECTORS.reading);
-    expect(ctlCalls).toContain(SELECTORS.add);
+    expect(ctlCalls).toContain(SELECTORS.DESK.filed);
+    expect(ctlCalls).toContain(SELECTORS.DESK.review);
+    expect(ctlCalls).toContain(SELECTORS.DESK.reading);
+    expect(ctlCalls).toContain(SELECTORS.DESK.add);
   });
 
   it("lights the review lane around the add button, then drops both together", async () => {
     const { log, ctx } = recorder();
     await inbox.play(ctx);
-    const litReview = log.findIndex(([word, sels]) => word === "light" && sels?.includes?.(SELECTORS.review));
-    const gotoAdd = log.findIndex(([word, sel]) => word === "goto" && sel === SELECTORS.add);
-    const pressAdd = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.add);
+    const litReview = log.findIndex(([word, sels]) => word === "light" && sels?.includes?.(SELECTORS.DESK.review));
+    const gotoAdd = log.findIndex(([word, sel]) => word === "goto" && sel === SELECTORS.DESK.add);
+    const pressAdd = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.add);
     const markAdd = log.findIndex(([word, name]) => word === "mark" && name === "inbox-add");
     const sayso = log.findIndex(([word, text]) => word === "callout" && text === "Nothing joins your orbit without your say-so.");
     expect(litReview).toBeGreaterThan(-1);
@@ -289,7 +333,7 @@ describe("the beats, in the mockup's order", () => {
        unlights the review lane by the same selector string earlier on. */
     const unlitTogether = log
       .slice(litReview + 1)
-      .filter(([word, sels]) => word === "unlight" && (sels?.includes?.(SELECTORS.add) || sels?.includes?.(SELECTORS.review)));
+      .filter(([word, sels]) => word === "unlight" && (sels?.includes?.(SELECTORS.DESK.add) || sels?.includes?.(SELECTORS.DESK.review)));
     expect(unlitTogether.length).toBe(2);
   });
 });

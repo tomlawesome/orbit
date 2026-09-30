@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmPlayer } from "../../web/src/lib/tour/player.js";
@@ -35,6 +35,17 @@ function setReducedMotion(matches) {
   window.matchMedia = () => ({
     matches,
     media: "(prefers-reduced-motion: reduce)",
+    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+  });
+}
+
+/** #1083: a `matchMedia` that answers both the reduced-motion query and
+ *  media.js's own `POCKET_QUERY` (`isPocket()`), so a test can mount the
+ *  transport in whichever dialect it needs. */
+function setMedia({ reduced = false, pocket = false } = {}) {
+  window.matchMedia = (query) => ({
+    matches: /prefers-reduced-motion/u.test(query) ? reduced : pocket,
+    media: query,
     addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
   });
 }
@@ -328,5 +339,191 @@ describe("a chapter that throws", () => {
     expect(String(errors[0])).toContain("nothing-the-product-renders");
     expect(player.playing()).toBe(false);
     expect(player.ended()).toBe(true);
+  });
+});
+
+describe("#1083: the pocket transport", () => {
+  /** Puts the pill up in the pocket dialect. */
+  function withPocketTransport(parts) {
+    setMedia({ pocket: true });
+    const face = mountTransport({ player: parts.player, clock: parts.clock, doc: document, loop: false });
+    return { ...parts, face };
+  }
+
+  afterEach(() => {
+    setMedia({ pocket: false });
+    document.documentElement.removeAttribute("data-tour-pocket");
+  });
+
+  it("paints twelve <i> ticks, not buttons, and carries data-pocket-above", async () => {
+    const parts = film();
+    await parts.player.measure();
+    withPocketTransport(parts);
+
+    const ticks = [...bar().querySelectorAll(".tick")];
+    expect(ticks).toHaveLength(12);
+    for (const tick of ticks) expect(tick.tagName).toBe("I");
+    expect(bar().getAttribute("data-pocket-above")).toBe("");
+    expect(document.documentElement.hasAttribute("data-tour-pocket")).toBe(true);
+  });
+
+  it("keeps ticks as real buttons on desk, and adds no pocket-only attribute", async () => {
+    const parts = film();
+    await parts.player.measure();
+    withTransport(parts); /* desk mount, default matchMedia (pocket false) */
+
+    const ticks = [...bar().querySelectorAll(".tick")];
+    for (const tick of ticks) expect(tick.tagName).toBe("BUTTON");
+    expect(bar().hasAttribute("data-pocket-above")).toBe(false);
+    expect(document.documentElement.hasAttribute("data-tour-pocket")).toBe(false);
+  });
+
+  it("the rail is one role=slider target with the chapter's own aria-valuenow", async () => {
+    const parts = film();
+    await parts.player.measure();
+    const { player } = withPocketTransport(parts);
+    player.jump(3);
+    await settle();
+
+    const track = bar().querySelector(".track");
+    expect(track.getAttribute("role")).toBe("slider");
+    expect(track.getAttribute("aria-valuemin")).toBe("0");
+    expect(track.getAttribute("aria-valuemax")).toBe("11");
+    expect(track.getAttribute("aria-valuenow")).toBe("3");
+    expect(track.getAttribute("aria-valuetext")).toContain("Chapter 4");
+    player.destroy();
+  });
+
+  it("a pointer drag aims a tick and jumps to it on release", async () => {
+    const parts = film();
+    await parts.player.measure();
+    const { player } = withPocketTransport(parts);
+    const track = bar().querySelector(".track");
+    track.getBoundingClientRect = () => ({ left: 0, right: 250, width: 250, top: 0, bottom: 44, height: 44, x: 0, y: 0, toJSON() {} });
+    track.setPointerCapture = () => {};
+
+    /* aimed near the very end of the rail */
+    track.dispatchEvent(new window.PointerEvent("pointerdown", { pointerId: 1, clientX: 240, bubbles: true }));
+    expect(bar().querySelector(".now").classList.contains("aim")).toBe(true);
+    expect(bar().classList.contains("touched")).toBe(true);
+
+    track.dispatchEvent(new window.PointerEvent("pointerup", { pointerId: 1, clientX: 240, bubbles: true }));
+    await settle();
+    expect(bar().querySelector(".now").classList.contains("aim")).toBe(false);
+    expect(player.chapter()).toBe(11); /* the last chapter, nearest the far end */
+    player.destroy();
+  });
+
+  it("ArrowRight/ArrowLeft/Home/End jump the rail", async () => {
+    const parts = film();
+    await parts.player.measure();
+    const { player } = withPocketTransport(parts);
+    player.jump(5);
+    await settle();
+    const track = bar().querySelector(".track");
+
+    track.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    expect(player.chapter()).toBe(6);
+    track.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true }));
+    expect(player.chapter()).toBe(5);
+    track.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Home", bubbles: true, cancelable: true }));
+    expect(player.chapter()).toBe(0);
+    track.dispatchEvent(new window.KeyboardEvent("keydown", { key: "End", bubbles: true, cancelable: true }));
+    expect(player.chapter()).toBe(11);
+    player.destroy();
+  });
+
+  it("docks to .top the instant a kit sheet opens, and comes home 350ms after it closes", async () => {
+    vi.useFakeTimers();
+    try {
+      const parts = film();
+      await parts.player.measure();
+      const { player } = withPocketTransport(parts);
+      player.jump(0);
+      await vi.advanceTimersByTimeAsync(0);
+
+      /* Real Sheet.svelte components mount their own `.p-sheet-layer` once
+         and toggle `open` on it after — an attribute change, not a new
+         node — which is exactly what the dock's own MutationObserver
+         watches for (§4.4: "attributes, class"). */
+      const layer = document.createElement("div");
+      layer.className = "p-sheet-layer";
+      document.body.appendChild(layer);
+      await vi.advanceTimersByTimeAsync(0);
+
+      layer.classList.add("open");
+      /* immediate on .open appearing (owner's fix 1) — no 150ms fade owed */
+      await vi.advanceTimersByTimeAsync(0);
+      expect(bar().classList.contains("top")).toBe(true);
+
+      layer.classList.remove("open");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(bar().classList.contains("top")).toBe(true); /* not yet — 350ms owed */
+      await vi.advanceTimersByTimeAsync(349);
+      expect(bar().classList.contains("top")).toBe(true);
+      /* the 350ms mark fires the move; the move's own 150ms fade-out then
+         applies the class */
+      await vi.advanceTimersByTimeAsync(1 + 150);
+      expect(bar().classList.contains("top")).toBe(false);
+      player.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stands .raised when a .pk-bar owns the foot", async () => {
+    vi.useFakeTimers();
+    try {
+      const parts = film();
+      await parts.player.measure();
+      const { player } = withPocketTransport(parts);
+      /* Mounted closed first, then given its class, the same way the dock's
+         attribute-only observer expects (see the .top test's own note). */
+      const pkBar = document.createElement("div");
+      pkBar.getBoundingClientRect = () => ({ height: 64, top: 0, bottom: 64, left: 0, right: 390, width: 390, x: 0, y: 0, toJSON() {} });
+      document.body.appendChild(pkBar);
+      await vi.advanceTimersByTimeAsync(0);
+      pkBar.className = "pk-bar";
+      await vi.advanceTimersByTimeAsync(0);
+      /* home -> raised is an ordinary move: the 150ms fade applies first */
+      await vi.advanceTimersByTimeAsync(151);
+      expect(bar().classList.contains("raised")).toBe(true);
+      player.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores its own tourfilm-marked Escape, and lets a reader's own sheet close without stopping the film", async () => {
+    const parts = film();
+    await parts.player.measure();
+    const { player } = withPocketTransport(parts);
+    player.jump(0);
+    await settle();
+
+    const tourfilmEscape = new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    Object.defineProperty(tourfilmEscape, "tourfilm", { value: true });
+    document.dispatchEvent(tourfilmEscape);
+    expect(player.ended()).toBe(false);
+
+    const layer = document.createElement("div");
+    layer.className = "p-sheet-layer open";
+    document.body.appendChild(layer);
+    document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    /* the film did not open this sheet (hasFilmOpenedSheet defaults false),
+       so the film must not stop for it */
+    expect(player.ended()).toBe(false);
+    player.destroy();
+  });
+
+  it("still stops on a real Escape with no sheet up", async () => {
+    const parts = film();
+    await parts.player.measure();
+    const { player } = withPocketTransport(parts);
+    player.jump(0);
+    await settle();
+    document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    expect(player.ended()).toBe(true);
+    player.destroy();
   });
 });

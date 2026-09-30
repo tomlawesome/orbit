@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import belt, { SELECTORS } from "../../web/src/lib/tour/chapters/08-the-belt.js";
+import { POCKET_RIDE } from "../../web/src/routes/item/[[id]]/band.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmPlayer } from "../../web/src/lib/tour/player.js";
 import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
@@ -27,6 +28,17 @@ const HOME_SOURCE = readFileSync(web("src/routes/home/+page.svelte"), "utf8");
 const ITEM_SOURCE = [
   "src/routes/item/[[id]]/+page.svelte",
   "src/routes/item/[[id]]/belt.behaviour.js",
+].map((file) => readFileSync(web(file), "utf8")).join("\n");
+
+/* #1083: the pocket's own body (pocket.svelte's `pk-body`) and its route to
+   `/item` (`pk-below`'s opened row, Row.svelte's own acts, and the reading
+   sheet a document's press raises, Sheet.svelte) — the pocket-only markup
+   chapter 8's POCKET selectors are checked against, beside the belt's own
+   (ITEM_SOURCE), which does not change shape for the pocket. */
+const POCKET_SOURCE = [
+  "src/routes/home/pocket.svelte",
+  "src/lib/pocket/Row.svelte",
+  "src/lib/pocket/Sheet.svelte",
 ].map((file) => readFileSync(web(file), "utf8")).join("\n");
 
 /** Lifted from v19-tour-chapter-arrive.test.mjs, which pins chapter 1's
@@ -199,16 +211,35 @@ beforeEach(() => {
 });
 
 describe("the selectors chapter 8 names", () => {
-  it("every one of them exists in home's or the belt's own markup", () => {
+  it("every desk one exists in home's or the belt's own markup", () => {
     const rendered = namesIn(HOME_SOURCE + "\n" + ITEM_SOURCE);
-    for (const [beat, selector] of Object.entries(SELECTORS)) {
+    for (const [beat, selector] of Object.entries(SELECTORS.DESK)) {
       for (const token of tokensOf(selector)) {
         expect(
           rendered.has(token),
-          `chapter 8's "${beat}" names "${selector}", but neither /home nor the belt renders "${token}"`,
+          `chapter 8's desk "${beat}" names "${selector}", but neither /home nor the belt renders "${token}"`,
         ).toBe(true);
       }
     }
+  });
+
+  it("every pocket one exists in the pocket dialect's or the belt's own markup", () => {
+    const rendered = namesIn(ITEM_SOURCE + "\n" + POCKET_SOURCE);
+    for (const [beat, selector] of Object.entries(SELECTORS.POCKET)) {
+      for (const token of tokensOf(selector)) {
+        expect(
+          rendered.has(token),
+          `chapter 8's pocket "${beat}" names "${selector}", but neither the pocket dialect nor the belt renders "${token}"`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("pins POCKET_RIDE (band.js) at at least one paper riding the belt", () => {
+    /* #1083: the two-papers count this chapter's docLabel/docHit beats rely
+       on being "however many ride" (see point 3 of the chapter's own header
+       comment) presumes the belt seats at least one. */
+    expect(POCKET_RIDE).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -262,11 +293,11 @@ describe("the beats, in round 6's order", () => {
     await belt.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel]);
     expect(said).toEqual([
-      ["Every body carries its documents in a belt around it.", SELECTORS.docLabel],
-      ["The belt is what you have attached to it.", SELECTORS.docLabel],
-      ["Click one to bring it in.", SELECTORS.docLabel],
-      ["The page itself, read without leaving the sky.", SELECTORS.cardwrap],
-      ["later → steps the belt — so do the arrow keys.", SELECTORS.laterInk],
+      ["Every body carries its documents in a belt around it.", SELECTORS.DESK.docLabel],
+      ["The belt is what you have attached to it.", SELECTORS.DESK.docLabel],
+      ["Click one to bring it in.", SELECTORS.DESK.docLabel],
+      ["The page itself, read without leaving the sky.", SELECTORS.DESK.cardwrap],
+      ["later → steps the belt — so do the arrow keys.", SELECTORS.DESK.laterInk],
     ]);
   });
 
@@ -274,19 +305,19 @@ describe("the beats, in round 6's order", () => {
     const { log, ctx } = recorder();
     await belt.play(ctx);
     const pressed = log.filter(([word]) => word === "press").map(([, sel]) => sel);
-    expect(pressed).toEqual([SELECTORS.body, SELECTORS.docLabel, SELECTORS.laterInk, SELECTORS.soonerInk]);
+    expect(pressed).toEqual([SELECTORS.DESK.body, SELECTORS.DESK.docLabel, SELECTORS.DESK.laterInk, SELECTORS.DESK.soonerInk]);
   });
 
   it("reads a paper for real right after pressing it, and unreads it on the later step", async () => {
     const { log, ctx } = recorder();
     await belt.play(ctx);
-    const pressPapers = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.docLabel);
+    const pressPapers = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.docLabel);
     const readAt = log.findIndex(([word]) => word === "read");
-    const pressLater = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.laterInk);
+    const pressLater = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.laterInk);
     const unreadAt = log.findIndex(([word]) => word === "unread");
     /* one `ctl` call for the paper's real hit sits between the two */
     expect(readAt).toBe(pressPapers + 2);
-    expect(log[readAt]).toEqual(["read", SELECTORS.docHit]);
+    expect(log[readAt]).toEqual(["read", SELECTORS.DESK.docHit]);
     expect(unreadAt).toBe(pressLater + 1);
     /* Only ever read once and unread once — one paper, whichever it is. */
     expect(log.filter(([word]) => word === "read")).toHaveLength(1);
@@ -296,8 +327,8 @@ describe("the beats, in round 6's order", () => {
   it("says no copy for ← sooner — one press each way is enough (round 6)", async () => {
     const { log, ctx } = recorder();
     await belt.play(ctx);
-    const afterLater = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.laterInk);
-    const soonerPress = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.soonerInk);
+    const afterLater = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.laterInk);
+    const soonerPress = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.soonerInk);
     const calloutsBetween = log
       .slice(afterLater + 1, soonerPress)
       .filter(([word]) => word === "callout");

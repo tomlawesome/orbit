@@ -42,10 +42,10 @@ const LABEL_ONLY_LINES = [
   "star chart · after dark · clouds · dawn · retrograde",
 ];
 
-function stage() {
+function stage({ pocket = false } = {}) {
   setReducedMotion(false);
   const clock = createClock({ reducedMotion: () => false });
-  const ctx = createFilmContext({ clock, doc: document });
+  const ctx = createFilmContext({ clock, doc: document, pocket });
   const player = createFilmPlayer({ clock, ctx, chapters: CHAPTERS });
   return { clock, ctx, player };
 }
@@ -113,5 +113,33 @@ describe("the film's script (round 7, #1097)", () => {
     });
 
     face.destroy();
+  });
+
+  it("#1083: the pocket script carries the shortened belt line, and never the label", async () => {
+    const { player } = stage({ pocket: true });
+    const { script } = await player.measure();
+    const allLines = script.flat();
+
+    expect(allLines).toContain("later → steps the belt.");
+    expect(allLines).not.toContain("later → steps the belt — so do the arrow keys.");
+    /* a label, not read into the script, on either dialect */
+    expect(allLines).not.toContain("Tap one to bring it in.");
+    expect(allLines).not.toContain("Click one to bring it in.");
+  });
+
+  it("#1083 §1: the desk script is byte-identical to a committed snapshot", async () => {
+    const { script } = await stage({ pocket: false }).player.measure();
+    expect(script).toMatchSnapshot();
+  });
+
+  it("#1083: is otherwise identical to the desk script, chapter for chapter", async () => {
+    const desk = await stage({ pocket: false }).player.measure();
+    const pocket = await stage({ pocket: true }).player.measure();
+    /* chapter 8 (index 7) carries the one changed line; every other chapter
+       is byte-identical between dialects. */
+    desk.script.forEach((lines, k) => {
+      if (k === 7) return;
+      expect(pocket.script[k], `chapter ${k + 1}`).toEqual(lines);
+    });
   });
 });

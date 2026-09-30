@@ -1183,6 +1183,9 @@ The cut is the desk dialect's own, `(min-width: 901px)` — the same one home
 uses to choose between its two dialects (CON-10) — so "desk" means exactly
 what it already means everywhere else in v19.
 
+**Shipped by #1083 on 2026-09-30:** the pocket cut plays on a pocket
+viewport and spends `tourSeenAt` the same way the desk cut does.
+
 ## 25. Accessibility means real access, not conformance wording (owner, 2026-09-25)
 
 WCAG is the default check. A departure from a criterion is fine if keyboard,
@@ -1357,3 +1360,37 @@ the same code and tokens as its planet on the dial; matching stays
 `pocket-search.js`'s, shared with the phone. Round 1's B survives as a
 feature idea (search that lights the dial); A is the fallback that was not
 needed. The build brief is `design/v19/search/round-1/BUILD.md`.
+
+## 32. The pocket cut of the one-take film (Fable's call, 2026-09-30)
+
+#1083's build notes (`design/v19/tour/round-8/build-notes.md`) translate the
+desk's one-take film (§23) to the pocket dialect. No verdicted design round
+first (owner, 2026-09-30): the desk film is precedent and this is a
+translation, not a new design; the owner reviews the built pocket film.
+Round 8 (`design/1083-tour-pocket`, 2026-09-24) drew the cut and the owner
+answered its three questions on 2026-09-25 (1a, 2c, 3b — see the issue).
+Calls below are Fable's own, made while writing the build notes, each with
+its reason:
+
+- **The transport is 64px tall with 12px type**, not round 8's 60px/9.5px,
+  because the kit's own type floor is 12px and the pill is drawn on the kit.
+- **The twelve chapter ticks are painted marks, not buttons**, on the
+  pocket: twelve 44px hit boxes cannot fit a 250px rail without lying about
+  their hit box, so the rail itself is the one slider target and the
+  keyboard route the desk's tick buttons were.
+- **The transport moves between its three places by a fade, never a
+  slide.** A pill sliding across a rising sheet clashes with it by
+  definition; the clash sampler is what decides, and a fade cannot clash.
+- **Chapter 2's recurrence beat is dropped on the pocket.** The pocket form
+  only renders "comes round" once a kind is really chosen, and really
+  choosing one dirties the form, so `/create`'s "Leave without adding?"
+  sheet would block chapter 3's `setScreen("/home")`. The one place the
+  pocket plays fewer beats than the desk; a product change could let it
+  come back (#1083 §11).
+- **A sky line** (a callout whose subject is the dial or a body on it)
+  anchors to the household's own sun, side `bottom`, `dy: 30`: it sits in
+  the dial's lower half beneath the household's name rather than over the
+  bodies, since the pocket dial has no empty quarter to put a line in.
+
+Both new phone strings (owner's 3b, and the belt's label) are recorded
+where they are said, `chapters/08-the-belt.js`; no other copy changed.
