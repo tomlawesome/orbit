@@ -133,10 +133,10 @@ const STYLES = `
    button across the WHOLE 62px pill and lands it under row one's own strip
    (#1083, pocket-measure's own "covered by" finding on the ARRIVE frame:
    .now and .pp overlapped because centring, not the row split, was placing
-   the button). .now/.tip (still .track's own children, unmoved) reach back
-   into row one by an offset the size of row two's own run of buttons — the
-   same trick .clock, a sibling positioned in row one, uses to reach the
-   right edge. */
+   the button). .now/.tip are bar's own children (moved there for Addendum
+   A/the "label spills out of its box" fix — see the JS construction's own
+   note), so row one is just their own left/top against the bar, the same
+   as .clock's own right/top reaches the opposite corner. */
 @media (max-width:900px),(max-height:600px){
   #${BAR_ID}{
     left:var(--p-gutter,16px);right:var(--p-gutter,16px);bottom:calc(12px + env(safe-area-inset-bottom));
@@ -160,16 +160,23 @@ const STYLES = `
   #${BAR_ID} .track{position:absolute;left:108px;right:0;top:19px;height:44px;margin:0;touch-action:none}
   #${BAR_ID} .rail{top:21px}
   #${BAR_ID} .fill,#${BAR_ID} .head{top:21px}
-  #${BAR_ID} .now,#${BAR_ID} .tip{position:absolute;top:-18px;left:-100px;right:auto;
+  #${BAR_ID} .now,#${BAR_ID} .tip{position:absolute;top:1px;left:8px;right:auto;
     font:12px var(--mono);letter-spacing:.14em;overflow:hidden;white-space:nowrap}
   /* round 3's own guard: no ellipsis on the pocket's chapter name. */
   #${BAR_ID} .now{text-overflow:clip}
-  #${BAR_ID} .clock{position:absolute;top:1px;right:0;margin-left:0;font:12px var(--mono)}
+  #${BAR_ID} .clock{position:absolute;top:1px;right:8px;margin-left:0;font:12px var(--mono)}
   /* The twelve ticks are painted marks here, not buttons (§4.2's Call): a
      44px hit box around an 18px spacing would overlap its neighbours, and
      the rail itself is the one keyboard/pointer target. */
   #${BAR_ID} .tick{position:absolute;top:19px;width:1px;height:6px;margin-left:-.5px;
     background:var(--ink-faint);border-radius:0;pointer-events:none}
+  /* The desk's own tick is a 18x38 button with an invisible face and a
+     painted ::after dash (this same stylesheet's desk-only rule, above);
+     the pocket's own tick is that dash drawn directly, an <i> with no face
+     to hide behind, and would otherwise inherit that ::after too — a second,
+     spurious mark below the one just drawn (#1083, found on the running
+     demo). */
+  #${BAR_ID} .tick::after{content:none}
   #${BAR_ID} .tick.aim{top:17px;height:10px;background:var(--accent)}
   #${BAR_ID} .now.aim{color:var(--accent)}
 }
