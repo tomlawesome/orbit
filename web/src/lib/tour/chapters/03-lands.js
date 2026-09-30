@@ -50,17 +50,37 @@ const DAYS = 381;
 
 /**
  * Every element this chapter names, so
- * tests/unit/v19-tour-chapter-lands.test.mjs can pin the real one (`.dial`)
- * against home's own markup. `.tourfilm-lands-body` is not real markup —
- * this chapter draws and removes it itself — so it is pinned by running the
- * chapter instead, the way chapter 5 pins `.tourfilm-time-body`.
+ * tests/unit/v19-tour-chapter-lands.test.mjs can pin the real ones against
+ * home's own markup (desk) and pocket.svelte's (pocket).
+ * `.tourfilm-lands-body` is not real markup — this chapter draws and removes
+ * it itself — so it is pinned by running the chapter instead, the way
+ * chapter 5 pins `.tourfilm-time-body`.
+ *
+ * #1083 §3.6: `dialPlacement()` returns coordinates in the dial's 380-unit
+ * viewBox, and the pocket dial's own `<svg>` shares that viewBox, so the
+ * demo body appends there with no scaling — `dialSvg` names that append
+ * target, separately from `dial`, the round container the ring wraps.
  */
 export const SELECTORS = Object.freeze({
-  /** The star chart itself — where the demo body lands, and the ring the
-   *  second callout names again. */
-  dial: ".dial",
-  /** The demo body this chapter draws and removes; never a real item. */
-  body: ".tourfilm-lands-body",
+  DESK: Object.freeze({
+    /** The star chart itself — where the demo body lands, and the ring the
+     *  second callout names again. It is its own `<svg>`, so it is also
+     *  where the demo body appends. */
+    dial: ".dial",
+    dialSvg: ".dial",
+    /** The demo body this chapter draws and removes; never a real item. */
+    body: ".tourfilm-lands-body",
+  }),
+  POCKET: Object.freeze({
+    /** The round dial, ringed whole. */
+    dial: ".pocket .mdial",
+    /** Its own `<svg>` — the demo body's real append target. */
+    dialSvg: ".pocket .mdial svg",
+    /** This household's own sun — the sky line's anchor (§3.3). */
+    sun: ".pocket .mdial .pk-sun",
+    /** The demo body this chapter draws and removes; never a real item. */
+    body: ".tourfilm-lands-body",
+  }),
 });
 
 /**
@@ -90,26 +110,34 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { setScreen, veil, ctl, goto, unlight, callout, dropCallout, dry, doc } = ctx;
+    const { pocket, setScreen, veil, ctl, goto, unlight, callout, dropCallout, dry, doc } = ctx;
+    const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
     await setScreen("/home");
     veil(false);
 
     /* The demo body lands, plain, before anything is taught. */
-    const dial = ctl({ sel: SELECTORS.dial });
+    const dialSvg = ctl({ sel: S.dialSvg });
     let bodyEl = null;
-    if (!dry() && dial.els[0]) bodyEl = drawLandedBody(doc, dial.els[0], DAYS);
+    if (!dry() && dialSvg.els[0]) bodyEl = drawLandedBody(doc, dialSvg.els[0], DAYS);
 
-    /* "Bodies orbit by when they're due." — the body that just landed. */
-    const body = ctl({ sel: SELECTORS.body, round: true, optional: true });
+    /* "Bodies orbit by when they're due." — the body that just landed, by
+       room (§3.2's resolution). */
+    const body = ctl({ sel: S.body, round: true, optional: true });
     await goto(body, { willPress: false });
     await callout("Bodies orbit by when they're due.", body, "top", { mark: "lands-body" });
     unlight(body);
 
-    /* "The nearer the ring, the sooner." — the whole chart, once more. */
-    const ring = ctl({ sel: SELECTORS.dial, round: true });
+    /* "The nearer the ring, the sooner." — the whole chart, once more. On the
+       pocket this is a sky line (§3.3): anchored to the sun, not the ring. */
+    const ring = ctl({ sel: S.dial, round: true });
     await goto(ring, { willPress: false });
-    await callout("The nearer the ring, the sooner.", ring, "right", { mark: "lands-ring" });
+    if (pocket) {
+      const sun = ctl({ sel: SELECTORS.POCKET.sun, round: true });
+      await callout("The nearer the ring, the sooner.", sun, "bottom", { dy: 30, mark: "lands-ring" });
+    } else {
+      await callout("The nearer the ring, the sooner.", ring, "right", { mark: "lands-ring" });
+    }
     unlight(ring);
     dropCallout();
 

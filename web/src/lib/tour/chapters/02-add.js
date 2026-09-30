@@ -41,24 +41,52 @@
 /**
  * Every element this chapter names, in one place, so
  * tests/unit/v19-tour-chapter-add.test.mjs can pin them against real markup.
+ *
+ * #1083: two frozen sets. The pocket route is `#morb`'s hatch → its own
+ * "Add an item" row → `/create`'s pocket form (§5 of the build notes); there
+ * is no drawer, so the pocket set names the hatch and its row instead of a
+ * drawer's own card.
  */
 export const SELECTORS = Object.freeze({
-  /** Home's own handle for adding something new. */
-  star: "#nstar",
-  /** The considered form itself, once `/create` opens. */
-  card: "#card",
-  /** What to call it. */
-  name: "#f-name",
-  /** The type chip nearest the mockup's own "insp" control. */
-  inspection: '#types button[data-type="inspection"]',
-  /** When it's due. */
-  due: "#f-date",
-  /** What it costs. */
-  cost: "#f-cost",
-  /** How often — already defaulted to yearly. */
-  recurrence: "#f-recur",
-  /** Saves the entry. */
-  add: "#card .btn-primary",
+  DESK: Object.freeze({
+    /** Home's own handle for adding something new. */
+    star: "#nstar",
+    /** The considered form itself, once `/create` opens. */
+    card: "#card",
+    /** What to call it. */
+    name: "#f-name",
+    /** The type chip nearest the mockup's own "insp" control. */
+    inspection: '#types button[data-type="inspection"]',
+    /** When it's due. */
+    due: "#f-date",
+    /** What it costs. */
+    cost: "#f-cost",
+    /** How often — already defaulted to yearly. */
+    recurrence: "#f-recur",
+    /** Saves the entry. */
+    add: "#card .btn-primary",
+  }),
+  POCKET: Object.freeze({
+    /** Home's own account orb — opens the hatch. */
+    orb: "#morb",
+    /** Any open sheet's own panel — lit `ringless` while the hatch's own
+     *  "Add an item" row is ringed inside it (round 8's cut-out, §3.5). */
+    panel: ".p-sheet-layer.open .p-sheet-panel",
+    /** The hatch's own "Add an item" row. */
+    addLink: '.p-sheet-layer.open [data-row-face][href$="/create"]',
+    /** The pocket form's first card — the kind chips. */
+    card: "#pocket-entry .pc-form > .pc-card:first-child",
+    /** What to call it. */
+    name: '#pocket-entry input[id$="-name"]',
+    /** The inspection chip: `KINDS[2].id === "inspection"` (entry.js). */
+    inspection: "#pocket-entry .pc-kinds .pc-chip:nth-child(3)",
+    /** When it's due — present with no kind chosen (`kindHasDate(null)`). */
+    due: '#pocket-entry input[id$="-due"]',
+    /** What it costs. */
+    cost: '#pocket-entry input[id$="-cost"]',
+    /** The save bar's own save pill. */
+    add: ".pk-bar .pk-save",
+  }),
 });
 
 /** @type {import("./index.js").Chapter} */
@@ -68,24 +96,55 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { setScreen, veil, ctl, goto, press, typeInto, quiet, unlight, callout, dropCallout, mark, w, T } = ctx;
+    const {
+      pocket, setScreen, veil, ctl, goto, press, typeInto, quiet, unlight, light, callout, dropCallout, mark,
+      open, close, waitForReal, w, T,
+    } = ctx;
+    const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
     await setScreen("/home");
     veil(false);
 
-    /* "There's your add." — the north star, dimmed down to it before it's touched. */
-    const star = ctl({ sel: SELECTORS.star, round: true });
-    veil(true);
-    await goto(star);
-    await press(star);
-    await mark("add-star");
-    unlight(star);
+    if (pocket) {
+      /* The account orb opens the hatch; its own "Add an item" row leads to
+         `/create` — there is no drawer on the pocket (#1083 §2). */
+      const orb = ctl({ sel: SELECTORS.POCKET.orb, round: true });
+      veil(true);
+      await goto(orb);
+      await press(orb);
+      open(orb);
+      await w(T.sheet);
+      const panel = ctl({ sel: SELECTORS.POCKET.panel, ringless: true });
+      light(panel);
+      const addLink = ctl({ sel: SELECTORS.POCKET.addLink, radius: 10 });
+      await goto(addLink);
+      await press(addLink);
+      await mark("add-star");
+      unlight(addLink);
+      unlight(panel);
+      await close();
+      await setScreen("/create");
+      /* The pocket's own /create reads the household list before it draws
+         its form at all (routes/create/pocket.svelte's `phase`) — real
+         network time a single settle() tick does not wait out. */
+      await waitForReal(SELECTORS.POCKET.card);
+    } else {
+      /* "There's your add." — the north star, dimmed down to it before it's touched. */
+      const star = ctl({ sel: SELECTORS.DESK.star, round: true });
+      veil(true);
+      await goto(star);
+      await press(star);
+      await mark("add-star");
+      unlight(star);
 
-    /* The drawer's own "open the full form" leads here. */
-    await setScreen("/create");
+      /* The drawer's own "open the full form" leads here. */
+      await setScreen("/create");
+    }
 
-    /* "Add anything here, by hand or by forwarding a document." — the whole form, named once. */
-    const card = ctl({ sel: SELECTORS.card, radius: 16 });
+    /* "Add anything here, by hand or by forwarding a document." — the whole
+       form, named once. The pocket stands the pill on its own save bar once
+       `/create` is up (transport.js's own dock/stand, automatic). */
+    const card = ctl({ sel: S.card, radius: 16 });
     await goto(card, { willPress: false });
     await callout(
       "Add anything here, by hand or by forwarding a document.",
@@ -97,7 +156,7 @@ export default {
     unlight(card);
 
     /* What to call it, typed in — and marked half-way through the name. */
-    const name = ctl({ sel: SELECTORS.name, radius: 10 });
+    const name = ctl({ sel: S.name, radius: 10 });
     await goto(name);
     await press(name);
     await typeInto(name, "Car MOT — Volvo V60", { mark: "add-typing" });
@@ -106,14 +165,14 @@ export default {
 
     /* What kind of thing it is — held at a quiet ring once chosen, same as
        the mockup leaves its own insp control. */
-    const inspection = ctl({ sel: SELECTORS.inspection, radius: 16 });
+    const inspection = ctl({ sel: S.inspection, radius: pocket ? 22 : 16 });
     await goto(inspection);
     await press(inspection);
     quiet(inspection);
     await w(T.field);
 
     /* When it's due. */
-    const due = ctl({ sel: SELECTORS.due, radius: 12 });
+    const due = ctl({ sel: S.due, radius: 12 });
     await goto(due);
     await press(due);
     await typeInto(due, "29 Aug 2027");
@@ -121,23 +180,31 @@ export default {
     await w(T.field);
 
     /* What it costs. */
-    const cost = ctl({ sel: SELECTORS.cost, radius: 12 });
+    const cost = ctl({ sel: S.cost, radius: 12 });
     await goto(cost);
     await press(cost);
     await typeInto(cost, "54.85");
     unlight(cost);
     await w(T.field);
 
-    /* How often — already yearly by default. */
-    const recurrence = ctl({ sel: SELECTORS.recurrence, radius: 12 });
-    await goto(recurrence);
-    await press(recurrence);
-    unlight(recurrence);
-    await mark("add-yearly");
-    await w(T.field);
+    /* How often — already yearly by default. #1083 §6's Call: dropped on
+       the pocket. The pocket form only renders "comes round" once a kind is
+       really chosen, and really choosing one dirties the form so
+       `/create`'s "Leave without adding?" sheet would block chapter 3's
+       `setScreen("/home")`. This is the one place the pocket plays fewer
+       beats than the desk (#1083 §11: a product change, not the film's,
+       would let this come back). */
+    if (!pocket) {
+      const recurrence = ctl({ sel: SELECTORS.DESK.recurrence, radius: 12 });
+      await goto(recurrence);
+      await press(recurrence);
+      unlight(recurrence);
+      await mark("add-yearly");
+      await w(T.field);
+    }
 
     /* Saved — left lit; the next chapter picks up from here. */
-    const add = ctl({ sel: SELECTORS.add, radius: 14 });
+    const add = ctl({ sel: S.add, radius: pocket ? 22 : 14 });
     await goto(add);
     await press(add);
     await mark("add-add");

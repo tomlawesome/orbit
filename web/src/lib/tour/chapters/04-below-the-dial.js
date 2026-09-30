@@ -49,17 +49,27 @@
 /**
  * Every element this chapter names, in one place, so
  * tests/unit/v19-tour-chapter-below-the-dial.test.mjs can pin them against
- * home's real markup.
+ * home's real markup (desk) and pocket.svelte's (pocket).
  */
 export const SELECTORS = Object.freeze({
-  /** The manifest column itself — always rendered, and the ratified
-   *  "manifest" stop's own target (stops.js). */
-  manifest: "#manifest-top",
-  /** The manifest's own "TODAY ·" header row. */
-  today: "#manifest-top .today",
-  /** One manifest row, real item or suggestion, whichever sits first — the
-   *  law read out applies to either. */
-  row: "#manifest-top .item",
+  DESK: Object.freeze({
+    /** The manifest column itself — always rendered, and the ratified
+     *  "manifest" stop's own target (stops.js). */
+    manifest: "#manifest-top",
+    /** The manifest's own "TODAY ·" header row. */
+    today: "#manifest-top .today",
+    /** One manifest row, real item or suggestion, whichever sits first — the
+     *  law read out applies to either. */
+    row: "#manifest-top .item",
+  }),
+  POCKET: Object.freeze({
+    /** The manifest column, pocket.svelte's own. */
+    manifest: ".pocket .pk-below",
+    /** Its own caption header, first if there is more than one group. */
+    today: ".pocket .pk-below h2.p-caps",
+    /** One manifest row, whichever sits first. */
+    row: ".pocket .pk-below .p-row",
+  }),
 });
 
 /** The mockup's own lead-in before the scroll begins, verbatim. */
@@ -72,14 +82,16 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { setScreen, veil, ctl, goto, unlight, callout, dropCallout, mark, w, T, dry, doc } = ctx;
+    const { pocket, setScreen, veil, ctl, goto, unlight, callout, dropCallout, mark, w, T, dry, doc } = ctx;
+    const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
     await setScreen("/home");
     veil(false);
 
     /* The page scrolls down to the manifest — for real, since it genuinely
-       sits below the fold here. */
-    const manifest = ctl({ sel: SELECTORS.manifest });
+       sits below the fold here. Nothing on the pocket home is fixed except
+       the top chrome, which retracts on scroll on its own (#1083 §6). */
+    const manifest = ctl({ sel: S.manifest });
     await w(T.cross);
     await w(SCROLL_LEAD_MS);
     if (!dry()) manifest.els[0]?.scrollIntoView?.({ behavior: "auto", block: "start" });
@@ -89,7 +101,7 @@ export default {
     veil(true);
 
     /* "The manifest lists what's ahead, nearest first." — its own header. */
-    const today = ctl({ sel: SELECTORS.today, radius: 8, optional: true });
+    const today = ctl({ sel: S.today, radius: 8, optional: true });
     await goto(today, { willPress: false });
     await callout("The manifest lists what's ahead, nearest first.", today, "left", {
       w: 196,
@@ -98,7 +110,7 @@ export default {
     unlight(today);
 
     /* "Same law as the dial..." — one row, whichever sits first. */
-    const row = ctl({ sel: SELECTORS.row, radius: 14, optional: true });
+    const row = ctl({ sel: S.row, radius: 14, optional: true });
     await goto(row, { willPress: false });
     await callout(
       "Same law as the dial, read top to bottom instead of round the ring.",

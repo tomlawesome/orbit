@@ -77,20 +77,38 @@ const LEAD_MS = 200;
  * Every element this chapter names, so
  * tests/unit/v19-tour-chapter-done.test.mjs can pin the real ones (`.item-card`,
  * the done button's position, `.dial`) against the item and home screens'
- * own markup. `.tourfilm-time-body` is not real markup — this chapter draws
- * and removes it itself — so it is pinned by running the chapter instead.
+ * own markup (desk) and pocket's (pocket). `.tourfilm-time-body` is not real
+ * markup — this chapter draws and removes it itself — so it is pinned by
+ * running the chapter instead.
  */
 export const SELECTORS = Object.freeze({
-  /** The item screen's own card, whichever record rides at the apex. */
-  card: ".item-card",
-  /** The record's own complete action: first of the item's actions,
-   *  whenever it is active (see the header note on why this cannot be a
-   *  class or id instead). */
-  done: '.acts[aria-label="Item actions"] button:first-child',
-  /** The star chart, so the demo body has somewhere real to live. */
-  dial: ".dial",
-  /** The demo body this chapter draws and removes; never a real item. */
-  body: ".tourfilm-time-body",
+  DESK: Object.freeze({
+    /** The item screen's own card, whichever record rides at the apex. */
+    card: ".item-card",
+    /** The record's own complete action: first of the item's actions,
+     *  whenever it is active (see the header note on why this cannot be a
+     *  class or id instead). */
+    done: '.acts[aria-label="Item actions"] button:first-child',
+    /** The star chart, so the demo body has somewhere real to live. */
+    dial: ".dial",
+    dialSvg: ".dial",
+    /** The demo body this chapter draws and removes; never a real item. */
+    body: ".tourfilm-time-body",
+  }),
+  POCKET: Object.freeze({
+    /** Same class as desk. */
+    card: ".item-card",
+    /** The pocket's own complete action, a real class this time. */
+    done: '.ip-acts[aria-label="Item actions"] .ip-complete',
+    /** The round dial. */
+    dial: ".pocket .mdial",
+    /** Its own `<svg>` — the demo body's real append target (§3.6). */
+    dialSvg: ".pocket .mdial svg",
+    /** This household's own sun — the sky line's anchor (§3.3). */
+    sun: ".pocket .mdial .pk-sun",
+    /** The demo body this chapter draws and removes; never a real item. */
+    body: ".tourfilm-time-body",
+  }),
 });
 
 /** Eased 0..1, matching chapter 5's own (and the mockup's `walk`). @param {number} t */
@@ -133,16 +151,17 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { setScreen, veil, ctl, goto, press, light, unlight, callout, dropCallout, tween, w, T, mark, dry, doc } = ctx;
+    const { pocket, setScreen, veil, ctl, goto, press, light, unlight, callout, dropCallout, tween, w, T, mark, dry, doc } = ctx;
+    const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
     await setScreen("/item");
     veil(true);
 
     /* The whole card stays lit while the complete button is taught within it. */
-    const card = ctl({ sel: SELECTORS.card, radius: 16, optional: true });
+    const card = ctl({ sel: S.card, radius: 16, optional: true });
     light(card);
 
-    const done = ctl({ sel: SELECTORS.done, radius: 10, optional: true });
+    const done = ctl({ sel: S.done, radius: pocket ? 22 : 10, optional: true });
     await goto(done);
     await callout(
       "MOT passed — mark it done and it swings back out to next year.",
@@ -160,13 +179,13 @@ export default {
     await setScreen("/home");
     veil(false);
 
-    const dial = ctl({ sel: SELECTORS.dial });
+    const dialSvg = ctl({ sel: S.dialSvg });
     let bodyEl = null;
-    if (!dry() && dial.els[0]) bodyEl = drawTimeBody(doc, dial.els[0], DAYS_NEAR);
+    if (!dry() && dialSvg.els[0]) bodyEl = drawTimeBody(doc, dialSvg.els[0], DAYS_NEAR);
     await w(T.cross);
     await w(LEAD_MS);
 
-    const body = ctl({ sel: SELECTORS.body, round: true, optional: true });
+    const body = ctl({ sel: S.body, round: true, optional: true });
     light(body);
     await tween(WALK_MS, (t) => {
       if (dry() || !bodyEl) return;
@@ -176,13 +195,25 @@ export default {
     });
     await mark("done-swung");
 
+    /* "A repeat is never finished..." — a sky line on the pocket (§3.3):
+       anchored to the sun, not the body. */
     await goto(body, { willPress: false });
-    await callout(
-      "A repeat is never finished; it comes round. A one-off simply ends.",
-      body,
-      "top",
-      { mark: "done-round" },
-    );
+    if (pocket) {
+      const sun = ctl({ sel: SELECTORS.POCKET.sun, round: true });
+      await callout(
+        "A repeat is never finished; it comes round. A one-off simply ends.",
+        sun,
+        "bottom",
+        { dy: 30, mark: "done-round" },
+      );
+    } else {
+      await callout(
+        "A repeat is never finished; it comes round. A one-off simply ends.",
+        body,
+        "top",
+        { mark: "done-round" },
+      );
+    }
     unlight(body);
     dropCallout();
 
