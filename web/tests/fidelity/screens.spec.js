@@ -415,6 +415,13 @@ const SCREENS = [
     mockupOnly: [".foot"],
   },
   {
+    name: "stumble",
+    /* The 500 (#1139): a fixtures-only route that genuinely fails in load. */
+    path: "/kit/stumble",
+    stage: "owned",
+    settle: () => document.querySelectorAll(".stumble .digit").length === 3,
+  },
+  {
     name: "maintenance",
     /* The fixture window has three entries, so this is the state WITH the
        arrow — the drawer closed, as it first renders. The one-entry state,

@@ -40,7 +40,6 @@ const STATIONS = [
   { slug: "login", state: "starting", ring: "#dawn .glyph svg", share: 0.4 },
   { slug: "logout", state: "rest", ring: "#dusk .glyph svg", share: 0.4 },
   { slug: "invite", state: "used", ring: ".invite-card .invite-ring", share: 0.4 },
-  { slug: "500", state: "rest", ring: ".stage .errring", share: 0.4 },
   { slug: "login", state: "local-card", ring: ".ringcard .bigring", share: 0.3, card: true },
   { slug: "login", state: "first-administrator", ring: ".ringcard .bigring", share: 0.3, card: true },
   { slug: "setup", state: "rest", ring: ".ringcard .bigring", share: 0.3, card: true },

@@ -57,18 +57,22 @@ export function archiveOf({ workspace, receipts = [], documentsByItem = {}, toda
     }
   }
   for (const receipt of receipts.filter((one) => one.canApprove)) {
+    /* The count-only fallback names nothing beyond its own line, so it is
+       typed loosely here rather than as the API's full attachment shape --
+       every read below already treats sizeBytes and scanState as absent. */
     const attachments =
-      receipt.attachments ??
+      /** @type {{ displayName: string, sizeBytes?: number, scanState?: "clean" | "unknown" }[]} */
+      (receipt.attachments ??
       (receipt.attachmentCount
         ? [{ displayName: `${receipt.attachmentCount} forwarded document${receipt.attachmentCount === 1 ? "" : "s"}` }]
-        : []);
+        : []));
     for (const [index, attachment] of attachments.entries()) {
       rows.push({
         id: `${receipt.id}-att-${index}`,
         name: /** @type {string} */ (attachment.displayName),
         sizeBytes: attachment.sizeBytes ?? null,
         addedAt: /** @type {string} */ (receipt.receivedAt),
-        clean: attachment.scannedClean ?? null,
+        clean: attachment.scanState === "clean",
         suggestion: receipt.proposal?.title ?? "Forwarded email",
         receiptId: receipt.id,
         household: null,

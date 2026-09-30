@@ -1,6 +1,7 @@
 import { readDocumentPagePreview } from "orbit/server/document-preview";
 
 import { placeholderPageSvg, requireFixtureDocument } from "$lib/server/document-content-fixture.js";
+import { placeholderResponse, previewResponse } from "$lib/server/preview-response.js";
 import { read } from "$lib/server/api.js";
 
 /**
@@ -19,19 +20,7 @@ export const GET = read(
   async (event, session) => {
     const documentId = /** @type {string} */ (event.params.documentId);
     const preview = await readDocumentPagePreview(session.user.id, documentId);
-    const responseBody = Uint8Array.from(preview.bytes);
-    preview.bytes.fill(0);
-    return new Response(responseBody, {
-      status: 200,
-      headers: {
-        "Cache-Control": "private, no-store",
-        "Content-Disposition": "inline",
-        "Content-Length": String(responseBody.length),
-        "Content-Security-Policy": "default-src 'none'; sandbox",
-        "Content-Type": preview.mediaType,
-        "X-Content-Type-Options": "nosniff",
-      },
-    });
+    return previewResponse(preview);
   },
   {
     /* #1141: with no engine behind ORBIT_FIXTURES=1, this answered every
@@ -40,18 +29,7 @@ export const GET = read(
        placeholder page keeps the same headers the real route carries. */
     fixture: (event) => {
       const doc = requireFixtureDocument(/** @type {string} */ (event.params.documentId));
-      const body = placeholderPageSvg(doc.displayName);
-      return new Response(body, {
-        status: 200,
-        headers: {
-          "Cache-Control": "private, no-store",
-          "Content-Disposition": "inline",
-          "Content-Length": String(Buffer.byteLength(body)),
-          "Content-Security-Policy": "default-src 'none'; sandbox",
-          "Content-Type": "image/svg+xml",
-          "X-Content-Type-Options": "nosniff",
-        },
-      });
+      return placeholderResponse(placeholderPageSvg(doc.displayName));
     },
   },
 );
