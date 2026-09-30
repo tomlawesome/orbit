@@ -1,5 +1,7 @@
 # Sign-in door states — round 1 (#788)
 
+> **Verdict (owner, 2026-09-06):** C — the held dawn — is ratified; A, B and D are dropped.
+
 Wording and placement for the three states where the v19 door cannot open,
 per the owner's 2026-09-05 decision: all three live on the door, the button
 is hidden while sign-in is unavailable, fixed Orbit-owned wording styled to
