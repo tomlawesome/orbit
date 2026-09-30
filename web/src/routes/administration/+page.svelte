@@ -6,20 +6,29 @@
     commandMailbox,
     createLocalUser,
     createSystem,
+    hardDeleteHousehold,
     readAdminScreen,
     readSignInMethods,
+    restoreHousehold,
+    retryDocumentJob,
     sendSetupLink,
     startStepUp,
+    testMail,
   } from "$lib/data/workspace.js";
+  import { deletionNameMatches } from "$lib/data/household.js";
   import { SETUP_LINK_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { constellationPlanetsOf, galaxyOf } from "$lib/data/chart.js";
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { mountStation } from "$lib/backdrops/station.js";
+  import { ago } from "$lib/format.js";
   import Chrome from "$lib/Chrome.svelte";
   import { isPocket } from "$lib/pocket/media.js";
   import Pocket from "./pocket.svelte";
-  import { SETUP_LINK_DAYS, initialsOf, lapses, openFor, plainly, sendWords, setupWords, stamp } from "./words.js";
+  import {
+    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, initialsOf, lapses, openFor, plainly,
+    sendWords, setupWords, stamp, testVerdict,
+  } from "./words.js";
   import "./administration.css";
 
   /**
@@ -61,6 +70,10 @@
   let backdropRoot = null;
   /* #1123: on a phone the pocket's column holds the page's one main landmark. */
   const pocket = isPocket();
+  /** @param {unknown} error */
+  const said = (error) => /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+  /** @param {number} n @param {string} one @param {string} [many] */
+  const count = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
   /* §11 (#453): direct placement — it lands on the real route and refreshes
      the screen with the server's answer. Deciding join requests is NOT an
@@ -149,6 +162,86 @@
       systemProblem = setupWords(error);
     } finally {
       systemBusy = false;
+    }
+  }
+
+  /* HOUSEHOLD RECOVERY ON THE CLOCK (#1001, design/v19/household-recovery/
+     round-1/b-the-row-on-the-clock.html, owner-decisions §19). A household
+     whose deletion is requested and still inside its 30-day window carries
+     its own state and both acts on its Systems row; nothing is drawn once
+     nothing is scheduled. Restore is the safe act, one tap. Delete now
+     follows the household page's own danger protocol exactly (§15, "57 admin
+     only": restore is drawn on administration only, never on the household
+     page, whatever the server allows). */
+  const recoverable = $derived.by(() => view?.recoverable ?? []);
+  /** @param {string} iso */
+  const daysLeft = (iso) => Math.max(0, Math.ceil(
+    (Date.parse(iso) - Date.parse(view?.now ?? new Date().toISOString())) / 86_400_000,
+  ));
+  /** @param {string} iso */
+  const goneOn = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "long", timeZone: "UTC" });
+  /** @param {{ deleteAfter: string }} row */
+  const expired = (row) => Date.parse(row.deleteAfter) <= Date.parse(view?.now ?? new Date().toISOString());
+
+  /** What was said on a row after restoring it, keyed by household id. @type {Record<string, { ok: boolean, text: string }>} */
+  let clockSaid = $state({});
+  /** @param {{ id: string, name: string }} row */
+  async function restoreRow(row) {
+    try {
+      await restoreHousehold(row.id);
+      clockSaid[row.id] = { ok: true, text: `restored · ${row.name} is back exactly as it was` };
+      view = await readAdminScreen();
+    } catch (error) {
+      clockSaid[row.id] = { ok: false, text: `not restored — ${said(error)}` };
+    }
+  }
+
+  /** Which row's "delete now" confirm is open, and what has been typed into each. @type {Record<string, boolean>} */
+  let doomConfirming = $state({});
+  /** @type {Record<string, string>} */
+  let doomTypedName = $state({});
+  /** @type {Record<string, string | null>} */
+  let doomProblem = $state({});
+  /** Rows replaced by their said-line after a hard delete. @type {{ id: string, text: string }[]} */
+  let doomGone = $state([]);
+  /** @param {{ id: string, name: string }} row */
+  const openDoomConfirm = (row) => {
+    doomConfirming[row.id] = true;
+    doomTypedName[row.id] = "";
+    doomProblem[row.id] = null;
+  };
+  /** @param {{ id: string, name: string }} row */
+  const doomNameOk = (row) => deletionNameMatches(doomTypedName[row.id] ?? "", row.name);
+
+  /* The two-tap protocol (household page's own danger line): the first tap
+     arms the button and does nothing else; the second fires. An unfired arm
+     relaxes on its own after 4 seconds, exactly as the mockup's own script
+     does. */
+  /** @type {string | null} */
+  let doomArmed = $state(null);
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let doomArmTimer = null;
+  /** @param {{ id: string, name: string }} row */
+  function twoTapDoom(row) {
+    if (doomArmed === row.id) {
+      clearTimeout(doomArmTimer ?? undefined);
+      doomArmed = null;
+      fireDoom(row);
+      return;
+    }
+    clearTimeout(doomArmTimer ?? undefined);
+    doomArmed = row.id;
+    doomArmTimer = setTimeout(() => (doomArmed = null), 4_000);
+  }
+  /** @param {{ id: string, name: string }} row */
+  async function fireDoom(row) {
+    try {
+      await hardDeleteHousehold(row.id, doomTypedName[row.id] ?? "");
+      doomConfirming[row.id] = false;
+      doomGone = [...doomGone, { id: row.id, text: `deleted · ${row.name} is gone for good · its members keep their accounts` }];
+      view = await readAdminScreen();
+    } catch (error) {
+      doomProblem[row.id] = said(error);
     }
   }
 
@@ -401,6 +494,120 @@
     }
   }
 
+  /* DOCUMENT JOBS AND THE TWO MAIL TESTS (#1071, design/v19/administration-ops/
+     round-2/f-the-screens-grammar.html, owner 2026-09-19 "much better, good
+     job. approved"). One family of state pills, coloured like the ADMIN
+     pill: bad (failed), warm (retrying), run (running), ok (passed),
+     quiet-and-breathing (checking). */
+  /** @type {Record<string, string>} */
+  const ROLE_TONE = { over: "bad", soon: "warn", up: "run", "": "" };
+
+  /* Document jobs: a People row without an avatar, ordered by what needs the
+     reader, `retry` on FAILED rows only. Retrying flips the row to QUEUED at
+     once, the same optimistic update the phone's own retry makes — the next
+     screen re-read (any other admin act) settles it against the server. */
+  /** @type {Record<string, { status: string, at: string }>} */
+  let retriedJobs = $state({});
+  const jobs = $derived.by(() => {
+    const list = (view?.operations?.documentJobs ?? []).map((job) => retriedJobs[job.id]
+      ? { ...job, status: /** @type {typeof job.status} */ (retriedJobs[job.id].status), attempts: 0, updatedAt: retriedJobs[job.id].at }
+      : job);
+    return list.sort((a, b) => (JOB_STATES[a.status]?.rank ?? 9) - (JOB_STATES[b.status]?.rank ?? 9)
+      || Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  });
+  const jobCounts = $derived.by(() => {
+    /** @type {Record<string, number>} */
+    const by = {};
+    for (const job of jobs) by[job.status] = (by[job.status] ?? 0) + 1;
+    return ["failed", "retry", "processing", "pending", "completed"].filter((status) => by[status])
+      .map((status) => `${by[status]} ${JOB_STATES[status].word}`).join(" · ");
+  });
+  const jobsClock = $derived.by(() => view?.now ?? new Date().toISOString());
+  /** @param {(typeof jobs)[number]} job */
+  const jobMeta = (job) => {
+    /* The failed row's reason lives in its subtext permanently, with the
+       tries and when it was last tried alongside it (the issue's own
+       example: "couldn't reach the virus scanner · 5 of 5 tries · last
+       tried 6m ago"). The client has no per-kind maximum to print "of N"
+       against, so only the count travels, as the phone's own detail panel
+       already shows it. */
+    if (job.status === "failed") {
+      return `${JOB_REASONS[job.lastErrorCode ?? "unknown"] ?? JOB_REASONS.unknown} · ${count(job.attempts, "try", "tries")} · last tried ${ago(job.updatedAt, jobsClock)}`;
+    }
+    if (job.status === "retry") return job.lastErrorCode ? JOB_REASONS[job.lastErrorCode] ?? JOB_REASONS.unknown : `last tried ${ago(job.updatedAt, jobsClock)}`;
+    if (job.status === "pending") return retriedJobs[job.id] ? "attempt 1 · queued just now" : `queued ${ago(job.createdAt, jobsClock)}`;
+    if (job.status === "processing") return `started ${ago(job.updatedAt, jobsClock)}`;
+    return `${JOB_STATES[job.status]?.word ?? job.status} ${ago(job.updatedAt, jobsClock)}`;
+  };
+  /** @type {string | null} */
+  let jobsProblem = $state(null);
+  /** @param {(typeof jobs)[number]} job */
+  async function retryJob(job) {
+    jobsProblem = null;
+    try {
+      await retryDocumentJob(job.id, job.status);
+      retriedJobs[job.id] = { status: "pending", at: new Date().toISOString() };
+    } catch (error) {
+      jobsProblem = said(error);
+    }
+  }
+
+  /* The two live mail tests: "test this mailbox" (the IMAP verify and the
+     relay half together — it replaces "check connection") and "test the
+     relay". The server now keeps each one's last answer (owner, 2026-09-19:
+     "the server remembers the last mail-test result so the pill survives a
+     reload — Yes"), so the pill is read straight off the screen's own
+     re-read rather than kept in local state. */
+  const mailProbes = $derived.by(() => view?.operations?.mailProbes ?? { mailbox: null, relay: null });
+  const TEST_KINDS = /** @type {const} */ (["mailbox", "relay"]);
+  /** @type {"mailbox" | "relay" | null} */
+  let testingWhich = $state(null);
+  /** @type {string | null} */
+  let testProblem = $state(null);
+  /** @param {"mailbox" | "relay"} which */
+  async function runMailTest(which) {
+    if (testingWhich) return;
+    testingWhich = which;
+    testProblem = null;
+    try {
+      await testMail(which);
+      view = await readAdminScreen();
+    } catch (error) {
+      testProblem = said(error);
+    } finally {
+      testingWhich = null;
+    }
+  }
+  /** @param {"mailbox" | "relay"} which */
+  const testPill = (which) => {
+    if (testingWhich === which) return { word: "checking…", tone: "quiet" };
+    const probe = mailProbes[which];
+    if (!probe) return null;
+    const verdict = testVerdict(probe.result);
+    return { word: `${verdict.word} · ${ago(probe.at, jobsClock)}`, tone: ROLE_TONE[verdict.tone] ?? "" };
+  };
+  /** @param {"mailbox" | "relay"} which */
+  const testSubtext = (which) => {
+    if (testingWhich === which) return "checking now";
+    const probe = mailProbes[which];
+    if (!probe) return "not tested yet";
+    const verdict = testVerdict(probe.result);
+    return verdict.reason || plainly(probe.result);
+  };
+
+  /* The tell (page-head pills, under the subline): one per thing that needs
+     the reader, each a link down to its card — so a failure is visible from
+     the top of the page without scrolling. */
+  const tells = $derived.by(() => {
+    /** @type {{ href: string, text: string }[]} */
+    const items = [];
+    const failedJobs = jobs.filter((job) => job.status === "failed").length;
+    if (failedJobs) items.push({ href: "#jobs-card", text: `${count(failedJobs, "job")} failed` });
+    if (mailProbes.relay && testVerdict(mailProbes.relay.result).tone === "over") items.push({ href: "#mail-card", text: "relay failed" });
+    if (mailProbes.mailbox && testVerdict(mailProbes.mailbox.result).tone === "over") items.push({ href: "#mail-card", text: "mailbox failed" });
+    return items;
+  });
+
   /* The public contact address (#860): one field an administrator sets,
      changes or clears, never defaulted from any account's own email. Named
      plainly on the door's third state (#788) when it cannot open safely — so
@@ -527,6 +734,15 @@
     <div class="sub">{view
       ? `the instance from above · admins see everything by design · ${view.users.length} people · ${view.households.length} systems`
       : "the instance from above · admins see everything by design"}</div>
+    {#if tells.length}
+      <div class="tells" aria-label="needs attention">
+        {#each tells as tell (tell.text)}
+          <!-- A same-page anchor to the card below, not a route. -->
+          <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+          <a class="role bad" href={tell.href}>{tell.text}</a>
+        {/each}
+      </div>
+    {/if}
   </header>
 
   {#if view}
@@ -821,6 +1037,65 @@
             </div>
           </div>
         {/each}
+
+        <!-- ON THE CLOCK (#1001): readWorkspace excludes a household with a
+             deletion requested from `households` outright
+             (isNull(deletionRequestedAt), src/server/workspace-repository.ts)
+             -- it never appears in view.households, doomed or not -- so this
+             reads `recoverable` on its own rather than matching it against
+             the households list above. Same shape pocket.svelte's own clock
+             row already uses. It carries no items (id, name, deleteAfter
+             only), so its ring is plain -- no ringDots here either, exactly
+             as pocket.svelte draws it. -->
+        {#each recoverable.filter((doom) => !doomGone.some((line) => line.id === doom.id)) as doom (doom.id)}
+          {@const rowExpired = expired(doom)}
+          <div class="system" class:doomed={!rowExpired}>
+            <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+              {#if rowExpired}
+                <circle cx="17" cy="17" r="13" fill="none" style="stroke:var(--chart-line)"/>
+                <circle cx="17" cy="17" r="2.6" style="fill:var(--ink-mid)"/>
+              {:else}
+                <circle cx="17" cy="17" r="13" class="ring" fill="none"/>
+                <circle cx="17" cy="17" r="2.6" class="sun"/>
+              {/if}
+            </svg>
+            <div class="who">
+              <b>{doom.name}</b>
+              <span>{rowExpired ? "past its window · removing"
+                : `on the clock · ${count(daysLeft(doom.deleteAfter), "day")} left · gone for good ${goneOn(doom.deleteAfter)}`}</span>
+            </div>
+            {#if !rowExpired}
+              <div class="acts">
+                <button class="rebtn" onclick={() => restoreRow(doom)}>restore</button>
+                {#if !doomConfirming[doom.id]}
+                  <button class="dangerbtn" onclick={() => openDoomConfirm(doom)}>delete now →</button>
+                {:else}
+                  <button class="dangerbtn" class:armed={doomArmed === doom.id} disabled={!doomNameOk(doom)}
+                          onclick={() => twoTapDoom(doom)}>
+                    {doomArmed === doom.id ? "tap again to delete for good" : "delete now"}</button>
+                {/if}
+              </div>
+              {#if doomConfirming[doom.id]}
+                <div class="confirm">
+                  <p class="stake">Deleting now skips the {count(daysLeft(doom.deleteAfter), "day")}. Nothing comes
+                    back after this — not for you, not for anyone.</p>
+                  <div class="field">
+                    <label for="doomname-{doom.id}">type the system’s name exactly to wake the button</label>
+                    <input id="doomname-{doom.id}" placeholder={doom.name} autocomplete="off"
+                           bind:value={doomTypedName[doom.id]} />
+                  </div>
+                  {#if doomProblem[doom.id]}<div class="adminproblem">{doomProblem[doom.id]}</div>{/if}
+                </div>
+              {/if}
+            {/if}
+            {#if clockSaid[doom.id]}
+              <div class="adminproblem said" class:ok={clockSaid[doom.id].ok}>{clockSaid[doom.id].text}</div>
+            {/if}
+          </div>
+        {/each}
+        {#each doomGone as line (line.id)}
+          <div class="system settled"><div class="adminproblem gone">{line.text}</div></div>
+        {/each}
       </div>
 
       <!-- #860: one published address, never a real administrator's own
@@ -855,11 +1130,37 @@
         {/if}
       </div>
 
+      <!-- DOCUMENT JOBS (#1071, #1055 round 2): a People row without an
+           avatar, sibling to People and Systems, in the grid cell that was
+           empty beside Public contact. Kind only — never the document's name
+           (owner, 2026-09-19). -->
+      <div class="card" id="jobs-card">
+        <div class="cardhead"><h2>Document jobs</h2>
+          {#if jobCounts}<span class="count">{jobCounts}</span>{/if}</div>
+        {#each jobs as job (job.id)}
+          <div class="person">
+            <div class="who"><b>{JOB_KINDS[job.kind] ?? job.kind}</b><span>{jobMeta(job)}</span></div>
+            <span class="role {ROLE_TONE[JOB_STATES[job.status]?.tone ?? ''] ?? ''}">{JOB_STATES[job.status]?.word ?? job.status}</span>
+            {#if job.status === "failed"}
+              <button class="place" onclick={() => retryJob(job)}>retry</button>
+            {/if}
+          </div>
+        {:else}
+          <p class="jobfoot">no document jobs yet</p>
+        {/each}
+        <div class="jobfoot">the 25 most recently touched jobs are kept; older ones are not</div>
+        {#if jobsProblem}<div class="adminproblem">{jobsProblem}</div>{/if}
+      </div>
+
       <!-- §15: mail machinery sits WITH operations — one panel, two halves. -->
-      <div class="card wide machinery">
+      <div class="card wide machinery" id="mail-card">
         <div class="half">
           <div class="cardhead">
             <h2>Mail machinery</h2>
+            <button disabled={testingWhich !== null} class:busy={testingWhich === "mailbox"}
+                    onclick={() => runMailTest("mailbox")}>test this mailbox</button>
+            <button disabled={testingWhich !== null} class:busy={testingWhich === "relay"}
+                    onclick={() => runMailTest("relay")}>test the relay</button>
             {#if view.mailbox && !editing}
               <button onclick={openMailboxEditor}>{view.mailbox.configured ? "change mailbox…" : "set up mailbox…"}</button>
             {/if}
@@ -871,6 +1172,23 @@
               {:else}<b>{value}</b>{/if}
             </div>
           {/each}
+
+          <!-- The two live tests' last answer (#1071): a pill on its own row
+               that stays until the next test, the server's own memory of it
+               rather than this screen's — no row among those above already
+               stands for "the outbound relay", so each test gets its own row
+               rather than a guessed-at home on an unrelated one. -->
+          {#each TEST_KINDS as which (which)}
+            {@const pill = testPill(which)}
+            <div class="person">
+              <div class="who">
+                <b>{which === "mailbox" ? "mailbox test" : "relay test"}</b>
+                <span>{testSubtext(which)}</span>
+              </div>
+              {#if pill}<span class="role {pill.tone}">{pill.word}</span>{/if}
+            </div>
+          {/each}
+          {#if testProblem}<div class="adminproblem">{testProblem}</div>{/if}
 
           {#if view.mailbox}
             {@const mailbox = view.mailbox}
@@ -888,9 +1206,9 @@
             {/if}
 
             {#if mailbox.configured && !editing && !rotating}
+              <!-- "check connection" is gone (#1071): "test this mailbox"
+                   above runs the same IMAP verify, plus the relay half. -->
               <div class="placerow mailboxrow">
-                <button disabled={mailboxBusy !== null}
-                        onclick={() => mailboxAction("verify", { action: "verify" })}>check connection</button>
                 <button disabled={mailboxBusy !== null}
                         onclick={() => mailboxAction("probe", { action: "probe" })}>run setup probe</button>
                 <button disabled={mailboxBusy !== null}
