@@ -110,7 +110,7 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { pocket, setScreen, veil, ctl, goto, press, light, unlight, callout, dropCallout, mark, open, close, w, T } = ctx;
+    const { pocket, setScreen, veil, ctl, goto, press, light, unlight, callout, dropCallout, mark, open, close, w, T, waitForReal } = ctx;
     const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
     await setScreen("/home");
@@ -130,6 +130,11 @@ export default {
     await press(orb);
     if (pocket) {
       unlight(orb);
+      /* #1174: the line is dropped before the hatch rises. The pill docks to
+         the top the instant the sheet opens (transport.js, owner's fix 1),
+         and this line — pinned under the chrome beside the orb — was still
+         up there for it to land on. */
+      dropCallout();
       open(orb);
       await w(T.sheet);
       const panel = ctl({ sel: SELECTORS.POCKET.panel, ringless: true });
@@ -144,6 +149,13 @@ export default {
       unlight(orb);
     }
     await setScreen("/inbox");
+    /* #1174: the pocket inbox draws nothing behind its title until its own
+       read of the queue returns (`routes/inbox/pocket.svelte`'s `view`) —
+       real network time a single settle() tick does not wait out, the same
+       as the pocket's /create in chapter 2. Without this the first lane was
+       named against an empty page: no ring, and its label at the screen's
+       centre. */
+    if (pocket) await waitForReal(".pki-lane, .pki-quiet");
 
     /* The three lanes, read out by name. Desk order: filed, review, reading
        (the mockup's own). Pocket order: review, reading, filed — the page's

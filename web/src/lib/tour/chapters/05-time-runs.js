@@ -177,8 +177,17 @@ export default {
        `.dial` element it always has (`dialSvg`, above — the same selector). */
     const dial = pocket ? ctl({ sel: S.dial, round: true }) : dialSvg;
     if (pocket) { veil(true); light(body); }
-    await callout("At a month out it warms, and Orbit reminds you.", dial, "top", { mark: "time-toast" });
-    if (pocket) veil(false);
+    /* `pin` (#1174): the line stays at the dial's top, clamped under the
+       chrome — round 8's toast position. Without it the pocket's own
+       "flip when it does not fit" rule dropped it under the dial instead. */
+    await callout("At a month out it warms, and Orbit reminds you.", dial, "top", { mark: "time-toast", pin: pocket });
+    if (pocket) {
+      veil(false);
+      /* #1174: lit again above for the toast's hole, so unlit again here —
+         left lit, its ring outlived the body it was drawn round and stood on
+         the relay and inbox screens after it. */
+      unlight(body);
+    }
     dropCallout();
 
     if (bodyEl) bodyEl.remove();

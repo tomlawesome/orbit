@@ -50,8 +50,13 @@
  * tests/unit/v19-tour-chapter-paper-by-post.test.mjs can pin it against
  * `/settings/mail`'s real markup.
  *
- * #1083 §6: unchanged on the pocket — the relay page's own ≤620px rules
- * already lay the card full width, so DESK and POCKET are the same set.
+ * #1174: the pocket is NOT the same set. #1083 §6 assumed the relay page's
+ * ≤620px rules laid the desk card full width on a phone; by the time the
+ * pocket cut was built, /settings/mail had its own pocket dialect
+ * (`routes/settings/mail/pocket.svelte`, `.rl-pocket`), and the desk
+ * `.relay-card` is display:none there — a 0x0 box the film ringed and
+ * pinned both lines to, at the top-left corner of the screen. The pocket's
+ * relay card is its address card.
  */
 export const SELECTORS = Object.freeze({
   DESK: Object.freeze({
@@ -60,7 +65,10 @@ export const SELECTORS = Object.freeze({
     card: ".relay-card",
   }),
   POCKET: Object.freeze({
-    card: ".relay-card",
+    /** The pocket relay's own address card (pocket.svelte's first
+     *  `.p-card`, labelled "Your address"): the address, share, status,
+     *  ingest and the two acts — what "your relay address" points at. */
+    card: '.rl-pocket section[aria-label="Your address"]',
   }),
 });
 
