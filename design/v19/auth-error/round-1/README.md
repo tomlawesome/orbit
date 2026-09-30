@@ -1,5 +1,7 @@
 # Sign-in did not complete — round 1 (#1056)
 
+> **Verdict (owner, 2026-09-19):** B — the held dawn, refused — is ratified, with the contact-address sentence dropped.
+
 One state in the door's own family for the identity-provider callback that
 fails. Artwork in every sheet is the shipped door verbatim (copied from
 `design/v19/signin-states/round-1/c-the-held-dawn.html`, itself the copy of

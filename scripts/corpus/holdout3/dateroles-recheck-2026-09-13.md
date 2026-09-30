@@ -1,5 +1,7 @@
 # Hold-out 3 date-role re-check under the kind-of-thing rule (owner, 2026-09-13)
 
+> **Dated audit record**, 2026-09-13.
+
 Re-check of every `dateRoles` and `scheduleKind` truth in
 `extraction-holdout3-fullpage.ts` against the date-role conventions the owner
 set on 2026-09-13. Only roles, `scheduleKind` and the `recurrenceMonths` that
