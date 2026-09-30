@@ -208,6 +208,70 @@ describe("the lit element is left exactly as it was found", () => {
   });
 });
 
+describe("Addendum A: the lift yields to a clip (#1083, 2026-09-30)", () => {
+  it("does not translate a control whose 2px rise would leave a clipping parent, but still rings it strong", async () => {
+    document.body.innerHTML = '<div id="row" style="overflow:clip"><button id="face"></button></div>';
+    const row = document.getElementById("row");
+    const face = document.getElementById("face");
+    /* The face fills its row exactly — a kit Row's own shape — so any rise
+       at all leaves the row's own clip. */
+    box(row, { x: 10, y: 10, w: 300, h: 56 });
+    box(face, { x: 10, y: 10, w: 300, h: 56 });
+    const before = { transform: face.style.transform, filter: face.style.filter };
+
+    const { clock, ctx } = stage();
+    const c = ctx.ctl({ sel: "#face" });
+    await playOut(clock, ctx.goto(c, { willPress: false }));
+
+    expect(face.style.transform).toBe(before.transform);
+    expect(face.style.filter).toBe(before.filter);
+    expect(c.lifted).toBe(true);
+    expect(c.rings[0].style.boxShadow).toContain("46px"); /* "strong", same as any other control */
+
+    ctx.unlight(c);
+    expect(face.style.transform).toBe(before.transform);
+    expect(face.style.filter).toBe(before.filter);
+  });
+
+  it("still translates a control with room above its clipping ancestor", async () => {
+    document.body.innerHTML = '<div id="row" style="overflow:clip"><button id="face"></button></div>';
+    const row = document.getElementById("row");
+    const face = document.getElementById("face");
+    /* The row is 8px taller than the face, padded above it, so a 2px rise
+       stays inside. */
+    box(row, { x: 10, y: 2, w: 300, h: 64 });
+    box(face, { x: 10, y: 10, w: 300, h: 56 });
+
+    const { clock, ctx } = stage();
+    const c = ctx.ctl({ sel: "#face" });
+    await playOut(clock, ctx.goto(c, { willPress: false }));
+
+    expect(face.style.transform).toBe("translateY(-2px)");
+  });
+
+  it("press() bases a flat (clipped) control on translate(0,0), never the lift", async () => {
+    document.body.innerHTML = '<div id="row" style="overflow:clip"><button id="face"></button></div>';
+    box(document.getElementById("row"), { x: 10, y: 10, w: 300, h: 56 });
+    const face = document.getElementById("face");
+    box(face, { x: 10, y: 10, w: 300, h: 56 });
+
+    const { clock, ctx } = stage();
+    const c = ctx.ctl({ sel: "#face" });
+    await playOut(clock, ctx.goto(c, { willPress: false }));
+    await playOut(clock, ctx.press(c));
+    expect(face.style.transform).not.toContain("translateY(-2px)");
+  });
+
+  it("the desk's own chapter-11 markup (no clip) still translates", async () => {
+    document.body.innerHTML = '<nav id="account"><a id="settings" href="/settings"></a></nav>';
+    box(document.getElementById("settings"), { x: 100, y: 100, w: 200, h: 24 });
+    const { clock, ctx } = stage();
+    const c = ctx.ctl({ sel: "#settings" });
+    await playOut(clock, ctx.goto(c, { willPress: false }));
+    expect(document.getElementById("settings").style.transform).toBe("translateY(-2px)");
+  });
+});
+
 describe("the callout", () => {
   it("carries the ratified line and is pinned to the named edge", async () => {
     document.body.innerHTML = '<svg class="dial"></svg>';
