@@ -271,6 +271,43 @@ export const SIGNED_IN = [
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   } },
 
+  /* #1083: the pocket cut of the one-take film, three states — a household
+     whose tour is still due (the fixture's own tour endpoint says
+     `tourSeenAt: null`), driven headless through the design's own review
+     hooks (film.js's `window.__chapters`/`__jump`/`__hold`/`__pause`). */
+  { route: "/home", state: "film-rest", reach: async (page) => {
+    await page.route("**/api/settings/tour", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: '{"tour":{"tourSeenAt":null}}' }));
+    await go(page, "/home");
+    await page.waitForFunction(() => Array.isArray(/** @type {any} */ (window).__chapters));
+    await page.evaluate(() => /** @type {any} */ (window).__pause());
+    await settle(page);
+  } },
+  { route: "/home", state: "film-hatch", reach: async (page) => {
+    await page.route("**/api/settings/tour", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: '{"tour":{"tourSeenAt":null}}' }));
+    await go(page, "/home");
+    await page.waitForFunction(() => Array.isArray(/** @type {any} */ (window).__chapters));
+    await page.evaluate(() => {
+      /** @type {any} */ (window).__hold = "sky-settings";
+      /** @type {any} */ (window).__jump(10); /* chapter 11, "Your sky" */
+    });
+    await page.waitForFunction(() => /** @type {any} */ (window).__held === "sky-settings");
+    await settle(page);
+  } },
+  { route: "/home", state: "film-create", reach: async (page) => {
+    await page.route("**/api/settings/tour", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: '{"tour":{"tourSeenAt":null}}' }));
+    await go(page, "/home");
+    await page.waitForFunction(() => Array.isArray(/** @type {any} */ (window).__chapters));
+    await page.evaluate(() => {
+      /** @type {any} */ (window).__hold = "add-drawer";
+      /** @type {any} */ (window).__jump(1); /* chapter 2, "Add" */
+    });
+    await page.waitForFunction(() => /** @type {any} */ (window).__held === "add-drawer");
+    await settle(page);
+  } },
+
   /* /item/<receiptId>: the suggestion seated in the belt (#1145; round 3 §4's
      receipt page merged into it) -- its card holds the decisions and
      `review & amend →` raises the review sheet. */

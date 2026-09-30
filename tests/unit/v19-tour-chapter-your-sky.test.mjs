@@ -34,6 +34,15 @@ const HOME_SOURCE = [
   "src/routes/home/swatches.js",
 ].map((file) => readFileSync(web(file), "utf8")).join("\n");
 
+/* #1083: the pocket hatch — home's own pocket screen (`#morb`), the hatch
+   menu itself (settings row, swatches), and the sheet shell the hatch opens
+   inside of (`.p-sheet-layer`/`.p-sheet-panel`, Sheet.svelte). */
+const POCKET_SOURCE = [
+  "src/routes/home/pocket.svelte",
+  "src/lib/pocket/Hatch.svelte",
+  "src/lib/pocket/Sheet.svelte",
+].map((file) => readFileSync(web(file), "utf8")).join("\n");
+
 /** Every name home's source assigns to a class or an id. Lifted from
  *  v19-tour-chapter-arrive.test.mjs, which lifted it from
  *  v19-tour-stops.test.mjs. */
@@ -134,33 +143,45 @@ beforeEach(() => {
 });
 
 describe("the selectors chapter 11 names", () => {
-  it("every class and id it names exists in home's own markup", () => {
+  it("every desk class and id it names exists in home's own markup", () => {
     const rendered = namesIn(HOME_SOURCE);
-    for (const [beat, selector] of Object.entries(SELECTORS)) {
+    for (const [beat, selector] of Object.entries(SELECTORS.DESK)) {
       for (const token of tokensOf(selector)) {
         expect(
           rendered.has(token),
-          `chapter 11's "${beat}" names "${selector}", but /home renders no "${token}"`,
+          `chapter 11's desk "${beat}" names "${selector}", but /home renders no "${token}"`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("every pocket class it names exists in the pocket hatch's own markup (#1083)", () => {
+    const rendered = namesIn(POCKET_SOURCE);
+    for (const [beat, selector] of Object.entries(SELECTORS.POCKET)) {
+      for (const token of tokensOf(selector)) {
+        expect(
+          rendered.has(token),
+          `chapter 11's pocket "${beat}" names "${selector}", but the pocket hatch renders no "${token}"`,
         ).toBe(true);
       }
     }
   });
 
   it("the orb it names is the account orb, not the inbox orb beside it", () => {
-    expect(SELECTORS.orb).toBe("button.orb");
+    expect(SELECTORS.DESK.orb).toBe("button.orb");
     expect(HOME_SOURCE).toContain('class="orb"');
     expect(HOME_SOURCE).toContain('class="orb inbox-orb"');
   });
 
   it("the settings row it names is a real link to /settings", () => {
-    expect(SELECTORS.settingsLink).toContain('[href$="/settings"]');
+    expect(SELECTORS.DESK.settingsLink).toContain('[href$="/settings"]');
     expect(HOME_SOURCE).toContain('resolve("/settings")');
   });
 
   it("the dawn and after-dark swatches it names are told apart the way the product's own click handler tells them apart", () => {
     /* packOf (swatches.js) reads a swatch's title; so does this chapter. */
-    expect(SELECTORS.dawn).toContain('[title="dawn"]');
-    expect(SELECTORS.afterDark).toContain('[title="after dark"]');
+    expect(SELECTORS.DESK.dawn).toContain('[title="dawn"]');
+    expect(SELECTORS.DESK.afterDark).toContain('[title="after dark"]');
     expect(HOME_SOURCE).toContain('title="dawn"');
     expect(HOME_SOURCE).toContain('title="after dark"');
     expect(HOME_SOURCE).toContain("button.title.replace");
@@ -217,8 +238,8 @@ describe("the beats, in the mockup's order", () => {
     await sky.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel]);
     expect(said).toEqual([
-      ["Settings holds your sky, your relay and this walk — take it again anytime.", SELECTORS.settingsLink],
-      ["star chart · after dark · clouds · dawn · retrograde", SELECTORS.swatches],
+      ["Settings holds your sky, your relay and this walk — take it again anytime.", SELECTORS.DESK.settingsLink],
+      ["star chart · after dark · clouds · dawn · retrograde", SELECTORS.DESK.swatches],
     ]);
   });
 
@@ -226,7 +247,7 @@ describe("the beats, in the mockup's order", () => {
     const { log, ctx } = recorder();
     await sky.play(ctx);
     const pressed = log.filter(([word]) => word === "press").map(([, sel]) => sel);
-    expect(pressed).toEqual([SELECTORS.orb, SELECTORS.dawn, SELECTORS.afterDark]);
+    expect(pressed).toEqual([SELECTORS.DESK.orb, SELECTORS.DESK.dawn, SELECTORS.DESK.afterDark]);
   });
 
   it("marks sky-orb, sky-settings, sky-swatches, sky-dawn and sky-back, in that order", async () => {
@@ -242,7 +263,7 @@ describe("the beats, in the mockup's order", () => {
     const worn = log.filter(([word]) => word === "wear").map(([, pack]) => pack);
     /* `null`, not "after dark": the sky goes back to the reader's own. */
     expect(worn).toEqual(["dawn", null]);
-    const pressedDawn = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.dawn);
+    const pressedDawn = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.dawn);
     const woreDawn = log.findIndex(([word, pack]) => word === "wear" && pack === "dawn");
     expect(woreDawn).toBe(pressedDawn + 1);
   });
