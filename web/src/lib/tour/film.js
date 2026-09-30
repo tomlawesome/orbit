@@ -30,6 +30,7 @@ import { createFilmContext } from "./vocabulary.js";
 /**
  * @param {object} [options]
  * @param {Document} [options.doc]
+ * @param {boolean} [options.pocket] the pocket dialect (`isPocket()`, decided by the caller)
  * @param {import("./chapters/index.js").Chapter[]} [options.chapters]
  * @param {() => string} [options.routeOf]
  * @param {(route: string) => Promise<unknown>} [options.navigate]
@@ -39,6 +40,7 @@ import { createFilmContext } from "./vocabulary.js";
  */
 export function createFilm({
   doc = document,
+  pocket = false,
   chapters = CHAPTERS,
   routeOf,
   navigate,
@@ -47,7 +49,7 @@ export function createFilm({
   onError = (error) => console.error("Tour film stopped:", error),
 } = {}) {
   const clock = createClock();
-  const ctx = createFilmContext({ clock, doc, routeOf, navigate, settle });
+  const ctx = createFilmContext({ clock, doc, pocket, routeOf, navigate, settle });
 
   /** @type {ReturnType<typeof mountTransport> | null} */
   let face = null;
@@ -68,7 +70,11 @@ export function createFilm({
    */
   async function start({ from = 0 } = {}) {
     const { offsets, total } = await player.measure();
-    if (transport) face = mountTransport({ player, clock, doc });
+    /* transport.js decides its own dialect (isPocket(), at mount inside
+       buildTicks) rather than being told: the pill's shape is CSS-driven
+       exactly as the product's own screens are, and only the tick's element
+       type needs a JS branch at all (#1083 §4.2). */
+    if (transport) face = mountTransport({ player, clock, doc, hasFilmOpenedSheet: ctx.hasOpenUndo });
     hooks.__total = total;
     hooks.__offsets = offsets.slice();
     hooks.__chapters = chapters.map((one, k) => ({ id: one.id, name: one.name, at: offsets[k] }));
