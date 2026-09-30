@@ -1403,5 +1403,50 @@ its reason:
   the dial's lower half beneath the household's name rather than over the
   bodies, since the pocket dial has no empty quarter to put a line in.
 
+**Corrections on the owner's iPhone (Fable's calls, #1174 and #1175,
+2026-09-30).** The built cut passed every Chromium check and broke on the
+phone. What changed, and why:
+
+- **The film's marks follow the page.** Rings, typed lines and the callout
+  re-measure on scroll and resize (as the veil's holes always did), so a
+  screen scrolling under the film — a `goto` into the band, chapter 4's
+  manifest, a row opening, a browser bar collapsing — never leaves a
+  spotlight where a control was. A jump or a stop puts the page back at the
+  top, where every chapter opens.
+- **The film's own scrolls are instant or on its clock**, never the page's
+  smooth scroll: chapter 4 glides on a tween over `T.scroll`, and a `goto`
+  scrolls its control in at once, so the next beat measures a page that has
+  arrived.
+- **`unread()` is marked as the film's own Escape**, as `close()` always
+  was. Unmarked, the transport stopped the film at chapter 8 on both
+  dialects (a regression in #1083, which moved the dispatch to the
+  document).
+- **Only what a reader can see is lit** (`visible`): chips scrolled off
+  the strip and captions of papers rolled off the sky are scenery, not
+  spotlights. On the pocket a paper's whole caption seat is ringed once,
+  not each of its two lines; the read prefers a paper that is out and falls
+  back to the first paper the belt holds, as the desk always has.
+- **Chapter 5's reminder line is pinned to the dial's top** under the
+  chrome (round 8's toast position) rather than flipped under the dial.
+- **Chapter 6 rings the pocket relay's own address card**; the desk
+  `.relay-card` is a 0x0 box on the phone since the relay got its pocket
+  dialect.
+- **Chapter 7 waits for the pocket inbox to draw its lanes**, and drops the
+  orb's line before the hatch rises so the docking pill has nothing to land
+  on.
+- **The pill and the callouts blur with `-webkit-backdrop-filter` too**:
+  iOS Safari before 18 knows only the prefixed name, and without it both
+  were see-through boxes with the page's words showing through their own.
+- **The first-run create card takes the door's own phone column** (#1175,
+  door-phone.css's `.ringcard`): the login ring at its station holding the
+  question "Name your first system", the fields beneath, the act a
+  full-width pill, the ring closing while you type — because a 500px ring
+  cannot hold a 300px card on a 390px screen. The desk is untouched.
+- **The phone in WebKit is now a check** (`pocket-webkit`,
+  `web/tests/fidelity/tour-pocket-webkit.spec.js` and
+  `pocket-create-ring.spec.js`): the film played through and every mark
+  held at two widths, and the create card's ring, in Safari's engine, run
+  by CI's `fidelity` job.
+
 Both new phone strings (owner's 3b, and the belt's label) are recorded
 where they are said, `chapters/08-the-belt.js`; no other copy changed.

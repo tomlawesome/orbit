@@ -19,6 +19,9 @@ import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
 
 const web = (path) => resolve(import.meta.dirname, "../../web", path);
 const RELAY_SOURCE = readFileSync(web("src/routes/settings/mail/+page.svelte"), "utf8");
+/* #1174: the pocket relay is its own dialect (pocket.svelte), and chapter 6's
+   pocket selector is pinned against THAT file, not the desk's. */
+const RELAY_POCKET_SOURCE = readFileSync(web("src/routes/settings/mail/pocket.svelte"), "utf8");
 
 function namesIn(source) {
   const names = new Set();
@@ -100,19 +103,21 @@ describe("the selectors chapter 6 names", () => {
     }
   });
 
-  /* #1083 §6: unchanged on the pocket — the relay page's own ≤620px rules
-     already lay the card full width, so DESK and POCKET are the same set,
-     and the pocket source is the very same file. */
-  it("every pocket one of them exists in /settings/mail's own markup too", () => {
-    const rendered = namesIn(RELAY_SOURCE);
+  /* #1174: the pocket relay is pocket.svelte's, where the desk's
+     `.relay-card` is a 0x0 box — the pocket set is pinned against the pocket
+     file, and must not be the desk's selector. */
+  it("every pocket one of them exists in the pocket relay's own markup (pocket.svelte)", () => {
+    const rendered = namesIn(RELAY_POCKET_SOURCE);
     for (const [beat, selector] of Object.entries(SELECTORS.POCKET)) {
       for (const token of tokensOf(selector)) {
         expect(
           rendered.has(token),
-          `chapter 6's pocket "${beat}" names "${selector}", but /settings/mail renders no "${token}"`,
+          `chapter 6's pocket "${beat}" names "${selector}", but the pocket relay renders no "${token}"`,
         ).toBe(true);
       }
     }
+    expect(RELAY_POCKET_SOURCE).toContain('aria-label="Your address"');
+    expect(SELECTORS.POCKET.card).not.toBe(".relay-card");
   });
 
   it("names the same card the ratified walk already points at", () => {
@@ -122,7 +127,7 @@ describe("the selectors chapter 6 names", () => {
     expect(stop.route).toBe("/settings/mail");
     expect(stop.target).toContain(".relay-card");
     expect(SELECTORS.DESK.card).toBe(".relay-card");
-    expect(SELECTORS.POCKET.card).toBe(".relay-card");
+    expect(SELECTORS.POCKET.card).toContain(".rl-pocket");
   });
 
   it("says the same two lines the ratified walk already says", () => {

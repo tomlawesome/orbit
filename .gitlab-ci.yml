@@ -1526,11 +1526,12 @@ fidelity:
   image:
     name: $PLAYWRIGHT_IMAGE
     pull_policy: if-not-present
-  # 30m since #1148: the job runs two Playwright runs one after the other --
-  # the one-at-a-time appearance gate (~6m) and the phone floor measurement on
+  # 30m since #1148: the job runs three Playwright runs one after the other --
+  # the one-at-a-time appearance gate (~6m), the phone floor measurement on
   # four workers (~11m) -- which measured 16.7m on a quiet host, about what
-  # `smoke` already takes. Run side by side they shared four CPUs and failed
-  # each other's timing; see web/playwright.config.js.
+  # `smoke` already takes -- and, since #1174, the phone film in WebKit
+  # (~5m). Run side by side they shared four CPUs and failed each other's
+  # timing; see web/playwright.config.js.
   timeout: 30m
   rules:
     - *not_scheduled
@@ -1568,6 +1569,12 @@ fidelity:
       # back.
       node scripts/web-build-stamp.mjs check || echo "the fidelity gate will build its own copy"
       pnpm --filter orbit-web fidelity
+      # The phone in WebKit (#1174, #1175): the first-run film played through
+      # and the create card's ring, in Safari's engine, which this image
+      # ships and the Chromium-only runs above never opened. Its own script
+      # because a host without WebKit's libraries cannot run it; ~5 minutes,
+      # one worker, after the two runs above so it shares no CPU with them.
+      pnpm --filter orbit-web fidelity:webkit
     - *reuse_evidence
   artifacts:
     name: orbit-fidelity-diffs

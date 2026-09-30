@@ -113,6 +113,10 @@ export default {
       await goto(orb);
       await press(orb);
       open(orb);
+      /* #1174: the orb is behind the hatch's scrim from here on. Left lit,
+         its ring outlived the screen — it was still drawn at the top right
+         of /create, round the reader's avatar, for the whole chapter. */
+      unlight(orb);
       await w(T.sheet);
       const panel = ctl({ sel: SELECTORS.POCKET.panel, ringless: true });
       light(panel);

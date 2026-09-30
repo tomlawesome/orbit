@@ -53,12 +53,15 @@ export function mmss(ms) {
 }
 
 /* Not one colour below is new: every value is a pack token from packs.css,
-   the same rule tour.css states. */
+   the same rule tour.css states. The blur is written both ways (#1174): iOS
+   Safari before 18 knows only `-webkit-backdrop-filter`, and without it the
+   pill at its 38% recede is a see-through box with the page's words showing
+   through its own. */
 const STYLES = `
 #${BAR_ID}{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);
   width:470px;height:44px;z-index:${Z_INDEX};box-sizing:border-box;
   display:flex;align-items:center;gap:2px;padding:0 16px 0 8px;
-  background:var(--panel-raised);backdrop-filter:blur(14px);
+  background:var(--panel-raised);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
   border:1px solid var(--line);border-radius:22px;opacity:1;transition:opacity .6s ease}
 #${BAR_ID}.dim{opacity:.38}
 #${BAR_ID}.gone{opacity:.16}

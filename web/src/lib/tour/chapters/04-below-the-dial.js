@@ -82,7 +82,7 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { pocket, setScreen, veil, ctl, goto, unlight, callout, dropCallout, mark, w, T, dry, doc } = ctx;
+    const { pocket, setScreen, veil, ctl, goto, unlight, callout, dropCallout, mark, w, tween, T, dry, doc } = ctx;
     const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
     await setScreen("/home");
@@ -94,8 +94,7 @@ export default {
     const manifest = ctl({ sel: S.manifest });
     await w(T.cross);
     await w(SCROLL_LEAD_MS);
-    if (!dry()) manifest.els[0]?.scrollIntoView?.({ behavior: "auto", block: "start" });
-    await w(T.scroll);
+    await glide(manifestTop());
     await mark("manifest-scrolled");
 
     veil(true);
@@ -124,8 +123,36 @@ export default {
     /* And back up, the sky in view again for the next chapter. */
     veil(false);
     await w(T.cross);
-    if (!dry()) doc.defaultView?.scrollTo?.({ top: 0, behavior: "auto" });
-    await w(T.scroll);
+    await glide(0);
     await w(T.cross);
+
+    /* THE SCROLL RUNS ON THE FILM'S CLOCK (#1174). It used to be the page's
+       own smooth scroll (`scrollIntoView` / `scrollTo` with behavior "auto",
+       which home's `html{scroll-behavior:smooth}` makes a real-time glide the
+       clock never saw): the return to the top was found still at the
+       manifest when chapter 5 began, its walking body off the top of the
+       screen, and the veil and rings measured the page mid-glide. A tween
+       over the same `T.scroll` spends the same budget, pauses with the film,
+       lands at once under reduced motion (the same "jump, like every other
+       motion" home.css gives the page), and is where it says it is when the
+       next beat measures. Each frame is an instant scroll, so the page's own
+       smooth behaviour cannot stretch it. */
+    function manifestTop() {
+      if (dry()) return 0;
+      const el = manifest.els[0];
+      const view = doc.defaultView;
+      if (!el || !view) return 0;
+      const most = Math.max(0, doc.documentElement.scrollHeight - view.innerHeight);
+      return Math.min(most, Math.max(0, view.scrollY + el.getBoundingClientRect().top));
+    }
+    /** @param {number} top */
+    function glide(top) {
+      const view = doc.defaultView;
+      const from = dry() || !view ? 0 : view.scrollY;
+      return tween(T.scroll, (t) => {
+        if (dry() || !view) return;
+        view.scrollTo({ top: from + (top - from) * t, behavior: "instant" });
+      });
+    }
   },
 };

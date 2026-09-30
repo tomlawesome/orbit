@@ -94,7 +94,9 @@ export default {
        around it. The mockup lights all five together for the first line and
        drops the outer four for the second, so the sentence about the centre
        is the only thing still lit when it is read. */
-    const others = ctl({ sel: S.others, all: true, round: !pocket, radius: pocket ? 22 : undefined, optional: true });
+    /* #1174: on the pocket the strip scrolls sideways and keeps every chip in
+       the DOM; only the chips a reader can see are lit (`visible`). */
+    const others = ctl({ sel: S.others, all: true, round: !pocket, radius: pocket ? 22 : undefined, optional: true, visible: pocket });
     await goto(centreSun, { willPress: false });
     light(others);
     await callout("Every sun is a household you belong to.", centreSun, pocket ? "bottom" : "top", {
@@ -113,6 +115,7 @@ export default {
       round: pocket ? false : true,
       radius: pocket ? 22 : undefined,
       optional: true,
+      visible: pocket,
     });
     await goto(gran, { willPress: false });
     await callout(

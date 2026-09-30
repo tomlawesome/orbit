@@ -163,7 +163,7 @@ describe("the beats, against a recorder", () => {
         goto: async (c) => log.push(["goto", c.sel]),
         light: (c) => log.push(["light", c.sel]),
         unlight: (c) => log.push(["unlight", c.sel]),
-        callout: async (text, anchor) => log.push(["callout", text, anchor.sel]),
+        callout: async (text, anchor, side, o) => log.push(["callout", text, anchor.sel, side, o]),
         dropCallout: () => log.push(["dropCallout"]),
         tween: async (ms, fn) => { fn(1); log.push(["tween"]); },
         w: async () => log.push(["w"]),
@@ -224,6 +224,21 @@ describe("the beats, against a recorder", () => {
     expect(marks).toEqual(["time-warmed"]);
     /* the second mark rides inside the reminder callout's own options, which
        the recorder's `callout` stub does not see -- pinned for real below. */
+  });
+
+  it("pins the reminder line at the dial's top on the pocket, and never on the desk (#1174)", async () => {
+    const desk = recorder();
+    await timeRuns.play(desk.ctx);
+    const deskToast = desk.log.find(([word, text]) => word === "callout" && text.startsWith("At a month out"));
+    expect(deskToast[3]).toBe("top");
+    expect(deskToast[4]?.pin).toBeFalsy();
+
+    const pocket = recorder();
+    pocket.ctx.pocket = true;
+    await timeRuns.play(pocket.ctx);
+    const toast = pocket.log.find(([word, text]) => word === "callout" && text.startsWith("At a month out"));
+    expect(toast[3]).toBe("top");
+    expect(toast[4]?.pin).toBe(true);
   });
 
   it("presses nothing: chapter 5 only looks", async () => {

@@ -70,7 +70,7 @@ export default {
 
     /* The nearest other household's sun — optional, so a household alone in
        its sky still plays this chapter, unchanged. */
-    const other = ctl({ sel: S.other, round: !pocket, radius: pocket ? 22 : undefined, optional: true });
+    const other = ctl({ sel: S.other, round: !pocket, radius: pocket ? 22 : undefined, optional: true, visible: pocket });
     veil(true);
     await goto(other);
     await callout(
