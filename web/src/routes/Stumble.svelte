@@ -55,12 +55,12 @@
            the server too so the HTML arrives with the sky already drawn. -->
       <g class="stars">
         <g fill="#dbe2f5">
-          {#each stars.far as st}
+          {#each stars.far as st, j (j)}
             <circle cx={st.x.toFixed(1)} cy={st.y.toFixed(1)} r={st.r.toFixed(2)} opacity={st.o.toFixed(2)}/>
           {/each}
         </g>
         <g fill="#e8edff">
-          {#each stars.near as st}
+          {#each stars.near as st, j (j)}
             <circle cx={st.x.toFixed(1)} cy={st.y.toFixed(1)} r={(st.r * 3.4).toFixed(1)} fill="url(#stargl)"/>
             <circle cx={st.x.toFixed(1)} cy={st.y.toFixed(1)} r={st.r.toFixed(2)} opacity={st.o.toFixed(2)}/>
           {/each}
@@ -83,7 +83,7 @@
       <!-- The craft: the status's own digits, each tumbling on its own
            period with two faint, turned and grown afterimages. -->
       <g class="craft">
-        {#each CX as cx, i}
+        {#each CX as cx, i (i)}
           <g class="digit d{i}">
             <text x={cx} y="610" text-anchor="middle" font-family="'Space Grotesk',sans-serif"
                   font-weight="600" font-size="300" fill="#e8dcbc" opacity=".08"
@@ -101,6 +101,8 @@
 
   <h1 class="stumbled">Orbit stumbled</h1>
   <div class="line-a">Something went wrong on Orbit's side.</div>
+  <!-- `try again` is this same address, reloaded (#1139 notes §4.3), not a route to resolve. -->
+  <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
   <div class="line-b"><a class="again" href={page.url.pathname + page.url.search} data-sveltekit-reload>try again</a><span class="dot" aria-hidden="true">·</span><a class="home" href={resolve("/")}>return home &rarr;</a></div>
 
   <Grain slope={0.09} />
