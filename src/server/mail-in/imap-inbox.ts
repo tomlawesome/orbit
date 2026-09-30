@@ -136,7 +136,10 @@ function orderedAttachments(rows: Array<{ id: string; displayName: string; media
   }));
 }
 
-async function privateMailboxUser(userId: string): Promise<{ id: string; isInstanceAdmin: boolean }> {
+/** Exported for `imap-attachment-preview.ts` (#1155), which needs the same
+ * signed-in/instance-admin gate `getImapReview` applies before it goes on to
+ * its own receipt-scoped read. */
+export async function privateMailboxUser(userId: string): Promise<{ id: string; isInstanceAdmin: boolean }> {
   const [user] = await getDb().select({ id: users.id, isInstanceAdmin: users.isInstanceAdmin }).from(users)
     .where(and(eq(users.id, userId), isNull(users.disabledAt))).limit(1);
   if (!user) throw new AppError("account_disabled", "This Orbit account cannot read reviewed intake", 403);

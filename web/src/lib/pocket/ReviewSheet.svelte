@@ -19,7 +19,8 @@
    *   householdId: string | null,
    *   households?: import('../../routes/create/entry.js').FormHousehold[],
    *   readings?: import('./review.js').FormReading[],
-   *   papers?: { name: string, meta: string }[],
+   *   papers?: { id?: string | null, name: string, meta: string, drawable?: boolean }[],
+   *   receiptId?: string | null,
    *   busy?: boolean,
    *   problem?: string | null,
    *   onsave: (item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null) => Promise<boolean>,
@@ -28,7 +29,7 @@
   /** @type {Props} */
   let {
     open = $bindable(false), title, proposal, householdId, households = [], readings = [], papers = [],
-    busy = false, problem = null, onsave,
+    receiptId = null, busy = false, problem = null, onsave,
   } = $props();
 
   /** @type {import('../../routes/create/entry.js').Entry | null} */
@@ -52,7 +53,7 @@
   {#if entry}
     <form id="{uid}-form" aria-label="Review {title}" onsubmit={(event) => { event.preventDefault(); save(); }}>
       <EntryForm bind:entry households={household ? [household] : []} mode="review" nested
-                 disabled={busy} {readings} {papers} />
+                 disabled={busy} {readings} {papers} {receiptId} />
     </form>
     {#if problem}<p class="p-error" role="alert">{problem}</p>
     {:else if refusal}<p class="rv-refusal" id="{uid}-refusal">{refusal}</p>{/if}
