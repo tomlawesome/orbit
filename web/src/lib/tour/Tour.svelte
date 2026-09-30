@@ -54,6 +54,11 @@
     if (route === "/inbox") return goto(resolve("/inbox"));
     if (route === "/create") return goto(resolve("/create"));
     if (route === "/item") return goto(resolve("/item"));
+    /* #1174: the pocket's belt chapter walks the row's own `open →` act to a
+       named item — one that carries documents — rather than whichever rides
+       at the apex. The id is the act's own href's, never typed here. */
+    const item = /^\/item\/([^/?#]+)$/u.exec(route);
+    if (item) return goto(resolve("/item/[[id]]", { id: item[1] }));
     if (route === "/settings/mail") return goto(resolve("/settings/mail"));
     return goto(resolve("/home"));
   }
