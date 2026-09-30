@@ -42,9 +42,14 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
  *     bar, a callout or the top chrome's controls (the chrome under a raised
  *     sheet's scrim is inert and the pill docks over it by the owner's 1a,
  *     so that one is not counted while a sheet is up); no callout leaves the
- *     screen; every ring on the screen is drawn round a real element's own
- *     box — a ring that matches nothing under it is a spotlight in the wrong
- *     place, which is what the owner saw; and the film reaches its own end
+ *     screen; every callout points at something — its anchor (the box the
+ *     film stamps on it) is a real, on-screen element and its stem lands on
+ *     that box, the design's own `dy` allowed — and covers no bright text
+ *     but its anchor's (text under the veil is dimmed by design; text in a
+ *     hole, or with the veil down, is being read); every ring on the screen
+ *     is drawn round a real element's own box — a ring that matches nothing
+ *     under it is a spotlight in the wrong place, which is what the owner
+ *     saw; and the film reaches its own end
  *     with all twelve chapters seen in order and no error in the console — a
  *     film that stops itself (`Tour film stopped:`) is the failure chapter 8
  *     had.
@@ -101,38 +106,129 @@ function sample() {
   }
   const chrome = document.querySelector(".p-chrome:not(.hidden)");
   const chromeBox = chrome ? chrome.getBoundingClientRect() : null;
+
+  /* The veil's holes, read from its own mask: text inside one is bright. */
+  const veil = document.getElementById("orbit-tour-veil");
+  const veilUp = veil !== null && parseFloat(getComputedStyle(veil).opacity) > 0.05;
+  /** @type {{ x: number, y: number, w: number, h: number }[]} */
+  const holes = [];
+  if (veilUp && veil) {
+    const mask = veil.style.maskImage || veil.style.webkitMaskImage || "";
+    const m = /url\("data:image\/svg\+xml,(.*)"\)/u.exec(mask);
+    const svg = m ? decodeURIComponent(m[1]) : "";
+    for (const r of svg.matchAll(/<rect x="([\d.-]+)" y="([\d.-]+)" width="([\d.]+)" height="([\d.]+)" rx=/gu)) {
+      holes.push({ x: +r[1], y: +r[2], w: +r[3], h: +r[4] });
+    }
+    for (const c of svg.matchAll(/<circle cx="([\d.-]+)" cy="([\d.-]+)" r="([\d.]+)"/gu)) {
+      holes.push({ x: +c[1] - +c[3], y: +c[2] - +c[3], w: 2 * +c[3], h: 2 * +c[3] });
+    }
+  }
+  /** @param {DOMRect} r */
+  const bright = (r) => !veilUp || holes.some((h) => r.left < h.x + h.w && r.right > h.x && r.top < h.y + h.h && r.bottom > h.y);
+
+  /** Every readable text box on the page that is not the film's own. */
+  /** @type {{ rect: DOMRect, node: Text }[]} */
+  const texts = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = /** @type {Text} */ (node);
+    if (!text.data.trim()) continue;
+    const parent = /** @type {HTMLElement | null} */ (text.parentElement);
+    if (parent === null) continue;
+    if (parent.closest("#orbit-tour-film, #orbit-tour-veil, #orbit-tour-transport, script, style")) continue;
+    const cs = getComputedStyle(parent);
+    if (cs.visibility === "hidden" || cs.display === "none" || parseFloat(cs.opacity) < 0.05) continue;
+    /* visually-hidden text (the kit's sr-only, the count beads' words) is
+       a 1px box whose text still measures at its laid-out width */
+    const pb = parent.getBoundingClientRect();
+    if (pb.width < 2 || pb.height < 2) continue;
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    for (const rect of range.getClientRects()) {
+      if (rect.width < 2 || rect.height < 2) continue;
+      texts.push({ rect, node: text });
+    }
+  }
+
   for (const el of /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".tourfilm-callout"))) {
     const box = el.getBoundingClientRect();
     if (el.style.opacity === "0") continue; /* leaving */
+    const said = (el.textContent ?? "").slice(0, 28);
     if (box.left < -0.5 || box.top < -0.5 || box.right > window.innerWidth + 0.5 || box.bottom > window.innerHeight + 0.5) {
       faults.push(`callout past the screen (${Math.round(box.left)},${Math.round(box.top)} ${Math.round(box.width)}x${Math.round(box.height)})`);
     }
     if (chromeBox && chromeBox.height > 0 && intersects(box, chromeBox)) faults.push("callout under the top chrome");
+
+    /* What it points at. */
+    const anchor = el.dataset.tourfilmAnchor ?? "";
+    const side = el.dataset.tourfilmSide ?? "";
+    const dy = Math.abs(Number(el.dataset.tourfilmDy ?? 0));
+    /** @type {DOMRect | null} */
+    let target = null;
+    if (anchor === "none") {
+      faults.push(`callout pointing at nothing: "${said}"`);
+    } else if (anchor !== "point" && anchor) {
+      const [x, y, w, h] = anchor.split(",").map(Number);
+      target = new DOMRect(x, y, w, h);
+      if (w < 1 || h < 1) faults.push(`callout on a 0x0 anchor: "${said}"`);
+      else if (target.right <= 0 || target.bottom <= 0 || target.left >= window.innerWidth || target.top >= window.innerHeight) {
+        faults.push(`callout whose anchor is off the screen: "${said}"`);
+      } else {
+        /* The stem's tip: the 14px square sits 8px past the box's edge,
+           rotated, so its tip is ~7px beyond the box on the named side. */
+        const stem = el.querySelector("i");
+        const sb = stem ? stem.getBoundingClientRect() : box;
+        const tip = side === "top" ? [(sb.left + sb.right) / 2, sb.bottom]
+          : side === "bottom" ? [(sb.left + sb.right) / 2, sb.top]
+            : side === "left" ? [sb.right, (sb.top + sb.bottom) / 2]
+              : [sb.left, (sb.top + sb.bottom) / 2];
+        const slackX = 10 + (side === "left" || side === "right" ? dy : 0);
+        const slackY = 10 + (side === "top" || side === "bottom" ? dy : 0);
+        const onTarget = tip[0] >= target.left - slackX && tip[0] <= target.right + slackX
+          && tip[1] >= target.top - slackY && tip[1] <= target.bottom + slackY;
+        if (!onTarget) faults.push(`callout's stem misses its anchor: "${said}"`);
+      }
+    }
+
+    /* Bright text it covers, other than its anchor's own — and other than
+       the lit surface its anchor stands in: a hole that contains the anchor
+       (the item card round its complete button, the hatch's panel round
+       its settings row) is the film's own picture of "this control, here",
+       and a line inside it has nowhere else to sit. */
+    /** @param {DOMRect} r @param {{ x: number, y: number, w: number, h: number }} h */
+    const within = (r, h) => r.left >= h.x - 1 && r.right <= h.x + h.w + 1 && r.top >= h.y - 1 && r.bottom <= h.y + h.h + 1;
+    const surface = target ? holes.filter((h) => within(target, h) && (h.w > target.width + 2 || h.h > target.height + 2)) : [];
+    for (const { rect, node } of texts) {
+      if (!intersects(box, rect) || !bright(rect)) continue;
+      if (target && within(rect, { x: target.left, y: target.top, w: target.width, h: target.height })) continue;
+      if (surface.some((h) => within(rect, h))) continue;
+      faults.push(`callout "${said}" covers the text "${node.data.trim().slice(0, 24)}"`);
+      break;
+    }
   }
-  /* Every ring on the screen must be the outline of something real: an
-     element under the ring's own centre whose box the ring matches, to the
-     ring's own padding (the film pads a paper's ring 8px). A ring round a
-     0x0 box is a control the page has replaced since it was measured. */
+  /* Every ring must be the outline of something real: the film's own
+     account (`__lit`, vocabulary.js's litBoxes) gives each ring beside the
+     box of the element it was drawn round as it measures NOW — the two must
+     agree to a pixel, the element must still be in the document and shown,
+     and no ring may be up that the film does not account for (one left
+     behind by a screen change). The rings' own frame after a scroll is
+     allowed for by the caller (two samples running). */
   const rings = [.../** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll("#orbit-tour-film .tourfilm-ring"))]
     .filter((r) => r.style.opacity !== "0");
-  for (const ring of rings) {
-    const box = ring.getBoundingClientRect();
-    if (box.width < 1 || box.height < 1) { faults.push("a ring round nothing (0x0)"); continue; }
-    if (box.right <= 0 || box.bottom <= 0 || box.left >= window.innerWidth || box.top >= window.innerHeight) continue;
-    const cx = Math.min(window.innerWidth - 1, Math.max(0, (box.left + box.right) / 2));
-    const cy = Math.min(window.innerHeight - 1, Math.max(0, (box.top + box.bottom) / 2));
-    const under = document.elementsFromPoint(cx, cy).filter((el) => !el.closest("#orbit-tour-film, #orbit-tour-veil, #orbit-tour-transport"));
-    let matched = false;
-    for (const el of under) {
-      for (let node = /** @type {Element | null} */ (el); node && node !== document.body && !matched; node = node.parentElement) {
-        const b = node.getBoundingClientRect();
-        const dx = Math.abs(b.left - box.left), dy = Math.abs(b.top - box.top);
-        const dw = Math.abs(b.width - box.width), dh = Math.abs(b.height - box.height);
-        if (dx <= 9 && dy <= 9 && dw <= 18 && dh <= 18) matched = true;
-      }
-      if (matched) break;
-    }
-    if (!matched) faults.push(`a ring round nothing at ${Math.round(box.left)},${Math.round(box.top)} ${Math.round(box.width)}x${Math.round(box.height)}`);
+  /** @type {{ ring: {x:number,y:number,w:number,h:number}, target: {x:number,y:number,w:number,h:number}, connected: boolean, shown: boolean, sel: string }[]} */
+  const lit = /** @type {any} */ (window).__lit?.() ?? [];
+  if (rings.length > lit.length) faults.push(`${rings.length - lit.length} ring(s) the film does not account for`);
+  for (const one of lit) {
+    const where = `${one.sel} at ${Math.round(one.ring.x)},${Math.round(one.ring.y)} ${Math.round(one.ring.w)}x${Math.round(one.ring.h)}`;
+    if (!one.connected) { faults.push(`a ring round an element no longer in the document: ${where}`); continue; }
+    if (one.ring.w < 1 || one.ring.h < 1 || one.target.w < 1 || one.target.h < 1) { faults.push(`a ring round nothing (0x0): ${where}`); continue; }
+    const off = one.ring.x + one.ring.w <= 0 || one.ring.y + one.ring.h <= 0 || one.ring.x >= window.innerWidth || one.ring.y >= window.innerHeight;
+    if (off) continue; /* a control the page has scrolled away is not on the screen to mislead */
+    if (!one.shown) faults.push(`a ring round something a reader cannot see: ${where}`);
+    const drift = Math.max(Math.abs(one.ring.x - one.target.x), Math.abs(one.ring.y - one.target.y),
+      Math.abs(one.ring.w - one.target.w), Math.abs(one.ring.h - one.target.h));
+    /* 2px is the lift: the control rises 2px inside its ring (applyLift). */
+    if (drift > 2.5) faults.push(`a ring ${Math.round(drift)}px off its element: ${where}`);
   }
   const reading = /** @type {any} */ (window).__reading?.();
   return {
@@ -169,25 +265,25 @@ test.describe("the pocket film in WebKit (#1174)", () => {
     const faults = {};
     /** @type {number[]} */
     const chapters = [];
-    /** A ring is re-measured one frame after the page moves, so a ring
-     *  caught between the scroll and that frame is not a fault; one seen on
-     *  two samples running (250ms apart) is. @type {Set<string>} */
-    let lastRingFaults = new Set();
+    /** The chrome is re-measured one frame after the page moves and a
+     *  callout fades over 180ms, so a fault caught on one 250ms sample is a
+     *  frame in transit; one seen on two samples running is on the screen
+     *  long enough to be read. `pointing at nothing` is counted at once —
+     *  it is never in transit. @type {Set<string>} */
+    let lastFaults = new Set();
     let ended = false;
     const started = Date.now();
     while (!ended && Date.now() - started < 380_000) {
       const s = await page.evaluate(sample);
       if (s) {
-        const ringFaults = new Set();
+        const now = new Set();
         for (const fault of s.faults) {
           const key = `${fault} · ${s.url} · ch${s.chapter}`;
-          if (fault.startsWith("a ring round nothing")) {
-            ringFaults.add(key);
-            if (!lastRingFaults.has(key)) continue;
-          }
+          now.add(key);
+          if (!fault.startsWith("callout pointing at nothing") && !lastFaults.has(key)) continue;
           faults[key] = (faults[key] ?? 0) + 1;
         }
-        lastRingFaults = ringFaults;
+        lastFaults = now;
         if (chapters.at(-1) !== s.chapter) chapters.push(s.chapter);
         ended = s.ended;
       }
