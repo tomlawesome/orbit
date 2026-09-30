@@ -1,202 +1,231 @@
 # Orbit administrator operations
 
-This document defines the security and state-transition contract for
-`ORB-FUT-004`. The operations interface is diagnostic and corrective; it is not
-a generic database editor or log viewer.
+This document is for the person who runs an Orbit instance. It says what the
+administration screen and the operations APIs show you, what they hide, and
+what you can do from them. It is also the contract those surfaces are held
+to: the operations interface is for diagnosing and correcting, not a general
+database editor or log viewer.
+
+A few words used throughout:
+
+- **Bounded** means a value comes from a fixed list of words that Orbit
+  chose in advance. A bounded reason can name a kind of failure, but it can
+  never carry a password, an address, a filename or an error message.
+- The **document key** (`DOCUMENT_KEK`) is the one master key that protects
+  every encrypted document and detail. "KEK" stands for key-encryption key.
+- **CSRF proof** is a check that a request came from Orbit's own pages, not
+  from another website you happened to have open.
 
 ## Information boundary
 
-Only authenticated instance administrators may use operations APIs. Every
-response is non-cacheable. Responses may contain:
+Only signed-in instance administrators can use the operations APIs. Every
+response is marked not to be cached. A response may contain:
 
-- worker state and last successful cycle time;
-- configured/unconfigured provider state;
+- worker state and the time of the last successful cycle;
+- whether each provider is configured or not;
 - counts by bounded status and safe failure category;
-- job identifiers, kind, attempts, lifecycle state, and timestamps;
-- actor/household/action labels from the audit history.
+- job identifiers, kind, attempts, lifecycle state and timestamps;
+- actor, household and action labels from the audit history.
 
-Responses must never contain credentials, provider URLs, recipient addresses,
+A response never contains credentials, provider URLs, recipient addresses,
 push endpoints or keys, raw exception text, raw audit `changes`, document
-names/content/hashes/storage keys, request headers, sessions, or message bodies.
+names, content, hashes or storage keys, request headers, sessions, or message
+bodies.
 
-Worker boundaries convert errors to versioned categories before persistence:
+Before a worker records a failure it turns the error into one of a fixed set
+of categories:
 
 - notifications: `smtp_unconfigured`, `smtp_unavailable`, `smtp_rejected`,
   `push_unconfigured`, `push_unsubscribed`, `push_unavailable`,
   `recipient_preferences_disabled`, or `unknown`;
-- documents: existing controlled codes such as `key_unavailable` and
+- documents: the existing controlled codes such as `key_unavailable` and
   `purge_failed`, plus `scanner_unavailable`, `scanner_timeout`,
   `scanner_protocol`, `scanner_failed`, `staging_object_invalid`,
   `scan_recovery_expired`, and `stage_purge_failed`.
 
-Historical raw notification errors remain internal and are never returned.
+Raw notification errors recorded in the past stay internal and are never
+returned.
 
 ## Readiness and classified diagnostics
 
-The public `GET /api/health` endpoint is a content-free readiness probe. It
-checks the required database dependency and returns HTTP `200` with `ready` or
-HTTP `503` with `degraded`. Both responses are non-cacheable and identify
-neither the dependency nor its error. Optional SMTP, push, IMAP, scanner, and
-document-processor failures do not make core records unreadable and therefore
-do not change this required-dependency result.
+`GET /api/health` is public and says nothing about why. It checks the
+database, which Orbit cannot run without, and answers HTTP `200` with `ready`
+or HTTP `503` with `degraded`. Neither answer names the dependency or its
+error, and neither may be cached. The optional services (SMTP, push, IMAP, the
+virus scanner and the document processor) do not affect this answer: when one
+of them fails, core records stay readable.
 
-Authenticated administrators use the bounded diagnostics surfaces together:
+As an administrator you use four surfaces together, each answering one kind
+of question:
 
-| Failure class | Authoritative surface | Safe evidence |
+| Failure class | Where to look | What it can show |
 | --- | --- | --- |
 | Required dependency | `/api/health` | `ready` or `degraded` only |
-| Configuration and provider | `/api/admin/operations` | configured state and allowlisted provider category |
+| Configuration and provider | `/api/admin/operations` | configured state and an allowlisted provider category |
 | Queue | `/api/admin/operations` | bounded status counts, safe failure category, attempts and timestamps |
 | Storage and document dependencies | `/api/admin/documents/health` | allowlisted encryption, storage, scanner, model extraction, quota and worker state |
 
 ### Model extraction (ADR-0025 section 5)
 
-`/api/admin/documents/health` carries a `modelExtraction` entry with three
-states, so an instance where every upload is quietly getting the heuristic
-suggestions alone does not look like a healthy one:
+`/api/admin/documents/health` includes a `modelExtraction` entry with one of
+three states. It exists so that an instance where every upload is quietly
+getting the built-in (heuristic) suggestions alone does not look healthy:
 
-- `not_configured` — the optional `ai` Compose profile is not running. This is
-  a design state, not a warning: most instances sit here for good, and it never
-  makes overall health degraded. The Compose profile is the only switch; there
-  is no in-app toggle.
+- `not_configured` — the optional AI add-on is not running. That add-on is the
+  `ai` Compose profile, and the profile is the only switch: there is no
+  in-app toggle. This is a normal state, not a warning. Most instances stay
+  here for good, and it never makes overall health degraded.
 - `ready` — the model is answering, and recent attempts are mostly succeeding.
-- `unavailable` — the profile is configured but the model is not answering
+- `unavailable` — the add-on is running but the model is not answering
   (`unreachable`), or more than half of the recent attempts came back with
-  nothing (`failing`). This marks overall health degraded.
+  nothing (`failing`). This makes overall health degraded.
 
-The entry also reports the recent window as three counts — attempts, failures
-and, of those, how many lost the deadline race. A handful of timeouts with the
-status still `ready` is a host that is occasionally slow; `unreachable` is a
-model that is down. Nothing in the entry names a document, its content or the
-selected model: it is counts and a fixed vocabulary of reasons.
+The entry also gives three counts for the recent window: attempts, failures,
+and how many of the failures were timeouts. A handful of timeouts with the
+status still `ready` means a host that is occasionally slow; `unreachable`
+means a model that is down. The entry never names a document, its content or
+the selected model. It is counts and a fixed list of reasons.
 
-Per upload, a model failure stays invisible to the person uploading: no error,
-no blocked flow, and the suggestions are simply the heuristic ones.
+The person uploading never sees a model failure: no error, no blocked step,
+just the built-in suggestions instead.
 
-The administrator routes remain session- and administrator-protected and
-non-cacheable. A degraded optional category is actionable independently and
-does not disclose configuration values, provider identity, private content, or
-raw dependency errors.
+The administrator routes stay session- and administrator-protected and are
+never cached. A degraded optional category can be acted on by itself, and does
+not reveal configuration values, provider identity, private content or raw
+dependency errors.
 
 ## Operational log contract
 
-`ORBIT_LOG_LEVEL` remains compatible with the existing `error`, `warn`,
-`info`, and `debug` values and defaults to `info`. `ORBIT_LOG_FORMAT` is an
-optional secure control with `text` (the default) or `json`. Invalid values
-fall back to the safe default. Both formats are renders of one event model;
-they do not create separate vocabularies or fields.
+Two settings control the logs. `ORBIT_LOG_LEVEL` takes `error`, `warn`,
+`info` or `debug` and defaults to `info`. `ORBIT_LOG_FORMAT` is optional and
+takes `text` (the default) or `json`. An invalid value falls back to the safe
+default. Both formats show the same events with the same fields; neither has
+anything the other lacks.
 
 Every record has a timestamp, level, component, event, lifecycle `state`, and
-bounded `reason`, `action`, `impact`, and `duration_ms` values. Configuration
-problem records additionally use fixed `setting`, `problem_code`, and
-`fallback` values. Records may end with a `detail` — a short quoted phrase for
-what the fixed vocabulary cannot say on its own, such as which migration
-disagreed. Its wording comes from Orbit's own source; only identifiers such as
-migration tags and counts are filled in, so a detail never carries SQL,
-configuration values or credentials. Text is one line with stable columns.
-JSON has the same fields and meanings. Colour is used only for a real TTY, is automatically off
-for `NO_COLOR`, non-TTY, redirected, and JSON output, and is never added to
-collected logs.
+bounded `reason`, `action`, `impact` and `duration_ms` values. Records about a
+configuration problem also carry fixed `setting`, `problem_code` and
+`fallback` values. A record may end with a `detail`: a short quoted phrase for
+what the fixed words cannot say on their own, such as which migration
+disagreed. The wording of a detail comes from Orbit's own source. Only
+identifiers such as migration tags and counts are filled in, so a detail never
+carries SQL, configuration values or credentials. Text output is one line per
+record with stable columns; JSON has the same fields with the same meanings.
+Colour is used only on a real terminal. It is off for `NO_COLOR`, for output
+that is piped or redirected, and for JSON, and it is never added to collected
+logs.
 
 The lifecycle states are `starting`, `ready`, `degraded`, `retrying`,
-`recovered`, `exhausted`, `stopping`, `disabled`, `invalid`, `blocked`, and
+`recovered`, `exhausted`, `stopping`, `disabled`, `invalid`, `blocked` and
 `completed`. Components cover application, configuration, authentication,
-database/migrations, notification and delivery, document/scanner/parser,
-mail receipt/ingestion, backup/recovery, and shutdown. Unchanged steady states
-such as `ready` are suppressed for the process lifetime. Persistent failure
-and retry states are re-emitted after a fixed 60-second cooldown, and an
-unhealthy-to-healthy transition is emitted as `recovered`; initial `starting`
-to `ready` remains `ready`.
+database and migrations, notification and delivery, document, scanner and
+parser, mail receipt and ingestion, backup and recovery, and shutdown. A
+steady state that has not changed, such as `ready`, is logged once for the
+life of the process. A failure or retry state that persists is logged again
+after a fixed 60-second cooldown. Going from unhealthy back to healthy is
+logged as `recovered`; the first `starting` to `ready` is just `ready`.
 
 Ordinary logs never contain raw exceptions, stack traces, provider responses,
-SQL, filenames, paths, hosts, URLs, recipients, tokens, user/household/
-document identifiers, message/document content, or configuration values.
-Worker catches classify the failure and continue their bounded polling loop;
-unexpected process-level startup failures remain fail-closed and are never
-silently swallowed. Database notices and launcher errors are reduced to fixed
-classifications.
+SQL, filenames, paths, hosts, URLs, recipients, tokens, user, household or
+document identifiers, message or document content, or configuration values.
+When a worker catches an error it classifies the failure and carries on
+polling. An unexpected failure at process startup still stops the process and
+is never silently swallowed. Database notices and launcher errors are reduced
+to fixed classifications.
 
-The relevant event groups are:
+The event groups you will see:
 
-| Component | Starting/healthy path | Failure and operator action |
+| Component | Starting and healthy path | Failure, and what you do |
 | --- | --- | --- |
-| Application/configuration | `application.startup` and `configuration.problem` | invalid or optional settings are blocked/degraded with safe fallback and a fixed remediation |
-| Authentication | `auth.configuration`, `auth.provider` | discovery/token/callback failures block sign-in without provider detail |
-| Database/migrations | `database.connection`, `database.migration` | notices, unavailable connections, and migration integrity failures remain bounded |
-| Document/scanner/parser | `document.lifecycle`, `document.scan`, `document.parse`, `document.worker` | required scanning fails closed; retries, recovery, and exhaustion identify the safe action |
-| Notifications/delivery | `notification.worker`, `delivery.smtp`, `delivery.push` | provider failures are categorized and retried or exhausted without recipients |
-| Mail receipt/ingestion | `imap.receipt`, `imap.ingestion` | preflight and worker failures show bounded retry/degraded state |
-| Backup/recovery/shutdown | `backup.operation`, `recovery.operation`, `shutdown.signal` | scripts and runtime operators use fixed recovery/stopping classifications |
+| Application and configuration | `application.startup` and `configuration.problem` | an invalid or optional setting is blocked or degraded with a safe fallback and a fixed remediation |
+| Authentication | `auth.configuration`, `auth.provider` | discovery, token and callback failures block sign-in without provider detail |
+| Database and migrations | `database.connection`, `database.migration` | notices, unavailable connections and migration integrity failures stay bounded |
+| Document, scanner and parser | `document.lifecycle`, `document.scan`, `document.parse`, `document.worker` | required scanning fails closed; retries, recovery and exhaustion name the safe action |
+| Notifications and delivery | `notification.worker`, `delivery.smtp`, `delivery.push` | provider failures are categorised and retried or exhausted, without recipients |
+| Mail receipt and ingestion | `imap.receipt`, `imap.ingestion` | preflight and worker failures show a bounded retry or degraded state |
+| Backup, recovery and shutdown | `backup.operation`, `recovery.operation`, `shutdown.signal` | scripts and runtime operators use fixed recovery and stopping classifications |
 
-Backup and restore remain explicit operator actions. Their CLI output is
-static and content-free; the application event vocabulary reserves the same
-bounded backup/recovery states for integrations without logging archive paths
-or private data.
+Backup and restore are things you run deliberately. Their command-line output
+is static and content-free. The application reserves the same bounded backup
+and recovery states for integrations, and never logs an archive path or
+private data.
 
 ## Logs, audit, health, and administrator diagnostics
 
-Logs answer “what operational transition occurred?” and are ephemeral. The
-audit trail answers “what security or data action was accepted?” and persists
-the existing safe action labels. Public health remains the unchanged,
-content-free required-database readiness contract. The administrator-only
-operations surface answers “what is the current bounded state and what safe
-operator action is available?” It includes the in-memory configuration problem
-registry: fixed code, severity, setting category, safe fallback, and
-remediation only. It is exposed through the existing administrator-protected
-operations route; signed-out and non-administrator callers receive the same
-authorization failure and cannot read diagnostics.
+Each surface answers one question:
 
-Roll out with the default text format and the existing level. Enable JSON only
-for a controlled collector that handles the same privacy contract. To roll
-back, unset `ORBIT_LOG_FORMAT` or restore `text`; no database migration or
-external telemetry service is involved. If a new classification is needed,
-add it to the bounded model and tests before use rather than logging arbitrary
-values.
+- Logs answer "what operational transition just happened?" and are not kept.
+- The audit trail answers "what security or data action was accepted?" and is
+  kept, using the existing safe action labels.
+- Public health answers only "is the required database there?" and is
+  unchanged.
+- The administrator-only operations surface answers "what is the current
+  bounded state, and what safe action can I take?" It includes the in-memory
+  registry of configuration problems: a fixed code, severity, setting
+  category, safe fallback and remediation, and nothing else. It is served by
+  the existing administrator-protected operations route. Anyone signed out, or
+  signed in but not an administrator, gets the same authorisation failure and
+  cannot read diagnostics.
+
+Roll out with the default text format and your existing level. Turn on JSON
+only for a controlled log collector that keeps to the same privacy contract.
+To go back, unset `ORBIT_LOG_FORMAT` or set it to `text`; no database
+migration or outside telemetry service is involved. If a new classification
+is ever needed, it is added to the bounded model and its tests before use,
+rather than logging arbitrary values.
 
 ## Corrective actions
 
-All mutations require CSRF validation, administrator authorization, an exact
-expected source state, and an audit event after an accepted transition. A
-missing, stale, replayed, processing, or otherwise zero-row transition returns
-the bounded conflict result and writes no misleading success audit.
+Every change you make through the operations surface needs CSRF proof,
+administrator authorisation, and the item to be in exactly the state the
+action expects. An accepted change writes an audit event. If the item is
+missing, has moved on, was already acted on, is being processed, or the update
+touches no row for any other reason, you get the bounded conflict result and
+no misleading success is written to the audit trail.
 
-- A failed or cancelled notification may be retried. Its attempt count, lock,
-  sent time, and failure state are cleared and it is scheduled immediately.
-- A pending, retrying, or failed notification may be discarded as cancelled.
-- A failed scanner recovery job may be retried from attempt zero while its
-  recovery expiry remains unchanged. A failed terminal stage purge may be
-  retried as deletion only; it never re-enters scanning.
-- Restore preserves the scanner job attempt count and failed/manual state; only
-  live pending, retry, or processing leases are requeued.
-- A failed document job may be discarded as cancelled. Scanner-recovery
-  discard/expiry rejects metadata and schedules idempotent secure stage purge;
-  a deletion error remains an administrator-visible `purge_pending` backlog,
-  never a claimed success.
-- Processing work is never mutated by an administrator. The API returns the
-  same non-enumerating conflict response for missing and non-actionable IDs.
+- A failed or cancelled notification can be retried. Its attempt count, lock,
+  sent time and failure state are cleared and it is scheduled straight away.
+- A pending, retrying or failed notification can be discarded; it becomes
+  cancelled.
+- A failed scanner recovery job can be retried from attempt zero. Its recovery
+  expiry does not change. A failed final stage purge can be retried as a
+  deletion only; it never goes back into scanning.
+- A restore keeps a scanner job's attempt count and its failed or manual
+  state; only live pending, retry or processing leases are put back in the
+  queue.
+- A failed document job can be discarded; it becomes cancelled. Discarding or
+  expiring a scanner recovery rejects the metadata and schedules a secure
+  purge of the staged file that is safe to run more than once. If that
+  deletion fails, it stays visible to you as a `purge_pending` backlog, never
+  a claimed success.
+- Work that is being processed is never changed by an administrator. The API
+  gives the same conflict response for an ID that does not exist and one that
+  cannot be acted on, so it cannot be used to discover IDs.
 
-Notification delivery remains at-least-once: SMTP cannot guarantee that a
-provider accepted a message but the subsequent database update succeeded.
-Retry actions must state this duplicate-delivery risk.
+Notification delivery is at-least-once: SMTP cannot guarantee that a provider
+accepted a message and that Orbit's database update afterwards also succeeded.
+The retry action tells you this: retrying can send a duplicate.
 
-Document worker completions use an unguessable lease token. A stale worker may
-not overwrite a job claimed by a newer worker.
+When a document worker finishes a job it presents a one-time claim that
+cannot be guessed. A worker that has been overtaken by a newer one cannot
+overwrite the newer worker's job.
 
 ## Maintenance mode and the way back in
 
 Maintenance closes Orbit to users while administrators keep full access
 (ADR-0013). Administrators pass the request guard on every route, so the
-maintenance control needs no exempt path: a non-administrator probing it during
-maintenance receives the same bounded `503` as any other path, and the control
-is neither discoverable nor invocable from outside.
+maintenance control needs no special exemption. Someone who is not an
+administrator and tries the control during maintenance gets the same bounded
+`503` as on any other path; from outside, the control cannot be found or
+used.
 
-Sign-in stays open while maintenance is active — the sign-in page and the OIDC
-login, callback, session and logout routes are exempt — so the ordinary
-recovery path is simply to sign in and end maintenance from the control.
+Sign-in stays open during maintenance: the sign-in page and the OIDC login,
+callback, session and logout routes are exempt. So the ordinary way back in
+is to sign in and end maintenance from the control.
 
-`/api/health` answers `200` with `status: maintenance` while the instance is
-closed but healthy, so orchestrators keep routing traffic to it and do not
-restart it. Only a genuine dependency failure answers `503 degraded`.
+While the instance is closed but healthy, `/api/health` answers `200` with
+`status: maintenance`. Orchestrators keep routing traffic to it and do not
+restart it. Only a real dependency failure answers `503 degraded`.
 
 ### The emergency path, when OIDC itself is down
 
@@ -206,44 +235,46 @@ If no administrator can sign in, reopen the instance from the host:
 bash scripts/end-maintenance.sh
 ```
 
-The script runs the application's own deactivation function inside the already
-published image, as a disposable one-off (ADR-0015). It never edits the
-database directly: the write is versioned and audited exactly as an
-administrator's would be, with a null actor and `origin: operator_shell` in the
-audit row, so the recovery is visible in the audit history afterwards.
+The script runs the application's own "end maintenance" function inside the
+already published image, as a throwaway one-off container (ADR-0015). It never
+edits the database directly. The write is versioned and audited exactly as an
+administrator's would be, with no actor and `origin: operator_shell` in the
+audit row, so you can see the recovery in the audit history afterwards.
 
-It also cancels any scheduled notice that has already come due. Effective
-maintenance is the singleton being active *or* such a notice existing, so
-clearing one without the other would leave the instance closed and the operator
-still locked out.
+It also cancels any scheduled maintenance notice that has already come due.
+Orbit counts itself as in maintenance if either the maintenance flag is set
+*or* such a notice exists, so clearing one without the other would leave the
+instance closed and you still locked out.
 
-The script is idempotent: running it against an instance that is already open
-changes nothing, writes no audit row, and still succeeds. It requires the
-database to be reachable, which is true whenever maintenance is what stands
+The script is safe to run twice: against an instance that is already open it
+changes nothing, writes no audit row, and still succeeds. It needs the
+database to be reachable, which is always so when maintenance is what stands
 between users and a running instance.
 
 ## Adding a local user
 
-Local sign-in is always available, whether or not OIDC is also enabled. From
+Local sign-in is always available, whether or not OIDC is also on. From
 **Administration → Users**, enter the new user's email, display name, and how
 long their setup link should stay valid (1 to 14 days, default 7), then
-create the account. Orbit **emails the setup link to that address** — it is
-never shown on screen, never returned by the API, and never recoverable after
-the fact. The new user opens it, sets their own password, and is signed in.
+create the account. Orbit **emails the setup link to that address**. The link
+is never shown on screen, never returned by the API, and cannot be recovered
+afterwards. The new user opens it, sets their own password, and is signed in.
 
-Because the link only ever leaves by mail, **an instance with no working SMTP
-configured cannot add a local user.** Configure SMTP first (see "Mailbox
-provider operation" below for the provider-verification contract outbound
-mail shares with inbound). If sending fails at creation time, the account
-still exists and the row shows a bounded reason with a Retry action, so
-nothing needs recreating.
+<!-- screenshot: Administration → Users, the "add a local user" form with email, display name and "link valid for" days -->
 
-A local user who has forgotten their password gets the same mechanism: "Send
-a new setup link" on their row in the users table, behind the same recent-
-authentication challenge as any other sensitive action. Issuing a new link
-invalidates any earlier one for that user. See
+Because the link only ever leaves by email, **an instance with no working
+SMTP cannot add a local user.** Configure SMTP first (see "Mailbox provider
+operation" below for the provider checks that outbound mail shares with
+inbound). If sending fails when the account is created, the account still
+exists and its row shows a bounded reason with a Retry action, so nothing
+needs recreating.
+
+A local user who has forgotten their password gets the same treatment: "Send
+a new setup link" on their row in the users table, behind the same
+recent-sign-in challenge as any other sensitive action. Sending a new link
+cancels any earlier one for that user. See
 [authentication.md](authentication.md#administrator-adding-a-local-user) for
-the operator-facing walkthrough, including what to tell a new user.
+the walkthrough, including what to tell a new user.
 
 ## Recovering the primary administrator
 
@@ -254,35 +285,34 @@ used OIDC and has lost the provider, recover from the deployment host:
 docker compose --env-file .env-orbit exec orbit-app node /opt/orbit/cli/orbit.js auth recovery-link
 ```
 
-The command reads `instance_authority` for the current primary administrator,
-mints a one-time setup link for them, revokes every session they held, records
-the `recovery_link_issued` audit entry, and prints that one URL to the
-terminal — nothing else. Opening the link sets (or replaces) the primary
-administrator's local password and signs them in. The link expires **5
-minutes** after issue: an administrator doing this should be doing it
-instantly, and a stale link answers the same `setup_token_invalid` as any
-other expired or already-used setup link. It never touches `is_instance_admin`
-and never moves primary authority, so it cannot bypass the last-administrator
-or primary-administrator invariants.
+The command looks up the current primary administrator in
+`instance_authority`, creates a one-time setup link for them, signs them out
+everywhere, records the `recovery_link_issued` audit entry, and prints that
+one URL to the terminal and nothing else. Opening the link sets (or replaces)
+the primary administrator's local password and signs them in. The link
+expires **5 minutes** after it is printed: use it straight away. A stale link
+gets the same `setup_token_invalid` answer as any other expired or already
+used setup link. The command never touches `is_instance_admin` and never
+moves primary authority, so it cannot get round the last-administrator or
+primary-administrator rules.
 
 Anyone who can run `docker compose exec` on the host can recover the primary
-administrator at any time (ADR-0022 §6). That is the trust boundary this
-command sits inside, not a gap it introduces: host access to the running
-deployment already means full control of it.
+administrator at any time (ADR-0022 §6). That is not a gap the command opens:
+host access to the running deployment already means full control of it.
 
 ## When the encryption key and the recovery bundle are both lost
 
 This is the last resort, and it recovers nothing. Read the whole section
 before running it.
 
-Orbit encrypts documents and personal details — including everyone's email
-address — under one key. If that key and the recovery bundle are both gone,
+Orbit encrypts documents and personal details, including everyone's email
+address, under one key. If that key and the recovery bundle are both gone,
 those things are gone with them, permanently. Nothing here brings them back.
 
-What it does fix is the second problem that follows: Orbit finds an account by
-its email address, and it can no longer read any address, so **nobody can sign
-in at all**. Without this command the instance is a locked box with everyone's
-accounts intact inside it.
+What it does fix is the second problem that follows. Orbit finds an account by
+its email address, and it can no longer read any address, so **nobody can
+sign in at all**. Without this command the instance is a locked box with
+everyone's accounts intact inside it.
 
 ```sh
 docker compose --env-file .env-orbit exec orbit-app node /opt/orbit/cli/orbit.js auth clear-addresses
@@ -309,7 +339,7 @@ their own password through a setup link as usual.
 **It refuses to run while the key still works.** This is deliberate, and it is
 the guard that matters most. If members cannot sign in and the key is fine,
 the fault is something else entirely, and running this would destroy addresses
-that were never in danger — so the command checks first and stops. If you have
+that were never in danger, so the command checks first and stops. If you have
 the recovery bundle, restore that instead: it brings the key back and nothing
 is lost.
 
@@ -317,21 +347,22 @@ It can only be run from the host shell. No page, no button and no API request
 can reach it, deliberately: reachable over the network it would be a single
 request that wipes every account's identity. It needs a real terminal, so a
 script or scheduled job cannot run it either. Each run is recorded in the
-audit log as `account_addresses_cleared`, with counts only — the addresses
-could not be read, so there is nothing to record.
+audit log as `account_addresses_cleared`, with counts only. The addresses
+could not be read, so there is nothing else to record.
 
 ## Provider tests
 
-The SMTP test verifies connection and authentication only. It does not send a
-message and returns a bounded result category. It has a short timeout and never
-returns configuration or provider response text. Push tests, when added, target
-only the requesting administrator's current subscription and cannot select an
-arbitrary recipient.
+The SMTP test checks connection and sign-in only. It sends no message and
+returns a bounded result category. It has a short timeout and never returns
+configuration or the provider's response text. Push tests, when added, go
+only to the requesting administrator's own current subscription; they cannot
+pick another recipient.
 
 ## Deployment configuration readiness
 
 Run guided setup once from the persistent deployment directory, then check the
-configuration before every first start or material provider change:
+configuration before every first start and before any material provider
+change:
 
 ```sh
 bash scripts/configure.sh
@@ -340,29 +371,35 @@ bash scripts/configure.sh --set-oidc-secret
 bash scripts/configure.sh --check
 ```
 
-The first command is the non-interactive bootstrap and upgrade path: it creates
-missing generated secrets and preserves existing operator settings. Guided
-setup first asks whether to sign in with local accounts only or also with an
-identity provider (`ORBIT_AUTH_OIDC`, default local-only); answering "also"
-atomically records the public HTTPS Orbit origin, complete OIDC issuer,
-client ID, and derived callback URL. It does not collect provider
-credentials. The separate secret step reads the OIDC client secret silently,
-stores it atomically at `.orbit-secrets/oidc-client-secret` with mode `0600`,
-and records only `/run/orbit-secrets/orbit-oidc-client-secret` in
-`.env-orbit`. Do not provide the secret on the command line or through a
-literal shell pipeline. Turning `ORBIT_AUTH_OIDC` back to `false` later
-disables provider sign-in without deleting its configuration, so it can be
-turned back on with no re-entry; see
+The first command is the non-interactive bootstrap and upgrade path. It
+creates any missing generated secrets and keeps your existing settings.
+
+Guided setup first asks whether people sign in with local accounts only, or
+also with an identity provider (`ORBIT_AUTH_OIDC`, default local-only). If you
+answer "also", it records the public HTTPS Orbit origin, the complete OIDC
+issuer, the client ID and the callback URL it works out from those, writing
+them all in one go so a failure part-way leaves nothing half-written. It does
+not ask for provider credentials.
+
+The separate secret step reads the OIDC client secret without echoing it,
+stores it in one go at `.orbit-secrets/oidc-client-secret` with mode `0600`,
+and records only the path `/run/orbit-secrets/orbit-oidc-client-secret` in
+`.env-orbit`. Never give the secret on the command line or through a shell
+pipeline that contains it as text.
+
+Setting `ORBIT_AUTH_OIDC` back to `false` later turns provider sign-in off
+without deleting its configuration, so you can turn it back on without
+re-entering anything; see
 [authentication.md](authentication.md#adding-oidc-later).
 
-The readiness check validates required settings, direct-versus-file secret
-ambiguity, and partially configured optional groups. Its output contains only
-field names and readiness categories; it does not print values. A failed check
-is an administrator action and must be resolved before deployment. Keep the
-persistent `.env-orbit` file mode `0600`; direct and file-backed forms are
-mutually exclusive. Ordinary configuration and recognised upgrades preserve
-the OIDC secret file. Never put credentials in command arguments, terminal
-history, issue text, chat, or logs.
+The readiness check looks for required settings that are missing, secrets
+given both directly and as a file, and optional groups that are only partly
+configured. Its output has only field names and readiness categories, never
+values. A failed check is yours to resolve before deploying. Keep the
+persistent `.env-orbit` file at mode `0600`. A secret is given either
+directly or as a file, never both. Ordinary configuration runs and recognised
+upgrades keep the OIDC secret file. Never put credentials in command
+arguments, terminal history, issue text, chat or logs.
 
 ## Mailbox provider operation
 
@@ -371,17 +408,17 @@ base `docker-compose.yml` without mail secret files.
 
 **The mailbox is not container configuration.** Since ADR-0017 an instance
 administrator sets it on the administration screen, and Orbit stores the
-password encrypted in its own database under the encryption key. No `IMAP_*`
-environment variable is accepted any more; a leftover one in `.env-orbit`
-fails the configuration check as a removed key. Outbound SMTP is unchanged and
-is still deployment configuration.
+password encrypted in its own database under the document key. No `IMAP_*`
+environment variable is accepted any more; one left in `.env-orbit` fails the
+configuration check as a removed key. Outbound SMTP is unchanged and is still
+deployment configuration.
 
 To configure inbound mail:
 
 1. Configure SMTP first, and deploy the mail overlay so the SMTP password is
-   mounted from `${ORBIT_SECRETS_DIR}/smtp-password`. Supply it from a secret
-   manager or private editor, not a command argument. The path must be a
-   non-empty regular file, not a symbolic link, and readable only by the
+   mounted from `${ORBIT_SECRETS_DIR}/smtp-password`. Put it there from a
+   secret manager or a private editor, not a command argument. The path must
+   be a non-empty ordinary file, not a symbolic link, and readable only by the
    deployment operator.
 
    ```sh
@@ -396,20 +433,23 @@ To configure inbound mail:
    TLS server name, provider profile, envelope-recipient header, poll seconds
    and the mailbox password.
 
-3. Orbit connects to the provider and authenticates **before** it stores
-   anything. A refusal leaves whatever was there untouched and stores no part
-   of the password; only a successful check commits it.
+   <!-- screenshot: Administration → Mail machinery, the mailbox settings form -->
 
-Two things are derived from the account address and are not entered
-separately: the collection domain, and the base local part every member's
-relay address is built on. Relay addresses are plus-addresses of that account
+3. Orbit connects to the provider and signs in **before** it stores anything.
+   If the provider refuses, whatever was there before is untouched and no part
+   of the password is stored; only a successful check commits it.
+
+Two things are worked out from the account address rather than entered: the
+collection domain, and the base local part every member's relay address is
+built on. Relay addresses are plus-addresses of that account
 (`account+<code>@domain`), so it must be an address the provider delivers
 sub-addressed mail to.
 
-The alias-derivation key is generated by Orbit at first setup, stored
-encrypted alongside the password, and never shown to anyone — members
-included. Changing the account address generates a new one, which changes
-every member's relay address; correcting a host, port or folder does not.
+The alias key, which Orbit uses to make each member's relay address, is
+generated at first setup, stored encrypted alongside the password, and never
+shown to anyone, members included. Changing the account address generates a
+new alias key, which changes every member's relay address; correcting a host,
+port or folder does not.
 
 **Forward, do not redirect.** The only supported way to use a relay address is
 for a member to forward mail to it from their own mailbox. A redirect keeps the
@@ -424,20 +464,20 @@ check is the `Authentication-Results` header your provider writes, and Orbit
 has to know whose header to believe: that is the **trusted authserv-id** on the
 mail settings screen. Gmail and Outlook are known, so leaving it blank works
 for them. For Mailcow or any other provider it is your own mail server's
-hostname — the name it writes at the start of that header — and until you fill
-it in Orbit believes nothing, matches nothing to anybody, and says so on each
+hostname, the name it writes at the start of that header. Until you fill it in
+Orbit believes nothing, matches nothing to anybody, and says so on each
 member's relay page. That is deliberate: guessing would be the guess an
 attacker gets to use.
 
 A message Orbit cannot match to a member is deleted from the mailbox, and
 nothing is kept for you or anyone else to look at. The sender is told once, and
-only when your provider vouched for them — never a mailing list, never an
+only when your provider vouched for them: never a mailing list, never an
 autoresponder, never twice in a day, and never quoting what they sent.
 
-Each member can also pause their own collection from the same page. While they
-are paused, mail addressed to them is recorded as having arrived and nothing
-else happens to it: no attachment is fetched, nothing is stored, and they are
-not told. Turning it back on prepares everything that was waiting, once. A held
+Each member can pause their own collection from the same page. While they are
+paused, mail addressed to them is recorded as having arrived and nothing else
+happens to it: no attachment is fetched, nothing is stored, and they are not
+told. Turning it back on prepares everything that was waiting, once. A held
 message expires on the same schedule as any other, after which it lives only in
 the provider mailbox. One member pausing changes nothing for anybody else.
 
@@ -447,153 +487,155 @@ they are or what address they came to.
 
 Members rotate their own relay address from their relay page, and one member
 rotating changes nothing for anybody else. The one exception is an emergency:
-an administrator can replace the alias key for the whole instance, which
-changes every member's address at once. Choose how long the old addresses keep
-collecting — anything from none at all up to 90 days — and mail already on its
-way arrives at the old address until that runs out. Everything else about
-rotation belongs to the member, not to you: you can see that a rotation
-happened and who did it, never the address itself.
+you can replace the alias key for the whole instance, which changes every
+member's address at once. Choose how long the old addresses keep collecting,
+anything from none at all up to 90 days, and mail already on its way arrives
+at the old address until that runs out. Everything else about rotation belongs
+to the member, not to you: you can see that a rotation happened and who did
+it, never the address itself.
 
-The container bootstrap copies mounted Compose secrets into a private tmpfs,
-sets ownership to Orbit's unprivileged runtime user, applies mode `0400`, then
-drops root. The application reads only the `/run/orbit-secrets/...` copies.
-Missing, partial, empty, symbolic-link, oversized, or simultaneously direct and
-file-backed secrets fail closed.
+When the container starts it copies the mounted Compose secrets into a
+private in-memory folder that disappears when the container stops, gives them
+to Orbit's unprivileged runtime user, sets mode `0400`, then drops root. The
+application reads only the `/run/orbit-secrets/...` copies. A secret that is
+missing, partial, empty, a symbolic link, oversized, or given both directly
+and as a file stops startup.
 
-SMTP and IMAP are verified independently with certificate and hostname
-validation. SMTP supports required STARTTLS or implicit TLS; plaintext and
-opportunistic downgrade are unsupported. IMAP uses implicit verified TLS on
-the configured port without assuming that a provider uses only the default
-port. Polling cannot begin until both current configurations pass preflight.
-A startup outage leaves mailbox ingestion degraded and retryable while core
-records, the durable cursor, existing private drafts, and cleanup obligations
-remain available.
+SMTP and IMAP are checked separately, each with certificate and hostname
+validation. SMTP supports required STARTTLS or implicit TLS; plain text and
+opportunistic downgrade are not supported. IMAP uses implicit verified TLS on
+the port you configured; it does not assume a provider uses only the default
+port. Polling cannot begin until both current configurations pass their
+checks. If a provider is down at startup, mailbox ingestion is degraded and
+retryable while core records, the durable cursor (Orbit's record of how far
+through the mailbox it has read), existing private drafts and cleanup
+obligations stay available.
 
-The administrator operations view exposes only these mailbox classes:
+The administrator operations view shows only these mailbox states:
 
-| State | Operator meaning |
+| State | What it means for you |
 | --- | --- |
 | `not_configured` | Required provider or alias configuration is absent. |
-| `disabled` | Polling is intentionally disabled; existing state is preserved. |
-| `verification_pending` | Current configuration has not yet passed both provider checks. |
+| `disabled` | Polling is intentionally off; existing state is kept. |
+| `verification_pending` | The current configuration has not yet passed both provider checks. |
 | `available` | Both provider checks passed and polling may run. |
-| `provider_unavailable` | A bounded provider connection or authentication check failed. |
-| `unsafe_input` | Configuration is malformed or internally inconsistent. |
-| `credential_locked` | The stored credential could not be decrypted under the current key (ADR-0017); polling is stopped until an administrator re-enters it. |
-| `retrying` | A content-free notification is waiting for bounded retry. |
+| `provider_unavailable` | A bounded provider connection or sign-in check failed. |
+| `unsafe_input` | The configuration is malformed or contradicts itself. |
+| `credential_locked` | The stored password could not be decrypted under the current key (ADR-0017); polling is stopped until an administrator re-enters it. |
+| `retrying` | A content-free notification is waiting for a bounded retry. |
 | `exhausted` | A content-free notification reached its attempt limit. |
-| `retention_backlog` | Private staging cleanup needs operator attention. |
+| `retention_backlog` | Private staging cleanup needs your attention. |
 
-Verification and retry actions require an authenticated instance
-administrator, same-origin CSRF proof, and non-cacheable responses. They never
-return recipients, aliases, filenames, message or document content, hashes,
-storage identifiers, credentials, or raw provider errors. Administrator
-authority does not grant access to a user's private receipt, draft, staged
-attachment, or authenticated review page.
+Verification and retry actions need a signed-in instance administrator,
+same-origin CSRF proof, and responses that are never cached. They never return
+recipients, aliases, filenames, message or document content, hashes, storage
+identifiers, credentials or raw provider errors. Being an administrator does
+not give you access to a user's private receipt, draft, staged attachment or
+their review page.
 
 What the mailbox settings screen shows, and only this: host, port, account
 address, folder, TLS server name, provider profile, envelope-recipient header,
 poll seconds, verification state and time, who set the credential and when,
 the *shape* relay addresses take, and the bounded health words above. It never
-shows the mailbox password, the alias key, or any member's relay address —
-none of which has a read path at all.
+shows the mailbox password, the alias key or any member's relay address. None
+of those can be read back at all.
 
-Mailbox notifications are durable, leased, idempotently materialized, and
-bounded on failure. Their generic body contains no source content and links
-only to `/?open=inbox` on the configured HTTP(S) application origin. The link
-still requires authentication and cannot approve, attach, or write anything.
-SMTP remains at-least-once: if a provider accepts a message immediately before
-Orbit loses its completion update, an explicit retry can duplicate the generic
-notification. The interface warns before retrying exhausted deliveries.
+Mailbox notifications are durable, claimed by one worker at a time, safe to
+create more than once, and bounded on failure. Their generic body contains no
+source content and links only to `/?open=inbox` on the configured HTTP(S)
+application origin. The link still needs sign-in and cannot approve, attach or
+write anything. SMTP is at-least-once: if a provider accepts a message just
+before Orbit loses its completion update, an explicit retry can send the
+generic notification twice. The interface warns before retrying exhausted
+deliveries.
 
 ### Disable, restart, and credential rotation
 
 All of these are actions on the administration screen. None needs a redeploy,
 and none is a container setting.
 
-- **Pause ingest** stops new polling and preserves everything: the mailbox
-  cursor, receipts, private drafts and staging are untouched, exactly as the
-  old `IMAP_ENABLED=false` preserved them. Resume picks up from the durable
-  cursor.
-- **Check connection** re-runs the bounded TLS and authentication check
-  against the stored credential and records the outcome as a bounded word.
-- **Run setup probe** sends one message from the instance to a derived
-  plus-address of the mailbox and watches for it to come back. It answers
-  `delivered` when the message arrived with its envelope recipient intact —
-  the only state in which mail can be attributed to a member — and separates
-  the two ways it can fail: `delivered_without_recipient_header` means the
-  provider delivers sub-addressed mail but strips the envelope recipient, and
-  `not_delivered` means it does not deliver it at all. Orbit removes its own
-  probe message from the mailbox.
+- **Pause ingest** stops new polling and keeps everything: the mailbox cursor,
+  receipts, private drafts and staging are untouched, exactly as the old
+  `IMAP_ENABLED=false` kept them. Resume picks up from the durable cursor.
+- **Check connection** re-runs the bounded TLS and sign-in check against the
+  stored password and records the outcome as a bounded word.
+- **Run setup probe** sends one message from the instance to a plus-address
+  of the mailbox and watches for it to come back. It answers `delivered` when
+  the message arrived with its envelope recipient intact, the only state in
+  which mail can be matched to a member. It tells the two failures apart:
+  `delivered_without_recipient_header` means the provider delivers
+  sub-addressed mail but strips the envelope recipient, and `not_delivered`
+  means it does not deliver it at all. Orbit removes its own probe message
+  from the mailbox.
 - **Rotate password** takes the new password, proves it against the provider
   first, and only then swaps it in. The new encrypted row becomes active and
   the old one is deleted in the same transaction, so a rotation never leaves a
-  spent credential behind and a refused one leaves the previous password
+  spent password behind, and a refused one leaves the previous password
   working.
 - **Remove credential** deletes the stored password and switches ingest off.
   The host, account and folder stay, and so do the cursor, receipts, drafts
   and staging.
-- A routine restart re-verifies the current provider commitment before polling
+- A routine restart re-checks the current provider settings before polling
   and resumes through the durable cursor and leases. Re-enabling after a
-  restart or provider outage uses the preserved cursor and receipt identities;
-  it must not create a second draft or delivery operation for already recorded
-  mail.
-- Rotate SMTP independently by replacing its host secret file atomically and
-  restarting the exact deployed image. Never place a credential in a command,
-  screenshot, issue, log, or acceptance record.
+  restart or provider outage uses the kept cursor and receipt identities; it
+  must not create a second draft or delivery for mail already recorded.
+- Rotate SMTP separately: replace its host secret file in one step and
+  restart the exact deployed image. Never put a credential in a command,
+  screenshot, issue, log or acceptance record.
 
-If the encryption key is replaced **without** rewrapping — a recovery-bundle
+If the document key is replaced **without** rewrapping (a recovery-bundle
 import, or repair regenerating `document-kek` when no document volume is
-retained — the stored mailbox credential can no longer be decrypted. Mail-in
-reports `credential_locked`, polling stops, and an administrator re-enters the
-password on the same screen. A mailbox password is re-obtainable from the
-provider; documents and encrypted metadata are not, which is why this degradation
-is acceptable for those two paths specifically: both are a wholesale key
-*replacement*, not a rotation, and neither carries the old key forward for a
-rewrap to use. An ordinary planned rotation is different — see "Rotating the
-document key-encryption key" below — and leaves every credential, document and
-encrypted metadata field readable throughout.
+kept) the stored mailbox password can no longer be decrypted. Mail-in reports
+`credential_locked`, polling stops, and you re-enter the password on the same
+screen. That is acceptable for those two paths because a mailbox password can
+be fetched again from the provider; documents and encrypted metadata cannot.
+Both paths are a wholesale key *replacement*, not a rotation, and neither
+keeps the old key for a rewrap to use. An ordinary planned rotation is
+different (see "Rotating the document key-encryption key" below) and leaves
+every credential, document and encrypted field readable throughout.
 
 ### Exact-image mailbox acceptance
 
-Representative provider acceptance is release evidence, not an ordinary CI
-secret. Use controlled provider identities, keep their credentials only in the
-mounted files above, and deploy the immutable digest under test. Record the
+Acceptance against a real provider is release evidence, not an ordinary CI
+secret. Use provider identities set aside for it, keep their credentials only
+in the mounted files above, and deploy the exact build under test by its
+digest (the fingerprint that names one build and nothing else). Record the
 image's `org.opencontainers.image.revision` label and require it to match the
 accepted source revision.
 
 Exercise, in order:
 
-1. verified SMTP and IMAP TLS/authentication;
+1. verified SMTP and IMAP TLS and sign-in;
 2. preservation of the configured envelope-recipient header;
 3. reconnect and container restart with the durable cursor preserved;
 4. one controlled PDF receipt, including a replay that creates no second
    private draft;
 5. a generic notification whose link requires sign-in and opens only the
    recipient's private inbox;
-6. notification content inspection proving that no source, provider,
-   recipient, household, item, attachment, alias, or draft data is present;
-7. bounded provider failure followed by recovery without cursor, draft, or
-   delivery-identity loss.
+6. inspection of the notification content proving that no source, provider,
+   recipient, household, item, attachment, alias or draft data is present;
+7. a bounded provider failure followed by recovery without loss of the cursor,
+   drafts or delivery identities.
 
-The external harness reduces those observations to the boolean stage schema
+The external harness reduces those observations to the yes/no stage schema
 accepted by `scripts/acceptance-mailbox.mjs`. Set the expected and inspected
-digest/revision independently, use `ORBIT_ACCEPTANCE_MODE=live`, and direct the
-sanitized JSON record to a private evidence path with
-`ORBIT_ACCEPTANCE_EVIDENCE_FILE`. The script rejects digest/revision mismatch,
-malformed or incomplete proof, and emits no raw provider material.
+digest and revision independently, use `ORBIT_ACCEPTANCE_MODE=live`, and
+direct the sanitised JSON record to a private evidence path with
+`ORBIT_ACCEPTANCE_EVIDENCE_FILE`. The script rejects a digest or revision
+mismatch and malformed or incomplete proof, and emits no raw provider
+material.
 
-`ORBIT_ACCEPTANCE_MODE=fake` is deterministic synthetic contract evidence for
-ordinary CI only. Its record is explicitly non-representative and cannot be
-used as live provider or release acceptance.
+`ORBIT_ACCEPTANCE_MODE=fake` produces predictable made-up contract evidence
+for ordinary CI only. Its record says so, and cannot be used as live provider
+or release acceptance.
 
 ## Exporting a recovery bundle
 
 Orbit does not export a recovery bundle for you. If `DOCUMENT_KEK` is ever
-lost with no bundle to recover it, every document, all encrypted metadata,
-and — once account addresses are encrypted — every stored address are gone
-for good, by design (see "Restoring the document key-encryption key" below).
-Making a bundle is a deliberate step, and it is one every deployment should
+lost with no bundle to recover it from, every document, all encrypted
+metadata and, once account addresses are encrypted, every stored address are
+gone for good, by design (see "Restoring the document key-encryption key"
+below). Making a bundle is a deliberate step, and one every deployment should
 take before it holds real data:
 
 ```sh
@@ -601,21 +643,23 @@ orbit backup
 orbit export-recovery-bundle <backup.tar>
 ```
 
-`orbit export-recovery-bundle` wraps the live `DOCUMENT_KEK` under a
-passphrase you choose (scrypt-derived key, AES-256-GCM) and packages it with
-the backup you just made into one bundle file, `orbit-recovery-<timestamp>.tar`.
+`orbit export-recovery-bundle` locks the live `DOCUMENT_KEK` under a
+passphrase you choose (the passphrase is stretched with scrypt and the key
+encrypted with AES-256-GCM) and packages it with the backup you just made into
+one file, `orbit-recovery-<timestamp>.tar`.
 
 Keep its two parts apart: the bundle file on storage separate from this
-instance, and its passphrase in a password manager or on paper — never both
-together, because that separation is what keeps anyone who gets hold of the
-file alone from being able to use it.
+instance, and its passphrase in a password manager or on paper. Never keep
+them together. That separation is what stops anyone who gets hold of the file
+alone from being able to use it.
 
-The administration screen carries a persistent "No recovery bundle exported"
-card until a bundle has been recorded, and again after every `DOCUMENT_KEK`
-rotation, because a bundle wrapped under the previous key can no longer
-recover the current one. The card is a reminder, not a gate: it never blocks
-use of the instance, and it clears the moment `orbit export-recovery-bundle`
-completes.
+The administration screen shows a "No recovery bundle exported" card until a
+bundle has been recorded, and again after every `DOCUMENT_KEK` rotation,
+because a bundle made under the previous key can no longer recover the
+current one. The card is a reminder, not a gate: it never blocks use of the
+instance, and it clears the moment `orbit export-recovery-bundle` completes.
+
+<!-- screenshot: Administration screen, the "No recovery bundle exported" card -->
 
 To use a recovery bundle, see `orbit import-recovery-bundle` and "Restoring
 the document key-encryption key" below.
@@ -623,29 +667,30 @@ the document key-encryption key" below.
 ## Restoring the document key-encryption key
 
 An instance that starts without `DOCUMENT_KEK` is **locked**, not damaged.
-Nothing is lost and nothing is overwritten: documents cannot be opened,
-encrypted notes, references and mail-in extracts cannot be read or written,
+Nothing is lost and nothing is overwritten. Documents cannot be opened;
+encrypted notes, references and mail-in extracts cannot be read or written;
 and every item edit is refused with a 503, because saving an item rewrites its
-encrypted fields. The rest of Orbit stays usable, which is deliberate
-(ADR-0024 decision 5) — a missing key must not take the household's list down
-with it.
+encrypted fields. The rest of Orbit stays usable, deliberately (ADR-0024
+decision 5): a missing key must not take the household's list down with it.
 
 Members see this at the field: "locked — safe, but unreadable right now", and
-a paused edit panel that names an administrator as who fixes it. The
+a paused edit panel that says an administrator is who fixes it. The
 administration screen shows one "Encrypted details are locked" card with how
-many items and mail-in messages are waiting. No count and no key mechanic
-reaches a member, and Orbit never claims the data is gone, because it is not.
+many items and mail-in messages are waiting. No count and no detail of the key
+reaches a member, and Orbit never says the data is gone, because it is not.
+
+<!-- screenshot: Administration screen, the "Encrypted details are locked" card -->
 
 To restore it, put the same key back where the deployment expects it and
 restart the exact deployed image:
 
-1. Confirm which key this database was written under. Every wrapped row
+1. Confirm which key this database was written under. Every encrypted row
    records its own `key_id`, and the startup log names the key id Orbit is
    holding. A key that is not the one that wrote them leaves everything locked
-   exactly as it was — a wrong key can never damage a value, because
-   authenticated decryption refuses rather than guesses.
-2. Restore the key file from wherever you kept it — your recovery bundle, or
-   the secrets directory backup — with owner-only permissions:
+   exactly as it was. A wrong key can never damage a value, because
+   decryption refuses rather than guesses.
+2. Restore the key file from wherever you kept it, your recovery bundle or
+   the secrets directory backup, with owner-only permissions:
    ```sh
    install -m 0400 /path/to/your/copy/document-kek .orbit-secrets/document-kek
    ```
@@ -655,30 +700,31 @@ restart the exact deployed image:
    ```
 4. Confirm on the administration screen that the "Encrypted details are
    locked" card has gone. It disappears the moment the instance holds a usable
-   key; nothing needs re-encrypting and no backfill runs, because the values
+   key. Nothing needs re-encrypting and no backfill runs, because the values
    were never changed.
 
-If the key is genuinely gone and no recovery bundle holds it, this is not a
+If the key is really gone and no recovery bundle holds it, this is not a
 restore. Encrypted documents and Tier 1 metadata are unrecoverable by design
-when both the key and the bundle are lost — that is the whole point of the
-encryption — and the way back is a restore of both the database and the key
-from a backup that has them together (ADR-0004).
+when both the key and the bundle are lost; that is the whole point of the
+encryption. The way back is to restore both the database and the key from a
+backup that has them together (ADR-0004).
 
 ## Rotating the document key-encryption key
 
-`DOCUMENT_KEK` wraps three populations: document encryption keys
-(`document_crypto`), the per-household metadata keys that cover both Tier 1 and
-Tier 2 (`metadata_keys`, ADR-0024), and the mail-in mailbox credential and alias key (`mail_in_secrets`,
-ADR-0017). Rotating it is always an operator decision (#932) — nothing in
-Orbit rotates it automatically or on a schedule.
+`DOCUMENT_KEK` protects three kinds of stored secret: the key for each
+document (`document_crypto`), each household's metadata keys covering Tier 1
+and Tier 2 fields (`metadata_keys`, ADR-0024), and the mail-in mailbox
+password and alias key (`mail_in_secrets`, ADR-0017). Rotating it is always
+your decision (#932). Nothing in Orbit rotates it automatically or on a
+schedule.
 
-Rotation is genuinely online: for its duration the running application holds
-**both** the current key and the next one (`DOCUMENT_KEK_NEXT`, #954,
-ADR-0024 decision 4), so every row stays readable by its own stored key id
-regardless of whether the rewrap worker has reached it yet. No row is ever
-unreadable, and no maintenance window is needed at any step below.
+Nothing is ever locked during a rotation. For as long as it runs, the
+application holds **both** the current key and the next one
+(`DOCUMENT_KEK_NEXT`, #954, ADR-0024 decision 4). Every row records which key
+protects it, so every row stays readable whether or not the rewrap worker has
+reached it yet. No maintenance window is needed at any step below.
 
-1. Generate a fresh key and place it where the rotation overlay expects it,
+1. Generate a fresh key and put it where the rotation overlay expects it,
    with owner-only permissions:
    ```sh
    openssl rand -hex 32 > .orbit-secrets/document-kek-next
@@ -692,58 +738,61 @@ unreadable, and no maintenance window is needed at any step below.
    COMPOSE_FILE=docker-compose.yml:docker-compose.kek-rotation.yml \
      bash scripts/deploy-container.sh --pull
    ```
-   After this restart Orbit holds both keys: every existing row is still on
-   the current key and reads exactly as before, and a row the worker moves to
-   the next key from here on reads too, by its own key id, with nothing
-   locked at any point in between. From this restart anything newly written —
-   an uploaded document, a new household's metadata key, a mailbox credential —
-   is wrapped under the **next** key straight away (#955), so the rewrap in
-   step 3 is chasing a fixed set of rows rather than a moving one.
+   After this restart Orbit holds both keys. Every existing row is still on
+   the current key and reads exactly as before; a row the worker moves to the
+   next key reads too. From this restart anything newly written (an uploaded
+   document, a new household's metadata key, a mailbox password) goes under
+   the **next** key straight away (#955), so the rewrap in step 3 is working
+   through a fixed set of rows rather than a growing one.
 
-   From this restart the rotation is also visible until step 4 removes the
-   second key (#956): Orbit records one instance-level
-   `document_kek_rotation_started` audit entry naming both key ids — one per
-   rotation, however many restarts happen inside it — every startup logs a
-   `document.kek_rotation` line saying a rotation is in progress and for how
-   long, and the administration screen shows a "Document key rotation in
-   progress" card with how long it has been open. Orbit never refuses to
-   start over a long-open rotation — that would turn a slow rotation into an
-   outage — so this visibility is the whole guard: if the card or the log
-   line is still there tomorrow, the rotation was left unfinished, not
-   handled.
+   From this restart you can also see that a rotation is open, until step 4
+   removes the second key (#956):
+
+   - the administration screen shows a "Document key rotation in progress"
+     card with how long it has been open;
+   - every startup logs a `document.kek_rotation` line saying a rotation is in
+     progress and for how long;
+   - the audit history has one instance-level `document_kek_rotation_started`
+     entry naming both key ids, one per rotation however many restarts happen
+     inside it.
+
+   Orbit never refuses to start because a rotation has been open a long time;
+   that would turn a slow rotation into an outage. So this visibility is the
+   whole guard: if the card or the log line is still there tomorrow, the
+   rotation was left unfinished.
+
+   <!-- screenshot: Administration screen, the "Document key rotation in progress" card -->
+
 3. Run the rewrap worker. It reads the current key exactly as the running
    application does, and takes the next key only from the file you give it:
    ```sh
    pnpm rewrap-kek --next-key-file .orbit-secrets/document-kek-next
    ```
    It reports progress and keeps going until every `document_crypto`,
-   `metadata_keys` and `mail_in_secrets` row is wrapped under the next key,
-   resuming correctly if you stop it (Ctrl-C, a crash, a host reboot) and run
-   it again — every row it has not yet reached is still fully readable under
-   the current key, and every row it has already moved is fully readable
-   under the next one; a batch is one transaction, so a row is never left
-   half-migrated, and step 2 means both states read successfully the whole
-   time. It records one `document_kek_rotation_completed` audit entry when it
-   finishes.
-4. **The point of no return.** Only once the worker reports completion,
-   promote the next key to current and drop the overlay:
+   `metadata_keys` and `mail_in_secrets` row is under the next key. You can
+   stop it (Ctrl-C, a crash, a host reboot) and run it again; it carries on
+   from where it was. Every row it has not reached is still readable under
+   the current key, and every row it has moved is readable under the next
+   one. Each batch is one transaction, so a row is never left half-moved. It
+   records one `document_kek_rotation_completed` audit entry when it finishes.
+4. **The point of no return.** Only once the worker reports completion, make
+   the next key the current one and drop the overlay:
    ```sh
    mv .orbit-secrets/document-kek-next .orbit-secrets/document-kek
    bash scripts/deploy-container.sh --pull
    ```
-   Read this step as a confirmation. Everything before it can be undone.
+   Treat this step as a confirmation. Everything before it can be undone.
    This move overwrites the outgoing key, and after it that key is gone: no
-   row is wrapped under it any more, nothing needs it, and it cannot be used
-   to read anything ever again. That is deliberate — a rotation you are
-   running because a key may have leaked has not achieved much if the leaked
-   key is still sitting in `.orbit-secrets/` beside its replacement.
+   row is under it any more, nothing needs it, and it cannot be used to read
+   anything ever again. That is deliberate. A rotation you are running because
+   a key may have leaked has not achieved much if the leaked key is still
+   sitting in `.orbit-secrets/` beside its replacement.
 
-   Orbit derives `DOCUMENT_KEK`'s id from the key bytes themselves, so this
+   Orbit works out `DOCUMENT_KEK`'s id from the key bytes themselves, so this
    restart always finds every row already on the key it just loaded as
-   current — nothing needs to know the id in advance. Dropping the overlay
-   (by deploying with just `docker-compose.yml` again) removes
-   `DOCUMENT_KEK_NEXT`; with the rewrap already complete, no row depended on
-   it being there.
+   current; nothing needs to know the id in advance. Dropping the overlay (by
+   deploying with just `docker-compose.yml` again) removes
+   `DOCUMENT_KEK_NEXT`; with the rewrap complete, no row depended on it.
 
 ### If you are rotating because a key may have leaked
 
@@ -757,9 +806,9 @@ copy someone took before you started.
 
 ### Undoing a rotation, before step 4 only
 
-Going back is not a rollback — there is nothing to roll back. It is a
+Going back is not a rollback, because there is nothing to roll back. It is a
 rotation in the other direction, from the new key to the original one, and it
-is available only while both keys are still loaded. After step 4 the original
+is only possible while both keys are still loaded. After step 4 the original
 key no longer exists, so there is no way back and you should not plan for one.
 
 To undo, swap which key is which and run the same steps again:
@@ -770,48 +819,49 @@ mv .orbit-secrets/document-kek-next  .orbit-secrets/document-kek
 mv .orbit-secrets/document-kek-abandoning .orbit-secrets/document-kek-next
 ```
 
-Then repeat steps 2, 3 and 4. Nothing is unreadable at any point of it: the
-instance holds the same two keys throughout, and every row reads under
-whichever of them wrapped it. Step 4 finishes by overwriting the abandoned
-key, which is what you want — a spare key left lying in `.orbit-secrets/` is
-one a later rotation can pick up by mistake, and this instance has already
-written rows under it.
+Then repeat steps 2, 3 and 4. Nothing is unreadable at any point: the instance
+holds the same two keys throughout, and every row reads under whichever of
+them protects it. Step 4 finishes by overwriting the abandoned key, which is
+what you want. A spare key left lying in `.orbit-secrets/` is one a later
+rotation can pick up by mistake, and this instance has already written rows
+under it.
 
-If you copied that key anywhere else — a password manager, a note, a backup
-of the secrets directory — delete it there too. Removing the file on this
-host is not the same as the key being gone.
+If you copied that key anywhere else (a password manager, a note, a backup of
+the secrets directory) delete it there too. Removing the file on this host is
+not the same as the key being gone.
 
-Recovery-bundle import and repair's `document-kek` regeneration remain
-wholesale key *replacements*, not rotations: neither carries the old key
-forward for a rewrap, so they still leave existing documents, encrypted metadata
-and the mailbox credential unreadable under the new key (the paragraph above
-this section).
+Recovery-bundle import and repair's `document-kek` regeneration are still
+wholesale key *replacements*, not rotations. Neither keeps the old key for a
+rewrap, so they leave existing documents, encrypted metadata and the mailbox
+password unreadable under the new key (see the end of "Disable, restart, and
+credential rotation" above).
 
 ## Hostile document processor operation
 
-The default stack keeps `TIKA_URL` empty and does not start the `processing`
-profile. Documents remain uploadable and reviewable without parser-derived
-suggestions.
+The default stack leaves `TIKA_URL` empty and does not start the `processing`
+profile. Documents can still be uploaded and reviewed; you just get no
+suggestions read out of the file.
 
-To opt into the pinned processor, set
-`TIKA_URL=http://orbit-tika:9998`, validate the resolved Compose configuration,
-and start the profile:
+To turn on the pinned processor, set `TIKA_URL=http://orbit-tika:9998`, check
+the resolved Compose configuration, and start the profile:
 
 ```sh
 docker compose --env-file .env-orbit --profile processing config --quiet
 docker compose --env-file .env-orbit --profile processing up -d orbit-tika orbit-app
 ```
 
-Do not add host ports, application secrets, document volumes, default-network
-membership, arbitrary Tika headers or caller-selected endpoints. The supplied
-configuration runs Tika non-root with a read-only filesystem, disables OCR and
-embedded recursion, and keeps it on the egress-denied processing network.
-ClamAV uses that network for bounded scan streams and a separate network only
-for signature updates; it does not share PostgreSQL's default network.
+Do not add host ports, application secrets, document volumes, membership of
+the default network, arbitrary Tika headers or caller-chosen endpoints. The
+supplied configuration runs Tika as a non-root user with a read-only
+filesystem, turns off OCR (reading text out of images) and the unpacking of
+files embedded in other files, and keeps it on the processing network, which
+has no route to the internet. ClamAV uses that network for bounded scan
+streams and a separate network only for signature updates; it does not share
+PostgreSQL's default network.
 
-To disable extraction safely, clear `TIKA_URL`, recreate `orbit-app`, and stop
-the optional processor. Already-clean encrypted originals remain available and
-the review flow falls back to manual fields:
+To turn extraction off safely, clear `TIKA_URL`, recreate `orbit-app`, and
+stop the optional processor. Originals already scanned clean stay available
+and the review flow falls back to filling the fields by hand:
 
 ```sh
 docker compose --env-file .env-orbit up -d orbit-app
@@ -820,26 +870,27 @@ docker compose --env-file .env-orbit --profile processing stop orbit-tika
 
 ## Private model server and its model pull
 
-The default stack does not start the `ai` profile. An operator who leaves it off
-gets no model server, no pull helper, and no change of any kind.
+The default stack does not start the `ai` profile. If you leave it off you
+get no model server, no pull helper, and no change of any kind.
 
-Where the profile is on, the model server runs on the same egress-denied network
-as the document parser, and its port is not published to the host. This is
-deliberate and structural: the container that would hold document text has no
+With the profile on, the model server runs on the same no-internet network as
+the document parser, and its port is not published to the host. This is
+deliberate and built in: the container that would hold document text has no
 route to the internet, so it cannot become a way out for household documents,
-whatever image or model is loaded into it. The address Orbit would use is fixed
-in the application code, so there is no base URL, proxy setting or API key to
-configure, and therefore no configuration that could aim extraction at a hosted
+whatever image or model is loaded into it. The address Orbit uses for it is
+fixed in the application code, so there is no base URL, proxy setting or API
+key to configure, and so no setting that could point extraction at a hosted
 service. Do not give this service the default network, a second network or a
 published port; the Compose validation refuses the configuration if you do.
 
 ### Pulling a model
 
-Because the server has no route out, it cannot download a model. Getting one in
-is a separate step that an operator runs by name — it never happens as a side
-effect of starting the stack. Set the model reference in `.env-orbit` first. A
-digest-pinned reference is recommended, so that a later pull fetches the model
-that was actually evaluated rather than whatever the tag points at that day:
+Because the server has no route out, it cannot download a model. Getting one
+in is a separate step that you run by name; it never happens as a side effect
+of starting the stack. Set the model reference in `.env-orbit` first. A
+reference pinned by digest is recommended, so that a later pull fetches the
+model that was actually evaluated rather than whatever the name points at
+that day:
 
 ```sh
 # .env-orbit
@@ -861,9 +912,9 @@ Start the server once the pull has reported success:
 docker compose --env-file .env-orbit --profile ai up -d orbit-ollama
 ```
 
-Run the pull again whenever the model reference changes. The pull helper is the
-only part of this stack that reaches the internet for model data, it runs only
-for as long as your command runs, and it never receives document text.
+Run the pull again whenever the model reference changes. The pull helper is
+the only part of this stack that reaches the internet for model data. It runs
+only for as long as your command runs, and it never receives document text.
 
 ### Hosts with no direct internet access
 
@@ -872,11 +923,11 @@ host it cannot fetch anything. Two options, in order of preference:
 
 1. Allow the host outbound access, or point the Docker daemon at an HTTP proxy,
    for the length of the pull only, then take it away again. The model server
-   is unaffected either way: the access belongs to the host and to the one-shot
+   is unaffected either way: the access belongs to the host and to the one-off
    pull container, never to the service Orbit talks to.
 2. Carry the model in from a machine that does have access. Run the pull there
-   against the same compose file, export the model volume, and import it on the
-   isolated host. Only model data moves; no household data is involved.
+   against the same compose file, export the model volume, and import it on
+   the isolated host. Only model data moves; no household data is involved.
 
 ```sh
 # on the connected machine, after the pull above has succeeded
@@ -890,7 +941,7 @@ docker compose --env-file .env-orbit --profile ai-model-pull \
   -c 'tar -C /root/.ollama -xzf /import/orbit-model.tar.gz'
 ```
 
-Transfer the archive between the two machines by whatever means the site already
+Move the archive between the two machines by whatever means your site already
 trusts. Then confirm the server can see the model:
 
 ```sh
@@ -906,13 +957,14 @@ docker compose --env-file .env-orbit --profile ai stop orbit-ollama
 
 ## Audit history
 
-Instance-wide actions may have no household, so `audit_log.household_id` is
-nullable. Administrator history is cursor-paginated and selects only safe
-columns. Pages use the stable descending `(created_at, id)` keyset and the
-administrator interface exposes a bounded **Load older history** action rather
-than replacing the current page. Equal timestamps therefore neither duplicate
-nor skip events. Raw `changes` remain available solely to trusted internal
-code. Retained events use only safe actor, household, and action labels after
-household purge; deleted private names and raw changes are never rendered.
-Unknown future action codes receive a generic label rather than exposing raw
-payloads.
+Instance-wide actions may have no household, so `audit_log.household_id` may
+be empty. The administrator history is read a page at a time, from newest to
+oldest, and selects only safe columns. Each page continues from the exact
+`(created_at, id)` position of the last entry on the previous one, so events
+with the same timestamp are neither shown twice nor skipped, and the
+administrator screen adds older entries to what is already shown rather than
+replacing the page. Raw `changes` are available only to trusted internal
+code. After a household is purged, its retained events keep only the safe
+actor, household and action labels; deleted private names and raw changes
+are never shown. An action code Orbit does not yet know gets a generic label
+rather than exposing the raw payload.
