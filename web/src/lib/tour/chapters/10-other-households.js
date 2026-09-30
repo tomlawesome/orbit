@@ -39,13 +39,20 @@
 /**
  * Every element this chapter names, so
  * tests/unit/v19-tour-chapter-other-households.test.mjs can pin it against
- * home's real markup.
+ * home's real markup (desk) and pocket.svelte's (pocket).
  */
 export const SELECTORS = Object.freeze({
-  /** The nearest other household's own system ring — the same real element
-   *  chapter 1 calls `others`, matched singly and optionally. The ring, not
-   *  the `.minisys` group: see chapter 1's note on the label in the box. */
-  other: ".minisys .msring",
+  DESK: Object.freeze({
+    /** The nearest other household's own system ring — the same real element
+     *  chapter 1 calls `others`, matched singly and optionally. The ring, not
+     *  the `.minisys` group: see chapter 1's note on the label in the box. */
+    other: ".minisys .msring",
+  }),
+  POCKET: Object.freeze({
+    /** The nearest other household's own pill chip — the same real element
+     *  chapter 1's pocket set calls `others`. */
+    other: ".pocket .skies .msys",
+  }),
 });
 
 /** @type {import("./index.js").Chapter} */
@@ -55,14 +62,15 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { setScreen, veil, ctl, goto, press, unlight, callout, dropCallout } = ctx;
+    const { pocket, setScreen, veil, ctl, goto, press, unlight, callout, dropCallout } = ctx;
+    const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
     await setScreen("/home");
     veil(false);
 
     /* The nearest other household's sun — optional, so a household alone in
        its sky still plays this chapter, unchanged. */
-    const other = ctl({ sel: SELECTORS.other, round: true, optional: true });
+    const other = ctl({ sel: S.other, round: !pocket, radius: pocket ? 22 : undefined, optional: true });
     veil(true);
     await goto(other);
     await callout(
