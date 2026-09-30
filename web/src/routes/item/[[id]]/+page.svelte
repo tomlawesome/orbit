@@ -17,9 +17,11 @@
   import { POCKET_QUERY, isPocket } from "$lib/pocket/media.js";
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
   import Reader from "./Reader.svelte";
+  import StagedPage from "$lib/pocket/StagedPage.svelte";
   import EntryForm from "../../create/EntryForm.svelte";
   import { entryOf, fieldsOf, refusalOf } from "../../create/entry.js";
   import { beltManifestOf, documentPreviewStateOf } from "$lib/data/belt.js";
+  import { loadStagedPage } from "$lib/data/staged-page.js";
   import {
     archiveCommand, completeCommand, nextDateAfter, rescheduleCommand,
     snoozeCommand, statusCommand, upsertCommand,
@@ -448,7 +450,9 @@
   }
   /** @param {string} id */
   function showPaperById(id) {
-    const doc = row?.docs.find((one) => one.id === id);
+    // The inbox sends a staged attachment's own id; home's pocket sends the
+    // belt doc id (#1155) -- either one can name the paper being asked for.
+    const doc = row?.docs.find((one) => one.attachmentId === id || one.id === id);
     if (doc) showPaper(doc);
   }
   async function removePreviewDoc() {
@@ -524,6 +528,18 @@
   let previewOpen = $state(false);
   let previewImgLoaded = $state(false);
   let previewImgFailed = $state(false);
+  /* #1155: a staged paper's bytes come from loadStagedPage, not a bare `<img
+     src>` — only that loader can tell "gone" (404/410) apart from "could not
+     draw" (a status an <img> error event never carries). Both img tags and
+     the Reader read previewSrc regardless of origin; for an accepted
+     document it is simply doc.previewHref. */
+  let previewSrc = $state("");
+  let previewGone = $state(false);
+  /** @type {AbortController | null} */
+  let previewAbort = null;
+  /* Discards a loadStagedPage result that lands after the card has moved on
+     to a different paper (or closed and reopened the same one). */
+  let previewToken = 0;
   /* create-v3's own walk: the page does not appear the instant it has
      loaded — it waits for a minimum beat so a fast load never flickers. */
   let previewBeatDone = $state(false);
@@ -539,37 +555,70 @@
   /* A document Orbit believed showable but whose actual page failed to load
      (the preview endpoint refused it for a reason the summary could not
      predict, e.g. a structurally invalid PDF) reads exactly as "a kind
-     Orbit cannot draw" — the same honest line, never a stuck loading state. */
-  const previewState = $derived(previewImgFailed ? "undrawable" : previewDocState);
+     Orbit cannot draw" — the same honest line, never a stuck loading state.
+     A staged paper whose mail has gone (#1155) takes priority over both:
+     there is no page and nothing to call "could not draw" either. */
+  const previewState = $derived(previewGone ? "gone" : previewImgFailed ? "undrawable" : previewDocState);
   const previewShowing = $derived(
-    previewDocState === "available" && previewImgLoaded && previewBeatDone && !previewImgFailed,
+    previewDocState === "available" && previewImgLoaded && previewBeatDone && !previewImgFailed && !previewGone,
   );
   const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function revokePreviewSrc() {
+    if (previewSrc.startsWith("blob:")) URL.revokeObjectURL(previewSrc);
+  }
 
   /** @param {import("./band.js").BeltDoc} doc
       @param {"left" | "right"} side */
   function openPreview(doc, side) {
     clearTimeout(previewCloseTimer);
     clearTimeout(previewBeatTimer);
+    previewAbort?.abort();
+    previewAbort = null;
+    revokePreviewSrc();
+    const token = ++previewToken;
     previewDoc = doc;
     previewSide = side;
     previewImgLoaded = false;
     previewImgFailed = false;
+    previewGone = false;
     previewRestoring = false;
     previewProblem = null;
+    previewSrc = doc.staged ? "" : doc.previewHref;
     previewBeatDone = documentPreviewStateOf(doc) !== "available";
     if (!previewBeatDone) {
       previewBeatTimer = setTimeout(() => { previewBeatDone = true; }, reducedMotion() ? 0 : 900);
     }
     if (!previewOpen) tick().then(() => { previewOpen = true; });
+
+    if (doc.staged && doc.previewHref) {
+      const controller = new AbortController();
+      previewAbort = controller;
+      loadStagedPage(doc.previewHref, controller.signal).then((result) => {
+        if (token !== previewToken) return;
+        if (result.kind === "page") previewSrc = result.url;
+        else if (result.kind === "gone") previewGone = true;
+        else previewImgFailed = true;
+      }).catch((error) => {
+        if (token !== previewToken || (error instanceof DOMException && error.name === "AbortError")) return;
+        previewImgFailed = true;
+      });
+    }
   }
   function closePreview() {
     if (!previewDoc) return;
     previewOpen = false;
     clearTimeout(previewBeatTimer);
+    previewAbort?.abort();
+    previewAbort = null;
     /* The card stays mounted through its own fade-out, same choreography as
        the belt's cardwrap swap and create-v3's own topsheet. */
-    previewCloseTimer = setTimeout(() => { previewDoc = null; }, reducedMotion() ? 0 : 800);
+    previewCloseTimer = setTimeout(() => {
+      previewDoc = null;
+      revokePreviewSrc();
+      previewSrc = "";
+      previewGone = false;
+    }, reducedMotion() ? 0 : 800);
   }
   /* The reading card sits level with the item card's own middle (create-v3's
      levelWithCard, belt.behaviour.js's port of it) — a figure only the belt
@@ -693,8 +742,9 @@
         await tick();
         band.remeasure?.();
         /* A paper asked for on arrival, or by the search, opens once its item
-           is seated (#1072). */
-        if (arrivalPaper && pocket) {
+           is seated (#1072). The desk opens it too (#1155): `showPaperById`
+           already routes through `belt.openDoc`. */
+        if (arrivalPaper) {
           const id = arrivalPaper;
           arrivalPaper = null;
           showPaperById(id);
@@ -1171,9 +1221,11 @@
               <input id="s-cost" inputmode="decimal" bind:value={sform.cost} placeholder="optional" disabled={proposalLocked}></div>
             {#if row.docs.length}
               <!-- The forwarded paper rides in the belt beside this card, as an
-                   item's papers do -- ringed, staged, attached on acceptance. -->
-              <div class="note"><b>◆ {row.docs.map((doc) => doc.name).join(" · ")}</b>
-                {row.docs.length === 1 ? "rides" : "ride"} in the belt beside this card — attached on acceptance.</div>
+                   item's papers do -- ringed, staged, attached on acceptance;
+                   its own name presses through to it (#1155). -->
+              <div class="note">{#each row.docs as doc, i (doc.id)}{i > 0 ? " · " : ""}<button
+                  type="button" class="ip-paperlink" onclick={() => showPaperById(doc.id)}>◆ {doc.name}</button>{/each}
+                {row.docs.length === 1 ? "rides" : "ride"} in the belt beside this card — press it to read it · attached on acceptance.</div>
             {/if}
             {#if unreadable}
               <div class="note">{unreadable}</div>
@@ -1495,24 +1547,47 @@
           <div class="focus">
             <div class="plate" aria-hidden="true">{previewDoc.plate}</div>
             <div class="focusline">Orbit could not draw a picture of this document.</div>
-            <div class="why">the file is fine — scanned clean, and yours to download<br>orbit just could not turn it into a page to read here</div>
+            {#if previewDoc.staged}
+              <div class="why">it scanned clean, and is still attached on acceptance<br>orbit just could not turn it into a page to read here</div>
+            {:else}
+              <div class="why">the file is fine — scanned clean, and yours to download<br>orbit just could not turn it into a page to read here</div>
+            {/if}
           </div>
         {:else if state === "staged"}
-          <!-- #1145: a suggestion's paper, staged with the mail. The fifth
-               honest state, in §18's grammar: the plate held still, the line
-               says what is happening, and the foot holds nothing, because
-               nothing can be done with it until the suggestion is accepted. -->
+          <!-- #1155: the one paper Orbit genuinely cannot draw a page for --
+               named, but not a PDF (or the count-only fallback). The plate
+               held still, the line says what is happening, and the foot
+               holds nothing, because nothing can be done with it here. -->
           <div class="focus">
             <div class="plate" aria-hidden="true">{previewDoc.plate}</div>
             <div class="focusline">Not yet in orbit.</div>
-            <div class="why">this paper came with the suggestion and is attached on acceptance<br>the page comes once it is yours</div>
+            <div class="why">this paper came with the mail and is attached on acceptance<br>orbit has no page to show for it</div>
+          </div>
+        {:else if state === "gone"}
+          <!-- #1155: the mail was decided or burned up between the belt
+               listing it and the preview answering -- never a guess, and
+               never conflated with "could not draw". No foot: there is
+               nothing left to act on from here. -->
+          <div class="focus">
+            <div class="plate" aria-hidden="true">{previewDoc.plate}</div>
+            <div class="focusline">This mail has gone.</div>
+            <div class="why">it burned up, or was decided from another screen<br>orbit keeps nothing of it</div>
           </div>
         {/if}
 
         {#if state === "available"}
           <div class="topsheet">
             <div class="sheet">
-              <img src={previewDoc.previewHref} alt="Page one of {previewDoc.name}"
+              <!-- previewSrc starts "" for a staged paper, while loadStagedPage's
+                   fetch is still in flight (#1155's own build, fixed here): an
+                   `<img src="">` is not "no image" to a browser, it is a request
+                   for the current page, which then fails to decode and fires
+                   onerror immediately -- wrongly and permanently locking the
+                   card into "could not draw". `|| undefined` omits the
+                   attribute instead of setting it empty, so no such request is
+                   ever made; a non-staged document's previewSrc is never empty,
+                   so this changes nothing for it. -->
+              <img src={previewSrc || undefined} alt="Page one of {previewDoc.name}"
                    onload={() => (previewImgLoaded = true)}
                    onerror={() => { previewImgLoaded = true; previewImgFailed = true; }} />
             </div>
@@ -1520,7 +1595,12 @@
         {/if}
       </div>
 
-      {#if state === "removed"}
+      {#if state === "available" && previewDoc.staged}
+        <!-- #1155: the one deliberate extension of §18's foot rule -- nothing
+             can be done with a staged paper here, and the foot says why in
+             one line rather than staying empty. -->
+        <div class="rcfoot"><span class="rcnote">not yet in orbit · attached on acceptance</span></div>
+      {:else if state === "removed"}
         <div class="rcfoot">
           <button type="button" class="quiet" disabled={previewRestoring}
                   onclick={restorePreviewDoc}>restore</button>
@@ -1528,7 +1608,7 @@
         {#if previewProblem}
           <div class="problem" role="alert">{previewProblem}</div>
         {/if}
-      {:else if state === "undrawable"}
+      {:else if state === "undrawable" && !previewDoc.staged}
         <div class="rcfoot">
           <!-- Same cast the old docview card used: doc.href is a download
                endpoint, not a page route -- outside resolve()'s typed route
@@ -1655,11 +1735,17 @@
          button: it opens the reader. The honest states hold the plate still:
          the line says what is happening; the foot holds only what can be
          done. -->
-    {#if state === "available"}
+    {#if previewDoc.staged}
+      <!-- #1155: a staged paper draws through StagedPage, which owns its own
+           fetch (loadStagedPage), its own loading/page/gone/undrawable states
+           and its own Reader. The accepted-document face below is untouched. -->
+      <StagedPage href={previewDoc.previewHref} name={previewDoc.name}
+                  drawable={Boolean(previewDoc.previewHref)} reader itemTitle={row?.title ?? ""} />
+    {:else if state === "available"}
       <button class="bp-page" class:shown={previewShowing} disabled={!previewShowing}
               aria-label="Read {previewDoc.name}" onclick={() => { readerOpen = true; }}>
         <span class="bp-under" aria-hidden="true"></span>
-        <img src={previewDoc.previewHref} alt="Page one of {previewDoc.name}"
+        <img src={previewSrc} alt="Page one of {previewDoc.name}"
              onload={() => (previewImgLoaded = true)}
              onerror={() => { previewImgLoaded = true; previewImgFailed = true; }} />
       </button>
@@ -1679,9 +1765,6 @@
         {:else if state === "refused"}
           <p class="bp-line">Orbit refused this file.</p>
           <p class="bp-why">it did not pass what Orbit checks before keeping a file</p>
-        {:else if state === "staged"}
-          <p class="bp-line">Not yet in orbit.</p>
-          <p class="bp-why">attached once the suggestion is added</p>
         {:else}
           <p class="bp-line">Orbit could not draw a picture of this document.</p>
           <p class="bp-why">the file is fine and yours to download</p>
@@ -1742,7 +1825,7 @@
       <button class="p-pill" onclick={() => { sheetOpen = false; }}>keep</button>
       <button class="p-pill bp-danger" disabled={busy}
               onclick={() => { const item = record; sheetOpen = false; run(() => archiveCommand(item), { leave: true }); }}>retire</button>
-    {:else if face === "preview" && previewDoc}
+    {:else if face === "preview" && previewDoc && !previewDoc.staged}
       {#if previewState === "removed"}
         <button class="p-pill bp-restore" disabled={previewRestoring} onclick={restorePreviewDoc}>restore</button>
       {:else if previewState === "undrawable"}
@@ -1752,7 +1835,7 @@
   {/snippet}
 </Sheet>
 
-{#if previewDoc && previewShowing && row}
+{#if previewDoc && previewShowing && row && !previewDoc.staged}
   <Reader bind:open={readerOpen} doc={previewDoc} itemTitle={row.title} onremove={removePreviewDoc} />
 {/if}
 
@@ -1763,5 +1846,6 @@
   <ReviewSheet bind:open={reviewOpen} title={seatedSuggestion.proposal?.title ?? seatedSuggestion.title ?? ""}
                proposal={seatedSuggestion.proposal} householdId={seatedSuggestion.householdId ?? primaryHousehold}
                households={suggestionHouseholds} readings={formReadingsOf(seatedSuggestion)}
-               papers={papersOf(seatedSuggestion)} busy={acceptBusy} problem={reviewProblem} onsave={saveReview} />
+               papers={papersOf(seatedSuggestion)} receiptId={seatedSuggestion.receiptId ?? null}
+               busy={acceptBusy} problem={reviewProblem} onsave={saveReview} />
 {/if}

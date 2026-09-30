@@ -79,7 +79,8 @@ const DESK = /** @type {Record<string, string[]>} */ ({
   settings: ["settings.png"], "settings-mail": ["relay.png"], administration: ["administration.png"],
   door: ["first-run.png", "first-run-error.png", "newcomer.png"],
   login: ["login.png", "door-mixed.png", "door-local.png", "door-identity.png", "door-claim.png"],
-  setup: ["setup.png"], logout: ["logout.png"], 404: ["notfound.png"], maintenance: ["maintenance.png", "maintenance-mobile.png"],
+  setup: ["setup.png"], logout: ["logout.png"], 404: ["notfound.png"], 500: ["stumble.png"],
+  maintenance: ["maintenance.png", "maintenance-mobile.png"],
 });
 
 test("the review index", async () => {
