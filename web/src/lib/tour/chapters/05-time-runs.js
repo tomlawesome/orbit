@@ -58,17 +58,30 @@ const LEAD_MS = 400;
 
 /**
  * Every element this chapter names, so
- * tests/unit/v19-tour-chapter-time-runs.test.mjs can pin the real one
- * (`.dial`) against home's own markup. `.tourfilm-time-body` is not real
- * markup — this chapter draws and removes it itself — so it is pinned by
- * running the chapter instead.
+ * tests/unit/v19-tour-chapter-time-runs.test.mjs can pin the real ones
+ * against home's own markup (desk) and pocket.svelte's (pocket).
+ * `.tourfilm-time-body` is not real markup — this chapter draws and removes
+ * it itself — so it is pinned by running the chapter instead.
  */
 export const SELECTORS = Object.freeze({
-  /** The star chart, so the demo body has somewhere real to live and the
-   *  reminder line has something real to anchor to. */
-  dial: ".dial",
-  /** The demo body this chapter draws and removes; never a real item. */
-  body: ".tourfilm-time-body",
+  DESK: Object.freeze({
+    /** The star chart, so the demo body has somewhere real to live and the
+     *  reminder line has something real to anchor to. */
+    dial: ".dial",
+    dialSvg: ".dial",
+    /** The demo body this chapter draws and removes; never a real item. */
+    body: ".tourfilm-time-body",
+  }),
+  POCKET: Object.freeze({
+    /** The round dial, and the reminder line's own anchor. */
+    dial: ".pocket .mdial",
+    /** Its own `<svg>` — the demo body's real append target (§3.6). */
+    dialSvg: ".pocket .mdial svg",
+    /** This household's own sun — the sky line's anchor (§3.3). */
+    sun: ".pocket .mdial .pk-sun",
+    /** The demo body this chapter draws and removes; never a real item. */
+    body: ".tourfilm-time-body",
+  }),
 });
 
 /** Eased 0..1, matching the mockup's own `walk`. @param {number} t */
@@ -111,15 +124,16 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { setScreen, veil, ctl, goto, light, unlight, callout, dropCallout, tween, w, mark, dry, doc } = ctx;
+    const { pocket, setScreen, veil, ctl, goto, light, unlight, callout, dropCallout, tween, w, mark, dry, doc } = ctx;
+    const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
     await setScreen("/home");
     veil(false);
 
     /* The demo body arrives far out, plain, before anything is taught. */
-    const dial = ctl({ sel: SELECTORS.dial });
+    const dialSvg = ctl({ sel: S.dialSvg });
     let bodyEl = null;
-    if (!dry() && dial.els[0]) bodyEl = drawTimeBody(doc, dial.els[0], DAYS_FAR);
+    if (!dry() && dialSvg.els[0]) bodyEl = drawTimeBody(doc, dialSvg.els[0], DAYS_FAR);
     await w(LEAD_MS);
 
     /* The walk. The body is lit before it moves, so the ring is already on
@@ -134,7 +148,7 @@ export default {
        comment names "chapters 5/9/12's travelling hole", which is about the
        mask being able to FOLLOW a moving hole, not an instruction to raise
        one here; it misled this chapter and chapter 12 once already. */
-    const body = ctl({ sel: SELECTORS.body, round: true, optional: true });
+    const body = ctl({ sel: S.body, round: true, optional: true });
     light(body);
     await tween(WALK_MS, (t) => {
       if (dry() || !bodyEl) return;
@@ -144,13 +158,27 @@ export default {
     });
     await mark("time-warmed");
 
-    /* It has landed close in. Visit it properly and say why. */
+    /* It has landed close in. Visit it properly and say why. On the pocket
+       this is a sky line (§3.3): anchored to the sun, not the body. */
     await goto(body, { willPress: false });
-    await callout("Time runs. The nearer the sun, the sooner.", body, "bottom");
+    if (pocket) {
+      const sun = ctl({ sel: SELECTORS.POCKET.sun, round: true });
+      await callout("Time runs. The nearer the sun, the sooner.", sun, "bottom", { dy: 30 });
+    } else {
+      await callout("Time runs. The nearer the sun, the sooner.", body, "bottom");
+    }
     unlight(body);
 
-    /* The reminder line: no toast exists to carry it, so the chart does. */
+    /* The reminder line: no toast exists to carry it, so the chart does.
+       #1083 §6: on the pocket the veil comes up first, the body still lit so
+       its hole stays cut — round 8's rule, the pocket dial has no empty
+       quarter and a line over the bodies is worse than a veil. The desk
+       keeps `veil(false)` throughout, as ratified, and keeps naming the same
+       `.dial` element it always has (`dialSvg`, above — the same selector). */
+    const dial = pocket ? ctl({ sel: S.dial, round: true }) : dialSvg;
+    if (pocket) { veil(true); light(body); }
     await callout("At a month out it warms, and Orbit reminds you.", dial, "top", { mark: "time-toast" });
+    if (pocket) veil(false);
     dropCallout();
 
     if (bodyEl) bodyEl.remove();

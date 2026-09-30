@@ -27,6 +27,9 @@ const HOME_SOURCE = [
   "src/routes/home/home.behaviour.js",
 ].map((file) => readFileSync(web(file), "utf8")).join("\n");
 
+/* #1083: the pocket's own home screen — where the pill-chip strip lives. */
+const POCKET_SOURCE = readFileSync(web("src/routes/home/pocket.svelte"), "utf8");
+
 /** Every name home's source assigns to a class or an id, however it writes
  *  it — literal, Svelte expression, or DOM assignment. Carried over from
  *  01-arrive.js's own test, which pins the eight-stop walk the same way. */
@@ -103,13 +106,25 @@ beforeEach(() => {
 });
 
 describe("the selectors chapter 10 names", () => {
-  it("every one of them exists in home's own markup", () => {
+  it("every desk one exists in home's own markup", () => {
     const rendered = namesIn(HOME_SOURCE);
-    for (const [beat, selector] of Object.entries(SELECTORS)) {
+    for (const [beat, selector] of Object.entries(SELECTORS.DESK)) {
       for (const token of tokensOf(selector)) {
         expect(
           rendered.has(token),
-          `chapter 10's "${beat}" names "${selector}", but /home renders no "${token}"`,
+          `chapter 10's desk "${beat}" names "${selector}", but /home renders no "${token}"`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("every pocket one exists in pocket.svelte's own markup (#1083)", () => {
+    const rendered = namesIn(POCKET_SOURCE);
+    for (const [beat, selector] of Object.entries(SELECTORS.POCKET)) {
+      for (const token of tokensOf(selector)) {
+        expect(
+          rendered.has(token),
+          `chapter 10's pocket "${beat}" names "${selector}", but pocket.svelte renders no "${token}"`,
         ).toBe(true);
       }
     }
@@ -123,7 +138,7 @@ describe("the selectors chapter 10 names", () => {
     expect(sun.target).toContain(".minisys");
     /* The film rings the system's own 40px ring inside that group, not the
        group: the group's box takes in the label above (#866, #1098 frames). */
-    expect(SELECTORS.other).toBe(".minisys .msring");
+    expect(SELECTORS.DESK.other).toBe(".minisys .msring");
   });
 });
 

@@ -38,6 +38,9 @@ const HOME_SOURCE = [
   "src/routes/home/home.behaviour.js",
 ].map((file) => readFileSync(web(file), "utf8")).join("\n");
 
+/* #1083: the pocket's own home screen. */
+const POCKET_SOURCE = readFileSync(web("src/routes/home/pocket.svelte"), "utf8");
+
 /** Every name home's source assigns to a class or an id, however it writes
  *  it — literal, Svelte expression, or DOM assignment. Lifted from
  *  v19-tour-stops.test.mjs, which pins the eight-stop walk the same way. */
@@ -112,13 +115,25 @@ beforeEach(() => {
 });
 
 describe("the selectors chapter 1 names", () => {
-  it("every one of them exists in home's own markup", () => {
+  it("every desk one exists in home's own markup", () => {
     const rendered = namesIn(HOME_SOURCE);
-    for (const [beat, selector] of Object.entries(SELECTORS)) {
+    for (const [beat, selector] of Object.entries(SELECTORS.DESK)) {
       for (const token of tokensOf(selector)) {
         expect(
           rendered.has(token),
-          `chapter 1's "${beat}" names "${selector}", but /home renders no "${token}"`,
+          `chapter 1's desk "${beat}" names "${selector}", but /home renders no "${token}"`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("every pocket one exists in pocket.svelte's own markup (#1083)", () => {
+    const rendered = namesIn(POCKET_SOURCE);
+    for (const [beat, selector] of Object.entries(SELECTORS.POCKET)) {
+      for (const token of tokensOf(selector)) {
+        expect(
+          rendered.has(token),
+          `chapter 1's pocket "${beat}" names "${selector}", but pocket.svelte renders no "${token}"`,
         ).toBe(true);
       }
     }
@@ -130,9 +145,9 @@ describe("the selectors chapter 1 names", () => {
     const chart = TOUR_STOPS.find((stop) => stop.id === "chart");
     const sun = TOUR_STOPS.find((stop) => stop.id === "sun");
     expect(chart.target).toContain(".dial");
-    expect(SELECTORS.dial).toBe(".dial");
+    expect(SELECTORS.DESK.dial).toBe(".dial");
     expect(sun.target).toContain(".sun-link");
-    expect(SELECTORS.sun).toBe(".sun-link");
+    expect(SELECTORS.DESK.sun).toBe(".sun-link");
   });
 });
 

@@ -104,6 +104,69 @@ function tourHeldAtOthers() {
 }
 
 /**
+ * #1083: the same hold as `tourHeldAtOthers`, above, but for the pocket
+ * dialect — keyed on `.msys` (the pocket's own pill chips) rather than the
+ * desk's `.minisys`, and reading the pocket's own chapter id (`others`,
+ * unchanged — the registry is one list for both dialects).
+ */
+function tourHeldAtOthersPocket() {
+  const w = /** @type {any} */ (window);
+  w.__hold = "others-gran";
+  if (document.querySelectorAll(".msys").length === 0) return false;
+  if (typeof w.__jump !== "function" || !Array.isArray(w.__chapters)) return false;
+  if (!w.__fidelityJumped) {
+    const k = w.__chapters.findIndex((/** @type {{ id: string }} */ c) => c.id === "others");
+    if (k < 0) return false;
+    w.__fidelityJumped = true;
+    w.__jump(k);
+    return false;
+  }
+  if (w.__held !== "others-gran") return false;
+  const veil = document.getElementById("orbit-tour-veil");
+  const chrome = document.getElementById("orbit-tour-film");
+  const pill = document.getElementById("orbit-tour-transport");
+  if (!veil || !chrome || !pill) return false;
+  if (getComputedStyle(veil).opacity === "0") return false;
+  if (!chrome.querySelector(".tourfilm-ring")) return false;
+  if (!chrome.querySelector(".tourfilm-callout")) return false;
+  return [veil, chrome, pill].every(
+    (el) => !el.getAnimations({ subtree: true }).some((a) => a instanceof CSSTransition),
+  );
+}
+
+/**
+ * #1083: the pocket's own chapter 11 ("Your sky"), held at `sky-settings` —
+ * the account hatch up, the settings row ringed, the pill docked to the top
+ * (owner's 1a). Settle also requires the sheet to be open and the pill's own
+ * `.top` class, so the frame is never photographed mid-dock.
+ */
+function tourHeldAtSkySettingsPocket() {
+  const w = /** @type {any} */ (window);
+  w.__hold = "sky-settings";
+  if (typeof w.__jump !== "function" || !Array.isArray(w.__chapters)) return false;
+  if (!w.__fidelityJumped) {
+    const k = w.__chapters.findIndex((/** @type {{ id: string }} */ c) => c.id === "sky");
+    if (k < 0) return false;
+    w.__fidelityJumped = true;
+    w.__jump(k);
+    return false;
+  }
+  if (w.__held !== "sky-settings") return false;
+  const veil = document.getElementById("orbit-tour-veil");
+  const chrome = document.getElementById("orbit-tour-film");
+  const pill = document.getElementById("orbit-tour-transport");
+  if (!veil || !chrome || !pill) return false;
+  if (getComputedStyle(veil).opacity === "0") return false;
+  if (!chrome.querySelector(".tourfilm-ring")) return false;
+  if (!chrome.querySelector(".tourfilm-callout")) return false;
+  if (!document.querySelector(".p-sheet-layer.open")) return false;
+  if (!pill.classList.contains("top")) return false;
+  return [veil, chrome, pill].every(
+    (el) => !el.getAnimations({ subtree: true }).some((a) => a instanceof CSSTransition),
+  );
+}
+
+/**
  * @typedef {{
  *   name: string,
  *   path: string,
@@ -740,6 +803,42 @@ const SCREENS = [
     tourDue: true,
     reducedMotion: "reduce",
     settle: tourHeldAtOthers,
+  },
+  /*
+   * #1083: the pocket cut's own three owned frames, at 390x844 — the same
+   * `others-gran` mark as the desk pair (dark and light, the ring's 3.03:1
+   * case on dawn), plus one frame the desk has no equivalent for: the
+   * transport docked to the top edge while a kit sheet is up (owner's 1a).
+   */
+  {
+    name: "tour-pocket-dark",
+    path: "/home",
+    stage: "owned",
+    pack: "starchart",
+    tourDue: true,
+    reducedMotion: "reduce",
+    viewport: { width: 390, height: 844 },
+    settle: tourHeldAtOthersPocket,
+  },
+  {
+    name: "tour-pocket-light",
+    path: "/home",
+    stage: "owned",
+    pack: "dawn",
+    tourDue: true,
+    reducedMotion: "reduce",
+    viewport: { width: 390, height: 844 },
+    settle: tourHeldAtOthersPocket,
+  },
+  {
+    name: "tour-pocket-docked",
+    path: "/home",
+    stage: "owned",
+    pack: "starchart",
+    tourDue: true,
+    reducedMotion: "reduce",
+    viewport: { width: 390, height: 844 },
+    settle: tourHeldAtSkySettingsPocket,
   },
 ];
 

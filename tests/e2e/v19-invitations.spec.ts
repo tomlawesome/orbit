@@ -236,22 +236,19 @@ test("an invited reader's arrival never draws the chooser: the sky moves to the 
     // always opens.
     //
     // On the mobile project the newcomer context is a phone too (the runner
-    // hands `browser.newContext` the project's device), and a phone gets no
-    // film at all until its own cut lands (owner-decisions.md §24, #1083):
-    // there the assertion is that nothing mounts, not that the film opens.
+    // hands `browser.newContext` the project's device), and since #1083 the
+    // pocket dialect takes the same path as the desk one (trigger.js,
+    // owner-decisions.md §24's ending note) -- the film opens there too,
+    // same as v19-tour.spec.ts now asserts for the ordinary first-run case.
     const transport = newcomerPage.locator("#orbit-tour-transport");
-    if (test.info().project.name.startsWith("mobile")) {
-      await expect(transport).toHaveCount(0);
-    } else {
-      await expect(transport).toBeVisible({ timeout: 30_000 });
-      await expect
-        .poll(() =>
-          newcomerPage.evaluate(
-            () => (window as unknown as { __reading?: () => { chapter: number } }).__reading?.().chapter,
-          ),
-        )
-        .toBe(0);
-    }
+    await expect(transport).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(() =>
+        newcomerPage.evaluate(
+          () => (window as unknown as { __reading?: () => { chapter: number } }).__reading?.().chapter,
+        ),
+      )
+      .toBe(0);
   } finally {
     await newcomerContext.close();
   }
