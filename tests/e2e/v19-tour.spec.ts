@@ -51,9 +51,13 @@ resetDatabaseBetweenSpecFiles();
  * uses and swept the same way (`support/households.ts`) — nothing here
  * invents its own shape.
  *
- * DESK ONLY (owner-decisions.md §24): the film has no pocket cut, so a
- * mobile project run is skipped rather than left to hang on a transport
- * pill that never mounts.
+ * #1083: THE POCKET CUT, TOO. The film now plays on a pocket viewport as
+ * well as a desk one (owner-decisions.md §24's ending note), so the mobile
+ * project run is no longer skipped. Its own assertions are pocket-specific
+ * (the rail is a slider, not the desk's numbered ticks; there is no
+ * `#dial-name`, which is desk-only markup) and are gated on
+ * `test.info().project.name.startsWith("mobile")` rather than duplicating
+ * the whole test.
  */
 
 test.use({ reducedMotion: "reduce" });
@@ -78,13 +82,28 @@ async function signInAwayFromHome(page: Page) {
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent("/inbox")}`);
   await page.getByRole("link", { name: READER() }).click();
   /* #1080: waits for the session, then holds administrator access — the
-     sweep's hard delete is an instance-admin power. */
+     sweep's hard delete is an instance-admin power. This polls the SESSION
+     through page.request, a separate context from the page's own frame, so
+     it can resolve before the browser's own redirect chain (the #840 door:
+     /inbox -> hooks.server.js's 303 to / -> the arrival's own load) has
+     actually landed. */
   await ensureWorkerAdministrator(page);
   /* Not always /inbox: an administrator with no household of their own may
      land on the arrival's newcomer screen instead (#840). Either is fine —
      what matters is that it is not /home, where the film's own trigger
      would otherwise run ahead of this file's own setup. */
   await expect(page).not.toHaveURL(/\/home$/, { timeout: 30_000 });
+  /* #1083: `not.toHaveURL` is satisfied by ANY non-/home URL, including one
+     partway through the #840 door's own redirect chain — the reader's own
+     account being freshly minted (no household of any kind yet), that
+     chain is real network time this assertion does not wait out. A reader
+     on the pocket meets the same chain the desk reader does, but the next
+     step (anEmptySky's own fetch) found it racing an in-flight navigation
+     there and not on desk — load timing, not a different route. Waiting
+     for the network to go quiet is what actually proves the redirect (and
+     whatever the landed screen's own onMount fetches) has settled, so the
+     next real fetch this file makes is not torn down mid-flight. */
+  await page.waitForLoadState("networkidle");
 }
 
 /** A household of the reader's own: empty, and this session's active one. */
@@ -147,10 +166,8 @@ async function reading(page: Page) {
 }
 
 test("a first-time reader gets the film, works its transport, and a second arrival stays silent", async ({ page }) => {
-  /* The film has no pocket cut (§24); a mobile run would wait on a
-     transport pill that trigger.js never mounts. */
-  test.skip(test.info().project.name.startsWith("mobile"), "the film is desk-only (owner-decisions.md §24)");
   test.setTimeout(90_000);
+  const mobile = test.info().project.name.startsWith("mobile");
 
   await signInAwayFromHome(page);
   const household = await anEmptySky(page);
@@ -159,13 +176,26 @@ test("a first-time reader gets the film, works its transport, and a second arriv
     await forgetTheWalk(page);
 
     /* THE TRIGGER: a reader who has never taken the film lands on their own
-       sky, on desk, and the transport pill is up. */
+       sky, and the transport pill is up — on desk and on the pocket alike
+       (#1083). `#dial-name` is desk-only markup (routes/home/+page.svelte);
+       the pocket's own household name sits in the dial with no id. */
     await page.goto("/home");
     await homeIsLive(page);
     const transport = page.locator("#orbit-tour-transport");
     await expect(transport).toBeVisible({ timeout: 30_000 });
-    await expect(page.locator("#dial-name")).toHaveText(household.name);
+    if (!mobile) await expect(page.locator("#dial-name")).toHaveText(household.name);
     await page.waitForFunction(() => typeof (window as unknown as { __jump?: unknown }).__jump === "function");
+
+    if (mobile) {
+      /* #1083 §4.2: the rail is the one slider target on the pocket, not
+         the desk's twelve numbered tick buttons. */
+      await expect(transport.locator(".track[role=slider]")).toBeVisible();
+
+      /* §4.4: docking to the top edge while a kit sheet is up. */
+      await page.evaluate(() => (window as unknown as { __jump(n: number): void }).__jump(10)); /* "Your sky" */
+      await expect(page.locator(".p-sheet-layer.open")).toBeVisible({ timeout: 10_000 });
+      await expect(transport).toHaveClass(/\btop\b/);
+    }
 
     /* THE FILM RUNS THROUGH ITS CHAPTERS — jumped, never waited out. A jump
        sets the chapter synchronously (player.js), so the reading reported
@@ -195,8 +225,10 @@ test("a first-time reader gets the film, works its transport, and a second arriv
     /* STOPPING WRITES tourSeenAt and clears the veil — the reader's screen
        handed back. player.js's `stop()` clears the veil synchronously but
        the write happens after (trigger.js's `beginFilm`), so the record is
-       polled rather than sampled once. */
+       polled rather than sampled once. On the pocket, stopping also folds
+       whatever sheet the film had opened (vocabulary.js's `clear()`, §3.4). */
     await expect(page.locator("#orbit-tour-veil")).toBeHidden();
+    if (mobile) await expect(page.locator(".p-sheet-layer.open")).toHaveCount(0);
     await expect
       .poll(async () => (await tourRecordOf(page)).tourSeenAt, { timeout: 15_000 })
       .not.toBeNull();

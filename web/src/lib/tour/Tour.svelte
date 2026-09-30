@@ -4,13 +4,15 @@
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
   import { readTour, writeTourSeen } from "$lib/data/workspace.js";
+  import { isPocket } from "$lib/pocket/media.js";
   import { createFilm } from "./film.js";
   import { tourHasSomethingToShow } from "./offer.js";
   import { tourMayBegin } from "./relaunch.js";
   import { beginFilm } from "./trigger.js";
 
   /**
-   * THE FIRST-RUN FILM (#866) — the trigger, and the decision to put it up.
+   * THE FIRST-RUN FILM (#866, pocket cut #1083) — the trigger, and the
+   * decision to put it up.
    *
    * §23 of design/owner-decisions.md retired the old eight-stop card walk
    * outright ("The only tour is the one with the play and pause buttons.
@@ -26,16 +28,20 @@
    * only ever STARTS on the reader's first landing on /home, and only when
    * the server says they have never taken it (#751's `tourSeenAt`).
    *
-   * The gate itself — desk-only (§24), never a phone write, give up quietly
-   * if `readTour` throws, nothing for a household-less reader — lives in
-   * trigger.js's `beginFilm`, framework-free so it is unit-testable without a
-   * mounted component. This file is the wiring: it decides "phone" from the
-   * real viewport, and hands `beginFilm` the real `readTour`, the real
-   * household check and a function that builds the real film.
+   * THE DIALECT (#1083). The film now plays on every viewport: `pocket:
+   * isPocket()` (the same switch the product's own screens pick their own
+   * dialect with, CON-10) is handed to `createFilm` and on into
+   * `createFilmContext`, so a chapter can choose pocket selectors and anchors
+   * without ever calling `matchMedia` itself. See §24's shipped note in
+   * design/owner-decisions.md for what this ends.
+   *
+   * The gate itself — give up quietly if `readTour` throws, nothing for a
+   * household-less reader — lives in trigger.js's `beginFilm`, framework-free
+   * so it is unit-testable without a mounted component. This file is the
+   * wiring: it hands `beginFilm` the real `readTour`, the real household
+   * check and a function that builds the real film.
    */
   const HOME = "/home";
-  /* The same cut home uses to choose between its two dialects (CON-10). */
-  const DESK = "(min-width: 901px)";
   /**
    * Walking onto the screen a chapter names. Written as literal navigations
    * rather than one built from the route string, so the router — and the
@@ -76,12 +82,12 @@
   async function begin() {
     await landed();
     await beginFilm({
-      phone: !matchMedia(DESK).matches,
       readTour,
       hasHousehold: () => tourHasSomethingToShow(document),
       createFilmRun: () => {
         film = createFilm({
           doc: document,
+          pocket: isPocket(),
           routeOf: () => page.url.pathname,
           navigate: walkTo,
           settle: tick,

@@ -34,6 +34,15 @@ const HOME_SOURCE = [
   "src/routes/home/swatches.js",
 ].map((file) => readFileSync(web(file), "utf8")).join("\n");
 
+/* #1083: the pocket hatch — home's own pocket screen (`#morb`), the hatch
+   menu itself (settings row, swatches), and the sheet shell the hatch opens
+   inside of (`.p-sheet-layer`/`.p-sheet-panel`, Sheet.svelte). */
+const POCKET_SOURCE = [
+  "src/routes/home/pocket.svelte",
+  "src/lib/pocket/Hatch.svelte",
+  "src/lib/pocket/Sheet.svelte",
+].map((file) => readFileSync(web(file), "utf8")).join("\n");
+
 /** Every name home's source assigns to a class or an id. Lifted from
  *  v19-tour-chapter-arrive.test.mjs, which lifted it from
  *  v19-tour-stops.test.mjs. */
@@ -134,33 +143,45 @@ beforeEach(() => {
 });
 
 describe("the selectors chapter 11 names", () => {
-  it("every class and id it names exists in home's own markup", () => {
+  it("every desk class and id it names exists in home's own markup", () => {
     const rendered = namesIn(HOME_SOURCE);
-    for (const [beat, selector] of Object.entries(SELECTORS)) {
+    for (const [beat, selector] of Object.entries(SELECTORS.DESK)) {
       for (const token of tokensOf(selector)) {
         expect(
           rendered.has(token),
-          `chapter 11's "${beat}" names "${selector}", but /home renders no "${token}"`,
+          `chapter 11's desk "${beat}" names "${selector}", but /home renders no "${token}"`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("every pocket class it names exists in the pocket hatch's own markup (#1083)", () => {
+    const rendered = namesIn(POCKET_SOURCE);
+    for (const [beat, selector] of Object.entries(SELECTORS.POCKET)) {
+      for (const token of tokensOf(selector)) {
+        expect(
+          rendered.has(token),
+          `chapter 11's pocket "${beat}" names "${selector}", but the pocket hatch renders no "${token}"`,
         ).toBe(true);
       }
     }
   });
 
   it("the orb it names is the account orb, not the inbox orb beside it", () => {
-    expect(SELECTORS.orb).toBe("button.orb");
+    expect(SELECTORS.DESK.orb).toBe("button.orb");
     expect(HOME_SOURCE).toContain('class="orb"');
     expect(HOME_SOURCE).toContain('class="orb inbox-orb"');
   });
 
   it("the settings row it names is a real link to /settings", () => {
-    expect(SELECTORS.settingsLink).toContain('[href$="/settings"]');
+    expect(SELECTORS.DESK.settingsLink).toContain('[href$="/settings"]');
     expect(HOME_SOURCE).toContain('resolve("/settings")');
   });
 
   it("the dawn and after-dark swatches it names are told apart the way the product's own click handler tells them apart", () => {
     /* packOf (swatches.js) reads a swatch's title; so does this chapter. */
-    expect(SELECTORS.dawn).toContain('[title="dawn"]');
-    expect(SELECTORS.afterDark).toContain('[title="after dark"]');
+    expect(SELECTORS.DESK.dawn).toContain('[title="dawn"]');
+    expect(SELECTORS.DESK.afterDark).toContain('[title="after dark"]');
     expect(HOME_SOURCE).toContain('title="dawn"');
     expect(HOME_SOURCE).toContain('title="after dark"');
     expect(HOME_SOURCE).toContain("button.title.replace");
@@ -217,8 +238,8 @@ describe("the beats, in the mockup's order", () => {
     await sky.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel]);
     expect(said).toEqual([
-      ["Settings holds your sky, your relay and this walk — take it again anytime.", SELECTORS.settingsLink],
-      ["star chart · after dark · clouds · dawn · retrograde", SELECTORS.swatches],
+      ["Settings holds your sky, your relay and this walk — take it again anytime.", SELECTORS.DESK.settingsLink],
+      ["star chart · after dark · clouds · dawn · retrograde", SELECTORS.DESK.swatches],
     ]);
   });
 
@@ -226,7 +247,7 @@ describe("the beats, in the mockup's order", () => {
     const { log, ctx } = recorder();
     await sky.play(ctx);
     const pressed = log.filter(([word]) => word === "press").map(([, sel]) => sel);
-    expect(pressed).toEqual([SELECTORS.orb, SELECTORS.dawn, SELECTORS.afterDark]);
+    expect(pressed).toEqual([SELECTORS.DESK.orb, SELECTORS.DESK.dawn, SELECTORS.DESK.afterDark]);
   });
 
   it("marks sky-orb, sky-settings, sky-swatches, sky-dawn and sky-back, in that order", async () => {
@@ -242,7 +263,7 @@ describe("the beats, in the mockup's order", () => {
     const worn = log.filter(([word]) => word === "wear").map(([, pack]) => pack);
     /* `null`, not "after dark": the sky goes back to the reader's own. */
     expect(worn).toEqual(["dawn", null]);
-    const pressedDawn = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.dawn);
+    const pressedDawn = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.dawn);
     const woreDawn = log.findIndex(([word, pack]) => word === "wear" && pack === "dawn");
     expect(woreDawn).toBe(pressedDawn + 1);
   });
@@ -331,5 +352,69 @@ describe("the chapter played for real", () => {
     await playOut(clock, sky.play(ctx));
     ctx.destroy();
     expect(document.getElementById("hero").outerHTML).toBe(before);
+  });
+});
+
+/** Home's pocket hatch, already open: the settings row sized exactly to its
+ *  own row (a kit Row's `overflow:clip`, Addendum A's own case) and the
+ *  five swatches, matching pocket.svelte/Hatch.svelte's real selectors. */
+function drawPocketHatch() {
+  document.body.innerHTML = `
+    <div class="hero" id="hero">
+      <button id="morb"></button>
+      <div class="p-sheet-layer open">
+        <div class="p-sheet-panel">
+          <div class="p-row" style="overflow:clip">
+            <a data-row-face href="/settings"></a>
+          </div>
+          <div class="swatches">
+            ${PACKS.map(([title]) => `<button class="swatch" title="${title}"></button>`).join("")}
+          </div>
+        </div>
+      </div>
+    </div>`;
+  box(document.getElementById("morb"), { x: 340, y: 22, w: 40, h: 40 });
+  box(document.querySelector(".p-sheet-panel"), { x: 0, y: 200, w: 390, h: 500 });
+  /* The row and its face share exactly one box — the shape a kit Row draws
+     when its face fills it — so any lift at all would leave the clip. */
+  box(document.querySelector(".p-row"), { x: 17, y: 300, w: 356, h: 56 });
+  box(document.querySelector("[data-row-face]"), { x: 17, y: 300, w: 356, h: 56 });
+  box(document.querySelector(".swatches"), { x: 17, y: 400, w: 356, h: 44 });
+  document.querySelectorAll(".swatch").forEach((el, k) => {
+    box(el, { x: 17 + k * 44, y: 400, w: 44, h: 44 });
+  });
+}
+
+describe("Addendum A: the pocket settings row keeps its clip (#1083, 2026-09-30)", () => {
+  it("never translates [data-row-face] — dry run touches no DOM, and the wet run leaves style.transform empty throughout", async () => {
+    drawPocketHatch();
+    const clock = createClock({ reducedMotion: () => false });
+    const ctx = createFilmContext({ clock, doc: document, pocket: true });
+
+    /* Dry: the vocabulary stubs itself out entirely (§ vocabulary.js's own
+       "dry mode costs the same as playing"), so there is nothing to touch. */
+    clock.dryStart();
+    await sky.play(ctx);
+    clock.dryEnd();
+    expect(document.getElementById("hero")).not.toBeNull();
+
+    /* Wet: sample style.transform on every frame, including the moment the
+       settings beat is lit, not only the final restored state. */
+    drawPocketHatch();
+    clock.setPlaying(true);
+    const seenTransforms = new Set();
+    let done = false;
+    const playing = sky.play(ctx).then(() => { done = true; }, () => { done = true; });
+    let spent = 0;
+    while (!done && spent < 400000) {
+      clock.advance(100);
+      spent += 100;
+      await settle();
+      const face = document.querySelector("[data-row-face]");
+      if (face) seenTransforms.add(face.style.transform);
+    }
+    await playing;
+    expect([...seenTransforms]).toEqual([""]);
+    ctx.destroy();
   });
 });

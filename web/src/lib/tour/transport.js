@@ -30,6 +30,7 @@
  * to stop it, and that the script is there. See
  * design/v19/tour/round-7/README.md for the ruling this draws.
  */
+import { isPocket } from "$lib/pocket/media.js";
 import { startFilmLoop } from "./clock.js";
 
 const BAR_ID = "orbit-tour-transport";
@@ -82,13 +83,20 @@ const STYLES = `
   margin-left:-.5px;background:var(--ink-faint)}
 #${BAR_ID} .tick:hover::after,#${BAR_ID} .tick.here::after{background:var(--accent)}
 #${BAR_ID} .tick:focus-visible{outline:1.5px solid var(--accent);outline-offset:-8px;border-radius:8px}
-#${BAR_ID} .now{position:absolute;top:8px;left:0;white-space:nowrap;
+/* #1083: .now/.tip moved from .track's own children to bar's (see the JS
+   construction's own note) — 80px is exactly where .track's own left edge
+   already sat (32px play/pause + 2px gap + 32px stop + 2px gap + track's own
+   4px margin-left), so this is the same rendered position as before, not a
+   new one. */
+#${BAR_ID} .now{position:absolute;top:8px;left:80px;white-space:nowrap;
   font:9.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--ink-quiet)}
-#${BAR_ID} .tip{position:absolute;top:8px;left:0;white-space:nowrap;opacity:0;
+#${BAR_ID} .tip{position:absolute;top:8px;left:80px;white-space:nowrap;opacity:0;
   font:9.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--accent);
   transition:opacity .15s ease}
 #${BAR_ID} .tip.on{opacity:1}
-#${BAR_ID} .track.tipping .now{opacity:0}
+/* :has(), not a descendant combinator: .now is bar's own child now, a
+   sibling of .track rather than nested in it (#1083). */
+#${BAR_ID}:has(.track.tipping) .now{opacity:0}
 #${BAR_ID} .clock{font:10px var(--mono);letter-spacing:.12em;color:var(--ink-quiet);
   white-space:nowrap;margin-left:8px}
 @media (prefers-reduced-motion: reduce){
@@ -108,6 +116,70 @@ const STYLES = `
 #${BAR_ID} .scr:focus{position:static;width:auto;height:auto;overflow:visible;
   clip:auto;padding:0 6px}
 #${BAR_ID} .scr:focus-visible{outline:1.5px solid var(--accent);outline-offset:1px;border-radius:4px}
+
+/* ---- #1083 §4: the pocket transport --------------------------------------
+   Same DOM, same elements, a second stylesheet: nothing here touches a desk
+   selector's own declaration above, and this block only ever applies under
+   the pocket's own switch (media.js's POCKET_QUERY, repeated here because a
+   stylesheet cannot read a JS constant).
+
+   THE ROW SPLIT. .words is drawn by the desk row's own children rather than
+   a new wrapper: every child is pulled out of the flex row and given an
+   explicit place in one of the two rows (row one: y 1-19, the pill's own
+   padding-top to the row's own height; row two: y 19-63), so nothing here
+   is a new element, only where the existing ones sit. Row two's own
+   children (the buttons, the rail) are positioned EXPLICITLY at top:19px
+   rather than left to the desk's own centring rule, which spreads a 44px
+   button across the WHOLE 62px pill and lands it under row one's own strip
+   (#1083, pocket-measure's own "covered by" finding on the ARRIVE frame:
+   .now and .pp overlapped because centring, not the row split, was placing
+   the button). .now/.tip are bar's own children (moved there for Addendum
+   A/the "label spills out of its box" fix — see the JS construction's own
+   note), so row one is just their own left/top against the bar, the same
+   as .clock's own right/top reaches the opposite corner. */
+@media (max-width:900px),(max-height:600px){
+  #${BAR_ID}{
+    left:var(--p-gutter,16px);right:var(--p-gutter,16px);bottom:calc(12px + env(safe-area-inset-bottom));
+    transform:none;width:auto;height:64px;box-sizing:border-box;
+    padding:1px 8px;gap:0;border-radius:18px;
+    transition:opacity .2s ease}
+  /* #1083 owner's fix (round 8, 1a): a fade between places, never a slide —
+     the JS move (below) drives this transition's actual duration per move;
+     this base rule only stops the .6s desk recede fade from firing during a
+     reposition. Reduced motion: instant either way (clock.js's own idiom). */
+  @media (prefers-reduced-motion:reduce){ #${BAR_ID}{transition:none} }
+  #${BAR_ID}.top{bottom:auto;top:calc(10px + env(safe-area-inset-top))}
+  #${BAR_ID}.raised{bottom:calc(var(--tour-raise,64px) + 12px)}
+  #${BAR_ID} .pp,#${BAR_ID} .stp{position:absolute;top:19px;width:44px;height:44px;border-radius:12px}
+  #${BAR_ID} .pp{left:8px}
+  #${BAR_ID} .stp{left:56px}
+  #${BAR_ID} .pp svg{width:12px;height:12px}
+  #${BAR_ID} .stp svg{width:10px;height:10px}
+  /* The rail: the one slider target, 44px tall, full width after the
+     buttons (8 pad + 44 + 4 gap + 44 + 8 gap = 108). */
+  #${BAR_ID} .track{position:absolute;left:108px;right:0;top:19px;height:44px;margin:0;touch-action:none}
+  #${BAR_ID} .rail{top:21px}
+  #${BAR_ID} .fill,#${BAR_ID} .head{top:21px}
+  #${BAR_ID} .now,#${BAR_ID} .tip{position:absolute;top:1px;left:8px;right:auto;
+    font:12px var(--mono);letter-spacing:.14em;overflow:hidden;white-space:nowrap}
+  /* round 3's own guard: no ellipsis on the pocket's chapter name. */
+  #${BAR_ID} .now{text-overflow:clip}
+  #${BAR_ID} .clock{position:absolute;top:1px;right:8px;margin-left:0;font:12px var(--mono)}
+  /* The twelve ticks are painted marks here, not buttons (§4.2's Call): a
+     44px hit box around an 18px spacing would overlap its neighbours, and
+     the rail itself is the one keyboard/pointer target. */
+  #${BAR_ID} .tick{position:absolute;top:19px;width:1px;height:6px;margin-left:-.5px;
+    background:var(--ink-faint);border-radius:0;pointer-events:none}
+  /* The desk's own tick is a 18x38 button with an invisible face and a
+     painted ::after dash (this same stylesheet's desk-only rule, above);
+     the pocket's own tick is that dash drawn directly, an <i> with no face
+     to hide behind, and would otherwise inherit that ::after too — a second,
+     spurious mark below the one just drawn (#1083, found on the running
+     demo). */
+  #${BAR_ID} .tick::after{content:none}
+  #${BAR_ID} .tick.aim{top:17px;height:10px;background:var(--accent)}
+  #${BAR_ID} .now.aim{color:var(--accent)}
+}
 `;
 
 /**
@@ -116,8 +188,19 @@ const STYLES = `
  * @param {import("./clock.js").FilmClock} options.clock
  * @param {Document} [options.doc]
  * @param {boolean} [options.loop] drive the clock from real frames (off in tests)
+ * @param {() => boolean} [options.hasFilmOpenedSheet] (#1083 §4.6) whether
+ *   the film itself currently owns an open sheet (vocabulary.js's `open()`/
+ *   `close()` undo list) — an Escape while a sheet is up that the film did
+ *   NOT open is the reader closing their own, and must not also stop the
+ *   film.
  */
-export function mountTransport({ player, clock, doc = document, loop = true }) {
+export function mountTransport({
+  player,
+  clock,
+  doc = document,
+  loop = true,
+  hasFilmOpenedSheet = () => false,
+}) {
   if (!doc.getElementById(STYLE_ID)) {
     const style = doc.createElement("style");
     style.id = STYLE_ID;
@@ -125,10 +208,19 @@ export function mountTransport({ player, clock, doc = document, loop = true }) {
     doc.head.appendChild(style);
   }
 
+  /* #1083 §4.2/§4.4: decided once, at mount, the same as the film's own
+     dialect is fixed at mount (CON-10) — the pill's shape and recede are
+     already CSS-media-driven and need no JS branch, but the tick's element
+     type and the docking/slider wiring below do. */
+  const pocket = isPocket();
+
   const bar = doc.createElement("div");
   bar.id = BAR_ID;
   bar.setAttribute("role", "group");
   bar.setAttribute("aria-label", "Tour transport");
+  /* #1083 §3.7: stays pressable while a kit sheet inerts the rest of the
+     page (focus.js's `inertPage` already skips this attribute). */
+  if (pocket) bar.setAttribute("data-pocket-above", "");
 
   const pp = doc.createElement("button");
   pp.type = "button";
@@ -165,7 +257,7 @@ export function mountTransport({ player, clock, doc = document, loop = true }) {
   tip.className = "tip";
   const head = doc.createElement("div");
   head.className = "head";
-  track.append(rail, fill, now, tip, head);
+  track.append(rail, fill, head);
 
   const readout = doc.createElement("div");
   readout.className = "clock";
@@ -195,10 +287,17 @@ export function mountTransport({ player, clock, doc = document, loop = true }) {
   status.className = "vh";
   status.setAttribute("role", "status");
 
-  bar.append(pp, stop, scriptBtn, track, readout, scriptRegion, status);
+  /* #1083: .now/.tip are bar's own children, not track's — a text node's
+     accessible box must sit inside whatever element contains it
+     (pocket-measure's own "label spills out of its box" finding), and .now
+     sitting in row one while .track sits in row two means it cannot be
+     track's descendant on the pocket. Positioned relative to bar in both
+     dialects; see the desk/pocket rules below for the two placements. */
+  bar.append(pp, stop, scriptBtn, track, now, tip, readout, scriptRegion, status);
   doc.body.appendChild(bar);
 
-  /** @type {HTMLButtonElement[]} */
+  /** Buttons on desk, painted `<i>` marks on the pocket (#1083 §4.2).
+   *  @type {(HTMLButtonElement | HTMLElement)[]} */
   let ticks = [];
 
   function setIcon() {
@@ -224,18 +323,40 @@ export function mountTransport({ player, clock, doc = document, loop = true }) {
     fill.style.width = `${t * width}px`;
     head.style.left = `${t * width}px`;
     readout.textContent = `${mmss(Math.min(cursor, total))} / ${mmss(total)}`;
-    const labelWidth = now.offsetWidth;
-    now.style.left = `${Math.max(0, Math.min(t * width - labelWidth / 2, width - labelWidth))}px`;
+    /* On desk, .now tracks the playhead along the rail. On the pocket, row
+       one is a fixed strip (chapter name left, clock right, §4.1) — the CSS
+       already places it, and an inline `left` here would fight that.
+       #1083: .now is bar's own child now, not track's (see the JS
+       construction's own note), so the offset this computes WITHIN the
+       rail's own width is added to the rail's own offset within the bar. */
+    if (!pocket) {
+      const labelWidth = now.offsetWidth;
+      const withinTrack = Math.max(0, Math.min(t * width - labelWidth / 2, width - labelWidth));
+      now.style.left = `${track.offsetLeft + withinTrack}px`;
+    }
   }
 
   /**
-   * One tick per chapter, placed at the reading its chapter starts on. The
-   * painted mark is 1x8; the button around it is 18x38, which is the widest
-   * the tick spacing allows without two of them overlapping.
+   * One tick per chapter, placed at the reading its chapter starts on.
+   *
+   * On desk, the painted mark is 1x8 and the button around it is 18x38, the
+   * widest the tick spacing allows without two of them overlapping.
+   *
+   * #1083 §4.2's Call: on the pocket the ticks are painted `<i>` marks, not
+   * buttons — twelve 44px hit boxes cannot fit a 250px rail without lying
+   * about their hit box, and the rail itself (below) is the one slider
+   * target and the keyboard route the desk's tick buttons were. Decided by
+   * `isPocket()` at mount, same as the rest of this module's own dialect.
    */
   function buildTicks() {
     for (const old of ticks) old.remove();
     ticks = player.chapters().map((one, k) => {
+      if (pocket) {
+        const tick = doc.createElement("i");
+        tick.className = "tick";
+        track.insertBefore(tick, head);
+        return tick;
+      }
       const tick = doc.createElement("button");
       tick.type = "button";
       tick.className = "tick";
@@ -248,7 +369,10 @@ export function mountTransport({ player, clock, doc = document, loop = true }) {
         track.classList.add("tipping");
         const total = player.total();
         const x = total ? (player.offsets()[k] / total) * track.clientWidth : 0;
-        tip.style.left = `${Math.max(0, Math.min(x - tip.offsetWidth / 2, track.clientWidth - tip.offsetWidth))}px`;
+        /* #1083: .tip is bar's own child now, not track's — see paint()'s
+           own note on the same offset. */
+        const withinTrack = Math.max(0, Math.min(x - tip.offsetWidth / 2, track.clientWidth - tip.offsetWidth));
+        tip.style.left = `${track.offsetLeft + withinTrack}px`;
       };
       const unname = () => {
         tip.classList.remove("on");
@@ -262,6 +386,221 @@ export function mountTransport({ player, clock, doc = document, loop = true }) {
       return tick;
     });
     placeTicks();
+  }
+
+  /* ---- #1083 §4.2: the pocket's rail, the one slider target -------------- */
+
+  /** The chapter whose offset is closest to the reading `clientX` maps to
+   *  along the rail. @param {number} clientX */
+  function nearest(clientX) {
+    const rect = track.getBoundingClientRect();
+    const ratio = rect.width > 0 ? Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)) : 0;
+    const reading = ratio * player.total();
+    const offsets = player.offsets();
+    let best = 0;
+    let bestDist = Infinity;
+    offsets.forEach((offset, k) => {
+      const dist = Math.abs(offset - reading);
+      if (dist < bestDist) { bestDist = dist; best = k; }
+    });
+    return best;
+  }
+
+  /** @type {number | null} */
+  let aimIndex = null;
+
+  /** While aiming, the aimed tick's mark grows and `.now` shows the aimed
+   *  chapter's name in the accent; on release it shows the playing chapter
+   *  again (`unaim`, via `markChapter`). @param {number} index */
+  function aim(index) {
+    aimIndex = index;
+    ticks.forEach((tick, k) => tick.classList.toggle("aim", k === index));
+    now.textContent = (player.chapters()[index]?.name ?? "").toUpperCase();
+    now.classList.add("aim");
+  }
+
+  function unaim() {
+    if (aimIndex === null) return;
+    aimIndex = null;
+    ticks.forEach((tick) => tick.classList.remove("aim"));
+    now.classList.remove("aim");
+    markChapter(player.chapter());
+  }
+
+  /** A `pointerdown` anywhere on the bar brings it fully opaque for 1.2s
+   *  (§4.3), whether or not it lands on the rail. */
+  let touchTimer = /** @type {ReturnType<typeof setTimeout> | null} */ (null);
+  function touchBar() {
+    bar.classList.add("touched");
+    if (touchTimer) clearTimeout(touchTimer);
+    touchTimer = setTimeout(() => { bar.classList.remove("touched"); touchTimer = null; }, 1200);
+  }
+
+  /** @type {number | null} */
+  let trackPointerId = null;
+  /** @param {PointerEvent} event */
+  function onTrackPointerDown(event) {
+    trackPointerId = event.pointerId;
+    track.setPointerCapture?.(event.pointerId);
+    track.classList.add("touched");
+    touchBar();
+    aim(nearest(event.clientX));
+  }
+  /** @param {PointerEvent} event */
+  function onTrackPointerMove(event) {
+    if (event.pointerId !== trackPointerId) return;
+    aim(nearest(event.clientX));
+  }
+  /** @param {PointerEvent} event */
+  function onTrackPointerUp(event) {
+    if (event.pointerId !== trackPointerId) return;
+    trackPointerId = null;
+    track.classList.remove("touched");
+    const index = nearest(event.clientX);
+    unaim();
+    player.jump(index);
+    touchBar();
+  }
+  /** @param {PointerEvent} event */
+  function onTrackPointerCancel(event) {
+    if (event.pointerId !== trackPointerId) return;
+    trackPointerId = null;
+    track.classList.remove("touched");
+    unaim();
+  }
+  /** ArrowRight/ArrowLeft jump ±1 chapter, Home/End first/last (§4.2).
+   *  @param {KeyboardEvent} event */
+  function onTrackKeydown(event) {
+    const last = player.chapters().length - 1;
+    if (event.key === "ArrowRight") { event.preventDefault(); player.jump(Math.min(last, player.chapter() + 1)); }
+    else if (event.key === "ArrowLeft") { event.preventDefault(); player.jump(Math.max(0, player.chapter() - 1)); }
+    else if (event.key === "Home") { event.preventDefault(); player.jump(0); }
+    else if (event.key === "End") { event.preventDefault(); player.jump(last); }
+  }
+
+  if (pocket) {
+    track.setAttribute("role", "slider");
+    track.tabIndex = 0;
+    track.setAttribute("aria-label", "Chapter");
+    track.setAttribute("aria-valuemin", "0");
+    track.setAttribute("aria-valuemax", String(player.chapters().length - 1));
+    track.addEventListener("pointerdown", onTrackPointerDown);
+    track.addEventListener("pointermove", onTrackPointerMove);
+    track.addEventListener("pointerup", onTrackPointerUp);
+    track.addEventListener("pointercancel", onTrackPointerCancel);
+    track.addEventListener("keydown", onTrackKeydown);
+  }
+
+  /* ---- #1083 §4.4: dock and stand ----------------------------------------
+     The transport owns this; chapters never say it. Feature-detected off the
+     real DOM (a kit sheet's `.p-sheet-layer.open`, `/create`'s `.pk-bar`),
+     never off the dialect flag, so it costs nothing extra on desk — neither
+     selector is ever present there. */
+  /** @type {"home" | "top" | "raised"} */
+  let dockState = "home";
+  let leaveTopTimer = /** @type {ReturnType<typeof setTimeout> | null} */ (null);
+  /** @type {Element | null} */
+  let observedBar = null;
+  /** @type {ResizeObserver | null} */
+  let barResizeObserver = null;
+  /** @type {MutationObserver | null} */
+  let dockObserver = null;
+
+  const sheetOpen = () => Boolean(doc.querySelector(".p-sheet-layer.open"));
+  const footBar = () => doc.querySelector(".pk-bar");
+  const stillMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function updateRaiseOffset() {
+    const pkBar = footBar();
+    if (!pkBar) return;
+    bar.style.setProperty("--tour-raise", `${Math.round(pkBar.getBoundingClientRect().height)}px`);
+  }
+
+  function ensureBarObserved() {
+    const pkBar = footBar();
+    if (pkBar === observedBar) return;
+    barResizeObserver?.disconnect();
+    observedBar = pkBar;
+    if (pkBar && typeof ResizeObserver === "function") {
+      barResizeObserver = new ResizeObserver(() => { if (dockState === "raised") updateRaiseOffset(); });
+      barResizeObserver.observe(pkBar);
+    }
+    updateRaiseOffset();
+  }
+
+  /** @param {"home" | "top" | "raised"} state */
+  function applyDockState(state) {
+    dockState = state;
+    bar.classList.toggle("top", state === "top");
+    bar.classList.toggle("raised", state === "raised");
+    if (state === "raised") { ensureBarObserved(); updateRaiseOffset(); }
+    setRecede();
+  }
+
+  /** Moving is a fade, not a slide (owner's Call, round 8): opacity to 0 in
+   *  150ms at the old place, reposition, opacity to its recede level in
+   *  200ms. Reduced motion: instant.
+   *
+   *  Going to `.top` is the one exception (owner's fix 1): it happens the
+   *  instant a sheet's own `.open` appears, never waiting out the 150ms fade
+   *  first — a pill still sliding into place as the sheet rises is exactly
+   *  the clash the docking exists to avoid. The position changes at once;
+   *  only its opacity still eases in.
+   *
+   *  @param {"home" | "top" | "raised"} next
+   *  @param {{ immediate?: boolean }} [o] */
+  function moveDock(next, o = {}) {
+    if (next === dockState) return;
+    if (stillMotion() || o.immediate) {
+      applyDockState(next);
+      if (o.immediate && !stillMotion()) {
+        bar.style.transition = "none";
+        bar.style.opacity = "0";
+        void bar.offsetHeight;
+        bar.style.transition = "opacity 200ms ease";
+        bar.style.opacity = "";
+      }
+      return;
+    }
+    bar.style.transition = "opacity 150ms ease";
+    bar.style.opacity = "0";
+    setTimeout(() => {
+      applyDockState(next);
+      void bar.offsetHeight;
+      bar.style.transition = "opacity 200ms ease";
+      bar.style.opacity = "";
+    }, 150);
+  }
+
+  function evaluateDock() {
+    if (sheetOpen()) {
+      if (leaveTopTimer) { clearTimeout(leaveTopTimer); leaveTopTimer = null; }
+      if (dockState !== "top") moveDock("top", { immediate: true });
+      return;
+    }
+    if (dockState === "top") {
+      /* owner's fix 1: leave .top only once the sheet's own fade (--p-rise,
+         300ms) has finished. */
+      if (!leaveTopTimer) {
+        leaveTopTimer = setTimeout(() => {
+          leaveTopTimer = null;
+          moveDock(footBar() ? "raised" : "home");
+        }, 350);
+      }
+      return;
+    }
+    const next = footBar() ? "raised" : "home";
+    if (next !== dockState) moveDock(next);
+    else ensureBarObserved();
+  }
+
+  if (pocket) {
+    doc.documentElement.setAttribute("data-tour-pocket", "");
+    if (typeof MutationObserver === "function") {
+      dockObserver = new MutationObserver(() => evaluateDock());
+      dockObserver.observe(doc.body, { subtree: true, attributes: true, attributeFilter: ["class"] });
+    }
+    evaluateDock();
   }
 
   function placeTicks() {
@@ -299,6 +638,10 @@ export function mountTransport({ player, clock, doc = document, loop = true }) {
     const one = player.chapters()[index];
     now.textContent = (one?.name ?? "").toUpperCase();
     ticks.forEach((tick, k) => tick.classList.toggle("here", k === index));
+    if (pocket) {
+      track.setAttribute("aria-valuenow", String(index));
+      track.setAttribute("aria-valuetext", `Chapter ${index + 1}: ${one?.name ?? ""}`);
+    }
     setRecede();
   }
 
@@ -309,10 +652,17 @@ export function mountTransport({ player, clock, doc = document, loop = true }) {
 
   /** @param {KeyboardEvent} event */
   function onKeydown(event) {
+    /* #1083 §4.6: the film's own dispatches (vocabulary.js's `close()` and
+       `unread()`) are marked so this never mistakes them for the reader
+       stopping the film. */
+    if (/** @type {{ tourfilm?: boolean }} */ (event).tourfilm === true) return;
     if (event.key === " " || event.key === "Spacebar") {
       event.preventDefault();
       player.toggle();
     } else if (event.key === "Escape") {
+      /* #1083 §4.6: a sheet up that the film did not open is the reader
+         closing their own — let it pass rather than also stopping the film. */
+      if (pocket && sheetOpen() && !hasFilmOpenedSheet()) return;
       event.preventDefault();
       stoppedByUser = true;
       player.stop();
@@ -324,7 +674,11 @@ export function mountTransport({ player, clock, doc = document, loop = true }) {
     stoppedByUser = true;
     player.stop();
   });
-  doc.addEventListener("keydown", onKeydown);
+  /* #1083 §4.6: capture phase, so Esc still stops the film under a kit
+     sheet, whose own capture handler (`holdSheet`, sheet.js) would otherwise
+     stop propagation before a bubble-phase listener here ever saw it. Safe on
+     desk: nothing there ever calls `stopPropagation` on Escape. */
+  doc.addEventListener("keydown", onKeydown, { capture: true });
 
   /* The transport follows the player directly rather than waiting to be
      told: whoever assembles the film has no job wiring these two together. */
@@ -382,7 +736,19 @@ export function mountTransport({ player, clock, doc = document, loop = true }) {
       offFrame();
       offPlaying();
       stopLoop();
-      doc.removeEventListener("keydown", onKeydown);
+      doc.removeEventListener("keydown", onKeydown, { capture: true });
+      if (pocket) {
+        track.removeEventListener("pointerdown", onTrackPointerDown);
+        track.removeEventListener("pointermove", onTrackPointerMove);
+        track.removeEventListener("pointerup", onTrackPointerUp);
+        track.removeEventListener("pointercancel", onTrackPointerCancel);
+        track.removeEventListener("keydown", onTrackKeydown);
+        if (touchTimer) clearTimeout(touchTimer);
+        if (leaveTopTimer) clearTimeout(leaveTopTimer);
+        dockObserver?.disconnect();
+        barResizeObserver?.disconnect();
+        doc.documentElement.removeAttribute("data-tour-pocket");
+      }
       bar.remove();
     },
   };

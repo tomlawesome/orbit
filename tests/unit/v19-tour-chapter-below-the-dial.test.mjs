@@ -32,6 +32,13 @@ const HOME_SOURCE = [
   "src/routes/home/CorridorRow.svelte",
 ].map((file) => readFileSync(web(file), "utf8")).join("\n");
 
+/* #1083: the pocket's own manifest column and header live on pocket.svelte
+   itself; each row is Row.svelte's own `.p-row`. */
+const POCKET_SOURCE = [
+  "src/routes/home/pocket.svelte",
+  "src/lib/pocket/Row.svelte",
+].map((file) => readFileSync(web(file), "utf8")).join("\n");
+
 /** Every name the source assigns to a class or an id, however it writes it —
  *  literal, Svelte expression, or DOM assignment. Lifted from
  *  v19-tour-chapter-arrive.test.mjs, which lifted it from v19-tour-stops. */
@@ -119,13 +126,25 @@ beforeEach(() => {
 });
 
 describe("the selectors chapter 4 names", () => {
-  it("every one of them exists in home's own markup", () => {
+  it("every desk one exists in home's own markup", () => {
     const rendered = namesIn(HOME_SOURCE);
-    for (const [beat, selector] of Object.entries(SELECTORS)) {
+    for (const [beat, selector] of Object.entries(SELECTORS.DESK)) {
       for (const token of tokensOf(selector)) {
         expect(
           rendered.has(token),
-          `chapter 4's "${beat}" names "${selector}", but /home renders no "${token}"`,
+          `chapter 4's desk "${beat}" names "${selector}", but /home renders no "${token}"`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("every pocket one exists in pocket.svelte's own markup (#1083)", () => {
+    const rendered = namesIn(POCKET_SOURCE);
+    for (const [beat, selector] of Object.entries(SELECTORS.POCKET)) {
+      for (const token of tokensOf(selector)) {
+        expect(
+          rendered.has(token),
+          `chapter 4's pocket "${beat}" names "${selector}", but pocket.svelte renders no "${token}"`,
         ).toBe(true);
       }
     }
@@ -136,7 +155,7 @@ describe("the selectors chapter 4 names", () => {
        onto its own idea of where the manifest is or what it says. */
     const stop = TOUR_STOPS.find((one) => one.id === "manifest");
     expect(stop.target).toContain("#manifest-top");
-    expect(SELECTORS.manifest).toBe("#manifest-top");
+    expect(SELECTORS.DESK.manifest).toBe("#manifest-top");
     expect(stop.copy).toEqual([
       "The manifest lists what's ahead, nearest first.",
       "Same law as the dial, read top to bottom instead of round the ring.",
@@ -192,7 +211,7 @@ describe("the beats, in the mockup's order", () => {
     await manifest.play(ctx);
     const scrolled = log.findIndex(([word, name]) => word === "mark" && name === "manifest-scrolled");
     const veilTrue = log.findIndex(([word, on]) => word === "veil" && on === true);
-    const gotoToday = log.findIndex(([word, sel]) => word === "goto" && sel === SELECTORS.today);
+    const gotoToday = log.findIndex(([word, sel]) => word === "goto" && sel === SELECTORS.DESK.today);
     expect(scrolled).toBeGreaterThan(-1);
     expect(veilTrue).toBeGreaterThan(scrolled);
     expect(veilTrue).toBeLessThan(gotoToday);
@@ -203,8 +222,8 @@ describe("the beats, in the mockup's order", () => {
     await manifest.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel, side, mark]) => [text, sel, side, mark]);
     expect(said).toEqual([
-      ["The manifest lists what's ahead, nearest first.", SELECTORS.today, "left", "manifest-today"],
-      ["Same law as the dial, read top to bottom instead of round the ring.", SELECTORS.row, "left", "manifest-row"],
+      ["The manifest lists what's ahead, nearest first.", SELECTORS.DESK.today, "left", "manifest-today"],
+      ["Same law as the dial, read top to bottom instead of round the ring.", SELECTORS.DESK.row, "left", "manifest-row"],
     ]);
   });
 
@@ -213,8 +232,8 @@ describe("the beats, in the mockup's order", () => {
     await manifest.play(ctx);
     const visited = log.filter(([word]) => word === "goto").map(([, sel, willPress]) => [sel, willPress]);
     expect(visited).toEqual([
-      [SELECTORS.today, false],
-      [SELECTORS.row, false],
+      [SELECTORS.DESK.today, false],
+      [SELECTORS.DESK.row, false],
     ]);
     expect(log.some(([word]) => word === "press")).toBe(false);
   });
@@ -222,7 +241,7 @@ describe("the beats, in the mockup's order", () => {
   it("veils down again before scrolling back up, and ends veil-free", async () => {
     const { log, ctx } = recorder();
     await manifest.play(ctx);
-    const rowUnlit = log.findIndex(([word, sels]) => word === "unlight" && sels?.includes?.(SELECTORS.row));
+    const rowUnlit = log.findIndex(([word, sels]) => word === "unlight" && sels?.includes?.(SELECTORS.DESK.row));
     const lastVeil = log.filter(([word]) => word === "veil").at(-1);
     expect(lastVeil).toEqual(["veil", false]);
     const veilFalseAfterRow = log.findIndex(

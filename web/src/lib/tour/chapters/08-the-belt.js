@@ -97,32 +97,59 @@
  * Every element this chapter names, so
  * tests/unit/v19-tour-chapter-the-belt.test.mjs can pin them against the
  * belt's real markup (web/src/routes/item/[[id]]/+page.svelte,
- * belt.behaviour.js) and home's own (`.body-link`).
+ * belt.behaviour.js), home's own (`.body-link`/`.pk-body`) and pocket.svelte's
+ * `itemActs`/Row.svelte's `data-row-acts`.
+ *
+ * #1083 (round 8's re-cut, owner's 2c): most of these are the SAME selectors
+ * on both dialects — the belt's own markup (papers, end-caps) does not
+ * change shape for the pocket — so only the desk-only and pocket-only
+ * entries are named twice.
  */
 export const SELECTORS = Object.freeze({
-  /** The seated household's own body on the dial — round 6's "the Volvo",
-   *  whichever real item happens to be first in DOM order. */
-  body: ".body-link",
-  /** Every document currently riding the belt beside the apex item — round
-   *  6's "two ringed papers", generalised to however many there are. */
-  docLabel: "#caps .doclabel",
-  /** A paper's own real hit, in `#seats` — where `read()` (vocabulary.js)
-   *  dispatches its one genuine click. Picked out from `.hit` by the one
-   *  thing belt.behaviour.js's own `aria-label` always says for a document
-   *  and never for an item; never a specific document (point 3), only
-   *  whichever paper is first in DOM order. */
-  docHit: 'g.hit[aria-label*="a document attached to"]',
-  /** The item card at the apex — round 6's anchor for "read without leaving
-   *  the sky". */
-  cardwrap: "#cardwrap",
-  /** `later →`: the ink that lifts and presses. */
-  laterInk: '#ends g.endcap-hit[data-step="1"] text.endcap',
-  /** `later →`'s real hit box, which the ring wraps instead of the ink. */
-  laterTarget: '#ends g.endcap-hit[data-step="1"] rect.endtarget',
-  /** `← sooner`: the ink that lifts and presses. */
-  soonerInk: '#ends g.endcap-hit[data-step="-1"] text.endcap',
-  /** `← sooner`'s real hit box. */
-  soonerTarget: '#ends g.endcap-hit[data-step="-1"] rect.endtarget',
+  DESK: Object.freeze({
+    /** The seated household's own body on the dial — round 6's "the Volvo",
+     *  whichever real item happens to be first in DOM order. */
+    body: ".body-link",
+    /** Every document currently riding the belt beside the apex item — round
+     *  6's "two ringed papers", generalised to however many there are. */
+    docLabel: "#caps .doclabel",
+    /** A paper's own real hit, in `#seats` — where `read()` (vocabulary.js)
+     *  dispatches its one genuine click. Picked out from `.hit` by the one
+     *  thing belt.behaviour.js's own `aria-label` always says for a document
+     *  and never for an item; never a specific document (point 3), only
+     *  whichever paper is first in DOM order. */
+    docHit: 'g.hit[aria-label*="a document attached to"]',
+    /** The item card at the apex — round 6's anchor for "read without leaving
+     *  the sky". */
+    cardwrap: "#cardwrap",
+    /** `later →`: the ink that lifts and presses. */
+    laterInk: '#ends g.endcap-hit[data-step="1"] text.endcap',
+    /** `later →`'s real hit box, which the ring wraps instead of the ink. */
+    laterTarget: '#ends g.endcap-hit[data-step="1"] rect.endtarget',
+    /** `← sooner`: the ink that lifts and presses. */
+    soonerInk: '#ends g.endcap-hit[data-step="-1"] text.endcap',
+    /** `← sooner`'s real hit box. */
+    soonerTarget: '#ends g.endcap-hit[data-step="-1"] rect.endtarget',
+  }),
+  POCKET: Object.freeze({
+    /** The seated household's own body — the pocket dial's own round mark
+     *  (pocket.svelte, `tapBody`/`openRow`). */
+    body: ".pocket .mdial .pk-body",
+    /** The opened manifest row's own "open →" act (pocket.svelte's
+     *  `itemActs`, Row.svelte's `data-row-acts`) — the real route from a
+     *  body to `/item` (owner's 6a, #1119). */
+    openAct: '.pocket .pk-below [data-row-acts] a[aria-label^="Open"]',
+    /** Same markup as desk — the belt does not change shape for the pocket. */
+    docLabel: "#caps .doclabel",
+    docHit: 'g.hit[aria-label*="a document attached to"]',
+    /** The preview sheet's own panel — #1088's reading card is a kit Sheet
+     *  on the pocket. */
+    cardwrap: ".p-sheet-layer.open .p-sheet-panel",
+    laterInk: '#ends g.endcap-hit[data-step="1"] text.endcap',
+    laterTarget: '#ends g.endcap-hit[data-step="1"] rect.endtarget',
+    soonerInk: '#ends g.endcap-hit[data-step="-1"] text.endcap',
+    soonerTarget: '#ends g.endcap-hit[data-step="-1"] rect.endtarget',
+  }),
 });
 
 /** @type {import("./index.js").Chapter} */
@@ -133,25 +160,40 @@ export default {
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
     const {
-      setScreen, veil, ctl, goto, press, light, unlight, callout, dropCallout, mark, read, unread, w, T,
+      pocket, setScreen, veil, ctl, goto, press, light, unlight, callout, dropCallout, mark, read, unread,
+      open, w, T,
     } = ctx;
+    const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
-    /* ---- beat 1: arrival — unchanged from round 5, translated per (1) ---- */
+    /* ---- beat 1: arrival — translated per (1); re-cut on the pocket per
+       owner's 6a: tap the body, its manifest row opens, the row's "open →"
+       act is the real route to `/item` (#1119). ---- */
     await setScreen("/home");
     veil(false);
 
-    const body = ctl({ sel: SELECTORS.body, round: true, optional: true });
+    const body = ctl({ sel: S.body, round: true, optional: true });
     veil(true);
     await goto(body);
     await press(body);
-    await mark("belt-arrive");
-    unlight(body);
+    if (pocket) {
+      open(body);
+      await w(T.scroll);
+      await mark("belt-arrive");
+      const openAct = ctl({ sel: SELECTORS.POCKET.openAct, radius: 22, optional: true });
+      await goto(openAct);
+      await press(openAct);
+      unlight(openAct);
+      unlight(body);
+    } else {
+      await mark("belt-arrive");
+      unlight(body);
+    }
 
     await setScreen("/item");
     await w(T.cross);
 
     /* ---- beat 2: the papers ---- */
-    const papers = ctl({ sel: SELECTORS.docLabel, all: true, pad: 8, radius: 6, optional: true });
+    const papers = ctl({ sel: S.docLabel, all: true, pad: 8, radius: 6, optional: true });
     await goto(papers, { willPress: false });
     await callout("Every body carries its documents in a belt around it.", papers, "left", {
       mark: "belt-cert",
@@ -159,30 +201,54 @@ export default {
     await callout("The belt is what you have attached to it.", papers, "right", { w: 220, mark: "belt-svc" });
 
     /* ---- beat 3: the paper pressed, the page beside the card ---- */
-    await callout("Click one to bring it in.", papers, "top", { label: true, hold: 2000, mark: "belt-doc" });
+    /* ✎ #1083: the pocket's label reads "Tap", the desk's "Click" — a label,
+       not in the script (round 7's own rule for `label: true`). */
+    await callout(pocket ? "Tap one to bring it in." : "Click one to bring it in.", papers, "top", {
+      label: true,
+      hold: 2000,
+      mark: "belt-doc",
+    });
     await press(papers);
     /* The one genuine click this film makes (see point 2, above) — safe
        because openDoc mutates nothing that outlives the film. */
-    read(ctl({ sel: SELECTORS.docHit, all: true, optional: true }));
+    read(ctl({ sel: S.docHit, all: true, optional: true }));
+    if (pocket) await w(T.sheet); /* the preview sheet rises; the pill docks (automatic) */
 
-    const cardwrap = ctl({ sel: SELECTORS.cardwrap, radius: 16 });
-    await callout("The page itself, read without leaving the sky.", cardwrap, "right", { mark: "belt-read" });
+    const cardwrap = ctl({ sel: S.cardwrap, radius: 16 });
+    await callout(
+      "The page itself, read without leaving the sky.",
+      cardwrap,
+      pocket ? "top" : "right",
+      { mark: "belt-read" },
+    );
     dropCallout();
     unlight(papers);
 
     /* ---- beat 4: the belt steps, by pointer ---- */
-    const later = ctl({ sel: SELECTORS.laterInk, ring: SELECTORS.laterTarget, optional: true });
+    if (pocket) {
+      /* Round 8's order: the sheet is modal, so it folds BEFORE the belt is
+         even approached (the desk's `unread()` stays where it is, after
+         `press(later)`, below). */
+      await unread();
+      await w(T.sheet); /* the sheet folds; the pill comes home (automatic) */
+    }
+    const later = ctl({ sel: S.laterInk, ring: S.laterTarget, optional: true });
     await goto(later);
-    await callout("later → steps the belt — so do the arrow keys.", later, "top", { mark: "belt-later" });
+    /* ✎ #1083 (owner's 3b): the pocket line drops the arrow-keys clause. */
+    await callout(pocket ? "later → steps the belt." : "later → steps the belt — so do the arrow keys.", later, "top", {
+      mark: "belt-later",
+    });
     await press(later);
-    /* Round 6: "two things happen together" — the card folds away and the
-       belt rolls. The roll itself is still only ever named, never driven
-       for real (#1094's own rule, unchanged); the fold is real, by Esc. */
-    unread();
+    if (!pocket) {
+      /* Round 6: "two things happen together" — the card folds away and the
+         belt rolls. The roll itself is still only ever named, never driven
+         for real (#1094's own rule, unchanged); the fold is real, by Esc. */
+      unread();
+    }
     unlight(later);
     await w(T.cross);
 
-    const sooner = ctl({ sel: SELECTORS.soonerInk, ring: SELECTORS.soonerTarget, optional: true });
+    const sooner = ctl({ sel: S.soonerInk, ring: S.soonerTarget, optional: true });
     await goto(sooner);
     await press(sooner);
     await mark("belt-sooner");

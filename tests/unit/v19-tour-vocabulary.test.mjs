@@ -208,6 +208,70 @@ describe("the lit element is left exactly as it was found", () => {
   });
 });
 
+describe("Addendum A: the lift yields to a clip (#1083, 2026-09-30)", () => {
+  it("does not translate a control whose 2px rise would leave a clipping parent, but still rings it strong", async () => {
+    document.body.innerHTML = '<div id="row" style="overflow:clip"><button id="face"></button></div>';
+    const row = document.getElementById("row");
+    const face = document.getElementById("face");
+    /* The face fills its row exactly — a kit Row's own shape — so any rise
+       at all leaves the row's own clip. */
+    box(row, { x: 10, y: 10, w: 300, h: 56 });
+    box(face, { x: 10, y: 10, w: 300, h: 56 });
+    const before = { transform: face.style.transform, filter: face.style.filter };
+
+    const { clock, ctx } = stage();
+    const c = ctx.ctl({ sel: "#face" });
+    await playOut(clock, ctx.goto(c, { willPress: false }));
+
+    expect(face.style.transform).toBe(before.transform);
+    expect(face.style.filter).toBe(before.filter);
+    expect(c.lifted).toBe(true);
+    expect(c.rings[0].style.boxShadow).toContain("46px"); /* "strong", same as any other control */
+
+    ctx.unlight(c);
+    expect(face.style.transform).toBe(before.transform);
+    expect(face.style.filter).toBe(before.filter);
+  });
+
+  it("still translates a control with room above its clipping ancestor", async () => {
+    document.body.innerHTML = '<div id="row" style="overflow:clip"><button id="face"></button></div>';
+    const row = document.getElementById("row");
+    const face = document.getElementById("face");
+    /* The row is 8px taller than the face, padded above it, so a 2px rise
+       stays inside. */
+    box(row, { x: 10, y: 2, w: 300, h: 64 });
+    box(face, { x: 10, y: 10, w: 300, h: 56 });
+
+    const { clock, ctx } = stage();
+    const c = ctx.ctl({ sel: "#face" });
+    await playOut(clock, ctx.goto(c, { willPress: false }));
+
+    expect(face.style.transform).toBe("translateY(-2px)");
+  });
+
+  it("press() bases a flat (clipped) control on translate(0,0), never the lift", async () => {
+    document.body.innerHTML = '<div id="row" style="overflow:clip"><button id="face"></button></div>';
+    box(document.getElementById("row"), { x: 10, y: 10, w: 300, h: 56 });
+    const face = document.getElementById("face");
+    box(face, { x: 10, y: 10, w: 300, h: 56 });
+
+    const { clock, ctx } = stage();
+    const c = ctx.ctl({ sel: "#face" });
+    await playOut(clock, ctx.goto(c, { willPress: false }));
+    await playOut(clock, ctx.press(c));
+    expect(face.style.transform).not.toContain("translateY(-2px)");
+  });
+
+  it("the desk's own chapter-11 markup (no clip) still translates", async () => {
+    document.body.innerHTML = '<nav id="account"><a id="settings" href="/settings"></a></nav>';
+    box(document.getElementById("settings"), { x: 100, y: 100, w: 200, h: 24 });
+    const { clock, ctx } = stage();
+    const c = ctx.ctl({ sel: "#settings" });
+    await playOut(clock, ctx.goto(c, { willPress: false }));
+    expect(document.getElementById("settings").style.transform).toBe("translateY(-2px)");
+  });
+});
+
 describe("the callout", () => {
   it("carries the ratified line and is pinned to the named edge", async () => {
     document.body.innerHTML = '<svg class="dial"></svg>';
@@ -670,5 +734,200 @@ describe("reading a paper", () => {
 
     player.destroy();
     p.cleanup();
+  });
+
+  it("unread() dispatches on the document, in capture-reachable form, not window (#1083)", () => {
+    /* The kit sheet's own `holdSheet` (sheet.js) listens on the document in
+       the capture phase — window.dispatchEvent would never reach it. A
+       document-dispatched event still bubbles to window too, so the desk's
+       own window-level handler (tested above) keeps working. */
+    document.body.innerHTML = '<div class="hit"></div>';
+    let sawOnDoc = false;
+    const onDoc = (event) => { if (event.key === "Escape") sawOnDoc = true; };
+    document.addEventListener("keydown", onDoc);
+    const { ctx } = stage();
+    ctx.read(ctx.ctl({ sel: ".hit" }));
+    ctx.unread();
+    expect(sawOnDoc).toBe(true);
+    document.removeEventListener("keydown", onDoc);
+  });
+});
+
+describe("#1083: the pocket dialect", () => {
+  it("is exposed on the context, fixed at construction", () => {
+    const clock = createClock({ reducedMotion: () => false });
+    expect(createFilmContext({ clock, doc: document }).pocket).toBe(false);
+    expect(createFilmContext({ clock, doc: document, pocket: true }).pocket).toBe(true);
+  });
+
+  describe("ControlSpec.ringless (§3.5)", () => {
+    it("cuts the veil's hole but draws no ring and lifts nothing", async () => {
+      document.body.innerHTML = '<div class="panel"></div>';
+      box(document.querySelector(".panel"), { x: 10, y: 10, w: 300, h: 400 });
+      const { ctx } = stage();
+      ctx.veil(true);
+      const panel = ctx.ctl({ sel: ".panel", ringless: true });
+      ctx.light(panel);
+      expect(holesOf()).toHaveLength(1);
+      expect(document.querySelector(".tourfilm-ring")).toBeNull();
+      expect(document.querySelector(".panel").style.transform).toBe("");
+      ctx.unlight(panel);
+      expect(holesOf()).toHaveLength(0);
+    });
+  });
+
+  describe("open()/close() (§3.4)", () => {
+    /** A `.pk-body` whose click opens a row elsewhere, the way
+     *  pocket.svelte's `tapBody`/`openRow` do — real markup, real click. */
+    function drawBodyAndRow() {
+      document.body.innerHTML = `
+        <g class="pk-body"></g>
+        <div data-row><button data-row-face aria-expanded="false"></button></div>`;
+      const body = document.querySelector(".pk-body");
+      const face = document.querySelector("[data-row-face]");
+      body.addEventListener("click", () => face.setAttribute("aria-expanded", "true"));
+      face.addEventListener("click", () => face.setAttribute("aria-expanded", "false"));
+      return { body, face };
+    }
+
+    it("open() on a .pk-body dispatches a real click", () => {
+      const { face } = drawBodyAndRow();
+      const { ctx } = stage();
+      ctx.open(ctx.ctl({ sel: ".pk-body" }));
+      expect(face.getAttribute("aria-expanded")).toBe("true");
+    });
+
+    it("clear() undoes an open row by clicking its own toggle", () => {
+      const { face } = drawBodyAndRow();
+      const { ctx } = stage();
+      ctx.open(ctx.ctl({ sel: ".pk-body" }));
+      expect(face.getAttribute("aria-expanded")).toBe("true");
+      ctx.clear();
+      expect(face.getAttribute("aria-expanded")).toBe("false");
+      ctx.destroy();
+    });
+
+    it("open() on anything else queues close() as its undo, which folds a kit sheet", async () => {
+      document.body.innerHTML = `
+        <button id="morb"></button>
+        <div class="p-sheet-layer open"><div class="p-sheet-panel"></div></div>`;
+      const orb = document.getElementById("morb");
+      const layer = document.querySelector(".p-sheet-layer");
+      orb.addEventListener("click", () => layer.classList.add("open"));
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") layer.classList.remove("open");
+      });
+      const { ctx } = stage();
+      ctx.open(ctx.ctl({ sel: "#morb" }));
+      expect(layer.classList.contains("open")).toBe(true);
+      ctx.clear();
+      /* close() polls a frame at a time for the sheet to really go; give it
+         a few real macrotasks. */
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(layer.classList.contains("open")).toBe(false);
+      ctx.destroy();
+    });
+
+    it("close() marks its own Escape with tourfilm=true", async () => {
+      document.body.innerHTML = '<div class="p-sheet-layer"><div class="p-sheet-panel"></div></div>';
+      let seenTourfilm = null;
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") seenTourfilm = /** @type {{tourfilm?: boolean}} */ (event).tourfilm;
+      });
+      const { ctx } = stage();
+      await ctx.close();
+      expect(seenTourfilm).toBe(true);
+    });
+
+    it("does nothing in dry mode", async () => {
+      const { body: pkBody, face } = drawBodyAndRow();
+      const clock = createClock({ reducedMotion: () => false });
+      const ctx = createFilmContext({ clock, doc: document, pocket: true });
+      clock.dryStart();
+      ctx.open(ctx.ctl({ sel: ".pk-body" }));
+      await ctx.close();
+      clock.dryEnd();
+      expect(face.getAttribute("aria-expanded")).toBe("false");
+      expect(pkBody).not.toBeNull();
+    });
+  });
+
+  describe("goto scrolls into view on the pocket, and never on desk (§3.1)", () => {
+    function stageWithChrome() {
+      document.body.innerHTML = '<div class="p-chrome"></div><button id="target"></button>';
+      box(document.querySelector(".p-chrome"), { x: 0, y: 0, w: 400, h: 56 });
+      box(document.getElementById("target"), { x: 10, y: 20, w: 40, h: 40 }); /* under the chrome */
+    }
+
+    it("scrolls a control clear of the top chrome on the pocket", async () => {
+      stageWithChrome();
+      const target = document.getElementById("target");
+      let scrolled = false;
+      target.scrollIntoView = () => { scrolled = true; };
+      const clock = createClock({ reducedMotion: () => false });
+      const ctx = createFilmContext({ clock, doc: document, pocket: true });
+      clock.setPlaying(true);
+      await playOut(clock, ctx.goto(ctx.ctl({ sel: "#target" }), { willPress: false }));
+      expect(scrolled).toBe(true);
+      ctx.destroy();
+    });
+
+    it("never scrolls on desk", async () => {
+      stageWithChrome();
+      const target = document.getElementById("target");
+      let scrolled = false;
+      target.scrollIntoView = () => { scrolled = true; };
+      const { clock, ctx } = stage();
+      await playOut(clock, ctx.goto(ctx.ctl({ sel: "#target" }), { willPress: false }));
+      expect(scrolled).toBe(false);
+      ctx.destroy();
+    });
+  });
+
+  describe("callout placement on the pocket (§3.2)", () => {
+    function drawAnchor(box_) {
+      document.body.innerHTML = '<div class="p-chrome"></div><div id="anchor"></div>';
+      box(document.querySelector(".p-chrome"), { x: 0, y: 0, w: 390, h: 56 });
+      box(document.getElementById("anchor"), box_);
+    }
+
+    it("resolves left/right to top or bottom, whichever has more room", async () => {
+      /* An anchor near the very top: far more room below it than above. */
+      drawAnchor({ x: 100, y: 60, w: 40, h: 40 });
+      const clock = createClock({ reducedMotion: () => false });
+      const ctx = createFilmContext({ clock, doc: document, pocket: true });
+      clock.setPlaying(true);
+      const anchor = ctx.ctl({ sel: "#anchor" });
+      await playOut(clock, ctx.callout("Hello.", anchor, "left"));
+      const note = document.querySelector(".tourfilm-callout");
+      /* bottom placement puts the box BELOW the anchor's point */
+      expect(parseFloat(note.style.top)).toBeGreaterThan(100);
+      ctx.destroy();
+    });
+
+    it("clamps horizontally to the pocket's own gutter, not CALLOUT_EDGE", async () => {
+      drawAnchor({ x: 2, y: 400, w: 20, h: 20 }); /* hard against the left edge */
+      const clock = createClock({ reducedMotion: () => false });
+      const ctx = createFilmContext({ clock, doc: document, pocket: true });
+      clock.setPlaying(true);
+      window.innerWidth = 390;
+      const anchor = ctx.ctl({ sel: "#anchor" });
+      await playOut(clock, ctx.callout("Hi.", anchor, "top"));
+      const note = document.querySelector(".tourfilm-callout");
+      expect(parseFloat(note.style.left)).toBeGreaterThanOrEqual(12); /* the 360-width gutter floor */
+      ctx.destroy();
+    });
+
+    it("label callouts are 12px on the pocket, the kit's own floor", async () => {
+      drawAnchor({ x: 100, y: 400, w: 40, h: 40 });
+      const clock = createClock({ reducedMotion: () => false });
+      const ctx = createFilmContext({ clock, doc: document, pocket: true });
+      clock.setPlaying(true);
+      const anchor = ctx.ctl({ sel: "#anchor" });
+      await playOut(clock, ctx.callout("Filed", anchor, "top", { label: true }));
+      const note = document.querySelector(".tourfilm-callout");
+      expect(note.style.cssText).toContain("12px");
+      ctx.destroy();
+    });
   });
 });

@@ -164,6 +164,26 @@ test("a reader changes their password from the helm, inline", async ({ page }) =
   /* The one thing the product cannot do for itself yet — see the helper. */
   await ensureLocalPassword(page, workerAccount("outsider"), PASSWORD());
 
+  /* The save is one HTTP round trip -- SignInChallenge shows its note only
+     once that promise resolves (`confirmMethod` in +page.svelte awaits
+     `writeLocalPassword` before touching any state) -- and the work behind
+     it (verify the current password, hash the new one, and on a replacement
+     end every other session) is Argon2id twice over, uncapped by wall time.
+     A fixed 5000ms wait was racing that request rather than answering it, so
+     #1173 waits for the response itself, however long it actually takes. */
+  const savedPassword = () => page.waitForResponse((response) =>
+    new URL(response.url()).pathname === "/api/auth/local/password" && response.request().method() === "POST");
+
+  /* Whether the real save below actually went through -- the `finally`
+     cleanup only resets the account when it knows this is true, rather than
+     assuming it from how the rest of the test went. Assuming it is what made
+     the old cleanup race the save itself: on a slow response the assertion
+     below timed out first, cleanup fired immediately after while the save
+     was still in flight, and whichever of the two finished last won -- the
+     account could be left on either password, unpredictably, for the next
+     run or retry to trip over (#1173). */
+  let passwordChanged = false;
+
   try {
     await openSettings(page);
     await expect(passwordRow(page)).toContainText("set");
@@ -179,14 +199,23 @@ test("a reader changes their password from the helm, inline", async ({ page }) =
        part was wrong. */
     await challenge.getByLabel("current password").fill("not-the-password");
     await challenge.getByLabel("new password").fill(NEW_PASSWORD);
-    await challenge.getByRole("button", { name: "save it" }).click();
+    const [refused] = await Promise.all([
+      savedPassword(),
+      challenge.getByRole("button", { name: "save it" }).click(),
+    ]);
+    expect(refused.ok(), "a wrong current password should have been refused").toBe(false);
     await expect(challenge.locator(".note")).toContainText("current password");
 
     /* The real one goes through, and the screen says what it cost: a changed
        password ends every other session (ADR-0023 §7). */
     await challenge.getByLabel("current password").fill(PASSWORD());
     await challenge.getByLabel("new password").fill(NEW_PASSWORD);
-    await challenge.getByRole("button", { name: "save it" }).click();
+    const [saved] = await Promise.all([
+      savedPassword(),
+      challenge.getByRole("button", { name: "save it" }).click(),
+    ]);
+    expect(saved.ok(), "the real current password should have been accepted").toBe(true);
+    passwordChanged = true;
     await expect(page.locator(".note.ok")).toContainText("password changed");
     await expect(page.locator(".challenge")).toHaveCount(0);
     await expect(passwordRow(page)).toContainText("changed");
@@ -196,11 +225,16 @@ test("a reader changes their password from the helm, inline", async ({ page }) =
     const session = await page.request.get("/api/auth/session");
     expect((await session.json()).authenticated, "the caller's own session did not survive the change").toBeTruthy();
   } finally {
-    /* Put it back, so a retried file meets the state the first attempt did. */
-    await page.request.post("/api/auth/local/password", {
-      headers: await sessionHeaders(page),
-      data: { password: PASSWORD(), currentPassword: NEW_PASSWORD },
-    });
+    /* Put it back, so a retried file meets the state the first attempt did --
+       only when the save above is known (from its own response) to have
+       actually landed; otherwise the account is still on PASSWORD() and
+       resetting it here would just be a second, unnecessary race. */
+    if (passwordChanged) {
+      await page.request.post("/api/auth/local/password", {
+        headers: await sessionHeaders(page),
+        data: { password: PASSWORD(), currentPassword: NEW_PASSWORD },
+      });
+    }
   }
 });
 

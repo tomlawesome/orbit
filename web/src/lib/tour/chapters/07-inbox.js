@@ -68,21 +68,39 @@
 /**
  * Every element this chapter names, in one place, so
  * tests/unit/v19-tour-chapter-inbox.test.mjs can pin them against home's and
- * the inbox route's real markup.
+ * the inbox route's real markup (desk) and pocket.svelte's/
+ * `routes/inbox/pocket.svelte`'s (pocket).
  */
 export const SELECTORS = Object.freeze({
-  /** Home's own door to the inbox — always rendered, mail waiting or not. */
-  orb: ".inbox-orb",
-  /** What the relay has already turned into orbit items. */
-  filed: ".lanes .lane.filed",
-  /** Arrivals waiting on a member's own say-so — the middle of the three,
-   *  addressed by DOM position since nothing else names it. */
-  review: ".lanes .lane:nth-of-type(2)",
-  /** Still being read, or failed outright — the third of the three. */
-  reading: ".lanes .lane:nth-of-type(3)",
-  /** The one real "add to orbit" control, inside whichever receipt is
-   *  waiting for review; absent on a household with nothing pending. */
-  add: ".receipt .actions button.yes",
+  DESK: Object.freeze({
+    /** Home's own door to the inbox — always rendered, mail waiting or not. */
+    orb: ".inbox-orb",
+    /** What the relay has already turned into orbit items. */
+    filed: ".lanes .lane.filed",
+    /** Arrivals waiting on a member's own say-so — the middle of the three,
+     *  addressed by DOM position since nothing else names it. */
+    review: ".lanes .lane:nth-of-type(2)",
+    /** Still being read, or failed outright — the third of the three. */
+    reading: ".lanes .lane:nth-of-type(3)",
+    /** The one real "add to orbit" control, inside whichever receipt is
+     *  waiting for review; absent on a household with nothing pending. */
+    add: ".receipt .actions button.yes",
+  }),
+  POCKET: Object.freeze({
+    /** Home's own account orb — opens the hatch. */
+    orb: "#morb",
+    /** Any open sheet's own panel, lit `ringless` (§3.5). */
+    panel: ".p-sheet-layer.open .p-sheet-panel",
+    /** The hatch's own "Inbox" row. */
+    inboxLink: '.p-sheet-layer.open [data-row-face][href$="/inbox"]',
+    /** The three lanes, in the pocket page's own order (review, reading,
+     *  filed) — round 8's re-cut, §6. */
+    review: '.pki-lane[aria-labelledby="pki-review-h"]',
+    reading: '.pki-lane[aria-labelledby="pki-reading-h"]',
+    filed: '.pki-lane[aria-labelledby="pki-filed-h"]',
+    /** The one real "add to orbit" control (ReviewCard.svelte's ArmButton). */
+    add: ".pki-lane .rv-yes",
+  }),
 });
 
 /** @type {import("./index.js").Chapter} */
@@ -92,13 +110,15 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { setScreen, veil, ctl, goto, press, light, unlight, callout, dropCallout, mark } = ctx;
+    const { pocket, setScreen, veil, ctl, goto, press, light, unlight, callout, dropCallout, mark, open, close, w, T } = ctx;
+    const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
     await setScreen("/home");
     veil(false);
 
-    /* Home's own door to the inbox, dimmed down to it before it's touched. */
-    const orb = ctl({ sel: SELECTORS.orb, round: true });
+    /* Home's own door to the inbox, dimmed down to it before it's touched.
+       On the pocket the door is the account hatch's own "Inbox" row. */
+    const orb = ctl({ sel: S.orb, round: true });
     veil(true);
     await goto(orb);
     await callout(
@@ -108,20 +128,43 @@ export default {
       { mark: "inbox-orb" },
     );
     await press(orb);
-    unlight(orb);
+    if (pocket) {
+      unlight(orb);
+      open(orb);
+      await w(T.sheet);
+      const panel = ctl({ sel: SELECTORS.POCKET.panel, ringless: true });
+      light(panel);
+      const inboxLink = ctl({ sel: SELECTORS.POCKET.inboxLink, radius: 10 });
+      await goto(inboxLink);
+      await press(inboxLink);
+      unlight(inboxLink);
+      unlight(panel);
+      await close();
+    } else {
+      unlight(orb);
+    }
     await setScreen("/inbox");
 
-    /* The three lanes, read out by name — the mockup's own order and sides.
-       A household with nothing waiting has no `.lanes` at all, so every one
-       of these is optional: the same beats play, nothing lights. */
+    /* The three lanes, read out by name. Desk order: filed, review, reading
+       (the mockup's own). Pocket order: review, reading, filed — the page's
+       own order (#1083 §6), one scroll down; the labels are pictures, not
+       script, so the transcript is unchanged either way. A household with
+       nothing waiting has no lanes at all, so every one of these is
+       optional: the same beats play, nothing lights. */
     /** @type {{ id: string, label: string, sel: string, side: "left" | "right" | "top" | "bottom" }[]} */
-    const lanes = [
-      { id: "filed", label: "Filed", sel: SELECTORS.filed, side: "bottom" },
-      { id: "review", label: "For your review", sel: SELECTORS.review, side: "bottom" },
-      { id: "reading", label: "Still reading", sel: SELECTORS.reading, side: "top" },
-    ];
+    const lanes = pocket
+      ? [
+          { id: "review", label: "For your review", sel: S.review, side: "bottom" },
+          { id: "reading", label: "Still reading", sel: S.reading, side: "top" },
+          { id: "filed", label: "Filed", sel: S.filed, side: "bottom" },
+        ]
+      : [
+          { id: "filed", label: "Filed", sel: S.filed, side: "bottom" },
+          { id: "review", label: "For your review", sel: S.review, side: "bottom" },
+          { id: "reading", label: "Still reading", sel: S.reading, side: "top" },
+        ];
     for (const lane of lanes) {
-      const c = ctl({ sel: lane.sel, radius: 14, optional: true });
+      const c = ctl({ sel: lane.sel, radius: pocket ? 16 : 14, optional: true });
       await goto(c, { willPress: false });
       await callout(lane.label, c, lane.side, { label: true, hold: 1500, mark: `inbox-lane-${lane.id}` });
       dropCallout();
@@ -133,9 +176,9 @@ export default {
        it, the way chapter 1 lights the outer suns as a group. Both are
        optional: a household with nothing to review plays this beat with
        nothing lit, never a different beat. */
-    const review = ctl({ sel: SELECTORS.review, radius: 14, optional: true });
+    const review = ctl({ sel: S.review, radius: pocket ? 16 : 14, optional: true });
     light(review);
-    const add = ctl({ sel: SELECTORS.add, radius: 10, optional: true });
+    const add = ctl({ sel: S.add, radius: pocket ? 22 : 10, optional: true });
     await goto(add);
     await press(add);
     await mark("inbox-add");

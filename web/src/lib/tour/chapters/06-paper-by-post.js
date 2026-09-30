@@ -49,11 +49,19 @@
  * Every element this chapter names, in one place, so
  * tests/unit/v19-tour-chapter-paper-by-post.test.mjs can pin it against
  * `/settings/mail`'s real markup.
+ *
+ * #1083 §6: unchanged on the pocket — the relay page's own ≤620px rules
+ * already lay the card full width, so DESK and POCKET are the same set.
  */
 export const SELECTORS = Object.freeze({
-  /** The relay card — the same target the ratified walk already points at
-   *  for this exact copy (stops.js's own "relay" stop). */
-  card: ".relay-card",
+  DESK: Object.freeze({
+    /** The relay card — the same target the ratified walk already points at
+     *  for this exact copy (stops.js's own "relay" stop). */
+    card: ".relay-card",
+  }),
+  POCKET: Object.freeze({
+    card: ".relay-card",
+  }),
 });
 
 /** @type {import("./index.js").Chapter} */
@@ -63,7 +71,8 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { setScreen, veil, ctl, goto, unlight, callout, dropCallout } = ctx;
+    const { pocket, setScreen, veil, ctl, goto, unlight, callout, dropCallout } = ctx;
+    const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
     await setScreen("/home");
     veil(false);
@@ -76,7 +85,7 @@ export default {
     /* "Forward a bill to your relay address and Orbit reads a copy." /
        "Your mail is never redirected — it keeps arriving exactly where it
        always has." — the whole card, named once, carrying both lines. */
-    const card = ctl({ sel: SELECTORS.card, radius: 16 });
+    const card = ctl({ sel: S.card, radius: 16 });
     await goto(card, { willPress: false });
     await callout(
       "Forward a bill to your relay address and Orbit reads a copy.",

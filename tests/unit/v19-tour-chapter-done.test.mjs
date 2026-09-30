@@ -23,6 +23,11 @@ import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
 const web = (path) => resolve(import.meta.dirname, "../../web", path);
 const ITEM_SOURCE = readFileSync(web("src/routes/item/[[id]]/+page.svelte"), "utf8");
 const HOME_SOURCE = readFileSync(web("src/routes/home/+page.svelte"), "utf8");
+/* #1083: the pocket dialect of home — where the pocket's own dial, sun and
+   the demo body's real append target live (`.pocket .mdial`, `.pk-sun`). The
+   pocket's own complete button (`.ip-acts`, `.ip-complete`) is in the SAME
+   item screen file as the desk's, so ITEM_SOURCE already covers it. */
+const POCKET_SOURCE = readFileSync(web("src/routes/home/pocket.svelte"), "utf8");
 
 function namesIn(source) {
   const names = new Set();
@@ -130,30 +135,59 @@ beforeEach(() => {
 });
 
 describe("the selectors chapter 9 names", () => {
-  it("the item screen's own ones (.item-card, the actions group) exist in its markup", () => {
+  it("the desk item screen's own ones (.item-card, the actions group) exist in its markup", () => {
     const rendered = namesIn(ITEM_SOURCE);
-    for (const token of tokensOf(SELECTORS.card)) {
-      expect(rendered.has(token), `chapter 9 names "${SELECTORS.card}", but /item renders no "${token}"`).toBe(true);
+    for (const token of tokensOf(SELECTORS.DESK.card)) {
+      expect(rendered.has(token), `chapter 9's desk names "${SELECTORS.DESK.card}", but /item renders no "${token}"`).toBe(true);
     }
-    for (const token of tokensOf(SELECTORS.done)) {
-      expect(rendered.has(token), `chapter 9 names "${SELECTORS.done}", but /item renders no "${token}"`).toBe(true);
+    for (const token of tokensOf(SELECTORS.DESK.done)) {
+      expect(rendered.has(token), `chapter 9's desk names "${SELECTORS.DESK.done}", but /item renders no "${token}"`).toBe(true);
     }
     expect(attributeValuesIn(ITEM_SOURCE).has("Item actions")).toBe(true);
   });
 
-  it("the real dial exists in home's own markup", () => {
+  it("the pocket's own ones (.item-card, .ip-acts/.ip-complete) exist in the same item screen markup", () => {
+    /* The pocket's complete button is the SAME item screen file as the
+       desk's (its own dialect branch, `class:ip={pocket}`) — no separate
+       pocket route to read. */
+    const rendered = namesIn(ITEM_SOURCE);
+    for (const token of tokensOf(SELECTORS.POCKET.card)) {
+      expect(rendered.has(token), `chapter 9's pocket names "${SELECTORS.POCKET.card}", but /item renders no "${token}"`).toBe(true);
+    }
+    for (const token of tokensOf(SELECTORS.POCKET.done)) {
+      expect(rendered.has(token), `chapter 9's pocket names "${SELECTORS.POCKET.done}", but /item renders no "${token}"`).toBe(true);
+    }
+    expect(attributeValuesIn(ITEM_SOURCE).has("Item actions")).toBe(true);
+  });
+
+  it("the desk's real dial exists in home's own markup", () => {
     const rendered = namesIn(HOME_SOURCE);
-    for (const token of tokensOf(SELECTORS.dial)) {
-      expect(rendered.has(token), `chapter 9 names "${SELECTORS.dial}", but /home renders no "${token}"`).toBe(true);
+    for (const token of tokensOf(SELECTORS.DESK.dial)) {
+      expect(rendered.has(token), `chapter 9's desk names "${SELECTORS.DESK.dial}", but /home renders no "${token}"`).toBe(true);
     }
   });
 
-  it("the drawn one (.tourfilm-time-body) is never real markup", () => {
+  it("the pocket's own dial, its svg, and the sun exist in the pocket dialect's own markup", () => {
+    const rendered = namesIn(POCKET_SOURCE);
+    for (const selector of [SELECTORS.POCKET.dial, SELECTORS.POCKET.dialSvg, SELECTORS.POCKET.sun]) {
+      for (const token of tokensOf(selector)) {
+        expect(rendered.has(token), `chapter 9's pocket names "${selector}", but the pocket dialect renders no "${token}"`).toBe(true);
+      }
+    }
+  });
+
+  it("the drawn one (.tourfilm-time-body) is never real markup, on either dialect", () => {
+    /* Same value on both dialects (see the chapter's own SELECTORS export),
+       so one check covers it — but checked against the pocket's own source
+       too, not just the desk's. */
+    expect(SELECTORS.POCKET.body).toBe(SELECTORS.DESK.body);
     const item = namesIn(ITEM_SOURCE);
     const home = namesIn(HOME_SOURCE);
-    for (const token of tokensOf(SELECTORS.body)) {
+    const pocket = namesIn(POCKET_SOURCE);
+    for (const token of tokensOf(SELECTORS.DESK.body)) {
       expect(item.has(token)).toBe(false);
       expect(home.has(token)).toBe(false);
+      expect(pocket.has(token)).toBe(false);
     }
   });
 });
@@ -209,7 +243,7 @@ describe("the beats, against a recorder", () => {
     await done.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel]);
     expect(said).toEqual([
-      ["MOT passed — mark it done and it swings back out to next year.", SELECTORS.done],
+      ["MOT passed — mark it done and it swings back out to next year.", SELECTORS.DESK.done],
       ["A repeat is never finished; it comes round. A one-off simply ends.", ".tourfilm-time-body"],
     ]);
   });
@@ -218,9 +252,9 @@ describe("the beats, against a recorder", () => {
     const { log, ctx } = recorder();
     await done.play(ctx);
     const homeIndex = log.findIndex(([w, route]) => w === "setScreen" && route === "/home");
-    const litCard = log.findIndex(([w, sel]) => w === "light" && sel === SELECTORS.card);
-    const unlitCard = log.findIndex(([w, sel]) => w === "unlight" && sel === SELECTORS.card);
-    const unlitDone = log.findIndex(([w, sel]) => w === "unlight" && sel === SELECTORS.done);
+    const litCard = log.findIndex(([w, sel]) => w === "light" && sel === SELECTORS.DESK.card);
+    const unlitCard = log.findIndex(([w, sel]) => w === "unlight" && sel === SELECTORS.DESK.card);
+    const unlitDone = log.findIndex(([w, sel]) => w === "unlight" && sel === SELECTORS.DESK.done);
     expect(litCard).toBeGreaterThanOrEqual(0);
     expect(litCard).toBeLessThan(homeIndex);
     expect(unlitCard).toBeLessThan(homeIndex);
@@ -231,7 +265,7 @@ describe("the beats, against a recorder", () => {
     const { log, ctx } = recorder();
     await done.play(ctx);
     const pressed = log.filter(([word]) => word === "press").map(([, sel]) => sel);
-    expect(pressed).toEqual([SELECTORS.done]);
+    expect(pressed).toEqual([SELECTORS.DESK.done]);
   });
 
   it("marks done-complete, done-swung and done-round", async () => {

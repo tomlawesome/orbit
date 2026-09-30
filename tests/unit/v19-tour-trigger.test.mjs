@@ -43,7 +43,6 @@ describe("beginFilm — desk, first ever arrival, a household present", () => {
     const run = fakeFilmRun();
     const createFilmRun = vi.fn(() => run);
     const outcome = await beginFilm({
-      phone: false,
       readTour: async () => ({ tourSeenAt: null }),
       hasHousehold: () => true,
       createFilmRun,
@@ -55,55 +54,33 @@ describe("beginFilm — desk, first ever arrival, a household present", () => {
   });
 });
 
-describe("beginFilm — a phone (§24)", () => {
-  it("starts nothing, and never even reads or writes tourSeenAt", async () => {
-    const readTour = vi.fn(async () => ({ tourSeenAt: null }));
-    const createFilmRun = vi.fn(() => fakeFilmRun());
+describe("beginFilm — a pocket viewport (#1083, ending §24)", () => {
+  it("starts the film and writes once on end, the same as a desk arrival", async () => {
+    const run = fakeFilmRun();
     const writeSeen = vi.fn();
-
     const outcome = await beginFilm({
-      phone: true,
-      readTour,
+      readTour: async () => ({ tourSeenAt: null }),
       hasHousehold: () => true,
-      createFilmRun,
+      createFilmRun: () => run,
       writeSeen,
     });
 
-    expect(outcome).toBe("phone");
-    expect(createFilmRun).not.toHaveBeenCalled();
-    /* The assertion that matters most: a phone login must not spend the
-       reader's one chance at the film. readTour is never even called, so
-       there is nothing whose result could be written — but writeSeen itself
-       not being called is the fact that has to hold. */
-    expect(readTour).not.toHaveBeenCalled();
+    expect(outcome).toBe("started");
     expect(writeSeen).not.toHaveBeenCalled();
-  });
 
-  it("still starts nothing even when tourSeenAt is already set", async () => {
-    /* Belt and braces: the phone gate fires before the record is even read,
-       so a phone with tourSeenAt already set takes the exact same "phone"
-       path as one with no record at all — not a different path that
-       happens to agree. */
-    const readTour = vi.fn(async () => ({ tourSeenAt: "2026-09-01T00:00:00.000Z" }));
-    const writeSeen = vi.fn();
-    const outcome = await beginFilm({
-      phone: true,
-      readTour,
-      hasHousehold: () => true,
-      createFilmRun: () => fakeFilmRun(),
-      writeSeen,
-    });
-    expect(outcome).toBe("phone");
-    expect(readTour).not.toHaveBeenCalled();
-    expect(writeSeen).not.toHaveBeenCalled();
+    /* The pocket cut spends `tourSeenAt` the same way the desk cut does:
+       once, on end, never on start. */
+    run.end();
+    expect(writeSeen).toHaveBeenCalledTimes(1);
+    run.end();
+    expect(writeSeen).toHaveBeenCalledTimes(1);
   });
 });
 
-describe("beginFilm — tourSeenAt already set, on a desk", () => {
+describe("beginFilm — tourSeenAt already set", () => {
   it("starts nothing", async () => {
     const createFilmRun = vi.fn(() => fakeFilmRun());
     const outcome = await beginFilm({
-      phone: false,
       readTour: async () => ({ tourSeenAt: "2026-09-01T00:00:00.000Z" }),
       hasHousehold: () => true,
       createFilmRun,
@@ -115,10 +92,9 @@ describe("beginFilm — tourSeenAt already set, on a desk", () => {
 });
 
 describe("beginFilm — no household (the adrift sky, #864)", () => {
-  it("starts nothing on a desk with tourSeenAt null", async () => {
+  it("starts nothing with tourSeenAt null", async () => {
     const createFilmRun = vi.fn(() => fakeFilmRun());
     const outcome = await beginFilm({
-      phone: false,
       readTour: async () => ({ tourSeenAt: null }),
       hasHousehold: () => false,
       createFilmRun,
@@ -133,7 +109,6 @@ describe("beginFilm — readTour throwing", () => {
   it("gives up quietly rather than interrupting the sky", async () => {
     const createFilmRun = vi.fn(() => fakeFilmRun());
     const outcome = await beginFilm({
-      phone: false,
       readTour: async () => { throw new Error("network"); },
       hasHousehold: () => true,
       createFilmRun,
@@ -149,7 +124,6 @@ describe("beginFilm — skip writes tourSeenAt exactly once", () => {
     const run = fakeFilmRun();
     const writeSeen = vi.fn();
     const outcome = await beginFilm({
-      phone: false,
       readTour: async () => ({ tourSeenAt: null }),
       hasHousehold: () => true,
       createFilmRun: () => run,
@@ -183,9 +157,9 @@ describe("the wiring", () => {
     "utf8",
   );
 
-  it("Tour.svelte calls beginFilm with the desk cut, before reading the record", () => {
+  it("Tour.svelte calls beginFilm, and hands the real film its pocket reading (#1083)", () => {
     expect(tourSource).toContain("beginFilm({");
-    expect(tourSource).toContain('phone: !matchMedia(DESK).matches');
+    expect(tourSource).toContain("pocket: isPocket()");
   });
 
   it("Tour.svelte no longer draws the superseded card (§23)", () => {

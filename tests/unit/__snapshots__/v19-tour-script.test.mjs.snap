@@ -1,0 +1,56 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`the film's script (round 7, #1097) > #1083 §1: the desk script is byte-identical to a committed snapshot 1`] = `
+[
+  [
+    "This is your star chart.",
+    "Every sun is a household you belong to.",
+    "That's your sun, at centre — your household, always here.",
+    "The rest of the sky holds systems you don't belong to — tap one to fly there.",
+  ],
+  [
+    "Add anything here, by hand or by forwarding a document.",
+  ],
+  [
+    "Bodies orbit by when they're due.",
+    "The nearer the ring, the sooner.",
+  ],
+  [
+    "The manifest lists what's ahead, nearest first.",
+    "Same law as the dial, read top to bottom instead of round the ring.",
+  ],
+  [
+    "Time runs. The nearer the sun, the sooner.",
+    "At a month out it warms, and Orbit reminds you.",
+  ],
+  [
+    "Forward a bill to your relay address and Orbit reads a copy.",
+    "Your mail is never redirected — it keeps arriving exactly where it always has.",
+  ],
+  [
+    "Mail lands here first — filed, waiting for review, or still being read.",
+    "Nothing joins your orbit without your say-so.",
+  ],
+  [
+    "Every body carries its documents in a belt around it.",
+    "The belt is what you have attached to it.",
+    "The page itself, read without leaving the sky.",
+    "later → steps the belt — so do the arrow keys.",
+  ],
+  [
+    "MOT passed — mark it done and it swings back out to next year.",
+    "A repeat is never finished; it comes round. A one-off simply ends.",
+  ],
+  [
+    "The rest of the sky holds households you don't belong to.",
+    "Tap one to fly there — Gran's flat, the narrowboat.",
+  ],
+  [
+    "Settings holds your sky, your relay and this walk — take it again anytime.",
+  ],
+  [
+    "That was a year, in one turn of the ring.",
+    "Now it's yours.",
+  ],
+]
+`;
