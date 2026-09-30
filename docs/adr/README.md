@@ -1,15 +1,16 @@
 # Architecture decision records
 
-ADRs record durable, cross-cutting decisions and their consequences. GitHub
-issues track delivery work; ADRs do not contain changing implementation status.
+ADRs record durable decisions that affect more than one part of the system,
+and their consequences. Issues track delivery work; ADRs do not contain
+changing implementation status.
 
 ## Governance
 
 - New or materially revised ADRs are reviewed and accepted by the repository
   owner under the working model in the repository `AGENTS.md`.
 - Use the next four-digit number and a short lowercase filename.
-- State the context, decision, consequences, alternatives, and supersession
-  relationship.
+- State the context, decision, consequences, alternatives, and which older
+  decision (if any) this one replaces.
 - Do not rewrite accepted history to make an old decision appear current.
   Supersede it with a new ADR.
 
@@ -34,11 +35,11 @@ issues track delivery work; ADRs do not contain changing implementation status.
 - [ADR-0017: Mail-in credential ownership and per-user relays](0017-mail-in-credential-ownership-and-per-user-relay.md)
 - [ADR-0018: The engine is a library, `orbit-web` links it, adapter-node ships it](0018-engine-library-and-adapter-node-packaging.md)
 - [ADR-0019: Deployment assets ship inside the image](0019-deployment-assets-ship-inside-the-image.md)
-- [ADR-0020: Validation evidence is a cosign attestation binding digest and policy version; publication only consumes it](0020-validation-evidence-binds-digest-and-policy.md)
+- [ADR-0020: Validation evidence is a cosign attestation binding digest and policy version; publication only consumes it](0020-validation-evidence-binds-digest-and-policy.md) (an attestation is a signed proof record about one exact image)
 - [ADR-0021: Local passwords are hashed with Argon2id via `@node-rs/argon2`](0021-local-password-hashing-argon2id.md) (Proposed)
 - [ADR-0022: The instance is claimed with a code printed once in the container's own log, and a lost administrator is recovered from the deployment host](0022-bootstrap-claim-and-lost-administrator-recovery.md) (Proposed)
-- [ADR-0023: One user, two optional sign-in methods; OIDC self-registers, local is administrator-created, sensitive actions always re-challenge](0023-registration-linking-and-recent-authentication.md) (Proposed)
-- [ADR-0024: Tier 1 metadata encrypts under one per-household DEK beneath the existing KEK, with a derived per-household blind index](0024-tiered-metadata-encryption.md) (Accepted)
+- [ADR-0023: One user, two optional sign-in methods; OIDC self-registers, local is administrator-created, sensitive actions always re-challenge](0023-registration-linking-and-recent-authentication.md) (Proposed; OIDC is sign-in through an outside identity provider)
+- [ADR-0024: Tier 1 metadata encrypts under one per-household DEK beneath the existing KEK, with a derived per-household blind index](0024-tiered-metadata-encryption.md) (Accepted; each household's data has its own key, itself protected by the master key, and a blind index lets exact-match lookups work without decrypting)
 - [ADR-0025: Model extraction is a schema-bound, evidence-grounded proposer on a fixed internal endpoint, gated by a hold-out corpus](0025-local-model-extraction.md) (Accepted; §4 amended 2026-09-10)
 - [ADR-0026: Extraction finds every candidate, tags each with the label beside it, then chooses per field](0026-extraction-sieves-tags-then-chooses.md) (Accepted)
 - [ADR-0027: Every password sign-in is completed by an emailed approval link](0027-email-second-factor.md) (Accepted)
