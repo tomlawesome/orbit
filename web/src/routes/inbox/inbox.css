@@ -79,6 +79,13 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
         color:var(--ink-mid);border:1px solid var(--line-soft);border-radius:9px;
         padding:6px 11px;margin-top:10px}
 .inbox-page .attach .clean{color:var(--ok-text)}
+/* #1155: the chip is the way into the belt with that paper open, when it
+   has one to open (a named attachment). The count-only fallback stays a
+   plain, non-interactive span. */
+.inbox-page a.attach{text-decoration:none;color:inherit;cursor:pointer}
+.inbox-page a.attach:hover .name,.inbox-page a.attach:focus-visible .name{text-decoration:underline}
+.inbox-page a.attach:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.inbox-page .attach .view{color:var(--accent-text)}
 .inbox-page .receipt .actions{display:flex;gap:8px;margin-top:14px;align-items:center}
 .inbox-page .receipt .actions button{font-size:12.5px;border-radius:9px;padding:7px 15px;cursor:pointer;
                          border:1px solid var(--line);background:none;color:var(--ink-mid);font-family:var(--ui)}

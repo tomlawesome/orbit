@@ -126,6 +126,8 @@ describe("archiveOf", () => {
     expect(loose.name).toBe("policy-schedule.pdf");
     expect(loose.suggestion).toBe("Home insurance renewal");
     expect(loose.viaRelay).toBe(true);
+    // #1172: the API answers scanState, not scannedClean (imap-inbox.ts:108-115).
+    expect(loose.clean).toBe(true);
   });
 
   it("dresses each attached row in its body's dial colour", () => {
