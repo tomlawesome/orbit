@@ -139,9 +139,24 @@ export const SELECTORS = Object.freeze({
      *  `itemActs`, Row.svelte's `data-row-acts`) — the real route from a
      *  body to `/item` (owner's 6a, #1119). */
     openAct: '.pocket .pk-below [data-row-acts] a[aria-label^="Open"]',
-    /** Same markup as desk — the belt does not change shape for the pocket. */
-    docLabel: "#caps .doclabel",
+    /** A paper's whole caption seat on the pocket (#1174): its two-line name
+     *  is two `.doclabel` texts inside one `.capseat`, so ringing the labels
+     *  drew two nested rings per paper. The seat is one box. Resolved with
+     *  `visible`, since the pocket keeps the captions of papers that have
+     *  rolled off the sky in the DOM at opacity 0 (belt.behaviour.js's
+     *  `offSky`), and those were ringed too — off the screen's right edge. */
+    docLabel: "#caps .capseat:has(.doclabel)",
+    /** Same hit as desk. The pocket belt marks a paper that is folded
+     *  inside its item, or rolled off the sky's edge, `aria-hidden="true"`
+     *  (belt.behaviour.js's `gone`); the first paper OUT is preferred for
+     *  the read (`docHitOut`), and the first paper at all is what the desk
+     *  has always pressed when none is. */
     docHit: 'g.hit[aria-label*="a document attached to"]',
+    docHitOut: 'g.hit[aria-label*="a document attached to"][aria-hidden="false"]',
+    /** The belt is built — what the chapter waits for on the pocket before
+     *  naming a paper, since the pocket's belt draws after its route has
+     *  settled (see `play`). */
+    belt: "#caps .capseat",
     /** The preview sheet's own panel — #1088's reading card is a kit Sheet
      *  on the pocket. */
     cardwrap: ".p-sheet-layer.open .p-sheet-panel",
@@ -161,7 +176,7 @@ export default {
   async play(ctx) {
     const {
       pocket, setScreen, veil, ctl, goto, press, light, unlight, callout, dropCallout, mark, read, unread,
-      open, w, T,
+      open, w, T, waitForReal,
     } = ctx;
     const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
@@ -191,9 +206,13 @@ export default {
 
     await setScreen("/item");
     await w(T.cross);
+    /* #1174: the pocket's belt is drawn after its route has settled — real
+       time the clock never budgeted, waited out under a stall the same way
+       chapter 2 waits for the pocket's /create. */
+    if (pocket) await waitForReal(SELECTORS.POCKET.belt);
 
     /* ---- beat 2: the papers ---- */
-    const papers = ctl({ sel: S.docLabel, all: true, pad: 8, radius: 6, optional: true });
+    const papers = ctl({ sel: S.docLabel, all: true, pad: 8, radius: 6, optional: true, visible: pocket });
     await goto(papers, { willPress: false });
     await callout("Every body carries its documents in a belt around it.", papers, "left", {
       mark: "belt-cert",
@@ -211,7 +230,12 @@ export default {
     await press(papers);
     /* The one genuine click this film makes (see point 2, above) — safe
        because openDoc mutates nothing that outlives the film. */
-    read(ctl({ sel: S.docHit, all: true, optional: true }));
+    /* #1174, pocket: read a paper that is out on the sky if there is one;
+       otherwise the first paper the belt holds, as the desk always has —
+       the preview is the product's own and opens for either, and the beat
+       needs a page to read. */
+    const out = pocket ? ctl({ sel: SELECTORS.POCKET.docHitOut, all: true, optional: true, visible: true }) : null;
+    read(out && out.els.length > 0 ? out : ctl({ sel: S.docHit, all: true, optional: true }));
     if (pocket) await w(T.sheet); /* the preview sheet rises; the pill docks (automatic) */
 
     const cardwrap = ctl({ sel: S.cardwrap, radius: 16 });

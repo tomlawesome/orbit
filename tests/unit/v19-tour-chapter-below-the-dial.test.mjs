@@ -192,6 +192,11 @@ describe("the beats, in the mockup's order", () => {
         dropCallout: () => log.push(["dropCallout"]),
         mark: async (name) => log.push(["mark", name]),
         w: async (ms) => log.push(["w", ms]),
+        /* #1174: the two scrolls run on the film's clock as a tween over
+           T.scroll — the same beat the mockup's own `w(T.scroll)` spent, so
+           it is logged as that beat. The step is landed once, as the clock
+           lands it under reduced motion and in the dry run. */
+        tween: async (ms, fn) => { fn(1); log.push(["w", ms]); },
         T,
         dry: () => false,
         doc: { defaultView: null },
