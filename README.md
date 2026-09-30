@@ -455,9 +455,9 @@ The choice lives in `.env-orbit`, not in the command, so turning a service on
 or off later is a one-line edit. Leave `COMPOSE_PROFILES` empty for the
 standard stack, which runs neither.
 
-Neither service has a port on the host. Both sit on a private network that can
-reach Orbit and nothing else: not the database, not the other services, not
-the internet. Ollama keeps its models in a local volume, never uses cloud
+Neither service has a port on the host. Both sit on a private network shared
+only with Orbit and the virus scanner. From there they cannot reach the
+database or the internet. Ollama keeps its models in a local volume, never uses cloud
 models, and is limited to 2 CPUs and 6 GiB of memory by default.
 
 Because Ollama cannot reach the internet, it cannot download a model. Set
