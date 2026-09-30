@@ -1,9 +1,20 @@
 # Orbit supply-chain evidence
 
-Orbit treats supply-chain evidence as a publication gate, not as an
-informational report produced after an image is released. The binding policy is
-`.github/supply-chain-policy.json`; `scripts/supply-chain-policy.mjs` validates
-that policy and converts scanner output into bounded review evidence.
+Orbit treats supply-chain evidence as a gate that publication has to pass,
+not as a report written after an image is released. The binding policy is
+`.github/supply-chain-policy.json`; `scripts/supply-chain-policy.mjs` checks
+that policy and turns scanner output into bounded review evidence.
+
+Three terms used throughout:
+
+- A **digest** is a fingerprint that names exactly one container image. A
+  tag such as `preview` is a name that can be moved to a different image; a
+  digest cannot.
+- An **SBOM** (software bill of materials) is a list of every software
+  component inside an image. Orbit's is written in the SPDX 2.3 format.
+- An **attestation** is a signed statement about a digest, such as "this
+  image passed these checks under this policy" or "this is its SBOM", that
+  anyone can verify later.
 
 ## Trusted workflow
 
@@ -11,34 +22,33 @@ Every merge request on GitLab and every push to `preview` performs these
 steps. GitLab (`.gitlab-ci.yml`) is the gate since #801; GitHub runs the same
 checks on its mirror as a second opinion that blocks nothing.
 
-1. A separate read-only `licence_policy` job walks the whole installed
-   dependency tree -- not a pull-request diff -- and checks every package's
-   declared licence against `supply-chain/licence-policy.yml`. This replaces
-   GitHub's `actions/dependency-review-action`, which ran only on the
-   `pull_request` event and stopped running when the mirror flip (#801) left
-   GitHub with no pull requests to compare (#815). The vulnerability half of
-   what that action covered is unaffected: it was already the
+1. A separate read-only `licence_policy` job checks every package's declared
+   licence against `supply-chain/licence-policy.yml`. It walks the whole
+   installed dependency tree, not the diff of one merge request. This
+   replaces GitHub's `actions/dependency-review-action`, which ran only on
+   the `pull_request` event and stopped running when the mirror flip (#801)
+   left GitHub with no pull requests to compare (#815). The vulnerability
+   half of what that action covered is unaffected: it was already the
    `supply_chain_source` job below.
 2. A read-only job scans the checked-out repository for dependency
-   vulnerabilities and secret patterns. Checkout credentials are not
-   persisted. The raw secret-scan report is never uploaded and is deleted
-   after a sanitized finding record is generated.
+   vulnerabilities and secret patterns. Checkout credentials are not kept.
+   The raw secret-scan report is never uploaded, and is deleted once a
+   sanitised finding record has been written.
 3. Fast and PostgreSQL integration checks must pass along with the source
-   policy before container validation can advance.
+   policy before container validation can go further.
 4. CI builds one AMD64 production image, records its configuration identity,
-   then scans that local identity for vulnerabilities and generates an SPDX
-   2.3 SBOM.
-5. The repository policy verifies that the vulnerability report and SBOM name
-   the same image that enters Compose, recovery, privacy, browser and
-   accessibility tests.
-6. Merge requests stop with read-only evidence. Only a push to `preview` or a
-   hotfix branch reaches a registry, and only after every preceding gate
-   passes.
+   then scans that local identity for vulnerabilities and generates the SBOM.
+5. The repository policy checks that the vulnerability report and SBOM name
+   the same image that goes on into the Compose, recovery, privacy, browser
+   and accessibility tests.
+6. Merge requests stop there, with read-only evidence. Only a push to
+   `preview` or a hotfix branch reaches a registry, and only after every
+   earlier gate passes.
 7. GitLab's `record_image` job pushes that exact tested image to
-   `registry.tomlawson.io` as `sha-<commit>` without rebuilding, resolves the
-   registry digest, pulls it back, verifies its configuration identity and
-   records the digest as `gitlab-tested-image.json`. The `sign_evidence` job
-   — alone on the runner that holds the signing key — mints a cosign
+   `registry.tomlawson.io` as `sha-<commit>` without rebuilding, reads back
+   the registry digest, pulls it again, checks its configuration identity
+   and records the digest as `gitlab-tested-image.json`. The `sign_evidence`
+   job, alone on the runner that holds the signing key, makes a cosign
    attestation binding the digest to the policy version that judged it. The
    separate `publish_channel` job verifies that attestation, re-runs the
    cheap checks, and only then adds the channel tag
@@ -47,11 +57,12 @@ checks on its mirror as a second opinion that blocks nothing.
    `publish-from-gitlab.yml` waits for that pipeline, checks the record names
    this commit, copies the digest to GHCR with `crane copy` and refuses if the
    copy resolves to anything else. Nothing built on GitHub reaches GHCR.
-9. GitHub mints short-lived OIDC provenance and SBOM attestations for the
-   copied digest, using the SBOM GitLab produced, and verifies both before
-   recording a deployable preview.
+9. GitHub makes short-lived provenance and SBOM attestations for the copied
+   digest, signed through GitHub's own identity (OIDC) rather than a stored
+   key, using the SBOM GitLab produced, and verifies both before recording a
+   deployable preview.
 
-The source, exact-image and attestation-verification artifacts are retained for
+The source, exact-image and attestation-verification artifacts are kept for
 14 days. They contain public package and image metadata, bounded finding
 identifiers and policy decisions. They must not contain secret matches,
 private runtime configuration or environment values.
@@ -59,31 +70,31 @@ private runtime configuration or environment values.
 ## Policy and exceptions
 
 High and critical dependency or image vulnerabilities block publication.
-Every repository secret finding blocks regardless of its scanner severity.
-Lower-severity vulnerabilities remain visible in the retained evidence.
+Every repository secret finding blocks, whatever severity the scanner gives
+it. Lower-severity vulnerabilities stay visible in the kept evidence.
 
 Dependency licences are governed separately from the full source and image
-scans. `supply-chain/licence-policy.yml` allows only the listed
-SPDX-compatible permissive or file-level reciprocal licences, and
+scans. `supply-chain/licence-policy.yml` allows only the listed permissive or
+file-level reciprocal licences, named by their SPDX identifiers.
 `scripts/ci/licence-policy.mjs` (the `licence_policy` job) checks every
-shipped package's declared licence against it, not just newly introduced ones.
-The gate covers only what reaches the runtime image -- the Dockerfile's
-`web-deps` production dependencies and the `@fontsource*` typefaces inlined
-into the client bundle -- not build or test tooling (owner decision,
-2026-09-05): a GPL build tool does not affect the licence of what it
-produces. A licence outside the allow-list blocks automatically. Missing or
-ambiguous licence metadata blocks the same way: there is no manual-review
-pass-through. There are no advisory or package licence exemptions for shipped
-dependencies. Any exemption must be narrow, justified, owned, time-bounded and
-linked to a tracking issue. Vulnerabilities are unaffected by this job; they
-remain governed by `supply_chain_source` below.
+shipped package's declared licence against it, not just newly introduced
+ones. The gate covers only what reaches the runtime image: the Dockerfile's
+`web-deps` production dependencies and the `@fontsource*` typefaces built
+into the client bundle. It does not cover build or test tooling (owner
+decision, 2026-09-05): a GPL build tool does not affect the licence of what
+it produces. A licence outside the allow-list blocks automatically. Missing
+or ambiguous licence metadata blocks the same way; there is no manual-review
+pass-through. There are no advisory or package licence exemptions for
+shipped dependencies. Any exemption must be narrow, justified, owned,
+time-limited and linked to a tracking issue. Vulnerabilities are unaffected
+by this job; they stay governed by `supply_chain_source` below.
 
 A vulnerability exception is valid only when it identifies the finding,
-package and scope, names an owner, gives a rationale, links a tracking issue
-and has not expired. Secret findings have no exception path. The policy
-validator fails closed on stale or malformed exceptions. Exceptions do not
-change scanner output; they make a narrow, reviewable publication decision for
-a known vulnerability.
+package and scope, names an owner, gives a reason, links a tracking issue and
+has not expired. Secret findings have no exception path. The policy validator
+stops on a stale or malformed exception. Exceptions do not change scanner
+output; they make a narrow, reviewable publication decision for a known
+vulnerability.
 
 The `exceptions[]` list currently holds the pinned sidecar findings that had
 no upstream fix to pin to on 2026-09-04 (#740): OpenSSL 3.5.7 in the Node and
@@ -103,12 +114,12 @@ the musl image and the glibc CI hosts need, at an exact version, in both
 `@napi-rs/canvas-linux-x64-gnu` and `-linux-x64-musl` is the older of the
 two. `@node-rs/argon2` (MIT, `napi-rs/node-rs` on GitHub) with
 `@node-rs/argon2-linux-x64-gnu` and `-linux-x64-musl` was added for
-local-account password hashing under ADR-0021; its licence was confirmed as
+local-account password hashing under ADR-0021. Its licence was confirmed as
 MIT for all three packages from their published metadata on 2026-09-09, and
 the `licence_policy` job checks them on every run from then on. Neither
 package family runs an install script, so `allowBuilds` in
 `pnpm-workspace.yaml` is unchanged and `pnpm install --frozen-lockfile`
-still fetches no binaries of its own: the prebuilt `.node` files arrive
+still fetches no binaries of its own. The prebuilt `.node` files arrive
 inside the pinned platform packages, which is why these were chosen over
 `argon2`, whose install compiles with node-gyp or downloads a prebuild.
 
@@ -116,7 +127,7 @@ inside the pinned platform packages, which is why these were chosen over
 
 The exception this section describes was removed from
 `supply-chain/licence-policy.yml` on 2026-09-05, alongside the scope change
-above: `sharp` and every `@img/sharp-*` platform package it names are absent
+above. `sharp` and every `@img/sharp-*` platform package it names are absent
 from the installed tree entirely (no `sharp` resolves anywhere in
 `pnpm-lock.yaml`, shipped or not), so the exception matched nothing and the
 2026-10-31 review it was pending is moot. The record below is kept for
@@ -131,16 +142,18 @@ Reverting is not an acceptable resolution: GitHub advisory
 vulnerabilities in `sharp` versions before 0.35.0 and identifies 0.35.0 as
 patched.
 
-The exception in `supply-chain/licence-policy.yml` therefore excludes
-only the exact `@img` platform-package PURLs for `sharp` 0.35.0 and libvips
-1.3.0 from the licence check. It does not add LGPL to the repository-wide
-allow-list and does not carry forward to a later package version. Issue
+The exception in `supply-chain/licence-policy.yml` therefore excluded only
+the exact `@img` platform packages for `sharp` 0.35.0 and libvips 1.3.0 from
+the licence check, each named by its PURL (a package URL: one precise
+identifier for a package, its version and where it comes from). It did not
+add LGPL to the repository-wide allow-list and did not carry forward to a
+later package version. Issue
 [#107](https://github.com/tomlawesome/orbit/issues/107) owns the evidence and
-requires re-review by 2026-10-31. The owner is `tomlawesome`.
+required re-review by 2026-10-31. The owner is `tomlawesome`.
 
 `sharp` is Apache-2.0 licensed; its prebuilt platform packages carry the
 separately licensed libvips shared library. A distributed Orbit container must
-retain the upstream licence and copyright material and must keep the
+keep the upstream licence and copyright material and must keep the
 corresponding libvips source location available so recipients can exercise the
 rights granted by the LGPL. The upstream sources and licence texts are
 maintained in the
@@ -152,9 +165,9 @@ new review rather than relying on this decision.
 
 The same release comparison could not infer licences for a set of updated
 direct package declarations. Their installed, versioned package manifests were
-manually checked on 2026-07-31, and `nodemailer` again on 2026-09-08 at 10.0.1,
-which is still MIT-0; `next` and `eslint-config-next` have since left
-the dependency tree entirely (neither is in any `package.json` or in
+checked by hand on 2026-07-31, and `nodemailer` again on 2026-09-08 at 10.0.1,
+which is still MIT-0. `next` and `eslint-config-next` have since left the
+dependency tree entirely (neither is in any `package.json` or in
 `pnpm-lock.yaml`) and are dropped from the table below rather than kept as a
 record of a package that is no longer here:
 
@@ -163,9 +176,9 @@ record of a package that is no longer here:
 | `drizzle-orm` | 0.45.2 | Apache-2.0 |
 | `nodemailer` | 10.0.1 | MIT-0 |
 
-These declarations are already inside the global allow-list and require no
-package exception. Dependency, secret, exact-image vulnerability, SBOM,
-provenance and protected-promotion gates remain unchanged.
+These declarations are already inside the global allow-list and need no
+package exception. The dependency, secret, exact-image vulnerability, SBOM,
+provenance and protected-promotion gates are unchanged.
 
 Validate the current policy locally with:
 
@@ -173,35 +186,37 @@ Validate the current policy locally with:
 node scripts/supply-chain-policy.mjs validate
 ```
 
-The policy inventories every upstream build and runtime container using its
-human-readable version tag, the tag's observed multi-platform index digest and
-the exact Linux/AMD64 manifest used by Orbit. Repository configuration uses the
-tag plus that AMD64 digest, so an upstream tag move cannot change a build,
-integration test or deployment. Each entry records source and registry
-provenance, licence evidence, file locations, an update owner, resolution date
-and review deadline.
+The policy lists every upstream build and runtime container three ways: its
+human-readable version tag, the multi-platform index digest that tag was seen
+to point at, and the exact Linux/AMD64 manifest Orbit uses. Repository
+configuration uses the tag plus that AMD64 digest, so an upstream tag move
+cannot change a build, integration test or deployment. Each entry records
+source and registry provenance, licence evidence, file locations, an update
+owner, resolution date and review deadline.
 
-The application image is different: it does not have a repository-owned stable
-digest until a release is accepted. Compose therefore requires `ORBIT_IMAGE`
+The application image is different: it has no repository-owned stable digest
+until a release is accepted. Compose therefore requires `ORBIT_IMAGE`
 explicitly. Pull deployments accept a full `registry/repository@sha256:...`
 identity; local build scripts supply a revision-specific local tag for the
 image they build from the checked-out source. A `latest` tag may still be
 published during an explicitly approved stable promotion, but it is a
-convenience pointer rather than deployment or acceptance evidence.
+convenience pointer, not deployment or acceptance evidence.
 
 ### Resolving a tag is not deploying one
 
 The rule this enforces is that **a deployment runs an immutable digest**. A
 mutable tag may therefore be *resolved* to a digest, provided the resolved
-digest is what gets recorded and deployed. It may never itself be deployed.
+digest is what gets recorded and deployed. The tag itself may never be
+deployed.
 
-This distinction matters because the earlier expression of the rule — that no
-deployment script may name a mutable reference at all — also forbade automating
-the resolution, which forced an operator to discover a digest by hand before
-installing. Automating that lookup does not weaken the guarantee: what runs is
-still an immutable, attested artifact, and the digest is still recorded. What
-changes is only who performs the lookup. [ADR-0008](adr/0008-installer-resolved-release-digests.md)
-records the decision.
+This distinction matters because the earlier wording of the rule, that no
+deployment script may name a mutable reference at all, also forbade
+automating the lookup. That forced an operator to find a digest by hand
+before installing. Automating the lookup does not weaken the guarantee: what
+runs is still an immutable, attested artifact, and the digest is still
+recorded. Only who performs the lookup changes.
+[ADR-0008](adr/0008-installer-resolved-release-digests.md) records the
+decision.
 
 Enforcement follows the property rather than the wording: every assignment of
 `ORBIT_IMAGE` in a deployment script must produce either a
@@ -216,7 +231,7 @@ Every pinned image is written down twice: in the file that uses it
 and in `.github/supply-chain-policy.json`, which records the digest, the index
 digest and the date it was resolved. Both have to say the same thing.
 
-Use a focused pull request for image updates:
+Use a focused merge request for image updates:
 
 1. Read the upstream release notes and image-source change history. Confirm
    maintenance status, provenance and licence evidence before accepting a new
@@ -224,57 +239,62 @@ Use a focused pull request for image updates:
 2. Renovate opens the bump. It rewrites the pin in the file and stops there:
    the policy is a bespoke JSON file it cannot read, so its merge request
    arrives with the two places disagreeing.
-3. CI goes red on that merge request, at the step
-   `Refuse a pin that drifted between compose and policy`. That is the drift
-   check (`node scripts/sidecar-pins.mjs check --offline`) doing its job, not a
-   broken build.
+3. CI goes red on that merge request, in the `supply_chain_source` job at the
+   line `node scripts/sidecar-pins.mjs check --offline`. That is the drift
+   check doing its job, not a broken build.
 4. Run `node scripts/sidecar-pins.mjs sync`. It takes the pin now in the file
-   as the truth, re-resolves the tag's index digest from the registry, and
-   writes the reference, the index digest and today's date into the policy —
-   then rewrites any other file that pins the same image. Review the diff and
-   push it to the Renovate branch. Do not update an untracked reference or
-   add a temporary mutable fallback.
+   as the truth, looks up the tag's index digest from the registry again, and
+   writes the reference, the index digest and today's date into the policy.
+   Then it rewrites any other file that pins the same image. Review the diff
+   and push it to the Renovate branch. Do not update an untracked reference
+   or add a temporary mutable fallback.
 5. Run `node scripts/supply-chain-policy.mjs validate`, the focused policy
    tests (`pnpm vitest run scripts/sidecar-pins.test.mjs`), static/unit checks
    and Compose configuration validation.
-6. Let protected CI pull the pinned identities and repeat PostgreSQL,
+6. Let protected CI pull the pinned identities and repeat the PostgreSQL,
    malware-detection, parser-isolation, backup/restore, privacy, browser,
    accessibility, exact-image vulnerability and SBOM gates.
-7. Merge only when the protected pull-request checks pass. The trusted branch
-   run must then publish and attest the exact application image it tested.
+7. Merge only when the protected merge-request checks pass. The trusted
+   branch run must then publish and attest the exact application image it
+   tested.
 
 If an upstream registry no longer serves a recorded manifest, the update is a
 release blocker; do not silently fall back to the tag.
 
 ### When the pin is current but its packages are not
 
-A digest pin is frozen on purpose; the security advisories about what is inside
-it are not. So an image can be exactly what its tag points at today and still
-be missing a fix its own distribution published weeks ago — which is how the
-findings on #740 accumulated.
+A digest pin is frozen on purpose; the security advisories about what is
+inside it are not. So an image can be exactly what its tag points at today and
+still be missing a fix its own distribution published weeks ago. That is how
+the findings on #740 built up.
 
-The `sidecar_pin_freshness` job in `.gitlab-ci.yml` runs weekly and asks all
-three questions: do the file and the policy agree, has the tag moved, and does
-the pinned image itself have package upgrades waiting. When anything is behind
-it files, or updates, one open issue titled `Sidecar pins are behind` holding
-the full report, and the run goes red. It was ported from GitHub Actions
-(#820) once GitHub issues on the mirror were switched off (#801); the report
-and the issue title are unchanged, only where the issue lives.
+The `sidecar_pin_freshness` job in `.gitlab-ci.yml` runs weekly and asks
+three questions:
+
+- Do the file and the policy agree?
+- Has the tag moved?
+- Does the pinned image itself have package upgrades waiting?
+
+When anything is behind it files, or updates, one open issue titled
+`Sidecar pins are behind` holding the full report, and the run goes red. It
+was ported from GitHub Actions (#820) once GitHub issues on the mirror were
+switched off (#801); the report and the issue title are unchanged, only where
+the issue lives.
 
 A moved tag is fixed by re-pinning, and `sidecar-pins.mjs sync` does it. Stale
 packages inside a current pin have no such remedy: there is nothing newer to
 pin to. Either upstream rebuilds the image, or the finding becomes a named
-entry in the policy's `exceptions[]` with an owner, a rationale, a tracking
+entry in the policy's `exceptions[]` with an owner, a reason, a tracking
 issue and an expiry date.
 
 **The weekly schedule is not running yet, and this is the manual step it
 replaces.** The job only runs in a scheduled pipeline that sets the
 `SIDECAR_FRESHNESS` variable, and it files or updates the issue with a project
-access token in the `SIDECAR_ISSUE_TOKEN` CI/CD variable -- both are settings
+access token in the `SIDECAR_ISSUE_TOKEN` CI/CD variable. Both are settings
 only the owner can create (GitLab Settings > CI/CD, and Settings > CI/CD >
 Schedules with the schedule's target branch set to `dev`; see the job's own
-comment in `.gitlab-ci.yml` for why `dev`). Until both exist the cadence is a
-person: **weekly, whoever is working on Orbit**, run
+comment in `.gitlab-ci.yml` for why `dev`). Until both exist the schedule is
+a person: **weekly, whoever is working on Orbit**, run
 
 ```bash
 node scripts/sidecar-pins.mjs check --packages
@@ -286,16 +306,16 @@ image without pulling the large ones.
 
 ## Tool provenance and ownership
 
-Trivy runs from a reviewed, AMD64 manifest digest recorded in the policy. Orbit
-does not execute the Trivy setup or wrapper actions. This is deliberate because
-the Trivy ecosystem had a
+Trivy, the vulnerability scanner, runs from a reviewed AMD64 manifest digest
+recorded in the policy. Orbit does not run the Trivy setup or wrapper
+actions. This is deliberate: the Trivy ecosystem had a
 [published March 2026 supply-chain incident](https://github.com/aquasecurity/trivy/security/advisories/GHSA-69fq-xp46-6x23).
-The selected release is post-incident, but the executable identity remains
-digest-pinned.
+The selected release is from after the incident, and the executable is still
+pinned by digest.
 
 GitHub's `actions/attest` action is pinned to the reviewed commit recorded in
 the policy. It attaches provenance and the SPDX SBOM to the already pushed
-digest; it does not build or transform the image. Orbit maintainers own both
+digest; it does not build or change the image. Orbit maintainers own both
 tool updates and the policy review date. Licences, upstream release pages,
 versions and immutable identities are recorded beside that ownership.
 
@@ -304,7 +324,7 @@ job (#815). It has no third-party action to pin: it reads
 `supply-chain/licence-policy.yml` and each installed package's own
 `package.json`, both already inside the checkout.
 
-The vulnerability database is intentionally refreshed by the pinned scanner
-at run time because vulnerability knowledge changes. Scanner version metadata
-and database timestamps are retained with each run so a later review can
-identify the evidence set that made the decision.
+The vulnerability database is deliberately refreshed by the pinned scanner at
+run time, because vulnerability knowledge changes. Scanner version metadata
+and database timestamps are kept with each run so a later review can identify
+the evidence set that made the decision.
