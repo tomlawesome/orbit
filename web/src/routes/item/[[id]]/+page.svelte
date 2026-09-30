@@ -1578,7 +1578,16 @@
         {#if state === "available"}
           <div class="topsheet">
             <div class="sheet">
-              <img src={previewSrc} alt="Page one of {previewDoc.name}"
+              <!-- previewSrc starts "" for a staged paper, while loadStagedPage's
+                   fetch is still in flight (#1155's own build, fixed here): an
+                   `<img src="">` is not "no image" to a browser, it is a request
+                   for the current page, which then fails to decode and fires
+                   onerror immediately -- wrongly and permanently locking the
+                   card into "could not draw". `|| undefined` omits the
+                   attribute instead of setting it empty, so no such request is
+                   ever made; a non-staged document's previewSrc is never empty,
+                   so this changes nothing for it. -->
+              <img src={previewSrc || undefined} alt="Page one of {previewDoc.name}"
                    onload={() => (previewImgLoaded = true)}
                    onerror={() => { previewImgLoaded = true; previewImgFailed = true; }} />
             </div>
