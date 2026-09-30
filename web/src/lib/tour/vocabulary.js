@@ -87,6 +87,11 @@ export const T = {
   bloom: 600,
   scroll: 600,
   rmHold: 1200,        /* reduced motion: a state with nothing to read */
+  /* #1083: a kit Sheet's rise and fold, matching --p-rise (tokens.css). Priced
+     here so a pocket chapter can charge the beat the same way it prices any
+     other motion, while open()/close() themselves cost the film nothing (they
+     wait on the real DOM, not the clock — see vocabulary.js's own note). */
+  sheet: 300,
 };
 
 /** The mockup's default corner. */
@@ -99,6 +104,16 @@ const CHROME_ID = "orbit-tour-film";
 const TRANSPORT_LANE = 60;
 const CALLOUT_GAP = 18;
 const CALLOUT_EDGE = 16;
+
+/* ---- #1083: the pocket's own callout geometry --------------------------
+   §3.2 of the pocket build notes. The pocket has no fixed CALLOUT_EDGE: the
+   gutter is the product's own `--p-gutter` (16px at 390, 12px at 360), the
+   top limit is the real top chrome's measured bottom (`.p-chrome`, 56px +
+   safe area) and the bottom limit is the transport's OWN measured rect
+   wherever it currently stands, never a written-down lane. */
+const POCKET_CHROME_FALLBACK = 56;
+const POCKET_CALLOUT_MARGIN = 8;
+const POCKET_MAX_WIDTH = 300;
 
 /** How long a line is held: the mockup's `holdFor`, word for word.
  *  @param {string} text */
@@ -129,6 +144,9 @@ export class TourControlMissing extends Error {
  * @property {number} [pad]               grown this far outside the element
  * @property {number} [radius]            corner, when not round
  * @property {boolean} [optional]         may legitimately match nothing
+ * @property {boolean} [ringless]         (#1083 §3.5) `light()` cuts the
+ *   veil's hole and lifts nothing, drawing no ring — round 8's cut-out for an
+ *   open sheet's own panel, which stays bright while a row inside it is ringed.
  *
  * @typedef {object} Control
  * @property {string} sel
@@ -137,6 +155,7 @@ export class TourControlMissing extends Error {
  * @property {boolean} round
  * @property {number} pad
  * @property {number} radius
+ * @property {boolean} ringless
  * @property {HTMLDivElement[]} rings
  * @property {boolean} lifted
  * @property {{ el: Element, transform: string, filter: string, transition: string }[]} saved
@@ -218,6 +237,9 @@ function bez(p0, c, p1, t) {
  * @param {object} options
  * @param {import("./clock.js").FilmClock} options.clock
  * @param {Document} [options.doc]
+ * @param {boolean} [options.pocket] (#1083) the pocket dialect, fixed at
+ *   mount (`isPocket()`, decided by the caller — chapters never call
+ *   `matchMedia` themselves, they only ever read `ctx.pocket`).
  * @param {() => string} [options.routeOf]
  * @param {(route: string) => Promise<unknown>} [options.navigate]
  * @param {(route: string) => Promise<unknown>} [options.settle] resolves once the screen is really there
@@ -225,6 +247,7 @@ function bez(p0, c, p1, t) {
 export function createFilmContext({
   clock,
   doc = document,
+  pocket = false,
   routeOf = () => doc.location.pathname,
   navigate = async () => {},
   settle = async () => {},
@@ -277,6 +300,10 @@ export function createFilmContext({
        their own pace, so the layer stays out of the tree rather than
        becoming a trap. */
     layer.setAttribute("aria-hidden", "true");
+    /* #1083 §3.7: every element the film mounts on <body> stays pressable
+       while a kit sheet is up — focus.js's `inertPage` already skips this
+       attribute. Harmless on desk, where no sheet ever inerts the page. */
+    layer.setAttribute("data-pocket-above", "");
     layer.style.cssText = [
       "position:fixed",
       "inset:0",
@@ -452,6 +479,32 @@ export function createFilmContext({
     }
   }
 
+  /**
+   * Waits for a selector to actually exist, bounded and unbudgeted (a
+   * `clock.stall()`, the same idiom `setScreen`'s own navigation uses) —
+   * for the one screen `settle()`'s single tick is not enough for: the
+   * pocket's own `/create` renders nothing behind `#pocket-entry` until its
+   * own async household read finishes (`routes/create/pocket.svelte`'s
+   * `phase`), which is real network time no `tick()` can wait out (#1083,
+   * found running chapter 2's pocket cut headless). No-op in dry mode, and
+   * costs nothing there.
+   *
+   * @param {string} selector
+   * @param {number} [timeoutMs]
+   */
+  async function waitForReal(selector, timeoutMs = 4000) {
+    if (dry() || doc.querySelector(selector)) return;
+    const release = clock.stall();
+    try {
+      const deadline = Date.now() + timeoutMs;
+      while (!doc.querySelector(selector) && Date.now() < deadline) {
+        await new Promise((res) => setTimeout(res, 32));
+      }
+    } finally {
+      release();
+    }
+  }
+
   /** The mockup's `veil`. @param {boolean} on */
   function veil(on) {
     veiled = !!on;
@@ -478,8 +531,9 @@ export function createFilmContext({
     const round = s.round ?? false;
     const pad = s.pad ?? 0;
     const radius = s.radius ?? DEFAULT_RADIUS;
+    const ringless = s.ringless ?? false;
     if (dry()) {
-      return { sel: s.sel, els: [], ringEls: [], round, pad, radius, rings: [], lifted: false, saved: [] };
+      return { sel: s.sel, els: [], ringEls: [], round, pad, radius, ringless, rings: [], lifted: false, saved: [] };
     }
     const els = s.all
       ? Array.from(doc.querySelectorAll(s.sel))
@@ -488,18 +542,23 @@ export function createFilmContext({
     const ringEls = s.ring
       ? Array.from(doc.querySelectorAll(s.ring))
       : els;
-    return { sel: s.sel, els, ringEls, round, pad, radius, rings: [], lifted: false, saved: [] };
+    return { sel: s.sel, els, ringEls, round, pad, radius, ringless, rings: [], lifted: false, saved: [] };
   }
 
   /** Lights controls without travelling to them — the mockup turning several
-   *  `.hl`s on at once, as chapter 1 does for the four outer suns.
+   *  `.hl`s on at once, as chapter 1 does for the four outer suns. A
+   *  `ringless` control (#1083 §3.5) only cuts the veil's hole: no ring is
+   *  drawn and nothing is lifted — round 8's cut-out for an open sheet's own
+   *  panel, kept bright while a row inside it is ringed separately.
    *  @param {...Control} controls */
   function light(...controls) {
     for (const c of controls) {
       if (dry() || c.els.length === 0) continue;
-      ensureRings(c);
-      syncRings(c);
-      ringState(c, "on");
+      if (!c.ringless) {
+        ensureRings(c);
+        syncRings(c);
+        ringState(c, "on");
+      }
       addLit(c);
     }
   }
@@ -618,12 +677,60 @@ export function createFilmContext({
     return clock.w(T.grow);
   }
 
+  /** The top chrome's measured bottom edge (`.p-chrome`, #1083 §3.1/§3.2):
+   *  56px plus the safe area when the real element is mounted, the fixed
+   *  fallback when it is not (the pocket's own `--p-chrome` token). */
+  function chromeBottom() {
+    const chrome = doc.querySelector(".p-chrome");
+    return chrome ? chrome.getBoundingClientRect().bottom : POCKET_CHROME_FALLBACK;
+  }
+
+  /** The vertical band a pocket control or callout must stay inside: below
+   *  the top chrome, above wherever the transport currently stands (its own
+   *  measured rect when mounted, `TRANSPORT_LANE` at the foot when not —
+   *  #1083 §3.1/§3.2, both read the pill "wherever it is").
+   *
+   *  When the pill is docked to the TOP (transport.js's own `.top`, while a
+   *  kit sheet is up), its rect sits near the chrome, not the foot — using
+   *  it as the band's lower limit there would put the limit above the top,
+   *  an inside-out band for whatever the sheet holds. The band's floor falls
+   *  back to the viewport's own foot in that case, same as before the pill
+   *  ever mounts. */
+  function pocketBand() {
+    const bar = doc.getElementById("orbit-tour-transport");
+    const pill = bar && !bar.classList.contains("top") ? bar.getBoundingClientRect() : null;
+    return { top: chromeBottom(), bottom: pill ? pill.top : window.innerHeight - TRANSPORT_LANE };
+  }
+
+  /** #1083 §3.1: on the pocket, `goto` scrolls the control into view first
+   *  when its ring box does not sit wholly inside `pocketBand()` — nothing on
+   *  desk scrolls. One animation frame is waited under `clock.stall()`, the
+   *  same idiom `setScreen` uses for a navigation the dry run could not have
+   *  budgeted for, so the film's measured length is untouched.
+   *  @param {Control} c */
+  async function scrollIntoBand(c) {
+    if (!pocket || dry() || c.els.length === 0) return;
+    const box = boxOf(c.ringEls, c.pad);
+    const band = pocketBand();
+    if (box.y >= band.top && box.y + box.h <= band.bottom) return;
+    const release = clock.stall();
+    try {
+      c.els[0].scrollIntoView({ block: "center", behavior: "auto" });
+      /* A plain timer, not requestAnimationFrame: this wait is only about
+         giving the scroll a moment to land, not about a paint. */
+      await new Promise((res) => setTimeout(res, 16));
+    } finally {
+      release();
+    }
+  }
+
   /**
    * The mockup's `goto`: travel, become the control's outline, and lift it.
    * @param {Control} c
    * @param {{ willPress?: boolean }} [o]
    */
   async function goto(c, o = {}) {
+    await scrollIntoBand(c);
     await travel(c);
     await growInto(c);
     applyLift(c);
@@ -896,30 +1003,121 @@ export function createFilmContext({
    * which paper it opened, only that Escape closes whichever is open — and
    * no new handle onto the belt is needed either, which keeps the tour/
    * product boundary one-way exactly as it already is everywhere else.
+   *
+   * #1083: dispatched on `doc`, not `window` — a document-dispatched keydown
+   * still bubbles to the window's own handler, and `doc` is also where the
+   * pocket's kit sheet listens in its capture phase (`holdSheet`,
+   * sheet.js), so the same dispatch closes either surface.
    */
   function unread() {
     if (!readingOpen) return;
     readingOpen = false;
     if (dry()) return;
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    doc.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  }
+
+  /* ---- #1083 §3.4: the pocket's sheet and row openers -------------------- */
+
+  /** Every undo `open()` has queued, run in reverse by `clear()`. Each entry
+   *  looks its own target up fresh when it runs rather than holding a
+   *  reference, so a target the screen has already disposed of (a jump, a
+   *  navigation) is simply not found and costs nothing to skip.
+   *  @type {(() => void)[]} */
+  let openUndo = [];
+
+  /**
+   * Opens a pocket sheet or row FOR REAL, the same one genuine click
+   * `read()` already makes for a paper (see its own doc, above) — a
+   * generalisation on the same terms, not a second rule. Allowed targets,
+   * recorded here so nobody mistakes this for a licence to click anything:
+   * `#morb` (opens the account hatch, a kit Sheet), a dial body `.pk-body`
+   * (opens its manifest row in place). A paper's own hit is `read()`'s, not
+   * this word's.
+   *
+   * Queues the undo `clear()` needs to leave no sheet up and no row open: a
+   * row's own toggle button (`[data-row-face][aria-expanded="true"]`) for a
+   * `.pk-body`, `close()` for anything else.
+   *
+   * @param {Control} c
+   */
+  function open(c) {
+    if (dry() || c.els.length === 0) return;
+    const el = c.els[0];
+    const isRow = el.classList?.contains("pk-body") ?? false;
+    el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    if (isRow) {
+      openUndo.push(() => {
+        const face = doc.querySelector('[data-row-face][aria-expanded="true"]');
+        if (face) face.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      });
+    } else {
+      openUndo.push(() => { void close(); });
+    }
+  }
+
+  /**
+   * Closes whatever `open()` opened, the way a reader's own Escape would: a
+   * document-dispatched keydown (§3.4 above), marked `tourfilm` so the
+   * transport's own key handler (§4.6) ignores it rather than treating it as
+   * the reader stopping the film. Then waits — bounded at 800ms, polling
+   * every 16ms — until no `.p-sheet-layer.open` remains and the sheet's own
+   * history entry (`pocketSheet`) is gone, so the next beat never races the
+   * sheet's fold. Dry mode: no-op, zero time — the fold is motion, and
+   * chapters price it themselves with `w(T.sheet)`.
+   *
+   * Polled with a plain timer rather than `requestAnimationFrame`: this wait
+   * is not about a paint, so it has no reason to depend on one.
+   */
+  async function close() {
+    if (dry()) return;
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    Object.defineProperty(event, "tourfilm", { value: true, configurable: true });
+    doc.dispatchEvent(event);
+    const win = /** @type {Window} */ (doc.defaultView ?? window);
+    const deadline = Date.now() + 800;
+    while (
+      doc.querySelector(".p-sheet-layer.open")
+      || (win.history.state && /** @type {Record<string, unknown>} */ (win.history.state).pocketSheet !== undefined)
+    ) {
+      if (Date.now() >= deadline) break;
+      await new Promise((res) => setTimeout(res, 16));
+    }
   }
 
   /* ---- the callout ------------------------------------------------------ */
+
+  /** The product's own `--p-gutter` (tokens.css: 16px at 390, 12px at 360),
+   *  read live so a callout's pocket clamp always matches the real column —
+   *  never a written-down width (#1083 §3.2). Falls back to the same
+   *  breakpoint tokens.css itself uses when the property cannot be read
+   *  (no live document, e.g. mid dry-run measurement of a real chapter). */
+  function gutterPx() {
+    const raw = typeof window.getComputedStyle === "function"
+      ? parseFloat(window.getComputedStyle(doc.documentElement).getPropertyValue("--p-gutter"))
+      : NaN;
+    if (Number.isFinite(raw) && raw > 0) return raw;
+    return window.innerWidth <= 389 ? 12 : 16;
+  }
 
   /**
    * @param {string} text
    * @param {Point} pt
    * @param {"left"|"right"|"top"|"bottom"} side
    * @param {{ dy?: number, label?: boolean, w?: number }} o
+   * @param {{ box?: {x:number,y:number,w:number,h:number,cx:number,cy:number} | null }} [pocketFit]
+   *   #1083 §3.2: the anchor's own box, so a pocket callout can flip an
+   *   explicit top/bottom when it does not fit, and clamp against the real
+   *   top chrome and the transport's own measured rect.
    */
-  function showCallout(text, pt, side, o) {
+  function showCallout(text, pt, side, o, pocketFit = {}) {
     const root = ensureChrome();
     const box = doc.createElement("div");
     box.className = "tourfilm-callout";
     box.textContent = text;
+    const maxWidth = pocket ? Math.min(o.w ?? POCKET_MAX_WIDTH, window.innerWidth - 2 * gutterPx()) : (o.w ?? 260);
     box.style.cssText = [
       "position:fixed",
-      `max-width:${o.w ?? 260}px`,
+      `max-width:${maxWidth}px`,
       "width:max-content",
       "text-wrap:balance",
       "box-sizing:border-box",
@@ -929,7 +1127,7 @@ export function createFilmContext({
       "border-radius:12px",
       "padding:11px 14px",
       o.label
-        ? "font:11px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mid)"
+        ? `font:${pocket ? 12 : 11}px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mid)`
         : "font:13.5px/1.45 var(--ui);color:var(--ink)",
       "opacity:0",
       "pointer-events:none",
@@ -952,26 +1150,49 @@ export function createFilmContext({
 
     const wd = box.offsetWidth;
     const ht = box.offsetHeight;
+
+    /* #1083 §3.2: an explicit top/bottom flips on the pocket when the box
+       does not fit in the band it was asked to sit in (< box height + the
+       gap). `left`/`right` are resolved to `top`/`bottom` by the caller
+       (callout(), below) before this ever runs. */
+    let finalSide = side;
+    const band = pocket ? pocketBand() : null;
+    if (pocket && band && pocketFit.box && (side === "top" || side === "bottom")) {
+      const room = side === "top" ? pt[1] - band.top : band.bottom - pt[1];
+      if (room < ht + CALLOUT_GAP) finalSide = side === "top" ? "bottom" : "top";
+    }
+    if (finalSide !== side && pocketFit.box) {
+      pt = edgeOf(pocketFit.box, finalSide);
+    }
+
     let x;
     let y;
-    if (side === "left") { x = pt[0] - CALLOUT_GAP - wd; y = pt[1] - ht / 2; }
-    else if (side === "right") { x = pt[0] + CALLOUT_GAP; y = pt[1] - ht / 2; }
-    else if (side === "top") { x = pt[0] - wd / 2; y = pt[1] - CALLOUT_GAP - ht; }
+    if (finalSide === "left") { x = pt[0] - CALLOUT_GAP - wd; y = pt[1] - ht / 2; }
+    else if (finalSide === "right") { x = pt[0] + CALLOUT_GAP; y = pt[1] - ht / 2; }
+    else if (finalSide === "top") { x = pt[0] - wd / 2; y = pt[1] - CALLOUT_GAP - ht; }
     else { x = pt[0] - wd / 2; y = pt[1] + CALLOUT_GAP; }
     if (o.dy) y += o.dy;
-    /* never off the screen, and never under the transport */
-    x = Math.max(CALLOUT_EDGE, Math.min(x, window.innerWidth - CALLOUT_EDGE - wd));
-    y = Math.max(CALLOUT_EDGE, Math.min(y, window.innerHeight - TRANSPORT_LANE - ht));
+    if (pocket && band) {
+      /* the pocket's own gutter horizontally; never over the top chrome or
+         inside the transport's own measured rect, wherever it stands */
+      const gutter = gutterPx();
+      x = Math.max(gutter, Math.min(x, window.innerWidth - gutter - wd));
+      y = Math.max(band.top + POCKET_CALLOUT_MARGIN, Math.min(y, band.bottom - POCKET_CALLOUT_MARGIN - ht));
+    } else {
+      /* never off the screen, and never under the transport */
+      x = Math.max(CALLOUT_EDGE, Math.min(x, window.innerWidth - CALLOUT_EDGE - wd));
+      y = Math.max(CALLOUT_EDGE, Math.min(y, window.innerHeight - TRANSPORT_LANE - ht));
+    }
     box.style.left = `${x}px`;
     box.style.top = `${y}px`;
-    if (side === "left" || side === "right") {
+    if (finalSide === "left" || finalSide === "right") {
       stem.style.top = `${Math.max(12, Math.min(pt[1] - y, ht - 12)) - 7}px`;
-      stem.style[side === "left" ? "right" : "left"] = "-8px";
+      stem.style[finalSide === "left" ? "right" : "left"] = "-8px";
     } else {
       stem.style.left = `${Math.max(14, Math.min(pt[0] - x, wd - 14)) - 7}px`;
-      stem.style[side === "top" ? "bottom" : "top"] = "-8px";
+      stem.style[finalSide === "top" ? "bottom" : "top"] = "-8px";
     }
-    const slide = { left: [6, 0], right: [-6, 0], top: [0, 6], bottom: [0, -6] }[side];
+    const slide = { left: [6, 0], right: [-6, 0], top: [0, 6], bottom: [0, -6] }[finalSide];
     box.style.transform = still() ? "translate(0,0)" : `translate(${slide[0]}px,${slide[1]}px)`;
     requestAnimationFrame(() => {
       box.style.opacity = "1";
@@ -1005,12 +1226,25 @@ export function createFilmContext({
     if (dry() && !o.label) transcriptLines.push(text);
     await clock.w(T.calloutIn);
     if (!dry()) {
+      const anchorBox = !Array.isArray(anchor) && anchor.els.length > 0
+        ? boxOf(anchor.ringEls, anchor.pad)
+        : null;
+      /* #1083 §3.2: on the pocket, left/right resolve to whichever of
+         top/bottom has more room between the anchor and the band's own
+         limit (the top chrome below it, the transport above it). */
+      let resolvedSide = side;
+      if (pocket && anchorBox && (side === "left" || side === "right")) {
+        const band = pocketBand();
+        const roomAbove = anchorBox.y - band.top;
+        const roomBelow = band.bottom - (anchorBox.y + anchorBox.h);
+        resolvedSide = roomBelow >= roomAbove ? "bottom" : "top";
+      }
       const pt = Array.isArray(anchor)
         ? anchor
-        : anchor.els.length === 0
-          ? centreOfViewport()
-          : edgeOf(boxOf(anchor.ringEls, anchor.pad), side);
-      live = showCallout(text, pt, side, o);
+        : anchorBox
+          ? edgeOf(anchorBox, resolvedSide)
+          : centreOfViewport();
+      live = showCallout(text, pt, resolvedSide, o, { box: anchorBox });
     }
     await clock.hold(o.hold ?? holdFor(text));
     if (o.mark) await mark(o.mark);
@@ -1081,6 +1315,12 @@ export function createFilmContext({
        already closes it — a film that ends leaving a reading card open is
        a bug the same way one that ends leaving a pack worn would be. */
     unread();
+    /* #1083 §3.4: whatever `open()` opened, in reverse — a jump or a stop
+       must leave no sheet up and no row open on the pocket either. Each
+       undo looks its own target up fresh, so one already gone with the
+       screen it belonged to is simply not found. */
+    for (const undo of openUndo.slice().reverse()) undo();
+    openUndo = [];
     if (layer) {
       for (const stale of Array.from(layer.querySelectorAll(".tourfilm-ring,.tourfilm-callout,.tourfilm-typed"))) {
         stale.remove();
@@ -1107,6 +1347,9 @@ export function createFilmContext({
     doc,
     clock,
     T,
+    /** #1083: the pocket dialect, fixed at mount. Chapters read this to
+     *  choose selectors and anchors; they never call `matchMedia`. */
+    pocket,
     /* clock words, so a chapter never imports the clock itself */
     w: clock.w,
     hold: clock.hold,
@@ -1117,6 +1360,7 @@ export function createFilmContext({
     reduced: still,
     /* the film's own words */
     setScreen,
+    waitForReal,
     veil,
     veiled: () => veiled,
     ctl,
@@ -1130,6 +1374,12 @@ export function createFilmContext({
     wear,
     read,
     unread,
+    open,
+    close,
+    /** #1083 §4.6: whether the film itself currently owns an open sheet or
+     *  row — the transport's own Escape handler reads this to tell "the film
+     *  should stop" from "the reader is closing their own sheet". */
+    hasOpenUndo: () => openUndo.length > 0,
     travel,
     growInto,
     callout,
