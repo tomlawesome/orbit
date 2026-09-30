@@ -17,8 +17,8 @@ body{background:#04070f}
 
 /* The craft never sits still: the world (stars, limb) is steady, the three
    digits tumble, each on its own period, and three loose parts drift off. */
-.breathe{animation:breathe 9s ease-in-out infinite alternate}
-@keyframes breathe{from{opacity:.75}to{opacity:1}}
+.stumble .haze-breathe{animation:stumble-breathe 9s ease-in-out infinite alternate}
+@keyframes stumble-breathe{from{opacity:.75}to{opacity:1}}
 .digit{transform-box:fill-box;transform-origin:center}
 .d0{animation:t0 23s ease-in-out infinite alternate}
 .d1{animation:t1 31s ease-in-out infinite alternate}
