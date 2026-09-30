@@ -273,6 +273,7 @@ page's URL at failure, which this one has to infer.
 
 - 2026-09-27 · d97cb335 (!997) · pipeline 1740 / smoke (job 25230) · `.note.ok` never showed "password changed" within 5000ms at line 190. Retried as job 25322 on the same commit: green. !997 touches only mail-in failure reasons and cannot reach the password form. First sighting; an issue on the third.
 - 2026-09-30 · 6f720bed (!1005, M14 batch: 500 page, staged attachment preview, contrast fixes; none reach the password form) · pipeline 1827 / smoke (job 26687) · same failure at line 190; the in-job retry then got "the password was refused (HTTP 403)" in 3.5s, consistent with the first attempt having changed it. Job retried as 26693: green. Second sighting.
+- 2026-09-30 · 977a6cba (!1006, M14 pocket-film batch: `web/src/lib/tour/*` and two pocket route files; none reach the password form) · pipeline 1832 / smoke (job 26744) · this time at line 183: the wrong-current-password `.note` ("current password") never appeared within 5000ms, element not found. Playwright's in-job retry passed (reported `1 flaky`). Third sighting: filed as #1173.
 
 ## sign-in-methods.spec.ts:245 "an administrator sends a new setup link from somebody's row" — desktop-chromium
 
