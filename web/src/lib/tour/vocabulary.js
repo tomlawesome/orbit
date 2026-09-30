@@ -96,6 +96,9 @@ export const T = {
 
 /** The mockup's default corner. */
 const DEFAULT_RADIUS = 14;
+/** The lift's own rise (applyLift/press) — how far a 2px translateY reaches
+ *  up, and so how much clearance `clipped()` checks for (Addendum A). */
+const LIFT_PX = 2;
 /** Above veil.js's sheet (2000), which reserves this headroom by name. */
 const Z_CHROME = 2100;
 const CHROME_ID = "orbit-tour-film";
@@ -158,7 +161,7 @@ export class TourControlMissing extends Error {
  * @property {boolean} ringless
  * @property {HTMLDivElement[]} rings
  * @property {boolean} lifted
- * @property {{ el: Element, transform: string, filter: string, transition: string }[]} saved
+ * @property {{ el: Element, transform: string, filter: string, transition: string, flat?: boolean }[]} saved
  */
 
 /** @typedef {[number, number]} Point */
@@ -563,6 +566,27 @@ export function createFilmContext({
     }
   }
 
+  /**
+   * Addendum A (2026-09-30, #1083): true when a 2px rise would leave an
+   * ancestor that hides or scrolls its overflow — a kit Row's
+   * `overflow:clip` (sized exactly to its face), a sheet body's `auto`.
+   * Runtime detection rather than a per-control flag, so it applies
+   * wherever the film later lights a clipped control without a chapter
+   * needing to know.
+   * @param {Element} el
+   */
+  function clipped(el) {
+    if (typeof window.getComputedStyle !== "function") return false;
+    const r = el.getBoundingClientRect();
+    for (let node = el.parentElement; node && node !== doc.body; node = node.parentElement) {
+      const cs = window.getComputedStyle(node);
+      if (cs.overflowY === "visible" && cs.overflowX === "visible") continue;
+      const box = node.getBoundingClientRect();
+      if (r.top - LIFT_PX < box.top + 0.5) return true;
+    }
+    return false;
+  }
+
   /** @param {Control} c */
   function applyLift(c) {
     if (dry() || c.lifted) return;
@@ -570,13 +594,20 @@ export function createFilmContext({
     for (const el of c.els) {
       const style = styleOf(el);
       if (!style) continue;
+      const flat = clipped(el);
       c.saved.push({
         el,
         transform: style.transform,
         filter: style.filter,
         transition: style.transition,
+        flat,
       });
       style.transition = still() ? "none" : `transform ${T.lift}ms ${T.ease},filter ${T.lift}ms ease`;
+      /* Addendum A: the lift yields to a clip — the ring alone says
+         "lifted". A translated face that would leave a Row's own clip is a
+         control shown cut, and the glow is invisible inside the clip
+         anyway, so nothing is lost but 2px of movement nobody can see. */
+      if (flat) continue;
       style.transform = "translateY(-2px)";
       style.filter = "drop-shadow(0 0 14px color-mix(in srgb,var(--accent) 34%,transparent))";
     }
@@ -742,8 +773,12 @@ export function createFilmContext({
   /** The mockup's `press`: the control presses ITSELF. @param {Control} c */
   async function press(c) {
     if (!dry() && !still()) {
-      const base = c.lifted ? "translateY(-2px)" : "translate(0,0)";
       for (const el of c.els) {
+        /* Addendum A: a lifted-but-clipped element never actually moved
+           (applyLift left it flat), so its press must not either — reading
+           a per-element flag rather than `c.lifted` alone. */
+        const flat = c.saved.find((s) => s.el === el)?.flat;
+        const base = c.lifted && !flat ? "translateY(-2px)" : "translate(0,0)";
         const style = styleOf(el);
         if (style) style.transition = "none";
         void anim(el, [

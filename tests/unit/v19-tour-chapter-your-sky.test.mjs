@@ -354,3 +354,67 @@ describe("the chapter played for real", () => {
     expect(document.getElementById("hero").outerHTML).toBe(before);
   });
 });
+
+/** Home's pocket hatch, already open: the settings row sized exactly to its
+ *  own row (a kit Row's `overflow:clip`, Addendum A's own case) and the
+ *  five swatches, matching pocket.svelte/Hatch.svelte's real selectors. */
+function drawPocketHatch() {
+  document.body.innerHTML = `
+    <div class="hero" id="hero">
+      <button id="morb"></button>
+      <div class="p-sheet-layer open">
+        <div class="p-sheet-panel">
+          <div class="p-row" style="overflow:clip">
+            <a data-row-face href="/settings"></a>
+          </div>
+          <div class="swatches">
+            ${PACKS.map(([title]) => `<button class="swatch" title="${title}"></button>`).join("")}
+          </div>
+        </div>
+      </div>
+    </div>`;
+  box(document.getElementById("morb"), { x: 340, y: 22, w: 40, h: 40 });
+  box(document.querySelector(".p-sheet-panel"), { x: 0, y: 200, w: 390, h: 500 });
+  /* The row and its face share exactly one box — the shape a kit Row draws
+     when its face fills it — so any lift at all would leave the clip. */
+  box(document.querySelector(".p-row"), { x: 17, y: 300, w: 356, h: 56 });
+  box(document.querySelector("[data-row-face]"), { x: 17, y: 300, w: 356, h: 56 });
+  box(document.querySelector(".swatches"), { x: 17, y: 400, w: 356, h: 44 });
+  document.querySelectorAll(".swatch").forEach((el, k) => {
+    box(el, { x: 17 + k * 44, y: 400, w: 44, h: 44 });
+  });
+}
+
+describe("Addendum A: the pocket settings row keeps its clip (#1083, 2026-09-30)", () => {
+  it("never translates [data-row-face] — dry run touches no DOM, and the wet run leaves style.transform empty throughout", async () => {
+    drawPocketHatch();
+    const clock = createClock({ reducedMotion: () => false });
+    const ctx = createFilmContext({ clock, doc: document, pocket: true });
+
+    /* Dry: the vocabulary stubs itself out entirely (§ vocabulary.js's own
+       "dry mode costs the same as playing"), so there is nothing to touch. */
+    clock.dryStart();
+    await sky.play(ctx);
+    clock.dryEnd();
+    expect(document.getElementById("hero")).not.toBeNull();
+
+    /* Wet: sample style.transform on every frame, including the moment the
+       settings beat is lit, not only the final restored state. */
+    drawPocketHatch();
+    clock.setPlaying(true);
+    const seenTransforms = new Set();
+    let done = false;
+    const playing = sky.play(ctx).then(() => { done = true; }, () => { done = true; });
+    let spent = 0;
+    while (!done && spent < 400000) {
+      clock.advance(100);
+      spent += 100;
+      await settle();
+      const face = document.querySelector("[data-row-face]");
+      if (face) seenTransforms.add(face.style.transform);
+    }
+    await playing;
+    expect([...seenTransforms]).toEqual([""]);
+    ctx.destroy();
+  });
+});

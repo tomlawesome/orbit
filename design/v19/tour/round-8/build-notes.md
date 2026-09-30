@@ -534,3 +534,89 @@ note the measured lengths; screenshot every held mark into the PR or a
   `design/v19/tour/round-8/`.
 
 Written by Fable, 2026-09-30.
+
+## Addendum A (2026-09-30) — the lift inside a tight clip
+
+**The failure.** `film-hatch` fails the pocket-measure `cut` check at all four
+widths: chapter 11's `goto(settingsLink)` applies the film's universal lift
+(`applyLift`: inline `transform: translateY(-2px)` + a drop-shadow filter) to
+the hatch row's face, and the kit Row (`Row.svelte` l.208, `.p-row{overflow:
+clip}`), sized exactly to its face, clips the top 2px. The check is right:
+a lifted face that leaves its row is a control shown cut.
+
+**Call: the lift yields to a clip.** The film does not translate a control
+whose 2px rise would leave a clipping ancestor; the ring alone says
+"lifted". Reason: the film's rule is to leave the product's DOM and picture
+as it found them, and a Row's clip is the product's own — it gives the row
+its rounded corners and its unfold, and every kit Row shares it. Inside such
+a clip the glow is invisible anyway (it falls outside the row), so nothing
+is lost but 2px of movement nobody can see whole. Runtime detection, not a
+per-control flag: it is the same rule wherever the film later lights a
+clipped control (the inbox's `.rv-yes` inside a card, the row act in
+`.p-row-open{overflow:hidden}`), and it needs no chapter to know.
+
+**Exact change — `web/src/lib/tour/vocabulary.js`, `applyLift(c)`.** Before
+the `for` loop, compute per element:
+
+```js
+/** True when a 2px rise would leave an ancestor that hides or scrolls its
+ *  overflow — a kit Row's `overflow:clip`, a sheet body's `auto`. */
+function clipped(el) {
+  if (typeof window.getComputedStyle !== "function") return false;
+  const r = el.getBoundingClientRect();
+  for (let node = el.parentElement; node && node !== doc.body; node = node.parentElement) {
+    const cs = window.getComputedStyle(node);
+    if (cs.overflowY === "visible" && cs.overflowX === "visible") continue;
+    const box = node.getBoundingClientRect();
+    if (r.top - LIFT_PX < box.top + 0.5) return true;
+  }
+  return false;
+}
+```
+
+with `const LIFT_PX = 2` beside `DEFAULT_RADIUS`. In the loop, keep the
+`c.saved.push(...)` and the `transition` line as they are, then:
+
+```js
+if (clipped(el)) continue;           /* the ring alone says lifted */
+style.transform = "translateY(-2px)";
+style.filter = "drop-shadow(0 0 14px color-mix(in srgb,var(--accent) 34%,transparent))";
+```
+
+`c.lifted` stays `true` (so `press()` still bases its scale on the lifted
+state — `translateY(-2px)` in its keyframes would move the face again, so
+`press()` must read a per-element flag: record `flat: true` in the saved
+entry and use `translate(0,0)` as the base for those elements). `restore()`
+is unchanged: it puts back whatever inline values were saved, which for a
+flat element is the original transform. `goto` still calls
+`ringState(c, "strong")`, so the ring brightens as on every other control.
+No ControlSpec change; no chapter change; nothing under `dry()` (the guard
+sits inside `applyLift`, which already returns in dry mode).
+
+**What must not change.** `Row.svelte`: nothing — not `overflow:clip`, not
+the reorder-only `[data-lifted]` rule (that state carries a shadow and a
+background the film must not borrow). The desk: no built desk control sits
+inside a tight clip, so `clipped()` is false for every desk target and the
+desk lift is pixel-identical; add a unit assertion that `applyLift` on the
+desk chapter-11 markup (`#account nav a`) still sets `translateY(-2px)`.
+`press()` on desk is unchanged.
+
+**Against the floors the state asserts** (`pocket-measure.spec.js`,
+`film-hatch`): the face now sits exactly inside `.p-row` → `cut()` finds no
+clipper it leaves (`within` with 1px slack); its label was never cut; the
+row's 56px face still passes the 44px floor; the 12px floor is untouched;
+`covered` is unaffected (the ring lives in the `pointer-events:none` chrome
+layer, as in the two states that already pass). Also re-run `film-rest` and
+`film-create` (the create fields are not in a clip; behaviour there is
+unchanged) and the clash sampler at 390 and 360 — the pill does not move,
+so the counts should not.
+
+**Tests to add.** `v19-tour-vocabulary.test.mjs`: a control inside a
+`overflow:clip` parent sized to it gets no inline transform/filter after
+`goto`, `c.lifted` is true, the ring is `strong`, and `unlight` restores the
+original inline style; a control with room above (parent 8px taller,
+`padding-top:4px`) is still translated. `v19-tour-chapter-your-sky.test.mjs`:
+pocket dry/wet run of the settings beat leaves `[data-row-face]`'s
+`style.transform` empty.
+
+Written by Fable, 2026-09-30.
