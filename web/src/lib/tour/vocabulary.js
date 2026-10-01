@@ -1634,6 +1634,11 @@ export function createFilmContext({
     if (dot) dot.style.opacity = "0";
     veilTargets([]);
     room(0);
+    /* #1174 round 5: whatever a chapter staged on the product's own page —
+       chapter 4's example rows, chapter 5's danger ring — marks itself
+       `data-tourfilm-staged`, and goes here on a jump or a stop as well as
+       at the chapter's own end, so the page is left as the film found it. */
+    for (const staged of Array.from(doc.querySelectorAll("[data-tourfilm-staged]"))) staged.remove();
     /* #1174: the page back at the top, where every chapter opens and where
        the film found it. A jump or a stop out of a chapter that had scrolled
        the page (chapter 4's manifest, a pocket `goto`) left it there, and
@@ -1676,6 +1681,10 @@ export function createFilmContext({
     hold: clock.hold,
     wait: clock.wait,
     tween: clock.tween,
+    /** #1174 round 5: a Web Animation on the film's own terms — paused
+     *  with the film, cancelled by `clear()`, nothing at all under reduced
+     *  motion or in the dry run. Resolves when it finishes or is cancelled. */
+    animate: anim,
     room,
     holdFor,
     dry,
