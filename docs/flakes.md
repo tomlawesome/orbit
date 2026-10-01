@@ -309,3 +309,6 @@ page's URL at failure, which this one has to infer.
 ## tour-pocket-webkit.spec.js "plays end to end at 430x932 under normal motion" — pill moving between places (#1174)
 
 - 2026-10-01 · c952834f · local `pocket-webkit` (Playwright image, WebKit) · one fault, "pill moving between places (dim raised) · /create · ch2": the pill was mid-move for over the check's 3s at one sample, with the page painting 9.6 frames a second on a busy host. Green on an immediate rerun of the test alone on the same code (12.2 frames a second). The move is a 350ms fade, so this is the sampler's wall-clock bound under load.
+- 2026-10-01 · b6154cd4 · local `pocket-webkit`, full project run (24.8 minutes, host load average above 20) · the same fault, 5 samples. Second sighting.
+- 2026-10-01 · b6154cd4 · the test alone, load average 22.7, 5.0 frames a second · the same fault, 3 samples. Third sighting.
+- 2026-10-01 · b6154cd4 · the test alone, 10.1 frames a second · the same fault, 2 samples. Fourth sighting. The same test passed on round 4's tour code (dad90e83) at 11.3 frames a second, and then on b6154cd4 at 9.7 frames a second. Round 5 changes nothing in chapter 2, /create or the pill. Past the third sighting, so it needs an issue; not filed from this session (#1174 round 5 note).
