@@ -1511,3 +1511,23 @@ ring, calls by Opus 5.5, #1174).**
   ring is steady and fully red, with no pulse. Each pack's own red is at
   least 3:1 against its ground: about 3.7:1 on dawn and clouds, 7:1 on the
   dark packs. The ring is drawn under the bodies and the sun.
+
+**Round 6 on the owner's iPhone (2026-10-01; calls by Opus 5.5, #1174).**
+
+- **Chapter 8 plays on through a household with no belt or no papers.**
+  The film stood still at 1:56. On a household with nothing in it the
+  phone has no body to open, so the film walks to /item, which shows the
+  empty household's card, and waited 12 seconds for a belt that is never
+  drawn. Then it stopped itself at 2:09, at a preview sheet that no paper
+  could open. A household whose items carry no papers stopped there too.
+  Now the empty household's card counts as /item having arrived. The
+  preview sheet is required only when a paper was opened, and is then
+  waited for, in case a phone raises it after its 300ms. The desk is
+  unchanged.
+- **What chapter 8 shows a new household is still open.** Its lines play
+  over the empty card, pointing at nothing, and so does chapter 9's "mark
+  it done" line. Whether the film should stage example papers there, as
+  chapter 4 stages example rows, is a design call for Fable or the owner.
+- **The check** fails on any wait for the page that runs out (the film
+  records each one), and plays chapters 7 to 9 on an empty household at
+  all three phone sizes, and on a household without papers at 390x844.
