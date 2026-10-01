@@ -1481,3 +1481,33 @@ Opus 5.5 finishing Fable's round, #1174).**
   includes a reader's tap. It asks that the clock keeps moving, that the
   pill is in front, never faint and its readout at 4.5:1, that no hole or
   ring snaps, and that at every held mark the lit control is not dimmed.
+
+**Round 5 on the owner's iPhone (2026-10-01; owner's decision on the danger
+ring, calls by Opus 5.5, #1174).**
+
+- **Chapter 4 stages example rows on a new household.** No first-run data
+  is seeded, so a new household's pocket manifest is empty and chapter 4's
+  two lines pointed at blank sky. Round 8's pocket one-take holds three rows
+  at this mark. Where the pocket manifest has no "Needs attention" row, the
+  film draws its own: a "Needs attention" header and the mockup's three rows,
+  nearest first (Gutter clearing T+16d, Car MOT — Volvo V60 T−16d, Boiler
+  service T−22d), with dates counted from today. Each row's meta line opens
+  with "example" in the accent. The rows wear the real row's solid hairline,
+  not the dashed pen, because a dashed row means a suggestion on the
+  pocket. They fade in before the scroll and fade out once the page is back
+  at the top. They are gone at the chapter's end, and on a jump or a stop,
+  and are never written to the account. A household with rows of its own
+  sees those instead. The desk is unchanged. On a new household it already
+  shows its "TODAY" header and "nothing scheduled", but its row line points
+  at nothing (follow-up).
+- **The danger ring pulses red in chapter 5 (owner's decision).** "Time
+  runs" is where the film shows the danger zone: a body walks in toward the
+  sun. From the moment the body lands until the chapter ends, the film lays
+  its own ring over the dial's r=62 circle, on the desk and the phone. The
+  ring is a solid `--overdue` line, 2.5 units wide, and the zone is washed
+  in the same red at 14%. Every 1.4s the line dips to 55% and back, and a
+  second red ring swells to 1.22x and fades. The pulse runs on the film's
+  clock, so it pauses and stops with the film. Under reduced motion the
+  ring is steady and fully red, with no pulse. Each pack's own red is at
+  least 3:1 against its ground: about 3.7:1 on dawn and clouds, 7:1 on the
+  dark packs. The ring is drawn under the bodies and the sun.
