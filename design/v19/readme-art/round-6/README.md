@@ -54,4 +54,9 @@ as well.
 
 ## Verdicts
 
-Awaiting owner
+Owner, 2026-10-01, on #1177: "I like it but I don't think it really fits
+with the rest of orbit." Then 37a: keep the photograph, grade it into
+Orbit's palette.
+
+Round 7 (`../round-7/`) is M's crop and composition with the photograph
+graded hard into After Dark, and the mono line dropped.
