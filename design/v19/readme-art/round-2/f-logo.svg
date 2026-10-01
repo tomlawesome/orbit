@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="Orbit">
+<defs><clipPath id="tile"><rect width="200" height="200" rx="44"/></clipPath><radialGradient id="pk" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#ff4fd8" stop-opacity="0.6"/><stop offset="0.3" stop-color="#ff4fd8" stop-opacity="0.16"/><stop offset="1" stop-color="#ff4fd8" stop-opacity="0"/></radialGradient></defs>
+<g clip-path="url(#tile)"><rect width="200" height="200" fill="#080a14"/><circle cx="26" cy="24" r="150" fill="url(#pk)"/>
+<g fill="#9fd6e6"><circle cx="160" cy="30" r="1.2" opacity=".6"/><circle cx="176" cy="150" r="1" opacity=".5"/><circle cx="40" cy="176" r="1.1" opacity=".5"/><circle cx="120" cy="184" r=".8" opacity=".4"/></g></g>
+<circle cx="100" cy="100" r="62" fill="none" stroke="#2de2e6" stroke-width="6.88889"/><circle cx="100" cy="100" r="5.59722" fill="#fff0fb"/><circle cx="154.25" cy="68.5694" r="12.4861" fill="#ff4fd8"/>
+</svg>

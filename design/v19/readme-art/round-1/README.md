@@ -117,4 +117,12 @@ for the pick.
 
 ## Verdicts
 
-Awaiting owner
+Owner, 2026-10-01, recorded on #1177:
+
+- **9d — none of A, B or C.** "These are all super boring."
+- **13a — the light looks (B One ink, C Daybreak) don't fit the dark brand.**
+  Round 2 is dark only, like the app.
+- **12a — the tagline is "your year, in orbit"** (CON-11).
+
+Nothing survives as a feature idea from this round; round 2 starts again,
+bolder, in `../round-2/`.
