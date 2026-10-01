@@ -223,14 +223,14 @@ export default {
     if (pocket) {
       const sun = ctl({ sel: SELECTORS.POCKET.sun, round: true });
       await callout(
-        "A repeat is never finished; it comes round. A one-off simply ends.",
+        "Renewals start their orbit again, fixed length items disappear.",
         sun,
         "bottom",
         { dy: 30, mark: "done-round" },
       );
     } else {
       await callout(
-        "A repeat is never finished; it comes round. A one-off simply ends.",
+        "Renewals start their orbit again, fixed length items disappear.",
         body,
         "top",
         { mark: "done-round" },

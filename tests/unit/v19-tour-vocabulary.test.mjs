@@ -1166,7 +1166,7 @@ describe("#1174: a pinned callout keeps its side on the pocket", () => {
     box(document.querySelector(".mdial"), { x: 16, y: 56, w: 358, h: 358 });
     const { clock, ctx } = pocketStage();
     const dial = ctx.ctl({ sel: ".mdial", round: true });
-    await playOut(clock, ctx.callout("At a month out it warms, and Orbit reminds you.", dial, "top"));
+    await playOut(clock, ctx.callout("Orbit reminds you, visually and through notifications.", dial, "top"));
     const note = document.querySelector(".tourfilm-callout");
     expect(parseFloat(note.style.top)).toBeGreaterThanOrEqual(414); /* under the dial */
   });
@@ -1179,7 +1179,7 @@ describe("#1174: a pinned callout keeps its side on the pocket", () => {
     box(document.querySelector(".mdial"), { x: 16, y: 56, w: 358, h: 358 });
     const { clock, ctx } = pocketStage();
     const dial = ctx.ctl({ sel: ".mdial", round: true });
-    await playOut(clock, ctx.callout("At a month out it warms, and Orbit reminds you.", dial, "top", { pin: true }));
+    await playOut(clock, ctx.callout("Orbit reminds you, visually and through notifications.", dial, "top", { pin: true }));
     const note = document.querySelector(".tourfilm-callout");
     expect(parseFloat(note.style.top)).toBe(56 + 8);
     expect(note.querySelector("i").style.bottom).toBe("-8px"); /* the stem still points down, at the dial */

@@ -194,7 +194,7 @@ export default {
     await goto(add);
     await press(add);
     await mark("inbox-add");
-    await callout("Nothing joins your orbit without your say-so.", add, "right", { mark: "inbox-sayso" });
+    await callout("Nothing gets added without your review.", add, "right", { mark: "inbox-sayso" });
     unlight(add);
     unlight(review);
     dropCallout();

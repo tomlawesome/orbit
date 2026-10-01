@@ -90,22 +90,16 @@ export default {
     veil(true);
     await setScreen("/settings/mail");
 
-    /* "Forward a bill to your relay address and Orbit reads a copy." /
-       "Your mail is never redirected — it keeps arriving exactly where it
-       always has." — the whole card, named once, carrying both lines. */
+    /* "Forward a bill to your relay address and Orbit reads a copy to import
+       it." — the whole card, named once. Its second line, "Your mail is never
+       redirected...", was the owner's cut (2026-10-01, #1174). */
     const card = ctl({ sel: S.card, radius: 16 });
     await goto(card, { willPress: false });
     await callout(
-      "Forward a bill to your relay address and Orbit reads a copy.",
+      "Forward a bill to your relay address and Orbit reads a copy to import it.",
       card,
       "top",
       { mark: "relay-addr" },
-    );
-    await callout(
-      "Your mail is never redirected — it keeps arriving exactly where it always has.",
-      card,
-      "bottom",
-      { mark: "relay-never" },
     );
     unlight(card);
     dropCallout();

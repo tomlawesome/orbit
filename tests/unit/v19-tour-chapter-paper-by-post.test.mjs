@@ -130,11 +130,10 @@ describe("the selectors chapter 6 names", () => {
     expect(SELECTORS.POCKET.card).toContain(".rl-pocket");
   });
 
-  it("says the same two lines the ratified walk already says", () => {
+  it("says the same line the ratified walk already says (its second cut, #1174)", () => {
     const stop = TOUR_STOPS.find((one) => one.id === "relay");
     expect(stop.copy).toEqual([
-      "Forward a bill to your relay address and Orbit reads a copy.",
-      "Your mail is never redirected — it keeps arriving exactly where it always has.",
+      "Forward a bill to your relay address and Orbit reads a copy to import it.",
     ]);
   });
 });
@@ -181,13 +180,12 @@ describe("the beats, against a recorder", () => {
     expect(moved).toBeGreaterThan(veilOn);
   });
 
-  it("says the two ratified lines, in order, both on the relay card", async () => {
+  it("says its one ratified line, on the relay card", async () => {
     const { log, ctx } = recorder();
     await relay.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel]);
     expect(said).toEqual([
-      ["Forward a bill to your relay address and Orbit reads a copy.", ".relay-card"],
-      ["Your mail is never redirected — it keeps arriving exactly where it always has.", ".relay-card"],
+      ["Forward a bill to your relay address and Orbit reads a copy to import it.", ".relay-card"],
     ]);
   });
 
@@ -201,7 +199,7 @@ describe("the beats, against a recorder", () => {
 });
 
 describe("the chapter played for real", () => {
-  it("puts its two lines on the screen in order", async () => {
+  it("puts its one line on the screen", async () => {
     drawRelay();
     const clock = createClock({ reducedMotion: () => false });
     const ctx = createFilmContext({
@@ -236,8 +234,7 @@ describe("the chapter played for real", () => {
     sample();
 
     expect(said).toEqual([
-      "Forward a bill to your relay address and Orbit reads a copy.",
-      "Your mail is never redirected — it keeps arriving exactly where it always has.",
+      "Forward a bill to your relay address and Orbit reads a copy to import it.",
     ]);
     ctx.destroy();
   });

@@ -323,7 +323,7 @@ describe("the beats, in the mockup's order", () => {
     const gotoAdd = log.findIndex(([word, sel]) => word === "goto" && sel === SELECTORS.DESK.add);
     const pressAdd = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.add);
     const markAdd = log.findIndex(([word, name]) => word === "mark" && name === "inbox-add");
-    const sayso = log.findIndex(([word, text]) => word === "callout" && text === "Nothing joins your orbit without your say-so.");
+    const sayso = log.findIndex(([word, text]) => word === "callout" && text === "Nothing gets added without your review.");
     expect(litReview).toBeGreaterThan(-1);
     expect(litReview).toBeLessThan(gotoAdd);
     expect(pressAdd).toBeGreaterThan(gotoAdd);
