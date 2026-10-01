@@ -123,9 +123,12 @@ the run reported; do not use broad Docker prune or delete commands.
 
 The `smoke` job runs the Playwright suite in `tests/e2e/` against the
 production container it has just built, with the throwaway OIDC profile. The
-suite runs in two browser projects, desktop Chromium and mobile Chromium (a
-Pixel 7 profile), so both of Orbit's layouts are covered. The automated checks
-are deliberately representative, not device certification:
+suite runs in three browser projects: desktop Chromium, mobile Chromium (a
+Pixel 7 profile) and desktop Firefox. The two Chromium projects cover both of
+Orbit's layouts, and Firefox repeats the desktop layout on a second browser
+engine (#1183). WebKit is not run yet. The maintenance-window spec runs once
+per project, after the rest, one project at a time. The automated checks are
+deliberately representative, not device certification:
 
 | Contract | Automated evidence |
 | --- | --- |
@@ -141,8 +144,12 @@ are deliberately representative, not device certification:
 Where one of these checks has found a real fault in Orbit, the test is
 marked `test.fail` with the fault named in it, so it stays visible and turns
 red the day the fault is fixed and the mark is still there.
+Where a fault shows only sometimes on one browser, `test.fail` would pass or
+fail by chance, so that check is marked `test.fixme` on that browser with the
+fault named instead. Today that is the dropped-focus fault in
+`v19-feedback-recovery.spec.ts` on Firefox.
 
 Fixtures use throwaway made-up households, items, documents and mailbox
 metadata. The Playwright trace is kept only on the first retry. Checks on
 real devices and with real assistive technology are still part of release
-acceptance and are not implied by the automated Chromium evidence.
+acceptance and are not implied by the automated Chromium and Firefox evidence.
