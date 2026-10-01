@@ -77,4 +77,10 @@ round 1. Nothing is wired into the repo README or `public/` yet.
 
 ## Verdicts
 
-Awaiting owner
+Owner, 2026-10-01, on #1177 (28d): **none of H, I or J.** "None of your new
+three are any good. I want an ultra realistic galactic plane with glorious
+detail." And: "give me a version of the original with the fixed ring and
+planet."
+
+Round 4 (`../round-4/`) is round 2's E with the standard mark and the gold
+planet, over a photographic plane.
