@@ -251,6 +251,7 @@ page's URL at failure, which this one has to infer.
 ## Runner host out of disk: `no space left on device`, and browsers crashing in the same pipeline
 
 - 2026-09-27 · 0eb5ac03 (!995, phone batch) · pipeline 1721 · four jobs lost, none to an assertion: `sidecar_images` (runner 1, `cp: write error: No space left on device` copying the Trivy cache), `smoke_local_only` (runner 8, `no space left on device` writing to `/builds/.orbit-docker-data/containerd`), `fidelity` (runner 7, `Page crashed` in `pocket-kit.spec.js:142`, 169 of 170 appearance tests and all 508 measurements passed), `smoke` (runner 8, `Target crashed` opening a page in `second-factor.spec.ts:223`, 170 passed). Both runners are on the host `gitlab-runners`; the nightly tidy runs at 03:15. First sighting.
+- 2026-10-01 · f80a6d1f (!1013, Firefox run) · pipeline 1934, 21:42 UTC · `build_image` (`pnpm install`: `No space left on device` in the image build) and `sidecar_images` (Trivy: `unable to initialize fs cache: DB error: write /tmp`, then `cp: write error: No space left on device`); the seven jobs behind them skipped. Pipeline 1933 (!1014) on the same host at the same time. Second sighting; the host's disk was full eight hours after the nightly tidy, so the tidy's reserve (3 GB) is not holding a day's pulls.
 
 ## v19-reduced-motion.spec.ts:244 "reduced motion › signed-out screens hold still" — desktop-chromium
 
