@@ -18,8 +18,7 @@
 </p>
 
 <p align="center">
-  <img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-15162b?style=flat-square&logo=nextdotjs&logoColor=white" />
-  <img alt="React 19" src="https://img.shields.io/badge/React-19-715cff?style=flat-square&logo=react&logoColor=white" />
+  <img alt="SvelteKit" src="https://img.shields.io/badge/SvelteKit-ff3e00?style=flat-square&logo=svelte&logoColor=white" />
   <img alt="PostgreSQL 18" src="https://img.shields.io/badge/PostgreSQL-18-22b8a9?style=flat-square&logo=postgresql&logoColor=white" />
   <img alt="Docker ready" src="https://img.shields.io/badge/Docker-ready-2496ed?style=flat-square&logo=docker&logoColor=white" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-ff4fa3?style=flat-square&logo=typescript&logoColor=white" />
@@ -53,83 +52,100 @@ The older direct command still works and is signature-checked the same way:
 curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/install.sh | bash
 ```
 
-On a capable controlling terminal, the installer opens the Orbit command
-centre with Install, Update, Repair, and Exit choices. Install guides the
-operator through a supported Standard, Document processing, Full local stack,
-or Custom profile, then asks whether to sign in with local accounts only (the
-default) or also with an identity provider; only the latter answer collects
-the public HTTPS Orbit origin, complete OIDC issuer, client ID, and hidden
-OIDC client secret in private staging — a local-only install collects only the
-origin. The target is not changed until the final review is accepted.
-After the stack is up, the completion screen points the operator at the
-container log to claim the fresh instance and create its first
-administrator; see
-[authentication.md](docs/authentication.md#claiming-a-fresh-install). Repair
-is a non-mutating dispatch point until the bounded repair engine in issue
-#261 is delivered.
-Git is not required and the repository is not cloned: a deployment needs
-compose assets and a published image, not source or tests.
+### What the installer asks
 
-For log-oriented or automated use, a downloaded installer also accepts
-`--plain` with one direct `--install`, `--update`, or `--repair` action.
-Install is accepted only for an empty or narrowly pre-provisioned target;
-Update is accepted only for a recognized deployment. Plain and redirected
-output is stable, line-oriented, and contains no terminal control sequences.
+Run from a terminal, the installer shows a menu: Install, Update, Repair or
+Exit.
 
-`scripts/install.sh --simulate` (optionally combined with `--plain`) runs a
-safe, non-mutating rehearsal of the same command-centre renderer, menus, text
-and hidden-input widgets, and fixed representative success and failure
-presentation, so an owner can preview the experience without installing or
-updating Orbit. It never inspects or changes a target, never contacts Docker,
-curl, a registry, or an OIDC provider, and every value it shows is a labelled,
-synthetic placeholder. `--simulate` cannot be combined with `--install`,
-`--update`, or `--repair`.
+<!-- screenshot: installer menu with Install, Update, Repair, Exit -->
 
-Unattended installation is supported only with a complete, pre-provisioned
-`.env-orbit` and an existing non-empty regular
-`.orbit-secrets/oidc-client-secret` file with mode `0600`. The environment file
-must select the canonical file-backed secret path, and all required values must
-pass `bash scripts/configure.sh --check`. A field requiring attention, unsafe
-file, invalid callback, or incomplete optional group is refused before Compose
-starts.
+- **Install** sets up a new Orbit in an empty directory. It first asks which
+  profile you want: Standard (Orbit, its database and the malware scanner),
+  Document processing (adds a local text-extraction service), Full local stack
+  (adds a local AI model server as well), or Custom. It then asks whether
+  people will sign in with local accounts only (the default) or also through
+  an identity provider, an external sign-in service such as Authentik. Local
+  accounts only: it needs just Orbit's public address. Identity provider as
+  well: it also needs the provider's address (the "issuer"), the client ID it
+  gave you, and the client secret, which you type hidden. Nothing in the
+  directory changes until you accept the final review screen.
+- **Update** refreshes an existing Orbit. If the current settings are complete
+  it keeps them, and your secrets, exactly as they are and does not ask again.
+- **Repair** changes nothing yet. It tells you to run
+  `bash scripts/repair.sh --check` to diagnose the deployment, then `--plan`
+  to see what a repair would do.
 
-For an unattended bootstrap into a directory that has no Compose files yet,
-the directory must contain exactly `.env-orbit` and `.orbit-secrets/` before
-the installer runs. `.env-orbit` must be a regular, non-symlink file with mode
-`0600`; `.orbit-secrets/` must be a real, non-symlink directory with mode
-`0700`; and every existing immediate child of that directory must be a
-non-empty regular, non-symlink file with mode `0600`. The required
-`.orbit-secrets/oidc-client-secret` file must already be present and non-empty.
-Extra top-level entries, symlinks, directories, devices, empty files, or broad
-permissions are refused before Docker or downloads begin. These pre-provisioned
-files are preserved byte-for-byte if configuration, OIDC discovery, or Compose
-preflight fails before transaction commit.
+When everything is running, the final screen shows Orbit's address, the
+version, the exact build installed, the profile, and the commands for status
+and logs. It also points you at the container log, which holds the link for
+claiming the new Orbit and creating its first administrator: see
+[Claiming a fresh install](docs/authentication.md#claiming-a-fresh-install).
 
-It pulls the published image, resolves it to an immutable digest, and takes
-its deployment assets — the compose files, the Tika configuration and the
-operator scripts — out of that same image, which carries them. A compose file
-therefore cannot drift from the image it configures, and an install needs
-nothing but the registry. The resolved `registry/repository@sha256:...` digest
-is written to `.env-orbit`, and that digest is what runs. A tag is only ever read to resolve it; a mutable
-reference is never deployed.
+Git is not needed and the repository is not cloned. A deployment needs only
+the Compose files and a published build, not the source code or tests.
 
-It then creates or revalidates the Orbit-specific `.env-orbit` configuration,
-generates independent 256-bit session, PostgreSQL, and document-encryption
-secrets, validates the rendered Compose configuration, and prepares the
-selected service images. Completion is withheld until PostgreSQL is healthy,
-Orbit's content-free `/api/health` contract reports ready, ClamAV is healthy,
-and each selected optional service passes its bounded probe. The final screen
-shows the safe public URL, version, channel, abbreviated revision, immutable
-digest, selected profile, and exact status/log commands. Development and routine preview
-images target 64-bit x86 (`linux/amd64`) for faster iteration. ARM64 is added
-only after a dedicated exact-image validation path is enabled for that
-architecture.
+### Automated or logged runs
 
-If guided collection is cancelled or a non-interactive run has a required
-field requiring attention, the installer restores the previous managed file
-state and prints only field names and safe next actions. From a controlling terminal,
-rerun the same installer command, then use the existing configuration
-contracts when working from a checked-out deployment:
+Add `--plain` for output with no screen drawing, one line at a time, safe for
+logs and pipes, and name one action: `--install`, `--update` or `--repair`.
+`--install` accepts only an empty directory (or a pre-provisioned one, below);
+`--update` accepts only a directory that already holds an Orbit deployment.
+
+`bash scripts/install.sh --simulate` (with `--plain` if you like) is a
+rehearsal. It shows the same menus, prompts and example success and failure
+screens, using clearly labelled made-up values. It does not read or change the
+directory and never contacts Docker, `curl`, a registry or an identity
+provider. It cannot be combined with `--install`, `--update` or `--repair`.
+
+### Installing with no prompts
+
+For an unattended install, the directory must already contain a complete
+`.env-orbit` and an `.orbit-secrets/` directory, and nothing else. Before it
+downloads anything, the installer checks that:
+
+- `.env-orbit` is a plain file (not a symlink) with permissions `0600`;
+- `.orbit-secrets/` is a real directory (not a symlink) with permissions
+  `0700`, and every file inside it is a plain, non-empty, non-symlink file
+  with permissions `0600`;
+- `.orbit-secrets/oidc-client-secret` exists and is not empty;
+- `.env-orbit` points at that secret file (the file-backed setting, not the
+  direct one) and passes `bash scripts/configure.sh --check`.
+
+Anything else is refused before Docker or any download starts: extra files,
+symlinks, empty files, looser permissions, a setting that still needs
+attention, an invalid callback address, or an optional group that is only
+half filled in. If configuration, identity-provider discovery or the Compose
+pre-check then fails, your files are left byte-for-byte as they were.
+
+### What gets installed
+
+The installer downloads Orbit from the release registry, the server that
+publishes Orbit's builds. It records exactly which build it downloaded using
+the build's digest: a fingerprint that identifies one build and nothing else.
+That fingerprint is written to `.env-orbit`, and that build is what runs, so
+an update can't swap in something different behind your back. Everything
+needed to run Orbit, including its configuration files and operator scripts,
+is packed inside the same build. The files always match the version they came
+with, and the installer never downloads them separately. A version name like
+`preview` is only used to look up which build it points to today; what gets
+installed is always the fingerprint, never the name.
+
+It then creates or re-checks `.env-orbit`, generates three separate random
+secrets (for sign-in sessions, the database password and document
+encryption), checks the Compose configuration, and fetches the images for the
+services you chose. It reports success only once the database is healthy,
+Orbit's own health check at `/api/health` says ready, the malware scanner is
+healthy, and each optional service you chose answers its check.
+
+Development and routine preview builds are made for 64-bit x86
+(`linux/amd64`) so they build faster. ARM64 builds are added only once they
+can be tested the same exact-image way.
+
+If you cancel during the prompts, or an unattended run finds a setting that
+needs attention, the installer puts the managed files back as they were and
+prints only the names of the fields and what to do next. From a terminal,
+rerun the installer. From a checked-out deployment you can also fix the
+settings directly:
 
 ```sh
 bash scripts/configure.sh --init
@@ -137,13 +153,10 @@ bash scripts/configure.sh --set-oidc-secret
 bash scripts/configure.sh --check
 ```
 
-Recognized upgrades with complete configuration are revalidated without
-reprompting or rewriting valid operator values or secrets.
-
 ### Building from source instead
 
-Building is a developer workflow rather than an installation choice, so the
-installer does not offer it. Clone the repository and build explicitly:
+Building is a developer task, not an install option, so the installer does
+not offer it. Clone the repository and build:
 
 ```bash
 git clone https://github.com/tomlawesome/orbit.git && cd orbit
@@ -151,11 +164,11 @@ bash scripts/configure.sh
 bash scripts/build-container.sh
 ```
 
-The generated secrets live under `.orbit-secrets`, which is accessible only to
-the installing host user. Compose mounts only the required files into each
-container under `/run/secrets`; the values are not injected into container
-environment variables. Existing secrets are preserved on subsequent runs, and
-the installer never reads or modifies a generic `.env` file.
+Generated secrets live in `.orbit-secrets`, readable only by the user who ran
+the script. Compose gives each container only the secret files it needs, under
+`/run/secrets`; secret values never go into container environment variables.
+Later runs keep existing secrets, and the scripts never read or write a
+generic `.env` file.
 
 ## Your home has an orbit
 
@@ -224,10 +237,10 @@ write documentation assets.
 - **Installable without private offline storage** — a PWA shell and
   service-worker push handling, while authenticated workspace data remains
   server-authoritative and changes are never queued for later replay.
-- **Private by design** — local password accounts always available, optional
-  provider-neutral OIDC, opaque server-side sessions, PKCE, signed token
-  validation, same-origin enforcement, CSRF protection, and authenticated
-  household APIs.
+- **Private by design** — local password accounts are always available, and
+  an identity provider is optional. Sign-in state stays on the server, and
+  every request is checked to be genuine and to come from Orbit's own
+  address before it can touch household data.
 
 ## One app. Standard supporting services.
 
@@ -251,19 +264,20 @@ flowchart LR
     orbit -->|Notifications| delivery
 ```
 
-- `orbit` is the complete Orbit application: interface, authenticated
-  APIs, versioned migrations, and notification scheduler. It can be built from
-  source or pulled only when `ORBIT_IMAGE` names an exact registry digest.
-- `orbit-postgres` is the digest-pinned official PostgreSQL 18 Alpine image
-  with a persistent volume.
-- `orbit-clamav` is the official scanner image. It receives only quarantined
-  file streams over the private Compose network and has no published host port,
-  database credentials, document volume, or Orbit secrets.
+- `orbit` is the whole Orbit application: the interface, the signed-in APIs,
+  the database migrations and the notification scheduler. It is either built
+  from source or pulled by exact build fingerprint (`ORBIT_IMAGE` must name a
+  registry digest).
+- `orbit-postgres` is the official PostgreSQL 18 Alpine image, pinned to one
+  exact build, with a persistent volume.
+- `orbit-clamav` is the official malware scanner image. It receives only
+  quarantined file streams over a private network and has no port on the host,
+  no database credentials, no document volume and no Orbit secrets.
 
-There is no custom PostgreSQL image and no separate Orbit frontend/backend pair
-to maintain. ClamAV is enabled by default and normally needs approximately
-4 GiB of memory; administrators can explicitly disable it, but Orbit displays a
-persistent warning and marks subsequently uploaded files as unscanned.
+There is no custom PostgreSQL image and no separate frontend and backend to
+maintain. ClamAV is on by default and normally needs about 4 GiB of memory.
+An administrator can turn it off, but Orbit then shows a permanent warning and
+marks every later upload as unscanned.
 
 ## Run with Docker
 
@@ -276,57 +290,66 @@ bash scripts/configure.sh --set-oidc-secret
 bash scripts/configure.sh --check
 ```
 
-The first, non-interactive command creates `.env-orbit` plus the private
-`.orbit-secrets` directory without starting containers. It also runs the
-selected Orbit image once, with only a key-generation command, to generate and
-persist Orbit's VAPID Web Push key pair on first setup: the private key stays
-in `.orbit-secrets` and only the public key is written to `.env-orbit`. The
-explicit `--init` step asks whether to sign in with local accounts only
-(the default, `ORBIT_AUTH_OIDC=false`) or also with an identity provider; only
-when the answer is "also" does it record the public HTTPS Orbit origin, full
-OIDC issuer URL, and client ID, and derive the exact callback URL. It never
-asks for or invents the provider's client secret. The dedicated secret step
-reads that credential silently and persists it in the private
-`.orbit-secrets` directory; only its runtime file path is recorded in
-`.env-orbit`. See [authentication setup](docs/authentication.md). The
-value-free `--check` reports whether required settings and optional setting
-groups are complete without printing their contents. For non-interactive
-installation or upgrade, plain `bash scripts/configure.sh` preserves the
-existing configuration and secret file; the installer will continue only when
-that existing configuration and secret file are already complete and safe.
-After Orbit starts, an operator claims the fresh instance — see
-[authentication.md](docs/authentication.md#claiming-a-fresh-install).
+`bash scripts/configure.sh` on its own creates `.env-orbit` and the private
+`.orbit-secrets` directory without starting any containers. It runs the Orbit
+image once, only to generate the key pair used for browser push
+notifications: the private key goes in `.orbit-secrets`, the public key in
+`.env-orbit`. If the files already exist it leaves them alone. Unattended
+installs and upgrades rely on this: the installer carries on only when the
+existing configuration and secret file are already complete and safe.
+
+`--init` asks whether people will sign in with local accounts only (the
+default, `ORBIT_AUTH_OIDC=false`) or also through an identity provider. Only if
+you answer "also" does it ask for Orbit's public HTTPS address, the provider's
+issuer URL and the client ID, and it works out the callback URL itself. It
+never asks for, or invents, the provider's client secret.
+
+`--set-oidc-secret` reads that secret without showing it, stores it in
+`.orbit-secrets`, and records only the file's path in `.env-orbit`. See
+[authentication setup](docs/authentication.md).
+
+`--check` reports whether every required setting and each optional group is
+complete. It prints setting names and their state, never values.
+
+After Orbit starts, claim it to create the first administrator: see
+[Claiming a fresh install](docs/authentication.md#claiming-a-fresh-install).
 
 ### 2. Start Orbit
 
+From a checkout, build the image and start the stack with the same guarded
+script CI uses:
+
 ```sh
-ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)" \
-  docker compose --env-file .env-orbit \
-  -f docker-compose.yml -f compose/docker-compose.build.yml up --build
+bash scripts/deploy-container.sh --build
 ```
 
-Building from source needs the `compose/docker-compose.build.yml` overlay. The base
-compose file describes a deployment, which has a published image but no source
-tree, so the build context lives in the overlay rather than the base file.
+It builds through the `compose/docker-compose.build.yml` overlay. The base
+Compose file describes a deployment, which has a published image and no source
+tree, so the build instructions live in the overlay. If you drive Compose by
+hand, `scripts/build-container.sh` shows the three build variables
+(`ORBIT_VERSION`, `ORBIT_REVISION`, `ORBIT_CHANNEL`) the overlay requires.
 
-For a deployed instance, open the HTTPS origin recorded in `APP_URL`; the
-reverse proxy must route that origin to Orbit's published port. Plain HTTP is
-supported only for loopback development, such as
-[http://127.0.0.1:3000](http://127.0.0.1:3000) on the Docker host. The health
-endpoint is available at `/api/health`.
+Open the address in `APP_URL`. For a real deployment that is an HTTPS
+address, and your reverse proxy must send it to Orbit's published port. Plain
+HTTP works only on the Docker host itself, at
+[http://127.0.0.1:3000](http://127.0.0.1:3000). The health check is at
+`/api/health`.
 
-Orbit listens on all host interfaces by default. Set
-`ORBIT_BIND_ADDRESS=127.0.0.1` in `.env-orbit` when access should be restricted
-to the Docker host or an HTTPS reverse proxy. Do not expose port `3000` directly
-to the public internet.
+By default Orbit listens on every network interface of the host. Set
+`ORBIT_BIND_ADDRESS=127.0.0.1` in `.env-orbit` when only the host itself, or a
+reverse proxy running on it, should reach Orbit. Never open port `3000`
+directly to the internet.
 
-The application waits for PostgreSQL, applies versioned migrations, starts the
-notification scheduler, and then serves the full-stack application.
+On start, Orbit waits for the database, applies any pending database
+migrations (schema updates), starts the notification scheduler, then serves
+the application.
 
-Before an upgrade, create and verify a database backup and retain an owner-only
-copy of the exact pre-upgrade `.env-orbit` beside it. The ordinary backup
-manifest intentionally does not contain configuration or secrets; the sidecar
-copy preserves the previous immutable image and provenance identity:
+### Before and after an upgrade
+
+Before an upgrade, take a backup, check it, and keep a copy of the current
+`.env-orbit` beside it, readable only by you. The backup deliberately holds
+no configuration or secrets; the saved `.env-orbit` records exactly which
+build was running, so you can go back to it:
 
 ```sh
 umask 077
@@ -344,27 +367,36 @@ esac
 ORBIT_BACKUP_DIR="$preupgrade_dir" bash scripts/backup.sh --verify "$backup_path" >/dev/null
 ```
 
-The installer validates the image's configuration contract before changing an
-existing `.env-orbit`; legacy configuration is migrated only by the installer
-transaction, which keeps its private rollback copy. Before the installer
-reports that configuration and Compose preflight passed, an ordinary
-configuration or pre-start failure automatically restores the original
-managed file state. Each successful migration records the target semantic
-version and exact image digest in the managed
-`ORBIT_CONFIG_APPLIED_VERSION` and `ORBIT_CONFIG_APPLIED_DIGEST` fields; these
-must match the immutable `ORBIT_IMAGE` digest and must not be edited manually.
-A successful fresh install or recognized directory rename also persists the
-validated `COMPOSE_PROJECT_NAME`. Keep using `docker compose --env-file
-.env-orbit`, `scripts/backup.sh`, and `scripts/restore.sh` from the deployment
-directory so ordinary operator actions continue to address that same Compose
-project after reboot; do not substitute a remembered `--project-name`.
-A hard interruption can bypass cleanup: `.env-orbit` is either the original
-file or a complete atomic new file, never a partial file, and private
-`.orbit-install-staging.*` evidence may remain with owner-only permissions.
-Keep that evidence until recovery is complete.
-A standalone legacy configuration can be inspected with
-`scripts/configuration.sh --preflight` and must be migrated explicitly with
-the target image metadata supplied to `scripts/configuration.sh --migrate`:
+What the installer guarantees during an upgrade:
+
+- It checks the new build's configuration rules before touching an existing
+  `.env-orbit`, and keeps a private rollback copy. Until it reports success, a
+  configuration or pre-start failure automatically restores the original
+  files.
+- Each successful upgrade records the version and build fingerprint it applied
+  in `ORBIT_CONFIG_APPLIED_VERSION` and `ORBIT_CONFIG_APPLIED_DIGEST`. They
+  must match `ORBIT_IMAGE`; never edit them by hand.
+- A fresh install, or a recognised rename of the deployment directory, records
+  the validated `COMPOSE_PROJECT_NAME` (the Compose project name). Keep running
+  `docker compose --env-file .env-orbit`, `scripts/backup.sh` and
+  `scripts/restore.sh` from the deployment directory, and do not pass a
+  remembered `--project-name`, so every command keeps addressing the same
+  containers and volumes after a reboot.
+- If the installer is killed mid-run, `.env-orbit` is either the old file or
+  the complete new one, never half-written. Private
+  `.orbit-install-staging.*` files may be left behind with owner-only
+  permissions; keep them until recovery is complete.
+- Before reusing an existing deployment it proves the deployment is really
+  this one: the Compose project, the database volume's labels, who owns the
+  stopped containers, and the previous build. Moving the directory therefore
+  never quietly creates an empty database. A fresh install is refused if any
+  Orbit database volume already exists, and an update is refused if ownership
+  cannot be proven. Orbit never deletes or resets a database volume by itself.
+  Keep `.orbit-secrets/postgres-password` exactly as it is.
+
+A configuration file from an older Orbit that no installer has migrated can be
+inspected with `scripts/configuration.sh --preflight` and upgraded explicitly,
+giving it the new build's details:
 
 ```sh
 bash scripts/configuration.sh --migrate --orbit-image \
@@ -374,18 +406,12 @@ bash scripts/configuration.sh --migrate --orbit-image \
   --compose-project-name orbit
 ```
 
-The image digest and applied digest must be the same; the command retains one
-owner-only rollback copy beside the file. For a recognized existing
-deployment, the installer proves the Compose project, database volume labels,
-stopped-container ownership, and prior immutable application image before
-reusing that project, so moving the deployment directory does not silently
-create a new database volume. A fresh or pre-provisioned target is refused
-when any Orbit database volume is present, and an existing deployment is
-refused when ownership is ambiguous or cannot be proven. Orbit never deletes
-or resets a database volume automatically; preserve the existing
-`.orbit-secrets/postgres-password` byte-for-byte. If services have started and
-database migration or authentication then fails, stop Orbit and restore both
-the verified backup and the matching owner-only configuration copy:
+The two digests must be the same. The command keeps one owner-only rollback
+copy beside the file, changes the file all at once or not at all, is safe to
+run again, and never rewrites your own values or secrets.
+
+If Orbit has started but the database migration or sign-in then fails, stop
+it and restore both the checked backup and the saved configuration:
 
 ```sh
 docker compose --env-file .env-orbit stop orbit-app
@@ -395,136 +421,137 @@ docker compose --env-file .env-orbit pull orbit-app
 ORBIT_BACKUP_DIR="$preupgrade_dir" bash scripts/restore.sh "$backup_path"
 ```
 
-The restored configuration supplies the exact previous image digest and
-provenance; do not substitute a mutable tag or edit only `ORBIT_IMAGE`. Follow
-the restore confirmation, verify the configured `/api/health` endpoint and
-authenticated sign-in on the previous image, and only then remove the temporary
-copy with `rm -f -- "$preupgrade_config"`. Keep it if health is not verified.
-Configuration migration is atomic and idempotent; it does not rewrite operator
-values or secrets.
+The restored `.env-orbit` names the previous build exactly; do not swap in a
+version name or edit only `ORBIT_IMAGE`. Follow the restore prompts, check
+`/api/health` and that you can sign in on the previous build, and only then
+delete the saved copy with `rm -f -- "$preupgrade_config"`. Keep it until
+health is confirmed.
 
 ### Optional local processing stack
 
-The standard stack includes private ClamAV scanning. Tika OCR/text extraction
-and Ollama are deliberately separate because they increase host memory and are
-never needed for normal operation. To start both optional services, add this to
-`.env-orbit` before starting them:
+The standard stack already scans every upload for malware. Two further
+services are optional, because they need a lot of host memory and normal use
+does not need them: Tika, which extracts text from documents (including OCR
+for scanned pages), and Ollama, which runs an AI model locally. Current Orbit
+releases use Tika only to show bounded review evidence. They never send
+document text to Ollama and never let it create or change household data.
+
+To turn both on, add these lines to `.env-orbit`:
 
 ```sh
 TIKA_URL=http://orbit-tika:9998
 # Choose a local model only after checking its size, licence and host capacity.
 OLLAMA_MODEL=<a-local-model-name>
-```
-
-Select the optional services in `.env-orbit`:
-
-```sh
 COMPOSE_PROFILES=processing,ai
 ```
 
-Then launch the full local stack with the ordinary command:
+Then start Orbit with the usual command:
 
 ```sh
 docker compose --env-file .env-orbit up -d
 ```
 
-Selection lives in configuration rather than in the command, so enabling or
-disabling an optional service later is a one-line edit rather than a different
-command to remember. Leave `COMPOSE_PROFILES` empty for the standard
-deployment, which runs neither the parser nor the model server.
+The choice lives in `.env-orbit`, not in the command, so turning a service on
+or off later is a one-line edit. Leave `COMPOSE_PROFILES` empty for the
+standard stack, which runs neither.
 
-The services have no published host ports. Tika is attached only to a dedicated
-internal processing network shared with Orbit, so it has no route to the
-database, sibling services on the default network, or external networks.
-Ollama remains reachable only on the private default Compose network. Its
-volume is persistent, local-only, uses no cloud models, and is bounded to 2
-CPUs and 6 GiB by default. It does not download a model automatically. After
-the server reports healthy, pull the model selected above explicitly:
+Neither service has a port on the host. Both sit on a private network shared
+only with Orbit and the virus scanner. From there they cannot reach the
+database or the internet. Ollama keeps its models in a local volume, never uses cloud
+models, and is limited to 2 CPUs and 6 GiB of memory by default.
+
+Because Ollama cannot reach the internet, it cannot download a model. Set
+`OLLAMA_MODEL` first, then run the one-off pull helper, which downloads into
+the model volume and exits:
 
 ```sh
-docker compose --env-file .env-orbit \
-  exec orbit-ollama sh -ec 'test -n "$ORBIT_OLLAMA_MODEL"; ollama pull "$ORBIT_OLLAMA_MODEL"'
+docker compose --env-file .env-orbit --profile ai-model-pull \
+  run --rm orbit-ollama-model-pull
 ```
 
-This prepares the optional infrastructure only. Current Orbit releases use
-Tika for bounded review evidence; they do not send document text to Ollama or
-permit it to create or update household data. Stop and remove the optional
-containers with the same Compose arguments followed by `down`; omit `--volumes`
-to retain downloaded models.
+Full details, including hosts with no internet access, are in
+[Private model server and its model pull](docs/administrator-operations.md#private-model-server-and-its-model-pull).
+
+To stop and remove the optional containers, run the same Compose command with
+`down` instead of `up -d`. Leave out `--volumes` to keep downloaded models.
 
 > [!IMPORTANT]
-> Keep `APP_URL`, the address used in the browser, and the OIDC callback host
-> identical. Do not switch between `localhost` and `127.0.0.1` during a sign-in
-> attempt.
+> Use one address everywhere: `APP_URL`, the address in the browser, and the
+> callback address registered with the identity provider. Do not switch
+> between `localhost` and `127.0.0.1` part-way through a sign-in.
 
-Orbit never exposes a household workspace to an unauthenticated visitor. A
-fresh instance is unclaimed until an operator opens the claim link printed in
-the container's own start-up log (see
-[authentication.md](docs/authentication.md#claiming-a-fresh-install)); the
-person who claims it becomes the initial instance administrator and completes
-a guided setup for the household name, timezone, currency, and sections. The
-wizard offers Home, Vehicles, Devices, and Services as sensible defaults or
-accepts a fully custom section list.
+Nobody sees a household without signing in. A new Orbit stays unclaimed until
+someone opens the claim link printed in the container's start-up log (see
+[Claiming a fresh install](docs/authentication.md#claiming-a-fresh-install)).
+That person becomes the first instance administrator and is walked through
+setup: household name, timezone, currency and sections. Home, Vehicles,
+Devices and Services are offered as defaults, or you can give your own list.
 
-Instance administrators can manage every household and grant or remove
-administrator access for other registered users. Orbit prevents removal of the
-last administrator.
+<!-- screenshot: first-run setup wizard, sections step -->
+
+Instance administrators can manage every household and can grant or remove
+administrator access for other users. Orbit will not let the last
+administrator be removed.
 
 ### Update and launch an existing checkout
 
-Once the host has a configured `.env-orbit`, update and start Orbit with:
+Once `.env-orbit` exists, update and start Orbit from a checkout with:
 
 ```sh
 ./scripts/update-and-start.sh
 ```
 
-The script fast-forwards the current Git branch, pulls the official PostgreSQL
-image, refreshes the application build layers, rebuilds the `orbit-app`
-service, starts the stack in the background, and prints the resulting service
-status. It stops immediately if Git, Docker Compose v2, or `.env-orbit` is
-unavailable.
+It pulls the latest source (fast-forward only), pulls the PostgreSQL and
+ClamAV images, rebuilds the Orbit image, starts the stack in the background
+and prints the service status. It stops at once if Git, Docker Compose v2 or
+`.env-orbit` is missing.
 
 ## Production foundation
 
 Orbit already includes:
 
-- a clean first-run wizard, instance administrators, and owner-controlled
-  household membership;
-- create, edit, schedule, remind, archive, undo, and restore workflows;
-- recurrence suggestions and household-local calendar-date rules;
-- a schedule-aware notification centre with read, dismiss, and snooze state;
-- per-user email and browser-push delivery preferences;
-- atomic, audited household ownership transfer;
-- PostgreSQL/Drizzle models for users, sessions, households, memberships,
-  items, events, reminders, push devices, delivery state, and audit history;
-- local password accounts, always available, and optional provider-neutral
-  OpenID Connect discovery and Authorization Code flow with S256 PKCE — see
+- a first-run setup wizard, instance administrators, and household membership
+  controlled by each household's owner;
+- create, edit, schedule, remind, archive, undo and restore;
+- recurrence suggestions and calendar-date rules that follow the household's
+  own timezone;
+- a notification centre that knows the schedule, with read, dismiss and
+  snooze;
+- per-user choices for email and browser-push delivery;
+- household ownership transfer that happens all at once and is written to
+  the audit history;
+- a PostgreSQL database (managed with Drizzle) for users, sessions,
+  households, memberships, items, events, reminders, push devices, delivery
+  state and audit history;
+- local password accounts, always available, plus optional sign-in through
+  any standard OpenID Connect provider using the recommended flow
+  (Authorization Code with PKCE) — see
   [authentication.md](docs/authentication.md);
-- just-in-time OIDC user provisioning and immutable issuer/subject identities
-  when OIDC is enabled;
-- SMTP and Web Push delivery through an atomic PostgreSQL-backed scheduler;
-- an authentication gate that reveals no workspace or cached household data to
+- when a provider is on, accounts are created at first sign-in and tied
+  permanently to that provider's identity for the person;
+- email and browser-push delivery through a scheduler that uses PostgreSQL
+  to make sure each notification is claimed once;
+- a sign-in gate that shows nothing about a workspace or a household to
   signed-out visitors;
-- production health checks, standalone Next.js output, a purpose-built browser
-  favicon, and version-controlled migrations.
-- bounded PDF/JPEG/PNG uploads, ClamAV malware rejection, per-document
-  AES-256-GCM envelope encryption, quotas, audited downloads, soft deletion,
-  retention purge, and storage reconciliation — see
-  [Encryption at rest](docs/encryption-at-rest.md) for the full picture,
-  including what this does not protect and why.
+- production health checks, a standalone server build, a purpose-built
+  browser favicon, and version-controlled migrations;
+- document uploads (PDF, JPEG, PNG) with size limits, malware rejection by
+  ClamAV, a separate encryption key for each document, quotas, audited
+  downloads, soft deletion, timed purge and storage reconciliation — see
+  [Encryption at rest](docs/encryption-at-rest.md) for what this protects,
+  what it does not, and why.
 
-Orbit does not retain authenticated workspace snapshots or queued changes in
-app-controlled browser storage. It purges the legacy preview-build IndexedDB
-database before session bootstrap and local logout, and its service worker
-excludes API and authentication responses. Production images contain no sample
-household items or seeded fake records.
+Orbit does not keep workspace data or pending changes in the browser's own
+storage. It removes the old preview-build IndexedDB database before a session
+starts and on sign-out, and its service worker never caches API or sign-in
+responses. Production images contain no sample households or seeded records.
 
 ## Local development
 
 ### Requirements
 
 - Node.js 22 or later
-- pnpm 11
+- pnpm, at the version `package.json` pins under `packageManager`
 - PostgreSQL 18, or Docker for the database only
 
 ### Start the development stack
@@ -588,14 +615,15 @@ bash scripts/test-e2e-local.sh --keep
 bash scripts/test-e2e-local.sh --reuse <project> --spec tests/e2e/v19-mail-review.spec.ts
 ```
 
-Only assemble the Compose commands by hand -- as that script's own `--keep`
-output does when it prints the exact teardown line -- when you need to inspect
-a stack between steps. `docker-compose.yml`'s `name: orbit` and `.env-orbit`'s
-`COMPOSE_PROJECT_NAME` both default the project to the *same* name a real
-deployment uses, from any checkout, so a bare `--env-file .env-orbit` command
-with no `-p` can silently attach to that deployment's containers and named
-volumes instead of creating its own -- this is the trap AGENTS.md documents
-and issue #536 hit for real. Always pass an isolating `-p`:
+If you run the Compose commands by hand (for example to inspect a stack
+between steps), always pass an isolating `-p`, or you can silently attach to
+your real deployment's containers and data. `docker-compose.yml`'s
+`name: orbit` and `.env-orbit`'s `COMPOSE_PROJECT_NAME` both default to the
+same project name a real deployment uses, from any checkout, so a bare
+`--env-file .env-orbit` command with no `-p` reuses that deployment's
+containers and named volumes instead of creating its own. AGENTS.md documents
+this trap and issue #536 hit it for real. The `--keep` output prints the
+exact teardown line to use:
 
 ```sh
 docker compose -p orbit-acceptance-local --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.acceptance.yml up --build --wait
@@ -640,48 +668,52 @@ outside the stable contract remain in the
 
 ## Configuration
 
-All supported runtime variables are documented in
-[`.env-orbit.example`](.env-orbit.example). Sensitive settings accept either
-their direct variable or the corresponding `_FILE` variable. Do not configure
-both forms for the same setting.
+Every supported setting is listed, with comments, in
+[`.env-orbit.example`](.env-orbit.example). A sensitive setting can be given
+either directly (for example `SESSION_SECRET`) or as the path to a file
+holding it (`SESSION_SECRET_FILE`). Set one form or the other, never both.
 
-The generated `.env-orbit` is a concise operator file arranged into Core,
-Authentication, Generated secrets and keys, Deployment, Optional services,
-and Observability sections. Reference-only defaults and tuning examples remain
-in `.env-orbit.example`. Configure an optional group as a complete unit, then
-run `bash scripts/configure.sh --check` before starting or updating Orbit. The
-check reports only field names and readiness states, never values.
+The generated `.env-orbit` is short and grouped into Core, Authentication,
+Generated secrets and keys, Deployment, Optional services and Observability.
+Defaults and tuning examples stay in `.env-orbit.example` for reference. Fill
+in an optional group completely or not at all, then run
+`bash scripts/configure.sh --check` before starting or updating Orbit. The
+check prints setting names and their state, never values.
 
-Examples below demonstrate the expected shape. Generate real secrets; do not
-copy placeholder secret values into a public deployment.
+The examples below show the expected shape only. Generate real secrets; never
+copy a placeholder into a real deployment.
 
-The installer creates and mounts the PostgreSQL password and Orbit session
-secret files. If you choose another `_FILE` setting, create that file yourself
-and add a matching read-only secret mount to the Compose service.
+The installer creates and mounts the PostgreSQL password and session secret
+files for you. If you choose a different `_FILE` setting, create that file
+yourself and add a matching read-only secret mount to the Compose service.
+
+In the table, a "digest" is a build's fingerprint: it identifies one exact
+build and nothing else. The "document key-encryption key" is the master key
+that protects each document's own key.
 
 | Variable | Used by | Purpose | Example value |
 | --- | --- | --- | --- |
-| `APP_URL` | Orbit | Canonical browser origin used for cookies and request validation. Use HTTPS except on loopback. | `https://orbit.example.com` |
+| `APP_URL` | Orbit | The address people use in the browser; also used for cookies and request checks. Use HTTPS except on loopback. | `https://orbit.example.com` |
 | `ORBIT_IMAGE` | Compose | Exact `registry/repository@sha256:...` identity for pulled deployments. Repository build scripts supply a revision-specific local tag instead. | `ghcr.io/tomlawesome/orbit@sha256:<64 lowercase hexadecimal characters>` |
 | `ORBIT_BIND_ADDRESS` | Compose | Host interface that publishes Orbit. Use loopback when a reverse proxy is on the same host. | `0.0.0.0` |
 | `ORBIT_PORT` | Compose | Host TCP port mapped to container port 3000. | `3000` |
 | `SESSION_SECRET` | Orbit | Direct session-signing secret. Leave empty when `SESSION_SECRET_FILE` is set. | `<64-character-random-hex>` |
 | `SESSION_SECRET_FILE` | Orbit | File containing the session-signing secret. The Compose stack overrides this to `/run/secrets/...`. | `.orbit-secrets/session-secret` |
-| `SESSION_TTL_SECONDS` | Orbit | Login-session lifetime in seconds. | `604800` |
-| `DOCUMENTS_ROOT` | Orbit | Durable encrypted-document root inside the container. | `/var/lib/orbit/documents` |
-| `DOCUMENTS_QUARANTINE_ROOT` | Orbit | Ephemeral plaintext quarantine; Compose supplies a private `tmpfs`. | `/tmp/orbit-document-quarantine` |
+| `SESSION_TTL_SECONDS` | Orbit | How long a sign-in lasts, in seconds. | `604800` |
+| `DOCUMENTS_ROOT` | Orbit | Where encrypted documents are kept inside the container. | `/var/lib/orbit/documents` |
+| `DOCUMENTS_QUARANTINE_ROOT` | Orbit | Temporary holding area for an upload while it is scanned; Compose supplies a private in-memory folder that disappears on restart. | `/tmp/orbit-document-quarantine` |
 | `DOCUMENT_KEK` | Orbit | Direct 32-byte hexadecimal document key-encryption key. Leave empty when the file form is used. | `<64-character-random-hex>` |
 | `DOCUMENT_KEK_FILE` | Orbit | File containing the document key-encryption key. Compose mounts the generated file under `/run/secrets`. | `.orbit-secrets/document-kek` |
-| `DOCUMENT_KEK_NEXT` / `DOCUMENT_KEK_NEXT_FILE` | Orbit | Second document KEK, held alongside the first only for the duration of an online rotation (#954). Set only via the `docker-compose.kek-rotation.yml` overlay — see "Rotating the document key-encryption key" in `docs/administrator-operations.md`. | `<64-character-random-hex>` |
-| `DOCUMENT_MAX_BYTES` | Orbit | Maximum bytes accepted for one document. | `26214400` |
-| `DOCUMENT_HOUSEHOLD_QUOTA_BYTES` | Orbit | Maximum retained document bytes for one household. | `5368709120` |
-| `DOCUMENT_INSTANCE_QUOTA_BYTES` | Orbit | Maximum retained document bytes for the instance. | `21474836480` |
-| `DOCUMENT_RETENTION_DAYS` | Orbit | Soft-delete interval before irreversible document purge. | `30` |
-| `DOCUMENT_SCAN_MODE` | Orbit | `required` fails closed when ClamAV is unavailable; `disabled` is an explicit warned bypass. | `required` |
+| `DOCUMENT_KEK_NEXT` / `DOCUMENT_KEK_NEXT_FILE` | Orbit | Second document key-encryption key, held alongside the first only while a key rotation is in progress (#954). Set only via the `docker-compose.kek-rotation.yml` overlay — see "Rotating the document key-encryption key" in `docs/administrator-operations.md`. | `<64-character-random-hex>` |
+| `DOCUMENT_MAX_BYTES` | Orbit | Largest upload accepted, in bytes. | `26214400` |
+| `DOCUMENT_HOUSEHOLD_QUOTA_BYTES` | Orbit | Most document storage one household may keep. | `5368709120` |
+| `DOCUMENT_INSTANCE_QUOTA_BYTES` | Orbit | Most document storage the whole instance may keep. | `21474836480` |
+| `DOCUMENT_RETENTION_DAYS` | Orbit | Days a deleted document can still be restored before it is purged for good. | `30` |
+| `DOCUMENT_SCAN_MODE` | Orbit | `required` refuses uploads when ClamAV is unavailable; `disabled` skips scanning and shows a permanent warning. | `required` |
 | `CLAMAV_HOST` | Orbit | Private Compose hostname of the ClamAV daemon. | `orbit-clamav` |
 | `CLAMAV_PORT` | Orbit | Private ClamAV daemon port; do not publish it on the host. | `3310` |
-| `CLAMAV_TIMEOUT_MS` | Orbit | Maximum malware-scan duration per upload. | `30000` |
-| `CLAMAV_MEMORY_LIMIT` | Compose | Memory limit assigned to the scanner container. | `4g` |
+| `CLAMAV_TIMEOUT_MS` | Orbit | Longest a malware scan may take per upload. | `30000` |
+| `CLAMAV_MEMORY_LIMIT` | Compose | Memory limit for the scanner container. | `4g` |
 | `DATABASE_URL` | Orbit | Complete PostgreSQL connection URL. Leave empty when using the individual PostgreSQL settings. | `postgres://orbit:example-password@postgres:5432/orbit` |
 | `DATABASE_URL_FILE` | Orbit | File containing a complete database URL instead of `DATABASE_URL`. | `/run/secrets/orbit-database-url` |
 | `POSTGRES_HOST` | Orbit | PostgreSQL hostname. Compose overrides the host-local default with the database service name. | `localhost` |
@@ -690,75 +722,82 @@ and add a matching read-only secret mount to the Compose service.
 | `POSTGRES_USER` | Orbit and PostgreSQL | PostgreSQL role created and used by Orbit. | `orbit` |
 | `POSTGRES_PASSWORD` | Orbit and PostgreSQL | Direct database password. Leave empty when the password file is used. | `<generated-random-password>` |
 | `POSTGRES_PASSWORD_FILE` | Orbit and PostgreSQL | File containing the generated PostgreSQL password. | `.orbit-secrets/postgres-password` |
-| `OIDC_ISSUER` | Orbit | HTTPS issuer/discovery URL for the OpenID Connect provider. | `https://auth.example.com/application/o/orbit/` |
-| `OIDC_CLIENT_ID` | Orbit | Client identifier registered with the identity provider. | `orbit` |
+| `OIDC_ISSUER` | Orbit | The identity provider's HTTPS address, which Orbit also uses to discover its settings. | `https://auth.example.com/application/o/orbit/` |
+| `OIDC_CLIENT_ID` | Orbit | The client ID the identity provider gave Orbit. | `orbit` |
 | `OIDC_CLIENT_SECRET` | Orbit | Direct OIDC client secret. Leave empty when the file form is used. | `<provider-generated-secret>` |
 | `OIDC_CLIENT_SECRET_FILE` | Orbit | File containing the OIDC client secret. | `/run/orbit-secrets/orbit-oidc-client-secret` |
-| `OIDC_CALLBACK_URL` | Orbit | Exact callback URI registered with the identity provider. | `https://orbit.example.com/api/auth/callback` |
+| `OIDC_CALLBACK_URL` | Orbit | The exact return address registered with the identity provider. | `https://orbit.example.com/api/auth/callback` |
 | `OIDC_SCOPES` | Orbit | Space-separated scopes requested during sign-in; must contain `openid`. | `openid profile email` |
-| `OIDC_EMAIL_CLAIM` | Orbit | ID-token claim containing the user email address. | `email` |
-| `OIDC_EMAIL_VERIFIED_CLAIM` | Orbit | ID-token claim indicating whether the email is verified. | `email_verified` |
-| `OIDC_NAME_CLAIM` | Orbit | ID-token claim used as the registered user’s display name. | `name` |
-| `OIDC_AVATAR_CLAIM` | Orbit | Optional ID-token claim containing the avatar URL. | `picture` |
+| `OIDC_EMAIL_CLAIM` | Orbit | Which field of the provider's ID token holds the email address. | `email` |
+| `OIDC_EMAIL_VERIFIED_CLAIM` | Orbit | Which field says whether the email is verified. | `email_verified` |
+| `OIDC_NAME_CLAIM` | Orbit | Which field becomes the person's display name. | `name` |
+| `OIDC_AVATAR_CLAIM` | Orbit | Optional field holding the avatar URL. | `picture` |
 | `SMTP_HOST` / `SMTP_PORT` | Worker | SMTP server host and port. | `smtp.example.com` / `587` |
 | `SMTP_SECURITY` | Worker | `starttls` (port 587) or `implicit_tls` (port 465); plaintext SMTP is unsupported. | `starttls` |
 | `SMTP_USER` / `SMTP_PASSWORD_FILE` | Worker | SMTP login and a file containing its password. | `orbit@example.com` / `/run/orbit-secrets/orbit-smtp-password` |
 | `SMTP_URL` | Worker | Deprecated compatibility form; do not set it with the individual SMTP settings. | `smtps://orbit%40example.com:password@smtp.example.com:465` |
 | `SMTP_FROM` | Worker | Display name and sender address for reminder email. | `Orbit <orbit@example.com>` |
-| `VAPID_SUBJECT` | Worker | Contact URI included in Web Push VAPID claims. VAPID enables browser/PWA native notifications; it is not Pushover. | `mailto:admin@example.com` |
-| `VAPID_PUBLIC_KEY` | Browser and worker | Public VAPID key generated for this deployment. | `<base64url-public-key>` |
-| `VAPID_PRIVATE_KEY` | Worker | Direct private VAPID key. Leave empty when the file form is used. | `<base64url-private-key>` |
-| `VAPID_PRIVATE_KEY_FILE` | Worker | File containing the private VAPID key. | `/run/secrets/orbit-vapid-private-key` |
-| `WORKER_POLL_SECONDS` | Worker | Interval between notification queue scans. | `60` |
-| `MAINTENANCE_TICK_SECONDS` | Worker | Interval between checks for a due scheduled maintenance notice. Scheduled maintenance begins on the clock, not on this tick; the tick only records the change durably. | `30` |
+| `VAPID_SUBJECT` | Worker | Contact address sent with browser push notifications. VAPID is the standard for browser and PWA push; it is not Pushover. | `mailto:admin@example.com` |
+| `VAPID_PUBLIC_KEY` | Browser and worker | Public push key generated for this deployment. | `<base64url-public-key>` |
+| `VAPID_PRIVATE_KEY` | Worker | Direct private push key. Leave empty when the file form is used. | `<base64url-private-key>` |
+| `VAPID_PRIVATE_KEY_FILE` | Worker | File containing the private push key. | `/run/secrets/orbit-vapid-private-key` |
+| `WORKER_POLL_SECONDS` | Worker | Seconds between checks of the notification queue. | `60` |
+| `MAINTENANCE_TICK_SECONDS` | Worker | Seconds between checks for a scheduled maintenance notice that is due. Maintenance begins at its scheduled time regardless; this only records the change. | `30` |
 | `NOTIFICATION_MAX_ATTEMPTS` | Worker | Delivery attempts before a notification is marked failed. | `5` |
-| `MIGRATE_ON_START` | Orbit | Applies pending Drizzle migrations during application startup. Compose sets this to `true`. | `false` |
+| `MIGRATE_ON_START` | Orbit | Applies pending database migrations at startup. Compose sets this to `true`. | `false` |
 | `WORKER_ENABLED` | Orbit | Runs the notification scheduler inside the application container. Compose sets this to `true`. | `false` |
 | `DRIZZLE_MIGRATIONS_PATH` | Orbit | Directory containing versioned SQL migrations. | `drizzle` |
 | `ORBIT_SECRETS_DIR` | Compose | Host directory containing files mounted as Compose secrets. | `./.orbit-secrets` |
 
 Inbound mail (the mailbox Orbit polls for incoming statements and documents)
-is no longer environment configuration: an instance administrator sets it
-from the administration screen, and Orbit stores the credential encrypted in
-the database (ADR-0017). No `IMAP_*` environment key is accepted any more.
+is not set here any more. An instance administrator sets it on the
+administration screen, and Orbit stores the credential encrypted in the
+database (ADR-0017). No `IMAP_*` setting is accepted.
 
 Use `docker-compose.mail.yml` once the SMTP password file exists. The
 complete operator procedure and production-like acceptance boundary are
 documented in
 [Orbit administrator operations](docs/administrator-operations.md).
 
-For production, use HTTPS, file-backed secrets, a private PostgreSQL connection,
-and valid OIDC, SMTP, and VAPID credentials. Keep recovery bundles outside the
-Docker host before storing real household data.
+For production, use HTTPS, file-backed secrets, a private PostgreSQL
+connection, and working identity-provider, SMTP and push credentials. Keep
+recovery bundles somewhere other than the Docker host before storing real
+household data.
 
-Create a validated ordinary backup containing the PostgreSQL database and an
-encrypted document-volume archive:
+### Backups
+
+Create a checked backup of the PostgreSQL database and an encrypted archive
+of the document volume:
 
 ```sh
 bash scripts/backup.sh
 ```
 
-The ordinary backup deliberately excludes the document key and is useful only
-with the matching local key. Restore it transactionally while Orbit is stopped:
+The ordinary backup deliberately leaves out the document key, so it is only
+useful together with the key on this host. Restore it while Orbit is stopped;
+the restore either completes fully or changes nothing:
 
 ```sh
 bash scripts/restore.sh backups/orbit-YYYYMMDD-HHMMSS.tar
 ```
 
-Create a separately stored, passphrase-protected recovery bundle when the
-backup must remain recoverable after loss of the host:
+When the backup must survive losing the host, create a recovery bundle
+protected by a passphrase and store it elsewhere:
 
 ```sh
 bash scripts/export-recovery-bundle.sh backups/orbit-YYYYMMDD-HHMMSS.tar
 bash scripts/import-recovery-bundle.sh backups/orbit-recovery-YYYYMMDD-HHMMSS.tar
 ```
 
-The recovery-key envelope uses authenticated AES-256-GCM with scrypt. Neither
-the document key nor recovery passphrase is printed, placed in an environment
-variable, or passed as a process argument.
+The bundle is sealed with strong, tamper-evident encryption (AES-256-GCM,
+with the key derived from the passphrase by scrypt). Neither the document key
+nor the passphrase is ever printed, put in an environment variable or passed
+on a command line.
 
-Build or deploy the Compose application through the same guarded scripts used
-by CI:
+### Build or deploy
+
+Build or deploy the Compose application through the same guarded scripts CI
+uses:
 
 ```sh
 bash scripts/build-container.sh

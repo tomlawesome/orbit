@@ -196,11 +196,12 @@ enough to take one of these actions.
 
 - A user with a local password re-enters it inline, next to the action. It is
   checked under the same backoff and pacing as ordinary sign-in.
-- A user with only an OIDC identity is sent to the provider with `max_age=0`,
-  forcing a fresh provider sign-in, and Orbit requires the returned `auth_time`
-  to be no more than about 60 seconds old. A provider that cannot do this
-  fails the action closed with `step_up_failed` rather than allowing it
-  through — that is the correct direction for that failure.
+- A user with only an OIDC identity is sent back to the provider to sign in
+  again. Orbit asks the provider for a fresh sign-in (it sends `max_age=0`)
+  and accepts the result only if the provider says the sign-in happened
+  within about the last 60 seconds. A provider that cannot do this refuses
+  the action with `step_up_failed` rather than letting it through; refusing
+  is the correct direction for that failure.
 - The resulting proof is bound to the session and the specific action, is
   spent the moment it is used, and cannot be replayed even within its short
   (120 second) life.
@@ -233,8 +234,15 @@ In the Authentik Admin interface:
 3. Add the Orbit callback as a **Strict** redirect URI. For production use `https://orbit.your-domain.tld/api/auth/callback`. Loopback development may instead use `http://127.0.0.1:3000/api/auth/callback`.
 4. Include the standard `openid`, `profile`, and `email` scope mappings.
 5. Keep the recommended per-provider issuer mode. With an application slug of `orbit`, the issuer is normally `https://auth.example.com/application/o/orbit/`.
-6. Select an asymmetric **Signing key**, such as Authentik's self-signed certificate. Orbit intentionally accepts asymmetric ID-token algorithms only and validates them against the provider's JWKS.
+6. Select an asymmetric **Signing key**, such as Authentik's self-signed certificate. Orbit only trusts sign-in tokens it can check against the provider's published public keys (its JWKS); it deliberately refuses tokens signed with a shared secret.
 7. Select a stable, non-email subject mode, such as a hashed user ID or user UUID. Changing this setting later creates a new Orbit identity from the application's perspective.
+
+<!-- screenshot: Authentik's OAuth2/OIDC provider form, showing client type, redirect URI, signing key and subject mode -->
+
+The settings this produces, in plain terms: Orbit sends the person to
+Authentik to sign in, Authentik sends them back to Orbit's callback address
+with a signed token, and Orbit checks that token's signature and contents
+before it seats a session.
 
 The guided configuration commands and their contract are in "Adding OIDC
 later" above. The resulting production settings have this shape:
@@ -265,7 +273,11 @@ and `http://127.0.0.1:3000/api/auth/callback` for the callback. Do not use
 plain HTTP, loopback names, or documentation placeholder domains for a real
 deployment.
 
-Authentik currently reports `email_verified` independently of the `email` claim. Orbit requires a usable email address but does not pretend an unverified address is verified: it records the claim as supplied and can use that status for future policy decisions.
+Authentik currently reports `email_verified` separately from the `email`
+claim (a claim is one named field inside the sign-in token). Orbit requires
+a usable email address but does not pretend an unverified address is
+verified: it records the claim as supplied and can use that status for
+future policy decisions.
 
 Relevant Authentik references:
 
@@ -343,6 +355,12 @@ await fetch("/api/auth/session/refresh", {
 ```
 
 ## Security model
+
+In short: Orbit keeps every sign-in secret on the server, never in the
+browser; it checks that every request that changes something came from its
+own pages; and it answers a failed sign-in with the same one word however it
+failed, so nobody can learn which accounts exist. The list below is the
+detail behind that, for readers who want to check it.
 
 - Local passwords are hashed with Argon2id and verified through an in-process
   concurrency gate so a burst of sign-in attempts cannot exhaust the host;
