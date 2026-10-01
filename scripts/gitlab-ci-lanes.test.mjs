@@ -166,6 +166,7 @@ describe("pipeline lanes", () => {
       "licence_policy",
       "repair_journeys",
       "smoke",
+      "smoke_firefox",
       "smoke_local_only",
       "supply_chain_image",
       "supply_chain_source",
