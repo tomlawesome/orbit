@@ -305,3 +305,7 @@ page's URL at failure, which this one has to infer.
 ## fidelity: door-station.spec.js:103 "the ring's hand-over to a card at 390x664, motion no-preference › the ring travels from the door's station to the card's"
 
 - 2026-10-01 · d3141346 (!1013, #1183's Firefox projects for tests/e2e; nothing under web/ or tests/fidelity) · pipeline 1926 / fidelity (job 28697) · "a jump between frames at 317ms": 38.9 against the < 20 bound. The full fidelity runs on !1010 and !1012 just before it passed, and the same pipeline's smoke ran about eleven minutes longer than usual alongside it on the shared runner. First sighting; an issue on the third.
+
+## tour-pocket-webkit.spec.js "plays end to end at 430x932 under normal motion" — pill moving between places (#1174)
+
+- 2026-10-01 · c952834f · local `pocket-webkit` (Playwright image, WebKit) · one fault, "pill moving between places (dim raised) · /create · ch2": the pill was mid-move for over the check's 3s at one sample, with the page painting 9.6 frames a second on a busy host. Green on an immediate rerun of the test alone on the same code (12.2 frames a second). The move is a 350ms fade, so this is the sampler's wall-clock bound under load.
