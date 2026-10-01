@@ -92,6 +92,9 @@ export const SELECTORS = Object.freeze({
     /** The star chart, so the demo body has somewhere real to live. */
     dial: ".dial",
     dialSvg: ".dial",
+    /** The household's sun — where "MOT passed" is read when no body
+     *  carries a paper (#1174 round 6). */
+    sun: ".sun-link",
     /** The demo body this chapter draws and removes; never a real item. */
     body: ".tourfilm-time-body",
   }),
@@ -154,25 +157,44 @@ export default {
     const { pocket, setScreen, veil, ctl, goto, press, light, unlight, callout, dropCallout, tween, w, T, mark, dry, doc } = ctx;
     const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
-    await setScreen("/item");
-    veil(true);
+    if (ctx.carriesPapers && !ctx.carriesPapers()) {
+      /* #1174 round 6 (Fable's call): no body carries a paper, so chapter 8
+         stayed on the sky and there is no item here to open. The first
+         line is read over the dial, the sun ringed, with no press; the
+         swing back out below plays as it always has. */
+      await setScreen("/home");
+      veil(true);
+      const sun = ctl({ sel: S.sun, round: true });
+      await goto(sun, { willPress: false });
+      await callout(
+        "MOT passed — mark it done and it swings back out to next year.",
+        sun,
+        pocket ? "bottom" : "top",
+        pocket ? { w: 240, dy: 30, mark: "done-complete" } : { w: 240, mark: "done-complete" },
+      );
+      dropCallout();
+      unlight(sun);
+    } else {
+      await setScreen("/item");
+      veil(true);
 
-    /* The whole card stays lit while the complete button is taught within it. */
-    const card = ctl({ sel: S.card, radius: 16, optional: true });
-    light(card);
+      /* The whole card stays lit while the complete button is taught within it. */
+      const card = ctl({ sel: S.card, radius: 16, optional: true });
+      light(card);
 
-    const done = ctl({ sel: S.done, radius: pocket ? 22 : 10, optional: true });
-    await goto(done);
-    await callout(
-      "MOT passed — mark it done and it swings back out to next year.",
-      done,
-      "left",
-      { w: 240, mark: "done-complete" },
-    );
-    await press(done);
-    dropCallout();
-    unlight(done);
-    unlight(card);
+      const done = ctl({ sel: S.done, radius: pocket ? 22 : 10, optional: true });
+      await goto(done);
+      await callout(
+        "MOT passed — mark it done and it swings back out to next year.",
+        done,
+        "left",
+        { w: 240, mark: "done-complete" },
+      );
+      await press(done);
+      dropCallout();
+      unlight(done);
+      unlight(card);
+    }
 
     /* Home again, undimmed: the item — drawn, never written — settles back
        out to next year in front of the reader. */

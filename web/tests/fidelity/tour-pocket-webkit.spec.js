@@ -1275,3 +1275,67 @@ test.describe("chapter 8 plays through on a new household (#1174 round 6)", () =
     });
   }
 });
+
+/* ---- round 6, Fable's call (#1174, 2026-10-01) -------------------------
+   On a household with no papers (nothing in it, or items that carry none)
+   chapters 8 and 9 open no item and point at nothing: chapter 8 stays on
+   the sky and reads its two lines over the dial with the sun ringed;
+   chapter 9 reads "MOT passed" there too, with no press, then plays its
+   second line as before. So, on an empty household at 390x844: every line
+   either chapter shows is anchored to an element on the screen, with its
+   stem on it, and the film never walks to /item. */
+test.describe("chapters 8 and 9 stay on the sky when nothing carries a paper (#1174 round 6)", () => {
+  test("at 390x844 on a household with nothing in it, every line of chapters 8 and 9 points at something on the screen, and no item is opened", async ({ browser }) => {
+    test.setTimeout(150_000);
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+      reducedMotion: "no-preference",
+    });
+    const page = await context.newPage();
+    await emptyHousehold(page);
+    const errors = await openFilm(page);
+    await page.waitForFunction(() => document.querySelector(".pocket .mdial") && !document.querySelector(".pocket .pk-below .pk-list"),
+      null, { timeout: 30_000 });
+    const ids = await page.evaluate(() => /** @type {any} */ (window).__chapters.map((/** @type {any} */ c) => c.id));
+    const from = ids.indexOf("belt");
+    const until = ids.indexOf("others");
+    await page.evaluate((k) => /** @type {any} */ (window).__jump(k), from);
+    /** @type {Record<string, number>} */
+    const faults = {};
+    /** @type {Set<string>} */
+    const lines = new Set();
+    /** @type {Set<string>} */
+    const urls = new Set();
+    /** @type {Map<string, number>} */
+    let streak = new Map();
+    let reached = false;
+    const started = Date.now();
+    while (Date.now() - started < 120_000) {
+      const m = await page.evaluate(sample);
+      const s = await page.evaluate(sampleTransport);
+      if (!s || !m) break;
+      if (s.chapter >= until) { reached = true; break; }
+      if (s.chapter < from) { await page.waitForTimeout(250); continue; }
+      urls.add(s.url);
+      for (const text of await page.evaluate(() => [.../** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(".tourfilm-callout"))]
+        .filter((el) => el.style.opacity !== "0").map((el) => (el.textContent ?? "").slice(0, 28)))) lines.add(text);
+      const now = new Map();
+      for (const f of m.faults.filter((one) => one.startsWith("callout"))) {
+        const key = `${f} · ${s.url} · ch${s.chapter + 1}`;
+        const run = (streak.get(key) ?? 0) + 1;
+        now.set(key, run);
+        if (run >= (f.startsWith("callout pointing at nothing") ? 1 : 2)) faults[key] = (faults[key] ?? 0) + 1;
+      }
+      streak = now;
+      await page.waitForTimeout(250);
+    }
+    const waitedOut = await page.evaluate(waitsRunOut);
+    await context.close();
+    expect.soft(errors, "no error in the console").toEqual([]);
+    expect.soft(waitedOut, "no wait for the page ran out").toEqual([]);
+    expect.soft(reached, "the film plays on into chapter 10").toBe(true);
+    expect.soft([...urls].filter((u) => u.startsWith("/item")), "no item is opened in chapters 8 and 9").toEqual([]);
+    expect.soft(lines.size, "the lines of chapters 8 and 9 were seen").toBeGreaterThanOrEqual(4);
+    expect.soft(faults, "every line points at something on the screen").toEqual({});
+  });
+});

@@ -1524,10 +1524,34 @@ ring, calls by Opus 5.5, #1174).**
   preview sheet is required only when a paper was opened, and is then
   waited for, in case a phone raises it after its 300ms. The desk is
   unchanged.
-- **What chapter 8 shows a new household is still open.** Its lines play
-  over the empty card, pointing at nothing, and so does chapter 9's "mark
-  it done" line. Whether the film should stage example papers there, as
-  chapter 4 stages example rows, is a design call for Fable or the owner.
+- **What chapter 8 shows a new household** was left open here, and is
+  settled in the addendum below.
 - **The check** fails on any wait for the page that runs out (the film
   records each one), and plays chapters 7 to 9 on an empty household at
   all three phone sizes, and on a household without papers at 390x844.
+
+**Round 6 addendum, 2026-10-01: chapters 8 and 9 without papers (Fable's
+call, built by Opus 5.5, #1174).**
+
+- **Where no body carries a paper, chapters 8 and 9 open no item and
+  point at nothing.** That covers a household with nothing in it, and one
+  whose items carry no documents. Desk and phone alike.
+- **Chapter 8 stays on the sky.** With the sun ringed, it reads "Every
+  body carries its documents in a belt around it." and then "The belt is
+  what you have attached to it." over the dial. The third line, about
+  reading the page, is dropped, because there is no page to read.
+- **Chapter 9 reads "MOT passed — mark it done and it swings back out to
+  next year." over the dial,** with the sun ringed and no press. Its
+  second line, and the drawn body swinging back out, play as before.
+- **A household with a body carrying a paper plays both chapters exactly
+  as before.**
+- **How the film knows.** It asks the sky once, after home's own read has
+  landed and before the film is measured: is there a body with documents?
+  (`data-docs` on the desk, `data-papers` on the phone.) The answer holds
+  for the whole run, so the chapter markers match what plays.
+- **The film is shorter on this path.** Phone: 3:02 with normal motion,
+  1:56 reduced (3:20 and 2:05 with papers). Desk: 3:00 and 1:56 (3:17 and
+  2:07).
+- **The check** plays chapters 8 and 9 on an empty household at 390x844.
+  Every line must point at something on the screen, and no item may be
+  opened.
