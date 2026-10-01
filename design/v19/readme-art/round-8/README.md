@@ -90,4 +90,5 @@ Nothing is wired into the repo README or `public/` yet.
 
 ## Verdicts
 
-Awaiting owner
+Owner, 2026-10-01 (42a): O, Terminator. Wired into the README as
+docs/images/orbit-mark.svg and docs/images/orbit-banner.png.
