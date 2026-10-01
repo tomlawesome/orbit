@@ -84,6 +84,8 @@ export function createFilm({
     hooks.__jump = player.jump;
     /* #1174: the film's own account of its rings, for the phone check. */
     hooks.__lit = ctx.litBoxes;
+    /* #1174 round 6: every wait for the page that ran out. */
+    hooks.__waitedOut = ctx.waitedOut;
     hooks.__stop = player.stop;
     hooks.__pause = () => player.setPlaying(false);
     hooks.__play = () => player.setPlaying(true);

@@ -290,6 +290,9 @@ export function createFilmContext({
    *  same words the chapter itself plays — never a second copy to forget.
    *  @type {string[]} */
   let transcriptLines = [];
+  /** Every `waitForReal` that ran out (#1174 round 6), for the phone check.
+   *  @type {{ selector: string, ms: number, route: string }[]} */
+  const waitedOut = [];
 
   const dry = () => clock.dry();
   const still = () => clock.reduced();
@@ -606,6 +609,13 @@ export function createFilmContext({
       while (!doc.querySelector(selector) && Date.now() < deadline) {
         await new Promise((res) => setTimeout(res, 32));
       }
+      /* #1174 round 6: a wait that ran out is the film standing still for
+         something that was never coming -- 12 seconds of a frozen clock on
+         the reader's screen (chapter 8 on a new household, waiting for a
+         belt with nothing on it). Recorded, so the phone check can fail on
+         it however fast or slow the host: under the stall budget it looked
+         like an honest wait. */
+      if (!doc.querySelector(selector)) waitedOut.push({ selector, ms: timeoutMs, route: routeOf() });
     } finally {
       release();
     }
@@ -1740,6 +1750,8 @@ export function createFilmContext({
     })),
     /* the script (round 7, #1097): read by player.js's measure() */
     transcript: () => transcriptLines.slice(),
+    /* #1174 round 6: the waits for the page that ran out */
+    waitedOut: () => waitedOut.map((one) => ({ ...one })),
     resetTranscript: () => { transcriptLines = []; },
   };
 }
