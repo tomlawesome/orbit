@@ -237,7 +237,6 @@ In the Authentik Admin interface:
 6. Select an asymmetric **Signing key**, such as Authentik's self-signed certificate. Orbit only trusts sign-in tokens it can check against the provider's published public keys (its JWKS); it deliberately refuses tokens signed with a shared secret.
 7. Select a stable, non-email subject mode, such as a hashed user ID or user UUID. Changing this setting later creates a new Orbit identity from the application's perspective.
 
-<!-- screenshot: Authentik's OAuth2/OIDC provider form, showing client type, redirect URI, signing key and subject mode -->
 
 The settings this produces, in plain terms: Orbit sends the person to
 Authentik to sign in, Authentik sends them back to Orbit's callback address

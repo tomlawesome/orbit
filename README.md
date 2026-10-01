@@ -57,7 +57,6 @@ curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/inst
 Run from a terminal, the installer shows a menu: Install, Update, Repair or
 Exit.
 
-<!-- screenshot: installer menu with Install, Update, Repair, Exit -->
 
 - **Install** sets up a new Orbit in an empty directory. It first asks which
   profile you want: Standard (Orbit, its database and the malware scanner),
