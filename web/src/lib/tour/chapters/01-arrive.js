@@ -94,17 +94,10 @@ export default {
        around it. The mockup lights all five together for the first line and
        drops the outer four for the second, so the sentence about the centre
        is the only thing still lit when it is read. */
-    /* #1174: on the pocket the strip scrolls sideways and keeps every chip in
-       the DOM; only the chips a reader can see are lit (`visible`). */
-    const others = ctl({ sel: S.others, all: true, round: !pocket, radius: pocket ? 22 : undefined, optional: true, visible: pocket });
     await goto(centreSun, { willPress: false });
-    light(others);
-    await callout("Every sun is a household you belong to.", centreSun, pocket ? "bottom" : "top", {
-      ...skyOpts,
-      mark: "arrive-suns",
-    });
-    unlight(others);
-    await callout("That's your sun, at centre — your household, always here.", centreSun, "bottom", skyOpts);
+    /* Owner's cut (2026-10-01, #1174): "Every sun is a household you belong
+       to." is gone; the chapter goes straight to the reader's own sun. */
+    await callout("That's your sun, in the centre — your household, always here.", centreSun, "bottom", skyOpts);
     unlight(centreSun);
 
     /* One of the others, to say what the rest of the sky is for. On the
@@ -122,7 +115,7 @@ export default {
     });
     await goto(gran, { willPress: false });
     await callout(
-      "The rest of the sky holds systems you don't belong to — tap one to fly there.",
+      "Explore the sky to find other households — maybe you belong there too?",
       pocket ? centreSun : gran,
       pocket ? "bottom" : "left",
       { ...skyOpts, mark: "arrive-gran" },

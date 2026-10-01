@@ -321,7 +321,7 @@ export default {
     if (pocket && opened) await waitForReal(S.cardwrap);
     const cardwrap = ctl({ sel: S.cardwrap, radius: 16, optional: pocket && !opened });
     await callout(
-      "The page itself, read without leaving the sky.",
+      "Read the full document, right here.",
       cardwrap,
       pocket ? "top" : "right",
       { mark: "belt-read" },

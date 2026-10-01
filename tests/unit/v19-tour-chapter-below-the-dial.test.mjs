@@ -150,7 +150,7 @@ describe("the selectors chapter 4 names", () => {
     }
   });
 
-  it("names the same manifest the ratified walk already points at, with the same copy", () => {
+  it("names the same manifest the ratified walk already points at, with the same copy (its second line cut, #1174)", () => {
     /* stops.js is where these were ratified; the film must not drift off
        onto its own idea of where the manifest is or what it says. */
     const stop = TOUR_STOPS.find((one) => one.id === "manifest");
@@ -158,7 +158,6 @@ describe("the selectors chapter 4 names", () => {
     expect(SELECTORS.DESK.manifest).toBe("#manifest-top");
     expect(stop.copy).toEqual([
       "The manifest lists what's ahead, nearest first.",
-      "Same law as the dial, read top to bottom instead of round the ring.",
     ]);
   });
 });
@@ -233,23 +232,21 @@ describe("the beats, in the mockup's order", () => {
     expect(veilTrue).toBeLessThan(gotoToday);
   });
 
-  it("says the two ratified lines, in order, each pinned to its own control and mark", async () => {
+  it("says its one ratified line, pinned to today with its mark", async () => {
     const { log, ctx } = recorder();
     await manifest.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel, side, mark]) => [text, sel, side, mark]);
     expect(said).toEqual([
       ["The manifest lists what's ahead, nearest first.", SELECTORS.DESK.today, "left", "manifest-today"],
-      ["Same law as the dial, read top to bottom instead of round the ring.", SELECTORS.DESK.row, "left", "manifest-row"],
     ]);
   });
 
-  it("visits today and one row, never pressing either", async () => {
+  it("visits today alone, never pressing it, and no row since the row's line was cut (#1174)", async () => {
     const { log, ctx } = recorder();
     await manifest.play(ctx);
     const visited = log.filter(([word]) => word === "goto").map(([, sel, willPress]) => [sel, willPress]);
     expect(visited).toEqual([
       [SELECTORS.DESK.today, false],
-      [SELECTORS.DESK.row, false],
     ]);
     expect(log.some(([word]) => word === "press")).toBe(false);
   });
@@ -257,18 +254,19 @@ describe("the beats, in the mockup's order", () => {
   it("veils down again before scrolling back up, and ends veil-free", async () => {
     const { log, ctx } = recorder();
     await manifest.play(ctx);
-    const rowUnlit = log.findIndex(([word, sels]) => word === "unlight" && sels?.includes?.(SELECTORS.DESK.row));
+    const todayUnlit = log.findIndex(([word, sels]) => word === "unlight" && sels?.includes?.(SELECTORS.DESK.today));
+    expect(todayUnlit).toBeGreaterThan(-1);
     const lastVeil = log.filter(([word]) => word === "veil").at(-1);
     expect(lastVeil).toEqual(["veil", false]);
-    const veilFalseAfterRow = log.findIndex(
-      ([word, on], i) => word === "veil" && on === false && i > rowUnlit,
+    const veilFalseAfterToday = log.findIndex(
+      ([word, on], i) => word === "veil" && on === false && i > todayUnlit,
     );
-    expect(veilFalseAfterRow).toBeGreaterThan(rowUnlit);
+    expect(veilFalseAfterToday).toBeGreaterThan(todayUnlit);
   });
 });
 
 describe("the chapter played for real", () => {
-  it("puts its two lines on the screen in order, against a manifest with items", async () => {
+  it("puts its one line on the screen, against a manifest with items", async () => {
     drawHome({ rows: 2 });
     const clock = createClock({ reducedMotion: () => false });
     const ctx = createFilmContext({ clock, doc: document });
@@ -298,7 +296,6 @@ describe("the chapter played for real", () => {
 
     expect(said).toEqual([
       "The manifest lists what's ahead, nearest first.",
-      "Same law as the dial, read top to bottom instead of round the ring.",
     ]);
     ctx.destroy();
   });

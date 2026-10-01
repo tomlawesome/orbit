@@ -236,9 +236,9 @@ export default {
       await goto(body, { willPress: false });
       if (pocket) {
         const sun = ctl({ sel: SELECTORS.POCKET.sun, round: true });
-        await callout("Time runs. The nearer the sun, the sooner.", sun, "bottom", { dy: 30 });
+        await callout("As time rolls by, items gravitate toward your sun, the sooner the event, the closer they are.", sun, "bottom", { dy: 30 });
       } else {
-        await callout("Time runs. The nearer the sun, the sooner.", body, "bottom");
+        await callout("As time rolls by, items gravitate toward your sun, the sooner the event, the closer they are.", body, "bottom");
       }
       unlight(body);
 
@@ -253,7 +253,7 @@ export default {
       /* `pin` (#1174): the line stays at the dial's top, clamped under the
          chrome — round 8's toast position. Without it the pocket's own
          "flip when it does not fit" rule dropped it under the dial instead. */
-      await callout("At a month out it warms, and Orbit reminds you.", dial, "top", { mark: "time-toast", pin: pocket });
+      await callout("Orbit reminds you, visually and through notifications.", dial, "top", { mark: "time-toast", pin: pocket });
       if (pocket) {
         veil(false);
         /* #1174: lit again above for the toast's hole, so unlit again here —

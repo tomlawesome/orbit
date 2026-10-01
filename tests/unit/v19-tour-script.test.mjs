@@ -135,11 +135,15 @@ describe("the film's script (round 7, #1097)", () => {
   it("#1083: is otherwise identical to the desk script, chapter for chapter", async () => {
     const desk = await stage({ pocket: false }).player.measure();
     const pocket = await stage({ pocket: true }).player.measure();
-    /* chapter 8 (index 7) carries the one changed line; every other chapter
-       is byte-identical between dialects. */
+    /* chapter 8 (index 7) carries the shortened belt line, and chapter 3
+       (index 2) the owner's two first lines (#1174, 2026-10-01): the desk
+       sizes a body by its cost and says so, the pocket does not. Every other
+       chapter is byte-identical between dialects. */
     desk.script.forEach((lines, k) => {
-      if (k === 7) return;
+      if (k === 7 || k === 2) return;
       expect(pocket.script[k], `chapter ${k + 1}`).toEqual(lines);
     });
+    expect(desk.script[2]).toEqual(["Bodies orbit by when they're due, higher value events are larger."]);
+    expect(pocket.script[2]).toEqual(["Bodies orbit by when they're due."]);
   });
 });

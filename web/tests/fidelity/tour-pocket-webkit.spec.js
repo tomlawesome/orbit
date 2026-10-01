@@ -31,7 +31,7 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
  * rewrites the host's node_modules (environment skill, 2026-08-24).
  *
  * Two passes, both under reduced motion so the whole thing fits a CI job
- * (the played film is 2:09 reduced against 3:44; the timings only normal
+ * (the phone's film is 1:42 reduced against 2:55; the timings only normal
  * motion can catch are the clash sampler's, tour-pocket-clash.spec.js). Each
  * pass measured ~2.7 minutes on a quiet host and ~4 under load, so the
  * budget is 7: a stalled film here should fail on what it did, not on the
@@ -61,12 +61,12 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
 /** Every mark the pocket cut fires, chapter by chapter (chapters/*.js;
  *  `add-yearly` is desk-only, #1083 §6). */
 const MARKS = [
-  ["arrive", ["arrive-chart", "arrive-suns", "arrive-gran"]],
+  ["arrive", ["arrive-chart", "arrive-gran"]],
   ["add", ["add-star", "add-drawer", "add-typing", "add-add"]],
-  ["lands", ["lands-body", "lands-ring"]],
-  ["manifest", ["manifest-scrolled", "manifest-today", "manifest-row"]],
+  ["lands", ["lands-body"]],
+  ["manifest", ["manifest-scrolled", "manifest-today"]],
   ["time", ["time-warmed", "time-toast"]],
-  ["relay", ["relay-addr", "relay-never"]],
+  ["relay", ["relay-addr"]],
   ["inbox", ["inbox-orb", "inbox-lane-review", "inbox-lane-reading", "inbox-lane-filed", "inbox-lanes", "inbox-add", "inbox-sayso"]],
   ["belt", ["belt-arrive", "belt-cert", "belt-svc", "belt-doc", "belt-read", "belt-later", "belt-sooner"]],
   ["done", ["done-complete", "done-swung", "done-round"]],
@@ -728,14 +728,16 @@ test.describe("the pocket film in WebKit (#1174)", () => {
    barely taller than a phone, so the scroll stopped at the page's own end
    (149px at 430x932) and the header stayed 37-47% of the way down. So at
    each phone, under normal motion, the film plays from its own start, as
-   the owner's did, to each of chapter 4's two lines: the page has
-   scrolled, each line's anchor (the manifest's header, then its first row)
-   is on the screen and clear of the pill, and the header has been brought
-   up into the top third of the screen. Chapter 5 then opens on the page at
-   its top, with nothing of the film's left below it. */
+   the owner's did, to chapter 4's line: the page has scrolled, the
+   manifest's header and its first row are both on the screen and clear of
+   the pill, and the header has been brought up into the top third of the
+   screen. Chapter 5 then opens on the page at its top, with nothing of the
+   film's left below it. (The chapter's second line, which pointed at the
+   first row, was the owner's cut, 2026-10-01; the row is still checked, at
+   the one line left.) */
 test.describe("chapter 4 takes the page down to the manifest (#1174 round 4)", () => {
   for (const phone of PHONES) {
-    test(`at ${phone.width}x${phone.height} the manifest is on the screen at both of chapter 4's lines`, async ({ browser }) => {
+    test(`at ${phone.width}x${phone.height} the manifest is on the screen at chapter 4's line`, async ({ browser }) => {
       test.setTimeout(240_000);
       const context = await browser.newContext({
         viewport: { width: phone.width, height: phone.height }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
@@ -745,16 +747,17 @@ test.describe("chapter 4 takes the page down to the manifest (#1174 round 4)", (
       const errors = await openFilm(page);
       /** @type {string[]} */
       const wrong = [];
-      for (const [mark, sel] of [["manifest-today", ".pocket .pk-below h2.p-caps"], ["manifest-row", ".pocket .pk-below .p-row"]]) {
-        await page.evaluate((m) => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = m; }, mark);
-        if (mark !== "manifest-today") await page.evaluate(() => /** @type {any} */ (window).__play());
-        try {
-          await page.waitForFunction((m) => /** @type {any} */ (window).__held === m, mark, { timeout: 150_000 });
-        } catch {
-          wrong.push(`${mark}: never reached`);
-          continue;
-        }
-        await page.waitForTimeout(350);
+      const mark = "manifest-today";
+      await page.evaluate((m) => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = m; }, mark);
+      let reached = true;
+      try {
+        await page.waitForFunction((m) => /** @type {any} */ (window).__held === m, mark, { timeout: 150_000 });
+      } catch {
+        wrong.push(`${mark}: never reached`);
+        reached = false;
+      }
+      if (reached) await page.waitForTimeout(350);
+      for (const [what, sel] of reached ? [["the header", ".pocket .pk-below h2.p-caps"], ["the first row", ".pocket .pk-below .p-row"]] : []) {
         const seen = await page.evaluate((s) => {
           const el = document.querySelector(s);
           const pill = document.getElementById("orbit-tour-transport")?.getBoundingClientRect();
@@ -770,10 +773,10 @@ test.describe("chapter 4 takes the page down to the manifest (#1174 round 4)", (
           };
         }, sel);
         const where = `page at ${seen.scrollY}px of ${seen.most}, anchor ${seen.top}..${seen.bottom}, pill top ${seen.pillTop}, screen ${seen.vh}`;
-        if (!seen.found) wrong.push(`${mark}: ${sel} is not on the page`);
+        if (!seen.found) wrong.push(`${mark}: ${what}, ${sel}, is not on the page`);
         else if (seen.scrollY < 1) wrong.push(`${mark}: the page never left the top (${where})`);
-        else if (seen.top === null || seen.top < 0 || seen.bottom === null || seen.bottom > (seen.pillTop ?? seen.vh)) wrong.push(`${mark}: its anchor is off the screen or under the pill (${where})`);
-        else if (mark === "manifest-today" && seen.top > seen.vh / 3) wrong.push(`${mark}: the manifest's header is still low on the screen, not brought up to it (${where})`);
+        else if (seen.top === null || seen.top < 0 || seen.bottom === null || seen.bottom > (seen.pillTop ?? seen.vh)) wrong.push(`${mark}: ${what} is off the screen or under the pill (${where})`);
+        else if (what === "the header" && seen.top > seen.vh / 3) wrong.push(`${mark}: the manifest's header is still low on the screen, not brought up to it (${where})`);
       }
       /* and chapter 5 opens on the page as the film found it: at its top,
          with nothing of the film's own left below it */
@@ -788,7 +791,7 @@ test.describe("chapter 4 takes the page down to the manifest (#1174 round 4)", (
       }
       await context.close();
       expect(errors, "no error in the console").toEqual([]);
-      expect(wrong, "the manifest on the screen at chapter 4's lines").toEqual([]);
+      expect(wrong, "the manifest on the screen at chapter 4's line").toEqual([]);
     });
   }
 });
@@ -954,11 +957,14 @@ test.describe("suggested values give way to real text (#1174 round 4)", () => {
       what's ahead" and "Same law as the dial" pointed at blank sky. The
       fixture app's household is full, so nothing above could see it. Here
       the household is emptied as the browser reads it (home reads
-      /api/workspace again on mount), and at both of chapter 4's lines the
-      manifest must hold at least one row on the screen, clear of the pill
-      — the film's own example rows where the household has none, each
-      saying it is an example. Once the chapter moves on, and when the
-      film is stopped on one of its lines, nothing the film staged is left.
+      /api/workspace again on mount), and at chapter 4's line the manifest
+      must hold at least one row on the screen, clear of the pill — the
+      film's own example rows where the household has none, each saying it
+      is an example — and the film's ring must be on the example's own
+      header, the line's anchor. Once the chapter moves on, and when the
+      film is stopped on its line, nothing the film staged is left. ("Same
+      law as the dial", which pointed at the first row, was the owner's cut,
+      2026-10-01; this used to hold at its mark, manifest-row.)
 
    2. Owner decision: when the film shows the danger-zone ring it pulses
       red, visibly. That is chapter 5 ("Time runs"), where a body walks in
@@ -989,7 +995,7 @@ const STAGED = "[data-tourfilm-staged], .tourfilm-example-row, .tourfilm-danger"
 
 test.describe("chapter 4's manifest holds rows to point at on a new household (#1174 round 5)", () => {
   for (const phone of PHONES) {
-    test(`at ${phone.width}x${phone.height} the empty household's manifest shows rows at both of chapter 4's lines, and the film leaves none behind`, async ({ browser }) => {
+    test(`at ${phone.width}x${phone.height} the empty household's manifest shows rows at chapter 4's line, and the film leaves none behind`, async ({ browser }) => {
       test.setTimeout(180_000);
       const context = await browser.newContext({
         viewport: { width: phone.width, height: phone.height }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
@@ -1004,10 +1010,9 @@ test.describe("chapter 4's manifest holds rows to point at on a new household (#
       const index = await page.evaluate(() => /** @type {any} */ (window).__chapters.findIndex((/** @type {any} */ c) => c.id === "manifest"));
       /** @type {string[]} */
       const wrong = [];
-      for (const mark of ["manifest-today", "manifest-row"]) {
+      for (const mark of ["manifest-today"]) {
         await page.evaluate((m) => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = m; }, mark);
-        if (mark === "manifest-today") await page.evaluate((k) => /** @type {any} */ (window).__jump(k), index);
-        else await page.evaluate(() => /** @type {any} */ (window).__play());
+        await page.evaluate((k) => /** @type {any} */ (window).__jump(k), index);
         try {
           await page.waitForFunction((m) => /** @type {any} */ (window).__held === m, mark, { timeout: 60_000 });
         } catch {
@@ -1033,15 +1038,18 @@ test.describe("chapter 4's manifest holds rows to point at on a new household (#
             };
           });
           const lit = /** @type {any} */ (window).__lit?.() ?? [];
-          return { rows, lit, floor: Math.round(floor) };
+          const head = document.querySelector(".pocket .pk-below .tourfilm-example h2")?.getBoundingClientRect();
+          return { rows, lit, floor: Math.round(floor), head: head ? { x: head.left, y: head.top, w: head.width, h: head.height } : null };
         });
         const shown = seen.rows.filter((row) => row.onScreen);
         if (shown.length === 0) wrong.push(`${mark}: the manifest has no row on the screen (${seen.rows.length} in the page, the pill's top at ${seen.floor})`);
         for (const row of seen.rows.filter((one) => one.staged && !one.says)) wrong.push(`${mark}: a row the film staged does not say it is an example (${JSON.stringify(row.box)})`);
-        if (mark === "manifest-row" && shown.length > 0) {
-          const first = shown[0].box;
-          const ringed = seen.lit.some((/** @type {any} */ one) => Math.abs(one.target.y - first.y) < 20 && Math.abs(one.target.h - first.h) < 30);
-          if (!ringed) wrong.push(`manifest-row: the first row is not the one lit (${JSON.stringify(first)})`);
+        /* the line's anchor is the example's own header, and that is what is lit */
+        if (!seen.head) wrong.push(`${mark}: the staged manifest has no header to point at`);
+        else {
+          const head = seen.head;
+          const ringed = seen.lit.some((/** @type {any} */ one) => Math.abs(one.target.y - head.y) < 20 && Math.abs(one.target.h - head.h) < 30);
+          if (!ringed) wrong.push(`${mark}: the example's header is not the one lit (${JSON.stringify(head)})`);
         }
       }
       /* chapter 5: nothing the film staged in chapter 4 is left */
@@ -1053,20 +1061,20 @@ test.describe("chapter 4's manifest holds rows to point at on a new household (#
       } catch {
         wrong.push("time-warmed: never reached");
       }
-      /* and a stop on one of chapter 4's lines leaves nothing either */
-      await page.evaluate((k) => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = "manifest-row"; hooks.__jump(k); }, index);
+      /* and a stop on chapter 4's line leaves nothing either */
+      await page.evaluate((k) => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = "manifest-today"; hooks.__jump(k); }, index);
       try {
-        await page.waitForFunction(() => /** @type {any} */ (window).__held === "manifest-row", null, { timeout: 60_000 });
+        await page.waitForFunction(() => /** @type {any} */ (window).__held === "manifest-today", null, { timeout: 60_000 });
         await page.evaluate(() => /** @type {any} */ (window).__stop());
         await page.waitForTimeout(300);
         const left = await page.evaluate((s) => document.querySelectorAll(s).length, STAGED);
-        if (left) wrong.push(`stopped at manifest-row: ${left} staged nodes left on the page`);
+        if (left) wrong.push(`stopped at manifest-today: ${left} staged nodes left on the page`);
       } catch {
-        wrong.push("manifest-row (second pass): never reached");
+        wrong.push("manifest-today (second pass): never reached");
       }
       await context.close();
       expect(errors, "no error in the console").toEqual([]);
-      expect(wrong, "the manifest has rows at chapter 4's lines, and the film's own go with it").toEqual([]);
+      expect(wrong, "the manifest has rows at chapter 4's line, and the film's own go with it").toEqual([]);
     });
   }
 });
