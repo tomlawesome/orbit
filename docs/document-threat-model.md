@@ -148,8 +148,8 @@ recoverable state.
   private tmpfs, and mounts only its read-only configuration.
 - Orbit sends bytes only to the fixed `/tika` endpoint with fixed
   no-embedded-recursion and no-OCR headers. The server configuration also
-  excludes `TesseractOCRParser` and, since Tika 4.1 moved OCR selection out of
-  that exclusion path, sets `text-recognizers: []`. OCR is disabled in v1 and
+  excludes `TesseractOCRParser` and also sets Tika 4.1's `text-recognizers: []`,
+  so two independent settings keep OCR off. OCR is disabled in v1 and
   requires a separate opt-in design with bounded pages, languages, resources
   and adversarial evidence before it can be enabled.
 - Parser and OCR output is bounded untrusted evidence. It may populate only
