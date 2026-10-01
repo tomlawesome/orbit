@@ -61,7 +61,7 @@ services:
   # closed when it is unavailable, while the rest of the application stays up.
   orbit-clamav:
     container_name: orbit-clamav
-    image: clamav/clamav:1.5.4-debian@sha256:a1ebc843a1bf773c442a0739778d30e9072da7c52417ab7d805942510fa88394
+    image: clamav/clamav:1.5.4-debian@sha256:38482a33c6791529d57ece99e5fda54ab94f85534d43306a0b37f5c5bd0aa498
     restart: unless-stopped
     networks:
       # clamd shares only the hostile-document channel with Orbit. A separate
@@ -86,7 +86,7 @@ services:
   # docker compose --profile processing up -d
   orbit-tika:
     container_name: orbit-tika
-    image: apache/tika:4.0.0-full@sha256:6c244af88e8575ebe8bf0bc5e2da03c49663dd0acc7809cd99c8e9ff8741cbfb
+    image: apache/tika:4.1.0-full@sha256:d7607239d4e9c2dc1fd396f41a370576a334aef28f767e5bc5511247a1e1adf7
     profiles: ["processing"]
     restart: unless-stopped
     user: "35002:35002"
@@ -95,6 +95,12 @@ services:
     # the only thing holding the Tesseract OCR parser out of the parser set,
     # and it only binds in the array form under a registered component name:
     # the object form parses, loads nothing and reports no error (#687).
+    # Tika 4.1 added a second switch, "text-recognizers", for the engine that
+    # reads text out of images and rendered pages. The config file sets it to
+    # [] as well, so OCR stays off by two independent settings (#687, the
+    # threat model). Checked on 4.1.0 with a PNG and a scanned PDF (#794):
+    # no config reads the text; the exclusion alone or with the empty list
+    # reads none.
     # This argument is the only thing that selects the config file: the server
     # reads no environment variable for it, so change the path here (#692).
     command: ["-c", "/etc/orbit/tika-config.json"]
@@ -126,7 +132,7 @@ services:
   # separate, deliberate step -- see the one-shot model pull helper below.
   orbit-ollama:
     container_name: orbit-ollama
-    image: ollama/ollama:0.34.4@sha256:4be1eaabf0dd0152bfbb780347e2888b5fe86ec25d0faa3eb4b1a956173736fb
+    image: ollama/ollama:0.35.0@sha256:9c1dc45ea758396139ec0adfa52947714c61f8d1e4537a6e2daef8138e7a64a9
     profiles: ["ai"]
     restart: unless-stopped
     environment:
@@ -185,7 +191,7 @@ services:
     # length of the download only, writes to the volume, and stops. Deliberately
     # no container_name, and restart "no": a one-shot `run` container must not
     # claim a name a long-lived service could want, nor come back by itself.
-    image: ollama/ollama:0.34.4@sha256:4be1eaabf0dd0152bfbb780347e2888b5fe86ec25d0faa3eb4b1a956173736fb
+    image: ollama/ollama:0.35.0@sha256:9c1dc45ea758396139ec0adfa52947714c61f8d1e4537a6e2daef8138e7a64a9
     profiles: ["ai-model-pull"]
     restart: "no"
     environment:
