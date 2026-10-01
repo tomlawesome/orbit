@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import belt, { SELECTORS } from "../../web/src/lib/tour/chapters/08-the-belt.js";
+import belt, { SELECTORS, householdCarriesPapers } from "../../web/src/lib/tour/chapters/08-the-belt.js";
 import { POCKET_RIDE } from "../../web/src/routes/item/[[id]]/band.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmPlayer } from "../../web/src/lib/tour/player.js";
@@ -483,5 +483,63 @@ describe("the chapter played for real", () => {
       return spent;
     };
     expect(await lengthWith(false)).toBe(await lengthWith(true));
+  });
+});
+
+/* #1174 round 6 (Fable's call): with no body carrying a paper the chapter
+   stays on the sky and reads its first two lines over the sun. */
+describe("when no body carries a paper", () => {
+  function recorder(pocket) {
+    const log = [];
+    const control = (sel) => ({ sel, els: [], ringEls: [], round: false, pad: 0, radius: 14, rings: [], lifted: false, saved: [] });
+    return {
+      log,
+      ctx: {
+        pocket,
+        carriesPapers: () => false,
+        setScreen: async (route) => log.push(["setScreen", route]),
+        veil: (on) => log.push(["veil", on]),
+        ctl: (spec) => { log.push(["ctl", spec.sel]); return control(spec.sel); },
+        goto: async (c) => log.push(["goto", c.sel]),
+        press: async (c) => log.push(["press", c.sel]),
+        light: (c) => log.push(["light", c.sel]),
+        unlight: (c) => log.push(["unlight", c.sel]),
+        callout: async (text, anchor, side, o) => { log.push(["callout", text, anchor.sel]); if (o?.mark) log.push(["mark", o.mark]); },
+        dropCallout: () => log.push(["dropCallout"]),
+        mark: async (name) => log.push(["mark", name]),
+        read: (c) => log.push(["read", c.sel]),
+        unread: () => log.push(["unread"]),
+        open: (c) => log.push(["open", c.sel]),
+        waitForReal: async () => log.push(["waitForReal"]),
+        w: async () => {},
+        T: { cross: 350, scroll: 600, sheet: 300 },
+      },
+    };
+  }
+
+  for (const pocket of [false, true]) {
+    it(`stays on the sky and reads two lines over the sun, opening nothing (${pocket ? "pocket" : "desk"})`, async () => {
+      const { log, ctx } = recorder(pocket);
+      await belt.play(ctx);
+      const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
+      expect(log.filter(([word]) => word === "setScreen").map(([, route]) => route)).toEqual(["/home"]);
+      expect(log.filter(([word]) => ["press", "read", "open", "unread"].includes(word))).toEqual([]);
+      expect(log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel])).toEqual([
+        ["Every body carries its documents in a belt around it.", S.sun],
+        ["The belt is what you have attached to it.", S.sun],
+      ]);
+      expect(log.filter(([word]) => word === "mark").map(([, name]) => name)).toEqual(["belt-cert", "belt-svc"]);
+      expect(log.at(-1)).toEqual(["unlight", S.sun]);
+    });
+  }
+
+  it("householdCarriesPapers reads the sky's own counts, per dialect", () => {
+    document.body.innerHTML = '<a class="body-link" data-docs="2"></a><div class="pocket"><svg class="mdial"><g class="pk-body" data-papers="0"></g></svg></div>';
+    expect(householdCarriesPapers(document, false)).toBe(true);
+    expect(householdCarriesPapers(document, true)).toBe(false);
+    document.body.innerHTML = '<a class="body-link"></a><div class="pocket"><svg class="mdial"><g class="pk-body" data-papers="1"></g><g class="pk-body" data-body-sugg data-papers="3"></g></svg></div>';
+    expect(householdCarriesPapers(document, false)).toBe(false);
+    expect(householdCarriesPapers(document, true)).toBe(true);
+    document.body.innerHTML = "";
   });
 });

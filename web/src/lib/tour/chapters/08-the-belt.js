@@ -110,6 +110,11 @@ export const SELECTORS = Object.freeze({
     /** The seated household's own body on the dial — round 6's "the Volvo",
      *  whichever real item happens to be first in DOM order. */
     body: ".body-link",
+    /** A body that carries documents (#1174 round 6): home's own count. */
+    bodyWithPapers: ".body-link[data-docs]",
+    /** The household's sun — where the lines are read when no body carries
+     *  a paper (#1174 round 6). */
+    sun: ".sun-link",
     /** Every document currently riding the belt beside the apex item — round
      *  6's "two ringed papers", generalised to however many there are. */
     docLabel: "#caps .doclabel",
@@ -144,6 +149,8 @@ export const SELECTORS = Object.freeze({
      *  first, so the belt it lands in has papers to show; a sky where none
      *  carries any falls back to the first body. */
     bodyWithPapers: '.pocket .mdial .pk-body:not([data-body-sugg])[data-papers]:not([data-papers="0"])',
+    /** The household's sun (#1174 round 6), as chapter 12 names it. */
+    sun: ".pocket .mdial .pk-sun",
     /** The opened manifest row's own "open →" act (pocket.svelte's
      *  `itemActs`, Row.svelte's `data-row-acts`) — the real route from a
      *  body to `/item` (owner's 6a, #1119). */
@@ -180,6 +187,18 @@ export const SELECTORS = Object.freeze({
   }),
 });
 
+/**
+ * Whether any body on the sky carries a paper (#1174 round 6, Fable's
+ * call). film.js asks this once, before the film is measured, and hands the
+ * answer to every chapter as `carriesPapers()`: with none, chapters 8 and 9
+ * stay on the sky, and the measure must know that before a frame plays.
+ * @param {Document} doc
+ * @param {boolean} pocket
+ */
+export function householdCarriesPapers(doc, pocket) {
+  return Boolean(doc.querySelector(pocket ? SELECTORS.POCKET.bodyWithPapers : SELECTORS.DESK.bodyWithPapers));
+}
+
 /** @type {import("./index.js").Chapter} */
 export default {
   id: "belt",
@@ -192,6 +211,31 @@ export default {
       open, w, T, waitForReal,
     } = ctx;
     const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
+
+    /* ---- #1174 round 6 (Fable's call): no body carries a paper ----
+       A household with nothing in it, or whose items carry no papers, has
+       no belt to show: walking to /item opened an empty card or a bare
+       belt, and every line pointed at nothing. So the chapter stays on the
+       sky and reads its first two lines over the dial, the sun ringed.
+       The third ("the page itself") is dropped: there is no page to read.
+       Desk and pocket alike; `carriesPapers` is fixed before the measure,
+       so the dry run takes this path too. */
+    if (ctx.carriesPapers && !ctx.carriesPapers()) {
+      await setScreen("/home");
+      veil(true);
+      const sun = ctl({ sel: S.sun, round: true });
+      await goto(sun, { willPress: false });
+      if (pocket) {
+        await callout("Every body carries its documents in a belt around it.", sun, "bottom", { dy: 30, mark: "belt-cert" });
+        await callout("The belt is what you have attached to it.", sun, "bottom", { dy: 30, mark: "belt-svc" });
+      } else {
+        await callout("Every body carries its documents in a belt around it.", sun, "top", { mark: "belt-cert" });
+        await callout("The belt is what you have attached to it.", sun, "bottom", { mark: "belt-svc" });
+      }
+      dropCallout();
+      unlight(sun);
+      return;
+    }
 
     /* ---- beat 1: arrival — translated per (1); re-cut on the pocket per
        owner's 6a: tap the body, its manifest row opens, the row's "open →"
