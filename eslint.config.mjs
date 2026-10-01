@@ -49,5 +49,10 @@ export default defineConfig([
   // a failure naming a scratch file and had to work out that nothing was
   // actually wrong. Nothing in tmp/ is built, shipped or imported by
   // anything that is.
-  "tmp/**"]),
+  "tmp/**",
+  // Design rounds (#1177): the render helpers beside each round's artwork
+  // are one-off scripts that made the PNGs and panes the owner reviewed.
+  // They are records of how the pictures were made, not shipped or imported
+  // code, and they use require() like any throwaway Node script.
+  "design/**/*.cjs"]),
 ]);
