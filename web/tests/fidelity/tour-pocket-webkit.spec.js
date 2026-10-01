@@ -937,3 +937,238 @@ test.describe("suggested values give way to real text (#1174 round 4)", () => {
     });
   }
 });
+
+
+/* ---- round 5 (#1174, the owner's iPhone, 2026-10-01) -------------------
+   1. Chapter 4 brought the manifest up the screen, and the manifest was
+      empty: a new household has nothing in it, so "The manifest lists
+      what's ahead" and "Same law as the dial" pointed at blank sky. The
+      fixture app's household is full, so nothing above could see it. Here
+      the household is emptied as the browser reads it (home reads
+      /api/workspace again on mount), and at both of chapter 4's lines the
+      manifest must hold at least one row on the screen, clear of the pill
+      — the film's own example rows where the household has none, each
+      saying it is an example. Once the chapter moves on, and when the
+      film is stopped on one of its lines, nothing the film staged is left.
+
+   2. Owner decision: when the film shows the danger-zone ring it pulses
+      red, visibly. That is chapter 5 ("Time runs"), where a body walks in
+      toward the sun. At its held mark the ring must be on the screen and
+      red on every pack, at least 3:1 against the pack's ground; under
+      normal motion it must move, and under reduced motion it must hold
+      still; and it must be gone once chapter 6 begins. On the phone and on
+      the desk. */
+
+/** The household as the fixture serves it, with nothing in it: no items,
+ *  no suggestions, no mail.
+ *  @param {import("@playwright/test").Page} page */
+async function emptyHousehold(page) {
+  await page.route(/\/api\/workspace$/, async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const body = await response.json();
+    for (const household of body.workspace?.households ?? []) household.items = [];
+    if (body.workspace) body.workspace.suggestions = [];
+    await route.fulfill({ response, json: body });
+  });
+  await page.route(/\/api\/imap-inbox$/, (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: '{"receipts":[]}' }));
+}
+
+/** Everything the film stages on the product's own page. */
+const STAGED = "[data-tourfilm-staged], .tourfilm-example-row, .tourfilm-danger";
+
+test.describe("chapter 4's manifest holds rows to point at on a new household (#1174 round 5)", () => {
+  for (const phone of PHONES) {
+    test(`at ${phone.width}x${phone.height} the empty household's manifest shows rows at both of chapter 4's lines, and the film leaves none behind`, async ({ browser }) => {
+      test.setTimeout(180_000);
+      const context = await browser.newContext({
+        viewport: { width: phone.width, height: phone.height }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+        reducedMotion: "no-preference",
+      });
+      const page = await context.newPage();
+      await emptyHousehold(page);
+      const errors = await openFilm(page);
+      /* the browser's own read has landed: the household is the empty one */
+      await page.waitForFunction(() => document.querySelector(".pocket .mdial") && !document.querySelector(".pocket .pk-below .pk-list"),
+        null, { timeout: 30_000 });
+      const index = await page.evaluate(() => /** @type {any} */ (window).__chapters.findIndex((/** @type {any} */ c) => c.id === "manifest"));
+      /** @type {string[]} */
+      const wrong = [];
+      for (const mark of ["manifest-today", "manifest-row"]) {
+        await page.evaluate((m) => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = m; }, mark);
+        if (mark === "manifest-today") await page.evaluate((k) => /** @type {any} */ (window).__jump(k), index);
+        else await page.evaluate(() => /** @type {any} */ (window).__play());
+        try {
+          await page.waitForFunction((m) => /** @type {any} */ (window).__held === m, mark, { timeout: 60_000 });
+        } catch {
+          wrong.push(`${mark}: never reached`);
+          continue;
+        }
+        await page.waitForTimeout(350);
+        const seen = await page.evaluate(() => {
+          const pill = document.getElementById("orbit-tour-transport")?.getBoundingClientRect();
+          const floor = pill ? pill.top : window.innerHeight;
+          const rows = [...document.querySelectorAll(".pocket .pk-below :is(.p-row, .tourfilm-example-row)")].map((el) => {
+            const r = el.getBoundingClientRect();
+            let faint = false;
+            for (let node = /** @type {Element | null} */ (el); node; node = node.parentElement) {
+              const cs = getComputedStyle(node);
+              if (cs.visibility === "hidden" || cs.display === "none" || Number(cs.opacity) < 0.5) faint = true;
+            }
+            return {
+              staged: el.classList.contains("tourfilm-example-row"),
+              says: /example/i.test(el.textContent ?? ""),
+              onScreen: !faint && r.height >= 40 && r.top >= 0 && r.bottom <= floor,
+              box: { x: r.left, y: r.top, w: r.width, h: r.height },
+            };
+          });
+          const lit = /** @type {any} */ (window).__lit?.() ?? [];
+          return { rows, lit, floor: Math.round(floor) };
+        });
+        const shown = seen.rows.filter((row) => row.onScreen);
+        if (shown.length === 0) wrong.push(`${mark}: the manifest has no row on the screen (${seen.rows.length} in the page, the pill's top at ${seen.floor})`);
+        for (const row of seen.rows.filter((one) => one.staged && !one.says)) wrong.push(`${mark}: a row the film staged does not say it is an example (${JSON.stringify(row.box)})`);
+        if (mark === "manifest-row" && shown.length > 0) {
+          const first = shown[0].box;
+          const ringed = seen.lit.some((/** @type {any} */ one) => Math.abs(one.target.y - first.y) < 20 && Math.abs(one.target.h - first.h) < 30);
+          if (!ringed) wrong.push(`manifest-row: the first row is not the one lit (${JSON.stringify(first)})`);
+        }
+      }
+      /* chapter 5: nothing the film staged in chapter 4 is left */
+      await page.evaluate(() => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = "time-warmed"; hooks.__play(); });
+      try {
+        await page.waitForFunction(() => /** @type {any} */ (window).__held === "time-warmed", null, { timeout: 60_000 });
+        const left = await page.evaluate(() => document.querySelectorAll(".pocket .pk-below :is([data-tourfilm-staged], .tourfilm-example-row)").length);
+        if (left) wrong.push(`time-warmed: ${left} of chapter 4's staged nodes left in the manifest`);
+      } catch {
+        wrong.push("time-warmed: never reached");
+      }
+      /* and a stop on one of chapter 4's lines leaves nothing either */
+      await page.evaluate((k) => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = "manifest-row"; hooks.__jump(k); }, index);
+      try {
+        await page.waitForFunction(() => /** @type {any} */ (window).__held === "manifest-row", null, { timeout: 60_000 });
+        await page.evaluate(() => /** @type {any} */ (window).__stop());
+        await page.waitForTimeout(300);
+        const left = await page.evaluate((s) => document.querySelectorAll(s).length, STAGED);
+        if (left) wrong.push(`stopped at manifest-row: ${left} staged nodes left on the page`);
+      } catch {
+        wrong.push("manifest-row (second pass): never reached");
+      }
+      await context.close();
+      expect(errors, "no error in the console").toEqual([]);
+      expect(wrong, "the manifest has rows at chapter 4's lines, and the film's own go with it").toEqual([]);
+    });
+  }
+});
+
+/** The danger ring as painted now: its stroke on every pack, with the
+ *  contrast against that pack's ground, and what of it is moving. */
+function dangerRing() {
+  const ring = document.querySelector(".tourfilm-danger");
+  if (!ring) return null;
+  /** @param {string} c */
+  const rgb = (c) => {
+    const hex = c.trim().match(/^#([0-9a-f]{6})$/i);
+    if (hex) return [0, 2, 4].map((i) => parseInt(hex[1].slice(i, i + 2), 16));
+    const m = c.match(/rgba?\(([^)]+)\)/);
+    return m ? m[1].split(/[ ,/]+/).filter(Boolean).slice(0, 3).map(Number) : [0, 0, 0];
+  };
+  /** @param {number[]} c */
+  const lum = (c) => {
+    const [r, g, b] = c.map((v) => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const stroked = /** @type {Element} */ (ring.querySelector("[data-danger-line]") ?? ring);
+  const root = document.documentElement;
+  const before = root.dataset.theme;
+  const packs = [];
+  for (const theme of ["starchart", "afterdark", "dawn", "clouds", "retrograde"]) {
+    root.dataset.theme = theme;
+    const stroke = rgb(getComputedStyle(stroked).stroke);
+    const ground = rgb(getComputedStyle(root).getPropertyValue("--bg"));
+    const [a, b] = [lum(stroke), lum(ground)].sort((x, y) => y - x);
+    packs.push({ theme, stroke, contrast: Math.round(((a + 0.05) / (b + 0.05)) * 100) / 100 });
+  }
+  if (before === undefined) delete root.dataset.theme;
+  else root.dataset.theme = before;
+  const box = ring.getBoundingClientRect();
+  const moving = document.getAnimations().filter((a) => {
+    const target = /** @type {KeyframeEffect} */ (a.effect)?.target;
+    return target instanceof Element && ring.contains(target) && a.playState !== "finished";
+  });
+  return {
+    packs,
+    onScreen: box.width > 20 && box.top >= 0 && box.bottom <= window.innerHeight,
+    opacity: Number(getComputedStyle(stroked).strokeOpacity) * Number(getComputedStyle(stroked).opacity),
+    animations: moving.length,
+    /* what a frame shows: every part's opacity and transform */
+    frame: [...ring.querySelectorAll("*")].map((el) => `${getComputedStyle(el).opacity}|${getComputedStyle(el).transform}|${getComputedStyle(el).strokeOpacity}`).join(";"),
+  };
+}
+
+test.describe("the danger-zone ring pulses red while chapter 5 shows it (#1174 round 5)", () => {
+  const CASES = [
+    { name: "on the phone, normal motion", viewport: { width: 390, height: 844 }, phone: true, reduced: false },
+    { name: "on the phone, reduced motion", viewport: { width: 390, height: 844 }, phone: true, reduced: true },
+    { name: "on the desk, normal motion", viewport: { width: 1600, height: 1000 }, phone: false, reduced: false },
+  ];
+  for (const one of CASES) {
+    test(`${one.name}: red on every pack at time-warmed, ${one.reduced ? "steady" : "moving"}, and gone in chapter 6`, async ({ browser }) => {
+      test.setTimeout(150_000);
+      const context = await browser.newContext({
+        viewport: one.viewport, isMobile: one.phone, hasTouch: one.phone, deviceScaleFactor: one.phone ? 2 : 1,
+        reducedMotion: one.reduced ? "reduce" : "no-preference",
+      });
+      const page = await context.newPage();
+      const errors = await openFilm(page);
+      const index = await page.evaluate(() => /** @type {any} */ (window).__chapters.findIndex((/** @type {any} */ c) => c.id === "time"));
+      /** @type {string[]} */
+      const wrong = [];
+      await page.evaluate((k) => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = "time-warmed"; hooks.__jump(k); }, index);
+      try {
+        await page.waitForFunction(() => /** @type {any} */ (window).__held === "time-warmed", null, { timeout: 60_000 });
+        await page.waitForTimeout(300);
+        const held = await page.evaluate(dangerRing);
+        if (!held) wrong.push("time-warmed: no danger ring drawn");
+        else {
+          if (!held.onScreen) wrong.push("time-warmed: the danger ring is not on the screen");
+          for (const pack of held.packs) {
+            const [r, g, b] = pack.stroke;
+            if (!(r >= 150 && r - g >= 60 && r - b >= 40)) wrong.push(`time-warmed, ${pack.theme}: the ring is not red (rgb ${pack.stroke.join(",")})`);
+            if (pack.contrast < 3) wrong.push(`time-warmed, ${pack.theme}: the ring is ${pack.contrast}:1 against the ground, under 3:1`);
+          }
+          if (one.reduced) {
+            if (held.animations) wrong.push(`time-warmed: ${held.animations} animations on the ring under reduced motion`);
+            if (held.opacity < 0.9) wrong.push(`time-warmed: the still ring is faint (${held.opacity})`);
+          } else if (!held.animations) wrong.push("time-warmed: the ring has no animation under normal motion");
+          /* played on: under normal motion the frames differ, under reduced they do not */
+          await page.evaluate(() => /** @type {any} */ (window).__play());
+          const frames = [];
+          for (let k = 0; k < 5; k++) {
+            await page.waitForTimeout(140);
+            frames.push(await page.evaluate(() => {
+              const ring = document.querySelector(".tourfilm-danger");
+              return ring ? [...ring.querySelectorAll("*")].map((el) => `${getComputedStyle(el).opacity}|${getComputedStyle(el).transform}|${getComputedStyle(el).strokeOpacity}`).join(";") : "gone";
+            }));
+          }
+          const distinct = new Set(frames.filter((f) => f !== "gone")).size;
+          if (!one.reduced && distinct < 2) wrong.push(`playing: the ring's frames never changed (${frames.length} samples)`);
+          if (one.reduced && distinct > 1) wrong.push("playing: the ring moved under reduced motion");
+        }
+      } catch (error) {
+        wrong.push(`time-warmed: never reached (${String(error).slice(0, 80)})`);
+      }
+      await page.evaluate(() => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = "relay-addr"; hooks.__play(); });
+      try {
+        await page.waitForFunction(() => /** @type {any} */ (window).__held === "relay-addr", null, { timeout: 90_000 });
+        if (await page.evaluate(() => document.querySelectorAll(".tourfilm-danger").length)) wrong.push("relay-addr: the danger ring outlived chapter 5");
+      } catch {
+        wrong.push("relay-addr: never reached");
+      }
+      await context.close();
+      expect(errors, "no error in the console").toEqual([]);
+      expect(wrong, "the danger ring red, pulsing (or still, reduced) and gone after").toEqual([]);
+    });
+  }
+});
