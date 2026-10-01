@@ -487,7 +487,7 @@ That person becomes the first instance administrator and is walked through
 setup: household name, timezone, currency and sections. Home, Vehicles,
 Devices and Services are offered as defaults, or you can give your own list.
 
-<!-- screenshot: first-run setup wizard, sections step -->
+![The first-run setup wizard asking for a name, time zone and currency, and admitting to the four default sections](docs/images/first-run-sections-step.png)
 
 Instance administrators can manage every household and can grant or remove
 administrator access for other users. Orbit will not let the last
