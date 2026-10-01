@@ -145,13 +145,13 @@ export default {
       await setScreen("/create");
     }
 
-    /* "Add anything here, by hand or by forwarding a document." — the whole
+    /* "Fill in the details here." — the whole
        form, named once. The pocket stands the pill on its own save bar once
        `/create` is up (transport.js's own dock/stand, automatic). */
     const card = ctl({ sel: S.card, radius: 16 });
     await goto(card, { willPress: false });
     await callout(
-      "Add anything here, by hand or by forwarding a document.",
+      "Fill in the details here.",
       card,
       "top",
       { mark: "add-drawer" },
