@@ -710,3 +710,77 @@ test.describe("the pocket film in WebKit (#1174)", () => {
   });
 });
 
+
+/* ---- round 4 (#1174, the owner's iPhone, 2026-10-01) -------------------
+   Chapter 4 ("Below the dial") did not take the page down to the manifest
+   on the owner's phone. Nothing above asked where the manifest ended up:
+   the played film only looks at a callout's anchor, and the manifest's
+   header was on the screen all along, just low on it. The pocket home is
+   barely taller than a phone, so the scroll stopped at the page's own end
+   (149px at 430x932) and the header stayed 37-47% of the way down. So at
+   each phone, under normal motion, the film plays from its own start, as
+   the owner's did, to each of chapter 4's two lines: the page has
+   scrolled, each line's anchor (the manifest's header, then its first row)
+   is on the screen and clear of the pill, and the header has been brought
+   up into the top third of the screen. Chapter 5 then opens on the page at
+   its top, with nothing of the film's left below it. */
+test.describe("chapter 4 takes the page down to the manifest (#1174 round 4)", () => {
+  for (const phone of PHONES) {
+    test(`at ${phone.width}x${phone.height} the manifest is on the screen at both of chapter 4's lines`, async ({ browser }) => {
+      test.setTimeout(240_000);
+      const context = await browser.newContext({
+        viewport: { width: phone.width, height: phone.height }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+        reducedMotion: "no-preference",
+      });
+      const page = await context.newPage();
+      const errors = await openFilm(page);
+      /** @type {string[]} */
+      const wrong = [];
+      for (const [mark, sel] of [["manifest-today", ".pocket .pk-below h2.p-caps"], ["manifest-row", ".pocket .pk-below .p-row"]]) {
+        await page.evaluate((m) => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = m; }, mark);
+        if (mark !== "manifest-today") await page.evaluate(() => /** @type {any} */ (window).__play());
+        try {
+          await page.waitForFunction((m) => /** @type {any} */ (window).__held === m, mark, { timeout: 150_000 });
+        } catch {
+          wrong.push(`${mark}: never reached`);
+          continue;
+        }
+        await page.waitForTimeout(350);
+        const seen = await page.evaluate((s) => {
+          const el = document.querySelector(s);
+          const pill = document.getElementById("orbit-tour-transport")?.getBoundingClientRect();
+          const box = el?.getBoundingClientRect();
+          return {
+            found: Boolean(el),
+            top: box ? Math.round(box.top) : null,
+            bottom: box ? Math.round(box.bottom) : null,
+            pillTop: pill ? Math.round(pill.top) : null,
+            scrollY: Math.round(window.scrollY),
+            most: Math.round(document.documentElement.scrollHeight - window.innerHeight),
+            vh: window.innerHeight,
+          };
+        }, sel);
+        const where = `page at ${seen.scrollY}px of ${seen.most}, anchor ${seen.top}..${seen.bottom}, pill top ${seen.pillTop}, screen ${seen.vh}`;
+        if (!seen.found) wrong.push(`${mark}: ${sel} is not on the page`);
+        else if (seen.scrollY < 1) wrong.push(`${mark}: the page never left the top (${where})`);
+        else if (seen.top === null || seen.top < 0 || seen.bottom === null || seen.bottom > (seen.pillTop ?? seen.vh)) wrong.push(`${mark}: its anchor is off the screen or under the pill (${where})`);
+        else if (mark === "manifest-today" && seen.top > seen.vh / 3) wrong.push(`${mark}: the manifest's header is still low on the screen, not brought up to it (${where})`);
+      }
+      /* and chapter 5 opens on the page as the film found it: at its top,
+         with nothing of the film's own left below it */
+      await page.evaluate(() => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = "time-warmed"; hooks.__play(); });
+      try {
+        await page.waitForFunction(() => /** @type {any} */ (window).__held === "time-warmed", null, { timeout: 60_000 });
+        const after = await page.evaluate(() => ({ y: Math.round(window.scrollY), room: document.querySelectorAll(".tourfilm-room").length }));
+        if (after.y !== 0) wrong.push(`time-warmed: the page left scrolled ${after.y}px after chapter 4`);
+        if (after.room !== 0) wrong.push("time-warmed: chapter 4's room below the page left behind");
+      } catch {
+        wrong.push("time-warmed: never reached");
+      }
+      await context.close();
+      expect(errors, "no error in the console").toEqual([]);
+      expect(wrong, "the manifest on the screen at chapter 4's lines").toEqual([]);
+    });
+  }
+});
+

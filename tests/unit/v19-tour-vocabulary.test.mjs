@@ -507,6 +507,31 @@ describe("typing into a field", () => {
   });
 });
 
+describe("#1174 round 4: room below the page", () => {
+  it("adds a blank block of the height asked after everything on the page, and takes it away", () => {
+    document.body.innerHTML = '<main id="page"></main>';
+    const { ctx } = stage();
+    ctx.room(240.2);
+    const block = /** @type {HTMLElement} */ (document.querySelector(".tourfilm-room"));
+    expect(block).not.toBeNull();
+    expect(block.style.height).toBe("241px");
+    expect(block.getAttribute("aria-hidden")).toBe("true");
+    ctx.room(90);
+    expect(document.querySelectorAll(".tourfilm-room")).toHaveLength(1);
+    expect(block.style.height).toBe("90px");
+    ctx.room(0);
+    expect(document.querySelector(".tourfilm-room")).toBeNull();
+  });
+
+  it("goes with clear(), so a jump or a stop leaves the page as it was found", () => {
+    document.body.innerHTML = '<main id="page"></main>';
+    const { ctx } = stage();
+    ctx.room(300);
+    ctx.clear();
+    expect(document.querySelector(".tourfilm-room")).toBeNull();
+  });
+});
+
 describe("wearing a pack", () => {
   /** A reader who is sitting in "clouds" when the film starts. */
   function arriveIn(pack) {

@@ -176,10 +176,15 @@ describe("the beats, in the mockup's order", () => {
    *  real document — lifted from v19-tour-chapter-add.test.mjs's own. */
   function recorder() {
     const log = [];
+    /* #1174 round 4: the room a chapter makes below the page, kept apart
+       from the beats so their order reads as it always has. */
+    const rooms = [];
     const control = (sel) => ({ sel, els: [], ringEls: [], round: false, pad: 0, radius: 14, rings: [], lifted: false, saved: [] });
     return {
       log,
+      rooms,
       ctx: {
+        room: (px) => rooms.push(px),
         setScreen: async (route) => log.push(["setScreen", route]),
         veil: (on) => log.push(["veil", on]),
         ctl: (spec) => {
@@ -203,6 +208,12 @@ describe("the beats, in the mockup's order", () => {
       },
     };
   }
+
+  it("leaves no room of its own below the page once it ends (#1174 round 4)", async () => {
+    const { rooms, ctx } = recorder();
+    await manifest.play(ctx);
+    expect(rooms.at(-1)).toBe(0);
+  });
 
   it("arrives on /home with the veil down before scrolling", async () => {
     const { log, ctx } = recorder();

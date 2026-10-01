@@ -75,6 +75,12 @@ export const SELECTORS = Object.freeze({
 /** The mockup's own lead-in before the scroll begins, verbatim. */
 const SCROLL_LEAD_MS = 400;
 
+/** #1174 round 4: the clear space between the top chrome's foot and the
+ *  manifest's own top once the pocket page has scrolled to it — the kit's
+ *  12px, the same margin a pocket field keeps under the chrome
+ *  (EntryForm.svelte's `scroll-margin-top`). */
+const LAND_GAP = 12;
+
 /** @type {import("./index.js").Chapter} */
 export default {
   id: "manifest",
@@ -82,7 +88,7 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { pocket, setScreen, veil, ctl, goto, unlight, callout, dropCallout, mark, w, tween, T, dry, doc } = ctx;
+    const { pocket, setScreen, veil, ctl, goto, unlight, callout, dropCallout, mark, w, tween, room, T, dry, doc } = ctx;
     const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
     await setScreen("/home");
@@ -124,6 +130,7 @@ export default {
     veil(false);
     await w(T.cross);
     await glide(0);
+    room(0);
     await w(T.cross);
 
     /* THE SCROLL RUNS ON THE FILM'S CLOCK (#1174). It used to be the page's
@@ -137,13 +144,29 @@ export default {
        motion" home.css gives the page), and is where it says it is when the
        next beat measures. Each frame is an instant scroll, so the page's own
        smooth behaviour cannot stretch it. */
+    /* WHERE IT LANDS (#1174 round 4). On the owner's iPhone the page did
+       not go to the manifest: the pocket home is barely taller than the
+       phone, so the scroll stopped at the page's own end — 149px at
+       430x932 on the fixture, less on a real household — and the manifest
+       stayed low on the screen, where it already was. On the pocket the
+       manifest's top now lands just under the top chrome's full height
+       (the chrome slides away as the page goes down and back on any
+       scroll up, so the header is clear of it either way), and where the
+       page is too short to get it there, the film makes the room below it
+       (`room`), taken away again once the page is back at its top. The
+       desk keeps its own long page and its old aim. */
     function manifestTop() {
       if (dry()) return 0;
       const el = manifest.els[0];
       const view = doc.defaultView;
       if (!el || !view) return 0;
+      const chrome = pocket ? doc.querySelector(".p-chrome") : null;
+      const clear = chrome instanceof HTMLElement ? chrome.offsetHeight + LAND_GAP : 0;
+      const want = Math.max(0, view.scrollY + el.getBoundingClientRect().top - clear);
       const most = Math.max(0, doc.documentElement.scrollHeight - view.innerHeight);
-      return Math.min(most, Math.max(0, view.scrollY + el.getBoundingClientRect().top));
+      if (!pocket) return Math.min(most, want);
+      if (want > most) room(want - most);
+      return want;
     }
     /** @param {number} top */
     function glide(top) {
