@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
+import { settleArrival } from "./support/arrival";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { ensureLocalPassword } from "./support/local-credentials";
 import { ensureWorkerAdministrator, workerAccount, workerFixturePassword } from "./support/worker-identity";
@@ -40,6 +41,11 @@ const READER_PASSWORD = () => workerFixturePassword(READER());
 async function signIn(page: Page, returnTo: string) {
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
   await page.getByRole("link", { name: READER() }).click();
+  /* #1183, #1096's race: the reader has no household yet, so this lands on
+     the arrival, and the seed below turns its pending decision onward -- its
+     location.replace to /home then aborted ensureLocalPassword's page.goto
+     (NS_BINDING_ABORTED on desktop-firefox). Let the arrival land first. */
+  await settleArrival(page);
   await ensureWorkerAdministrator(page);
 }
 
