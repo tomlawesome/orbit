@@ -268,6 +268,7 @@ page's URL at failure, which this one has to infer.
 - 2026-09-27 · 667f28d8 (the M14 desk batch; its only home change is the desk's `+page.svelte` search wiring, not the pocket dial) · local fidelity gate in the pinned Playwright image on a loaded host · after Back to /home, `expect(dial).not.toHaveClass(/arrive/)` found no dial element within the timeout. Rerun alone in the same image straight after: passed in 4.8s. First sighting.
 - 2026-09-27 · b1157cd6 (#1142/#1159 pocket row changes on `fix/1142-opened-signal`, none in the dial's arrival) · local pocket fidelity in the pinned Playwright image, during the pocket-measure run and another agent's work · failed the same way; rerun alone in the same image: passed in 8.3s. Second sighting.
 - 2026-09-27 · ee496987 (`fix/1131-desk-contrast`, a desk filled-primary button colour change, none in the pocket dial) · local fidelity gate in the pinned Playwright image · failed the same way; rerun alone in the same image: passed in 41.1s (whole file) with test 7 of 13 clean at 3.1s. Third sighting: filed as #1164.
+- 2026-10-01 · d3141346 (!1013, #1183's Firefox projects for tests/e2e; nothing under web/ or tests/fidelity) · pipeline 1926 / fidelity (job 28697) · now at line 95: after Back to /home, `expect(dial).not.toHaveClass(/arrive/)` found no dial element. The same pipeline's smoke ran about eleven minutes longer than usual alongside it on the shared runner.
 
 ## sign-in-methods.spec.ts:158 "a reader changes their password from the helm, inline" — desktop-chromium
 
@@ -299,3 +300,7 @@ page's URL at failure, which this one has to infer.
 ## pocket-measure.spec.js:540 "/home · film-create meets the pocket floors" — pocket-measure, 390x664
 
 - 2026-09-30 · 0135f516 (!1006, the batch that built this film chapter) · pipeline 1855 / fidelity (job 27168) · `page.waitForFunction` hit the 60000ms test timeout. The same test passed on pipeline 1836 (same film code), and the job retried as 27270 on the same commit was green. First sighting; an issue on the third.
+
+## fidelity: door-station.spec.js:103 "the ring's hand-over to a card at 390x664, motion no-preference › the ring travels from the door's station to the card's"
+
+- 2026-10-01 · d3141346 (!1013, #1183's Firefox projects for tests/e2e; nothing under web/ or tests/fidelity) · pipeline 1926 / fidelity (job 28697) · "a jump between frames at 317ms": 38.9 against the < 20 bound. The full fidelity runs on !1010 and !1012 just before it passed, and the same pipeline's smoke ran about eleven minutes longer than usual alongside it on the shared runner. First sighting; an issue on the third.
