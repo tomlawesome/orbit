@@ -34,6 +34,9 @@ import { isPocket } from "$lib/pocket/media.js";
 import { startFilmLoop } from "./clock.js";
 
 const BAR_ID = "orbit-tour-transport";
+/** #1174 round 3: the pane that keeps a reader's taps off the page while
+ *  the pocket film plays it. */
+const CATCH_ID = "orbit-tour-catch";
 const STYLE_ID = "orbit-tour-transport-styles";
 /** Above veil.js's sheet (2000) and the film's own chrome (2100). */
 const Z_INDEX = 2200;
@@ -182,6 +185,23 @@ const STYLES = `
   #${BAR_ID} .tick::after{content:none}
   #${BAR_ID} .tick.aim{top:17px;height:10px;background:var(--accent)}
   #${BAR_ID} .now.aim{color:var(--accent)}
+  /* #1174 round 3, the owner's 7a: the play bar is always in front — never
+     dimmed, covered or faint, above the veil, the scrim, the sheets and the
+     page, on every pack. So on the phone it no longer recedes while the
+     film plays (the desk's .dim/.gone stay the desk's), and it carries its
+     own ground: the pack's raised panel laid over the pack's own --bg, so
+     it is opaque whatever is behind it — the veil, a sheet, a light page —
+     and the kit's lifted-row shadow to stand it off that. The words step
+     up from --ink-quiet to --ink-mid and the rail from --line-soft to
+     --line, both pack tokens, so the readout reads on its own ground at
+     well over 4.5:1 on every pack. The blur goes: there is nothing left to
+     see through. Position and docking are unchanged. */
+  #${BAR_ID},#${BAR_ID}.dim,#${BAR_ID}.gone{opacity:1}
+  #${BAR_ID}{background:linear-gradient(var(--panel-raised),var(--panel-raised)),var(--bg);
+    -webkit-backdrop-filter:none;backdrop-filter:none;
+    box-shadow:0 10px 28px rgb(0 0 0 / .35)}
+  #${BAR_ID} .now,#${BAR_ID} .clock{color:var(--ink-mid)}
+  #${BAR_ID} .rail{background:var(--line)}
 }
 `;
 
@@ -299,6 +319,47 @@ export function mountTransport({
   bar.append(pp, stop, scriptBtn, track, now, tip, readout, scriptRegion, status);
   doc.body.appendChild(bar);
 
+  /* #1174 round 3: on the phone the page under the film is the film's
+     picture, not the reader's form. The owner's tap on /create's
+     "suggestion" chip while the film walked that form chose a kind with no
+     due date; the date field left the form, the film's next beat named a
+     control that was no longer there, and the film stopped itself — at
+     0:37, with the pill faded to its end state, which looked like a film
+     that had frozen. A clear pane just under the pill takes every touch
+     on the page while the film runs, playing or paused, so nothing the
+     film is showing can be changed under it; the pill above it is the
+     reader's control, as it always was. Gone when the film ends or is
+     stopped, back when it plays again. It marks itself `data-pocket-above`
+     so a sheet the film opens does not make it inert (focus.js) and let
+     the touch through to the sheet's own scrim. Desk readers point with a
+     mouse at a film that never opens a form under them by touch, so the
+     desk is left as it was. */
+  const catcher = pocket ? doc.createElement("div") : null;
+  /** @param {Event} event */
+  const swallow = (event) => {
+    if (event.cancelable) event.preventDefault();
+    event.stopPropagation();
+  };
+  const CAUGHT = ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "dblclick",
+    "contextmenu", "touchstart", "touchmove", "touchend", "wheel"];
+  if (catcher) {
+    catcher.id = CATCH_ID;
+    catcher.setAttribute("aria-hidden", "true");
+    catcher.setAttribute("data-pocket-above", "");
+    catcher.style.cssText = [
+      "position:fixed",
+      "inset:0",
+      `z-index:${Z_INDEX - 1}`,
+      "background:transparent",
+      "touch-action:none",
+      "-webkit-tap-highlight-color:transparent",
+      "-webkit-user-select:none",
+      "user-select:none",
+    ].join(";");
+    for (const type of CAUGHT) catcher.addEventListener(type, swallow, { passive: false });
+    doc.body.insertBefore(catcher, bar);
+  }
+
   /** Buttons on desk, painted `<i>` marks on the pocket (#1083 §4.2).
    *  @type {(HTMLButtonElement | HTMLElement)[]} */
   let ticks = [];
@@ -316,6 +377,7 @@ export function mountTransport({
   function setRecede() {
     bar.classList.toggle("dim", clock.playing() && !player.ended());
     bar.classList.toggle("gone", player.ended());
+    if (catcher) catcher.hidden = player.ended();
   }
 
   function paint() {
@@ -752,6 +814,7 @@ export function mountTransport({
         barResizeObserver?.disconnect();
         doc.documentElement.removeAttribute("data-tour-pocket");
       }
+      catcher?.remove();
       bar.remove();
     },
   };
