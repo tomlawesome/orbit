@@ -217,17 +217,8 @@ export default {
         mark: "manifest-today",
       });
       unlight(today);
-
-      /* "Same law as the dial..." — one row, whichever sits first. */
-      const row = ctl({ sel: P.row, radius: 14, optional: true });
-      await goto(row, { willPress: false });
-      await callout(
-        "Same law as the dial, read top to bottom instead of round the ring.",
-        row,
-        "left",
-        { mark: "manifest-row" },
-      );
-      unlight(row);
+      /* Owner's cut (2026-10-01, #1174): the second line, "Same law as the
+         dial, read top to bottom instead of round the ring.", is gone. */
       dropCallout();
 
       /* And back up, the sky in view again for the next chapter. */

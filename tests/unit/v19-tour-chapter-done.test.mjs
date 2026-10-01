@@ -244,7 +244,7 @@ describe("the beats, against a recorder", () => {
     const said = log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel]);
     expect(said).toEqual([
       ["MOT passed — mark it done and it swings back out to next year.", SELECTORS.DESK.done],
-      ["A repeat is never finished; it comes round. A one-off simply ends.", ".tourfilm-time-body"],
+      ["Renewals start their orbit again, fixed length items disappear.", ".tourfilm-time-body"],
     ]);
   });
 
@@ -334,7 +334,7 @@ describe("the chapter played for real", () => {
 
     expect(said).toEqual([
       "MOT passed — mark it done and it swings back out to next year.",
-      "A repeat is never finished; it comes round. A one-off simply ends.",
+      "Renewals start their orbit again, fixed length items disappear.",
     ]);
     ctx.destroy();
   });

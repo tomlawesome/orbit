@@ -74,7 +74,7 @@ export default {
     veil(true);
     await goto(other);
     await callout(
-      "The rest of the sky holds households you don't belong to.",
+      "Explore the sky to find other households.",
       other,
       "left",
       { mark: "others-gran" },

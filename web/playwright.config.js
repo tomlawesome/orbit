@@ -70,7 +70,7 @@ export default defineConfig({
        `fidelity` job after `fidelity`: WebKit's system libraries are in
        Playwright's image but not on every host, so it is not folded into
        the `fidelity` script that a host without them runs. One worker, one
-       phone at a time, as `fidelity` itself; the played film is ~2:10 under
+       phone at a time, as `fidelity` itself; the played film is ~1:42 under
        reduced motion, so the per-test limit is set by the spec. */
     { name: "pocket-webkit", workers: 1,
       testMatch: ["**/tour-pocket-webkit.spec.js", "**/pocket-create-ring.spec.js"],

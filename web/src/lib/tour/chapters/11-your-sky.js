@@ -121,7 +121,7 @@ export default {
     const settingsLink = ctl({ sel: S.settingsLink });
     await goto(settingsLink, { willPress: false });
     await callout(
-      "Settings holds your sky, your relay and this walk — take it again anytime.",
+      "Take the tour again anytime from Settings.",
       settingsLink,
       "left",
       { mark: "sky-settings" },

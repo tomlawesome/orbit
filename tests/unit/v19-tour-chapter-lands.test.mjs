@@ -166,14 +166,25 @@ describe("the beats, against a recorder", () => {
     expect(log[1]).toEqual(["veil", false]);
   });
 
-  it("says the two ratified lines, in order, each pinned to its own control", async () => {
+  /* The owner's rewrite (2026-10-01, #1174): one line, not two ("The nearer
+     the ring, the sooner." is cut), and it differs by surface — the desk
+     sizes a body by its cost and says so; the pocket draws every body one
+     size and does not. */
+  it("says its one line on the desk, pinned to the demo body", async () => {
     const { log, ctx } = recorder();
     await lands.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel]);
     expect(said).toEqual([
-      ["Bodies orbit by when they're due.", ".tourfilm-lands-body"],
-      ["The nearer the ring, the sooner.", ".dial"],
+      ["Bodies orbit by when they're due, higher value events are larger.", ".tourfilm-lands-body"],
     ]);
+  });
+
+  it("says the pocket's shorter line, without the size clause (#1174)", async () => {
+    const { log, ctx } = recorder();
+    ctx.pocket = true;
+    await lands.play(ctx);
+    const said = log.filter(([word]) => word === "callout").map(([, text]) => text);
+    expect(said).toEqual(["Bodies orbit by when they're due."]);
   });
 
   it("presses nothing: chapter 3 only looks", async () => {
@@ -208,7 +219,7 @@ describe("the chapter played for real", () => {
     ctx.destroy();
   });
 
-  it("puts its two lines on the screen in order", async () => {
+  it("puts its one line on the screen", async () => {
     drawHome();
     const clock = createClock({ reducedMotion: () => false });
     const ctx = createFilmContext({ clock, doc: document });
@@ -237,8 +248,7 @@ describe("the chapter played for real", () => {
     sample();
 
     expect(said).toEqual([
-      "Bodies orbit by when they're due.",
-      "The nearer the ring, the sooner.",
+      "Bodies orbit by when they're due, higher value events are larger.",
     ]);
     ctx.destroy();
   });

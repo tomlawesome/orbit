@@ -125,20 +125,16 @@ export default {
        room (§3.2's resolution). */
     const body = ctl({ sel: S.body, round: true, optional: true });
     await goto(body, { willPress: false });
-    await callout("Bodies orbit by when they're due.", body, "top", { mark: "lands-body" });
+    /* Owner's words (2026-10-01, #1174): the desk sizes a body by its cost,
+       the pocket draws every body one size, so only the desk says so. The
+       second line, "The nearer the ring, the sooner.", was cut the same day. */
+    await callout(
+      pocket ? "Bodies orbit by when they're due." : "Bodies orbit by when they're due, higher value events are larger.",
+      body,
+      "top",
+      { mark: "lands-body" },
+    );
     unlight(body);
-
-    /* "The nearer the ring, the sooner." — the whole chart, once more. On the
-       pocket this is a sky line (§3.3): anchored to the sun, not the ring. */
-    const ring = ctl({ sel: S.dial, round: true });
-    await goto(ring, { willPress: false });
-    if (pocket) {
-      const sun = ctl({ sel: SELECTORS.POCKET.sun, round: true });
-      await callout("The nearer the ring, the sooner.", sun, "bottom", { dy: 30, mark: "lands-ring" });
-    } else {
-      await callout("The nearer the ring, the sooner.", ring, "right", { mark: "lands-ring" });
-    }
-    unlight(ring);
     dropCallout();
 
     if (bodyEl) bodyEl.remove();

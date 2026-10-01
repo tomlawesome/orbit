@@ -296,7 +296,7 @@ describe("the beats, in round 6's order", () => {
       ["Every body carries its documents in a belt around it.", SELECTORS.DESK.docLabel],
       ["The belt is what you have attached to it.", SELECTORS.DESK.docLabel],
       ["Click one to bring it in.", SELECTORS.DESK.docLabel],
-      ["The page itself, read without leaving the sky.", SELECTORS.DESK.cardwrap],
+      ["Read the full document, right here.", SELECTORS.DESK.cardwrap],
       ["later → steps the belt — so do the arrow keys.", SELECTORS.DESK.laterInk],
     ]);
   });
@@ -369,7 +369,7 @@ describe("the chapter played for real", () => {
       "Every body carries its documents in a belt around it.",
       "The belt is what you have attached to it.",
       "Click one to bring it in.",
-      "The page itself, read without leaving the sky.",
+      "Read the full document, right here.",
       "later → steps the belt — so do the arrow keys.",
     ]);
     ctx.destroy();

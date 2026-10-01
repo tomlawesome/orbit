@@ -15,7 +15,7 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
  * sheet's rise and fold, the 350ms return — vanish under reduced motion, so
  * only normal motion can catch a race in them).
  *
- * Opt-in and skipped by default (`TOUR_CLASH`): sampling a full 3:44 film
+ * Opt-in and skipped by default (`TOUR_CLASH`): sampling a full 2:55 film
  * every 250ms at two widths is slow, and nothing else in the fidelity gate
  * takes that long. Run it explicitly when the transport's own docking,
  * fading or callout placement changes:
