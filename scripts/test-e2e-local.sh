@@ -70,7 +70,8 @@
 #   --spec PATH     Playwright spec file or glob, e.g.
 #                    tests/e2e/v19-mail-review.spec.ts
 #   --project NAME  Playwright project from tests/e2e/playwright.config.ts:
-#                    desktop-chromium or mobile-chromium. Default: both.
+#                    desktop-chromium, mobile-chromium or desktop-firefox.
+#                    Default: all of them, plus the maintenance-* tail.
 #   --keep          Leave the stack up on exit instead of tearing it down, so a
 #                    failed run can be inspected: query the database, read the
 #                    container logs, open the app. The run logs its own
@@ -197,7 +198,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h | --help)
-      printf 'Usage: %s [--profile oidc|local-only] [--spec PATH] [--project desktop-chromium|mobile-chromium] [--keep] [--ci-cap] [--reuse PROJECT]\n' "$0"
+      printf 'Usage: %s [--profile oidc|local-only] [--spec PATH] [--project desktop-chromium|mobile-chromium|desktop-firefox] [--keep] [--ci-cap] [--reuse PROJECT]\n' "$0"
       exit 0
       ;;
     *)
@@ -683,7 +684,7 @@ fi
 # --- Run the Playwright suite -------------------------------------------------
 # playwright_args was assembled right after argument parsing, above.
 
-log "installing Playwright's Chromium build"
+log "installing Playwright's Chromium and Firefox builds"
 # scripts/install-test-browser.sh (README "Local development"): a plain
 # --only-shell install, not CI's --with-deps. --with-deps apt-get-installs
 # system libraries and needs root; a local checkout is not guaranteed sudo.
