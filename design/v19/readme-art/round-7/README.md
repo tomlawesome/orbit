@@ -57,4 +57,7 @@ when it is, the credit line goes into the README as well.
 
 ## Verdicts
 
-Awaiting owner
+Owner, 2026-10-01, on #1177 (40): "Try something totally different."
+
+N is dropped. Round 8 (`../round-8/`) is three directions that break with
+the mark over a star field: Terminator, The year turns, The chart room.
