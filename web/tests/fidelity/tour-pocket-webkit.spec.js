@@ -252,6 +252,66 @@ function sample() {
   };
 }
 
+/** The veil's open holes, wherever the veil keeps them — an inline mask's
+ *  shapes (#1174 round 3) or a data-URI mask's (before it) — so the check
+ *  below reads either. Inset from each hole's rounded edge, and on the
+ *  screen. */
+function openHoles() {
+  const veil = document.getElementById("orbit-tour-veil");
+  if (!veil || parseFloat(getComputedStyle(veil).opacity) < 0.3) return [];
+  /** @type {{ x: number, y: number, w: number, h: number, inset: number }[]} */
+  const out = [];
+  const shapes = veil.querySelectorAll("mask .hole:not(.leaving)");
+  for (const shape of shapes) {
+    const n = (/** @type {string} */ name) => Number(shape.getAttribute(name));
+    if (shape.tagName.toLowerCase() === "circle") out.push({ x: n("cx") - n("r"), y: n("cy") - n("r"), w: 2 * n("r"), h: 2 * n("r"), inset: n("r") * 0.3 });
+    else out.push({ x: n("x"), y: n("y"), w: n("width"), h: n("height"), inset: Math.max(4, n("rx")) });
+  }
+  if (!shapes.length) {
+    const m = /url\("data:image\/svg\+xml,(.*)"\)/u.exec(veil.style.webkitMaskImage || veil.style.maskImage || "");
+    const svg = m ? decodeURIComponent(m[1]) : "";
+    for (const r of svg.matchAll(/<rect x="([\d.-]+)" y="([\d.-]+)" width="([\d.]+)" height="([\d.]+)" rx="([\d.]+)"/gu)) {
+      out.push({ x: +r[1], y: +r[2], w: +r[3], h: +r[4], inset: Math.max(4, +r[5]) });
+    }
+    for (const c of svg.matchAll(/<circle cx="([\d.-]+)" cy="([\d.-]+)" r="([\d.]+)"/gu)) {
+      out.push({ x: +c[1] - +c[3], y: +c[2] - +c[3], w: 2 * +c[3], h: 2 * +c[3], inset: +c[3] * 0.3 });
+    }
+  }
+  return out.map((h) => {
+    const x = Math.max(0, h.x + h.inset), y = Math.max(0, h.y + h.inset);
+    const right = Math.min(window.innerWidth, h.x + h.w - h.inset), bottom = Math.min(window.innerHeight, h.y + h.h - h.inset);
+    return { x, y, width: right - x, height: bottom - y };
+  }).filter((c) => c.width >= 12 && c.height >= 12);
+}
+
+/**
+ * What a hole shows, as really painted: the spread between the darkest and
+ * brightest pixels of a screenshot of it (2nd to 98th percentile of grey).
+ * The veil over anything squeezes that spread to about 38%, on a dark pack
+ * or a light one; a hole leaves it as it is.
+ * @param {import("@playwright/test").Page} page
+ * @param {{ x: number, y: number, width: number, height: number }} clip
+ */
+async function spreadOf(page, clip) {
+  const png = await page.screenshot({ clip, caret: "hide" });
+  return page.evaluate(async (data) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${data}`;
+    await img.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const cx = /** @type {CanvasRenderingContext2D} */ (canvas.getContext("2d"));
+    cx.drawImage(img, 0, 0);
+    const { data: px } = cx.getImageData(0, 0, canvas.width, canvas.height);
+    /** @type {number[]} */
+    const greys = [];
+    for (let i = 0; i < px.length; i += 4) greys.push(0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2]);
+    greys.sort((a, b) => a - b);
+    return greys[Math.floor(greys.length * 0.98)] - greys[Math.floor(greys.length * 0.02)];
+  }, png.toString("base64"));
+}
+
 /** @param {import("@playwright/test").Page} page */
 async function openFilm(page) {
   /** @type {string[]} */
@@ -597,7 +657,7 @@ test.describe("the pocket film in WebKit (#1174)", () => {
     });
   }
 
-  test("reaches every mark at 360x780, each drawn on the screen", async ({ page }) => {
+  test("reaches every mark at 360x780, each drawn on the screen and what it lights lit", async ({ page }) => {
     test.setTimeout(420_000);
     await page.setViewportSize({ width: 360, height: 780 });
     const errors = await openFilm(page);
@@ -625,6 +685,23 @@ test.describe("the pocket film in WebKit (#1174)", () => {
         const s = await page.evaluate(sample);
         if (!s) { wrong.push(`${mark}: no transport`); continue; }
         for (const fault of s.faults) wrong.push(`${mark}: ${fault}`);
+        /* #1174 round 3: what the film lights is lit. The first open hole
+           photographed with the veil up and with it hidden: a hole that
+           really is one shows the same either way; the veil's data-URI
+           mask cut nothing (an image mask works on alpha, and its black
+           holes were opaque), so every lit control sat dimmed like the
+           rest of the page. Holes with nothing in them prove nothing and
+           are skipped. */
+        const [hole] = await page.evaluate(openHoles);
+        if (hole) {
+          const lit = await spreadOf(page, hole);
+          await page.evaluate(() => { /** @type {HTMLElement} */ (document.getElementById("orbit-tour-veil")).style.visibility = "hidden"; });
+          const bare = await spreadOf(page, hole);
+          await page.evaluate(() => { /** @type {HTMLElement} */ (document.getElementById("orbit-tour-veil")).style.visibility = ""; });
+          if (bare >= 24 && lit < bare * 0.85) {
+            wrong.push(`${mark}: a lit control dimmed under the veil (${Math.round(lit)} of its ${Math.round(bare)} grey levels showing, at ${Math.round(hole.x)},${Math.round(hole.y)})`);
+          }
+        }
       }
     }
 
