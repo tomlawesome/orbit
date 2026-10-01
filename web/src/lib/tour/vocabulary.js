@@ -293,6 +293,11 @@ export function createFilmContext({
   /** Every `waitForReal` that ran out (#1174 round 6), for the phone check.
    *  @type {{ selector: string, ms: number, route: string }[]} */
   const waitedOut = [];
+  /** Whether any body in the household carries a paper (#1174 round 6,
+   *  Fable's call). Read once from the sky by film.js before the film is
+   *  measured, and held for the run, so the dry run and the played film
+   *  take the same path through chapters 8 and 9. True until told. */
+  let papers = true;
 
   const dry = () => clock.dry();
   const still = () => clock.reduced();
@@ -1752,6 +1757,10 @@ export function createFilmContext({
     transcript: () => transcriptLines.slice(),
     /* #1174 round 6: the waits for the page that ran out */
     waitedOut: () => waitedOut.map((one) => ({ ...one })),
+    /* #1174 round 6: does any body carry a paper? (see `papers`, above) */
+    carriesPapers: () => papers,
+    /** @param {boolean} on */
+    setCarriesPapers: (on) => { papers = Boolean(on); },
     resetTranscript: () => { transcriptLines = []; },
   };
 }
