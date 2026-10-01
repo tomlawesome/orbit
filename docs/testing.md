@@ -134,6 +134,13 @@ are deliberately representative, not device certification:
 | Screen reader | `v19-screen-reader.spec.ts` reads back what the browser's accessibility engine would announce on every core-journey screen, and writes the raw ARIA tree to `test-results/aria/<route>.txt` for a person to read. |
 | Charts | `v19-chart-accessibility.spec.ts` checks the home dial is a labelled group with a named link per body, and that nothing focusable inside it is unnamed. |
 | Reduced motion | `v19-reduced-motion.spec.ts` checks that `prefers-reduced-motion` and no-JS both fall back to the plain list. |
+| Responsive layout | `v19-layout-and-themes.spec.ts` opens every signed-in screen at 1440×900, 820×1180 and 412×915 (desktop project) and checks the page never scrolls sideways, every visible control sits inside the screen and is not cut off, and Axe finds nothing at that size. |
+| Colour and theme packs | The same spec runs Axe over every screen in every theme pack other than the default (which `v19-axe-sweep.spec.ts` covers), in both layouts, after confirming the pack is the one drawn. Text size is not checked: Orbit stores the setting but no v19 screen applies it yet. |
+| Feedback and recovery | `v19-feedback-recovery.spec.ts` makes things fail on purpose: a save on `/create` with no connection, a mail suggestion whose approval fails (item view and `/inbox`), a household deletion request that fails, and a document picked on `/create`. Each checks the message reaches a screen reader, focus is not dropped, and the same act works by keyboard once the fault is gone. |
+
+Where one of these checks has found a real fault in Orbit, the test is
+marked `test.fail` with the fault named in it, so it stays visible and turns
+red the day the fault is fixed and the mark is still there.
 
 Fixtures use throwaway made-up households, items, documents and mailbox
 metadata. The Playwright trace is kept only on the first retry. Checks on
