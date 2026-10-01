@@ -166,6 +166,10 @@ export const SELECTORS = Object.freeze({
      *  naming a paper, since the pocket's belt draws after its route has
      *  settled (see `play`). */
     belt: "#caps .capseat",
+    /** The empty household's card on the phone's item screen (#1174 round
+     *  6): what /item shows in place of a belt when the household has
+     *  nothing in it, so it is the screen having arrived too. */
+    emptyCard: ".ip-emptycard",
     /** The preview sheet's own panel — #1088's reading card is a kit Sheet
      *  on the pocket. */
     cardwrap: ".p-sheet-layer.open .p-sheet-panel",
@@ -230,8 +234,11 @@ export default {
     await w(T.cross);
     /* #1174: the pocket's belt is drawn after its route has settled — real
        time the clock never budgeted, waited out under a stall the same way
-       chapter 2 waits for the pocket's /create. */
-    if (pocket) await waitForReal(SELECTORS.POCKET.belt);
+       chapter 2 waits for the pocket's /create. Round 6: a household with
+       nothing in it never draws a belt — /item shows its empty card — and
+       waiting for one froze the film's clock at 1:56 for the whole 12s
+       bound on the owner's iPhone. Either is the screen having arrived. */
+    if (pocket) await waitForReal(`${SELECTORS.POCKET.belt}, ${SELECTORS.POCKET.emptyCard}`);
 
     /* ---- beat 2: the papers ---- */
     const papers = ctl({ sel: S.docLabel, all: true, pad: 8, radius: 6, optional: true, visible: pocket });
@@ -257,10 +264,18 @@ export default {
        the preview is the product's own and opens for either, and the beat
        needs a page to read. */
     const out = pocket ? ctl({ sel: SELECTORS.POCKET.docHitOut, all: true, optional: true, visible: true }) : null;
-    read(out && out.els.length > 0 ? out : ctl({ sel: S.docHit, all: true, optional: true }));
+    const paper = out && out.els.length > 0 ? out : ctl({ sel: S.docHit, all: true, optional: true });
+    read(paper);
     if (pocket) await w(T.sheet); /* the preview sheet rises; the pill docks (automatic) */
 
-    const cardwrap = ctl({ sel: S.cardwrap, radius: 16 });
+    /* #1174 round 6, pocket: the preview sheet is only there if a paper was
+       opened. A household with no papers (or nothing at all) has none to
+       open, and naming the sheet anyway stopped the film here at 2:09. A
+       paper that was opened is waited for, bounded, as a phone may raise
+       the sheet later than its 300ms. The desk's card is always there. */
+    const opened = paper.els.length > 0;
+    if (pocket && opened) await waitForReal(S.cardwrap);
+    const cardwrap = ctl({ sel: S.cardwrap, radius: 16, optional: pocket && !opened });
     await callout(
       "The page itself, read without leaving the sky.",
       cardwrap,
