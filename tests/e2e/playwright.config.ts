@@ -52,6 +52,22 @@ const PARALLEL_WORKERS = Number(process.env.ORBIT_E2E_WORKERS ?? 2);
 // today.
 const reuseKeptStack = process.env.ORBIT_E2E_REUSE === "true";
 
+// #1183: Firefox has no --host-resolver-rules (the Chromium switch `use`
+// passes below), so the same redirect of `orbit-oidc` is made with two
+// Firefox prefs: localDomains resolves the name to loopback, and forcePort
+// moves the fixed in-container 4443 to wherever TEST_OIDC_PORT published it.
+// forcePort is global to the browser, which is safe here because nothing
+// else the suite opens uses 4443. In CI the port is 4443 and no remap is set.
+const oidcHostPort = process.env.TEST_OIDC_PORT ?? "4443";
+const firefoxLaunchOptions = process.env.ORBIT_ACCEPTANCE_OIDC === "true"
+  ? {
+    firefoxUserPrefs: {
+      "network.dns.localDomains": "orbit-oidc",
+      ...(oidcHostPort === "4443" ? {} : { "network.socket.forcePort": `4443=${oidcHostPort}` }),
+    },
+  }
+  : undefined;
+
 export default defineConfig({
   testDir: ".",
   // #1080: the spec FILE is the parallel unit, not the test. Specs assume
@@ -149,25 +165,44 @@ export default defineConfig({
       use: { ...devices["Pixel 7"] },
       dependencies: ["setup"],
     },
+    // #1183: the release audit (#1151) wants the suite on every engine. Same
+    // shape and viewport as desktop-chromium; its own launchOptions, because
+    // `use.launchOptions` above is a Chromium switch (see firefoxLaunchOptions).
+    // Specs gate on startsWith("mobile"), so this runs the desk dialect.
+    {
+      name: "desktop-firefox",
+      testIgnore: [/bootstrap-protection\.spec\.ts/, /maintenance\.spec\.ts/],
+      use: { ...devices["Desktop Firefox"], launchOptions: firefoxLaunchOptions },
+      dependencies: ["setup"],
+    },
     // #1080: maintenance.spec.ts opens an INSTANCE-WIDE maintenance window —
     // the one piece of state per-worker identities cannot unshare, because a
     // window deliberately closes every screen for every reader. It runs
-    // after the parallel bulk has finished, one project at a time (the two
-    // device projects would otherwise open two windows over each other).
+    // after the parallel bulk has finished, one project at a time (the device
+    // projects would otherwise open windows over each other). "The bulk" is
+    // every device project, desktop-firefox included (#1183).
     // Tail rather than head so a red spec in the bulk never runs UNDER a
-    // maintenance window; the cost is that a red bulk skips these two
+    // maintenance window; the cost is that a red bulk skips these
     // projects, which that run's rerun covers.
     {
       name: "maintenance-desktop",
       testMatch: /maintenance\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
-      dependencies: ["desktop-chromium", "mobile-chromium"],
+      dependencies: ["desktop-chromium", "mobile-chromium", "desktop-firefox"],
     },
     {
       name: "maintenance-mobile",
       testMatch: /maintenance\.spec\.ts/,
       use: { ...devices["Pixel 7"] },
       dependencies: ["maintenance-desktop"],
+    },
+    // #1183: the maintenance page is a screen people see, so it gets a
+    // Firefox pass too, last in the same one-at-a-time chain.
+    {
+      name: "maintenance-firefox",
+      testMatch: /maintenance\.spec\.ts/,
+      use: { ...devices["Desktop Firefox"], launchOptions: firefoxLaunchOptions },
+      dependencies: ["maintenance-mobile"],
     },
   ],
   outputDir: "../../test-results",

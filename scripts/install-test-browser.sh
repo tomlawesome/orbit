@@ -23,3 +23,7 @@ command -v node >/dev/null 2>&1 || {
 # This is a one-time local download. The headless shell is sufficient for the
 # scripted suite and is materially smaller than a full browser installation.
 node node_modules/@playwright/test/cli.js install --only-shell chromium
+# #1183: desktop-firefox and maintenance-firefox (tests/e2e/playwright.config.ts)
+# need Playwright's own Firefox build. Firefox has no headless-shell variant.
+# A download only, like the line above: no --with-deps, which needs root.
+node node_modules/@playwright/test/cli.js install firefox
