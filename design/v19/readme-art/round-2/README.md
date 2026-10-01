@@ -103,4 +103,12 @@ Nothing is wired into the repo README or `public/` yet.
 
 ## Verdicts
 
-Awaiting owner
+Owner, 2026-10-01, on #1177: **E, Galactic plane.**
+
+- Asked why the ring is so big (it is the sign-in's amended cut) and why the
+  planet isn't yellow (it is After Dark's accent token). Both are still open
+  with the owner — not ruled either way.
+- "I'd like to see three more versions of E though, more elegant, more
+  polished. Each distinct though along the same identity."
+
+D, F and G are dropped. Round 3 (`../round-3/`) is three refinements of E.
