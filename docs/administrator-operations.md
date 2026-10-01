@@ -260,7 +260,7 @@ create the account. Orbit **emails the setup link to that address**. The link
 is never shown on screen, never returned by the API, and cannot be recovered
 afterwards. The new user opens it, sets their own password, and is signed in.
 
-<!-- screenshot: Administration → Users, the "add a local user" form with email, display name and "link valid for" days -->
+![The "add a local user" form: email, display name, and a "link valid for" days field, with a create button](images/admin-add-local-user.png)
 
 Because the link only ever leaves by email, **an instance with no working
 SMTP cannot add a local user.** Configure SMTP first (see "Mailbox provider
@@ -433,7 +433,7 @@ To configure inbound mail:
    TLS server name, provider profile, envelope-recipient header, poll seconds
    and the mailbox password.
 
-   <!-- screenshot: Administration → Mail machinery, the mailbox settings form -->
+   ![The mailbox settings form: host, port, account, folder, TLS name, provider, envelope header, poll seconds and password](images/admin-mailbox-settings-form.png)
 
 3. Orbit connects to the provider and signs in **before** it stores anything.
    If the provider refuses, whatever was there before is untouched and no part
@@ -659,7 +659,7 @@ because a bundle wrapped under the previous key can no longer recover the
 current one. The card is a reminder, not a gate: it never blocks use of the
 instance, and it clears the moment `orbit export-recovery-bundle` completes.
 
-<!-- screenshot: Administration screen, the "No recovery bundle exported" card -->
+![The "No recovery bundle exported" card, persistent until a bundle is recorded](images/admin-no-recovery-bundle.png)
 
 To use a recovery bundle, see `orbit import-recovery-bundle` and "Restoring
 the document key-encryption key" below.
@@ -679,7 +679,7 @@ administration screen shows one "Encrypted details are locked" card with how
 many items and mail-in messages are waiting. No count and no detail of the key
 reaches a member, and Orbit never says the data is gone, because it is not.
 
-<!-- screenshot: Administration screen, the "Encrypted details are locked" card -->
+![The "Encrypted details are locked" card, with counts of affected items and mail-in messages](images/admin-encrypted-details-locked.png)
 
 To restore it, put the same key back where the deployment expects it and
 restart the exact deployed image:
@@ -761,7 +761,7 @@ reached it yet. No maintenance window is needed at any step below.
    whole guard: if the card or the log line is still there tomorrow, the
    rotation was left unfinished.
 
-   <!-- screenshot: Administration screen, the "Document key rotation in progress" card -->
+   ![The "Document key rotation in progress" card, with how long the rotation has been open](images/admin-key-rotation-in-progress.png)
 
 3. Run the rewrap worker. It reads the current key exactly as the running
    application does, and takes the next key only from the file you give it:
