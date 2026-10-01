@@ -72,4 +72,9 @@ and retake the index screenshots. Nothing is wired into the repo README or
 
 ## Verdicts
 
-Awaiting owner
+Owner, 2026-10-01, on #1177, reviewing L alongside four photograph
+candidates: "Photo 2 seems the best... and I quite like this version you did
+earlier" (round 4's K composition).
+
+L is dropped. Round 6 (`../round-6/`) is K's composition over photo 2 —
+ESO's "Majestic Milky Way" (ESO/F. Char, CC BY 4.0).
