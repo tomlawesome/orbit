@@ -527,8 +527,10 @@ export function createFilmContext({
        after the pocket's chapter 8) stays where it is rather than cutting to
        the apex item under the reader. */
     if (route === "/item" && routeOf().startsWith("/item/")) return;
-    /* The fields the film typed over are about to leave with the screen. */
+    /* The fields the film typed over are about to leave with the screen,
+       and the room a scroll made below the old one goes with it. */
     dropTyped();
+    room(0);
     const release = clock.stall();
     try {
       await navigate(route);
@@ -638,6 +640,35 @@ export function createFilmContext({
     const cs = window.getComputedStyle(el);
     if (cs.visibility === "hidden" || cs.display === "none") return false;
     return !(parseFloat(cs.opacity) < 0.05);
+  }
+
+  /* ---- #1174 round 4: room below the page ----------------------------
+     A chapter that scrolls the page to something low on it (chapter 4's
+     manifest) can only take it as far as the page's own end. The pocket
+     home is barely taller than a phone, so on the owner's iPhone "the page
+     scrolls to the manifest" moved it hardly at all: the manifest stayed
+     where it was, low on the screen. `room(px)` puts a blank, film-owned
+     block of that height after everything on the page, so the scroll can
+     land where the chapter means; `room(0)` takes it away, as do `clear()`
+     and every screen change, so the page is left as it was found. */
+  /** @type {HTMLElement | null} */
+  let roomEl = null;
+  /** @param {number} px */
+  function room(px) {
+    if (dry()) return;
+    const h = Math.max(0, Math.ceil(px));
+    if (h === 0) {
+      roomEl?.remove();
+      roomEl = null;
+      return;
+    }
+    if (!roomEl || !roomEl.isConnected) {
+      roomEl = doc.createElement("div");
+      roomEl.className = "tourfilm-room";
+      roomEl.setAttribute("aria-hidden", "true");
+      doc.body.appendChild(roomEl);
+    }
+    roomEl.style.cssText = `display:block;height:${h}px;margin:0;padding:0;pointer-events:none`;
   }
 
   /**
@@ -1565,6 +1596,7 @@ export function createFilmContext({
     }
     if (dot) dot.style.opacity = "0";
     veilTargets([]);
+    room(0);
     /* #1174: the page back at the top, where every chapter opens and where
        the film found it. A jump or a stop out of a chapter that had scrolled
        the page (chapter 4's manifest, a pocket `goto`) left it there, and
@@ -1607,6 +1639,7 @@ export function createFilmContext({
     hold: clock.hold,
     wait: clock.wait,
     tween: clock.tween,
+    room,
     holdFor,
     dry,
     reduced: still,
