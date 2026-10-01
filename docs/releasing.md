@@ -192,7 +192,6 @@ To run it:
    pipeline.
 4. Find the `promote_stable` job in the pipeline and click Run.
 
-<!-- screenshot: GitLab "Run pipeline" page with the PREVIEW_DIGEST variable filled in -->
 
 The job (`scripts/ci/promote-stable.sh`) then does the following, in order.
 Steps 1-8 and 10 are what the retired `promote-container.yml` GitHub workflow
@@ -239,7 +238,6 @@ Straight after `promote_stable` finishes, add the second signature:
    tab: https://github.com/tomlawesome/orbit/actions/workflows/countersign.yml
 2. Click **Run workflow** and enter the release tag, for example `v1.4.0`.
 
-<!-- screenshot: GitHub Actions, the "Countersign a stable release" workflow's Run workflow dialog -->
 
 It resolves the release's digest in GHCR and the tag's commit. Then it checks
 GitLab's key-based evidence for them with the same shared verifier every
