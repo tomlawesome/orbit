@@ -3,13 +3,13 @@
 > direction.
 
 <p align="center">
-  <img src="public/orbit-mark.svg" alt="Orbit logo" width="132" />
+  <img src="docs/images/orbit-mark.svg" alt="Orbit logo" width="132" />
 </p>
 
 <h1 align="center">Orbit</h1>
 
 <p align="center">
-  <strong>Everything in your orbit, on track.</strong>
+  <strong>your year, in orbit</strong>
 </p>
 
 <p align="center">
@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <img src="public/og.png" alt="Orbit — Everything in your orbit, on track" width="100%" />
+  <img src="docs/images/orbit-banner.png" alt="Orbit — your year, in orbit" width="100%" />
 </p>
 
 ## Quick start
@@ -834,7 +834,7 @@ bundled typefaces are separately licensed under the SIL OFL&nbsp;1.1
 (issue&nbsp;#440); their licence text ships with the application.
 
 <p align="center">
-  <img src="public/orbit-mark.svg" alt="" width="52" />
+  <img src="docs/images/orbit-mark.svg" alt="" width="52" />
   <br />
-  <strong>Everything in your orbit, on track.</strong>
+  <strong>your year, in orbit</strong>
 </p>
