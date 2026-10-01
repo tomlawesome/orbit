@@ -49,6 +49,7 @@ resetDatabaseBetweenSpecFiles();
  */
 
 const isPocket = () => test.info().project.name.startsWith("mobile");
+const isFirefox = () => test.info().project.use.defaultBrowserType === "firefox";
 
 /** Focus on `selector` by keyboard: already there, or Tab onward to it. */
 async function reach(page: Page, selector: string, screen: string, cap = 60) {
@@ -78,6 +79,17 @@ const FOCUS_LOST_TO_DISABLED_BUTTON = (where: string) =>
   `DEFECT (#1178): ${where} disables the pressed button while the request is out, so focus falls back to <body> `
   + "and the failure leaves the reader nowhere -- keep focus on the control (aria-disabled, not disabled) or move it to the message";
 
+/* #1183: on desktop-firefox that defect is a race, not a certainty. Firefox
+   sometimes keeps focus on the pressed button while it is disabled and
+   sometimes drops it to <body>, run to run on the same code (the /create and
+   /inbox checks each went both ways on 2026-10-01). test.fail would then pass
+   or fail by chance, so every check that expects the defect is fixme on
+   Firefox until #1178's fix makes it deterministic; Chromium still proves the
+   defect every run. */
+const FOCUS_DEFECT_RACES_ON_FIREFOX =
+  "DEFECT (#1178), timing-dependent on Firefox: the pressed button, disabled while its request is out, sometimes "
+  + "keeps focus and sometimes drops it to <body>, so this check cannot report either way until the button keeps focus";
+
 /* ── online-workspace policy ───────────────────────────────────────────── */
 
 const failCommands = (route: Route) =>
@@ -86,8 +98,10 @@ const failCommands = (route: Route) =>
 const createOffline: Journey = {
   name: "a save on /create that cannot reach Orbit",
   /* The desk shows the browser's own error words (create.behaviour.js
-     saveProblem); the pocket prefixes "not saved". */
-  words: /^not saved|Failed to fetch/,
+     saveProblem), which differ by engine: Chromium's "Failed to fetch",
+     Firefox's "NetworkError when attempting to fetch resource." (#1183);
+     the pocket prefixes "not saved". */
+  words: /^not saved|Failed to fetch|NetworkError when attempting to fetch resource/,
   fire: async (page) => {
     const name = `Offline proving ${randomUUID().slice(0, 8)}`;
     await gotoCreate(page);
@@ -300,6 +314,7 @@ for (const journey of JOURNEYS) {
 
   test(`${journey.name} leaves focus where the reader was`, async ({ page }) => {
     const defect = journey.focusDefect?.();
+    test.fixme(Boolean(defect) && isFirefox(), FOCUS_DEFECT_RACES_ON_FIREFOX);
     test.fail(Boolean(defect), defect);
     test.setTimeout(90_000);
     await signIn(page, "/home");
@@ -372,6 +387,7 @@ test("a document picked on /create leaves focus where the reader was", async ({ 
   /* The pocket saves by opening the new item: a navigation, where focus
      starting over is SvelteKit's own reset, not a loss. The desk stays put. */
   test.skip(isPocket(), "the pocket save navigates to the new item; focus starting over there is not a loss");
+  test.fixme(isFirefox(), FOCUS_DEFECT_RACES_ON_FIREFOX);
   const defect = FOCUS_LOST_TO_DISABLED_BUTTON("the desk create card (#card .btn-primary)");
   test.fail(Boolean(defect), defect);
   test.setTimeout(90_000);

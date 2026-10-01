@@ -209,8 +209,13 @@ test("a click over one household's ring opens that household, not the neighbour 
   /* #670's separation guarantee, measured on the rendered page rather than on
      a placement fixture: no two drawn hit circles within 80px of each other,
      or a ring — the surface #640 deliberately kept clickable — could steal a
-     click the way a box once did. */
+     click the way a box once did.
+     #1183: measured to within one layout unit. placement.js builds the floor
+     to 80px plus a micron, and Chromium reports that position exactly, but
+     Firefox snaps layout to 1/60px, so the same pair reads 79.996px there.
+     Anything a whole unit or more under the floor still fails. */
   const converging = await page.evaluate(() => {
+    const LAYOUT_UNIT = 1 / 60;
     const rings = [...document.querySelectorAll(".minisys")].map((card) => {
       const box = card.querySelector(".mshit")?.getBoundingClientRect();
       return box ? { name: (card.getAttribute("aria-label") ?? "").replace(/^Request to join /u, ""), x: box.left + box.width / 2, y: box.top + box.height / 2 } : null;
@@ -219,7 +224,7 @@ test("a click over one household's ring opens that household, not the neighbour 
     for (let i = 0; i < rings.length; i += 1) {
       for (let j = i + 1; j < rings.length; j += 1) {
         const gap = Math.hypot(rings[i].x - rings[j].x, rings[i].y - rings[j].y);
-        if (gap < 80) tooClose.push(`${rings[i].name} and ${rings[j].name} are ${gap.toFixed(1)}px apart`);
+        if (gap < 80 - LAYOUT_UNIT) tooClose.push(`${rings[i].name} and ${rings[j].name} are ${gap.toFixed(3)}px apart`);
       }
     }
     return tooClose;
