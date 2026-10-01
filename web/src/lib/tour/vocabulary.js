@@ -546,6 +546,17 @@ export function createFilmContext({
     } finally {
       release();
     }
+    /* #1174 round 3: every chapter opens a screen at its top, as `clear()`
+       resets a jump. A walk from a screen the film had scrolled (chapter
+       2's /create, scrolled down to its save bar) let the router's own
+       scroll reset run as home's `scroll-behavior:smooth` glide, and
+       chapter 3's first line was placed while the dial was still off the
+       top of the screen. Instant, so the next beat measures a page that
+       has arrived. */
+    const win = doc.defaultView;
+    if (win && typeof win.scrollTo === "function" && (win.scrollY || 0) > 0) {
+      win.scrollTo({ top: 0, behavior: "instant" });
+    }
     dropGone();
   }
 
