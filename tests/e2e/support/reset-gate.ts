@@ -87,8 +87,15 @@ const EMPTY: Gate = { attending: {}, resetWanted: null };
 const TEARDOWN_EXPIRY_MS = 10_000;
 
 /** A crashed worker's `running` entry, kept long enough to outlast the
- *  slowest test the suite declares (v19-mail-collection's 180s) and no
- *  longer. A dead pid is pruned immediately regardless. */
+ *  slowest test the suite declares (v19-mail-collection's 240s) and no
+ *  longer. A dead pid is pruned immediately regardless.
+ *
+ *  #1183: measured from the worker's last sign of life, not from the start
+ *  of its file -- stillInsideSpecFile renews the stamp at every test. Timed
+ *  from the file's start, a live worker in a file longer than this was
+ *  pruned as if it had crashed, and a waiting worker then reset the
+ *  database under it: desktop-firefox's v19-layout-and-themes (56 tests)
+ *  lost its anchor household that way in pipeline 1926. */
 const RUNNING_EXPIRY_MS = 300_000;
 
 /** How long to hold the state file's lock directory before assuming the
@@ -306,6 +313,19 @@ export async function enterSpecFile(options: {
     }
     return;
   }
+}
+
+/**
+ * Called before every test: this worker is still alive and still inside its
+ * file, so its `running` entry starts its expiry over (see RUNNING_EXPIRY_MS).
+ * Only a `running` entry is renewed; `tearing-down` keeps its own short clock.
+ */
+export function stillInsideSpecFile(): void {
+  const worker = me();
+  withGate((gate) => {
+    const entry = gate.attending[worker];
+    if (entry?.phase === "running") entry.since = Date.now();
+  });
 }
 
 /**
