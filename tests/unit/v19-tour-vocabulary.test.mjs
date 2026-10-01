@@ -507,6 +507,30 @@ describe("typing into a field", () => {
   });
 });
 
+describe("#1174 round 4: the typed line's cover is solid", () => {
+  it("stacks a see-through field over what is behind it, down to the first solid ground", async () => {
+    document.body.innerHTML = '<div id="card" style="background-color: rgb(20, 30, 40)"><div id="wrap"><input id="f-name" style="background-color: rgba(200, 210, 220, 0.55); border: 1px solid rgb(90, 90, 90)"></div></div>';
+    box(document.getElementById("f-name"), { x: 20, y: 100, w: 300, h: 48 });
+    const { clock, ctx } = stage();
+    await playOut(clock, ctx.typeInto(ctx.ctl({ sel: "#f-name" }), "Car MOT"));
+    const cover = /** @type {HTMLElement} */ (document.querySelector(".tourfilm-typed"));
+    /* the field's own see-through colour on top, the card's solid one under */
+    expect(cover.style.backgroundImage.replace(/\s+/gu, "")).toBe("linear-gradient(rgba(200,210,220,0.55),rgba(200,210,220,0.55))");
+    expect(cover.style.backgroundColor.replace(/\s+/gu, "")).toBe("rgb(20,30,40)");
+    expect(cover.style.borderStyle).toBe("solid");
+  });
+
+  it("is the field's own colour alone when that is already solid", async () => {
+    document.body.innerHTML = '<div style="background-color: rgb(1, 2, 3)"><input id="f-name" style="background-color: rgb(20, 30, 40)"></div>';
+    box(document.getElementById("f-name"), { x: 20, y: 100, w: 300, h: 48 });
+    const { clock, ctx } = stage();
+    await playOut(clock, ctx.typeInto(ctx.ctl({ sel: "#f-name" }), "Car MOT"));
+    const cover = /** @type {HTMLElement} */ (document.querySelector(".tourfilm-typed"));
+    expect(cover.style.backgroundImage).toBe("");
+    expect(cover.style.backgroundColor.replace(/\s+/gu, "")).toBe("rgb(20,30,40)");
+  });
+});
+
 describe("#1174 round 4: room below the page", () => {
   it("adds a blank block of the height asked after everything on the page, and takes it away", () => {
     document.body.innerHTML = '<main id="page"></main>';

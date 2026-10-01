@@ -784,3 +784,156 @@ test.describe("chapter 4 takes the page down to the manifest (#1174 round 4)", (
   }
 });
 
+/**
+ * How much of two same-sized screenshots differs: the share of pixels whose
+ * channels move by more than 40 levels, decoded in the page.
+ * @param {import("@playwright/test").Page} page
+ * @param {Buffer} a @param {Buffer} b
+ */
+async function shareDiffering(page, a, b) {
+  return page.evaluate(async ([one, two]) => {
+    /** @param {string} data */
+    const pixels = async (data) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${data}`;
+      await img.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const cx = /** @type {CanvasRenderingContext2D} */ (canvas.getContext("2d"));
+      cx.drawImage(img, 0, 0);
+      return cx.getImageData(0, 0, canvas.width, canvas.height).data;
+    };
+    const [p, q] = [await pixels(one), await pixels(two)];
+    if (p.length !== q.length) return 1;
+    let differ = 0;
+    for (let i = 0; i < p.length; i += 4) {
+      if (Math.abs(p[i] - q[i]) > 40 || Math.abs(p[i + 1] - q[i + 1]) > 40 || Math.abs(p[i + 2] - q[i + 2]) > 40) differ++;
+    }
+    return differ / (p.length / 4);
+  }, [a.toString("base64"), b.toString("base64")]);
+}
+
+/**
+ * Whether a field's own placeholder can be seen in its box: the box
+ * photographed as it is, and again with the placeholder taken off the
+ * field. The same picture both times means nothing of it shows.
+ * @param {import("@playwright/test").Page} page
+ * @param {string} id the field's id
+ */
+async function placeholderShows(page, id) {
+  const box = await page.evaluate((one) => {
+    const el = /** @type {HTMLElement} */ (document.getElementById(one));
+    const r = el.getBoundingClientRect();
+    const x = Math.max(0, r.left + 2), y = Math.max(0, r.top + 2);
+    const right = Math.min(window.innerWidth, r.right - 2), bottom = Math.min(window.innerHeight, r.bottom - 2);
+    return right - x < 8 || bottom - y < 8 ? null : { x, y, width: right - x, height: bottom - y };
+  }, id);
+  if (!box) return null;
+  const shot = () => page.screenshot({ clip: box, animations: "disabled", caret: "hide" });
+  const as = await shot();
+  await page.evaluate((one) => {
+    const el = /** @type {HTMLInputElement} */ (document.getElementById(one));
+    el.dataset.heldPlaceholder = el.placeholder;
+    el.placeholder = "";
+  }, id);
+  const bare = await shot();
+  await page.evaluate((one) => {
+    const el = /** @type {HTMLInputElement} */ (document.getElementById(one));
+    el.placeholder = el.dataset.heldPlaceholder ?? "";
+    delete el.dataset.heldPlaceholder;
+  }, id);
+  return (await shareDiffering(page, as, bare)) > 0.004;
+}
+
+/* ---- round 4: suggested values (#1174, the owner's iPhone) -------------
+   The owner saw a field's suggested value left showing behind the text in
+   it. The film never writes into a field: it paints its own line over the
+   field's box on a cover the field's own colour (vocabulary.js
+   `typeInto`). So at each phone, at both of chapter 2's typing marks,
+   every field the film has typed over must show none of its own
+   placeholder through the film's line. And the product's own form, with
+   no film: a field holding real text shows no suggestion; emptied, the
+   suggestion is back. */
+test.describe("suggested values give way to real text (#1174 round 4)", () => {
+  for (const phone of PHONES) {
+    test(`at ${phone.width}x${phone.height} no field the film types over shows its suggestion through the film's text`, async ({ browser }) => {
+      test.setTimeout(150_000);
+      const context = await browser.newContext({
+        viewport: { width: phone.width, height: phone.height }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+        reducedMotion: "no-preference",
+      });
+      const page = await context.newPage();
+      const errors = await openFilm(page);
+      const index = await page.evaluate(() => /** @type {any} */ (window).__chapters.findIndex((/** @type {any} */ c) => c.id === "add"));
+      /** @type {string[]} */
+      const wrong = [];
+      let typedOver = 0;
+      for (const mark of ["add-typing", "add-add"]) {
+        await page.evaluate((m) => { const hooks = /** @type {any} */ (window); hooks.__held = null; hooks.__hold = m; }, mark);
+        if (mark === "add-typing") await page.evaluate((k) => /** @type {any} */ (window).__jump(k), index);
+        else await page.evaluate(() => /** @type {any} */ (window).__play());
+        try {
+          await page.waitForFunction((m) => /** @type {any} */ (window).__held === m, mark, { timeout: 60_000 });
+        } catch {
+          wrong.push(`${mark}: never reached`);
+          continue;
+        }
+        await page.waitForTimeout(350);
+        /* the fields with a film line over them, on the screen */
+        const ids = await page.evaluate(() => {
+          const ghosts = [...document.querySelectorAll(".tourfilm-typed")].map((g) => g.getBoundingClientRect());
+          return [...document.querySelectorAll("#pocket-entry input[placeholder], #pocket-entry textarea[placeholder]")]
+            .filter((el) => /** @type {HTMLInputElement} */ (el).placeholder && !(/** @type {HTMLInputElement} */ (el).value))
+            .filter((el) => {
+              const r = el.getBoundingClientRect();
+              return ghosts.some((g) => Math.abs(g.left - r.left) < 2 && Math.abs(g.top - r.top) < 2 && Math.abs(g.width - r.width) < 2);
+            })
+            .map((el) => el.id);
+        });
+        for (const id of ids) {
+          const shows = await placeholderShows(page, id);
+          if (shows === null) continue;
+          typedOver++;
+          if (shows) wrong.push(`${mark}: #${id}'s suggestion shows through the film's typed line`);
+        }
+      }
+      await context.close();
+      expect(errors, "no error in the console").toEqual([]);
+      expect(typedOver, "the film's typed lines were found over their fields").toBeGreaterThan(0);
+      expect(wrong, "no suggestion behind the film's typed text").toEqual([]);
+    });
+
+    test(`at ${phone.width}x${phone.height} the pocket form's suggestions go while a field holds real text and come back when it is emptied`, async ({ browser }) => {
+      const context = await browser.newContext({
+        viewport: { width: phone.width, height: phone.height }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+      });
+      const page = await context.newPage();
+      await page.route("**/api/settings/tour", (route) =>
+        route.fulfill({ status: 200, contentType: "application/json", body: '{"tour":{"tourSeenAt":"2026-01-01T00:00:00.000Z"}}' }));
+      await page.goto(`${APP}/create`, { waitUntil: "load" });
+      await page.waitForSelector("#pocket-entry input[placeholder]", { timeout: 30_000 });
+      const ids = await page.evaluate(() => [...document.querySelectorAll("#pocket-entry input[placeholder], #pocket-entry textarea[placeholder]")]
+        .filter((el) => /** @type {HTMLInputElement} */ (el).placeholder && !(/** @type {HTMLInputElement} */ (el).disabled))
+        .map((el) => el.id));
+      /** @type {string[]} */
+      const wrong = [];
+      for (const id of ids) {
+        const field = page.locator(`[id="${id}"]`);
+        /* centred, clear of the save bar along the bottom */
+        await field.evaluate((el) => el.scrollIntoView({ block: "center", behavior: "instant" }));
+        await page.waitForTimeout(150);
+        if (!(await placeholderShows(page, id))) wrong.push(`#${id}: its suggestion is not drawn while it is empty`);
+        await field.fill(id.endsWith("-cost") ? "54.85" : "Kwik Fit Bristol");
+        await page.waitForTimeout(100);
+        if (await placeholderShows(page, id)) wrong.push(`#${id}: its suggestion still shows with real text in it`);
+        await field.fill("");
+        await page.waitForTimeout(100);
+        if (!(await placeholderShows(page, id))) wrong.push(`#${id}: its suggestion did not come back once emptied`);
+      }
+      await context.close();
+      expect(ids.length, "the form's suggested fields were found").toBeGreaterThan(2);
+      expect(wrong, "a suggestion only while the field is empty").toEqual([]);
+    });
+  }
+});
