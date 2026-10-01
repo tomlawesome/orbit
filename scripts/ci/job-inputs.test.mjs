@@ -237,12 +237,13 @@ describe("the pipeline and the declarations agree", () => {
     }
   });
 
-  it("puts the six image-running jobs ADR-0028 names on the image artefact", () => {
+  it("puts the image-running jobs on the image artefact: ADR-0028's six, and smoke_firefox (#1183)", () => {
     expect(jobsOnArtefact(config, "image")).toEqual([
       "acceptance",
       "launcher_install_compat",
       "repair_journeys",
       "smoke",
+      "smoke_firefox",
       "smoke_local_only",
       "supply_chain_image",
     ]);

@@ -1,4 +1,4 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig, devices, type Project } from "@playwright/test";
 
 // Every path below is resolved relative to THIS file's directory, which is
 // tests/e2e/ since #442. The suite is this directory, and both output trees
@@ -67,6 +67,69 @@ const firefoxLaunchOptions = process.env.ORBIT_ACCEPTANCE_OIDC === "true"
     },
   }
   : undefined;
+
+// #1183: which engines' projects this run has. Every engine by default, so a
+// local run is the whole suite; CI splits it across two jobs because Firefox
+// inside `smoke` took that job to 29.9 of its 30 minutes (pipeline 1926):
+// `smoke` sets chromium, `smoke_firefox` sets firefox (.gitlab-ci.yml).
+// "unclaimed" and "setup" are not per engine and are always present.
+const ENGINES = ["chromium", "firefox"] as const;
+const selectedEngines = (process.env.ORBIT_E2E_ENGINES || ENGINES.join(","))
+  .split(",").map((engine) => engine.trim()).filter(Boolean);
+for (const engine of selectedEngines) {
+  if (!(ENGINES as readonly string[]).includes(engine)) {
+    throw new Error(`ORBIT_E2E_ENGINES names "${engine}"; expected a comma-separated list of ${ENGINES.join(", ")}`);
+  }
+}
+const runs = (engine: (typeof ENGINES)[number]) => selectedEngines.includes(engine);
+
+const BULK_IGNORE = [/bootstrap-protection\.spec\.ts/, /maintenance\.spec\.ts/];
+const deviceProjects: Project[] = [
+  ...(runs("chromium")
+    ? [
+      { name: "desktop-chromium", testIgnore: BULK_IGNORE, use: { ...devices["Desktop Chrome"] }, dependencies: ["setup"] },
+      { name: "mobile-chromium", testIgnore: BULK_IGNORE, use: { ...devices["Pixel 7"] }, dependencies: ["setup"] },
+    ]
+    : []),
+  // #1183: the release audit (#1151) wants the suite on every engine. Same
+  // shape and viewport as desktop-chromium; its own launchOptions, because
+  // `use.launchOptions` below is a Chromium switch (see firefoxLaunchOptions).
+  // Specs gate on startsWith("mobile"), so this runs the desk dialect.
+  ...(runs("firefox")
+    ? [{
+      name: "desktop-firefox",
+      testIgnore: BULK_IGNORE,
+      use: { ...devices["Desktop Firefox"], launchOptions: firefoxLaunchOptions },
+      dependencies: ["setup"],
+    }]
+    : []),
+];
+
+// #1080: maintenance.spec.ts opens an INSTANCE-WIDE maintenance window — the
+// one piece of state per-worker identities cannot unshare, because a window
+// deliberately closes every screen for every reader. It runs after the
+// parallel bulk has finished, one project at a time (the device projects
+// would otherwise open windows over each other): the first waits for every
+// device project in this run, and each later one for the one before it.
+// Tail rather than head so a red spec in the bulk never runs UNDER a
+// maintenance window; the cost is that a red bulk skips these projects,
+// which that run's rerun covers. #1183: the maintenance page is a screen
+// people see, so Firefox gets its own pass, last in the chain.
+const maintenanceProjects: Project[] = [
+  ...(runs("chromium")
+    ? [
+      { name: "maintenance-desktop", use: { ...devices["Desktop Chrome"] } },
+      { name: "maintenance-mobile", use: { ...devices["Pixel 7"] } },
+    ]
+    : []),
+  ...(runs("firefox")
+    ? [{ name: "maintenance-firefox", use: { ...devices["Desktop Firefox"], launchOptions: firefoxLaunchOptions } }]
+    : []),
+].map((project, index, chain) => ({
+  ...project,
+  testMatch: /maintenance\.spec\.ts/,
+  dependencies: index === 0 ? deviceProjects.map((device) => device.name as string) : [chain[index - 1].name],
+}));
 
 export default defineConfig({
   testDir: ".",
@@ -153,57 +216,8 @@ export default defineConfig({
     // "unclaimed" is dropped above, so this dependency would point at a
     // project that no longer exists -- drop it too, in the same condition.
     { name: "setup", testMatch: /.*\.setup\.ts/, dependencies: reuseKeptStack ? [] : ["unclaimed"] },
-    {
-      name: "desktop-chromium",
-      testIgnore: [/bootstrap-protection\.spec\.ts/, /maintenance\.spec\.ts/],
-      use: { ...devices["Desktop Chrome"] },
-      dependencies: ["setup"],
-    },
-    {
-      name: "mobile-chromium",
-      testIgnore: [/bootstrap-protection\.spec\.ts/, /maintenance\.spec\.ts/],
-      use: { ...devices["Pixel 7"] },
-      dependencies: ["setup"],
-    },
-    // #1183: the release audit (#1151) wants the suite on every engine. Same
-    // shape and viewport as desktop-chromium; its own launchOptions, because
-    // `use.launchOptions` above is a Chromium switch (see firefoxLaunchOptions).
-    // Specs gate on startsWith("mobile"), so this runs the desk dialect.
-    {
-      name: "desktop-firefox",
-      testIgnore: [/bootstrap-protection\.spec\.ts/, /maintenance\.spec\.ts/],
-      use: { ...devices["Desktop Firefox"], launchOptions: firefoxLaunchOptions },
-      dependencies: ["setup"],
-    },
-    // #1080: maintenance.spec.ts opens an INSTANCE-WIDE maintenance window —
-    // the one piece of state per-worker identities cannot unshare, because a
-    // window deliberately closes every screen for every reader. It runs
-    // after the parallel bulk has finished, one project at a time (the device
-    // projects would otherwise open windows over each other). "The bulk" is
-    // every device project, desktop-firefox included (#1183).
-    // Tail rather than head so a red spec in the bulk never runs UNDER a
-    // maintenance window; the cost is that a red bulk skips these
-    // projects, which that run's rerun covers.
-    {
-      name: "maintenance-desktop",
-      testMatch: /maintenance\.spec\.ts/,
-      use: { ...devices["Desktop Chrome"] },
-      dependencies: ["desktop-chromium", "mobile-chromium", "desktop-firefox"],
-    },
-    {
-      name: "maintenance-mobile",
-      testMatch: /maintenance\.spec\.ts/,
-      use: { ...devices["Pixel 7"] },
-      dependencies: ["maintenance-desktop"],
-    },
-    // #1183: the maintenance page is a screen people see, so it gets a
-    // Firefox pass too, last in the same one-at-a-time chain.
-    {
-      name: "maintenance-firefox",
-      testMatch: /maintenance\.spec\.ts/,
-      use: { ...devices["Desktop Firefox"], launchOptions: firefoxLaunchOptions },
-      dependencies: ["maintenance-mobile"],
-    },
+    ...deviceProjects,
+    ...maintenanceProjects,
   ],
   outputDir: "../../test-results",
 });

@@ -1982,6 +1982,8 @@ smoke:
     ORBIT_IMAGE: $ORBIT_IMAGE_TAG
     PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
     ORBIT_ACCEPTANCE_OIDC: "true"
+    # #1183: the Chromium projects only; Firefox runs in smoke_firefox below.
+    ORBIT_E2E_ENGINES: chromium
     COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.dependency-proxy.yml -f compose/docker-compose.ci-cap.yml
   rules:
     - *not_scheduled
@@ -2016,13 +2018,9 @@ smoke:
         bash scripts/ci/verify-startup-banner.sh
     - bash scripts/ci/verify-nonroot-runtime.sh
     - bash scripts/ci/verify-privacy-boundary.sh
-    # The image ships the browser builds that match its Playwright version, so
-    # nothing is downloaded here: Chromium, and Firefox for the desktop-firefox
-    # and maintenance-firefox projects (#1183), which run in this one suite the
-    # way mobile-chromium does. Measured in pipeline 1926 (job 28701): the
-    # job took 29.9 minutes against the 30m timeout below, up from 11-19 on
-    # the merge requests just before it -- whether Firefox moves to a sibling
-    # job or the timeout moves is open on #1183. Gated on ORBIT_WEB alone (#1078), same axis
+    # The image ships the browser build that matches its Playwright version, so
+    # nothing is downloaded here. Chromium only (ORBIT_E2E_ENGINES above);
+    # Firefox is `smoke_firefox` below (#1183). Gated on ORBIT_WEB alone (#1078), same axis
     # `fidelity` already gates on: the four verify-*.sh calls above prove
     # runtime properties of the image that any change can break and stay
     # unconditional, but the click-through suite is what this axis answers for.
@@ -2045,6 +2043,94 @@ smoke:
     - *docker_in_job_teardown
   artifacts:
     name: orbit-playwright-report
+    paths:
+      - playwright-report/
+      - ci-evidence/
+    expire_in: 14 days
+    when: always
+
+# #1183: the same suite on Firefox -- desktop-firefox and maintenance-firefox
+# -- in its own job beside `smoke`, not inside it. Inside it, Firefox took
+# `smoke` to 29.9 of its 30 minutes in pipeline 1926 (job 28701), up from
+# 11-19 on the merge requests just before; running beside it keeps both well
+# inside the limit and costs one more stack, not a longer wait. Everything
+# else is `smoke` exactly -- same gates, `needs`, stack, image, reuse key
+# (scripts/ci/job-inputs.json) and artefacts -- so a red here means the same
+# as a red there. ORBIT_E2E_ENGINES is the only difference that matters.
+smoke_firefox:
+  stage: acceptance
+  extends: .privileged_runner
+  image:
+    name: $ORBIT_ACCEPTANCE_IMAGE
+    pull_policy: if-not-present
+  timeout: 30m
+  needs: *needs_gated_image
+  variables:
+    ORBIT_IMAGE: $ORBIT_IMAGE_TAG
+    PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
+    ORBIT_ACCEPTANCE_OIDC: "true"
+    # desktop-firefox and maintenance-firefox, plus the unclaimed/setup pair
+    # every run needs (tests/e2e/playwright.config.ts).
+    ORBIT_E2E_ENGINES: firefox
+    COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.dependency-proxy.yml -f compose/docker-compose.ci-cap.yml
+  rules:
+    - *not_scheduled
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    - when: manual
+      allow_failure: true
+  script:
+    - *reach_helpers
+    - orbit_lane_admits smoke_firefox || exit 0
+    - *system_lane_gate
+    - *reuse_gate
+    - *docker_in_job
+    - pnpm install --frozen-lockfile
+    - docker load --input image.tar
+    # configure.sh persists ORBIT_IMAGE when it sees one, and accepts only a
+    # digest or an orbit-local tag. The workflow never hits this because its
+    # image step exports ORBIT_IMAGE after this one; here it is a job
+    # variable, so hide it for the one command that must not see it.
+    - env -u ORBIT_IMAGE bash scripts/ci/create-test-configuration.sh
+    - *stack_diagnostics_on_failure
+    # The workflow builds the disposable OIDC provider as a step of its own,
+    # before the stack starts. Not extracted, because it is one command.
+    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc
+    - bash scripts/ci/start-acceptance-stack.sh
+    - bash scripts/ci/verify-health-endpoint.sh
+    - |
+      set -eu
+      TESTED_IMAGE_VERSION="$ORBIT_IMAGE_VERSION" \
+      PUBLICATION_CHANNEL="$ORBIT_RELEASE_STAGE" \
+      ORBIT_REVISION="${ORBIT_IMAGE_REVISION:-$CI_COMMIT_SHA}" \
+        bash scripts/ci/verify-startup-banner.sh
+    - bash scripts/ci/verify-nonroot-runtime.sh
+    - bash scripts/ci/verify-privacy-boundary.sh
+    # The image ships the browser build that matches its Playwright version, so
+    # nothing is downloaded here: the image's Firefox build is the one this
+    # Playwright version expects. Gated on ORBIT_WEB alone (#1078), same axis
+    # `fidelity` already gates on: the four verify-*.sh calls above prove
+    # runtime properties of the image that any change can break and stay
+    # unconditional, but the click-through suite is what this axis answers for.
+    - |
+      if [ "${ORBIT_WEB:-true}" != "true" ]; then
+        echo "skipped: no change to the v19 front end"
+      else
+        bash scripts/test-frontend.sh
+      fi
+    - *reuse_evidence
+  after_script:
+    # No diagnostics here: this shell has no daemon to ask (#1100), so the
+    # stack's logs are captured by *stack_diagnostics_on_failure above. The
+    # teardown call stays because it costs nothing and reads plainly; what
+    # actually disposes of the stack either way is *docker_in_job_teardown,
+    # which kills the daemon and removes its store. It reads COMPOSE_FILES and
+    # ORBIT_IMAGE, which are job variables and so are still set in this second
+    # shell.
+    - bash scripts/ci/stop-acceptance-stack.sh || true
+    - *docker_in_job_teardown
+  artifacts:
+    name: orbit-playwright-report-firefox
     paths:
       - playwright-report/
       - ci-evidence/
@@ -2784,6 +2870,8 @@ record_image:
     - job: build_image
       artifacts: true
     - job: smoke
+    # #1183: Firefox gated publication while it ran inside smoke; it still does.
+    - job: smoke_firefox
     - job: acceptance
     - job: supply_chain_image
     - job: repair_journeys
