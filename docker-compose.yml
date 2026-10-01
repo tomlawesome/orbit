@@ -95,12 +95,12 @@ services:
     # the only thing holding the Tesseract OCR parser out of the parser set,
     # and it only binds in the array form under a registered component name:
     # the object form parses, loads nothing and reports no error (#687).
-    # Tika 4.1 retired that mechanism for image/PDF parsing: they now call
-    # whatever is named in "text-recognizers" directly instead of going
-    # through the excluded composite, and an absent list resolves an engine
-    # from whatever is loaded rather than leaving OCR off. The config file
-    # sets "text-recognizers": [] to keep OCR disabled the way #687 and the
-    # threat model require.
+    # Tika 4.1 added a second switch, "text-recognizers", for the engine that
+    # reads text out of images and rendered pages. The config file sets it to
+    # [] as well, so OCR stays off by two independent settings (#687, the
+    # threat model). Checked on 4.1.0 with a PNG and a scanned PDF (#794):
+    # no config reads the text; the exclusion alone or with the empty list
+    # reads none.
     # This argument is the only thing that selects the config file: the server
     # reads no environment variable for it, so change the path here (#692).
     command: ["-c", "/etc/orbit/tika-config.json"]
