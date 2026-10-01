@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="Orbit">
+<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b0bed6"/><stop offset="0.3" stop-color="#c2cad9"/><stop offset="0.55" stop-color="#d7d5cf"/><stop offset="0.8" stop-color="#eedfc8"/><stop offset="1" stop-color="#f8e9d2"/></linearGradient></defs>
+<circle cx="100" cy="100" r="100" fill="url(#sky)"/>
+<circle cx="100" cy="100" r="62" fill="none" stroke="#414d62" stroke-width="6.88889"/><circle cx="100" cy="100" r="5.59722" fill="#eda253"/><circle cx="154.25" cy="68.5694" r="12.4861" fill="#1f7ac2"/>
+</svg>
