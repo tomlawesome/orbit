@@ -2016,8 +2016,12 @@ smoke:
         bash scripts/ci/verify-startup-banner.sh
     - bash scripts/ci/verify-nonroot-runtime.sh
     - bash scripts/ci/verify-privacy-boundary.sh
-    # The image ships the browser build that matches its Playwright version, so
-    # nothing is downloaded here. Gated on ORBIT_WEB alone (#1078), same axis
+    # The image ships the browser builds that match its Playwright version, so
+    # nothing is downloaded here: Chromium, and Firefox for the desktop-firefox
+    # and maintenance-firefox projects (#1183), which run in this one suite the
+    # way mobile-chromium does. Firefox measured ~1.4x Chromium per test, so it
+    # adds roughly 6-7 minutes here rather than doubling the job, and a sibling
+    # job would rebuild the stack for no gain. Gated on ORBIT_WEB alone (#1078), same axis
     # `fidelity` already gates on: the four verify-*.sh calls above prove
     # runtime properties of the image that any change can break and stay
     # unconditional, but the click-through suite is what this axis answers for.
