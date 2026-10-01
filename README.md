@@ -370,14 +370,14 @@ ORBIT_BACKUP_DIR="$preupgrade_dir" bash scripts/backup.sh --verify "$backup_path
 What the installer guarantees during an upgrade:
 
 - It checks the new build's configuration rules before touching an existing
-  `.env-orbit`, and keeps a private rollback copy. If configuration or the
-  pre-start check fails before it reports success, the original files are put
-  back automatically.
+  `.env-orbit`, and keeps a private rollback copy. Until it reports success, a
+  configuration or pre-start failure automatically restores the original
+  files.
 - Each successful upgrade records the version and build fingerprint it applied
   in `ORBIT_CONFIG_APPLIED_VERSION` and `ORBIT_CONFIG_APPLIED_DIGEST`. They
   must match `ORBIT_IMAGE`; never edit them by hand.
 - A fresh install, or a recognised rename of the deployment directory, records
-  the Compose project name in `COMPOSE_PROJECT_NAME`. Keep running
+  the validated `COMPOSE_PROJECT_NAME` (the Compose project name). Keep running
   `docker compose --env-file .env-orbit`, `scripts/backup.sh` and
   `scripts/restore.sh` from the deployment directory, and do not pass a
   remembered `--project-name`, so every command keeps addressing the same
