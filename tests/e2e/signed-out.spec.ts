@@ -192,20 +192,26 @@ test("no signed-out route says whether an address has an account", async ({ base
 
   /* One attempt each, with a password that is wrong for all of them. The
      backoff is per credential and allows five (ADR-0023 §4), so this cannot
-     be what turns one answer into a different one. */
-  const answers = await Promise.all(
-    [REAL_ADDRESS, ...ABSENT_ADDRESSES].map(async (email) => {
-      const response = await request.post("/api/auth/local/login", {
-        headers: { origin: baseURL as string },
-        data: { email, password: "orbit-e2e-wrong-password-placeholder" },
-      });
-      return JSON.stringify({
-        status: response.status(),
-        cacheControl: response.headers()["cache-control"],
-        body: await response.json(),
-      });
-    }),
-  );
+     be what turns one answer into a different one.
+     #1183: one at a time, not all four at once. Every attempt costs a
+     password derivation, and the instance runs two at a time and refuses a
+     caller that has queued for five seconds (src/lib/auth/verification-gate.ts)
+     with the same 429 the backoff uses. Four at once, beside the other
+     worker's own password work on a capped stack, was refused once in each of
+     five attempts in pipeline 1926 (the app logged each refusal). Asked in
+     turn, the probes still have to come back identical. */
+  const answers: string[] = [];
+  for (const email of [REAL_ADDRESS, ...ABSENT_ADDRESSES]) {
+    const response = await request.post("/api/auth/local/login", {
+      headers: { origin: baseURL as string },
+      data: { email, password: "orbit-e2e-wrong-password-placeholder" },
+    });
+    answers.push(JSON.stringify({
+      status: response.status(),
+      cacheControl: response.headers()["cache-control"],
+      body: await response.json(),
+    }));
+  }
 
   /* The whole assertion in one line: every address got the same answer, so
      the set of distinct answers has exactly one member. An unknown address, a
