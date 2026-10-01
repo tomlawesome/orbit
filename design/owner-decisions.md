@@ -1450,3 +1450,34 @@ phone. What changed, and why:
 
 Both new phone strings (owner's 3b, and the belt's label) are recorded
 where they are said, `chapters/08-the-belt.js`; no other copy changed.
+
+**Round 3 on the owner's iPhone (2026-10-01; owner's 7a and 11, calls by
+Opus 5.5 finishing Fable's round, #1174).**
+
+- **The play bar is always in front (owner's 7a).** On the phone it stays
+  at full strength while the film plays and after it ends (no 38%/16%
+  recede). Its ground is the pack's `--panel-raised` laid over the pack's
+  `--bg`, so it is opaque over the veil, a sheet or a light page, with the
+  kit's lifted-row shadow (`0 10px 28px rgb(0 0 0 / .35)`). Chapter name
+  and clock step up from `--ink-quiet` to `--ink-mid` and the rail from
+  `--line-soft` to `--line`: over 5:1 on every pack. No blur, because
+  nothing shows through. Its places, docking and round 8's fade between
+  places are unchanged. The desk pill is unchanged.
+- **Veil depth stays at the ratified 0.62.** The veil now really cuts its
+  holes: the CSS `mask-image` data URI never did in any engine (an image
+  mask works on alpha, and the black hole shapes were opaque), so every
+  lit control sat dimmed under the veil. The veil is an inline SVG
+  `<mask>`, with no image to decode. Holes open and close on a 180ms fade,
+  and rings fade out over the same 180ms instead of snapping.
+- **The page under the pocket film takes no touches while the film runs.**
+  A clear pane under the pill catches them, whether the film is playing or
+  paused, and goes when the film ends or is stopped. A tap on /create's
+  "suggestion" chip had removed the field the film named next, and the
+  film stopped itself. The desk is unchanged.
+- **Every screen the film walks to opens at its top**, as a jump already
+  does.
+- **The check** (`tour-pocket-webkit.spec.js`) plays under normal motion at
+  430x932 end to end, and at 390x844 and 360x780 through chapter 3. It
+  includes a reader's tap. It asks that the clock keeps moving, that the
+  pill is in front, never faint and its readout at 4.5:1, that no hole or
+  ring snaps, and that at every held mark the lit control is not dimmed.
