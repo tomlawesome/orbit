@@ -101,6 +101,9 @@ const DEFAULT_RADIUS = 14;
 const LIFT_PX = 2;
 /** Above veil.js's sheet (2000), which reserves this headroom by name. */
 const Z_CHROME = 2100;
+/** A ring fading out once its control is unlit — the veil's own hole
+ *  closes over the same 180ms (veil.js's HOLE_MS). */
+const RING_OUT_MS = 180;
 const CHROME_ID = "orbit-tour-film";
 /** Kept clear at the foot of the screen so a callout never lands under the
  *  transport, as the mockup keeps its own bottom 60 stage pixels clear. */
@@ -912,12 +915,24 @@ export function createFilmContext({
     await clock.w(T.press * 2);
   }
 
+  /** A ring put out (#1174 round 3): faded, as it was faded in, rather
+   *  than deleted between one frame and the next — a ring blinking out as
+   *  the hole under it closes is the flash the owner's phone showed every
+   *  time the film moved on. Gone at once under reduced motion.
+   *  @param {HTMLElement} ring */
+  function retireRing(ring) {
+    if (still()) { ring.remove(); return; }
+    ring.style.transition = `opacity ${RING_OUT_MS}ms ease`;
+    ring.style.opacity = "0";
+    setTimeout(() => ring.remove(), RING_OUT_MS + 40);
+  }
+
   /** The mockup's `unlight`. @param {...Control} controls */
   function unlight(...controls) {
     for (const c of controls) {
       if (dry()) continue;
       ringState(c, "off");
-      for (const ring of c.rings) ring.remove();
+      for (const ring of c.rings) retireRing(ring);
       c.rings = [];
       restore(c);
       dropLit(c);

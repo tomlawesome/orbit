@@ -51,18 +51,16 @@ function box(el, { x, y, w, h }) {
   });
 }
 
+/** The veil's open holes, read from its inline SVG mask (#1174 round 3);
+ *  a hole still closing is not counted. */
 function holesOf() {
-  const img = document.getElementById(OVERLAY_ID)?.style.maskImage ?? "";
-  const match = /url\("data:image\/svg\+xml,(.*)"\)/u.exec(img);
-  if (!match) return [];
-  const svg = decodeURIComponent(match[1]);
-  /* Only the holes: the mask's full-bleed sheet is the one rect with no
-     corner radius and a white fill, so requiring rx and #000 skips it. */
-  const rects = [...svg.matchAll(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" rx="([\d.]+)" ry="[\d.]+" fill="#000"\/>/gu)]
-    .map((m) => ({ kind: "rect", x: +m[1], y: +m[2], w: +m[3], h: +m[4] }));
-  const circles = [...svg.matchAll(/<circle cx="([\d.]+)" cy="([\d.]+)" r="([\d.]+)"/gu)]
-    .map((m) => ({ kind: "circle", cx: +m[1], cy: +m[2], r: +m[3] }));
-  return [...rects, ...circles];
+  const shapes = [...(document.getElementById(OVERLAY_ID)?.querySelectorAll("mask .hole:not(.leaving)") ?? [])];
+  return shapes.map((shape) => {
+    const n = (name) => Number(shape.getAttribute(name));
+    return shape.tagName.toLowerCase() === "circle"
+      ? { kind: "circle", cx: n("cx"), cy: n("cy"), r: n("r") }
+      : { kind: "rect", x: n("x"), y: n("y"), w: n("width"), h: n("height") };
+  });
 }
 
 /** A film context on a clock the test drives by hand. */
