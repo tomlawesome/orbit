@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "@playwright/test";
+import { emptyIntakeMailbox } from "./mail";
 import { GATE_HOOK_TIMEOUT_MS, enterSpecFile, leaveSpecFile, stillInsideSpecFile } from "./reset-gate";
 
 /**
@@ -336,9 +337,11 @@ export function resetDatabaseBetweenSpecFiles(): void {
          cleanup rests on it being cheap: a run whose resets have quietly
          grown to seconds each is a different trade-off, and this is where
          that shows up rather than in the total. */
-      reset: () => {
+      reset: async () => {
         const started = Date.now();
         resetDatabaseToSeed();
+        /* #1183: and the mail Orbit would otherwise read a second time. */
+        await emptyIntakeMailbox();
         console.log(`#1077: database back to its seed in ${Date.now() - started}ms`);
       },
     });
