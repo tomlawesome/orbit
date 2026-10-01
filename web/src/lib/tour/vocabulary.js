@@ -999,21 +999,53 @@ export function createFilmContext({
 
   /* ---- typing (the mockup's typeInto) ----------------------------------- */
 
-  /** An opaque background to paint the typed line on: the field's own, or
-   *  the first ancestor that has one, so the ghost hides whatever the real
-   *  field is showing underneath (`#f-name` ships with "New Entry" in it, a
-   *  date input shows its own placeholder).
+  /** How opaque a computed colour is: 0 for none, 1 for a solid one. Reads
+   *  the forms engines serialise a computed `background-color` in —
+   *  `rgb()`, `rgba()`, and `color(srgb … / a)` for a `color-mix()` — and
+   *  takes anything it cannot read for solid, as this cover always did.
+   *  @param {string} color */
+  function alphaOf(color) {
+    if (!color || color === "transparent") return 0;
+    const m = /\/\s*([\d.]+)(%?)\s*\)$/u.exec(color) ?? /^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)(%?)\s*\)$/u.exec(color);
+    if (!m) return 1;
+    const a = parseFloat(m[1]);
+    return m[2] ? a / 100 : a;
+  }
+
+  /** An opaque ground to paint the typed line on, so the cover hides
+   *  whatever the real field is showing underneath (`#f-name` ships with
+   *  "New Entry" in it, a date input shows its own placeholder, every
+   *  pocket field its "e.g." suggestion).
+   *
+   *  #1174 round 4: the field's own background is not enough when it is
+   *  see-through. The pocket's fields are 55% of the page colour over the
+   *  card (EntryForm.svelte's `.pc-field input`), so a cover in that colour
+   *  was 55% opaque, and on the owner's iPhone the field's "e.g. Car MOT"
+   *  showed behind the film's "Car MOT — Volvo V60". So the backgrounds are
+   *  stacked as the page stacks them — the field's own on top, then each
+   *  ancestor's — down to the first solid one, and the browser composites
+   *  them exactly as it does the field: the same colour, now solid. Written
+   *  as the declarations themselves (`background-color` the solid ground,
+   *  `background-image` the see-through layers over it).
    *  @param {Element} el */
   function backdropOf(el) {
-    if (typeof window.getComputedStyle !== "function") return "var(--panel)";
+    if (typeof window.getComputedStyle !== "function") return "background-color:var(--panel)";
+    /** @type {string[]} */
+    const layers = [];
     /** @type {Element | null} */
     let node = el;
     while (node) {
       const bg = window.getComputedStyle(node).backgroundColor;
-      if (bg && bg !== "transparent" && !/rgba\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)/u.test(bg)) return bg;
+      const alpha = alphaOf(bg);
+      if (alpha > 0) layers.push(bg);
+      if (alpha >= 1) break;
       node = node.parentElement;
     }
-    return "var(--panel)";
+    /* Nothing solid all the way up: the page's own colour is under it all. */
+    if (layers.length === 0 || alphaOf(layers[layers.length - 1]) < 1) layers.push("var(--bg)");
+    const ground = /** @type {string} */ (layers.pop());
+    const over = layers.map((c) => `linear-gradient(${c},${c})`).join(",");
+    return `background-color:${ground}${over ? `;background-image:${over}` : ""}`;
   }
 
   /** Sits a typed ghost exactly over its field's current box (#1174: called
@@ -1043,7 +1075,12 @@ export function createFilmContext({
       "overflow:hidden",
       "white-space:pre",
       "pointer-events:none",
-      `background:${backdropOf(el)}`,
+      backdropOf(el),
+      /* The field's own border, so the solid cover still reads as the
+         field and the line sits where the field's own text would. */
+      `border-style:${style?.borderStyle || "none"}`,
+      `border-width:${style?.borderWidth || "0px"}`,
+      `border-color:${style?.borderColor || "transparent"}`,
       `padding-left:${style?.paddingLeft || "0px"}`,
       `padding-right:${style?.paddingRight || "0px"}`,
       `font:${style?.font || "13.5px/1.45 var(--ui)"}`,
