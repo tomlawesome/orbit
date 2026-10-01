@@ -510,6 +510,13 @@ async function pillContrast(page, box) {
   }, png.toString("base64"));
 }
 
+/** The film's own record of each wait for the page that ran out (#1174
+ *  round 6, vocabulary.js `waitForReal`), as "selector on route". */
+function waitsRunOut() {
+  const list = /** @type {any} */ (window).__waitedOut?.() ?? [];
+  return list.map((/** @type {{ selector: string, route: string, ms: number }} */ one) => `${one.selector} on ${one.route}, ${one.ms / 1000}s`);
+}
+
 /** The three phones (#1174): the owner's (430x932), the common size, and
  *  the narrowest. The owner's plays the whole film; the other two play
  *  from the start through chapter 3's arrival home — the hatch, the veil,
@@ -641,12 +648,14 @@ test.describe("the pocket film in WebKit (#1174)", () => {
       }
       const frames = await page.evaluate(() => /** @type {any} */ (window).__frames);
       console.log(`${phone.width}x${phone.height}: ${samples} samples, the page painted ${(frames / ((Date.now() - started) / 1000)).toFixed(1)} frames a second`);
+      const waitedOut = await page.evaluate(waitsRunOut);
       await context.close();
 
       const unreadable = contrast.filter((one) => one.ratio < 4.5).map((one) => `${one.ratio.toFixed(1)}:1 at ${one.at} on ${one.url}`);
       const expected = chapterIds.map((/** @type {string} */ _, /** @type {number} */ k) => k).filter((/** @type {number} */ k) => k <= last + (phone.through === "yours" ? 0 : 1));
       expect.soft(errors, "no error in the console — a film that stopped itself says so there").toEqual([]);
       expect.soft(stuck, "the clock keeps moving — a film that stops advancing is stuck").toBeNull();
+      expect.soft(waitedOut, "no wait for the page ran out — the clock stood still for something that never came").toEqual([]);
       expect.soft(done, "the film plays as far as this phone watches it").toBe(true);
       expect.soft(chapters, "every chapter, in order, none skipped").toEqual(expected);
       expect.soft(tapped, "the reader's tap on the form was made").toBe(true);
@@ -1169,6 +1178,100 @@ test.describe("the danger-zone ring pulses red while chapter 5 shows it (#1174 r
       await context.close();
       expect(errors, "no error in the console").toEqual([]);
       expect(wrong, "the danger ring red, pulsing (or still, reduced) and gone after").toEqual([]);
+    });
+  }
+});
+
+/* ---- round 6 (#1174, the owner's iPhone, 2026-10-01) -------------------
+   The film stood still at 1:56 of the owner's 3:22: chapter 8, "The belt",
+   between its start and its first line, on the walk to /item. On a
+   household with nothing in it the phone has no body to open, so the film
+   walks to /item, which shows the empty household's card -- and then waited
+   for a belt that a household with nothing in it never draws. The wait is
+   bounded at 12 seconds, and the clock stands still across it; then the
+   film played on and stopped itself at 2:09, at the reading card no paper
+   could open. The round 3 play above missed it twice over: it plays the
+   fixture's full household, never an empty one, past chapter 4, and its
+   stall budget (15s) is longer than the wait's own bound, so a wait that ran
+   out read as an honest one. So the film now records any wait that runs out,
+   every play here fails on one, and this plays a new household through
+   chapter 8 -- empty, and with items but no papers -- at all three phones,
+   under normal motion, from chapter 7 (the walk in from /inbox) until
+   chapter 10 begins. */
+
+/** A household with items, none carrying a paper.
+ *  @param {import("@playwright/test").Page} page */
+async function paperlessHousehold(page) {
+  await page.route(/\/api\/workspace$/, async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const body = await response.json();
+    for (const household of body.workspace?.households ?? []) {
+      for (const item of household.items ?? []) item.documentCount = 0;
+    }
+    await route.fulfill({ response, json: body });
+  });
+}
+
+test.describe("chapter 8 plays through on a new household (#1174 round 6)", () => {
+  const CASES = [
+    ...PHONES.map((phone) => ({ phone, household: "empty" })),
+    { phone: PHONES[1], household: "paperless" },
+  ];
+  for (const { phone, household } of CASES) {
+    test(`at ${phone.width}x${phone.height} on ${household === "empty" ? "a household with nothing in it" : "a household whose items carry no papers"}, chapters 7 to 9 play on without the clock standing still and without the film stopping itself`, async ({ browser }) => {
+      test.setTimeout(180_000);
+      const context = await browser.newContext({
+        viewport: { width: phone.width, height: phone.height }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+        reducedMotion: "no-preference",
+      });
+      const page = await context.newPage();
+      if (household === "empty") await emptyHousehold(page);
+      else await paperlessHousehold(page);
+      const errors = await openFilm(page);
+      /* the browser's own read has landed */
+      if (household === "empty") {
+        await page.waitForFunction(() => document.querySelector(".pocket .mdial") && !document.querySelector(".pocket .pk-below .pk-list"),
+          null, { timeout: 30_000 });
+      } else {
+        await page.waitForFunction(() => document.querySelector(".pocket .mdial .pk-body:not([data-body-sugg])")
+          && !document.querySelector('.pocket .mdial .pk-body[data-papers]:not([data-papers="0"])'), null, { timeout: 30_000 });
+      }
+      const ids = await page.evaluate(() => /** @type {any} */ (window).__chapters.map((/** @type {any} */ c) => c.id));
+      const from = ids.indexOf("inbox");
+      const until = ids.indexOf("others");
+      await page.evaluate((k) => /** @type {any} */ (window).__jump(k), from);
+      /** The film's longest honest stall, as above. */
+      const STALL_BUDGET_MS = 15_000;
+      /** @type {string | null} */
+      let stuck = null;
+      /** @type {number[]} */
+      const chapters = [];
+      let lastCursor = -1;
+      let lastMoved = Date.now();
+      let reached = false;
+      let gone = false;
+      const started = Date.now();
+      while (Date.now() - started < 150_000) {
+        const s = await page.evaluate(sampleTransport);
+        if (!s) { gone = true; break; }
+        if (chapters.at(-1) !== s.chapter) chapters.push(s.chapter);
+        if (s.chapter >= until) { reached = true; break; }
+        if (s.cursor !== lastCursor) { lastCursor = s.cursor; lastMoved = Date.now(); }
+        else if (Date.now() - lastMoved > STALL_BUDGET_MS) {
+          stuck = `the clock stood at ${mmssOf(s.cursor)} for ${Math.round((Date.now() - lastMoved) / 1000)}s on ${s.url}, chapter ${s.chapter + 1}`;
+          break;
+        }
+        await page.waitForTimeout(250);
+      }
+      const waitedOut = await page.evaluate(waitsRunOut);
+      await context.close();
+      expect.soft(errors, "no error in the console — a film that stopped itself says so there").toEqual([]);
+      expect.soft(waitedOut, "no wait for the page ran out — the clock stood still for something that never came").toEqual([]);
+      expect.soft(stuck, "the clock keeps moving").toBeNull();
+      expect.soft(gone, "the play bar stays up — it goes when the film stops itself").toBe(false);
+      expect.soft(reached, "the film plays on into chapter 10").toBe(true);
+      expect.soft(chapters, "chapters 7, 8 and 9 in order, none skipped").toEqual([from, from + 1, from + 2, until]);
     });
   }
 });
