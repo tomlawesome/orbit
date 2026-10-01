@@ -141,7 +141,7 @@ export const TOUR_STOPS = [
     phone: false,
     example: false,
     copy: [
-      "Add anything here, by hand or by forwarding a document.",
+      "Fill in the details here.",
       "Settings holds your sky, your relay and this walk — take it again anytime.",
     ],
   },

@@ -199,7 +199,7 @@ describe("the selectors chapter 2 names", () => {
     expect(create.target).toContain("#nstar");
     expect(SELECTORS.DESK.star).toBe("#nstar");
     /* the ratified line this chapter's drawer callout says, verbatim */
-    expect(create.copy[0]).toBe("Add anything here, by hand or by forwarding a document.");
+    expect(create.copy[0]).toBe("Fill in the details here.");
   });
 });
 
@@ -268,7 +268,7 @@ describe("the beats, in the mockup's order", () => {
     await add.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel, side, mark]) => [text, sel, side, mark]);
     expect(said).toEqual([
-      ["Add anything here, by hand or by forwarding a document.", SELECTORS.DESK.card, "top", "add-drawer"],
+      ["Fill in the details here.", SELECTORS.DESK.card, "top", "add-drawer"],
     ]);
   });
 
