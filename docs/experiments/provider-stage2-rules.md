@@ -1,5 +1,7 @@
 # Provider stage 2: the rules and why each should generalise
 
+> **Dated experiment record**, 2026-09-12.
+
 Owner decision, 2026-09-12 (#996): the provider field gets its own stage 2,
 in its own file, sharing nothing with the other fields' stages. The rules
 below were written **before** the code, from a signal table over the tuning

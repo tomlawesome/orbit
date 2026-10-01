@@ -1,5 +1,7 @@
 # Hold-out 3 cost re-check under the whole-commitment rule (owner, 2026-09-13)
 
+> **Dated audit record**, 2026-09-13.
+
 Re-check of every `costMinor` truth in `extraction-holdout3-fullpage.ts` against
 the cost convention the owner set on 2026-09-13 (ADR-0026, "Amendment,
 2026-09-13"): a fixed-term contract costs everything paid over its term, printed

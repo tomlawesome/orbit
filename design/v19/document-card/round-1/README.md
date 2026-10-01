@@ -1,5 +1,7 @@
 # The document card — round 1 (#1059 previews and reader, #1054 download and restore)
 
+> **Superseded** by [round 2](../round-2/README.md): round 1's separate document card is gone.
+
 Three compositions for what happens when a document is the centred body on
 the v4 item belt: page one shown for real in place of the PDF plate, a way to
 read the whole document without leaving Orbit, and where download and restore
