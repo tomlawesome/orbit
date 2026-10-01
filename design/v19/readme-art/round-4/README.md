@@ -70,4 +70,9 @@ wired into the repo README or `public/` yet.
 
 ## Verdicts
 
-Awaiting owner
+Owner, 2026-10-01, on #1177: **rejected.** "Looks like a big blob. I'd say
+it's worse now." Then 29b: iterate, same composition, more contrast and
+visible structure at README size.
+
+Round 5 (`../round-5/`) keeps K's composition and rebuilds the sky
+stars-first.
