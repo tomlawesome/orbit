@@ -6,8 +6,9 @@ paper. Nothing leaves your machine.
 
 ## What you need
 
-One of these, for turning the file into text (Orbit uses Apache Tika for
-that, and this runs the same version with the same settings):
+One of these, for turning the file into text. Orbit uses Apache Tika, a free
+tool that reads the text out of documents, and this runs the same version
+with the same settings:
 
 1. **Docker Desktop** — the bundle starts the exact image Orbit runs. The
    first run downloads it (about 1 GB).
@@ -32,15 +33,16 @@ It prints one block per document as it goes, then leaves:
   the columns. See "Telling it the right answers" below.
 
 Under each document's answers come the **top three** for provider,
-reference, subtype, cost and dates: the answer it chose first, marked `*`,
-then the next two it would have offered. This is the list the review
+reference, subtype, cost and dates. The one marked `*` is its first choice;
+the other two are what it would offer next. This is the list the review
 screen will show, with the first pre-selected. When you check a document,
 count it as *first* (the `*` is right), *in three* (right one is 2 or 3),
 *wrong* (not in the three) or *blank*.
 
-Add `--keep-text` (run it from a PowerShell or command prompt in the unzipped folder: `.\run.cmd --keep-text`) to
-also save the text Tika pulled out of each file in `out\text\`, which shows
-what the reader was actually looking at.
+To see what the reader was actually looking at, add `--keep-text`: from a
+PowerShell or command prompt in the unzipped folder, run
+`.\run.cmd --keep-text`. It also saves the text Tika pulled out of each file
+in `out\text\`.
 
 Add `--candidates` (`.\run.cmd --candidates`) to lengthen each list to the
 whole shortlist it weighed (up to eight), with the reasons beside each. Use
@@ -60,8 +62,9 @@ never on the shortlist, or was on it and passed over.
 - **schedule** — what Orbit would remind you about (`renewal` or `service`),
   taken from the dates.
 - **recurrence** — how often it repeats, only when a schedule is found.
-- **text characters: 0** — Tika got no text at all, usually a scanned image;
-  Orbit does not read those either (no OCR).
+- **text characters: 0** — Tika got no text at all, usually a scanned image.
+  Orbit does not read those either: it cannot read text out of a picture
+  (that step is called OCR, and Orbit does not do it).
 
 ## Telling it the right answers, and getting a score
 
@@ -80,7 +83,10 @@ Nothing ever writes over `truth.csv` once it exists: those are your answers,
 and every later run leaves them alone. Delete the file if you want a fresh
 pre-filled one.
 
-`--score` reads it back, reads the same documents again, and prints:
+`--score` reads it back, reads the same documents again, and prints a line
+like this (`sieve+tag+choose` is the project's name for how the reader
+works: find every candidate, tag each with the label beside it, then choose
+one per field):
 
     real 23: sieve+tag+choose: 74.1% (152/205) [provider 78.3% (18/23), ...]
 

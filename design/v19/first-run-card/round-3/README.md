@@ -70,4 +70,6 @@ dawn, the stars, the reclaim and the ascent are the sheet's own, untouched;
 
 ## Verdicts
 
-Awaiting round 3.
+Ratified — see `design/owner-decisions.md` §17 (2026-09-09), which builds every
+new card on this round's ring, and commit `b0c9cab3` ("Promote the ratified
+round-3 ring into the first-run design record").

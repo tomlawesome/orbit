@@ -1,61 +1,70 @@
 # Testing Orbit
 
-Orbit has separate test layers so fast feedback does not depend on Docker while
-database and HTTP boundary claims use real services.
+Orbit's tests are in separate layers, so quick feedback does not depend on
+Docker, while anything that claims something about the database or an HTTP
+boundary is checked against real services.
 
 ## Commands
 
-- `pnpm test` runs the fast unit/domain suite and does not require Docker.
-- `pnpm test:integration` starts one disposable digest-pinned official
-  PostgreSQL 18 Alpine
-  container on a random loopback port, applies every migration, runs the
-  PostgreSQL/API integration suite, and removes that exact container on success,
-  failure or interruption.
-- `pnpm test:e2e` runs browser tests against an already-running application.
-- `pnpm test:coverage` produces diagnostic V8 coverage for the fast suite.
+- `pnpm test` runs the fast unit and domain suite. It does not need Docker.
+- `pnpm test:integration` starts one throwaway PostgreSQL 18 Alpine container
+  on a random loopback port, applies every migration, runs the PostgreSQL and
+  API integration suite, and removes that exact container whether the run
+  passes, fails or is interrupted. The container image is the official one,
+  pinned by digest (a fingerprint that names one exact image, so a moved tag
+  cannot change what the tests run against).
+- `pnpm test:e2e` runs browser tests against an application that is already
+  running.
+- `pnpm test:coverage` produces V8 coverage for the fast suite, for
+  information only.
 
-The integration command requires Docker to be running and does not use the
-developer Orbit database, containers or volumes. Every invocation generates a
+The integration command needs Docker to be running. It never touches the
+developer's own Orbit database, containers or volumes. Every run makes up a
 unique container, database name, user and fake password, so repeated and
 concurrent runs cannot share state. Test fixtures use only `example.invalid`
-identities and synthetic records. They never contact an OIDC provider and do
-not add an authentication bypass.
+identities and made-up records. They never contact an OIDC provider, and they
+add no way to skip real sign-in.
 
 ## Integration fixture contract
 
-Integration fixtures create only the records a test needs using the real
+Integration fixtures create only the records a test needs, using the real
 PostgreSQL schema: users, preferences, external identities, sessions,
-households, owner/member memberships, sections, items and visible document
-metadata. Sessions are created through the production session implementation;
-tests use the production cookie name and CSRF derivation. Route tests invoke
-the actual Next.js route functions with `NextRequest`, not a development
-server or mocked authorization boundary.
+households, owner and member memberships, sections, items and visible
+document metadata. Sessions are created through the production session code,
+and tests use the production cookie name and the production CSRF check (the
+check that a request came from Orbit's own pages, not another site). Route
+tests call the real SvelteKit route handlers with a `RequestEvent`
+(`tests/integration/support/request-event.ts`), not a development server or a
+mocked authorisation boundary.
 
-The initial examples cover a persisted `household.update` workspace mutation,
-CSRF rejection before mutation, and household-scoped document listing with a
-non-disclosing outsider response. Uploading, parsing, scanning and encrypting
-document bytes belong to higher test layers.
+The first examples cover a saved `household.update` workspace change, CSRF
+rejection before anything changes, and household-scoped document listing with
+an outsider response that reveals nothing. Uploading, parsing, scanning and
+encrypting document bytes belong to higher test layers.
 
-The PostgreSQL integration layer also contains a persisted authorization matrix
-covering malformed, expired and disabled sessions; live membership removal;
-workspace, household and lifecycle routes; document list/download/delete/
-restore denial; portable archive ownership and non-disclosure; and administrator
-operations. Denied requests assert bounded error contracts, `no-store` responses,
-unchanged target state and unchanged audit state where mutation is applicable.
+The PostgreSQL integration layer also holds a saved authorisation matrix. It
+covers malformed, expired and disabled sessions; live membership removal;
+workspace, household and lifecycle routes; denial of document list, download,
+delete and restore; portable archive ownership and non-disclosure; and
+administrator operations. For each denied request it asserts the bounded
+error contract, a `no-store` response, an unchanged target and, where the
+request would have changed something, an unchanged audit trail.
 
 ## Hand-writing a migration
 
-`pnpm db:generate` is refused (`scripts/db-generate-refused.mjs`, #535):
-`drizzle/meta/` only has snapshots through 0004, so `drizzle-kit generate`
-would diff against that stale snapshot and silently emit a migration that
-recreates almost the whole schema. Write migrations by hand instead:
+`pnpm db:generate` is refused (`scripts/db-generate-refused.mjs`, #535).
+drizzle-kit works out a new migration by comparing the schema with its last
+saved snapshot of it, and `drizzle/meta/` only has snapshots through 0004. So
+`drizzle-kit generate` would compare against that old snapshot and quietly
+write a migration that recreates almost the whole schema. Write migrations by
+hand instead:
 
 1. Create `drizzle/NNNN_name.sql`, where `NNNN` is the next number after the
    last journal entry, in the style of `drizzle/0027_instance_authority.sql`:
-   plain DDL, `--> statement-breakpoint` between statements, and a `DO $$ ...
-   END $$` block only where existing data needs a deliberate, auditable
-   transformation (0027 seats a primary administrator; failing closed on an
-   ambiguous case beats guessing).
+   plain DDL, with `--> statement-breakpoint` between statements. Write a
+   `DO $$ ... END $$` block only when existing rows must be changed, and make
+   that change deliberate and auditable. (0027 seats a primary administrator;
+   when the data is ambiguous it stops rather than guesses.)
 2. Add the matching entry to `drizzle/meta/_journal.json` by hand: `idx` one
    past the last entry, `version` copied from the file's own top-level
    `version`, `tag` equal to the migration's filename without `.sql`, `when` a
@@ -68,56 +77,65 @@ recreates almost the whole schema. Write migrations by hand instead:
    - New indexes go in `EXPECTED_INDEXES`, constraints (primary key, unique,
      foreign key) in `EXPECTED_CONSTRAINTS`, and new enum labels in
      `EXPECTED_ENUMS`.
-   - Everything here is asserted verbatim against `readSchemaContract` in
-     `tests/integration/migrations.test.ts`, so a mismatch (in either
-     direction) fails that test rather than passing silently.
-4. Update `tests/integration/migrations.test.ts` if the migration has
-   behaviour beyond the schema diff: a migration that seeds or transforms data
-   unconditionally (as 0028 and 0033 do for their singleton tables) needs an
-   assertion on that seeded state in the "migrates every current migration
-   into a fresh PostgreSQL 18 database" test, and a migration that can fail on
-   existing data (as 0022 does) needs its own scenario, following the
+   - Everything here is compared word for word with `readSchemaContract` in
+     `tests/integration/migrations.test.ts`, so a mismatch in either
+     direction fails that test rather than passing quietly.
+4. Update `tests/integration/migrations.test.ts` if the migration does more
+   than change the schema. A migration that always seeds or transforms data
+   (as 0028 and 0033 do for their single-row tables) needs an assertion on
+   that seeded state in the "migrates every current migration into a fresh
+   PostgreSQL 18 database" test. A migration that can fail on existing data
+   (as 0022 does) needs its own scenario, following the
    `document_openable_scan_status_valid` test below it.
 
 `tests/integration/fixtures/migration-baseline.json` freezes the supported
-upgrade starting point (`migrationPrefix`, currently through 0017) and is not
-touched by an ordinary new migration.
+upgrade starting point (`migrationPrefix`, currently through 0017). An
+ordinary new migration does not touch it.
 
 ## CI relationship
 
-Pull requests run planning governance, lint, type checking and the complete unit
-suite. Separate read-only workflows retain dependency-diff and CodeQL evidence.
-They do not run a production build, PostgreSQL integration, source secret scan
-or container build. Every push to protected `preview` (or a bounded
-`hotfix/**` source) runs the complete source-policy, PostgreSQL, exact-image,
-browser, security, recovery, installer and publication path. A pull request to
-`main` verifies the already-tested preview digest, embedded identity and
-attestations without rebuilding it.
+Merge requests and pushes to `dev` run:
 
-When selected, the two concurrent integration invocations prove that
-independent runs do not share PostgreSQL state or Docker resources. The command
-remains reusable as a single isolated run during local development.
+- lint, type checking and the complete unit suite;
+- the source secret scan;
+- the licence-policy check over the whole installed dependency tree;
+- PostgreSQL integration;
+- the container build, then the smoke, browser and recovery journeys against
+  that build.
 
-If Docker is unavailable, the command fails clearly. If a run is interrupted,
-inspect only the uniquely named `orbit-integration-*` container reported by the
-run; do not use broad Docker prune or delete commands.
+CodeQL runs separately on the GitHub mirror.
 
-## Authenticated accessibility acceptance
+Every push to protected `preview` (or a `hotfix/**` branch) runs the whole
+path: source policy, PostgreSQL, the exact image, browser, security, recovery,
+installer and publication. A merge to `main` checks the already-tested preview
+digest, its embedded identity and its attestations (the signed proofs of what
+it passed) without rebuilding it.
 
-The exact-image browser job runs `authenticated-accessibility.spec.ts` against
-the production container with the disposable OIDC profile. The automated
-matrix is deliberately representative rather than device certification:
+When selected, two integration runs at the same time prove that independent
+runs share no PostgreSQL state or Docker resources. The command is still
+usable as a single isolated run during local development.
+
+If Docker is unavailable, the command fails with a clear message. If a run is
+interrupted, look only at the uniquely named `orbit-integration-*` container
+the run reported; do not use broad Docker prune or delete commands.
+
+## What the accessibility checks cover
+
+The `smoke` job runs the Playwright suite in `tests/e2e/` against the
+production container it has just built, with the throwaway OIDC profile. The
+suite runs in two browser projects, desktop Chromium and mobile Chromium (a
+Pixel 7 profile), so both of Orbit's layouts are covered. The automated checks
+are deliberately representative, not device certification:
 
 | Contract | Automated evidence |
 | --- | --- |
-| WCAG A/AA | Axe on the authenticated dashboard/navigation, item editor and detail, document draft review, notifications, personalisation, mailbox review and administrator surfaces |
-| Keyboard and focus | Initial focus, tab containment, Escape dismissal, visible focus and return to desktop and mobile invoking controls; nested camera review is pointer-shielded |
-| Responsive layout | Chromium at 1440×900, 820×1180 and 412×915 with document and core-overlay overflow/bounds assertions |
-| Text and colour | Every Orbit text-size setting on every tested viewport, plus representative light, dark and system modes across After Dark, Verdant and Coast |
-| Feedback and recovery | Authenticated lifecycle, document-assisted item, IMAP review and online-workspace-policy journeys cover success, validation/conflict, provider failure and failed online mutation announcements |
+| WCAG A/AA | `v19-axe-sweep.spec.ts` runs Axe over every signed-in route in both layouts; `signed-out.spec.ts` covers the sign-in door. |
+| Keyboard and focus | `v19-keyboard.spec.ts` and `v19-keyboard-pocket.spec.ts` drive the core journeys, sign-in through sign-out, by keyboard alone on desktop and mobile. |
+| Screen reader | `v19-screen-reader.spec.ts` reads back what the browser's accessibility engine would announce on every core-journey screen, and writes the raw ARIA tree to `test-results/aria/<route>.txt` for a person to read. |
+| Charts | `v19-chart-accessibility.spec.ts` checks the home dial is a labelled group with a named link per body, and that nothing focusable inside it is unnamed. |
+| Reduced motion | `v19-reduced-motion.spec.ts` checks that `prefers-reduced-motion` and no-JS both fall back to the plain list. |
 
-Fixtures use disposable synthetic households, items, documents and mailbox
-metadata. The acceptance spec does not create screenshots; the standard
-Playwright trace is retained only on the first retry. Representative physical
-device and assistive-technology checks remain release acceptance and are not
-implied by the automated Chromium evidence.
+Fixtures use throwaway made-up households, items, documents and mailbox
+metadata. The Playwright trace is kept only on the first retry. Checks on
+real devices and with real assistive technology are still part of release
+acceptance and are not implied by the automated Chromium evidence.

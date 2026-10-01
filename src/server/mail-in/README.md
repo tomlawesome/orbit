@@ -29,14 +29,14 @@ journey, persistence.
 | --- | --- |
 | `core/imap-attachment-validation.ts` | BODYSTRUCTURE classification, attachment byte validation, display-name normalization. Moved as-is from `imap-attachment-validation.ts`. |
 | `core/imap-recipient.ts` | Recipient-alias derivation, normalization, and matching; trusted-header parsing. The alias base (`<account-local>+<code>@<domain>`) is derived from the mailbox account by `imapAliasBaseFromAccount` rather than being the fixed `orbit+` literal it was before ADR-0017. |
-| `core/imap-rotation.ts` | Alias-rotation state machine (`decideImapRotationState`, `assertImapRotationState`). Moved as-is from `imap-rotation.ts`. |
+| `core/relay-generations.ts` | Per-user relay-generation state (`assertRelayGenerationState`, `nextRelayGeneration`, `relayPreviousIsActive`, `activeRelayGenerations`; ADR-0017 slice 3). Replaced the instance-wide alias-rotation state machine that lived in `imap-rotation.ts`. |
 | `core/secret-crypto.ts` | Envelope encryption for a `mail_in_secrets` row: the same AES-256-GCM construction documents use, under its own AAD purpose (ADR-0017 slice 1). |
-| `core/config.ts` | `getImapIngestionConfig`, `imapProviderConnectionOptions`, `imapProviderConfigCommitment`, `imapAttachmentRetryDelayMs` — extracted from `imap-ingestion.ts`, which re-exports them for a churn-free import path. |
+| `core/config.ts` | `parseImapIngestionConfigFromEnvironment` (the old `getImapIngestionConfig` environment parser, kept only for the characterization tests; the live `getImapIngestionConfig` is in `mailbox-config.ts`), `imapProviderConnectionOptions`, `imapProviderConfigCommitment`, `imapAttachmentRetryDelayMs` — extracted from `imap-ingestion.ts`, which re-exports them for a churn-free import path. |
 | `core/review-state.ts` | `reviewInboxState`, `findReviewedIntakeCandidateReason` — extracted from `imap-inbox.ts`, which re-exports them for a churn-free import path — plus the read-side display shaping added by #467 (`reviewAttachmentDisplayName`, `reviewAttachmentMediaType`, `reviewAttachmentScanState`). |
 | `mailbox-config.ts` | Resolves the running mail-in configuration from `mail_in_mailbox`/`mail_in_secrets` and decrypts the credential (ADR-0017 slice 1). No environment fallback. |
 | `mailbox-settings.ts` | The administrator's set/verify/probe/rotate/remove/enable actions on that mailbox (ADR-0017 slice 2). Verifies against the provider before committing; the password and alias key are write-only and have no read path. |
-| `imap-ingestion.ts` | The ImapFlow network shell: polling cycle, recipient-alias reconciliation, attachment staging/commit, provider preflight. The `globalThis.__orbitImapProviderPreflight` singleton stays here, colocated with the worker that owns it. |
-| `imap-inbox.ts` | Review-inbox CRUD (list/get/discard/assign), staging purge. The `globalThis` singleton(s) for this worker's cycle stay colocated here. |
+| `imap-ingestion.ts` | The ImapFlow network shell: polling cycle, recipient-alias reconciliation, attachment staging/commit, provider preflight. The `globalThis` provider-preflight and worker-cycle singletons stay here, colocated with the worker that owns them. |
+| `imap-inbox.ts` | Review-inbox CRUD (list/get/discard/assign), staging purge. |
 | `imap-attachment-holding.ts` | Scan + encrypt inbound attachments to local staging ahead of commit. |
 | `imap-receipt-worker.ts` | SMTP notification delivery for receipts/review-ready mail. Its `globalThis.__orbit*` singleton stays colocated here. |
 
@@ -45,7 +45,8 @@ Old `src/server/imap-*.ts` paths (`imap-ingestion.ts`, `imap-inbox.ts`,
 one-line re-export stubs pointing at their new home here, so no caller's
 import path had to change. `imap-attachment-validation.ts`, `imap-recipient.ts`,
 and `imap-rotation.ts` had no consumers outside this module, so they moved
-outright with no stub.
+outright with no stub (`imap-rotation.ts` has since been replaced by
+`core/relay-generations.ts`).
 
 ## Failure reasons (#1143)
 
@@ -78,7 +79,7 @@ side of that boundary is characterized too.
 
 ## Contract
 
-`src/server/imap-characterization.test.ts` (43 tests) is the behavioural
+`src/server/imap-characterization.test.ts` is the behavioural
 contract for this module: it pins the pre-split behaviour of every pure
 function here (including the ten oddities flagged during characterization —
 see issue #298 — which were deliberately characterized, not fixed). Any
