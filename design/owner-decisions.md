@@ -80,6 +80,17 @@ centre `r7` filled `--sun`; planet `cx163 cy63.5 r16` filled `--accent`; drift
 **Strapline:** none on the sign-in — *"the hero is the name."* CON-11 records
 *"your year, in orbit"* for surfaces that want words (README, launcher splash).
 
+**Addendum, 2026-10-01 (owner, on #1177, the README art):** outside the app's
+own themed screens the mark is drawn at its **standard proportion** — ring,
+planet, centre dot, the word plain beside or under — never the sign-in's thin
+cut; and the planet is **always gold `#d8b45a`**, whatever ground it sits on
+(it stays gold on After Dark's river). Owner verbatim: *"The simple ring and
+planet is orbit's brand identity, and for something like this, it's always
+the gold colour. Changing the colour would only be appropriate in certain
+places and situations."* Theme tokens recolour the mark only inside the app's
+themed screens. The README tagline is CON-11's *"your year, in orbit"* (owner,
+same day).
+
 ## 3. The home screen
 
 ### The hero
