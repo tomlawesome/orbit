@@ -20,6 +20,38 @@ import { ImapFlow, type MessageStructureObject } from "imapflow";
 
 const IMAPS_PORT = Number(process.env.TEST_IMAPS_PORT ?? 3993);
 
+/** The one intake mailbox every v19-mail-collection pass delivers into and
+ *  Orbit polls (#459). Shared by all workers and all projects on a stack. */
+export const INTAKE_MAILBOX = "orbit-intake@in.orbit.test";
+
+/**
+ * #1183: empties the intake mailbox, as part of putting the stack back to its
+ * seed (support/database.ts). The restore wipes Orbit's own record of what it
+ * has already read from this box but GreenMail keeps the mail, so after a
+ * reset Orbit read every earlier pass's "Boiler cover renewal" again and the
+ * next pass found extra suggestion rows it never sent -- desktop-firefox in
+ * pipeline 1926, and any second pass on one local stack. Only ever called
+ * where the gate has every worker outside a spec file, so no worker's
+ * in-flight mail is in the box.
+ */
+export async function emptyIntakeMailbox(): Promise<void> {
+  const client = new ImapFlow({
+    host: "127.0.0.1",
+    port: IMAPS_PORT,
+    secure: true,
+    tls: { rejectUnauthorized: false },
+    auth: { user: INTAKE_MAILBOX, pass: "orbit-e2e-mail-helper" },
+    logger: false,
+  });
+  await client.connect();
+  try {
+    const box = await client.mailboxOpen("INBOX");
+    if (box.exists > 0) await client.messageDelete("1:*");
+  } finally {
+    await client.logout().catch(() => client.close());
+  }
+}
+
 /** Depth-first search for the first text/plain node in a body structure. */
 function findTextPlainPart(node: MessageStructureObject | undefined): string | undefined {
   if (!node) return undefined;

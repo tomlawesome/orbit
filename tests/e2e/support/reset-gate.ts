@@ -238,14 +238,14 @@ function me(): string {
 export async function enterSpecFile(options: {
   workers: number;
   overBudget: () => string | null;
-  reset: () => void;
+  reset: () => void | Promise<void>;
 }): Promise<void> {
   const worker = me();
 
   /* One worker is always alone, so skip the probe entirely and reset every
      file: #1077 unchanged, and no gate file written at all. */
   if (options.workers <= 1) {
-    options.reset();
+    await options.reset();
     return;
   }
 
@@ -303,7 +303,7 @@ export async function enterSpecFile(options: {
          throws, the ask stands: this worker's file fails loudly, and the next
          worker to find itself alone tries the same restore and fails the same
          way, rather than the run carrying on over a half-reset database. */
-      options.reset();
+      await options.reset();
       withGate((gate) => {
         gate.resetWanted = null;
       });
