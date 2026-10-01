@@ -649,13 +649,13 @@ encrypted with AES-256-GCM) and packages it with the backup you just made into
 one file, `orbit-recovery-<timestamp>.tar`.
 
 Keep its two parts apart: the bundle file on storage separate from this
-instance, and its passphrase in a password manager or on paper. Never keep
-them together. That separation is what stops anyone who gets hold of the file
-alone from being able to use it.
+instance, and its passphrase in a password manager or on paper — never both
+together. That separation is what stops anyone who gets hold of the file alone
+from being able to use it.
 
 The administration screen shows a "No recovery bundle exported" card until a
 bundle has been recorded, and again after every `DOCUMENT_KEK` rotation,
-because a bundle made under the previous key can no longer recover the
+because a bundle wrapped under the previous key can no longer recover the
 current one. The card is a reminder, not a gate: it never blocks use of the
 instance, and it clears the moment `orbit export-recovery-bundle` completes.
 
