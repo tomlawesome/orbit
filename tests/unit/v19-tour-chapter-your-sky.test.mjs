@@ -238,7 +238,7 @@ describe("the beats, in the mockup's order", () => {
     await sky.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel]);
     expect(said).toEqual([
-      ["Take the tour again anytime from Settings.", SELECTORS.DESK.settingsLink],
+      ["Watch the tour again anytime from the settings or the menu.", SELECTORS.DESK.settingsLink],
       ["star chart · after dark · clouds · dawn · retrograde", SELECTORS.DESK.swatches],
     ]);
   });
@@ -306,7 +306,7 @@ describe("the chapter played for real", () => {
     sample();
 
     expect(said).toEqual([
-      "Take the tour again anytime from Settings.",
+      "Watch the tour again anytime from the settings or the menu.",
       "star chart · after dark · clouds · dawn · retrograde",
     ]);
     ctx.destroy();
