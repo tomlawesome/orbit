@@ -170,7 +170,7 @@ export class TourControlMissing extends Error {
  * @property {boolean} ringless
  * @property {HTMLDivElement[]} rings
  * @property {boolean} lifted
- * @property {{ el: Element, transform: string, filter: string, transition: string, flat?: boolean }[]} saved
+ * @property {{ el: Element, transform: string, filter: string, transition: string, flat?: boolean, svgPos?: boolean }[]} saved
  */
 
 /** @typedef {[number, number]} Point */
@@ -758,6 +758,24 @@ export function createFilmContext({
     return false;
   }
 
+  /**
+   * Addendum B (#1174, chapter 8's fault A): true for an SVG element whose
+   * OWN `transform` attribute is its real position — the pocket belt's
+   * `.capseat` groups, painted every frame by `translate(x,y)` on that very
+   * attribute. The CSS `transform` PROPERTY a lift or a press would set
+   * does not compose with that attribute; it replaces it outright (the CSS
+   * Transforms spec's own rule), so the control snaps to roughly (0,0) in
+   * its SVG's own coordinate space for as long as it stays lit — which
+   * rendered as a ring on "checklist.pdf" sitting over the back link
+   * instead of on the paper it names. Detected at runtime, the same way
+   * `clipped()` finds a control a lift would show cut, rather than asking
+   * every chapter to know which controls move themselves this way.
+   * @param {Element} el
+   */
+  function svgPositioned(el) {
+    return el instanceof SVGElement && el.hasAttribute("transform");
+  }
+
   /** @param {Control} c */
   function applyLift(c) {
     if (dry() || c.lifted) return;
@@ -766,19 +784,22 @@ export function createFilmContext({
       const style = styleOf(el);
       if (!style) continue;
       const flat = clipped(el);
+      const svgPos = svgPositioned(el);
       c.saved.push({
         el,
         transform: style.transform,
         filter: style.filter,
         transition: style.transition,
-        flat,
+        flat: flat || svgPos,
+        svgPos,
       });
       style.transition = still() ? "none" : `transform ${T.lift}ms ${T.ease},filter ${T.lift}ms ease`;
       /* Addendum A: the lift yields to a clip — the ring alone says
          "lifted". A translated face that would leave a Row's own clip is a
          control shown cut, and the glow is invisible inside the clip
-         anyway, so nothing is lost but 2px of movement nobody can see. */
-      if (flat) continue;
+         anyway, so nothing is lost but 2px of movement nobody can see.
+         Addendum B: it yields the same way to its own position. */
+      if (flat || svgPos) continue;
       style.transform = "translateY(-2px)";
       style.filter = "drop-shadow(0 0 14px color-mix(in srgb,var(--accent) 34%,transparent))";
     }
@@ -955,10 +976,18 @@ export function createFilmContext({
   async function press(c) {
     if (!dry() && !still()) {
       for (const el of c.els) {
+        const saved = c.saved.find((s) => s.el === el);
+        /* Addendum B: an SVG element positioned by its own `transform`
+           attribute cannot take even `translate(0,0)` as a squash base —
+           that is still an inline `transform` PROPERTY, which overrides the
+           attribute exactly as the lift's own did (see `svgPositioned`).
+           No press animation plays for it; the ring and the clock cost are
+           the whole of this beat for a control that moves itself. */
+        if (saved?.svgPos) continue;
         /* Addendum A: a lifted-but-clipped element never actually moved
            (applyLift left it flat), so its press must not either — reading
            a per-element flag rather than `c.lifted` alone. */
-        const flat = c.saved.find((s) => s.el === el)?.flat;
+        const flat = saved?.flat;
         const base = c.lifted && !flat ? "translateY(-2px)" : "translate(0,0)";
         const style = styleOf(el);
         if (style) style.transition = "none";
