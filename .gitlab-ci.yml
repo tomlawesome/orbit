@@ -2224,6 +2224,30 @@ smoke_firefox:
     expire_in: 14 days
     when: always
 
+# #1192: WebKit has no Chromium `--host-resolver-rules` switch and no
+# Firefox `network.dns.localDomains`/`network.socket.forcePort` prefs (see
+# firefoxLaunchOptions's #1183 comment in tests/e2e/playwright.config.ts) to
+# send the orbit-oidc redirect anywhere else, so these two jobs resolve it
+# the one way left: the job container's own hosts file. The Playwright
+# process they run lives in that same container, alongside the Compose
+# stack's published ports (`.docker_in_job` above runs the daemon IN the job
+# container for exactly this reason -- its own comment), so a browser there
+# that is told orbit-oidc is 127.0.0.1 reaches the real sidecar. Both jobs
+# below pin TEST_OIDC_PORT=4443 so the port in the fixed
+# https://orbit-oidc:4443/ issuer URL (compose/docker-compose.acceptance.yml)
+# is always the one Compose actually publishes to -- no port rewrite needed,
+# just the hostname. Writing /etc/hosts needs root, which this job container
+# already is (`.docker_in_job` above installs packages with no sudo).
+#
+# CI-only: a local `--project desktop-webkit`/`mobile-webkit` run
+# (scripts/test-e2e-local.sh) still has no way to resolve orbit-oidc --
+# editing /etc/hosts needs root this host does not grant (same constraint
+# scripts/test-install-bootstrap.sh hit) and TEST_OIDC_PORT is deliberately a
+# random free port locally, not 4443, so there would be a port to rewrite as
+# well as a name. Unsolved here; use desktop-chromium/firefox locally instead.
+.webkit_oidc_hosts: &webkit_oidc_hosts |
+  grep -q '[[:space:]]orbit-oidc$' /etc/hosts || echo "127.0.0.1 orbit-oidc" >> /etc/hosts
+
 # #1192: the same suite on WebKit, desktop and phone, each in its own job
 # beside `smoke` and `smoke_firefox` -- not inside either. Desktop and phone
 # together ran close to the same 30m limit that Firefox hit inside `smoke`
@@ -2249,6 +2273,10 @@ smoke_webkit:
     # mobile-webkit instead.
     ORBIT_E2E_ENGINES: webkit
     ORBIT_E2E_WEBKIT_DEVICES: desktop
+    # Pinned, not left to default to the same value, so the /etc/hosts
+    # mapping below (.webkit_oidc_hosts) never has to rewrite a port: see its
+    # comment.
+    TEST_OIDC_PORT: "4443"
     COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.dependency-proxy.yml -f compose/docker-compose.ci-cap.yml
   rules:
     - *not_scheduled
@@ -2262,6 +2290,7 @@ smoke_webkit:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *webkit_oidc_hosts
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
     # configure.sh persists ORBIT_IMAGE when it sees one, and accepts only a
@@ -2337,6 +2366,10 @@ smoke_webkit_mobile:
     # desktop-webkit instead.
     ORBIT_E2E_ENGINES: webkit
     ORBIT_E2E_WEBKIT_DEVICES: mobile
+    # Pinned, not left to default to the same value, so the /etc/hosts
+    # mapping below (.webkit_oidc_hosts) never has to rewrite a port: see its
+    # comment.
+    TEST_OIDC_PORT: "4443"
     COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.dependency-proxy.yml -f compose/docker-compose.ci-cap.yml
   rules:
     - *not_scheduled
@@ -2350,6 +2383,7 @@ smoke_webkit_mobile:
     - *system_lane_gate
     - *reuse_gate
     - *docker_in_job
+    - *webkit_oidc_hosts
     - pnpm install --frozen-lockfile
     - docker load --input image.tar
     # configure.sh persists ORBIT_IMAGE when it sees one, and accepts only a
