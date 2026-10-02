@@ -133,12 +133,16 @@ export function createFilm({
     player,
     clock,
     ctx,
-    destroy() {
-      if (destroyed) return;
-      destroyed = true;
-      face?.destroy();
-      face = null;
-      player.destroy();
-    },
+    destroy,
   };
+
+  /** Idempotent: the bar's own leave (#1190), a second take or an unmount
+   *  may each call it, and only the first does anything. */
+  function destroy() {
+    if (destroyed) return;
+    destroyed = true;
+    face?.destroy();
+    face = null;
+    player.destroy();
+  }
 }
