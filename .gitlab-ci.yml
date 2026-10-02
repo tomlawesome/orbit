@@ -853,7 +853,7 @@ classify:
       fi
 
       : > classify.env
-      for pair in ORBIT_RISK:risk ORBIT_BUILD:build ORBIT_INTEGRATION:integration ORBIT_SYSTEM:system ORBIT_WEB:web ORBIT_LICENCE:licence; do
+      for pair in ORBIT_RISK:risk ORBIT_BUILD:build ORBIT_INTEGRATION:integration ORBIT_SYSTEM:system ORBIT_WEB:web ORBIT_E2E:e2e ORBIT_LICENCE:licence; do
         name="${pair%%:*}"
         key="${pair##*:}"
         # Assigned before it is printed: `set -e` sees a failed command
@@ -2020,13 +2020,15 @@ smoke:
     - bash scripts/ci/verify-privacy-boundary.sh
     # The image ships the browser build that matches its Playwright version, so
     # nothing is downloaded here. Chromium only (ORBIT_E2E_ENGINES above);
-    # Firefox is `smoke_firefox` below (#1183). Gated on ORBIT_WEB alone (#1078), same axis
-    # `fidelity` already gates on: the four verify-*.sh calls above prove
-    # runtime properties of the image that any change can break and stay
-    # unconditional, but the click-through suite is what this axis answers for.
+    # Firefox is `smoke_firefox` below (#1183). Gated on ORBIT_E2E alone: the
+    # front end `fidelity` gates on (ORBIT_WEB, #1078) plus the suite itself
+    # (#1181), so a merge request that only adds a spec still runs it. The four
+    # verify-*.sh calls above prove runtime properties of the image that any
+    # change can break and stay unconditional, but the click-through suite is
+    # what this axis answers for.
     - |
-      if [ "${ORBIT_WEB:-true}" != "true" ]; then
-        echo "skipped: no change to the v19 front end"
+      if [ "${ORBIT_E2E:-true}" != "true" ]; then
+        echo "skipped: no change to the v19 front end or the browser suite"
       else
         bash scripts/test-frontend.sh
       fi
@@ -2108,13 +2110,13 @@ smoke_firefox:
     - bash scripts/ci/verify-privacy-boundary.sh
     # The image ships the browser build that matches its Playwright version, so
     # nothing is downloaded here: the image's Firefox build is the one this
-    # Playwright version expects. Gated on ORBIT_WEB alone (#1078), same axis
-    # `fidelity` already gates on: the four verify-*.sh calls above prove
-    # runtime properties of the image that any change can break and stay
+    # Playwright version expects. Gated on ORBIT_E2E alone, as `smoke` is
+    # (#1078, #1181): the four verify-*.sh calls above prove runtime
+    # properties of the image that any change can break and stay
     # unconditional, but the click-through suite is what this axis answers for.
     - |
-      if [ "${ORBIT_WEB:-true}" != "true" ]; then
-        echo "skipped: no change to the v19 front end"
+      if [ "${ORBIT_E2E:-true}" != "true" ]; then
+        echo "skipped: no change to the v19 front end or the browser suite"
       else
         bash scripts/test-frontend.sh
       fi

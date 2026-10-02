@@ -43,6 +43,13 @@ const dependencySnapshotPaths = new Set(["pnpm-lock.yaml", "pnpm-workspace.yaml"
 // layer moves without charging every system-risk change for it.
 const webPatterns = [/^web\//u, /^pnpm-lock\.yaml$/u, /^pnpm-workspace\.yaml$/u];
 
+// What `smoke`'s and `smoke_firefox`'s browser suite answers for (#1181): the
+// front end, as above, plus the suite itself and the script that runs it. A
+// merge request that only added a spec used to skip the suite, so the new spec
+// first ran after merge. Kept apart from `webPatterns` because a spec change
+// cannot move what `fidelity` photographs.
+const browserSuitePatterns = [...webPatterns, /^tests\/e2e\//u, /^scripts\/test-frontend\.sh$/u];
+
 // What the `licence_policy` job (#815) reaches for: a change to any of these
 // can add or move a dependency, so the installed-tree licence walk needs to
 // run. Narrower than a full dependency-snapshot change on purpose -- unlike
@@ -213,6 +220,15 @@ export function touchesWeb(changedPaths) {
 }
 
 /**
+ * True when a change can move what the browser suite clicks through, or the
+ * suite itself. Fails safe the same way `touchesWeb` does.
+ */
+export function touchesBrowserSuite(changedPaths) {
+  if (!Array.isArray(changedPaths) || changedPaths.length === 0) return true;
+  return changedPaths.some((path) => matchesAny(normalizePath(path), browserSuitePatterns));
+}
+
+/**
  * True when a change can move what the `licence_policy` gate checks. Fails
  * safe the same way `touchesWeb` does: no usable list of changed paths means
  * run it.
@@ -259,6 +275,7 @@ export function ciRequirements(changedPaths, options = {}) {
     integration: risk === CI_RISK.INTEGRATION || risk === CI_RISK.SYSTEM,
     system: risk === CI_RISK.SYSTEM,
     web: touchesWeb(changedPaths),
+    e2e: touchesBrowserSuite(changedPaths),
     licence: touchesLicencePolicy(changedPaths),
     launcherCompat: touchesLauncherInstallCompat(changedPaths),
   };
@@ -386,13 +403,14 @@ function main() {
   const integration = risk === CI_RISK.SYSTEM || requirements.integration;
   const system = risk === CI_RISK.SYSTEM || requirements.system;
   const web = requirements.web;
+  const e2e = requirements.e2e;
   const licence = requirements.licence;
   const launcherCompat = requirements.launcherCompat;
   // A lane is a claim about the whole diff, so a diff that could not be proven
   // has no lane at all -- the same fail-safe the three axes above apply.
   const lane = comparisonProven ? requirements.lane : CI_LANE.FULL;
   console.log(
-    `CI risk classification: risk=${risk} lane=${lane} build=${build} integration=${integration} system=${system} web=${web} licence=${licence} launcher_compat=${launcherCompat} (${reason}).`,
+    `CI risk classification: risk=${risk} lane=${lane} build=${build} integration=${integration} system=${system} web=${web} e2e=${e2e} licence=${licence} launcher_compat=${launcherCompat} (${reason}).`,
   );
   if (graphChanged !== undefined) {
     console.log(`Production dependency graph changed: ${graphChanged}.`);
@@ -405,6 +423,7 @@ function main() {
     appendFileSync(process.env.GITHUB_OUTPUT, `integration=${integration}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `system=${system}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `web=${web}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `e2e=${e2e}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `licence=${licence}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `launcher_compat=${launcherCompat}\n`);
   }

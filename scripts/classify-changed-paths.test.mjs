@@ -10,6 +10,7 @@ import {
   requiresExecutableValidation,
   touchesLauncherInstallCompat,
   touchesLicencePolicy,
+  touchesBrowserSuite,
   touchesWeb,
 } from "./classify-changed-paths.mjs";
 
@@ -127,6 +128,42 @@ describe("changed-path CI risk classification", () => {
   });
 
   /*
+   * The browser suite's own trigger (#1181): everything that moves the front
+   * end, plus the suite itself. A merge request that only adds or changes a
+   * spec under tests/e2e/ used to skip the suite, so the new spec first ran
+   * after merge. Wider than `web` on purpose, and kept apart from it: a spec
+   * change cannot move what `fidelity` photographs.
+   */
+  it("runs the browser suite when only the suite itself changed (#1181)", () => {
+    expect(touchesBrowserSuite(["tests/e2e/v19-axe-sweep.spec.ts"])).toBe(true);
+    expect(touchesBrowserSuite(["tests/e2e/support/fixtures.ts"])).toBe(true);
+    expect(touchesBrowserSuite(["tests/e2e/playwright.config.ts"])).toBe(true);
+    expect(touchesBrowserSuite(["scripts/test-frontend.sh"])).toBe(true);
+    expect(ciRequirements(["tests/e2e/v19-create.spec.ts"]).e2e).toBe(true);
+    // ...without charging the fidelity gate for it.
+    expect(ciRequirements(["tests/e2e/v19-create.spec.ts"]).web).toBe(false);
+  });
+
+  it("runs the browser suite whenever the fidelity gate's front end moves", () => {
+    for (const path of ["web/src/routes/home/+page.svelte", "pnpm-lock.yaml", "pnpm-workspace.yaml"]) {
+      expect(touchesBrowserSuite([path])).toBe(true);
+    }
+  });
+
+  it("does not run the browser suite for changes that reach neither the front end nor the suite", () => {
+    expect(touchesBrowserSuite(["docs/architecture.md"])).toBe(false);
+    expect(touchesBrowserSuite(["src/server/documents/scanner.ts"])).toBe(false);
+    expect(touchesBrowserSuite(["tests/integration/items.test.ts"])).toBe(false);
+    expect(ciRequirements(["docs/architecture.md"]).e2e).toBe(false);
+  });
+
+  it("fails safe to running the browser suite without a usable comparison", () => {
+    expect(touchesBrowserSuite([])).toBe(true);
+    expect(touchesBrowserSuite(undefined)).toBe(true);
+    expect(touchesBrowserSuite(null)).toBe(true);
+  });
+
+  /*
    * The `licence_policy` gate's own trigger (#815): a change that can add or
    * move a dependency reaches it, one that cannot does not.
    */
@@ -197,6 +234,7 @@ describe("changed-path CI risk classification", () => {
       // A lockfile change can move what the v19 build resolves, so the
       // fidelity gate runs even when the lane stays fast.
       web: true,
+      e2e: true,
       // A lockfile change is exactly what the licence gate exists to catch.
       licence: true,
       launcherCompat: false,

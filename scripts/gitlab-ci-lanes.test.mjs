@@ -104,6 +104,7 @@ function runClassifyEnv(environment = {}) {
         "integration=false",
         "system=false",
         "web=false",
+        "e2e=false",
         "licence=false",
         "launcher_compat=false",
         "",
@@ -136,6 +137,7 @@ const everythingOn = {
   ORBIT_INTEGRATION: "true",
   ORBIT_SYSTEM: "true",
   ORBIT_WEB: "true",
+  ORBIT_E2E: "true",
   ORBIT_LICENCE: "true",
   ORBIT_LAUNCHER_COMPAT: "true",
   ORBIT_LANE: "full",
@@ -242,6 +244,7 @@ describe("pipeline lanes", () => {
         ORBIT_INTEGRATION: "false",
         ORBIT_SYSTEM: "false",
         ORBIT_WEB: "false",
+        ORBIT_E2E: "false",
         ORBIT_LICENCE: "false",
         // The CI lane does not run launcher_install_compat, and the lane
         // survives because nothing overrode it.
@@ -275,6 +278,19 @@ describe("pipeline lanes", () => {
     // A delivery push widens the lane without claiming the diff was riskier
     // than it was: only the label rewrites the axes.
     expect(runClassifyEnv({ CI_COMMIT_BRANCH: "dev" }).variables.ORBIT_SYSTEM).toBe("false");
+  });
+
+  // #1181: the browser suite has its own axis, and both jobs that run it read
+  // that axis rather than the front-end one `fidelity` reads.
+  it("gates both browser-suite jobs on ORBIT_E2E", () => {
+    for (const name of ["smoke", "smoke_firefox"]) {
+      const block = allBlocks.get(name);
+      const suite = block.indexOf("bash scripts/test-frontend.sh");
+      const gate = block.lastIndexOf('if [ "${ORBIT_E2E:-true}" != "true" ]; then', suite);
+      expect(gate, `${name}: the browser suite is not behind ORBIT_E2E`).toBeGreaterThan(-1);
+      expect(block, name).not.toMatch(/\$\{ORBIT_WEB/u);
+    }
+    expect(runClassifyEnv().variables.ORBIT_E2E).toBe("false");
   });
 
   it("hands the lane on from classify as a dotenv variable", () => {
