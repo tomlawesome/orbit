@@ -139,16 +139,20 @@ function drawBelt(container, { docs = 2 } = {}) {
        buildSeats to prove read()/unread() against something that behaves
        like the shipped screen — a real click really mounts a card (openDoc's
        own effect), a real Escape really closes it (+page.svelte's own
-       onKeydown), and neither touches localStorage or a server. */
+       onKeydown), and neither touches localStorage or a server.
+       `aria-hidden="false"` is paintMembers' own say for "this one is
+       actually out" (#1174 round 9) — docBody's ring relies on it. */
     const hit = document.createElementNS(SVG_NS, "g");
     hit.setAttribute("class", "hit");
     hit.setAttribute("aria-label", `Document ${k}, a document attached to Volvo V60`);
+    hit.setAttribute("aria-hidden", "false");
     hit.addEventListener("click", () => {
       if (document.getElementById("readcard")) return;
       const card = document.createElement("aside");
       card.id = "readcard";
       container.appendChild(card);
     });
+    box(hit, { x: 600 + k * 20, y: 270, w: 40, h: 40 });
     seats.appendChild(hit);
   }
   members.append(ends, seats, caps);
@@ -236,7 +240,7 @@ describe("the selectors chapter 8 names", () => {
   });
 
   it("pins POCKET_RIDE (band.js) at at least one paper riding the belt", () => {
-    /* #1083: the two-papers count this chapter's docLabel/docHit beats rely
+    /* #1083: the two-papers count this chapter's docBody/docHit beats rely
        on being "however many ride" (see point 3 of the chapter's own header
        comment) presumes the belt seats at least one. */
     expect(POCKET_RIDE).toBeGreaterThanOrEqual(1);
@@ -293,9 +297,9 @@ describe("the beats, in round 6's order", () => {
     await belt.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel]);
     expect(said).toEqual([
-      ["Every body carries its documents in a belt around it.", SELECTORS.DESK.docLabel],
-      ["The belt is what you have attached to it.", SELECTORS.DESK.docLabel],
-      ["Click one to bring it in.", SELECTORS.DESK.docLabel],
+      ["Every body carries its documents in a belt around it.", SELECTORS.DESK.docBody],
+      ["The belt is what you have attached to it.", SELECTORS.DESK.docBody],
+      ["Click one to bring it in.", SELECTORS.DESK.docBody],
       ["Read the full document, right here.", SELECTORS.DESK.cardwrap],
       ["later → steps the belt — so do the arrow keys.", SELECTORS.DESK.laterInk],
     ]);
@@ -305,13 +309,13 @@ describe("the beats, in round 6's order", () => {
     const { log, ctx } = recorder();
     await belt.play(ctx);
     const pressed = log.filter(([word]) => word === "press").map(([, sel]) => sel);
-    expect(pressed).toEqual([SELECTORS.DESK.body, SELECTORS.DESK.docLabel, SELECTORS.DESK.laterInk, SELECTORS.DESK.soonerInk]);
+    expect(pressed).toEqual([SELECTORS.DESK.body, SELECTORS.DESK.docBody, SELECTORS.DESK.laterInk, SELECTORS.DESK.soonerInk]);
   });
 
   it("reads a paper for real right after pressing it, and unreads it on the later step", async () => {
     const { log, ctx } = recorder();
     await belt.play(ctx);
-    const pressPapers = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.docLabel);
+    const pressPapers = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.docBody);
     const readAt = log.findIndex(([word]) => word === "read");
     const pressLater = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.laterInk);
     const unreadAt = log.findIndex(([word]) => word === "unread");
