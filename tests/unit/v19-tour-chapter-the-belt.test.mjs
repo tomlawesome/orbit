@@ -520,6 +520,61 @@ describe("the chapter played for real", () => {
   }, 20000);
 });
 
+/* Owner answer 8b (2026-10-02): with `later →` spent, the beat goes the other
+   way -- `← sooner` is ringed, named and pressed, then `later →` brings the
+   belt back to the item. With both spent there is nowhere to step: no ring,
+   no line. Every case plays the same length. */
+describe("the step beat when an end-cap is spent (owner 8b)", () => {
+  const run = async (spentSteps) => {
+    drawScene({ docs: 2 });
+    for (const step of spentSteps) {
+      const cap = document.querySelector(`.endcap-hit[data-step="${step}"]`);
+      cap.setAttribute("aria-disabled", "true");
+      cap.classList.add("off");
+    }
+    const clock = createClock({ reducedMotion: () => false });
+    const ctx = createFilmContext({ clock, doc: document });
+    clock.setPlaying(true);
+    const promise = belt.play(ctx);
+    let done = false;
+    promise.then(() => { done = true; });
+    const lifted = new Set();
+    const lines = new Set();
+    let elapsed = 0;
+    while (!done && elapsed < 400000) {
+      clock.advance(100);
+      elapsed += 100;
+      await settle();
+      for (const step of ["1", "-1"]) {
+        if (document.querySelector(`.endcap-hit[data-step="${step}"] text.endcap`)?.style.transform) lifted.add(step);
+      }
+      for (const el of document.querySelectorAll(".tourfilm-callout")) {
+        if (/steps the belt/u.test(el.textContent ?? "")) lines.add(el.textContent);
+      }
+    }
+    const total = clock.sched();
+    ctx.destroy();
+    return { total, lifted, lines };
+  };
+
+  it("names and rings ← sooner instead when later → is spent", async () => {
+    const live = await run([]);
+    const swapped = await run(["1"]);
+    expect([...live.lines]).toEqual(["later → steps the belt — so do the arrow keys."]);
+    expect([...swapped.lines]).toEqual(["← sooner steps the belt — so do the arrow keys."]);
+    expect(swapped.lifted.has("-1")).toBe(true);
+    expect(swapped.total).toBe(live.total);
+  }, 30000);
+
+  it("rings and names nothing when both are spent, at the same length", async () => {
+    const live = await run([]);
+    const neither = await run(["1", "-1"]);
+    expect([...neither.lines]).toEqual([]);
+    expect([...neither.lifted]).toEqual([]);
+    expect(neither.total).toBe(live.total);
+  }, 30000);
+});
+
 /* #1174 round 6 (Fable's call): with no body carrying a paper the chapter
    stays on the sky and reads its first two lines over the sun. */
 describe("when no body carries a paper", () => {

@@ -376,42 +376,55 @@ export default {
       await unread();
       await w(T.sheet); /* the sheet folds; the pill comes home (automatic) */
     }
+    /* Owner answer 8b (2026-10-02): the named step goes `later →` when it
+       can. When `later →` is spent but `← sooner` is not, it goes the other
+       way, with its own line, and the silent second step comes back with
+       `later →` -- either order ends on the item it started from, which is
+       chapter 9's opening frame. Both spent (a belt of one): no ring, no
+       press, no line. Every case costs the same beats, so the chapter's
+       length never depends on the household. */
     const laterSpent = spentCap(S.laterHit);
-    let later = ctl({ sel: S.laterInk, ring: S.laterTarget, optional: true });
-    if (laterSpent) later = { ...later, els: [], ringEls: [] };
-    await goto(later);
+    const swap = laterSpent && !spentCap(S.soonerHit);
+    /** @param {"later" | "sooner"} which */
+    const cap = (which) => {
+      const sel = which === "later" ? S.laterInk : S.soonerInk;
+      const ring = which === "later" ? S.laterTarget : S.soonerTarget;
+      const c = ctl({ sel, ring, optional: true });
+      return spentCap(which === "later" ? S.laterHit : S.soonerHit) ? { ...c, els: [], ringEls: [] } : c;
+    };
+    const first = cap(swap ? "sooner" : "later");
+    await goto(first);
     /* ✎ #1083 (owner's 3b): the pocket line drops the arrow-keys clause. */
-    const laterLine = pocket ? "later → steps the belt." : "later → steps the belt — so do the arrow keys.";
-    if (laterSpent) {
-      /* #1174 round 7: no ring, no press, no callout for a spent end-cap —
-         treated as absent, same as `goto`/`press` already cost the same
-         beat whether `els` is empty or not. The callout's own cost (its
-         fade-in plus the line's read time) is paid directly here instead of
-         through `callout()`, so dry and real measure identically without a
-         box ever drawing over nothing. */
+    const word = swap ? "← sooner" : "later →";
+    const line = pocket ? `${word} steps the belt.` : `${word} steps the belt — so do the arrow keys.`;
+    if (laterSpent && !swap) {
+      /* #1174 round 7: nothing to step to is treated as absent -- no box
+         drawn over nothing. The callout's own cost (its fade-in plus the
+         line's read time) is paid directly instead of through `callout()`,
+         so dry and real measure identically. */
       await w(T.calloutIn);
-      await hold(holdFor(laterLine));
+      await hold(holdFor(line));
       await mark("belt-later");
     } else {
-      await callout(laterLine, later, "top", { mark: "belt-later" });
+      await callout(line, first, "top", { mark: "belt-later" });
     }
-    await press(later);
+    await press(first);
     if (!pocket) {
       /* Round 6: "two things happen together" — the card folds away and the
          belt rolls. The roll itself is still only ever named, never driven
          for real (#1094's own rule, unchanged); the fold is real, by Esc. */
       unread();
     }
-    unlight(later);
+    unlight(first);
     await w(T.cross);
 
-    const soonerSpent = spentCap(S.soonerHit);
-    let sooner = ctl({ sel: S.soonerInk, ring: S.soonerTarget, optional: true });
-    if (soonerSpent) sooner = { ...sooner, els: [], ringEls: [] };
-    await goto(sooner);
-    await press(sooner);
+    /* Read after the first step has landed: the end it stepped away from is
+       live again. */
+    const second = cap(swap ? "later" : "sooner");
+    await goto(second);
+    await press(second);
     await mark("belt-sooner");
-    unlight(sooner);
+    unlight(second);
     await w(T.cross);
 
     /* End state: the apex item, both papers ringed and breathing again —
