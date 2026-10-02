@@ -141,7 +141,7 @@ export const TOUR_STOPS = [
     example: false,
     copy: [
       "Fill in the details here.",
-      "Take the tour again anytime from Settings.",
+      "Watch the tour again anytime from the settings or the menu.",
     ],
   },
 ];

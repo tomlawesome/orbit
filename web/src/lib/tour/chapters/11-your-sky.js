@@ -121,7 +121,7 @@ export default {
     const settingsLink = ctl({ sel: S.settingsLink });
     await goto(settingsLink, { willPress: false });
     await callout(
-      "Take the tour again anytime from Settings.",
+      "Watch the tour again anytime from the settings or the menu.",
       settingsLink,
       "left",
       { mark: "sky-settings" },
