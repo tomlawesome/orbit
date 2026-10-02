@@ -380,7 +380,7 @@ function sampleTransport() {
   /* In front: whatever answers a hit test on the pill must be the pill. */
   /** @type {[number, number, string][]} */
   const points = [];
-  for (const sel of [".pp", ".stp", ".track", ".now", ".clock"]) {
+  for (const sel of [".pp", ".skp", ".track", ".now", ".clock"]) {
     const el = pill.querySelector(sel);
     if (!el) continue;
     const r = el.getBoundingClientRect();
@@ -599,7 +599,9 @@ test.describe("the pocket film in WebKit (#1174)", () => {
             break;
           }
           const now = new Map();
-          const seen = [...s.faults.map((f) => ({ f, pill: true, need: 0 })), ...(m?.faults ?? []).map((f) => ({ f, pill: false, need: f.startsWith("callout pointing at nothing") ? 1 : 2 }))];
+          /* #1190: once the film has ended, the pill holds then fades out
+             and is gone — that is the ruling now, not a fault to sample. */
+          const seen = [...(s.ended ? [] : s.faults.map((f) => ({ f, pill: true, need: 0 }))), ...(m?.faults ?? []).map((f) => ({ f, pill: false, need: f.startsWith("callout pointing at nothing") ? 1 : 2 }))];
           for (const { f, pill, need } of seen) {
             /* the pill's faults are keyed without their opacity figure, so
                a fade in progress is one fault lasting, not several */
