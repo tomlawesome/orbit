@@ -260,7 +260,14 @@ carries the relevant risk, exactly as they already did on an ordinary merge
 request. `fidelity` gates on `ORBIT_WEB` directly and never called
 `orbit_full_gate` even before #1078, so it is unaffected by this section;
 #1078 brought `smoke`'s click-through suite into the same shape by wrapping
-only its `scripts/test-frontend.sh` call in an `ORBIT_WEB` check — `smoke`'s
+only its `scripts/test-frontend.sh` call in a check of its own. Since #1181
+that check reads `ORBIT_E2E`, not `ORBIT_WEB`: the same front-end paths plus
+`tests/e2e/` and `scripts/test-frontend.sh`, so a merge request that only
+adds or changes a spec runs the suite before merge (`smoke_firefox` reads the
+same axis). When that check says no, the job ends there, before it records
+reuse evidence (#1187): a run that never clicked through must not be one a
+later pipeline can stand on. `fidelity` stays on `ORBIT_WEB`, because a spec
+cannot move what it photographs. `smoke`'s
 runtime-property checks (`verify-health-endpoint.sh`,
 `verify-startup-banner.sh`, `verify-nonroot-runtime.sh`,
 `verify-privacy-boundary.sh`) stay unconditional, because they prove the
@@ -278,13 +285,14 @@ since, so unpicking it costs more than it would have on the merge request. A
 reader meeting a red `dev -> preview` promotion should expect this, not
 treat it as a surprise.
 
-`orbit_full_gate` answering yes does not by itself widen `ORBIT_LANE`: that
-is `classify`'s own decision, forced to `full` for a push to any delivery
-branch or a merge request into `main`, but — as of this writing — not yet
-for a merge request into `preview`. A `dev -> preview` promotion whose entire
-diff happens to fall inside the CI-definition or ignore/policy lane's narrow
-file set would still have those jobs skipped by `orbit_lane_admits` before
-`orbit_full_gate` is ever consulted. Tracked as #1092.
+`orbit_full_gate` answering yes does not by itself widen `ORBIT_LANE`, nor
+the browser checks' own axes; `classify` does both. It forces the lane to
+`full` for a push to any delivery branch and for a merge request into
+`preview` or `main` (#1092), so a promotion whose whole diff sits in a narrow
+lane still runs the acceptance stage. On the same events, except a push to
+`dev`, it also switches `ORBIT_WEB` and `ORBIT_E2E` on (#1186), so `fidelity`
+and both browser suites run at promotion even when its diff never touched
+`web/`.
 
 ### Standing on an earlier run (#898, ADR-0028)
 

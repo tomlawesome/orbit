@@ -104,6 +104,7 @@ function runClassifyEnv(environment = {}) {
         "integration=false",
         "system=false",
         "web=false",
+        "e2e=false",
         "licence=false",
         "launcher_compat=false",
         "",
@@ -136,6 +137,7 @@ const everythingOn = {
   ORBIT_INTEGRATION: "true",
   ORBIT_SYSTEM: "true",
   ORBIT_WEB: "true",
+  ORBIT_E2E: "true",
   ORBIT_LICENCE: "true",
   ORBIT_LAUNCHER_COMPAT: "true",
   ORBIT_LANE: "full",
@@ -242,6 +244,7 @@ describe("pipeline lanes", () => {
         ORBIT_INTEGRATION: "false",
         ORBIT_SYSTEM: "false",
         ORBIT_WEB: "false",
+        ORBIT_E2E: "false",
         ORBIT_LICENCE: "false",
         // The CI lane does not run launcher_install_compat, and the lane
         // survives because nothing overrode it.
@@ -275,6 +278,85 @@ describe("pipeline lanes", () => {
     // A delivery push widens the lane without claiming the diff was riskier
     // than it was: only the label rewrites the axes.
     expect(runClassifyEnv({ CI_COMMIT_BRANCH: "dev" }).variables.ORBIT_SYSTEM).toBe("false");
+  });
+
+  // #1181: the browser suite has its own axis, and both jobs that run it read
+  // that axis rather than the front-end one `fidelity` reads.
+  it("gates both browser-suite jobs on ORBIT_E2E", () => {
+    for (const name of ["smoke", "smoke_firefox"]) {
+      const block = allBlocks.get(name);
+      const suite = block.indexOf("bash scripts/test-frontend.sh");
+      const gate = block.lastIndexOf('if [ "${ORBIT_E2E:-true}" != "true" ]; then', suite);
+      expect(gate, `${name}: the browser suite is not behind ORBIT_E2E`).toBeGreaterThan(-1);
+      expect(block, name).not.toMatch(/\$\{ORBIT_WEB/u);
+    }
+    expect(runClassifyEnv().variables.ORBIT_E2E).toBe("false");
+  });
+
+  /*
+   * #1186: the promotion is where the whole suite runs again (#1078), but the
+   * browser checks read their own axes, which came from the diff alone. A
+   * promotion with no web change skipped `fidelity` and both browser suites.
+   * The events `orbit_full_gate` names now switch those axes on; a `dev` push
+   * still tests only what it changed.
+   */
+  it("runs every browser check on the promotions and on delivery pushes (#1186)", () => {
+    for (const environment of [
+      { CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "preview" },
+      { CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
+      { CI_COMMIT_BRANCH: "preview" },
+      { CI_COMMIT_BRANCH: "main" },
+      { CI_COMMIT_BRANCH: "hotfix/x" },
+    ]) {
+      const { variables } = runClassifyEnv(environment);
+      const event = JSON.stringify(environment);
+      expect(variables.ORBIT_WEB, event).toBe("true");
+      expect(variables.ORBIT_E2E, event).toBe("true");
+      // Only the browser axes: the rest still say what the diff carried.
+      expect(variables.ORBIT_SYSTEM, event).toBe("false");
+    }
+    for (const environment of [
+      { CI_COMMIT_BRANCH: "dev" },
+      { CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "dev" },
+      { CI_COMMIT_BRANCH: "feature/x" },
+    ]) {
+      const { variables } = runClassifyEnv(environment);
+      expect(variables.ORBIT_WEB, JSON.stringify(environment)).toBe("false");
+      expect(variables.ORBIT_E2E, JSON.stringify(environment)).toBe("false");
+    }
+  });
+
+  /*
+   * #1187: a run that skipped its browser suite must leave no reuse evidence,
+   * or a later merge-request pipeline with the same key -- the promotion
+   * among them -- stands on it and never runs the suite. Run, not read: the
+   * gate entry and everything after it share one shell, so what matters is
+   * whether the shell gets as far as `*reuse_evidence`.
+   */
+  it("leaves no reuse evidence when a smoke job skips its browser suite (#1187)", () => {
+    for (const name of ["smoke", "smoke_firefox"]) {
+      const block = allBlocks.get(name);
+      const scriptStart = block.indexOf("\n  script:\n");
+      const scriptEnd = block.indexOf("\n  after_script:\n");
+      const entries = block
+        .slice(scriptStart, scriptEnd)
+        .split(/\n {4}- /u)
+        .slice(1);
+      const gate = entries.findIndex((entry) => entry.includes('"${ORBIT_E2E:-true}" != "true"'));
+      expect(gate, `${name}: no ORBIT_E2E gate`).toBeGreaterThan(-1);
+      const after = entries.slice(gate + 1);
+      expect(after.some((entry) => entry.startsWith("bash scripts/test-frontend.sh")), name).toBe(true);
+      expect(after.at(-1), name).toBe("*reuse_evidence");
+      // The gate entry itself, then a stand-in for every later entry.
+      const shell = `${entries[gate].replace(/^\|\n/u, "").replace(/^ {6}/gmu, "")}\necho REACHED_EVIDENCE\n`;
+      const run = (value) =>
+        execFileSync("sh", ["-c", shell], {
+          encoding: "utf8",
+          env: { PATH: process.env.PATH, ORBIT_E2E: value },
+        });
+      expect(run("false"), `${name}: a skipped suite reached *reuse_evidence`).not.toMatch(/REACHED_EVIDENCE/u);
+      expect(run("true"), name).toMatch(/REACHED_EVIDENCE/u);
+    }
   });
 
   it("hands the lane on from classify as a dotenv variable", () => {
