@@ -1439,14 +1439,21 @@ export function createFilmContext({
       `max-width:${maxWidth}px`,
       "width:max-content",
       "text-wrap:balance",
+      /* Centred both ways (owner, 2026-10-02): a balanced line is shorter
+         than its box, and left-set it reads as off-centre. Even padding
+         centres it vertically. */
+      "text-align:center",
       "box-sizing:border-box",
-      "background:var(--panel-raised)",
-      /* both spellings (#1174): iOS Safari before 18 knows only the
-         prefixed one, and without the blur a 75-80% panel lets the page's
-         own words show through the line being read */
-      "-webkit-backdrop-filter:blur(14px)",
-      "backdrop-filter:blur(14px)",
-      "border:1px solid var(--line)",
+      /* Lifted off the page (owner, 2026-10-02: the theme's own panel was
+         too dark to catch on the beats that move quickly). Opaque, so no
+         word behind shows through; a fifth of the pack's ink mixed into its
+         ground, so it reads lighter on the dark packs and a shade deeper on
+         the light ones. The edge is the pack's ink, never the accent: the
+         accent is the highlight rings' colour, and a bubble must not read
+         as one (owner, 2026-10-02). */
+      "background:color-mix(in srgb, var(--bg) 80%, var(--ink) 20%)",
+      "border:1px solid color-mix(in srgb, var(--ink) 26%, transparent)",
+      "box-shadow:0 10px 30px rgba(0,0,0,.35)",
       "border-radius:12px",
       "padding:11px 14px",
       o.label
@@ -1462,10 +1469,8 @@ export function createFilmContext({
       "position:absolute",
       "width:14px",
       "height:14px",
-      "background:var(--panel-raised)",
-      "-webkit-backdrop-filter:blur(14px)",
-      "backdrop-filter:blur(14px)",
-      "border:1px solid var(--line)",
+      "background:color-mix(in srgb, var(--bg) 80%, var(--ink) 20%)",
+      "border:1px solid color-mix(in srgb, var(--ink) 26%, transparent)",
       "transform:rotate(45deg)",
       "z-index:-1",
     ].join(";");
