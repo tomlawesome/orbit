@@ -27,3 +27,7 @@ node node_modules/@playwright/test/cli.js install --only-shell chromium
 # need Playwright's own Firefox build. Firefox has no headless-shell variant.
 # A download only, like the line above: no --with-deps, which needs root.
 node node_modules/@playwright/test/cli.js install firefox
+# #1192: desktop-webkit and mobile-webkit (tests/e2e/playwright.config.ts) need
+# Playwright's own WebKit build the same way; WebKit has no headless-shell
+# variant either.
+node node_modules/@playwright/test/cli.js install webkit

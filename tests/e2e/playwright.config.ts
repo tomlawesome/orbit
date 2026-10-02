@@ -69,11 +69,14 @@ const firefoxLaunchOptions = process.env.ORBIT_ACCEPTANCE_OIDC === "true"
   : undefined;
 
 // #1183: which engines' projects this run has. Every engine by default, so a
-// local run is the whole suite; CI splits it across two jobs because Firefox
+// local run is the whole suite; CI splits it across jobs because Firefox
 // inside `smoke` took that job to 29.9 of its 30 minutes (pipeline 1926):
-// `smoke` sets chromium, `smoke_firefox` sets firefox (.gitlab-ci.yml).
+// `smoke` sets chromium, `smoke_firefox` sets firefox (.gitlab-ci.yml). #1192
+// adds webkit the same way; webkit's own two jobs (smoke_webkit,
+// smoke_webkit_mobile) split further by device -- see ORBIT_E2E_WEBKIT_DEVICES
+// below -- because desktop and phone together ran close to the same 30m limit.
 // "unclaimed" and "setup" are not per engine and are always present.
-const ENGINES = ["chromium", "firefox"] as const;
+const ENGINES = ["chromium", "firefox", "webkit"] as const;
 const selectedEngines = (process.env.ORBIT_E2E_ENGINES || ENGINES.join(","))
   .split(",").map((engine) => engine.trim()).filter(Boolean);
 for (const engine of selectedEngines) {
@@ -82,6 +85,20 @@ for (const engine of selectedEngines) {
   }
 }
 const runs = (engine: (typeof ENGINES)[number]) => selectedEngines.includes(engine);
+
+// #1192: within the webkit engine, which device class(es) this run has. Both
+// by default (a local run is the whole engine); smoke_webkit sets desktop,
+// smoke_webkit_mobile sets mobile (.gitlab-ci.yml). No equivalent split
+// exists for chromium/firefox because neither needed one yet.
+const WEBKIT_DEVICES = ["desktop", "mobile"] as const;
+const selectedWebkitDevices = (process.env.ORBIT_E2E_WEBKIT_DEVICES || WEBKIT_DEVICES.join(","))
+  .split(",").map((device) => device.trim()).filter(Boolean);
+for (const device of selectedWebkitDevices) {
+  if (!(WEBKIT_DEVICES as readonly string[]).includes(device)) {
+    throw new Error(`ORBIT_E2E_WEBKIT_DEVICES names "${device}"; expected a comma-separated list of ${WEBKIT_DEVICES.join(", ")}`);
+  }
+}
+const runsWebkit = (device: (typeof WEBKIT_DEVICES)[number]) => runs("webkit") && selectedWebkitDevices.includes(device);
 
 const BULK_IGNORE = [/bootstrap-protection\.spec\.ts/, /maintenance\.spec\.ts/];
 const deviceProjects: Project[] = [
@@ -103,6 +120,38 @@ const deviceProjects: Project[] = [
       dependencies: ["setup"],
     }]
     : []),
+  // #1192: the release audit (#1192) wants the suite on WebKit too, phone
+  // first because Orbit's WebKit users are mostly on iPhones -- desktop
+  // alongside it on the owner's instruction. Same ignore list and `setup`
+  // dependency as the Chromium/Firefox projects.
+  //
+  // No launchOptions override here: desktop-firefox needs one because the
+  // top-level `use.launchOptions` below is a Chromium switch
+  // (--host-resolver-rules) that redirects the orbit-oidc sign-in host for
+  // the OIDC profile. No WebKit equivalent is known or verified here (no
+  // documented hostResolverRules or user-prefs analogue, and this change
+  // could not run the suite locally to check one), so `launchOptions` is
+  // explicitly unset rather than inherit the Chromium flag, which WebKit's
+  // launcher does not understand. Until someone verifies what WebKit needs,
+  // an OIDC-dependent spec (sign-in, second-factor) is likely to fail under
+  // these two projects for a harness reason, not a product one -- open
+  // question, not a guess.
+  ...(runsWebkit("desktop")
+    ? [{
+      name: "desktop-webkit",
+      testIgnore: BULK_IGNORE,
+      use: { ...devices["Desktop Safari"], launchOptions: undefined },
+      dependencies: ["setup"],
+    }]
+    : []),
+  ...(runsWebkit("mobile")
+    ? [{
+      name: "mobile-webkit",
+      testIgnore: BULK_IGNORE,
+      use: { ...devices["iPhone 15"], launchOptions: undefined },
+      dependencies: ["setup"],
+    }]
+    : []),
 ];
 
 // #1080: maintenance.spec.ts opens an INSTANCE-WIDE maintenance window — the
@@ -114,7 +163,10 @@ const deviceProjects: Project[] = [
 // Tail rather than head so a red spec in the bulk never runs UNDER a
 // maintenance window; the cost is that a red bulk skips these projects,
 // which that run's rerun covers. #1183: the maintenance page is a screen
-// people see, so Firefox gets its own pass, last in the chain.
+// people see, so Firefox gets its own pass, last in the chain. #1192 does
+// not add one for WebKit -- out of scope for the issue that added
+// desktop-webkit/mobile-webkit above; they still gate maintenance-desktop's
+// start via deviceProjects.map() below like any other device project.
 const maintenanceProjects: Project[] = [
   ...(runs("chromium")
     ? [
