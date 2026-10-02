@@ -730,6 +730,8 @@ jobs:
           ORBIT_ACCEPTANCE_OIDC: "true"
         run: |
           pnpm exec playwright install --with-deps --only-shell chromium
+          # #1183: desktop-firefox and maintenance-firefox run in the same suite.
+          pnpm exec playwright install --with-deps firefox
           bash scripts/test-frontend.sh
 
       - name: Upload browser test report

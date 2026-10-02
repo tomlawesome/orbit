@@ -207,6 +207,9 @@ const ZERO_ON_LIGHT_PACK =
 const PACK_DEFECTS: Record<string, string> = {
   "/household/[id] clouds desktop-chromium": ZERO_ON_LIGHT_PACK,
   "/household/[id] dawn desktop-chromium": ZERO_ON_LIGHT_PACK,
+  /* #1183: the same .zero contrast failure, found again by desktop-firefox. */
+  "/household/[id] clouds desktop-firefox": ZERO_ON_LIGHT_PACK,
+  "/household/[id] dawn desktop-firefox": ZERO_ON_LIGHT_PACK,
 };
 
 const VIEWPORTS = [

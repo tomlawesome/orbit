@@ -2,7 +2,8 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "@playwright/test";
-import { GATE_HOOK_TIMEOUT_MS, enterSpecFile, leaveSpecFile } from "./reset-gate";
+import { emptyIntakeMailbox } from "./mail";
+import { GATE_HOOK_TIMEOUT_MS, enterSpecFile, leaveSpecFile, stillInsideSpecFile } from "./reset-gate";
 
 /**
  * #1077: the acceptance stack's database goes back to its seed between spec
@@ -336,12 +337,23 @@ export function resetDatabaseBetweenSpecFiles(): void {
          cleanup rests on it being cheap: a run whose resets have quietly
          grown to seconds each is a different trade-off, and this is where
          that shows up rather than in the total. */
-      reset: () => {
+      reset: async () => {
         const started = Date.now();
         resetDatabaseToSeed();
+        /* #1183: and the mail Orbit would otherwise read a second time. */
+        await emptyIntakeMailbox();
         console.log(`#1077: database back to its seed in ${Date.now() - started}ms`);
       },
     });
+  });
+
+  /* #1183: a sign of life per test, so a long file is not mistaken for a
+     crashed worker and reset underneath (reset-gate.ts RUNNING_EXPIRY_MS). */
+  test.beforeEach(() => {
+    /* Workers first: snapshotExists only caches a yes, and the one-worker
+       local-only profile would otherwise ask the database before every test. */
+    if (test.info().config.workers <= 1 || !snapshotExists()) return;
+    stillInsideSpecFile();
   });
 
   test.afterAll(async () => {

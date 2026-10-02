@@ -115,6 +115,44 @@ export async function currentFocus(p: Page, exclude: string | null = null): Prom
   return p.evaluate((x) => (window as unknown as KbWindow).__kb.focused(x), exclude);
 }
 
+/** A short name for whatever has focus, for failure messages. */
+async function focusLabel(p: Page): Promise<string> {
+  return p.evaluate(() => {
+    const el = document.activeElement;
+    if (!el || el === document.body) return "body";
+    const cls = typeof el.className === "string" && el.className.trim() ? `.${el.className.trim().split(/\s+/)[0]}` : "";
+    return el.tagName.toLowerCase() + (el.id ? `#${el.id}` : "") + cls;
+  });
+}
+
+/*
+ * #1183: headless Firefox does not wrap. Tab on the page's last control
+ * leaves focus right there, press after press, where Chromium passes through
+ * <body> and comes round to the top (a real Firefox hands focus to its
+ * toolbar and back; headless has no toolbar to hand it to). Measured on a
+ * three-button page: Firefox "a b c c c c", Chromium "a b c BODY a b".
+ *
+ * Called once a press has left focus where it was. On Firefox, and only when
+ * that control really is the last focusable thing on the page, it stands in
+ * for the toolbar's hand-off with one blur() -- after which Firefox's next
+ * Tab starts from the top -- and answers true. Anywhere else it answers false
+ * and does nothing, so focus held on a control that is NOT the last one is
+ * still the trap it always was. Never on Chromium: tabTo's header records
+ * that a blur after a wrap breaks headless Chromium, and Chromium wraps.
+ */
+async function wrapPastEndOfPage(p: Page): Promise<boolean> {
+  if (p.context().browser()?.browserType().name() !== "firefox") return false;
+  return p.evaluate((selector) => {
+    const el = document.activeElement;
+    if (!(el instanceof HTMLElement) || el === document.body) return false;
+    const rendered = [...document.querySelectorAll(selector)].filter((node) =>
+      node.getClientRects().length > 0 && !node.closest("[inert]") && getComputedStyle(node).visibility !== "hidden");
+    if (rendered[rendered.length - 1] !== el) return false;
+    el.blur();
+    return true;
+  }, INTERACTIVE_SELECTOR);
+}
+
 type Match = { selector?: string; tag?: string; textIncludes?: string };
 
 /** Blurs whatever has focus, then Tabs to the first element matching `match`,
@@ -134,6 +172,10 @@ export async function tabTo(p: Page, match: Match, { cap = 60, screen = "" }: { 
      breaks, not tabbing onward from wherever focus already, legitimately,
      is. Continuing from the current position is both the fix and the more
      honest keyboard idiom: a real reader never blurs themselves either. */
+  /* #1183: `visited` is where each press landed, so a miss names the path it
+     took; wrapPastEndOfPage (above) is how Firefox gets round the end. */
+  const visited: string[] = [];
+  let previous = await focusLabel(p);
   for (let i = 0; i < cap; i += 1) {
     await p.keyboard.press("Tab");
     const matched = await p.evaluate((m) => {
@@ -145,8 +187,12 @@ export async function tabTo(p: Page, match: Match, { cap = 60, screen = "" }: { 
       return true;
     }, match);
     if (matched) return;
+    const at = await focusLabel(p);
+    const wrapped = at === previous && await wrapPastEndOfPage(p);
+    visited.push(wrapped ? `${at} (end of page, wrapped)` : at);
+    previous = wrapped ? "" : at;
   }
-  throw new Error(`${screen}: Tab never reached the requested control within ${cap} presses`);
+  throw new Error(`${screen}: Tab never reached the requested control within ${cap} presses (focus went: ${visited.join(" → ")})`);
 }
 
 /**
@@ -191,6 +237,15 @@ export async function auditTabOrder(p: Page, screen: string, { root = null, excl
       info = await currentFocus(p, exclude);
       if (!info || info.key !== lastKey) break;
       await p.waitForTimeout(50);
+    }
+    /* #1183: still on the same control after every retry, and it is the
+       page's last: Firefox's end of page, not a trap. Hand focus round to the
+       top and take the press that follows; a control stuck anywhere else
+       falls through to the "stuck" break below exactly as before. */
+    if (info && info.key === lastKey && await wrapPastEndOfPage(p)) {
+      await p.keyboard.press("Tab");
+      await p.waitForTimeout(20);
+      info = await currentFocus(p, exclude);
     }
     if (!info) continue; // focus passed through browser chrome; keep pressing rather than giving up
     lastKey = info.key;
