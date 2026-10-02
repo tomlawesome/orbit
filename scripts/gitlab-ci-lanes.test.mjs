@@ -326,6 +326,39 @@ describe("pipeline lanes", () => {
     }
   });
 
+  /*
+   * #1187: a run that skipped its browser suite must leave no reuse evidence,
+   * or a later merge-request pipeline with the same key -- the promotion
+   * among them -- stands on it and never runs the suite. Run, not read: the
+   * gate entry and everything after it share one shell, so what matters is
+   * whether the shell gets as far as `*reuse_evidence`.
+   */
+  it("leaves no reuse evidence when a smoke job skips its browser suite (#1187)", () => {
+    for (const name of ["smoke", "smoke_firefox"]) {
+      const block = allBlocks.get(name);
+      const scriptStart = block.indexOf("\n  script:\n");
+      const scriptEnd = block.indexOf("\n  after_script:\n");
+      const entries = block
+        .slice(scriptStart, scriptEnd)
+        .split(/\n {4}- /u)
+        .slice(1);
+      const gate = entries.findIndex((entry) => entry.includes('"${ORBIT_E2E:-true}" != "true"'));
+      expect(gate, `${name}: no ORBIT_E2E gate`).toBeGreaterThan(-1);
+      const after = entries.slice(gate + 1);
+      expect(after.some((entry) => entry.startsWith("bash scripts/test-frontend.sh")), name).toBe(true);
+      expect(after.at(-1), name).toBe("*reuse_evidence");
+      // The gate entry itself, then a stand-in for every later entry.
+      const shell = `${entries[gate].replace(/^\|\n/u, "").replace(/^ {6}/gmu, "")}\necho REACHED_EVIDENCE\n`;
+      const run = (value) =>
+        execFileSync("sh", ["-c", shell], {
+          encoding: "utf8",
+          env: { PATH: process.env.PATH, ORBIT_E2E: value },
+        });
+      expect(run("false"), `${name}: a skipped suite reached *reuse_evidence`).not.toMatch(/REACHED_EVIDENCE/u);
+      expect(run("true"), name).toMatch(/REACHED_EVIDENCE/u);
+    }
+  });
+
   it("hands the lane on from classify as a dotenv variable", () => {
     const classify = allBlocks.get("classify");
     expect(classify).toMatch(/printf 'ORBIT_LANE=%s\\n' "\$lane" >> classify\.env/u);
