@@ -352,9 +352,16 @@ export default {
     const opened = paper.els.length > 0;
     if (pocket && opened) await waitForReal(S.cardwrap);
     const cardwrap = ctl({ sel: S.cardwrap, radius: 16, optional: pocket && !opened });
+    /* #1174 round 7 (fault B): "top of cardwrap" sits only the callout's own
+       height above the sheet's rise — room enough above the sheet's OWN
+       header, but not above the belt's own document captions as well, once
+       fault A's fix stopped moving them out of the way. Pinned to the
+       papers instead, which this beat is already holding: same side, clear
+       of both. Desk is untouched — its card never rises over anything. */
+    const readAnchor = pocket && papers.els.length > 0 ? papers : cardwrap;
     await callout(
       "Read the full document, right here.",
-      cardwrap,
+      readAnchor,
       pocket ? "top" : "right",
       { mark: "belt-read" },
     );
