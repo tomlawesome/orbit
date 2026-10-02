@@ -44,7 +44,7 @@ describe("in-job Docker daemons clean up after themselves (#823)", () => {
     expect(jobs.map(([name]) => name).sort()).toEqual(
       [
         "acceptance", "install_bootstrap", "install_bootstrap_latest", "launcher_install_compat", "repair_journeys",
-        "smoke", "smoke_firefox", "smoke_local_only", "supply_chain_image",
+        "smoke", "smoke_firefox", "smoke_local_only", "smoke_webkit", "smoke_webkit_mobile", "supply_chain_image",
       ].sort(),
     );
   });
@@ -183,7 +183,7 @@ describe("a job names the image it loaded, not the commit it is running on (#104
     expect(loaders.map(([name]) => name).sort()).toEqual(
       [
         "acceptance", "launcher_install_compat", "record_image", "repair_journeys",
-        "smoke", "smoke_firefox", "smoke_local_only", "supply_chain_image",
+        "smoke", "smoke_firefox", "smoke_local_only", "smoke_webkit", "smoke_webkit_mobile", "supply_chain_image",
       ].sort(),
     );
   });

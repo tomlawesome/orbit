@@ -2224,6 +2224,188 @@ smoke_firefox:
     expire_in: 14 days
     when: always
 
+# #1192: the same suite on WebKit, desktop and phone, each in its own job
+# beside `smoke` and `smoke_firefox` -- not inside either. Desktop and phone
+# together ran close to the same 30m limit that Firefox hit inside `smoke`
+# (#1183), so WebKit splits by device too (ORBIT_E2E_WEBKIT_DEVICES,
+# tests/e2e/playwright.config.ts) rather than sharing one job across both.
+# Everything else is `smoke` exactly -- same gates, `needs`, stack, image,
+# reuse key (scripts/ci/job-inputs.json) and artefacts -- so a red here means
+# the same as a red there.
+smoke_webkit:
+  stage: acceptance
+  extends: .privileged_runner
+  image:
+    name: $ORBIT_ACCEPTANCE_IMAGE
+    pull_policy: if-not-present
+  timeout: 30m
+  needs: *needs_gated_image
+  variables:
+    ORBIT_IMAGE: $ORBIT_IMAGE_TAG
+    PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
+    ORBIT_ACCEPTANCE_OIDC: "true"
+    # desktop-webkit, plus the unclaimed/setup pair every run needs
+    # (tests/e2e/playwright.config.ts). smoke_webkit_mobile below runs
+    # mobile-webkit instead.
+    ORBIT_E2E_ENGINES: webkit
+    ORBIT_E2E_WEBKIT_DEVICES: desktop
+    COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.dependency-proxy.yml -f compose/docker-compose.ci-cap.yml
+  rules:
+    - *not_scheduled
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    - when: manual
+      allow_failure: true
+  script:
+    - *reach_helpers
+    - orbit_lane_admits smoke_webkit || exit 0
+    - *system_lane_gate
+    - *reuse_gate
+    - *docker_in_job
+    - pnpm install --frozen-lockfile
+    - docker load --input image.tar
+    # configure.sh persists ORBIT_IMAGE when it sees one, and accepts only a
+    # digest or an orbit-local tag. The workflow never hits this because its
+    # image step exports ORBIT_IMAGE after this one; here it is a job
+    # variable, so hide it for the one command that must not see it.
+    - env -u ORBIT_IMAGE bash scripts/ci/create-test-configuration.sh
+    - *stack_diagnostics_on_failure
+    # The workflow builds the disposable OIDC provider as a step of its own,
+    # before the stack starts. Not extracted, because it is one command.
+    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc
+    - bash scripts/ci/start-acceptance-stack.sh
+    - bash scripts/ci/verify-health-endpoint.sh
+    - |
+      set -eu
+      TESTED_IMAGE_VERSION="$ORBIT_IMAGE_VERSION" \
+      PUBLICATION_CHANNEL="$ORBIT_RELEASE_STAGE" \
+      ORBIT_REVISION="${ORBIT_IMAGE_REVISION:-$CI_COMMIT_SHA}" \
+        bash scripts/ci/verify-startup-banner.sh
+    - bash scripts/ci/verify-nonroot-runtime.sh
+    - bash scripts/ci/verify-privacy-boundary.sh
+    # The image ships the browser build that matches its Playwright version, so
+    # nothing is downloaded here: the image's WebKit build is the one this
+    # Playwright version expects. Gated on ORBIT_E2E alone, as `smoke` is
+    # (#1078, #1181): the four verify-*.sh calls above prove runtime
+    # properties of the image that any change can break and stay
+    # unconditional, but the click-through suite is what this axis answers for.
+    #
+    # A skip ends the job here, before *reuse_evidence (#1187): evidence from a
+    # run that never clicked through would let a later pipeline with the same
+    # key -- the promotion among them -- stand on it and skip the suite too.
+    - |
+      if [ "${ORBIT_E2E:-true}" != "true" ]; then
+        echo "skipped: no change to the v19 front end or the browser suite; no reuse evidence recorded"
+        exit 0
+      fi
+    - bash scripts/test-frontend.sh
+    - *reuse_evidence
+  after_script:
+    # No diagnostics here: this shell has no daemon to ask (#1100), so the
+    # stack's logs are captured by *stack_diagnostics_on_failure above. The
+    # teardown call stays because it costs nothing and reads plainly; what
+    # actually disposes of the stack either way is *docker_in_job_teardown,
+    # which kills the daemon and removes its store. It reads COMPOSE_FILES and
+    # ORBIT_IMAGE, which are job variables and so are still set in this second
+    # shell.
+    - bash scripts/ci/stop-acceptance-stack.sh || true
+    - *docker_in_job_teardown
+  artifacts:
+    name: orbit-playwright-report-webkit
+    paths:
+      - playwright-report/
+      - ci-evidence/
+    expire_in: 14 days
+    when: always
+
+# #1192: the phone half of smoke_webkit above -- see its comment for why
+# WebKit splits by device. Identical in every other respect.
+smoke_webkit_mobile:
+  stage: acceptance
+  extends: .privileged_runner
+  image:
+    name: $ORBIT_ACCEPTANCE_IMAGE
+    pull_policy: if-not-present
+  timeout: 30m
+  needs: *needs_gated_image
+  variables:
+    ORBIT_IMAGE: $ORBIT_IMAGE_TAG
+    PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
+    ORBIT_ACCEPTANCE_OIDC: "true"
+    # mobile-webkit, plus the unclaimed/setup pair every run needs
+    # (tests/e2e/playwright.config.ts). smoke_webkit above runs
+    # desktop-webkit instead.
+    ORBIT_E2E_ENGINES: webkit
+    ORBIT_E2E_WEBKIT_DEVICES: mobile
+    COMPOSE_FILES: -f docker-compose.yml -f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml -f compose/docker-compose.dependency-proxy.yml -f compose/docker-compose.ci-cap.yml
+  rules:
+    - *not_scheduled
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "preview" || $CI_COMMIT_BRANCH =~ /^hotfix\//
+    - when: manual
+      allow_failure: true
+  script:
+    - *reach_helpers
+    - orbit_lane_admits smoke_webkit_mobile || exit 0
+    - *system_lane_gate
+    - *reuse_gate
+    - *docker_in_job
+    - pnpm install --frozen-lockfile
+    - docker load --input image.tar
+    # configure.sh persists ORBIT_IMAGE when it sees one, and accepts only a
+    # digest or an orbit-local tag. The workflow never hits this because its
+    # image step exports ORBIT_IMAGE after this one; here it is a job
+    # variable, so hide it for the one command that must not see it.
+    - env -u ORBIT_IMAGE bash scripts/ci/create-test-configuration.sh
+    - *stack_diagnostics_on_failure
+    # The workflow builds the disposable OIDC provider as a step of its own,
+    # before the stack starts. Not extracted, because it is one command.
+    - docker compose --env-file .env-orbit $COMPOSE_FILES build orbit-oidc
+    - bash scripts/ci/start-acceptance-stack.sh
+    - bash scripts/ci/verify-health-endpoint.sh
+    - |
+      set -eu
+      TESTED_IMAGE_VERSION="$ORBIT_IMAGE_VERSION" \
+      PUBLICATION_CHANNEL="$ORBIT_RELEASE_STAGE" \
+      ORBIT_REVISION="${ORBIT_IMAGE_REVISION:-$CI_COMMIT_SHA}" \
+        bash scripts/ci/verify-startup-banner.sh
+    - bash scripts/ci/verify-nonroot-runtime.sh
+    - bash scripts/ci/verify-privacy-boundary.sh
+    # The image ships the browser build that matches its Playwright version, so
+    # nothing is downloaded here: the image's WebKit build is the one this
+    # Playwright version expects. Gated on ORBIT_E2E alone, as `smoke` is
+    # (#1078, #1181): the four verify-*.sh calls above prove runtime
+    # properties of the image that any change can break and stay
+    # unconditional, but the click-through suite is what this axis answers for.
+    #
+    # A skip ends the job here, before *reuse_evidence (#1187): evidence from a
+    # run that never clicked through would let a later pipeline with the same
+    # key -- the promotion among them -- stand on it and skip the suite too.
+    - |
+      if [ "${ORBIT_E2E:-true}" != "true" ]; then
+        echo "skipped: no change to the v19 front end or the browser suite; no reuse evidence recorded"
+        exit 0
+      fi
+    - bash scripts/test-frontend.sh
+    - *reuse_evidence
+  after_script:
+    # No diagnostics here: this shell has no daemon to ask (#1100), so the
+    # stack's logs are captured by *stack_diagnostics_on_failure above. The
+    # teardown call stays because it costs nothing and reads plainly; what
+    # actually disposes of the stack either way is *docker_in_job_teardown,
+    # which kills the daemon and removes its store. It reads COMPOSE_FILES and
+    # ORBIT_IMAGE, which are job variables and so are still set in this second
+    # shell.
+    - bash scripts/ci/stop-acceptance-stack.sh || true
+    - *docker_in_job_teardown
+  artifacts:
+    name: orbit-playwright-report-webkit-mobile
+    paths:
+      - playwright-report/
+      - ci-evidence/
+    expire_in: 14 days
+    when: always
+
 # The second acceptance profile (#916, M7): `smoke` above against an Orbit
 # with no identity provider at all.
 #
@@ -2958,6 +3140,9 @@ record_image:
     - job: smoke
     # #1183: Firefox gated publication while it ran inside smoke; it still does.
     - job: smoke_firefox
+    # #1192: WebKit, desktop and phone, gates publication the same way.
+    - job: smoke_webkit
+    - job: smoke_webkit_mobile
     - job: acceptance
     - job: supply_chain_image
     - job: repair_journeys
