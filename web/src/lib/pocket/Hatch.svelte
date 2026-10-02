@@ -11,8 +11,10 @@
   const uid = $props.id();
 
   /**
-   * THE HATCH (#1120, proposal §2.2): the account menu as a list sheet,
-   * opened from the orb, on every signed-in screen below the CON-10 switch.
+   * THE HATCH (#1120, proposal §2.2): the account menu as a sheet, opened
+   * from the orb, on every signed-in screen below the CON-10 switch. Its
+   * content's height, not a list sheet's fixed 60%, which hid the swatches
+   * behind the foot on an iPhone (#1188).
    * Who you are; the journeys as 56px rows, the current page's in the accent
    * text grade; the five theme swatches as 44px rings; sign-out as a ghost
    * pill that arms. Leaves by any of the sheet's dismisses.
@@ -68,7 +70,7 @@
 <!-- The head is the account (§5.2): avatar, name, role. The sheet's own
      title carries the name for a screen reader; the drawn one is hidden
      from it so the name is heard once. -->
-<Sheet bind:open size="list" title={name || "Account and menu"} hideTitle={Boolean(name)}>
+<Sheet bind:open size="callout" title={name || "Account and menu"} hideTitle={Boolean(name)}>
   {#snippet head()}
     {#if name}
       <span class="who">
