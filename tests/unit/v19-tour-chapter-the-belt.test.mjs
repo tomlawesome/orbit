@@ -301,47 +301,38 @@ describe("the beats, in round 6's order", () => {
       ["The belt is what you have attached to it.", SELECTORS.DESK.docBody],
       ["Click one to bring it in.", SELECTORS.DESK.docBody],
       ["Read the full document, right here.", SELECTORS.DESK.cardwrap],
-      ["later → steps the belt — so do the arrow keys.", SELECTORS.DESK.laterInk],
     ]);
   });
 
-  it("presses the body, the papers, and both end-caps — never lands a step on a document (#1094)", async () => {
+  it("presses the body, then the papers — never lands a step on a document (#1094), and never touches an end-cap (#1174 round 10)", async () => {
     const { log, ctx } = recorder();
     await belt.play(ctx);
     const pressed = log.filter(([word]) => word === "press").map(([, sel]) => sel);
-    expect(pressed).toEqual([SELECTORS.DESK.body, SELECTORS.DESK.docBody, SELECTORS.DESK.laterInk, SELECTORS.DESK.soonerInk]);
+    expect(pressed).toEqual([SELECTORS.DESK.body, SELECTORS.DESK.docBody]);
   });
 
-  it("reads a paper for real right after pressing it, and unreads it on the later step", async () => {
+  it("reads a paper for real right after pressing it, and unreads it right after the read callout", async () => {
     const { log, ctx } = recorder();
     await belt.play(ctx);
     const pressPapers = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.docBody);
     const readAt = log.findIndex(([word]) => word === "read");
-    const pressLater = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.laterInk);
+    const dropAt = log.findIndex(([word]) => word === "dropCallout");
     const unreadAt = log.findIndex(([word]) => word === "unread");
     /* one `ctl` call for the paper's real hit sits between the two */
     expect(readAt).toBe(pressPapers + 2);
     expect(log[readAt]).toEqual(["read", SELECTORS.DESK.docHit]);
-    expect(unreadAt).toBe(pressLater + 1);
+    /* #1174 round 10: the belt's own step (round 6's beat 4) is gone from
+       the film, so the card now closes right where the read beat leaves
+       off, not on a step this chapter no longer takes. */
+    expect(unreadAt).toBe(dropAt + 1);
     /* Only ever read once and unread once — one paper, whichever it is. */
     expect(log.filter(([word]) => word === "read")).toHaveLength(1);
     expect(log.filter(([word]) => word === "unread")).toHaveLength(1);
   });
-
-  it("says no copy for ← sooner — one press each way is enough (round 6)", async () => {
-    const { log, ctx } = recorder();
-    await belt.play(ctx);
-    const afterLater = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.laterInk);
-    const soonerPress = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.soonerInk);
-    const calloutsBetween = log
-      .slice(afterLater + 1, soonerPress)
-      .filter(([word]) => word === "callout");
-    expect(calloutsBetween).toEqual([]);
-  });
 });
 
 describe("the chapter played for real", () => {
-  it("puts its five lines on the screen in order", async () => {
+  it("puts its four lines on the screen in order", async () => {
     drawScene({ docs: 2 });
     const clock = createClock({ reducedMotion: () => false });
     const ctx = createFilmContext({ clock, doc: document });
@@ -374,7 +365,6 @@ describe("the chapter played for real", () => {
       "The belt is what you have attached to it.",
       "Click one to bring it in.",
       "Read the full document, right here.",
-      "later → steps the belt — so do the arrow keys.",
     ]);
     ctx.destroy();
   });
@@ -398,8 +388,9 @@ describe("the chapter played for real", () => {
     await playing;
 
     expect(sawOpen).toBe(true);
-    /* Closed by beat 4's own unread() (the belt's step), not just by the
-       teardown below — round 6's "two things happen together". */
+    /* Closed by the read beat's own unread(), right after its callout, not
+       just by the teardown below (#1174 round 10: round 6's own beat 4,
+       which used to close it, is gone from the film). */
     expect(document.getElementById("readcard")).toBeNull();
     ctx.destroy();
     expect(document.getElementById("readcard")).toBeNull();
@@ -471,13 +462,10 @@ describe("the chapter played for real", () => {
     expect(several).toBe(none);
   });
 
-  it("plays the same length even with no body on the dial and both end-caps spent", async () => {
-    const lengthWith = async (withControls) => {
+  it("plays the same length with no body on the dial", async () => {
+    const lengthWith = async (withBody) => {
       drawScene({ docs: 2 });
-      if (!withControls) {
-        document.querySelector(".body-link")?.remove();
-        for (const cap of document.querySelectorAll(".endcap-hit")) cap.remove();
-      }
+      if (!withBody) document.querySelector(".body-link")?.remove();
       const clock = createClock({ reducedMotion: () => false });
       const ctx = createFilmContext({ clock, doc: document });
       clock.setPlaying(true);
@@ -488,95 +476,6 @@ describe("the chapter played for real", () => {
     };
     expect(await lengthWith(false)).toBe(await lengthWith(true));
   });
-
-  it("a spent end-cap (present but aria-disabled) is never lit, never pressed, but costs the same beat as a live one (#1174 fault D)", async () => {
-    const run = async (spent) => {
-      drawScene({ docs: 2 });
-      if (spent) {
-        const later = document.querySelector('.endcap-hit[data-step="1"]');
-        later.setAttribute("aria-disabled", "true");
-        later.classList.add("off");
-      }
-      const clock = createClock({ reducedMotion: () => false });
-      const ctx = createFilmContext({ clock, doc: document });
-      clock.setPlaying(true);
-      const promise = belt.play(ctx);
-      let done = false;
-      promise.then(() => { done = true; });
-      let everLifted = false;
-      let elapsed = 0;
-      while (!done && elapsed < 400000) {
-        clock.advance(100);
-        elapsed += 100;
-        await settle();
-        const ink = document.querySelector('.endcap-hit[data-step="1"] text.endcap');
-        if (ink?.style.transform) everLifted = true;
-      }
-      const total = clock.sched();
-      ctx.destroy();
-      return { total, everLifted };
-    };
-    const live = await run(false);
-    const spentRun = await run(true);
-    expect(live.everLifted).toBe(true); /* sanity: a live end-cap really is lit */
-    expect(spentRun.everLifted).toBe(false); /* a spent one, treated as absent, never is */
-    expect(spentRun.total).toBe(live.total); /* the chapter plays the same length either way */
-  }, 20000);
-});
-
-/* Owner answer 8b (2026-10-02): with `later →` spent, the beat goes the other
-   way -- `← sooner` is ringed, named and pressed, then `later →` brings the
-   belt back to the item. With both spent there is nowhere to step: no ring,
-   no line. Every case plays the same length. */
-describe("the step beat when an end-cap is spent (owner 8b)", () => {
-  const run = async (spentSteps) => {
-    drawScene({ docs: 2 });
-    for (const step of spentSteps) {
-      const cap = document.querySelector(`.endcap-hit[data-step="${step}"]`);
-      cap.setAttribute("aria-disabled", "true");
-      cap.classList.add("off");
-    }
-    const clock = createClock({ reducedMotion: () => false });
-    const ctx = createFilmContext({ clock, doc: document });
-    clock.setPlaying(true);
-    const promise = belt.play(ctx);
-    let done = false;
-    promise.then(() => { done = true; });
-    const lifted = new Set();
-    const lines = new Set();
-    let elapsed = 0;
-    while (!done && elapsed < 400000) {
-      clock.advance(100);
-      elapsed += 100;
-      await settle();
-      for (const step of ["1", "-1"]) {
-        if (document.querySelector(`.endcap-hit[data-step="${step}"] text.endcap`)?.style.transform) lifted.add(step);
-      }
-      for (const el of document.querySelectorAll(".tourfilm-callout")) {
-        if (/steps the belt/u.test(el.textContent ?? "")) lines.add(el.textContent);
-      }
-    }
-    const total = clock.sched();
-    ctx.destroy();
-    return { total, lifted, lines };
-  };
-
-  it("names and rings ← sooner instead when later → is spent", async () => {
-    const live = await run([]);
-    const swapped = await run(["1"]);
-    expect([...live.lines]).toEqual(["later → steps the belt — so do the arrow keys."]);
-    expect([...swapped.lines]).toEqual(["← sooner steps the belt — so do the arrow keys."]);
-    expect(swapped.lifted.has("-1")).toBe(true);
-    expect(swapped.total).toBe(live.total);
-  }, 30000);
-
-  it("rings and names nothing when both are spent, at the same length", async () => {
-    const live = await run([]);
-    const neither = await run(["1", "-1"]);
-    expect([...neither.lines]).toEqual([]);
-    expect([...neither.lifted]).toEqual([]);
-    expect(neither.total).toBe(live.total);
-  }, 30000);
 });
 
 /* #1174 round 6 (Fable's call): with no body carrying a paper the chapter
