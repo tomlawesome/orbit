@@ -43,11 +43,12 @@ const dependencySnapshotPaths = new Set(["pnpm-lock.yaml", "pnpm-workspace.yaml"
 // layer moves without charging every system-risk change for it.
 const webPatterns = [/^web\//u, /^pnpm-lock\.yaml$/u, /^pnpm-workspace\.yaml$/u];
 
-// What `smoke`'s and `smoke_firefox`'s browser suite answers for (#1181): the
-// front end, as above, plus the suite itself and the script that runs it. A
-// merge request that only added a spec used to skip the suite, so the new spec
-// first ran after merge. Kept apart from `webPatterns` because a spec change
-// cannot move what `fidelity` photographs.
+// What `smoke`, `smoke_firefox`, `smoke_webkit` and `smoke_webkit_mobile`'s
+// browser suite answers for (#1181): the front end, as above, plus the suite
+// itself and the script that runs it. A merge request that only added a spec
+// used to skip the suite, so the new spec first ran after merge. Kept apart
+// from `webPatterns` because a spec change cannot move what `fidelity`
+// photographs.
 const browserSuitePatterns = [...webPatterns, /^tests\/e2e\//u, /^scripts\/test-frontend\.sh$/u];
 
 // What the `licence_policy` job (#815) reaches for: a change to any of these

@@ -101,9 +101,12 @@ Merge requests and pushes to `dev` run:
 - the licence-policy check over the whole installed dependency tree;
 - PostgreSQL integration;
 - the container build, then the smoke, browser and recovery journeys against
-  that build. The browser suite is two jobs side by side: `smoke` runs it in
-  Chromium and `smoke_firefox` in Firefox. With Firefox inside `smoke`, that
-  one job took 29.9 of its 30 minutes, so it has its own (#1183).
+  that build. The browser suite is four jobs side by side: `smoke` runs it in
+  Chromium, `smoke_firefox` in Firefox, and `smoke_webkit` /
+  `smoke_webkit_mobile` in WebKit, desktop and phone. With Firefox inside
+  `smoke`, that one job took 29.9 of its 30 minutes, so it has its own
+  (#1183); WebKit's desktop and phone projects together ran close to the same
+  limit, so they split the same way (#1192).
 - the appearance checks, also two jobs: `fidelity` (Chromium appearance and
   the phone-floor measurements) and `fidelity_webkit` (the phone film in
   WebKit), split in #1174 so neither risks the 30-minute job limit.
@@ -126,17 +129,22 @@ the run reported; do not use broad Docker prune or delete commands.
 
 ## What the accessibility checks cover
 
-The `smoke` and `smoke_firefox` jobs run the Playwright suite in `tests/e2e/`
-against the production container just built, with the throwaway OIDC
-profile. The suite has three browser projects: desktop Chromium and mobile
-Chromium (a Pixel 7 profile) in `smoke`, and desktop Firefox in
-`smoke_firefox`. The two Chromium projects cover both of Orbit's layouts, and
-Firefox repeats the desktop layout on a second browser engine (#1183). WebKit
-is not run yet. The maintenance-window spec runs once per project, after the
-rest, one project at a time. Locally, `scripts/test-e2e-local.sh` runs all
-three unless told otherwise; `ORBIT_E2E_ENGINES=chromium` or `=firefox` picks
-one engine the way the two jobs do. The automated checks are deliberately
-representative, not device certification:
+The `smoke`, `smoke_firefox`, `smoke_webkit` and `smoke_webkit_mobile` jobs
+run the Playwright suite in `tests/e2e/` against the production container
+just built, with the throwaway OIDC profile. The suite has five browser
+projects: desktop Chromium and mobile Chromium (a Pixel 7 profile) in
+`smoke`, desktop Firefox in `smoke_firefox`, and desktop WebKit (Safari) and
+mobile WebKit (an iPhone 15 profile) in `smoke_webkit` and
+`smoke_webkit_mobile`. The two Chromium projects cover both of Orbit's
+layouts, and Firefox and WebKit repeat them on their own engines (#1183,
+#1192). The maintenance-window spec runs once per project, after the rest,
+one project at a time, for the Chromium and Firefox projects only -- WebKit
+has no maintenance pass of its own yet. Locally, `scripts/test-e2e-local.sh`
+runs all five unless told otherwise; `ORBIT_E2E_ENGINES=chromium`, `=firefox`
+or `=webkit` picks one engine the way the jobs do, and
+`ORBIT_E2E_WEBKIT_DEVICES=desktop` or `=mobile` narrows WebKit further the
+way `smoke_webkit` and `smoke_webkit_mobile` do. The automated checks are
+deliberately representative, not device certification:
 
 | Contract | Automated evidence |
 | --- | --- |
@@ -160,4 +168,5 @@ fault named instead. Today that is the dropped-focus fault in
 Fixtures use throwaway made-up households, items, documents and mailbox
 metadata. The Playwright trace is kept only on the first retry. Checks on
 real devices and with real assistive technology are still part of release
-acceptance and are not implied by the automated Chromium and Firefox evidence.
+acceptance and are not implied by the automated Chromium, Firefox and WebKit
+evidence.
