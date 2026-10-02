@@ -260,7 +260,12 @@ carries the relevant risk, exactly as they already did on an ordinary merge
 request. `fidelity` gates on `ORBIT_WEB` directly and never called
 `orbit_full_gate` even before #1078, so it is unaffected by this section;
 #1078 brought `smoke`'s click-through suite into the same shape by wrapping
-only its `scripts/test-frontend.sh` call in an `ORBIT_WEB` check — `smoke`'s
+only its `scripts/test-frontend.sh` call in a check of its own. Since #1181
+that check reads `ORBIT_E2E`, not `ORBIT_WEB`: the same front-end paths plus
+`tests/e2e/` and `scripts/test-frontend.sh`, so a merge request that only
+adds or changes a spec runs the suite before merge (`smoke_firefox` reads the
+same axis). `fidelity` stays on `ORBIT_WEB`, because a spec cannot move what
+it photographs. `smoke`'s
 runtime-property checks (`verify-health-endpoint.sh`,
 `verify-startup-banner.sh`, `verify-nonroot-runtime.sh`,
 `verify-privacy-boundary.sh`) stay unconditional, because they prove the
