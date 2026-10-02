@@ -264,8 +264,10 @@ only its `scripts/test-frontend.sh` call in a check of its own. Since #1181
 that check reads `ORBIT_E2E`, not `ORBIT_WEB`: the same front-end paths plus
 `tests/e2e/` and `scripts/test-frontend.sh`, so a merge request that only
 adds or changes a spec runs the suite before merge (`smoke_firefox` reads the
-same axis). `fidelity` stays on `ORBIT_WEB`, because a spec cannot move what
-it photographs. `smoke`'s
+same axis). When that check says no, the job ends there, before it records
+reuse evidence (#1187): a run that never clicked through must not be one a
+later pipeline can stand on. `fidelity` stays on `ORBIT_WEB`, because a spec
+cannot move what it photographs. `smoke`'s
 runtime-property checks (`verify-health-endpoint.sh`,
 `verify-startup-banner.sh`, `verify-nonroot-runtime.sh`,
 `verify-privacy-boundary.sh`) stay unconditional, because they prove the
