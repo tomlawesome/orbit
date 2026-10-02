@@ -882,6 +882,7 @@ export function mountTransport({
     paint,
     /** #1190: fires once the bar has left (`leave()`'s own promise settled)
      *  — film.js's way to know when to destroy the whole film. */
+    /** @param {() => void} cb */
     onLeave(cb) {
       leaveCbs.add(cb);
       return () => leaveCbs.delete(cb);
