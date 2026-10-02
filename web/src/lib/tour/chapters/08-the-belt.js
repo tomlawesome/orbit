@@ -131,10 +131,16 @@ export const SELECTORS = Object.freeze({
     laterInk: '#ends g.endcap-hit[data-step="1"] text.endcap',
     /** `later →`'s real hit box, which the ring wraps instead of the ink. */
     laterTarget: '#ends g.endcap-hit[data-step="1"] rect.endtarget',
+    /** `later →`'s own hit GROUP (#1174, fault D) — markEnds (belt.behaviour.js)
+     *  puts `aria-disabled`/`.off` here, not on the ink or the target, when
+     *  the apex item sits at this end of its own manifest. */
+    laterHit: '#ends g.endcap-hit[data-step="1"]',
     /** `← sooner`: the ink that lifts and presses. */
     soonerInk: '#ends g.endcap-hit[data-step="-1"] text.endcap',
     /** `← sooner`'s real hit box. */
     soonerTarget: '#ends g.endcap-hit[data-step="-1"] rect.endtarget',
+    /** `← sooner`'s own hit group, same reason as `laterHit`. */
+    soonerHit: '#ends g.endcap-hit[data-step="-1"]',
   }),
   POCKET: Object.freeze({
     /** The seated household's own body — the pocket dial's own round mark
@@ -182,8 +188,10 @@ export const SELECTORS = Object.freeze({
     cardwrap: ".p-sheet-layer.open .p-sheet-panel",
     laterInk: '#ends g.endcap-hit[data-step="1"] text.endcap',
     laterTarget: '#ends g.endcap-hit[data-step="1"] rect.endtarget',
+    laterHit: '#ends g.endcap-hit[data-step="1"]',
     soonerInk: '#ends g.endcap-hit[data-step="-1"] text.endcap',
     soonerTarget: '#ends g.endcap-hit[data-step="-1"] rect.endtarget',
+    soonerHit: '#ends g.endcap-hit[data-step="-1"]',
   }),
 });
 
@@ -208,9 +216,20 @@ export default {
   async play(ctx) {
     const {
       pocket, setScreen, veil, ctl, goto, press, light, unlight, callout, dropCallout, mark, read, unread,
-      open, w, T, waitForReal,
+      open, w, hold, holdFor, T, waitForReal,
     } = ctx;
     const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
+    /** #1174 round 7 (fault D): a spent end-cap (markEnds, belt.behaviour.js)
+     *  is PRESENT but disabled — `aria-disabled="true"`, `.off` — not absent
+     *  from the DOM the way `optional` alone can tell. The chapter's own
+     *  comment above (point under "WHAT SURVIVES UNCHANGED FROM ROUND 6")
+     *  assumed a spent end-cap simply would not exist; it does, so this
+     *  reads the SAME markup `markEnds` writes to, treating it as absent.
+     *  @param {string} sel */
+    function spentCap(sel) {
+      const el = ctl({ sel, optional: true }).els[0];
+      return Boolean(el && (el.getAttribute("aria-disabled") === "true" || el.classList.contains("off")));
+    }
 
     /* ---- #1174 round 6 (Fable's call): no body carries a paper ----
        A household with nothing in it, or whose items carry no papers, has
@@ -246,11 +265,24 @@ export default {
     /* #1174, pocket: a body that carries documents, so the belt the film
        lands in has papers to teach with — the apex item may have none, and
        the pocket folds every other item's papers away. The dry run and a
-       sky where no body carries any take the plain first body. */
+       sky where no body carries any take the plain first body.
+       #1174 round 7 (fault D): among bodies that carry papers, one that is
+       not the dial's own last body is preferred, so beat 4's "later →"
+       rings a live step rather than one the belt has already spent — the
+       dial lists bodies in the same date order the belt steps them in. Kept
+       to a single dial read, so a household where every carrier is last (or
+       there is only one) plays exactly as before: the plain first carrier. */
     let body = ctl({ sel: S.body, round: true, optional: true });
     if (pocket) {
-      const carrying = ctl({ sel: SELECTORS.POCKET.bodyWithPapers, round: true, optional: true, visible: true });
-      if (carrying.els.length > 0) body = carrying;
+      const carrying = ctl({
+        sel: SELECTORS.POCKET.bodyWithPapers, all: true, round: true, optional: true, visible: true,
+      });
+      if (carrying.els.length > 0) {
+        const everyBody = ctl({ sel: SELECTORS.POCKET.body, all: true, round: true, optional: true, visible: true });
+        const last = everyBody.els[everyBody.els.length - 1];
+        const chosen = carrying.els.find((el) => el !== last) ?? carrying.els[0];
+        body = { ...carrying, els: [chosen], ringEls: [chosen] };
+      }
     }
     veil(true);
     await goto(body);
@@ -337,12 +369,25 @@ export default {
       await unread();
       await w(T.sheet); /* the sheet folds; the pill comes home (automatic) */
     }
-    const later = ctl({ sel: S.laterInk, ring: S.laterTarget, optional: true });
+    const laterSpent = spentCap(S.laterHit);
+    let later = ctl({ sel: S.laterInk, ring: S.laterTarget, optional: true });
+    if (laterSpent) later = { ...later, els: [], ringEls: [] };
     await goto(later);
     /* ✎ #1083 (owner's 3b): the pocket line drops the arrow-keys clause. */
-    await callout(pocket ? "later → steps the belt." : "later → steps the belt — so do the arrow keys.", later, "top", {
-      mark: "belt-later",
-    });
+    const laterLine = pocket ? "later → steps the belt." : "later → steps the belt — so do the arrow keys.";
+    if (laterSpent) {
+      /* #1174 round 7: no ring, no press, no callout for a spent end-cap —
+         treated as absent, same as `goto`/`press` already cost the same
+         beat whether `els` is empty or not. The callout's own cost (its
+         fade-in plus the line's read time) is paid directly here instead of
+         through `callout()`, so dry and real measure identically without a
+         box ever drawing over nothing. */
+      await w(T.calloutIn);
+      await hold(holdFor(laterLine));
+      await mark("belt-later");
+    } else {
+      await callout(laterLine, later, "top", { mark: "belt-later" });
+    }
     await press(later);
     if (!pocket) {
       /* Round 6: "two things happen together" — the card folds away and the
@@ -353,7 +398,9 @@ export default {
     unlight(later);
     await w(T.cross);
 
-    const sooner = ctl({ sel: S.soonerInk, ring: S.soonerTarget, optional: true });
+    const soonerSpent = spentCap(S.soonerHit);
+    let sooner = ctl({ sel: S.soonerInk, ring: S.soonerTarget, optional: true });
+    if (soonerSpent) sooner = { ...sooner, els: [], ringEls: [] };
     await goto(sooner);
     await press(sooner);
     await mark("belt-sooner");

@@ -484,6 +484,40 @@ describe("the chapter played for real", () => {
     };
     expect(await lengthWith(false)).toBe(await lengthWith(true));
   });
+
+  it("a spent end-cap (present but aria-disabled) is never lit, never pressed, but costs the same beat as a live one (#1174 fault D)", async () => {
+    const run = async (spent) => {
+      drawScene({ docs: 2 });
+      if (spent) {
+        const later = document.querySelector('.endcap-hit[data-step="1"]');
+        later.setAttribute("aria-disabled", "true");
+        later.classList.add("off");
+      }
+      const clock = createClock({ reducedMotion: () => false });
+      const ctx = createFilmContext({ clock, doc: document });
+      clock.setPlaying(true);
+      const promise = belt.play(ctx);
+      let done = false;
+      promise.then(() => { done = true; });
+      let everLifted = false;
+      let elapsed = 0;
+      while (!done && elapsed < 400000) {
+        clock.advance(100);
+        elapsed += 100;
+        await settle();
+        const ink = document.querySelector('.endcap-hit[data-step="1"] text.endcap');
+        if (ink?.style.transform) everLifted = true;
+      }
+      const total = clock.sched();
+      ctx.destroy();
+      return { total, everLifted };
+    };
+    const live = await run(false);
+    const spentRun = await run(true);
+    expect(live.everLifted).toBe(true); /* sanity: a live end-cap really is lit */
+    expect(spentRun.everLifted).toBe(false); /* a spent one, treated as absent, never is */
+    expect(spentRun.total).toBe(live.total); /* the chapter plays the same length either way */
+  }, 20000);
 });
 
 /* #1174 round 6 (Fable's call): with no body carrying a paper the chapter
