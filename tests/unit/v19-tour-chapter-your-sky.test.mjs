@@ -17,7 +17,7 @@ import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
  *
  * THE POINT OF THIS FILE is the first block: every selector the chapter
  * names must EXIST in home's own markup. Two of chapter 11's selectors
- * (`settingsLink`, `dawn`, `afterDark`) are attribute selectors rather than
+ * (`dawn`, `afterDark`) are attribute selectors rather than
  * a bare class or id, because home's markup has no class or id to tell the
  * five swatches or the settings link apart from their siblings — they are
  * told apart the same way the product's own click handler tells them apart
@@ -112,11 +112,13 @@ function drawHome() {
           ${PACKS.map(([title, name]) =>
             `<button title="${title}" aria-pressed="${name === "afterdark"}"></button>`).join("")}
         </div>
+        <button class="watch">↻ watch the tour</button>
       </div>
     </div>`;
   box(document.querySelector("button.orb"), { x: 1214, y: 22, w: 40, h: 40 });
   box(document.querySelector('#account nav a[href$="/settings"]'), { x: 1030, y: 200, w: 210, h: 28 });
   box(document.querySelector("#account .swatches"), { x: 1068, y: 284, w: 148, h: 34 });
+  box(document.querySelector("#account button.watch"), { x: 1030, y: 330, w: 150, h: 18 });
   document.querySelectorAll("#account .swatches button").forEach((el, k) => {
     box(el, { x: 1068 + k * 25, y: 284, w: 18, h: 18 });
   });
@@ -173,9 +175,9 @@ describe("the selectors chapter 11 names", () => {
     expect(HOME_SOURCE).toContain('class="orb inbox-orb"');
   });
 
-  it("the settings row it names is a real link to /settings", () => {
-    expect(SELECTORS.DESK.settingsLink).toContain('[href$="/settings"]');
-    expect(HOME_SOURCE).toContain('resolve("/settings")');
+  it("the watch control it names is the account menu's own (#1189)", () => {
+    expect(SELECTORS.DESK.watchTour).toBe("#account button.watch");
+    expect(HOME_SOURCE).toMatch(/<button class="watch"[^>]*>[\s\S]*?↻ watch the tour<\/button>/u);
   });
 
   it("the dawn and after-dark swatches it names are told apart the way the product's own click handler tells them apart", () => {
@@ -238,7 +240,7 @@ describe("the beats, in the mockup's order", () => {
     await sky.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel]);
     expect(said).toEqual([
-      ["Watch the tour again anytime from the settings or the menu.", SELECTORS.DESK.settingsLink],
+      ["Watch the tour again anytime from the settings or the menu.", SELECTORS.DESK.watchTour],
       ["star chart · after dark · clouds · dawn · retrograde", SELECTORS.DESK.swatches],
     ]);
   });
@@ -370,6 +372,7 @@ function drawPocketHatch() {
           <div class="swatches">
             ${PACKS.map(([title]) => `<button class="swatch" title="${title}"></button>`).join("")}
           </div>
+          <button class="watch">↻ watch the tour</button>
         </div>
       </div>
     </div>`;
@@ -380,13 +383,14 @@ function drawPocketHatch() {
   box(document.querySelector(".p-row"), { x: 17, y: 300, w: 356, h: 56 });
   box(document.querySelector("[data-row-face]"), { x: 17, y: 300, w: 356, h: 56 });
   box(document.querySelector(".swatches"), { x: 17, y: 400, w: 356, h: 44 });
+  box(document.querySelector(".p-sheet-panel button.watch"), { x: 17, y: 448, w: 160, h: 44 });
   document.querySelectorAll(".swatch").forEach((el, k) => {
     box(el, { x: 17 + k * 44, y: 400, w: 44, h: 44 });
   });
 }
 
-describe("Addendum A: the pocket settings row keeps its clip (#1083, 2026-09-30)", () => {
-  it("never translates [data-row-face] — dry run touches no DOM, and the wet run leaves style.transform empty throughout", async () => {
+describe("the pocket hatch: the watch line is lit, the settings row never is (#1189; Addendum A, #1083)", () => {
+  it("lifts the hatch's own ↻ watch the tour and never translates [data-row-face] — dry run touches no DOM", async () => {
     drawPocketHatch();
     const clock = createClock({ reducedMotion: () => false });
     const ctx = createFilmContext({ clock, doc: document, pocket: true });
@@ -403,6 +407,7 @@ describe("Addendum A: the pocket settings row keeps its clip (#1083, 2026-09-30)
     drawPocketHatch();
     clock.setPlaying(true);
     const seenTransforms = new Set();
+    let watchLifted = false;
     let done = false;
     const playing = sky.play(ctx).then(() => { done = true; }, () => { done = true; });
     let spent = 0;
@@ -412,9 +417,12 @@ describe("Addendum A: the pocket settings row keeps its clip (#1083, 2026-09-30)
       await settle();
       const face = document.querySelector("[data-row-face]");
       if (face) seenTransforms.add(face.style.transform);
+      if (document.querySelector(".p-sheet-panel button.watch")?.style.transform) watchLifted = true;
     }
     await playing;
     expect([...seenTransforms]).toEqual([""]);
+    /* The line names the menu, so the menu's own control is what is lit. */
+    expect(watchLifted).toBe(true);
     ctx.destroy();
   });
 });
