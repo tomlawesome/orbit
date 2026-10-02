@@ -69,7 +69,7 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { pocket, setScreen, veil, ctl, goto, light, unlight, callout, dropCallout } = ctx;
+    const { pocket, setScreen, veil, ctl, goto, unlight, callout, dropCallout } = ctx;
     const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
     await setScreen("/home");
