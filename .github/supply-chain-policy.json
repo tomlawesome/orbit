@@ -918,28 +918,6 @@
       "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
       "expiresOn": "2026-11-04",
       "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-84782",
-      "package": "libssl3t64",
-      "installedVersion": "3.0.13-0ubuntu3.15",
-      "owner": "Orbit maintainers",
-      "rationale": "In ollama/ollama:0.35.0, the latest release (2026-10-01), whose Ubuntu base still carries this OpenSSL build. Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-84782",
-      "package": "openssl",
-      "installedVersion": "3.0.13-0ubuntu3.15",
-      "owner": "Orbit maintainers",
-      "rationale": "In ollama/ollama:0.35.0, the latest release (2026-10-01), whose Ubuntu base still carries this OpenSSL build. Owner granted, 2026-10-01.",
-      "expiresOn": "2026-11-04",
-      "trackingIssue": 794
     }
   ],
   "containerImages": [
@@ -1035,9 +1013,9 @@
     },
     {
       "name": "Ollama optional local AI service",
-      "tag": "ollama/ollama:0.35.0",
-      "reference": "ollama/ollama:0.35.0@sha256:9c1dc45ea758396139ec0adfa52947714c61f8d1e4537a6e2daef8138e7a64a9",
-      "indexDigest": "sha256:2a6e883b917fc543389599dae79918f5cac9e1438890506982f44aa4f5625d01",
+      "tag": "ollama/ollama:0.35.1",
+      "reference": "ollama/ollama:0.35.1@sha256:17e945f1aa6e505707eeb621e3f36847d0a4a063d4778f7007645acccfb8bd4f",
+      "indexDigest": "sha256:292ee7945dfc3d5840a181f3ab86fedb1e66703e02c8af98b50f4da56b7e278c",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -1047,7 +1025,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/ollama/ollama/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-10-01",
+      "resolvedOn": "2026-10-02",
       "reviewBy": "2026-10-30"
     }
   ],
