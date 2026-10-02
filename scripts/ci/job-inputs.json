@@ -84,6 +84,12 @@
         "@image"
       ]
     },
+    "smoke_firefox": {
+      "artefact": "image",
+      "deny": [
+        "@image"
+      ]
+    },
     "smoke_local_only": {
       "artefact": "image",
       "deny": [

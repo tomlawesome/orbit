@@ -2,7 +2,7 @@ import { createTransport } from "nodemailer";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 import { settleArrival } from "./support/arrival";
-import { waitForSenderVerificationToken } from "./support/mail";
+import { INTAKE_MAILBOX, waitForSenderVerificationToken } from "./support/mail";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { ensureWorkerAdministrator, workerAccount, workerEmail } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
@@ -37,7 +37,7 @@ resetDatabaseBetweenSpecFiles();
  * exactly the reasoning `sendMail` below already applies to the trusted
  * recipient header.
  */
-const MAILBOX_ACCOUNT = "orbit-intake@in.orbit.test";
+const MAILBOX_ACCOUNT = INTAKE_MAILBOX;
 /* GreenMail runs with -Dgreenmail.auth.disabled, so this is accepted as-is
    and is not a credential to anything. */
 const MAILBOX_PASSWORD = "greenmail-proving-ground-only";

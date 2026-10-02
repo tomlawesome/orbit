@@ -101,7 +101,9 @@ Merge requests and pushes to `dev` run:
 - the licence-policy check over the whole installed dependency tree;
 - PostgreSQL integration;
 - the container build, then the smoke, browser and recovery journeys against
-  that build.
+  that build. The browser suite is two jobs side by side: `smoke` runs it in
+  Chromium and `smoke_firefox` in Firefox. With Firefox inside `smoke`, that
+  one job took 29.9 of its 30 minutes, so it has its own (#1183).
 
 CodeQL runs separately on the GitHub mirror.
 
@@ -121,11 +123,17 @@ the run reported; do not use broad Docker prune or delete commands.
 
 ## What the accessibility checks cover
 
-The `smoke` job runs the Playwright suite in `tests/e2e/` against the
-production container it has just built, with the throwaway OIDC profile. The
-suite runs in two browser projects, desktop Chromium and mobile Chromium (a
-Pixel 7 profile), so both of Orbit's layouts are covered. The automated checks
-are deliberately representative, not device certification:
+The `smoke` and `smoke_firefox` jobs run the Playwright suite in `tests/e2e/`
+against the production container just built, with the throwaway OIDC
+profile. The suite has three browser projects: desktop Chromium and mobile
+Chromium (a Pixel 7 profile) in `smoke`, and desktop Firefox in
+`smoke_firefox`. The two Chromium projects cover both of Orbit's layouts, and
+Firefox repeats the desktop layout on a second browser engine (#1183). WebKit
+is not run yet. The maintenance-window spec runs once per project, after the
+rest, one project at a time. Locally, `scripts/test-e2e-local.sh` runs all
+three unless told otherwise; `ORBIT_E2E_ENGINES=chromium` or `=firefox` picks
+one engine the way the two jobs do. The automated checks are deliberately
+representative, not device certification:
 
 | Contract | Automated evidence |
 | --- | --- |
@@ -141,8 +149,12 @@ are deliberately representative, not device certification:
 Where one of these checks has found a real fault in Orbit, the test is
 marked `test.fail` with the fault named in it, so it stays visible and turns
 red the day the fault is fixed and the mark is still there.
+Where a fault shows only sometimes on one browser, `test.fail` would pass or
+fail by chance, so that check is marked `test.fixme` on that browser with the
+fault named instead. Today that is the dropped-focus fault in
+`v19-feedback-recovery.spec.ts` on Firefox.
 
 Fixtures use throwaway made-up households, items, documents and mailbox
 metadata. The Playwright trace is kept only on the first retry. Checks on
 real devices and with real assistive technology are still part of release
-acceptance and are not implied by the automated Chromium evidence.
+acceptance and are not implied by the automated Chromium and Firefox evidence.
