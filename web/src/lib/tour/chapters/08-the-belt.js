@@ -51,19 +51,25 @@
  *    Escape a reader's own hand would make: the tour/product boundary stays
  *    one-way, exactly as it is everywhere else in this file.
  *
- * 3. THE TWO PAPERS ARE NEVER TWO SPECIFIC DOCUMENTS. Round 6 names a
- *    certificate and a service history because its worked example has both.
- *    A chapter must not branch on what is actually attached to whatever item
- *    `/item` seats — zero, one or several — so "the two ringed papers" is
- *    every `.doclabel` on screen, lit together, `all: true, optional: true`,
- *    the same `optional` idiom 01-arrive.js uses for the other households'
- *    suns. Nothing here required the doc/item split #1088 draws on the
- *    interactive rock itself (`.hit.open`): that class does not exist on
- *    this branch (feature/1088-document-preview is not merged here) and
- *    would not have helped regardless, per (2) above. `.doclabel` does exist
- *    already (it is #1062's, not #1088's) and is the one class the shipped
- *    markup gives a document that an item never wears, so it is what this
- *    chapter rings.
+ * 3. THE TWO PAPERS ARE NEVER TWO SPECIFIC DOCUMENTS, AND WHAT RINGS IS THE
+ *    PAPER, NOT ITS NAME. Round 6 names a certificate and a service history
+ *    because its worked example has both. A chapter must not branch on what
+ *    is actually attached to whatever item `/item` seats — zero, one or
+ *    several — so "the two ringed papers" is every real paper currently out
+ *    on the belt, lit together, `all: true, optional: true`, the same
+ *    `optional` idiom 01-arrive.js uses for the other households' suns. This
+ *    file's own first cut rang `.doclabel`, the document's file-name caption
+ *    — the one class the shipped markup gives a document that an item never
+ *    wears (it is #1062's, not #1088's). The owner's review of the cut film
+ *    (#1174 round 9, 2026-10-02): the file name is the least interesting
+ *    thing about a document, and odd to be the one thing lit. `docBody`
+ *    rings the paper's own rock instead — the same `g.hit` `read()` already
+ *    presses (point 2, above), picked out by belt.behaviour.js's own
+ *    aria-label and, unlike `docHit`'s "whichever is first", filtered to
+ *    `[aria-hidden="false"]` so a paper still folded inside its item, or
+ *    rolled off the pocket's sky (`offSky`, belt.behaviour.js), never rings
+ *    either — the same signal `docHitOut` already reads for which paper to
+ *    open. The caption stays on screen, under the body it names, unlit.
  *
  * WHAT SURVIVES UNCHANGED FROM ROUND 6. The end-caps are real controls
  * (#1062) and this chapter drives them exactly as named: `sel` is the
@@ -115,9 +121,14 @@ export const SELECTORS = Object.freeze({
     /** The household's sun — where the lines are read when no body carries
      *  a paper (#1174 round 6). */
     sun: ".sun-link",
-    /** Every document currently riding the belt beside the apex item — round
-     *  6's "two ringed papers", generalised to however many there are. */
-    docLabel: "#caps .doclabel",
+    /** Every paper's own body — the rock `drawRock()` paints inside its
+     *  `.hit` (belt.behaviour.js) — currently riding the belt beside the
+     *  apex item: round 6's "two ringed papers", generalised to however many
+     *  there are, ringing the paper itself rather than its file-name
+     *  caption (#1174 round 9, the owner's call: point 3, above).
+     *  `[aria-hidden="false"]` is belt.behaviour.js's own say for "this one
+     *  is actually out". */
+    docBody: 'g.hit[aria-label*="a document attached to"][aria-hidden="false"]',
     /** A paper's own real hit, in `#seats` — where `read()` (vocabulary.js)
      *  dispatches its one genuine click. Picked out from `.hit` by the one
      *  thing belt.behaviour.js's own `aria-label` always says for a document
@@ -161,13 +172,14 @@ export const SELECTORS = Object.freeze({
      *  `itemActs`, Row.svelte's `data-row-acts`) — the real route from a
      *  body to `/item` (owner's 6a, #1119). */
     openAct: '.pocket .pk-below .p-row[data-open] [data-row-acts] a[aria-label^="Open"]',
-    /** A paper's whole caption seat on the pocket (#1174): its two-line name
-     *  is two `.doclabel` texts inside one `.capseat`, so ringing the labels
-     *  drew two nested rings per paper. The seat is one box. Resolved with
-     *  `visible`, since the pocket keeps the captions of papers that have
-     *  rolled off the sky in the DOM at opacity 0 (belt.behaviour.js's
-     *  `offSky`), and those were ringed too — off the screen's right edge. */
-    docLabel: "#caps .capseat:has(.doclabel)",
+    /** Every paper's own body, same selector as desk's `docBody` (the
+     *  belt's own markup does not change shape for the pocket) — ringing
+     *  the rock, not the two-line file-name caption beneath it (#1174 round
+     *  9, the owner's call: point 3, above). `[aria-hidden="false"]` already
+     *  excludes the papers the pocket keeps in the DOM at opacity 0 once
+     *  they roll off the sky (belt.behaviour.js's `offSky`) or are still
+     *  folded inside their item — no separate `visible` filter needed. */
+    docBody: 'g.hit[aria-label*="a document attached to"][aria-hidden="false"]',
     /** Same hit as desk. The pocket belt marks a paper that is folded
      *  inside its item, or rolled off the sky's edge, `aria-hidden="true"`
      *  (belt.behaviour.js's `gone`); the first paper OUT is preferred for
@@ -317,7 +329,7 @@ export default {
     if (pocket) await waitForReal(`${SELECTORS.POCKET.belt}, ${SELECTORS.POCKET.emptyCard}`);
 
     /* ---- beat 2: the papers ---- */
-    const papers = ctl({ sel: S.docLabel, all: true, pad: 8, radius: 6, optional: true, visible: pocket });
+    const papers = ctl({ sel: S.docBody, all: true, pad: 6, round: true, optional: true });
     await goto(papers, { willPress: false });
     await callout("Every body carries its documents in a belt around it.", papers, "left", {
       mark: "belt-cert",
