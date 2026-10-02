@@ -2044,12 +2044,16 @@ smoke:
     # verify-*.sh calls above prove runtime properties of the image that any
     # change can break and stay unconditional, but the click-through suite is
     # what this axis answers for.
+    #
+    # A skip ends the job here, before *reuse_evidence (#1187): evidence from a
+    # run that never clicked through would let a later pipeline with the same
+    # key -- the promotion among them -- stand on it and skip the suite too.
     - |
       if [ "${ORBIT_E2E:-true}" != "true" ]; then
-        echo "skipped: no change to the v19 front end or the browser suite"
-      else
-        bash scripts/test-frontend.sh
+        echo "skipped: no change to the v19 front end or the browser suite; no reuse evidence recorded"
+        exit 0
       fi
+    - bash scripts/test-frontend.sh
     - *reuse_evidence
   after_script:
     # No diagnostics here: this shell has no daemon to ask (#1100), so the
@@ -2132,12 +2136,16 @@ smoke_firefox:
     # (#1078, #1181): the four verify-*.sh calls above prove runtime
     # properties of the image that any change can break and stay
     # unconditional, but the click-through suite is what this axis answers for.
+    #
+    # A skip ends the job here, before *reuse_evidence (#1187): evidence from a
+    # run that never clicked through would let a later pipeline with the same
+    # key -- the promotion among them -- stand on it and skip the suite too.
     - |
       if [ "${ORBIT_E2E:-true}" != "true" ]; then
-        echo "skipped: no change to the v19 front end or the browser suite"
-      else
-        bash scripts/test-frontend.sh
+        echo "skipped: no change to the v19 front end or the browser suite; no reuse evidence recorded"
+        exit 0
       fi
+    - bash scripts/test-frontend.sh
     - *reuse_evidence
   after_script:
     # No diagnostics here: this shell has no daemon to ask (#1100), so the
