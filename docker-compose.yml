@@ -132,7 +132,7 @@ services:
   # separate, deliberate step -- see the one-shot model pull helper below.
   orbit-ollama:
     container_name: orbit-ollama
-    image: ollama/ollama:0.35.0@sha256:9c1dc45ea758396139ec0adfa52947714c61f8d1e4537a6e2daef8138e7a64a9
+    image: ollama/ollama:0.35.1@sha256:17e945f1aa6e505707eeb621e3f36847d0a4a063d4778f7007645acccfb8bd4f
     profiles: ["ai"]
     restart: unless-stopped
     environment:
@@ -191,7 +191,7 @@ services:
     # length of the download only, writes to the volume, and stops. Deliberately
     # no container_name, and restart "no": a one-shot `run` container must not
     # claim a name a long-lived service could want, nor come back by itself.
-    image: ollama/ollama:0.35.0@sha256:9c1dc45ea758396139ec0adfa52947714c61f8d1e4537a6e2daef8138e7a64a9
+    image: ollama/ollama:0.35.1@sha256:17e945f1aa6e505707eeb621e3f36847d0a4a063d4778f7007645acccfb8bd4f
     profiles: ["ai-model-pull"]
     restart: "no"
     environment:
