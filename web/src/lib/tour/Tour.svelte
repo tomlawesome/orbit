@@ -7,7 +7,7 @@
   import { isPocket } from "$lib/pocket/media.js";
   import { createFilm } from "./film.js";
   import { tourHasSomethingToShow } from "./offer.js";
-  import { tourMayBegin } from "./relaunch.js";
+  import { onRestartInPlace, tourMayBegin } from "./relaunch.js";
   import { beginFilm } from "./trigger.js";
 
   /**
@@ -90,6 +90,9 @@
       readTour,
       hasHousehold: () => tourHasSomethingToShow(document),
       createFilmRun: () => {
+        /* A second take on the same load (#753, #1189) leaves nothing of the
+           first behind. */
+        film?.destroy();
         film = createFilm({
           doc: document,
           pocket: isPocket(),
@@ -110,11 +113,21 @@
    * back on /home in the SAME session must still get the film. `tourMayBegin`
    * lets exactly that one arrival through; see relaunch.js.
    */
+  /* A relaunch from a menu while already on /home (#1189) changes no path,
+     so it bumps this instead; the effect below reads it to run again. */
+  let restarts = $state(0);
   $effect(() => {
+    void restarts;
     if (page.url.pathname !== HOME || !tourMayBegin(started)) return;
     started = true;
     void begin();
   });
 
-  onMount(() => () => film?.destroy());
+  onMount(() => {
+    const stopListening = onRestartInPlace(() => restarts++);
+    return () => {
+      stopListening();
+      film?.destroy();
+    };
+  });
 </script>

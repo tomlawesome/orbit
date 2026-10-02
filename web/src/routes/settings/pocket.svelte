@@ -8,6 +8,7 @@
   import { wake } from "$lib/pocket/wake.js";
   import { applyTheme } from "$lib/theme-swatches.js";
   import { agoLong } from "$lib/format.js";
+  import { watchTour } from "$lib/tour/watch.js";
   import { alertsSupported, currentSubscription, disableAlerts, enableAlerts } from "$lib/push/alerts.js";
   import {
     readSentLately,
@@ -487,6 +488,8 @@
           </button>
         {/each}
       </div>
+      <!-- Under the packs, where the desk card has it (#1189). -->
+      <button class="st-watch" onclick={watchTour}>↻ watch the tour</button>
     </section>
 
     <!-- REMINDERS, two tabs (§20, §22 under 560px). -->
@@ -757,6 +760,8 @@
     margin:0 calc(var(--p-card-pad) * -1);padding:4px var(--p-card-pad) 6px;
     scroll-padding:0 var(--p-card-pad)}
   .st-packs::-webkit-scrollbar{display:none}
+  .st-watch{appearance:none;display:flex;align-items:center;min-height:var(--p-hit);margin-top:4px;padding:0;
+    border:0;background:none;cursor:pointer;font:var(--p-type-meta)/1.4 var(--mono);color:var(--accent-text)}
   .st-pack{appearance:none;flex:none;width:112px;height:88px;padding:0;border:0;background:none;cursor:pointer;
     display:flex;flex-direction:column;gap:6px;scroll-snap-align:start;-webkit-tap-highlight-color:transparent}
   .st-swatch{position:relative;display:block;width:112px;height:62px;border-radius:12px;overflow:hidden;
