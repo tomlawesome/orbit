@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   BAND_MARGIN, BERTH_NARROW, BERTH_WIDE, DOC_OFF, J_H, J_PHI, J_RHO, MAX_GAP,
   MIN_GAP, RAD, bedOf, berthFor, bloomTargetsOf, bodiesOf, cardWidthOf, docSpread,
-  geometryOf, itemOffsetsOf, lehmer, matchesOf, nearestMatchOf, reachableAt,
+  geometryOf, itemOffsetsOf, lehmer, matchesOf, nearestMatchOf, paperLines, reachableAt,
   rollRangeOf, seatOf, shortName, stepFrom, warpOf, AMBIENT_SEED,
 } from "../../web/src/routes/item/[[id]]/band.js";
 import { beltManifestOf, documentPreviewStateOf, sizeLabel } from "../../web/src/lib/data/belt.js";
@@ -81,6 +81,17 @@ describe("the belt's manifest", () => {
     // A caption is an identifier: the extension survives the elision.
     expect(shortName("service-invoice-2026.pdf")).toBe("service-inv…2026.pdf");
     expect(shortName("Service history")).toBe("Service history");
+  });
+
+  it("wraps the pocket's two-line document caption without ever cutting a word in half (#1174)", () => {
+    // The two real names chapter 8's fault C broke on: the old 17-char hard
+    // cut split "2026" into "2" and "026". The extension now carries whole.
+    expect(paperLines("service-invoice-2026.pdf")).toEqual(["service-invoice-2026", ".pdf"]);
+    expect(paperLines("service-checklist.pdf")).toEqual(["service-checklist", ".pdf"]);
+    // A real name with a space and no extension: breaks at the space, not mid-word.
+    expect(paperLines("MOT certificate 2025")).toEqual(["MOT certificate", "2025"]);
+    // Short enough already: one line, untouched.
+    expect(paperLines("Service history")).toEqual(["Service history"]);
   });
 
   it("keeps a retired item's seat only when it is the one being arrived at", () => {

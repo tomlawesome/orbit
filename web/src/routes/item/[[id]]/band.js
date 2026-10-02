@@ -595,6 +595,36 @@ export function shortName(s) {
   return s.length <= 21 ? s : s.slice(0, 11) + "…" + s.slice(-8);
 }
 
+/** @param {string} text @param {number} n */
+export function clip(text, n) {
+  return text.length <= n ? text : text.slice(0, n - 1).trimEnd() + "…";
+}
+
+/* The pocket's two-line caption for a document (#1174, chapter 8's fault C):
+   a filename must never break mid-word. The first line reaches for the
+   extension — "service-invoice-2026" / ".pdf" — carrying the whole stem
+   across if the extension itself is short enough to ride the second line;
+   failing that, it breaks after the latest hyphen, underscore or space the
+   first line can reach; only a single unbroken run longer than the line is
+   ever hard-cut. */
+/** @param {string} name @returns {string[]} at most two lines */
+export function paperLines(name) {
+  if (name.length <= 17) return [name];
+  const dot = name.lastIndexOf(".");
+  if (dot > 0 && dot < name.length - 1 && name.length - dot <= 17) {
+    return [name.slice(0, dot), name.slice(dot)];
+  }
+  const breakAt = Math.max(
+    name.lastIndexOf(" ", 17), name.lastIndexOf("-", 17), name.lastIndexOf("_", 17),
+  );
+  if (breakAt > 6) {
+    const atSpace = name[breakAt] === " ";
+    const head = name.slice(0, atSpace ? breakAt : breakAt + 1).trimEnd();
+    return [head, clip(name.slice(breakAt + 1).trimStart(), 17)];
+  }
+  return [name.slice(0, 17), clip(name.slice(17), 17)];
+}
+
 const BAND_VAR = {
   over: "var(--overdue)", soon: "var(--warm)",
   up: "var(--upcoming)", ok: "var(--ok)",
