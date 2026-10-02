@@ -54,6 +54,10 @@ export function createFilm({
 
   /** @type {ReturnType<typeof mountTransport> | null} */
   let face = null;
+  /** #1190: destroy() is called from more than one place now — the bar's
+   *  own leave, and whoever assembles the film unmounting — so it must be
+   *  safe to call twice. */
+  let destroyed = false;
 
   /* No onChapter/onEnd here: the transport subscribes to the player itself
      (player.js's follower lists), so the two stay wired however this is
@@ -83,7 +87,12 @@ export function createFilm({
        buildTicks) rather than being told: the pill's shape is CSS-driven
        exactly as the product's own screens are, and only the tick's element
        type needs a JS branch at all (#1083 §4.2). */
-    if (transport) face = mountTransport({ player, clock, doc, hasFilmOpenedSheet: ctx.hasOpenUndo });
+    if (transport) {
+      face = mountTransport({ player, clock, doc, hasFilmOpenedSheet: ctx.hasOpenUndo });
+      /* #1190: the bar's own leave (skip, or a natural finish's hold) is
+         what ends the film now — not just the next take or an unmount. */
+      face.onLeave(() => destroy());
+    }
     hooks.__total = total;
     hooks.__offsets = offsets.slice();
     hooks.__chapters = chapters.map((one, k) => ({ id: one.id, name: one.name, at: offsets[k] }));
@@ -125,6 +134,8 @@ export function createFilm({
     clock,
     ctx,
     destroy() {
+      if (destroyed) return;
+      destroyed = true;
       face?.destroy();
       face = null;
       player.destroy();

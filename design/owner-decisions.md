@@ -1555,3 +1555,16 @@ call, built by Opus 5.5, #1174).**
 - **The check** plays chapters 8 and 9 on an empty household at 390x844.
   Every line must point at something on the screen, and no item may be
   opened.
+
+## 33. The play bar's Stop becomes Skip, and the bar leaves (Fable 5.1, 2026-10-02)
+
+The owner asked: *"The tour play bar needs a way to close it, and cancel/skip
+the tour."* (#1190.) The bar's square Stop is now a cross, labelled "Skip the
+tour" — the same control, same slot, same hit target, pressed or Escape ends
+the film exactly as Stop always did. The bar then fades out and the film is
+destroyed shortly after; a natural finish holds the bar at full strength for
+3s first, then leaves the same way. This supersedes round 5's "the stopped
+and ended state keeps the 16% ghost" (§32's round-5 text above): the ghost is
+retired, because "Watch the tour" (#1189) now does its one job. Round 5's and
+round 8's own READMEs (`design/v19/tour/round-5/`, `design/1083-tour-pocket/`)
+are left as written; this entry is the record of what changed since.
