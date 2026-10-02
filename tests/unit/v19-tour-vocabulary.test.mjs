@@ -270,6 +270,56 @@ describe("Addendum A: the lift yields to a clip (#1083, 2026-09-30)", () => {
   });
 });
 
+describe("Addendum B: the lift yields to an SVG element's own position (#1174, chapter 8's fault A)", () => {
+  it("does not set a CSS transform on a control positioned by its own SVG `transform` attribute, but still rings it strong", async () => {
+    document.body.innerHTML =
+      '<svg><g id="caps"><g id="seat" class="capseat" transform="translate(50,60)"><text>a.pdf</text></g></g></svg>';
+    const seat = document.getElementById("seat");
+    // The belt paints this every frame via the attribute, never happy-dom's
+    // own layout — box() stands in for what paintMembers() would measure.
+    box(seat, { x: 50, y: 60, w: 40, h: 16 });
+    const before = { transform: seat.style.transform, filter: seat.style.filter };
+
+    const { clock, ctx } = stage();
+    const c = ctx.ctl({ sel: "#seat" });
+    await playOut(clock, ctx.goto(c, { willPress: false }));
+
+    expect(seat.style.transform).toBe(before.transform);
+    expect(seat.style.filter).toBe(before.filter);
+    expect(seat.getAttribute("transform")).toBe("translate(50,60)");
+    expect(c.lifted).toBe(true);
+    expect(c.rings[0].style.boxShadow).toContain("46px"); /* "strong", same as any other control */
+
+    ctx.unlight(c);
+    expect(seat.style.transform).toBe(before.transform);
+    expect(seat.getAttribute("transform")).toBe("translate(50,60)");
+  });
+
+  it("press() never sets an inline transform on an SVG-positioned control, not even translate(0,0)", async () => {
+    document.body.innerHTML =
+      '<svg><g id="caps"><g id="seat" class="capseat" transform="translate(50,60)"><text>a.pdf</text></g></g></svg>';
+    const seat = document.getElementById("seat");
+    box(seat, { x: 50, y: 60, w: 40, h: 16 });
+
+    const { clock, ctx } = stage();
+    const c = ctx.ctl({ sel: "#seat" });
+    await playOut(clock, ctx.goto(c, { willPress: false }));
+    await playOut(clock, ctx.press(c));
+
+    expect(seat.style.transform).toBe("");
+    expect(seat.getAttribute("transform")).toBe("translate(50,60)");
+  });
+
+  it("a plain SVG control with no transform attribute still lifts normally", async () => {
+    document.body.innerHTML = '<svg><circle id="sun" cx="190" cy="190" r="8"></circle></svg>';
+    box(document.getElementById("sun"), { x: 182, y: 182, w: 16, h: 16 });
+    const { clock, ctx } = stage();
+    const c = ctx.ctl({ sel: "#sun" });
+    await playOut(clock, ctx.goto(c, { willPress: false }));
+    expect(document.getElementById("sun").style.transform).toBe("translateY(-2px)");
+  });
+});
+
 describe("the callout", () => {
   it("carries the ratified line and is pinned to the named edge", async () => {
     document.body.innerHTML = '<svg class="dial"></svg>';
