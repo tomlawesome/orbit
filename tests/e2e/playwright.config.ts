@@ -58,6 +58,14 @@ const reuseKeptStack = process.env.ORBIT_E2E_REUSE === "true";
 // moves the fixed in-container 4443 to wherever TEST_OIDC_PORT published it.
 // forcePort is global to the browser, which is safe here because nothing
 // else the suite opens uses 4443. In CI the port is 4443 and no remap is set.
+//
+// #1192: WebKit has neither switch, and Playwright exposes no third way to
+// do this from inside a browser's own launch options. Its redirect happens
+// outside this file instead, in CI: smoke_webkit/smoke_webkit_mobile add
+// orbit-oidc to the job container's /etc/hosts (.gitlab-ci.yml,
+// `.webkit_oidc_hosts`), which is where that job's Playwright process and
+// the stack's published ports already live. See the desktop-webkit/
+// mobile-webkit projects below for the launchOptions half of this.
 const oidcHostPort = process.env.TEST_OIDC_PORT ?? "4443";
 const firefoxLaunchOptions = process.env.ORBIT_ACCEPTANCE_OIDC === "true"
   ? {
@@ -125,22 +133,32 @@ const deviceProjects: Project[] = [
   // alongside it on the owner's instruction. Same ignore list and `setup`
   // dependency as the Chromium/Firefox projects.
   //
-  // No launchOptions override here: desktop-firefox needs one because the
+  // launchOptions: {} here, not left unset, and not `undefined`. The
   // top-level `use.launchOptions` below is a Chromium switch
   // (--host-resolver-rules) that redirects the orbit-oidc sign-in host for
-  // the OIDC profile. No WebKit equivalent is known or verified here (no
-  // documented hostResolverRules or user-prefs analogue, and this change
-  // could not run the suite locally to check one), so `launchOptions` is
-  // explicitly unset rather than inherit the Chromium flag, which WebKit's
-  // launcher does not understand. Until someone verifies what WebKit needs,
-  // an OIDC-dependent spec (sign-in, second-factor) is likely to fail under
-  // these two projects for a harness reason, not a product one -- open
-  // question, not a guess.
+  // the OIDC profile, and WebKit's launcher does not understand it
+  // ("Cannot parse arguments: Unknown option --host-resolver-rules=...",
+  // pipeline 1982, 12 failures across these two projects). Playwright merges
+  // a project's `use` over the top-level one key at a time
+  // (playwright/lib/util.js's mergeObjects) and SKIPS a key whose value is
+  // literally `undefined`, keeping the parent's -- which is exactly why the
+  // first attempt at this (`launchOptions: undefined`) still inherited the
+  // Chromium args and still failed. `{}` is a real value, so it replaces the
+  // inherited object outright and WebKit launches with no extra args.
+  //
+  // WebKit still needs orbit-oidc redirected somewhere it can reach -- it
+  // has no --host-resolver-rules and no Firefox-style user-pref equivalent
+  // (no documented one exists). That redirect happens one layer out, in CI:
+  // smoke_webkit/smoke_webkit_mobile (.gitlab-ci.yml, `.webkit_oidc_hosts`)
+  // add orbit-oidc to the job container's own /etc/hosts, which is the
+  // mechanism a `use.launchOptions` in this file cannot express at all (no
+  // browser flag involved). A local `--project desktop-webkit`/`mobile-webkit`
+  // run has no equivalent yet -- see that CI comment for why.
   ...(runsWebkit("desktop")
     ? [{
       name: "desktop-webkit",
       testIgnore: BULK_IGNORE,
-      use: { ...devices["Desktop Safari"], launchOptions: undefined },
+      use: { ...devices["Desktop Safari"], launchOptions: {} },
       dependencies: ["setup"],
     }]
     : []),
@@ -148,7 +166,7 @@ const deviceProjects: Project[] = [
     ? [{
       name: "mobile-webkit",
       testIgnore: BULK_IGNORE,
-      use: { ...devices["iPhone 15"], launchOptions: undefined },
+      use: { ...devices["iPhone 15"], launchOptions: {} },
       dependencies: ["setup"],
     }]
     : []),
