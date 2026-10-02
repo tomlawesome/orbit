@@ -852,6 +852,21 @@ classify:
         lane=full
       fi
 
+      # The browser checks read their own axes, not `orbit_full_gate`, so the
+      # events that gate run them here (#1186): a push to `preview`, `main` or
+      # `hotfix/*`, and the merge request into `preview` or `main`. Without
+      # this a promotion whose diff never touched `web/` skipped `fidelity`
+      # and both browser suites -- the full gate in every job but those. Not
+      # `dev`: a push there tests what it changed (#1078). Keep the two lists
+      # in step with `orbit_on_delivery_branch` and `orbit_full_gate`.
+      browser_gate=false
+      case "${CI_COMMIT_BRANCH:-}" in
+        preview | main | hotfix/*) browser_gate=true ;;
+      esac
+      case "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-}" in
+        preview | main) browser_gate=true ;;
+      esac
+
       : > classify.env
       for pair in ORBIT_RISK:risk ORBIT_BUILD:build ORBIT_INTEGRATION:integration ORBIT_SYSTEM:system ORBIT_WEB:web ORBIT_E2E:e2e ORBIT_LICENCE:licence; do
         name="${pair%%:*}"
@@ -864,6 +879,9 @@ classify:
         # back is a different pipeline again.
         if [ "$forced" = true ]; then
           if [ "$name" = ORBIT_RISK ]; then value=system; else value=true; fi
+        fi
+        if [ "$browser_gate" = true ]; then
+          case "$name" in ORBIT_WEB | ORBIT_E2E) value=true ;; esac
         fi
         printf '%s=%s\n' "$name" "$value" >> classify.env
       done

@@ -293,6 +293,39 @@ describe("pipeline lanes", () => {
     expect(runClassifyEnv().variables.ORBIT_E2E).toBe("false");
   });
 
+  /*
+   * #1186: the promotion is where the whole suite runs again (#1078), but the
+   * browser checks read their own axes, which came from the diff alone. A
+   * promotion with no web change skipped `fidelity` and both browser suites.
+   * The events `orbit_full_gate` names now switch those axes on; a `dev` push
+   * still tests only what it changed.
+   */
+  it("runs every browser check on the promotions and on delivery pushes (#1186)", () => {
+    for (const environment of [
+      { CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "preview" },
+      { CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
+      { CI_COMMIT_BRANCH: "preview" },
+      { CI_COMMIT_BRANCH: "main" },
+      { CI_COMMIT_BRANCH: "hotfix/x" },
+    ]) {
+      const { variables } = runClassifyEnv(environment);
+      const event = JSON.stringify(environment);
+      expect(variables.ORBIT_WEB, event).toBe("true");
+      expect(variables.ORBIT_E2E, event).toBe("true");
+      // Only the browser axes: the rest still say what the diff carried.
+      expect(variables.ORBIT_SYSTEM, event).toBe("false");
+    }
+    for (const environment of [
+      { CI_COMMIT_BRANCH: "dev" },
+      { CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "dev" },
+      { CI_COMMIT_BRANCH: "feature/x" },
+    ]) {
+      const { variables } = runClassifyEnv(environment);
+      expect(variables.ORBIT_WEB, JSON.stringify(environment)).toBe("false");
+      expect(variables.ORBIT_E2E, JSON.stringify(environment)).toBe("false");
+    }
+  });
+
   it("hands the lane on from classify as a dotenv variable", () => {
     const classify = allBlocks.get("classify");
     expect(classify).toMatch(/printf 'ORBIT_LANE=%s\\n' "\$lane" >> classify\.env/u);
