@@ -5,6 +5,7 @@
   import { DEFAULT_THEME } from "$lib/theme.js";
   import { SWATCHES, applyTheme } from "$lib/theme-swatches.js";
   import Hatch from "$lib/pocket/Hatch.svelte";
+  import { watchTour } from "$lib/tour/watch.js";
   import TopChrome from "$lib/pocket/TopChrome.svelte";
 
   /**
@@ -153,6 +154,8 @@
               aria-pressed={active === id} onclick={() => setSwatch(id)}></button>
     {/each}
   </div>
+  <!-- Beside the theme, as on the phone (#1189). -->
+  <button class="watch" onclick={() => { open = false; void watchTour(); }}>↻ watch the tour</button>
   <button class="signout" onclick={tapSignOut}>{armedOut ? "tap again to sign out" : "sign out →"}</button>
   {#if signOutProblem}<div class="signout-problem">{signOutProblem}</div>{/if}
 </div>
@@ -229,6 +232,9 @@
   .swatches button{width:18px;height:18px;border-radius:50%;cursor:pointer;
                    border:1px solid var(--line);padding:0}
   .swatches button[aria-pressed=true]{outline:2px solid var(--accent);outline-offset:2px}
+  .watch{display:block;margin-bottom:12px;font:12px var(--mono);color:var(--accent-text);
+         background:none;border:0;cursor:pointer;padding:0}
+  .watch:hover{text-decoration:underline}
   .signout{font:12px var(--mono);color:var(--ink-quiet);background:none;border:0;cursor:pointer;padding:0}
   .signout:hover{color:var(--overdue-text)}
   .signout-problem{font:10.5px var(--mono);color:var(--overdue-text);margin-top:7px;line-height:1.7}

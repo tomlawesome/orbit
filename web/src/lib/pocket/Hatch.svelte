@@ -3,6 +3,7 @@
   import { signOut } from "$lib/data/workspace.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
   import { SWATCHES, applyTheme } from "$lib/theme-swatches.js";
+  import { watchTour } from "$lib/tour/watch.js";
   import ArmButton from "./ArmButton.svelte";
   import Row from "./Row.svelte";
   import Sheet from "./Sheet.svelte";
@@ -55,6 +56,19 @@
      reader reaches the goodbye screen. */
   /** @type {string | null} */
   let problem = $state(null);
+  /* "Watch the tour" (#1189). The sheet closes first and its history entry
+     comes off before the film navigates, or the back that pops it would
+     land after the film's own navigation and undo it. */
+  async function watch() {
+    const popped = new Promise((done) => {
+      addEventListener("popstate", done, { once: true });
+      setTimeout(done, 400);
+    });
+    open = false;
+    await popped;
+    await watchTour();
+  }
+
   async function leave() {
     problem = null;
     try {
@@ -109,6 +123,8 @@
       </button>
     {/each}
   </div>
+  <!-- The body's quiet last line, which a sheet allows outside its foot. -->
+  <button class="watch" onclick={watch}>↻ watch the tour</button>
   {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
   <!-- The sheet's one act, in its pinned foot (review round §1.2). -->
   {#snippet foot()}
@@ -132,4 +148,6 @@
   .swatch span{width:30px;height:30px;border-radius:50%;border:1px solid var(--line)}
   .swatch[aria-pressed=true] span{outline:2px solid var(--accent);outline-offset:3px}
   .swatch:focus-visible{outline:2px solid var(--accent);outline-offset:0}
+  .watch{appearance:none;display:flex;align-items:center;min-height:var(--p-hit);margin-top:4px;padding:0;
+    border:0;background:none;cursor:pointer;font:var(--p-type-meta)/1.4 var(--mono);color:var(--accent-text)}
 </style>
