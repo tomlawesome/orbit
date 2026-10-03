@@ -5,16 +5,7 @@ import { authErrorResponse } from "orbit/lib/auth/http";
 import { listSessions } from "orbit/lib/auth/session";
 
 import { read } from "$lib/server/api.js";
-
-/**
- * The most devices this screen ever names (#1151 A1-R7). `listSessions` has
- * no limit of its own, so an account that quietly accumulated a long tail of
- * old sessions (a token nothing ever revoked, a device nobody signed out of)
- * sent the whole tail down every time this screen was read. The sort already
- * puts the current session first and the rest newest-seen first, so the cap
- * drops the stalest ones, never the current or the recently active.
- */
-export const SESSION_LIST_LIMIT = 20;
+import { SESSION_LIST_LIMIT } from "$lib/server/session-limits.js";
 
 /**
  * "Where you're signed in" (#482): every session the caller holds, reduced
