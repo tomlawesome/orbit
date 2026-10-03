@@ -3479,6 +3479,51 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
   });
 
+  // O2-F1 (#1151): confirm_safe_batch's own prompt says "N safe action(s)
+  // proposed above", so the preview it shows must be only those N — never
+  // the manual/dangerous lines of the rest of the plan, which this batch is
+  // not about to run and the operator is not being asked about here.
+  it("O2-F1: the safe-batch preview shows only the safe action, never a manual finding that happens to be in the same plan", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644); // safe: fix-permissions
+    rmSync(join(targetDir, "docker-compose.yml")); // manual: managed-file-missing
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "y\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    const preview = result.stdout.slice(0, result.stdout.indexOf("prompt field=safe-batch"));
+    expect(preview).toContain("plan action=fix-permissions resolves=managed-file-permissions");
+    expect(preview).not.toContain("action=manual");
+    expect(result.stdout).toContain("execute action=fix-permissions resolves=managed-file-permissions result=done");
+    expect(result.stdout).toContain("execute action=manual resolves=managed-file-missing result=skipped");
+  });
+
+  it("O2-F1: the interactive safe-batch preview shows only the safe action too", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644); // safe: fix-permissions
+    rmSync(join(targetDir, "docker-compose.yml")); // manual: managed-file-missing
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "y\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    const preview = result.stdout.slice(0, result.stdout.indexOf("plan action=fix-permissions"));
+    // Nothing printed to stdout before the one safe plan line — in
+    // particular, no manual plan line precedes it.
+    expect(preview).toBe("");
+    const previewSection = result.stdout.slice(0, result.stdout.indexOf("execute action="));
+    expect(previewSection).not.toContain("action=manual");
+    expect(result.stdout).toContain("execute action=fix-permissions resolves=managed-file-permissions result=done");
+    expect(result.stdout).toContain("execute action=manual resolves=managed-file-missing result=skipped");
+  });
+
   it("machine prompts: a non-'y' answer aborts with zero mutation", () => {
     const targetDir = makeFixture({ withConfigure: false });
     chmodSync(join(targetDir, ".env-orbit"), 0o644);
