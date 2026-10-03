@@ -49,6 +49,11 @@ import { isInstanceAdministrator } from "@/server/authorization";
 // (#383).
 const MAX_ITEMS_PER_HOUSEHOLD = 500;
 const MAX_NOTIFICATION_IDS_PER_HOUSEHOLD = 2_000;
+/** #1151 A4-R5: an administrator's read otherwise loads every household in
+ *  the instance with nothing bounding the count, unlike every other list
+ *  this read returns. */
+const MAX_INSTANCE_HOUSEHOLDS = 2_000;
+
 /** Truncates to the outbound schema cap instead of letting workspaceSchema.parse fail on stored data (#383). */
 function clampedForRead<T>(values: T[], limit: number): T[] {
   if (values.length <= limit) return values;
@@ -73,13 +78,13 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     deletionRequestedAt: households.deletionRequestedAt,
     deleteAfter: households.deleteAfter,
   };
-  const householdRows = administrator
+  const householdRows = clampedForRead(administrator
     ? await getDb().select(householdSelection).from(households).where(isNull(households.deletionRequestedAt)).orderBy(asc(households.createdAt))
     : await getDb().select(householdSelection)
       .from(memberships)
       .innerJoin(households, eq(households.id, memberships.householdId))
       .where(and(eq(memberships.userId, userId), isNull(households.deletionRequestedAt)))
-      .orderBy(asc(households.createdAt));
+      .orderBy(asc(households.createdAt)), MAX_INSTANCE_HOUSEHOLDS);
 
   const recoverableHouseholds = administrator
     ? await getDb().select({ id: households.id, name: households.name, deleteAfter: households.deleteAfter }).from(households).where(and(isNotNull(households.deletionRequestedAt), sql`${households.deleteAfter} > now()`)).orderBy(asc(households.deleteAfter))
