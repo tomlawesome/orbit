@@ -101,10 +101,13 @@ function resolvedDeps(deps = {}) {
 }
 
 /**
- * Turns browser alerts on for this device. Idempotent by design — a device
- * already subscribed returns its live subscription straight away, before
- * anything that would prompt for permission or write anything, so calling
- * this on a device that is already on is silent and safe.
+ * Turns browser alerts on for this device. A device already subscribed
+ * skips the browser permission prompt and `pushManager.subscribe` — that
+ * part really is idempotent — but still (re)sends the subscription to the
+ * server every time. An existing browser subscription says the BROWSER
+ * remembers being on; it says nothing about whether the server's last
+ * write actually landed, so skipping the POST here left a device that
+ * looked "on" forever even if the one write it ever tried had failed.
  *
  * The sequence, in order: register the worker if the browser has not
  * already (this browser's own registration may still be in flight);
@@ -123,7 +126,10 @@ export async function enableAlerts(deps = {}) {
   const registration = (await d.getRegistration()) ?? (await d.register());
 
   const existing = await registration.pushManager.getSubscription();
-  if (existing) return existing;
+  if (existing) {
+    await d.writePushSubscription(existing.toJSON());
+    return existing;
+  }
 
   const permission = await d.requestPermission();
   if (permission !== "granted") {
