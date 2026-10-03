@@ -30,6 +30,17 @@ const mutationSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("remove"), id: z.uuid() }),
 ]);
 
+/**
+ * One seeded, unverified row — the shape `seedSenderAddress` always leaves a
+ * real reader with (#1151 SQ2-Q4: the real route is never actually empty,
+ * because the read above seeds one before listing).
+ */
+const SENDERS_FIXTURE = {
+  addresses: [
+    { id: "fixture-sender-1", address: "tom@example.com", source: "account", verified: false, verificationPending: false },
+  ],
+};
+
 export const GET = read(
   async (_event, session) => {
     /* Seeding on read is what puts the account's own address in front of the
@@ -39,7 +50,7 @@ export const GET = read(
     const addresses = await listSenderAddresses(session.user.id);
     return json({ addresses }, { headers: { "cache-control": "no-store" } });
   },
-  { fixture: () => json({ addresses: [] }, { headers: { "cache-control": "no-store" } }) },
+  { fixture: () => json(SENDERS_FIXTURE, { headers: { "cache-control": "no-store" } }) },
 );
 
 export const PUT = write(async (event, session) => {
