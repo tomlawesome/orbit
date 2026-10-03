@@ -12,7 +12,7 @@ import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentDrafts, documentJobs, documents } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { getDocumentConfig } from "@/server/documents/config";
-import { LocalDocumentStorage } from "@/server/documents/storage";
+import { LocalDocumentStorage, STORAGE_KEY_PATTERN } from "@/server/documents/storage";
 import { processOwnedPurge, type OwnedPurgeState } from "@/server/documents/purge";
 import { operationalDocumentReason, type ClaimedDocumentJob } from "@/server/document-maintenance/claims";
 
@@ -97,7 +97,7 @@ export async function processPurgeJob(job: ClaimedDocumentJob): Promise<"complet
           || record.lifecycle !== "pending_deletion"
           || record.generation !== claimedJob.generation
         ) return undefined;
-        if (!record.storageKey || !/^[a-f0-9]{64}$/u.test(record.storageKey)) {
+        if (!record.storageKey || !STORAGE_KEY_PATTERN.test(record.storageKey)) {
           throw new Error("Invalid document purge storage metadata");
         }
         return {
