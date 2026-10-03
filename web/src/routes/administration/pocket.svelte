@@ -103,10 +103,18 @@
     if (failing.length > 2) list.push({ id: "ad-operations", word: `${failing.length - 2} more failing` });
     const failedJobs = jobs.filter((job) => job.status === "failed").length;
     if (failedJobs) list.unshift({ id: "ad-documents", word: `${count(failedJobs, "job")} failed` });
-    if (tests.relay?.word === "failed") list.push({ id: "ad-mail", word: "relay failed" });
-    if (tests.mailbox?.word === "failed" || (!tests.mailbox && view.mailbox?.verificationState === "failed")) {
-      list.push({ id: "ad-mail", word: "mailbox failed" });
+    /* #1151 A1-Q6: carried over from `tests` (#1071's throwaway,
+       reload-forgetting local copy), removed when A1-Q6 moved this screen
+       onto the server-backed `mailProbes` the desk layout already reads —
+       left unconverted here, so svelte-check's "Cannot find name 'tests'"
+       was a real dangling reference, not a false positive. */
+    if (mailProbes.relay && testVerdict(mailProbes.relay.result).tone === "over") {
+      list.push({ id: "ad-mail", word: "relay failed" });
     }
+    const mailboxFailed = mailProbes.mailbox
+      ? testVerdict(mailProbes.mailbox.result).tone === "over"
+      : view.mailbox?.verificationState === "failed";
+    if (mailboxFailed) list.push({ id: "ad-mail", word: "mailbox failed" });
     return list;
   });
 
