@@ -3108,7 +3108,14 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       ],
     });
 
-    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+    // O2-S1: restoring .env-orbit from a staging snapshot is never
+    // automatic (see the dedicated describe block below) — explicitly
+    // confirm via the machine-prompt channel, exactly like the dangerous
+    // batch's own never-automatable approval.
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {}, {
+      env: { ORBIT_REPAIR_PROMPTS: "machine" },
+      input: "y\n",
+    });
 
     expect(result.stdout).toContain(
       "execute action=restore-transaction resolves=staging-evidence-present result=done",
@@ -3132,7 +3139,13 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     // not exist before the interrupted transaction and must be removed.
     writeFileSync(join(targetDir, "docker-compose.mail.yml"), "services: {}\n");
 
-    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+    // O2-S1: this staging snapshot also carries a backup of .env-orbit
+    // (envBackupLines above), so this restore needs explicit confirmation
+    // too — see this test's sibling above.
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {}, {
+      env: { ORBIT_REPAIR_PROMPTS: "machine" },
+      input: "y\n",
+    });
 
     expect(result.stdout).toContain(
       "execute action=restore-transaction resolves=staging-evidence-present result=done",
@@ -3246,7 +3259,12 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       committed: false,
     });
 
-    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+    // O2-S1: explicit confirmation required — see the dedicated describe
+    // block below.
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {}, {
+      env: { ORBIT_REPAIR_PROMPTS: "machine" },
+      input: "y\n",
+    });
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain(
