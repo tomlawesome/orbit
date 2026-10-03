@@ -528,27 +528,39 @@
     mailboxBusy = label;
     mailboxProblem = null;
     mailboxOutcome = null;
+    /** @type {Awaited<ReturnType<typeof commandMailbox>> | undefined} */
+    let answer;
     try {
-      const answer = await commandMailbox(command);
+      answer = await commandMailbox(command);
+    } catch (error) {
+      /* The command itself refused — nothing changed server-side, so this
+         really is "not done". */
+      mailboxProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      mailboxBusy = null;
+      return;
+    }
+    mailboxOutcome = answer.outcome ?? null;
+    /* Only a verified credential closes the form; a refused one leaves it
+       open with what was typed, minus the password, so the administrator
+       can correct a host or a port without retyping everything. */
+    if (!answer.outcome || answer.outcome === "verified") {
+      editing = false;
+      rotating = false;
+      aliasRotating = false;
+    }
+    password = "";
+    try {
       /* The whole screen is re-read rather than patched, the same way placing
          a person does: the machinery rows are derived from the mailbox, so a
-         patch would leave them describing the previous state. */
+         patch would leave them describing the previous state. A failure HERE
+         is a second, separate thing from the command above: that one already
+         landed, so this is never read back as "not done" with the version
+         left stale until a reload (#1151 A1-R5). */
       view = await readAdminScreen();
-      mailboxOutcome = answer.outcome ?? null;
-      /* Only a verified credential closes the form; a refused one leaves it
-         open with what was typed, minus the password, so the administrator
-         can correct a host or a port without retyping everything. */
-      if (!answer.outcome || answer.outcome === "verified") {
-        editing = false;
-        rotating = false;
-        aliasRotating = false;
-      }
-      password = "";
-    } catch (error) {
-      mailboxProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
-    } finally {
-      mailboxBusy = null;
+    } catch {
+      mailboxProblem = "done — Orbit could not refresh this screen, so reload to see the new version";
     }
+    mailboxBusy = null;
   }
 
   /* DOCUMENT JOBS AND THE TWO MAIL TESTS (#1071, design/v19/administration-ops/
