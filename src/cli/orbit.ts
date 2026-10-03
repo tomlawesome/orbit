@@ -1078,15 +1078,15 @@ function commandRestoreEngineRehearse(scenarioPath: string): never {
 // deployment target, so silently defaulting to cwd is a materially higher-
 // stakes mistake than for a read-only readiness report.
 
-/** install.sh:134-138 (ORBIT_CHANNEL). */
+/** install.sh:148-151 (ORBIT_CHANNEL). */
 const CHANNEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-/** install.sh:138-141 (ORBIT_REPOSITORY). */
+/** install.sh:152-155 (ORBIT_REPOSITORY). */
 const REPOSITORY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}\/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
-/** install.sh:142-145 (ORBIT_REGISTRY). */
+/** install.sh:156-159 (ORBIT_REGISTRY). */
 const REGISTRY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?$/;
-/** install.sh:125-126 (ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: 1-999 by pattern, further bounded to <=900). */
+/** install.sh:139-143 (ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: 1-999 by pattern, further bounded to <=900). */
 const READINESS_TIMEOUT_PATTERN = /^[1-9][0-9]{0,2}$/;
-/** install.sh:130 (ORBIT_INSTALLER_POLL_INTERVAL_SECONDS: a single digit, 1-9). */
+/** install.sh:144-147 (ORBIT_INSTALLER_POLL_INTERVAL_SECONDS: a single digit, 1-9). */
 const READINESS_POLL_PATTERN = /^[1-9]$/;
 
 interface InstallEnvironmentConfig {
@@ -1101,7 +1101,7 @@ interface InstallEnvironmentConfig {
  * Reads and validates ORBIT_REPOSITORY/ORBIT_REGISTRY/ORBIT_CHANNEL/
  * ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS/ORBIT_INSTALLER_POLL_INTERVAL_SECONDS
  * exactly the way install.sh does at its own top-of-script argument/env
- * validation (install.sh:13-15,123-145) — install-orchestrator.ts itself
+ * validation (install.sh:13-15,137-159) — install-orchestrator.ts itself
  * has no reason to own environment-variable parsing (it takes an already-
  * validated context), so this is this CLI's own responsibility, the same
  * way it already owns `--dir` parsing for `check`. Fails closed with
