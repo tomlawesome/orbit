@@ -113,6 +113,10 @@ function runConfigure(targetDir, args = [], envOverrides = {}, input = undefined
       PATH: `${binDir}:${process.env.PATH}`,
       HOME: process.env.HOME ?? tmpdir(),
       ORBIT_IMAGE: "orbit-local:abcdef123456",
+      // These helpers simulate the installer driving configure.sh (the realistic
+      // caller), so they carry its trust marker too -- see the dedicated
+      // negative test below for the one case that must NOT carry it.
+      ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE: "1",
       ...envOverrides,
     },
     ...processGuard(),
@@ -132,6 +136,10 @@ function runConfigureWithControllingTerminal(targetDir, args = [], envOverrides 
       PATH: `${binDir}:${process.env.PATH}`,
       HOME: process.env.HOME ?? tmpdir(),
       ORBIT_IMAGE: "orbit-local:abcdef123456",
+      // These helpers simulate the installer driving configure.sh (the realistic
+      // caller), so they carry its trust marker too -- see the dedicated
+      // negative test below for the one case that must NOT carry it.
+      ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE: "1",
       ...envOverrides,
     },
   });
@@ -159,6 +167,7 @@ function runConfigureWithPipeEOF(targetDir, args = [], envOverrides = {}, input 
         PATH: `${binDir}:${process.env.PATH}`,
         HOME: process.env.HOME ?? tmpdir(),
         ORBIT_IMAGE: "orbit-local:abcdef123456",
+        ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE: "1",
         ...envOverrides,
       },
       ...processGuard(),
@@ -265,6 +274,50 @@ describe("configure.sh", () => {
     for (const name of ["session-secret", "postgres-password", "document-kek", "vapid-private-key"]) {
       expect(existsSync(join(customSecretsDir, name))).toBe(true);
     }
+  });
+
+  it("ignores a stale ambient ORBIT_IMAGE on an existing deployment without the installer's trust marker, printing what it ignored (#1151 O1-S4)", () => {
+    const pinnedImage = `old-registry.example/orbit@sha256:${"a".repeat(64)}`;
+    const targetDir = makeFixture(`APP_URL=https://orbit.example.invalid\nORBIT_IMAGE=${pinnedImage}\n`);
+    const binDir = makeFakeBin();
+
+    // Deliberately bypasses the runConfigure helper (which now always
+    // carries ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE, simulating the installer):
+    // this is exactly the bare, human-run invocation the finding is about,
+    // with a stale ORBIT_IMAGE left over in the shell and no trust marker.
+    const result = failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "configure.sh")], {
+      cwd: targetDir,
+      encoding: "utf8",
+      env: {
+        PATH: `${binDir}:${process.env.PATH}`,
+        HOME: process.env.HOME ?? tmpdir(),
+        ORBIT_IMAGE: "orbit-local:bbbbbbbbbbbb",
+      },
+      ...processGuard(),
+    }), { label: "bareConfigureStaleImage" });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("ignoring ORBIT_IMAGE=orbit-local:bbbbbbbbbbbb");
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain(`ORBIT_IMAGE=${pinnedImage}`);
+  });
+
+  it("still seeds ORBIT_IMAGE from the environment on a brand-new deployment, even without the trust marker", () => {
+    const targetDir = makeFixture(undefined);
+    const binDir = makeFakeBin();
+
+    const result = failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "configure.sh")], {
+      cwd: targetDir,
+      encoding: "utf8",
+      env: {
+        PATH: `${binDir}:${process.env.PATH}`,
+        HOME: process.env.HOME ?? tmpdir(),
+        ORBIT_IMAGE: "orbit-local:cccccccccccc",
+      },
+      ...processGuard(),
+    }), { label: "bareConfigureFreshImage" });
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain("ORBIT_IMAGE=orbit-local:cccccccccccc");
   });
 
   it("creates a concise operator environment while leaving reference-only defaults in the example", () => {

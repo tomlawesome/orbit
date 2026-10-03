@@ -1194,7 +1194,11 @@ prepare_configuration() {
   installer_ui_phase=configuration
   installer_ui_component=configuration
   installer_ui_event configuration configuration starting configuration-migration configure
-  if ! ORBIT_IMAGE="$resolved_reference" bash scripts/configure.sh; then
+  # ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1 is configure.sh's own opt-in marker
+  # (#1151 O1-S4): it never trusts an ambient ORBIT_IMAGE on an existing
+  # deployment without it, since install.sh is the only caller that has
+  # already run this image through the registry and signature checks above.
+  if ! ORBIT_IMAGE="$resolved_reference" ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1 bash scripts/configure.sh; then
     fail "Configuration failed; restoring the previous deployment."
   fi
   is_regular_non_symlink_file "$environment_file" ||
@@ -1302,7 +1306,8 @@ stage_guided_install_configuration() {
   installer_ui_event configuration configuration starting configuration-migration configure
   ORBIT_IMAGE="$resolved_reference" bash "$staging_dir/scripts/configure.sh" --init ||
     fail_with configuration-failure retry "Guided configuration was cancelled or invalid; the target remains unchanged."
-  ORBIT_IMAGE="$resolved_reference" bash "$staging_dir/scripts/configure.sh" ||
+  # See prepare_configuration's identical call for ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE (#1151 O1-S4).
+  ORBIT_IMAGE="$resolved_reference" ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1 bash "$staging_dir/scripts/configure.sh" ||
     fail_with configuration-failure retry "Secret generation failed; the target remains unchanged."
 
   # --init just asked the sign-in mode question (ADR-0023 section 1) and

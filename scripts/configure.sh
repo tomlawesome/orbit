@@ -37,6 +37,9 @@ fi
 temporary_file=""
 terminal_fd=""
 terminal_echo_disabled=0
+# Set by ensure_environment_file when .env-orbit did not exist yet -- read
+# by persist_orbit_image below (#1151 O1-S4).
+environment_file_was_created=0
 installer_ui_input_loaded=0
 installer_ui_path="$repo_dir/scripts/installer-ui.sh"
 if [[ -f "$installer_ui_path" && ! -L "$installer_ui_path" ]]; then
@@ -217,6 +220,7 @@ ensure_environment_file() {
     return
   fi
 
+  environment_file_was_created=1
   temporary_file="$(mktemp "$PWD/.env-orbit.installing.XXXXXX")" ||
     fail "Could not create a temporary Orbit environment file."
   chmod 600 "$temporary_file" ||
@@ -363,6 +367,20 @@ update_managed_keys() {
 persist_orbit_image() {
   local orbit_image="${ORBIT_IMAGE:-}"
   [[ -n "$orbit_image" ]] || return 0
+  # A bare `bash scripts/configure.sh` picks up whatever ORBIT_IMAGE is
+  # exported in the invoking shell -- including a stale value left over
+  # from an earlier session -- and previously persisted it unconditionally,
+  # silently rewriting an existing deployment's pinned image without going
+  # through install.sh's own registry/signature checks (#1151 O1-S4). A
+  # brand-new .env-orbit has no prior pin to protect and needs this value to
+  # seed itself (install.sh's own fresh-install call relies on exactly
+  # that), so only an EXISTING deployment requires the installer's explicit
+  # trust marker, ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1 (set by install.sh
+  # itself alongside ORBIT_IMAGE; never set by a human invocation).
+  if [[ "$environment_file_was_created" != 1 && "${ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE:-}" != 1 ]]; then
+    printf 'Orbit configure: ignoring ORBIT_IMAGE=%s from the environment; an existing deployment only changes its pinned image through the installer.\n' "$orbit_image" >&2
+    return 0
+  fi
   if ! is_valid_orbit_image "$orbit_image"; then
     fail "ORBIT_IMAGE must be an immutable registry digest or the installer-generated local build tag."
   fi
