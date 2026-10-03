@@ -1366,8 +1366,13 @@ function instanceLineOf(build) {
   return parts.join(" · ");
 }
 
-/** @param {string} iso */
-const shortDate = (iso) =>
+/**
+ * Named apart from format.js's and belt.js's own `shortDate` (#1151 W2-Q5):
+ * those take a bare date and append T00:00:00Z themselves; this one takes a
+ * document's full `availableAt` instant as it already arrives from the API.
+ * @param {string} iso  a full ISO instant, not a bare date
+ */
+const shortAddedDate = (iso) =>
   new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 
 /** @param {number} bytes */
@@ -1408,7 +1413,7 @@ export async function readItem(id, workspace) {
       section: sections.get(item.sectionId) ?? null,
       documents: (body.documents ?? []).map((doc) => ({
         name: doc.displayName,
-        meta: `added ${shortDate(doc.availableAt)} · ${sizeLabel(doc.sizeBytes)}`,
+        meta: `added ${shortAddedDate(doc.availableAt)} · ${sizeLabel(doc.sizeBytes)}`,
       })),
     };
   }
@@ -1462,7 +1467,7 @@ export async function readItemDocuments(householdId, itemId) {
     name: doc.displayName,
     meta: [
       sizeLabel(doc.sizeBytes),
-      `added ${shortDate(doc.availableAt)}`,
+      `added ${shortAddedDate(doc.availableAt)}`,
       doc.lifecycle === "pending_deletion" ? "removed" : null,
     ].filter(Boolean).join(" · "),
   }));
