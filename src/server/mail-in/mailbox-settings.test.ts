@@ -1021,6 +1021,7 @@ describe("finding the probe's own message in the mailbox", () => {
     deleted: string[];
     loggedOut: number;
     released: number;
+    fetchQueries: unknown[];
   }
 
   function installClient(options: {
@@ -1029,7 +1030,7 @@ describe("finding the probe's own message in the mailbox", () => {
     refuseDelete?: boolean;
     sentTo: () => string;
   }): FakeClientCalls {
-    const calls: FakeClientCalls = { searched: [], deleted: [], loggedOut: 0, released: 0 };
+    const calls: FakeClientCalls = { searched: [], deleted: [], loggedOut: 0, released: 0, fetchQueries: [] };
     mocks.createImapClient.mockImplementation(() => ({
       connect: async () => undefined,
       getMailboxLock: async () => ({ release: () => { calls.released += 1; } }),
@@ -1037,9 +1038,12 @@ describe("finding the probe's own message in the mailbox", () => {
         calls.searched.push(query);
         return options.uids;
       },
-      fetchOne: async () => ({
-        headers: Buffer.from(options.headers ? options.headers(options.sentTo()) : "", "utf8"),
-      }),
+      fetchOne: async (_uid: string, query: unknown) => {
+        calls.fetchQueries.push(query);
+        return {
+          headers: Buffer.from(options.headers ? options.headers(options.sentTo()) : "", "utf8"),
+        };
+      },
       messageDelete: async (uid: string) => {
         calls.deleted.push(uid);
         if (options.refuseDelete) throw new Error("EXPUNGE refused");
@@ -1071,6 +1075,27 @@ describe("finding the probe's own message in the mailbox", () => {
     expect(calls.deleted).toEqual(["42"]);
     expect(calls.released).toBe(1);
     expect(calls.loggedOut).toBe(1);
+  });
+
+  it("reads the header as a bounded partial fetch, not the unbounded headers:true option (#1151 SR2-R2)", async () => {
+    await configureMailbox();
+    let sentTo = "";
+    const calls = installClient({
+      uids: [7],
+      headers: (to) => `X-Original-To: ${to}\r\n`,
+      sentTo: () => sentTo,
+    });
+
+    await runMailboxSetupProbe(ADMIN, {
+      smtpConfig: () => smtp,
+      sendProbeMail: async (message) => { sentTo = message.to; },
+    });
+
+    expect(calls.fetchQueries).toEqual([
+      { bodyParts: [{ key: expect.stringContaining("HEADER.FIELDS"), maxLength: expect.any(Number) }] },
+    ]);
+    const [query] = calls.fetchQueries as Array<{ bodyParts: Array<{ maxLength: number }> }>;
+    expect(query.bodyParts[0].maxLength).toBeGreaterThan(0);
   });
 
   it("reports delivered_without_recipient_header when the provider stripped the header", async () => {
