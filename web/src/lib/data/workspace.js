@@ -834,23 +834,6 @@ export async function readHome(fetchImpl) {
 }
 
 /**
- * Everything the corridor renders (#461): the whole workspace (the corridor
- * spans every system), the signed-in user for the chrome, and the reckoning
- * date. The transform itself (corridorOf) is pure and lives in chart.js.
- */
-export async function readDueNext() {
-  const [workspace, session] = await Promise.all([readWorkspace(), readSession().catch(() => null)]);
-  const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
-  return {
-    workspace,
-    primary,
-    household: workspace.households.find((one) => one.id === primary) ?? null,
-    user: session?.user ?? null,
-    today: todayOf(workspace),
-  };
-}
-
-/**
  * Everything the inbox screen renders (#463): the raw receipts in their
  * bounded groups, the approvable ones ALSO in suggestion shape (the approve
  * protocol's input), the relay summary, and a pinned "now" so elapsed-time
