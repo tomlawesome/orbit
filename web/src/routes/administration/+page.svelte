@@ -569,7 +569,7 @@
      pill: bad (failed), warm (retrying), run (running), ok (passed),
      quiet-and-breathing (checking). */
   /** @type {Record<string, string>} */
-  const ROLE_TONE = { over: "bad", soon: "warn", up: "run", "": "" };
+  const ROLE_TONE = { over: "bad", soon: "warn", up: "run", ok: "ok", "": "" };
 
   /* Document jobs: a People row without an avatar, ordered by what needs the
      reader, `retry` on FAILED rows only. Retrying flips the row to QUEUED at
