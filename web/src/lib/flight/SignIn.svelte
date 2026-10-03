@@ -144,6 +144,13 @@
   let approvalTimer;
   /** Set by the component's own teardown, so a poll in flight lands nowhere. */
   let approvalStopped = false;
+  /** Epoch ms after which the approval poll gives up (#1151 W1-R1), the same
+      kind of backstop the STARTING poll already keeps — read once when the
+      waiting card goes up. */
+  let approvalDeadlineAt = 0;
+  /** Consecutive unreadable rounds (a non-ok response or a failing fetch),
+      so an outage backs the poll off instead of hammering it every 2s. */
+  let approvalFailures = 0;
 
   let claimCode = $state("");
   let email = $state("");
@@ -291,11 +298,14 @@
     canResendAt = Date.parse(pending.canResendAt) || 0;
     card = "waiting";
     showCard(true);
+    approvalFailures = 0;
+    approvalDeadlineAt = Date.now() + STARTING_BACKSTOP_MS;
     askAgain();
   }
 
   /**
-   * One round of "has anybody answered yet", every two seconds.
+   * One round of "has anybody answered yet", every two seconds while
+   * healthy.
    *
    * The claim cookie the sign-in route handed this browser is the whole of the
    * request: nothing is sent in the body, and a tab without that cookie gets
@@ -303,10 +313,20 @@
    *
    * An unreadable answer is not an end -- a proxy hiccup must not throw a
    * reader out of a sign-in that is still perfectly live -- so only the
-   * server's own three words stop the loop.
+   * server's own three words stop the loop on their own account. But an
+   * unreadable answer backs the poll off (#1151 W1-R1) instead of hammering
+   * an outage every 2s, and either way the poll gives up once
+   * `approvalDeadlineAt` passes, the same kind of backstop the STARTING poll
+   * already keeps (door-state.js's `applyStartingBackstop`) -- surfaced as
+   * the waiting card's own "lapsed" words, not a silent stop.
    */
   function askAgain() {
     if (approvalStopped) return;
+    if (Date.now() >= approvalDeadlineAt) {
+      pendingState = "lapsed";
+      return;
+    }
+    const delay = Math.min(2000 * 2 ** approvalFailures, 16_000);
     approvalTimer = setTimeout(async () => {
       if (approvalStopped) return;
       let answer = null;
@@ -339,8 +359,9 @@
         pendingState = "lapsed";
         return;
       }
+      approvalFailures = answer === null ? approvalFailures + 1 : 0;
       askAgain();
-    }, 2000);
+    }, delay);
   }
 
   /** "Send it again", inside ADR-0027 §8's limits, which the server keeps. */
