@@ -51,6 +51,7 @@ const { GET: readMethods } = await loadRoute("auth/methods");
 const { DELETE: removeLocal } = await loadRoute("auth/methods/local");
 const { DELETE: removeIdentity } = await loadRoute("auth/methods/oidc/[identityId]");
 const { POST: startLink } = await loadRoute("auth/link/oidc/start");
+const { POST: startStepUp } = await loadRoute("auth/step-up/start");
 const { GET: callback } = await loadRoute("auth/callback");
 
 const ORIGIN = "http://127.0.0.1:3000";
@@ -343,6 +344,36 @@ describe("linking a provider identity (ADR-0023 §6)", () => {
     await expect(provisionIdentity(identity)).resolves.toMatchObject({ id: actorId });
   });
 
+  it("answers 200 { location } instead of a redirect when the caller asks for JSON (#1151 SF1-F1)", async () => {
+    // handToProvider (web/src/lib/data/workspace.js) fetches with
+    // `redirect: "manual"` so it can drive the hand-off itself, which turns
+    // any redirect response into an opaque one it cannot read a location
+    // from — it sends `accept: application/json` and the route has to
+    // answer in that shape instead of the 302 a plain form post still gets.
+    const actorId = await localUser("link-json");
+    const actor = await actorFor(actorId);
+    const config = getAuthConfig();
+
+    const started = await callRoute(startLink, {
+      url: `${ORIGIN}/api/auth/link/oidc/start`,
+      method: "POST",
+      headers: { ...writeHeaders(actor), accept: "application/json" },
+      body: challengeBody({ currentPassword: PASSWORD }, { returnTo: "/settings" }),
+    });
+
+    expect(started.status).toBe(200);
+    expect(started.headers.get("cache-control")).toBe("no-store");
+    // The transaction is sealed exactly as it is for the 302 case — only the
+    // body's shape changes with Accept, nothing about what was started.
+    const sealed = readSetCookie(started, transactionCookieName(config))?.value ?? "";
+    expect(sealed).not.toBe("");
+    expect(await openLoginTransaction(sealed, config)).toMatchObject({ linkUserId: actorId });
+
+    const body = await started.json();
+    const authorizationUrl = new URL(body.location);
+    expect(authorizationUrl.origin).toBe(new URL(METADATA.authorization_endpoint).origin);
+  });
+
   it("refuses a provider account that already belongs to somebody else, and moves nothing", async () => {
     const actorId = await localUser("link-contested");
     const holderId = await oidcUser("link-holder");
@@ -389,6 +420,54 @@ describe("linking a provider identity (ADR-0023 §6)", () => {
 
     expect(readSetCookie(crossSite, transactionCookieName(config))).toBeUndefined();
     expect(await identityRows(actorId)).toHaveLength(0);
+  });
+});
+
+describe("starting a step-up re-challenge (ADR-0023 §5)", () => {
+  it("answers 200 { location } instead of a redirect when the caller asks for JSON (#1151 SF1-F1)", async () => {
+    // Same reason as the link-start test above: handToProvider drives the
+    // hand-off itself with `redirect: "manual"`, which it can only do from a
+    // JSON body naming where to go.
+    const actorId = await localUser("stepup-json");
+    const actor = await actorFor(actorId);
+    const config = getAuthConfig();
+
+    const started = await callRoute(startStepUp, {
+      url: `${ORIGIN}/api/auth/step-up/start`,
+      method: "POST",
+      headers: { ...writeHeaders(actor), accept: "application/json" },
+      body: JSON.stringify({ intent: "password_change", returnTo: "/settings" }),
+    });
+
+    expect(started.status).toBe(200);
+    expect(started.headers.get("cache-control")).toBe("no-store");
+    const sealed = readSetCookie(started, transactionCookieName(config))?.value ?? "";
+    expect(sealed).not.toBe("");
+    expect(await openLoginTransaction(sealed, config)).toMatchObject({
+      stepUpSessionId: actor.sessionId,
+      intent: "password_change",
+    });
+
+    const body = await started.json();
+    const authorizationUrl = new URL(body.location);
+    expect(authorizationUrl.origin).toBe(new URL(METADATA.authorization_endpoint).origin);
+    // The re-challenge itself: a fresh authentication, not a remembered one.
+    expect(authorizationUrl.searchParams.get("max_age")).toBe("0");
+  });
+
+  it("still answers a plain 302 for a form post with no Accept header", async () => {
+    const actorId = await localUser("stepup-redirect");
+    const actor = await actorFor(actorId);
+
+    const started = await callRoute(startStepUp, {
+      url: `${ORIGIN}/api/auth/step-up/start`,
+      method: "POST",
+      headers: writeHeaders(actor),
+      body: JSON.stringify({ intent: "password_change", returnTo: "/settings" }),
+    });
+
+    expect(started.status).toBe(302);
+    expect(typeof started.headers.get("location")).toBe("string");
   });
 });
 
