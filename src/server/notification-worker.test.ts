@@ -15,6 +15,7 @@ import {
   deliveryFailureState,
   effectiveReminderOffsets,
   enabledDeliveryChannels,
+  failDelivery,
   getNotificationWorkerConfig,
   getNotificationWorkerHealth,
   householdReminderTime,
@@ -225,6 +226,49 @@ describe("notification worker scheduling", () => {
     expect(deliveryFailureState("recipient_address_unreadable", 5, 5)).toBe("failed");
     expect(deliveryFailureState("push_unavailable", 5, 5)).toBe("failed");
     expect(deliveryFailureState("unknown", 5, 5)).toBe("failed");
+  });
+
+  it("failDelivery's own real outcome is what decides exhausted, not a second copy of the threshold (#1151 A4-Q4)", async () => {
+    const updates: Array<{ status: unknown }> = [];
+    const fakeDb = {
+      update: () => ({
+        set: (values: { status: unknown }) => ({
+          where: () => {
+            updates.push({ status: values.status });
+            return Promise.resolve();
+          },
+        }),
+      }),
+    } as unknown as Parameters<typeof failDelivery>[0];
+
+    // maxAttempts is 5. One attempt BEFORE the real threshold (attempts=4)
+    // is where the old log code's `attempts + 1 >= maxAttempts` -- double
+    // counting the post-claim increment `claimDeliveries` already applied --
+    // disagreed with the real status and called it "exhausted" a cycle
+    // early.
+    const oneBeforeThreshold = await failDelivery(
+      fakeDb, "delivery-1", "lease-1", 4, 5, "unknown", new Date(), () => 1_000,
+    );
+    expect(oneBeforeThreshold).toBe("retry");
+    const oldBuggyExhausted = 4 + 1 >= 5;
+    expect(oldBuggyExhausted).toBe(true); // the bug: it said "exhausted" here
+    expect(oneBeforeThreshold !== "retry").toBe(false); // the fix: it does not
+
+    const atThreshold = await failDelivery(
+      fakeDb, "delivery-1", "lease-1", 5, 5, "unknown", new Date(), () => 1_000,
+    );
+    expect(atThreshold).toBe("failed");
+
+    // A category that cancels outright (never retries, whatever `attempts`
+    // says) is "exhausted" too under the real-status fix -- the old formula
+    // would have called a cancelled delivery "retrying" at a low attempt
+    // count.
+    const cancelledEarly = await failDelivery(
+      fakeDb, "delivery-1", "lease-1", 1, 5, "smtp_rejected", new Date(), () => 1_000,
+    );
+    expect(cancelledEarly).toBe("cancelled");
+    expect(cancelledEarly !== "retry").toBe(true);
+    expect(updates.map((update) => update.status)).toEqual(["retry", "failed", "cancelled"]);
   });
 
   it("#383 finding 2: only allows push endpoints that are https on the default port and not a private or reserved address", () => {
