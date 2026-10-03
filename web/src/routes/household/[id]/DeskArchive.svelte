@@ -7,7 +7,7 @@
     startStepUp,
     writePortableArchive,
   } from "$lib/data/workspace.js";
-  import { ARCHIVE_MAX_BYTES, archiveFileProblem, passphraseProblem, sizeLabel } from "./archive.js";
+  import { ARCHIVE_MAX_BYTES, archiveFileProblem, PASSPHRASE_MIN, passphraseProblem, sizeLabel } from "./archive.js";
 
   /*
    * THE ARCHIVE ON THE DESK (#1002). The phone's own build is #1122's
@@ -217,7 +217,7 @@
   }
 
   async function lookInside() {
-    if (!file || passIn.length < 12) return;
+    if (!file || passIn.length < PASSPHRASE_MIN) return;
     inProblem = null;
     inPhase = "looking";
     try {
@@ -395,7 +395,7 @@
             </div>
             <div class="act">
               <button class="ghost" onclick={startOver}>another file</button>
-              <button class="ghost" disabled={passIn.length < 12 || inPhase === "looking"} onclick={lookInside}>
+              <button class="ghost" disabled={passIn.length < PASSPHRASE_MIN || inPhase === "looking"} onclick={lookInside}>
                 {inPhase === "looking" ? "looking…" : "look inside"}</button>
             </div>
           </div>
