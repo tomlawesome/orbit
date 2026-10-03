@@ -131,6 +131,14 @@ const createOffline: Journey = {
      (pipeline 1989, mobile-webkit) -- the opposite of Chromium's #1178
      defect, not a timing race like Firefox's. Nothing to expect-fail here. */
   focusDefect: () => isWebkit() ? undefined : FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket create bar (.pk-save)" : "the desk create card (#card .btn-primary)"),
+  /* #1196: on desktop Safari, the `page.route` mock on /api/workspace/commands
+     above is not applied by WebKit's driver, so the save succeeds for real
+     and the failure notice this journey waits for never appears. Detail on
+     #1196. */
+  announceDefect: () =>
+    test.info().project.name === "desktop-webkit"
+      ? "#1196: desktop Safari does not apply the route mock, so the save succeeds and no failure is shown"
+      : undefined,
 };
 
 /* ── IMAP review ───────────────────────────────────────────────────────── */
