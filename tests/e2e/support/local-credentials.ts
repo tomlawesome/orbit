@@ -73,9 +73,11 @@ export async function ensureLocalPassword(page: Page, account: string, password:
      for the frame id" rather than timing out, so waiting longer here
      (38ab8ca2's `waitForLoadState("load")`, removed) does not help -- the
      frame object only becomes valid for Playwright's purposes after that
-     error has already been raised once. v19-archive.spec.ts's own
-     `gotoAfterStepUp` is the real fix: retry the one navigation that can
-     hit this, right where it happens. */
+     error has already been raised once, and on WebKit retrying the
+     navigation itself is not reliable either (pipeline 2005). The caller
+     must continue on a fresh page on WebKit instead: v19-archive.spec.ts's
+     own `pageAfterStepUp` is the real fix, right where this round trip
+     ends. */
 
   const set = await page.request.post("/api/auth/local/password", {
     /* Read again, not reused: setting a password that REPLACES one revokes
