@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   closeSync,
   constants,
@@ -563,6 +564,86 @@ function commandConfigure(deployDir: string, args: string[]): never {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Scratch-directory cleanup for backup/restore (#1151 O1-R1). Each of
+// commandBackup's --verify branch and commandRestore's --recover and
+// <backup.tar> branches creates a private mkdtempSync workDir under
+// os.tmpdir() that can hold decrypted document bytes and database dumps
+// while the command runs. A try/finally alone misses two cases: (1) a
+// signal (Ctrl-C/SIGINT, or SIGTERM from a supervisor) does not unwind JS
+// try/finally at all by default, so the directory is orphaned in /tmp
+// forever; (2) the success path in each branch calls `process.exit(0)`
+// *inside* the try, and process.exit() terminates immediately without
+// running a pending `finally` — confirmed empirically, not merely assumed —
+// so a plain try/finally around a process.exit() call never actually ran
+// its cleanup either. withScratchDirectory fixes both: callers never call
+// process.exit() from inside the wrapped callback, and the same tracked-set
+// cleanup runs on normal completion, on a thrown error, and on SIGINT/SIGTERM.
+const activeScratchDirectories = new Set<string>();
+let scratchCleanupSignalHandlersInstalled = false;
+
+function removeScratchDirectory(workDir: string): void {
+  try {
+    rmSync(workDir, { recursive: true, force: true });
+  } catch {
+    // Best effort: nothing more useful to do if removal itself fails.
+  }
+}
+
+function installScratchCleanupSignalHandlers(): void {
+  if (scratchCleanupSignalHandlersInstalled) return;
+  scratchCleanupSignalHandlersInstalled = true;
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => {
+      for (const workDir of activeScratchDirectories) removeScratchDirectory(workDir);
+      activeScratchDirectories.clear();
+      // 128 + signal number, the conventional shell-reported exit status
+      // (SIGINT=2, SIGTERM=15); matches the 130 already used for Ctrl-C
+      // during masked TTY entry above.
+      process.exit(signal === "SIGINT" ? 130 : 143);
+    });
+  }
+}
+
+/** Runs `run` with `workDir` tracked for signal cleanup, always removing it afterward — on normal return, on a thrown error, and (via the signal handlers above) on SIGINT/SIGTERM. `run` must never call process.exit() itself; callers call it, with the result of `run`, only after this returns. */
+function withScratchDirectory<T>(workDir: string, run: () => T): T {
+  installScratchCleanupSignalHandlers();
+  activeScratchDirectories.add(workDir);
+  try {
+    return run();
+  } finally {
+    activeScratchDirectories.delete(workDir);
+    removeScratchDirectory(workDir);
+  }
+}
+
+// Hidden/experimental, mirroring __install-transaction-rehearse and
+// __restore-engine-rehearse above: exercises withScratchDirectory's signal
+// cleanup end-to-end for src/cli/orbit.test.ts, without needing a real
+// docker backup/restore run to create a window to signal during.
+//
+// Blocks the same way the real docker-compose adapters block (a
+// synchronous spawnSync call), rather than a pure-JS wait: that is not a
+// cosmetic choice. A tight synchronous loop (e.g. Atomics.wait) never
+// returns control to the event loop, so a signal arriving during one is
+// never actually delivered to a `process.on` listener until the loop is
+// unblocked some other way — proven directly against this file's own
+// mkdtempSync/spawnSync pattern before writing this comment. What actually
+// happens on a real Ctrl-C is: the terminal's SIGINT reaches the whole
+// foreground process group, so the blocked `docker` child dies from the
+// same signal, spawnSync returns, and only then does the event loop
+// deliver the pending SIGINT/SIGTERM callback registered below. Spawning a
+// real `sleep` child here, signalled as a process group, reproduces that
+// exact sequence instead of a shape nothing in production ever hits.
+function commandScratchDirectorySignalRehearse(sleepSeconds: string): never {
+  const workDir = mkdtempSync(join(tmpdir(), "orbit-scratch-signal-rehearse-"));
+  withScratchDirectory(workDir, () => {
+    process.stdout.write(`workDir=${workDir}\n`);
+    spawnSync("sleep", [sleepSeconds]);
+  });
+  process.exit(0);
+}
+
 function commandBackup(deployDir: string, args: string[]): never {
   refuseDockerInContainer("backup");
   const paths = resolveBackupRestorePaths(deployDir);
@@ -573,13 +654,11 @@ function commandBackup(deployDir: string, args: string[]): never {
     if (args.length !== 2 || !args[1]) fail("orbit: usage: orbit backup --verify <backup.tar>");
     const target = resolve(args[1]);
     const workDir = mkdtempSync(join(tmpdir(), "orbit-backup-verify-"));
-    try {
+    withScratchDirectory(workDir, () => {
       verifyBackupBundle(target, documentKekHex, workDir, adapter);
       process.stdout.write(`Orbit backup is valid: ${args[1]}\n`);
-      process.exit(0);
-    } finally {
-      rmSync(workDir, { recursive: true, force: true });
-    }
+    });
+    process.exit(0);
   }
 
   if (args.length !== 0) fail("orbit: usage: orbit backup [--verify <backup.tar>]");
@@ -616,19 +695,17 @@ function commandRestore(deployDir: string, args: string[]): never {
   if (recoverMode) {
     if (backupFile !== undefined || yesFlag) fail("orbit: usage: --recover accepts no other arguments");
     const workDir = mkdtempSync(join(tmpdir(), "orbit-restore-recover-"));
-    try {
+    withScratchDirectory(workDir, () => {
       recoverRestore({ adapter, paths: restorePaths, workDir });
       process.stdout.write("Orbit recovery completed; the prior database, document tree, and key state were restored.\n");
-      process.exit(0);
-    } finally {
-      rmSync(workDir, { recursive: true, force: true });
-    }
+    });
+    process.exit(0);
   }
 
   if (backupFile === undefined) fail("orbit: usage: orbit restore [--yes] <backup.tar> | orbit restore --recover");
   const documentKekHex = readDocumentKekHex(paths.documentKekFile);
   const workDir = mkdtempSync(join(tmpdir(), "orbit-restore-"));
-  try {
+  withScratchDirectory(workDir, () => {
     runRestore({
       backupTarPath: resolve(backupFile),
       documentKekHex,
@@ -638,10 +715,8 @@ function commandRestore(deployDir: string, args: string[]): never {
       confirm: makeRestoreConfirmer(yesFlag),
     });
     process.stdout.write("Orbit restore completed successfully.\n");
-    process.exit(0);
-  } finally {
-    rmSync(workDir, { recursive: true, force: true });
-  }
+  });
+  process.exit(0);
 }
 
 function commandExportRecoveryBundle(deployDir: string, args: string[]): never {
@@ -1410,6 +1485,11 @@ function main(): void {
     const scenarioPath = rest[0];
     if (!scenarioPath) fail("orbit: __restore-engine-rehearse requires a scenario file path");
     commandRestoreEngineRehearse(scenarioPath);
+    return;
+  }
+
+  if (command === "__scratch-directory-signal-rehearse") {
+    commandScratchDirectorySignalRehearse(rest[0] ?? "5");
     return;
   }
 
