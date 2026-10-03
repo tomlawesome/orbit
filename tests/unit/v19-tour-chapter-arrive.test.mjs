@@ -105,6 +105,11 @@ async function playOut(clock, promise, step = 100, cap = 400000) {
     await settle();
   }
   if (failure) throw failure;
+  // T-Q7 (#1151): the loop above exits either because the chapter finished
+  // or because `cap` ran out -- without this, a chapter that hangs forever
+  // fell out of the loop with `failure` still null and returned as if it
+  // had played out cleanly.
+  if (!done) throw new Error(`playOut: chapter did not finish within ${cap}ms of simulated time`);
 }
 
 beforeEach(() => {
