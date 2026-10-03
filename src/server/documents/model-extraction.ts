@@ -1,4 +1,3 @@
-import { isValidLocalModel } from "@/lib/deployment-profile";
 import { log } from "@/lib/logger";
 import {
   documentDateRoles,
@@ -682,6 +681,36 @@ export async function pingExtractionModel(options: { deadlineMs?: number } = {})
   }
 }
 
+// `deployment-profile.ts`'s `isValidLocalModel` answers a narrower question
+// -- does the installed `.env-orbit` match one of the installer's four known
+// profile combinations -- ported byte-for-byte from install.sh's own
+// `is_valid_local_model` (see that module's header). It never learned the
+// digest-pinned form `docs/administrator-operations.md`'s "Pulling a model"
+// section documents and recommends (`OLLAMA_MODEL=<model>@sha256:<digest>`),
+// so reusing it here silently disabled AI extraction for exactly the value
+// an operator was told to set (#1151 SF2-F5). Extraction's own question --
+// is this a reference Ollama can resolve -- is answered here instead,
+// independently of the installer's profile-matching rule.
+const OLLAMA_MODEL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+const OLLAMA_MODEL_TAG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const OLLAMA_MODEL_DIGEST_PATTERN = /^sha256:[a-fA-F0-9]{64}$/;
+
+/** Accepts both forms Ollama resolves a model reference by: `name[:tag]`
+ * (install.sh's own grammar) and the documented digest pin `name@sha256:…`. */
+function isAcceptedOllamaModelReference(value: string): boolean {
+  if (value.length < 1 || value.length > 128) return false;
+  const at = value.indexOf("@");
+  if (at !== -1) {
+    const name = value.slice(0, at);
+    const digest = value.slice(at + 1);
+    return OLLAMA_MODEL_NAME_PATTERN.test(name) && OLLAMA_MODEL_DIGEST_PATTERN.test(digest);
+  }
+  const colon = value.indexOf(":");
+  const name = colon === -1 ? value : value.slice(0, colon);
+  const tag = colon === -1 ? undefined : value.slice(colon + 1);
+  return OLLAMA_MODEL_NAME_PATTERN.test(name) && (tag === undefined || OLLAMA_MODEL_TAG_PATTERN.test(tag));
+}
+
 /**
  * The selected model name, the only knob the model path has. An unset or
  * malformed value means the `ai` profile is not in play and the model path is
@@ -689,7 +718,7 @@ export async function pingExtractionModel(options: { deadlineMs?: number } = {})
  */
 export function selectedExtractionModel(environment: NodeJS.ProcessEnv = process.env): string | undefined {
   const model = (environment[MODEL_ENVIRONMENT_KEY] ?? "").trim();
-  return model && isValidLocalModel(model) ? model : undefined;
+  return model && isAcceptedOllamaModelReference(model) ? model : undefined;
 }
 
 /**
