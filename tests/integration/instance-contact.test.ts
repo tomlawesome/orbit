@@ -126,7 +126,12 @@ describe("PostgreSQL public-contact-address contracts (#860)", () => {
     expect(Object.keys(signedOut).sort()).toEqual(["claimed", "configured", "contactAddress", "methods", "phase"]);
   });
 
-  it("reflects whether authentication is configured, without ever naming why not", async () => {
+  // T-Q4 (#1151): this used to be named "reflects whether authentication is
+  // configured, without ever naming why not", promising coverage of the
+  // false case this test never exercises -- the comment below already
+  // explains why that case is left to door-state.test.mjs instead. Renamed
+  // to match what the body actually proves.
+  it("reflects that authentication is configured, in this always-valid environment", async () => {
     // A real, valid auth configuration is already loaded by the integration
     // harness (createIntegrationFixture depends on it), so this environment
     // always answers `configured: true`; the false branch and its message
