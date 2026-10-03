@@ -1141,7 +1141,10 @@ export class RestoreRun {
     }
 
     this.adapter.collectDocumentsArchive(checkpointDocuments);
-    validateDocumentArchiveEntries(listTarEntriesVerbose(checkpointDocuments));
+    // O2-Q12: not validated here — verifyCheckpointArtifactsCorrespond
+    // (below) already validates this same documents.tar before extracting
+    // it, so a second validateDocumentArchiveEntries(listTarEntriesVerbose())
+    // pass here would read the whole archive twice for nothing.
 
     this.copyCheckpointKey();
     this.verifyCheckpointArtifactsCorrespond("orbit_restore_checkpoint_stage_");
