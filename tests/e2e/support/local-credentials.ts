@@ -65,6 +65,12 @@ export async function ensureLocalPassword(page: Page, account: string, password:
   await page.getByRole("link", { name: account }).click();
   /* The callback mints the proof and sends the browser back to `returnTo`. */
   await page.waitForURL(/\/settings/, { timeout: 20_000 });
+  /* #1192: WebKit only -- waitForURL resolves on the URL match, but a caller
+     that fires its own page.goto right after this returns can still land
+     mid this navigation's commit ("Cannot find web frame for the frame id",
+     v19-archive.spec.ts). Waiting for the frame's own load event closes
+     that gap. */
+  await page.waitForLoadState("load");
 
   const set = await page.request.post("/api/auth/local/password", {
     /* Read again, not reused: setting a password that REPLACES one revokes
