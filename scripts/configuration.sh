@@ -56,6 +56,12 @@ is_deprecated_secret() {
   return 1
 }
 
+# Direct-value/_FILE pairs the app's own contract (src/lib/config-contract.ts's
+# exclusivePairs) rejects as mutually exclusive: setting both certifies a file
+# the app refuses at runtime. Same nine pairs, same order, kept side by side
+# with that list.
+readonly secret_file_pairs='SESSION_SECRET:SESSION_SECRET_FILE DOCUMENT_KEK:DOCUMENT_KEK_FILE DOCUMENT_KEK_NEXT:DOCUMENT_KEK_NEXT_FILE POSTGRES_PASSWORD:POSTGRES_PASSWORD_FILE OIDC_CLIENT_SECRET:OIDC_CLIENT_SECRET_FILE VAPID_PRIVATE_KEY:VAPID_PRIVATE_KEY_FILE SMTP_PASSWORD:SMTP_PASSWORD_FILE DATABASE_URL:DATABASE_URL_FILE SMTP_URL:SMTP_URL_FILE'
+
 is_control_free() {
   local value="$1" char i
   for ((i=0; i<${#value}; i++)); do
@@ -162,6 +168,13 @@ parse_file() {
     esac
   done < "$file"
   [[ "$assignment_count" -gt 0 ]] || fail_code configuration_syntax
+  local secret_file_pair direct_key file_key
+  for secret_file_pair in $secret_file_pairs; do
+    direct_key="${secret_file_pair%%:*}"; file_key="${secret_file_pair#*:}"
+    if [[ -n "${seen[$direct_key]:-}" && -n "${seen[$file_key]:-}" ]]; then
+      fail_code configuration_secret_conflict
+    fi
+  done
   if [[ -n "$schema_value" && "$schema_value" != "$schema_version" ]]; then
     [[ "$schema_value" =~ ^[0-9]+$ && "$schema_value" -gt "$schema_version" ]] && fail_code configuration_version
     fail_code configuration_version
@@ -243,7 +256,23 @@ migrate_file() {
 
   if [[ "$transaction" != 1 ]]; then
     backup="${file}${rollback_suffix}"
-    if [[ -e "$backup" || -L "$backup" ]]; then fail_code configuration_migration; fi
+    if [[ -e "$backup" || -L "$backup" ]]; then
+      # A leftover rollback backup only blocks a legitimate retry when it
+      # cannot be told apart from a fresh one: if it is byte-identical to
+      # $file right now, the only way that can be true is that an earlier
+      # --migrate run was interrupted after writing this same backup from
+      # this same pre-migration content but before its own final `mv`
+      # applied anything — $file was never actually changed, so the
+      # "already current" short-circuit above never got a chance to fire
+      # on retry either, and there is nothing here worth protecting. A
+      # backup that differs (or is a symlink) is a real rollback point from
+      # a genuinely different migration and must not be silently replaced.
+      if [[ ! -L "$backup" ]] && cmp -s -- "$file" "$backup" 2>/dev/null; then
+        rm -f -- "$backup" 2>/dev/null || fail_code configuration_migration
+      else
+        fail_code configuration_migration
+      fi
+    fi
     umask 077
     cp -- "$file" "$backup" 2>/dev/null || fail_code configuration_migration
     chmod 600 "$backup" 2>/dev/null || fail_code configuration_migration
