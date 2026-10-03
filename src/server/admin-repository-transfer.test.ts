@@ -28,9 +28,8 @@ const mocks = vi.hoisted(() => ({
   identitiesUsable: true,
 }));
 
-vi.mock("@/server/authorization", () => ({
-  requireInstanceAdministrator: async () => undefined,
-}));
+const requireInstanceAdministrator = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock("@/server/authorization", () => ({ requireInstanceAdministrator }));
 
 vi.mock("@/server/local-credentials", () => ({
   identitiesAreUsable: () => mocks.identitiesUsable,
@@ -206,6 +205,7 @@ beforeEach(() => {
   mocks.localCredentials = [];
   mocks.auditLog = [];
   mocks.identitiesUsable = true;
+  requireInstanceAdministrator.mockClear();
 });
 
 afterEach(() => {
@@ -246,5 +246,19 @@ describe("transferPrimaryAdministrator's eligibility check (#1151 SS1-S1)", () =
   it("still refuses a target with no sign-in method at all", async () => {
     await expect(transferPrimaryAdministrator(ACTOR, recentAuthentication(ACTOR), TARGET))
       .rejects.toMatchObject({ code: "transfer_target_ineligible", status: 409 });
+  });
+});
+
+describe("transferPrimaryAdministrator's return (#1151 A1-Q1)", () => {
+  it("builds the post-transfer list without re-running the admin check its own transaction already passed", async () => {
+    mocks.localCredentials = [{ userId: TARGET }];
+
+    await transferPrimaryAdministrator(ACTOR, recentAuthentication(ACTOR), TARGET);
+
+    // The transaction above verified the actor directly against `users`;
+    // `requireInstanceAdministrator` is only `listInstanceUsers`'s own guard,
+    // so a call here would mean the return value re-asked a question this
+    // function had just answered for the same actor.
+    expect(requireInstanceAdministrator).not.toHaveBeenCalled();
   });
 });

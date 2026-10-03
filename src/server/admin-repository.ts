@@ -99,6 +99,19 @@ function compareEmail(left: string | null, right: string | null): number {
 
 export async function listInstanceUsers(actorUserId: string): Promise<InstanceUserList> {
   await requireInstanceAdministrator(actorUserId);
+  return instanceUserList();
+}
+
+/**
+ * `listInstanceUsers`'s own body, without the admin check (#1151 A1-Q1): a
+ * mutation elsewhere in this file already re-reads and verifies the actor
+ * as part of its own transaction before it ever gets here, so calling the
+ * guarded export afterwards to build its return value re-ran a check that
+ * had already passed, a moment earlier, on the same actor. Only
+ * `listInstanceUsers` is exported; a caller with no transaction of its own
+ * to have already verified from must still go through it.
+ */
+async function instanceUserList(): Promise<InstanceUserList> {
   const db = getDb();
   const [authority] = await db
     .select({ primaryUserId: instanceAuthority.primaryUserId })
@@ -224,7 +237,7 @@ export async function setInstanceAdministrator(
     });
   });
 
-  return listInstanceUsers(actorUserId);
+  return instanceUserList();
 }
 
 /**
@@ -316,7 +329,7 @@ export async function setInstanceUserDisabled(
     });
   });
 
-  return listInstanceUsers(actorUserId);
+  return instanceUserList();
 }
 
 /**
@@ -429,7 +442,7 @@ export async function transferPrimaryAdministrator(
     });
   });
 
-  return listInstanceUsers(actorUserId);
+  return instanceUserList();
 }
 
 /**
