@@ -202,7 +202,10 @@ export const COST_FORMAT_HINT = "Use a dot for pence, for example 12.50";
  * position — groups of exactly three digits after it, none after the
  * decimal point — so "12,50" and "1,2500" are rejected rather than
  * silently reinterpreted (#1151 W1-F1/W1-S4).
- * @param {string} text
+ * @param {string | undefined} text an optional form field (PanelForm.cost
+ *   et al.) can genuinely be undefined; `String(text ?? "")` below already
+ *   treats that the same as empty, so the type is corrected to say so
+ *   rather than every optional-field caller narrowing it first.
  */
 export function minorOf(text) {
   const clean = String(text ?? "").replace(/[£$€\s]/g, "");
