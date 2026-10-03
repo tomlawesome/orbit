@@ -293,6 +293,10 @@
    * @type {string}
    */
   let provenIntent = $state("");
+  /** Which person's "setup_link_issue" step-up this is resuming, for the
+      phone layout's own sheet — it keeps a whole Person, not just an id,
+      so it looks this up once `view` loads (#1151 A1-F2). */
+  let resumedResendPersonId = $state(/** @type {string | null} */ (null));
 
   /**
    * The typed draft, carried across a step-up (#915). Leaving for the provider
@@ -300,18 +304,42 @@
    * come back to an empty form and have to type the person in again. Session
    * storage, not local: it belongs to this tab and this errand, and it holds
    * only what the administrator typed — never a password, never a link.
+   *
+   * Covers all three challenged intents this screen has (#1151 A1-F2): the
+   * local-user form's own fields always ride along, and `intent` says which
+   * OTHER form — new system, or a resend row — to reopen and refill, since
+   * only one of those can be in flight for a given step-up. A fourth
+   * intent arriving later just adds a branch here, not a new mechanism.
    */
   const DRAFT_KEY = "orbit-local-user-draft";
 
-  function stashDraft() {
-    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(localDraft)); } catch { /* storage refused: the form simply starts empty */ }
+  /** @param {string} intent */
+  function stashDraft(intent) {
+    const payload = {
+      intent,
+      local: localDraft,
+      systemName,
+      resend: resendFor ? { personId: resendFor, days: resendDays } : null,
+    };
+    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(payload)); } catch { /* storage refused: the form simply starts empty */ }
   }
 
   function restoreDraft() {
     try {
       const held = sessionStorage.getItem(DRAFT_KEY);
       sessionStorage.removeItem(DRAFT_KEY);
-      if (held) localDraft = { ...localDraft, ...JSON.parse(held) };
+      if (!held) return;
+      const draft = JSON.parse(held);
+      if (draft.local) localDraft = { ...localDraft, ...draft.local };
+      if (draft.intent === "system_create" && draft.systemName) {
+        systemName = draft.systemName;
+        creatingSystem = true;
+      }
+      if (draft.intent === "setup_link_issue" && draft.resend?.personId) {
+        resendFor = draft.resend.personId;
+        resendDays = draft.resend.days ?? SETUP_LINK_DAYS.fallback;
+        resumedResendPersonId = draft.resend.personId;
+      }
     } catch { /* nothing held, or unreadable: the form starts empty */ }
   }
 
@@ -343,7 +371,7 @@
     resendProblem = null;
     if (actorHasPassword || provenIntent === intent) { openField(); return; }
     try {
-      stashDraft();
+      stashDraft(intent);
       await startStepUp({ intent, returnTo: `/administration?stepup=${encodeURIComponent(intent)}` });
     } catch (error) {
       report(setupWords(error));
@@ -724,7 +752,7 @@
 <!-- #1123, proposal §2.12: administration on a phone, chosen by CSS. It
      shares this page's state and acts (the step-up challenge, the re-read),
      so both dialects answer the server the same way. -->
-<Pocket {view} fixtures={Boolean(data?.fixtures)} {actorHasPassword} {provenIntent} bind:draft={localDraft}
+<Pocket {view} fixtures={Boolean(data?.fixtures)} {actorHasPassword} {provenIntent} {resumedResendPersonId} bind:draft={localDraft}
         challenge={challengeThen} reread={async () => { view = await readAdminScreen(); }}
         spent={() => (provenIntent = "")} />
 
