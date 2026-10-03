@@ -8,6 +8,12 @@ readonly environment_file="${ORBIT_ENV_FILE:-.env-orbit}"
 readonly backup_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
 readonly secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
 readonly document_kek_file="$secrets_directory/document-kek"
+# Shared with restore.sh (#1151 O2-R3): both scripts stop orbit-app and
+# cut over the document tree/database, and nothing serialized a backup
+# against a concurrent restore -- a backup finishing mid-restore could
+# start orbit-app back up during restore's own document-tree cutover.
+readonly lock_file="${ORBIT_BACKUP_RESTORE_LOCK_FILE:-$backup_directory/.orbit-backup-restore.lock}"
+lock_fd=""
 readonly bundle_format_version="1"
 readonly timestamp="$(date -u +%Y%m%d-%H%M%S)"
 work_directory=""
@@ -37,7 +43,22 @@ require_tools() {
   command -v openssl >/dev/null 2>&1 || fail "OpenSSL is required."
   command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required."
   command -v tar >/dev/null 2>&1 || fail "tar is required."
+  command -v flock >/dev/null 2>&1 || fail "flock is required."
   [[ -f "$environment_file" ]] || fail "Missing ${environment_file}."
+}
+
+# #1151 O2-R3: held for the whole run, shared with restore.sh's identical
+# lock file. Opening the fd keeps the lock held until this process exits
+# (bash closes every fd it opened on exit), so there is no separate unlock
+# step.
+acquire_backup_restore_lock() {
+  mkdir -p -- "$backup_directory" || fail "Could not create ${backup_directory}."
+  chmod 700 -- "$backup_directory" || fail "Could not restrict ${backup_directory} permissions."
+  exec {lock_fd}>"$lock_file" || fail "Could not open the backup/restore lock file at ${lock_file}."
+  if ! flock -n "$lock_fd"; then
+    printf 'Orbit backup: another backup or restore is already running; waiting for it to finish...\n' >&2
+    flock "$lock_fd" || fail "Could not acquire the backup/restore lock at ${lock_file}."
+  fi
 }
 
 # See restore.sh's identical materialize_document_kek_from_direct_value for
@@ -226,6 +247,7 @@ if [[ "${1:-}" == "--verify" ]]; then
   validate_bundle "$2" >/dev/null
   printf 'Orbit backup is valid: %s\n' "$2"
 elif [[ "$#" == 0 ]]; then
+  acquire_backup_restore_lock
   create_bundle
 else
   fail "Usage: bash scripts/backup.sh [--verify <backup.tar>]"
