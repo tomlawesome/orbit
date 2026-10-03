@@ -19,8 +19,8 @@ boundary, MEDIUM = deployment correctness, LOW = UX).
   the fixed safe/reversible action set only: fix-permissions,
   restore-transaction, restart-services; stage two/dangerous actions remain
   unimplemented) was added 2026-08-13.
-- **Totals:** 381 guarantees — 219 HIGH, 128 MEDIUM, 34 LOW.
-  Install/configuration family: 217 (123 HIGH). Backup/recovery/deploy
+- **Totals:** 382 guarantees — 219 HIGH, 129 MEDIUM, 34 LOW.
+  Install/configuration family: 218 (123 HIGH). Backup/recovery/deploy
   family: 164 (96 HIGH).
 - **Maintenance:** a change to an operational script that adds, removes, or
   moves a guarantee must update this catalogue in the same pull request;
@@ -348,13 +348,13 @@ Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `confi
 |---|---:|
 | install.sh | 57 |
 | configure.sh | 34 |
-| configuration.sh | 25 |
+| configuration.sh | 26 |
 | container-entrypoint.sh | 14 |
 | installer-ui.sh | 13 |
 | repair.sh | 56 |
 | installer-simulation.sh | 8 |
 | get-orbit.sh | 10 |
-| **Total** | **217** |
+| **Total** | **218** |
 
 **Guarantee count by category × criticality**
 
@@ -362,13 +362,13 @@ Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `confi
 |---|---:|---:|---:|---:|
 | refusal/fail-closed | 29 | 26 | 7 | 62 |
 | secret-handling | 31 | 5 | 0 | 36 |
-| input-validation | 6 | 21 | 8 | 35 |
+| input-validation | 6 | 22 | 8 | 36 |
 | provenance/immutability | 20 | 10 | 0 | 30 |
 | transactional/rollback | 18 | 3 | 0 | 21 |
 | permissions/ownership | 18 | 0 | 0 | 18 |
 | idempotency | 0 | 4 | 4 | 8 |
 | recovery | 1 | 5 | 1 | 7 |
-| **Total** | **123** | **74** | **20** | **217** |
+| **Total** | **123** | **75** | **20** | **218** |
 
 **Guarantees duplicated across scripts (up to 10, both citations)**
 
