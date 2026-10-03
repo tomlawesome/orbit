@@ -28,8 +28,10 @@
    * RECENT AUTHENTICATION (§17): when the server answers an archive act with
    * `recent_authentication_required`, the callout asks the reader to prove it
    * is them (their password, or their identity provider) and then runs the
-   * same act again. The archive routes do not ask for this today (#1122's
-   * report); the callout answers the refusal, it never invents one.
+   * same act again. The archive write routes do ask for this (#1132:
+   * `archive_export`/`archive_import` in recent-auth.ts) — exporting hands
+   * the whole household away decrypted, importing writes into it; the
+   * callout answers that real refusal, it never invents one (#1151 W2-Q7).
    */
 
   /** @type {{ householdId: string, householdName: string, entries: number, sections: number }} */
