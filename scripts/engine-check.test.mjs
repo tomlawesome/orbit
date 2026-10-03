@@ -233,7 +233,7 @@ describe("ORBIT_ENGINE_CHECK=container: composes the documented one-off invocati
     expect(argv[0]).toBe("compose");
   });
 
-  it("refuses (exit 5) when timeout is unavailable, before ever changing directory into a Compose invocation", () => {
+  it("refuses (exit 5) when timeout is unavailable", () => {
     const targetDir = makeFixture({ composeProjectName: "enginechecktest" });
     const binDir = mkdtempSync(join(tmpdir(), "orbit-engine-check-notimeout-"));
     scratchDirs.push(binDir);
@@ -292,7 +292,7 @@ describe("ORBIT_ENGINE_CHECK=container: composes the documented one-off invocati
     expect(argv[projectNameIndex + 1]).toBe("env-supplied-project");
   });
 
-  it("refuses (exit 5) when docker is unavailable, before ever changing directory into a Compose invocation", () => {
+  it("refuses (exit 5) when docker is unavailable", () => {
     const targetDir = makeFixture();
     const dockerlessBinDir = makeDockerlessBinDir();
     const result = runEngineCheck(targetDir, [], {
