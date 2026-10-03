@@ -58,14 +58,24 @@ describe("beginFilm — a pocket viewport (#1083, ending §24)", () => {
   it("starts the film and writes once on end, the same as a desk arrival", async () => {
     const run = fakeFilmRun();
     const writeSeen = vi.fn();
+    // T-Q11 (#1151): this used to be byte-for-byte the desk test above, with
+    // nothing pocket-related in it at all. beginFilm genuinely never
+    // receives a viewport flag -- Tour.svelte reads isPocket() only inside
+    // its own createFilmRun closure, threading it into createFilm() instead
+    // (see Tour.svelte and film.js) -- which is exactly the mechanism that
+    // lets a pocket viewport take this same path: createFilmRun decides
+    // pocket-ness entirely on its own, so beginFilm must call it with
+    // nothing. That is the one pocket-related fact this layer can check.
+    const createFilmRun = vi.fn(() => run);
     const outcome = await beginFilm({
       readTour: async () => ({ tourSeenAt: null }),
       hasHousehold: () => true,
-      createFilmRun: () => run,
+      createFilmRun,
       writeSeen,
     });
 
     expect(outcome).toBe("started");
+    expect(createFilmRun).toHaveBeenCalledWith();
     expect(writeSeen).not.toHaveBeenCalled();
 
     /* The pocket cut spends `tourSeenAt` the same way the desk cut does:
