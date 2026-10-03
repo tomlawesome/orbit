@@ -47,10 +47,16 @@ async function signIn(page: Page) {
   await ensureWorkerAdministrator(page);
 }
 
-/** A household with two items, spread across "this month" and "next month"
- * so the manifest corridor exercises both its `.today`/current group and its
- * `.month` grouping (#469). Named "reduced-motion-" + a uuid: other specs
- * share this stack (#730). */
+/** A household with three items, spread across "overdue", "this month" and
+ * "next month" so the manifest corridor exercises both its `.today`/current
+ * group and its `.month` grouping (#469). Named "reduced-motion-" + a uuid:
+ * other specs share this stack (#730).
+ *
+ * T-Q3 (#1151): the overdue item is the point. +page.svelte's `.ping`
+ * (POL-2's perihelion ping) only renders `{#if firstOverdue}`
+ * (`bodies.find((b) => b.overdue)`), so without one the reduced-motion
+ * check below for it ran against an element that was never in the page at
+ * all and could not have caught a real regression. */
 async function seedHousehold(page: Page) {
   const householdId = randomUUID();
   const sectionId = randomUUID();
@@ -76,11 +82,14 @@ async function seedHousehold(page: Page) {
   });
   if (!created.ok()) throw new Error(`Could not seed the reduced-motion household (${created.status()})`);
 
+  const overdueItem = `${NAME_PREFIX}overdue tv licence`;
   const soonItem = `${NAME_PREFIX}gutter service`;
   const laterItem = `${NAME_PREFIX}boiler certificate`;
+  const overdueDue = new Date(Date.now() - 5 * 86_400_000).toISOString().slice(0, 10);
   const soonDue = new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10);
   const laterDue = new Date(Date.now() + 70 * 86_400_000).toISOString().slice(0, 10);
   for (const [title, dueDate, scheduleKind] of [
+    [overdueItem, overdueDue, "renewal"],
     [soonItem, soonDue, "service"],
     [laterItem, laterDue, "renewal"],
   ] as const) {
@@ -107,7 +116,7 @@ async function seedHousehold(page: Page) {
     if (!upsert.ok()) throw new Error(`Could not seed item "${title}" (${upsert.status()})`);
   }
 
-  return { id: householdId, name, soonItem, laterItem };
+  return { id: householdId, name, overdueItem, soonItem, laterItem };
 }
 
 /** Every CSS animation/transition currently RUNNING on the page (not
@@ -205,9 +214,15 @@ test.describe("reduced motion", () => {
 
       // POL-2's perihelion ping is dropped with `display:none` under reduced
       // motion (home.css `@media (prefers-reduced-motion: reduce){.ping{display:none}}`).
+      // T-Q3 (#1151): `.ping` only renders at all when the household has an
+      // overdue item (+page.svelte's `firstOverdue`) -- seedHousehold now
+      // always gives it one, so this requires the element to actually be
+      // there rather than silently passing when it is not.
       await test.step("/home: POL-2 perihelion ping", async () => {
         const ping = page.locator(".ping").first();
-        if ((await ping.count()) > 0 && (await ping.isVisible())) {
+        if ((await ping.count()) === 0) {
+          problems.push("/home: .ping (POL-2 perihelion ping) did not render for the seeded overdue item");
+        } else if (await ping.isVisible()) {
           problems.push("/home: .ping (POL-2 perihelion ping) is still visible under reduced motion");
         }
       });
