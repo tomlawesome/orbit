@@ -746,11 +746,25 @@ export function applySetOidcSecret(deployDir: string, secret: string): string {
 
 export interface GuidedInitInput {
   appUrl: string;
-  issuer: string;
-  clientId: string;
+  /** Defaults to "oidc" (unset preserves this function's original always-OIDC behavior). */
+  authMode?: "local" | "oidc";
+  issuer?: string;
+  clientId?: string;
 }
 
-/** guided_init's validate-then-write tail (configure.sh:684-745, guarantees #11-14), given already-collected candidate answers (TTY prompting, the ORBIT_CONFIGURE_* env triad, or #297 machine prompts are all the caller's concern — see the CLI wiring in src/cli/orbit.ts). Writes nothing until all three re-validate. */
+/**
+ * guided_init's validate-then-write tail (configure.sh:684-745, guarantees
+ * #11-14), given already-collected candidate answers (TTY prompting, the
+ * ORBIT_CONFIGURE_* env triad, or #297 machine prompts are all the caller's
+ * concern — see the CLI wiring in src/cli/orbit.ts). Writes nothing until
+ * every required field re-validates.
+ *
+ * O1-F1: `authMode: "local"` is guided_init's local-only branch
+ * (configure.sh:843-850, ADR-0023 §1) — APP_URL and ORBIT_AUTH_OIDC=false
+ * only, never touching OIDC_*, so switching the provider off never forces
+ * deleting its configuration. This engine previously had no such path at
+ * all, so a local-only init always demanded `issuer`/`clientId`.
+ */
 export function applyGuidedInit(deployDir: string, input: GuidedInitInput): string {
   const normalizedAppUrl = normalizePublicOrigin(input.appUrl);
   if (!normalizedAppUrl) {
@@ -759,13 +773,23 @@ export function applyGuidedInit(deployDir: string, input: GuidedInitInput): stri
       "guided-configuration-invalid",
     );
   }
-  if (!isValidOidcIssuer(input.issuer)) {
+
+  if (input.authMode === "local") {
+    ensureEnvironmentFile(deployDir);
+    updateManagedKeys(deployDir, [
+      ["APP_URL", normalizedAppUrl],
+      ["ORBIT_AUTH_OIDC", "false"],
+    ]);
+    return "Orbit guided configuration saved APP_URL and set ORBIT_AUTH_OIDC=false (local accounts only).";
+  }
+
+  if (!isValidOidcIssuer(input.issuer ?? "")) {
     refuse(
       "OIDC_ISSUER must be a complete https:// issuer URL with no credentials, query, fragment, loopback address or example.com placeholder.",
       "guided-configuration-invalid",
     );
   }
-  if (!isValidClientId(input.clientId)) {
+  if (!isValidClientId(input.clientId ?? "")) {
     refuse("OIDC_CLIENT_ID must be a non-empty value with no whitespace or control characters.", "guided-configuration-invalid");
   }
 
@@ -774,8 +798,8 @@ export function applyGuidedInit(deployDir: string, input: GuidedInitInput): stri
   updateManagedKeys(deployDir, [
     ["APP_URL", normalizedAppUrl],
     ["ORBIT_AUTH_OIDC", "true"],
-    ["OIDC_ISSUER", input.issuer],
-    ["OIDC_CLIENT_ID", input.clientId],
+    ["OIDC_ISSUER", input.issuer as string],
+    ["OIDC_CLIENT_ID", input.clientId as string],
     ["OIDC_CALLBACK_URL", callbackUrl],
   ]);
 
@@ -1065,13 +1089,23 @@ function validateOidcSecretAnswer(value: string): string | undefined {
 
 export interface CollectedGuidedInitAnswers {
   appUrl: string;
-  issuer: string;
-  clientId: string;
+  issuer?: string;
+  clientId?: string;
 }
 
-/** The machine-prompt-driven collection guided_init performs when `ORBIT_CONFIGURE_PROMPTS=machine` (configure.sh:698-707): APP_URL, then OIDC_ISSUER, then OIDC_CLIENT_ID, in that order. */
-export function collectMachineGuidedInit(driver: ConfigureMachinePromptDriver): CollectedGuidedInitAnswers {
+/**
+ * The machine-prompt-driven collection guided_init performs when
+ * `ORBIT_CONFIGURE_PROMPTS=machine` (configure.sh:698-707): APP_URL, then —
+ * for `oidc` mode only — OIDC_ISSUER, then OIDC_CLIENT_ID. `authMode`
+ * defaults to "oidc" to match configure.sh's own machine-prompt default
+ * (guided_init: `[[ -n "$auth_mode" ]] || auth_mode="oidc"`, configure.sh
+ * line ~786); "local" asks for APP_URL alone (O1-F1 — this previously had
+ * no local-only path at all, so a local-only machine-prompt init always
+ * demanded OIDC values the operator never intended to supply).
+ */
+export function collectMachineGuidedInit(driver: ConfigureMachinePromptDriver, authMode: "local" | "oidc" = "oidc"): CollectedGuidedInitAnswers {
   const appUrl = collectConfigureMachineField("APP_URL", driver, validateAppUrlAnswer, (value) => classifyUrlRejection(value, false));
+  if (authMode === "local") return { appUrl };
   const issuer = collectConfigureMachineField("OIDC_ISSUER", driver, validateOidcIssuerAnswer, (value) => classifyUrlRejection(value, true));
   const clientId = collectConfigureMachineField("OIDC_CLIENT_ID", driver, validateClientIdAnswer, classifyClientIdRejection);
   return { appUrl, issuer, clientId };

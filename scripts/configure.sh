@@ -1371,7 +1371,13 @@ run_engine() {
     extra_env+=(-e "ORBIT_CONFIGURE_PROMPTS=machine")
   fi
   local env_var
-  for env_var in ORBIT_CONFIGURE_APP_URL ORBIT_CONFIGURE_OIDC_ISSUER ORBIT_CONFIGURE_OIDC_CLIENT_ID; do
+  # O1-F1: ORBIT_CONFIGURE_AUTH_MODE forwarded alongside the OIDC triad — a
+  # machine-prompt --init that delegates (run above) must carry the same
+  # local/oidc choice guided_init's own bash path reads, or the containerized
+  # engine (which has no local-only path to fall back on) always assumes
+  # oidc and demands OIDC_ISSUER/OIDC_CLIENT_ID answers a local-only operator
+  # never intended to give.
+  for env_var in ORBIT_CONFIGURE_APP_URL ORBIT_CONFIGURE_OIDC_ISSUER ORBIT_CONFIGURE_OIDC_CLIENT_ID ORBIT_CONFIGURE_AUTH_MODE; do
     if [[ -n "${!env_var:-}" ]]; then
       extra_env+=(-e "${env_var}=${!env_var}")
     fi

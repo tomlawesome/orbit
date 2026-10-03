@@ -444,17 +444,31 @@ function commandConfigureApply(deployDir: string): never {
   }
 }
 
+/** O1-F1: ORBIT_CONFIGURE_AUTH_MODE, read the same way guided_init reads it in configure.sh (unset means "let the rest of commandConfigureInit decide"). */
+function readConfigureAuthMode(): "local" | "oidc" | undefined {
+  const raw = process.env.ORBIT_CONFIGURE_AUTH_MODE;
+  if (raw === undefined || raw === "") return undefined;
+  if (raw === "local" || raw === "oidc") return raw;
+  fail("orbit: ORBIT_CONFIGURE_AUTH_MODE must be 'local' or 'oidc'.");
+}
+
 function commandConfigureInit(deployDir: string): never {
   const envAppUrl = process.env.ORBIT_CONFIGURE_APP_URL;
   const envIssuer = process.env.ORBIT_CONFIGURE_OIDC_ISSUER;
   const envClientId = process.env.ORBIT_CONFIGURE_OIDC_CLIENT_ID;
   const providedCount = [envAppUrl, envIssuer, envClientId].filter((value) => !!value).length;
+  const authMode = readConfigureAuthMode();
 
   let appUrl: string;
-  let issuer: string;
-  let clientId: string;
+  let issuer: string | undefined;
+  let clientId: string | undefined;
+  let resolvedAuthMode: "local" | "oidc";
 
   if (providedCount === 3) {
+    if (authMode === "local") {
+      fail("orbit: ORBIT_CONFIGURE_AUTH_MODE=local conflicts with a supplied OIDC issuer/client ID environment set.");
+    }
+    resolvedAuthMode = "oidc";
     appUrl = envAppUrl as string;
     issuer = envIssuer as string;
     clientId = envClientId as string;
@@ -463,8 +477,12 @@ function commandConfigureInit(deployDir: string): never {
       "orbit: guided configuration requires all of ORBIT_CONFIGURE_APP_URL, ORBIT_CONFIGURE_OIDC_ISSUER and ORBIT_CONFIGURE_OIDC_CLIENT_ID together, not a partial set.",
     );
   } else if (isConfigureMachinePromptMode()) {
+    // O1-F1: a local-only machine-prompt init only ever needs APP_URL —
+    // this previously always collected (and so always demanded) the OIDC
+    // fields too, regardless of ORBIT_CONFIGURE_AUTH_MODE.
+    resolvedAuthMode = authMode ?? "oidc";
     try {
-      const collected = collectMachineGuidedInit(stdoutConfigureMachineDriver());
+      const collected = collectMachineGuidedInit(stdoutConfigureMachineDriver(), resolvedAuthMode);
       appUrl = collected.appUrl;
       issuer = collected.issuer;
       clientId = collected.clientId;
@@ -479,7 +497,7 @@ function commandConfigureInit(deployDir: string): never {
   }
 
   try {
-    const message = applyGuidedInit(deployDir, { appUrl, issuer, clientId });
+    const message = applyGuidedInit(deployDir, { appUrl, authMode: resolvedAuthMode, issuer, clientId });
     process.stdout.write(`${message}\n`);
     process.exit(0);
   } catch (error) {
