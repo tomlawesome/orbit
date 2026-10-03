@@ -867,7 +867,7 @@ export async function readInboxScreen() {
   const receipts = inbox.receipts ?? [];
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   const caught = receipts
-    .filter((receipt) => receipt.classification !== "waiting")
+    .filter((receipt) => receipt.classification !== "waiting" && receipt.receivedAt)
     .map((receipt) => receipt.receivedAt)
     .sort()
     .pop() ?? null;
