@@ -41,7 +41,18 @@ export type { ReminderOffset, RecipientWarningDays };
 const notificationEnvironmentSchema = z.object({
   SMTP_HOST: z.string().trim().max(253).optional().default(""),
   SMTP_PORT: z.coerce.number().int().min(1).max(65535).optional(),
-  SMTP_SECURITY: z.enum(["starttls", "implicit_tls"]).optional().default("starttls"),
+  /* The install-time contract accepts "" as "not set" for every one of these
+     fields (#1151 SF2-F2): every other field here is a plain, unconstrained
+     string so an empty one parses fine on its own, but an enum has no empty
+     member to land on, so "" failed `.parse()` outright and crashed the
+     running app at boot instead of falling back to the default the way
+     every other unset field does. The preprocess step treats "" as "not
+     provided" before the enum ever sees it; anything else that is not a
+     real member still fails, exactly as it always has. */
+  SMTP_SECURITY: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.enum(["starttls", "implicit_tls"]).optional().default("starttls"),
+  ),
   SMTP_USER: z.string().trim().max(320).optional().default(""),
   SMTP_PASSWORD: z.string().optional().default(""),
   // Deprecated compatibility input. New deployments should use the fields above.
@@ -261,6 +272,16 @@ export function getNotificationWorkerConfig(environment: NodeJS.ProcessEnv = pro
 }
 
 /**
+ * Every outbound provider request's bound (#1151 SR2-R4, A4-R3): both
+ * channels' dispatch runs inside the household's own DB advisory lock
+ * (`dispatchUnderHouseholdLifecycleLock`), so an unbounded request to a
+ * blackholed provider holds that lock -- and therefore every ordinary
+ * workspace write for the household -- for as long as the provider never
+ * answers, rather than for this many seconds.
+ */
+export const NOTIFICATION_PROVIDER_TIMEOUT_MS = 5_000;
+
+/**
  * Builds a TLS-pinned Nodemailer transport without exposing provider details.
  *
  * nodemailer's `createTransport(urlString, secondArgument)` only ever reads
@@ -282,9 +303,9 @@ export function createSmtpTransport(config: NotificationWorkerConfig, timeouts =
   url.searchParams.set("tls.rejectUnauthorized", "true");
   if (url.hostname) url.searchParams.set("tls.servername", url.hostname);
   if (timeouts) {
-    url.searchParams.set("connectionTimeout", "5000");
-    url.searchParams.set("greetingTimeout", "5000");
-    url.searchParams.set("socketTimeout", "5000");
+    url.searchParams.set("connectionTimeout", String(NOTIFICATION_PROVIDER_TIMEOUT_MS));
+    url.searchParams.set("greetingTimeout", String(NOTIFICATION_PROVIDER_TIMEOUT_MS));
+    url.searchParams.set("socketTimeout", String(NOTIFICATION_PROVIDER_TIMEOUT_MS));
   }
   return nodemailer.createTransport(url.toString());
 }
@@ -562,7 +583,10 @@ async function claimDeliveries(
   });
 }
 
-function createDefaultNotificationProviders(config: NotificationWorkerConfig): NotificationProviders {
+/** Exported for the fast suite (#1151 SR2-R4): the one place real `nodemailer`
+ *  and `web-push` calls are built, and therefore the one place their
+ *  outbound timeout can be pinned without a live provider. */
+export function createDefaultNotificationProviders(config: NotificationWorkerConfig): NotificationProviders {
   let transporter: ReturnType<typeof nodemailer.createTransport> | undefined;
   if (config.vapidSubject && config.vapidPublicKey && config.vapidPrivateKey) {
     webPush.setVapidDetails(config.vapidSubject, config.vapidPublicKey, config.vapidPrivateKey);
@@ -590,7 +614,20 @@ function createDefaultNotificationProviders(config: NotificationWorkerConfig): N
       });
     },
     async sendPush(notification) {
-      await webPush.sendNotification(notification.target, JSON.stringify(notification.payload));
+      // Bounded to the same NOTIFICATION_PROVIDER_TIMEOUT_MS the email
+      // transport uses, for the identical reason (#1151 SR2-R4, A4-R3): this
+      // send runs inside the household lifecycle advisory lock, one
+      // subscription at a time, so an endpoint that never answers used to
+      // hold that lock -- and every ordinary workspace write for the
+      // household -- open indefinitely rather than for a bounded few
+      // seconds per device. `web-push` turns its own timeout into a plain
+      // `Error` with no `.code` or `.statusCode`, which `categorizeProviderError`
+      // already answers as the generic `unknown` category -- a real failure,
+      // counted against this delivery's retry schedule, not a hang nothing
+      // ever resolves.
+      await webPush.sendNotification(notification.target, JSON.stringify(notification.payload), {
+        timeout: NOTIFICATION_PROVIDER_TIMEOUT_MS,
+      });
     },
   };
 }
