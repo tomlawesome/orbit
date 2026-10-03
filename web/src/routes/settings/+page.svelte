@@ -44,6 +44,8 @@
   let { data } = $props();
   /** @type {Awaited<ReturnType<typeof readSettingsScreen>> | null} */
   let view = $state(null);
+  /** @type {string | null} */
+  let screenProblem = $state(null);
 
   /* The roster and its offer live in helm.js, shared with the phone layout. */
   let active = $state(DEFAULT_THEME);
@@ -387,6 +389,22 @@
   /** The armed action a step-up came back for; the phone layout reopens its sheet (#1125). */
   let resumedMethod = $state(/** @type {string | null} */ (null));
 
+  /**
+   * The screen's own read, broken out so a failed fetch can be retried
+   * (#1195): additive like every other read below it, rather than the one
+   * fetch that used to take the whole page down with it.
+   */
+  async function loadScreen() {
+    screenProblem = null;
+    try {
+      const screen = await readSettingsScreen();
+      view = screen;
+      emailReminders = screen.reminders.emailEnabled;
+    } catch {
+      screenProblem = "not shown — Orbit could not reach your settings";
+    }
+  }
+
   const initials = $derived(
     (/** @type {Awaited<ReturnType<typeof readSettingsScreen>> | null} */ (view)?.user?.displayName ?? "")
       .split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
@@ -398,8 +416,7 @@
       /** @type {SVGGElement} */ (/** @type {unknown} */ (document.getElementById("neartile"))),
     );
     active = document.documentElement.dataset.theme || DEFAULT_THEME;
-    view = await readSettingsScreen();
-    emailReminders = /** @type {Awaited<ReturnType<typeof readSettingsScreen>>} */ (view).reminders.emailEnabled;
+    await loadScreen();
     try {
       sessions = await readSessions();
     } catch {
@@ -479,6 +496,15 @@
     <h1>Settings</h1>
     <div class="sub">your controls, and only yours · the instance’s levers live on administration</div>
   </header>
+
+  {#if screenProblem && !view}
+    <div class="cards">
+      <div class="card wide">
+        <p class="note">{screenProblem}</p>
+        <button onclick={loadScreen}>try again</button>
+      </div>
+    </div>
+  {/if}
 
   {#if view}
     <div class="cards">
