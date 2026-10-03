@@ -914,8 +914,21 @@ export async function runImapIngestionCycle(
       /* Both header sets in one fetch: the provider's envelope recipient, and
          everything the sender rules read (ADR-0017 decision 3). A header
          nobody fetched reads exactly like a header nobody sent, so the list
-         lives beside the rules in core/sender-authentication.ts. */
-      const fetchOptions = { uid: true, headers: [config.trustedRecipientHeader, ...SENDER_AUTHENTICATION_HEADERS], source: { maxLength: IMAP_ATTACHMENT_LIMITS.rawMessageBytes }, internalDate: true, size: true, bodyStructure: true };
+         lives beside the rules in core/sender-authentication.ts.
+         Requested as a bounded bodyParts range rather than the `headers`
+         convenience option (SR2-R1): the latter has no size bound at all, so
+         a message with one pathologically large header value would be read
+         in full before core/sender-authentication.ts's own 64KB check ever
+         saw it. A `HEADER.FIELDS (...)` bodyParts entry still lands in
+         `message.headers`, same as the `headers` option -- imapflow folds
+         both into the same field -- but a `maxLength` here is a true
+         partial fetch: the server is asked for at most that many bytes, so
+         the client never buffers more than the ceiling in the first place.
+         Kept equal to sender-authentication.ts's own MAX_HEADER_BYTES by
+         hand, since that constant is not exported. */
+      const HEADER_FETCH_LIMIT_BYTES = 64 * 1_024;
+      const headerFieldNames = [config.trustedRecipientHeader, ...SENDER_AUTHENTICATION_HEADERS];
+      const fetchOptions = { uid: true, bodyParts: [{ key: `HEADER.FIELDS (${headerFieldNames.join(" ")})`, maxLength: HEADER_FETCH_LIMIT_BYTES }], source: { maxLength: IMAP_ATTACHMENT_LIMITS.rawMessageBytes }, internalDate: true, size: true, bodyStructure: true };
       const processMessage = async (message: { uid: number; source?: Buffer; headers?: Buffer; size?: number; bodyStructure?: MessageStructureObject; internalDate?: Date | string }) => {
         try {
         const source = message.source;
