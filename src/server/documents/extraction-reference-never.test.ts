@@ -31,6 +31,17 @@ describe("neverTheReference", () => {
       .toBe(true);
   });
 
+  it("lets an account or customer label overrule a dialled-number shape (#1151 A3-S2)", () => {
+    // Ten digits with a leading zero is also an ordinary account number
+    // shape; a page that names it outright settles it.
+    expect(neverTheReference([tag("account", "Account number"), tag("phone", "0123456789", "shape")]))
+      .toBe(false);
+    expect(neverTheReference([tag("customer", "Customer number"), tag("phone", "0123456789", "shape")]))
+      .toBe(false);
+    // Nothing spoke for this one, so the dialled shape stands.
+    expect(neverTheReference([tag("other", ""), tag("phone", "0123456789", "shape")])).toBe(true);
+  });
+
   it("lets a label overrule check arithmetic, which passes by chance", () => {
     // Roughly one ten-digit number in eleven balances as a UTR, so an
     // account number the page named in so many words keeps its label.
