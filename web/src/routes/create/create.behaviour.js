@@ -290,8 +290,12 @@ export function mountCreate() {
 
     try {
       const active = household ?? await activeHousehold();
+      // FormHousehold.currency is optional (entry.js) even though
+      // Household.currency is not — active can be either here, so this is
+      // really possibly undefined; the same fallback pocket.svelte's own
+      // save() already uses for the identical gap (#1151 W1-Q9).
       await applyCommand(createCommandOf(entryFromForm(), {
-        householdId: active.id, currency: active.currency, id: draftId,
+        householdId: active.id, currency: active.currency ?? "GBP", id: draftId,
       }));
 
       if (attachment) {
