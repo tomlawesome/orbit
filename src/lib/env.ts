@@ -2,6 +2,8 @@ import { z } from "zod";
 import {
   OIDC_CALLBACK_PATH,
   SESSION_SECRET_RUNTIME_MESSAGE,
+  SESSION_TTL_SECONDS_MAX,
+  SESSION_TTL_SECONDS_MIN,
   isValidSessionSecret,
 } from "@/lib/config-contract";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
@@ -12,7 +14,10 @@ const baseEnvironmentSchema = z.object({
   // (issue #578): the runtime used to accept any 32-character string, so an
   // instance could start on a secret its own configure step refused.
   SESSION_SECRET: z.string().refine(isValidSessionSecret, { message: SESSION_SECRET_RUNTIME_MESSAGE }),
-  SESSION_TTL_SECONDS: z.coerce.number().int().min(900).max(2_592_000).default(604_800),
+  // Bounds shared with config-contract.ts's isValidSessionTtlSeconds
+  // (SF2-F6), so the readiness contract and this loader can never disagree
+  // about what's in range.
+  SESSION_TTL_SECONDS: z.coerce.number().int().min(SESSION_TTL_SECONDS_MIN).max(SESSION_TTL_SECONDS_MAX).default(604_800),
   // Explicit mode key (ADR-0023 §1): local sign-in is always available; OIDC
   // is enabled only when this is exactly "true" (default "false"). The OIDC
   // fields below are parsed and validated only when it is.

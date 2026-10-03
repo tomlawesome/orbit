@@ -123,6 +123,32 @@ export function isValidSessionSecret(value: string): boolean {
   return SECRET_HEX256_PATTERN.test(value);
 }
 
+// SF2-F6: SESSION_TTL_SECONDS had no shape validation anywhere in the
+// readiness contract (evaluateReadiness below), only in env.ts's runtime
+// auth-config loader (`z.coerce.number().int().min(900).max(2_592_000)`) --
+// so `orbit check` could report an invalid value "ready" and the app would
+// then crash on the very next start. The bounds live here once, the same
+// discipline SECRET_HEX256_PATTERN above already uses, and env.ts imports
+// them rather than restating the numbers.
+export const SESSION_TTL_SECONDS_MIN = 900;
+export const SESSION_TTL_SECONDS_MAX = 2_592_000;
+
+/**
+ * The readiness-contract shape check for SESSION_TTL_SECONDS: a plain
+ * decimal integer in range. Deliberately narrower than env.ts's
+ * `z.coerce.number()` (which also accepts "900.0", "1e3", leading/trailing
+ * whitespace, or a hex literal via plain JS `Number()` coercion) — those
+ * never appear in a value env-orbit-file.ts's own parser has already
+ * accepted (it forbids leading/trailing whitespace) or that configure.sh/the
+ * administration UI would ever write, and "ready" should mean unambiguously
+ * valid, not merely coercible.
+ */
+export function isValidSessionTtlSeconds(value: string): boolean {
+  if (!/^[0-9]+$/.test(value)) return false;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= SESSION_TTL_SECONDS_MIN && parsed <= SESSION_TTL_SECONDS_MAX;
+}
+
 /** Operator-facing wording, kept identical across bash and TypeScript. */
 export const SECRET_HEX256_REQUIREMENT =
   "must be 64 hexadecimal characters (a 256-bit secret), as produced by: openssl rand -hex 32";
@@ -499,6 +525,20 @@ export function evaluateReadiness(
     isSet(record, "VAPID_PUBLIC_KEY") &&
     exactlyOneSet(record, "VAPID_PRIVATE_KEY", "VAPID_PRIVATE_KEY_FILE");
   optional("push", pushReady, pushPresent);
+
+  // SF2-F6: configuration.sh --check never tracked SESSION_TTL_SECONDS at
+  // all (it is in allowed_keys but no check function ever looks at it), so
+  // this is a deliberate improvement over bash, not a parity restatement —
+  // unlike every optional() group above, nothing is printed for the
+  // absent-or-valid cases (bash's own silence there is preserved exactly,
+  // so every existing fixture's line-for-line parity is untouched); only a
+  // present-but-invalid value — the one case that otherwise sails through
+  // `orbit check` as "ready" and then crashes the auth config loader at
+  // startup — adds a line and clears ok.
+  if (isSet(record, "SESSION_TTL_SECONDS") && !isValidSessionTtlSeconds(record.SESSION_TTL_SECONDS as string)) {
+    lines.push("missing session-ttl");
+    ok = false;
+  }
 
   return { lines, ok };
 }
