@@ -776,12 +776,13 @@ function makeFixture({ withConfigure = true, withComposeAndEnv = true, withSecre
   return targetDir;
 }
 
-// Overwrites .env-orbit with a digest-pinned ORBIT_IMAGE (the shape
-// stale-container comparisons require — see the regex in
-// check_application_container in repair.sh). makeFixture()'s default
-// ORBIT_IMAGE ("orbit-local:abcdef123456") is deliberately not
-// digest-pinned so ordinary tests never accidentally exercise this
-// comparison.
+// Overwrites .env-orbit with a digest-pinned ORBIT_IMAGE — one of the two
+// forms check_application_container's regex in repair.sh accepts (SF2-F9:
+// the other is makeFixture()'s own default installer-local tag,
+// "orbit-local:abcdef123456", which is equally comparable). Tests that want
+// a stale-container/image-identity comparison use this helper (and/or an
+// explicit `app: { image: ... }` override) to get a specific, deliberately
+// matched or mismatched value rather than relying on either default.
 function writeDigestPinnedEnv(targetDir, orbitImage) {
   const envLines = [
     "APP_URL=https://orbit.repair-test.internal",
@@ -1744,18 +1745,30 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).not.toContain("stale-container");
   });
 
-  it("does not report stale-container when ORBIT_IMAGE is not digest-pinned (nothing safe to compare)", () => {
-    // makeFixture()'s default ORBIT_IMAGE ("orbit-local:abcdef123456") is a
-    // local build tag, not a digest-pinned reference; the comparison must
-    // stay silent rather than guess.
-    const targetDir = makeFixture();
+  it("does not report stale-container when ORBIT_IMAGE matches neither accepted form (nothing safe to compare)", () => {
+    // SF2-F9: repair.sh accepts BOTH a digest-pinned reference and
+    // makeFixture()'s own default installer-local tag
+    // ("orbit-local:abcdef123456") — neither is silently dropped any more.
+    // Only a value matching neither form leaves nothing safe to compare.
+    const targetDir = makeFixture({ withConfigure: false });
+    writeDigestPinnedEnv(targetDir, "ghcr.io/tomlawesome/orbit:latest");
 
     const result = runRepair(targetDir, ["--check"], {
       app: { present: true, image: "something-else:latest", health: "healthy" },
     });
-
     expect(result.status).toBe(0);
     expect(result.stdout).not.toContain("stale-container");
+  });
+
+  it("reports stale-container when the installer-local ORBIT_IMAGE tag no longer matches the running container (SF2-F9)", () => {
+    const targetDir = makeFixture(); // default ORBIT_IMAGE=orbit-local:abcdef123456
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: { present: true, image: "orbit-local:fedcba987654", health: "healthy" },
+    });
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain("finding class=stale-container target=container severity=warn");
   });
 
   // --- image-identity-mismatch (issue #528 slice C) -------------------------
@@ -1812,11 +1825,12 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).not.toContain("image-identity-mismatch");
   });
 
-  it("skips image-identity-mismatch when ORBIT_IMAGE is not digest-pinned", () => {
-    // makeFixture()'s default ORBIT_IMAGE is not digest-pinned; even if a
-    // mismatched local image happened to be configured, there is nothing
+  it("skips image-identity-mismatch when ORBIT_IMAGE matches neither accepted form", () => {
+    // SF2-F9: unlike makeFixture()'s own default installer-local tag (now
+    // recognized), a value matching neither accepted form leaves nothing
     // safe to compare against.
-    const targetDir = makeFixture();
+    const targetDir = makeFixture({ withConfigure: false });
+    writeDigestPinnedEnv(targetDir, "ghcr.io/tomlawesome/orbit:latest");
 
     const result = runRepair(targetDir, ["--check"], {
       app: { present: true, image: "something-else:latest", health: "healthy" },
