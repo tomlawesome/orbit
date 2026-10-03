@@ -1177,7 +1177,10 @@
   .ad-chip{flex:none;display:flex;align-items:center;min-height:var(--p-hit);min-width:var(--p-hit);text-decoration:none;
     animation:ad-chip 360ms var(--p-ease) both;animation-delay:calc(180ms + var(--j) * 45ms)}
   .ad-chip span{display:flex;align-items:center;height:36px;padding:0 14px;box-sizing:border-box;border-radius:18px;
-    border:1px solid var(--line);background:var(--panel);color:var(--ink-mid);
+    /* --ink-mid is not one of packs.css's measured text companions (#491);
+       --ink-quiet is the one built to clear 4.5:1 as words on this card's own
+       translucent --panel, same as .ad-sub/.ad-kmark/.ad-count below. */
+    border:1px solid var(--line);background:var(--panel);color:var(--ink-quiet);
     font:var(--p-type-meta)/1 var(--mono);white-space:nowrap}
   .ad-chip:active span{border-color:var(--accent);background:color-mix(in srgb, var(--accent) 14%, transparent);color:var(--accent-text)}
   .ad-chip:focus-visible{outline:none}
