@@ -27,7 +27,10 @@ vi.mock("node:crypto", async (importOriginal) => ({
 vi.mock("@/server/workspace-access", () => ({ requireHouseholdAccess: mocks.access }));
 vi.mock("@/server/documents/config", () => ({ getDocumentConfig: mocks.config }));
 vi.mock("@/server/documents/scanner", () => ({ scanFileWithClamAv: mocks.scan }));
-vi.mock("@/server/documents/tika", () => ({ extractTextWithTika: mocks.extract }));
+vi.mock("@/server/documents/tika", async () => ({
+  ...await vi.importActual<typeof import("@/server/documents/tika")>("@/server/documents/tika"),
+  extractTextWithTika: mocks.extract,
+}));
 vi.mock("@/server/documents/suggestions", async () => ({
   ...await vi.importActual<typeof import("@/server/documents/suggestions")>("@/server/documents/suggestions"),
   proposalFromText: mocks.proposal,
@@ -535,7 +538,10 @@ describe("item document inspection", () => {
     expect(fetchMock).toHaveBeenCalledWith(new URL("http://orbit-tika:9998/tika"), expect.objectContaining({ method: "PUT" }));
     expect(result.extracted).toBe(true);
 
-    vi.doMock("@/server/documents/tika", () => ({ extractTextWithTika: mocks.extract }));
+    vi.doMock("@/server/documents/tika", async () => ({
+      ...await vi.importActual<typeof import("@/server/documents/tika")>("@/server/documents/tika"),
+      extractTextWithTika: mocks.extract,
+    }));
     vi.unstubAllGlobals();
   });
 

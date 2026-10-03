@@ -13,10 +13,8 @@ import {
   type DocumentProposal,
 } from "@/server/documents/suggestions";
 import { classifyDocumentStructure, detectDocumentMediaType, type DocumentStructureReason } from "@/server/documents/validation";
-import { extractTextWithTika } from "@/server/documents/tika";
+import { extractTextWithTika, MAX_EXTRACTED_CHARACTERS } from "@/server/documents/tika";
 import { requireHouseholdAccess } from "@/server/workspace-access";
-
-const MAX_EXTRACTED_CHARACTERS = 250_000;
 const parserRecoveryMessage = "Suggestions are unavailable right now. Review the fields manually; the document can still be attached.";
 const processorDisabledMessage = "Automatic suggestions require the optional document processor. You can still attach this file.";
 const unsupportedStructureMessage = "Orbit could not safely inspect this document structure. Choose another PDF, JPEG, or PNG before adding the item.";
