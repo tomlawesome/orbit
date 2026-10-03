@@ -2378,22 +2378,36 @@ run_diagnosis() {
   if [[ "$resource_check_eligible" == 1 ]]; then
     if [[ "$docker_available" == 1 ]]; then
       checked=$((checked + 1))
-      volume_list="$(timeout "$docker_probe_timeout" docker volume ls \
-        --filter "name=$document_volume_key" --format '{{.Name}}' 2>/dev/null || true)"
-      our_volume="${project}_${document_volume_key}"
-      found_ours=0
-      found_other=0
-      while IFS= read -r volume || [[ -n "$volume" ]]; do
-        [[ -z "$volume" ]] && continue
-        [[ "$volume" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ && "$volume" =~ (^|_)orbit-documents-data$ ]] || continue
-        if [[ "$volume" == "$our_volume" ]]; then
-          found_ours=1
-        else
-          found_other=1
+      if volume_list="$(timeout "$docker_probe_timeout" docker volume ls \
+        --filter "name=$document_volume_key" --format '{{.Name}}' 2>/dev/null)"; then
+        our_volume="${project}_${document_volume_key}"
+        found_ours=0
+        found_other=0
+        while IFS= read -r volume || [[ -n "$volume" ]]; do
+          [[ -z "$volume" ]] && continue
+          [[ "$volume" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ && "$volume" =~ (^|_)orbit-documents-data$ ]] || continue
+          if [[ "$volume" == "$our_volume" ]]; then
+            found_ours=1
+          else
+            found_other=1
+          fi
+        done <<< "$volume_list"
+        [[ "$found_other" == 1 ]] && add_finding unrelated-resource-present document-volume info
+        if [[ "$found_ours" == 1 ]]; then
+          if [[ "$secrets_status" != ok || "${secret_status[document-kek]:-missing}" == missing ]]; then
+            add_finding document-volume-retained-without-key document-volume fail
+          fi
         fi
-      done <<< "$volume_list"
-      [[ "$found_other" == 1 ]] && add_finding unrelated-resource-present document-volume info
-      if [[ "$found_ours" == 1 ]]; then
+      else
+        # SS1-S4: the initial docker_available probe passed, but THIS probe
+        # failed (daemon hiccup, timeout, ...) — unlike an empty result, a
+        # failed command proves nothing about retention either way. Treating
+        # that as "no volume found" would let a document-kek regeneration be
+        # planned on an unproven "safe" read, silently destroying any
+        # documents actually retained under the old key. Only a positively
+        # proven safe state may ever let that regeneration proceed, so a
+        # failed probe is treated exactly like a retained volume: the honest
+        # outcome is manual, never a guess.
         if [[ "$secrets_status" != ok || "${secret_status[document-kek]:-missing}" == missing ]]; then
           add_finding document-volume-retained-without-key document-volume fail
         fi

@@ -92,10 +92,24 @@ const recoveryCryptoScriptPath = join(scriptsDir, "recovery-crypto.mjs");
 function dockerShimScript({
   unavailable = false,
   volumes = [],
+  // SS1-S4: makes `docker volume ls --filter name=<this value> ...` fail
+  // (exit 1) rather than listing anything, simulating a transient
+  // docker/daemon hiccup on THIS specific probe even though the initial
+  // `docker ps -a` connectivity probe (docker_available) already
+  // succeeded. Unset (the default) leaves every `volume ls` call
+  // succeeding, exactly as before this option existed.
+  volumeLsFailFilter = "",
   containers = [],
   composeFails = false,
   db = { present: true, ready: true, authResult: "ok" },
-  app = { present: true, image: "ghcr.io/tomlawesome/orbit@sha256:" + "0".repeat(64), health: "healthy" },
+  // SF2-F9: matches makeFixture()'s own default ORBIT_IMAGE
+  // ("orbit-local:abcdef123456") so an ordinary test sees pinned_image ==
+  // actual_image and never trips stale-container by accident now that
+  // repair.sh recognizes the installer-local tag form as well as a
+  // digest. A test that wants a mismatch already overrides this (and/or
+  // calls writeDigestPinnedEnv) explicitly — see e.g. the restart-services
+  // and image-identity-mismatch tests below.
+  app = { present: true, image: "orbit-local:abcdef123456", health: "healthy" },
   argvLogPath = "",
   // --execute's restart-services support: `restartFails` makes every
   // `docker restart` invocation fail (exit 1); `healthMarkerPath`, when
@@ -402,14 +416,23 @@ function dockerShimScript({
     // rationale as `ps)` above.
     "      volume_args=(\"${@:3}\")",
     "      volume_idx=0",
+    "      volume_filter=''",
     '      while (( volume_idx < ${#volume_args[@]} )); do',
     '        volume_arg="${volume_args[volume_idx]}"',
     '        case "$volume_arg" in',
     "          -q|--quiet) volume_idx=$((volume_idx + 1)) ;;",
-    "          -f|--filter|--format) volume_idx=$((volume_idx + 2)) ;;",
+    "          -f|--filter)",
+    "            volume_idx=$((volume_idx + 1))",
+    '            volume_filter="${volume_args[volume_idx]:-}"',
+    "            volume_idx=$((volume_idx + 1))",
+    "            ;;",
+    "          --format) volume_idx=$((volume_idx + 2)) ;;",
     '          *) printf "unknown flag: %s\\n" "$volume_arg" >&2; exit 125 ;;',
     "        esac",
     "      done",
+    volumeLsFailFilter
+      ? `      if [[ "$volume_filter" == 'name=${volumeLsFailFilter}' ]]; then exit 1; fi`
+      : "      true",
     volumeLines || "      true",
     "      exit 0",
     "    fi",
@@ -1349,6 +1372,43 @@ describe("scripts/repair.sh --check", () => {
 
     expect(result.status).toBe(4);
     expect(result.stdout).toContain("finding class=volume-retained-without-credentials target=database-volume severity=fail");
+    expect(result.stdout).not.toContain("document-volume-retained-without-key");
+  });
+
+  // SS1-S4 (#1151): a transient failure of THIS probe — docker briefly
+  // unreachable, a timeout — must never be read as "no volume found". Before
+  // the fix, the `|| true` on `docker volume ls` swallowed the failure and
+  // left found_ours=0, so a retained document volume could go completely
+  // unreported and document-kek would be planned for a silent
+  // regenerate-secret that destroys it. The fix treats a failed probe exactly
+  // like a found, retained volume: document-volume-retained-without-key
+  // fires and secret-missing/document-kek resolves to manual, never
+  // regenerate-secret.
+  it("SS1-S4: treats a failed document-volume probe as retained (manual), never as safe to regenerate, even though the initial docker_available probe succeeded", () => {
+    const targetDir = makeFixture();
+    rmSync(join(targetDir, ".orbit-secrets", "document-kek"));
+
+    const result = runRepair(targetDir, ["--check"], { volumeLsFailFilter: "orbit-documents-data" });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=secret-missing target=document-kek severity=warn");
+    expect(result.stdout).toContain(
+      "finding class=document-volume-retained-without-key target=document-volume severity=fail",
+    );
+
+    const plan = runRepair(targetDir, ["--plan"], { volumeLsFailFilter: "orbit-documents-data" });
+    expect(plan.stdout).toContain(
+      "plan action=manual resolves=secret-missing mutation=none backup=not-required target=document-kek rollback=not-required expect=operator-action",
+    );
+    expect(plan.stdout).not.toContain("action=regenerate-secret resolves=secret-missing");
+  });
+
+  it("SS1-S4: a failed document-volume probe does not affect the unrelated database-volume guard", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], { volumeLsFailFilter: "orbit-documents-data" });
+
+    expect(result.status).toBe(0);
     expect(result.stdout).not.toContain("document-volume-retained-without-key");
   });
 
