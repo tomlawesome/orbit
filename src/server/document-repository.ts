@@ -646,13 +646,27 @@ export async function uploadItemDocument(input: {
         ciphertextSize: encrypted.ciphertext.length,
         ...encrypted.envelope,
       });
-      await transaction.update(documents).set({
+      // Asserted, not assumed: a slow encrypt can run past the maintenance
+      // sweep's interrupted-upload boundary (rejectInterruptedDocuments),
+      // which moves the row out of `encrypting` while this is in flight. An
+      // unconditional update would report success regardless, leaving a
+      // document the caller is told is "available" but whose ciphertext the
+      // next reconciliation sweep deletes as unreferenced (A2-R1).
+      const [published] = await transaction.update(documents).set({
         lifecycle: "available",
         availableAt: now,
         failureCode: null,
         version: sql`${documents.version} + 1`,
         updatedAt: now,
-      }).where(and(eq(documents.id, documentId), eq(documents.lifecycle, "encrypting")));
+      }).where(and(eq(documents.id, documentId), eq(documents.lifecycle, "encrypting")))
+        .returning({ id: documents.id });
+      if (!published) {
+        throw new AppError(
+          "document_publish_conflict",
+          "That document's upload state changed while it was being published",
+          409,
+        );
+      }
       await transaction.insert(auditLog).values({
         householdId: input.householdId,
         actorUserId: input.userId,
