@@ -7,6 +7,7 @@ import {
   readdirSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -343,6 +344,69 @@ describe("interruption evidence, no dispose() ever called (mirrors a hard SIGKIL
     // staging-evidence-present), which this module does not reimplement.
     rmSync(tx.stagingDir, { recursive: true, force: true });
     expect(existsSync(tx.stagingDir)).toBe(false);
+  });
+});
+
+describe("guided-staging commit ordering (SR1-R6)", () => {
+  it("committing .orbit-secrets before .env-orbit means a crash in between never leaves an .env-orbit that references secrets which do not exist", () => {
+    const tx = InstallTransaction.begin(targetDir, [envManaged, secretsManaged]);
+    // Mirrors install-orchestrator.ts's guidedStaged block exactly: stage
+    // and commit the secrets directory first, then the environment file
+    // that points at it (DOCUMENT_KEK_FILE=.orbit-secrets/document-kek).
+    tx.writeStagedFile(".orbit-secrets/document-kek", `${"a".repeat(64)}\n`, 0o600);
+    tx.commitMove(".orbit-secrets", "directory");
+    // Deliberately stop here, never writing/committing .env-orbit — the
+    // exact moment a SIGKILL between the two commits would land.
+    expect(existsSync(join(targetDir, ".orbit-secrets", "document-kek"))).toBe(true);
+    expect(existsSync(join(targetDir, ".env-orbit"))).toBe(false);
+    // The old (wrong) order committed .env-orbit first: had this crash
+    // landed there instead, a live .env-orbit would exist whose
+    // DOCUMENT_KEK_FILE points at a .orbit-secrets tree that was never
+    // committed — exactly the dangerous state this ordering avoids.
+    rmSync(tx.stagingDir, { recursive: true, force: true });
+  });
+});
+
+describe("cross-process deployment lock (O1-R7)", () => {
+  it("refuses begin() when another writer already holds the lock", () => {
+    const lockPath = join(targetDir, ".orbit-engine.lock");
+    writeFileSync(lockPath, "");
+    try {
+      expect(() => InstallTransaction.begin(targetDir, [])).toThrow(InstallTransactionRefusal);
+    } finally {
+      rmSync(lockPath, { force: true });
+    }
+  });
+
+  it("releases the lock on dispose(), so a later begin() succeeds", () => {
+    const tx = InstallTransaction.begin(targetDir, []);
+    expect(existsSync(join(targetDir, ".orbit-engine.lock"))).toBe(true);
+    tx.commit();
+    tx.dispose();
+    expect(existsSync(join(targetDir, ".orbit-engine.lock"))).toBe(false);
+    const second = InstallTransaction.begin(targetDir, []);
+    second.commit();
+    second.dispose();
+  });
+
+  it("releases the lock even when begin() itself fails after taking it", () => {
+    // A symlinked managed path fails preflightManagedPaths, inside begin(),
+    // after the lock is already taken — the lock must not be leaked.
+    const real = join(targetDir, "real-target");
+    writeFileSync(real, "");
+    symlinkSync(real, join(targetDir, "bad-managed-path"));
+    expect(() => InstallTransaction.begin(targetDir, [{ path: "bad-managed-path", type: "file" }])).toThrow(InstallTransactionRefusal);
+    expect(existsSync(join(targetDir, ".orbit-engine.lock"))).toBe(false);
+  });
+
+  it("a stale lock (older than the staleness window) is taken over rather than blocking forever", () => {
+    const lockPath = join(targetDir, ".orbit-engine.lock");
+    writeFileSync(lockPath, "");
+    const old = new Date(Date.now() - 20 * 60 * 1000);
+    utimesSync(lockPath, old, old);
+    const tx = InstallTransaction.begin(targetDir, []);
+    tx.commit();
+    tx.dispose();
   });
 });
 

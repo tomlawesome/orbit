@@ -12,6 +12,7 @@ import {
   renameSync,
   rmSync,
   rmdirSync,
+  statSync,
   writeFileSync,
   writeSync,
 } from "node:fs";
@@ -57,7 +58,8 @@ export interface ManagedPath {
 export type InstallTransactionRefusalCode =
   | "unsafe-final-type"
   | "unsafe-backup-source"
-  | "staging-directory-unavailable";
+  | "staging-directory-unavailable"
+  | "locked";
 
 /**
  * Thrown for every fail-closed refusal this module makes: a managed path
@@ -74,6 +76,66 @@ export class InstallTransactionRefusal extends Error {
     this.code = code;
     this.path = path;
   }
+}
+
+// --- cross-process lock (O1-R7/O1-R8) ---------------------------------------
+//
+// Shared (same file name, same algorithm) with configure-engine.ts's own
+// acquireDeployLock: both modules mutate the same managed paths
+// (.env-orbit/.orbit-secrets) under the same deployment directory, and
+// neither had any cross-process exclusion before this — a concurrent
+// install/update could revert a configure writer's committed changes, or
+// two concurrent install/update runs could revert each other's. One lock
+// file for both closes both gaps: a second `orbit install`, `orbit update`
+// or `orbit configure` targeting the same directory fails fast with a
+// clear message instead of racing.
+const DEPLOY_LOCK_FILE_NAME = ".orbit-engine.lock";
+const DEPLOY_LOCK_STALE_MS = 10 * 60 * 1000;
+
+/** Acquires the deployment-directory lock, or refuses if another run holds it. Returns a release function the caller must call exactly once, success or failure. */
+function acquireDeployLock(targetDir: string, operationLabel: string): () => void {
+  const lockPath = join(targetDir, DEPLOY_LOCK_FILE_NAME);
+
+  const takeLock = (): number => openSync(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
+
+  let fd: number;
+  try {
+    fd = takeLock();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      throw new InstallTransactionRefusal(`Could not take the ${operationLabel} lock at ${lockPath}.`, "locked");
+    }
+    let staleEnough: boolean;
+    try {
+      staleEnough = Date.now() - statSync(lockPath).mtimeMs > DEPLOY_LOCK_STALE_MS;
+    } catch {
+      staleEnough = true; // Lock vanished between the EEXIST and this stat; retry once below.
+    }
+    if (!staleEnough) {
+      throw new InstallTransactionRefusal(
+        `Another ${operationLabel} is already running against this deployment (lock held at ${lockPath}). Wait for it to finish, or remove the lock file yourself once you are certain no other run is active.`,
+        "locked",
+      );
+    }
+    try {
+      rmSync(lockPath, { force: true });
+      fd = takeLock();
+    } catch {
+      throw new InstallTransactionRefusal(`Another ${operationLabel} is already running against this deployment (lock held at ${lockPath}).`, "locked");
+    }
+  }
+  closeSync(fd);
+
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    try {
+      rmSync(lockPath, { force: true });
+    } catch {
+      /* best effort */
+    }
+  };
 }
 
 export interface RollbackFailure {
@@ -217,6 +279,7 @@ export class InstallTransaction {
   private active = false;
   private committed = false;
   private disposed = false;
+  private releaseLock: () => void = () => {};
 
   private constructor(targetDir: string, stagingDir: string, managedPaths: readonly ManagedPath[]) {
     this.targetDir = targetDir;
@@ -227,29 +290,39 @@ export class InstallTransaction {
   }
 
   /**
-   * Preflights every managed path (#46), creates the private 0700 staging
-   * directory under the target (#48), and backs up every currently-existing
-   * managed path into the rollback area (#47) before marking the
-   * transaction active (#49) — mirrors install.sh:1395-1439 in order.
+   * Takes the deployment lock (O1-R7: a concurrent install/update must fail
+   * fast rather than silently revert this run's committed changes, or have
+   * its own reverted), then preflights every managed path (#46), creates
+   * the private 0700 staging directory under the target (#48), and backs up
+   * every currently-existing managed path into the rollback area (#47)
+   * before marking the transaction active (#49) — mirrors
+   * install.sh:1395-1439 in order, with the lock as the new first step.
    */
   static begin(targetDir: string, managedPaths: readonly ManagedPath[]): InstallTransaction {
-    preflightManagedPaths(targetDir, managedPaths);
-
-    let stagingDir: string;
+    const releaseLock = acquireDeployLock(targetDir, "orbit install/update");
     try {
-      stagingDir = mkdtempSync(join(targetDir, STAGING_DIRECTORY_PREFIX));
-    } catch (error) {
-      throw new InstallTransactionRefusal(
-        `Could not create a private staging directory: ${(error as Error).message}`,
-        "staging-directory-unavailable",
-      );
-    }
-    chmodSync(stagingDir, SECURE_DIRECTORY_MODE);
+      preflightManagedPaths(targetDir, managedPaths);
 
-    const transaction = new InstallTransaction(targetDir, stagingDir, managedPaths);
-    transaction.prepareRollbackArea();
-    transaction.active = true;
-    return transaction;
+      let stagingDir: string;
+      try {
+        stagingDir = mkdtempSync(join(targetDir, STAGING_DIRECTORY_PREFIX));
+      } catch (error) {
+        throw new InstallTransactionRefusal(
+          `Could not create a private staging directory: ${(error as Error).message}`,
+          "staging-directory-unavailable",
+        );
+      }
+      chmodSync(stagingDir, SECURE_DIRECTORY_MODE);
+
+      const transaction = new InstallTransaction(targetDir, stagingDir, managedPaths);
+      transaction.releaseLock = releaseLock;
+      transaction.prepareRollbackArea();
+      transaction.active = true;
+      return transaction;
+    } catch (error) {
+      releaseLock();
+      throw error;
+    }
   }
 
   // prepare_rollback_area (install.sh:1372-1393).
@@ -449,32 +522,40 @@ export class InstallTransaction {
     }
     this.disposed = true;
 
-    let rollbackAttempted = false;
-    let rollbackSucceeded = true;
-    if (this.active && !this.committed) {
-      rollbackAttempted = true;
-      rollbackSucceeded = this.rollback().ok;
-    }
-
-    if (!rollbackSucceeded) {
-      return {
-        rollbackAttempted,
-        rollbackSucceeded,
-        stagingDirectoryRemoved: false,
-        preservedStagingDirectory: this.stagingDir,
-      };
-    }
-
     try {
-      rmSync(this.stagingDir, { recursive: true, force: true });
-      return { rollbackAttempted, rollbackSucceeded, stagingDirectoryRemoved: true };
-    } catch {
-      return {
-        rollbackAttempted,
-        rollbackSucceeded,
-        stagingDirectoryRemoved: false,
-        preservedStagingDirectory: this.stagingDir,
-      };
+      let rollbackAttempted = false;
+      let rollbackSucceeded = true;
+      if (this.active && !this.committed) {
+        rollbackAttempted = true;
+        rollbackSucceeded = this.rollback().ok;
+      }
+
+      if (!rollbackSucceeded) {
+        return {
+          rollbackAttempted,
+          rollbackSucceeded,
+          stagingDirectoryRemoved: false,
+          preservedStagingDirectory: this.stagingDir,
+        };
+      }
+
+      try {
+        rmSync(this.stagingDir, { recursive: true, force: true });
+        return { rollbackAttempted, rollbackSucceeded, stagingDirectoryRemoved: true };
+      } catch {
+        return {
+          rollbackAttempted,
+          rollbackSucceeded,
+          stagingDirectoryRemoved: false,
+          preservedStagingDirectory: this.stagingDir,
+        };
+      }
+    } finally {
+      // Always releases, success or failure (O1-R7) — the lock taken in
+      // begin() must never outlive this transaction, or every later
+      // install/update against this deployment fails until someone notices
+      // and removes the lock file by hand.
+      this.releaseLock();
     }
   }
 
