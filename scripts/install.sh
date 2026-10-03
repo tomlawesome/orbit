@@ -1190,7 +1190,12 @@ self_fetch_release_manifest() {
       fail "Asked for ${channel} but the signed release manifest is for v${manifest_version}; refusing."
   fi
 
-  printf '%s\n' "$manifest_json"
+  # Set the global directly rather than printing it for a caller to capture
+  # via $(...): command substitution runs this whole function in a subshell,
+  # so release_manifest_work_dir above would only ever be set in that
+  # subshell and cleanup() in the parent shell would never see it -- leaking
+  # orbit-install-manifest.* on every self-fetch run (#1151 #1201).
+  release_manifest_path="$manifest_json"
 }
 
 prepare_configuration() {
@@ -1593,7 +1598,10 @@ if [[ -n "${ORBIT_RELEASE_MANIFEST:-}" ]]; then
     fail "ORBIT_RELEASE_MANIFEST does not point at a readable file: ${ORBIT_RELEASE_MANIFEST}."
   release_manifest_path="$ORBIT_RELEASE_MANIFEST"
 else
-  release_manifest_path="$(self_fetch_release_manifest)"
+  # Called directly, not via $(...): see the comment at the end of
+  # self_fetch_release_manifest for why command substitution here would
+  # silently drop its cleanup of release_manifest_work_dir.
+  self_fetch_release_manifest
 fi
 
 manifest_digest="$(manifest_field "$release_manifest_path" digest)"
