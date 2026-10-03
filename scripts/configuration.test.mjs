@@ -173,19 +173,34 @@ describe("configuration.sh", () => {
 
   it("classifies every documented example key without values", () => {
     const example = readFileSync(join(process.cwd(), ".env-orbit.example"), "utf8");
-    const keys = new Set();
-    for (const match of example.matchAll(/^(?:#\s*)?([A-Z][A-Z0-9_]*)=/gmu)) keys.add(match[1]);
-    const result = run([...keys].map((key) => {
-      if (key === "ORBIT_CONFIG_SCHEMA_VERSION") return `${key}=1`;
-      if (key === "ORBIT_IMAGE") return `${key}=${appliedImage}`;
-      if (key === "ORBIT_CONFIG_APPLIED_VERSION") return `${key}=${appliedVersion}`;
-      if (key === "ORBIT_CONFIG_APPLIED_DIGEST") return `${key}=${appliedDigest}`;
-      if (key === "COMPOSE_PROJECT_NAME") return `${key}=${appliedProject}`;
-      return `${key}=value`;
-    }).join("\n") + "\n");
-    expect(result.status).toBe(0);
-    for (const key of keys) expect(result.stdout).toMatch(new RegExp(`^(?:current|deprecated_supported) ${key}$`, "mu"));
-    expect(result.stdout).not.toContain("value");
+    const allKeys = new Set();
+    for (const match of example.matchAll(/^(?:#\s*)?([A-Z][A-Z0-9_]*)=/gmu)) allKeys.add(match[1]);
+    // .env-orbit.example documents both the direct and _FILE form of each
+    // secret as alternatives; setting both together is the exact pair
+    // configuration.sh now refuses (#1151 O1-Q1). Run the fixture twice —
+    // once keeping each pair's direct form, once keeping its _FILE form —
+    // so every documented key is still exercised, just never alongside its
+    // own mutually-exclusive counterpart.
+    const directKeys = ["SESSION_SECRET", "DOCUMENT_KEK", "DOCUMENT_KEK_NEXT", "POSTGRES_PASSWORD", "OIDC_CLIENT_SECRET", "VAPID_PRIVATE_KEY", "SMTP_PASSWORD", "DATABASE_URL", "SMTP_URL"];
+    for (const preferFile of [false, true]) {
+      const keys = new Set(allKeys);
+      for (const directKey of directKeys) {
+        const fileKey = `${directKey}_FILE`;
+        if (!keys.has(directKey) || !keys.has(fileKey)) continue;
+        keys.delete(preferFile ? directKey : fileKey);
+      }
+      const result = run([...keys].map((key) => {
+        if (key === "ORBIT_CONFIG_SCHEMA_VERSION") return `${key}=1`;
+        if (key === "ORBIT_IMAGE") return `${key}=${appliedImage}`;
+        if (key === "ORBIT_CONFIG_APPLIED_VERSION") return `${key}=${appliedVersion}`;
+        if (key === "ORBIT_CONFIG_APPLIED_DIGEST") return `${key}=${appliedDigest}`;
+        if (key === "COMPOSE_PROJECT_NAME") return `${key}=${appliedProject}`;
+        return `${key}=value`;
+      }).join("\n") + "\n");
+      expect(result.status).toBe(0);
+      for (const key of keys) expect(result.stdout).toMatch(new RegExp(`^(?:current|deprecated_supported) ${key}$`, "mu"));
+      expect(result.stdout).not.toContain("value");
+    }
   });
 
   it("rejects duplicates, unknown keys, interpolation and unsafe modes", () => {
@@ -296,6 +311,57 @@ describe("configuration.sh", () => {
     expect(readFileSync(result.file, "utf8")).toBe(original);
     expect(readFileSync(`${result.file}.orbit-config.rollback`, "utf8")).toBe(original);
     expect(`${result.stdout}${result.stderr}`).not.toContain("orbit.example.invalid");
+  });
+
+  it("a migration interrupted before it ever touched the file can be retried, not refused forever (#1151 O1-R5)", () => {
+    const original = "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n";
+    const { file } = run(original, ["--check"]);
+    // Simulates the exact half-done state a crash between "write the
+    // rollback backup" and "rename the migrated temp file into place"
+    // leaves: a backup that is byte-identical to the still-unmigrated file.
+    writeFileSync(`${file}.orbit-config.rollback`, original);
+    chmodSync(`${file}.orbit-config.rollback`, 0o600);
+
+    const retry = failOnProcessDeadline(spawnSync("bash", [script, ...migrationArgs(), "--file", file], { encoding: "utf8", ...processGuard() }), { label: "retry" });
+    expect(retry.status).toBe(0);
+    expect(readFileSync(file, "utf8")).toContain(`ORBIT_IMAGE=${appliedImage}\n`);
+    // The regenerated backup is the fresh pre-migration copy, not the stale one.
+    expect(readFileSync(`${file}.orbit-config.rollback`, "utf8")).toBe(original);
+  });
+
+  it("a leftover backup that differs from the current file is still protected, never silently replaced", () => {
+    const original = "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n";
+    const { file } = run(original, ["--check"]);
+    const unrelatedRollback = "APP_URL=https://a-genuinely-different-prior-deployment.invalid\n";
+    writeFileSync(`${file}.orbit-config.rollback`, unrelatedRollback);
+    chmodSync(`${file}.orbit-config.rollback`, 0o600);
+
+    const retry = failOnProcessDeadline(spawnSync("bash", [script, ...migrationArgs(), "--file", file], { encoding: "utf8", ...processGuard() }), { label: "retry" });
+    expect(retry.status).not.toBe(0);
+    expect(retry.stderr.trim()).toBe("configuration_migration");
+    expect(readFileSync(file, "utf8")).toBe(original);
+    expect(readFileSync(`${file}.orbit-config.rollback`, "utf8")).toBe(unrelatedRollback);
+  });
+
+  it("refuses a direct secret value set together with its _FILE counterpart, matching the app's own contract (#1151 O1-Q1)", () => {
+    for (const action of ["--check", "--preflight"]) {
+      const result = run(
+        "APP_URL=https://orbit.example.invalid\nSESSION_SECRET=abc123\nSESSION_SECRET_FILE=/run/secrets/orbit-session-secret\n",
+        [action],
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.stderr.trim()).toBe("configuration_secret_conflict");
+    }
+  });
+
+  it("accepts either form of a secret alone, only rejecting the pair", () => {
+    for (const content of [
+      "APP_URL=https://orbit.example.invalid\nSESSION_SECRET=abc123\n",
+      "APP_URL=https://orbit.example.invalid\nSESSION_SECRET_FILE=/run/secrets/orbit-session-secret\n",
+    ]) {
+      const result = run(content, ["--preflight"]);
+      expect(result.status).toBe(0);
+    }
   });
 
   it("reports future and gap schema versions with a distinct bounded code", () => {
