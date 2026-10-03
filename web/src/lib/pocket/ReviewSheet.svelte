@@ -2,7 +2,7 @@
   import { untrack } from "svelte";
   import Sheet from "./Sheet.svelte";
   import EntryForm from "../../routes/create/EntryForm.svelte";
-  import { entryOfProposal, refusalOf, reviewItemOf } from "../../routes/create/entry.js";
+  import { entryChanged, entryOfProposal, refusalOf, reviewItemOf } from "../../routes/create/entry.js";
   const uid = $props.id();
 
   /**
@@ -34,13 +34,22 @@
 
   /** @type {import('../../routes/create/entry.js').Entry | null} */
   let entry = $state(null);
+  /** What the form started as (#1151 W1-S2), taken the same moment as
+      `entry` — a scrim tap or drag-down used to discard an amended form
+      outright; this is what lets the sheet ask first via confirmDiscard. */
+  /** @type {import('../../routes/create/entry.js').Entry | null} */
+  let start = $state(null);
   /* A fresh form each time the sheet rises, before it draws. */
   $effect.pre(() => {
     if (!open) return;
-    untrack(() => { entry = entryOfProposal(proposal ?? {}, { householdId }); });
+    untrack(() => {
+      entry = entryOfProposal(proposal ?? {}, { householdId });
+      start = $state.snapshot(entry);
+    });
   });
   const household = $derived(households.find((one) => one.id === entry?.householdId) ?? null);
   const refusal = $derived(entry ? refusalOf(entry) : null);
+  const dirty = () => Boolean(entry && start && entryChanged(entry, start));
 
   async function save() {
     if (!entry || refusal || busy) return;
@@ -49,7 +58,7 @@
   }
 </script>
 
-<Sheet bind:open size="full" title="Review & amend">
+<Sheet bind:open size="full" title="Review & amend" confirmDiscard={dirty}>
   {#if entry}
     <form id="{uid}-form" aria-label="Review {title}" onsubmit={(event) => { event.preventDefault(); save(); }}>
       <EntryForm bind:entry households={household ? [household] : []} mode="review" nested
