@@ -392,31 +392,43 @@ async function attemptVerification(email: string, password: string): Promise<Cre
 }
 
 /**
- * Counts one failure and applies the schedule. Read and write happen inside
- * one transaction with the row locked, so two simultaneous wrong guesses count
- * as two rather than racing to write the same number twice.
+ * Counts one failure and applies the schedule, under an executor the caller
+ * already holds a transaction on (a refused sign-in approval, ADR-0027 §8) or
+ * `getDb()` on its own (an ordinary wrong password). Read and write happen
+ * under the same row lock either way, so two simultaneous failures -- a wrong
+ * password and a refused approval landing together -- count as two rather
+ * than racing to write the same number twice.
+ *
+ * This is the one place the lockout schedule is applied: a wrong password and
+ * a refused approval both reach it, so the two cannot drift into two
+ * backoffs the way a second, hand-rolled increment once did (#1151 A1-F1).
  */
-async function recordFailure(userId: string): Promise<void> {
-  await getDb().transaction(async (transaction) => {
-    const [current] = await transaction
-      .select({ failedAttemptCount: localCredentials.failedAttemptCount })
-      .from(localCredentials)
-      .where(eq(localCredentials.userId, userId))
-      .for("update")
-      .limit(1);
-    if (!current) return;
+export async function recordLocalCredentialFailure(
+  executor: Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0],
+  userId: string,
+): Promise<void> {
+  const [current] = await executor
+    .select({ failedAttemptCount: localCredentials.failedAttemptCount })
+    .from(localCredentials)
+    .where(eq(localCredentials.userId, userId))
+    .for("update")
+    .limit(1);
+  if (!current) return;
 
-    const failures = current.failedAttemptCount + 1;
-    const penaltyMs = lockoutMs(failures);
-    await transaction
-      .update(localCredentials)
-      .set({
-        failedAttemptCount: failures,
-        lockedUntil: penaltyMs > 0 ? new Date(Date.now() + penaltyMs) : null,
-        updatedAt: new Date(),
-      })
-      .where(eq(localCredentials.userId, userId));
-  });
+  const failures = current.failedAttemptCount + 1;
+  const penaltyMs = lockoutMs(failures);
+  await executor
+    .update(localCredentials)
+    .set({
+      failedAttemptCount: failures,
+      lockedUntil: penaltyMs > 0 ? new Date(Date.now() + penaltyMs) : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(localCredentials.userId, userId));
+}
+
+async function recordFailure(userId: string): Promise<void> {
+  await getDb().transaction((transaction) => recordLocalCredentialFailure(transaction, userId));
 }
 
 /**
