@@ -20,7 +20,7 @@
  * environment -- it is a pure function of what it is handed.
  */
 
-import { formatInvitationDate } from "@/server/invitations/mail";
+import { firstName, formatInvitationDate, hostOf } from "@/server/invitations/mail";
 
 export interface ApprovalMailContext {
   /** The recipient's chosen display name; only its first word is used. */
@@ -55,20 +55,6 @@ function pad(value: number): string {
  */
 export function formatApprovalMoment(when: Date): string {
   return `${formatInvitationDate(when)} at ${pad(when.getUTCHours())}:${pad(when.getUTCMinutes())} UTC`;
-}
-
-/** The first word of a chosen display name -- "Hello Priya,". */
-function firstName(name: string): string {
-  return name.trim().split(/\s+/u)[0] || name.trim();
-}
-
-/** The instance's own host, read off the one link rather than passed twice. */
-function hostOf(link: string): string {
-  try {
-    return new URL(link).host;
-  } catch {
-    return "";
-  }
 }
 
 /**
