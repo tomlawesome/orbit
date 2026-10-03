@@ -364,32 +364,20 @@
     }, delay);
   }
 
-  /** "Send it again", inside ADR-0027 §8's limits, which the server keeps. */
+  /** "Send it again", inside ADR-0027 §8's limits, which the server keeps.
+   *  #1151 W1-Q5: this used to re-implement present()'s own
+   *  busy/message/fetch/error scaffolding by hand (and, on a non-ok
+   *  response, always fell back to the generic cardMessageFor(undefined)
+   *  rather than present()'s own reading of the error code) — reusing it
+   *  here means a future revision of present()'s refusal wording answers
+   *  this card too, not just the three that already call it. */
   async function resendApproval() {
     if (busy) return;
-    busy = true;
-    message = "";
-    try {
-      const response = await fetch("/api/auth/local/login/resend", {
-        method: "POST",
-        credentials: "same-origin",
-        cache: "no-store",
-        headers: { "content-type": "application/json" },
-        body: "{}",
-      });
-      const answer = response.ok ? await response.json() : null;
-      if (!answer) {
-        message = cardMessageFor(undefined);
-        return;
-      }
-      if (answer.state === "limited") limited = true;
-      else if (answer.state === "unknown") pendingState = "lapsed";
-      else canResendAt = Date.parse(answer.canResendAt) || 0;
-    } catch {
-      message = cardMessageFor(undefined);
-    } finally {
-      busy = false;
-    }
+    const answer = await present("/api/auth/local/login/resend", {});
+    if (!answer) return;
+    if (answer.state === "limited") limited = true;
+    else if (answer.state === "unknown") pendingState = "lapsed";
+    else canResendAt = Date.parse(answer.canResendAt) || 0;
   }
 
   /** Mixed mode's quiet line: the same card, opened rather than offered. */
