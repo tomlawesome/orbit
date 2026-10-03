@@ -6,42 +6,28 @@
    * amend →` are the row's own (pocket.svelte). A component for the reason
    * ItemDrawer.svelte gives.
    */
-  import { money } from "$lib/format.js";
+  import { papersOf, readingsOf } from "$lib/pocket/review.js";
 
   /** @type {{ suggestion: import('$lib/data/workspace.js').ReceiptSuggestion, problem?: string | null }} */
   let { suggestion, problem = null } = $props();
 
-  /** @type {Record<string, string>} */
-  const EVIDENCE = { provider: "provider", renewsOn: "dueDate", costMinor: "costMinor" };
-  /** @param {string} field */
-  const sureness = (field) => {
-    const evidence = suggestion.fieldEvidence?.[EVIDENCE[field]];
-    return evidence ? (evidence.confidence === "low" ? "unsure" : "sure") : "";
-  };
-  const papers = $derived(
-    suggestion.attachments?.length
-      ? suggestion.attachments.map((one) => one.displayName ?? "document")
-      : [suggestion.sourceDocument]);
-  /** @param {string} iso */
-  const long = (iso) =>
-    new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+  /* The real readings and papers (#1151 W1-Q11), not a second copy of
+     review.js's own confidence logic: that copy dropped the lock check
+     (readingsOf's `sure` reads null, not a guess, once the key is gone) and
+     the attachmentCount guard (a receipt with nothing named drew one blank
+     paper row instead of none). */
+  const readings = $derived(readingsOf(suggestion));
+  const papers = $derived(papersOf(suggestion));
 </script>
 
-{#if suggestion.provider}
-  <div class="p-kv"><span>provider</span><b>{suggestion.provider}{#if sureness("provider")}<i>{sureness("provider")}</i>{/if}</b></div>
-{/if}
-{#if suggestion.renewsOn}
-  <div class="p-kv"><span>{suggestion.scheduleKind === "expiry" ? "ends" : "renews"}</span>
-    <b>{long(suggestion.renewsOn)}{#if sureness("renewsOn")}<i>{sureness("renewsOn")}</i>{/if}</b></div>
-{/if}
-{#if suggestion.costMinor}
-  <div class="p-kv"><span>cost</span>
-    <b>{money(suggestion.costMinor, suggestion.currency, true)}{#if sureness("costMinor")}<i>{sureness("costMinor")}</i>{/if}</b></div>
-{/if}
+{#each readings as reading (reading.field)}
+  <div class="p-kv"><span>{reading.label}</span>
+    <b>{reading.value}{#if reading.sure !== null}<i>{reading.sure ? "sure" : "unsure"}</i>{/if}</b></div>
+{/each}
 <!-- The paper's name where the data holds one (review round §6.f, round 3
      §2), no size; else the count the list gives. -->
-{#each papers as name, index (index)}
-  <p class="attached"><span class="p-paper" aria-hidden="true">◆</span><span class="name">{name}</span><span class="clean">scanned clean</span></p>
+{#each papers as paper (paper.id ?? paper.name)}
+  <p class="attached"><span class="p-paper" aria-hidden="true">◆</span><span class="name">{paper.name}</span><span class="clean">scanned clean</span></p>
 {/each}
 {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
 
