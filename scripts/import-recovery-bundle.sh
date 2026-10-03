@@ -8,6 +8,7 @@ readonly recovery_bundle="${1:-}"
 readonly environment_file="${ORBIT_ENV_FILE:-.env-orbit}"
 readonly secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
 readonly live_kek="$secrets_directory/document-kek"
+readonly document_kek_next="$secrets_directory/document-kek-next"
 readonly backup_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
 readonly restore_journal="$backup_directory/.orbit-restore/restore.journal"
 temporary_directory=""
@@ -21,10 +22,30 @@ compose() { docker compose --env-file "$environment_file" "$@"; }
 cleanup() {
   if [[ "$unfinished_restore" == true ]]; then
     printf 'Orbit recovery import: the inner restore evidence was preserved; keep Orbit stopped and run bash scripts/restore.sh --recover.\n' >&2
-  elif [[ "$key_replaced" == true && -n "$previous_kek" ]]; then
-    compose stop orbit-app >/dev/null 2>&1 || true
-    mv -f -- "$previous_kek" "$live_kek" || true
-    compose start orbit-app >/dev/null 2>&1 || true
+  elif [[ "$key_replaced" == true ]]; then
+    # O2-R1: key_replaced is set BEFORE the first of the two renames below,
+    # not after both complete, so a Ctrl-C or dropped session between them
+    # still lands here. Inspect the actual file rather than trusting that
+    # both renames finished: $previous_kek existing on disk is what proves
+    # the live key still needs restoring, whether that is because only the
+    # first rename ran, or because both ran and something later failed.
+    if [[ -f "$previous_kek" && ! -L "$previous_kek" ]]; then
+      compose stop orbit-app >/dev/null 2>&1 || true
+      if mv -f -- "$previous_kek" "$live_kek"; then
+        compose start orbit-app >/dev/null 2>&1 || true
+      else
+        # The rename back failed: $previous_kek -- possibly the ONLY
+        # remaining copy of the old key -- is still inside
+        # $temporary_directory. Never delete that directory in this state;
+        # leave it for the operator rather than destroying the one copy an
+        # already-failing automatic recovery could not restore.
+        printf 'Orbit recovery import: could not restore the previous document key from %s; Orbit is stopped. Restore it by hand before starting Orbit again.\n' \
+          "$previous_kek" >&2
+        return
+      fi
+    elif [[ "$app_stopped" == true ]]; then
+      compose start orbit-app >/dev/null 2>&1 || true
+    fi
   elif [[ "$app_stopped" == true ]]; then
     compose start orbit-app >/dev/null 2>&1 || true
   fi
@@ -50,6 +71,14 @@ command -v docker >/dev/null 2>&1 || fail "Docker is required."
 [[ -d "$secrets_directory" && ! -L "$secrets_directory" ]] || fail "Missing regular secrets directory."
 [[ ! -e "$restore_journal" && ! -L "$restore_journal" ]] ||
   fail "preflight/journal failed; an unfinished restore exists; run bash scripts/restore.sh --recover before importing another recovery bundle."
+# SS1-S3: a document-KEK rotation holds TWO live keys at once (DOCUMENT_KEK
+# and DOCUMENT_KEK_NEXT, staged at this path per docs/administrator-
+# operations.md's "Rotating the document key-encryption key"). Swapping
+# DOCUMENT_KEK under a rotation in progress would leave the rewrap worker
+# reading one key from this file and a different, unrelated one from
+# DOCUMENT_KEK_NEXT -- never a state this script may create.
+[[ ! -e "$document_kek_next" && ! -L "$document_kek_next" ]] ||
+  fail "preflight/rotation failed; a document-KEK rotation is open ($document_kek_next exists). Finish it (pnpm rewrap-kek --next-key-file $document_kek_next, then mv $document_kek_next $live_kek and redeploy) or abort it (remove $document_kek_next and redeploy without the docker-compose.kek-rotation.yml overlay) before importing a recovery bundle."
 
 temporary_directory="$(mktemp -d "${TMPDIR:-/tmp}/orbit-recovery-import.XXXXXX")"
 if ! tar -tf "$recovery_bundle" 2>/dev/null | sort > "$temporary_directory/contents"; then
@@ -96,9 +125,13 @@ fi
 compose stop orbit-app >/dev/null
 app_stopped=true
 previous_kek="$temporary_directory/previous-document-kek"
+# O2-R1: set BEFORE the first rename, not after both complete — see
+# cleanup()'s own comment for why the flag alone is no longer what decides
+# whether to restore; this only has to be true early enough that cleanup
+# always reaches the file-inspection branch while the swap is mid-flight.
+key_replaced=true
 mv -- "$live_kek" "$previous_kek"
 mv -- "$temporary_directory/document-kek" "$live_kek"
-key_replaced=true
 
 # restore.sh authenticates the inner bundle with the recovered KEK. Revert the
 # key automatically if the inner restore fails, keeping the prior deployment usable.
