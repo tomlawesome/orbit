@@ -297,7 +297,7 @@ describe("configure.sh", () => {
     }), { label: "bareConfigureStaleImage" });
 
     expect(result.status).toBe(0);
-    expect(result.stderr).toContain("ignoring ORBIT_IMAGE=orbit-local:bbbbbbbbbbbb");
+    expect(result.stderr).toContain("ignoring the environment's ORBIT_IMAGE value orbit-local:bbbbbbbbbbbb");
     expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain(`ORBIT_IMAGE=${pinnedImage}`);
   });
 
