@@ -166,7 +166,15 @@ export function createInstallGuidedConfigurationAdapter(options: InstallScriptAd
         { ...baseEnv, ORBIT_IMAGE: orbitImage, ORBIT_CONFIGURE_PROMPTS: "machine" },
         answers,
       ),
-    runDefault: (configureScript, orbitImage) => runSync(configureScript, [], { ORBIT_IMAGE: orbitImage }),
+    // O1-S4: configure.sh's bare flow now refuses to persist an ambient
+    // ORBIT_IMAGE onto an already-initialized .env-orbit unless
+    // ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1 is set — install.sh's own two call
+    // sites (prepare_configuration's single bare call, and
+    // stage_guided_install_configuration's second bare call after --init)
+    // both set it, since the installer is the only caller that has already
+    // run this image through the registry/signature checks. runDefault here
+    // backs both of this module's own TS equivalents the same way.
+    runDefault: (configureScript, orbitImage) => runSync(configureScript, [], { ORBIT_IMAGE: orbitImage, ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE: "1" }),
     runSetOidcSecret: (configureScript, answers) =>
       runMachinePromptSession(
         bashBinary,
