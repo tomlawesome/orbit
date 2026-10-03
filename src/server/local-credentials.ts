@@ -80,8 +80,12 @@ const MAX_DISPLAY_NAME_LENGTH = 128;
  * How long a credential is locked after `failures` consecutive failures.
  * Zero while the free attempts last, then 1 s doubling to the 15 minute
  * ceiling — so the sixth failure costs a second and the tenth costs sixteen.
+ *
+ * Exported for `bootstrap.ts`'s claim backoff (#1151 A1-Q3), which is the
+ * same shape for the same reason and used to carry its own copy of this
+ * formula and these three constants under different names.
  */
-function lockoutMs(failures: number): number {
+export function lockoutMs(failures: number): number {
   const overrun = failures - LOCAL_SIGN_IN_FREE_ATTEMPTS;
   if (overrun <= 0) return 0;
   return Math.min(LOCAL_LOCKOUT_FLOOR_MS * 2 ** (overrun - 1), LOCAL_LOCKOUT_CEILING_MS);
