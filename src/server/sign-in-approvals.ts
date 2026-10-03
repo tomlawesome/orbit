@@ -41,11 +41,10 @@ import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { base64url } from "jose";
 import { getDb } from "@/db";
 import { auditLog, signInApprovals, users } from "@/db/schema";
-import { AppError } from "@/lib/app-error";
 import { describeDevice } from "@/lib/auth/device";
 import { log } from "@/lib/logger";
 import { recordLocalCredentialFailure } from "@/server/local-credentials";
-import { sendBoundedMail, type InvitationMailer, type InvitationSendError } from "@/server/invitations/send";
+import { absoluteAppLink, sendBoundedMail, type InvitationMailer, type InvitationSendError } from "@/server/invitations/send";
 import { getNotificationWorkerConfig } from "@/server/notification-worker";
 import { openInstanceMetadataReader } from "@/server/metadata/fields";
 import { renderApprovalMail } from "@/server/sign-in-approvals/mail";
@@ -195,17 +194,10 @@ export interface SignInApprovalOptions {
   now?: Date;
 }
 
-/** One absolute approval link, built exactly the way `setupLink` builds a setup one. */
+/** One absolute approval link -- `absoluteAppLink` (#1151 A1-Q4), the one
+ *  builder `invitationLink` and `setupLink` also use. */
 export function approvalLink(token: string, environment: NodeJS.ProcessEnv = process.env): string {
-  const configured = environment.APP_URL;
-  if (!configured) throw new AppError("unsafe_input", "The approval link cannot be built", 503);
-  try {
-    const url = new URL(configured);
-    if (!url.hostname || !["http:", "https:"].includes(url.protocol)) throw new Error("unsafe application origin");
-    return new URL(`/approve/${encodeURIComponent(token)}`, url.origin).href;
-  } catch {
-    throw new AppError("unsafe_input", "The approval link cannot be built", 503);
-  }
+  return absoluteAppLink("approve", token, "The approval link cannot be built", environment);
 }
 
 /** What the sign-in route hands back to the waiting browser. */

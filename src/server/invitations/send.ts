@@ -31,17 +31,35 @@ export interface InvitationMailer {
   sendEmail(notification: SmtpNotification): Promise<void>;
 }
 
-/** One absolute link, from the instance's public base URL and nothing else. */
-export function invitationLink(token: string, environment: NodeJS.ProcessEnv = process.env): string {
+/**
+ * One absolute link under this instance's own public base URL, from a route
+ * segment and a token -- the one shape an invitation, a setup/recovery and a
+ * sign-in approval link all share (#1151 A1-Q4), differing only in which
+ * route they point at and the words their own error carries. `setupLink`
+ * (`local-credentials/setup-mail.ts`) and `approvalLink`
+ * (`sign-in-approvals.ts`) both import this rather than keeping their own
+ * copy of it.
+ */
+export function absoluteAppLink(
+  routeSegment: string,
+  token: string,
+  errorMessage: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
   const configured = environment.APP_URL;
-  if (!configured) throw new AppError("unsafe_input", "The invitation link cannot be built", 503);
+  if (!configured) throw new AppError("unsafe_input", errorMessage, 503);
   try {
     const url = new URL(configured);
     if (!url.hostname || !["http:", "https:"].includes(url.protocol)) throw new Error("unsafe application origin");
-    return new URL(`/invite/${encodeURIComponent(token)}`, url.origin).href;
+    return new URL(`/${routeSegment}/${encodeURIComponent(token)}`, url.origin).href;
   } catch {
-    throw new AppError("unsafe_input", "The invitation link cannot be built", 503);
+    throw new AppError("unsafe_input", errorMessage, 503);
   }
+}
+
+/** One absolute link, from the instance's public base URL and nothing else. */
+export function invitationLink(token: string, environment: NodeJS.ProcessEnv = process.env): string {
+  return absoluteAppLink("invite", token, "The invitation link cannot be built", environment);
 }
 
 /**
