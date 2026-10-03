@@ -40,6 +40,11 @@
      member has to be able to read and save the address they just asked for. */
   let rotated = $state(/** @type {typeof data.relay | null} */ (null));
   let working = $state(false);
+  /* Rotating is destructive — the old address stops collecting new mail —
+     so it arms first, the same two-tap protocol the phone layout's own
+     ArmButton gives it (pocket.svelte). "pause ingest" beside it is
+     reversible and stays a single tap. */
+  let armedRotate = $state(false);
   const relay = $derived(rotated ?? data.relay);
   const failures = $derived(data.failures ?? []);
   const pocket = isPocket();
@@ -64,7 +69,11 @@
       working = false;
     }
   };
-  const rotate = () => act("rotate");
+  const tapRotate = () => {
+    if (!armedRotate) { armedRotate = true; return; }
+    armedRotate = false;
+    act("rotate");
+  };
   const toggleIngest = () => act(relay.ingest === "paused" ? "resume" : "pause");
 
   /** @type {?HTMLDivElement} */
@@ -104,7 +113,7 @@
   <div class="kv"><span>status</span><b>{relay.status}</b></div>
   <div class="kv"><span>last received</span><span>{relay.lastReceived}</span></div>
   <div class="kv"><span>ingest</span><b>{relay.ingest}</b></div>
-  <div class="btns"><button class="pri" disabled={working} onclick={rotate}>rotate address</button><button disabled={working} onclick={toggleIngest}>{relay.ingest === "paused" ? "resume ingest" : "pause ingest"}</button></div>
+  <div class="btns"><button class="pri" disabled={working} aria-expanded={armedRotate} onclick={tapRotate}>{armedRotate ? "tap again to rotate" : "rotate address"}</button><button disabled={working} onclick={toggleIngest}>{relay.ingest === "paused" ? "resume ingest" : "pause ingest"}</button></div>
   {#if failures.length}
     <!-- #434: arrived-but-unreadable mail, in the server's own bounded words. -->
     <div class="failures">
