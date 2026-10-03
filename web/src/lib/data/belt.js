@@ -428,11 +428,3 @@ export function suggestionRowOf(suggestion, today) {
     suggestion,
   };
 }
-
-/**
- * How many papers the whole belt is carrying — the card's own count line.
- * @param {BeltRow[]} manifest
- * @returns {number}
- */
-export const documentCountOf = (manifest) =>
-  manifest.reduce((sum, row) => sum + row.docs.length, 0);
