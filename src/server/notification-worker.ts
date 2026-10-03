@@ -1269,6 +1269,12 @@ export function startNotificationWorker(config = getNotificationWorkerConfig()):
     try {
       await runNotificationCycle(config);
       workerState.__orbitWorkerLastSuccessAt = new Date().toISOString();
+      /* #1151 A4-F2: the category was already cleared here on a success, but
+         the timestamp it belongs to was not -- so the admin Operations panel
+         kept showing the moment of the FIRST failure, forever, with no code
+         beside it, however many clean cycles ran since. The two travel
+         together; both clear together. */
+      workerState.__orbitWorkerLastErrorAt = undefined;
       workerState.__orbitWorkerLastErrorCategory = undefined;
       log.info({ event: "notification.worker", state: "ready", action: "none" });
     } catch {
