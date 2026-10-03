@@ -45,6 +45,8 @@
      ArmButton gives it (pocket.svelte). "pause ingest" beside it is
      reversible and stays a single tap. */
   let armedRotate = $state(false);
+  /** @type {string | null} */
+  let problem = $state(null);
   const relay = $derived(rotated ?? data.relay);
   const failures = $derived(data.failures ?? []);
   const pocket = isPocket();
@@ -63,8 +65,18 @@
   const act = async (action) => {
     if (working) return;
     working = true;
+    problem = null;
     try {
       rotated = await rotateRelay(action);
+    } catch {
+      /* #1151 W2-R6: this used to have no catch at all, so a failure left
+         the button back to normal with nothing changed and no word of why.
+         Same wording as the phone layout's own copy of this act
+         (pocket.svelte's own `problem`), in the same spot below the
+         buttons as that layout's own error text. */
+      problem = action === "rotate"
+        ? "not rotated — your address is unchanged. try again"
+        : `not ${action === "pause" ? "paused" : "resumed"} — Orbit could not reach your relay`;
     } finally {
       working = false;
     }
@@ -114,6 +126,7 @@
   <div class="kv"><span>last received</span><span>{relay.lastReceived}</span></div>
   <div class="kv"><span>ingest</span><b>{relay.ingest}</b></div>
   <div class="btns"><button class="pri" disabled={working} aria-expanded={armedRotate} onclick={tapRotate}>{armedRotate ? "tap again to rotate" : "rotate address"}</button><button disabled={working} onclick={toggleIngest}>{relay.ingest === "paused" ? "resume ingest" : "pause ingest"}</button></div>
+  {#if problem}<p class="problem">{problem}</p>{/if}
   {#if failures.length}
     <!-- #434: arrived-but-unreadable mail, in the server's own bounded words. -->
     <div class="failures">
