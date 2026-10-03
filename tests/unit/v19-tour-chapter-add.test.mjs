@@ -199,7 +199,7 @@ describe("the selectors chapter 2 names", () => {
     expect(create.target).toContain("#nstar");
     expect(SELECTORS.DESK.star).toBe("#nstar");
     /* the ratified line this chapter's drawer callout says, verbatim */
-    expect(create.copy[0]).toBe("Add anything here, by hand or by forwarding a document.");
+    expect(create.copy[0]).toBe("Fill in the details here.");
   });
 });
 
@@ -268,7 +268,7 @@ describe("the beats, in the mockup's order", () => {
     await add.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel, side, mark]) => [text, sel, side, mark]);
     expect(said).toEqual([
-      ["Add anything here, by hand or by forwarding a document.", SELECTORS.DESK.card, "top", "add-drawer"],
+      ["Fill in the details here.", SELECTORS.DESK.card, "top", "add-drawer"],
     ]);
   });
 
@@ -318,6 +318,21 @@ describe("the beats, in the mockup's order", () => {
     await add.play(ctx);
     const name = log.find(([word, sel]) => word === "typeInto" && sel === SELECTORS.DESK.name);
     expect(name[3]).toBe("add-typing");
+  });
+
+  it("on the pocket, unlights the orb once the hatch is open, so no ring outlives /home (#1174)", async () => {
+    const { log, ctx } = recorder();
+    ctx.pocket = true;
+    ctx.open = (c) => log.push(["open", c.sel]);
+    ctx.close = async () => log.push(["close"]);
+    ctx.waitForReal = async (sel) => log.push(["waitForReal", sel]);
+    await add.play(ctx);
+    const opened = log.findIndex(([word, sel]) => word === "open" && sel === SELECTORS.POCKET.orb);
+    const unlitOrb = log.findIndex(([word, sels]) => word === "unlight" && sels?.includes?.(SELECTORS.POCKET.orb));
+    const left = log.findIndex(([word, route]) => word === "setScreen" && route === "/create");
+    expect(opened).toBeGreaterThan(-1);
+    expect(unlitOrb).toBeGreaterThan(opened);
+    expect(unlitOrb).toBeLessThan(left);
   });
 
   it("leaves the add button lit at the end, for the next chapter to inherit", async () => {

@@ -369,6 +369,10 @@ function covered({ scope, only = -1 }) {
     for (const [x, y] of points) {
       const hit = document.elementFromPoint(x, y);
       if (!hit || hit === el || el.contains(hit) || hit.contains(el)) continue;
+      /* The film's catch pane (#1174 round 3) keeps a reader's taps off the
+         page while the film is up, paused or held included: being under it
+         is the design, not a cover. */
+      if (hit.id === "orbit-tour-catch") continue;
       /* A control drawn inside a field (a password's `show`) is the
          field's own adornment, not something over it. */
       const control = hit.closest(TAPPABLE);

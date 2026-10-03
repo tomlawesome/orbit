@@ -354,15 +354,15 @@ export async function dismissTourIfShown(p: Page) {
   await expect(transport).toBeVisible({ timeout: SETTLE_TIMEOUT });
   await p.keyboard.press("Escape");
   /* Esc reaches transport.js's own listener, which calls player.stop() —
-     the same path the pill's Stop button takes, and it is what turns the
+     the same path the pill's Skip button takes, and it is what turns the
      write in trigger.js's `beginFilm` (tourSeenAt) into a fact. Stop clears
      the veil (`ctx.veil(false)` in player.js) synchronously, which is what
      actually frees the underlying screen for the rest of the spec — the
-     pill itself is NOT removed by stop, only by the film's own destroy()
-     on unmount, so it lingers as a 16%-opacity ghost rather than
-     disappearing. Waiting for the pill to hide would therefore hang; the
-     veil (`#orbit-tour-veil`, veil.js's `hideVeil`) is the element that is
-     actually torn down, and `toBeHidden` is satisfied by "not attached". */
+     pill itself is not removed by stop in the same tick: it fades out and
+     the film destroys itself a second later (#1190). Waiting for the pill
+     to hide would therefore be racy right after Escape; the veil
+     (`#orbit-tour-veil`, veil.js's `hideVeil`) is the element that is torn
+     down synchronously, and `toBeHidden` is satisfied by "not attached". */
   await expect(p.locator("#orbit-tour-veil")).toBeHidden();
 }
 

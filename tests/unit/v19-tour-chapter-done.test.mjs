@@ -244,7 +244,7 @@ describe("the beats, against a recorder", () => {
     const said = log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel]);
     expect(said).toEqual([
       ["MOT passed — mark it done and it swings back out to next year.", SELECTORS.DESK.done],
-      ["A repeat is never finished; it comes round. A one-off simply ends.", ".tourfilm-time-body"],
+      ["Renewals start their orbit again, fixed length items disappear.", ".tourfilm-time-body"],
     ]);
   });
 
@@ -334,7 +334,7 @@ describe("the chapter played for real", () => {
 
     expect(said).toEqual([
       "MOT passed — mark it done and it swings back out to next year.",
-      "A repeat is never finished; it comes round. A one-off simply ends.",
+      "Renewals start their orbit again, fixed length items disappear.",
     ]);
     ctx.destroy();
   });
@@ -365,4 +365,49 @@ describe("the chapter played for real", () => {
     const after = document.querySelector(".item-card").outerHTML;
     expect(normalizeStyles(after)).toBe(normalizeStyles(before));
   });
+});
+
+/* #1174 round 6 (Fable's call): with no body carrying a paper, "MOT
+   passed" is read over the sun with no press, and no item is opened. */
+describe("when no body carries a paper", () => {
+  it("the desk's sun exists in home's own markup", () => {
+    const rendered = namesIn(HOME_SOURCE);
+    for (const token of tokensOf(SELECTORS.DESK.sun)) {
+      expect(rendered.has(token), `chapter 9's desk names "${SELECTORS.DESK.sun}", but /home renders no "${token}"`).toBe(true);
+    }
+  });
+
+  for (const pocket of [false, true]) {
+    it(`reads the first line at the sun, presses nothing, and never opens /item (${pocket ? "pocket" : "desk"})`, async () => {
+      const log = [];
+      const control = (sel) => ({ sel, els: [], ringEls: [], round: false, pad: 0, radius: 14, rings: [], lifted: false, saved: [] });
+      const ctx = {
+        pocket,
+        carriesPapers: () => false,
+        doc: document,
+        dry: () => false,
+        T: { cross: 350 },
+        setScreen: async (route) => log.push(["setScreen", route]),
+        veil: (on) => log.push(["veil", on]),
+        ctl: (spec) => { log.push(["ctl", spec.sel]); return control(spec.sel); },
+        goto: async (c) => log.push(["goto", c.sel]),
+        press: async (c) => log.push(["press", c.sel]),
+        light: (c) => log.push(["light", c.sel]),
+        unlight: (c) => log.push(["unlight", c.sel]),
+        callout: async (text, anchor, side, o) => { log.push(["callout", text, anchor.sel]); if (o?.mark) log.push(["mark", o.mark]); },
+        dropCallout: () => log.push(["dropCallout"]),
+        tween: async (ms, fn) => { fn(1); log.push(["tween"]); },
+        w: async () => log.push(["w"]),
+        mark: async (name) => log.push(["mark", name]),
+      };
+      await done.play(ctx);
+      const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
+      expect(log.filter(([word]) => word === "setScreen").map(([, route]) => route)).not.toContain("/item");
+      expect(log.filter(([word]) => word === "press")).toEqual([]);
+      const said = log.filter(([word]) => word === "callout");
+      expect(said[0]).toEqual(["callout", "MOT passed — mark it done and it swings back out to next year.", S.sun]);
+      expect(said).toHaveLength(2);
+      expect(log.filter(([word]) => word === "mark").map(([, name]) => name)).toEqual(["done-complete", "done-swung", "done-round"]);
+    });
+  }
 });

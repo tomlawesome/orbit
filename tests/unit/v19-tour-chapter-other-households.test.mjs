@@ -189,7 +189,7 @@ describe("the beats, in the mockup's order", () => {
     await chapter.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel]);
     expect(said).toEqual([
-      ["The rest of the sky holds households you don't belong to.", ".minisys .msring"],
+      ["Explore the sky to find other households.", ".minisys .msring"],
       ["Tap one to fly there — Gran's flat, the narrowboat.", ".minisys .msring"],
     ]);
   });
@@ -243,7 +243,7 @@ describe("the chapter played for real", () => {
     sample();
 
     expect(said).toEqual([
-      "The rest of the sky holds households you don't belong to.",
+      "Explore the sky to find other households.",
       "Tap one to fly there — Gran's flat, the narrowboat.",
     ]);
     ctx.destroy();

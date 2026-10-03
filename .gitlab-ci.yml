@@ -1519,7 +1519,11 @@ gitleaks:
 # `launch_timing` job at the end of this file, at promotion frequency.
 # Since #1148 the same script also runs the `pocket-measure` project (the
 # phone floors, #1120) as a second run after the first; the timeout below
-# says why they run in sequence.
+# says why they run in sequence. The phone film in WebKit (#1174, #1175) used
+# to run here too, as a third sequential project, but moved out to its own
+# `fidelity_webkit` job (#1174): on pipeline 1926 the Chromium runs below
+# already took about 19m and the WebKit film alone had grown to 18.8m --
+# together past the 30-minute job limit this job keeps.
 fidelity:
   stage: acceptance
   tags: [light]
@@ -1578,6 +1582,61 @@ fidelity:
     # `on_failure` until #898: the diffs are only interesting on a red run, but
     # the reuse evidence exists only on a green one, and a job has one
     # `artifacts:` block. `always` uploads whichever of the two exists.
+    when: always
+
+# The phone film in WebKit (#1174, #1175): the first-run film played through
+# and the create card's ring, in Safari's engine, which this image ships and
+# the Chromium-only runs in `fidelity` never open. Its own script because a
+# host without WebKit's libraries cannot run it. Split out of `fidelity` by
+# #1174: on pipeline 1926 the Chromium runs there already took about 19
+# minutes, and this project alone had grown to 18.8m once it started playing
+# the whole phone film at several sizes and on several households -- together
+# past the 30-minute job limit. Same image, gates, `needs` and reuse keying as
+# `fidelity`; it serves the same `fast`-built web/build artefact rather than
+# building its own.
+fidelity_webkit:
+  stage: acceptance
+  tags: [light]
+  image:
+    name: $PLAYWRIGHT_IMAGE
+    pull_policy: if-not-present
+  # 18.8m measured on pipeline 1926 on a loaded host, one worker (the
+  # `pocket-webkit` project is pinned to one, same as `fidelity`'s appearance
+  # project). 30m gives it the same headroom `fidelity` keeps for its own
+  # Playwright runs.
+  timeout: 30m
+  rules:
+    - *not_scheduled
+    - when: on_success
+  needs: *needs_gated_with_fast_artifacts
+  script:
+    - *reach_helpers
+    - orbit_lane_admits fidelity_webkit || exit 0
+    - *reuse_gate
+    - |
+      if [ "${ORBIT_WEB:-true}" != "true" ]; then
+        echo "skipped: no change to the v19 front end"
+        exit 0
+      fi
+      # Same preparation as `fidelity`: the image ships its own Node and
+      # browser build, so only pnpm is installed here.
+      npm install --global "$(node -p "require('./package.json').packageManager")"
+      pnpm install --frozen-lockfile
+      # web/tsconfig.json extends ./.svelte-kit/tsconfig.json; see `fidelity`.
+      pnpm --filter orbit-web exec svelte-kit sync
+      # `fast` built web/build and handed it over as an artefact (#1061); see
+      # `fidelity` for the full reasoning.
+      node scripts/web-build-stamp.mjs check || echo "the fidelity gate will build its own copy"
+      pnpm --filter orbit-web fidelity:webkit
+    - *reuse_evidence
+  artifacts:
+    name: orbit-fidelity-webkit-diffs
+    paths:
+      - web/test-results/fidelity/
+      - ci-evidence/
+    expire_in: 14 days
+    # Same reasoning as `fidelity`: `always` uploads whichever of the diffs
+    # (red run) or the reuse evidence (green run) exists.
     when: always
 
 # The workflow runs `pnpm test:integration`, which starts its own disposable

@@ -190,7 +190,7 @@ describe("the deny-lists", () => {
   });
 
   it("denies nothing at all for the two jobs ADR-0028 gives no deny-list", () => {
-    for (const job of ["fidelity", "integration"]) {
+    for (const job of ["fidelity", "fidelity_webkit", "integration"]) {
       expect(denyGlobs(config, job)).toEqual([]);
       expect(covers(job, "docs/architecture.md"), `${job} takes the whole checkout`).toBe(true);
     }
@@ -247,7 +247,7 @@ describe("the pipeline and the declarations agree", () => {
       "smoke_local_only",
       "supply_chain_image",
     ]);
-    for (const job of ["fast", "fast_docker", "fidelity", "integration", "sidecar_images"]) {
+    for (const job of ["fast", "fast_docker", "fidelity", "fidelity_webkit", "integration", "sidecar_images"]) {
       expect(artefactOf(config, job)).toBe("");
     }
   });

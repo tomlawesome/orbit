@@ -52,7 +52,7 @@
  * verbatim — reading time is not motion — and the whole of why the film
  * measures 3:41 normally and 2:07 reduced.
  */
-import { hideVeil, showVeil, veilTargets } from "./veil.js";
+import { hideVeil, refreshVeil, showVeil, veilTargets } from "./veil.js";
 
 /**
  * The film's timings, verbatim from the mockup's own `T`. Motion values are
@@ -101,6 +101,9 @@ const DEFAULT_RADIUS = 14;
 const LIFT_PX = 2;
 /** Above veil.js's sheet (2000), which reserves this headroom by name. */
 const Z_CHROME = 2100;
+/** A ring fading out once its control is unlit — the veil's own hole
+ *  closes over the same 180ms (veil.js's HOLE_MS). */
+const RING_OUT_MS = 180;
 const CHROME_ID = "orbit-tour-film";
 /** Kept clear at the foot of the screen so a callout never lands under the
  *  transport, as the mockup keeps its own bottom 60 stage pixels clear. */
@@ -150,6 +153,12 @@ export class TourControlMissing extends Error {
  * @property {boolean} [ringless]         (#1083 §3.5) `light()` cuts the
  *   veil's hole and lifts nothing, drawing no ring — round 8's cut-out for an
  *   open sheet's own panel, which stays bright while a row inside it is ringed.
+ * @property {boolean} [visible]          (#1174) keep only the matches a
+ *   reader can see: a box inside the viewport, and nothing faded to nothing
+ *   by its own or an ancestor's opacity. The pocket's strips and belts keep
+ *   scenery in the DOM — chips scrolled off the strip, captions of papers
+ *   that have rolled off the sky at opacity 0 — and a ring drawn round
+ *   scenery is a spotlight on nothing.
  *
  * @typedef {object} Control
  * @property {string} sel
@@ -161,7 +170,7 @@ export class TourControlMissing extends Error {
  * @property {boolean} ringless
  * @property {HTMLDivElement[]} rings
  * @property {boolean} lifted
- * @property {{ el: Element, transform: string, filter: string, transition: string, flat?: boolean }[]} saved
+ * @property {{ el: Element, transform: string, filter: string, transition: string, flat?: boolean, svgPos?: boolean }[]} saved
  */
 
 /** @typedef {[number, number]} Point */
@@ -261,6 +270,9 @@ export function createFilmContext({
   let dot = null;
   /** @type {HTMLDivElement | null} */
   let live = null;            /* the callout currently out */
+  /** Re-places `live` against its anchor's current box (#1174), when the
+   *  callout was pinned to a control rather than a point. @type {(() => void) | null} */
+  let livePlace = null;
   /** @type {Control[]} */
   let litControls = [];
   /** @type {Set<Animation>} */
@@ -278,6 +290,14 @@ export function createFilmContext({
    *  same words the chapter itself plays — never a second copy to forget.
    *  @type {string[]} */
   let transcriptLines = [];
+  /** Every `waitForReal` that ran out (#1174 round 6), for the phone check.
+   *  @type {{ selector: string, ms: number, route: string }[]} */
+  const waitedOut = [];
+  /** Whether any body in the household carries a paper (#1174 round 6,
+   *  Fable's call). Read once from the sky by film.js before the film is
+   *  measured, and held for the run, so the dry run and the played film
+   *  take the same path through chapters 8 and 9. True until told. */
+  let papers = true;
 
   const dry = () => clock.dry();
   const still = () => clock.reduced();
@@ -333,8 +353,47 @@ export function createFilmContext({
     layer.appendChild(dot);
     at = centreOfViewport();
     placeDot(at);
+    window.addEventListener("scroll", onViewportChange, { passive: true, capture: true });
+    window.addEventListener("resize", onViewportChange);
     return layer;
   }
+
+  /* ---- #1174: the chrome follows the page ------------------------------
+     Every mark the film draws — a ring, a typed line, the callout — is a
+     fixed box measured once from the element it sits on. The pocket's
+     screens scroll under the film (a `goto` scrolls the control into the
+     band, chapter 4 scrolls to the manifest, a kit Row opening scrolls to
+     itself, and a phone's own browser bar collapsing resizes the viewport),
+     and every one of those left the marks where the element WAS: a ring
+     floating over the wrong row, typed text over the wrong field. The veil
+     already re-measures its holes on scroll and resize (veil.js); this is
+     the same loop for the rest of the chrome. One frame at a time, capture
+     phase so a scroll inside any scroller is caught, not only the window's. */
+  /** @type {number | null} */
+  let syncRaf = null;
+  function syncChrome() {
+    syncRaf = null;
+    dropGone();
+    for (const c of litControls) syncRings(c);
+    for (const { ghost, el } of ghosts) placeGhost(ghost, el);
+    if (livePlace) livePlace();
+    refreshVeil();
+  }
+  function onViewportChange() {
+    if (syncRaf !== null || typeof requestAnimationFrame !== "function") return;
+    syncRaf = requestAnimationFrame(syncChrome);
+  }
+  /* And on every frame the film paints (clock.js's painters run whether the
+     film is playing or paused, driven by the transport's loop): an element
+     can move without any scroll — the belt turns to bring a pressed paper
+     to its apex and its captions cross the screen; a row unfolds above a
+     lit control — and the marks must go with it, as chapters 5, 9 and 12
+     already keep their ring on a body they move themselves. Cheap: a few
+     boxes measured, and nothing repainted unless one changed. */
+  const offFrame = clock.onFrame(() => {
+    if (dry() || (litControls.length === 0 && ghosts.length === 0 && !live)) return;
+    syncChrome();
+  });
 
   /** @param {Point} p */
   function placeDot(p) {
@@ -471,14 +530,61 @@ export function createFilmContext({
   async function setScreen(route) {
     if (dry()) return;
     if (routeOf() === route) return;
-    /* The fields the film typed over are about to leave with the screen. */
+    /* #1174: "/item" is the item screen, whichever item it shows — a chapter
+       asking for it while the film already stands on /item/<id> (chapter 9
+       after the pocket's chapter 8) stays where it is rather than cutting to
+       the apex item under the reader. */
+    if (route === "/item" && routeOf().startsWith("/item/")) return;
+    /* The fields the film typed over are about to leave with the screen,
+       and the room a scroll made below the old one goes with it. */
     dropTyped();
+    room(0);
     const release = clock.stall();
     try {
       await navigate(route);
       await settle(route);
+      /* #1174: a kit sheet closing pops its own history entry, and the
+         browser delivers that popstate a moment later — sometimes after the
+         walk to the next screen has begun, and the router then keeps the
+         screen the popstate names. One more walk, once the dust has
+         settled, lands where the chapter said. */
+      if (routeOf() !== route) {
+        await new Promise((res) => setTimeout(res, 150));
+        await navigate(route);
+        await settle(route);
+      }
     } finally {
       release();
+    }
+    /* #1174 round 3: every chapter opens a screen at its top, as `clear()`
+       resets a jump. A walk from a screen the film had scrolled (chapter
+       2's /create, scrolled down to its save bar) let the router's own
+       scroll reset run as home's `scroll-behavior:smooth` glide, and
+       chapter 3's first line was placed while the dial was still off the
+       top of the screen. Instant, so the next beat measures a page that
+       has arrived. */
+    const win = doc.defaultView;
+    if (win && typeof win.scrollTo === "function" && (win.scrollY || 0) > 0) {
+      win.scrollTo({ top: 0, behavior: "instant" });
+    }
+    dropGone();
+  }
+
+  /**
+   * #1174: a ring belongs to an element. A control left lit into a screen
+   * change (chapter 2 leaves the add button lit for chapter 3 to inherit,
+   * as the mockup does) has elements that leave with that screen, and its
+   * ring outlived them — drawn on the next screen at the old place, or, once
+   * the chrome followed the page, shrunk round a 0x0 box. Whatever is lit
+   * and no longer in the document is unlit here, as if the chapter had.
+   */
+  function dropGone() {
+    for (const c of litControls.slice()) {
+      if (c.els.length === 0 || c.els.some((el) => el.isConnected)) continue;
+      for (const ring of c.rings) ring.remove();
+      c.rings = [];
+      restore(c);
+      dropLit(c);
     }
   }
 
@@ -492,10 +598,15 @@ export function createFilmContext({
    * found running chapter 2's pocket cut headless). No-op in dry mode, and
    * costs nothing there.
    *
+   * The bound is generous on purpose (#1174): the wait is a stall, so a
+   * screen that is there in 200ms costs 200ms, and a phone on a slow link
+   * or a busy host that takes six seconds is not a reason to stop the film
+   * with "no element matches" — which is what a 4s bound did under load.
+   *
    * @param {string} selector
    * @param {number} [timeoutMs]
    */
-  async function waitForReal(selector, timeoutMs = 4000) {
+  async function waitForReal(selector, timeoutMs = 12_000) {
     if (dry() || doc.querySelector(selector)) return;
     const release = clock.stall();
     try {
@@ -503,6 +614,13 @@ export function createFilmContext({
       while (!doc.querySelector(selector) && Date.now() < deadline) {
         await new Promise((res) => setTimeout(res, 32));
       }
+      /* #1174 round 6: a wait that ran out is the film standing still for
+         something that was never coming -- 12 seconds of a frozen clock on
+         the reader's screen (chapter 8 on a new household, waiting for a
+         belt with nothing on it). Recorded, so the phone check can fail on
+         it however fast or slow the host: under the stall budget it looked
+         like an honest wait. */
+      if (!doc.querySelector(selector)) waitedOut.push({ selector, ms: timeoutMs, route: routeOf() });
     } finally {
       release();
     }
@@ -518,6 +636,54 @@ export function createFilmContext({
     } else {
       hideVeil();
     }
+  }
+
+  /**
+   * #1174: whether a reader can see this element at all — a non-empty box
+   * that touches the viewport, and the element's OWN opacity above nothing
+   * (SVG's `opacity` presentation attribute, which the belt sets to 0 on an
+   * off-sky caption, reads back through computed style like any other).
+   * Its own, deliberately, not its ancestors': a screen still fading in
+   * around a control is a control about to be seen, not scenery.
+   * @param {Element} el
+   */
+  function shown(el) {
+    const box = el.getBoundingClientRect();
+    if (box.width <= 0 || box.height <= 0) return false;
+    if (box.right <= 0 || box.bottom <= 0 || box.left >= window.innerWidth || box.top >= window.innerHeight) return false;
+    if (typeof window.getComputedStyle !== "function") return true;
+    const cs = window.getComputedStyle(el);
+    if (cs.visibility === "hidden" || cs.display === "none") return false;
+    return !(parseFloat(cs.opacity) < 0.05);
+  }
+
+  /* ---- #1174 round 4: room below the page ----------------------------
+     A chapter that scrolls the page to something low on it (chapter 4's
+     manifest) can only take it as far as the page's own end. The pocket
+     home is barely taller than a phone, so on the owner's iPhone "the page
+     scrolls to the manifest" moved it hardly at all: the manifest stayed
+     where it was, low on the screen. `room(px)` puts a blank, film-owned
+     block of that height after everything on the page, so the scroll can
+     land where the chapter means; `room(0)` takes it away, as do `clear()`
+     and every screen change, so the page is left as it was found. */
+  /** @type {HTMLElement | null} */
+  let roomEl = null;
+  /** @param {number} px */
+  function room(px) {
+    if (dry()) return;
+    const h = Math.max(0, Math.ceil(px));
+    if (h === 0) {
+      roomEl?.remove();
+      roomEl = null;
+      return;
+    }
+    if (!roomEl || !roomEl.isConnected) {
+      roomEl = doc.createElement("div");
+      roomEl.className = "tourfilm-room";
+      roomEl.setAttribute("aria-hidden", "true");
+      doc.body.appendChild(roomEl);
+    }
+    roomEl.style.cssText = `display:block;height:${h}px;margin:0;padding:0;pointer-events:none`;
   }
 
   /**
@@ -538,9 +704,13 @@ export function createFilmContext({
     if (dry()) {
       return { sel: s.sel, els: [], ringEls: [], round, pad, radius, ringless, rings: [], lifted: false, saved: [] };
     }
-    const els = s.all
+    let els = s.all
       ? Array.from(doc.querySelectorAll(s.sel))
       : [doc.querySelector(s.sel)].filter((el) => el !== null);
+    if (s.visible) {
+      els = (s.all ? els : Array.from(doc.querySelectorAll(s.sel))).filter(shown);
+      if (!s.all) els = els.slice(0, 1);
+    }
     if (els.length === 0 && !s.optional) throw new TourControlMissing(s.sel);
     const ringEls = s.ring
       ? Array.from(doc.querySelectorAll(s.ring))
@@ -555,6 +725,7 @@ export function createFilmContext({
    *  panel, kept bright while a row inside it is ringed separately.
    *  @param {...Control} controls */
   function light(...controls) {
+    if (!dry()) dropGone();
     for (const c of controls) {
       if (dry() || c.els.length === 0) continue;
       if (!c.ringless) {
@@ -587,6 +758,24 @@ export function createFilmContext({
     return false;
   }
 
+  /**
+   * Addendum B (#1174, chapter 8's fault A): true for an SVG element whose
+   * OWN `transform` attribute is its real position — the pocket belt's
+   * `.capseat` groups, painted every frame by `translate(x,y)` on that very
+   * attribute. The CSS `transform` PROPERTY a lift or a press would set
+   * does not compose with that attribute; it replaces it outright (the CSS
+   * Transforms spec's own rule), so the control snaps to roughly (0,0) in
+   * its SVG's own coordinate space for as long as it stays lit — which
+   * rendered as a ring on "checklist.pdf" sitting over the back link
+   * instead of on the paper it names. Detected at runtime, the same way
+   * `clipped()` finds a control a lift would show cut, rather than asking
+   * every chapter to know which controls move themselves this way.
+   * @param {Element} el
+   */
+  function svgPositioned(el) {
+    return el instanceof SVGElement && el.hasAttribute("transform");
+  }
+
   /** @param {Control} c */
   function applyLift(c) {
     if (dry() || c.lifted) return;
@@ -595,19 +784,22 @@ export function createFilmContext({
       const style = styleOf(el);
       if (!style) continue;
       const flat = clipped(el);
+      const svgPos = svgPositioned(el);
       c.saved.push({
         el,
         transform: style.transform,
         filter: style.filter,
         transition: style.transition,
-        flat,
+        flat: flat || svgPos,
+        svgPos,
       });
       style.transition = still() ? "none" : `transform ${T.lift}ms ${T.ease},filter ${T.lift}ms ease`;
       /* Addendum A: the lift yields to a clip — the ring alone says
          "lifted". A translated face that would leave a Row's own clip is a
          control shown cut, and the glow is invisible inside the clip
-         anyway, so nothing is lost but 2px of movement nobody can see. */
-      if (flat) continue;
+         anyway, so nothing is lost but 2px of movement nobody can see.
+         Addendum B: it yields the same way to its own position. */
+      if (flat || svgPos) continue;
       style.transform = "translateY(-2px)";
       style.filter = "drop-shadow(0 0 14px color-mix(in srgb,var(--accent) 34%,transparent))";
     }
@@ -746,7 +938,12 @@ export function createFilmContext({
     if (box.y >= band.top && box.y + box.h <= band.bottom) return;
     const release = clock.stall();
     try {
-      c.els[0].scrollIntoView({ block: "center", behavior: "auto" });
+      /* "instant", never "auto" (#1174): home's own `html{scroll-behavior:
+         smooth}` makes "auto" a smooth scroll that is still travelling when
+         the control is measured a frame later, so the ring and the dot land
+         where the control WAS. The film's travel is the motion here; the
+         page simply needs to be there. */
+      c.els[0].scrollIntoView({ block: "center", behavior: "instant" });
       /* A plain timer, not requestAnimationFrame: this wait is only about
          giving the scroll a moment to land, not about a paint. */
       await new Promise((res) => setTimeout(res, 16));
@@ -761,6 +958,11 @@ export function createFilmContext({
    * @param {{ willPress?: boolean }} [o]
    */
   async function goto(c, o = {}) {
+    /* #1174: a screen the PRODUCT changed under the film (a body's own tap
+       flying to its item, pocket.svelte's `tapBody`) is not a `setScreen`,
+       so whatever was lit on the old screen is dropped at the next word
+       that draws — its element is gone with the screen. */
+    if (!dry()) dropGone();
     await scrollIntoBand(c);
     await travel(c);
     await growInto(c);
@@ -774,10 +976,18 @@ export function createFilmContext({
   async function press(c) {
     if (!dry() && !still()) {
       for (const el of c.els) {
+        const saved = c.saved.find((s) => s.el === el);
+        /* Addendum B: an SVG element positioned by its own `transform`
+           attribute cannot take even `translate(0,0)` as a squash base —
+           that is still an inline `transform` PROPERTY, which overrides the
+           attribute exactly as the lift's own did (see `svgPositioned`).
+           No press animation plays for it; the ring and the clock cost are
+           the whole of this beat for a control that moves itself. */
+        if (saved?.svgPos) continue;
         /* Addendum A: a lifted-but-clipped element never actually moved
            (applyLift left it flat), so its press must not either — reading
            a per-element flag rather than `c.lifted` alone. */
-        const flat = c.saved.find((s) => s.el === el)?.flat;
+        const flat = saved?.flat;
         const base = c.lifted && !flat ? "translateY(-2px)" : "translate(0,0)";
         const style = styleOf(el);
         if (style) style.transition = "none";
@@ -791,12 +1001,24 @@ export function createFilmContext({
     await clock.w(T.press * 2);
   }
 
+  /** A ring put out (#1174 round 3): faded, as it was faded in, rather
+   *  than deleted between one frame and the next — a ring blinking out as
+   *  the hole under it closes is the flash the owner's phone showed every
+   *  time the film moved on. Gone at once under reduced motion.
+   *  @param {HTMLElement} ring */
+  function retireRing(ring) {
+    if (still()) { ring.remove(); return; }
+    ring.style.transition = `opacity ${RING_OUT_MS}ms ease`;
+    ring.style.opacity = "0";
+    setTimeout(() => ring.remove(), RING_OUT_MS + 40);
+  }
+
   /** The mockup's `unlight`. @param {...Control} controls */
   function unlight(...controls) {
     for (const c of controls) {
       if (dry()) continue;
       ringState(c, "off");
-      for (const ring of c.rings) ring.remove();
+      for (const ring of c.rings) retireRing(ring);
       c.rings = [];
       restore(c);
       dropLit(c);
@@ -821,45 +1043,88 @@ export function createFilmContext({
 
   /* ---- typing (the mockup's typeInto) ----------------------------------- */
 
-  /** An opaque background to paint the typed line on: the field's own, or
-   *  the first ancestor that has one, so the ghost hides whatever the real
-   *  field is showing underneath (`#f-name` ships with "New Entry" in it, a
-   *  date input shows its own placeholder).
+  /** How opaque a computed colour is: 0 for none, 1 for a solid one. Reads
+   *  the forms engines serialise a computed `background-color` in —
+   *  `rgb()`, `rgba()`, and `color(srgb … / a)` for a `color-mix()` — and
+   *  takes anything it cannot read for solid, as this cover always did.
+   *  @param {string} color */
+  function alphaOf(color) {
+    if (!color || color === "transparent") return 0;
+    const m = /\/\s*([\d.]+)(%?)\s*\)$/u.exec(color) ?? /^rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)(%?)\s*\)$/u.exec(color);
+    if (!m) return 1;
+    const a = parseFloat(m[1]);
+    return m[2] ? a / 100 : a;
+  }
+
+  /** An opaque ground to paint the typed line on, so the cover hides
+   *  whatever the real field is showing underneath (`#f-name` ships with
+   *  "New Entry" in it, a date input shows its own placeholder, every
+   *  pocket field its "e.g." suggestion).
+   *
+   *  #1174 round 4: the field's own background is not enough when it is
+   *  see-through. The pocket's fields are 55% of the page colour over the
+   *  card (EntryForm.svelte's `.pc-field input`), so a cover in that colour
+   *  was 55% opaque, and on the owner's iPhone the field's "e.g. Car MOT"
+   *  showed behind the film's "Car MOT — Volvo V60". So the backgrounds are
+   *  stacked as the page stacks them — the field's own on top, then each
+   *  ancestor's — down to the first solid one, and the browser composites
+   *  them exactly as it does the field: the same colour, now solid. Written
+   *  as the declarations themselves (`background-color` the solid ground,
+   *  `background-image` the see-through layers over it).
    *  @param {Element} el */
   function backdropOf(el) {
-    if (typeof window.getComputedStyle !== "function") return "var(--panel)";
+    if (typeof window.getComputedStyle !== "function") return "background-color:var(--panel)";
+    /** @type {string[]} */
+    const layers = [];
     /** @type {Element | null} */
     let node = el;
     while (node) {
       const bg = window.getComputedStyle(node).backgroundColor;
-      if (bg && bg !== "transparent" && !/rgba\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)/u.test(bg)) return bg;
+      const alpha = alphaOf(bg);
+      if (alpha > 0) layers.push(bg);
+      if (alpha >= 1) break;
       node = node.parentElement;
     }
-    return "var(--panel)";
+    /* Nothing solid all the way up: the page's own colour is under it all. */
+    if (layers.length === 0 || alphaOf(layers[layers.length - 1]) < 1) layers.push("var(--bg)");
+    const ground = /** @type {string} */ (layers.pop());
+    const over = layers.map((c) => `linear-gradient(${c},${c})`).join(",");
+    return `background-color:${ground}${over ? `;background-image:${over}` : ""}`;
+  }
+
+  /** Sits a typed ghost exactly over its field's current box (#1174: called
+   *  again whenever the page moves under it).
+   *  @param {HTMLElement} ghost @param {Element} el */
+  function placeGhost(ghost, el) {
+    const box = boxOf([el]);
+    ghost.style.left = `${box.x}px`;
+    ghost.style.top = `${box.y}px`;
+    ghost.style.width = `${box.w}px`;
+    ghost.style.height = `${box.h}px`;
   }
 
   /** The film's own text, laid over one field and wearing that field's font.
    *  @param {Element} el
-   *  @returns {{ line: HTMLSpanElement, caret: HTMLElement }} */
+   *  @returns {{ line: HTMLSpanElement, caret: HTMLElement, ghost: HTMLDivElement }} */
   function ghostOver(el) {
     const root = ensureChrome();
-    const box = boxOf([el]);
     const style = typeof window.getComputedStyle === "function" ? window.getComputedStyle(el) : null;
     const ghost = doc.createElement("div");
     ghost.className = "tourfilm-typed";
     ghost.style.cssText = [
       "position:fixed",
-      `left:${box.x}px`,
-      `top:${box.y}px`,
-      `width:${box.w}px`,
-      `height:${box.h}px`,
       "display:flex",
       "align-items:center",
       "box-sizing:border-box",
       "overflow:hidden",
       "white-space:pre",
       "pointer-events:none",
-      `background:${backdropOf(el)}`,
+      backdropOf(el),
+      /* The field's own border, so the solid cover still reads as the
+         field and the line sits where the field's own text would. */
+      `border-style:${style?.borderStyle || "none"}`,
+      `border-width:${style?.borderWidth || "0px"}`,
+      `border-color:${style?.borderColor || "transparent"}`,
       `padding-left:${style?.paddingLeft || "0px"}`,
       `padding-right:${style?.paddingRight || "0px"}`,
       `font:${style?.font || "13.5px/1.45 var(--ui)"}`,
@@ -878,18 +1143,20 @@ export function createFilmContext({
       "vertical-align:text-bottom",
     ].join(";");
     ghost.append(line, caret);
+    placeGhost(ghost, el);
     root.appendChild(ghost);
-    return { line, caret };
+    return { line, caret, ghost };
   }
 
-  /** Every ghost currently on the screen, so the film can take them off.
-   *  @type {HTMLElement[]} */
+  /** Every ghost currently on the screen, with the field it sits over, so
+   *  the film can take them off and keep them over their fields meanwhile.
+   *  @type {{ ghost: HTMLElement, el: Element }[]} */
   let ghosts = [];
 
   /** Takes the typed text off the screen. The product never had it, so there
    *  is nothing to put back — the ghosts simply go. */
   function dropTyped() {
-    for (const ghost of ghosts) ghost.remove();
+    for (const { ghost } of ghosts) ghost.remove();
     ghosts = [];
   }
 
@@ -925,7 +1192,7 @@ export function createFilmContext({
     if (!dry() && c.els.length > 0) {
       for (const el of c.els) {
         const ghost = ghostOver(el);
-        ghosts.push(/** @type {HTMLElement} */ (ghost.line.parentElement));
+        ghosts.push({ ghost: ghost.ghost, el });
         written.push(ghost);
       }
       /* Reduced motion: the state arrives, it does not animate. The waits
@@ -1048,7 +1315,15 @@ export function createFilmContext({
     if (!readingOpen) return;
     readingOpen = false;
     if (dry()) return;
-    doc.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    /* #1174: marked as the film's own, exactly as `close()` marks its
+       Escape. Unmarked, the transport's capture-phase key handler took this
+       for the reader pressing Escape and STOPPED THE FILM at chapter 8 — on
+       the desk after "later → steps the belt", on the pocket the moment the
+       preview sheet folded — since #1083 moved the dispatch from `window`
+       (which a document listener never sees) to `doc`. */
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    Object.defineProperty(event, "tourfilm", { value: true, configurable: true });
+    doc.dispatchEvent(event);
   }
 
   /* ---- #1083 §3.4: the pocket's sheet and row openers -------------------- */
@@ -1117,6 +1392,10 @@ export function createFilmContext({
       if (Date.now() >= deadline) break;
       await new Promise((res) => setTimeout(res, 16));
     }
+    /* #1174: the sheet's own history pop is delivered by the browser a tick
+       after the state reads clean; give it that tick so the next walk is
+       not raced by it (see setScreen). */
+    await new Promise((res) => setTimeout(res, 60));
   }
 
   /* ---- the callout ------------------------------------------------------ */
@@ -1138,11 +1417,16 @@ export function createFilmContext({
    * @param {string} text
    * @param {Point} pt
    * @param {"left"|"right"|"top"|"bottom"} side
-   * @param {{ dy?: number, label?: boolean, w?: number }} o
-   * @param {{ box?: {x:number,y:number,w:number,h:number,cx:number,cy:number} | null }} [pocketFit]
+   * @param {{ dy?: number, label?: boolean, w?: number, pin?: boolean }} o
+   *   `pin` (#1174): keep the side asked for even when the box does not fit
+   *   there, and clamp it into the band instead of flipping — chapter 5's
+   *   reminder line sits over the dial's top under the chrome (round 8's
+   *   toast position), where a flip would drop it under the dial instead.
+   * @param {{ box?: {x:number,y:number,w:number,h:number,cx:number,cy:number} | null, control?: Control | null }} [pocketFit]
    *   #1083 §3.2: the anchor's own box, so a pocket callout can flip an
    *   explicit top/bottom when it does not fit, and clamp against the real
-   *   top chrome and the transport's own measured rect.
+   *   top chrome and the transport's own measured rect. `control` (#1174) is
+   *   the anchor itself when there is one, so the box can follow it.
    */
   function showCallout(text, pt, side, o, pocketFit = {}) {
     const root = ensureChrome();
@@ -1155,10 +1439,21 @@ export function createFilmContext({
       `max-width:${maxWidth}px`,
       "width:max-content",
       "text-wrap:balance",
+      /* Centred both ways (owner, 2026-10-02): a balanced line is shorter
+         than its box, and left-set it reads as off-centre. Even padding
+         centres it vertically. */
+      "text-align:center",
       "box-sizing:border-box",
-      "background:var(--panel-raised)",
-      "backdrop-filter:blur(14px)",
-      "border:1px solid var(--line)",
+      /* Lifted off the page (owner, 2026-10-02: the theme's own panel was
+         too dark to catch on the beats that move quickly). Opaque, so no
+         word behind shows through; a fifth of the pack's ink mixed into its
+         ground, so it reads lighter on the dark packs and a shade deeper on
+         the light ones. The edge is the pack's ink, never the accent: the
+         accent is the highlight rings' colour, and a bubble must not read
+         as one (owner, 2026-10-02). */
+      "background:color-mix(in srgb, var(--bg) 80%, var(--ink) 20%)",
+      "border:1px solid color-mix(in srgb, var(--ink) 26%, transparent)",
+      "box-shadow:0 10px 30px rgba(0,0,0,.35)",
       "border-radius:12px",
       "padding:11px 14px",
       o.label
@@ -1174,9 +1469,8 @@ export function createFilmContext({
       "position:absolute",
       "width:14px",
       "height:14px",
-      "background:var(--panel-raised)",
-      "backdrop-filter:blur(14px)",
-      "border:1px solid var(--line)",
+      "background:color-mix(in srgb, var(--bg) 80%, var(--ink) 20%)",
+      "border:1px solid color-mix(in srgb, var(--ink) 26%, transparent)",
       "transform:rotate(45deg)",
       "z-index:-1",
     ].join(";");
@@ -1191,8 +1485,8 @@ export function createFilmContext({
        gap). `left`/`right` are resolved to `top`/`bottom` by the caller
        (callout(), below) before this ever runs. */
     let finalSide = side;
-    const band = pocket ? pocketBand() : null;
-    if (pocket && band && pocketFit.box && (side === "top" || side === "bottom")) {
+    if (pocket && !o.pin && pocketFit.box && (side === "top" || side === "bottom")) {
+      const band = pocketBand();
       const room = side === "top" ? pt[1] - band.top : band.bottom - pt[1];
       if (room < ht + CALLOUT_GAP) finalSide = side === "top" ? "bottom" : "top";
     }
@@ -1200,33 +1494,55 @@ export function createFilmContext({
       pt = edgeOf(pocketFit.box, finalSide);
     }
 
-    let x;
-    let y;
-    if (finalSide === "left") { x = pt[0] - CALLOUT_GAP - wd; y = pt[1] - ht / 2; }
-    else if (finalSide === "right") { x = pt[0] + CALLOUT_GAP; y = pt[1] - ht / 2; }
-    else if (finalSide === "top") { x = pt[0] - wd / 2; y = pt[1] - CALLOUT_GAP - ht; }
-    else { x = pt[0] - wd / 2; y = pt[1] + CALLOUT_GAP; }
-    if (o.dy) y += o.dy;
-    if (pocket && band) {
-      /* the pocket's own gutter horizontally; never over the top chrome or
-         inside the transport's own measured rect, wherever it stands */
-      const gutter = gutterPx();
-      x = Math.max(gutter, Math.min(x, window.innerWidth - gutter - wd));
-      y = Math.max(band.top + POCKET_CALLOUT_MARGIN, Math.min(y, band.bottom - POCKET_CALLOUT_MARGIN - ht));
-    } else {
-      /* never off the screen, and never under the transport */
-      x = Math.max(CALLOUT_EDGE, Math.min(x, window.innerWidth - CALLOUT_EDGE - wd));
-      y = Math.max(CALLOUT_EDGE, Math.min(y, window.innerHeight - TRANSPORT_LANE - ht));
+    /* #1174: the anchor point is read fresh each time the box is placed, so
+       a callout pinned to a control stays on it when the page scrolls or the
+       viewport resizes under it (syncChrome). A callout given a bare point
+       keeps that point. */
+    const control = pocketFit.control ?? null;
+    const pointNow = () => (control && control.els.length > 0)
+      ? edgeOf(boxOf(control.ringEls, control.pad), finalSide)
+      : pt;
+
+    function place() {
+      const p = pointNow();
+      /* What this line points at, for the phone check (tour-pocket-webkit
+         .spec.js): the anchor's current box, or "none" when the control it
+         was pinned to matched nothing — a line pointing at nothing. */
+      const a = control && control.els.length > 0 ? boxOf(control.ringEls, control.pad) : null;
+      box.dataset.tourfilmAnchor = a ? `${a.x},${a.y},${a.w},${a.h}` : (control ? "none" : "point");
+      box.dataset.tourfilmSide = finalSide;
+      box.dataset.tourfilmDy = String(o.dy ?? 0);
+      const band = pocket ? pocketBand() : null;
+      let x;
+      let y;
+      if (finalSide === "left") { x = p[0] - CALLOUT_GAP - wd; y = p[1] - ht / 2; }
+      else if (finalSide === "right") { x = p[0] + CALLOUT_GAP; y = p[1] - ht / 2; }
+      else if (finalSide === "top") { x = p[0] - wd / 2; y = p[1] - CALLOUT_GAP - ht; }
+      else { x = p[0] - wd / 2; y = p[1] + CALLOUT_GAP; }
+      if (o.dy) y += o.dy;
+      if (pocket && band) {
+        /* the pocket's own gutter horizontally; never over the top chrome or
+           inside the transport's own measured rect, wherever it stands */
+        const gutter = gutterPx();
+        x = Math.max(gutter, Math.min(x, window.innerWidth - gutter - wd));
+        y = Math.max(band.top + POCKET_CALLOUT_MARGIN, Math.min(y, band.bottom - POCKET_CALLOUT_MARGIN - ht));
+      } else {
+        /* never off the screen, and never under the transport */
+        x = Math.max(CALLOUT_EDGE, Math.min(x, window.innerWidth - CALLOUT_EDGE - wd));
+        y = Math.max(CALLOUT_EDGE, Math.min(y, window.innerHeight - TRANSPORT_LANE - ht));
+      }
+      box.style.left = `${x}px`;
+      box.style.top = `${y}px`;
+      if (finalSide === "left" || finalSide === "right") {
+        stem.style.top = `${Math.max(12, Math.min(p[1] - y, ht - 12)) - 7}px`;
+        stem.style[finalSide === "left" ? "right" : "left"] = "-8px";
+      } else {
+        stem.style.left = `${Math.max(14, Math.min(p[0] - x, wd - 14)) - 7}px`;
+        stem.style[finalSide === "top" ? "bottom" : "top"] = "-8px";
+      }
     }
-    box.style.left = `${x}px`;
-    box.style.top = `${y}px`;
-    if (finalSide === "left" || finalSide === "right") {
-      stem.style.top = `${Math.max(12, Math.min(pt[1] - y, ht - 12)) - 7}px`;
-      stem.style[finalSide === "left" ? "right" : "left"] = "-8px";
-    } else {
-      stem.style.left = `${Math.max(14, Math.min(pt[0] - x, wd - 14)) - 7}px`;
-      stem.style[finalSide === "top" ? "bottom" : "top"] = "-8px";
-    }
+    place();
+    livePlace = control ? place : null;
     const slide = { left: [6, 0], right: [-6, 0], top: [0, 6], bottom: [0, -6] }[finalSide];
     box.style.transform = still() ? "translate(0,0)" : `translate(${slide[0]}px,${slide[1]}px)`;
     requestAnimationFrame(() => {
@@ -1249,7 +1565,7 @@ export function createFilmContext({
    * @param {string} text
    * @param {Control | Point} anchor
    * @param {"left"|"right"|"top"|"bottom"} side
-   * @param {{ hold?: number, dy?: number, label?: boolean, w?: number, mark?: string }} [o]
+   * @param {{ hold?: number, dy?: number, label?: boolean, w?: number, mark?: string, pin?: boolean }} [o]
    */
   async function callout(text, anchor, side, o = {}) {
     dropCallout();
@@ -1261,6 +1577,7 @@ export function createFilmContext({
     if (dry() && !o.label) transcriptLines.push(text);
     await clock.w(T.calloutIn);
     if (!dry()) {
+      dropGone();
       const anchorBox = !Array.isArray(anchor) && anchor.els.length > 0
         ? boxOf(anchor.ringEls, anchor.pad)
         : null;
@@ -1279,7 +1596,7 @@ export function createFilmContext({
         : anchorBox
           ? edgeOf(anchorBox, resolvedSide)
           : centreOfViewport();
-      live = showCallout(text, pt, resolvedSide, o, { box: anchorBox });
+      live = showCallout(text, pt, resolvedSide, o, { box: anchorBox, control: Array.isArray(anchor) ? null : anchor });
     }
     await clock.hold(o.hold ?? holdFor(text));
     if (o.mark) await mark(o.mark);
@@ -1290,6 +1607,7 @@ export function createFilmContext({
     if (!live) return;
     const box = live;
     live = null;
+    livePlace = null;
     box.style.transition = "opacity .18s ease";
     box.style.opacity = "0";
     setTimeout(() => box.remove(), T.calloutOut + 240);
@@ -1343,6 +1661,7 @@ export function createFilmContext({
     }
     filmAnims.clear();
     if (live) { live.remove(); live = null; }
+    livePlace = null;
     dropTyped();
     /* The reader's own sky, back — before anything else can be jumped to. */
     unwear();
@@ -1363,6 +1682,22 @@ export function createFilmContext({
     }
     if (dot) dot.style.opacity = "0";
     veilTargets([]);
+    room(0);
+    /* #1174 round 5: whatever a chapter staged on the product's own page —
+       chapter 4's example rows, chapter 5's danger ring — marks itself
+       `data-tourfilm-staged`, and goes here on a jump or a stop as well as
+       at the chapter's own end, so the page is left as the film found it. */
+    for (const staged of Array.from(doc.querySelectorAll("[data-tourfilm-staged]"))) staged.remove();
+    /* #1174: the page back at the top, where every chapter opens and where
+       the film found it. A jump or a stop out of a chapter that had scrolled
+       the page (chapter 4's manifest, a pocket `goto`) left it there, and
+       the next chapter's dial — the walking body of chapter 5 — played off
+       the top of the screen. Instant: the film's own scroll is a beat of its
+       own; this is the stage being reset between takes. */
+    const win = doc.defaultView;
+    if (win && typeof win.scrollTo === "function" && (win.scrollY || 0) > 0) {
+      win.scrollTo({ top: 0, behavior: "instant" });
+    }
     at = centreOfViewport();
     placeDot(at);
   }
@@ -1373,7 +1708,12 @@ export function createFilmContext({
     hideVeil();
     veiled = false;
     unsubscribe();
+    offFrame();
     if (layer) layer.remove();
+    window.removeEventListener("scroll", onViewportChange, { capture: true });
+    window.removeEventListener("resize", onViewportChange);
+    if (syncRaf !== null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(syncRaf);
+    syncRaf = null;
     layer = null;
     dot = null;
   }
@@ -1390,6 +1730,11 @@ export function createFilmContext({
     hold: clock.hold,
     wait: clock.wait,
     tween: clock.tween,
+    /** #1174 round 5: a Web Animation on the film's own terms — paused
+     *  with the film, cancelled by `clear()`, nothing at all under reduced
+     *  motion or in the dry run. Resolves when it finishes or is cancelled. */
+    animate: anim,
+    room,
     holdFor,
     dry,
     reduced: still,
@@ -1426,8 +1771,30 @@ export function createFilmContext({
     /* measurement, exposed for the chapters that need to place something */
     boxOf,
     lit: () => litControls.slice(),
+    /** #1174: every ring the film has up, beside the box of the element it
+     *  was drawn round as that element measures NOW — the phone check's
+     *  own account of "a spotlight in the right place": each ring's box
+     *  equals its element's, the element is in the document and shown. */
+    litBoxes: () => litControls.flatMap((c) => c.rings.map((ring, index) => {
+      const el = c.ringEls[index];
+      const r = ring.getBoundingClientRect();
+      const t = el ? boxOf([el], c.pad) : { x: 0, y: 0, w: 0, h: 0 };
+      return {
+        ring: { x: r.left, y: r.top, w: r.width, h: r.height },
+        target: { x: t.x, y: t.y, w: t.w, h: t.h },
+        connected: Boolean(el && el.isConnected),
+        shown: Boolean(el && el.isConnected && shown(el)),
+        sel: c.sel,
+      };
+    })),
     /* the script (round 7, #1097): read by player.js's measure() */
     transcript: () => transcriptLines.slice(),
+    /* #1174 round 6: the waits for the page that ran out */
+    waitedOut: () => waitedOut.map((one) => ({ ...one })),
+    /* #1174 round 6: does any body carry a paper? (see `papers`, above) */
+    carriesPapers: () => papers,
+    /** @param {boolean} on */
+    setCarriesPapers: (on) => { papers = Boolean(on); },
     resetTranscript: () => { transcriptLines = []; },
   };
 }

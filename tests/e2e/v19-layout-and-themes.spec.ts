@@ -89,7 +89,24 @@ const SCREENS: Screen[] = [
   {
     name: "/administration",
     path: () => "/administration",
-    ready: (page) => expect(page.getByRole("heading", { name: "Administration" })).toBeVisible(),
+    ready: async (page) => {
+      await expect(page.getByRole("heading", { name: "Administration" })).toBeVisible();
+      /* The heading draws before `view` has loaded (the cards below it are
+         `{#if view}`-gated, pocket.svelte's own loading skeleton otherwise),
+         so waiting on the heading alone can leave the real cards — and
+         their own entrance fades — still to come. Wait for the loading
+         skeleton to clear first, so entrancesSettled below catches every
+         entrance already under way rather than snapshotting an empty page
+         a beat too early. */
+      await expect(page.locator(".ad-loading")).toHaveCount(0);
+      /* The tells, the jump strip's chips and every card below fade and
+         slide in on arrival (pocket.svelte's .ad-tell/.ad-chip/.ad-card),
+         same as the other pocket screens below — a scan mid-fade reads a
+         control's ink through its own fading-in opacity and axe calls that
+         a contrast violation that is gone a frame later (entrancesSettled's
+         own doc comment). */
+      await entrancesSettled(page.locator(".ad-pocket"));
+    },
   },
   {
     name: "/household/[id]",

@@ -25,6 +25,7 @@
   import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
   import CorridorRow from "./CorridorRow.svelte";
   import NorthStarMark from "$lib/NorthStarMark.svelte";
+  import { watchTour } from "$lib/tour/watch.js";
   import "./home.css";
 
   /**
@@ -1262,6 +1263,14 @@
     <button style="background:#080a14;box-shadow:inset 0 0 0 1px #ff4fd8" title="retrograde"
             aria-pressed="false"></button>
   </div>
+  <!-- "Watch the tour" (#1189), beside the theme as in every account menu.
+       The card closes the way home.behaviour.js's closeOverlays closes it,
+       so the film opens over the sky rather than under the card. -->
+  <button class="watch" onclick={() => {
+    document.getElementById("account")?.classList.remove("open");
+    document.querySelector("button.orb")?.setAttribute("aria-expanded", "false");
+    void watchTour();
+  }}>↻ watch the tour</button>
   <!-- Two taps to leave, and the second one revokes the session before a
        single frame of the descent is drawn (§15: logout is the login played
        backwards, and it is a real sign-out, not an animation about one). -->
