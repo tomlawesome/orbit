@@ -409,8 +409,12 @@ check_capacity() {
   [[ "$current_database_bytes" =~ ^[0-9]+$ ]] ||
     fail 'preflight/capacity failed; current database size is not numeric.'
   current_database_kib=$(( (current_database_bytes + 1023) / 1024 ))
+  # The container's own DOCUMENTS_ROOT (env_file: .env-orbit), not a value
+  # read on the host: matches wherever the app actually writes documents,
+  # including the compose volume mount, which tracks the same variable and
+  # default (#1151 SF2-F1).
   current_document_kib="$(compose run --rm --no-deps --entrypoint sh orbit-app -c \
-    'du -sk /var/lib/orbit/documents | awk '\''NR == 1 { print $1 }'\''' 2>/dev/null | tr -d '[:space:]')" ||
+    'du -sk "${DOCUMENTS_ROOT:-/var/lib/orbit/documents}" | awk '\''NR == 1 { print $1 }'\''' 2>/dev/null | tr -d '[:space:]')" ||
     fail 'preflight/capacity failed; current document usage could not be measured.'
   [[ "$current_document_kib" =~ ^[0-9]+$ ]] ||
     fail 'preflight/capacity failed; current document usage is not numeric.'
@@ -425,7 +429,7 @@ check_capacity() {
   [[ "$temp_available_kib" =~ ^[0-9]+$ && "$temp_available_kib" -ge "$temp_required_kib" ]] ||
     fail 'preflight/capacity failed; reserve temporary filesystem space for checkpoint extraction.'
   volume_available_kib="$(compose run --rm --no-deps --entrypoint sh orbit-app -c \
-    'df -Pk /var/lib/orbit/documents | awk '\''NR == 2 { print $4 }'\''' 2>/dev/null | tr -d '[:space:]')" ||
+    'df -Pk "${DOCUMENTS_ROOT:-/var/lib/orbit/documents}" | awk '\''NR == 2 { print $4 }'\''' 2>/dev/null | tr -d '[:space:]')" ||
     fail 'preflight/capacity failed; document-volume capacity could not be checked.'
   [[ "$volume_available_kib" =~ ^[0-9]+$ ]] ||
     fail 'preflight/capacity failed; document-volume capacity is not numeric.'
@@ -572,7 +576,9 @@ create_checkpoint() {
   if ! compose exec -T orbit-db pg_restore --list < "$checkpoint_dump" >/dev/null 2>&1; then
     fail 'checkpoint/database failed; the captured PostgreSQL archive is invalid.'
   fi
-  if ! compose run --rm --no-deps --entrypoint tar orbit-app -C /var/lib/orbit/documents -cf - . > "$checkpoint_documents" 2>/dev/null; then
+  # The container's own DOCUMENTS_ROOT (#1151 SF2-F1); see check_capacity above.
+  if ! compose run --rm --no-deps --entrypoint sh orbit-app -c \
+    'exec tar -C "${DOCUMENTS_ROOT:-/var/lib/orbit/documents}" -cf - .' > "$checkpoint_documents" 2>/dev/null; then
     fail 'checkpoint/documents failed; the current document tree could not be captured.'
   fi
   validate_document_archive "$checkpoint_documents"
@@ -606,8 +612,9 @@ create_checkpoint() {
 replace_documents_from_archive() {
   local archive_path="$1"
   documents_replaced=true
+  # The container's own DOCUMENTS_ROOT (#1151 SF2-F1); see check_capacity above.
   if ! compose run --rm --no-deps --entrypoint sh orbit-app -c \
-    'set -eu; find /var/lib/orbit/documents -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; exec tar -C /var/lib/orbit/documents -xf -' \
+    'set -eu; documents_root="${DOCUMENTS_ROOT:-/var/lib/orbit/documents}"; find "$documents_root" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; exec tar -C "$documents_root" -xf -' \
     < "$archive_path" >/dev/null 2>&1; then
     return 1
   fi
@@ -641,7 +648,9 @@ capture_active_documents() {
   local archive_path="$temporary_directory/active-documents.tar"
   local active_root="$temporary_directory/active-documents"
   mkdir -p "$active_root"
-  if ! compose run --rm --no-deps --entrypoint tar orbit-app -C /var/lib/orbit/documents -cf - . > "$archive_path" 2>/dev/null; then
+  # The container's own DOCUMENTS_ROOT (#1151 SF2-F1); see check_capacity above.
+  if ! compose run --rm --no-deps --entrypoint sh orbit-app -c \
+    'exec tar -C "${DOCUMENTS_ROOT:-/var/lib/orbit/documents}" -cf - .' > "$archive_path" 2>/dev/null; then
     return 1
   fi
   validate_document_archive "$archive_path"
