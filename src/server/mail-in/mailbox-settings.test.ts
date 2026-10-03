@@ -69,11 +69,29 @@ vi.mock("@/db", async () => {
     return sources[meta.table]?.[meta.key] ?? null;
   }
 
-  /** Only `eq` is used by this module, so pairs of operands are enough. */
+  /**
+   * Only `eq`, bare or combined with `and`, is used by this module, so
+   * pairs of operands are enough. `and(eq(a, A), eq(b, B))` nests its two
+   * `eq` conditions inside its own `queryChunks` rather than putting their
+   * Column/Param operands at the top level, so collection walks down into
+   * any chunk that is itself a condition (has its own `queryChunks`) rather
+   * than reading one level only; the flattened order is still `[a, A, b,
+   * B, ...]`, so every pair must match for the whole condition to (AND
+   * semantics), exactly as the loop below already assumed.
+   */
+  function collectOperands(node: unknown, into: unknown[]): void {
+    if (is(node, Column) || is(node, Param)) {
+      into.push(node);
+      return;
+    }
+    const chunks = (node as { queryChunks?: unknown[] })?.queryChunks;
+    if (Array.isArray(chunks)) for (const chunk of chunks) collectOperands(chunk, into);
+  }
+
   function matches(condition: unknown, sources: Sources): boolean {
     if (!condition) return true;
-    const operands = ((condition as { queryChunks?: unknown[] }).queryChunks ?? [])
-      .filter((chunk) => is(chunk, Column) || is(chunk, Param));
+    const operands: unknown[] = [];
+    collectOperands(condition, operands);
     for (let index = 0; index + 1 < operands.length; index += 2) {
       const left = resolve(operands[index], sources);
       const right = resolve(operands[index + 1], sources);
@@ -526,6 +544,32 @@ describe("verification outcomes are a bounded vocabulary", () => {
     expect(after?.verificationState).toBe("verified");
     expect(secretsOfKind("imap_password")).toHaveLength(1);
     expect(auditActions()).toContain("mail_in_credential_verified");
+  });
+
+  it("does not let a slow verify overwrite a rotation that landed while it was running (#1151 A2-R4)", async () => {
+    await configureMailbox();
+    const versionAtStart = mailbox()?.version as number;
+
+    // The verify call is slow enough that a credential rotation completes,
+    // and bumps the version, before this verify's own write runs.
+    const { outcome } = await verifyMailboxCredential(ADMIN, {
+      verifyImap: async () => {
+        const row = mailbox();
+        if (row) {
+          row.version = versionAtStart + 1;
+          row.verificationState = "verified";
+          row.verifiedAt = new Date("2026-01-01T00:00:00Z");
+        }
+        return "imap_unavailable";
+      },
+    });
+
+    expect(outcome).toBe("provider_unavailable");
+    // The rotation's version and state survive; the stale verify neither
+    // bumped the version again nor stamped its own "failed" over it.
+    expect(mailbox()?.version).toBe(versionAtStart + 1);
+    expect(mailbox()?.verificationState).toBe("verified");
+    expect((mailbox()?.verifiedAt as Date).toISOString()).toBe("2026-01-01T00:00:00.000Z");
   });
 
   it("marks the stored mailbox verified or failed when the credential is checked on its own", async () => {
