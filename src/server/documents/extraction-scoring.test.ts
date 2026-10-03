@@ -6,6 +6,7 @@ import {
   classifyProvider,
   classifySubtype,
   formatThreeWayScore,
+  looseProviderNameMatch,
   scoreCorpusRepeated,
   scoreCorpusThreeWay,
   type ThreeWayExtractor,
@@ -267,5 +268,23 @@ describe("classifyProvider accepts a short form of the name", () => {
   });
   it("is blank when nothing was extracted", () => {
     expect(classifyProvider("Wexley Water plc", undefined)).toBe("blank");
+  });
+});
+
+// #1151 X-Q3: the provider eval CLIs (provider-bins-cli.ts,
+// provider-stage1-cli.ts) each carried their own identical copy of this
+// looser, by-eye comparison; both now import it from here instead.
+describe("looseProviderNameMatch", () => {
+  it("matches case- and punctuation-insensitively", () => {
+    expect(looseProviderNameMatch("Acme Cover Ltd", "acme cover ltd")).toBe(true);
+    expect(looseProviderNameMatch("Acme Cover Ltd.", "Acme Cover Ltd")).toBe(true);
+  });
+  it("accepts a short form at least 4 characters long, either direction", () => {
+    expect(looseProviderNameMatch("Acme Cover Ltd", "Acme")).toBe(true);
+    expect(looseProviderNameMatch("Acme", "Acme Cover Ltd")).toBe(true);
+  });
+  it("rejects a short form under 4 characters, and an unrelated name", () => {
+    expect(looseProviderNameMatch("Acme Cover Ltd", "Ace")).toBe(false);
+    expect(looseProviderNameMatch("Acme Cover Ltd", "Northfield Gas")).toBe(false);
   });
 });
