@@ -1,9 +1,17 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const webPushMock = vi.hoisted(() => ({
+  setVapidDetails: vi.fn(),
+  sendNotification: vi.fn(async () => ({ statusCode: 201, body: "", headers: {} })),
+}));
+vi.mock("web-push", () => ({ default: webPushMock }));
+
 import {
   categorizeProviderError,
+  createDefaultNotificationProviders,
   deliveryFailureState,
   effectiveReminderOffsets,
   enabledDeliveryChannels,
@@ -11,6 +19,7 @@ import {
   getNotificationWorkerHealth,
   householdReminderTime,
   isAllowedPushEndpoint,
+  NOTIFICATION_PROVIDER_TIMEOUT_MS,
   notificationRetryDelayMs,
   reminderIsSnoozed,
 } from "./notification-worker";
@@ -143,6 +152,21 @@ describe("notification worker scheduling", () => {
     expect(config.maxAttempts).toBe(5);
   });
 
+  it("treats SMTP_SECURITY=\"\" as not set, the same as every other unset field (#1151 SF2-F2)", () => {
+    const config = getNotificationWorkerConfig({
+      NODE_ENV: "test",
+      SMTP_SECURITY: "",
+    } as NodeJS.ProcessEnv);
+    expect(config.smtpSecurity).toBe("starttls");
+  });
+
+  it("still rejects a genuinely invalid SMTP_SECURITY rather than silently defaulting it", () => {
+    expect(() => getNotificationWorkerConfig({
+      NODE_ENV: "test",
+      SMTP_SECURITY: "tls1.2",
+    } as NodeJS.ProcessEnv)).toThrow();
+  });
+
   it("keeps SMTP providers independent and prefers a file-backed password", () => {
     const config = getNotificationWorkerConfig({
       NODE_ENV: "test",
@@ -232,5 +256,31 @@ describe("notification worker scheduling", () => {
       lastErrorAt: null,
       lastErrorCategory: null,
     });
+  });
+
+  it("bounds a push send to the same outbound timeout the email transport uses (#1151 SR2-R4, A4-R3)", async () => {
+    webPushMock.sendNotification.mockClear();
+    const providers = createDefaultNotificationProviders(getNotificationWorkerConfig({
+      NODE_ENV: "test",
+      VAPID_SUBJECT: "mailto:ops@example.test",
+      VAPID_PUBLIC_KEY: "public-key",
+      VAPID_PRIVATE_KEY: "private-key",
+    } as NodeJS.ProcessEnv));
+
+    await providers.sendPush({
+      target: { endpoint: "https://push.services.example.test/sub/abc123", keys: { p256dh: "p", auth: "a" } },
+      payload: { title: "Due today", body: "An item", url: "/" },
+    });
+
+    expect(webPushMock.sendNotification).toHaveBeenCalledTimes(1);
+    const [, , options] = webPushMock.sendNotification.mock.calls[0] as unknown as [unknown, unknown, { timeout?: number }];
+    // Before the fix, no third argument was passed at all: a blackholed
+    // endpoint held the household's DB advisory lock for as long as the
+    // provider never answered, one subscription at a time.
+    expect(options?.timeout).toBe(NOTIFICATION_PROVIDER_TIMEOUT_MS);
+  });
+
+  it("gives a push send's timeout the same bound the email transport's connect/greeting/socket timeouts use", () => {
+    expect(NOTIFICATION_PROVIDER_TIMEOUT_MS).toBe(5_000);
   });
 });
