@@ -6,8 +6,30 @@
  * lease token that fences every subsequent write (ADR-0010). Nothing here
  * reaches the database, so a claim shape can be reasoned about on its own.
  */
+import { sql } from "drizzle-orm";
 import { operationalReasons, type OperationalReason } from "@/lib/logger";
 import type { OwnedPurgeJob } from "@/server/documents/purge";
+
+/**
+ * The claim-update every job-claim query performs once it has picked its
+ * rows: mark the job processing, bump its attempt count, and set a fresh
+ * ten-minute lease and lease token (A2-Q3). purge-jobs.ts, scan-recovery.ts
+ * and rewrap-worker.ts each spliced this same text into their own
+ * `claimable`-scoped CTE; building this fragment does not reach the
+ * database any more than constructing a WHERE clause does -- composing it
+ * into a caller's own `sql` template is what runs the query.
+ */
+export const JOB_CLAIM_UPDATE = sql`
+      update document_jobs as job
+      set status = 'processing',
+          attempts = job.attempts + 1,
+          locked_at = now(),
+          lease_expires_at = now() + interval '10 minutes',
+          lease_token = gen_random_uuid(),
+          updated_at = now()
+      from claimable
+      where job.id = claimable.id
+      returning job.id, job.document_id, job.generation, job.lease_token`;
 
 export function operationalDocumentReason(value: string): OperationalReason {
   return (operationalReasons as readonly string[]).includes(value)
