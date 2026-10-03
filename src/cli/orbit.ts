@@ -1281,33 +1281,43 @@ function commandInstallOrUpdate(action: "install" | "update", deployDirArg: stri
 function commandEndMaintenance(args: string[]): void {
   if (args.length > 0) fail(`orbit: unknown option ${args[0]} (usage: orbit end-maintenance)`);
   void (async () => {
-    const [{ endMaintenanceFromOperatorShell }, { closeDatabase }] = await Promise.all([
-      import("../server/maintenance"),
-      import("../db"),
-    ]);
     try {
-      const { changed, cancelledWindows } = await endMaintenanceFromOperatorShell();
-      if (!changed) {
-        process.stdout.write("orbit: maintenance was not active; nothing to change\n");
-      } else if (cancelledWindows > 0) {
-        const plural = cancelledWindows === 1 ? "window" : "windows";
-        process.stdout.write(
-          `orbit: maintenance ended; cancelled ${cancelledWindows} due scheduled ${plural}\n`,
-        );
-      } else {
-        process.stdout.write("orbit: maintenance ended\n");
+      const [{ endMaintenanceFromOperatorShell }, { closeDatabase }] = await Promise.all([
+        import("../server/maintenance"),
+        import("../db"),
+      ]);
+      try {
+        const { changed, cancelledWindows } = await endMaintenanceFromOperatorShell();
+        if (!changed) {
+          process.stdout.write("orbit: maintenance was not active; nothing to change\n");
+        } else if (cancelledWindows > 0) {
+          const plural = cancelledWindows === 1 ? "window" : "windows";
+          process.stdout.write(
+            `orbit: maintenance ended; cancelled ${cancelledWindows} due scheduled ${plural}\n`,
+          );
+        } else {
+          process.stdout.write("orbit: maintenance ended\n");
+        }
+      } catch {
+        // Category only, like every other refusal this CLI surfaces: a
+        // connection failure's own message can carry the connection string,
+        // and this command runs in the one place an operator is most likely to
+        // be pasting output to someone else. The container's logs hold the
+        // detail if it is needed.
+        process.stderr.write("orbit: end-maintenance failed; the database could not be updated\n");
+        await closeDatabase().catch(() => {});
+        process.exit(1);
       }
+      await closeDatabase();
     } catch {
-      // Category only, like every other refusal this CLI surfaces: a
-      // connection failure's own message can carry the connection string,
-      // and this command runs in the one place an operator is most likely to
-      // be pasting output to someone else. The container's logs hold the
-      // detail if it is needed.
+      // #1151 O1-R6: the dynamic import() above used to run outside any
+      // try/catch, so a module-load failure (a broken image, a missing
+      // file) became an unhandled promise rejection instead of this
+      // command's own clean, bounded failure message. There is no
+      // closeDatabase to call here -- a failed import never produced one.
       process.stderr.write("orbit: end-maintenance failed; the database could not be updated\n");
-      await closeDatabase().catch(() => {});
       process.exit(1);
     }
-    await closeDatabase();
   })();
 }
 
@@ -1331,51 +1341,60 @@ function commandEndMaintenance(args: string[]): void {
 function commandAuthRecoveryLink(): void {
   process.env.ORBIT_LOG_LEVEL = "error";
   void (async () => {
-    const [{ getDb, closeDatabase }, { instanceAuthority, auditLog }, { issueSetupToken }, { revokeUserSessions }, { getAuthConfig }] =
-      await Promise.all([
-        import("../db"),
-        import("../db/schema"),
-        import("../server/local-credentials"),
-        import("../lib/auth/session"),
-        import("../lib/env"),
-      ]);
     try {
-      const db = getDb();
-      const [authority] = await db.select({ primaryUserId: instanceAuthority.primaryUserId }).from(instanceAuthority).limit(1);
-      const primaryUserId = authority?.primaryUserId ?? null;
-      if (!primaryUserId) {
-        process.stderr.write("orbit: this Orbit instance has no primary administrator to recover\n");
+      const [{ getDb, closeDatabase }, { instanceAuthority, auditLog }, { issueSetupToken }, { revokeUserSessions }, { getAuthConfig }] =
+        await Promise.all([
+          import("../db"),
+          import("../db/schema"),
+          import("../server/local-credentials"),
+          import("../lib/auth/session"),
+          import("../lib/env"),
+        ]);
+      try {
+        const db = getDb();
+        const [authority] = await db.select({ primaryUserId: instanceAuthority.primaryUserId }).from(instanceAuthority).limit(1);
+        const primaryUserId = authority?.primaryUserId ?? null;
+        if (!primaryUserId) {
+          process.stderr.write("orbit: this Orbit instance has no primary administrator to recover\n");
+          await closeDatabase().catch(() => {});
+          process.exit(1);
+          return;
+        }
+
+        const { token } = await issueSetupToken(primaryUserId, "recovery", { createdByUserId: null });
+        await revokeUserSessions(primaryUserId);
+        await db.insert(auditLog).values({
+          householdId: null,
+          actorUserId: primaryUserId,
+          entityType: "user",
+          entityId: primaryUserId,
+          action: "recovery_link_issued",
+          changes: {},
+        });
+
+        const config = getAuthConfig();
+        const url = new URL(`/setup/${token}`, config.appUrl).toString();
+        process.stdout.write(`${url}\n`);
+      } catch {
+        // Category only, like every other refusal this CLI surfaces (see
+        // commandEndMaintenance's own comment): a connection or driver failure
+        // can carry the connection string, and this command's output is the
+        // one thing an operator recovering access is most likely to paste
+        // somewhere else.
+        process.stderr.write("orbit: recovery-link failed; the database could not be updated\n");
         await closeDatabase().catch(() => {});
         process.exit(1);
         return;
       }
-
-      const { token } = await issueSetupToken(primaryUserId, "recovery", { createdByUserId: null });
-      await revokeUserSessions(primaryUserId);
-      await db.insert(auditLog).values({
-        householdId: null,
-        actorUserId: primaryUserId,
-        entityType: "user",
-        entityId: primaryUserId,
-        action: "recovery_link_issued",
-        changes: {},
-      });
-
-      const config = getAuthConfig();
-      const url = new URL(`/setup/${token}`, config.appUrl).toString();
-      process.stdout.write(`${url}\n`);
+      await closeDatabase();
     } catch {
-      // Category only, like every other refusal this CLI surfaces (see
-      // commandEndMaintenance's own comment): a connection or driver failure
-      // can carry the connection string, and this command's output is the
-      // one thing an operator recovering access is most likely to paste
-      // somewhere else.
+      // #1151 O1-R6: see commandEndMaintenance's matching comment -- the
+      // dynamic imports above used to run outside any try/catch, turning a
+      // module-load failure into an unhandled promise rejection instead of
+      // this command's own clean, bounded failure message.
       process.stderr.write("orbit: recovery-link failed; the database could not be updated\n");
-      await closeDatabase().catch(() => {});
       process.exit(1);
-      return;
     }
-    await closeDatabase();
   })();
 }
 
@@ -1405,58 +1424,67 @@ const CLEAR_ADDRESSES_CONFIRMATION_PHRASE = "CLEAR ADDRESSES";
 function commandAuthClearAddresses(): void {
   process.env.ORBIT_LOG_LEVEL = "error";
   void (async () => {
-    const [{ closeDatabase }, { clearUnreadableAddresses, encryptionKeyIsUsable }] = await Promise.all([
-      import("../db"),
-      import("../server/account-addresses-reset"),
-    ]);
     try {
-      /* The refusal that matters most. An operator who sees "instance locked"
-         and assumes the worst would otherwise destroy addresses that were
-         perfectly recoverable — the key was fine, and only the bundle needed
-         restoring. Checked before a single word about clearing anything. */
-      if (await encryptionKeyIsUsable()) {
-        process.stderr.write(
-          "orbit: refused — this instance can still read its encrypted data, so its addresses are not lost.\n"
-          + "orbit: if members cannot sign in, the fault is elsewhere; this command would destroy addresses for nothing.\n",
+      const [{ closeDatabase }, { clearUnreadableAddresses, encryptionKeyIsUsable }] = await Promise.all([
+        import("../db"),
+        import("../server/account-addresses-reset"),
+      ]);
+      try {
+        /* The refusal that matters most. An operator who sees "instance locked"
+           and assumes the worst would otherwise destroy addresses that were
+           perfectly recoverable — the key was fine, and only the bundle needed
+           restoring. Checked before a single word about clearing anything. */
+        if (await encryptionKeyIsUsable()) {
+          process.stderr.write(
+            "orbit: refused — this instance can still read its encrypted data, so its addresses are not lost.\n"
+            + "orbit: if members cannot sign in, the fault is elsewhere; this command would destroy addresses for nothing.\n",
+          );
+          await closeDatabase().catch(() => {});
+          process.exit(1);
+          return;
+        }
+
+        process.stdout.write(
+          "This does NOT recover anything. Documents and encrypted details stay unreadable.\n"
+          + "It clears the account addresses this instance can no longer read, so that people can be let back in:\n"
+          + "  - every unreadable account address is removed; the accounts themselves survive\n"
+          + "  - every unreadable mail-forwarding address is removed, and must be added and proved again\n"
+          + "  - addresses this instance CAN still read are left alone\n"
+          + "Afterwards, run `orbit auth recovery-link` to get back in as the primary administrator,\n"
+          + "then re-enter members' addresses by hand.\n",
         );
+        const answer = readTtyLine(`Type ${CLEAR_ADDRESSES_CONFIRMATION_PHRASE} to continue: `);
+        if (answer !== CLEAR_ADDRESSES_CONFIRMATION_PHRASE) {
+          process.stderr.write("orbit: not confirmed; nothing was changed\n");
+          await closeDatabase().catch(() => {});
+          process.exit(1);
+          return;
+        }
+
+        const outcome = await clearUnreadableAddresses();
+        process.stdout.write(
+          `orbit: cleared ${outcome.users} account address(es) and removed ${outcome.senderAddresses} `
+          + "mail-forwarding address(es).\n"
+          + "orbit: next, run `orbit auth recovery-link`.\n",
+        );
+      } catch {
+        // Category only, for the same reason recovery-link gives above: a driver
+        // failure can carry the connection string, and an operator in the middle
+        // of this is the likeliest person to paste their terminal somewhere.
+        process.stderr.write("orbit: clear-addresses failed; the database could not be updated\n");
         await closeDatabase().catch(() => {});
         process.exit(1);
         return;
       }
-
-      process.stdout.write(
-        "This does NOT recover anything. Documents and encrypted details stay unreadable.\n"
-        + "It clears the account addresses this instance can no longer read, so that people can be let back in:\n"
-        + "  - every unreadable account address is removed; the accounts themselves survive\n"
-        + "  - every unreadable mail-forwarding address is removed, and must be added and proved again\n"
-        + "  - addresses this instance CAN still read are left alone\n"
-        + "Afterwards, run `orbit auth recovery-link` to get back in as the primary administrator,\n"
-        + "then re-enter members' addresses by hand.\n",
-      );
-      const answer = readTtyLine(`Type ${CLEAR_ADDRESSES_CONFIRMATION_PHRASE} to continue: `);
-      if (answer !== CLEAR_ADDRESSES_CONFIRMATION_PHRASE) {
-        process.stderr.write("orbit: not confirmed; nothing was changed\n");
-        await closeDatabase().catch(() => {});
-        process.exit(1);
-        return;
-      }
-
-      const outcome = await clearUnreadableAddresses();
-      process.stdout.write(
-        `orbit: cleared ${outcome.users} account address(es) and removed ${outcome.senderAddresses} `
-        + "mail-forwarding address(es).\n"
-        + "orbit: next, run `orbit auth recovery-link`.\n",
-      );
+      await closeDatabase();
     } catch {
-      // Category only, for the same reason recovery-link gives above: a driver
-      // failure can carry the connection string, and an operator in the middle
-      // of this is the likeliest person to paste their terminal somewhere.
+      // #1151 O1-R6: see commandEndMaintenance's matching comment -- the
+      // dynamic imports above used to run outside any try/catch, turning a
+      // module-load failure into an unhandled promise rejection instead of
+      // this command's own clean, bounded failure message.
       process.stderr.write("orbit: clear-addresses failed; the database could not be updated\n");
-      await closeDatabase().catch(() => {});
       process.exit(1);
-      return;
     }
-    await closeDatabase();
   })();
 }
 
