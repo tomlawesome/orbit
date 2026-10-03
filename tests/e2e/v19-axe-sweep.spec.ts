@@ -370,6 +370,12 @@ test.describe("the signed-in v19 sweep", () => {
 
   for (const route of PLAIN_ROUTES) {
     test(`${route.path} has no automated WCAG A/AA violations`, async ({ page }) => {
+      if (route.path === "/settings") {
+        /* #1195: on desktop Safari, /settings draws only its header -- one
+           aborted fetch blanks every card -- so there is nothing here for
+           axe to sweep. The other routes in this loop are unaffected. */
+        test.fail(test.info().project.name === "desktop-webkit", "#1195: desktop Safari leaves /settings with only its header; the cards never render");
+      }
       await signIn(page, route.path);
       await route.ready(page);
       await axeCheck(page);

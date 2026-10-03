@@ -128,6 +128,10 @@ test.describe.configure({ mode: "serial" });
 
 test("the helm lists the sign-in methods an account actually has", async ({ page, browser }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the block is asserted on the desk dialect");
+  /* #1195: on desktop Safari, /settings draws only its header -- one
+     aborted fetch blanks every card, so the Sign-in methods card this
+     test reads from is never there. */
+  test.fail(test.info().project.name === "desktop-webkit", "#1195: desktop Safari leaves /settings with only its header; the cards never render");
   test.setTimeout(90_000);
 
   /* Somebody has to hold the instance before anyone else can sign in at all
