@@ -133,8 +133,11 @@
     })),
   );
   // `ended` is the expiry past its date (#1005): quiet ink, never the alarm.
+  // `unscheduled` (#1151 W1-F3) is an active item with no due date at all —
+  // the same quiet tone, rather than the undefined key that rendered the
+  // search sheet's trail and mark dot with the invalid `var(undefined)`.
   /** @type {Record<string, string>} */
-  const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok", ended: "--ink-mid" };
+  const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok", ended: "--ink-mid", unscheduled: "--ink-mid" };
   /** @type {(b: { days: number | null }) => string} */
   const tlabel = (b) => (b.days === null ? "" : b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
   /** @type {(iso: string) => string} */
