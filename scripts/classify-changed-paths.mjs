@@ -130,17 +130,23 @@ const fastPatterns = [
   /^docs\//u,
   /^\.github\/ISSUE_TEMPLATE\//u,
   /^\.github\/pull_request_template\.md$/u,
-  /^\.github\/supply-chain-policy\.json$/u,
   /^supply-chain\/licence-policy\.yml$/u,
   /^[^/]+\.md$/u,
   /^\.gitignore$/u,
   /^LICENSE$/u,
-  /^scripts\/(?:supply-chain-policy|stable-promotion-policy)(?:\.test)?\.mjs$/u,
+  /^scripts\/stable-promotion-policy(?:\.test)?\.mjs$/u,
   /^scripts\/[^/]*(?:policy|workflow)\.test\.mjs$/u,
   /^src\/.*\.test\.[cm]?[jt]sx?$/u,
 ];
 
 const systemPatterns = [
+  // The vulnerability policy itself and its evaluator (D1-F2, #1151): a
+  // change confined to these can loosen what `supply_chain_image` accepts, so
+  // it must force the lane that builds and scans an image, not the cheapest
+  // one. (scripts/supply-chain-policy.test.mjs stays fast -- it only exercises
+  // the evaluator, it is not what the pipeline runs against the real image.)
+  /^\.github\/supply-chain-policy\.json$/u,
+  /^scripts\/supply-chain-policy\.mjs$/u,
   /^\.github\/workflows\//u,
   /^Dockerfile$/u,
   // The two deployment compose files stay at the root (installer contract,
