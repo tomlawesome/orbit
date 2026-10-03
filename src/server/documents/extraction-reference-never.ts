@@ -52,9 +52,16 @@ const CAN_BE_THE_REFERENCE: readonly IdentifierTag[] =
  */
 export function neverTheReference(tags: readonly Tag<"identifier">[]): boolean {
   const labelled = tags.some((tag) => CAN_BE_THE_REFERENCE.includes(tag.value));
+  // A number the page calls its account or customer number is a stronger
+  // claim than a bare ten-or-eleven-digit shape with a leading zero, which
+  // plenty of account numbers also happen to have: the `DIALLED` shape rule
+  // cannot tell "0123456789" the account number from a dialled number by
+  // digits alone, so a page that names it outright settles it (A3-S2).
+  const identityLabelled = tags.some((tag) => tag.value === "account" || tag.value === "customer");
   return tags.some((tag) =>
     NEVER_THE_REFERENCE.includes(tag.value) &&
-    !(tag.value === "company" && tag.source === "shape" && labelled));
+    !(tag.value === "company" && tag.source === "shape" && labelled) &&
+    !(tag.value === "phone" && tag.source === "shape" && identityLabelled));
 }
 
 /** The text a shape rule reads: what the page printed either side of the
