@@ -24,7 +24,7 @@ const passphrase = "correct-horse-battery-staple";
 const mocks = vi.hoisted(() => ({
   selectQueues: new Map<string, unknown[][]>(),
   insertCalls: [] as Array<{ table: string; values: unknown }>,
-  uploadItemDocument: vi.fn(async () => ({ id: "uploaded" })),
+  uploadItemDocument: vi.fn(async (_input: { filename: string; itemId: string }) => ({ id: "uploaded" })),
   requireMetadataWriter: vi.fn(),
   openMetadataReader: vi.fn(),
 }));
@@ -243,7 +243,7 @@ describe("portable archive import (#1151 A2-F3, A2-S2)", () => {
     const result = await importPortableArchive({ userId, householdId, archive: fullArchive(), passphrase, conflictItemIds: [] });
 
     expect(mocks.uploadItemDocument).toHaveBeenCalledTimes(1);
-    const call = mocks.uploadItemDocument.mock.calls[0][0] as { filename: string; itemId: string };
+    const call = mocks.uploadItemDocument.mock.calls[0][0];
     expect(call.filename).toBe("policy-a.pdf");
     expect(call.itemId).not.toBe(item1Id); // the new, re-generated item id, not the archive's
     // Policy B's section does not exist in this household, so it (and its
