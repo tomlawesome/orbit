@@ -76,7 +76,39 @@ describe("orbit auth: usage (no database needed)", () => {
   });
 });
 
-const hasDatabase = Boolean(process.env.DATABASE_URL);
+/*
+ * O1-S2 (#1151): this suite's `afterEach` below deletes every row of users,
+ * sessions, credentials and the audit log -- previously gated on nothing
+ * more than DATABASE_URL being set at all, so a developer who had it
+ * exported for ordinary local work (against their own real database) lost
+ * all four tables the moment they ran `pnpm exec vitest run`.
+ *
+ * scripts/test-integration.mjs provisions its disposable database with an
+ * exact, distinctive shape -- database `orbit_integration_<id>`, owned by
+ * user `orbit_test_<id>` -- and nothing else in this codebase names a
+ * database that way, so requiring one of those markers is the same test
+ * `pnpm test:integration` already relies on to know it is talking to a
+ * database it created and will throw away, never a real one.
+ */
+function isTestDatabase(databaseUrl: string): boolean {
+  try {
+    const url = new URL(databaseUrl);
+    const database = url.pathname.replace(/^\//u, "");
+    return database.startsWith("orbit_integration_") || url.username.startsWith("orbit_test_");
+  } catch {
+    return false;
+  }
+}
+
+const databaseUrl = process.env.DATABASE_URL;
+const hasDatabase = Boolean(databaseUrl && isTestDatabase(databaseUrl));
+if (databaseUrl && !hasDatabase) {
+  console.log(
+    "orbit.auth.test.ts: DATABASE_URL is set but does not look like a disposable test database "
+    + "(scripts/test-integration.mjs names one orbit_integration_<id>, owned by orbit_test_<id>); "
+    + "skipping rather than deleting rows from whatever database this actually is.",
+  );
+}
 
 describe.skipIf(!hasDatabase)("orbit auth recovery-link (real database)", () => {
   afterEach(async () => {
