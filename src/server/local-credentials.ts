@@ -528,30 +528,57 @@ function setupTokenTtlMs(purpose: CredentialSetupTokenPurpose, expiresInDays?: n
   return (expiresInDays ?? SETUP_TOKEN_DEFAULT_DAYS) * DAY_MS;
 }
 
+/** A freshly minted setup or recovery token, not yet written anywhere (#1151 A1-S1). */
+export interface MintedSetupToken {
+  token: string;
+  tokenHash: string;
+  purpose: CredentialSetupTokenPurpose;
+  expiresAt: Date;
+}
+
 /**
- * Mints a one-use setup or recovery link for `userId` and records
- * `setup_link_issued` in the same transaction (ADR-0023 §8). The token is
- * returned once and is not retrievable afterwards — only its digest is
- * stored, so a caller that fails to hand it to its recipient has lost it for
- * good, exactly like an invitation.
+ * Builds a one-use setup or recovery token and its expiry. Pure: touches no
+ * storage, so a caller can hold the result, try to send it, and only ask for
+ * it to be written once the send is known to have gone out — the way
+ * `resendSignInApproval` already treats a sign-in approval's own token
+ * (#1151 A1-S1).
+ */
+export function mintSetupToken(
+  purpose: CredentialSetupTokenPurpose,
+  expiresInDays?: number,
+): MintedSetupToken {
+  const token = createSetupToken();
+  return {
+    token,
+    tokenHash: setupTokenDigest(token),
+    purpose,
+    expiresAt: new Date(Date.now() + setupTokenTtlMs(purpose, expiresInDays)),
+  };
+}
+
+/**
+ * Writes a token `mintSetupToken` built, and records `setup_link_issued` in
+ * the same transaction (ADR-0023 §8). The token itself is not retrievable
+ * afterwards — only its digest is stored, so a caller that fails to hand it
+ * to its recipient has lost it for good, exactly like an invitation.
  *
- * Issuing invalidates every earlier unspent link this user holds, whatever
+ * Writing it invalidates every earlier unspent link this user holds, whatever
  * its purpose (ADR-0023 §3: "sends a new one ... which invalidates any
  * earlier link"). They are invalidated by expiring them — `expires_at` moved
  * to now — rather than by marking them consumed, because `consumed_at` means
  * somebody redeemed the link, and a table that cannot tell a spent link from
  * a superseded one is a table that cannot answer whether a link was used.
+ *
+ * Call this only once the mail (or whatever else carries the token) is
+ * confirmed sent: calling it first and mailing second is the bug this
+ * function's split from `issueSetupToken` exists to make impossible again —
+ * a failed send used to retire the one link the reader already had.
  */
-export async function issueSetupToken(
+export async function persistSetupToken(
   userId: string,
-  purpose: CredentialSetupTokenPurpose,
-  options: IssueSetupTokenOptions = {},
-): Promise<{ token: string; expiresAt: Date }> {
-  const token = createSetupToken();
-  const tokenHash = setupTokenDigest(token);
-  const expiresAt = new Date(Date.now() + setupTokenTtlMs(purpose, options.expiresInDays));
-  const createdByUserId = options.createdByUserId ?? null;
-
+  minted: MintedSetupToken,
+  createdByUserId: string | null,
+): Promise<void> {
   await getDb().transaction(async (transaction) => {
     const [target] = await transaction.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1);
     if (!target) throw new AppError("user_not_found", "That registered Orbit user is no longer available", 404);
@@ -568,9 +595,9 @@ export async function issueSetupToken(
 
     await transaction.insert(credentialSetupTokens).values({
       userId,
-      tokenHash,
-      purpose,
-      expiresAt,
+      tokenHash: minted.tokenHash,
+      purpose: minted.purpose,
+      expiresAt: minted.expiresAt,
       createdByUserId,
     });
     await transaction.insert(auditLog).values({
@@ -579,11 +606,27 @@ export async function issueSetupToken(
       entityType: "user",
       entityId: userId,
       action: "setup_link_issued",
-      changes: { userId, purpose },
+      changes: { userId, purpose: minted.purpose },
     });
   });
+}
 
-  return { token, expiresAt };
+/**
+ * Mints a one-use setup or recovery link for `userId` and writes it
+ * immediately (ADR-0023 §8). For a caller that does not itself send the
+ * link -- the CLI and the administration screen's direct callers -- there is
+ * no send to wait on, so minting and writing stay one step; `setup-mail.ts`
+ * uses `mintSetupToken`/`persistSetupToken` directly instead, because it does
+ * have a send to wait on.
+ */
+export async function issueSetupToken(
+  userId: string,
+  purpose: CredentialSetupTokenPurpose,
+  options: IssueSetupTokenOptions = {},
+): Promise<{ token: string; expiresAt: Date }> {
+  const minted = mintSetupToken(purpose, options.expiresInDays);
+  await persistSetupToken(userId, minted, options.createdByUserId ?? null);
+  return { token: minted.token, expiresAt: minted.expiresAt };
 }
 
 /** Sets `userId`'s password hash inside whatever transaction the caller holds. */

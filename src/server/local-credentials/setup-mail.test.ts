@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => ({
   },
   locked: false,
   auditRows: [] as Array<Record<string, unknown>>,
-  issued: [] as string[],
+  persisted: [] as string[],
   key: { scope: "instance", householdId: null, keyId: "test-key", dataKey: Buffer.alloc(32, 9) },
 }));
 
@@ -43,9 +43,14 @@ vi.mock("@/server/local-credentials", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/server/local-credentials")>();
   return {
     ...original,
-    issueSetupToken: async (userId: string) => {
-      mocks.issued.push(userId);
-      return { token: "setup-token", expiresAt: new Date("2026-09-22T09:00:00.000Z") };
+    mintSetupToken: () => ({
+      token: "setup-token",
+      tokenHash: "setup-token-hash",
+      purpose: "setup" as const,
+      expiresAt: new Date("2026-09-22T09:00:00.000Z"),
+    }),
+    persistSetupToken: async (userId: string) => {
+      mocks.persisted.push(userId);
     },
   };
 });
@@ -85,7 +90,7 @@ beforeEach(() => {
   mocks.row = null;
   mocks.locked = false;
   mocks.auditRows = [];
-  mocks.issued = [];
+  mocks.persisted = [];
   sent.length = 0;
 });
 
@@ -143,9 +148,9 @@ describe("sendSetupLink with an encrypted address (#969)", () => {
     await expect(sendSetupLink(ADMIN, USER, { mailer }))
       .rejects.toMatchObject({ code: "metadata_locked", status: 503 });
     expect(sent).toEqual([]);
-    // No token minted: issuing one would have killed the link this user may
-    // already be holding, in exchange for one that cannot be delivered.
-    expect(mocks.issued).toEqual([]);
+    // Nothing written: writing a token would have killed the link this user
+    // may already be holding, in exchange for one that cannot be delivered.
+    expect(mocks.persisted).toEqual([]);
     expect(mocks.auditRows).toEqual([]);
   });
 
@@ -155,6 +160,31 @@ describe("sendSetupLink with an encrypted address (#969)", () => {
     await expect(sendSetupLink(ADMIN, USER, { mailer }))
       .rejects.toMatchObject({ code: "recipient_address_unreadable", status: 409 });
     expect(sent).toEqual([]);
-    expect(mocks.issued).toEqual([]);
+    expect(mocks.persisted).toEqual([]);
+  });
+});
+
+describe("a resend that cannot be delivered (#1151 A1-S1)", () => {
+  it("never writes the new token, so the reader's earlier link stays live", async () => {
+    mocks.row = {
+      id: USER,
+      email: "ada@example.invalid",
+      emailEnc: null,
+      displayName: "Ada Lovelace",
+      credential: USER,
+    };
+    const failingMailer = {
+      sendEmail: async () => {
+        throw new Error("connection refused");
+      },
+    };
+
+    const delivery = await sendSetupLink(ADMIN, USER, { mailer: failingMailer });
+
+    expect(delivery.sendError).not.toBeNull();
+    /* The send failed, so the old link -- whatever it was -- must still be
+       the live one: nothing here may have superseded it. */
+    expect(mocks.persisted).toEqual([]);
+    expect(mocks.auditRows).toEqual([]);
   });
 });
