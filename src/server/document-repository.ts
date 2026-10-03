@@ -458,6 +458,13 @@ export async function uploadItemDocument(input: {
       }
     }
 
+    // A `required` scan reads the quarantine file again below only once the
+    // ClamAV scan (which can run for as long as CLAMAV_TIMEOUT_MS) has
+    // finished, so the validation buffer is zeroed immediately rather than
+    // held in memory for that whole wait (A2-Q1). With scanning `disabled`
+    // there is no such gap -- the second read bought nothing but duplicate
+    // I/O -- so that path reuses this buffer instead of reading again.
+    const reuseValidationBytesForEncrypt = config.scanMode === "disabled";
     const validationBytes = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
     try {
       if (!await validateSupportedDocumentStructure(validationBytes, mediaType)) {
@@ -468,7 +475,7 @@ export async function uploadItemDocument(input: {
         );
       }
     } finally {
-      validationBytes.fill(0);
+      if (!reuseValidationBytesForEncrypt) validationBytes.fill(0);
     }
     await reserveDocumentMetadata({
       documentId,
@@ -642,7 +649,9 @@ export async function uploadItemDocument(input: {
     }
     log.info({ event: "document.lifecycle", state: "starting", action: "none" });
 
-    const plaintext = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
+    const plaintext = reuseValidationBytesForEncrypt
+      ? validationBytes
+      : await storage.readQuarantine(received.quarantinePath, config.maxBytes);
     let encrypted: ReturnType<typeof encryptDocument>;
     // The next key while a rotation is in progress (#955).
     const publishWrap = wrappingKey(config);
