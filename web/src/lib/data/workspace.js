@@ -780,7 +780,15 @@ function todayOf(workspace) {
 export async function readHome(fetchImpl) {
   const [workspace, session, inbox] = await Promise.all([
     readWorkspace(fetchImpl),
-    readSession({}, fetchImpl),
+    /* Additive, the same way every other read in this Promise.all is
+       (#1151 W2-R4): every caller below only ever reads `session?.user`,
+       so a session-endpoint hiccup should cost the reader that one field,
+       not the whole screen it arrives alongside — which had already
+       loaded by the time Promise.all would otherwise have thrown. This
+       was the one unguarded read standing out among guarded neighbours,
+       repeated at every screen below that takes workspace and session
+       together. */
+    readSession({}, fetchImpl).catch(() => null),
     /* Additive: mail-in suggestions enrich home, they must never sink it. */
     readInbox(fetchImpl).catch(() => /** @type {Inbox} */ ({ receipts: [] })),
   ]);
@@ -831,7 +839,7 @@ export async function readHome(fetchImpl) {
  * date. The transform itself (corridorOf) is pure and lives in chart.js.
  */
 export async function readDueNext() {
-  const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
+  const [workspace, session] = await Promise.all([readWorkspace(), readSession().catch(() => null)]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   return {
     workspace,
@@ -851,7 +859,7 @@ export async function readDueNext() {
 export async function readInboxScreen() {
   const [workspace, session, inbox, relay] = await Promise.all([
     readWorkspace(),
-    readSession(),
+    readSession().catch(() => null),
     readInbox().catch(() => /** @type {Inbox} */ ({ receipts: [] })),
     /* Additive: the relaybar is a summary line, not the screen's subject. */
     readRelay().catch(() => UNAVAILABLE_RELAY),
@@ -903,7 +911,7 @@ export async function readInboxScreen() {
 export async function readSettingsScreen() {
   const [workspace, session, inbox, relay, reminders] = await Promise.all([
     readWorkspace(),
-    readSession(),
+    readSession().catch(() => null),
     readInbox().catch(() => /** @type {Inbox} */ ({ receipts: [] })),
     /* Additive: the helm's relay card is a summary, not the screen's subject. */
     readRelay().catch(() => UNAVAILABLE_RELAY),
@@ -1054,7 +1062,7 @@ export async function readAdminScreen() {
   const [workspace, session, users, mailbox, contact, rotation, metadata, recoveryBundle, health, operations] =
     await Promise.all([
     readWorkspace(),
-    readSession(),
+    readSession().catch(() => null),
     json(await fetch("/api/admin/users", { credentials: "same-origin" }))
       .then(
         (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean, disabledAt?: ?string }[] }} */ body) =>
@@ -2117,7 +2125,7 @@ export async function sendSetupLink(userId, options = {}) {
  * @param {string} householdId
  */
 export async function readHouseholdScreen(householdId) {
-  const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
+  const [workspace, session] = await Promise.all([readWorkspace(), readSession().catch(() => null)]);
   const [roster, joinRequests, invitations] = await Promise.all([
     /** @type {Promise<Partial<Roster>>} */ (
       json(await fetch(`/api/households/${householdId}/members`, { credentials: "same-origin" }))
@@ -2341,7 +2349,7 @@ export async function withdrawInvitation(householdId, invitationId) {
  * @param {string} id  the centred item, or (#434) a mail-in receipt
  */
 export async function readBelt(id) {
-  const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
+  const [workspace, session] = await Promise.all([readWorkspace(), readSession().catch(() => null)]);
   const today = todayOf(workspace);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   let household = workspace.households.find((one) =>
