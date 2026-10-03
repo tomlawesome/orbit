@@ -194,7 +194,16 @@ describe("Tika adapter", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("emits a bounded attempt record before the request and a success record with the document reference, character count and non-negative duration", async () => {
+  /* #1151 A2-Q7: this test's own name used to promise a document reference
+     and a character count the body never checked -- toMatchObject only
+     proved the "ready" record was AT LEAST { event, state, action }, not
+     that it was exactly that plus a duration. Neither field exists: this
+     event never carries one, the same as every other document.* event in
+     this codebase. Retitled to the one thing proven, and the "ready" record
+     is now checked by its exact key set so an undisclosed field added later
+     (a document reference or a character count among them) would fail here
+     rather than pass silently under toMatchObject. */
+  it("emits a bounded attempt record before the request and a success record with only a non-negative duration, no document reference or character count", async () => {
     const infoSpy = vi.spyOn(log, "info");
     vi.mocked(fetch).mockResolvedValue(response({ body: chunksStream([Buffer.from("bounded text")]) }));
 
@@ -203,8 +212,10 @@ describe("Tika adapter", () => {
     const parseCalls = infoSpy.mock.calls.filter(([event]) => event.event === "document.parse");
     expect(parseCalls).toHaveLength(2);
     expect(parseCalls[0][0]).toEqual({ event: "document.parse", state: "starting", action: "check_parser" });
-    expect(parseCalls[1][0]).toMatchObject({ event: "document.parse", state: "ready", action: "none" });
-    const ms = (parseCalls[1][0] as { durationMs: number }).durationMs;
+    const ready = parseCalls[1][0] as Record<string, unknown>;
+    expect(Object.keys(ready).sort()).toEqual(["action", "durationMs", "event", "state"]);
+    expect(ready).toMatchObject({ event: "document.parse", state: "ready", action: "none" });
+    const ms = ready.durationMs as number;
     expect(Number.isInteger(ms)).toBe(true);
     expect(ms).toBeGreaterThanOrEqual(0);
   });
