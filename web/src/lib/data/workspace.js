@@ -1384,10 +1384,13 @@ const sizeLabel = (bytes) =>
  * `version`/`updatedAt`/`snoozedUntil` ride along for #424's writes.
  *
  * @param {string} id  an item id, or (#434) a mail-in receipt id
+ * @param {Workspace} [workspace]  a workspace the caller already holds
+ *   (#1151 W2-Q4: readBelt reads one for itself before falling back to
+ *   this for a mail-in suggestion, and must not read a second one)
  * @returns {Promise<?ItemView>}
  */
-export async function readItem(id) {
-  const workspace = await readWorkspace();
+export async function readItem(id, workspace) {
+  workspace ??= await readWorkspace();
   for (const household of workspace.households) {
     const item = (household.items ?? []).find((one) => one.id === id);
     if (!item) continue;
@@ -2341,7 +2344,7 @@ export async function readBelt(id) {
   /** @type {?ItemView} */
   let suggestion = null;
   if (!household) {
-    const found = await readItem(id);
+    const found = await readItem(id, workspace);
     if (!found?.suggestion) return null;
     suggestion = found;
     household = workspace.households.find((one) => one.id === (found.householdId ?? primary))
