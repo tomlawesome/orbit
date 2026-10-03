@@ -2967,6 +2967,15 @@ record_image:
     - job: fast_docker
     - job: base_image
     - job: integration
+    # D1-S1 (#1151): these three run on the same preview/hotfix push that
+    # triggers this job (fidelity's `rules:` is the shared *not_scheduled +
+    # on_success; smoke_local_only and launcher_install_compat both match
+    # their branch rule before falling through to `when: manual`), so none
+    # is `optional: true` -- a push here would never create a pipeline
+    # missing one of them.
+    - job: fidelity
+    - job: smoke_local_only
+    - job: launcher_install_compat
     # ADR-0031 #1/#3: the two launcher archives the release-manifest step
     # below hashes.
     - job: build_launcher
