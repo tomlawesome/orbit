@@ -85,8 +85,16 @@ describe("administrator SMTP relay verification", () => {
   /* One test only: `verifySmtpProvider` throttles a second call within 1s of
      the first (its own dedup, unrelated to #1071) on real wall-clock time
      with no injectable clock, so a second case here would collide with the
-     first rather than proving anything new. */
-  it("reports unsafe_input when the SMTP connection check throws, and still stores the answer (#1071, swallowed since this suite has no DATABASE_URL)", async () => {
+     first rather than proving anything new.
+
+     #1151 A1-Q8: this test's own name used to claim it "still stores the
+     answer", but the suite never mocks `@/db` (same as the IMAP test above),
+     so `recordMailProbeResult`'s write always throws here and is swallowed --
+     nothing a test running in this file can observe. Renamed to the one
+     thing it actually proves, matching the IMAP test's own honest phrasing:
+     the live answer still comes back whole even though the store write
+     failed. Whether the write itself lands is #1067's integration coverage. */
+  it("still answers unsafe_input with the live result when the SMTP connection check throws, even though the mail-probe store write fails", async () => {
     vi.mocked(verifySmtpProviderConnection).mockRejectedValueOnce(new Error("connection refused"));
     await expect(verifySmtpProvider("admin-user")).resolves.toEqual({ result: "unsafe_input" });
   });
