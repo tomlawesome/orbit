@@ -3839,6 +3839,17 @@ do_regenerate_secret_step() {
 # unlike rotate-credential, a failed regenerate step has written nothing
 # (mktemp + rename is all-or-nothing), so there is no half-applied state to
 # recover, only a target that still needs a secret.
+#
+# SS1-S5: a freshly minted secret only reaches the running orbit-app
+# container by restarting it — the same bind-mount-is-an-inode lesson
+# do_restart_services_after_rotation's own comment explains for the
+# database credential (#629) applies identically here, since every one of
+# these targets (session-secret, postgres-password, document-kek) is
+# mounted into orbit-app. Without the restart the file on disk is new but
+# the running process still reads the old value, and reporting success
+# anyway would be dishonest. restart_compose_service memoizes per service,
+# so this is a no-op if something earlier in the same run already
+# restarted orbit-app.
 run_regenerate_secret_steps() {
   local target
   dangerous_failure_reason=none
@@ -3850,6 +3861,12 @@ run_regenerate_secret_steps() {
       return 1
     fi
   done
+  if ! restart_compose_service orbit-app; then
+    dangerous_failure_reason="step-failed"
+    printf 'Orbit repair: new secret material was written, but restarting orbit-app failed.\n' >&2
+    printf 'Orbit repair: the running container is still using the OLD value until it restarts. Restart orbit-app yourself (e.g. bash scripts/deploy-container.sh --pull) and re-run diagnosis to confirm it is healthy.\n' >&2
+    return 1
+  fi
   return 0
 }
 

@@ -4696,14 +4696,22 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
     expect(leftoverStaging).toHaveLength(0);
   });
 
-  it("regenerates a real zero-byte placeholder secret (install.sh's own OIDC_CLIENT_SECRET_FILE shape) — the old empty placeholder is gone, replaced by real content", () => {
+  // SF2-F10 (#1151): oidc-client-secret is issued by the identity provider,
+  // not minted by Orbit, so unlike every other generated secret it is NEVER
+  // regenerated — even in the exact zero-byte-placeholder shape
+  // (ensure_oidc_client_secret_placeholder in configure.sh) a real
+  // install.sh deployment produces before an operator ever runs
+  // --set-oidc-secret.
+  it("never regenerates oidc-client-secret, even from a real zero-byte placeholder (install.sh's own OIDC_CLIENT_SECRET_FILE shape) — plans manual instead, pointing at configure.sh", () => {
     const targetDir = makeFixture({ withConfigure: false });
-    // Mirrors ensure_oidc_client_secret_placeholder in configure.sh: a real,
-    // zero-byte, mode-0600 file — not simply removed — is exactly what a
-    // real install.sh deployment produces before an operator ever runs
-    // --set-oidc-secret.
     writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "");
     chmodSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), 0o600);
+
+    const plan = runRepair(targetDir, ["--plan"]);
+    expect(plan.stdout).toContain(
+      "plan action=manual resolves=secret-missing mutation=none backup=not-required target=oidc-client-secret rollback=not-required expect=operator-action",
+    );
+    expect(plan.stderr).toContain("bash scripts/configure.sh --set-oidc-secret");
 
     const result = runRepair(
       targetDir,
@@ -4713,16 +4721,14 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
     );
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("execute action=regenerate-secret resolves=secret-missing result=done");
+    expect(result.stdout).toContain("dangerous result=empty done=0 failed=0 reason=none");
+    expect(result.stdout).not.toContain("action=regenerate-secret resolves=secret-missing target=oidc-client-secret");
 
     const secretPath = join(targetDir, ".orbit-secrets", "oidc-client-secret");
-    const content = readFileSync(secretPath, "utf8").trim();
-    expect(content).toMatch(HEX_SECRET_PATTERN);
-    expect(content.length).toBeGreaterThan(0);
-    expect(statSync(secretPath).mode & 0o777).toBe(0o600);
+    expect(readFileSync(secretPath, "utf8")).toBe("");
   });
 
-  it("regenerates every distinct missing-secret target deferred in the same run", () => {
+  it("regenerates every distinct missing-secret target deferred in the same run, except oidc-client-secret (SF2-F10)", () => {
     const targetDir = makeFixture({ withConfigure: false });
     rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
     rmSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"));
@@ -4738,14 +4744,56 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
     const doneLines = lines(result.stdout).filter(
       (line) => line === "execute action=regenerate-secret resolves=secret-missing result=done",
     );
-    expect(doneLines).toHaveLength(2);
-    expect(result.stdout).toContain("dangerous result=complete done=2 failed=0 reason=none");
+    expect(doneLines).toHaveLength(1);
+    expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
+    expect(result.stdout).toContain("execute action=manual resolves=secret-missing result=skipped");
 
     const sessionSecret = readFileSync(join(targetDir, ".orbit-secrets", "session-secret"), "utf8").trim();
-    const oidcSecret = readFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "utf8").trim();
     expect(sessionSecret).toMatch(HEX_SECRET_PATTERN);
-    expect(oidcSecret).toMatch(HEX_SECRET_PATTERN);
-    expect(sessionSecret).not.toBe(oidcSecret);
+    expect(statSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), { throwIfNoEntry: false })).toBeFalsy();
+  });
+
+  // SS1-S5 (#1151): a freshly minted secret is useless to the running
+  // application until orbit-app restarts and re-resolves the bind-mounted
+  // secret file (the same #629 lesson regenerate-secret was missing).
+  it("restarts orbit-app after regenerating a secret, so the new value actually reaches the running container", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+    const restartLogPath = join(scratchDir(), "restart.log");
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { restartLogPath },
+      { input: "regenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
+    const restarted = readFileSync(restartLogPath, "utf8").trim().split("\n").filter(Boolean);
+    expect(restarted).toEqual(["3333bbbb4444"]); // the app container id, exactly once
+  });
+
+  it("reports failure (never a silent success) when the new secret was written but restarting orbit-app itself failed", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { restartFails: true },
+      { input: "regenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("dangerous result=failed done=0 failed=1 reason=step-failed");
+    expect(result.stderr).toContain("restarting orbit-app failed");
+    expect(result.stderr).toContain("still using the OLD value");
+
+    // The new secret material WAS written — only the restart failed — so
+    // this is never reported as if nothing happened.
+    const sessionSecret = readFileSync(join(targetDir, ".orbit-secrets", "session-secret"), "utf8").trim();
+    expect(sessionSecret).toMatch(HEX_SECRET_PATTERN);
   });
 
   // --- step failure: TOCTOU re-proof catches a change during the approval
