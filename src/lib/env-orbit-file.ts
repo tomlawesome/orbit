@@ -20,7 +20,38 @@ export type ParseEnvOrbitResult =
   | { ok: true; record: EnvOrbitRecord; schemaPresent: boolean }
   | { ok: false; code: EnvOrbitFailureCode };
 
-const REMOVED_KEYS: readonly string[] = [];
+// Mirrors scripts/configuration.sh's `removed_keys` (SQ1-Q1): keys this
+// project used to accept and now refuses with a dedicated
+// configuration_removed_key code, rather than the generic
+// configuration_unknown_key an operator would otherwise get.
+const REMOVED_KEYS: readonly string[] = [
+  "IMAP_ENABLED",
+  "IMAP_HOST",
+  "IMAP_PORT",
+  "IMAP_USER",
+  "IMAP_PASSWORD",
+  "IMAP_PASSWORD_FILE",
+  "IMAP_MAILBOX",
+  "IMAP_TLS_SERVER_NAME",
+  "IMAP_RECIPIENT_DOMAIN",
+  "IMAP_TRUSTED_RECIPIENT_HEADER",
+  "IMAP_POLL_SECONDS",
+  "IMAP_ALIAS_CURRENT_GENERATION",
+  "IMAP_ALIAS_CURRENT_SECRET",
+  "IMAP_ALIAS_CURRENT_SECRET_FILE",
+  "IMAP_ALIAS_PREVIOUS_GENERATION",
+  "IMAP_ALIAS_PREVIOUS_SECRET",
+  "IMAP_ALIAS_PREVIOUS_SECRET_FILE",
+  "IMAP_ALIAS_PREVIOUS_EXPIRES_AT",
+  "IMAP_ALIAS_GENERATION",
+  "IMAP_ALIAS_CURRENT_KEY",
+  "IMAP_ALIAS_CURRENT_KEY_FILE",
+  "IMAP_ALIAS_SECRET",
+  "IMAP_ALIAS_SECRET_FILE",
+  "IMAP_ALIAS_PREVIOUS_KEY",
+  "IMAP_ALIAS_PREVIOUS_KEY_FILE",
+  "IMAP_ALIAS_PREVIOUS_EXPIRY",
+];
 
 function isControlFree(value: string): boolean {
   for (const char of value) {
