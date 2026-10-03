@@ -40,10 +40,11 @@ import { createHash, randomBytes } from "node:crypto";
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { base64url } from "jose";
 import { getDb } from "@/db";
-import { auditLog, localCredentials, signInApprovals, users } from "@/db/schema";
+import { auditLog, signInApprovals, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { describeDevice } from "@/lib/auth/device";
 import { log } from "@/lib/logger";
+import { recordLocalCredentialFailure } from "@/server/local-credentials";
 import { sendBoundedMail, type InvitationMailer, type InvitationSendError } from "@/server/invitations/send";
 import { getNotificationWorkerConfig } from "@/server/notification-worker";
 import { openInstanceMetadataReader } from "@/server/metadata/fields";
@@ -507,28 +508,16 @@ export async function decideSignInApproval(
         action: "sign_in_refused",
         changes: {},
       });
-      await countRefusalAsFailure(transaction, row.userId);
+      /* One refusal, counted -- and scheduled -- exactly as an ordinary wrong
+         password is (ADR-0027 §8, #1151 A1-F1): `recordLocalCredentialFailure`
+         is the one place the backoff schedule is applied, so a correct
+         password that is then denied locks the credential the same way a
+         wrong one does, rather than only incrementing a count nothing reads. */
+      await recordLocalCredentialFailure(transaction, row.userId);
     }
 
     return { recorded: true };
   });
-}
-
-type Executor = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
-
-/**
- * One refusal, counted in the same column an ordinary wrong password is
- * counted in (ADR-0027 §8). The schedule itself stays where it already lives;
- * this only adds to the count, so the two cannot drift into two backoffs.
- */
-async function countRefusalAsFailure(executor: Executor, userId: string): Promise<void> {
-  await executor
-    .update(localCredentials)
-    .set({
-      failedAttemptCount: sql`${localCredentials.failedAttemptCount} + 1`,
-      updatedAt: new Date(),
-    })
-    .where(eq(localCredentials.userId, userId));
 }
 
 /** Where a waiting tab stands. `unknown` covers every dead end at once. */

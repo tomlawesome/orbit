@@ -461,6 +461,28 @@ describe("a refusal (ADR-0027 §8 and consequences)", () => {
     expect(store.audit.map((row) => row.action)).toContain("sign_in_refused");
   });
 
+  it("locks the credential after enough refusals, the same way enough wrong passwords would (#1151 A1-F1)", async () => {
+    /* An attacker who holds the correct password but keeps getting denied
+       must be slowed down exactly as a wrong-password guesser is -- not just
+       counted. Each send resets the clock well past the hourly mail limit so
+       every refusal below reaches a fresh pending sign-in, which is the only
+       thing the hourly cap bounds. */
+    let now = NINE;
+    for (let refusal = 0; refusal < 6; refusal += 1) {
+      now = at(now, refusal === 0 ? 0 : 61 * 60 * 1000);
+      const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now });
+      const token = tokenFromLatestMail();
+      // eslint-disable-next-line no-await-in-loop -- each refusal must land before the next pending sign-in is minted
+      await decideSignInApproval(token, "denied");
+      void pending;
+    }
+
+    expect(store.credentials[0].failedAttemptCount).toBe(6);
+    const lockedUntil = store.credentials[0].lockedUntil as Date | null;
+    expect(lockedUntil).not.toBeNull();
+    expect((lockedUntil as Date).getTime()).toBeGreaterThan(now.getTime());
+  });
+
   it("tells the account holder once, on their next successful sign-in", async () => {
     await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer });
     await decideSignInApproval(tokenFromLatestMail(), "denied");
