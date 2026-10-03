@@ -364,6 +364,16 @@ describe("configuration.sh", () => {
     }
   });
 
+  it("accepts an empty direct placeholder beside a populated _FILE value, matching config-contract.ts's own falsy-string check", () => {
+    // configure.sh itself writes exactly this shape for OIDC_CLIENT_SECRET
+    // (an empty direct assignment left in place beside the real
+    // _FILE value) — src/lib/config-contract.ts's `record[direct] &&
+    // record[file]` treats an empty string as not-set, so this is not the
+    // conflict configuration_secret_conflict exists to catch.
+    const result = run("APP_URL=https://orbit.example.invalid\nOIDC_CLIENT_SECRET=\nOIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n", ["--preflight"]);
+    expect(result.status).toBe(0);
+  });
+
   it("reports future and gap schema versions with a distinct bounded code", () => {
     for (const value of ["2", "0"]) {
       const result = run(`ORBIT_CONFIG_SCHEMA_VERSION=${value}\nAPP_URL=https://a.example.invalid\n`);
