@@ -19,7 +19,7 @@
   import { ago, agoLong, money } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
-  import { searchPocket } from "./pocket-search.js";
+  import { readSearchDocuments, searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
   import { tlabel } from "./bands.js";
   import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
@@ -587,6 +587,9 @@
   /** @type {object | null} */
   let searchDocumentsFor = null;
 
+  /** #1151 W1-Q8: shared with the pocket's own copy (home/pocket.svelte)
+   *  via pocket-search.js's readSearchDocuments, which also carries the
+   *  concurrency cap (#1151 W1-R9) this copy never had. */
   async function loadSearchDocuments() {
     const household = view?.household;
     const householdId = view?.primary;
@@ -595,15 +598,10 @@
     const carrying = (household.items ?? []).filter((item) => item.status === "active" && (item.documentCount ?? 0) > 0);
     // Additive: an item whose papers cannot be read loses its papers from the
     // results, not the search.
-    const found = await Promise.all(carrying.map(async (item) => {
-      try {
-        const papers = await readItemDocuments(householdId, item.id);
-        return papers.map((doc) => ({ ...doc, itemTitle: item.title }));
-      } catch {
-        return [];
-      }
-    }));
-    if (searchDocumentsFor === household) searchDocuments = found.flat();
+    const found = await readSearchDocuments(
+      carrying, readItemDocuments, householdId, () => searchDocumentsFor !== household,
+    );
+    if (searchDocumentsFor === household) searchDocuments = found;
   }
 
   const searchRows = $derived(groups ? [...groups.attention, ...groups.later] : []);

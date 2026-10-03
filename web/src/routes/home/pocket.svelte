@@ -21,7 +21,7 @@
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
   import { markDoor } from "../household/[id]/door.js";
   import { HIT_R, spacedBodies } from "./pocket-dial.js";
-  import { searchPocket } from "./pocket-search.js";
+  import { readSearchDocuments, searchPocket } from "./pocket-search.js";
   import ItemDrawer from "./ItemDrawer.svelte";
   import SuggestionDrawer from "./SuggestionDrawer.svelte";
 
@@ -319,12 +319,9 @@
   /** @type {object | null} */
   let searchDocumentsFor = null;
 
-  /** At most this many readItemDocuments() calls in flight at once (#1151
-   *  W1-R9): a household with hundreds of items carrying documents used to
-   *  fire every one of them the instant the search sheet opened, with no
-   *  cap at all. */
-  const SEARCH_DOC_CONCURRENCY = 6;
-
+  /** #1151 W1-Q8: shared with the desk's own copy (home/+page.svelte) via
+   *  pocket-search.js's readSearchDocuments, which also carries the
+   *  concurrency cap (#1151 W1-R9). */
   async function loadSearchDocuments() {
     const household = view?.household;
     const householdId = view?.primary;
@@ -333,20 +330,8 @@
     const carrying = (household.items ?? []).filter((item) => item.status === "active" && (item.documentCount ?? 0) > 0);
     // Additive: an item whose papers cannot be read loses its papers from the
     // results, not the search.
-    /** @type {typeof searchDocuments} */
-    const found = [];
-    let cursor = 0;
-    async function worker() {
-      while (cursor < carrying.length && searchDocumentsFor === household) {
-        const item = carrying[cursor++];
-        try {
-          const papers = await readItemDocuments(householdId, item.id);
-          found.push(...papers.map((doc) => ({ ...doc, itemTitle: item.title })));
-        } catch { /* this item's papers drop out, not the whole search */ }
-      }
-    }
-    await Promise.all(
-      Array.from({ length: Math.min(SEARCH_DOC_CONCURRENCY, carrying.length) }, worker),
+    const found = await readSearchDocuments(
+      carrying, readItemDocuments, householdId, () => searchDocumentsFor !== household,
     );
     if (searchDocumentsFor === household) {
       searchDocuments = found;
