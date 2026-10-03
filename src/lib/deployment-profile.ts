@@ -1,3 +1,4 @@
+import { isValidLocalModel } from "./config-contract";
 import { readEnvironmentValue } from "./target-identity";
 
 // Deployment-profile identity (issue #295 slice 5), ported from
@@ -24,12 +25,10 @@ import { readEnvironmentValue } from "./target-identity";
 // add (an explicit `--profile`/`--model` CLI surface plus the guarantee #20
 // download-confirmation flag) to reach parity with the *interactive* branch.
 
-const LOCAL_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?$/;
-
-/** is_valid_local_model (install.sh:617-621). */
-export function isValidLocalModel(value: string): boolean {
-  return value.length >= 1 && value.length <= 128 && LOCAL_MODEL_PATTERN.test(value);
-}
+// is_valid_local_model (install.sh:617-621): the single rule now lives in
+// config-contract.ts (O1-Q6), shared with configure-engine.ts's own
+// --set-deployment-profile restatement of the identical check.
+export { isValidLocalModel } from "./config-contract";
 
 export type DeploymentProfile = "standard" | "processing" | "ai" | "full";
 

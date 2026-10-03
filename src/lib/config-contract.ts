@@ -262,6 +262,18 @@ export function isValidOrbitImage(value: string): boolean {
   );
 }
 
+// O1-Q6: is_valid_local_model (install.sh:617-621 / configure.sh's own
+// identical restatement for `--set-deployment-profile`) used to be
+// duplicated verbatim in deployment-profile.ts (the install side) and
+// configure-engine.ts (the configure side), with no shared source to keep
+// them from drifting. One rule, here, same discipline as
+// SECRET_HEX256_PATTERN/isValidOrbitImage above.
+const LOCAL_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?$/;
+
+export function isValidLocalModel(value: string): boolean {
+  return value.length >= 1 && value.length <= 128 && LOCAL_MODEL_PATTERN.test(value);
+}
+
 export function isValidClientId(value: string): boolean {
   return value.length > 0 && !containsForbiddenCharacters(value) && isWriteSafeEnvValue(value);
 }
