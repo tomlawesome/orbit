@@ -74,4 +74,14 @@ describe("authentication configuration", () => {
       OIDC_CLIENT_SECRET: "client-secret",
     })).toThrow("OIDC_ISSUER");
   });
+
+  // SF2-F4: ORBIT_AUTH_OIDC="" is contract-legal (config-contract.ts's
+  // envOrbitSchema accepts "" alongside "true"/"false" — a key that is
+  // present but unset in .env-orbit round-trips as ""), but this loader's
+  // z.enum(["true","false"]).default("false") used to throw on it, because
+  // zod's own .default() only ever applies to a genuinely undefined field.
+  it("SF2-F4: treats ORBIT_AUTH_OIDC=\"\" as unset (local-only), not a thrown error", () => {
+    const config = getAuthConfig({ ...localOnlyEnvironment, ORBIT_AUTH_OIDC: "" });
+    expect(config.oidc).toBeNull();
+  });
 });
