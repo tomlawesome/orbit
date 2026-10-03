@@ -207,12 +207,20 @@
   let flight = $state(null);
   let leaving = $state(fixtureFlight === "down");
   let armedOut = $state(false);
+  /** Set for the span of the actual signOut() request (#1151 W1-R7):
+      armedOut alone stays true for that whole span too, so a third rapid
+      tap — while the second tap's request is still in flight — fell
+      through the `if (!armedOut)` guard and fired a second, concurrent
+      signOut() call. */
+  let signingOut = $state(false);
   /** @type {string | null} */
   let signOutProblem = $state(null);
 
   async function tapSignOut() {
     /* Two taps, as every destructive control in this app arms and fires. */
     if (!armedOut) { armedOut = true; return; }
+    if (signingOut) return;
+    signingOut = true;
     signOutProblem = null;
     /*
      * THE REVOCATION BEAT, chosen deliberately: BEFORE the first frame.
@@ -227,6 +235,7 @@
       redirectTo = await signOut();
     } catch (error) {
       armedOut = false;
+      signingOut = false;
       signOutProblem = /** @type {any} */ (error)?.message ?? "still signed in — try again";
       return;
     }
@@ -1298,7 +1307,7 @@
   <!-- Two taps to leave, and the second one revokes the session before a
        single frame of the descent is drawn (§15: logout is the login played
        backwards, and it is a real sign-out, not an animation about one). -->
-  <button class="signout" onclick={tapSignOut}>
+  <button class="signout" onclick={tapSignOut} disabled={signingOut}>
     {armedOut ? "tap again to sign out" : "sign out →"}
   </button>
   {#if signOutProblem}<div class="signout-problem">{signOutProblem}</div>{/if}
