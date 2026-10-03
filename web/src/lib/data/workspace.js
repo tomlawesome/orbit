@@ -408,11 +408,16 @@ export class WorkspaceError extends Error {
  * decode into, so the shape is written down next to the URL that produces it
  * and TypeScript infers T from that annotation.
  *
+ * Exported only so tests/unit/workspace-json.test.js can drive it directly
+ * with a fake response, the way alerts.js's own helpers take fakes rather
+ * than a mocked global — every real caller in this module already reached
+ * it as a plain local function, and still does.
+ *
  * @template T
  * @param {Response} response
  * @returns {Promise<T>}
  */
-async function json(response) {
+export async function json(response) {
   const body = await response.json().catch(() => null);
   if (!response.ok) {
     /* Signed out is not an error state the screens handle — it is a journey:
@@ -432,6 +437,17 @@ async function json(response) {
     throw new WorkspaceError(message, {
       status: response.status,
       code: body?.error?.code,
+    });
+  }
+  if (body === null) {
+    /* A 2xx whose body does not parse as JSON — a proxy restart, a cached
+       offline page a service worker served with status 200, anything that
+       answered but was never the real route — is exactly as unreachable as
+       a non-2xx with no body. Every caller here already expects a decoded
+       object back and dereferences it immediately, so without this they hit
+       their own bare TypeError instead of the message above (#1151 W2-R3). */
+    throw new WorkspaceError(`Orbit could not be reached (${response.status})`, {
+      status: response.status,
     });
   }
   return body;
