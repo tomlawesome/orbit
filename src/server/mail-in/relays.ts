@@ -18,7 +18,7 @@
  * only its sha256 digest is written, so nothing in this module may put an
  * address in a row, a log, an audit `changes` blob or an error.
  */
-import { and, eq, inArray, isNotNull, lte, notInArray, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, lte, notInArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, imapIngestionMessages, imapRecipientAliases, mailInRelays, users } from "@/db/schema";
 import type { ImapIngestionConfig } from "./core/config";
@@ -330,20 +330,38 @@ export function relayLookupGenerations(relay: RelayGenerationState, now: Date): 
   return activeRelayGenerations(relay, now);
 }
 
+/** Users per rotation chunk (A2-R5). Bounded so one chunk's transaction is
+ * cheap regardless of instance size; tuned, not load-bearing for correctness. */
+const ROTATION_CHUNK_SIZE = 500;
+
 /**
  * The administrator's emergency instance-wide alias-key rotation — the ONLY
  * operation that changes every member's address, and the only place in this
  * file without a `user_id` predicate.
  *
  * The caller has already inserted the new `alias_key` secret row and pointed
- * the mailbox at it; what happens here is one transaction that rotates every
- * user with the grace the administrator chose (0 to 90 days, the same ceiling
- * the environment era capped a transition at). The superseded key row is kept
- * until the grace lapses, because the outgoing digests are spelt in its bytes
- * and `imap_recipient_aliases.alias_key_secret_id` is what names it.
+ * the mailbox at it, in its own short transaction (mailbox-settings.ts): the
+ * mailbox's `FOR UPDATE` lock only has to cover that pointer swap, which is
+ * the invariant it exists for (serializing concurrent mailbox-settings
+ * writes), not the per-user work below. Every member is rotated with the
+ * grace the administrator chose (0 to 90 days, the same ceiling the
+ * environment era capped a transition at), in bounded chunks, each its own
+ * transaction, so a large instance's rotation is many short statements
+ * instead of one that can run long enough to time out (A2-R5). The
+ * superseded key row is kept until the grace lapses, because the outgoing
+ * digests are spelt in its bytes and `imap_recipient_aliases.alias_key_secret_id`
+ * is what names it.
+ *
+ * Not resumable: a crash partway through leaves the remaining members on
+ * their previous generation, already-rotated members on the new one, and the
+ * mailbox already pointed at the new key. That is a recovery case for an
+ * administrator to re-run this (which issues its own new key and rotates
+ * everyone again), not a state this function detects or repairs itself — the
+ * same shape of trade-off the single giant transaction it replaces would
+ * have turned into total data loss for nothing, since it held the mailbox
+ * lock through the entire loop regardless.
  */
 export async function rotateAllRelaysForNewAliasKey(
-  executor: RelayExecutor,
   actorUserId: string,
   config: ImapIngestionConfig,
   aliasKeySecretId: string,
@@ -352,35 +370,49 @@ export async function rotateAllRelaysForNewAliasKey(
 ): Promise<{ users: number; graceUntil: Date }> {
   if (!Number.isSafeInteger(graceMs) || graceMs < 0 || graceMs > RELAY_MAX_GRACE_MS) throw new RelayConflictError();
   const graceUntil = new Date(now.getTime() + graceMs);
-  const candidates = await executor.select({ id: users.id }).from(users);
-  for (const candidate of candidates) {
-    const relay = await ensureRelayRow(candidate.id, executor);
-    const next = nextRelayGeneration(relay, graceMs, now);
-    const [updated] = await executor.update(mailInRelays).set({
-      currentGeneration: next.currentGeneration,
-      previousGeneration: next.previousGeneration,
-      previousExpiresAt: next.previousExpiresAt,
-      rotatedAt: now,
-      version: relay.version + 1,
-      updatedAt: now,
-    }).where(and(
-      eq(mailInRelays.userId, candidate.id),
-      eq(mailInRelays.version, relay.version),
-    )).returning(relayColumns);
-    if (!updated) throw new RelayConflictError();
-    await materialiseRelayAliases(
-      executor, candidate.id, updated, config, config.aliasCurrent.secret, aliasKeySecretId, now,
-    );
+  let rotated = 0;
+  let lastUserId: string | undefined;
+  for (;;) {
+    const candidates: Array<{ id: string }> = await getDb().select({ id: users.id })
+      .from(users)
+      .where(lastUserId ? gt(users.id, lastUserId) : undefined)
+      .orderBy(asc(users.id))
+      .limit(ROTATION_CHUNK_SIZE);
+    if (candidates.length === 0) break;
+    await getDb().transaction(async (transaction) => {
+      for (const candidate of candidates) {
+        const relay = await ensureRelayRow(candidate.id, transaction);
+        const next = nextRelayGeneration(relay, graceMs, now);
+        const [updated] = await transaction.update(mailInRelays).set({
+          currentGeneration: next.currentGeneration,
+          previousGeneration: next.previousGeneration,
+          previousExpiresAt: next.previousExpiresAt,
+          rotatedAt: now,
+          version: relay.version + 1,
+          updatedAt: now,
+        }).where(and(
+          eq(mailInRelays.userId, candidate.id),
+          eq(mailInRelays.version, relay.version),
+        )).returning(relayColumns);
+        if (!updated) throw new RelayConflictError();
+        await materialiseRelayAliases(
+          transaction, candidate.id, updated, config, config.aliasCurrent.secret, aliasKeySecretId, now,
+        );
+      }
+    });
+    rotated += candidates.length;
+    lastUserId = candidates[candidates.length - 1].id;
+    if (candidates.length < ROTATION_CHUNK_SIZE) break;
   }
-  await executor.insert(auditLog).values({
+  await getDb().insert(auditLog).values({
     householdId: null,
     actorUserId,
     entityType: "mail_in_mailbox",
     entityId: aliasKeySecretId,
     action: "mail_in_alias_key_rotated",
-    changes: { users: candidates.length, graceUntil: graceUntil.toISOString() },
+    changes: { users: rotated, graceUntil: graceUntil.toISOString() },
   });
-  return { users: candidates.length, graceUntil };
+  return { users: rotated, graceUntil };
 }
 
 /**

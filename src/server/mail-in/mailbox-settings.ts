@@ -644,10 +644,14 @@ export async function setMailboxIngestEnabled(
  *
  * This is the ONE operation that changes every member's address, and it is
  * deliberately not something a member can trigger: a new `alias_key` row is
- * minted, the mailbox is re-pointed at it, and every relay is rotated in the
- * same transaction with the grace the administrator chose — 0 to 90 days,
- * which is the same ceiling the environment-era configuration capped an alias
- * transition at.
+ * minted and the mailbox is re-pointed at it in one short transaction, then
+ * every relay is rotated in bounded chunks outside it (A2-R5) with the grace
+ * the administrator chose — 0 to 90 days, which is the same ceiling the
+ * environment-era configuration capped an alias transition at. The mailbox's
+ * `FOR UPDATE` lock covers only the pointer swap: holding it, or one giant
+ * transaction, for however long a full-membership rotation takes is what
+ * risked timing out on a large instance; see rotateAllRelaysForNewAliasKey's
+ * own comment for what that trades away.
  *
  * The superseded key row is KEPT, not deleted, unlike a password rotation:
  * every outgoing address is spelt in its bytes, and deleting it would cut the
@@ -663,7 +667,7 @@ export async function rotateMailboxAliasKey(
   await requireInstanceAdministrator(actorUserId);
   const grace = graceDaysSchema.parse(graceDays);
   const now = dependencies.now?.() ?? new Date();
-  await getDb().transaction(async (transaction) => {
+  const { config, aliasKeySecretId } = await getDb().transaction(async (transaction) => {
     const row = requireMailbox(await lockMailbox(transaction, expectedVersion));
     if (!row.passwordSecretId) throw new AppError("mailbox_not_configured", "Mail-in has not been set up", 409);
     const account = { host: row.host, user: row.accountUser };
@@ -678,8 +682,9 @@ export async function rotateMailboxAliasKey(
       currentId: created.id,
       byId: { [created.id]: aliasSecret },
     });
-    await rotateAllRelaysForNewAliasKey(transaction, actorUserId, config, created.id, grace * 86_400_000, now);
+    return { config, aliasKeySecretId: created.id };
   });
+  await rotateAllRelaysForNewAliasKey(actorUserId, config, aliasKeySecretId, grace * 86_400_000, now);
   return readMailboxSettings(actorUserId);
 }
 
