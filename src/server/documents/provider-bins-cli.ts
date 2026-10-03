@@ -23,7 +23,7 @@
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
 import { EXTRACTION_HOLDOUT3_FULLPAGE } from "./extraction-holdout3-fullpage";
 import { DESCRIBER_WORDS, providerTaggedOrganisations, providerWordRuns, STOP_WORDS } from "./extraction-provider-runs";
-import { classifyProvider } from "./extraction-scoring";
+import { classifyProvider, looseProviderNameMatch } from "./extraction-scoring";
 import { sieve } from "./extraction-sieve";
 import { tagCandidates } from "./extraction-tags";
 
@@ -50,12 +50,7 @@ const corpus = (onHoldout3 ? EXTRACTION_HOLDOUT3_FULLPAGE : EXTRACTION_CORPUS).s
 /** The scorer's answer, and a looser one: a reader marking this by eye
  * counts a short form of the name as a hit. Same runs, two rulers. */
 const strict = (wanted: string, got: string): boolean => classifyProvider(wanted, got) === "correct";
-const fold = (value: string): string => value.toLowerCase().replaceAll(/[^a-z0-9]+/gu, " ").trim();
-const loose = (wanted: string, got: string): boolean => {
-  const a = fold(wanted);
-  const b = fold(got);
-  return a === b || (b.length >= 4 && a.includes(b)) || (a.length >= 4 && b.includes(a));
-};
+const loose = looseProviderNameMatch;
 
 /**
  * The owner's original method, 2026-09-11, as they describe it: bin every
