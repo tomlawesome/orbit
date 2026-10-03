@@ -2038,14 +2038,23 @@ is_dangerous_deferred() {
   [[ "$dangerous" == 1 ]] && is_dangerous_action "$1"
 }
 
-# The confirmation preview: the same `plan ...` line grammar --plan itself
-# prints, derived from the already-computed $plan_entries. Enum-only,
-# printed to stdout ahead of the confirmation exchange.
+# The confirmation preview for the SAFE batch only: the same `plan ...`
+# line grammar --plan itself prints, derived from the already-computed
+# $plan_entries, filtered to the entries confirm_safe_batch is actually
+# about to run. O2-F1 (#1151): this used to print every entry in
+# $plan_entries — manual and dangerous lines included — even though
+# confirm_safe_batch's own prompt says "N safe action(s) proposed above",
+# so an operator confirming "the safe batch" was shown things that batch
+# will not run. Mirrors print_entries_preview's own already-correct
+# filtering for the dangerous batch, which never shows the safe batch's
+# entries either. Enum-only, printed to stdout ahead of the confirmation
+# exchange.
 print_plan_preview() {
   local entry action fclass ftarget
   for entry in "${plan_entries[@]:-}"; do
     [[ -n "$entry" ]] || continue
     IFS='|' read -r action fclass ftarget <<< "$entry"
+    is_safe_action "$action" || continue
     printf 'plan action=%s resolves=%s mutation=%s backup=%s target=%s rollback=%s expect=%s\n' \
       "$action" "$fclass" "${mutation_for_action[$action]}" "${backup_for_action[$action]}" \
       "$ftarget" "${rollback_for_action[$action]}" "${expected_for_action[$action]}"
