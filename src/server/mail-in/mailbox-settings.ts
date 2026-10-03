@@ -89,6 +89,10 @@ export type MailboxProbeOutcome = typeof mailboxProbeOutcomes[number];
  */
 const PROBE_DEADLINE_MS = 30_000;
 const PROBE_POLL_INTERVAL_MS = 3_000;
+/** Kept equal to imap-ingestion.ts's own header fetch bound by hand (SR2-R1,
+ * SR2-R2), since neither constant is exported across the mail-in/core
+ * boundary. */
+const HEADER_FETCH_LIMIT_BYTES = 64 * 1_024;
 
 /** Alias keys are 32 random bytes; the legacy shape check required at least 32 characters. */
 const ALIAS_KEY_BYTES = 32;
@@ -795,7 +799,16 @@ async function findProbeMessage(config: ImapIngestionConfig, token: string): Pro
         const uids = await client.search({ subject }, { uid: true });
         const uid = Array.isArray(uids) ? uids.at(-1) : undefined;
         if (uid !== undefined) {
-          const message = await client.fetchOne(String(uid), { headers: true }, { uid: true });
+          // A true bounded partial fetch (SR2-R2), not the unbounded
+          // `headers: true` convenience option this used to call: that one
+          // has no size limit at all, so the comment below's claim of
+          // matching the receipt path's bound (imap-ingestion.ts, SR2-R1)
+          // was not actually true until this read the header the same way.
+          const message = await client.fetchOne(
+            String(uid),
+            { bodyParts: [{ key: `HEADER.FIELDS (${config.trustedRecipientHeader})`, maxLength: HEADER_FETCH_LIMIT_BYTES }] },
+            { uid: true },
+          );
           const headers = message && typeof message === "object" && "headers" in message
             ? (message as { headers?: Buffer }).headers
             : undefined;
