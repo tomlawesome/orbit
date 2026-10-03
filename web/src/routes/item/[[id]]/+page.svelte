@@ -19,7 +19,7 @@
   import Reader from "./Reader.svelte";
   import StagedPage from "$lib/pocket/StagedPage.svelte";
   import EntryForm from "../../create/EntryForm.svelte";
-  import { COST_FORMAT_HINT, entryOf, fieldsOf, minorOf, refusalOf } from "../../create/entry.js";
+  import { COST_FORMAT_HINT, entryChanged, entryOf, fieldsOf, minorOf, refusalOf } from "../../create/entry.js";
   import { beltManifestOf, documentPreviewStateOf } from "$lib/data/belt.js";
   import { loadStagedPage } from "$lib/data/staged-page.js";
   import {
@@ -135,6 +135,18 @@
   let problem = $state(null);
   /** @type {PanelForm} */
   let form = $state({});
+  /** What the open panel's own form started as (#1151 W1-S5), captured by
+      open() the same moment it builds a fresh one. Null while no panel is
+      open, which is what lets panelDirty() read "nothing to lose" from it
+      alone. */
+  /** @type {string | null} */
+  let formStart = null;
+  /** The phone edit sheet's own baseline (#1151 W1-S5): the "edit" panel's
+      desktop inputs bind `form`, but its phone face binds `editEntry`
+      (EntryForm.svelte) instead, so it needs the same before-and-after
+      capture entry.js's own entryChanged compares. */
+  /** @type {import('../../create/entry.js').Entry | null} */
+  let editStart = null;
   /** Typed but not a sum of money (#1151 W1-F1/W1-S4): the complete and edit
       panels' own cost field, desktop and phone alike. */
   const formCostInvalid = $derived(Number.isNaN(minorOf(form.cost)));
@@ -962,7 +974,7 @@
     /* #1088: Esc closes the reading card first — the belt's own dead-space
        law (owner-decisions.md §18) — and only then a command panel. */
     if (event.key === "Escape" && previewDoc) { event.preventDefault(); belt?.closeDoc(); return; }
-    if (event.key === "Escape" && panel) { panel = null; armed = null; return; }
+    if (event.key === "Escape" && panel) { closePanel(); return; }
     if (typing(event.target)) return;
     if (event.key === "ArrowLeft") {
       event.preventDefault();
@@ -1009,6 +1021,7 @@
     if (panel === "snooze") form = { until: item.snoozedUntil ?? todayISO() };
     if (panel === "edit") {
       editEntry = entryOf(item);
+      editStart = $state.snapshot(editEntry);
       form = {
         title: item.title,
         provider: item.provider ?? "",
@@ -1018,7 +1031,33 @@
         recurrenceMonths: item.recurrenceMonths ?? "",
         notes: item.notes ?? "",
       };
+    } else {
+      editStart = null;
     }
+    formStart = panel ? JSON.stringify(form) : null;
+  }
+
+  /** Whether the open panel's own form differs from what it opened with
+      (#1151 W1-S5) — the same comparison entry.js's own entryChanged
+      makes for the create form. Checks both halves of the "edit" panel:
+      the desktop inputs (`form`) and the phone sheet's own EntryForm
+      (`editEntry`) — only one of the two is ever actually touched for a
+      given dialect, so checking both costs nothing on the other. */
+  function panelDirty() {
+    if (panel === null) return false;
+    if (editEntry && editStart && entryChanged(editEntry, editStart)) return true;
+    return formStart !== null && JSON.stringify(form) !== formStart;
+  }
+
+  /** Closes whatever panel is open, asking first if it would discard
+      something typed — the dirty-check-and-confirm W1-S1 built for the
+      desktop create form, reused here for the same reason: no desktop
+      confirm pattern already existed either. A decline leaves the panel
+      open and typed. */
+  function closePanel() {
+    if (panelDirty() && !confirm("Discard changes to this panel?")) return;
+    panel = null;
+    armed = null;
   }
 
   /** One writer. Success re-reads the belt — the item may have moved in time,
@@ -1426,7 +1465,7 @@
                   costMinor: minorOf(form.cost),
                   notes: (form.notes ?? "").trim() || undefined,
                 }), { leave: !form.nextDate })}>complete</button>
-              <button class="cancel-link" onclick={() => (panel = null)}>never mind</button>
+              <button class="cancel-link" onclick={closePanel}>never mind</button>
             </div>
           </div>
         {/if}
@@ -1438,7 +1477,7 @@
             <div class="save-row">
               <button class="btn-primary" disabled={busy || !form.dueDate}
                 onclick={() => run(() => rescheduleCommand(record, form.dueDate))}>reschedule</button>
-              <button class="cancel-link" onclick={() => (panel = null)}>never mind</button>
+              <button class="cancel-link" onclick={closePanel}>never mind</button>
             </div>
           </div>
         {/if}
@@ -1450,7 +1489,7 @@
             <div class="save-row">
               <button class="btn-primary" disabled={busy || !form.until}
                 onclick={() => run(() => snoozeCommand(record, form.until))}>snooze</button>
-              <button class="cancel-link" onclick={() => (panel = null)}>never mind</button>
+              <button class="cancel-link" onclick={closePanel}>never mind</button>
             </div>
           </div>
         {/if}
@@ -1492,7 +1531,7 @@
             <div class="save-row">
               <button class="btn-primary" disabled={busy || locked || !form.title?.trim() || formCostInvalid}
                 onclick={() => run(() => upsertCommand(record, editsOf()))}>save changes</button>
-              <button class="cancel-link" onclick={() => (panel = null)}>never mind</button>
+              <button class="cancel-link" onclick={closePanel}>never mind</button>
             </div>
           </div>
         {/if}
@@ -1512,7 +1551,7 @@
                   onclick={() => tap("cancel", () => run(() => statusCommand(record, "cancelled")))}>
                   {armed === "cancel" ? "tap again to cancel" : "cancel item"}</button>
               {/if}
-              <button class="cancel-link" onclick={() => { panel = null; armed = null; }}>never mind</button>
+              <button class="cancel-link" onclick={closePanel}>never mind</button>
             </div>
           </div>
         {/if}
@@ -1718,7 +1757,8 @@
 <!-- #1072: every panel, list and preview on a phone is this one kit Sheet;
      `face` says which. On a desk it is never raised. -->
 <Sheet bind:open={sheetOpen} size={face ? SHEET_SIZE[face] : "callout"} title={sheetTitle}
-       hideTitle={face === "search" || face === "preview"} onclose={sheetClosed}>
+       hideTitle={face === "search" || face === "preview"} onclose={sheetClosed}
+       confirmDiscard={panelDirty}>
   <!-- The search field rides in the sheet's head (§2.4). Declared in here
        rather than at the top of the markup: a top-level snippet trips the
        production bundler (#1130). -->
