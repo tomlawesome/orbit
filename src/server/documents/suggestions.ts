@@ -1,5 +1,11 @@
 import { basename } from "node:path";
-import type { ScheduleKind } from "@/lib/domain";
+import { scheduleKinds, type ScheduleKind } from "@/lib/domain";
+
+// Re-exported so every reader of a proposal's scheduleKind field, in
+// whichever server module, checks against the one list (A3-Q1): a copy
+// that drops "expiry" lets an expiry document arrive with its date but no
+// schedule type.
+export { scheduleKinds };
 
 const MAX_EXTRACTED_CHARACTERS = 250_000;
 const unsafeFormatting = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/gu;

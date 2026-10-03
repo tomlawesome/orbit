@@ -20,7 +20,7 @@ import { AppError } from "@/lib/app-error";
 import { type HomeItem } from "@/lib/domain";
 import { workspaceItemSchema } from "@/lib/workspace";
 import type { AdjudicatedField } from "@/server/documents/adjudication";
-import type { DocumentProposal } from "@/server/documents/suggestions";
+import { safeDocumentPlainText, scheduleKinds, type DocumentProposal } from "@/server/documents/suggestions";
 import { readHeldImapAttachment, purgeHeldImapAttachment } from "@/server/imap-attachment-holding";
 import { isDocumentAvailable, uploadItemDocument } from "@/server/document-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
@@ -91,19 +91,19 @@ function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
-function boundedText(value: unknown, maximum: number): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.normalize("NFKC").replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, " ").replace(/\s+/g, " ").trim();
-  return normalized && normalized.length <= maximum && !/[<>]/u.test(normalized) ? normalized : undefined;
-}
-
 function boundedProposalField(field: ProposalField, value: unknown): unknown {
   if (["title", "subtype", "provider", "reference", "currency", "dueDate", "scheduleKind"].includes(field)) {
-    const text = boundedText(value, proposalTextMaximum[field]);
+    // A3-Q2: delegates to suggestions.ts's own sanitiser rather than a
+    // local copy, which had drifted and no longer stripped Unicode bidi
+    // and zero-width characters.
+    const text = safeDocumentPlainText(value, proposalTextMaximum[field]);
     if (!text) return undefined;
     if (field === "currency" && !/^[A-Z]{3}$/u.test(text)) return undefined;
     if (field === "dueDate" && !/^\d{4}-\d{2}-\d{2}$/u.test(text)) return undefined;
-    if (field === "scheduleKind" && !["renewal", "service"].includes(text)) return undefined;
+    // A3-Q1: the shared list (suggestions.ts, from src/lib/domain.ts)
+    // includes "expiry"; a local copy missing it let an expiry document
+    // reach review with its date but no schedule type.
+    if (field === "scheduleKind" && !(scheduleKinds as readonly string[]).includes(text)) return undefined;
     return text;
   }
   if (field === "costMinor" && typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 100_000_000) return value;
@@ -143,7 +143,7 @@ export function sanitizeReviewDraftMetadata(input: unknown): {
     const candidate = record(evidenceInput?.[field]);
     const parsed = z.object({ source: evidenceSource, confidence: evidenceConfidence }).safeParse(candidate);
     if (!parsed.success) continue;
-    const alternative = boundedText(candidate?.alternative, proposalTextMaximum[field] ?? 100);
+    const alternative = safeDocumentPlainText(candidate?.alternative, proposalTextMaximum[field] ?? 100);
     fieldEvidence[field] = alternative ? { ...parsed.data, alternative } : parsed.data;
   }
   return { proposal, fieldEvidence };
