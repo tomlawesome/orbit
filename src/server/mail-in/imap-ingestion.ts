@@ -919,6 +919,24 @@ export async function runImapIngestionCycle(
         eq(imapIngestionMessages.mailbox, config.mailbox),
         eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
       ));
+      /* An unattributed message is deleted after this pass (below), in its
+         own read-write lock; a crash between the receipt committing here and
+         that delete running would otherwise strand the message in the
+         mailbox forever, since the checkpoint above already treats its UID
+         as seen (SR1-R4). Re-collecting every still-unattributed, unexpired
+         receipt for this UIDVALIDITY epoch each cycle makes the delete retry
+         until it actually lands; re-deleting an already-expunged UID is a
+         no-op. Bounded by the receipt's own retention window, the same one
+         that already governs how long an unattributed record is kept. */
+      const pendingExpungeRows = await getDb().select({
+        uid: imapIngestionMessages.mailboxUid,
+      }).from(imapIngestionMessages).where(and(
+        eq(imapIngestionMessages.mailbox, config.mailbox),
+        eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
+        eq(imapIngestionMessages.status, "unattributed"),
+        gt(imapIngestionMessages.expiresAt, new Date()),
+      )).orderBy(asc(imapIngestionMessages.mailboxUid)).limit(100);
+      for (const row of pendingExpungeRows) unattributedUids.push(row.uid);
       /* Both header sets in one fetch: the provider's envelope recipient, and
          everything the sender rules read (ADR-0017 decision 3). A header
          nobody fetched reads exactly like a header nobody sent, so the list
@@ -1053,7 +1071,8 @@ export async function runImapIngestionCycle(
         for (const uid of batch) await fetchThenProcess(uid);
       }
     } finally { lock.release(); }
-    if (unattributedUids.length) await deleteUnattributedMessages(client, config, unattributedUids);
+    const uniqueUnattributedUids = [...new Set(unattributedUids)];
+    if (uniqueUnattributedUids.length) await deleteUnattributedMessages(client, config, uniqueUnattributedUids);
   } finally {
     try { await client.logout(); } catch { /* Network failure already has no raw-mail logging. */ }
   }
