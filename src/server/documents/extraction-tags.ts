@@ -576,14 +576,30 @@ interface TriggerScope {
  * that leaves its own block has to know which block below or above it is the
  * one holding the value.
  */
+/**
+ * The three whole-document scans `buildScopes` needs -- cuts, hard cuts and
+ * block spans -- depend only on `text`, never on which kind's triggers are
+ * being scoped. `tagCandidates` computes this once and shares it across its
+ * four `buildScopes` calls (one per kind) instead of each repeating the same
+ * scan over the same document (A3-Q5).
+ */
+interface DocumentScanSpans {
+  cuts: TextSpan[];
+  hardCuts: TextSpan[];
+  blocks: TextSpan[];
+}
+
+function documentScanSpans(text: string): DocumentScanSpans {
+  return { cuts: findCuts(text), hardCuts: findHardCuts(text), blocks: blockSpans(text) };
+}
+
 function buildScopes(
   text: string,
   triggers: readonly LabelTrigger[],
   targets: readonly number[],
+  scan: DocumentScanSpans = documentScanSpans(text),
 ): TriggerScope[] {
-  const cuts = findCuts(text);
-  const hardCuts = findHardCuts(text);
-  const blocks = blockSpans(text);
+  const { cuts, hardCuts, blocks } = scan;
   const scopes: TriggerScope[] = [];
 
   // Collected first, because a trigger's reach across a block boundary stops
@@ -1039,11 +1055,12 @@ export const tagCandidates: TagStage = (text, candidates) => {
   // block below or above it holds the value it names.
   const startsOf = (kind: CandidateKind) =>
     candidates.filter((candidate) => candidate.kind === kind).map((candidate) => candidate.index);
+  const scan = documentScanSpans(text);
   const scopesByKind: Record<Exclude<CandidateKind, "date">, TriggerScope[]> = {
-    amount: buildScopes(text, AMOUNT_TRIGGERS, startsOf("amount")),
-    identifier: buildScopes(text, IDENTIFIER_TRIGGERS, startsOf("identifier")),
-    organisation: buildScopes(text, ORGANISATION_TRIGGERS, startsOf("organisation")),
-    heading: buildScopes(text, HEADING_TRIGGERS, startsOf("heading")),
+    amount: buildScopes(text, AMOUNT_TRIGGERS, startsOf("amount"), scan),
+    identifier: buildScopes(text, IDENTIFIER_TRIGGERS, startsOf("identifier"), scan),
+    organisation: buildScopes(text, ORGANISATION_TRIGGERS, startsOf("organisation"), scan),
+    heading: buildScopes(text, HEADING_TRIGGERS, startsOf("heading"), scan),
   };
 
   // One ConText pass over all the dates at once, then consumed in order --
