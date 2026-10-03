@@ -166,19 +166,29 @@ describe("the wiring", () => {
     resolve(import.meta.dirname, "../../web/src/lib/tour/Tour.svelte"),
     "utf8",
   );
+  // T-Q14 (#1151): a plain `toContain` proves only that the substring
+  // exists somewhere in the file -- including inside a `<!-- -->` template
+  // comment or a `//`/`/* */` disabled line in the `<script>` block, which
+  // would make the call look wired while actually being dead. Comments are
+  // stripped first, so what the checks below see is only what Svelte would
+  // actually compile and run.
+  const liveSource = tourSource
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
 
   it("Tour.svelte calls beginFilm, and hands the real film its pocket reading (#1083)", () => {
-    expect(tourSource).toContain("beginFilm({");
-    expect(tourSource).toContain("pocket: isPocket()");
+    expect(liveSource).toContain("beginFilm({");
+    expect(liveSource).toContain("pocket: isPocket()");
   });
 
   it("Tour.svelte no longer draws the superseded card (§23)", () => {
-    expect(tourSource).not.toContain("tourcard");
-    expect(tourSource).not.toContain("./engine.js");
-    expect(tourSource).not.toContain("./stops.js");
+    expect(liveSource).not.toContain("tourcard");
+    expect(liveSource).not.toContain("./engine.js");
+    expect(liveSource).not.toContain("./stops.js");
   });
 
   it("Tour.svelte builds the real film via createFilm", () => {
-    expect(tourSource).toContain("createFilm({");
+    expect(liveSource).toContain("createFilm({");
   });
 });
