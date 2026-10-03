@@ -194,6 +194,11 @@
   .belt-page #band{z-index:2}
   .belt-page #fore{z-index:5}
   .belt-page #members{position:fixed;inset:0;z-index:3;overflow:visible}
+  /* #1151 W1-Q18: the one place the seat ring and the end-cap ring's shared
+     width/offset live, so #1065's "the seats above now do it the same way
+     as the end-caps" stays true automatically rather than by two hand-kept
+     copies of the same two values. */
+  .belt-page{--belt-seat-ring:2px dashed var(--accent);--belt-seat-ring-offset:3px}
   .belt-page .hit{pointer-events:auto;cursor:pointer}
   .belt-page .hit .fring{opacity:0}
   .belt-page .hit:focus-visible{outline:none}
@@ -203,7 +208,7 @@
      .endcap-hit below. `.seat .hit` rather than `.hit` alone, so this leaves
      the pocket's document clump (buildClump, not wrapped in `.seat`) painting
      its ring on a child exactly as before: #1065 is scoped to seats. */
-  .belt-page .seat .hit:focus-visible{outline:2px dashed var(--accent);outline-offset:3px}
+  .belt-page .seat .hit:focus-visible{outline:var(--belt-seat-ring);outline-offset:var(--belt-seat-ring-offset)}
   .belt-page .hit:hover .rim{opacity:.9}
   .belt-page .rim{transition:opacity .25s ease}
   .belt-page .cap-name{font:11.5px var(--mono);fill:var(--ink-mid);text-anchor:middle}
@@ -237,7 +242,7 @@
      scoped to seats. 2px and offset, not a hairline: it has to read against
      the band on a phone as well as on a desk. */
   .belt-page .endcap-hit{pointer-events:auto;cursor:pointer}
-  .belt-page .endcap-hit:focus-visible{outline:2px dashed var(--accent);outline-offset:3px}
+  .belt-page .endcap-hit:focus-visible{outline:var(--belt-seat-ring);outline-offset:var(--belt-seat-ring-offset)}
   .belt-page .endcap-hit:hover .endcap{fill:var(--ink-mid)}
   .belt-page .endcap-hit.off{cursor:default}
   .belt-page .endcap-hit.off .endcap,
@@ -344,11 +349,13 @@
         cursor:pointer;padding:0}
   .belt-page .back:hover{color:var(--accent-text)}
 
-  /* The document's honest display, v2's, unchanged. No fabricated page image:
-     the plate says what the file is, the rows say what Orbit knows, the
-     button hands over the original. #476's page-one render turns this half
-     into the page itself. */
-  .belt-page .docview{display:flex;gap:20px;align-items:flex-start}
+  /* The honest stand-in for a page that has none to show (scanning, removed,
+     refused) or isn't drawing one yet: a plain card face, no fabricated page
+     image. #1088's readcard/topsheet/sheet/rcfoot draw the actual page
+     alongside it now; .docview/.docbody/.getrow, the pre-#1088 flex layout
+     this plate used to sit in, are gone from the markup and were deleted
+     from here with them (#1151 W1-Q16) rather than left to describe a
+     layout that no longer exists. */
   .belt-page .plate{flex:none;width:104px;height:134px;border-radius:8px;position:relative;
          border:1px solid var(--paper);background:var(--panel);
          display:grid;place-items:end center;padding-bottom:8px;
@@ -357,17 +364,6 @@
      background:var(--line);
      box-shadow:0 10px 0 var(--line),0 20px 0 var(--line-soft),0 30px 0 var(--line-soft),
                 0 40px 0 var(--line-soft),0 50px 0 var(--line-soft)}
-  .belt-page .docbody{flex:1;min-width:0}
-  .belt-page .docbody h2{font:520 14px var(--mono);line-height:1.35;word-break:break-all}
-  .belt-page .docbody .sub{font:10.5px var(--mono);color:var(--ink-mid);letter-spacing:.04em;
-                margin:5px 0 12px}
-  .belt-page .getrow{display:flex;align-items:center;gap:18px;margin-top:16px}
-  /* "the original in your hands" is a real link in the product — an <a> to
-     GET /api/documents/{id}/download, so it can be opened in its own tab or
-     copied like any address — where the sheet drew an inert <button>. These
-     two declarations are all it takes for an anchor to render as that button;
-     nothing else about the plate changes. */
-  .belt-page .getrow a.btn-primary{display:inline-block;text-decoration:none}
 
   /* ---- the search box -------------------------------------------------
      home.html's explore field, verbatim in its idiom: no box, one underline,
