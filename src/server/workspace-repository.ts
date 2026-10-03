@@ -49,7 +49,6 @@ import { isInstanceAdministrator } from "@/server/authorization";
 // (#383).
 const MAX_ITEMS_PER_HOUSEHOLD = 500;
 const MAX_NOTIFICATION_IDS_PER_HOUSEHOLD = 2_000;
-
 /** Truncates to the outbound schema cap instead of letting workspaceSchema.parse fail on stored data (#383). */
 function clampedForRead<T>(values: T[], limit: number): T[] {
   if (values.length <= limit) return values;
@@ -118,7 +117,17 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     getDb().select().from(dueEvents)
       .where(and(inArray(dueEvents.householdId, householdIds), isNull(dueEvents.completedAt)))
       .orderBy(asc(dueEvents.dueDate)),
-    getDb().select().from(reminderRules),
+    // #1151 A4-R4: scoped to this read's own households, the same way every
+    // other query here is. `reminder_rules` carries no household column of
+    // its own -- only `itemId` -- so the join runs through `items`, which
+    // already pins the join to the right instance's rows; a plain
+    // `.from(reminderRules)` used to scan and load the entire instance's
+    // reminder rules on every workspace read, for every household, however
+    // many other households and instances the table held.
+    getDb().select({ itemId: reminderRules.itemId, daysBefore: reminderRules.daysBefore })
+      .from(reminderRules)
+      .innerJoin(items, eq(items.id, reminderRules.itemId))
+      .where(inArray(items.householdId, householdIds)),
     // Only recordActivity's inserts (entityType "item", changes: { activity })
     // feed the item history timeline; every other audit_log write (document
     // lifecycle, membership, household lifecycle, ...) is filtered out by the
