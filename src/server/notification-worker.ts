@@ -20,6 +20,7 @@ import {
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
 import { log, operationalReasons, type OperationalReason } from "@/lib/logger";
 import {
+  DEFAULT_ENABLED_CHANNELS,
   DEFAULT_FINAL_WARNING_DAYS,
   DEFAULT_FIRST_WARNING_DAYS,
   effectiveReminderOffsets,
@@ -393,8 +394,8 @@ function candidateReminderOffsets(candidate: {
       ? []
       : [{
         daysBefore: candidate.daysBefore,
-        emailEnabled: candidate.emailEnabled ?? true,
-        pushEnabled: candidate.pushEnabled ?? true,
+        emailEnabled: candidate.emailEnabled ?? DEFAULT_ENABLED_CHANNELS.emailEnabled,
+        pushEnabled: candidate.pushEnabled ?? DEFAULT_ENABLED_CHANNELS.pushEnabled,
       }],
     candidate,
   );
