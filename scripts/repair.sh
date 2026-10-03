@@ -3058,6 +3058,7 @@ do_restore_transaction() {
   local -a staging_matches=()
   local -a touched=()
   local staging_root path parent backup_path live_backup_path had_backup have_live
+  local live_secret_path live_secret_backup_path dated_backup_path
 
   shopt -s nullglob dotglob
   staging_matches=(.orbit-install-staging.*)
@@ -3085,6 +3086,41 @@ do_restore_transaction() {
     printf 'Orbit repair: this staging directory was left behind after installation already succeeded; restoring from it would revert that update. Remove it manually once you have confirmed the current deployment is correct.\n' >&2
     return 1
   fi
+
+  # O2-S1: .env-orbit and .orbit-secrets hold the deployment's LIVE
+  # credentials, unlike every other path in restore_transaction_paths —
+  # restoring them from an install-staging snapshot is never "safe" the
+  # way a managed-file restore is, however old or however it got left
+  # behind. Two checks before anything is touched, and only when this
+  # staging snapshot actually carries a backup of one of them:
+  #   - never restore from a snapshot older than the live file it would
+  #     replace. An old snapshot restoring over a newer, possibly already
+  #     rotated, live secret is exactly the failure this guard exists to
+  #     prevent — age alone proves nothing is still in sync.
+  #   - never run unattended. This finding fires precisely because
+  #     `--safe-only`'s non-interactive automation path (confirm_safe_batch)
+  #     proceeds with no prompt at all; a live-secret restore must have a
+  #     real confirmation channel (a human at a controlling terminal, or an
+  #     explicit ORBIT_REPAIR_PROMPTS=machine caller) before it may run,
+  #     exactly like the dangerous batch's own "never automatable" rule.
+  for live_secret_path in .env-orbit .orbit-secrets; do
+    live_secret_backup_path="$staging_root/rollback/original/$live_secret_path"
+    [[ -e "$live_secret_backup_path" || -L "$live_secret_backup_path" ]] || continue
+
+    if [[ -e "$live_secret_path" && "$live_secret_path" -nt "$live_secret_backup_path" ]]; then
+      printf 'Orbit repair: refusing restore-transaction; the live %s is newer than the install-staging snapshot at %s.\n' \
+        "$live_secret_path" "$staging_root" >&2
+      printf 'Orbit repair: restoring it would silently revert live credentials to an older, possibly superseded value. Remove the stale staging directory by hand once you have confirmed the current deployment is correct.\n' >&2
+      return 1
+    fi
+
+    if [[ "$interactive" != 1 && "$machine_prompts" != 1 ]]; then
+      printf 'Orbit repair: refusing restore-transaction; %s would restore the live %s from an install-staging snapshot.\n' \
+        "$staging_root" "$live_secret_path" >&2
+      printf 'Orbit repair: this is never automatic; re-run with a controlling terminal, or ORBIT_REPAIR_PROMPTS=machine, to confirm it explicitly.\n' >&2
+      return 1
+    fi
+  done
 
   ensure_recovery_dir || return 1
 
@@ -3127,10 +3163,28 @@ do_restore_transaction() {
     touched+=("$path")
 
     if [[ "$have_live" == 1 ]]; then
-      remove_repair_path "$path" || {
-        restore_transaction_self_restore "${touched[@]}"
-        return 1
-      }
+      if [[ "$path" == .env-orbit || "$path" == .orbit-secrets ]]; then
+        # O2-S1: never delete the live copy of a secret — move it to a
+        # dated backup beside it instead, so it survives even after this
+        # run's private $recovery_dir is cleaned up at exit. The recovery
+        # copy above (cp -a into $recovery_dir/live) is for this action's
+        # own mid-transaction self-restore only; this is the operator's
+        # durable one.
+        dated_backup_path="${path}.pre-restore.$(date -u +%Y%m%dT%H%M%SZ)"
+        if [[ -e "$dated_backup_path" || -L "$dated_backup_path" ]]; then
+          restore_transaction_self_restore "${touched[@]}"
+          return 1
+        fi
+        mv -- "$path" "$dated_backup_path" || {
+          restore_transaction_self_restore "${touched[@]}"
+          return 1
+        }
+      else
+        remove_repair_path "$path" || {
+          restore_transaction_self_restore "${touched[@]}"
+          return 1
+        }
+      fi
     fi
 
     if [[ "$had_backup" == 1 ]]; then
