@@ -61,9 +61,7 @@
  * chapter's end), so it is never called here either: the swing back out
  * plays on the reader's own, undimmed sky.
  */
-import { dialPlacement } from "../../data/chart.js";
-
-const SVG_NS = "http://www.w3.org/2000/svg";
+import { drawDemoBody, ease, positionDemoBody } from "./demo-body.js";
 
 /** Ratified beat: the demo body walks from 16 days out (just completed) to
  *  381 (next year), over a fixed 2200ms after a 200ms lead-in — the
@@ -114,37 +112,18 @@ export const SELECTORS = Object.freeze({
   }),
 });
 
-/** Eased 0..1, matching chapter 5's own (and the mockup's `walk`). @param {number} t */
-function ease(t) {
-  return 1 - Math.pow(1 - t, 3);
-}
-
 /**
  * @param {Document} doc
  * @param {Element} dial
  * @param {number} days
  */
 function drawTimeBody(doc, dial, days) {
-  const group = doc.createElementNS(SVG_NS, "g");
-  group.setAttribute("class", "tourfilm-time-body");
-  group.setAttribute("aria-hidden", "true");
-  const dot = doc.createElementNS(SVG_NS, "circle");
-  dot.setAttribute("class", "tourfilm-time-dot");
-  dot.setAttribute("r", "5.5");
-  dot.setAttribute("style", "fill:var(--accent)");
-  group.appendChild(dot);
-  dial.appendChild(group);
-  positionTimeBody(group, days);
-  return group;
+  return drawDemoBody(doc, dial, days, "tourfilm-time-body", "tourfilm-time-dot");
 }
 
 /** @param {Element} group @param {number} days */
 function positionTimeBody(group, days) {
-  const { x, y } = dialPlacement(days);
-  const dot = group.querySelector(".tourfilm-time-dot");
-  if (!dot) return;
-  dot.setAttribute("cx", String(x));
-  dot.setAttribute("cy", String(y));
+  positionDemoBody(group, days, "tourfilm-time-dot");
 }
 
 /** @type {import("./index.js").Chapter} */
