@@ -671,7 +671,12 @@ verify_database_volume_safety() {
     return 0
   fi
   if [[ "$target_was_empty" == 1 ]]; then
-    fail "An existing Orbit database volume requires a recognized deployment with its preserved database credentials; refusing to start Compose."
+    # #1151 O1-S3: names the volume and the exact command, rather than
+    # leaving the operator to guess -- the normal case this now reaches is
+    # a volume a prior interruption's own failure path (wait_for_deployment_
+    # readiness) could not remove, since on a fresh install nothing else
+    # could have created it.
+    fail "An existing Orbit database volume (${candidates[*]}) requires a recognized deployment with its preserved database credentials; refusing to start Compose. If this is leftover from a previous failed install rather than a deployment you want to keep, remove it first: docker volume rm -- ${candidates[*]}"
   fi
   [[ "${#candidates[@]}" == 1 ]] ||
     fail "Multiple Orbit database volumes were found; refusing to start Compose until exactly one recognized deployment can be proven."
@@ -1450,6 +1455,20 @@ wait_for_deployment_readiness() {
   if ! compose up -d --no-build --remove-orphans >/dev/null 2>&1; then
     if [[ "$target_was_empty" == 1 ]]; then
       compose down --remove-orphans >/dev/null 2>&1 || true
+      # #1151 O1-S3: `compose up` creates the named database volume on first
+      # run, and verify_database_volume_safety already refused earlier (see
+      # its own "An existing Orbit database volume requires a recognized
+      # deployment" check) if one existed before this attempt started -- so
+      # on a fresh install (target_was_empty), any matching volume here was
+      # created by the attempt that just failed, never a deployment worth
+      # protecting. Leaving it behind (compose down has no --volumes) meant
+      # every retry failed that exact same check again, forever, with no
+      # way out it ever named.
+      local leftover_volume=""
+      leftover_volume="$(docker volume ls --filter "name=$database_volume_key" --format '{{.Name}}' 2>/dev/null | grep -E "(^|_)orbit-db-data\$" | head -n1)" || true
+      if [[ -n "$leftover_volume" ]]; then
+        docker volume rm -- "$leftover_volume" >/dev/null 2>&1 || true
+      fi
     fi
     fail_with docker-host repair "Orbit services could not be created or started."
   fi
