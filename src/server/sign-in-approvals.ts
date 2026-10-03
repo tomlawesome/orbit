@@ -324,11 +324,18 @@ async function mailApproval(
  * Opens a pending sign-in for a password that has already been verified, and
  * mails its approval link (ADR-0027 §1, §4-§6).
  *
- * The row is written whether or not the mail gets out: a pending sign-in that
- * could not be posted is still a sign-in nobody may complete, and writing it
- * anyway keeps the waiting tab's resend button pointed at something. It is
- * also what makes the hourly limit honest -- a suppressed send still leaves
- * the reader an earlier live link, and this tab waiting on its own.
+ * The row is written BEFORE the mail is attempted, and its send outcome
+ * recorded afterwards (#1151 A1-R1) -- the opposite order from the one this
+ * function used to use, which mailed a token no row yet existed for. A crash
+ * between the two halves used to leave the reader a mailed link with
+ * nothing in the database for it to resolve against: a dead link with no
+ * way even to ask for a fresh one, since collecting and resending both work
+ * by looking up an existing row. Writing the row first means that same
+ * crash instead leaves an unsent, harmless row that simply expires -- the
+ * waiting tab never got a response either, so it retries and gets a new one.
+ * A pending sign-in that could not be posted is still written and still
+ * counts toward the hourly limit once it does send, exactly as before; only
+ * the order changed.
  */
 export async function startSignInApproval(
   userId: string,
@@ -342,6 +349,19 @@ export async function startSignInApproval(
 
   const recipient = await readRecipient(userId);
   const limited = await sendsInWindow(userId, now) >= APPROVAL_SENDS_PER_HOUR;
+
+  const db = getDb();
+  const [row] = await db.insert(signInApprovals).values({
+    userId,
+    tokenHash: secretDigest(token),
+    claimHash: secretDigest(claim),
+    userAgent: facts.userAgent ? facts.userAgent.slice(0, 256) : null,
+    clientAddress: facts.clientAddress,
+    expiresAt,
+    sendCount: 0,
+    lastSentAt: null,
+  }).returning({ id: signInApprovals.id });
+
   /* An account that vanished between the password check and this read is a
      send that did not happen, never a send that silently counted: `sent`
      decides whether the hour's allowance is spent, so it has to mean "a mail
@@ -353,16 +373,11 @@ export async function startSignInApproval(
       : "unknown";
   const sent = !limited && sendError === null;
 
-  await getDb().insert(signInApprovals).values({
-    userId,
-    tokenHash: secretDigest(token),
-    claimHash: secretDigest(claim),
-    userAgent: facts.userAgent ? facts.userAgent.slice(0, 256) : null,
-    clientAddress: facts.clientAddress,
-    expiresAt,
-    sendCount: sent ? 1 : 0,
-    lastSentAt: sent ? now : null,
-  });
+  if (sent) {
+    await db.update(signInApprovals)
+      .set({ sendCount: 1, lastSentAt: now })
+      .where(eq(signInApprovals.id, row.id));
+  }
 
   return {
     claim,
