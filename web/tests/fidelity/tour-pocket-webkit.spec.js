@@ -68,7 +68,13 @@ const MARKS = [
   ["time", ["time-warmed", "time-toast"]],
   ["relay", ["relay-addr"]],
   ["inbox", ["inbox-orb", "inbox-lane-review", "inbox-lane-reading", "inbox-lane-filed", "inbox-lanes", "inbox-add", "inbox-sayso"]],
-  ["belt", ["belt-arrive", "belt-cert", "belt-svc", "belt-doc", "belt-read", "belt-later", "belt-sooner"]],
+  /* belt-later/belt-sooner retired with the step beat itself (#1174 round
+     10, the owner, 2026-10-02: the film never rings, names or presses
+     either end-cap any more) — 2e8eb0ba dropped them from the chapter but
+     missed this file, so every run paid two full 45s `never reached`
+     waits chasing marks the film no longer sets, on top of the budget
+     everything else here already needs: the 420s stall above. */
+  ["belt", ["belt-arrive", "belt-cert", "belt-svc", "belt-doc", "belt-read"]],
   ["done", ["done-complete", "done-swung", "done-round"]],
   ["others", ["others-gran", "others-ask"]],
   ["sky", ["sky-orb", "sky-settings", "sky-swatches", "sky-dawn", "sky-back"]],
