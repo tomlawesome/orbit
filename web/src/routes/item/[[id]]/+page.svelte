@@ -907,30 +907,25 @@
   const itemCount = $derived(bodies.filter((b) => b.kind === "item" && !b.item.suggestion).length);
   const suggestedCount = $derived(bodies.filter((b) => b.kind === "item" && b.item.suggestion).length);
   const suggestedNote = $derived(suggestedCount ? ` · ${suggestedCount} suggested` : "");
-  const findnote = $derived(
-    !bodies.length
-      ? "the belt is empty"
-      : !query.trim()
-        /* #1062: the note says what ORDER the belt is in, not which keys move
-           it. The end-caps are the visible way along it now, and the arrow
-           keys keep working as the shortcut they always were. */
-        ? `${itemCount} items${suggestedNote} · in date order, sooner to later`
-        : hitList.length
-          ? `${hitList.length} of ${itemCount} lit · enter centres the nearest`
-          : "nothing matches · the belt keeps its shape",
-  );
-  /* round-3 §3.2: the phone's caps head drops "in date order" -- the belt's
-     own shape says the order, and the cap is 40 characters at rest. The
-     desk's own find note under the `.find` box keeps the fuller line. */
-  const pocketFindnote = $derived(
-    !bodies.length
-      ? "the belt is empty"
-      : !query.trim()
-        ? `${itemCount} items${suggestedNote} · sooner to later`
-        : hitList.length
-          ? `${hitList.length} of ${itemCount} lit · enter centres the nearest`
-          : "nothing matches · the belt keeps its shape",
-  );
+  /** #1151 W1-Q17: the one place both find-notes' shared selection formula
+   *  (empty belt / no query / hit count / no match) lives — only the
+   *  no-query branch's wording actually differs between desk and phone
+   *  (round-3 §3.2: the phone's caps head drops "in date order" — the
+   *  belt's own shape says the order, and the cap is 40 characters at
+   *  rest), taken here as the one parameter that does.
+   *  @param {string} noQuerySuffix */
+  function findnoteFor(noQuerySuffix) {
+    if (!bodies.length) return "the belt is empty";
+    /* #1062: the note says what ORDER the belt is in, not which keys move
+       it. The end-caps are the visible way along it now, and the arrow
+       keys keep working as the shortcut they always were. */
+    if (!query.trim()) return `${itemCount} items${suggestedNote} · ${noQuerySuffix}`;
+    return hitList.length
+      ? `${hitList.length} of ${itemCount} lit · enter centres the nearest`
+      : "nothing matches · the belt keeps its shape";
+  }
+  const findnote = $derived(findnoteFor("in date order, sooner to later"));
+  const pocketFindnote = $derived(findnoteFor("sooner to later"));
 
   /** @param {KeyboardEvent} event */
   function onFindKey(event) {
