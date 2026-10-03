@@ -49,6 +49,18 @@ export type { InvitationSendError } from "@/server/invitations/send";
 /** Past this many open invitations a household is asked to tidy up first. */
 export const MAX_OPEN_INVITATIONS = 20;
 
+/**
+ * Longer than `sendBoundedMail`'s own bounded connect/greeting/socket
+ * timeouts could ever leave a send unresolved (#1151 SR1-R5): a row still
+ * showing neither `sentAt` nor `sendError` past this age was never going to
+ * get an outcome on its own -- the process that owed it one crashed between
+ * committing the row and recording what the send did. Reading the list is
+ * what notices this, and reconciling it to the one bounded word already used
+ * for "we don't know what happened" is what turns a silently stuck
+ * invitation back into one the owner can see failed and resend.
+ */
+const INVITATION_SEND_RECONCILE_MS = 2 * 60 * 1000;
+
 /** What the household screen is told about one invitation. No token, ever. */
 export interface HouseholdInvitation {
   id: string;
@@ -128,6 +140,33 @@ const summaryColumns = {
 const stillOpen = and(isNull(householdInvitations.redeemedAt), isNull(householdInvitations.revokedAt));
 
 /**
+ * Marks an invitation stuck with neither outcome as a send Orbit cannot
+ * account for, the same word an unreadable provider failure already uses
+ * (#1151 SR1-R5). The conditional `where` guards against reconciling a row a
+ * real send has since resolved out from under this read.
+ */
+async function reconcileUnresolvedSends(rows: InvitationRow[], now: Date): Promise<InvitationRow[]> {
+  const stale = rows.filter((row) => (
+    row.sentAt === null
+    && row.sendError === null
+    && now.getTime() - row.createdAt.getTime() > INVITATION_SEND_RECONCILE_MS
+  ));
+  if (stale.length === 0) return rows;
+
+  const db = getDb();
+  await Promise.all(stale.map((row) => db.update(householdInvitations)
+    .set({ sendError: "unknown" })
+    .where(and(
+      eq(householdInvitations.id, row.id),
+      isNull(householdInvitations.sentAt),
+      isNull(householdInvitations.sendError),
+    ))));
+
+  const staleIds = new Set(stale.map((row) => row.id));
+  return rows.map((row) => (staleIds.has(row.id) ? { ...row, sendError: "unknown" } : row));
+}
+
+/**
  * The household's open invitations, for anyone who may see that household.
  *
  * Members get the same list an owner does. They typed none of it and can
@@ -135,15 +174,20 @@ const stillOpen = and(isNull(householdInvitations.redeemedAt), isNull(householdI
  * mail and nobody else can see it happening is not the household this product
  * describes (§11's "who sees what").
  */
-export async function listHouseholdInvitations(actorUserId: string, householdId: string): Promise<HouseholdInvitation[]> {
+export async function listHouseholdInvitations(
+  actorUserId: string,
+  householdId: string,
+  now: Date = new Date(),
+): Promise<HouseholdInvitation[]> {
   await requireHouseholdAccess(actorUserId, householdId);
   const rows = await getDb().select(summaryColumns)
     .from(householdInvitations)
     .where(and(eq(householdInvitations.householdId, householdId), stillOpen))
     .orderBy(asc(householdInvitations.createdAt));
+  const reconciled = await reconcileUnresolvedSends(rows, now);
   // One DEK unwrap for the whole list (ADR-0024 decision 1), not one per row.
   const cipher = await openMetadataReader(householdId);
-  return rows.map((row) => summarise(row, cipher));
+  return reconciled.map((row) => summarise(row, cipher));
 }
 
 /** The owner check, made again inside the lock the write is taken under. */
