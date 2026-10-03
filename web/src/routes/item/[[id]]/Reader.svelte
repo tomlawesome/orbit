@@ -213,7 +213,15 @@
          onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={up}>
       <img bind:this={img} src={staged ? previewSrc : (doc.previewHref ?? "")} alt="Page one of {doc.name}"
            style:width={natural.w ? `${Math.round(natural.w * shownScale)}px` : undefined}
-           onload={() => { if (img) natural = { w: img.naturalWidth, h: img.naturalHeight }; }} />
+           onload={() => { if (img) natural = { w: img.naturalWidth, h: img.naturalHeight }; }}
+           onerror={() => {
+             /* #1151 W1-R11: this re-requests the page rather than reusing
+                the sheet's own already-loaded bytes, so it can fail on its
+                own even though the thumbnail that opened this already drew
+                fine — with no onerror at all, that left the browser's bare
+                broken-image glyph and no way to tell what happened. */
+             problem = "this page could not be drawn — try closing and reopening it";
+           }} />
     </div>
     <footer class="rd-foot">
       <p class="rd-page">page 1</p>
