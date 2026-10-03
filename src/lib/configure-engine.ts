@@ -23,6 +23,7 @@ import {
   containsForbiddenCharacters,
   isForbiddenHost,
   isValidClientId,
+  isValidLocalModel,
   isValidOidcIssuer,
   isValidOrbitImage,
   normalizePublicOrigin,
@@ -782,11 +783,6 @@ export function applyGuidedInit(deployDir: string, input: GuidedInitInput): stri
 }
 
 // --- deployment profile ---------------------------------------------------
-
-function isValidLocalModel(value: string): boolean {
-  if (value.length < 1 || value.length > 128) return false;
-  return /^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?$/.test(value);
-}
 
 /** set_deployment_profile (configure.sh:327-357, guarantee #10). Argument-shape refusals here map to configure.sh's own `return 2` (usage error, exit 2 from the CLI dispatch) rather than its generic `fail()` (exit 1) — src/cli/orbit.ts distinguishes them by this function's ConfigureEngineRefusal code. */
 export function setDeploymentProfile(deployDir: string, preset: string, model: string | undefined): string {
