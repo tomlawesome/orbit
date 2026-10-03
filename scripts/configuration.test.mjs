@@ -1,10 +1,10 @@
-import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { spawnSync } from "node:child_process";
-import { describe, expect, it, vi } from "vitest";
+import { spawn, spawnSync } from "node:child_process";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard, processWatchdog } from "./process-budget.mjs";
 
 // Every test here runs scripts/configuration.sh under bash; a spawn that
 // takes tens of milliseconds quiet takes seconds on a starved core (#698).
@@ -381,4 +381,79 @@ describe("configuration.sh", () => {
       expect(result.stderr.trim()).toBe("configuration_version");
     }
   });
+});
+
+// #1151 O1-R4: migrate_file's own "${file}.migrating.XXXXXX" scratch file
+// used to have no cleanup at all for a Ctrl-C or SIGTERM mid-migration --
+// each of its own error paths removed it on an ordinary failure, but
+// nothing ran if the process was simply killed between them, leaking the
+// scratch file forever. A trap now runs cleanup_migration_temp on any exit.
+//
+// This extracts the real migration_temp_file global, cleanup_migration_temp
+// function and its `trap ... EXIT` line from the live script (never a
+// hand-typed duplicate) into a minimal harness that blocks in a `read`
+// builtin on a FIFO -- standing in for migrate_file's own while/read loop,
+// which never forks an external command either -- rather than an external
+// `sleep`: bash defers running a trap until a foreground EXTERNAL command
+// returns, so a harness blocked in `sleep` would "pass" only because the
+// signal gets queued and actually lands once sleep finishes on its own,
+// never proving the trap fires promptly. Blocking in the `read` builtin
+// matches the real interruption window and lets SIGTERM land immediately.
+describe("configuration.sh's migration scratch file is removed on a signal (#1151 O1-R4)", () => {
+  const scratchDirs = [];
+  afterEach(() => {
+    while (scratchDirs.length > 0) rmSync(scratchDirs.pop(), { recursive: true, force: true });
+  });
+
+  function extractLine(source, pattern) {
+    const match = source.match(pattern);
+    if (!match) throw new Error(`Could not find ${pattern} in the given source`);
+    return match[0];
+  }
+
+  function extractFunction(source, name) {
+    return extractLine(source, new RegExp(`^${name}\\(\\) \\{[\\s\\S]*?\\n\\}`, "mu"));
+  }
+
+  it("removes the scratch file when the process is killed while it is tracked", async () => {
+    const source = readFileSync(script, "utf8");
+    const directory = mkdtempSync(join(tmpdir(), "orbit-configuration-migrate-signal-"));
+    scratchDirs.push(directory);
+    const scratchFile = join(directory, ".env-orbit.migrating.rehearse");
+    const fifo = join(directory, "block.fifo");
+    writeFileSync(scratchFile, "mid-migration content");
+    spawnSync("mkfifo", [fifo]);
+
+    const harness = [
+      "#!/usr/bin/env bash",
+      "set -Eeuo pipefail",
+      extractLine(source, /^migration_temp_file=""$/mu),
+      extractFunction(source, "cleanup_migration_temp"),
+      extractLine(source, /^trap cleanup_migration_temp EXIT$/mu),
+      `migration_temp_file=${JSON.stringify(scratchFile)}`,
+      'printf "READY\\n"',
+      `read -r _line < ${JSON.stringify(fifo)}`,
+    ].join("\n");
+
+    const child = spawn("bash", ["-c", harness]);
+    const watchdog = processWatchdog({ label: "migration-signal-rehearse", kill: () => child.kill("SIGKILL") });
+    let stdout = "";
+    const ready = new Promise((resolve) => {
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk.toString();
+        watchdog.touch();
+        if (stdout.includes("READY")) resolve();
+      });
+    });
+    const closed = new Promise((resolve) => child.on("close", resolve));
+
+    await ready;
+    expect(existsSync(scratchFile)).toBe(true);
+    child.kill("SIGTERM");
+    await closed;
+    watchdog.stop();
+    if (watchdog.reason) throw watchdog.error({ stdout });
+
+    expect(existsSync(scratchFile)).toBe(false);
+  }, PROCESS_TEST_TIMEOUT_MS);
 });

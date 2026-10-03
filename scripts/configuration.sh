@@ -18,6 +18,18 @@ orbit_image_value=""
 applied_version_value=""
 applied_digest_value=""
 compose_project_value=""
+# migrate_file's own scratch file (#1151 O1-R4): Ctrl-C or a SIGTERM mid-
+# migration previously left "${file}.migrating.XXXXXX" behind forever --
+# migrate_file's own error paths each removed it on a normal failure, but
+# nothing ran if the process was simply killed between them. A trap fires
+# this cleanup on any exit, signalled or not; rm -f is a no-op once the
+# file is already gone (removed on an ordinary failure, or renamed away on
+# success).
+migration_temp_file=""
+cleanup_migration_temp() {
+  [[ -z "$migration_temp_file" ]] || rm -f -- "$migration_temp_file" 2>/dev/null || true
+}
+trap cleanup_migration_temp EXIT
 
 fail_code() {
   printf '%s\n' "$1" >&2
@@ -285,6 +297,7 @@ migrate_file() {
     chmod 600 "$backup" 2>/dev/null || fail_code configuration_migration
   fi
   temp="$(mktemp "${file}.migrating.XXXXXX" 2>/dev/null)" || fail_code configuration_migration
+  migration_temp_file="$temp"
   chmod 600 "$temp" 2>/dev/null || { rm -f -- "$temp" 2>/dev/null; fail_code configuration_migration; }
   newline=$'\n'
   LC_ALL=C grep -q $'\r' "$file" && newline=$'\r\n'
@@ -319,6 +332,7 @@ migrate_file() {
     if [[ "$transaction" != 1 ]]; then cp -- "$backup" "$file" 2>/dev/null || true; fi
     fail_code configuration_migration
   fi
+  migration_temp_file=""
   printf 'Orbit configuration: migrated from schema %s version %s digest %s to schema v1 version %s digest %s\n' \
     "$prior_schema" "$prior_version" "$prior_digest" "$desired_version" "$desired_digest"
 }
