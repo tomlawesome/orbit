@@ -233,11 +233,12 @@
   let imgSmearTidal;
   /** #1151 W1-Q7: the live <defs> block, captured via innerHTML the same
       way srcLensarcs etc. are captured via outerHTML — one copy of the
-      filters/gradients, read live, rather than the six F_*/G_* string
-      constants this used to hand-duplicate them as. Every raster job gets
-      the whole captured block regardless of which ids it actually
-      references: an SVG filter/gradient nobody's `url(#id)` points at
-      inside one job's cropped document paints nothing and costs nothing. */
+      filters/gradients, read live, rather than the six filter/gradient
+      string constants this used to hand-duplicate them as. Every raster
+      job gets the whole captured block regardless of which ids it
+      actually references: an SVG filter/gradient nobody's url(#id)
+      points at inside one job's cropped document paints nothing and
+      costs nothing. */
   /** @type {SVGDefsElement | null} */
   let liveDefs;
 
