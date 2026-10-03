@@ -95,6 +95,33 @@ describe("reviewed intake contract", () => {
     });
   });
 
+  it("keeps an expiry scheduleKind, not just renewal and service (#1151 A3-Q1)", () => {
+    expect(sanitizeReviewDraftMetadata({
+      proposal: { title: "Passport", scheduleKind: "expiry" },
+    })).toEqual({
+      proposal: { title: "Passport", scheduleKind: "expiry" },
+      fieldEvidence: {},
+    });
+    expect(sanitizeReviewDraftMetadata({
+      proposal: { title: "Passport", scheduleKind: "not_a_real_kind" },
+    })).toEqual({
+      proposal: { title: "Passport" },
+      fieldEvidence: {},
+    });
+  });
+
+  it("strips Unicode bidi and zero-width characters from a proposal field, like suggestions.ts's own sanitiser (#1151 A3-Q2)", () => {
+    // U+2066 (left-to-right isolate) and U+200B (zero-width space): neither
+    // is a `<` or `>`, so only a sanitiser that knows about bidi and
+    // zero-width characters specifically catches them.
+    expect(sanitizeReviewDraftMetadata({
+      proposal: { title: `Acme⁦ Cover​` },
+    })).toEqual({
+      proposal: { title: "Acme Cover" },
+      fieldEvidence: {},
+    });
+  });
+
   it("carries the rejected reading into a mail-in draft's field evidence only for the fields adjudication disputed", () => {
     const proposal = { title: "receipt", provider: "Larkfield Mutual", reference: "LKM-1", dates: ["2027-02-01"] };
     const { fieldEvidence } = reviewDraftMetadataFromProposal(proposal, { provider: "Acme Cover" });
