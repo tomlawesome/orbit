@@ -19,7 +19,7 @@
   import Reader from "./Reader.svelte";
   import StagedPage from "$lib/pocket/StagedPage.svelte";
   import EntryForm from "../../create/EntryForm.svelte";
-  import { entryOf, fieldsOf, refusalOf } from "../../create/entry.js";
+  import { COST_FORMAT_HINT, entryOf, fieldsOf, minorOf, refusalOf } from "../../create/entry.js";
   import { beltManifestOf, documentPreviewStateOf } from "$lib/data/belt.js";
   import { loadStagedPage } from "$lib/data/staged-page.js";
   import {
@@ -135,6 +135,9 @@
   let problem = $state(null);
   /** @type {PanelForm} */
   let form = $state({});
+  /** Typed but not a sum of money (#1151 W1-F1/W1-S4): the complete and edit
+      panels' own cost field, desktop and phone alike. */
+  const formCostInvalid = $derived(Number.isNaN(minorOf(form.cost)));
 
   /* ---- THE POCKET (#1072, proposal §2.3) ---------------------------------
      Below the CON-10 switch the same belt is drawn closer — a low arc across
@@ -167,11 +170,6 @@
      ordinary seat, in place: the belt re-reads with the new item at the
      apex. On dismissal it leaves the belt and the apex moves to the
      neighbour it sat beside. The separate suggestion page is gone. */
-  /** @param {string} text */
-  const minorOfText = (text) => {
-    const value = Number.parseFloat(String(text).replace(",", "."));
-    return Number.isFinite(value) ? Math.round(value * 100) : undefined;
-  };
   const proposal = $derived(seatedSuggestion?.proposal ?? {});
   /** The desk card's form, from what the relay read.
       @param {import('$lib/data/workspace.js').ItemView | null} one */
@@ -264,12 +262,13 @@
   /** The desk card's own form, sent as the amended item. */
   function acceptAmendedOnDesk() {
     if (!receipt) return;
+    const cost = minorOf(sform.cost);
+    if (Number.isNaN(cost)) { acceptProblem = COST_FORMAT_HINT; return; }
     /** @type {import('$lib/data/workspace.js').ItemProposal} */
     const amended = { title: sform.title.trim() || "Forwarded email", currency: receipt.currency };
     if (proposal.subtype) amended.subtype = proposal.subtype;
     if (sform.provider.trim()) amended.provider = sform.provider.trim();
     if (sform.reference.trim()) amended.reference = sform.reference.trim();
-    const cost = minorOfText(sform.cost);
     if (cost !== undefined) amended.costMinor = cost;
     if (sform.dueDate) {
       amended.dueDate = sform.dueDate;
@@ -918,11 +917,6 @@
   const todayISO = () => data.today ?? new Date().toISOString().slice(0, 10);
   /** @type {(minor?: number | null) => string} */
   const pounds = (minor) => (minor === null || minor === undefined ? "" : (minor / 100).toFixed(2));
-  /** @type {(text?: string) => number | undefined} */
-  const minorOf = (text) => {
-    const value = Number.parseFloat(String(text).replace(",", "."));
-    return Number.isFinite(value) ? Math.round(value * 100) : undefined;
-  };
 
   /**
    * A panel is always about the record at the apex, so it is handed the one
@@ -1355,9 +1349,11 @@
               <input id="a-cnotes" bind:value={form.notes} placeholder="optional"></div>
             {#if locked}
               <div class="note">{COST_LOCKED}</div>
+            {:else if formCostInvalid}
+              <div class="note">{COST_FORMAT_HINT}</div>
             {/if}
             <div class="save-row">
-              <button class="btn-primary" disabled={busy || !form.completedDate}
+              <button class="btn-primary" disabled={busy || !form.completedDate || formCostInvalid}
                 onclick={() => run(() => completeCommand(record, {
                   completedDate: form.completedDate,
                   nextDate: form.nextDate || undefined,
@@ -1424,9 +1420,11 @@
                         placeholder={notesState === DAMAGED ? DAMAGED_PLACEHOLDER : "optional"}></textarea></div>
             {#if locked}
               <div class="note">{PANEL_LOCKED}</div>
+            {:else if formCostInvalid}
+              <div class="note">{COST_FORMAT_HINT}</div>
             {/if}
             <div class="save-row">
-              <button class="btn-primary" disabled={busy || locked || !form.title?.trim()}
+              <button class="btn-primary" disabled={busy || locked || !form.title?.trim() || formCostInvalid}
                 onclick={() => run(() => upsertCommand(record, editsOf()))}>save changes</button>
               <button class="cancel-link" onclick={() => (panel = null)}>never mind</button>
             </div>
@@ -1685,7 +1683,8 @@
              placeholder="optional" disabled={locked}></div>
     <div class="bp-field"><label for="p-cnotes">note</label>
       <input id="p-cnotes" bind:value={form.notes} placeholder="optional" enterkeyhint="done"></div>
-    {#if locked}<p class="bp-note">{COST_LOCKED}</p>{/if}
+    {#if locked}<p class="bp-note">{COST_LOCKED}</p>
+    {:else if formCostInvalid}<p class="bp-note">{COST_FORMAT_HINT}</p>{/if}
   {:else if face === "reschedule" && record}
     <p class="bp-lede">{row?.title} · due {row?.longWhen}</p>
     <div class="bp-field"><label for="p-due">new due date</label>
@@ -1799,7 +1798,7 @@
   {#snippet foot()}
     {#if face === "complete" && record}
       <button class="p-pill filled bp-go" style="--act:var(--ok);--act-text:var(--ok-text)"
-              disabled={busy || !form.completedDate}
+              disabled={busy || !form.completedDate || formCostInvalid}
               onclick={() => {
                 const fields = {
                   completedDate: /** @type {string} */ (form.completedDate),
