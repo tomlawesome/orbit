@@ -164,11 +164,20 @@ describe("enableAlerts — permission granted, not yet subscribed", () => {
 });
 
 describe("enableAlerts — already subscribed", () => {
-  it("returns the live subscription without a permission prompt or a second POST", async () => {
-    const existing = { endpoint: "https://push.example/already-on" };
+  it("skips the permission prompt but still (re)sends the subscription to the server", async () => {
+    // W2-S1: a device that looks subscribed in the browser may have never
+    // landed its write server-side (the one POST it tried could have
+    // failed) — so the server write must happen every time, not only on a
+    // fresh subscribe.
+    const subscriptionJson = {
+      endpoint: "https://push.example/already-on",
+      expirationTime: null,
+      keys: { p256dh: "p256dh-value", auth: "auth-value" },
+    };
+    const existing = { endpoint: subscriptionJson.endpoint, toJSON: () => subscriptionJson };
     const registration = fakeRegistration(existing);
     const requestPermission = vi.fn();
-    const writePushSubscription = vi.fn();
+    const writePushSubscription = vi.fn(async () => ({ subscribed: true }));
 
     const result = await enableAlerts({
       scope: SUPPORTED_SCOPE,
@@ -181,7 +190,27 @@ describe("enableAlerts — already subscribed", () => {
 
     expect(result).toBe(existing);
     expect(requestPermission).not.toHaveBeenCalled();
-    expect(writePushSubscription).not.toHaveBeenCalled();
+    expect(writePushSubscription).toHaveBeenCalledExactlyOnceWith(subscriptionJson);
+  });
+
+  it("propagates a failed server write instead of swallowing it", async () => {
+    // So a device whose write failed once stays correctly "not confirmed
+    // on" rather than the switch claiming success — the caller (the
+    // settings screen) is the one that decides what the reader sees.
+    const existing = { endpoint: "e", toJSON: () => ({ endpoint: "e", keys: {} }) };
+    const registration = fakeRegistration(existing);
+    const writePushSubscription = vi.fn(async () => { throw new Error("network down"); });
+
+    await expect(
+      enableAlerts({
+        scope: SUPPORTED_SCOPE,
+        getRegistration: vi.fn(async () => registration),
+        register: vi.fn(),
+        requestPermission: vi.fn(),
+        readPushConfig: vi.fn(),
+        writePushSubscription,
+      }),
+    ).rejects.toThrow("network down");
   });
 });
 
