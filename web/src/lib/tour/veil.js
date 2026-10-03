@@ -290,7 +290,15 @@ function ensureOverlay() {
     "position:fixed",
     "inset:0",
     "opacity:0",
-    "pointer-events:none", // never blocks a click on the real control it is cut around
+    /* #1151 W3-S1 (owner decision, 2026-10-03): while the tour is showing, a
+       tap or click never reaches the real screen beneath it — a hole only
+       lets the control show through, it never lets it be pressed. The mask
+       is paint only; this div still covers the full viewport for hit-testing,
+       holes included, as long as it is mounted. Tour chrome (the callout
+       layer, the transport bar) paints above this layer's own z-index and is
+       unaffected, since a sibling element above in stacking order takes the
+       hit before this one is even considered. */
+    "pointer-events:auto",
     `z-index:${Z_INDEX}`,
   ].join(";");
   const svg = document.createElementNS(SVG_NS, "svg");
