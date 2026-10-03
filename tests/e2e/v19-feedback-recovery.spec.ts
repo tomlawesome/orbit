@@ -50,6 +50,7 @@ resetDatabaseBetweenSpecFiles();
 
 const isPocket = () => test.info().project.name.startsWith("mobile");
 const isFirefox = () => test.info().project.use.defaultBrowserType === "firefox";
+const isWebkit = () => test.info().project.use.defaultBrowserType === "webkit";
 
 /** Focus on `selector` by keyboard: already there, or Tab onward to it. */
 async function reach(page: Page, selector: string, screen: string, cap = 60) {
@@ -126,7 +127,10 @@ const createOffline: Journey = {
       await expect(page).toHaveURL(isPocket() ? /\/item\/[0-9a-f-]{36}$/ : /\/home$/, { timeout: 30_000 });
     };
   },
-  focusDefect: () => FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket create bar (.pk-save)" : "the desk create card (#card .btn-primary)"),
+  /* #1192: WebKit keeps focus on the pressed button while it is disabled
+     (pipeline 1989, mobile-webkit) -- the opposite of Chromium's #1178
+     defect, not a timing race like Firefox's. Nothing to expect-fail here. */
+  focusDefect: () => isWebkit() ? undefined : FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket create bar (.pk-save)" : "the desk create card (#card .btn-primary)"),
 };
 
 /* ── IMAP review ───────────────────────────────────────────────────────── */
