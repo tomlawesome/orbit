@@ -23,7 +23,7 @@ import {
   normalizedDocumentFilename,
   validateSupportedDocumentStructure,
 } from "@/server/documents/validation";
-import { canAccessHouseholdDocuments } from "@/server/documents/authorization";
+import { canAccessHouseholdDocuments, canManageDocumentDeletion } from "@/server/documents/authorization";
 import { retryableScannerFailureCode, scannerRecoveryDelayMs } from "@/server/documents/staging";
 import { validUuid } from "@/server/workspace-access";
 
@@ -161,8 +161,10 @@ async function requireDocumentAccess(userId: string, documentId: string) {
       contentSha256: documents.contentSha256,
       deleteAfter: documents.deleteAfter,
       availableAt: documents.availableAt,
+      uploadedByUserId: documents.uploadedByUserId,
       administrator: users.isInstanceAdmin,
       membershipUserId: memberships.userId,
+      membershipRole: memberships.role,
     })
     .from(users)
     .innerJoin(documents, eq(documents.id, documentId))
@@ -182,6 +184,26 @@ async function requireDocumentAccess(userId: string, documentId: string) {
     || unavailableDocumentConditions.includes(record.lifecycle as typeof unavailableDocumentConditions[number])
   ) {
     throw new AppError("document_not_found", "That document is not available", 404);
+  }
+  return record;
+}
+
+/**
+ * Queueing a deletion or undoing one is narrower than the household-wide read
+ * access `requireDocumentAccess` grants: only the household owner or the
+ * member who uploaded the document may do it (#1151 A3-S1). Any other
+ * member can see the document but must not be able to purge or restore
+ * someone else's upload.
+ */
+async function requireDocumentDeletionAccess(userId: string, documentId: string) {
+  const record = await requireDocumentAccess(userId, documentId);
+  const isUploader = record.uploadedByUserId !== null && record.uploadedByUserId === userId;
+  if (!canManageDocumentDeletion(record.administrator, record.membershipRole, isUploader)) {
+    throw new AppError(
+      "document_deletion_forbidden",
+      "Only the household owner or the member who uploaded this document can do that",
+      403,
+    );
   }
   return record;
 }
@@ -790,7 +812,7 @@ export async function readDocumentDownload(
 }
 
 export async function requestDocumentDeletion(userId: string, documentId: string): Promise<DocumentSummary> {
-  const record = await requireDocumentAccess(userId, documentId);
+  const record = await requireDocumentDeletionAccess(userId, documentId);
   if (record.lifecycle !== "available") throw new AppError("document_not_found", "That document is not available", 404);
   const config = getDocumentConfig();
   const deleteAfter = new Date(Date.now() + config.retentionDays * 86_400_000);
@@ -822,7 +844,7 @@ export async function requestDocumentDeletion(userId: string, documentId: string
 }
 
 export async function restoreDocument(userId: string, documentId: string): Promise<DocumentSummary> {
-  const record = await requireDocumentAccess(userId, documentId);
+  const record = await requireDocumentDeletionAccess(userId, documentId);
   const config = getDocumentConfig();
   if (!isDocumentContentReady(record, config.scanMode, "restore") || !record.deleteAfter || record.deleteAfter <= new Date()) {
     throw new AppError("document_not_found", "That document is not available", 404);
