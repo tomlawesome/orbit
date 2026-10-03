@@ -92,7 +92,8 @@ export type ConfigureEngineRefusalCode =
   | "oidc-secret-placeholder-invalid"
   | "preflight-failed"
   | "configuration-migration-required"
-  | "write-failed";
+  | "write-failed"
+  | "locked";
 
 /**
  * Thrown for every fail-closed refusal this module makes. Never carries a
@@ -174,6 +175,73 @@ function atomicWriteFile(finalPath: string, content: string | Buffer, mode: numb
     }
     refuse(`Could not persist ${finalPath}.`, "write-failed");
   }
+}
+
+// --- cross-process lock (O1-R8/O1-R7) ---------------------------------------
+//
+// Shared (same file name, same algorithm) with install-transaction.ts's own
+// acquireDeployLock: both modules mutate the same managed paths
+// (.env-orbit/.orbit-secrets) under the same deployment directory, and
+// neither had any cross-process exclusion before this (two concurrent
+// `orbit configure` writers could each read-modify-write
+// updateManagedKeys's target and lose the other's keys; a concurrent
+// install/update could do the same to install-transaction.ts's commits).
+// Using one lock file for both closes both gaps with a single mechanism: a
+// second `orbit configure`, `orbit install` or `orbit update` targeting the
+// same directory fails fast with a clear message instead of racing.
+//
+// A plain `open(O_CREAT|O_EXCL)` is the exclusion primitive (atomic across
+// processes on every real filesystem this runs on, unlike a stat-then-create
+// pair); a lock file older than DEPLOY_LOCK_STALE_MS is treated as abandoned
+// by a crashed process (this engine has no PID-liveness check available
+// across a container boundary) and taken over rather than blocking forever.
+const DEPLOY_LOCK_FILE_NAME = ".orbit-engine.lock";
+const DEPLOY_LOCK_STALE_MS = 10 * 60 * 1000;
+
+/** Acquires the deployment-directory lock, or refuses if another run holds it. Returns a release function the caller must call exactly once, success or failure. */
+function acquireDeployLock(deployDir: string, operationLabel: string): () => void {
+  const lockPath = join(deployDir, DEPLOY_LOCK_FILE_NAME);
+
+  const takeLock = (): number => openSync(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
+
+  let fd: number;
+  try {
+    fd = takeLock();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      refuse(`Could not take the ${operationLabel} lock at ${lockPath}.`, "locked");
+    }
+    let staleEnough: boolean;
+    try {
+      staleEnough = Date.now() - statSync(lockPath).mtimeMs > DEPLOY_LOCK_STALE_MS;
+    } catch {
+      staleEnough = true; // Lock vanished between the EEXIST and this stat; retry once below.
+    }
+    if (!staleEnough) {
+      refuse(
+        `Another ${operationLabel} is already running against this deployment (lock held at ${lockPath}). Wait for it to finish, or remove the lock file yourself once you are certain no other run is active.`,
+        "locked",
+      );
+    }
+    try {
+      rmSync(lockPath, { force: true });
+      fd = takeLock();
+    } catch {
+      refuse(`Another ${operationLabel} is already running against this deployment (lock held at ${lockPath}).`, "locked");
+    }
+  }
+  closeSync(fd);
+
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    try {
+      rmSync(lockPath, { force: true });
+    } catch {
+      /* best effort */
+    }
+  };
 }
 
 function generateHexSecret(): string {
@@ -338,6 +406,16 @@ export function ensureEnvironmentFile(deployDir: string): EnsureEnvironmentFileR
  * bash's own `order` array built from positional arguments.
  */
 export function updateManagedKeys(deployDir: string, pairs: ReadonlyArray<readonly [string, string]>): void {
+  const releaseLock = acquireDeployLock(deployDir, "orbit configure");
+  try {
+    updateManagedKeysLocked(deployDir, pairs);
+  } finally {
+    releaseLock();
+  }
+}
+
+/** The actual read-modify-write, now only ever reached with the deployment lock held (O1-R8). */
+function updateManagedKeysLocked(deployDir: string, pairs: ReadonlyArray<readonly [string, string]>): void {
   const envPath = join(deployDir, ENVIRONMENT_FILE_NAME);
   const order = pairs.map(([key]) => key);
   const pending = new Map<string, string>(pairs);
@@ -452,10 +530,60 @@ export interface EnsureSecretFileResult {
   message?: string;
 }
 
-/** ensure_secret_file (configure.sh:747-772, guarantees #15-16), used for session-secret/postgres-password/document-kek. */
-export function ensureSecretFile(deployDir: string, relativePath: string): EnsureSecretFileResult {
+/**
+ * Like pathInfo, but also reports *why* statSync failed to follow the path
+ * when it did: ENOENT ("truly nothing here") versus anything else (EACCES,
+ * EIO, a transient mount problem, ...). ensureSecretFile needs that
+ * distinction (O1-S1/SS1-S2): pathInfo's own blanket catch treats every stat
+ * failure as "doesn't exist," which is exactly how a merely-unstatable
+ * DOCUMENT_KEK/SESSION_SECRET file used to get silently treated as absent
+ * and regenerated.
+ */
+function secretFilePathInfo(path: string): { info: PathInfo; statErrorCode?: string } {
+  let lst: Stats | undefined;
+  try {
+    lst = lstatSync(path);
+  } catch {
+    lst = undefined;
+  }
+  let st: Stats | undefined;
+  let statErrorCode: string | undefined;
+  try {
+    st = statSync(path);
+  } catch (error) {
+    statErrorCode = (error as NodeJS.ErrnoException).code;
+  }
+  return {
+    info: {
+      existsFollowing: st !== undefined,
+      isSymlink: lst?.isSymbolicLink() ?? false,
+      isRegularFollowing: st?.isFile() ?? false,
+      isDirectoryFollowing: st?.isDirectory() ?? false,
+    },
+    statErrorCode,
+  };
+}
+
+/**
+ * ensure_secret_file (configure.sh:747-772, guarantees #15-16), used for
+ * session-secret/postgres-password/document-kek.
+ *
+ * `isFreshInstall` governs the one case that matters most here (O1-S1/
+ * SS1-S2): a missing DOCUMENT_KEK or SESSION_SECRET file. On a genuinely
+ * fresh install (nothing deployed here yet) that is the normal first run and
+ * generating one is correct and expected. On an existing deployment it is
+ * instead the symptom of a lost or corrupted secret, and every encrypted
+ * document becomes permanently unreadable (or every session invalid) the
+ * moment this function "fixes" it by generating a replacement — so on an
+ * existing deployment a missing file is always a hard refusal naming the
+ * file and the recovery path, never a silent regeneration. A stat failure
+ * that is not ENOENT (permissions, I/O, a half-mounted secrets volume) is a
+ * hard refusal unconditionally, fresh install or not: it is never evidence
+ * that the file doesn't exist, only that this process could not find out.
+ */
+export function ensureSecretFile(deployDir: string, relativePath: string, isFreshInstall: boolean): EnsureSecretFileResult {
   const path = join(deployDir, relativePath);
-  const info = pathInfo(path);
+  const { info, statErrorCode } = secretFilePathInfo(path);
   if (info.existsFollowing) {
     if (!info.isRegularFollowing || info.isSymlink) {
       refuse(`Refusing to use ${relativePath} because it is not a regular file.`, "secret-file-invalid");
@@ -470,6 +598,20 @@ export function ensureSecretFile(deployDir: string, relativePath: string): Ensur
       refuse(`Could not restrict permissions on ${relativePath}.`, "secret-file-invalid");
     }
     return { generated: false };
+  }
+
+  if (statErrorCode !== undefined && statErrorCode !== "ENOENT") {
+    refuse(
+      `Could not check ${relativePath} (${statErrorCode}); refusing to guess whether it exists rather than possibly generating a replacement secret.`,
+      "secret-file-invalid",
+    );
+  }
+
+  if (!isFreshInstall) {
+    refuse(
+      `${relativePath} is missing on an existing Orbit deployment. Refusing to generate a replacement, which would make existing encrypted data unreadable or sign out every user. Restore ${relativePath} from backup (or Orbit's recovery bundle) to the exact path ${path}, then run \`orbit configure\` again.`,
+      "secret-file-invalid",
+    );
   }
 
   const secret = generateHexSecret();
@@ -506,11 +648,27 @@ function environmentKeyIsNonEmpty(deployDir: string, key: string): boolean {
   return (rawEnvironmentKeyValue(deployDir, key) ?? "") !== "";
 }
 
-/** ensure_oidc_secret_placeholder (configure.sh:786-814, guarantees #18-19). */
+/**
+ * ensure_oidc_secret_placeholder (configure.sh:786-814, guarantees #18-19).
+ *
+ * The zero-byte placeholder this writes exists for one reason only: Compose's
+ * `file:`-backed secret declaration needs a host source to exist even before
+ * an operator has ever run `--set-oidc-secret`. That bootstrap case is safe
+ * because nothing is lost — there was never a real secret at this path.
+ *
+ * Once OIDC_CLIENT_SECRET_FILE is itself already configured, though, a
+ * missing file here means the real secret this deployment already has was
+ * lost or deleted (O1-S5) — writing a fresh zero-byte placeholder over it
+ * would silently and permanently disable OIDC sign-in while `orbit
+ * configure` reports success. That case is always a hard refusal instead;
+ * never an empty secret.
+ */
 export function ensureOidcSecretPlaceholder(deployDir: string): void {
   if (environmentKeyIsNonEmpty(deployDir, "OIDC_CLIENT_SECRET") && !environmentKeyIsNonEmpty(deployDir, "OIDC_CLIENT_SECRET_FILE")) {
     return;
   }
+
+  const fileModeActive = environmentKeyIsNonEmpty(deployDir, "OIDC_CLIENT_SECRET_FILE");
 
   const secretPath = join(deployDir, OIDC_SECRET_RELATIVE_PATH);
   const info = pathInfo(secretPath);
@@ -524,6 +682,13 @@ export function ensureOidcSecretPlaceholder(deployDir: string): void {
       refuse(`Could not restrict permissions on ${OIDC_SECRET_RELATIVE_PATH}.`, "oidc-secret-placeholder-invalid");
     }
     return;
+  }
+
+  if (fileModeActive) {
+    refuse(
+      `${OIDC_SECRET_RELATIVE_PATH} is missing but OIDC_CLIENT_SECRET_FILE is already configured. Refusing to replace it with an empty placeholder, which would silently disable OIDC sign-in. Restore the OIDC client secret to ${OIDC_SECRET_RELATIVE_PATH}, or run \`orbit configure --set-oidc-secret\` again, then retry.`,
+      "oidc-secret-placeholder-invalid",
+    );
   }
 
   atomicWriteFile(secretPath, Buffer.alloc(0), 0o600, "installing");
@@ -712,6 +877,16 @@ export interface ConfigureApplyResult {
 export function runConfigureApply(deployDir: string, orbitImage: string | undefined): ConfigureApplyResult {
   const messages: string[] = [];
 
+  // Captured before anything below creates either path: O1-S1/SS1-S2's
+  // "existing deployment" signal for ensureSecretFile. Once ensureEnvironmentFile
+  // and ensureSecretsDirectory run, both paths exist unconditionally
+  // (freshly created, on a true fresh install) — checking after them would
+  // always read as "existing deployment" and wrongly refuse a real fresh
+  // install, so this has to run first and be threaded through.
+  const hadEnvironmentFile = pathInfo(join(deployDir, ENVIRONMENT_FILE_NAME)).existsFollowing;
+  const hadSecretsDirectory = pathInfo(join(deployDir, SECRETS_DIRECTORY_NAME)).existsFollowing;
+  const isFreshInstall = !hadEnvironmentFile && !hadSecretsDirectory;
+
   const envResult = ensureEnvironmentFile(deployDir);
   if (envResult.message) messages.push(envResult.message);
 
@@ -727,7 +902,7 @@ export function runConfigureApply(deployDir: string, orbitImage: string | undefi
   ensureSecretsDirectory(deployDir);
 
   for (const relativePath of GENERATED_SECRET_RELATIVE_PATHS) {
-    const result = ensureSecretFile(deployDir, relativePath);
+    const result = ensureSecretFile(deployDir, relativePath, isFreshInstall);
     if (result.message) messages.push(result.message);
   }
 

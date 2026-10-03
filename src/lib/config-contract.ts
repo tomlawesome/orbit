@@ -160,6 +160,25 @@ export function containsForbiddenCharacters(value: string): boolean {
   return /[\s\u0000-\u001f\u007f]/.test(value);
 }
 
+// The subset of env-orbit-file.ts's isValidValue (configuration.sh's
+// validate_value) not already implied by containsForbiddenCharacters, which
+// every write-time validator below already calls first and which already
+// forbids *all* whitespace — so validate_value's own "no whitespace before a
+// bare #" rule can never fire once that has passed, and is not restated
+// here. What's left: length, and `$`/backtick/a leading quote, which are
+// ambiguous or dangerous to Compose's env-file parser in ways no amount of
+// escaping fixes. Applied at WRITE time (guided configuration, machine
+// prompts) so this module can never accept — and configure-engine.ts can
+// never persist — a value that .env-orbit's own reader
+// (env-orbit-file.ts's parseEnvOrbitContent) then refuses to read back as a
+// syntax error (O1-F3): what configure writes must always read back.
+function isWriteSafeEnvValue(value: string): boolean {
+  if (value.length > 4096) return false;
+  if (/[$`]/.test(value)) return false;
+  if (/^['"]/.test(value)) return false;
+  return true;
+}
+
 export function isForbiddenHost(host: string): boolean {
   const bare = host.replace(/:.*$/, "");
   if (["127.0.0.1", "localhost", "0.0.0.0", "::1"].includes(bare)) return true;
@@ -186,6 +205,7 @@ function validateAuthority(authority: string): boolean {
 // Returns the lowercase-normalised origin, or null when invalid.
 export function normalizePublicOrigin(value: string): string | null {
   if (containsForbiddenCharacters(value)) return null;
+  if (!isWriteSafeEnvValue(value)) return null;
   if (!value.startsWith("https://")) return null;
   if (value.includes("@") || value.includes("?") || value.includes("#")) return null;
   const trimmed = value.replace(/\/$/, "");
@@ -200,6 +220,7 @@ export function normalizePublicOrigin(value: string): string | null {
 // fragment; a provider-specific path is allowed; same forbidden-host rules.
 export function isValidOidcIssuer(value: string): boolean {
   if (containsForbiddenCharacters(value)) return false;
+  if (!isWriteSafeEnvValue(value)) return false;
   if (!value.startsWith("https://")) return false;
   if (value.includes("@") || value.includes("?") || value.includes("#")) return false;
   const rest = value.slice("https://".length);
@@ -216,7 +237,7 @@ export function isValidOrbitImage(value: string): boolean {
 }
 
 export function isValidClientId(value: string): boolean {
-  return value.length > 0 && !containsForbiddenCharacters(value);
+  return value.length > 0 && !containsForbiddenCharacters(value) && isWriteSafeEnvValue(value);
 }
 
 // Field-format schema: shape validation for every allowed key when present.

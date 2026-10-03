@@ -95,7 +95,7 @@ function engineAccepts(value: string): boolean {
   writeFileSync(secretPath, `${value}\n`);
   chmodSync(secretPath, 0o600);
   try {
-    ensureSecretFile(dir, ".orbit-secrets/session-secret");
+    ensureSecretFile(dir, ".orbit-secrets/session-secret", false);
     return true;
   } catch {
     return false;
