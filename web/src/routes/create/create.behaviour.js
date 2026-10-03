@@ -82,6 +82,10 @@ export function mountCreate() {
       pocket's own `problem`, which nothing typed clears early. */
   /** @type {string | null} */
   let sticky = null;
+  /** Minted once for this draft, not per save attempt (#1151 W1-R2): a retry
+      after a dropped response reuses it, so the server's upsert-by-id
+      idempotency absorbs the retry instead of creating a second item. */
+  const draftId = crypto.randomUUID();
 
   /** The recurrence select's value, in months — 0 is once (#1058d). */
   const monthsOf = () => recurrenceOfChoice(recurSelect.value, recurMonths.value);
@@ -287,7 +291,7 @@ export function mountCreate() {
         type: "item.upsert",
         householdId: active.id,
         item: {
-          id: crypto.randomUUID(),
+          id: draftId,
           sectionId: /** @type {string} */ (chosenSection),
           title,
           subtype,
