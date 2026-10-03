@@ -32,7 +32,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog, mailInMailbox, mailInSecrets, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
-import { getDocumentConfig, wrappingKey } from "@/server/documents/config";
+import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { requireInstanceAdministrator } from "@/server/authorization";
 import {
   createSmtpTransport,
@@ -45,7 +45,7 @@ import {
   verifyImapProvider,
 } from "./imap-ingestion";
 import { deriveImapRecipientAlias, imapAliasBaseFromAccount, normalizeImapRecipientAlias } from "./core/imap-recipient";
-import { encryptMailInSecret, type MailInSecretKind } from "./core/secret-crypto";
+import { decryptMailInSecret, encryptMailInSecret, type MailInSecretKind } from "./core/secret-crypto";
 import { getImapIngestionConfig, imapConfigFromMailbox, MailInCredentialLockedError, resolveTrustedAuthservId } from "./mailbox-config";
 import { resetAllRelaysForMovedAccount, rotateAllRelaysForNewAliasKey } from "./relays";
 import { RELAY_MAX_GRACE_MS } from "./core/relay-generations";
@@ -263,6 +263,51 @@ async function insertSecret(
   return { id, keyId };
 }
 
+/**
+ * Moves a secret to a new host's AAD without changing its plaintext: decrypts
+ * under the old host, re-encrypts under the new one, as a fresh row (A2-S1).
+ * Used for the alias key on a hostname-only correction, where the account
+ * (and therefore every member's derived address) has not moved, so the key
+ * itself must not either — only its ciphertext's host binding needs to catch
+ * up, the same way `insertSecret` already treats a superseded row as
+ * something to replace, not mutate in place.
+ */
+async function rewrapSecretForNewHost(
+  transaction: Transaction,
+  secretId: string,
+  kind: MailInSecretKind,
+  oldAccount: { host: string; user: string },
+  newAccount: { host: string; user: string },
+  actorUserId: string,
+): Promise<{ id: string; keyId: string }> {
+  const [row] = await transaction.select().from(mailInSecrets).where(eq(mailInSecrets.id, secretId)).limit(1);
+  if (!row) throw new AppError("mailbox_not_configured", "Mail-in has not been set up", 409);
+  const documentConfig = getDocumentConfig();
+  const keyEncryptionKey = keyEncryptionKeyFor(documentConfig, row.keyId);
+  if (!keyEncryptionKey) throw new MailInCredentialLockedError(row.keyId);
+  const envelope = {
+    envelopeVersion: row.envelopeVersion as 1,
+    algorithm: "aes-256-gcm" as const,
+    keyId: row.keyId,
+    contentIv: row.contentIv,
+    contentAuthTag: row.contentAuthTag,
+    wrappedDek: row.wrappedDek,
+    wrapIv: row.wrapIv,
+    wrapAuthTag: row.wrapAuthTag,
+  };
+  const plaintext = decryptMailInSecret(
+    row.ciphertext,
+    { secretId: row.id, kind, host: oldAccount.host, user: oldAccount.user },
+    envelope,
+    keyEncryptionKey,
+  );
+  try {
+    return await insertSecret(transaction, kind, plaintext, newAccount, actorUserId);
+  } finally {
+    plaintext.fill(0);
+  }
+}
+
 async function recordMailboxAudit(
   transaction: Transaction,
   mailboxId: string,
@@ -400,15 +445,16 @@ export async function setMailboxSettings(
     const account = { host: input.host, user: input.accountUser };
     const password = await insertSecret(transaction, "imap_password", Buffer.from(input.password, "utf8"), account, actorUserId);
     const supersededPasswordId = row?.passwordSecretId ?? null;
-    /* An alias key row is bound to host and account by its own AAD, so a
-       re-set that moves the mailbox to a different account cannot keep it —
-       it would never decrypt again. Every address is derived from the
-       account anyway, so moving account already changes them all; a fresh
-       key costs nothing extra. A correction that leaves the account alone
-       keeps the key, and therefore every member's address, untouched. */
+    /* Every derived address comes from accountUser alone (imapAliasBaseFromAccount
+       reads only IMAP_USER); host and port name where that same account is
+       reached, not who it is. So only accountUser changing is the account
+       moving -- a provider migration that keeps the mailbox address (host
+       changes, nothing else) must not reset a single member's relay (A2-S1):
+       the addresses everyone already has printed on paper are still correct. */
     let aliasKeySecretId = row?.aliasKeySecretId ?? null;
     let supersededAliasKeyId: string | null = null;
-    const accountMoved = row !== undefined && (row.host !== input.host || row.accountUser !== input.accountUser);
+    const accountMoved = row !== undefined && row.accountUser !== input.accountUser;
+    const hostOnlyChanged = row !== undefined && !accountMoved && row.host !== input.host;
     if (!aliasKeySecretId || accountMoved) {
       const aliasSecret = randomBytes(ALIAS_KEY_BYTES).toString("base64url");
       const created = await insertSecret(transaction, "alias_key", Buffer.from(aliasSecret, "utf8"), account, actorUserId);
@@ -420,6 +466,17 @@ export async function setMailboxSettings(
          every old alias row goes inactive. The next poll cycle materialises
          each member's new row under the new key (ADR-0017 slice 3). */
       await resetAllRelaysForMovedAccount(transaction, now);
+    } else if (hostOnlyChanged && row && aliasKeySecretId) {
+      /* The key's own ciphertext is bound to host by its AAD (core/secret-
+         crypto.ts), so it must move with a host correction even though its
+         VALUE -- and therefore every address it derives -- does not. Rewrap
+         rather than rotate: no relay reset, no new generation, nothing a
+         member would ever notice. */
+      const rewrapped = await rewrapSecretForNewHost(
+        transaction, aliasKeySecretId, "alias_key", { host: row.host, user: row.accountUser }, account, actorUserId,
+      );
+      supersededAliasKeyId = aliasKeySecretId;
+      aliasKeySecretId = rewrapped.id;
     }
     const values = {
       host: input.host,

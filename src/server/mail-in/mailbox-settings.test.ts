@@ -841,18 +841,34 @@ describe("the alias key follows the account, not the edit", () => {
     expect((await readMailboxSettings(ADMIN)).aliasPattern).toBe("post+<code>@example.test");
   });
 
-  it("re-keys when the host moves too, because the key is bound to host as well as account", async () => {
+  it("re-wraps, but never resets, the alias key when only the host moves (#1151 A2-S1)", async () => {
     await configureMailbox();
     const aliasKeyId = mailbox()?.aliasKeySecretId;
+    const aliasKeyValue = decryptStored(secretsOfKind("alias_key")[0], { host: settings.host, user: settings.accountUser });
 
     await configureMailbox({ ...settings, host: "imap2.example.test" });
 
-    /* The alias key's own AAD names the host, so a key kept across a host
-       change would never decrypt again. Addresses are unchanged in shape
-       because they are derived from the account, which did not move. */
+    /* The alias key's own AAD names the host, so its ciphertext has to move
+       with a host correction -- a stale AAD would never decrypt again. But
+       accountUser, the only thing an address is derived from, did not move,
+       so the key's VALUE (and therefore every member's address) must not
+       move either: this is a provider migration, not an account change. */
     expect(mailbox()?.aliasKeySecretId).not.toBe(aliasKeyId);
     expect(secretsOfKind("alias_key")).toHaveLength(1);
+    expect(decryptStored(secretsOfKind("alias_key")[0], { host: "imap2.example.test", user: settings.accountUser }))
+      .toBe(aliasKeyValue);
     expect((await readMailboxSettings(ADMIN)).aliasPattern).toBe("intake+<code>@example.test");
+  });
+
+  it("leaves every alias row alone when only the host moves, same as any other non-account edit", async () => {
+    await configureMailbox();
+    mocks.tables[getTableName(imapRecipientAliases)] = [
+      { id: randomUUID(), userId: randomUUID(), generation: 1, aliasSha256: "a".repeat(64), status: "active", activeUntil: null },
+    ];
+
+    await configureMailbox({ ...settings, host: "imap2.example.test" });
+
+    expect(rows(imapRecipientAliases).map((row) => row.status)).toEqual(["active"]);
   });
 
   it("retires every alias row when a new alias key is generated, so no dead address stays eligible", async () => {
