@@ -11,7 +11,7 @@
   import CreateSystem from "./CreateSystem.svelte";
   import Newcomer from "./Newcomer.svelte";
   import {
-    CREATE, DOOR, INVITED, NEWCOMER, ONWARD,
+    ASKING, CREATE, DOOR, INVITED, NEWCOMER, ONWARD,
     arrivalStageOf, collidingHouseholdOf, createSystemCommand, isInvitedLanding,
     preferredCurrency, preferredTimeZone,
   } from "./stage.js";
@@ -208,6 +208,12 @@
 
     const next = arrivalStageOf(workspace);
     if (next === ONWARD) { handOn(); return; }
+    if (next === ASKING) {
+      /* #1151 W1-F2: a workspace that came back empty is asked, not
+         answered — the same honest surface as a server that cannot be
+         reached at all (the catch above). */
+      return;
+    }
     visibleHouseholds = workspace.visibleHouseholds ?? [];
     galaxy = labelledSkyOf(visibleHouseholds);
     if (next === CREATE) { enterCreate(); return; }
