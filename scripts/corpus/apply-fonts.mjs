@@ -9,6 +9,7 @@
 // truth, and a face that changed per render would change what Tika emits and
 // silently invalidate it.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { corpusDir, positional } from "./corpus-dir.mjs";
 const dir = corpusDir;
 // An optional filename limits the run to one document, so a document being
@@ -432,7 +433,13 @@ const DOCS = {
   },
   // A workshop job card: a squared trade sans for the printed form, a
   // typewriter mono for the figures typed into it.
-  "vehicle-service-record.html": {
+  //
+  // X-Q1 (#1151): qualified with its own directory because `sources/`'s
+  // twelve tuning documents below (#1007) independently picked the same
+  // filename for an unrelated document -- an unqualified key here collided
+  // with that one, and being the earlier of the two in this object literal,
+  // silently lost: JavaScript keeps only the later of two identical keys.
+  "holdout4/vehicle-service-record.html": {
     faces: [FACE("Corpus Motorworks", "Saira.ttf"), FACE("Corpus Motorworks Mono", "CutiveMono-Regular.ttf", "400")],
     swap: [[/"Liberation Sans", sans-serif/g, '"Corpus Motorworks", sans-serif'], [/"Liberation Mono", monospace/g, '"Corpus Motorworks Mono", monospace']],
   },
@@ -550,9 +557,16 @@ const DOCS = {
 
 };
 
-for (const [file, { faces, swap }] of Object.entries(DOCS)) {
+for (const [key, { faces, swap }] of Object.entries(DOCS)) {
+  // X-Q1 (#1151): a key holding its own directory (e.g.
+  // "holdout4/vehicle-service-record.html") always resolves to that exact
+  // file, so two corpus directories can reuse the same document filename
+  // without colliding in this table. An unqualified key still means
+  // "whichever directory --dir selected", as before.
+  const qualified = key.includes("/");
+  const file = qualified ? key.slice(key.lastIndexOf("/") + 1) : key;
   if (only && file !== only) continue;
-  const path = `${dir}/${file}`;
+  const path = qualified ? resolve(dir, "..", key) : `${dir}/${file}`;
   // Documents arrive in waves, so the table lists files that may not be
   // written yet. A missing one is not an error; it is simply not built.
   if (!existsSync(path)) { console.log(`${file}: not written yet, skipped`); continue; }
