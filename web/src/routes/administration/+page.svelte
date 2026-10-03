@@ -464,6 +464,34 @@
   let editing = $state(false);
   let rotating = $state(false);
   let password = $state("");
+  /* ROTATE EVERY ADDRESS (#1151 A1-F3): the phone layout's own `aliasOpen`
+     sheet, built here for the desk — the only mailbox act the desk card was
+     missing. Same default grace period as the phone's STANDARD_GRACE_DAYS. */
+  const ALIAS_STANDARD_GRACE_DAYS = 14;
+  let aliasRotating = $state(false);
+  let aliasGraceDays = $state(ALIAS_STANDARD_GRACE_DAYS);
+  /* Two-tap for this card's destructive single-click acts (#1151 A1-S2):
+     "remove credential" fired on one click here while the phone already
+     armed it first; "rotate every address" gets the same protocol from the
+     start rather than shipping unarmed and needing its own fix later.
+     Local to this card, like the household and archive cards' own copies
+     of the same protocol — armed relaxes on its own after 5s. */
+  /** @type {string | null} */
+  let mailboxArmed = $state(null);
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let mailboxArmTimer = null;
+  /** @param {string} key @param {() => void} fire */
+  function twoTapMailbox(key, fire) {
+    if (mailboxArmed === key) {
+      clearTimeout(mailboxArmTimer ?? undefined);
+      mailboxArmed = null;
+      fire();
+      return;
+    }
+    clearTimeout(mailboxArmTimer ?? undefined);
+    mailboxArmed = key;
+    mailboxArmTimer = setTimeout(() => (mailboxArmed = null), 5_000);
+  }
   /** @type {{ host: string, port: number, accountUser: string, mailbox: string, tlsServerName: string, providerProfile: string, trustedRecipientHeader: string, pollSeconds: number }} */
   let draft = $state({
     host: "", port: 993, accountUser: "", mailbox: "INBOX", tlsServerName: "",
@@ -513,6 +541,7 @@
       if (!answer.outcome || answer.outcome === "verified") {
         editing = false;
         rotating = false;
+        aliasRotating = false;
       }
       password = "";
     } catch (error) {
@@ -1233,7 +1262,7 @@
               <div class="kv"><span>tls name</span><b>{mailbox.tlsServerName || mailbox.host}</b></div>
             {/if}
 
-            {#if mailbox.configured && !editing && !rotating}
+            {#if mailbox.configured && !editing && !rotating && !aliasRotating}
               <!-- "check connection" is gone (#1071): "test this mailbox"
                    above runs the same IMAP verify, plus the relay half. -->
               <div class="placerow mailboxrow">
@@ -1246,10 +1275,42 @@
                         })}>{mailbox.enabled ? "pause ingest" : "resume ingest"}</button>
                 <button disabled={mailboxBusy !== null} onclick={() => { rotating = true; password = ""; }}>
                   rotate password…</button>
+                <!-- #1151 A1-F3: the phone layout's own "rotate every address",
+                     missing here until now. -->
                 <button disabled={mailboxBusy !== null}
-                        onclick={() => mailboxAction("remove", { action: "remove", expectedVersion: mailbox.version })}>
-                  remove credential</button>
+                        onclick={() => { aliasRotating = true; aliasGraceDays = ALIAS_STANDARD_GRACE_DAYS; }}>
+                  rotate every address…</button>
+                <!-- #1151 A1-S2: armed first, same two-tap as the phone's own
+                     remove-credential ArmButton — this used to fire on one
+                     unconfirmed click. -->
+                <button class="dangerbtn" class:armed={mailboxArmed === "remove"} disabled={mailboxBusy !== null}
+                        onclick={() => twoTapMailbox("remove",
+                          () => mailboxAction("remove", { action: "remove", expectedVersion: mailbox.version }))}>
+                  {mailboxArmed === "remove" ? "tap again to remove the credential" : "remove credential"}</button>
               </div>
+            {/if}
+
+            {#if aliasRotating}
+              <!-- #1151 A1-F3: every member's relay address gets a fresh one;
+                   old addresses keep collecting for the grace period below.
+                   Same act, same default grace, same two-tap as the phone's
+                   own "rotate every address" sheet. -->
+              <form class="mailboxform" onsubmit={(event) => {
+                event.preventDefault();
+                twoTapMailbox("alias", () => mailboxAction("alias", {
+                  action: "rotate_alias_key", expectedVersion: mailbox.version, graceDays: aliasGraceDays,
+                }));
+              }}>
+                <p class="mailboxnote">Every member gets a new relay address. Mail sent to an old one still arrives until its
+                  grace period runs out.</p>
+                <label>old addresses keep working for (days)
+                  <input type="number" min="0" max="90" bind:value={aliasGraceDays} required /></label>
+                <div class="placerow mailboxrow">
+                  <button type="submit" class="dangerbtn" class:armed={mailboxArmed === "alias"} disabled={mailboxBusy !== null}>
+                    {mailboxArmed === "alias" ? "tap again to rotate every address" : "rotate every address"}</button>
+                  <button type="button" onclick={() => { aliasRotating = false; mailboxArmed = null; }}>cancel</button>
+                </div>
+              </form>
             {/if}
 
             {#if rotating}
