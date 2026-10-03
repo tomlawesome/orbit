@@ -16,8 +16,9 @@ import {
   renameSync,
   rmSync,
   statfsSync,
+  writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import {
   type BackupDockerAdapter,
@@ -90,7 +91,9 @@ export type RestoreEngineRefusalCode =
   | "recovery-restore-failed"
   | "recovery-health-failed"
   | "capacity-measurement-invalid"
-  | "capacity-insufficient";
+  | "capacity-insufficient"
+  | "kek-rotation-open"
+  | "checkpoint-orphan-mismatch";
 
 /**
  * Thrown for every fail-closed refusal this module makes. Never carries
@@ -222,6 +225,34 @@ export interface RestorePaths {
 export function deriveRestorePaths(backupDirectory: string, documentKekFile: string): RestorePaths {
   const restoreRoot = join(backupDirectory, ".orbit-restore");
   return { backupDirectory, restoreRoot, journalPath: join(restoreRoot, "restore.journal"), documentKekFile };
+}
+
+/**
+ * The sibling file an online document-KEK rotation's compose overlay
+ * (docker-compose.kek-rotation.yml's `DOCUMENT_KEK_NEXT_FILE`) binds to:
+ * `.orbit-secrets/document-kek-next`, next to the live document-kek file
+ * itself. A purely filesystem-visible marker — this module never touches
+ * Docker or the database — so it is the one signal restore-engine.ts can
+ * check for an open rotation without reaching outside its own layer.
+ */
+function documentKekNextFilePath(documentKekFile: string): string {
+  return join(dirname(documentKekFile), "document-kek-next");
+}
+
+/**
+ * SS1-S3: a restore must never run while a second document-KEK is active in
+ * the running app. Overwriting the database/document tree underneath an
+ * open rotation would leave the rotation's own audit trail and bookkeeping
+ * permanently out of sync with the data it is supposed to be migrating.
+ */
+function refuseIfDocumentKekRotationOpen(documentKekFile: string): void {
+  const nextKeyPath = documentKekNextFilePath(documentKekFile);
+  if (isRegularNonSymlinkFile(nextKeyPath)) {
+    refuse(
+      "kek-rotation-open",
+      `preflight/rotation failed; a document-KEK rotation is open (${nextKeyPath} exists). Finish the rotation (complete the rewrap and remove the compose kek-rotation overlay) or abort it before restoring.`,
+    );
+  }
 }
 
 export interface RestoreCheckpointDigests {
@@ -924,6 +955,59 @@ export interface RestoreRunOptions {
   hooks?: RestoreDurabilityHooks;
 }
 
+/**
+ * O2-R10: written into a checkpoint directory by prepare(), before any
+ * capture work begins, and removed by createCheckpoint() the moment the
+ * checkpoint is durably journaled. A checkpoint directory that still
+ * carries this marker was never referenced by any journal — nothing
+ * durable was ever promised from it, so it is always safe to remove.
+ */
+const CHECKPOINT_PREPARING_MARKER = ".preparing";
+
+export interface OrphanedCheckpoint {
+  restoreId: string;
+  checkpointDirectory: string;
+}
+
+/**
+ * Scans restoreRoot for `checkpoint-*` directories still carrying
+ * CHECKPOINT_PREPARING_MARKER — i.e. left behind by a prepare() whose
+ * createCheckpoint() never reached writeRestoreJournal (a crash, a kill, or
+ * a capture-step refusal) — so --recover (or an operator, or a later
+ * restore's own preflight) can list and remove them instead of leaving them
+ * on disk forever (O2-R10). A checkpoint once journaled has its marker
+ * removed, so this never reports the live journal's own checkpoint, even
+ * while a recovery is still using it.
+ */
+export function listOrphanedCheckpoints(restoreRoot: string): OrphanedCheckpoint[] {
+  let entries: string[];
+  try {
+    entries = readdirSync(restoreRoot);
+  } catch {
+    return [];
+  }
+  const orphans: OrphanedCheckpoint[] = [];
+  for (const entry of entries) {
+    if (!entry.startsWith("checkpoint-")) continue;
+    const checkpointDirectory = join(restoreRoot, entry);
+    if (!isRealNonSymlinkDirectory(checkpointDirectory)) continue;
+    if (!isRegularNonSymlinkFile(join(checkpointDirectory, CHECKPOINT_PREPARING_MARKER))) continue;
+    orphans.push({ restoreId: entry.slice("checkpoint-".length), checkpointDirectory });
+  }
+  return orphans;
+}
+
+/** Removes one directory listOrphanedCheckpoints reported — never an arbitrary caller-supplied path, so a recursive rmSync can never be pointed somewhere else by mistake. */
+export function removeOrphanedCheckpoint(restoreRoot: string, orphan: OrphanedCheckpoint): void {
+  if (
+    dirname(orphan.checkpointDirectory) !== restoreRoot ||
+    !isRegularNonSymlinkFile(join(orphan.checkpointDirectory, CHECKPOINT_PREPARING_MARKER))
+  ) {
+    refuse("checkpoint-orphan-mismatch", "recovery/cleanup failed; the orphaned checkpoint directory no longer matches what was listed.");
+  }
+  rmSync(orphan.checkpointDirectory, { recursive: true, force: true });
+}
+
 export type RestoreDisposeOutcome = "rolled-back" | "rollback-failed" | "manual-recovery-required" | "completed" | "no-checkpoint";
 
 export interface RestoreDisposeResult {
@@ -960,10 +1044,20 @@ export class RestoreRun {
 
   /** create_checkpoint's directory setup (restore.sh:516-524), before any capture begins. */
   static prepare(options: RestoreRunOptions): RestoreRun {
+    refuseIfDocumentKekRotationOpen(options.paths.documentKekFile);
+
     mkdirSync(options.paths.restoreRoot, { recursive: true });
     chmodSync(options.paths.restoreRoot, SECURE_DIRECTORY_MODE);
     const checkpointDirectory = mkdtempSync(join(options.paths.restoreRoot, "checkpoint-"));
     chmodSync(checkpointDirectory, SECURE_DIRECTORY_MODE);
+    // O2-R10: this directory (and the dump/tar/key-copy createCheckpoint is
+    // about to put in it) exists before any journal references it. Without
+    // this marker, a crash before writeRestoreJournal's first call leaves it
+    // orphaned forever — neither --recover (which only ever looks at the
+    // journal's own restoreId) nor any later restore's own fresh
+    // mkdtempSync ever finds or removes it. createCheckpoint() removes the
+    // marker the moment the checkpoint is durably journaled.
+    writeFileSync(join(checkpointDirectory, CHECKPOINT_PREPARING_MARKER), "");
     const marker = "checkpoint-";
     const restoreId = checkpointDirectory.slice(checkpointDirectory.lastIndexOf(marker) + marker.length);
     return new RestoreRun(
@@ -1055,6 +1149,9 @@ export class RestoreRun {
     this.checkpointDigests = computeCheckpointDigests(this.checkpointDirectory);
     syncCheckpointArtifacts(this.checkpointDirectory, this.hooks);
     writeRestoreJournal(this.paths, { restoreId: this.restoreId, state: "checkpointed", ...this.checkpointDigests }, this.hooks);
+    // The journal now durably references this checkpoint directory by its
+    // restoreId — it is no longer an orphan (O2-R10).
+    rmSafely(join(this.checkpointDirectory, CHECKPOINT_PREPARING_MARKER));
 
     this.checkpointVerified = true;
   }
@@ -1157,7 +1254,13 @@ export class RestoreRun {
     if (!this.checkpointDigests || !validateCheckpointIntegrity(this.checkpointDirectory, this.checkpointDigests)) {
       return false;
     }
-    this.adapter.stopApp();
+    // O2-R8: a failed stop must abort before pg_restore --clean and the
+    // document-tree replace run underneath a still-running app — the
+    // previous code ignored stopApp()'s result and ran both mutations
+    // regardless.
+    if (!this.adapter.stopApp()) {
+      return false;
+    }
     this.appStopped = true;
     if (!applyCheckpointState(this.adapter, this.checkpointDirectory, this.paths.documentKekFile, this.workDir)) {
       return false;
@@ -1295,7 +1398,29 @@ export interface RecoverRestoreOptions {
  * recovery is safely retriable from any partial failure (#36).
  */
 export function recoverRestore(options: RecoverRestoreOptions): RestoreDisposeResult {
-  const { fields, checkpointDirectory } = loadRestoreJournal(options.paths.journalPath, options.paths.restoreRoot);
+  let loaded: { fields: RestoreJournalFields; checkpointDirectory: string };
+  try {
+    loaded = loadRestoreJournal(options.paths.journalPath, options.paths.restoreRoot);
+  } catch (error) {
+    // O2-R10: "no journal" is also exactly the shape a checkpoint directory
+    // orphaned before its first journal entry leaves behind — createCheckpoint
+    // crashed, was killed, or refused after prepare() created the directory
+    // but before writeRestoreJournal ever ran. Before this, --recover (like
+    // every later restore's own fresh mkdtempSync) had no way to find such a
+    // directory at all, so it stayed on disk forever. Nothing was ever
+    // journaled for it, so nothing durable was ever promised — removing it
+    // is always safe. A genuinely empty restoreRoot (no journal, no orphan)
+    // still refuses exactly as before.
+    if (error instanceof RestoreEngineRefusal && error.code === "journal-missing") {
+      const orphans = listOrphanedCheckpoints(options.paths.restoreRoot);
+      if (orphans.length > 0) {
+        for (const orphan of orphans) removeOrphanedCheckpoint(options.paths.restoreRoot, orphan);
+        return { outcome: "no-checkpoint" };
+      }
+    }
+    throw error;
+  }
+  const { fields, checkpointDirectory } = loaded;
   const digests: RestoreCheckpointDigests = {
     databaseSha256: fields.databaseSha256,
     documentsSha256: fields.documentsSha256,
