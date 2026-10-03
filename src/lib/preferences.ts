@@ -124,6 +124,19 @@ export interface ReminderOffset {
   pushEnabled: boolean;
 }
 
+/**
+ * Both channels, on (#1151 A4-Q5): what an offset gets when nothing --
+ * neither an item's own reminder rule nor a stored column -- says otherwise.
+ * Shared by `effectiveReminderOffsets`'s fallback pair below,
+ * `src/lib/notifications.ts`'s in-app reminder list, and
+ * `notification-worker.ts`'s own candidate offsets, which used to each carry
+ * their own copy of this same default.
+ */
+export const DEFAULT_ENABLED_CHANNELS: { emailEnabled: true; pushEnabled: true } = {
+  emailEnabled: true,
+  pushEnabled: true,
+};
+
 /** The recipient's own stored pair, as read from `user_preferences` (#468). */
 export interface RecipientWarningDays {
   firstWarningDays: number | null;
@@ -186,7 +199,7 @@ export function effectiveReminderOffsets(
   const final = warningDaysOrDefault(recipient.finalWarningDays, DEFAULT_FINAL_WARNING_DAYS, 0);
   return [...new Set([first, final])]
     .sort((left, right) => right - left)
-    .map((daysBefore) => ({ daysBefore, emailEnabled: true, pushEnabled: true }));
+    .map((daysBefore) => ({ daysBefore, ...DEFAULT_ENABLED_CHANNELS }));
 }
 
 /**
