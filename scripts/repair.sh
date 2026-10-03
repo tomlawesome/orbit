@@ -1163,7 +1163,10 @@ set -Eeuo pipefail
 #      above for that batch's own semantics).
 #   1  the safe batch (only) was declined — identical meaning to the
 #      existing `--safe-only` exit 1, unchanged; only reachable when
-#      `--dangerous`'s own result is not itself `failed`.
+#      `--dangerous`'s own result is not itself `failed`. This beats a
+#      merely-REFUSED (not failed) dangerous result (exit 6 below): an
+#      explicit decline the operator made is reported over a structural
+#      refusal of the OTHER, independent batch (O2-F2, #1151).
 #   4  a FAILURE occurred in either batch: the safe batch's own `failed`
 #      result, OR the dangerous batch's `result=failed` (`reason=
 #      checkpoint-failed`/`step-failed`) — a real failure always wins over a
@@ -1176,7 +1179,8 @@ set -Eeuo pipefail
 #      exit 1 (an explicit, single y/N decline) because the dangerous
 #      approval model has no single-shot decline — every refusal here is
 #      either a structural non-interactive refusal or an exhausted bounded
-#      retry.
+#      retry. Reported only when the safe batch's own result is not itself
+#      a decline (exit 1 above takes precedence over this one).
 
 # ============================================================================
 # EXPORT MODE (--export-diagnostics) — issue #531, ADR-0014 decision 10
@@ -4235,19 +4239,23 @@ execute_repair() {
 
   # Final exit code — see "EXIT CODES (--execute --dangerous)" above for the
   # full precedence table this implements. A real failure (4) in either
-  # batch always wins; a dangerous refusal (6) is reported next; a safe-batch
-  # decline (1) is preserved when nothing else overrides it; otherwise 0.
+  # batch always wins; an explicit safe-batch decline (1) is reported next
+  # — O2-F2 (#1151): checking it BEFORE the dangerous refusal (6) is the
+  # point, not an arbitrary order, because the two batches are independent
+  # and an operator's own explicit decline of one must never be silently
+  # replaced by a structural refusal of the other; a dangerous refusal (6)
+  # is preserved when nothing else overrides it; otherwise 0.
   # When $dangerous==0, $dangerous_exit_code stays 0 and this reduces to
   # exactly the original stage-one exit code (0/1/4) — see run_safe_batch's
   # own comment for why its output is unchanged in that case too.
   if [[ "$safe_batch_exit_code" == 4 || "$dangerous_exit_code" == 4 ]]; then
     exit 4
   fi
-  if [[ "$dangerous_exit_code" == 6 ]]; then
-    exit 6
-  fi
   if [[ "$safe_batch_exit_code" == 1 ]]; then
     exit 1
+  fi
+  if [[ "$dangerous_exit_code" == 6 ]]; then
+    exit 6
   fi
   exit 0
 }

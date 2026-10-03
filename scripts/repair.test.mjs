@@ -3896,6 +3896,35 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     expect(findCheckpointDir(targetDir)).toBeNull();
   });
 
+  // O2-F2 (#1151): the EXIT CODES (--execute --dangerous) table says exit 1
+  // (safe batch declined) is reachable whenever the dangerous batch's own
+  // result is not itself FAILED — refused is not failed, so an explicit
+  // safe-batch decline must still be reported as 1 even when the
+  // independent dangerous batch was also refused, never silently replaced
+  // by exit 6.
+  it("an explicit safe-batch decline is reported (exit 1), never masked by the independent dangerous batch also being refused", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    chmodSync(join(targetDir, ".env-orbit"), 0o644); // adds a fixable managed-file-permissions finding
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      // "n" declines the safe-batch confirm; stdin then runs out, so the
+      // dangerous batch's own typed-word prompt hits EOF on its first
+      // attempt and is refused too (reason=refused-by-operator) — both
+      // batches decline/refuse, and the explicit decline must win.
+      { input: "n\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("prompt-abort field=safe-batch");
+    expect(result.stdout).toContain("execution result=declined done=0 failed=0");
+    expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=refused-by-operator");
+    expect(treeSnapshot(targetDir)).toBe(before);
+  });
+
   // --- typed-word approval gate (owner: "operator must TYPE THE ACTION
   // WORD... a non-standard input, so muscle-memory Enter can never fire it")
 
