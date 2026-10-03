@@ -42,6 +42,10 @@
   let saved = $state(false);
   /** @type {string | null} */
   let problem = $state(null);
+  /** Minted once for this draft, not per save attempt (#1151 W1-R3): a retry
+      after a dropped response reuses it, so the server's upsert-by-id
+      idempotency absorbs the retry instead of creating a second item. */
+  const draftId = crypto.randomUUID();
 
   const refusal = $derived(phase === "ready" ? refusalOf(entry) : null);
   const dirty = $derived(!saved && (entryChanged(entry, start) || attachment !== null));
@@ -70,13 +74,12 @@
     if (!household) return;
     saving = true;
     problem = null;
-    const id = crypto.randomUUID();
     try {
-      await applyCommand(createCommandOf(entry, { householdId: household.id, currency: household.currency ?? "GBP", id }));
+      await applyCommand(createCommandOf(entry, { householdId: household.id, currency: household.currency ?? "GBP", id: draftId }));
       saved = true;
       wake(attachment ? `added to your orbit · ${attachment.name} was not kept` : `added to your orbit · ${entry.name.trim()}`);
       /* The approach (§2.5): the new item, seated on its belt. */
-      await goto(resolve("/item/[[id]]", { id }));
+      await goto(resolve("/item/[[id]]", { id: draftId }));
     } catch (error) {
       /* Loud (#1058): the reason stays above the bar until the next attempt,
          the button comes back, and nothing typed is lost. No wake. */
