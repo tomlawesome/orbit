@@ -836,6 +836,58 @@ rewrap, so they leave existing documents, encrypted metadata and the mailbox
 password unreadable under the new key (see the end of "Disable, restart, and
 credential rotation" above).
 
+## Recovering from a failed database credential rotation
+
+`bash scripts/repair.sh --execute --dangerous` rotates the `postgres-password`
+credential when diagnosis finds it broken (a mismatch, or missing alongside a
+retained database volume). Before touching the database it writes a
+**checkpoint**: the current password, encrypted with a passphrase you choose,
+to a file named on stderr (`Orbit repair: pre-rotation checkpoint created and
+verified at <path>/postgres-password.orbkek`). repair.sh decrypts it straight
+back and compares it byte-for-byte against the live password before going any
+further — the same "locked, not damaged" guarantee as `document-kek`: nothing
+is touched until there is a proven-good way back.
+
+If one of the rotation's own later steps then fails — writing the new
+credential to the database, landing the new secret file, or restarting the
+containers to pick it up — repair.sh stops and names which checkpoint file
+holds the password the database still actually has. Two different situations
+reach this message, and the recovery is not the same for both; the stderr text
+tells you which one you are in:
+
+- **The database was never changed** (the rotation step itself failed,
+  before anything new was written). Decrypt the checkpoint and put the
+  original password back where it was:
+  ```sh
+  printf '%s' 'your checkpoint passphrase' |
+    docker compose --project-name <your-project> --env-file .env-orbit \
+      run --rm --no-deps -T \
+      --volume "$PWD/<checkpoint-dir>/postgres-password.orbkek:/recovery/postgres-password.enc:ro" \
+      --entrypoint node orbit-app \
+      /opt/orbit/scripts/recovery-crypto.mjs decrypt /recovery/postgres-password.enc
+  ```
+  This prints the original password on stdout (nothing is written for you —
+  the passphrase and the printed value are both sensitive). Confirm it still
+  matches `.orbit-secrets/postgres-password`, then re-run diagnosis.
+
+- **Only the final restart failed, after the rotation fully landed** — the
+  database already has the new password and `.orbit-secrets/postgres-password`
+  already holds it; only the containers haven't restarted to pick it up. Do
+  **not** decrypt and restore the checkpoint here: it holds the OLD password,
+  which no longer matches the database and would reintroduce the exact
+  mismatch the rotation was fixing. Instead restart the deployment yourself:
+  ```sh
+  bash scripts/deploy-container.sh --pull
+  ```
+  then re-run diagnosis to confirm it is healthy. repair.sh's own stderr
+  output says which of these two states you are in; it never leaves you to
+  guess.
+
+The checkpoint file is never deleted automatically — delete it yourself, by
+hand, once you have confirmed the rotation succeeded (or that you have
+recovered the original password from it). Keep the passphrase only until then;
+Orbit never stores it.
+
 ## Hostile document processor operation
 
 The default stack leaves `TIKA_URL` empty and does not start the `processing`
