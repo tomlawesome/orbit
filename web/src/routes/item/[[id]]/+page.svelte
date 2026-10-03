@@ -616,6 +616,15 @@
   let previewCloseTimer;
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let previewBeatTimer;
+  /** #1151 W1-R10: an accepted document's preview is a bare `<img src>`
+   *  with only onload/onerror — unlike the staged path, which has its own
+   *  AbortController (loadStagedPage) — so a hung preview request left
+   *  previewImgLoaded/Failed never set and the reticle/"drawing" line
+   *  spinning forever, with no way to tell stuck from still loading.
+   *  Cleared the instant either handler actually fires. */
+  const PREVIEW_LOAD_TIMEOUT_MS = 15_000;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let previewLoadTimer;
 
   const previewDocState = $derived(previewDoc ? documentPreviewStateOf(previewDoc) : null);
   /* A document Orbit believed showable but whose actual page failed to load
@@ -639,6 +648,7 @@
   function openPreview(doc, side) {
     clearTimeout(previewCloseTimer);
     clearTimeout(previewBeatTimer);
+    clearTimeout(previewLoadTimer);
     previewAbort?.abort();
     previewAbort = null;
     revokePreviewSrc();
@@ -657,6 +667,11 @@
     }
     if (!previewOpen) tick().then(() => { previewOpen = true; });
 
+    if (!doc.staged && previewSrc) {
+      previewLoadTimer = setTimeout(() => {
+        if (token === previewToken) previewFailed();
+      }, PREVIEW_LOAD_TIMEOUT_MS);
+    }
     if (doc.staged && doc.previewHref) {
       const controller = new AbortController();
       previewAbort = controller;
@@ -671,10 +686,23 @@
       });
     }
   }
+  /** Shared by both the desk reticle's and the pocket sheet's own <img>
+   *  (#1151 W1-R10): clears the stuck-preview deadline the instant a real
+   *  answer arrives. */
+  function previewLoaded() {
+    clearTimeout(previewLoadTimer);
+    previewImgLoaded = true;
+  }
+  function previewFailed() {
+    clearTimeout(previewLoadTimer);
+    previewImgLoaded = true;
+    previewImgFailed = true;
+  }
   function closePreview() {
     if (!previewDoc) return;
     previewOpen = false;
     clearTimeout(previewBeatTimer);
+    clearTimeout(previewLoadTimer);
     previewAbort?.abort();
     previewAbort = null;
     /* The card stays mounted through its own fade-out, same choreography as
@@ -1691,8 +1719,7 @@
                    ever made; a non-staged document's previewSrc is never empty,
                    so this changes nothing for it. -->
               <img src={previewSrc || undefined} alt="Page one of {previewDoc.name}"
-                   onload={() => (previewImgLoaded = true)}
-                   onerror={() => { previewImgLoaded = true; previewImgFailed = true; }} />
+                   onload={previewLoaded} onerror={previewFailed} />
             </div>
           </div>
         {/if}
@@ -1851,8 +1878,7 @@
               aria-label="Read {previewDoc.name}" onclick={() => { readerOpen = true; }}>
         <span class="bp-under" aria-hidden="true"></span>
         <img src={previewSrc} alt="Page one of {previewDoc.name}"
-             onload={() => (previewImgLoaded = true)}
-             onerror={() => { previewImgLoaded = true; previewImgFailed = true; }} />
+             onload={previewLoaded} onerror={previewFailed} />
       </button>
       {#if !previewShowing}<p class="bp-line quiet" aria-live="polite">Orbit is drawing the page</p>{/if}
     {:else}
