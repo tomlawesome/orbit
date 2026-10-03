@@ -133,9 +133,18 @@
   const reduced = () =>
     typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+  /** Set by this component's own teardown (#1151 W1-R6), the same pattern
+   *  SignIn.svelte already carries for its own async checks: `decide()`'s
+   *  own fetches can still be in flight once the reader has left, and
+   *  resuming then would yank them on to /home from wherever they actually
+   *  are now, or leave `enterNewcomer`'s launch classes on a body this
+   *  component no longer owns. */
+  let disposed = false;
+
   onMount(() => {
     decide();
     return () => {
+      disposed = true;
       body().classList.remove("showform", "showdawn", "reclaimed", "rejected",
                               "grounded", "shownew", "instrument", "belong",
                               "counting", "bare", "launching", "pinned");
@@ -179,6 +188,11 @@
          on the front door a 401 is not an error, it is the answer — this reader
          is signed out and the door is what they came for. */
       const response = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
+      /* #1151 W1-R6: the reader this screen was deciding for may already be
+         gone — SignIn.svelte's own pattern for the same race. Past this
+         point, carrying on would be deciding for whoever is on screen now,
+         not this component. */
+      if (disposed) return;
       if (!response.ok) return;                /* signed out: the door stands */
       /* A session pointed at a household belongs to a member, and that is the
          whole question answered — no workspace read at all on the journey
@@ -187,6 +201,7 @@
          household its owner has since left is handed on the same way, and lands
          on home's own adrift surface, which is the honest answer there too. */
       const session = await response.json().catch(() => null);
+      if (disposed) return;
       if (isInvitedLanding(session)) {
         visibleHouseholds = session.visibleHouseholds ?? [];
         galaxy = labelledSkyOf(visibleHouseholds);
@@ -200,6 +215,7 @@
       }
       if (session?.activeHouseholdId) { handOn(); return; }
       workspace = await readWorkspace();
+      if (disposed) return;
     } catch {
       /* The server could not be reached. The door is the honest surface: it is
          the one thing on this screen that needs no answer. */
@@ -305,6 +321,7 @@
       body().classList.add("launching");
       if (!reduced()) body().classList.add("showdawn");
       await tick();
+      if (disposed) return; /* #1151 W1-R6 */
       /* The labelled sky is drawn but not shown: `shownew` arrives with the
          flight's own `land` beat, so the climb is not flying over the surface
          it is about to set down on. */
