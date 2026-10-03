@@ -57,6 +57,10 @@
   /** @type {HomeView | null} */
   // svelte-ignore state_referenced_locally
   let view = $state(data?.view ?? null);
+  /** The onMount re-read's own failure (#1151 W1-R4): null while that read
+      has not failed, or has not been tried yet. */
+  /** @type {string | null} */
+  let homeLoadProblem = $state(null);
   /* The system-status drawer's real data (#863), read server-side alongside
      `view` (see +page.server.js). Null only when that read failed; the
      drawer then shows no service rows rather than the fake, always-degraded
@@ -1024,6 +1028,13 @@
         restoreScroll = null;
         requestAnimationFrame(() => window.scrollTo(0, y));
       }
+    }).catch((error) => {
+      /* #1151 W1-R4: this read had no `.catch()` at all, so a backend outage
+         left the server-rendered page up with nothing behind it ever bound
+         — no listeners, no error, just a screen that looked alive and
+         answered nothing. */
+      if (disposed) return;
+      homeLoadProblem = /** @type {any} */ (error)?.message ?? String(error);
     });
     return () => {
       disposed = true;
@@ -1043,6 +1054,10 @@
      NOT — see the note on the law above; that is the one place this parts
      company with §14's drawer rule, deliberately. -->
 <svelte:window onkeydown={onWindowKeydown} onclick={onWindowClick} />
+
+{#if homeLoadProblem}
+  <p class="p-error" role="alert">Orbit could not reach your home: {homeLoadProblem}</p>
+{/if}
 
 <!-- #466/#1120: the pocket's two-tap decisions land on the same idempotent
      approve protocol the desk rows use (one operation id per receipt), and
