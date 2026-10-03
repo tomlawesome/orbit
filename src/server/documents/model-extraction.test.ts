@@ -329,6 +329,23 @@ describe("the service absent", () => {
     expect(selectedExtractionModel({} as NodeJS.ProcessEnv)).toBeUndefined();
   });
 
+  it("accepts the documented digest-pinned OLLAMA_MODEL form, not only a bare tag (#1151 SF2-F5)", () => {
+    // docs/administrator-operations.md recommends exactly this form so a
+    // later pull fetches the model that was actually evaluated.
+    const digestPinned = `llama3.1@sha256:${"a".repeat(64)}`;
+    expect(selectedExtractionModel({ OLLAMA_MODEL: digestPinned } as unknown as NodeJS.ProcessEnv))
+      .toBe(digestPinned);
+    expect(selectedExtractionModel({ OLLAMA_MODEL: "llama3.1:8b" } as unknown as NodeJS.ProcessEnv))
+      .toBe("llama3.1:8b");
+    expect(selectedExtractionModel({ OLLAMA_MODEL: "llama3.1" } as unknown as NodeJS.ProcessEnv))
+      .toBe("llama3.1");
+    // A malformed digest (wrong length, not hex) is still rejected.
+    expect(selectedExtractionModel({ OLLAMA_MODEL: "llama3.1@sha256:not-hex" } as unknown as NodeJS.ProcessEnv))
+      .toBeUndefined();
+    expect(selectedExtractionModel({ OLLAMA_MODEL: `llama3.1@sha256:${"a".repeat(63)}` } as unknown as NodeJS.ProcessEnv))
+      .toBeUndefined();
+  });
+
   it("leaves today's heuristic extraction exactly as it is", () => {
     expect(proposalFromText(
       "Provider: Acme Cover\nPolicy number: AB-12345\nRenews 2027-08-01",
