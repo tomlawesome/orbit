@@ -322,10 +322,19 @@ export default {
        papers instead, which this beat is already holding: same side, clear
        of both. Desk is untouched — its card never rises over anything. */
     const readAnchor = pocket && papers.els.length > 0 ? papers : cardwrap;
+    /* #1174 round 11: "top" of papers sits close enough to the chrome that
+       vocabulary.js's pocket band clamps it flush against the chrome's own
+       bottom edge (pocketBand() never reserves the transport's own space
+       there — its own comment says so — because the pill is docked `.top`
+       the instant this sheet opens). The callout then lands exactly where
+       the docked pill does. "bottom" of the same papers keeps clear of both
+       the captions above (point 3's own reasoning still holds) and the
+       pill's band near the chrome, with the risen sheet's own room below
+       taking it same as "top of cardwrap" once did. */
     await callout(
       "Read the full document, right here.",
       readAnchor,
-      pocket ? "top" : "right",
+      pocket ? "bottom" : "right",
       { mark: "belt-read" },
     );
     dropCallout();
