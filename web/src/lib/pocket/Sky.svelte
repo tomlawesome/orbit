@@ -23,12 +23,25 @@
   /** @type {Props} */
   let { grain = false } = $props();
 
+  /** #1151 W1-Q6: the pocket's own tile is 400x850, nowhere near sky.js's
+   *  1600x1000 one TILED_LAYERS.count is tuned for, so these are a
+   *  deliberately separate density (review round §1.5: "so the sky reads
+   *  as dense as the desk's beside it") rather than a second copy of
+   *  TILED_LAYERS.count that a future density retune there would expect to
+   *  reach. Named here, rather than left as bare call-site literals, so
+   *  that intent reads at the definition instead of looking like a stray
+   *  copy of the shared recipe's own count. */
+  const FAR_COUNT = 60;
+  const NEAR_COUNT = 30;
+
   /**
    * @param {number} layer
    * @param {number} count
    * @param {() => number} rng
    */
   function stars(layer, count, rng) {
+    // Only the shape (radius/opacity ranges) comes from the shared recipe;
+    // `count` is this tile's own, see FAR_COUNT/NEAR_COUNT above.
     const { rMin, rSpan, oMin, oSpan } = TILED_LAYERS[layer];
     return Array.from({ length: count }, () => ({
       cx: (rng() * 400).toFixed(1),
@@ -40,8 +53,8 @@
   /* One rng, far then near then bright: the call order is what keeps the
      seed stable. */
   const rng = seededRng(TILED_SEED);
-  const far = stars(0, 60, rng);
-  const near = stars(1, 30, rng);
+  const far = stars(0, FAR_COUNT, rng);
+  const near = stars(1, NEAR_COUNT, rng);
   const bright = Array.from({ length: 5 }, () => ({
     cx: (rng() * 400).toFixed(1),
     cy: (rng() * 850).toFixed(1),
