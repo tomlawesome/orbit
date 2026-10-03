@@ -10,7 +10,7 @@
     startStepUp,
     writePortableArchive,
   } from "$lib/data/workspace.js";
-  import { ARCHIVE_MAX_BYTES, archiveFileProblem, passphraseProblem, sizeLabel } from "./archive.js";
+  import { ARCHIVE_MAX_BYTES, archiveFileProblem, PASSPHRASE_MIN, passphraseProblem, sizeLabel } from "./archive.js";
 
   /*
    * THE ARCHIVE ON A PHONE (#1122, proposal §2.10 item 5; the card ratified
@@ -158,7 +158,7 @@
   }
 
   async function lookInside() {
-    if (!file || passIn.length < 12) return;
+    if (!file || passIn.length < PASSPHRASE_MIN) return;
     inProblem = null;
     inPhase = "looking";
     try {
@@ -300,7 +300,7 @@
         </div>
         <div class="hh-pair">
           <button class="p-pill" onclick={startOver}>another file</button>
-          <button class="p-pill filled" disabled={passIn.length < 12 || inPhase === "looking"} onclick={lookInside}>
+          <button class="p-pill filled" disabled={passIn.length < PASSPHRASE_MIN || inPhase === "looking"} onclick={lookInside}>
             {inPhase === "looking" ? "looking…" : "look inside"}</button>
         </div>
       {:else if preview}
