@@ -826,13 +826,31 @@ function writeFileBackedOidcSecretEnv(targetDir) {
   chmodSync(join(targetDir, ".env-orbit"), 0o600);
 }
 
+// O2-S4 (#1151): builds the env for a repair.sh child, with the fake
+// `docker` shim directory ALWAYS first on PATH — even when the caller's
+// own `env` supplies its own PATH override (e.g. to add a second shim,
+// for `mv`/`mkdir`/etc., ahead of the real one). A plain object spread
+// (`{ PATH: ..., ...env }`) lets a later `env.PATH` silently replace the
+// whole key, dropping the docker shim and letting that one test probe
+// whatever real `docker` happens to be on this host's PATH — exactly the
+// invariant dockerShimScript's own header comment promises never happens.
+// Prepending binDir here, after the spread, is what makes it win
+// regardless of what the caller passed; a caller's own shim directory
+// (first in its PATH value) still runs ahead of the real system PATH,
+// just behind the one directory that must never be skipped.
+function repairChildEnv(binDir, env) {
+  const merged = { HOME: process.env.HOME ?? tmpdir(), ...env };
+  merged.PATH = `${binDir}:${merged.PATH ?? process.env.PATH}`;
+  return merged;
+}
+
 function runRepair(targetDir, args, dockerOptions = {}, { input, env } = {}) {
   const binDir = makeFakeBin(dockerOptions);
   return failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "repair.sh"), ...args], {
     cwd: targetDir,
     encoding: "utf8",
     input,
-    env: { PATH: `${binDir}:${process.env.PATH}`, HOME: process.env.HOME ?? tmpdir(), ...env },
+    env: repairChildEnv(binDir, env),
     ...processGuard(),
   }), { label: "runRepair" });
 }
@@ -845,7 +863,7 @@ function spawnRepair(targetDir, args, dockerOptions = {}, { env } = {}) {
   const binDir = makeFakeBin(dockerOptions);
   const child = spawn("bash", [join(targetDir, "scripts", "repair.sh"), ...args], {
     cwd: targetDir,
-    env: { PATH: `${binDir}:${process.env.PATH}`, HOME: process.env.HOME ?? tmpdir(), ...env },
+    env: repairChildEnv(binDir, env),
   });
   let stdout = "";
   let stderr = "";
@@ -986,6 +1004,30 @@ describe("scripts/repair.sh --check", () => {
 
     expect(result.status).toBe(0);
     expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=18 skipped=0"]);
+  });
+
+  // O2-S4 (#1151): a test's own PATH override (e.g. to add a second shim
+  // for mv/mkdir ahead of the real one, as the EXIT-trap signal tests
+  // below do) must never drop the fake docker shim — the one thing this
+  // whole suite depends on to never reach a real daemon. Proven here with
+  // a decoy directory that ALSO defines `docker`, distinguishably wrong
+  // (exit 99): if the merge ever let a caller's PATH win outright, this
+  // decoy would run instead of the real fake shim and the deployment would
+  // report docker-unavailable instead of healthy.
+  it("a caller-supplied PATH override never shadows the fake docker shim (runRepair and spawnRepair alike)", async () => {
+    const targetDir = makeFixture();
+    const decoyDir = mkdtempSync(join(tmpdir(), "orbit-repair-path-decoy-"));
+    scratchDirs.push(decoyDir);
+    writeFileSync(join(decoyDir, "docker"), "#!/usr/bin/env bash\nexit 99\n", { mode: 0o755 });
+
+    const syncResult = runRepair(targetDir, ["--check"], {}, { env: { PATH: `${decoyDir}:${process.env.PATH}` } });
+    expect(syncResult.status).toBe(0);
+    expect(syncResult.stdout).not.toContain("docker-unavailable");
+
+    const spawned = spawnRepair(targetDir, ["--check"], {}, { env: { PATH: `${decoyDir}:${process.env.PATH}` } });
+    const { status } = await failOnProcessDeadline(spawned.exited, { label: "spawnRepair PATH override" });
+    expect(status).toBe(0);
+    expect(spawned.stdoutSoFar()).not.toContain("docker-unavailable");
   });
 
   it("never emits ANSI or cursor-control bytes", () => {
