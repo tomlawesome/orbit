@@ -58,7 +58,45 @@ require_tools() {
   [[ -f "$environment_file" ]] || fail 'preflight/configuration failed; the Orbit environment file is missing.'
 }
 
+# The contract (src/lib/config-contract.ts) accepts DOCUMENT_KEK as either a
+# direct hexadecimal value in .env-orbit or a DOCUMENT_KEK_FILE path (the
+# usual case: configure.sh/install.sh never write anything else). This
+# script -- and the docker-compose.yml secrets stanza every `compose run`/
+# `exec` call below depends on -- otherwise assumes the file-backed form
+# unconditionally, so a direct-value deployment (accepted for upgrades,
+# configuration.sh's deprecated_supported classification) failed closed
+# here before anything else ran (#1151 SF2-F11). A later call never sources
+# .env-orbit as shell (matching configuration.sh's own discipline), so this
+# reads the direct value the same inert, line-based way.
+read_env_value() {
+  local requested_key="$1" file="$2" line value="" found=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "${requested_key}="* ]]; then
+      value="${line#*=}"
+      found=$((found + 1))
+    fi
+  done < "$file"
+  [[ "$found" == 1 ]] || return 1
+  printf '%s' "$value"
+}
+
+materialize_document_kek_from_direct_value() {
+  local direct_value temp
+  direct_value="$(read_env_value DOCUMENT_KEK "$environment_file")" || return 1
+  [[ "$direct_value" =~ ^[0-9a-fA-F]{64}$ ]] || return 1
+  mkdir -p -- "$secrets_directory" || return 1
+  chmod 700 -- "$secrets_directory" 2>/dev/null || true
+  umask 077
+  temp="$(mktemp "${document_kek_file}.XXXXXX" 2>/dev/null)" || return 1
+  printf '%s' "$direct_value" > "$temp" || { rm -f -- "$temp"; return 1; }
+  chmod 600 -- "$temp" 2>/dev/null || { rm -f -- "$temp"; return 1; }
+  mv -f -- "$temp" "$document_kek_file" 2>/dev/null || { rm -f -- "$temp"; return 1; }
+}
+
 read_document_kek() {
+  if [[ ! -f "$document_kek_file" || -L "$document_kek_file" ]]; then
+    materialize_document_kek_from_direct_value || true
+  fi
   [[ -f "$document_kek_file" && ! -L "$document_kek_file" ]] ||
     fail 'preflight/key failed; the configured document key is missing.'
   [[ "$(tr -d '\r\n' < "$document_kek_file")" =~ ^[0-9a-fA-F]{64}$ ]] ||
