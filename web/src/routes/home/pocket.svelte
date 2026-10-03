@@ -319,6 +319,12 @@
   /** @type {object | null} */
   let searchDocumentsFor = null;
 
+  /** At most this many readItemDocuments() calls in flight at once (#1151
+   *  W1-R9): a household with hundreds of items carrying documents used to
+   *  fire every one of them the instant the search sheet opened, with no
+   *  cap at all. */
+  const SEARCH_DOC_CONCURRENCY = 6;
+
   async function loadSearchDocuments() {
     const household = view?.household;
     const householdId = view?.primary;
@@ -327,16 +333,23 @@
     const carrying = (household.items ?? []).filter((item) => item.status === "active" && (item.documentCount ?? 0) > 0);
     // Additive: an item whose papers cannot be read loses its papers from the
     // results, not the search.
-    const found = await Promise.all(carrying.map(async (item) => {
-      try {
-        const papers = await readItemDocuments(householdId, item.id);
-        return papers.map((doc) => ({ ...doc, itemTitle: item.title }));
-      } catch {
-        return [];
+    /** @type {typeof searchDocuments} */
+    const found = [];
+    let cursor = 0;
+    async function worker() {
+      while (cursor < carrying.length && searchDocumentsFor === household) {
+        const item = carrying[cursor++];
+        try {
+          const papers = await readItemDocuments(householdId, item.id);
+          found.push(...papers.map((doc) => ({ ...doc, itemTitle: item.title })));
+        } catch { /* this item's papers drop out, not the whole search */ }
       }
-    }));
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(SEARCH_DOC_CONCURRENCY, carrying.length) }, worker),
+    );
     if (searchDocumentsFor === household) {
-      searchDocuments = found.flat();
+      searchDocuments = found;
       papersReady = true;
     }
   }
