@@ -520,6 +520,39 @@ export function createFilmContext({
   /* ---- the words themselves -------------------------------------------- */
 
   /**
+   * Races a real, unbudgeted wait — already inside a `clock.stall()`, which
+   * is the only reason this is safe (below) — against the clock's own
+   * cancellation (#1151 W3-R2). `clock.cancel()` only ever settles waits
+   * booked through `clock.wait()`: a raw `navigate()`/`settle()` promise or
+   * a bare `setTimeout` is invisible to it, so a chapter suspended on one of
+   * those used to keep running after Stop or a jump, racing whatever chapter
+   * started next (and, for chapter 5's own demo body, keeping it on the
+   * real star chart for as long as that race took to resolve on its own —
+   * #1151 W3-R1, the same gap under a different name).
+   *
+   * The guard is `clock.wait(0)`, not a long or infinite one: `wait()`
+   * always books its span onto `sched` regardless of `stall()`, so any
+   * span here would silently push every wait still to come later than it
+   * should be — exactly what `stall()` exists to prevent. Zero costs
+   * nothing there. It still cannot fire on its own while stalled, because
+   * `advance()` skips its whole waiter-firing pass whenever `stalls > 0`
+   * (clock.js) — so for as long as the caller's own `clock.stall()` stays
+   * held, this guard only ever settles by `cancel()` rejecting it with
+   * CANCEL. Once the stall is released it resolves on the next frame like
+   * any other spent wait, which is harmless: the race it was guarding has
+   * always long since settled by then. Callers outside a stall must not
+   * use this — the guard would race the real wait for real, not stand
+   * aside from it.
+   *
+   * @template T
+   * @param {Promise<T>} promise
+   * @returns {Promise<T>}
+   */
+  function cancellable(promise) {
+    return Promise.race([promise, clock.wait(0)]);
+  }
+
+  /**
    * The mockup's `setBg`. A chapter names a real route; the film walks
    * there and waits for the screen to arrive. That wait is REAL time the dry
    * run could not have budgeted for, so the clock is stalled across it — the
@@ -541,17 +574,17 @@ export function createFilmContext({
     room(0);
     const release = clock.stall();
     try {
-      await navigate(route);
-      await settle(route);
+      await cancellable(navigate(route));
+      await cancellable(settle(route));
       /* #1174: a kit sheet closing pops its own history entry, and the
          browser delivers that popstate a moment later — sometimes after the
          walk to the next screen has begun, and the router then keeps the
          screen the popstate names. One more walk, once the dust has
          settled, lands where the chapter said. */
       if (routeOf() !== route) {
-        await new Promise((res) => setTimeout(res, 150));
-        await navigate(route);
-        await settle(route);
+        await cancellable(new Promise((res) => setTimeout(res, 150)));
+        await cancellable(navigate(route));
+        await cancellable(settle(route));
       }
     } finally {
       release();
@@ -612,7 +645,10 @@ export function createFilmContext({
     try {
       const deadline = Date.now() + timeoutMs;
       while (!doc.querySelector(selector) && Date.now() < deadline) {
-        await new Promise((res) => setTimeout(res, 32));
+        /* Cancellable (#1151 W3-R1/W3-R2): up to 12s of raw timers this
+           polling loop could otherwise keep running through, unseen by
+           clock.cancel(), after Stop or a jump. */
+        await cancellable(new Promise((res) => setTimeout(res, 32)));
       }
       /* #1174 round 6: a wait that ran out is the film standing still for
          something that was never coming -- 12 seconds of a frozen clock on
@@ -945,8 +981,10 @@ export function createFilmContext({
          page simply needs to be there. */
       c.els[0].scrollIntoView({ block: "center", behavior: "instant" });
       /* A plain timer, not requestAnimationFrame: this wait is only about
-         giving the scroll a moment to land, not about a paint. */
-      await new Promise((res) => setTimeout(res, 16));
+         giving the scroll a moment to land, not about a paint. Cancellable
+         (#1151 W3-R1/W3-R2) for the same reason setScreen's own real waits
+         are: a bare setTimeout is invisible to clock.cancel(). */
+      await cancellable(new Promise((res) => setTimeout(res, 16)));
     } finally {
       release();
     }
