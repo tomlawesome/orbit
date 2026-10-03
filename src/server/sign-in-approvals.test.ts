@@ -524,7 +524,6 @@ describe("a refusal (ADR-0027 §8 and consequences)", () => {
       now = at(now, refusal === 0 ? 0 : 61 * 60 * 1000);
       const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now });
       const token = tokenFromLatestMail();
-      // eslint-disable-next-line no-await-in-loop -- each refusal must land before the next pending sign-in is minted
       await decideSignInApproval(token, "denied");
       void pending;
     }
