@@ -189,15 +189,26 @@ export function entryOf(item) {
 }
 
 /**
+ * The message shown beside a cost field whose comma is not a thousands
+ * separator in a valid position (#1151 W1-F1/W1-S4): Orbit is a UK product,
+ * so a comma is only ever a thousands separator, never a decimal point.
+ */
+export const COST_FORMAT_HINT = "Use a dot for pence, for example 12.50";
+
+/**
  * A typed cost in minor units: undefined when empty, NaN when it is not a
- * sum of money. Accepts "84", "84.5", "£84.50", "1,200".
+ * sum of money. Accepts "84", "84.5", "£84.50", "1,250", "1,250.00". A
+ * comma is only accepted as a thousands separator in a valid grouping
+ * position — groups of exactly three digits after it, none after the
+ * decimal point — so "12,50" and "1,2500" are rejected rather than
+ * silently reinterpreted (#1151 W1-F1/W1-S4).
  * @param {string} text
  */
 export function minorOf(text) {
-  const clean = String(text ?? "").replace(/[£$€,\s]/g, "");
+  const clean = String(text ?? "").replace(/[£$€\s]/g, "");
   if (!clean) return undefined;
-  if (!/^\d+(\.\d{0,2})?$/.test(clean)) return Number.NaN;
-  return Math.round(Number(clean) * 100);
+  if (!/^\d+(\.\d{0,2})?$|^\d{1,3}(,\d{3})+(\.\d{0,2})?$/.test(clean)) return Number.NaN;
+  return Math.round(Number(clean.replace(/,/g, "")) * 100);
 }
 
 /**
@@ -209,7 +220,7 @@ export function refusalOf(entry) {
   if (!entry.name.trim()) return "not yet — give it a name";
   if (!entry.sectionId) return "not yet — choose a section";
   const cost = minorOf(entry.cost);
-  if (cost !== undefined && Number.isNaN(cost)) return "not yet — the cost is not a sum of money";
+  if (cost !== undefined && Number.isNaN(cost)) return `not yet — ${COST_FORMAT_HINT.toLowerCase()}`;
   if (entry.recurrence > 0 && kindRecurs(entry.kind) && !entry.dueDate && entry.kind)
     return "not yet — a repeat needs a due date";
   return null;
