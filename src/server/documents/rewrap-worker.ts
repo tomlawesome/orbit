@@ -39,7 +39,7 @@ import { log, operationalDetail } from "@/lib/logger";
 import { rewrapDocumentKey, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
 import { rewrapMetadataKey, type MetadataKeyContext } from "@/server/metadata/crypto";
 import { rewrapMailInSecret } from "@/server/mail-in/core/secret-crypto";
-import { operationalDocumentReason } from "@/server/document-maintenance/claims";
+import { JOB_CLAIM_UPDATE, operationalDocumentReason } from "@/server/document-maintenance/claims";
 
 type Transaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
 
@@ -109,16 +109,7 @@ export async function claimRewrapJobs(limit = DOCUMENT_REWRAP_CLAIM_LIMIT): Prom
       for update of job skip locked
       limit ${limit}
     ), claimed as (
-      update document_jobs as job
-      set status = 'processing',
-          attempts = job.attempts + 1,
-          locked_at = now(),
-          lease_expires_at = now() + interval '10 minutes',
-          lease_token = gen_random_uuid(),
-          updated_at = now()
-      from claimable
-      where job.id = claimable.id
-      returning job.id, job.document_id, job.generation, job.lease_token
+      ${JOB_CLAIM_UPDATE}
     )
     select claimed.id, claimed.document_id as "documentId", claimed.generation,
       claimed.lease_token as "leaseToken"
