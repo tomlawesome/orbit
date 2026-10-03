@@ -164,7 +164,15 @@ vi.mock("@/db", async () => {
           ...value,
         };
         rowsFor(table).push(row);
-        return Promise.resolve();
+        const keys = columnKeys(table as Record<string, { name?: string }>);
+        return {
+          returning(selection: Record<string, unknown>) {
+            return Promise.resolve([project(row, selection, keys)]);
+          },
+          then(resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) {
+            return Promise.resolve().then(resolve, reject);
+          },
+        };
       },
     };
   }
@@ -376,6 +384,29 @@ describe("a pending sign-in, from the password to the session (ADR-0027 §4-§6)
     expect(store.approvals).toHaveLength(1);
     expect(JSON.stringify(store.approvals[0])).not.toContain(token);
     expect(JSON.stringify(store.approvals[0])).not.toContain(pending.claim);
+  });
+
+  it("writes the pending row before the mail is sent, so a crash before the send leaves a row to expire rather than a dead link (#1151 A1-R1)", async () => {
+    let rowExistedBeforeSend = false;
+    const orderedMailer = {
+      async sendEmail(notification: { to: string; subject: string; text: string }) {
+        // The row must already exist, unsent, by the time the provider is
+        // asked to send -- that is the whole of the fix: a crash right here
+        // leaves a harmless, unsent row rather than a mailed link nothing in
+        // the database can resolve.
+        rowExistedBeforeSend = store.approvals.length === 1
+          && store.approvals[0].sendCount === 0
+          && store.approvals[0].lastSentAt === null;
+        posted.push({ to: notification.to, subject: notification.subject, text: notification.text });
+      },
+    };
+
+    await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer: orderedMailer });
+
+    expect(rowExistedBeforeSend).toBe(true);
+    // The outcome still lands once the send completes.
+    expect(store.approvals[0].sendCount).toBe(1);
+    expect(store.approvals[0].lastSentAt).not.toBeNull();
   });
 
   it("holds the tab until somebody presses Approve, then hands it one session", async () => {
