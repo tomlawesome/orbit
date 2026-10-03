@@ -4,8 +4,10 @@
  * The ratified mockup (design/v19/tour/round-5/f-one-take.html) writes its
  * twelve chapters in a small, fixed set of words: `setBg`, `veil`, `ctl`,
  * `mkHl`, `mkCut`, `goto`, `press`, `tap`, `typeInto`, `unlight`, `callout`,
- * `travel`. This module is those words again, against the real product. A
- * reader can hold the mockup beside a chapter file here and follow both.
+ * `travel`. This module is those words again, against the real product — all
+ * but `tap`, which no chapter ever called; removed rather than kept live for
+ * a caller that does not exist (#1151 W3-Q7). A reader can hold the mockup
+ * beside a chapter file here and follow both.
  *
  * `wear` is the one word here the mockup has no name for: it drove its dawn
  * chapter off a `dawnPack` flag that picked a different screenshot. The
@@ -1071,14 +1073,6 @@ export function createFilmContext({
     restore(c);
   }
 
-  /** The mockup's `tap`: visit, press, and leave dark again.
-   *  @param {Control} c @param {{ keep?: boolean, willPress?: boolean }} [o] */
-  async function tap(c, o = {}) {
-    await goto(c, o);
-    await press(c);
-    if (o.keep !== true) unlight(c);
-  }
-
   /* ---- typing (the mockup's typeInto) ----------------------------------- */
 
   /** How opaque a computed colour is: 0 for none, 1 for a solid one. Reads
@@ -1787,7 +1781,6 @@ export function createFilmContext({
     quiet,
     goto,
     press,
-    tap,
     typeInto,
     wear,
     read,
