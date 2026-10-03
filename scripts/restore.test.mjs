@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -51,6 +51,7 @@ function extractFunction(name) {
 
 const healthProbeUrlSource = extractFunction("health_probe_url");
 const waitForHealthSource = extractFunction("wait_for_health");
+const sweepOrphanedCheckpointsSource = extractFunction("sweep_orphaned_checkpoints");
 
 // Issue #678: the same two constants and four functions the live script uses,
 // extracted rather than retyped, so this suite cannot pass against a copy that
@@ -493,5 +494,82 @@ describe("scripts/restore.sh correspondence call sites (issue #678)", () => {
     for (const line of callLines) {
       expect(line).toMatch(/"\$\w+_report" [a-z-]+ \|\| return \$\?$/);
     }
+  });
+});
+
+// #1151 O2-R6: a process killed hard (SIGKILL, or an OOM kill) during
+// create_checkpoint -- before its own write_journal call durably records the
+// checkpoint -- left a full-size database dump and document tar behind
+// forever: it predates the journal that --recover and the "an unfinished
+// restore exists" refusal both key off of, so neither ever sees it. Same
+// shape as O2-R10 in the TypeScript engine. sweep_orphaned_checkpoints runs
+// early in every restore.sh invocation, while the backup/restore lock is
+// held, and removes every checkpoint-* directory except the one (if any)
+// the current journal names -- the real function extracted from
+// scripts/restore.sh, never a hand-typed duplicate.
+describe("scripts/restore.sh sweep_orphaned_checkpoints (#1151 O2-R6)", () => {
+  const scratchDirs = [];
+  afterEach(() => {
+    while (scratchDirs.length > 0) rmSync(scratchDirs.pop(), { recursive: true, force: true });
+  });
+
+  function makeRestoreRoot() {
+    const directory = mkdtempSync(join(tmpdir(), "orbit-restore-sweep-"));
+    scratchDirs.push(directory);
+    return directory;
+  }
+
+  function runSweep(restoreRoot, journalContent) {
+    const journalPath = join(restoreRoot, "restore.journal");
+    if (journalContent !== null) writeFileSync(journalPath, journalContent);
+    const harness = [
+      "#!/usr/bin/env bash",
+      "set -Eeuo pipefail",
+      `restore_root=${JSON.stringify(restoreRoot)}`,
+      `journal_path=${JSON.stringify(journalPath)}`,
+      sweepOrphanedCheckpointsSource,
+      "sweep_orphaned_checkpoints",
+      'printf "returned-cleanly\\n"',
+    ].join("\n");
+    return failOnProcessDeadline(spawnSync("bash", ["-c", harness], { encoding: "utf8", ...processGuard() }), { label: "runSweep" });
+  }
+
+  it("removes an abandoned checkpoint directory when no journal exists", () => {
+    const restoreRoot = makeRestoreRoot();
+    const orphan = join(restoreRoot, "checkpoint-abandoned1");
+    writeFileSync(join(restoreRoot, ".keep"), "");
+    mkdirSync(orphan, { recursive: true });
+    writeFileSync(join(orphan, "database.dump"), "stale-dump-bytes");
+
+    const result = runSweep(restoreRoot, null);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("returned-cleanly");
+    expect(existsSync(orphan)).toBe(false);
+  });
+
+  it("preserves the checkpoint directory the current journal names, and removes every other one", () => {
+    const restoreRoot = makeRestoreRoot();
+    const keep = join(restoreRoot, "checkpoint-current1");
+    const orphan = join(restoreRoot, "checkpoint-stale2");
+    mkdirSync(keep, { recursive: true });
+    mkdirSync(orphan, { recursive: true });
+    writeFileSync(join(keep, "database.dump"), "current-dump-bytes");
+    writeFileSync(join(orphan, "database.dump"), "stale-dump-bytes");
+    const journal = "format_version=1\nrestore_id=current1\nstate=checkpointed\n"
+      + `database_sha256=${"a".repeat(64)}\ndocuments_sha256=${"b".repeat(64)}\ndocument_kek_sha256=${"c".repeat(64)}\n`;
+
+    const result = runSweep(restoreRoot, journal);
+
+    expect(result.status).toBe(0);
+    expect(existsSync(keep)).toBe(true);
+    expect(existsSync(orphan)).toBe(false);
+  });
+
+  it("does nothing when the restore root does not exist yet", () => {
+    const restoreRoot = join(makeRestoreRoot(), "never-created");
+    const result = runSweep(restoreRoot, null);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("returned-cleanly");
   });
 });

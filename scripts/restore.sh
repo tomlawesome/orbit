@@ -603,6 +603,36 @@ write_journal() {
   rm -f -- "$previous_journal" >/dev/null 2>&1 || true
 }
 
+# #1151 O2-R6: a process killed hard (SIGKILL, or an OOM kill) during
+# create_checkpoint -- before its own write_journal call durably records
+# the checkpoint -- left a full-size database dump and document tar behind
+# forever. Nothing reports or removes it: it predates the journal that
+# --recover and the "an unfinished restore exists" refusal both key off of,
+# so neither ever sees it. Same shape as O2-R10 in the TypeScript engine
+# (restore-engine.ts), which fixed it with a marker file create_checkpoint
+# writes before capture and recoverRestore() later sweeps; this bash
+# script already has an equivalent invariant for free, from the
+# backup/restore lock (#1151 O2-R3): only one restore process can ever hold
+# acquire_backup_restore_lock, so a checkpoint-* directory found while
+# holding it, with no journal entry naming it, cannot belong to a run still
+# in progress -- it can only be a prior run's abandoned checkpoint. Run
+# once, early, while the lock is held and before create_checkpoint picks a
+# new directory.
+sweep_orphaned_checkpoints() {
+  local directory referenced_restore_id=""
+  [[ -d "$restore_root" ]] || return 0
+  if [[ -f "$journal_path" && ! -L "$journal_path" ]]; then
+    referenced_restore_id="$(awk -F= '$1 == "restore_id" { print $2 }' "$journal_path" 2>/dev/null)"
+  fi
+  for directory in "$restore_root"/checkpoint-*; do
+    [[ -d "$directory" && ! -L "$directory" ]] || continue
+    if [[ -n "$referenced_restore_id" && "$directory" == "$restore_root/checkpoint-$referenced_restore_id" ]]; then
+      continue
+    fi
+    rm -rf -- "$directory"
+  done
+}
+
 copy_checkpoint_key() {
   local source_key="${ORBIT_RESTORE_ROLLBACK_KEK_FILE:-$document_kek_file}"
   [[ -f "$source_key" && ! -L "$source_key" ]] || return 1
@@ -1005,6 +1035,7 @@ mkdir -p "$backup_directory"
 chmod 700 "$backup_directory"
 [[ ! -L "$restore_root" ]] || fail 'preflight/configuration failed; the restore evidence directory must not be a symbolic link.'
 acquire_backup_restore_lock
+sweep_orphaned_checkpoints
 
 if [[ "$recover_mode" == true ]]; then
   [[ -z "$backup_file" ]] || fail 'usage failed; --recover does not accept a new backup bundle.'
