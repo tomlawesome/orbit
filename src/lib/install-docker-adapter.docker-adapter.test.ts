@@ -150,6 +150,10 @@ const fakeDockerScript = [
   "    ;;",
   "esac",
   'if [[ -n "${ORBIT_STDOUT:-}" ]]; then printf \'%s\\n\' "$ORBIT_STDOUT"; fi',
+  // O1-R11: stands in for a hung/unresponsive daemon — sleeps well past any
+  // timeout a test configures, so composeUp/etc's own bound (not this
+  // script's own completion) is what ends the call.
+  'if [[ -n "${ORBIT_SLEEP_SECONDS:-}" ]]; then sleep "$ORBIT_SLEEP_SECONDS"; fi',
   'exit "${ORBIT_EXIT:-0}"',
   "",
 ].join("\n");
@@ -471,6 +475,67 @@ describe("createInstallDockerAdapter — compose lifecycle and health probes", (
     expect(adapterFor(binDirOk).checkDockerAvailable()).toBe(true);
     const binDirFail = makeFakeDockerBin();
     expect(adapterFor(binDirFail, { ORBIT_EXIT: "1" }).checkDockerAvailable()).toBe(false);
+  });
+});
+
+// O1-R11: before this, checkDockerAvailable/composePull/composeUp/
+// composeDown/composeConfigValidate/pullOllamaModel had no timeout at
+// all — unlike the bounded health probes above, an unresponsive daemon
+// could hang the installer forever. composeTimeoutsMs overrides let these
+// tests prove the bound actually kills a hung call and reports it as a
+// failure, using a fake `docker` that sleeps well past a short configured
+// timeout, rather than waiting out the real (deliberately generous,
+// minutes-long) production ceilings.
+describe("createInstallDockerAdapter — compose-lifecycle timeouts (O1-R11)", () => {
+  function hungAdapterFor(binDir: string, overrides: Partial<Record<"quick" | "pull" | "up" | "down" | "ollamaPull", number>>) {
+    return createInstallDockerAdapter({
+      envFile: ".env-orbit",
+      composeProjectName: "orbit",
+      env: shimEnv(binDir, { ORBIT_SLEEP_SECONDS: "5" }),
+      composeTimeoutsMs: overrides,
+    });
+  }
+
+  it("composeUp returns false (never hangs) when the daemon does not respond within the bound", () => {
+    const binDir = makeFakeDockerBin();
+    const adapter = hungAdapterFor(binDir, { up: 200 });
+    expect(adapter.composeUp()).toBe(false);
+  });
+
+  it("composePull returns false when the registry pull hangs past the bound", () => {
+    const binDir = makeFakeDockerBin();
+    const adapter = hungAdapterFor(binDir, { pull: 200 });
+    expect(adapter.composePull("orbit-db")).toBe(false);
+  });
+
+  it("composeDown does not throw or hang when the daemon does not respond within the bound", () => {
+    const binDir = makeFakeDockerBin();
+    const adapter = hungAdapterFor(binDir, { down: 200 });
+    expect(() => adapter.composeDown()).not.toThrow();
+  });
+
+  it("checkDockerAvailable and composeConfigValidate (the 'quick' bound) both return false rather than hang", () => {
+    const binDir = makeFakeDockerBin();
+    const adapter = hungAdapterFor(binDir, { quick: 200 });
+    expect(adapter.checkDockerAvailable()).toBe(false);
+    expect(adapter.composeConfigValidate()).toBe(false);
+  });
+
+  it("pullOllamaModel returns false when a model pull hangs past the bound", () => {
+    const binDir = makeFakeDockerBin();
+    const adapter = hungAdapterFor(binDir, { ollamaPull: 200 });
+    expect(adapter.pullOllamaModel("llama3")).toBe(false);
+  });
+
+  it("a call that finishes well inside its bound still succeeds normally (no regression)", () => {
+    const binDir = makeFakeDockerBin();
+    const adapter = createInstallDockerAdapter({
+      envFile: ".env-orbit",
+      composeProjectName: "orbit",
+      env: shimEnv(binDir),
+      composeTimeoutsMs: { quick: 200 },
+    });
+    expect(adapter.checkDockerAvailable()).toBe(true);
   });
 });
 
