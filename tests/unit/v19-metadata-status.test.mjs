@@ -140,7 +140,10 @@ describe("the item screen wires both states where they have to be seen", () => {
       const input = editPanel.slice(editPanel.indexOf(`id="${field}"`));
       expect(input.slice(0, input.indexOf("</div>"))).toContain("disabled={locked}");
     }
-    expect(editPanel).toContain("disabled={busy || locked || !form.title?.trim()}");
+    // #1151 W1-F1/W1-S4 added formCostInvalid as a further, independent gate
+    // (a malformed cost blocks save on its own) — locked still fully gates
+    // the button either way, which is what this test gets to prove.
+    expect(editPanel).toContain("disabled={busy || locked || !form.title?.trim() || formCostInvalid}");
     expect(editPanel).toContain("{PANEL_LOCKED}");
   });
 
@@ -157,8 +160,9 @@ describe("the item screen wires both states where they have to be seen", () => {
     const costInput = completePanel.slice(completePanel.indexOf('id="a-cost"'));
     expect(costInput.slice(0, costInput.indexOf("</div>"))).toContain("disabled={locked}");
     // The save button is never gated on `locked`: a no-cost completion stays
-    // available, exactly as the server accepts it.
-    expect(completePanel).toContain("disabled={busy || !form.completedDate}");
+    // available, exactly as the server accepts it. #1151 W1-F1/W1-S4 added
+    // formCostInvalid alongside it — an independent gate, not `locked`.
+    expect(completePanel).toContain("disabled={busy || !form.completedDate || formCostInvalid}");
     expect(completePanel).not.toMatch(/disabled=\{busy \|\| locked/);
     expect(completePanel).toContain("{COST_LOCKED}");
     expect(completePanel).not.toContain("{PANEL_LOCKED}");
