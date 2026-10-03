@@ -4187,6 +4187,44 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     expect(result.stdout).not.toContain(checkpointDir);
   });
 
+  // O2-R2 (#1151): by the time restart-services (step 4) is the one that
+  // fails, the rotation has already fully landed — rotate-credential and
+  // update-config both succeeded. The checkpoint holds the OLD credential,
+  // which the database no longer accepts at this point, so repeating the
+  // "recoverable from the checkpoint" guidance here would send the operator
+  // to reintroduce the exact mismatch the rotation just fixed. Contrast the
+  // test immediately above: same reason=step-failed, different step,
+  // different and non-overlapping guidance.
+  it("restart-services failure (the only step to fail, after rotate-credential and update-config both succeeded): guidance says restart yourself, never to restore the checkpoint", () => {
+    const targetDir = makeCredentialMismatchFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" }, restartFails: true },
+      { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("dangerous result=failed done=0 failed=1 reason=step-failed");
+    expect(result.stdout).toContain("execute action=rotate-database-credential resolves=database-credential-mismatch result=failed");
+    expect(result.stderr).toContain("stage two step 'restart-services' failed");
+
+    // The new, state-accurate guidance: already rotated, restart yourself.
+    expect(result.stderr).toContain("already rotated");
+    expect(result.stderr).toContain("bash scripts/deploy-container.sh --pull");
+    // Never the old, now-wrong "recoverable from the checkpoint" guidance,
+    // which would send the operator to reintroduce the mismatch.
+    expect(result.stderr).not.toContain("remains recoverable from the checkpoint");
+    expect(result.stderr).not.toContain("decrypt it with your checkpoint passphrase");
+
+    // The new credential IS already in the live secret file (update-config
+    // succeeded) — only the container restart failed.
+    expect(readFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), "utf8").trim()).toMatch(
+      HEX_SECRET_PATTERN,
+    );
+  });
+
   // --- passphrase rule enforcement (owner: "existing ≥12-char rule,
   // prompted twice") -----------------------------------------------------
 
