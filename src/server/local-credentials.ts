@@ -830,8 +830,13 @@ const uuidSchema = z.uuid();
  * (ADR-0023 §1, §3). Read at the moment of the decision rather than cached:
  * an operator who has just turned the provider off has changed what "usable"
  * means for the next request.
+ *
+ * Exported for `admin-repository.ts`'s primary-administrator transfer
+ * (#1151 SS1-S1), which owes the target the same answer the unlink checks
+ * below give their own caller: an external identity row that still exists
+ * is not the same fact as a provider that is still switched on.
  */
-function identitiesAreUsable(): boolean {
+export function identitiesAreUsable(): boolean {
   return getAuthConfig().oidc !== null;
 }
 
