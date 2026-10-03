@@ -449,3 +449,36 @@ describe("backup/restore scratch directories are cleaned up on exit and on SIGIN
     },
   );
 });
+
+// #1151 O1-R6: commandEndMaintenance, commandAuthRecoveryLink and
+// commandAuthClearAddresses each resolve their dynamic import()s inside a
+// `void (async () => {...})()` IIFE; a module-load failure in one of those
+// imports used to escape as an unhandled promise rejection instead of the
+// command's own clean, bounded failure message, because the imports ran
+// before any try block. Driving a real import failure would mean breaking
+// a real module file out from under a real CLI process, which risks leaving
+// it broken for whatever else reads the same checkout; this instead proves
+// the structural fix directly from the source: each command's own
+// `import(` call sites are now textually inside that function's own `try`,
+// not before it, so a regression moving them back out fails here.
+describe("orbit end-maintenance/auth commands keep their dynamic imports inside a try (#1151 O1-R6)", () => {
+  const source = readFileSync(cli, "utf8");
+
+  function functionBody(name: string): string {
+    const match = source.match(new RegExp(`function ${name}\\([^)]*\\): void \\{([\\s\\S]*?)\\n\\}\\n`, "mu"));
+    if (!match) throw new Error(`Could not find function ${name} in ${cli}`);
+    return match[1];
+  }
+
+  it.each(["commandEndMaintenance", "commandAuthRecoveryLink", "commandAuthClearAddresses"])(
+    "%s's first import( call comes after its first try {",
+    (name) => {
+      const body = functionBody(name);
+      const firstTry = body.indexOf("try {");
+      const firstImport = body.indexOf("import(");
+      expect(firstTry).toBeGreaterThanOrEqual(0);
+      expect(firstImport).toBeGreaterThanOrEqual(0);
+      expect(firstTry).toBeLessThan(firstImport);
+    },
+  );
+});
