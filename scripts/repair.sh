@@ -3741,6 +3741,20 @@ run_rotate_database_credential_steps() {
     if ! run_dangerous_step "$step"; then
       if [[ "$step" == checkpoint ]]; then
         dangerous_failure_reason="checkpoint-failed"
+      elif [[ "$step" == restart-services ]]; then
+        # O2-R2: by this step the rotation has already fully landed — the
+        # database role's password was already changed (rotate-credential)
+        # and the new secret file is already in place (update-config); only
+        # restarting the containers to pick it up failed. The checkpoint
+        # holds the OLD credential, which no longer matches the database at
+        # this point, so printing the usual "recoverable from the
+        # checkpoint" guidance here would send the operator to restore a
+        # value that would now MISMATCH rather than fix anything.
+        dangerous_failure_reason="step-failed"
+        printf "Orbit repair: stage two step '%s' failed.\n" "$step" >&2
+        printf 'Orbit repair: the database credential was already rotated and the new secret file is already in place; only restarting the containers failed.\n' >&2
+        printf 'Orbit repair: restart orbit-db then orbit-app yourself (e.g. bash scripts/deploy-container.sh --pull) to pick up the new credential.\n' >&2
+        printf 'Orbit repair: do not restore the checkpoint now — it holds the OLD credential, which no longer matches the database and would reintroduce the mismatch.\n' >&2
       else
         dangerous_failure_reason="step-failed"
         printf "Orbit repair: stage two step '%s' failed.\n" "$step" >&2
