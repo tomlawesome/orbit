@@ -169,7 +169,12 @@ async function interceptFailingMail(page: Page, household: Household) {
   await page.route("**/api/reviewed-intake/approve", (route) => {
     approvals += 1;
     if (approvals === 1) {
-      return route.fulfill({ status: 500, json: { error: { code: "intake_unavailable", message: "Orbit could not add this suggestion just now" } } });
+      // SQ2-Q1 (#1151): the real approve route never answers with
+      // "intake_unavailable" -- src/lib/app-error.ts's appErrorResponse has
+      // no such code, and its catch-all for an unexpected failure is always
+      // this exact status, code and message. A mocked shape the backend
+      // cannot produce proves nothing about how the UI handles one it can.
+      return route.fulfill({ status: 500, json: { error: { code: "internal_error", message: "Orbit could not complete the request" } } });
     }
     approved = true;
     return route.fulfill({ json: { outcome: "approved", itemId: null } });
@@ -177,7 +182,7 @@ async function interceptFailingMail(page: Page, household: Household) {
   return { receiptId, title, approvals: () => approvals };
 }
 
-const APPROVAL_FAILED = /could not add this suggestion just now/;
+const APPROVAL_FAILED = /could not complete the request/;
 
 const itemViewApproval: Journey = {
   name: "a mail suggestion whose approval fails, in the item view",
