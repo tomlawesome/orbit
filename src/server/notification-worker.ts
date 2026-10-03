@@ -89,6 +89,13 @@ export const notificationFailureCategories = [
   "recipient_preferences_disabled",
   "household_pending_deletion",
   "membership_removed",
+  /* #1151 A4-S5: a delivery that went stale while it sat retrying -- its
+     scheduled instant older than the catch-up window honours -- used to be
+     cancelled with a bare `null` reason, the same as the row had going in.
+     An admin reading the Operations panel could not tell that one apart
+     from the several other conditions already cancelling it with no
+     diagnostic at all; this one at least now names itself. */
+  "reminder_stale",
   /* #963: the item's name is Tier 2 ciphertext and would not decrypt — a
      locked instance or a damaged value. Retried like any transient fault,
      because both causes are repairable and neither justifies a nameless
@@ -892,6 +899,7 @@ async function deliverClaimed(
     if (!leaseToken || delivery.leaseToken !== leaseToken) continue;
     try {
       const staleBoundary = new Date(now.getTime() - notificationCatchUpWindowMs);
+      const isStale = delivery.scheduledFor < staleBoundary;
       const matchingRule = effectiveReminderOffsets(rulesByItem.get(delivery.itemId) ?? [], delivery).find((offset) => (
         householdReminderTime(delivery.dueDate, offset.daysBefore, delivery.timezone).getTime() === delivery.scheduledFor.getTime()
         && (delivery.channel === "email" ? offset.emailEnabled : offset.pushEnabled)
@@ -899,13 +907,25 @@ async function deliverClaimed(
       const preferenceEnabled = delivery.channel === "email"
         ? delivery.userEmailEnabled
         : delivery.userPushEnabled;
-      if (delivery.householdDeletionRequestedAt || delivery.userDisabledAt || delivery.completedAt || delivery.itemStatus !== "active" || delivery.scheduledFor < staleBoundary || reminderIsSnoozed(delivery.scheduledFor, delivery.snoozedUntil, delivery.timezone) || !matchingRule || !delivery.isMember) {
+      if (delivery.householdDeletionRequestedAt || delivery.userDisabledAt || delivery.completedAt || delivery.itemStatus !== "active" || isStale || reminderIsSnoozed(delivery.scheduledFor, delivery.snoozedUntil, delivery.timezone) || !matchingRule || !delivery.isMember) {
         await cancelDelivery(
           db,
           delivery.id,
           leaseToken,
           now,
-          delivery.householdDeletionRequestedAt ? "household_pending_deletion" : (!delivery.isMember ? "membership_removed" : null),
+          // #1151 A4-S5: every branch of the OR above used to report `null`
+          // here except the first two, leaving an admin looking at
+          // "cancelled" with nothing to say why. This names the stale case
+          // the finding points at; the other untitled branches above
+          // (disabled account, completed item, inactive item, snoozed,
+          // no matching rule) are unchanged.
+          delivery.householdDeletionRequestedAt
+            ? "household_pending_deletion"
+            : !delivery.isMember
+              ? "membership_removed"
+              : isStale
+                ? "reminder_stale"
+                : null,
         );
         continue;
       }
