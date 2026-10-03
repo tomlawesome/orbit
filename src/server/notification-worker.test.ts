@@ -19,9 +19,11 @@ import {
   getNotificationWorkerHealth,
   householdReminderTime,
   isAllowedPushEndpoint,
+  materializeDeliveriesForCandidate,
   NOTIFICATION_PROVIDER_TIMEOUT_MS,
   notificationRetryDelayMs,
   reminderIsSnoozed,
+  type MaterializationCandidate,
 } from "./notification-worker";
 
 const temporaryDirectories: string[] = [];
@@ -246,6 +248,90 @@ describe("notification worker scheduling", () => {
     expect(isAllowedPushEndpoint("https://localhost/probe")).toBe(false);
     // Malformed input must fail closed rather than throw.
     expect(isAllowedPushEndpoint("not a url")).toBe(false);
+  });
+
+  describe("materializeDeliveriesForCandidate (#1151 A4-S3)", () => {
+    const NOW = new Date("2026-09-20T09:00:00.000Z");
+    const CATCH_UP_BOUNDARY = new Date(NOW.getTime() - 24 * 60 * 60_000);
+
+    function candidate(overrides: Partial<MaterializationCandidate> = {}): MaterializationCandidate {
+      return {
+        householdId: "household-1",
+        eventId: "event-1",
+        dueDate: "2026-09-20",
+        timezone: "UTC",
+        userId: "user-1",
+        daysBefore: null,
+        emailEnabled: null,
+        pushEnabled: null,
+        userEmailEnabled: true,
+        userPushEnabled: true,
+        firstWarningDays: 14,
+        finalWarningDays: 3,
+        snoozedUntil: null,
+        ...overrides,
+      };
+    }
+
+    it("still sends a reminder due inside the catch-up window, exactly as before", () => {
+      // 09:00 UTC on the due date itself (daysBefore 0 via a single rule) is
+      // the due instant -- in the window, due right now.
+      const deliveries = materializeDeliveriesForCandidate(
+        candidate({ daysBefore: 0, emailEnabled: true, pushEnabled: true }),
+        NOW,
+        CATCH_UP_BOUNDARY,
+      );
+      expect(deliveries.map((d) => d.scheduledFor.toISOString())).toEqual([NOW.toISOString(), NOW.toISOString()]);
+    });
+
+    it("never sends a reminder not yet due", () => {
+      const deliveries = materializeDeliveriesForCandidate(
+        candidate({ dueDate: "2026-09-25", daysBefore: 3 }),
+        NOW,
+        CATCH_UP_BOUNDARY,
+      );
+      expect(deliveries).toEqual([]);
+    });
+
+    it("sends a single reminder more than a day overdue, rather than dropping it (the finding itself)", () => {
+      // 3 days before the due date is 2026-09-17T09:00Z -- two days before
+      // the catch-up boundary of 2026-09-19T09:00Z.
+      const deliveries = materializeDeliveriesForCandidate(
+        candidate({ dueDate: "2026-09-20", daysBefore: 3, emailEnabled: true, pushEnabled: false }),
+        NOW,
+        CATCH_UP_BOUNDARY,
+      );
+      expect(deliveries).toHaveLength(1);
+      expect(deliveries[0].channel).toBe("email");
+      expect(deliveries[0].scheduledFor.toISOString()).toBe("2026-09-17T09:00:00.000Z");
+    });
+
+    it("collapses two missed offsets (the default first/final pair) into one, per channel", () => {
+      // No item rule of its own (daysBefore: null), so the recipient's
+      // first/final pair applies -- 14 and 3 days before the due date. An
+      // outage spanning both leaves both overdue; the recipient gets one
+      // delivery, timestamped at the more recent (final) of the two.
+      const deliveries = materializeDeliveriesForCandidate(
+        candidate({ dueDate: "2026-09-20", firstWarningDays: 14, finalWarningDays: 3 }),
+        NOW,
+        CATCH_UP_BOUNDARY,
+      );
+      const emailDeliveries = deliveries.filter((d) => d.channel === "email");
+      expect(emailDeliveries).toHaveLength(1);
+      expect(emailDeliveries[0].scheduledFor.toISOString()).toBe("2026-09-17T09:00:00.000Z");
+      const pushDeliveries = deliveries.filter((d) => d.channel === "web_push");
+      expect(pushDeliveries).toHaveLength(1);
+      expect(pushDeliveries[0].scheduledFor.toISOString()).toBe("2026-09-17T09:00:00.000Z");
+    });
+
+    it("never sends a reminder the household snoozed, overdue or not", () => {
+      const deliveries = materializeDeliveriesForCandidate(
+        candidate({ dueDate: "2026-09-20", daysBefore: 3, snoozedUntil: "2026-09-30" }),
+        NOW,
+        CATCH_UP_BOUNDARY,
+      );
+      expect(deliveries).toEqual([]);
+    });
   });
 
   it("exposes only bounded initial worker health", () => {

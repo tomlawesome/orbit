@@ -457,6 +457,79 @@ export function isAllowedPushEndpoint(endpoint: string): boolean {
   return true;
 }
 
+/** One materialization candidate's own facts: a due event joined to one offset-eligible recipient. */
+export interface MaterializationCandidate {
+  householdId: string;
+  eventId: string;
+  dueDate: string;
+  timezone: string;
+  userId: string;
+  daysBefore: number | null;
+  emailEnabled: boolean | null;
+  pushEnabled: boolean | null;
+  userEmailEnabled: boolean;
+  userPushEnabled: boolean;
+  firstWarningDays: number | null;
+  finalWarningDays: number | null;
+  snoozedUntil: string | null;
+}
+
+/** One row {@link materializeDeliveriesForCandidate} is ready to insert into `notification_deliveries`. */
+export interface MaterializedDelivery {
+  householdId: string;
+  eventId: string;
+  userId: string;
+  channel: "email" | "web_push";
+  scheduledFor: Date;
+}
+
+/**
+ * Every delivery one candidate's reminders are due for, right now (#1151
+ * A4-S3). Pure and dependency-free of the database by design, so the catch-up
+ * rule is checkable without a fake query for every join this module's one
+ * caller needs.
+ *
+ * An offset whose computed time already fell due is normally sent as its own
+ * delivery. Past `catchUpBoundary` (`notificationCatchUpWindowMs`, 24h) it
+ * used to be dropped outright -- nothing written, nothing logged -- so an
+ * instance down for longer than that lost every reminder due in the gap with
+ * no trace. It is now collapsed, per channel, into the single most recent of
+ * the missed offsets: a real offset's own computed time, so the dispatch
+ * worker's own re-check (`effectiveReminderOffsets` matched against
+ * `delivery.scheduledFor`, in `deliverClaimed`) still finds it, and the
+ * recipient gets one "you missed this" rather than a pile of redundant stale
+ * ones or silence.
+ */
+export function materializeDeliveriesForCandidate(
+  candidate: MaterializationCandidate,
+  now: Date,
+  catchUpBoundary: Date,
+): MaterializedDelivery[] {
+  // Every offset this candidate's reminder actually fires at, already due
+  // (not scheduled for the future) and not snoozed away.
+  const due = candidateReminderOffsets(candidate)
+    .map((offset) => ({ offset, scheduledFor: householdReminderTime(candidate.dueDate, offset.daysBefore, candidate.timezone) }))
+    .filter(({ scheduledFor }) => scheduledFor <= now)
+    .filter(({ scheduledFor }) => !reminderIsSnoozed(scheduledFor, candidate.snoozedUntil, candidate.timezone));
+
+  return (["email", "web_push"] as const).flatMap((channel) => {
+    const eligible = due.filter(({ offset }) => enabledDeliveryChannels({ ...candidate, ...offset }).includes(channel));
+    const onTime = eligible.filter(({ scheduledFor }) => scheduledFor >= catchUpBoundary);
+    const overdue = eligible.filter(({ scheduledFor }) => scheduledFor < catchUpBoundary);
+    const chosen = [...onTime];
+    if (overdue.length > 0) {
+      chosen.push(overdue.reduce((latest, missed) => (missed.scheduledFor > latest.scheduledFor ? missed : latest)));
+    }
+    return chosen.map(({ scheduledFor }) => ({
+      householdId: candidate.householdId,
+      eventId: candidate.eventId,
+      userId: candidate.userId,
+      channel,
+      scheduledFor,
+    }));
+  });
+}
+
 async function materializeDueDeliveries(db: NotificationDatabase, now: Date): Promise<void> {
   // #383 finding 1: without a date predicate this join is instance-wide and
   // time-unbounded, so every open due_event × reminder_rule × membership row
@@ -518,19 +591,7 @@ async function materializeDueDeliveries(db: NotificationDatabase, now: Date): Pr
     ));
 
   const catchUpBoundary = new Date(now.getTime() - notificationCatchUpWindowMs);
-  const deliveries = candidates.flatMap((candidate) => candidateReminderOffsets(candidate).flatMap((offset) => {
-    const scheduledFor = householdReminderTime(candidate.dueDate, offset.daysBefore, candidate.timezone);
-    if (scheduledFor > now || scheduledFor < catchUpBoundary) return [];
-    if (reminderIsSnoozed(scheduledFor, candidate.snoozedUntil, candidate.timezone)) return [];
-    const channels = enabledDeliveryChannels({ ...candidate, ...offset });
-    return channels.map((channel) => ({
-      householdId: candidate.householdId,
-      eventId: candidate.eventId,
-      userId: candidate.userId,
-      channel,
-      scheduledFor,
-    }));
-  }));
+  const deliveries = candidates.flatMap((candidate) => materializeDeliveriesForCandidate(candidate, now, catchUpBoundary));
 
   if (deliveries.length) {
     await db.insert(notificationDeliveries).values(deliveries).onConflictDoNothing();
