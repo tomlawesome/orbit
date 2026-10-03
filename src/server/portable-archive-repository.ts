@@ -6,7 +6,7 @@ import { auditLog, documents, dueEvents, households, items, memberships, portabl
 import { AppError } from "@/lib/app-error";
 import { optionalText } from "@/lib/workspace";
 import { getDocumentConfig } from "@/server/documents/config";
-import { readDocumentDownload } from "@/server/document-repository";
+import { readDocumentDownload, uploadItemDocument } from "@/server/document-repository";
 import { decryptPortableArchive, encryptPortableArchive, isEncryptedPortableArchive, type EncryptedPortableArchive } from "@/server/portable-archive";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
 import { normalizeComparableMetadata } from "@/server/metadata/crypto";
@@ -16,16 +16,21 @@ import { acquireActiveHouseholdLock } from "@/server/workspace-access";
 const ARCHIVE_TTL_MS = 24 * 60 * 60 * 1_000;
 const MAX_ARCHIVE_BYTES = 128 * 1024 * 1024;
 
-const importedSectionSchema = z.object({ id: z.string().uuid(), slug: z.string().trim().min(1).max(100), name: z.string().trim().min(1).max(100), icon: z.string().trim().min(1).max(50), accent: z.string().trim().min(1).max(50), position: z.number().int().min(0).max(10_000), visible: z.boolean() });
+const importedSectionSchema = z.object({ id: z.string().uuid(), slug: z.string().trim().min(1).max(100), name: z.string().trim().min(1).max(100), icon: z.string().trim().min(1).max(50), accent: z.string().trim().min(1).max(50), position: z.number().int().min(0).max(10_000), visible: z.boolean(), archivedAt: z.string().nullable().optional() });
 // Field caps deliberately mirror `workspaceItemSchema` (src/lib/workspace.ts):
 // the read path re-validates every persisted item against that schema, so an
 // imported field this schema accepts but the reader rejects would insert a
 // row that 422s `readWorkspace` forever afterwards, with no in-product
 // recovery (#383 finding 2).
 const importedItemSchema = z.object({ id: z.string().uuid(), sectionId: z.string().uuid(), title: z.string().trim().min(1).max(100), subtype: optionalText(80).nullable(), provider: optionalText(100).nullable(), reference: optionalText(80).nullable(), costMinor: z.number().int().min(0).max(100_000_000).nullable().optional(), currency: z.string().length(3), startDate: z.string().nullable().optional(), expiryDate: z.string().nullable().optional(), renewalDate: z.string().nullable().optional(), serviceDate: z.string().nullable().optional(), recurrenceMonths: z.number().int().min(1).max(120).nullable().optional(), snoozedUntil: z.string().nullable().optional(), notes: optionalText(2_000).nullable(), externalDocumentUrl: z.string().nullable().optional(), status: z.enum(["active", "expired", "cancelled", "archived"]) });
+// Only the fields the import path cross-references (which item a document
+// belongs to, its lifecycle, and what to call it on re-upload); every other
+// exported document field is carried for round-tripping and left untyped.
+const importedDocumentSchema = z.object({ id: z.string().uuid(), itemId: z.string().uuid().nullable(), displayName: z.string().trim().min(1), lifecycle: z.string() }).passthrough();
+const importedDocumentBytesSchema = z.object({ id: z.string().uuid(), contentBase64: z.string() });
 // `.max(500)` mirrors `householdWorkspaceSchema.items` so an archive that
 // parses cleanly here cannot still brick the household by count alone.
-const importedArchiveSchema = z.object({ format: z.literal("orbit-portable-archive"), version: z.literal(1), household: z.object({ name: z.string().trim().min(1).max(100) }), sections: z.array(importedSectionSchema).max(200), items: z.array(importedItemSchema).max(500), dueEvents: z.array(z.unknown()).optional(), reminderRules: z.array(z.unknown()).optional(), documents: z.array(z.unknown()) });
+const importedArchiveSchema = z.object({ format: z.literal("orbit-portable-archive"), version: z.literal(1), household: z.object({ name: z.string().trim().min(1).max(100) }), sections: z.array(importedSectionSchema).max(200), items: z.array(importedItemSchema).max(500), dueEvents: z.array(z.unknown()).optional(), reminderRules: z.array(z.unknown()).optional(), documents: z.array(importedDocumentSchema), documentBytes: z.array(importedDocumentBytesSchema).optional() });
 
 function storage(): PortableArchiveStorage {
   return new PortableArchiveStorage(`${getDocumentConfig().storageRoot}/portable-archives`);
@@ -105,8 +110,18 @@ export async function createPortableArchive(input: {
   ]);
   if (!household) throw new AppError("household_not_found", "That household is not available", 404);
   // The portable archive is the deliberate plaintext escape hatch (ADR-0024
-  // decision 6): it exports decrypted values, and therefore needs the KEK.
+  // decision 6): it exports decrypted values, and therefore needs the KEK. A
+  // locked instance cannot decrypt anything, so an export taken now would
+  // write every title as "" — a file that imports but is useless. Refuse
+  // the export instead of producing it (A2-F2).
   const metadata = await openMetadataReader(input.householdId);
+  if (metadata.locked) {
+    throw new AppError(
+      "archive_metadata_locked",
+      "Orbit can't export while the encryption key is locked; its titles would come out blank. Unlock the key first.",
+      503,
+    );
+  }
   const exportedItems = householdItems.map((item) => ({
     ...item,
     reference: metadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference }).value,
@@ -250,6 +265,17 @@ export function previewPortableArchive(serialized: unknown, passphrase: string) 
   } finally { plaintext.fill(0); }
 }
 
+// A schema failure whose only issues are required text fields coming back
+// empty is not an unrecognized file — it is this exact format, produced
+// while the household's encryption key was locked (A2-F2). Telling the two
+// apart means a person who hits this is pointed at unlocking the key and
+// re-exporting, rather than being told their archive is unsupported.
+function isEmptyRequiredFieldsFailure(error: unknown): boolean {
+  return error instanceof z.ZodError
+    && error.issues.length > 0
+    && error.issues.every((issue) => issue.code === "too_small" && issue.origin === "string" && issue.minimum === 1);
+}
+
 function decodeImportArchive(serialized: unknown, passphrase: string) {
   if (!isEncryptedPortableArchive(serialized)) throw new AppError("archive_invalid", "That export has an invalid format", 422);
   rejectOversizedCiphertext(serialized);
@@ -260,6 +286,13 @@ function decodeImportArchive(serialized: unknown, passphrase: string) {
     return importedArchiveSchema.parse(JSON.parse(plaintext.toString("utf8")));
   } catch (error) {
     if (error instanceof AppError) throw error;
+    if (isEmptyRequiredFieldsFailure(error)) {
+      throw new AppError(
+        "archive_fields_empty",
+        "That export has empty required fields, most likely because the encryption key was locked when it was made. Unlock the key and export again.",
+        422,
+      );
+    }
     throw new AppError("archive_invalid", "That export is not a supported Orbit archive", 422);
   } finally { plaintext.fill(0); }
 }
@@ -356,27 +389,42 @@ export async function previewPortableImport(userId: string, householdId: string,
   const existing = await existingItemTitles(getDb(), householdId);
   const duplicateReferences = await existingReferenceMatches(getDb(), householdId, archive.items.map((item) => item.reference));
   const conflicts = archive.items.filter((item) => duplicatesExistingItem(item, existing, duplicateReferences)).map((item) => ({ id: item.id, title: item.title }));
-  return { householdName: archive.household.name, sections: archive.sections.length, items: archive.items.length, documents: archive.documents.length, conflicts, documentsExcluded: archive.documents.length > 0 };
+  const documentBytesById = new Set((archive.documentBytes ?? []).map((entry) => entry.id));
+  // True whenever at least one live document has no matching bytes in this
+  // archive — a metadata-only export, or a mixed one where some bytes were
+  // dropped. Which specific duplicates the person will skip is not known
+  // yet, so this is a "some documents may not come back" signal, not a count.
+  const documentsExcluded = archive.documents.some((document) => document.lifecycle === "available" && !documentBytesById.has(document.id));
+  return { householdName: archive.household.name, sections: archive.sections.length, items: archive.items.length, documents: archive.documents.length, conflicts, documentsExcluded };
 }
 
-/** Imports normalized metadata atomically. Attachments are deliberately excluded until they pass normal scan/encryption. */
+/**
+ * Imports normalized metadata atomically, then restores any documents whose
+ * bytes travelled with the archive (A2-S2) through the same upload path —
+ * same validation, malware scan and encryption — a direct upload takes.
+ * Document restoration happens after the metadata transaction commits,
+ * because `uploadItemDocument` manages its own scan/encrypt transactions and
+ * must see the newly imported items already committed.
+ */
 export async function importPortableArchive(input: { userId: string; householdId: string; archive: unknown; passphrase: string; conflictItemIds: string[] }) {
   await requireHouseholdAccess(input.userId, input.householdId);
   const archive = decodeImportArchive(input.archive, input.passphrase);
   const skipped = new Set(input.conflictItemIds);
-  const imported = await getDb().transaction(async (transaction) => {
+  const documentBytesById = new Map((archive.documentBytes ?? []).map((entry) => [entry.id, entry.contentBase64]));
+  const { imported, itemIdMap } = await getDb().transaction(async (transaction) => {
     await acquireActiveHouseholdLock(transaction, input.householdId);
     const existingSections = await transaction.select({ id: sections.id, slug: sections.slug }).from(sections).where(eq(sections.householdId, input.householdId));
     const sectionMap = new Map<string, string>();
     for (const source of archive.sections) {
       const current = existingSections.find((section) => section.slug === source.slug);
       const id = current?.id ?? randomUUID();
-      if (!current) await transaction.insert(sections).values({ id, householdId: input.householdId, slug: source.slug, name: source.name, icon: source.icon, accent: source.accent, position: source.position, visible: source.visible });
+      if (!current) await transaction.insert(sections).values({ id, householdId: input.householdId, slug: source.slug, name: source.name, icon: source.icon, accent: source.accent, position: source.position, visible: source.visible, archivedAt: source.archivedAt ? new Date(source.archivedAt) : null });
       sectionMap.set(source.id, id);
     }
     const existing = await existingItemTitles(transaction, input.householdId);
     const duplicateReferences = await existingReferenceMatches(transaction, input.householdId, archive.items.map((item) => item.reference));
     const metadata = await requireMetadataWriter(input.householdId, transaction);
+    const itemIdMap = new Map<string, string>();
     let count = 0;
     for (const source of archive.items) {
       const duplicate = duplicatesExistingItem(source, existing, duplicateReferences);
@@ -384,10 +432,40 @@ export async function importPortableArchive(input: { userId: string; householdId
       if (duplicate || !sectionMap.has(source.sectionId)) continue;
       const itemId = randomUUID();
       await transaction.insert(items).values({ id: itemId, householdId: input.householdId, sectionId: sectionMap.get(source.sectionId)!, title: null, titleEnc: metadata.encryptText("items.title", itemId, source.title), subtype: source.subtype ?? null, provider: null, providerEnc: metadata.encryptText("items.provider", itemId, source.provider), reference: null, referenceEnc: metadata.encryptText("items.reference", itemId, source.reference), referenceIndex: metadata.referenceIndex(source.reference), costMinor: null, costMinorEnc: metadata.encryptNumber("items.cost_minor", itemId, source.costMinor), currency: source.currency, startDate: source.startDate ?? null, expiryDate: source.expiryDate ?? null, renewalDate: source.renewalDate ?? null, serviceDate: source.serviceDate ?? null, recurrenceMonths: source.recurrenceMonths ?? null, snoozedUntil: source.snoozedUntil ?? null, notes: null, notesEnc: metadata.encryptText("items.notes", itemId, source.notes), externalDocumentUrl: source.externalDocumentUrl ?? null, status: source.status });
+      itemIdMap.set(source.id, itemId);
       count++;
     }
-    await transaction.insert(auditLog).values({ householdId: input.householdId, actorUserId: input.userId, entityType: "portable_archive", entityId: randomUUID(), action: "portable_archive_imported", changes: { importedItems: count, skippedConflicts: skipped.size, documentsExcluded: archive.documents.length } });
-    return count;
+    const restorableDocuments = archive.documents.filter((document) => document.lifecycle === "available" && document.itemId && itemIdMap.has(document.itemId) && documentBytesById.has(document.id));
+    await transaction.insert(auditLog).values({ householdId: input.householdId, actorUserId: input.userId, entityType: "portable_archive", entityId: randomUUID(), action: "portable_archive_imported", changes: { importedItems: count, skippedConflicts: skipped.size, documentsTotal: archive.documents.length, documentsRestorable: restorableDocuments.length } });
+    return { imported: count, itemIdMap };
   });
-  return { importedItems: imported, documentsExcluded: archive.documents.length };
+
+  // Outside the metadata transaction: `uploadItemDocument` runs its own
+  // scan/encrypt transactions and must see the items above as committed. A
+  // document that fails to re-validate or re-scan on the way back in is left
+  // unrestored rather than failing metadata the person already approved.
+  let documentsRestored = 0;
+  for (const document of archive.documents) {
+    if (document.lifecycle !== "available" || !document.itemId) continue;
+    const targetItemId = itemIdMap.get(document.itemId);
+    const contentBase64 = documentBytesById.get(document.id);
+    if (!targetItemId || !contentBase64) continue;
+    const bytes = Buffer.from(contentBase64, "base64");
+    try {
+      await uploadItemDocument({
+        userId: input.userId,
+        householdId: input.householdId,
+        itemId: targetItemId,
+        filename: document.displayName,
+        body: new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close(); } }),
+        declaredBytes: bytes.length,
+      });
+      documentsRestored++;
+    } catch {
+      // Left unrestored; counted below.
+    } finally {
+      bytes.fill(0);
+    }
+  }
+  return { importedItems: imported, documentsExcluded: archive.documents.length - documentsRestored };
 }
