@@ -327,10 +327,21 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
    * other spec expects to find it: taken.
    */
   test("first-run tour overlay", async ({ page }, testInfo) => {
-    /* The film has no pocket cut (§24): a phone mounts no transport, so the
-       pill this walkthrough reads is never there (v19-tour.spec.ts skips the
-       same way). */
-    test.skip(test.info().project.name.startsWith("mobile"), "the film is desk-only (owner-decisions.md §24)");
+    // T-Q2 (#1151): this used to skip every mobile run outright, citing "the
+    // film is desk-only (owner-decisions.md §24)" -- true when this was
+    // written, but §24's own ending note records #1083 (2026-09-30)
+    // shipping a pocket cut, and v19-tour.spec.ts stopped skipping mobile
+    // the same day; this file never caught up, so a real a11y regression in
+    // the pocket transport could never have failed here. transport.js is
+    // one shared component, so the structural checks below (role,
+    // accessible names, the script and status regions existing) hold on
+    // both viewports. The desk cut's exact heading count and status wording
+    // are still pinned desk-only: owner-decisions.md §32 records the pocket
+    // cut dropping content (chapter 2's recurrence beat), and this could
+    // not be run against the real app to confirm the pocket script's exact
+    // shape -- a follow-up with Playwright access should pin it the same
+    // way.
+    const mobile = test.info().project.name.startsWith("mobile");
     await signIn(page);
     const forgotten = await page.evaluate(async () => {
       const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
@@ -360,20 +371,31 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     await expect(page.getByRole("button", { name: "Skip the tour" })).toHaveAccessibleName(/\S/);
 
     // #1097 (round 7): the film is not narrated -- a screen reader gets its
-    // script instead, twelve headings deep, plus one announcement when the
-    // film starts. Both live inside the transport, visually hidden, never
-    // `aria-hidden` (design/v19/tour/round-7/README.md).
+    // script instead, twelve headings deep on the desk cut, plus one
+    // announcement when the film starts. Both live inside the transport,
+    // visually hidden, never `aria-hidden` (design/v19/tour/round-7/README.md).
     const script = transport.getByRole("region", { name: "Tour script" });
     await expect(script).toHaveCount(1);
-    await expect(script.locator("h3")).toHaveCount(12);
 
     const status = transport.getByRole("status");
     await expect(status).toHaveCount(1);
-    await expect(status).toHaveText(
-      "Orbit's tour is playing on screen: a short film over your own sky, "
-      + "with a transport at the bottom. Press Escape to skip it. The full "
-      + 'script is in the tour transport, under "Tour script".',
-    );
+
+    if (mobile) {
+      // Pocket content is pinned at twelve headings and this exact wording
+      // too once a run against the real app confirms the pocket script's
+      // shape; until then this only proves the script and announcement
+      // exist and are not empty, which is still strictly more than the
+      // blanket skip this replaces ever checked.
+      await expect(script.locator("h3").first()).toBeAttached();
+      await expect(status).not.toHaveText("");
+    } else {
+      await expect(script.locator("h3")).toHaveCount(12);
+      await expect(status).toHaveText(
+        "Orbit's tour is playing on screen: a short film over your own sky, "
+        + "with a transport at the bottom. Press Escape to skip it. The full "
+        + 'script is in the tour transport, under "Tour script".',
+      );
+    }
 
     await writeSnapshot(page, testInfo, "tour-overlay");
 
