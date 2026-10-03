@@ -73,6 +73,14 @@ export const RECEIPT_RETENTION_MS = 45 * 86_400_000;
  */
 const UNCONFIGURED_RECHECK_MS = 60_000;
 
+/**
+ * How long an attachment-processing lease (`attachmentProcessingLockedAt`)
+ * is honoured before a worker holding it is presumed dead and the row is
+ * free to be reclaimed (A2-Q6). Was written out as a literal ten-minute
+ * expression at every call site; one name now stands for the one window.
+ */
+const ATTACHMENT_LEASE_WINDOW_MS = 10 * 60_000;
+
 export interface ImapProviderPreflightState {
   status: ImapPreflightStatus;
   smtp: "not_configured" | "available" | "provider_unavailable" | "unsafe_input";
@@ -488,7 +496,7 @@ export async function commitStagedAttachment(
   try {
     return await getDb().transaction(async (transaction) => {
       const [active] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
-        .where(and(eq(imapIngestionMessages.id, messageId), eq(imapIngestionMessages.status, "processing"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, leaseToken), gt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(Date.now() - 10 * 60_000))))
+        .where(and(eq(imapIngestionMessages.id, messageId), eq(imapIngestionMessages.status, "processing"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, leaseToken), gt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(Date.now() - ATTACHMENT_LEASE_WINDOW_MS))))
         .for("update").limit(1);
       if (!active) throw new Error("staging_lease_lost");
       const [inserted] = await transaction.insert(imapIngestionAttachments).values({
@@ -610,7 +618,7 @@ export async function reconcileImapStagingObjects(limit = 100): Promise<void> {
     parentLeaseToken: imapIngestionMessages.attachmentProcessingLeaseToken,
     parentLockedAt: imapIngestionMessages.attachmentProcessingLockedAt,
   }).from(imapIngestionStagingObjects).innerJoin(imapIngestionMessages, eq(imapIngestionMessages.id, imapIngestionStagingObjects.messageId)).orderBy(asc(imapIngestionStagingObjects.createdAt)).limit(limit);
-  const liveCutoff = Date.now() - 10 * 60_000;
+  const liveCutoff = Date.now() - ATTACHMENT_LEASE_WINDOW_MS;
   for (const row of rows) {
     if (row.parentStatus === "processing" && row.parentLeaseToken === row.leaseToken && row.parentLockedAt && row.parentLockedAt.getTime() > liveCutoff) continue;
     const [attachment] = await getDb().select({ id: imapIngestionAttachments.id, status: imapIngestionAttachments.status, purgePending: imapIngestionAttachments.purgePending })
@@ -619,7 +627,7 @@ export async function reconcileImapStagingObjects(limit = 100): Promise<void> {
       await getDb().transaction(async (transaction) => {
         const [parent] = await transaction.select({ status: imapIngestionMessages.status, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, lockedAt: imapIngestionMessages.attachmentProcessingLockedAt }).from(imapIngestionMessages)
           .where(eq(imapIngestionMessages.id, row.messageId)).for("update").limit(1);
-        if (parent?.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - 10 * 60_000) return;
+        if (parent?.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - ATTACHMENT_LEASE_WINDOW_MS) return;
         await transaction.delete(imapIngestionStagingObjects).where(and(eq(imapIngestionStagingObjects.id, row.id), eq(imapIngestionStagingObjects.leaseToken, row.leaseToken)));
       });
       continue;
@@ -628,7 +636,7 @@ export async function reconcileImapStagingObjects(limit = 100): Promise<void> {
       await getDb().transaction(async (transaction) => {
         const [parent] = await transaction.select({ status: imapIngestionMessages.status, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, lockedAt: imapIngestionMessages.attachmentProcessingLockedAt }).from(imapIngestionMessages)
           .where(eq(imapIngestionMessages.id, row.messageId)).for("update").limit(1);
-        if (parent?.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - 10 * 60_000) return;
+        if (parent?.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - ATTACHMENT_LEASE_WINDOW_MS) return;
         await transaction.delete(imapIngestionStagingObjects).where(and(eq(imapIngestionStagingObjects.id, row.id), eq(imapIngestionStagingObjects.leaseToken, row.leaseToken)));
       });
       continue;
@@ -636,7 +644,7 @@ export async function reconcileImapStagingObjects(limit = 100): Promise<void> {
     const marked = await getDb().transaction(async (transaction) => {
       const [parent] = await transaction.select({ status: imapIngestionMessages.status, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, lockedAt: imapIngestionMessages.attachmentProcessingLockedAt }).from(imapIngestionMessages)
         .where(eq(imapIngestionMessages.id, row.messageId)).for("update").limit(1);
-      if (!parent || (parent.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - 10 * 60_000)) return false;
+      if (!parent || (parent.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - ATTACHMENT_LEASE_WINDOW_MS)) return false;
       await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", updatedAt: new Date() })
         .where(eq(imapIngestionStagingObjects.id, row.id));
       if (attachment?.status === "stored") {
@@ -651,7 +659,7 @@ export async function reconcileImapStagingObjects(limit = 100): Promise<void> {
       await getDb().transaction(async (transaction) => {
         const [parent] = await transaction.select({ status: imapIngestionMessages.status, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, lockedAt: imapIngestionMessages.attachmentProcessingLockedAt }).from(imapIngestionMessages)
           .where(eq(imapIngestionMessages.id, row.messageId)).for("update").limit(1);
-        if (!parent || (parent.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - 10 * 60_000)) return;
+        if (!parent || (parent.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - ATTACHMENT_LEASE_WINDOW_MS)) return;
         if (attachment?.status === "stored") {
           await transaction.delete(imapIngestionAttachments).where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "stored"), eq(imapIngestionAttachments.purgePending, true)));
         } else if (attachment?.status === "assigned" && attachment.purgePending) {
@@ -664,7 +672,7 @@ export async function reconcileImapStagingObjects(limit = 100): Promise<void> {
       await getDb().transaction(async (transaction) => {
         const [parent] = await transaction.select({ status: imapIngestionMessages.status, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, lockedAt: imapIngestionMessages.attachmentProcessingLockedAt }).from(imapIngestionMessages)
           .where(eq(imapIngestionMessages.id, row.messageId)).for("update").limit(1);
-        if (!parent || (parent.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - 10 * 60_000)) return;
+        if (!parent || (parent.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - ATTACHMENT_LEASE_WINDOW_MS)) return;
         await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeAttempts: sql`${imapIngestionStagingObjects.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
           .where(and(eq(imapIngestionStagingObjects.id, row.id), eq(imapIngestionStagingObjects.leaseToken, row.leaseToken)));
         if (attachment?.status === "stored") {
@@ -687,7 +695,7 @@ async function claimImapAttachmentProcessing(receiptId: string): Promise<ImapAtt
     eq(imapIngestionMessages.id, receiptId),
     eq(imapIngestionMessages.status, "processing"),
     sql`${imapIngestionMessages.attachmentProcessingAttempts} >= 5`,
-    or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - 10 * 60_000))),
+    or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - ATTACHMENT_LEASE_WINDOW_MS))),
   ));
   const token = randomUUID();
   const [claimed] = await getDb().update(imapIngestionMessages).set({
@@ -699,7 +707,7 @@ async function claimImapAttachmentProcessing(receiptId: string): Promise<ImapAtt
     eq(imapIngestionMessages.id, receiptId),
     eq(imapIngestionMessages.status, "processing"),
     lt(imapIngestionMessages.attachmentProcessingAttempts, 5),
-    or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - 10 * 60_000))),
+    or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - ATTACHMENT_LEASE_WINDOW_MS))),
     or(isNull(imapIngestionMessages.attachmentProcessingNextAttemptAt), lte(imapIngestionMessages.attachmentProcessingNextAttemptAt, now)),
   )).returning({ id: imapIngestionMessages.id, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, attempts: imapIngestionMessages.attachmentProcessingAttempts });
   return claimed?.leaseToken ? { id: claimed.id, leaseToken: claimed.leaseToken, attempts: claimed.attempts } : undefined;
@@ -903,7 +911,7 @@ export async function runImapIngestionCycle(
         eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
         eq(imapIngestionMessages.status, "processing"),
         or(isNull(imapIngestionMessages.attachmentProcessingNextAttemptAt), lte(imapIngestionMessages.attachmentProcessingNextAttemptAt, new Date())),
-        or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(Date.now() - 10 * 60_000))),
+        or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(Date.now() - ATTACHMENT_LEASE_WINDOW_MS))),
       )).orderBy(asc(imapIngestionMessages.mailboxUid)).limit(25);
       const [checkpoint] = await getDb().select({
         lastUid: sql<number | null>`max(${imapIngestionMessages.mailboxUid})`,
