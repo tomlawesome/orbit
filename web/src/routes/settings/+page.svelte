@@ -513,7 +513,6 @@
       <div class="idrow">
         <span class="avatar" aria-hidden="true">{initials}</span>
         <div class="who"><b>{view.user?.displayName ?? ""}</b><span>{view.user?.email ?? ""}</span></div>
-        <button>edit name</button>
       </div>
 
       <!-- Sign-in methods (#915, ADR-0023 §6; composition §2.7). This replaces
