@@ -58,6 +58,7 @@ import { formatRunScore, scoreCorpus, type ExtractedFields } from "../../src/ser
 import type { TaggedCandidate } from "../../src/server/documents/extraction-stages";
 import { undoTikaMarkdownEscapes } from "../../src/server/documents/tika";
 import { readTruthFile, TRUTH_HELP, truthCsv } from "./truth";
+import { TIKA_VERSION } from "./tika-version.mjs";
 
 /** As the application: what Tika sends past this point is not read. */
 const MAX_EXTRACTED_CHARACTERS = 250_000;
@@ -69,8 +70,12 @@ const MEDIA_TYPES: Record<string, string> = {
   ".png": "image/png",
 };
 
-const TIKA_IMAGE = "apache/tika:4.0.0-full@sha256:6c244af88e8575ebe8bf0bc5e2da03c49663dd0acc7809cd99c8e9ff8741cbfb";
-const TIKA_JAR = "tika-server-standard-4.0.0.jar";
+// O2-Q11 (#1151): the version number comes from tika-version.mjs, the one
+// place build.mjs also reads it from, so the two cannot drift apart. The
+// image digest is still pinned here directly -- it is a property of that
+// specific build, not of the version number alone.
+const TIKA_IMAGE = `apache/tika:${TIKA_VERSION}-full@sha256:6c244af88e8575ebe8bf0bc5e2da03c49663dd0acc7809cd99c8e9ff8741cbfb`;
+const TIKA_JAR = `tika-server-standard-${TIKA_VERSION}.jar`;
 const LOCAL_TIKA = "http://127.0.0.1:9998";
 const CONTAINER = "orbit-extract-tika";
 

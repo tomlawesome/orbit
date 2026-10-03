@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { digest, download, downloadVerified } from "./build.mjs";
+import { TIKA_VERSION } from "./tika-version.mjs";
 
 /*
  * O2-R5 (#1151): a download interrupted partway used to leave a half-written
@@ -152,5 +153,32 @@ describe("downloadVerified", () => {
 
     expect(calls).toBe(0);
     expect(readFileSync(to, "utf8")).toBe("already good");
+  });
+});
+
+/*
+ * O2-Q11 (#1151): build.mjs and cli.ts each used to hard-code the Tika
+ * version number ("4.0.0") separately, free to drift apart on a bump. Both
+ * now read it from tika-version.mjs. These tests fail if either file goes
+ * back to hard-coding its own literal version instead of referencing that
+ * shared constant.
+ */
+describe("Tika version pin", () => {
+  it("is read from tika-version.mjs by build.mjs", () => {
+    const source = readFileSync(new URL("./build.mjs", import.meta.url), "utf8");
+    expect(source).toMatch(/import\s*\{\s*TIKA_VERSION\s*\}\s*from\s*"\.\/tika-version\.mjs"/u);
+    expect(source).not.toMatch(/TIKA_VERSION\s*=\s*"4\.0\.0"/u);
+  });
+
+  it("is read from tika-version.mjs by cli.ts, not hard-coded a second time", () => {
+    const source = readFileSync(new URL("./cli.ts", import.meta.url), "utf8");
+    expect(source).toMatch(/import\s*\{\s*TIKA_VERSION\s*\}\s*from\s*"\.\/tika-version\.mjs"/u);
+    expect(source).not.toMatch(/"apache\/tika:4\.0\.0-full/u);
+    expect(source).not.toMatch(/"tika-server-standard-4\.0\.0\.jar"/u);
+    expect(source).toContain("${TIKA_VERSION}");
+  });
+
+  it("is the version the stack's own bundled config pins", () => {
+    expect(TIKA_VERSION).toBe("4.0.0");
   });
 });

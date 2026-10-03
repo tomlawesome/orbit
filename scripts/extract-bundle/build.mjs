@@ -19,6 +19,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeF
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { TIKA_VERSION } from "./tika-version.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "../..");
@@ -28,7 +29,6 @@ const cache = join(dist, "extract-bundle-downloads");
 
 const NODE_VERSION = "v22.23.2";
 const NODE_ZIP = `node-${NODE_VERSION}-win-x64.zip`;
-const TIKA_VERSION = "4.0.0";
 const TIKA_ZIP = `tika-server-standard-${TIKA_VERSION}.zip`;
 
 /*
