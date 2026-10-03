@@ -28,6 +28,11 @@ const ITEM_PAGE = read("routes/item/[[id]]/+page.svelte");
    rules are the item page's own (the separate Suggestion.svelte retired). */
 const SUGGESTION = ITEM_PAGE;
 const INBOX = read("routes/inbox/+page.svelte");
+/* #1151 W1-Q11/W1-Q14: the inbox's own READ-mark confidence logic (its old
+   local mark()) was retired in favour of review.js's shared readingsOf(),
+   which carries the identical evidenceReadable gate — read separately so
+   the suppression can still be pinned at its real source. */
+const REVIEW = read("lib/pocket/review.js");
 const ADMINISTRATION = read("routes/administration/+page.svelte");
 const HOME_DETAIL = read("routes/home/ItemView.svelte");
 
@@ -191,7 +196,13 @@ describe("the mail-in review surfaces", () => {
   });
 
   it("suppresses the READ marks when their evidence is damaged", () => {
-    expect(INBOX).toContain("if (!evidenceReadable(receipt.metadataStatus)) return null;");
+    // #1151 W1-Q11/W1-Q14: the inbox dropped its own copy of this gate and
+    // now reads review.js's shared readingsOf() instead — the suppression
+    // itself lives there now, so it is pinned there, and the inbox is only
+    // checked for actually wiring that shared helper in.
+    expect(INBOX).toContain('import { papersOf, readingsOf } from "$lib/pocket/review.js";');
+    expect(INBOX).toContain("readingsOf(receipt)");
+    expect(REVIEW).toContain("if (!evidenceReadable(mail.metadataStatus)) return null;");
     expect(SUGGESTION).toContain("const marked = (field) => evidenceShown && Boolean(seatedSuggestion?.fieldEvidence?.[field]);");
   });
 });
