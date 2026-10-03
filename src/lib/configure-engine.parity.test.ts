@@ -386,7 +386,14 @@ describe("persistOrbitImage: bash vs engine", () => {
   it("configure.sh's bare-flow persist_orbit_image / engine persistOrbitImage update an existing active ORBIT_IMAGE assignment identically in place", () => {
     const bashDir = makeBashFixture();
     expect(runBashConfigure(bashDir, [], { ORBIT_IMAGE: "orbit-local:aaaaaaaaaaaa" }).status).toBe(0);
-    expect(runBashConfigure(bashDir, [], { ORBIT_IMAGE: "orbit-local:bbbbbbbbbbbb" }).status).toBe(0);
+    // The second run re-pins an EXISTING deployment, which a bare configure.sh
+    // refuses unless the installer's trust marker is present (#1151 O1-S4);
+    // install.sh sets it alongside ORBIT_IMAGE, and the engine's
+    // persistOrbitImage is only ever reached through that installer path, so
+    // the like-for-like comparison is the trusted one (#1204).
+    expect(
+      runBashConfigure(bashDir, [], { ORBIT_IMAGE: "orbit-local:bbbbbbbbbbbb", ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE: "1" }).status,
+    ).toBe(0);
 
     const engineDir = makeEngineFixture();
     runConfigureApply(engineDir, "orbit-local:aaaaaaaaaaaa");
