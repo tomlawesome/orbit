@@ -16,6 +16,7 @@
   import StagedPage from "$lib/pocket/StagedPage.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
+  import { T_CLASS } from "../home/bands.js";
 
   /**
    * THE INBOX ON A PHONE (#1120, proposal §2.6). Server-rendered beside the
@@ -70,9 +71,10 @@
   const titleOf = (receipt) => reviewTitleOf(receipt);
   /** @param {Receipt} receipt */
   const burnsIn = (receipt) => burnsInOf(receipt, need().today);
-  /** The filed mark takes the item's urgency band today, as the desk's dot does. */
-  /** @type {Record<string, string>} */
-  const BANDS = { overdue: "over", "due-soon": "soon", upcoming: "up", ok: "ok", unscheduled: "ended" };
+  /** The filed mark takes the item's urgency band today, as the desk's dot
+   *  does — bands.js's own T_CLASS (#1151 W1-Q10), not a second copy that
+   *  had already drifted from it (its own `ended` key, which T_CLASS
+   *  carries too, is never actually hit via `??`, below). */
 
   const emptyQueue = $derived(
     view ? !view.review.length && !view.reading.length && !view.failed.length : false,
@@ -304,7 +306,7 @@
                      trims the name (round 3 §1, R5). -->
                 <Row title={entry.title ?? "a filed item"} href={resolve("/item/[[id]]", { id: entry.itemId })}
                      meta="added {short(/** @type {string} */ (entry.filedAt))}{entry.sourceDocument ? ` · ${entry.sourceDocument}` : ""}">
-                  {#snippet mark()}<span class="p-body {BANDS[entry.band] ?? 'ended'}"></span>{/snippet}
+                  {#snippet mark()}<span class="p-body {T_CLASS[entry.band] ?? 'ended'}"></span>{/snippet}
                 </Row>
               </div>
             {/each}

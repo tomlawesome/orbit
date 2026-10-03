@@ -28,14 +28,18 @@ describe("#1151 W1-F3: home/bands.js defines a tone for an unscheduled item", ()
   });
 });
 
-describe("#1151 W1-F3: pocket.svelte's own BAND_VAR copy matches", () => {
+describe("#1151 W1-Q10: pocket.svelte imports BAND_VAR/tlabel rather than keeping its own copy", () => {
   const POCKET = readFileSync(
     resolve(import.meta.dirname, "../../web/src/routes/home/pocket.svelte"),
     "utf8",
   );
 
-  it("declares an unscheduled key alongside the rest, same tone as ended", () => {
-    const line = POCKET.slice(POCKET.indexOf("const BAND_VAR ="), POCKET.indexOf("const BAND_VAR =") + 220);
-    expect(line).toMatch(/ended:\s*"--ink-mid",\s*unscheduled:\s*"--ink-mid"/u);
+  it("imports both from bands.js", () => {
+    expect(POCKET).toMatch(/import \{ BAND_VAR, tlabel \} from "\.\/bands\.js";/u);
+  });
+
+  it("no longer declares a local copy of either", () => {
+    expect(POCKET).not.toContain("const BAND_VAR =");
+    expect(POCKET).not.toContain("const tlabel =");
   });
 });

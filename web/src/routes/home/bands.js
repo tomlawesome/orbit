@@ -16,5 +16,9 @@ export const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: 
 /** @type {Record<string, string>} */
 export const T_CLASS = { overdue: "over", "due-soon": "soon", upcoming: "up", ok: "ok", ended: "ended", unscheduled: "ended" };
 
-/** @param {{ days: number }} b */
-export const tlabel = (b) => (b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
+/* #1151 W1-Q10: null-safe so the pocket's own copy (which this one now
+   replaces) can be dropped rather than kept as a second, diverging
+   version — an unscheduled row's `days` is null, and `null < 0` is false,
+   which would otherwise print the literal "T−nulld". */
+/** @param {{ days: number | null }} b */
+export const tlabel = (b) => (b.days === null ? "" : b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
