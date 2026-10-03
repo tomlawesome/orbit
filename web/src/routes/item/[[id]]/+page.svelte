@@ -687,14 +687,24 @@
      rather than through the reader this issue does not build). */
   async function restorePreviewDoc() {
     if (!previewDoc || previewRestoring) return;
+    /* #1151 W1-R12: the target, and the preview's own generation, taken
+       now — openPreview's `previewToken` already says when the reader has
+       moved on to a different document while something async for the old
+       one is still in flight. Without this, closing or blaming the wrong
+       document was always possible, not merely likely: `await
+       restoreDocument(...)` has no deadline of its own. */
+    const target = previewDoc;
+    const token = previewToken;
     previewRestoring = true;
     previewProblem = null;
     try {
-      await restoreDocument(previewDoc.id);
-      belt?.closeDoc();
+      await restoreDocument(target.id);
+      if (token === previewToken) belt?.closeDoc();
       await invalidateAll();
     } catch (error) {
-      previewProblem = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
+      if (token === previewToken) {
+        previewProblem = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
+      }
     } finally {
       previewRestoring = false;
     }
