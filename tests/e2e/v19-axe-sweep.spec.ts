@@ -350,6 +350,19 @@ test.describe("the signed-in v19 sweep", () => {
       path: "/settings",
       ready: async (page) => {
         await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+        if (!test.info().project.name.startsWith("mobile")) {
+          /* #1195: on desktop Safari, /settings draws only its header, and
+             axe's own `.analyze()` then hangs for the whole test timeout
+             scanning the blanked page (pipeline 2005's trace: this ready
+             function had already resolved -- heading visible, `.st-pocket`
+             present but hidden, same as it always is on the desk dialect --
+             so the 60s was lost inside `AxeBuilder.analyze()` itself, not
+             here). Asserting the desk's own cards exist turns that hang
+             into a bounded, catchable failure instead: true on every
+             desktop engine, not a WebKit special case, and scoped off
+             mobile, whose dialect has no `.cards` to find. */
+          await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
+        }
         await entrancesSettled(page.locator(".st-pocket"));
       },
     },
