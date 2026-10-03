@@ -76,6 +76,11 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 5
 fi
 
+if ! command -v timeout >/dev/null 2>&1; then
+  printf 'orbit engine-check: GNU timeout is required for a bounded container delegation\n' >&2
+  exit 5
+fi
+
 if [[ ! -f "$environment_file" || -L "$environment_file" ]]; then
   printf 'orbit engine-check: %s is missing\n' "$environment_file" >&2
   exit 5
@@ -170,9 +175,21 @@ if [[ -z "$project" ]]; then
 fi
 
 exit_code=0
-docker compose --project-name "$project" --env-file "$environment_file" \
+# #1151 O1-R2: every other Compose call install.sh makes is bounded (see its
+# own bounded_compose_probe); this containerized delegation was not, so a
+# wedged container or daemon hung this check forever instead of failing
+# closed. 60s mirrors the generous curl --max-time this project already uses
+# for a single bounded request-response round trip (install.sh's own
+# manifest/discovery fetches) -- check is pure local file/config work, never
+# network, so this is headroom for a cold container start, not an expected
+# duration. stdin is closed for the same reason bounded_compose_probe closes
+# it: `timeout` can background the process group while a terminal is
+# attached, and `compose run`'s first read of it would stop the process with
+# SIGTTIN, which TERM cannot wake.
+timeout --signal=TERM --kill-after=1s 60s \
+  docker compose --project-name "$project" --env-file "$environment_file" \
   run --rm --no-deps -T --entrypoint node \
   --volume "$repo_dir:/orbit-deploy:ro" \
-  orbit-app /opt/orbit/cli/orbit.js check --dir /orbit-deploy || exit_code=$?
+  orbit-app /opt/orbit/cli/orbit.js check --dir /orbit-deploy </dev/null || exit_code=$?
 
 exit "$exit_code"
