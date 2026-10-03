@@ -786,7 +786,10 @@
             <circle class="hit" cx={b.placement.x} cy={b.placement.y} r={HIT_R}/>
           </g>
         {:else}
-          <g class="pk-body" class:lit={lit === b.id} data-body={b.id} tabindex="0" role="button" aria-label={b.title}
+          <!-- data-papers: how many documents ride with this body, for the
+               first-run film's belt chapter (#1174), which opens a body that
+               carries some; one attribute, no style change (as pk-sun). -->
+          <g class="pk-body" class:lit={lit === b.id} data-body={b.id} data-papers={b.documentCount} tabindex="0" role="button" aria-label={b.title}
              onclick={() => tapBody(b)} onkeydown={(event) => onKeyActivate(event, () => tapBody(b))}>
             <circle cx={b.placement.x} cy={b.placement.y} r={bodyR(b)} style="fill:{bodyFill(b)}"/>
             {#if lit === b.id}<circle class="pk-lit" cx={b.placement.x} cy={b.placement.y} r={bodyR(b) + 4}/>{/if}

@@ -1403,5 +1403,168 @@ its reason:
   the dial's lower half beneath the household's name rather than over the
   bodies, since the pocket dial has no empty quarter to put a line in.
 
+**Corrections on the owner's iPhone (Fable's calls, #1174 and #1175,
+2026-09-30).** The built cut passed every Chromium check and broke on the
+phone. What changed, and why:
+
+- **The film's marks follow the page.** Rings, typed lines and the callout
+  re-measure on scroll and resize (as the veil's holes always did), so a
+  screen scrolling under the film — a `goto` into the band, chapter 4's
+  manifest, a row opening, a browser bar collapsing — never leaves a
+  spotlight where a control was. A jump or a stop puts the page back at the
+  top, where every chapter opens.
+- **The film's own scrolls are instant or on its clock**, never the page's
+  smooth scroll: chapter 4 glides on a tween over `T.scroll`, and a `goto`
+  scrolls its control in at once, so the next beat measures a page that has
+  arrived.
+- **`unread()` is marked as the film's own Escape**, as `close()` always
+  was. Unmarked, the transport stopped the film at chapter 8 on both
+  dialects (a regression in #1083, which moved the dispatch to the
+  document).
+- **Only what a reader can see is lit** (`visible`): chips scrolled off
+  the strip and captions of papers rolled off the sky are scenery, not
+  spotlights. On the pocket a paper's whole caption seat is ringed once,
+  not each of its two lines; the read prefers a paper that is out and falls
+  back to the first paper the belt holds, as the desk always has.
+- **Chapter 5's reminder line is pinned to the dial's top** under the
+  chrome (round 8's toast position) rather than flipped under the dial.
+- **Chapter 6 rings the pocket relay's own address card**; the desk
+  `.relay-card` is a 0x0 box on the phone since the relay got its pocket
+  dialect.
+- **Chapter 7 waits for the pocket inbox to draw its lanes**, and drops the
+  orb's line before the hatch rises so the docking pill has nothing to land
+  on.
+- **The pill and the callouts blur with `-webkit-backdrop-filter` too**:
+  iOS Safari before 18 knows only the prefixed name, and without it both
+  were see-through boxes with the page's words showing through their own.
+- **The first-run create card takes the door's own phone column** (#1175,
+  door-phone.css's `.ringcard`): the login ring at its station holding the
+  question "Name your first system", the fields beneath, the act a
+  full-width pill, the ring closing while you type — because a 500px ring
+  cannot hold a 300px card on a 390px screen. The desk is untouched.
+- **The phone in WebKit is now a check** (`pocket-webkit`,
+  `web/tests/fidelity/tour-pocket-webkit.spec.js` and
+  `pocket-create-ring.spec.js`): the film played through and every mark
+  held at two widths, and the create card's ring, in Safari's engine, run
+  by CI's `fidelity` job.
+
 Both new phone strings (owner's 3b, and the belt's label) are recorded
 where they are said, `chapters/08-the-belt.js`; no other copy changed.
+
+**Round 3 on the owner's iPhone (2026-10-01; owner's 7a and 11, calls by
+Opus 5.5 finishing Fable's round, #1174).**
+
+- **The play bar is always in front (owner's 7a).** On the phone it stays
+  at full strength while the film plays and after it ends (no 38%/16%
+  recede). Its ground is the pack's `--panel-raised` laid over the pack's
+  `--bg`, so it is opaque over the veil, a sheet or a light page, with the
+  kit's lifted-row shadow (`0 10px 28px rgb(0 0 0 / .35)`). Chapter name
+  and clock step up from `--ink-quiet` to `--ink-mid` and the rail from
+  `--line-soft` to `--line`: over 5:1 on every pack. No blur, because
+  nothing shows through. Its places, docking and round 8's fade between
+  places are unchanged. The desk pill is unchanged.
+- **Veil depth stays at the ratified 0.62.** The veil now really cuts its
+  holes: the CSS `mask-image` data URI never did in any engine (an image
+  mask works on alpha, and the black hole shapes were opaque), so every
+  lit control sat dimmed under the veil. The veil is an inline SVG
+  `<mask>`, with no image to decode. Holes open and close on a 180ms fade,
+  and rings fade out over the same 180ms instead of snapping.
+- **The page under the pocket film takes no touches while the film runs.**
+  A clear pane under the pill catches them, whether the film is playing or
+  paused, and goes when the film ends or is stopped. A tap on /create's
+  "suggestion" chip had removed the field the film named next, and the
+  film stopped itself. The desk is unchanged.
+- **Every screen the film walks to opens at its top**, as a jump already
+  does.
+- **The check** (`tour-pocket-webkit.spec.js`) plays under normal motion at
+  430x932 end to end, and at 390x844 and 360x780 through chapter 3. It
+  includes a reader's tap. It asks that the clock keeps moving, that the
+  pill is in front, never faint and its readout at 4.5:1, that no hole or
+  ring snaps, and that at every held mark the lit control is not dimmed.
+
+**Round 5 on the owner's iPhone (2026-10-01; owner's decision on the danger
+ring, calls by Opus 5.5, #1174).**
+
+- **Chapter 4 stages example rows on a new household.** No first-run data
+  is seeded, so a new household's pocket manifest is empty and chapter 4's
+  two lines pointed at blank sky. Round 8's pocket one-take holds three rows
+  at this mark. Where the pocket manifest has no "Needs attention" row, the
+  film draws its own: a "Needs attention" header and the mockup's three rows,
+  nearest first (Gutter clearing T+16d, Car MOT — Volvo V60 T−16d, Boiler
+  service T−22d), with dates counted from today. Each row's meta line opens
+  with "example" in the accent. The rows wear the real row's solid hairline,
+  not the dashed pen, because a dashed row means a suggestion on the
+  pocket. They fade in before the scroll and fade out once the page is back
+  at the top. They are gone at the chapter's end, and on a jump or a stop,
+  and are never written to the account. A household with rows of its own
+  sees those instead. The desk is unchanged. On a new household it already
+  shows its "TODAY" header and "nothing scheduled", but its row line points
+  at nothing (follow-up).
+- **The danger ring pulses red in chapter 5 (owner's decision).** "Time
+  runs" is where the film shows the danger zone: a body walks in toward the
+  sun. From the moment the body lands until the chapter ends, the film lays
+  its own ring over the dial's r=62 circle, on the desk and the phone. The
+  ring is a solid `--overdue` line, 2.5 units wide, and the zone is washed
+  in the same red at 14%. Every 1.4s the line dips to 55% and back, and a
+  second red ring swells to 1.22x and fades. The pulse runs on the film's
+  clock, so it pauses and stops with the film. Under reduced motion the
+  ring is steady and fully red, with no pulse. Each pack's own red is at
+  least 3:1 against its ground: about 3.7:1 on dawn and clouds, 7:1 on the
+  dark packs. The ring is drawn under the bodies and the sun.
+
+**Round 6 on the owner's iPhone (2026-10-01; calls by Opus 5.5, #1174).**
+
+- **Chapter 8 plays on through a household with no belt or no papers.**
+  The film stood still at 1:56. On a household with nothing in it the
+  phone has no body to open, so the film walks to /item, which shows the
+  empty household's card, and waited 12 seconds for a belt that is never
+  drawn. Then it stopped itself at 2:09, at a preview sheet that no paper
+  could open. A household whose items carry no papers stopped there too.
+  Now the empty household's card counts as /item having arrived. The
+  preview sheet is required only when a paper was opened, and is then
+  waited for, in case a phone raises it after its 300ms. The desk is
+  unchanged.
+- **What chapter 8 shows a new household** was left open here, and is
+  settled in the addendum below.
+- **The check** fails on any wait for the page that runs out (the film
+  records each one), and plays chapters 7 to 9 on an empty household at
+  all three phone sizes, and on a household without papers at 390x844.
+
+**Round 6 addendum, 2026-10-01: chapters 8 and 9 without papers (Fable's
+call, built by Opus 5.5, #1174).**
+
+- **Where no body carries a paper, chapters 8 and 9 open no item and
+  point at nothing.** That covers a household with nothing in it, and one
+  whose items carry no documents. Desk and phone alike.
+- **Chapter 8 stays on the sky.** With the sun ringed, it reads "Every
+  body carries its documents in a belt around it." and then "The belt is
+  what you have attached to it." over the dial. The third line, about
+  reading the page, is dropped, because there is no page to read.
+- **Chapter 9 reads "MOT passed — mark it done and it swings back out to
+  next year." over the dial,** with the sun ringed and no press. Its
+  second line, and the drawn body swinging back out, play as before.
+- **A household with a body carrying a paper plays both chapters exactly
+  as before.**
+- **How the film knows.** It asks the sky once, after home's own read has
+  landed and before the film is measured: is there a body with documents?
+  (`data-docs` on the desk, `data-papers` on the phone.) The answer holds
+  for the whole run, so the chapter markers match what plays.
+- **The film is shorter on this path.** Phone: 3:02 with normal motion,
+  1:56 reduced (3:20 and 2:05 with papers). Desk: 3:00 and 1:56 (3:17 and
+  2:07).
+- **The check** plays chapters 8 and 9 on an empty household at 390x844.
+  Every line must point at something on the screen, and no item may be
+  opened.
+
+## 33. The play bar's Stop becomes Skip, and the bar leaves (Fable 5.1, 2026-10-02)
+
+The owner asked: *"The tour play bar needs a way to close it, and cancel/skip
+the tour."* (#1190.) The bar's square Stop is now a cross, labelled "Skip the
+tour" — the same control, same slot, same hit target, pressed or Escape ends
+the film exactly as Stop always did. The bar then fades out and the film is
+destroyed shortly after; a natural finish holds the bar at full strength for
+3s first, then leaves the same way. This supersedes round 5's "the stopped
+and ended state keeps the 16% ghost" (§32's round-5 text above): the ghost is
+retired, because "Watch the tour" (#1189) now does its one job. Round 5's and
+round 8's own READMEs (`design/v19/tour/round-5/`, `design/1083-tour-pocket/`)
+are left as written; this entry is the record of what changed since.

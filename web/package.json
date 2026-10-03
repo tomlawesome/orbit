@@ -11,6 +11,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "scaffold": "node scripts/scaffold-screen.mjs",
     "fidelity": "playwright test --project=fidelity; a=$?; playwright test --project=pocket-measure; b=$?; [ $a -eq 0 ] && [ $b -eq 0 ]",
+    "fidelity:webkit": "playwright test --project=pocket-webkit",
     "launch-timing": "playwright test --project=launch-timing",
     "preview:build": "vite build && rm -rf .preview && cp -r build .preview",
     "preview:serve": "PORT=4180 node .preview/index.js",

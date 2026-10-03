@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   _resetTourRestartForTests,
+  onRestartInPlace,
   relaunchTour,
   requestTourRestart,
   tourMayBegin,
@@ -119,6 +120,49 @@ describe("the clear-and-launch path, end to end", () => {
 });
 
 /*
+ * #1189: "Watch the tour" now sits in both account menus, which are open on
+ * /home itself. Navigating to /home from /home changes nothing Tour.svelte's
+ * arrival effect watches, so the film would never start. Already home, the
+ * relaunch signals Tour.svelte in place instead of navigating.
+ */
+describe("relaunchTour from /home itself (#1189)", () => {
+  beforeEach(() => _resetTourRestartForTests());
+
+  it("signals in place, after the record is cleared, instead of navigating", async () => {
+    const order = [];
+    const stop = onRestartInPlace(() => order.push("signal"));
+    await relaunchTour({
+      clearTourSeen: async () => order.push("clear"),
+      navigateHome: async () => order.push("navigate"),
+      onHome: () => true,
+    });
+    stop();
+    expect(order).toEqual(["clear", "signal"]);
+    // The signal still has to get past Tour.svelte's one-shot guard.
+    expect(tourMayBegin(true)).toBe(true);
+  });
+
+  it("navigates as before from anywhere else, and signals nothing", async () => {
+    const order = [];
+    const stop = onRestartInPlace(() => order.push("signal"));
+    await relaunchTour({
+      clearTourSeen: async () => order.push("clear"),
+      navigateHome: async () => order.push("navigate"),
+      onHome: () => false,
+    });
+    stop();
+    expect(order).toEqual(["clear", "navigate"]);
+  });
+
+  it("stops signalling a listener once it unsubscribes", async () => {
+    const heard = vi.fn();
+    onRestartInPlace(heard)();
+    await relaunchTour({ clearTourSeen: async () => {}, navigateHome: async () => {}, onHome: () => true });
+    expect(heard).not.toHaveBeenCalled();
+  });
+});
+
+/*
  * The wiring itself — source checks, the walk test's own precedent for
  * behaviour that only shows up in a mounted Svelte component. Proves the
  * settings control and Tour.svelte's arrival effect actually call the
@@ -129,18 +173,31 @@ describe("the wiring", () => {
     resolve(import.meta.dirname, "../../web/src/lib/tour/Tour.svelte"),
     "utf8",
   );
-  const settingsSource = readFileSync(
-    resolve(import.meta.dirname, "../../web/src/routes/settings/+page.svelte"),
-    "utf8",
-  );
 
   it("Tour.svelte's arrival effect asks tourMayBegin, not `started` alone", () => {
     expect(tourSource).toContain("tourMayBegin(started)");
   });
 
-  it("the settings control clears the record and calls relaunchTour", () => {
-    expect(settingsSource).toContain("clearTourSeen");
-    expect(settingsSource).toContain("relaunchTour(");
-    expect(settingsSource).toMatch(/take the walk again/);
+  it("Tour.svelte listens for a restart in place", () => {
+    expect(tourSource).toContain("onRestartInPlace(");
+  });
+
+  /* #1189 (owner decision 2026-10-02): one label, four places. */
+  it.each([
+    "web/src/routes/settings/+page.svelte",
+    "web/src/routes/settings/pocket.svelte",
+    "web/src/lib/Chrome.svelte",
+    "web/src/lib/pocket/Hatch.svelte",
+  ])("%s offers \"watch the tour\" through watchTour", (path) => {
+    const source = readFileSync(resolve(import.meta.dirname, "../..", path), "utf8");
+    expect(source).toContain("watchTour");
+    expect(source).toMatch(/>\s*↻ watch the tour\s*</u);
+    expect(source).not.toMatch(/take the walk again</u);
+  });
+
+  it("watchTour clears the record and calls relaunchTour", () => {
+    const watchSource = readFileSync(resolve(import.meta.dirname, "../../web/src/lib/tour/watch.js"), "utf8");
+    expect(watchSource).toContain("clearTourSeen");
+    expect(watchSource).toContain("relaunchTour(");
   });
 });

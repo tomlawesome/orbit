@@ -11,8 +11,9 @@
  * Everything round 4 proved is kept and is kept here: space toggles, Esc
  * stops, tick jumps land on their chapters, hovering a tick names it (the
  * chapter label yields while it does), the focus ring. The pill recedes to
- * 38% while the film plays and returns on hover, focus or pause; the
- * stopped and ended state keeps the 16% ghost, which hover also brings back.
+ * 38% while the film plays and returns on hover, focus or pause. #1190: a
+ * skip or a natural finish ends at full strength, holds (the finish does,
+ * briefly), then the whole bar fades out and is gone — no more ghost.
  *
  * It paints from the PLAYER's budget, never from the wall clock — see
  * player.js. This module owns no timing of its own at all: it is told when a
@@ -34,6 +35,9 @@ import { isPocket } from "$lib/pocket/media.js";
 import { startFilmLoop } from "./clock.js";
 
 const BAR_ID = "orbit-tour-transport";
+/** #1174 round 3: the pane that keeps a reader's taps off the page while
+ *  the pocket film plays it. */
+const CATCH_ID = "orbit-tour-catch";
 const STYLE_ID = "orbit-tour-transport-styles";
 /** Above veil.js's sheet (2000) and the film's own chrome (2100). */
 const Z_INDEX = 2200;
@@ -41,9 +45,9 @@ const Z_INDEX = 2200;
 /** Round 7 (#1097): the script and its announcement. */
 const SCRIPT_ID = `${BAR_ID}-script`;
 const START_COPY = "Orbit's tour is playing on screen: a short film over "
-  + "your own sky, with a transport at the bottom. Press Escape to stop "
+  + "your own sky, with a transport at the bottom. Press Escape to skip "
   + 'it. The full script is in the tour transport, under "Tour script".';
-const STOPPED_COPY = "Tour stopped. Your sky is back.";
+const STOPPED_COPY = "Tour skipped. Your sky is back.";
 const FINISHED_COPY = "Tour finished. Your sky is back.";
 
 /** m:ss, as the mockup prints it. @param {number} ms */
@@ -53,25 +57,26 @@ export function mmss(ms) {
 }
 
 /* Not one colour below is new: every value is a pack token from packs.css,
-   the same rule tour.css states. */
+   the same rule tour.css states. The blur is written both ways (#1174): iOS
+   Safari before 18 knows only `-webkit-backdrop-filter`, and without it the
+   pill at its 38% recede is a see-through box with the page's words showing
+   through its own. */
 const STYLES = `
 #${BAR_ID}{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);
   width:470px;height:44px;z-index:${Z_INDEX};box-sizing:border-box;
   display:flex;align-items:center;gap:2px;padding:0 16px 0 8px;
-  background:var(--panel-raised);backdrop-filter:blur(14px);
+  background:var(--panel-raised);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
   border:1px solid var(--line);border-radius:22px;opacity:1;transition:opacity .6s ease}
 #${BAR_ID}.dim{opacity:.38}
-#${BAR_ID}.gone{opacity:.16}
-#${BAR_ID}.dim:hover,#${BAR_ID}.dim:focus-within,
-#${BAR_ID}.gone:hover,#${BAR_ID}.gone:focus-within{opacity:1}
+#${BAR_ID}.dim:hover,#${BAR_ID}.dim:focus-within{opacity:1}
 #${BAR_ID} button{background:none;border:0;padding:0;margin:0;cursor:pointer;color:var(--ink);
   display:flex;align-items:center;justify-content:center}
-#${BAR_ID} .pp,#${BAR_ID} .stp{width:32px;height:32px;border-radius:50%}
-#${BAR_ID} .pp:focus-visible,#${BAR_ID} .stp:focus-visible{outline:1.5px solid var(--accent);outline-offset:1px}
+#${BAR_ID} .pp,#${BAR_ID} .skp{width:32px;height:32px;border-radius:50%}
+#${BAR_ID} .pp:focus-visible,#${BAR_ID} .skp:focus-visible{outline:1.5px solid var(--accent);outline-offset:1px}
 #${BAR_ID} .pp svg{width:12px;height:12px}
-#${BAR_ID} .stp svg{width:10px;height:10px}
-#${BAR_ID} .pp svg,#${BAR_ID} .stp svg{display:block;fill:currentColor}
-#${BAR_ID} .pp:hover,#${BAR_ID} .stp:hover{color:var(--accent)}
+#${BAR_ID} .skp svg{width:10px;height:10px}
+#${BAR_ID} .pp svg,#${BAR_ID} .skp svg{display:block;fill:currentColor}
+#${BAR_ID} .pp:hover,#${BAR_ID} .skp:hover{color:var(--accent)}
 #${BAR_ID} .track{position:relative;flex:1;height:44px;margin-left:4px}
 #${BAR_ID} .rail{position:absolute;left:0;right:0;top:29px;height:2px;background:var(--line-soft)}
 #${BAR_ID} .fill{position:absolute;left:0;top:29px;height:2px;width:0;background:var(--accent)}
@@ -109,7 +114,7 @@ const STYLES = `
 #${BAR_ID} .vh{position:absolute;width:1px;height:1px;overflow:hidden;
   clip:rect(0 0 0 0);white-space:nowrap}
 /* The Script button is drawn the way a skip link is: the .vh clip above
-   until it has focus, then shown in the pill's own type beside Stop -- so
+   until it has focus, then shown in the pill's own type beside Skip -- so
    the picture the fidelity frames photograph does not change for anyone
    who has not tabbed to it. */
 #${BAR_ID} .scr{font:9.5px var(--mono);letter-spacing:.16em;text-transform:uppercase}
@@ -150,11 +155,11 @@ const STYLES = `
   @media (prefers-reduced-motion:reduce){ #${BAR_ID}{transition:none} }
   #${BAR_ID}.top{bottom:auto;top:calc(10px + env(safe-area-inset-top))}
   #${BAR_ID}.raised{bottom:calc(var(--tour-raise,64px) + 12px)}
-  #${BAR_ID} .pp,#${BAR_ID} .stp{position:absolute;top:19px;width:44px;height:44px;border-radius:12px}
+  #${BAR_ID} .pp,#${BAR_ID} .skp{position:absolute;top:19px;width:44px;height:44px;border-radius:12px}
   #${BAR_ID} .pp{left:8px}
-  #${BAR_ID} .stp{left:56px}
+  #${BAR_ID} .skp{left:56px}
   #${BAR_ID} .pp svg{width:12px;height:12px}
-  #${BAR_ID} .stp svg{width:10px;height:10px}
+  #${BAR_ID} .skp svg{width:10px;height:10px}
   /* The rail: the one slider target, 44px tall, full width after the
      buttons (8 pad + 44 + 4 gap + 44 + 8 gap = 108). */
   #${BAR_ID} .track{position:absolute;left:108px;right:0;top:19px;height:44px;margin:0;touch-action:none}
@@ -179,7 +184,28 @@ const STYLES = `
   #${BAR_ID} .tick::after{content:none}
   #${BAR_ID} .tick.aim{top:17px;height:10px;background:var(--accent)}
   #${BAR_ID} .now.aim{color:var(--accent)}
+  /* #1174 round 3, the owner's 7a: the play bar is always in front — never
+     dimmed, covered or faint, above the veil, the scrim, the sheets and the
+     page, on every pack. So on the phone it no longer recedes while the
+     film plays (the desk's .dim stays the desk's), and it carries its
+     own ground: the pack's raised panel laid over the pack's own --bg, so
+     it is opaque whatever is behind it — the veil, a sheet, a light page —
+     and the kit's lifted-row shadow to stand it off that. The words step
+     up from --ink-quiet to --ink-mid and the rail from --line-soft to
+     --line, both pack tokens, so the readout reads on its own ground at
+     well over 4.5:1 on every pack. The blur goes: there is nothing left to
+     see through. Position and docking are unchanged. */
+  #${BAR_ID},#${BAR_ID}.dim{opacity:1}
+  #${BAR_ID}{background:linear-gradient(var(--panel-raised),var(--panel-raised)),var(--bg);
+    -webkit-backdrop-filter:none;backdrop-filter:none;
+    box-shadow:0 10px 28px rgb(0 0 0 / .35)}
+  #${BAR_ID} .now,#${BAR_ID} .clock{color:var(--ink-mid)}
+  #${BAR_ID} .rail{background:var(--line)}
 }
+/* #1190: skip or a natural finish's hold ends this way — the whole bar
+   fades to nothing and stops taking input, on desk and the pocket alike.
+   After 7a's own rule above, so it beats that rule's opacity:1. */
+#${BAR_ID}.leaving{opacity:0;pointer-events:none}
 `;
 
 /**
@@ -229,14 +255,18 @@ export function mountTransport({
   ppIcon.setAttribute("viewBox", "0 0 12 12");
   pp.appendChild(ppIcon);
 
-  const stop = doc.createElement("button");
-  stop.type = "button";
-  stop.className = "stp";
-  stop.setAttribute("aria-label", "Stop");
-  stop.setAttribute("title", "Stop · esc");
-  stop.innerHTML = '<svg viewBox="0 0 10 10"><rect x="0" y="0" width="10" height="10" rx="1"/></svg>';
+  /* #1190: Skip replaces Stop -- same slot, same hit target, same tokens.
+     Pressing it ends the film exactly as Stop always did; the bar then
+     leaves (see the leave()/onEnd wiring below). */
+  const skip = doc.createElement("button");
+  skip.type = "button";
+  skip.className = "skp";
+  skip.setAttribute("aria-label", "Skip the tour");
+  skip.setAttribute("title", "Skip the tour · esc");
+  skip.innerHTML = '<svg viewBox="0 0 10 10"><path d="M1.5 1.5 L8.5 8.5 M8.5 1.5 L1.5 8.5" '
+    + 'stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/></svg>';
 
-  /* Round 7 (#1097): the Script button, after Stop -- the keyboard route to
+  /* Round 7 (#1097): the Script button, after Skip -- the keyboard route to
      the script for a reader already on the pill. */
   const scriptBtn = doc.createElement("button");
   scriptBtn.type = "button";
@@ -293,8 +323,49 @@ export function mountTransport({
      sitting in row one while .track sits in row two means it cannot be
      track's descendant on the pocket. Positioned relative to bar in both
      dialects; see the desk/pocket rules below for the two placements. */
-  bar.append(pp, stop, scriptBtn, track, now, tip, readout, scriptRegion, status);
+  bar.append(pp, skip, scriptBtn, track, now, tip, readout, scriptRegion, status);
   doc.body.appendChild(bar);
+
+  /* #1174 round 3: on the phone the page under the film is the film's
+     picture, not the reader's form. The owner's tap on /create's
+     "suggestion" chip while the film walked that form chose a kind with no
+     due date; the date field left the form, the film's next beat named a
+     control that was no longer there, and the film stopped itself — at
+     0:37, with the pill faded to its end state, which looked like a film
+     that had frozen. A clear pane just under the pill takes every touch
+     on the page while the film runs, playing or paused, so nothing the
+     film is showing can be changed under it; the pill above it is the
+     reader's control, as it always was. Gone when the film ends or is
+     stopped, back when it plays again. It marks itself `data-pocket-above`
+     so a sheet the film opens does not make it inert (focus.js) and let
+     the touch through to the sheet's own scrim. Desk readers point with a
+     mouse at a film that never opens a form under them by touch, so the
+     desk is left as it was. */
+  const catcher = pocket ? doc.createElement("div") : null;
+  /** @param {Event} event */
+  const swallow = (event) => {
+    if (event.cancelable) event.preventDefault();
+    event.stopPropagation();
+  };
+  const CAUGHT = ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "dblclick",
+    "contextmenu", "touchstart", "touchmove", "touchend", "wheel"];
+  if (catcher) {
+    catcher.id = CATCH_ID;
+    catcher.setAttribute("aria-hidden", "true");
+    catcher.setAttribute("data-pocket-above", "");
+    catcher.style.cssText = [
+      "position:fixed",
+      "inset:0",
+      `z-index:${Z_INDEX - 1}`,
+      "background:transparent",
+      "touch-action:none",
+      "-webkit-tap-highlight-color:transparent",
+      "-webkit-user-select:none",
+      "user-select:none",
+    ].join(";");
+    for (const type of CAUGHT) catcher.addEventListener(type, swallow, { passive: false });
+    doc.body.insertBefore(catcher, bar);
+  }
 
   /** Buttons on desk, painted `<i>` marks on the pocket (#1083 §4.2).
    *  @type {(HTMLButtonElement | HTMLElement)[]} */
@@ -312,7 +383,7 @@ export function mountTransport({
   /** The pill recedes while the film plays and returns whenever it is not. */
   function setRecede() {
     bar.classList.toggle("dim", clock.playing() && !player.ended());
-    bar.classList.toggle("gone", player.ended());
+    if (catcher) catcher.hidden = player.ended();
   }
 
   function paint() {
@@ -669,8 +740,89 @@ export function mountTransport({
     }
   }
 
+  /* #1190: THE BAR LEAVES. A skip (or Escape) ends the film exactly as Stop
+     always did and the bar leaves at once; a natural finish holds at full
+     strength for a beat first, so the reader sees it finished, then leaves
+     the same way. Both paths end in `leave()`: the bar fades (`.leaving`)
+     and the promise it returns settles once the fade is done, which is
+     when film.js destroys the whole film — the 1s is so the announcement
+     below is spoken before its live region goes with it. */
+  const LEAVE_MS = 1000;
+  const HOLD_MS = 3000;
+
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let holdTimer = null;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let leaveTimer = null;
+  /** @type {(() => void) | null} */
+  let holdFocusOut = null;
+  /** @type {Set<() => void>} */
+  const leaveCbs = new Set();
+
+  function clearLeaveTimers() {
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+    if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = null; }
+    if (holdFocusOut) { bar.removeEventListener("focusout", holdFocusOut); holdFocusOut = null; }
+  }
+
+  /** Moves focus off the bar before it disappears, so a reader tabbed into
+   *  it is not left focused on an element that is about to go — the page's
+   *  own `main` landmark, or `document.body` when there is none (sheet.js's
+   *  tabIndex/focus idiom). Round 7's rule otherwise stands: if focus was
+   *  not in the bar, it is left alone. */
+  function moveFocusOut() {
+    if (!bar.contains(doc.activeElement)) return;
+    const target = doc.querySelector("main") ?? doc.body;
+    if (!target) return;
+    target.tabIndex = -1;
+    target.focus({ preventScroll: true });
+  }
+
+  /** Fades the whole bar out and resolves once it is gone. */
+  function leave() {
+    moveFocusOut();
+    bar.classList.add("leaving");
+    return new Promise((resolve) => {
+      leaveTimer = setTimeout(() => {
+        leaveTimer = null;
+        resolve(undefined);
+      }, LEAVE_MS);
+    }).then(() => {
+      for (const cb of Array.from(leaveCbs)) cb();
+    });
+  }
+
+  /* Registered ahead of `offAnnounceEnd` below, so this reads `stoppedByUser`
+     while it still says what happened — the announcement follower clears it
+     after reading it for its own copy. */
+  const offLeave = player.onEnd((ended) => {
+    if (!ended) {
+      clearLeaveTimers();
+      bar.classList.remove("leaving");
+      return;
+    }
+    if (stoppedByUser) {
+      clearLeaveTimers();
+      void leave();
+      return;
+    }
+    holdTimer = setTimeout(() => {
+      holdTimer = null;
+      if (bar.matches(":focus-within")) {
+        holdFocusOut = () => {
+          bar.removeEventListener("focusout", /** @type {() => void} */ (holdFocusOut));
+          holdFocusOut = null;
+          void leave();
+        };
+        bar.addEventListener("focusout", holdFocusOut);
+      } else {
+        void leave();
+      }
+    }, HOLD_MS);
+  });
+
   pp.addEventListener("click", () => player.toggle());
-  stop.addEventListener("click", () => {
+  skip.addEventListener("click", () => {
     stoppedByUser = true;
     player.stop();
   });
@@ -728,9 +880,18 @@ export function mountTransport({
     markChapter,
     setRecede,
     paint,
+    /** #1190: fires once the bar has left (`leave()`'s own promise settled)
+     *  — film.js's way to know when to destroy the whole film. */
+    /** @param {() => void} cb */
+    onLeave(cb) {
+      leaveCbs.add(cb);
+      return () => leaveCbs.delete(cb);
+    },
     destroy() {
       offChapter();
       offEnd();
+      offLeave();
+      clearLeaveTimers();
       offAnnounceStart();
       offAnnounceEnd();
       offFrame();
@@ -749,6 +910,7 @@ export function mountTransport({
         barResizeObserver?.disconnect();
         doc.documentElement.removeAttribute("data-tour-pocket");
       }
+      catcher?.remove();
       bar.remove();
     },
   };

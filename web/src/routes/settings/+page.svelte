@@ -1,9 +1,7 @@
 <script>
   import { onMount } from "svelte";
-  import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import {
-    clearTourSeen,
     readAuthMethodsOffered,
     readSentLately,
     readSessions,
@@ -22,7 +20,7 @@
   import { SENT_LATELY_FIXTURE } from "$lib/data/fixtures/settings.js";
   import { agoLong } from "$lib/format.js";
   import { alertsSupported, currentSubscription, disableAlerts, enableAlerts } from "$lib/push/alerts.js";
-  import { relaunchTour } from "$lib/tour/relaunch.js";
+  import { watchTour } from "$lib/tour/watch.js";
   import { fillStarTiles } from "$lib/sky.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
   import Chrome from "$lib/Chrome.svelte";
@@ -56,19 +54,9 @@
     try { localStorage.setItem("orbit-theme", name); } catch {}
   }
 
-  /**
-   * "Take the walk again" (#753, slice 3 of #477, mockup stop 8 of
-   * design/v19/tour.html): clears `tourSeenAt` then goes to /home, where the
-   * existing first-run trigger starts the walk at stop 1 because the record
-   * now reads null. relaunchTour (relaunch.js) also arms the one-shot flag
-   * that gets this SAME-session arrival past Tour.svelte's `started` guard.
-   */
-  function walkAgain() {
-    return relaunchTour({
-      clearTourSeen,
-      navigateHome: () => goto(resolve("/home")),
-    });
-  }
+  /* "Watch the tour" (#753 built it here as "take the walk again"; #1189
+     renamed it and put it in both account menus and on phone settings):
+     $lib/tour/watch.js. */
 
   /**
    * Reminders (#468). The ratified card shows the two warning offsets as
@@ -617,7 +605,7 @@
           </button>
         {/each}
       </div>
-      <button class="relaunch" onclick={walkAgain}>↻ take the walk again</button>
+      <button class="relaunch" onclick={watchTour}>↻ watch the tour</button>
     </div>
 
     <div class="card">

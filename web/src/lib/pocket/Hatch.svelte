@@ -3,6 +3,7 @@
   import { signOut } from "$lib/data/workspace.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
   import { SWATCHES, applyTheme } from "$lib/theme-swatches.js";
+  import { watchTour } from "$lib/tour/watch.js";
   import ArmButton from "./ArmButton.svelte";
   import Row from "./Row.svelte";
   import Sheet from "./Sheet.svelte";
@@ -11,8 +12,10 @@
   const uid = $props.id();
 
   /**
-   * THE HATCH (#1120, proposal §2.2): the account menu as a list sheet,
-   * opened from the orb, on every signed-in screen below the CON-10 switch.
+   * THE HATCH (#1120, proposal §2.2): the account menu as a sheet, opened
+   * from the orb, on every signed-in screen below the CON-10 switch. Its
+   * content's height, not a list sheet's fixed 60%, which hid the swatches
+   * behind the foot on an iPhone (#1188).
    * Who you are; the journeys as 56px rows, the current page's in the accent
    * text grade; the five theme swatches as 44px rings; sign-out as a ghost
    * pill that arms. Leaves by any of the sheet's dismisses.
@@ -53,6 +56,19 @@
      reader reaches the goodbye screen. */
   /** @type {string | null} */
   let problem = $state(null);
+  /* "Watch the tour" (#1189). The sheet closes first and its history entry
+     comes off before the film navigates, or the back that pops it would
+     land after the film's own navigation and undo it. */
+  async function watch() {
+    const popped = new Promise((done) => {
+      addEventListener("popstate", done, { once: true });
+      setTimeout(done, 400);
+    });
+    open = false;
+    await popped;
+    await watchTour();
+  }
+
   async function leave() {
     problem = null;
     try {
@@ -68,7 +84,7 @@
 <!-- The head is the account (§5.2): avatar, name, role. The sheet's own
      title carries the name for a screen reader; the drawn one is hidden
      from it so the name is heard once. -->
-<Sheet bind:open size="list" title={name || "Account and menu"} hideTitle={Boolean(name)}>
+<Sheet bind:open size="callout" title={name || "Account and menu"} hideTitle={Boolean(name)}>
   {#snippet head()}
     {#if name}
       <span class="who">
@@ -107,6 +123,8 @@
       </button>
     {/each}
   </div>
+  <!-- The body's quiet last line, which a sheet allows outside its foot. -->
+  <button class="watch" onclick={watch}>↻ watch the tour</button>
   {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
   <!-- The sheet's one act, in its pinned foot (review round §1.2). -->
   {#snippet foot()}
@@ -130,4 +148,6 @@
   .swatch span{width:30px;height:30px;border-radius:50%;border:1px solid var(--line)}
   .swatch[aria-pressed=true] span{outline:2px solid var(--accent);outline-offset:3px}
   .swatch:focus-visible{outline:2px solid var(--accent);outline-offset:0}
+  .watch{appearance:none;display:flex;align-items:center;min-height:var(--p-hit);margin-top:4px;padding:0;
+    border:0;background:none;cursor:pointer;font:var(--p-type-meta)/1.4 var(--mono);color:var(--accent-text)}
 </style>

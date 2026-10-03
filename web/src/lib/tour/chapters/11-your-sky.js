@@ -54,9 +54,9 @@ export const SELECTORS = Object.freeze({
      *  from the inbox orb beside it, which is a plain link and shares the
      *  `.orb` class but not the `button` tag. */
     orb: "button.orb",
-    /** The "Settings" row inside the account menu the orb opens — named, and
-     *  never pressed, so the chapter can say what is behind it. */
-    settingsLink: '#account nav a[href$="/settings"]',
+    /** "↻ watch the tour" inside the account menu the orb opens (#1189) —
+     *  named, and never pressed: the line says it is here. */
+    watchTour: "#account button.watch",
     /** The five theme swatches, together — read out by name. */
     swatches: "#account .swatches",
     /** The dawn pack's own swatch, named by title the way the product's own
@@ -72,8 +72,8 @@ export const SELECTORS = Object.freeze({
     /** Any open sheet's own panel, lit `ringless` (§3.5) while the settings
      *  row inside it is ringed separately. */
     panel: ".p-sheet-layer.open .p-sheet-panel",
-    /** The hatch's own "Settings" row. */
-    settingsLink: '.p-sheet-layer.open [data-row-face][href$="/settings"]',
+    /** The hatch's own "↻ watch the tour" line (#1189). */
+    watchTour: ".p-sheet-layer.open button.watch",
     /** The hatch's own theme swatches, together. */
     swatches: ".p-sheet-layer.open .swatches",
     /** The dawn pack's own swatch, by title (theme-swatches.js's `SWATCHES`). */
@@ -117,16 +117,17 @@ export default {
     }
     await w(T.cross);
 
-    /* "Settings holds your sky, your relay and this walk" — named, not opened. */
-    const settingsLink = ctl({ sel: S.settingsLink });
-    await goto(settingsLink, { willPress: false });
+    /* Where to watch it again (#1189): the menu's own "↻ watch the tour",
+       ringed in the menu the line names, never pressed. */
+    const watchControl = ctl({ sel: S.watchTour });
+    await goto(watchControl, { willPress: false });
     await callout(
-      "Settings holds your sky, your relay and this walk — take it again anytime.",
-      settingsLink,
+      "Watch the tour again anytime from the settings or the menu.",
+      watchControl,
       "left",
       { mark: "sky-settings" },
     );
-    unlight(settingsLink);
+    unlight(watchControl);
 
     /* The five packs, read out by name. */
     const swatches = ctl({ sel: S.swatches });

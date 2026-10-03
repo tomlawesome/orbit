@@ -190,32 +190,32 @@ describe("the beats, in the mockup's order", () => {
     expect(log[1]).toEqual(["veil", false]);
   });
 
-  it("says the four ratified lines, in order, each pinned to its own control", async () => {
+  it("says the three ratified lines, in order, each pinned to its own control", async () => {
     const { log, ctx } = recorder();
     await arrive.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel]);
     expect(said).toEqual([
       ["This is your star chart.", ".dial"],
-      ["Every sun is a household you belong to.", ".sun-link"],
-      ["That's your sun, at centre — your household, always here.", ".sun-link"],
-      ["The rest of the sky holds systems you don't belong to — tap one to fly there.", ".minisys .msring"],
+      ["That's your sun, in the centre — your household, always here.", ".sun-link"],
+      ["Explore the sky to find other households — maybe you belong there too?", ".minisys .msring"],
     ]);
   });
 
-  it("lights the other suns for the first line and drops them for the second", async () => {
+  it("leaves the other suns unlit until after the centre line (#1174)", async () => {
     const { log, ctx } = recorder();
     await arrive.play(ctx);
     const order = log
-      .filter(([word, a]) => (word === "light" || word === "unlight" || word === "callout") && (a === ".minisys .msring" || word === "callout"))
+      .filter(([word, a]) => (word === "light" || word === "goto" || word === "callout") && (a === ".minisys .msring" || word === "callout"))
       .map(([word, a, sel]) => (word === "callout" ? `say:${sel}` : `${word}:${a}`));
-    /* the outer suns come up for "every sun", and are gone before the line
-       about the centre one is read */
-    expect(order).toContain("light:.minisys .msring");
-    const lit = order.indexOf("light:.minisys .msring");
-    const unlit = order.indexOf("unlight:.minisys .msring");
+    /* The owner cut "Every sun is a household you belong to." and with it
+       the beat that lit every other sun at once (2026-10-01): nothing lights
+       them all any more, and the one the last line rings is reached only
+       after the line about the centre sun. */
+    expect(order).not.toContain("light:.minisys .msring");
     const centreLine = order.lastIndexOf("say:.sun-link");
-    expect(lit).toBeLessThan(unlit);
-    expect(unlit).toBeLessThan(centreLine);
+    const toOther = order.indexOf("goto:.minisys .msring");
+    expect(centreLine).toBeGreaterThan(-1);
+    expect(toOther).toBeGreaterThan(centreLine);
   });
 
   it("presses nothing: chapter 1 only looks", async () => {
@@ -228,7 +228,7 @@ describe("the beats, in the mockup's order", () => {
 });
 
 describe("the chapter played for real", () => {
-  it("puts its four lines on the screen in order", async () => {
+  it("puts its three lines on the screen in order", async () => {
     drawHome();
     const clock = createClock({ reducedMotion: () => false });
     const ctx = createFilmContext({ clock, doc: document });
@@ -261,9 +261,8 @@ describe("the chapter played for real", () => {
 
     expect(said).toEqual([
       "This is your star chart.",
-      "Every sun is a household you belong to.",
-      "That's your sun, at centre — your household, always here.",
-      "The rest of the sky holds systems you don't belong to — tap one to fly there.",
+      "That's your sun, in the centre — your household, always here.",
+      "Explore the sky to find other households — maybe you belong there too?",
     ]);
     ctx.destroy();
   });

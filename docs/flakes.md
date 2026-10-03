@@ -305,3 +305,20 @@ page's URL at failure, which this one has to infer.
 ## fidelity: door-station.spec.js:103 "the ring's hand-over to a card at 390x664, motion no-preference › the ring travels from the door's station to the card's"
 
 - 2026-10-01 · d3141346 (!1013, #1183's Firefox projects for tests/e2e; nothing under web/ or tests/fidelity) · pipeline 1926 / fidelity (job 28697) · "a jump between frames at 317ms": 38.9 against the < 20 bound. The full fidelity runs on !1010 and !1012 just before it passed, and the same pipeline's smoke ran about eleven minutes longer than usual alongside it on the shared runner. First sighting; an issue on the third.
+
+## tour-pocket-webkit.spec.js "plays end to end at 430x932 under normal motion" — pill moving between places (#1174)
+
+- 2026-10-01 · c952834f · local `pocket-webkit` (Playwright image, WebKit) · one fault, "pill moving between places (dim raised) · /create · ch2": the pill was mid-move for over the check's 3s at one sample, with the page painting 9.6 frames a second on a busy host. Green on an immediate rerun of the test alone on the same code (12.2 frames a second). The move is a 350ms fade, so this is the sampler's wall-clock bound under load.
+- 2026-10-01 · b6154cd4 · local `pocket-webkit`, full project run (24.8 minutes, host load average above 20) · the same fault, 5 samples. Second sighting.
+- 2026-10-01 · b6154cd4 · the test alone, load average 22.7, 5.0 frames a second · the same fault, 3 samples. Third sighting.
+- 2026-10-01 · b6154cd4 · the test alone, 10.1 frames a second · the same fault, 2 samples. Fourth sighting. The same test passed on round 4's tour code (dad90e83) at 11.3 frames a second, and then on b6154cd4 at 9.7 frames a second. Round 5 changes nothing in chapter 2, /create or the pill. Past the third sighting, so it needs an issue; not filed from this session (#1174 round 5 note).
+- 2026-10-01 · 854f84a4 · local `pocket-webkit`, the sibling play "plays through chapter 3 at 390x844", run with four other tests, 6.0 frames a second · "pill faint (dim raised) · /create · ch2", 8 samples: the same pill at the same place, caught at low opacity rather than marked as moving. Green on a rerun of the test alone on the same code (9.8 frames a second). Round 6 changes nothing in chapters 2 or 3, /create or the pill. Fifth sighting; the issue is #1184.
+- 2026-10-03 · 60ada53e (!1018) · pipeline 1987 / fidelity_webkit (job 29946) · "pill moving between places (dim raised) · /create · ch2", 5 samples, 7.0 frames a second at 430x932 — same shape and the same degraded-host range as every sighting above. Sixth sighting, still #1184.
+
+## tour-pocket-webkit.spec.js "suggested values give way to real text (#1174 round 4)" — at 430x932 only
+
+- 2026-10-03 · 60ada53e (!1018) · pipeline 1987 / fidelity_webkit (job 29946) · green: this test is not in the job's failure list at this commit.
+- 2026-10-03 · 60ada53e, unchanged · local `pocket-webkit`, full project run · "add-add: #c8-cost's suggestion shows through the film's typed line". 390x844 and 360x780 passed in the same run. First local sighting.
+- 2026-10-03 · 60ada53e, unchanged · local `pocket-webkit`, full project run (the app server restarted fresh, nothing in `web/build` touched this time) · the same fault, same field, same size only. Second local sighting.
+
+Both local sightings are on the exact commit CI passed, which is the flake definition itself (fails and passes on unchanged code) rather than grounds for a third sighting's issue. A targeted diagnostic (jump to add-typing, play on to add-add, the real test's own sequence, repeated twice) measured the ghost div's box against the real `#c8-cost` input's box — identical to the sub-pixel, including the fraction — and a pixel-for-pixel compare of the field with and without its placeholder at that exact moment came back at 0 differing pixels both times: the diagnostic could not reproduce what the real test caught. The cause is likely a paint-timing race between WebKit's native placeholder and the ghost's opaque cover rather than a sizing or placement defect, but that is not established — not fixed.

@@ -357,7 +357,7 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     await expect(transport).toHaveAccessibleName(/\S/);
 
     await expect(page.getByRole("button", { name: /Play|Pause/ })).toHaveAccessibleName(/\S/);
-    await expect(page.getByRole("button", { name: "Stop" })).toHaveAccessibleName(/\S/);
+    await expect(page.getByRole("button", { name: "Skip the tour" })).toHaveAccessibleName(/\S/);
 
     // #1097 (round 7): the film is not narrated -- a screen reader gets its
     // script instead, twelve headings deep, plus one announcement when the
@@ -371,7 +371,7 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     await expect(status).toHaveCount(1);
     await expect(status).toHaveText(
       "Orbit's tour is playing on screen: a short film over your own sky, "
-      + "with a transport at the bottom. Press Escape to stop it. The full "
+      + "with a transport at the bottom. Press Escape to skip it. The full "
       + 'script is in the tour transport, under "Tour script".',
     );
 
@@ -379,9 +379,9 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
 
     // Ends the walk so the record is left taken, as every other spec expects.
     // Esc reaches transport.js's own listener -> player.stop(), which clears
-    // the veil synchronously; the pill itself lingers as a low-opacity ghost
-    // until the film unmounts (see keyboard.ts's `dismissTourIfShown`), so
-    // the veil -- not the pill -- is what this waits on.
+    // the veil synchronously; the pill itself then fades out and is removed
+    // a second later (#1190), so the veil -- not the pill -- is what this
+    // waits on.
     await page.keyboard.press("Escape");
     await expect(page.locator("#orbit-tour-veil")).toBeHidden();
   });
