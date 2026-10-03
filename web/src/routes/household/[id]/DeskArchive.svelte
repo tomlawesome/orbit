@@ -1,4 +1,5 @@
 <script>
+  import { onMount } from "svelte";
   import {
     importPortableArchive,
     previewPortableArchive,
@@ -36,6 +37,12 @@
    * own step-up intents, in place of the phone's Sheet (this route has no
    * modal component).
    */
+
+  /* #1151 W2-R1: set just before the step-up redirect, cleared on the way
+     back in. sessionStorage, not a query param — the identity provider owns
+     `returnTo` and this reader's own tab is the only place this needs to be
+     read. */
+  const STEPUP_RETURN_FLAG = "orbit-archive-stepup-return";
 
   /** @type {{ householdId: string, householdName: string, entries: number, sections: number }} */
   let { householdId, householdName, entries, sections } = $props();
@@ -155,11 +162,30 @@
   async function toProvider() {
     challengeProblem = null;
     try {
+      /* The redirect below leaves this page entirely — the chosen file, its
+         passphrase and the preview cannot survive that, browser-held state
+         has nowhere to live across it. A flag saying only "an archive act
+         sent this reader to the provider" can, and sessionStorage is the
+         right shelf for it: gone the moment the tab closes, never the
+         passphrase itself. */
+      try { sessionStorage.setItem(STEPUP_RETURN_FLAG, "1"); } catch { /* storage refused: the redirect still happens, just without the notice on return */ }
       await startStepUp({ intent: retryIntent, returnTo: location.pathname });
     } catch (error) {
+      try { sessionStorage.removeItem(STEPUP_RETURN_FLAG); } catch { /* nothing to clear */ }
       challengeProblem = wordsOf(error);
     }
   }
+
+  /** @type {string | null} */
+  let stepUpNotice = $state(null);
+
+  onMount(() => {
+    let returning = null;
+    try { returning = sessionStorage.getItem(STEPUP_RETURN_FLAG); } catch { /* unreadable: treat as not returning */ }
+    if (!returning) return;
+    try { sessionStorage.removeItem(STEPUP_RETURN_FLAG); } catch { /* already gone, or unreadable */ }
+    stepUpNotice = "back from signing in again · choose the file once more to carry on";
+  });
 
   /* ── acts ─────────────────────────────────────────────────────────────── */
   function writeArchiveNow() {
@@ -292,6 +318,8 @@
               tabindex={tab === "in" ? 0 : -1} onclick={() => (tab = "in")} onkeydown={tabKey}>bring one in</button>
     </div>
   </div>
+
+  {#if stepUpNotice}<p class="note top">{stepUpNotice}</p>{/if}
 
   <div class="arch">
     <div id="arch-panel-out" role="tabpanel" aria-labelledby="arch-tab-out" hidden={tab !== "out"}>
