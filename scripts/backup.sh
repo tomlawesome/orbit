@@ -25,6 +25,22 @@ fail() {
   exit 1
 }
 
+# Race-free equivalent of `mv --no-clobber`: `ln` succeeds atomically only
+# if $final_path does not already exist (POSIX EEXIST). `mv --no-clobber`'s
+# own existence check is a separate stat-then-rename, not atomic, and on a
+# same-second timestamp collision it silently exits 0 without moving
+# anything -- the script then reports success naming the OLD bundle, while
+# the new one is forgotten as a stale .tar.installing file cleanup never
+# runs for, since temporary_path is cleared right after (#1151 O2-S2).
+# Mirrors publishBundleAtomically in src/lib/recovery-bundle.ts.
+# $temporary_path and $final_path must be on the same filesystem, which they
+# already are (both under $backup_directory).
+publish_bundle_atomically() {
+  ln -- "$temporary_path" "$final_path" 2>/dev/null ||
+    fail "A backup already exists at $final_path; rerun to get a distinct timestamp."
+  rm -f -- "$temporary_path"
+}
+
 cleanup() {
   [[ -z "$work_directory" ]] || rm -rf -- "$work_directory"
   [[ -z "$temporary_path" ]] || rm -f -- "$temporary_path"
@@ -231,7 +247,7 @@ EOF
   tar -C "$work_directory" -cf "$temporary_path" manifest manifest.hmac checksums.sha256 database.dump documents.tar.enc
   tar -tf "$temporary_path" >/dev/null || fail "Could not validate the completed bundle."
   final_path="$backup_directory/orbit-$timestamp.tar"
-  mv --no-clobber -- "$temporary_path" "$final_path"
+  publish_bundle_atomically
   temporary_path=""
   compose start orbit-app >/dev/null
   app_stopped=false
