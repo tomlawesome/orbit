@@ -238,6 +238,11 @@ test("amend then accept from the item view", async ({ page }) => {
          readings and the two decisions; the fields are in the review sheet
          `review & amend →` raises (ReviewSheet.svelte: EntryForm in review
          mode), so the amendment happens there. */
+      /* #1196: a bounded wait for the button the mocked receipt should have
+         produced, true on every engine that reaches it -- mobile WebKit's
+         own interceptMail bypass (above) then fails this fast instead of
+         riding the click's own full test-timeout wait. */
+      await expect(page.getByRole("button", { name: "review & amend →" })).toBeVisible({ timeout: 30_000 });
       await page.getByRole("button", { name: "review & amend →" }).click();
       const form = page.getByRole("form", { name: "Review Reviewed intake 1786823446152" });
       const name = form.locator('input[id$="-name"]');
@@ -420,6 +425,11 @@ test("the phone sheet reads a staged paper's page one, and tells a gone mail apa
     await interceptMail(page, householdId, approvals);
 
     await page.goto("/inbox");
+    /* #1196: a bounded wait for the button the mocked receipt should have
+       produced, true on every engine that reaches it -- mobile WebKit's own
+       interceptMail bypass (above) then fails this fast instead of riding
+       the click's own full test-timeout wait. */
+    await expect(page.getByRole("button", { name: /policy-schedule\.pdf/ })).toBeVisible({ timeout: 30_000 });
     await page.getByRole("button", { name: /policy-schedule\.pdf/ }).click();
     const dialog = page.getByRole("dialog", { name: "policy-schedule.pdf" });
     await expect(dialog).toBeVisible();

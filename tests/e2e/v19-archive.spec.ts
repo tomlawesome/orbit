@@ -80,11 +80,20 @@ async function ensureReaderCanAnswerTheChallenge(page: Page) {
  * and then hung the suite's own retry to its deadline -- the page itself is
  * unusable after this, not racing it. A fresh page in the same context
  * keeps the session and step-up proof (both live in its cookies).
+ *
+ * That fresh page opens on `about:blank`, though: no origin, so the next
+ * caller's own `fetch` (`seedHousehold`'s `page.evaluate`) has nowhere to
+ * send those cookies and gets a 403 (pipeline 2009, `v19-archive.spec.ts:141`
+ * via `:175`). Land it on `/home` first -- same origin, already signed in
+ * via the context's cookies, so this is arriving, not signing in again --
+ * and wait for that arrival the same way `signIn` above does.
  */
 async function pageAfterStepUp(page: Page): Promise<Page> {
   if (page.context().browser()?.browserType().name() !== "webkit") return page;
   const fresh = await page.context().newPage();
   await page.close();
+  await fresh.goto("/home");
+  await settleArrival(fresh);
   return fresh;
 }
 
