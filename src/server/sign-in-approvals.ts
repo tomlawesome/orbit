@@ -527,10 +527,16 @@ export async function decideSignInApproval(
   });
 }
 
+/** What a caller's own session mint hands back, once spending the approval has succeeded. */
+export interface MintedApprovalSession {
+  token: string;
+  expiresAt: Date;
+}
+
 /** Where a waiting tab stands. `unknown` covers every dead end at once. */
 export type PendingSignInState =
   | { state: "waiting" }
-  | { state: "approved"; userId: string }
+  | { state: "approved"; userId: string; session?: MintedApprovalSession }
   | { state: "denied" }
   | { state: "unknown" };
 
@@ -542,8 +548,21 @@ export type PendingSignInState =
  * is the only one that may collect, so polling with a link somebody read over
  * a shoulder gets nothing. The approved answer is spent under a conditional
  * update, so two tabs sharing a cookie still leave exactly one session.
+ *
+ * `mintSession`, when given, is called with the spend already committed
+ * (#1151 SR1-R7). Session creation lives in `@/lib/auth/session` and opens
+ * its own transaction there, so it cannot share one with the update above;
+ * without this, a crash or a transient failure between the two used to
+ * strand a correctly approved sign-in forever -- the claim is single-use,
+ * the mailed link is already consumed, and nothing was left to retry. A
+ * callback that throws has its spend undone, conditioned on the row still
+ * carrying the exact mark this call just wrote (never somebody else's), so
+ * the next poll finds the approval open again rather than gone.
  */
-export async function collectSignInApproval(claim: string): Promise<PendingSignInState> {
+export async function collectSignInApproval(
+  claim: string,
+  mintSession?: (userId: string) => Promise<MintedApprovalSession>,
+): Promise<PendingSignInState> {
   if (claim.length === 0) return { state: "unknown" };
   const db = getDb();
   const [row] = await db
@@ -564,12 +583,24 @@ export async function collectSignInApproval(claim: string): Promise<PendingSignI
   if (row.expiresAt.getTime() <= Date.now()) return { state: "unknown" };
   if (row.outcome !== "approved") return { state: "waiting" };
 
+  const spentAt = new Date();
   const [claimed] = await db
     .update(signInApprovals)
-    .set({ consumedAt: new Date() })
+    .set({ consumedAt: spentAt })
     .where(and(eq(signInApprovals.id, row.id), isNull(signInApprovals.consumedAt)))
     .returning({ id: signInApprovals.id });
-  return claimed ? { state: "approved", userId: row.userId } : { state: "unknown" };
+  if (!claimed) return { state: "unknown" };
+  if (!mintSession) return { state: "approved", userId: row.userId };
+
+  try {
+    const session = await mintSession(row.userId);
+    return { state: "approved", userId: row.userId, session };
+  } catch (error) {
+    await db.update(signInApprovals)
+      .set({ consumedAt: null })
+      .where(and(eq(signInApprovals.id, row.id), eq(signInApprovals.consumedAt, spentAt)));
+    throw error;
+  }
 }
 
 /** What a resend did, in the words the waiting card has for each. */

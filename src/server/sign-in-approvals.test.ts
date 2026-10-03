@@ -422,6 +422,27 @@ describe("a pending sign-in, from the password to the session (ADR-0027 §4-§6)
     expect(await collectSignInApproval(pending.claim)).toEqual({ state: "unknown" });
   });
 
+  it("un-spends the approval when minting the session fails, rather than stranding it (#1151 SR1-R7)", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: "203.0.113.9" }, { mailer });
+    const token = tokenFromLatestMail();
+    await decideSignInApproval(token, "approved");
+
+    const mintFailure = new Error("session insert unavailable");
+    await expect(collectSignInApproval(pending.claim, async () => { throw mintFailure; }))
+      .rejects.toThrow(mintFailure);
+    // A crash here used to be permanent: consumedAt was already set, the
+    // claim is single-use and the mailed link already spent, with nothing
+    // left to retry against. It must come back open instead.
+    expect(store.approvals[0].consumedAt).toBeNull();
+
+    // The next poll -- this time minting succeeds -- gets the session.
+    const minted = { token: "session-token", expiresAt: new Date(NINE.getTime() + 60_000) };
+    await expect(collectSignInApproval(pending.claim, async () => minted))
+      .resolves.toEqual({ state: "approved", userId: USER, session: minted });
+    // Spent for good this time: a third attempt gets nothing.
+    expect(await collectSignInApproval(pending.claim)).toEqual({ state: "unknown" });
+  });
+
   it("gives nothing to anyone but the browser that typed the password", async () => {
     await startSignInApproval(USER, { userAgent: CHROME, clientAddress: "203.0.113.9" }, { mailer });
     const token = tokenFromLatestMail();
