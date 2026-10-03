@@ -3186,6 +3186,32 @@ describe("install.sh release manifest (ADR-0031 #7)", () => {
     expect(result.stdout).toContain(`CONFIGURE_INVOKED ORBIT_IMAGE=${resolvedReference}`);
   });
 
+  it("removes its own temporary manifest directory after a successful self-fetch (GitLab #1201)", () => {
+    const targetDir = makeTarget();
+    const dir = mkdtempSync(join(tmpdir(), "orbit-install-selffetch-"));
+    const { privatePem, publicPem } = generateKeyPair(dir);
+    const baseUrl = buildSelfFetchFixture(dir, privatePem);
+    // A private TMPDIR, never shared with anything else, so this test can
+    // assert the directory is empty afterward: self_fetch_release_manifest
+    // previously set release_manifest_work_dir inside the subshell forked
+    // for `release_manifest_path="$(self_fetch_release_manifest)"`, so
+    // cleanup()'s own copy of that variable, in the real shell, stayed
+    // empty and never removed the real orbit-install-manifest.* directory.
+    const privateTmpDir = mkdtempSync(join(tmpdir(), "orbit-install-selffetch-tmpdir-"));
+
+    const result = runInstall(targetDir, {
+      ORBIT_RELEASE_MANIFEST: "",
+      ORBIT_INSTALL_TEST_MANIFEST_BASE_URL: baseUrl,
+      ORBIT_INSTALL_TEST_PUBLIC_KEY_FILE: publicPem,
+      ORBIT_INSTALL_TEST_ALLOW_KEY_OVERRIDE: "1",
+      TMPDIR: privateTmpDir,
+    });
+
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(readdirSync(privateTmpDir).filter((name) => name.startsWith("orbit-install-manifest."))).toEqual([]);
+  });
+
   it("refuses a self-fetched manifest signed by the wrong key, before any pull", () => {
     const targetDir = makeTarget();
     const dir = mkdtempSync(join(tmpdir(), "orbit-install-selffetch-"));
