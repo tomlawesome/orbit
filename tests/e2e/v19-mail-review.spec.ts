@@ -205,6 +205,12 @@ test("the manifest row approves in two taps, idempotently under partial success"
     // Approved: the suggestion leaves the manifest.
     await expect(page.locator(".item.suggest", { hasText: "Reviewed intake" })).toHaveCount(0);
   } finally {
+    /* #1192: WebKit only -- interceptMail's routes are never unrouted, and a
+       page.request call issued while they are still registered (sweep's own
+       sessionHeaders) hangs for the test's whole remaining budget instead of
+       resolving or erroring. v19-hit-routing.spec.ts hits the same class of
+       route/request conflict; unrouteAll with ignoreErrors is its fix too. */
+    await page.unrouteAll({ behavior: "ignoreErrors" });
     await households.sweep(page);
   }
 });
@@ -266,6 +272,12 @@ test("amend then accept from the item view", async ({ page }) => {
     await expect(page).toHaveURL(new RegExp(`/item/${itemId}$`));
     await expect(page.getByRole("heading", { name: "Reviewed intake landing" })).toBeVisible();
   } finally {
+    /* #1192: WebKit only -- interceptMail's routes are never unrouted, and a
+       page.request call issued while they are still registered (sweep's own
+       sessionHeaders) hangs for the test's whole remaining budget instead of
+       resolving or erroring. v19-hit-routing.spec.ts hits the same class of
+       route/request conflict; unrouteAll with ignoreErrors is its fix too. */
+    await page.unrouteAll({ behavior: "ignoreErrors" });
     await households.sweep(page);
   }
 });
@@ -324,6 +336,12 @@ test("a dismissal takes two taps and mail that failed is visible on the relay", 
     await expect(page.locator(".failures")).toContainText("no longer available for review");
     await expect(page.locator(".failures")).toContainText("14 Aug");
   } finally {
+    /* #1192: WebKit only -- interceptMail's routes are never unrouted, and a
+       page.request call issued while they are still registered (sweep's own
+       sessionHeaders) hangs for the test's whole remaining budget instead of
+       resolving or erroring. v19-hit-routing.spec.ts hits the same class of
+       route/request conflict; unrouteAll with ignoreErrors is its fix too. */
+    await page.unrouteAll({ behavior: "ignoreErrors" });
     await households.sweep(page);
   }
 });
@@ -356,6 +374,12 @@ test("the desk reads a staged paper's page one, on the receipt's own screen and 
     await expect(page).toHaveURL(new RegExp(`/item/${receiptId}$`));
     await expect(page.locator("#readcard")).toHaveClass(/open/);
   } finally {
+    /* #1192: WebKit only -- interceptMail's routes are never unrouted, and a
+       page.request call issued while they are still registered (sweep's own
+       sessionHeaders) hangs for the test's whole remaining budget instead of
+       resolving or erroring. v19-hit-routing.spec.ts hits the same class of
+       route/request conflict; unrouteAll with ignoreErrors is its fix too. */
+    await page.unrouteAll({ behavior: "ignoreErrors" });
     await households.sweep(page);
   }
 });
@@ -387,6 +411,12 @@ test("the phone sheet reads a staged paper's page one, and tells a gone mail apa
     const reopened = page.getByRole("dialog", { name: "policy-schedule.pdf" });
     await expect(reopened).toContainText("This mail has gone.");
   } finally {
+    /* #1192: WebKit only -- interceptMail's routes are never unrouted, and a
+       page.request call issued while they are still registered (sweep's own
+       sessionHeaders) hangs for the test's whole remaining budget instead of
+       resolving or erroring. v19-hit-routing.spec.ts hits the same class of
+       route/request conflict; unrouteAll with ignoreErrors is its fix too. */
+    await page.unrouteAll({ behavior: "ignoreErrors" });
     await households.sweep(page);
   }
 });
