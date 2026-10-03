@@ -11,6 +11,7 @@ import {
   readFileSync,
   readSync,
   rmSync,
+  statfsSync,
   unlinkSync,
   writeSync,
 } from "node:fs";
@@ -307,8 +308,8 @@ const STREAM_CHUNK_BYTES = 1024 * 1024;
  * hard 2 GiB ceiling (`ERR_FS_FILE_TOO_LARGE`) independent of available
  * memory, and even under that ceiling it materialises the whole file at
  * once. This instead opens once with O_NOFOLLOW (no separate lstat-then-open
- * race window, matching readRegularFileNoFollow's discipline) and feeds the
- * digest fixed-size chunks via readSync, so peak memory is O(1) regardless
+ * race window, the same single-descriptor O_NOFOLLOW discipline this module
+ * uses throughout) and feeds the digest fixed-size chunks via readSync, so peak memory is O(1) regardless
  * of file size.
  */
 export function sha256File(path: string): string {
@@ -527,8 +528,8 @@ export function encryptDocumentArchive(plaintext: Buffer, documentKekHex: string
  * suite), but reads `plaintextPath` and writes `outputPath` in fixed-size
  * chunks through the cipher instead of holding the whole plaintext,
  * ciphertext, and a concatenated copy of both in memory at once. Both file
- * descriptors are opened O_NOFOLLOW (readRegularFileNoFollow's discipline
- * for the source; openWriteSecretDescriptor's for the 0600 destination).
+ * descriptors are opened O_NOFOLLOW (this module's usual single-descriptor
+ * discipline for the source; openWriteSecretDescriptor's for the 0600 destination).
  */
 export function encryptDocumentArchiveToFile(plaintextPath: string, documentKekHex: string, outputPath: string): void {
   const salt = randomBytes(DOCUMENT_ARCHIVE_SALT_BYTES);
@@ -555,6 +556,89 @@ export function encryptDocumentArchiveToFile(plaintextPath: string, documentKekH
     closeSync(inputDescriptor);
     key.fill(0);
     iv.fill(0);
+  }
+}
+
+/**
+ * decryptDocumentArchive's bounded-memory sibling (O2-R9/SR2-R3), modeled
+ * directly on encryptDocumentArchiveToFile above: reads the envelope header
+ * with one bounded read, then streams ciphertext to plaintext through the
+ * cipher in fixed-size chunks, so a large (or hostile, operator-supplied)
+ * document archive is never fully buffered in memory on the restore/verify
+ * path either. Same not-fully-authenticated caveat as decryptDocumentArchive
+ * — a wrong key is usually, not always, refused by a bad final PKCS#7 pad.
+ */
+export function decryptDocumentArchiveToFile(envelopePath: string, documentKekHex: string, outputPath: string): void {
+  const headerBytes = DOCUMENT_ARCHIVE_MAGIC.length + DOCUMENT_ARCHIVE_SALT_BYTES;
+  const inputDescriptor = openSync(envelopePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    // `position: null` on every read (header and body alike) so each call
+    // continues from the fd's own cursor rather than an explicit file
+    // offset — a positional read (a non-null `position`) does NOT advance
+    // that cursor, which would make the body loop below re-read starting
+    // from byte 0, re-consuming the header as ciphertext.
+    const header = Buffer.allocUnsafe(headerBytes);
+    let headerRead = 0;
+    while (headerRead < headerBytes) {
+      const bytesRead = readSync(inputDescriptor, header, headerRead, headerBytes - headerRead, null);
+      if (bytesRead === 0) break;
+      headerRead += bytesRead;
+    }
+    if (headerRead < headerBytes || !header.subarray(0, DOCUMENT_ARCHIVE_MAGIC.length).equals(DOCUMENT_ARCHIVE_MAGIC)) {
+      refuse("document-archive-invalid", "Document archive decryption failed.");
+    }
+    const salt = header.subarray(DOCUMENT_ARCHIVE_MAGIC.length, headerBytes);
+    const { key, iv } = deriveDocumentArchiveKeyIv(documentKekHex, salt);
+    const outputDescriptor = openWriteSecretDescriptor(outputPath);
+    try {
+      const decipher = createDecipheriv("aes-256-cbc", key, iv);
+      try {
+        const readBuffer = Buffer.allocUnsafe(STREAM_CHUNK_BYTES);
+        for (;;) {
+          const bytesRead = readSync(inputDescriptor, readBuffer, 0, readBuffer.length, null);
+          if (bytesRead === 0) break;
+          const chunk = decipher.update(bytesRead === readBuffer.length ? readBuffer : readBuffer.subarray(0, bytesRead));
+          if (chunk.length > 0) writeSync(outputDescriptor, chunk);
+        }
+        const final = decipher.final();
+        if (final.length > 0) writeSync(outputDescriptor, final);
+      } catch {
+        refuse("document-archive-invalid", "Document archive decryption failed.");
+      }
+    } finally {
+      closeSync(outputDescriptor);
+      key.fill(0);
+      iv.fill(0);
+    }
+  } finally {
+    closeSync(inputDescriptor);
+  }
+}
+
+/**
+ * A bounded first pass before decryptDocumentArchiveToFile ever touches the
+ * ciphertext body (O2-R9/SR2-R3): AES-256-CBC's ciphertext is always at
+ * least as long as its plaintext (PKCS#7 pads up to one block), so the
+ * envelope file's own size — read via a single stat, nothing decrypted — is
+ * already a safe upper bound on the decrypted tar it is about to produce.
+ * Refusing here when the destination filesystem cannot hold that many bytes
+ * closes the gap where an operator-supplied archive was previously
+ * decrypted and written to disk, unbounded, before the only capacity check
+ * (checkRestoreCapacity, run later by restore-engine.ts on the *extracted*
+ * tree) ever ran.
+ */
+function requireCapacityForDocumentArchive(envelopePath: string, destinationDir: string): void {
+  const descriptor = openSync(envelopePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  let envelopeBytes: number;
+  try {
+    envelopeBytes = fstatSync(descriptor).size;
+  } finally {
+    closeSync(descriptor);
+  }
+  const stats = statfsSync(destinationDir);
+  const availableBytes = stats.bavail * stats.bsize;
+  if (availableBytes < envelopeBytes) {
+    refuse("document-archive-invalid", "Document archive decryption failed; not enough space to stage the decrypted document tree.");
   }
 }
 
@@ -821,31 +905,6 @@ function openWriteSecretDescriptor(path: string, mode: number = SECURE_FILE_MODE
 }
 
 /**
- * Opens `path` for reading with a single `O_NOFOLLOW` descriptor and returns
- * its contents — deliberately not a separate `lstat`-then-`open`/`readFile`
- * pair, so there is no window between checking the path is not a symlink and
- * reading its content (CodeQL js/file-system-race). A dangling/symlink path
- * surfaces as `ELOOP`/`ENOENT` from the single `open` call itself.
- */
-function readRegularFileNoFollow(path: string): Buffer {
-  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try {
-    const stats = fstatSync(descriptor);
-    if (!stats.isFile()) throw new Error("not a regular file");
-    const buffer = Buffer.alloc(stats.size);
-    let readTotal = 0;
-    while (readTotal < buffer.length) {
-      const bytesRead = readSync(descriptor, buffer, readTotal, buffer.length - readTotal, readTotal);
-      if (bytesRead === 0) break;
-      readTotal += bytesRead;
-    }
-    return buffer.subarray(0, readTotal);
-  } finally {
-    closeSync(descriptor);
-  }
-}
-
-/**
  * The real BackupDockerAdapter: spawns the literal `docker compose` argument
  * lists backup.sh uses, over the exact fixed command shape (no shell
  * interpolation of caller-controlled data beyond the two path/envFile
@@ -906,7 +965,27 @@ export function createDockerComposeBackupAdapter(options: DockerComposeAdapterOp
       try {
         const result = spawnSync(
           dockerBinary,
-          composeArgs("run", "--rm", "--no-deps", "--entrypoint", "tar", "orbit-app", "-C", "/var/lib/orbit/documents", "-cf", "-", "."),
+          composeArgs(
+            "run",
+            "--rm",
+            "--no-deps",
+            "--entrypoint",
+            "tar",
+            "orbit-app",
+            "-C",
+            "/var/lib/orbit/documents",
+            // SS2-S1: excluded, not backed up. portable-archives/ holds the
+            // household portable-archive export (ADR-0024's deliberate
+            // plaintext escape hatch) — time-limited, re-creatable on
+            // request, and not an entry validateDocumentArchiveEntries's
+            // allow-list recognizes. Before this exclusion, any export
+            // sitting on disk made `orbit backup` refuse outright the
+            // moment it re-validated its own freshly collected archive.
+            "--exclude=./portable-archives",
+            "-cf",
+            "-",
+            ".",
+          ),
           { cwd, env, stdio: ["ignore", descriptor, "inherit"] },
         );
         if (result.status !== 0) refuse("document-archive-collection-failed", "The document archive could not be collected.");
@@ -954,15 +1033,10 @@ export function validateBackupBundleContents(
     refuse("database-archive-invalid", "The bundle database dump is invalid.");
   }
 
-  const encrypted = readRegularFileNoFollow(join(extractedDir, "documents.tar.enc"));
-  const plaintext = decryptDocumentArchive(encrypted, documentKekHex);
+  const envelopePath = join(extractedDir, "documents.tar.enc");
+  requireCapacityForDocumentArchive(envelopePath, extractedDir);
   const documentsTarPath = join(extractedDir, "documents.tar");
-  const descriptor = openWriteSecretDescriptor(documentsTarPath);
-  try {
-    writeSync(descriptor, plaintext);
-  } finally {
-    closeSync(descriptor);
-  }
+  decryptDocumentArchiveToFile(envelopePath, documentKekHex, documentsTarPath);
   validateDocumentArchiveEntries(listTarEntriesVerbose(documentsTarPath));
 
   return fields;
@@ -1168,4 +1242,5 @@ export function requireValidPassphrase(passphrase: string): void {
 export const internal = {
   runTar,
   deriveRecoveryKey,
+  requireCapacityForDocumentArchive,
 };
