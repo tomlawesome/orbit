@@ -12,6 +12,7 @@ import {
   readlinkSync,
   readdirSync,
   readFileSync,
+  renameSync,
   statSync,
   symlinkSync,
   unlinkSync,
@@ -1621,6 +1622,24 @@ describe("install.sh", () => {
     expect(projectCalls.join("\n")).not.toContain(basename(targetDir));
     expect(result.calls).toContain("up -d");
     expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("recognizes an existing deployment through a custom ORBIT_SECRETS_DIR, instead of refusing it as an unrecognizable target (#1151 SF2-F8)", () => {
+    // validate_target's "this looks like an existing deployment, treat it
+    // as an update" branch only checks that $secrets_directory is a real,
+    // non-symlink directory -- it never looked at ORBIT_SECRETS_DIR before
+    // this fix, so a deployment whose secrets were ever renamed/relocated
+    // read as unrecognizable and fresh-install validation refused it
+    // outright, before configure.sh (which does honour the variable) ever
+    // ran.
+    const targetDir = makeTarget();
+    makeExistingDeployment(targetDir);
+    const customSecretsDir = join(targetDir, "renamed-secrets");
+    renameSync(join(targetDir, ".orbit-secrets"), customSecretsDir);
+
+    const result = runInstall(targetDir, { ORBIT_SECRETS_DIR: customSecretsDir });
+
+    expect(result.stderr).not.toContain("Refusing to install here");
   });
 
   it("keeps backup and restore commands on the persisted env-file project", () => {

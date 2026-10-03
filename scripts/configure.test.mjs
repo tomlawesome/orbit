@@ -253,6 +253,20 @@ describe(".env-orbit.example", () => {
 });
 
 describe("configure.sh", () => {
+  it("honours ORBIT_SECRETS_DIR, writing generated secrets there instead of the default .orbit-secrets (#1151 SF2-F8)", () => {
+    const targetDir = makeFixture(undefined);
+    const customSecretsDir = join(targetDir, "custom-secrets-location");
+
+    const result = runConfigure(targetDir, [], { ORBIT_SECRETS_DIR: customSecretsDir });
+
+    expect(result.status).toBe(0);
+    expect(existsSync(join(targetDir, ".orbit-secrets"))).toBe(false);
+    expect(statSync(customSecretsDir).mode & 0o777).toBe(0o700);
+    for (const name of ["session-secret", "postgres-password", "document-kek", "vapid-private-key"]) {
+      expect(existsSync(join(customSecretsDir, name))).toBe(true);
+    }
+  });
+
   it("creates a concise operator environment while leaving reference-only defaults in the example", () => {
     const targetDir = makeFixture(undefined);
 

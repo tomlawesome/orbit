@@ -6,7 +6,7 @@ cd "$repo_dir"
 
 readonly environment_file=".env-orbit"
 readonly environment_example=".env-orbit.example"
-readonly secrets_directory=".orbit-secrets"
+readonly secrets_directory="${ORBIT_SECRETS_DIR:-.orbit-secrets}"
 readonly oidc_secret_file="$secrets_directory/oidc-client-secret"
 readonly oidc_secret_file_path="/run/orbit-secrets/orbit-oidc-client-secret"
 readonly maximum_secret_bytes=65536
