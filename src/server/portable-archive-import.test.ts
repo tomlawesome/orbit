@@ -1,0 +1,255 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AppError } from "@/lib/app-error";
+import { encryptPortableArchive } from "@/server/portable-archive";
+import { KDF_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
+
+/**
+ * Covers three A2 audit findings in the portable-archive import path:
+ *
+ * - A2-F2: a schema failure caused only by required fields coming back
+ *   empty (an export taken while the metadata key was locked) must be
+ *   told apart from a genuinely unsupported file.
+ * - A2-F3: an archived section's `archivedAt` must survive the round trip
+ *   instead of coming back live.
+ * - A2-S2: a document whose bytes travelled with the archive is restored
+ *   through the ordinary upload path; one whose target item was not
+ *   imported is left unrestored and counted as such.
+ *
+ * scrypt N=16384 by design; see KDF_TEST_TIMEOUT_MS for the cost.
+ */
+vi.setConfig({ testTimeout: KDF_TEST_TIMEOUT_MS });
+
+const passphrase = "correct-horse-battery-staple";
+
+const mocks = vi.hoisted(() => ({
+  selectQueues: new Map<string, unknown[][]>(),
+  insertCalls: [] as Array<{ table: string; values: unknown }>,
+  uploadItemDocument: vi.fn(async () => ({ id: "uploaded" })),
+  requireMetadataWriter: vi.fn(),
+  openMetadataReader: vi.fn(),
+}));
+
+function queue(map: Map<string, unknown[][]>, table: string, rows: unknown[]) {
+  const existing = map.get(table) ?? [];
+  existing.push(rows);
+  map.set(table, existing);
+}
+
+function nextRows(map: Map<string, unknown[][]>, table: string): unknown[] {
+  const list = map.get(table);
+  if (!list || list.length === 0) return [];
+  return list.shift()!;
+}
+
+vi.mock("@/db", async () => {
+  const { getTableName } = await import("drizzle-orm");
+
+  function selectBuilder() {
+    let table = "";
+    const chain: Record<string, unknown> = {
+      from(t: unknown) {
+        table = getTableName(t as never);
+        return chain;
+      },
+      innerJoin: () => chain,
+      leftJoin: () => chain,
+      where: () => chain,
+      limit: () => chain,
+      orderBy: () => chain,
+      then: (resolve: (rows: unknown[]) => unknown, reject?: (reason: unknown) => unknown) =>
+        Promise.resolve(nextRows(mocks.selectQueues, table)).then(resolve, reject),
+    };
+    return chain;
+  }
+
+  function insertBuilder(table: string) {
+    return {
+      values: (v: unknown) => {
+        mocks.insertCalls.push({ table, values: v });
+        return Promise.resolve();
+      },
+    };
+  }
+
+  const fakeDb: Record<string, unknown> = {
+    select: () => selectBuilder(),
+    insert: (t: unknown) => insertBuilder(getTableName(t as never)),
+    transaction: async (fn: (tx: unknown) => unknown) => fn(fakeDb),
+  };
+
+  return { getDb: () => fakeDb };
+});
+
+vi.mock("@/server/workspace-access", () => ({
+  acquireActiveHouseholdLock: vi.fn(async () => undefined),
+}));
+
+vi.mock("@/server/metadata/fields", () => ({
+  requireMetadataWriter: mocks.requireMetadataWriter,
+  openMetadataReader: mocks.openMetadataReader,
+}));
+
+vi.mock("@/server/document-repository", () => ({
+  readDocumentDownload: vi.fn(),
+  uploadItemDocument: mocks.uploadItemDocument,
+}));
+
+const { previewPortableImport, importPortableArchive, createPortableArchive } = await import("./portable-archive-repository");
+
+const userId = "39a5fac9-38cb-4178-b68a-a8d8db97ed3b";
+const householdId = "66a1f3d8-b79d-47a5-92fe-a4824270aa9a";
+const sectionId = "be56a287-919c-4237-ab23-e5897488e6a2";
+const item1Id = "26f04310-3f96-4828-94b2-f2fc693bc89e";
+const item2Id = "7fbbdc92-9e4b-4b98-9cfc-d6043a91f0d8";
+const doc1Id = "d8ae2faf-babd-4035-ba11-63ed9deb84d0";
+const doc2Id = "7112fcd4-6865-4bf4-a7c0-acb2e38edbd3";
+const orphanSectionId = "f71d534e-156f-414c-91cc-9c60f155f6e1";
+
+function encrypted(payload: unknown) {
+  return encryptPortableArchive(Buffer.from(JSON.stringify(payload)), passphrase);
+}
+
+function seedHouseholdAccess() {
+  queue(mocks.selectQueues, "households", [{ id: householdId, administrator: true, membershipUserId: null, role: null }]);
+}
+
+beforeEach(() => {
+  mocks.selectQueues.clear();
+  mocks.insertCalls.length = 0;
+  mocks.uploadItemDocument.mockClear();
+  mocks.requireMetadataWriter.mockReset();
+  mocks.requireMetadataWriter.mockResolvedValue({
+    encryptText: () => Buffer.from("enc"),
+    encryptNumber: () => Buffer.from("enc"),
+    referenceIndex: () => null,
+  });
+  mocks.openMetadataReader.mockReset();
+  mocks.openMetadataReader.mockResolvedValue({ locked: false, text: () => ({ value: null }) });
+});
+
+describe("portable archive export refusal (#1151 A2-F2)", () => {
+  it("refuses to export while the metadata key is locked, rather than writing blank titles", async () => {
+    queue(mocks.selectQueues, "households", [{ id: householdId, administrator: true, membershipUserId: null, role: "owner" }]);
+    queue(mocks.selectQueues, "households", [{ id: householdId, name: "Home", timezone: "Europe/London", defaultCurrency: "GBP" }]);
+    queue(mocks.selectQueues, "sections", []);
+    queue(mocks.selectQueues, "items", []);
+    queue(mocks.selectQueues, "due_events", []);
+    queue(mocks.selectQueues, "reminder_rules", []);
+    queue(mocks.selectQueues, "documents", []);
+    mocks.openMetadataReader.mockResolvedValueOnce({ locked: true, text: () => ({ value: null }) });
+
+    let caught: unknown;
+    try {
+      await createPortableArchive({ userId, householdId, passphrase, includeDocuments: false });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(AppError);
+    expect((caught as AppError).code).toBe("archive_metadata_locked");
+  });
+});
+
+describe("portable archive import error (#1151 A2-F2)", () => {
+  it("tells empty required fields (a locked-key export) apart from an unsupported file", async () => {
+    seedHouseholdAccess();
+    const archive = encrypted({
+      format: "orbit-portable-archive",
+      version: 1,
+      household: { name: "Home" },
+      sections: [],
+      items: [{
+        id: item1Id, sectionId, title: "", subtype: null, provider: null, reference: null,
+        currency: "GBP", status: "active",
+      }],
+      documents: [],
+    });
+
+    let caught: unknown;
+    try {
+      await previewPortableImport(userId, householdId, archive, passphrase);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(AppError);
+    expect((caught as AppError).code).toBe("archive_fields_empty");
+  });
+
+  it("still reports an unsupported file as unsupported, not as empty fields", async () => {
+    seedHouseholdAccess();
+    const archive = encrypted({ format: "not-an-orbit-archive", version: 1 });
+
+    let caught: unknown;
+    try {
+      await previewPortableImport(userId, householdId, archive, passphrase);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(AppError);
+    expect((caught as AppError).code).toBe("archive_invalid");
+  });
+});
+
+describe("portable archive import (#1151 A2-F3, A2-S2)", () => {
+  function fullArchive() {
+    return encrypted({
+      format: "orbit-portable-archive",
+      version: 1,
+      household: { name: "Home" },
+      sections: [{
+        id: sectionId, slug: "insurance", name: "Insurance", icon: "shield", accent: "blue",
+        position: 0, visible: true, archivedAt: "2024-01-01T00:00:00.000Z",
+      }],
+      items: [
+        {
+          id: item1Id, sectionId, title: "Policy A", subtype: null, provider: null, reference: null,
+          currency: "GBP", status: "active",
+        },
+        // Points at a section that was not exported: this item (and its
+        // document) cannot be imported.
+        {
+          id: item2Id, sectionId: orphanSectionId, title: "Policy B", subtype: null, provider: null,
+          reference: null, currency: "GBP", status: "active",
+        },
+      ],
+      documents: [
+        { id: doc1Id, itemId: item1Id, displayName: "policy-a.pdf", mediaType: "application/pdf", lifecycle: "available" },
+        { id: doc2Id, itemId: item2Id, displayName: "policy-b.pdf", mediaType: "application/pdf", lifecycle: "available" },
+      ],
+      documentBytes: [
+        { id: doc1Id, contentBase64: Buffer.from("hello").toString("base64") },
+        { id: doc2Id, contentBase64: Buffer.from("world").toString("base64") },
+      ],
+    });
+  }
+
+  it("carries archivedAt through to the inserted section", async () => {
+    seedHouseholdAccess();
+    queue(mocks.selectQueues, "sections", []); // no existing sections
+    queue(mocks.selectQueues, "items", []); // existingItemTitles: no existing items
+
+    await importPortableArchive({ userId, householdId, archive: fullArchive(), passphrase, conflictItemIds: [] });
+
+    const sectionInsert = mocks.insertCalls.find((call) => call.table === "sections");
+    const values = sectionInsert?.values as { archivedAt: Date | null };
+    expect(values.archivedAt).toBeInstanceOf(Date);
+    expect(values.archivedAt?.toISOString()).toBe("2024-01-01T00:00:00.000Z");
+  });
+
+  it("restores a document whose item was imported, and leaves one unrestored when its item was not", async () => {
+    seedHouseholdAccess();
+    queue(mocks.selectQueues, "sections", []);
+    queue(mocks.selectQueues, "items", []);
+
+    const result = await importPortableArchive({ userId, householdId, archive: fullArchive(), passphrase, conflictItemIds: [] });
+
+    expect(mocks.uploadItemDocument).toHaveBeenCalledTimes(1);
+    const call = mocks.uploadItemDocument.mock.calls[0][0] as { filename: string; itemId: string };
+    expect(call.filename).toBe("policy-a.pdf");
+    expect(call.itemId).not.toBe(item1Id); // the new, re-generated item id, not the archive's
+    // Policy B's section does not exist in this household, so it (and its
+    // document) was never imported; that document is left unrestored and
+    // counted, not silently claimed as included.
+    expect(result.importedItems).toBe(1);
+    expect(result.documentsExcluded).toBe(1);
+  });
+});
