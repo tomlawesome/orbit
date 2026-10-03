@@ -876,7 +876,7 @@
   <!-- §2.1: a button drawn as the desk's field, never a field on the page,
        so iOS never scrolls to an input that is about to move into the sheet. -->
   <button class="msearch" onclick={openSearch}>explore your world</button>
-  <div class="pk-below">
+  <div class="pk-below" class:pk-busy={busy}>
   {#if groups?.attention.length}
     <h2 class="p-caps">Needs attention</h2>
     <div class="pk-list" data-row-group data-row-cards>
@@ -962,7 +962,7 @@
   {/snippet}
   <!-- #1057's phone half (§2.4; phone-search round 1, B). -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="pk-results" bind:this={resultList} onkeydown={listKey}>
+  <div class="pk-results" class:pk-busy={busy} bind:this={resultList} onkeydown={listKey}>
     {#if !results.query}
       {#each results.items as one (one.id)}
         <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
@@ -1000,9 +1000,14 @@
   {#snippet foot()}
     {#if results.query && !results.nothing && results.complete}
       {@const top = results.complete}
-      <!-- The one accent action for the top match (§2.4). -->
-      <ArmButton label={`→ complete “${top.title}”`} armedLabel="tap again to complete" danger={false} wide
-                 class="pk-act" onfire={() => complete(top)} />
+      <!-- The one accent action for the top match (§2.4). Wrapped rather
+           than passed a disabled prop ArmButton has no concept of (#1151
+           W1-R8): dims and stops taking taps while any row act (or this
+           one) is already in flight, sharing the same `busy` flag. -->
+      <span class:pk-foot-busy={busy}>
+        <ArmButton label={`→ complete “${top.title}”`} armedLabel="tap again to complete" danger={false} wide
+                   class="pk-act" onfire={() => complete(top)} />
+      </span>
     {/if}
   {/snippet}
 </Sheet>
