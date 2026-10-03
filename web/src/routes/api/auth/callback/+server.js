@@ -157,9 +157,14 @@ export async function GET(event) {
       throw new AuthError("account_disabled", "This Orbit account is disabled", 403);
     }
 
-    // A successful login always replaces the browser's previous session.
-    await deleteSessionToken(event.cookies.get(sessionCookieName(config)));
+    /* A successful login always replaces the browser's previous session.
+       Create the replacement first (#1151 A1-R6): if the old token were
+       deleted first and createSession then failed -- a transient database
+       error, say -- the reader would be left with neither session, signed
+       out by a blip that had nothing to do with their sign-in. */
+    const previousSessionToken = event.cookies.get(sessionCookieName(config));
     const session = await createSession(user.id, config, event.request.headers.get("user-agent"));
+    await deleteSessionToken(previousSessionToken);
 
     clearTransactionCookie(event.cookies, config);
     setSessionCookie(event.cookies, session.token, config);
