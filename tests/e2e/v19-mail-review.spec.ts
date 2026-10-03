@@ -220,6 +220,11 @@ test("the manifest row approves in two taps, idempotently under partial success"
 });
 
 test("amend then accept from the item view", async ({ page }) => {
+  /* #1196: on mobile WebKit, the page's own /api/imap-inbox fetch after
+     `page.goto` reaches the real server instead of interceptMail's route --
+     Playwright's WebKit driver skips the mock after a full navigation.
+     desktop-webkit runs this same flow and passes; detail on #1196. */
+  test.fail(test.info().project.name === "mobile-webkit", "#1196: mobile WebKit skips interceptMail's route after goto, so this hits the real (empty) inbox");
   await signInToHome(page);
   const { householdId, itemId } = await seedHousehold(page);
 
@@ -402,6 +407,11 @@ test("the desk reads a staged paper's page one, on the receipt's own screen and 
 
 test("the phone sheet reads a staged paper's page one, and tells a gone mail apart from one it just cannot draw (#1155)", async ({ page }) => {
   test.skip(!test.info().project.name.startsWith("mobile"), "the pocket paper sheet is phone-only; see the desk test above");
+  /* #1196: on mobile WebKit, the page's own /api/imap-inbox fetch after
+     `page.goto` reaches the real server instead of interceptMail's route --
+     Playwright's WebKit driver skips the mock after a full navigation.
+     desktop-webkit runs this same flow and passes; detail on #1196. */
+  test.fail(test.info().project.name === "mobile-webkit", "#1196: mobile WebKit skips interceptMail's route after goto, so this hits the real (empty) inbox");
   await signInToHome(page);
   const { householdId } = await seedHousehold(page);
 
