@@ -577,6 +577,14 @@ export function mintSetupToken(
  * confirmed sent: calling it first and mailing second is the bug this
  * function's split from `issueSetupToken` exists to make impossible again —
  * a failed send used to retire the one link the reader already had.
+ *
+ * Locked per user (#1151 A1-R4): the "supersede, then insert" pair below
+ * reads the table before it writes it, so two calls for the same user with
+ * no lock between them both see "nothing to supersede" and both insert,
+ * leaving two live links to the same mailbox instead of one — a double
+ * click on "resend", or two administrators issuing at once. The advisory
+ * lock serializes them, same as `acquireActiveHouseholdLock` does for a
+ * household.
  */
 export async function persistSetupToken(
   userId: string,
@@ -584,6 +592,7 @@ export async function persistSetupToken(
   createdByUserId: string | null,
 ): Promise<void> {
   await getDb().transaction(async (transaction) => {
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:setup-token:${userId}`}, 0))`);
     const [target] = await transaction.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1);
     if (!target) throw new AppError("user_not_found", "That registered Orbit user is no longer available", 404);
 
