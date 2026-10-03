@@ -76,20 +76,34 @@ async function ensureReaderCanAnswerTheChallenge(page: Page) {
  * from a cross-origin hop to the provider and home again, and WebKit swaps
  * the main frame's internal id on a navigation like that; the very next
  * `page.goto` can lose a race with Playwright's own bookkeeping catching up
- * to the swap and fail immediately with "Cannot find web frame for the
- * frame id" (pipeline 1989 and 1990, job smoke_webkit, both desktop tests
- * below). It is not a slow page -- waiting longer first
+ * to the swap. It is not a slow page -- waiting longer first
  * (`local-credentials.ts`'s removed `waitForLoadState("load")`, #1192) did
- * not help, and the suite's own retry of the whole test got past this exact
- * call both times without hitting it again. Retrying the one navigation is
- * that same fix, without re-running the test.
+ * not help.
+ *
+ * Pipeline 1999, job smoke_webkit: a single retry of this one call (the
+ * previous fix here) is not enough -- the retried call itself can lose the
+ * same race and fail with "Cannot find web frame for the frame id" again
+ * (both desktop tests below, attempt 1). Worse, on the suite's own retry of
+ * the whole test the race can surface as `page.goto` simply never resolving
+ * -- no error to catch at all -- because this `goto` had no per-call
+ * timeout, so nothing short of the whole test's deadline ever interrupted
+ * it; the earlier claim that "the suite's own retry got past this exact
+ * call both times" (removed above) held for two samples and not for this
+ * pipeline's. Bounding each attempt and trying a few of them turns the
+ * silent hang into the same catchable, retryable case as the fast error.
  */
 async function gotoAfterStepUp(page: Page, url: string) {
-  try {
-    await page.goto(url);
-  } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes("Cannot find web frame for the frame id")) throw error;
-    await page.goto(url);
+  const ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+    try {
+      await page.goto(url, { timeout: 10_000 });
+      return;
+    } catch (error) {
+      const racedFrameSwap =
+        error instanceof Error &&
+        (error.message.includes("Cannot find web frame for the frame id") || error.name === "TimeoutError");
+      if (!racedFrameSwap || attempt === ATTEMPTS) throw error;
+    }
   }
 }
 
