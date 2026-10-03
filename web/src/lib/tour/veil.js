@@ -16,14 +16,24 @@
  * `create.css:221` — this module never uses that class name, or any class on
  * the target at all).
  *
- * MASKING APPROACH: one `<div>` at position:fixed, inset:0, painted with the
+ * MASKING APPROACH: one `<div>` at position:fixed, inset:0, at the ratified
+ * 0.62, holding one inline `<svg>` whose full-bleed rect is painted with the
  * pack's own `--bg` — never an invented colour, the same token the mockup's
- * own `.veil{background:var(--bg)}` uses — at the ratified 0.62. Its
- * `mask-image` points at a small inline SVG, rebuilt as a data URI whenever a
- * lit target's measured rect changes: a white full-bleed rect (mask
- * luminance 1 → the dark sheet paints there) with one black rect or circle
- * per hole (luminance 0 → the sheet is cut away, so the real element beneath
- * shows through at its own unmodified opacity). An SVG mask was chosen over
+ * own `.veil{background:var(--bg)}` uses — through an SVG `<mask>`: a white
+ * full-bleed rect (mask luminance 1 → the dark sheet paints there) with one
+ * black rect or circle per hole (luminance 0 → the sheet is cut away, so the
+ * real element beneath shows through at its own unmodified opacity).
+ *
+ * #1174 (round 3): the mask used to be a CSS `mask-image` data URI, rebuilt
+ * whenever a hole moved. Every rebuild is a new image the engine has to
+ * decode before it can paint the sheet, and Safari decodes data URIs off the
+ * main thread — a veil whose mask is in flight for a frame is a veil drawn
+ * wrong for a frame, every time the film lit or moved anything. An inline
+ * SVG has no image to load: a hole's attributes change and the next paint
+ * has them. The holes also open and close on a short fade (`HOLE_MS`)
+ * rather than in one frame — a bright patch snapping on and off over a
+ * dimmed phone screen reads as the screen flickering, which is what the
+ * owner saw. An SVG mask was chosen over
  * stacking several `radial-gradient`/`linear-gradient` mask layers with
  * `mask-composite`: two of the shapes here are rounded RECTANGLES, and while
  * a gradient stack can fake a circle cheaply, faking a soft-cornered rect
@@ -51,6 +61,12 @@
 
 export const OPACITY = 0.62;
 const FADE_MS = 450;
+/** A hole opening or closing (#1174 round 3): long enough that no frame
+ *  flips a patch of the screen from dimmed to lit, short enough to stay
+ *  inside the film's own beats (T.grow is 200ms). */
+export const HOLE_MS = 180;
+const SVG_NS = "http://www.w3.org/2000/svg";
+const MASK_ID = "orbit-tour-veil-mask";
 /** Above every routed page's own chrome (the highest z-index any route.css
  *  declares is 12, `home.css`'s `.askveil`); tour chrome built on top of the
  *  veil — a future transport, a callout — reserves the headroom above this. */
@@ -67,6 +83,11 @@ const DEFAULT_RADIUS = 14;
 
 /** @type {HTMLDivElement | null} */
 let overlayEl = null;
+/** The mask the holes are cut in. @type {SVGMaskElement | null} */
+let maskEl = null;
+/** One shape per lit element, kept while it is lit so a hole that moves is
+ *  the same hole moved, not a new one cut. @type {Map<Element, SVGElement>} */
+const holes = new Map();
 let visible = false;
 /** @type {VeilTarget[]} */
 let targets = [];
@@ -125,34 +146,70 @@ function serialize(rects) {
   return `${body}@${window.innerWidth}x${window.innerHeight}`;
 }
 
-/** @param {VeilRect[]} rects */
+/** @param {SVGElement} shape @param {VeilRect} r */
+function placeHole(shape, r) {
+  if (r.round) {
+    shape.setAttribute("cx", (r.x + r.w / 2).toFixed(1));
+    shape.setAttribute("cy", (r.y + r.h / 2).toFixed(1));
+    shape.setAttribute("r", (Math.max(r.w, r.h) / 2).toFixed(1));
+  } else {
+    shape.setAttribute("x", r.x.toFixed(1));
+    shape.setAttribute("y", r.y.toFixed(1));
+    shape.setAttribute("width", Math.max(0, r.w).toFixed(1));
+    shape.setAttribute("height", Math.max(0, r.h).toFixed(1));
+    shape.setAttribute("rx", String(r.radius));
+    shape.setAttribute("ry", String(r.radius));
+  }
+}
+
+/** Moves every lit target's hole to where its element is now.
+ *  @param {VeilRect[]} rects */
 function applyMask(rects) {
   if (!overlayEl) return;
-  if (rects.length === 0) {
-    overlayEl.style.maskImage = "none";
-    overlayEl.style.webkitMaskImage = "none";
-    return;
+  targets.forEach((t, k) => {
+    const shape = holes.get(t.el);
+    if (shape) placeHole(shape, rects[k]);
+  });
+}
+
+/**
+ * Cuts a hole for every target that has none, and closes the hole of every
+ * element no longer lit — on a fade, both ways, unless motion is reduced.
+ * A hole still closing whose element is lit again is opened again, not cut
+ * twice.
+ */
+function syncHoleSet() {
+  if (!maskEl) return;
+  const still = stillMotion();
+  const wanted = new Set(targets.map((t) => t.el));
+  for (const [el, shape] of holes) {
+    if (wanted.has(el)) continue;
+    holes.delete(el);
+    if (still) { shape.remove(); continue; }
+    shape.classList.add("leaving");
+    shape.style.fillOpacity = "0";
+    setTimeout(() => shape.remove(), HOLE_MS + 40);
   }
-  const vw = window.innerWidth, vh = window.innerHeight;
-  const holes = rects
-    .map((r) =>
-      r.round
-        ? `<circle cx="${(r.x + r.w / 2).toFixed(1)}" cy="${(r.y + r.h / 2).toFixed(1)}" r="${(Math.max(r.w, r.h) / 2).toFixed(1)}" fill="#000"/>`
-        : `<rect x="${r.x.toFixed(1)}" y="${r.y.toFixed(1)}" width="${Math.max(0, r.w).toFixed(1)}" height="${Math.max(0, r.h).toFixed(1)}" rx="${r.radius}" ry="${r.radius}" fill="#000"/>`,
-    )
-    .join("");
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${vw}" height="${vh}">` +
-    `<rect x="0" y="0" width="${vw}" height="${vh}" fill="#fff"/>${holes}</svg>`;
-  const uri = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
-  overlayEl.style.maskImage = uri;
-  overlayEl.style.webkitMaskImage = uri;
-  overlayEl.style.maskRepeat = "no-repeat";
-  overlayEl.style.webkitMaskRepeat = "no-repeat";
-  overlayEl.style.maskSize = "100% 100%";
-  overlayEl.style.webkitMaskSize = "100% 100%";
-  overlayEl.style.maskPosition = "0 0";
-  overlayEl.style.webkitMaskPosition = "0 0";
+  for (const t of targets) {
+    if (holes.has(t.el)) continue;
+    const shape = /** @type {SVGElement} */ (document.createElementNS(SVG_NS, t.round ? "circle" : "rect"));
+    shape.setAttribute("class", "hole");
+    shape.setAttribute("fill", "#000");
+    placeHole(shape, computeRect(t));
+    if (still) {
+      shape.style.fillOpacity = "1";
+      maskEl.appendChild(shape);
+    } else {
+      shape.style.fillOpacity = "0";
+      shape.style.transition = `fill-opacity ${HOLE_MS}ms ease`;
+      maskEl.appendChild(shape);
+      /* the start value has to be computed before the end value is set, or
+         there is nothing to transition from */
+      void getComputedStyle(shape).fillOpacity;
+      shape.style.fillOpacity = "1";
+    }
+    holes.set(t.el, shape);
+  }
 }
 
 /** Re-measures every current target; repaints the mask only if something
@@ -200,6 +257,18 @@ function onViewportChange() {
   if (updateHoles()) scheduleLoop();
 }
 
+/**
+ * #1174: re-measures the holes now, as a scroll would — for a lit element
+ * the PAGE moves without scrolling (the belt bringing a pressed paper to
+ * its apex, a row unfolding above a lit control). The loop above goes
+ * quiet once nothing has moved for a frame and only a scroll or a resize
+ * wakes it; the film's own per-frame sync (vocabulary.js) calls this so a
+ * hole follows its element whatever moved it. Repaints only on a change.
+ */
+export function refreshVeil() {
+  onViewportChange();
+}
+
 function addListeners() {
   // capture:true so a scroll inside any scrollable ancestor is caught, not
   // only a scroll of the window itself.
@@ -222,9 +291,34 @@ function ensureOverlay() {
     "inset:0",
     "opacity:0",
     "pointer-events:none", // never blocks a click on the real control it is cut around
-    "background:var(--bg)",
     `z-index:${Z_INDEX}`,
   ].join(";");
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("width", "100%");
+  svg.setAttribute("height", "100%");
+  svg.setAttribute("style", "position:absolute;inset:0;display:block;overflow:hidden");
+  const defs = document.createElementNS(SVG_NS, "defs");
+  maskEl = /** @type {SVGMaskElement} */ (document.createElementNS(SVG_NS, "mask"));
+  maskEl.setAttribute("id", MASK_ID);
+  maskEl.setAttribute("maskUnits", "userSpaceOnUse");
+  maskEl.setAttribute("x", "0");
+  maskEl.setAttribute("y", "0");
+  maskEl.setAttribute("width", "100%");
+  maskEl.setAttribute("height", "100%");
+  const all = document.createElementNS(SVG_NS, "rect");
+  all.setAttribute("width", "100%");
+  all.setAttribute("height", "100%");
+  all.setAttribute("fill", "#fff");
+  maskEl.appendChild(all);
+  defs.appendChild(maskEl);
+  const sheet = document.createElementNS(SVG_NS, "rect");
+  sheet.setAttribute("class", "sheet");
+  sheet.setAttribute("width", "100%");
+  sheet.setAttribute("height", "100%");
+  sheet.setAttribute("style", "fill:var(--bg)");
+  sheet.setAttribute("mask", `url(#${MASK_ID})`);
+  svg.append(defs, sheet);
+  overlayEl.appendChild(svg);
   document.body.appendChild(overlayEl);
   addListeners();
   return overlayEl;
@@ -233,6 +327,8 @@ function ensureOverlay() {
 function teardownOverlay() {
   if (overlayEl) overlayEl.remove();
   overlayEl = null;
+  maskEl = null;
+  holes.clear();
   lastSig = null;
   removeListeners();
 }
@@ -255,6 +351,7 @@ export function showVeil(options = {}) {
   el.style.transition = instant ? "none" : `opacity ${FADE_MS}ms ease`;
   if (!instant) void el.offsetHeight; /* force layout so opacity 0→n actually transitions */
   el.style.opacity = String(options.opacity ?? OPACITY);
+  syncHoleSet(); /* a hide cancelled mid-fade left the old holes behind */
   if (targets.length > 0) scheduleLoop();
 }
 
@@ -298,6 +395,7 @@ export function veilTargets(elements, options = {}) {
   targets = (elements ?? []).map((entry) => normalize(entry, options));
   lastSig = null; /* force a repaint even if the new geometry matches the old */
   ensureOverlay();
+  syncHoleSet();
   updateHoles();
   if (visible && targets.length > 0) scheduleLoop();
   else stopLoop();

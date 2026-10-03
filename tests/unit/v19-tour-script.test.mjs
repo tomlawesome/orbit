@@ -115,16 +115,18 @@ describe("the film's script (round 7, #1097)", () => {
     face.destroy();
   });
 
-  it("#1083: the pocket script carries the shortened belt line, and never the label", async () => {
-    const { player } = stage({ pocket: true });
-    const { script } = await player.measure();
-    const allLines = script.flat();
-
-    expect(allLines).toContain("later → steps the belt.");
-    expect(allLines).not.toContain("later → steps the belt — so do the arrow keys.");
-    /* a label, not read into the script, on either dialect */
-    expect(allLines).not.toContain("Tap one to bring it in.");
-    expect(allLines).not.toContain("Click one to bring it in.");
+  it("#1174 round 10: the belt's own step is gone from the film, on either dialect", async () => {
+    const { script: deskScript } = await stage({ pocket: false }).player.measure();
+    const { script: pocketScript } = await stage({ pocket: true }).player.measure();
+    for (const allLines of [deskScript.flat(), pocketScript.flat()]) {
+      expect(allLines).not.toContain("later → steps the belt.");
+      expect(allLines).not.toContain("later → steps the belt — so do the arrow keys.");
+      expect(allLines).not.toContain("← sooner steps the belt.");
+      expect(allLines).not.toContain("← sooner steps the belt — so do the arrow keys.");
+      /* a label, not read into the script, on either dialect */
+      expect(allLines).not.toContain("Tap one to bring it in.");
+      expect(allLines).not.toContain("Click one to bring it in.");
+    }
   });
 
   it("#1083 §1: the desk script is byte-identical to a committed snapshot", async () => {
@@ -135,11 +137,17 @@ describe("the film's script (round 7, #1097)", () => {
   it("#1083: is otherwise identical to the desk script, chapter for chapter", async () => {
     const desk = await stage({ pocket: false }).player.measure();
     const pocket = await stage({ pocket: true }).player.measure();
-    /* chapter 8 (index 7) carries the one changed line; every other chapter
-       is byte-identical between dialects. */
+    /* chapter 3 (index 2) carries the owner's two first lines (#1174,
+       2026-10-01): the desk sizes a body by its cost and says so, the
+       pocket does not. Chapter 8's own dialect difference (the belt's step)
+       is gone from the film entirely (#1174 round 10), so it no longer
+       needs an exception here — every other chapter, including it, is
+       byte-identical between dialects. */
     desk.script.forEach((lines, k) => {
-      if (k === 7) return;
+      if (k === 2) return;
       expect(pocket.script[k], `chapter ${k + 1}`).toEqual(lines);
     });
+    expect(desk.script[2]).toEqual(["Bodies orbit by when they're due, higher value events are larger."]);
+    expect(pocket.script[2]).toEqual(["Bodies orbit by when they're due."]);
   });
 });

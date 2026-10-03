@@ -166,7 +166,7 @@ describe("the pill", () => {
     withTransport(parts);
     const style = document.getElementById("orbit-tour-transport-styles").textContent;
     /* the ratified 32px buttons and the 18x38 hit around a 1x8 tick mark */
-    expect(style).toContain(".pp,#orbit-tour-transport .stp{width:32px;height:32px");
+    expect(style).toContain(".pp,#orbit-tour-transport .skp{width:32px;height:32px");
     expect(style).toContain(".tick{position:absolute;top:6px;width:18px;height:38px");
     expect(style).toContain("width:1px;height:8px");
   });
@@ -185,18 +185,145 @@ describe("the pill", () => {
     player.destroy();
   });
 
-  it("keeps the ghost when stopped, and CSS brings it back on hover", async () => {
+  it("#1190: skip adds `leaving`, and the bar is gone once it fires onLeave", async () => {
+    vi.useFakeTimers();
+    try {
+      const parts = film();
+      await parts.player.measure();
+      const { face, player } = withTransport(parts);
+      face.onLeave(() => face.destroy()); /* film.js's own wiring */
+      player.jump(0);
+      await vi.advanceTimersByTimeAsync(0);
+
+      bar().querySelector(".skp").click();
+      expect(bar().classList.contains("leaving")).toBe(true);
+      expect(document.getElementById(BAR_ID)).not.toBeNull();
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(document.getElementById(BAR_ID)).not.toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(document.getElementById(BAR_ID)).toBeNull();
+      player.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("#1190: a natural finish holds at full strength for 3s, then leaves", async () => {
+    vi.useFakeTimers();
+    try {
+      const parts = film();
+      await parts.player.measure();
+      const { face, player } = withTransport(parts);
+      player.jump(0);
+      await vi.advanceTimersByTimeAsync(0);
+
+      /* a finish, not a skip: ended with nobody having pressed anything */
+      player.stop();
+      expect(bar().classList.contains("dim")).toBe(false);
+      expect(bar().classList.contains("leaving")).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(2999);
+      expect(bar().classList.contains("leaving")).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(bar().classList.contains("leaving")).toBe(true);
+      face.destroy();
+      player.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("#1190: play during the hold restarts the film and cancels the leave", async () => {
+    vi.useFakeTimers();
+    try {
+      const parts = film();
+      await parts.player.measure();
+      const { face, player } = withTransport(parts);
+      player.jump(0);
+      await vi.advanceTimersByTimeAsync(0);
+
+      player.stop();
+      await vi.advanceTimersByTimeAsync(1500); /* partway through the 3s hold */
+      player.toggle(); /* today's toggle(): past the end, start again */
+      await vi.advanceTimersByTimeAsync(0);
+      expect(player.ended()).toBe(false);
+      expect(bar().classList.contains("leaving")).toBe(false);
+
+      /* waiting out what would have been the hold and the leave: neither fires */
+      await vi.advanceTimersByTimeAsync(3000 + 1000);
+      expect(bar().classList.contains("leaving")).toBe(false);
+      expect(document.getElementById(BAR_ID)).not.toBeNull();
+      face.destroy();
+      player.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("#1190: focus inside the bar moves to main when it leaves", async () => {
+    vi.useFakeTimers();
+    try {
+      const main = document.createElement("main");
+      document.body.appendChild(main);
+      const parts = film();
+      await parts.player.measure();
+      const { face, player } = withTransport(parts);
+      player.jump(0);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const skip = bar().querySelector(".skp");
+      skip.focus();
+      skip.click();
+      expect(document.activeElement).toBe(main);
+      face.destroy();
+      player.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("#1190: focus inside the bar moves to body when there is no main", async () => {
+    vi.useFakeTimers();
+    try {
+      const parts = film();
+      await parts.player.measure();
+      const { face, player } = withTransport(parts);
+      player.jump(0);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const skip = bar().querySelector(".skp");
+      skip.focus();
+      skip.click();
+      expect(document.activeElement).toBe(document.body);
+      face.destroy();
+      player.destroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("#1190: the skip control is labelled, same slot as the old Stop", async () => {
+    const parts = film();
+    await parts.player.measure();
+    withTransport(parts);
+    const skip = bar().querySelector(".skp");
+    expect(skip.getAttribute("aria-label")).toBe("Skip the tour");
+    expect(skip.getAttribute("title")).toBe("Skip the tour · esc");
+  });
+
+  it("#1190: announces a skip, not a stop", async () => {
     const parts = film();
     await parts.player.measure();
     const { player } = withTransport(parts);
     player.jump(0);
     await settle();
+    const status = bar().querySelector('[role="status"]');
+    expect(status.textContent).toContain("Press Escape to skip it.");
 
-    player.stop();
-    expect(bar().classList.contains("gone")).toBe(true);
-    const style = document.getElementById("orbit-tour-transport-styles").textContent;
-    expect(style).toContain("#orbit-tour-transport.gone{opacity:.16}");
-    expect(style).toContain("#orbit-tour-transport.gone:focus-within{opacity:1}");
+    bar().querySelector(".skp").click();
+    expect(status.textContent).toBe("Tour skipped. Your sky is back.");
+    player.destroy();
   });
 
   it("prints m:ss / m:ss", () => {
@@ -291,7 +418,7 @@ describe("the keys", () => {
     document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     expect(player.ended()).toBe(true);
     expect(player.playing()).toBe(false);
-    expect(bar().classList.contains("gone")).toBe(true);
+    expect(bar().classList.contains("leaving")).toBe(true);
     player.destroy();
   });
 

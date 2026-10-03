@@ -80,9 +80,9 @@ async function settleHome(page: Page) {
     await page.keyboard.press("Escape");
     /* Esc reaches player.stop() (transport.js), which tears down the veil
        (#orbit-tour-veil) synchronously -- that is what frees the real
-       screen underneath. The pill itself survives as a 16%-opacity ghost
-       until the film component unmounts, so it is the veil this waits on,
-       not the pill (see keyboard.ts's `dismissTourIfShown`). */
+       screen underneath. The pill itself fades out and is removed a second
+       later (#1190), so it is the veil this waits on, not the pill (see
+       keyboard.ts's `dismissTourIfShown`). */
     await expect(page.locator("#orbit-tour-veil")).toBeHidden();
   }
   await expect(page.locator(".dialwrap, .mdial").filter({ visible: true })).toHaveCount(1);

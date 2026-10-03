@@ -65,6 +65,9 @@
     "fidelity": {
       "deny": []
     },
+    "fidelity_webkit": {
+      "deny": []
+    },
     "sidecar_images": {
       "only": [
         "supply-chain/**",

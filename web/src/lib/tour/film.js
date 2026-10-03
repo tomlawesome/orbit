@@ -23,6 +23,7 @@
  */
 import { createClock } from "./clock.js";
 import { CHAPTERS } from "./chapters/index.js";
+import { householdCarriesPapers } from "./chapters/08-the-belt.js";
 import { createFilmPlayer } from "./player.js";
 import { mountTransport } from "./transport.js";
 import { createFilmContext } from "./vocabulary.js";
@@ -53,6 +54,10 @@ export function createFilm({
 
   /** @type {ReturnType<typeof mountTransport> | null} */
   let face = null;
+  /** #1190: destroy() is called from more than one place now — the bar's
+   *  own leave, and whoever assembles the film unmounting — so it must be
+   *  safe to call twice. */
+  let destroyed = false;
 
   /* No onChapter/onEnd here: the transport subscribes to the player itself
      (player.js's follower lists), so the two stay wired however this is
@@ -69,12 +74,25 @@ export function createFilm({
    * @param {{ from?: number }} [options]
    */
   async function start({ from = 0 } = {}) {
+    /* #1174 round 6: chapters 8 and 9 take another path when no body
+       carries a paper, and the measure has to know which before a frame
+       plays. Home's sky is server-drawn and then read again in the
+       browser; `body[data-home-ready]` is that read having landed, so the
+       sky is asked once it has (bounded: a home that never says so is
+       read as it stands). */
+    await homeSettled();
+    ctx.setCarriesPapers(householdCarriesPapers(doc, pocket));
     const { offsets, total } = await player.measure();
     /* transport.js decides its own dialect (isPocket(), at mount inside
        buildTicks) rather than being told: the pill's shape is CSS-driven
        exactly as the product's own screens are, and only the tick's element
        type needs a JS branch at all (#1083 §4.2). */
-    if (transport) face = mountTransport({ player, clock, doc, hasFilmOpenedSheet: ctx.hasOpenUndo });
+    if (transport) {
+      face = mountTransport({ player, clock, doc, hasFilmOpenedSheet: ctx.hasOpenUndo });
+      /* #1190: the bar's own leave (skip, or a natural finish's hold) is
+         what ends the film now — not just the next take or an unmount. */
+      face.onLeave(() => destroy());
+    }
     hooks.__total = total;
     hooks.__offsets = offsets.slice();
     hooks.__chapters = chapters.map((one, k) => ({ id: one.id, name: one.name, at: offsets[k] }));
@@ -82,6 +100,10 @@ export function createFilm({
        own headless check can read it the same way it reads __chapters. */
     hooks.__script = player.script();
     hooks.__jump = player.jump;
+    /* #1174: the film's own account of its rings, for the phone check. */
+    hooks.__lit = ctx.litBoxes;
+    /* #1174 round 6: every wait for the page that ran out. */
+    hooks.__waitedOut = ctx.waitedOut;
     hooks.__stop = player.stop;
     hooks.__pause = () => player.setPlaying(false);
     hooks.__play = () => player.setPlaying(true);
@@ -96,15 +118,31 @@ export function createFilm({
     return { offsets, total };
   }
 
+  /** Waits, up to 6s, for home's own read to land (#1174 round 6). */
+  async function homeSettled() {
+    const body = doc.body;
+    if (!body || body.dataset.homeReady === "true") return;
+    const until = Date.now() + 6_000;
+    while (body.dataset.homeReady !== "true" && Date.now() < until) {
+      await new Promise((res) => setTimeout(res, 50));
+    }
+  }
+
   return {
     start,
     player,
     clock,
     ctx,
-    destroy() {
-      face?.destroy();
-      face = null;
-      player.destroy();
-    },
+    destroy,
   };
+
+  /** Idempotent: the bar's own leave (#1190), a second take or an unmount
+   *  may each call it, and only the first does anything. */
+  function destroy() {
+    if (destroyed) return;
+    destroyed = true;
+    face?.destroy();
+    face = null;
+    player.destroy();
+  }
 }

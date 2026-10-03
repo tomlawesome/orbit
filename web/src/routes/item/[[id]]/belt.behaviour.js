@@ -26,8 +26,8 @@
  */
 import {
   AMBIENT_SEED, BAND_MARGIN, BERTH_NARROW, COS_I, DRIFT, GLIDE, HFRAC, RAD, RADIAL,
-  SIN_I, SWEEP, bedOf, berthFor, bloomTargetsOf, bodiesOf, cardWidthOf, clamp01, ease,
-  geometryOf, lehmer, phiAtX, pocketPapersOf, rollRangeOf, seatOf, spawnInto, stepFrom,
+  SIN_I, SWEEP, bedOf, berthFor, bloomTargetsOf, bodiesOf, cardWidthOf, clamp01, clip, ease,
+  geometryOf, lehmer, paperLines, phiAtX, pocketPapersOf, rollRangeOf, seatOf, spawnInto, stepFrom,
   POCKET_CREST, POCKET_DRIFT, POCKET_PLATE,
 } from "./band.js";
 import { isPocket } from "$lib/pocket/media.js";
@@ -427,16 +427,8 @@ export function mountBelt(root, options) {
      A neighbour's name (16 characters, then an ellipsis) and its T-label,
      13px, hung beneath the rock and held inside the screen's gutter: the
      neighbours sit 40px in from the edge, so a centred label would be cut.
-     A paper's name takes two lines of up to 17 characters. */
-  /** @param {string} text @param {number} n */
-  const clip = (text, n) => (text.length <= n ? text : text.slice(0, n - 1).trimEnd() + "…");
-  /** @param {string} name @returns {string[]} at most two lines */
-  function paperLines(name) {
-    if (name.length <= 17) return [name];
-    const cut = name.lastIndexOf(" ", 17);
-    const at = cut > 6 ? cut : 17;
-    return [name.slice(0, at).trimEnd(), clip(name.slice(at).trimStart(), 17)];
-  }
+     A paper's name takes two lines — `clip`/`paperLines` are band.js's own,
+     unit-tested there (#1174, chapter 8's fault C), next to `shortName`. */
   /** @param {Body} b @returns {SVGElement[]} */
   function pocketCaption(b) {
     if (b.kind === "doc") {

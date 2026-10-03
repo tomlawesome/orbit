@@ -218,11 +218,12 @@ test("a first-time reader gets the film, works its transport, and a second arriv
     await page.evaluate(() => (window as unknown as { __play(): void }).__play());
     await expect(playPause).toHaveAttribute("aria-label", "Pause");
 
-    /* AND STOP — through the pill's own button, the door a reader actually
-       presses, not the review hook, so this is the control under test. */
-    await transport.locator(".stp").click();
+    /* AND SKIP — through the pill's own button, the door a reader actually
+       presses, not the review hook, so this is the control under test.
+       (#1190: Skip replaces Stop, same slot and hit target.) */
+    await transport.locator(".skp").click();
 
-    /* STOPPING WRITES tourSeenAt and clears the veil — the reader's screen
+    /* SKIPPING WRITES tourSeenAt and clears the veil — the reader's screen
        handed back. player.js's `stop()` clears the veil synchronously but
        the write happens after (trigger.js's `beginFilm`), so the record is
        polled rather than sampled once. On the pocket, stopping also folds
@@ -233,6 +234,10 @@ test("a first-time reader gets the film, works its transport, and a second arriv
       .poll(async () => (await tourRecordOf(page)).tourSeenAt, { timeout: 15_000 })
       .not.toBeNull();
     const recordedAt = (await tourRecordOf(page)).tourSeenAt;
+
+    /* #1190: the bar then leaves on its own — removed a second after the
+       skip, not left as a faint ghost. */
+    await expect(transport).toHaveCount(0);
 
     /* A SECOND ARRIVAL AT /home DOES NOT REPLAY IT. dismissTourIfShown is a
        no-op here (the record is already set) — kept so this file reuses the

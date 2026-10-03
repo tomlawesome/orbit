@@ -161,6 +161,7 @@ describe("pipeline lanes", () => {
       "fast",
       "fast_docker",
       "fidelity",
+      "fidelity_webkit",
       "integration",
       // #1076: it consumes build_image's artifact, so it has to stop on a
       // lane that skipped the build rather than load the placeholder.

@@ -4,49 +4,44 @@ exports[`the film's script (round 7, #1097) > #1083 §1: the desk script is byte
 [
   [
     "This is your star chart.",
-    "Every sun is a household you belong to.",
-    "That's your sun, at centre — your household, always here.",
-    "The rest of the sky holds systems you don't belong to — tap one to fly there.",
+    "That's your sun, in the centre — your household, always here.",
+    "Explore the sky to find other households — maybe you belong there too?",
   ],
   [
-    "Add anything here, by hand or by forwarding a document.",
+    "Fill in the details here.",
   ],
   [
-    "Bodies orbit by when they're due.",
-    "The nearer the ring, the sooner.",
+    "Bodies orbit by when they're due, higher value events are larger.",
   ],
   [
     "The manifest lists what's ahead, nearest first.",
-    "Same law as the dial, read top to bottom instead of round the ring.",
   ],
   [
-    "Time runs. The nearer the sun, the sooner.",
-    "At a month out it warms, and Orbit reminds you.",
+    "As time rolls by, items gravitate toward your sun, the sooner the event, the closer they are.",
+    "Orbit reminds you, visually and through notifications.",
   ],
   [
-    "Forward a bill to your relay address and Orbit reads a copy.",
-    "Your mail is never redirected — it keeps arriving exactly where it always has.",
+    "Forward a bill to your relay address and Orbit reads a copy to import it.",
   ],
   [
     "Mail lands here first — filed, waiting for review, or still being read.",
-    "Nothing joins your orbit without your say-so.",
+    "Nothing gets added without your review.",
   ],
   [
     "Every body carries its documents in a belt around it.",
     "The belt is what you have attached to it.",
-    "The page itself, read without leaving the sky.",
-    "later → steps the belt — so do the arrow keys.",
+    "Read the full document, right here.",
   ],
   [
     "MOT passed — mark it done and it swings back out to next year.",
-    "A repeat is never finished; it comes round. A one-off simply ends.",
+    "Renewals start their orbit again, fixed length items disappear.",
   ],
   [
-    "The rest of the sky holds households you don't belong to.",
+    "Explore the sky to find other households.",
     "Tap one to fly there — Gran's flat, the narrowboat.",
   ],
   [
-    "Settings holds your sky, your relay and this walk — take it again anytime.",
+    "Watch the tour again anytime from the settings or the menu.",
   ],
   [
     "That was a year, in one turn of the ring.",

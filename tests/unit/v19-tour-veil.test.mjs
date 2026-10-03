@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { hideVeil, showVeil, veilTargets } from "../../web/src/lib/tour/veil.js";
+import { HOLE_MS, hideVeil, showVeil, veilTargets } from "../../web/src/lib/tour/veil.js";
 
 /*
  * #866: the film's veil is a masked full-viewport overlay, not the old
@@ -29,18 +29,22 @@ function rect(el, box) {
   });
 }
 
-/** Decodes the overlay's current mask data-URI into its hole shapes, so a
- *  test can assert on geometry without reaching into module internals. */
+/** Reads the overlay's current holes — the open ones, not one still
+ *  closing — out of its inline SVG mask (#1174 round 3), so a test can
+ *  assert on geometry without reaching into module internals. */
 function holesOf() {
-  const img = overlay()?.style.maskImage ?? "";
-  const match = /url\("data:image\/svg\+xml,(.*)"\)/u.exec(img);
-  if (!match) return [];
-  const svg = decodeURIComponent(match[1]);
-  const rects = [...svg.matchAll(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" rx="([\d.]+)" ry="[\d.]+" fill="#000"\/>/gu)]
-    .map((m) => ({ kind: "rect", x: +m[1], y: +m[2], w: +m[3], h: +m[4], rx: +m[5] }));
-  const circles = [...svg.matchAll(/<circle cx="([\d.]+)" cy="([\d.]+)" r="([\d.]+)" fill="#000"\/>/gu)]
-    .map((m) => ({ kind: "circle", cx: +m[1], cy: +m[2], r: +m[3] }));
-  return [...rects, ...circles];
+  const shapes = [...(overlay()?.querySelectorAll("mask .hole:not(.leaving)") ?? [])];
+  return shapes.map((shape) => {
+    const n = (name) => Number(shape.getAttribute(name));
+    return shape.tagName.toLowerCase() === "circle"
+      ? { kind: "circle", cx: n("cx"), cy: n("cy"), r: n("r") }
+      : { kind: "rect", x: n("x"), y: n("y"), w: n("width"), h: n("height"), rx: n("rx") };
+  });
+}
+
+/** The mask's whole markup, holes closing included. */
+function maskMarkup() {
+  return overlay()?.querySelector("mask")?.outerHTML ?? "";
 }
 
 function setReducedMotion(matches) {
@@ -81,7 +85,7 @@ describe("mounting", () => {
 
   it("paints the overlay at the ratified 0.62 with the pack's own --bg token", () => {
     showVeil();
-    expect(overlay().style.background).toContain("var(--bg)");
+    expect(overlay().querySelector(".sheet").getAttribute("style")).toContain("var(--bg)");
     expect(overlay().style.opacity).toBe("0.62");
   });
 
@@ -169,16 +173,17 @@ describe("the re-measure loop", () => {
     expect(holesOf()[0]).toMatchObject({ x: 40, y: 0 });
 
     // it settles: the loop goes quiet on its own (no more moving to chase)
-    const settledMask = overlay().style.maskImage;
+    const settledMask = maskMarkup();
     await frame(120);
-    expect(overlay().style.maskImage).toBe(settledMask);
+    expect(maskMarkup()).toBe(settledMask);
 
     // and stops outright the instant nothing is lit
     veilTargets([]);
-    const clearedMask = overlay().style.maskImage;
+    const clearedMask = maskMarkup();
     rect(el, { x: 999, y: 999, w: 20, h: 20 }); // moves again, but it is no longer watched
     await frame(120);
-    expect(overlay().style.maskImage).toBe(clearedMask);
+    expect(maskMarkup().includes('x="999.0"')).toBe(false);
+    expect(clearedMask.includes('x="999.0"')).toBe(false);
   });
 
   it("re-measures on a resize even with nothing animating", () => {
@@ -208,6 +213,63 @@ describe("the re-measure loop", () => {
   });
 });
 
+describe("#1174 round 3: no image to decode, no hole snapping", () => {
+  it("cuts its holes in an inline SVG mask, never a CSS mask-image the engine must load", () => {
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    rect(el, { x: 0, y: 0, w: 20, h: 20 });
+    showVeil();
+    veilTargets([el]);
+    expect(overlay().style.maskImage ?? "").toBe("");
+    expect(overlay().style.webkitMaskImage ?? "").toBe("");
+    expect(overlay().querySelector(".sheet").getAttribute("mask")).toBe("url(#orbit-tour-veil-mask)");
+    expect(holesOf()).toHaveLength(1);
+  });
+
+  it("opens a hole on a fade and closes it on one, rather than in one frame", async () => {
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    rect(el, { x: 0, y: 0, w: 20, h: 20 });
+    showVeil();
+    veilTargets([el]);
+    const shape = overlay().querySelector("mask .hole");
+    expect(shape.style.transition).toContain("fill-opacity");
+    expect(shape.style.fillOpacity).toBe("1");
+
+    veilTargets([]);
+    expect(holesOf()).toHaveLength(0);
+    expect(shape.isConnected).toBe(true); /* still there, closing */
+    expect(shape.classList.contains("leaving")).toBe(true);
+    expect(shape.style.fillOpacity).toBe("0");
+    await frame(HOLE_MS + 80);
+    expect(shape.isConnected).toBe(false);
+  });
+
+  it("re-opens a hole still closing instead of cutting a second one", () => {
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    rect(el, { x: 0, y: 0, w: 20, h: 20 });
+    showVeil();
+    veilTargets([el]);
+    veilTargets([]);
+    veilTargets([el]);
+    expect(holesOf()).toHaveLength(1);
+  });
+
+  it("keeps the same hole for an element that stays lit while others come and go", () => {
+    const a = document.createElement("div"), b = document.createElement("div");
+    document.body.append(a, b);
+    rect(a, { x: 0, y: 0, w: 10, h: 10 });
+    rect(b, { x: 50, y: 50, w: 10, h: 10 });
+    showVeil();
+    veilTargets([a]);
+    const first = overlay().querySelector("mask .hole");
+    veilTargets([a, b]);
+    expect(overlay().querySelector("mask .hole")).toBe(first);
+    expect(holesOf()).toHaveLength(2);
+  });
+});
+
 describe("reduced motion", () => {
   it("skips the fade — opacity lands immediately, no transition", () => {
     setReducedMotion(true);
@@ -229,6 +291,18 @@ describe("reduced motion", () => {
     rect(el, { x: 12, y: 0, w: 10, h: 10 });
     veilTargets([el]); // a stop re-issuing the same target after a jump, not a tween
     expect(holesOf()[0]).toMatchObject({ x: 12, y: 0 });
+  });
+
+  it("opens and closes holes at once, with nothing left closing", () => {
+    setReducedMotion(true);
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    rect(el, { x: 0, y: 0, w: 10, h: 10 });
+    showVeil();
+    veilTargets([el]);
+    expect(overlay().querySelector("mask .hole").style.transition).toBe("");
+    veilTargets([]);
+    expect(overlay().querySelectorAll("mask .hole")).toHaveLength(0);
   });
 
   it("removes the overlay immediately on hide, with no fade to wait out", () => {

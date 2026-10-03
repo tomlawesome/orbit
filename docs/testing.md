@@ -104,6 +104,9 @@ Merge requests and pushes to `dev` run:
   that build. The browser suite is two jobs side by side: `smoke` runs it in
   Chromium and `smoke_firefox` in Firefox. With Firefox inside `smoke`, that
   one job took 29.9 of its 30 minutes, so it has its own (#1183).
+- the appearance checks, also two jobs: `fidelity` (Chromium appearance and
+  the phone-floor measurements) and `fidelity_webkit` (the phone film in
+  WebKit), split in #1174 so neither risks the 30-minute job limit.
 
 CodeQL runs separately on the GitHub mirror.
 

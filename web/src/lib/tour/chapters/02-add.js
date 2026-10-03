@@ -113,6 +113,10 @@ export default {
       await goto(orb);
       await press(orb);
       open(orb);
+      /* #1174: the orb is behind the hatch's scrim from here on. Left lit,
+         its ring outlived the screen — it was still drawn at the top right
+         of /create, round the reader's avatar, for the whole chapter. */
+      unlight(orb);
       await w(T.sheet);
       const panel = ctl({ sel: SELECTORS.POCKET.panel, ringless: true });
       light(panel);
@@ -141,13 +145,13 @@ export default {
       await setScreen("/create");
     }
 
-    /* "Add anything here, by hand or by forwarding a document." — the whole
+    /* "Fill in the details here." — the whole
        form, named once. The pocket stands the pill on its own save bar once
        `/create` is up (transport.js's own dock/stand, automatic). */
     const card = ctl({ sel: S.card, radius: 16 });
     await goto(card, { willPress: false });
     await callout(
-      "Add anything here, by hand or by forwarding a document.",
+      "Fill in the details here.",
       card,
       "top",
       { mark: "add-drawer" },

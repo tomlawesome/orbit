@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 import { beforeEach, describe, expect, it } from "vitest";
 
-import belt, { SELECTORS } from "../../web/src/lib/tour/chapters/08-the-belt.js";
+import belt, { SELECTORS, householdCarriesPapers } from "../../web/src/lib/tour/chapters/08-the-belt.js";
 import { POCKET_RIDE } from "../../web/src/routes/item/[[id]]/band.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmPlayer } from "../../web/src/lib/tour/player.js";
@@ -139,16 +139,20 @@ function drawBelt(container, { docs = 2 } = {}) {
        buildSeats to prove read()/unread() against something that behaves
        like the shipped screen — a real click really mounts a card (openDoc's
        own effect), a real Escape really closes it (+page.svelte's own
-       onKeydown), and neither touches localStorage or a server. */
+       onKeydown), and neither touches localStorage or a server.
+       `aria-hidden="false"` is paintMembers' own say for "this one is
+       actually out" (#1174 round 9) — docBody's ring relies on it. */
     const hit = document.createElementNS(SVG_NS, "g");
     hit.setAttribute("class", "hit");
     hit.setAttribute("aria-label", `Document ${k}, a document attached to Volvo V60`);
+    hit.setAttribute("aria-hidden", "false");
     hit.addEventListener("click", () => {
       if (document.getElementById("readcard")) return;
       const card = document.createElement("aside");
       card.id = "readcard";
       container.appendChild(card);
     });
+    box(hit, { x: 600 + k * 20, y: 270, w: 40, h: 40 });
     seats.appendChild(hit);
   }
   members.append(ends, seats, caps);
@@ -236,7 +240,7 @@ describe("the selectors chapter 8 names", () => {
   });
 
   it("pins POCKET_RIDE (band.js) at at least one paper riding the belt", () => {
-    /* #1083: the two-papers count this chapter's docLabel/docHit beats rely
+    /* #1083: the two-papers count this chapter's docBody/docHit beats rely
        on being "however many ride" (see point 3 of the chapter's own header
        comment) presumes the belt seats at least one. */
     expect(POCKET_RIDE).toBeGreaterThanOrEqual(1);
@@ -293,51 +297,42 @@ describe("the beats, in round 6's order", () => {
     await belt.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel]);
     expect(said).toEqual([
-      ["Every body carries its documents in a belt around it.", SELECTORS.DESK.docLabel],
-      ["The belt is what you have attached to it.", SELECTORS.DESK.docLabel],
-      ["Click one to bring it in.", SELECTORS.DESK.docLabel],
-      ["The page itself, read without leaving the sky.", SELECTORS.DESK.cardwrap],
-      ["later → steps the belt — so do the arrow keys.", SELECTORS.DESK.laterInk],
+      ["Every body carries its documents in a belt around it.", SELECTORS.DESK.docBody],
+      ["The belt is what you have attached to it.", SELECTORS.DESK.docBody],
+      ["Click one to bring it in.", SELECTORS.DESK.docBody],
+      ["Read the full document, right here.", SELECTORS.DESK.cardwrap],
     ]);
   });
 
-  it("presses the body, the papers, and both end-caps — never lands a step on a document (#1094)", async () => {
+  it("presses the body, then the papers — never lands a step on a document (#1094), and never touches an end-cap (#1174 round 10)", async () => {
     const { log, ctx } = recorder();
     await belt.play(ctx);
     const pressed = log.filter(([word]) => word === "press").map(([, sel]) => sel);
-    expect(pressed).toEqual([SELECTORS.DESK.body, SELECTORS.DESK.docLabel, SELECTORS.DESK.laterInk, SELECTORS.DESK.soonerInk]);
+    expect(pressed).toEqual([SELECTORS.DESK.body, SELECTORS.DESK.docBody]);
   });
 
-  it("reads a paper for real right after pressing it, and unreads it on the later step", async () => {
+  it("reads a paper for real right after pressing it, and unreads it right after the read callout", async () => {
     const { log, ctx } = recorder();
     await belt.play(ctx);
-    const pressPapers = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.docLabel);
+    const pressPapers = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.docBody);
     const readAt = log.findIndex(([word]) => word === "read");
-    const pressLater = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.laterInk);
+    const dropAt = log.findIndex(([word]) => word === "dropCallout");
     const unreadAt = log.findIndex(([word]) => word === "unread");
     /* one `ctl` call for the paper's real hit sits between the two */
     expect(readAt).toBe(pressPapers + 2);
     expect(log[readAt]).toEqual(["read", SELECTORS.DESK.docHit]);
-    expect(unreadAt).toBe(pressLater + 1);
+    /* #1174 round 10: the belt's own step (round 6's beat 4) is gone from
+       the film, so the card now closes right where the read beat leaves
+       off, not on a step this chapter no longer takes. */
+    expect(unreadAt).toBe(dropAt + 1);
     /* Only ever read once and unread once — one paper, whichever it is. */
     expect(log.filter(([word]) => word === "read")).toHaveLength(1);
     expect(log.filter(([word]) => word === "unread")).toHaveLength(1);
   });
-
-  it("says no copy for ← sooner — one press each way is enough (round 6)", async () => {
-    const { log, ctx } = recorder();
-    await belt.play(ctx);
-    const afterLater = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.laterInk);
-    const soonerPress = log.findIndex(([word, sel]) => word === "press" && sel === SELECTORS.DESK.soonerInk);
-    const calloutsBetween = log
-      .slice(afterLater + 1, soonerPress)
-      .filter(([word]) => word === "callout");
-    expect(calloutsBetween).toEqual([]);
-  });
 });
 
 describe("the chapter played for real", () => {
-  it("puts its five lines on the screen in order", async () => {
+  it("puts its four lines on the screen in order", async () => {
     drawScene({ docs: 2 });
     const clock = createClock({ reducedMotion: () => false });
     const ctx = createFilmContext({ clock, doc: document });
@@ -369,8 +364,7 @@ describe("the chapter played for real", () => {
       "Every body carries its documents in a belt around it.",
       "The belt is what you have attached to it.",
       "Click one to bring it in.",
-      "The page itself, read without leaving the sky.",
-      "later → steps the belt — so do the arrow keys.",
+      "Read the full document, right here.",
     ]);
     ctx.destroy();
   });
@@ -394,8 +388,9 @@ describe("the chapter played for real", () => {
     await playing;
 
     expect(sawOpen).toBe(true);
-    /* Closed by beat 4's own unread() (the belt's step), not just by the
-       teardown below — round 6's "two things happen together". */
+    /* Closed by the read beat's own unread(), right after its callout, not
+       just by the teardown below (#1174 round 10: round 6's own beat 4,
+       which used to close it, is gone from the film). */
     expect(document.getElementById("readcard")).toBeNull();
     ctx.destroy();
     expect(document.getElementById("readcard")).toBeNull();
@@ -467,13 +462,10 @@ describe("the chapter played for real", () => {
     expect(several).toBe(none);
   });
 
-  it("plays the same length even with no body on the dial and both end-caps spent", async () => {
-    const lengthWith = async (withControls) => {
+  it("plays the same length with no body on the dial", async () => {
+    const lengthWith = async (withBody) => {
       drawScene({ docs: 2 });
-      if (!withControls) {
-        document.querySelector(".body-link")?.remove();
-        for (const cap of document.querySelectorAll(".endcap-hit")) cap.remove();
-      }
+      if (!withBody) document.querySelector(".body-link")?.remove();
       const clock = createClock({ reducedMotion: () => false });
       const ctx = createFilmContext({ clock, doc: document });
       clock.setPlaying(true);
@@ -483,5 +475,63 @@ describe("the chapter played for real", () => {
       return spent;
     };
     expect(await lengthWith(false)).toBe(await lengthWith(true));
+  });
+});
+
+/* #1174 round 6 (Fable's call): with no body carrying a paper the chapter
+   stays on the sky and reads its first two lines over the sun. */
+describe("when no body carries a paper", () => {
+  function recorder(pocket) {
+    const log = [];
+    const control = (sel) => ({ sel, els: [], ringEls: [], round: false, pad: 0, radius: 14, rings: [], lifted: false, saved: [] });
+    return {
+      log,
+      ctx: {
+        pocket,
+        carriesPapers: () => false,
+        setScreen: async (route) => log.push(["setScreen", route]),
+        veil: (on) => log.push(["veil", on]),
+        ctl: (spec) => { log.push(["ctl", spec.sel]); return control(spec.sel); },
+        goto: async (c) => log.push(["goto", c.sel]),
+        press: async (c) => log.push(["press", c.sel]),
+        light: (c) => log.push(["light", c.sel]),
+        unlight: (c) => log.push(["unlight", c.sel]),
+        callout: async (text, anchor, side, o) => { log.push(["callout", text, anchor.sel]); if (o?.mark) log.push(["mark", o.mark]); },
+        dropCallout: () => log.push(["dropCallout"]),
+        mark: async (name) => log.push(["mark", name]),
+        read: (c) => log.push(["read", c.sel]),
+        unread: () => log.push(["unread"]),
+        open: (c) => log.push(["open", c.sel]),
+        waitForReal: async () => log.push(["waitForReal"]),
+        w: async () => {},
+        T: { cross: 350, scroll: 600, sheet: 300 },
+      },
+    };
+  }
+
+  for (const pocket of [false, true]) {
+    it(`stays on the sky and reads two lines over the sun, opening nothing (${pocket ? "pocket" : "desk"})`, async () => {
+      const { log, ctx } = recorder(pocket);
+      await belt.play(ctx);
+      const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
+      expect(log.filter(([word]) => word === "setScreen").map(([, route]) => route)).toEqual(["/home"]);
+      expect(log.filter(([word]) => ["press", "read", "open", "unread"].includes(word))).toEqual([]);
+      expect(log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel])).toEqual([
+        ["Every body carries its documents in a belt around it.", S.sun],
+        ["The belt is what you have attached to it.", S.sun],
+      ]);
+      expect(log.filter(([word]) => word === "mark").map(([, name]) => name)).toEqual(["belt-cert", "belt-svc"]);
+      expect(log.at(-1)).toEqual(["unlight", S.sun]);
+    });
+  }
+
+  it("householdCarriesPapers reads the sky's own counts, per dialect", () => {
+    document.body.innerHTML = '<a class="body-link" data-docs="2"></a><div class="pocket"><svg class="mdial"><g class="pk-body" data-papers="0"></g></svg></div>';
+    expect(householdCarriesPapers(document, false)).toBe(true);
+    expect(householdCarriesPapers(document, true)).toBe(false);
+    document.body.innerHTML = '<a class="body-link"></a><div class="pocket"><svg class="mdial"><g class="pk-body" data-papers="1"></g><g class="pk-body" data-body-sugg data-papers="3"></g></svg></div>';
+    expect(householdCarriesPapers(document, false)).toBe(false);
+    expect(householdCarriesPapers(document, true)).toBe(true);
+    document.body.innerHTML = "";
   });
 });

@@ -72,9 +72,15 @@ body.reclaimed :where(.arrival) .bigring .ringglass{transform:scale(.6048);
       background:rgba(7,11,24,0);
       -webkit-backdrop-filter:blur(0px);backdrop-filter:blur(0px)}
 
-body.reclaimed :where(.arrival) .bigring .ringstroke{width:302.4px;height:302.4px}
+/* Desk only (#1175): on a phone the ring is already at the login ring's own
+   size, or 240px under 760px of visible height, and its stroke and orb are
+   100% of that box (door-phone.css) — a 302.4px stroke forced into a 240px
+   ring would spill out of it for the length of the hand-over. */
+@media (min-width:901px) and (min-height:601px){
+  body.reclaimed :where(.arrival) .bigring .ringstroke{width:302.4px;height:302.4px}
 
-body.reclaimed :where(.arrival) .bigring .ringorbit{width:302.4px;height:302.4px}
+  body.reclaimed :where(.arrival) .bigring .ringorbit{width:302.4px;height:302.4px}
+}
 
 /* `reclaimed` is the create path's hand-over beat and `igniting` is the
    flight's own: the card leaves on the same curve for both, so the pre-beat

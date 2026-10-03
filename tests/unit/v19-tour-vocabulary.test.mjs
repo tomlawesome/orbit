@@ -51,18 +51,16 @@ function box(el, { x, y, w, h }) {
   });
 }
 
+/** The veil's open holes, read from its inline SVG mask (#1174 round 3);
+ *  a hole still closing is not counted. */
 function holesOf() {
-  const img = document.getElementById(OVERLAY_ID)?.style.maskImage ?? "";
-  const match = /url\("data:image\/svg\+xml,(.*)"\)/u.exec(img);
-  if (!match) return [];
-  const svg = decodeURIComponent(match[1]);
-  /* Only the holes: the mask's full-bleed sheet is the one rect with no
-     corner radius and a white fill, so requiring rx and #000 skips it. */
-  const rects = [...svg.matchAll(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" rx="([\d.]+)" ry="[\d.]+" fill="#000"\/>/gu)]
-    .map((m) => ({ kind: "rect", x: +m[1], y: +m[2], w: +m[3], h: +m[4] }));
-  const circles = [...svg.matchAll(/<circle cx="([\d.]+)" cy="([\d.]+)" r="([\d.]+)"/gu)]
-    .map((m) => ({ kind: "circle", cx: +m[1], cy: +m[2], r: +m[3] }));
-  return [...rects, ...circles];
+  const shapes = [...(document.getElementById(OVERLAY_ID)?.querySelectorAll("mask .hole:not(.leaving)") ?? [])];
+  return shapes.map((shape) => {
+    const n = (name) => Number(shape.getAttribute(name));
+    return shape.tagName.toLowerCase() === "circle"
+      ? { kind: "circle", cx: n("cx"), cy: n("cy"), r: n("r") }
+      : { kind: "rect", x: n("x"), y: n("y"), w: n("width"), h: n("height") };
+  });
 }
 
 /** A film context on a clock the test drives by hand. */
@@ -269,6 +267,56 @@ describe("Addendum A: the lift yields to a clip (#1083, 2026-09-30)", () => {
     const c = ctx.ctl({ sel: "#settings" });
     await playOut(clock, ctx.goto(c, { willPress: false }));
     expect(document.getElementById("settings").style.transform).toBe("translateY(-2px)");
+  });
+});
+
+describe("Addendum B: the lift yields to an SVG element's own position (#1174, chapter 8's fault A)", () => {
+  it("does not set a CSS transform on a control positioned by its own SVG `transform` attribute, but still rings it strong", async () => {
+    document.body.innerHTML =
+      '<svg><g id="caps"><g id="seat" class="capseat" transform="translate(50,60)"><text>a.pdf</text></g></g></svg>';
+    const seat = document.getElementById("seat");
+    // The belt paints this every frame via the attribute, never happy-dom's
+    // own layout — box() stands in for what paintMembers() would measure.
+    box(seat, { x: 50, y: 60, w: 40, h: 16 });
+    const before = { transform: seat.style.transform, filter: seat.style.filter };
+
+    const { clock, ctx } = stage();
+    const c = ctx.ctl({ sel: "#seat" });
+    await playOut(clock, ctx.goto(c, { willPress: false }));
+
+    expect(seat.style.transform).toBe(before.transform);
+    expect(seat.style.filter).toBe(before.filter);
+    expect(seat.getAttribute("transform")).toBe("translate(50,60)");
+    expect(c.lifted).toBe(true);
+    expect(c.rings[0].style.boxShadow).toContain("46px"); /* "strong", same as any other control */
+
+    ctx.unlight(c);
+    expect(seat.style.transform).toBe(before.transform);
+    expect(seat.getAttribute("transform")).toBe("translate(50,60)");
+  });
+
+  it("press() never sets an inline transform on an SVG-positioned control, not even translate(0,0)", async () => {
+    document.body.innerHTML =
+      '<svg><g id="caps"><g id="seat" class="capseat" transform="translate(50,60)"><text>a.pdf</text></g></g></svg>';
+    const seat = document.getElementById("seat");
+    box(seat, { x: 50, y: 60, w: 40, h: 16 });
+
+    const { clock, ctx } = stage();
+    const c = ctx.ctl({ sel: "#seat" });
+    await playOut(clock, ctx.goto(c, { willPress: false }));
+    await playOut(clock, ctx.press(c));
+
+    expect(seat.style.transform).toBe("");
+    expect(seat.getAttribute("transform")).toBe("translate(50,60)");
+  });
+
+  it("a plain SVG control with no transform attribute still lifts normally", async () => {
+    document.body.innerHTML = '<svg><circle id="sun" cx="190" cy="190" r="8"></circle></svg>';
+    box(document.getElementById("sun"), { x: 182, y: 182, w: 16, h: 16 });
+    const { clock, ctx } = stage();
+    const c = ctx.ctl({ sel: "#sun" });
+    await playOut(clock, ctx.goto(c, { willPress: false }));
+    expect(document.getElementById("sun").style.transform).toBe("translateY(-2px)");
   });
 });
 
@@ -506,6 +554,55 @@ describe("typing into a field", () => {
     await playOut(live.clock, live.ctx.typeInto(live.ctx.ctl({ sel: "#f-name" }), "Car MOT — Volvo V60"));
     expect(ghostText()).toBe("Car MOT — Volvo V60");
     live.ctx.destroy();
+  });
+});
+
+describe("#1174 round 4: the typed line's cover is solid", () => {
+  it("stacks a see-through field over what is behind it, down to the first solid ground", async () => {
+    document.body.innerHTML = '<div id="card" style="background-color: rgb(20, 30, 40)"><div id="wrap"><input id="f-name" style="background-color: rgba(200, 210, 220, 0.55); border: 1px solid rgb(90, 90, 90)"></div></div>';
+    box(document.getElementById("f-name"), { x: 20, y: 100, w: 300, h: 48 });
+    const { clock, ctx } = stage();
+    await playOut(clock, ctx.typeInto(ctx.ctl({ sel: "#f-name" }), "Car MOT"));
+    const cover = /** @type {HTMLElement} */ (document.querySelector(".tourfilm-typed"));
+    /* the field's own see-through colour on top, the card's solid one under */
+    expect(cover.style.backgroundImage.replace(/\s+/gu, "")).toBe("linear-gradient(rgba(200,210,220,0.55),rgba(200,210,220,0.55))");
+    expect(cover.style.backgroundColor.replace(/\s+/gu, "")).toBe("rgb(20,30,40)");
+    expect(cover.style.borderStyle).toBe("solid");
+  });
+
+  it("is the field's own colour alone when that is already solid", async () => {
+    document.body.innerHTML = '<div style="background-color: rgb(1, 2, 3)"><input id="f-name" style="background-color: rgb(20, 30, 40)"></div>';
+    box(document.getElementById("f-name"), { x: 20, y: 100, w: 300, h: 48 });
+    const { clock, ctx } = stage();
+    await playOut(clock, ctx.typeInto(ctx.ctl({ sel: "#f-name" }), "Car MOT"));
+    const cover = /** @type {HTMLElement} */ (document.querySelector(".tourfilm-typed"));
+    expect(cover.style.backgroundImage).toBe("");
+    expect(cover.style.backgroundColor.replace(/\s+/gu, "")).toBe("rgb(20,30,40)");
+  });
+});
+
+describe("#1174 round 4: room below the page", () => {
+  it("adds a blank block of the height asked after everything on the page, and takes it away", () => {
+    document.body.innerHTML = '<main id="page"></main>';
+    const { ctx } = stage();
+    ctx.room(240.2);
+    const block = /** @type {HTMLElement} */ (document.querySelector(".tourfilm-room"));
+    expect(block).not.toBeNull();
+    expect(block.style.height).toBe("241px");
+    expect(block.getAttribute("aria-hidden")).toBe("true");
+    ctx.room(90);
+    expect(document.querySelectorAll(".tourfilm-room")).toHaveLength(1);
+    expect(block.style.height).toBe("90px");
+    ctx.room(0);
+    expect(document.querySelector(".tourfilm-room")).toBeNull();
+  });
+
+  it("goes with clear(), so a jump or a stop leaves the page as it was found", () => {
+    document.body.innerHTML = '<main id="page"></main>';
+    const { ctx } = stage();
+    ctx.room(300);
+    ctx.clear();
+    expect(document.querySelector(".tourfilm-room")).toBeNull();
   });
 });
 
@@ -929,5 +1026,212 @@ describe("#1083: the pocket dialect", () => {
       expect(note.style.cssText).toContain("12px");
       ctx.destroy();
     });
+  });
+});
+
+/* ---- #1174: the pocket film on a real phone ------------------------------
+   What broke on the owner's iPhone and what the fix promises, each pinned. */
+
+describe("#1174: the chrome follows the page", () => {
+  /** Fires the window's scroll listener and lets the sync frame run. */
+  async function scrolled() {
+    window.dispatchEvent(new window.Event("scroll"));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+
+  it("a lit control's ring moves with the control when the page scrolls under it", async () => {
+    document.body.innerHTML = '<button class="save"></button>';
+    const el = document.querySelector(".save");
+    box(el, { x: 100, y: 600, w: 120, h: 44 });
+    const { clock, ctx } = stage();
+    await playOut(clock, ctx.goto(ctx.ctl({ sel: ".save" })));
+    const ring = document.querySelector(".tourfilm-ring");
+    expect(parseFloat(ring.style.top)).toBe(600);
+    box(el, { x: 100, y: 200, w: 120, h: 44 }); /* the page scrolled 400px */
+    await scrolled();
+    expect(parseFloat(ring.style.top)).toBe(200);
+  });
+
+  it("a typed line stays over its field", async () => {
+    document.body.innerHTML = '<input class="name">';
+    const el = document.querySelector(".name");
+    box(el, { x: 40, y: 500, w: 300, h: 44 });
+    const { clock, ctx } = stage();
+    await playOut(clock, ctx.typeInto(ctx.ctl({ sel: ".name" }), "Car"));
+    const ghost = document.querySelector(".tourfilm-typed");
+    expect(parseFloat(ghost.style.top)).toBe(500);
+    box(el, { x: 40, y: 120, w: 300, h: 44 });
+    await scrolled();
+    expect(parseFloat(ghost.style.top)).toBe(120);
+  });
+
+  it("a callout pinned to a control stays on it", async () => {
+    document.body.innerHTML = '<div class="row"></div>';
+    const el = document.querySelector(".row");
+    box(el, { x: 100, y: 500, w: 200, h: 60 });
+    const { clock, ctx } = stage();
+    const row = ctx.ctl({ sel: ".row" });
+    const said = ctx.callout("Same law as the dial.", row, "bottom");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    clock.advance(200);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const note = document.querySelector(".tourfilm-callout");
+    const before = parseFloat(note.style.top);
+    expect(before).toBeGreaterThanOrEqual(560);
+    box(el, { x: 100, y: 300, w: 200, h: 60 });
+    await scrolled();
+    expect(parseFloat(note.style.top)).toBe(before - 200);
+    await playOut(clock, said);
+  });
+
+  it("clear() puts the page back at the top, however the film left a chapter", () => {
+    const { ctx } = stage();
+    const calls = [];
+    const scrollY = Object.getOwnPropertyDescriptor(window, "scrollY");
+    Object.defineProperty(window, "scrollY", { value: 197, configurable: true });
+    const scrollTo = window.scrollTo;
+    window.scrollTo = (options) => calls.push(options);
+    ctx.clear();
+    window.scrollTo = scrollTo;
+    if (scrollY) Object.defineProperty(window, "scrollY", scrollY); else delete window.scrollY;
+    expect(calls).toEqual([{ top: 0, behavior: "instant" }]);
+  });
+
+  it("the listeners go with destroy()", async () => {
+    document.body.innerHTML = '<button class="save"></button>';
+    const el = document.querySelector(".save");
+    box(el, { x: 100, y: 600, w: 120, h: 44 });
+    const { clock, ctx } = stage();
+    await playOut(clock, ctx.goto(ctx.ctl({ sel: ".save" })));
+    ctx.destroy();
+    expect(() => window.dispatchEvent(new window.Event("scroll"))).not.toThrow();
+    expect(document.querySelector(".tourfilm-ring")).toBeNull();
+  });
+});
+
+describe("#1174: a ring belongs to an element", () => {
+  it("a control left lit into a screen change is unlit once its element has left the document", async () => {
+    document.body.innerHTML = '<button class="save"></button>';
+    const el = document.querySelector(".save");
+    box(el, { x: 100, y: 600, w: 120, h: 44 });
+    const clock = createClock({ reducedMotion: () => false });
+    let route = "/create";
+    const ctx = createFilmContext({
+      clock, doc: document,
+      routeOf: () => route,
+      navigate: async (to) => { route = to; document.body.innerHTML = '<div class="home"></div>'; },
+    });
+    clock.setPlaying(true);
+    await playOut(clock, ctx.goto(ctx.ctl({ sel: ".save" })));
+    expect(document.querySelectorAll(".tourfilm-ring")).toHaveLength(1);
+    expect(ctx.lit()).toHaveLength(1);
+    await ctx.setScreen("/home");
+    expect(document.querySelectorAll(".tourfilm-ring")).toHaveLength(0);
+    expect(ctx.lit()).toHaveLength(0);
+    expect(el.style.transform).toBe(""); /* its inline style put back too */
+  });
+
+  it("a lit control still in the document keeps its ring across a screen change on the same page", async () => {
+    document.body.innerHTML = '<svg class="dial"><g class="body"></g></svg>';
+    box(document.querySelector(".body"), { x: 200, y: 160, w: 10, h: 10 });
+    const clock = createClock({ reducedMotion: () => false });
+    let route = "/home";
+    const ctx = createFilmContext({ clock, doc: document, routeOf: () => route, navigate: async (to) => { route = to; } });
+    clock.setPlaying(true);
+    ctx.light(ctx.ctl({ sel: ".body" }));
+    await ctx.setScreen("/item");
+    expect(document.querySelectorAll(".tourfilm-ring")).toHaveLength(1);
+  });
+});
+
+describe("#1174: unread() is the film's own Escape", () => {
+  it("marks it tourfilm, as close() does, so the transport never takes it for the reader stopping the film", () => {
+    document.body.innerHTML = '<div class="hit"></div>';
+    const { ctx } = stage();
+    const seen = [];
+    const onKey = (event) => seen.push({ key: event.key, tourfilm: event.tourfilm === true });
+    document.addEventListener("keydown", onKey, true);
+    ctx.read(ctx.ctl({ sel: ".hit" }));
+    ctx.unread();
+    document.removeEventListener("keydown", onKey, true);
+    expect(seen).toEqual([{ key: "Escape", tourfilm: true }]);
+  });
+});
+
+describe("#1174: `visible` names only what a reader can see", () => {
+  it("drops a match scrolled off the screen, one faded to nothing, and keeps the rest", () => {
+    document.body.innerHTML = '<a class="msys" id="a"></a><a class="msys" id="b"></a><a class="msys" id="c"></a><a class="msys" id="d"></a>';
+    window.innerWidth = 390;
+    window.innerHeight = 844;
+    box(document.getElementById("a"), { x: 16, y: 400, w: 150, h: 44 });
+    box(document.getElementById("b"), { x: 300, y: 400, w: 150, h: 44 }); /* half off the right: seen */
+    box(document.getElementById("c"), { x: 534, y: 400, w: 150, h: 44 }); /* wholly off: scenery */
+    box(document.getElementById("d"), { x: 16, y: 500, w: 150, h: 44 });
+    document.getElementById("d").style.opacity = "0";
+    const { ctx } = stage();
+    const all = ctx.ctl({ sel: ".msys", all: true, visible: true });
+    expect(all.els.map((el) => el.id)).toEqual(["a", "b"]);
+    const first = ctx.ctl({ sel: ".msys", visible: true });
+    expect(first.els.map((el) => el.id)).toEqual(["a"]);
+  });
+
+  it("is a first-visible, not a first: an unseen first match yields to the first seen one", () => {
+    document.body.innerHTML = '<a class="msys" id="a"></a><a class="msys" id="b"></a>';
+    box(document.getElementById("a"), { x: -400, y: 400, w: 150, h: 44 });
+    box(document.getElementById("b"), { x: 16, y: 400, w: 150, h: 44 });
+    const { ctx } = stage();
+    expect(ctx.ctl({ sel: ".msys", visible: true }).els.map((el) => el.id)).toEqual(["b"]);
+  });
+
+  it("still throws when nothing visible matches and the control is not optional", () => {
+    document.body.innerHTML = '<a class="msys" id="a"></a>';
+    box(document.getElementById("a"), { x: 1400, y: 400, w: 150, h: 44 }); /* past a 1280px screen */
+    const { ctx } = stage();
+    expect(() => ctx.ctl({ sel: ".msys", visible: true })).toThrow(TourControlMissing);
+  });
+
+  it("changes nothing without the flag", () => {
+    document.body.innerHTML = '<a class="msys" id="a"></a><a class="msys" id="b"></a>';
+    box(document.getElementById("a"), { x: 900, y: 400, w: 150, h: 44 });
+    box(document.getElementById("b"), { x: 16, y: 400, w: 150, h: 44 });
+    const { ctx } = stage();
+    expect(ctx.ctl({ sel: ".msys", all: true }).els.map((el) => el.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("#1174: a pinned callout keeps its side on the pocket", () => {
+  function pocketStage() {
+    setReducedMotion(false);
+    const clock = createClock({ reducedMotion: () => false });
+    const ctx = createFilmContext({ clock, doc: document, pocket: true });
+    clock.setPlaying(true);
+    return { clock, ctx };
+  }
+
+  it("without `pin`, a top line with no room above flips under its anchor", async () => {
+    document.body.innerHTML = '<header class="p-chrome"></header><div class="mdial"></div>';
+    window.innerWidth = 390;
+    window.innerHeight = 844;
+    box(document.querySelector(".p-chrome"), { x: 0, y: 0, w: 390, h: 56 });
+    box(document.querySelector(".mdial"), { x: 16, y: 56, w: 358, h: 358 });
+    const { clock, ctx } = pocketStage();
+    const dial = ctx.ctl({ sel: ".mdial", round: true });
+    await playOut(clock, ctx.callout("Orbit reminds you, visually and through notifications.", dial, "top"));
+    const note = document.querySelector(".tourfilm-callout");
+    expect(parseFloat(note.style.top)).toBeGreaterThanOrEqual(414); /* under the dial */
+  });
+
+  it("with `pin`, it stays at the top, clamped under the chrome — round 8's toast position", async () => {
+    document.body.innerHTML = '<header class="p-chrome"></header><div class="mdial"></div>';
+    window.innerWidth = 390;
+    window.innerHeight = 844;
+    box(document.querySelector(".p-chrome"), { x: 0, y: 0, w: 390, h: 56 });
+    box(document.querySelector(".mdial"), { x: 16, y: 56, w: 358, h: 358 });
+    const { clock, ctx } = pocketStage();
+    const dial = ctx.ctl({ sel: ".mdial", round: true });
+    await playOut(clock, ctx.callout("Orbit reminds you, visually and through notifications.", dial, "top", { pin: true }));
+    const note = document.querySelector(".tourfilm-callout");
+    expect(parseFloat(note.style.top)).toBe(56 + 8);
+    expect(note.querySelector("i").style.bottom).toBe("-8px"); /* the stem still points down, at the dial */
   });
 });
