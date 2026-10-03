@@ -1,6 +1,7 @@
 <script>
   import { beforeNavigate, goto, pushState } from "$app/navigation";
   import { page } from "$app/state";
+  import { createArm } from "./arm.js";
   import { sheetRelease } from "./gesture.js";
   import { portal } from "./portal.js";
   import { holdSheet, standOnKeyboard } from "./sheet.js";
@@ -43,6 +44,7 @@
    *   hideTitle?: boolean,
    *   onclose?: () => void,
    *   history?: boolean,
+   *   confirmDiscard?: () => boolean,
    *   children?: import('svelte').Snippet,
    *   head?: import('svelte').Snippet,
    *   foot?: import('svelte').Snippet,
@@ -56,6 +58,16 @@
     hideTitle = false,
     onclose = undefined,
     history = true,
+    /* #1151 W1-S2: a scrim tap or a drag-down used to discard an edited form
+       outright, same as the keyboard's "close" word (they share `dismiss()`
+       below) — no caller asked the reader first. Read right before each
+       dismiss, true when there is something to lose; undefined (every
+       caller that never passes it) keeps today's one-tap close exactly as
+       it was. The confirm itself reuses the pocket's own arm-then-fire
+       pattern (arm.js, already used for every other "are you sure" on this
+       kit) rather than a new one: the first dismiss arms it, the second
+       (or the close word, now reading "tap again to close") fires it. */
+    confirmDiscard = undefined,
     children = undefined,
     head = undefined,
     foot = undefined,
@@ -68,9 +80,15 @@
   let grown = $state(false);
   let drag = $state(0);
   let dragging = $state(false);
+  /** Armed by one dismiss attempt while `confirmDiscard()` says there is
+      something to lose; the next dismiss (of any kind — scrim, drag, the
+      close word, Escape) fires for real (#1151 W1-S2). */
+  let dismissArmed = $state(false);
+  const dismissArm = createArm({ onchange: (next) => (dismissArmed = next) });
 
   function dismiss() {
     if (!open) return;
+    if (confirmDiscard?.() && !dismissArm.tap()) return;
     open = false;
   }
 
@@ -89,6 +107,7 @@
       root.style.overflow = overflow;
       grown = false;
       drag = 0;
+      dismissArm.disarm();
       onclose?.();
     };
   });
@@ -181,7 +200,7 @@
     <div class="head">
       <h2 id="{uid}-title" class="title" class:sr-only={hideTitle}>{title}</h2>
       {@render head?.()}
-      <button class="p-pill close" data-sheet-close onclick={dismiss}>close</button>
+      <button class="p-pill close" data-sheet-close onclick={dismiss}>{dismissArmed ? "tap again to close" : "close"}</button>
     </div>
     <div class="body">{@render children?.()}</div>
     {#if foot}<div class="p-sheet-foot">{@render foot()}</div>{/if}

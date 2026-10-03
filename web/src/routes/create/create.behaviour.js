@@ -366,9 +366,17 @@ export function mountCreate() {
      listener above is attached. */
   card.dataset.ready = "true";
 
-  return () => {
-    teardown();
-    delete card.dataset.ready;
-    document.body.classList.remove("doc");
+  return {
+    teardown: () => {
+      teardown();
+      delete card.dataset.ready;
+      document.body.classList.remove("doc");
+    },
+    /** Whether a misclick or a close would discard something typed
+        (#1151 W1-S1). `reveal()`'s own one-way "the form grows as you
+        commit to it" is already exactly this signal — a real name, a
+        chosen type or a dropped document — so it is read rather than
+        tracked twice. */
+    isDirty: () => disclose.classList.contains("open"),
   };
 }
