@@ -83,6 +83,17 @@ export function runMachinePromptSession(
     const child: ChildProcessWithoutNullStreams = spawn(bashBinary, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
     const events: MachinePromptLine[] = [];
 
+    // O1-R9: the child can exit (crash, refuse, or otherwise close its own
+    // stdin) between this answer being requested and the write below —
+    // `answers.answer()` is async, so there is always a window. Without a
+    // listener, the 'error' Node emits on a write to a stream whose other
+    // end is gone (EPIPE) has no handler and crashes the whole process;
+    // with one, it is just data the close handler below already turns into
+    // the ordinary "configuration step failed" result (ok: false).
+    child.stdin.on("error", () => {
+      /* swallowed: a dead child's close/exit handling below is what answers this. */
+    });
+
     const rl = createInterface({ input: child.stdout, crlfDelay: Infinity });
     rl.on("line", (line) => {
       const parsed = parseMachinePromptLine(line);
@@ -91,7 +102,15 @@ export function runMachinePromptSession(
       if (parsed.type === "prompt") {
         const request: MachinePromptRequest = { field: parsed.field, kind: parsed.kind, attempt: parsed.attempt };
         Promise.resolve(answers.answer(request)).then((answer) => {
-          child.stdin.write(`${answer}\n`);
+          // The same already-exited-child race, caught synchronously too:
+          // `write()` on an ended/destroyed stream throws
+          // ERR_STREAM_WRITE_AFTER_END rather than emitting 'error'.
+          if (!child.stdin.writable || child.stdin.destroyed) return;
+          try {
+            child.stdin.write(`${answer}\n`);
+          } catch {
+            /* swallowed, same reasoning as the 'error' listener above. */
+          }
         });
       }
     });
