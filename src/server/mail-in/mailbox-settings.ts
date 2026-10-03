@@ -27,7 +27,7 @@
  * README).
  */
 import { randomBytes, randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog, mailInMailbox, mailInSecrets, users } from "@/db/schema";
@@ -649,11 +649,16 @@ async function recordVerificationOutcome(
   if (!row) return;
   await getDb().transaction(async (transaction) => {
     if (markState) {
+      // Compare-and-set on the version read alongside `row` (A2-R4): a slow
+      // verify must not overwrite a rotation that landed while it was
+      // running. When the version has moved on, that newer row already
+      // carries state fresher than this outcome, so there is nothing to fix.
       await transaction.update(mailInMailbox).set({
         verificationState: outcome === "verified" ? "verified" : "failed",
         verifiedAt: outcome === "verified" ? new Date() : row.verifiedAt,
         updatedAt: new Date(),
-      }).where(eq(mailInMailbox.singleton, true));
+        version: row.version + 1,
+      }).where(and(eq(mailInMailbox.singleton, true), eq(mailInMailbox.version, row.version)));
     }
     await recordMailboxAudit(transaction, row.id, actorUserId, "mail_in_credential_verified", { outcome });
   });
