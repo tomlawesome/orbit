@@ -21,11 +21,16 @@ import { callRoute, callRouteForSession, loadRoute } from "./support/request-eve
 const { POST: logout } = await loadRoute("auth/logout");
 const { GET: sessionStatus } = await loadRoute("auth/session");
 const { POST: refresh } = await loadRoute("auth/session/refresh");
-const sessionsRoute = await loadRoute("auth/sessions");
-const { GET: listSessions } = sessionsRoute;
-// #1151 A1-R7: the route's own cap, read back rather than duplicated as a
-// literal here, so this test fails the moment the two drift apart.
-const SESSION_LIST_LIMIT = (sessionsRoute as unknown as { SESSION_LIST_LIMIT: number }).SESSION_LIST_LIMIT;
+const { GET: listSessions } = await loadRoute("auth/sessions");
+// #1151 A1-R7: the route's own cap, read back from its own module rather
+// than duplicated as a literal here, so this test fails the moment the two
+// drift apart. Not a route export -- SvelteKit refuses a `+server.js` export
+// that isn't an HTTP method, one of its own options, or `_`-prefixed -- so
+// this crosses the same tsc/web boundary loadRoute does, once more, for the
+// one constant rather than the whole route.
+const SESSION_LIST_LIMIT = (await import(
+  /* @vite-ignore */ new URL("../../web/src/lib/server/session-limits.js", import.meta.url).href
+) as { SESSION_LIST_LIMIT: number }).SESSION_LIST_LIMIT;
 const { POST: revokeSessions } = await loadRoute("auth/sessions/revoke");
 const { POST: revokeOneSession } = await loadRoute("auth/sessions/[sessionId]/revoke");
 
