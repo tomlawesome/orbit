@@ -14,7 +14,14 @@ const documentEnvironmentSchema = z.object({
   DOCUMENT_INSTANCE_QUOTA_BYTES: z.coerce.number().int().min(25 * MIB).max(100_000 * GIB).default(20 * GIB),
   DOCUMENT_RETENTION_DAYS: z.coerce.number().int().min(1).max(3_650).default(30),
   DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS: z.coerce.number().int().min(1).max(168).default(24),
-  DOCUMENT_SCAN_MODE: z.enum(["required", "disabled"]).default("required"),
+  // The install-time contract (src/lib/config-contract.ts) accepts "" as
+  // "unset" for this variable, the same as every other optional one; that
+  // check must agree with this one, or a value the installer waved through
+  // throws here instead of falling back to the default (SF2-F3).
+  DOCUMENT_SCAN_MODE: z.preprocess(
+    (value) => value === "" ? undefined : value,
+    z.enum(["required", "disabled"]).default("required"),
+  ),
   CLAMAV_HOST: z.string().min(1).default("orbit-clamav"),
   CLAMAV_PORT: z.coerce.number().int().min(1).max(65_535).default(3310),
   CLAMAV_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
