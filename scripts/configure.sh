@@ -378,7 +378,11 @@ persist_orbit_image() {
   # trust marker, ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1 (set by install.sh
   # itself alongside ORBIT_IMAGE; never set by a human invocation).
   if [[ "$environment_file_was_created" != 1 && "${ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE:-}" != 1 ]]; then
-    printf 'Orbit configure: ignoring ORBIT_IMAGE=%s from the environment; an existing deployment only changes its pinned image through the installer.\n' "$orbit_image" >&2
+    # Worded without a literal "ORBIT_IMAGE=" (#1151 O1-S4 follow-up):
+    # scripts/supply-chain-policy.test.mjs scans this file for exactly that
+    # assignment shape to prove every deployment reference is pinned, and a
+    # message built the same way as a real assignment tripped it.
+    printf 'Orbit configure: ignoring the environment'"'"'s ORBIT_IMAGE value %s; an existing deployment only changes its pinned image through the installer.\n' "$orbit_image" >&2
     return 0
   fi
   if ! is_valid_orbit_image "$orbit_image"; then
