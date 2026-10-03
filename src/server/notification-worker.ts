@@ -1047,7 +1047,7 @@ async function deliverClaimed(
         }
       }
     } catch (error) {
-      await failDelivery(
+      const status = await failDelivery(
         db,
         delivery.id,
         leaseToken,
@@ -1057,7 +1057,16 @@ async function deliverClaimed(
         now,
         retryDelay,
       );
-      const exhausted = delivery.attempts + 1 >= config.maxAttempts;
+      /* #1151 A4-Q4: this used to re-derive its own threshold
+         (`delivery.attempts + 1 >= config.maxAttempts`) instead of reading
+         `failDelivery`'s own answer -- `delivery.attempts` is already the
+         post-claim count (`claimDeliveries` increments it when it claims the
+         row), so the extra `+ 1` double-counted and declared "exhausted" one
+         attempt before `deliveryFailureState` actually set the row to
+         `failed`. Reading the real status also means a `cancelled` outcome
+         (a category that never retries at all, whatever `attempts` says) is
+         "exhausted" too, rather than mislabelled "retrying". */
+      const exhausted = status !== "retry";
       log.warn({
         event: delivery.channel === "email" ? "delivery.smtp" : "delivery.push",
         state: exhausted ? "exhausted" : "retrying",
@@ -1070,7 +1079,10 @@ async function deliverClaimed(
 }
 
 /** Persists only a bounded failure code, never an untrusted provider message. */
-async function failDelivery(
+/** Exported for the fast suite (#1151 A4-Q4): the one place a failed
+ *  attempt's real outcome is decided, so a caller logging "exhausted" can
+ *  read it back instead of re-deriving its own copy of the threshold. */
+export async function failDelivery(
   db: NotificationDatabase,
   id: string,
   leaseToken: string,
@@ -1079,7 +1091,7 @@ async function failDelivery(
   category: NotificationFailureCategory,
   now: Date,
   retryDelay: (attempts: number) => number,
-): Promise<void> {
+): Promise<"cancelled" | "failed" | "retry"> {
   const status = deliveryFailureState(category, attempts, maxAttempts);
   const retryAt = status === "retry" ? new Date(now.getTime() + retryDelay(attempts)) : null;
   await db.update(notificationDeliveries).set({
@@ -1093,6 +1105,7 @@ async function failDelivery(
     eq(notificationDeliveries.status, "processing"),
     eq(notificationDeliveries.leaseToken, leaseToken),
   ));
+  return status;
 }
 
 /**
