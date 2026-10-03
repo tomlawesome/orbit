@@ -11,6 +11,12 @@ import { describe, expect, it } from "vitest";
  * inside the `.then()`, so a failed re-read left a screen that looked alive
  * and answered nothing, with no error shown anywhere.
  *
+ * The pocket's own re-read — `<Pocket>`'s `onchanged` prop, fired after the
+ * review sheet amends something on a phone — had the identical bare
+ * `view = await readHome()` with nothing catching it, so the same failure
+ * mode could happen there too; it now guards the same way, into the same
+ * `homeLoadProblem`.
+ *
  * `+page.svelte` is not import-tested here — a `.svelte` file needs the
  * compiler this suite does not pull in for a source check — so this pins
  * the fix the same way `v19-home-hit-area.test.mjs` pins `home.css`: against
@@ -34,5 +40,13 @@ describe("#1151 W1-R4: the home re-read catches its own failure", () => {
   it("renders the problem with the page's own alert pattern", () => {
     expect(HOME_PAGE).toMatch(/\{#if homeLoadProblem\}/u);
     expect(HOME_PAGE).toMatch(/class="p-error" role="alert"/u);
+  });
+
+  it("also catches the pocket's own re-read, on <Pocket>'s onchanged prop", () => {
+    const onchanged = HOME_PAGE.slice(HOME_PAGE.indexOf("onchanged={async () => {"));
+    expect(onchanged.slice(0, 50)).not.toMatch(/readHome\(\)/u); // not a bare one-liner any more
+    const tryBlock = onchanged.slice(0, onchanged.indexOf("}} />"));
+    expect(tryBlock).toMatch(/try\s*\{\s*view = await readHome\(\);/u);
+    expect(tryBlock).toMatch(/catch \(error\) \{\s*homeLoadProblem\s*=/u);
   });
 });

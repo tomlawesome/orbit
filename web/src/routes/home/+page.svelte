@@ -1066,7 +1066,16 @@
         onapprove={async (suggestion) => { armed = { id: suggestion.id, act: "approve" }; await tapReceipt(suggestion, "approve"); return mailProblem; }}
         ondismiss={async (suggestion) => { armed = { id: suggestion.id, act: "dismiss" }; await tapReceipt(suggestion, "dismiss"); return mailProblem; }}
         onamend={amendReceipt}
-        onchanged={async () => { view = await readHome(); }} />
+        onchanged={async () => {
+          /* #1151 W1-R4: the same unguarded read as the onMount one above —
+             a failure here left the pocket's own re-read silently going
+             nowhere, with no error shown. */
+          try {
+            view = await readHome();
+          } catch (error) {
+            homeLoadProblem = /** @type {any} */ (error)?.message ?? String(error);
+          }
+        }} />
 
 <!-- The flight's surfaces: the dawn the climb leaves from, the dusk the
      descent lands on, and the canvas, mark and void-name between them. Each
