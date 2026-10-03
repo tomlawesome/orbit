@@ -71,6 +71,29 @@ async function ensureReaderCanAnswerTheChallenge(page: Page) {
 }
 
 /**
+ * #1192: the first navigation after `ensureReaderCanAnswerTheChallenge`'s
+ * OIDC round trip, on WebKit only. That helper leaves the browser just back
+ * from a cross-origin hop to the provider and home again, and WebKit swaps
+ * the main frame's internal id on a navigation like that; the very next
+ * `page.goto` can lose a race with Playwright's own bookkeeping catching up
+ * to the swap and fail immediately with "Cannot find web frame for the
+ * frame id" (pipeline 1989 and 1990, job smoke_webkit, both desktop tests
+ * below). It is not a slow page -- waiting longer first
+ * (`local-credentials.ts`'s removed `waitForLoadState("load")`, #1192) did
+ * not help, and the suite's own retry of the whole test got past this exact
+ * call both times without hitting it again. Retrying the one navigation is
+ * that same fix, without re-running the test.
+ */
+async function gotoAfterStepUp(page: Page, url: string) {
+  try {
+    await page.goto(url);
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes("Cannot find web frame for the frame id")) throw error;
+    await page.goto(url);
+  }
+}
+
+/**
  * Answers DeskArchive.svelte's inline "sign in again" challenge, opened by
  * the export or import act just fired, and waits for it to close.
  *
@@ -157,7 +180,7 @@ test("write an archive, then bring it into a second household — a clash stays 
   const scratch = mkdtempSync(path.join(tmpdir(), "orbit-archive-e2e-"));
   try {
     // ── write it ──────────────────────────────────────────────────────────
-    await page.goto(`/household/${source.id}`);
+    await gotoAfterStepUp(page, `/household/${source.id}`);
     await expect(page.locator(".c-archive")).toBeVisible({ timeout: 30_000 });
     await expect(page.locator(".c-archive .man li").first()).toContainText("2"); // 2 entries
 
@@ -222,7 +245,7 @@ test("a wrong passphrase is refused, and nothing is read", async ({ page }) => {
   await ensureReaderCanAnswerTheChallenge(page);
   const scratch = mkdtempSync(path.join(tmpdir(), "orbit-archive-e2e-"));
   try {
-    await page.goto(`/household/${source.id}`);
+    await gotoAfterStepUp(page, `/household/${source.id}`);
     await expect(page.locator(".c-archive")).toBeVisible({ timeout: 30_000 });
 
     await page.getByRole("button", { name: "write an archive →" }).click();
