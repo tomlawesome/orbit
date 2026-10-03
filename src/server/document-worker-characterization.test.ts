@@ -1029,6 +1029,28 @@ describe("reconcileDocumentStorage", () => {
     ]);
   });
 
+  it("leaves a live document alone on a transient stat() failure, rather than rejecting it (#1151 SS2-S2)", async () => {
+    world.reconcileRecords = [{
+      documentId: DOCUMENT,
+      householdId: HOUSEHOLD,
+      itemId: ITEM,
+      lifecycle: "available",
+      storageKey: FINAL_KEY,
+    }];
+    // Not ENOENT: `ciphertextExists` only resolves `false` for a confirmed-
+    // absent file and rethrows anything else (EACCES, EIO, ...). That must
+    // not be treated the same as "the file is gone".
+    mocks.ciphertextExists.mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }));
+
+    await reconcileDocumentStorage();
+
+    expect(documentWrites()).toEqual([
+      expect.objectContaining({ failureCode: "processing_interrupted" }),
+    ]);
+    expect(mocks.writes.some((write) => write.table === "audit_log")).toBe(false);
+    expect(mocks.steps).not.toContain("execute:advisoryLock");
+  });
+
   it("leaves a document alone when the lock shows its lifecycle already moved on", async () => {
     world.reconcileRecords = [{
       documentId: DOCUMENT,
