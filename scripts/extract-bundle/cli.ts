@@ -59,6 +59,7 @@ import type { TaggedCandidate } from "../../src/server/documents/extraction-stag
 import { undoTikaMarkdownEscapes } from "../../src/server/documents/tika";
 import { readTruthFile, TRUTH_HELP, truthCsv } from "./truth";
 import { TIKA_VERSION } from "./tika-version.mjs";
+import { dockerRunFailure } from "./docker-run-outcome.mjs";
 
 /** As the application: what Tika sends past this point is not read. */
 const MAX_EXTRACTED_CHARACTERS = 250_000;
@@ -141,9 +142,19 @@ async function findTika(bundleDir: string): Promise<Tika> {
     const stop = () => new Promise<void>((done) => {
       execFile("docker", ["stop", CONTAINER], { windowsHide: true }, () => done());
     });
+    // O2-R4 (#1151): `docker run -d` always exits right after it starts the
+    // container or fails to -- it is never the long-lived process, Tika
+    // inside the container is. Going straight to the two-minute poll below
+    // regardless used to hide a `docker run` failure (a leftover container
+    // from an interrupted earlier run, for instance) behind the unrelated
+    // "Tika never answered" message. Check its own exit first.
+    const runExitCode = await new Promise<number | null>((resolve) => {
+      child.once("exit", resolve);
+    });
+    const failure = dockerRunFailure(runExitCode);
+    if (failure !== undefined) throw new Error(failure);
     if (await waitForTika(LOCAL_TIKA, undefined, 120)) return { url: LOCAL_TIKA, stop };
     await stop();
-    child.kill();
     throw new Error("Docker started but Tika never answered on port 9998");
   }
   if (await commandExists("java")) {
