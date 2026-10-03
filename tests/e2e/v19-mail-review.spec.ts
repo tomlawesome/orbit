@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
-import { householdRegister } from "./support/households";
+import { householdRegister, unrouteAndSweep } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
@@ -209,9 +209,13 @@ test("the manifest row approves in two taps, idempotently under partial success"
        page.request call issued while they are still registered (sweep's own
        sessionHeaders) hangs for the test's whole remaining budget instead of
        resolving or erroring. v19-hit-routing.spec.ts hits the same class of
-       route/request conflict; unrouteAll with ignoreErrors is its fix too. */
-    await page.unrouteAll({ behavior: "ignoreErrors" });
-    await households.sweep(page);
+       route/request conflict; unrouteAll is its fix too. Wrapped in
+       unrouteAndSweep (support/households.ts): on mobile WebKit a test whose
+       own action does not resolve in time has its page and context torn
+       down by Playwright's test timeout while this finally block is still
+       running, and an unrouteAll or sweep call that then finds the target
+       already closed must not replace the real timeout error with its own. */
+    await unrouteAndSweep(page, households);
   }
 });
 
@@ -276,9 +280,13 @@ test("amend then accept from the item view", async ({ page }) => {
        page.request call issued while they are still registered (sweep's own
        sessionHeaders) hangs for the test's whole remaining budget instead of
        resolving or erroring. v19-hit-routing.spec.ts hits the same class of
-       route/request conflict; unrouteAll with ignoreErrors is its fix too. */
-    await page.unrouteAll({ behavior: "ignoreErrors" });
-    await households.sweep(page);
+       route/request conflict; unrouteAll is its fix too. Wrapped in
+       unrouteAndSweep (support/households.ts): on mobile WebKit a test whose
+       own action does not resolve in time has its page and context torn
+       down by Playwright's test timeout while this finally block is still
+       running, and an unrouteAll or sweep call that then finds the target
+       already closed must not replace the real timeout error with its own. */
+    await unrouteAndSweep(page, households);
   }
 });
 
@@ -340,9 +348,13 @@ test("a dismissal takes two taps and mail that failed is visible on the relay", 
        page.request call issued while they are still registered (sweep's own
        sessionHeaders) hangs for the test's whole remaining budget instead of
        resolving or erroring. v19-hit-routing.spec.ts hits the same class of
-       route/request conflict; unrouteAll with ignoreErrors is its fix too. */
-    await page.unrouteAll({ behavior: "ignoreErrors" });
-    await households.sweep(page);
+       route/request conflict; unrouteAll is its fix too. Wrapped in
+       unrouteAndSweep (support/households.ts): on mobile WebKit a test whose
+       own action does not resolve in time has its page and context torn
+       down by Playwright's test timeout while this finally block is still
+       running, and an unrouteAll or sweep call that then finds the target
+       already closed must not replace the real timeout error with its own. */
+    await unrouteAndSweep(page, households);
   }
 });
 
@@ -378,9 +390,13 @@ test("the desk reads a staged paper's page one, on the receipt's own screen and 
        page.request call issued while they are still registered (sweep's own
        sessionHeaders) hangs for the test's whole remaining budget instead of
        resolving or erroring. v19-hit-routing.spec.ts hits the same class of
-       route/request conflict; unrouteAll with ignoreErrors is its fix too. */
-    await page.unrouteAll({ behavior: "ignoreErrors" });
-    await households.sweep(page);
+       route/request conflict; unrouteAll is its fix too. Wrapped in
+       unrouteAndSweep (support/households.ts): on mobile WebKit a test whose
+       own action does not resolve in time has its page and context torn
+       down by Playwright's test timeout while this finally block is still
+       running, and an unrouteAll or sweep call that then finds the target
+       already closed must not replace the real timeout error with its own. */
+    await unrouteAndSweep(page, households);
   }
 });
 
@@ -415,8 +431,12 @@ test("the phone sheet reads a staged paper's page one, and tells a gone mail apa
        page.request call issued while they are still registered (sweep's own
        sessionHeaders) hangs for the test's whole remaining budget instead of
        resolving or erroring. v19-hit-routing.spec.ts hits the same class of
-       route/request conflict; unrouteAll with ignoreErrors is its fix too. */
-    await page.unrouteAll({ behavior: "ignoreErrors" });
-    await households.sweep(page);
+       route/request conflict; unrouteAll is its fix too. Wrapped in
+       unrouteAndSweep (support/households.ts): on mobile WebKit a test whose
+       own action does not resolve in time has its page and context torn
+       down by Playwright's test timeout while this finally block is still
+       running, and an unrouteAll or sweep call that then finds the target
+       already closed must not replace the real timeout error with its own. */
+    await unrouteAndSweep(page, households);
   }
 });
