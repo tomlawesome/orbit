@@ -241,3 +241,45 @@ describe("immutable container version identity", () => {
     expect(healthRoute).not.toMatch(/version|revision/u);
   });
 });
+
+// #1151 A4-Q3: release-metadata-patterns.sh exists so ORBIT_VERSION/
+// ORBIT_REVISION/ORBIT_CHANNEL are validated with one set of patterns, not
+// a hand-copied one per checker -- build-container.sh and the Dockerfile's
+// runner stage both source it (#435). container-entrypoint.sh runs at
+// container startup, after the build stage that sources and then deletes
+// release-metadata-patterns.sh (it never ships in the final image), so it
+// cannot source the file either -- it carries its own third hand-copied
+// set of the same three patterns instead. A drifted copy here would build
+// and pass the other two checks, then refuse to start every container
+// (#1151's own description of the risk). This proves the three patterns
+// stay identical without changing that build shape, the same role
+// src/lib/session-secret.contract.test.ts and O1-Q5's
+// rollback-suffix-contract.test.mjs already play for their own
+// unsourceable duplicate constants.
+describe("container-entrypoint.sh's release-metadata patterns match release-metadata-patterns.sh (#1151 A4-Q3)", () => {
+  const patternsSource = readFileSync(new URL("./release-metadata-patterns.sh", import.meta.url), "utf8");
+
+  function canonicalPattern(name) {
+    const match = patternsSource.match(new RegExp(`^readonly ${name}='([^']*)'$`, "mu"));
+    if (!match) throw new Error(`Could not find readonly ${name}='...' in release-metadata-patterns.sh`);
+    return match[1];
+  }
+
+  function entrypointPattern(subject) {
+    const match = entrypoint.match(new RegExp(`printf '%s\\\\n' "\\$${subject}" \\| grep -Eq '([^']*)'`, "mu"));
+    if (!match) throw new Error(`Could not find the ${subject} grep -Eq pattern in container-entrypoint.sh`);
+    return match[1];
+  }
+
+  it("orbit_version's pattern matches ORBIT_VERSION_PATTERN", () => {
+    expect(entrypointPattern("orbit_version")).toBe(canonicalPattern("ORBIT_VERSION_PATTERN"));
+  });
+
+  it("orbit_revision's pattern matches ORBIT_REVISION_PATTERN", () => {
+    expect(entrypointPattern("orbit_revision")).toBe(canonicalPattern("ORBIT_REVISION_PATTERN"));
+  });
+
+  it("orbit_channel's pattern matches ORBIT_CHANNEL_PATTERN", () => {
+    expect(entrypointPattern("orbit_channel")).toBe(canonicalPattern("ORBIT_CHANNEL_PATTERN"));
+  });
+});
