@@ -31,6 +31,7 @@ import { getDb } from "@/db";
 import { auditLog, localCredentials, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import {
+  absoluteAppLink,
   sendBoundedMail,
   type InvitationMailer,
   type InvitationSendError,
@@ -54,18 +55,11 @@ export type SetupSendError = InvitationSendError;
 
 /**
  * One absolute link, from the instance's public base URL and nothing else —
- * built exactly the way `invitationLink` builds an invitation's.
+ * `absoluteAppLink` (#1151 A1-Q4), the one builder `invitationLink` and
+ * `approvalLink` also use.
  */
 export function setupLink(token: string, environment: NodeJS.ProcessEnv = process.env): string {
-  const configured = environment.APP_URL;
-  if (!configured) throw new AppError("unsafe_input", "The setup link cannot be built", 503);
-  try {
-    const url = new URL(configured);
-    if (!url.hostname || !["http:", "https:"].includes(url.protocol)) throw new Error("unsafe application origin");
-    return new URL(`/setup/${encodeURIComponent(token)}`, url.origin).href;
-  } catch {
-    throw new AppError("unsafe_input", "The setup link cannot be built", 503);
-  }
+  return absoluteAppLink("setup", token, "The setup link cannot be built", environment);
 }
 
 /** What an administrator is told about a send. Never the link, never the token. */
