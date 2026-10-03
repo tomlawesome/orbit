@@ -22,6 +22,7 @@
   import { markDoor } from "../household/[id]/door.js";
   import { HIT_R, spacedBodies } from "./pocket-dial.js";
   import { readSearchDocuments, searchPocket } from "./pocket-search.js";
+  import { BAND_VAR, tlabel } from "./bands.js";
   import ItemDrawer from "./ItemDrawer.svelte";
   import SuggestionDrawer from "./SuggestionDrawer.svelte";
 
@@ -132,14 +133,10 @@
       label: MONTHS[((view ? new Date(view.today + "T00:00:00Z").getUTCMonth() : 7) + k * 3) % 12],
     })),
   );
-  // `ended` is the expiry past its date (#1005): quiet ink, never the alarm.
-  // `unscheduled` (#1151 W1-F3) is an active item with no due date at all —
-  // the same quiet tone, rather than the undefined key that rendered the
-  // search sheet's trail and mark dot with the invalid `var(undefined)`.
-  /** @type {Record<string, string>} */
-  const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok", ended: "--ink-mid", unscheduled: "--ink-mid" };
-  /** @type {(b: { days: number | null }) => string} */
-  const tlabel = (b) => (b.days === null ? "" : b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
+  // BAND_VAR/tlabel: #1151 W1-Q10, shared with CorridorRow.svelte and
+  // +page.svelte's own dial via bands.js, rather than a second, diverging
+  // copy (bands.js's own tlabel is now the null-safe version this file's
+  // old copy had, per #1151 W1-F3's unscheduled band).
   /** @type {(iso: string) => string} */
   const short = (iso) =>
     new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
