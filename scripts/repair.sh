@@ -2882,7 +2882,15 @@ check_application_container() {
 
   if [[ "$env_status" == ok ]]; then
     pinned_image="$(read_environment_value ORBIT_IMAGE 2>/dev/null || true)"
-    [[ "$pinned_image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] || pinned_image=""
+    # SF2-F9: the config contract (src/lib/config-contract.ts's
+    # isValidOrbitImage) allows ORBIT_IMAGE to be either digest-pinned or an
+    # installer-local tag (`orbit-local:<12 lowercase hex>`) — accept both
+    # forms here too, rather than silently dropping every local-tag install
+    # from the stale-container/image-identity comparisons below.
+    if [[ ! "$pinned_image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ &&
+          ! "$pinned_image" =~ ^orbit-local:[0-9a-f]{12}$ ]]; then
+      pinned_image=""
+    fi
   fi
   # Recorded globally for Step 13 (check_image_identity) regardless of how
   # this function returns below — see its declaration near $findings.
