@@ -635,15 +635,38 @@ async function assignedReceiptAttachmentIds(receiptId: string): Promise<string[]
   return rows.map((row) => row.id);
 }
 
+// A dropped request (crash, timeout, lost connection) between claiming a
+// receipt for approval and finishing it leaves `approving` with no further
+// progress and no owner left to retry it: every later approve attempt, with
+// any operation id, would otherwise see a mismatched `approvalOperationId`
+// and refuse permanently as "already used". Past this bound the claim is
+// treated as abandoned rather than active (SR1-R3).
+const APPROVAL_RECLAIM_TIMEOUT_MS = 10 * 60_000;
+
 async function finishMailboxApproval(
   userId: string,
   input: MailboxApproval,
   requestHash: string,
 ): Promise<ApprovalOutcome> {
   const result = await getDb().transaction(async (transaction) => {
-    const [receipt] = await transaction.select().from(imapIngestionMessages)
+    let [receipt] = await transaction.select().from(imapIngestionMessages)
       .where(and(eq(imapIngestionMessages.id, input.source.receiptId), eq(imapIngestionMessages.userId, userId))).for("update").limit(1);
     if (!receipt) throw notFound();
+    if (
+      receipt.status === "approving"
+      && receipt.approvalStartedAt
+      && receipt.approvalStartedAt.getTime() < Date.now() - APPROVAL_RECLAIM_TIMEOUT_MS
+    ) {
+      const [reclaimed] = await transaction.update(imapIngestionMessages).set({
+        status: "pending_review",
+        approvalOperationId: null,
+        approvalResultId: null,
+        approvalRequestSha256: null,
+        approvalStartedAt: null,
+        updatedAt: new Date(),
+      }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "approving"))).returning();
+      if (reclaimed) receipt = reclaimed;
+    }
     if (receipt.approvalOperationId) {
       if (receipt.approvalOperationId !== input.operationId || receipt.approvalRequestSha256 !== requestHash) {
         throw new AppError("reviewed_intake_conflict", "That approval identity was already used", 409);
