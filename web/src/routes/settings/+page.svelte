@@ -651,6 +651,9 @@
       <div role="tabpanel" id="rem-panel-reminders" aria-labelledby="rem-tab-reminders" hidden={tab !== "reminders"}>
         <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed={emailReminders} aria-label="Email reminders" onclick={toggleEmailReminders}><i></i></button></div>
         <div class="kv"><span>browser alerts · this device</span><button class="toggle" aria-pressed={browserAlerts} aria-label="Browser alerts on this device" disabled={alertsBusy || !alertsAvailable} onclick={toggleBrowserAlerts}><i></i></button></div>
+        <!-- #1151 W2-S4: this used to show only on the "sent" tab, downstream
+             of the switches that actually cause it rather than beside them. -->
+        {#if bothOff}<p class="sent-off">both switches are off · nothing more will be sent until one is on</p>{/if}
         <div class="kv"><span>first warning</span><b>{view.reminders.firstWarning}</b></div>
         <div class="kv"><span>final warning</span><b>{view.reminders.finalWarning}</b></div>
         <div class="kv"><span>outbound mail</span><span><b class="on">{view.reminders.outboundMail}</b> · by your administrator</span></div>
