@@ -11,6 +11,12 @@ readonly journal_path="$restore_root/restore.journal"
 readonly secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
 readonly document_kek_file="$secrets_directory/document-kek"
 readonly bundle_format_version="1"
+# Shared with backup.sh (#1151 O2-R3): both scripts stop orbit-app and cut
+# over the document tree/database, and nothing serialized a restore against
+# a concurrent backup -- a backup finishing mid-restore could start
+# orbit-app back up during restore's own document-tree cutover.
+readonly lock_file="${ORBIT_BACKUP_RESTORE_LOCK_FILE:-$backup_directory/.orbit-backup-restore.lock}"
+lock_fd=""
 # An empty report means either "no rows" or "the query never ran", and only the
 # second is a reason to stop. The database emits this as the last line of every
 # report so execution is proven positively, independently of psql's exit code,
@@ -55,7 +61,20 @@ require_tools() {
   command -v stat >/dev/null 2>&1 || fail 'preflight/tools failed; stat is required.'
   command -v sync >/dev/null 2>&1 || fail 'preflight/tools failed; sync is required.'
   command -v curl >/dev/null 2>&1 || fail 'preflight/tools failed; curl is required.'
+  command -v flock >/dev/null 2>&1 || fail 'preflight/tools failed; flock is required.'
   [[ -f "$environment_file" ]] || fail 'preflight/configuration failed; the Orbit environment file is missing.'
+}
+
+# #1151 O2-R3: held for the whole run (both --recover and a normal restore),
+# shared with backup.sh's identical lock file. Opening the fd keeps the
+# lock held until this process exits (bash closes every fd it opened on
+# exit), so there is no separate unlock step.
+acquire_backup_restore_lock() {
+  exec {lock_fd}>"$lock_file" || fail "preflight/lock failed; could not open the backup/restore lock file at ${lock_file}."
+  if ! flock -n "$lock_fd"; then
+    printf 'Orbit restore: another backup or restore is already running; waiting for it to finish...\n' >&2
+    flock "$lock_fd" || fail "preflight/lock failed; could not acquire the backup/restore lock at ${lock_file}."
+  fi
 }
 
 # The contract (src/lib/config-contract.ts) accepts DOCUMENT_KEK as either a
@@ -985,6 +1004,7 @@ require_tools
 mkdir -p "$backup_directory"
 chmod 700 "$backup_directory"
 [[ ! -L "$restore_root" ]] || fail 'preflight/configuration failed; the restore evidence directory must not be a symbolic link.'
+acquire_backup_restore_lock
 
 if [[ "$recover_mode" == true ]]; then
   [[ -z "$backup_file" ]] || fail 'usage failed; --recover does not accept a new backup bundle.'
