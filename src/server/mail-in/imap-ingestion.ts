@@ -963,6 +963,24 @@ export async function runImapIngestionCycle(
           await getDb().update(imapIngestionMessages).set({ status: "quarantined", receiptStatus: "cancelled", failureCode: "recipient_mismatch", attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, attachmentProcessingNextAttemptAt: null, updatedAt: new Date() })
             .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "processing")));
         }
+        /* A resume can land between the pause check above and this receipt
+           being recorded (A2-R3): `setRelayIngestPaused`'s own bulk update
+           only moves rows that are already `held` at the moment it runs, so
+           a row inserted `held` from that stale check afterwards is not
+           caught and would otherwise sit there until the next pause/resume.
+           Re-check right away and catch up this one row if the member has
+           since resumed, the same transition the resume itself would apply. */
+        if (receipt && held && receipt.status === "held" && !(await relayIngestIsPaused(userId!))) {
+          await getDb().update(imapIngestionMessages).set({
+            status: "processing",
+            receiptStatus: "processing",
+            failureCode: null,
+            attachmentProcessingNextAttemptAt: new Date(),
+            attachmentProcessingLockedAt: null,
+            attachmentProcessingLeaseToken: null,
+            updatedAt: new Date(),
+          }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "held")));
+        }
         /* Unattributed mail is answered once, where the conditions allow, and
            then deleted: nothing is kept for an administrator or anyone else.
            The delete happens after the read-only pass, in its own read-write
