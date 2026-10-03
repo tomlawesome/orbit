@@ -55,7 +55,8 @@
   });
 
   /** Closing the tab or reloading: beforeNavigate never sees this, so the
-      browser's own beforeunload prompt is the only honest warning left. */
+      browser's own beforeunload prompt is the only honest warning left.
+      @param {BeforeUnloadEvent} event */
   function onBeforeUnload(event) {
     if (!form?.isDirty()) return;
     event.preventDefault();
