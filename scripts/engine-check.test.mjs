@@ -175,7 +175,7 @@ describe("default mode (ORBIT_ENGINE_CHECK unset): behavior-preserving proxy", (
     expect(result.status).toBe(direct.status);
   });
 
-  it("rejects an unrecognised flag with a usage error (exit 2), before touching docker or configure.sh", () => {
+  it("rejects an unrecognised flag with a usage error (exit 2)", () => {
     const targetDir = makeFixture();
     const result = runEngineCheck(targetDir, ["--bogus"]);
     expect(result.status).toBe(2);
