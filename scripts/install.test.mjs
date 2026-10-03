@@ -1348,6 +1348,12 @@ describe("install.sh", () => {
       "phase=configuration component=configuration state=completed reason=configuration-migration action=verify",
       "phase=oidc component=oidc state=completed reason=provider-discovery action=verify",
       "phase=compose component=compose state=completed reason=compose-validation action=check",
+      // #1151 O1-Q2: the application component gets the same starting/
+      // completed pair every sibling service-preparation component gets,
+      // even though no pull call runs here (it was already pulled during
+      // the identity phase) -- never a bare "completed" a UI tracking
+      // per-component state would see with no matching "starting".
+      "phase=preparation component=application state=starting reason=service-preparation action=pull",
       "phase=preparation component=application state=completed reason=service-preparation action=pull",
       "phase=database component=database state=healthy reason=database-health action=health",
       "phase=application component=application state=healthy reason=application-health action=health",
