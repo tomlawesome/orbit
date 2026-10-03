@@ -47,6 +47,8 @@ const mocks = vi.hoisted(() => ({
   getDb: vi.fn(),
   verifyMigrationIntegrity: vi.fn(),
   verifyMigrationJournalComplete: vi.fn(),
+  readAppliedMigrationHashes: vi.fn(),
+  readExpectedMigrationHashes: vi.fn(),
   migrate: vi.fn(),
   ensureMigrationRunsTable: vi.fn(),
   recordMigrationOutcome: vi.fn(),
@@ -109,6 +111,8 @@ vi.mock("@/db", () => ({
 vi.mock("@/db/migration-integrity", () => ({
   verifyMigrationIntegrity: mocks.verifyMigrationIntegrity,
   verifyMigrationJournalComplete: mocks.verifyMigrationJournalComplete,
+  readAppliedMigrationHashes: mocks.readAppliedMigrationHashes,
+  readExpectedMigrationHashes: mocks.readExpectedMigrationHashes,
   MigrationIntegrityError: mocks.MigrationIntegrityError,
 }));
 vi.mock("drizzle-orm/postgres-js/migrator", () => ({ migrate: mocks.migrate }));
@@ -163,6 +167,8 @@ describe("strict startup ordering", () => {
     mocks.validateStartupConfiguration.mockReset();
     mocks.verifyMigrationIntegrity.mockReset();
     mocks.verifyMigrationJournalComplete.mockReset();
+    mocks.readAppliedMigrationHashes.mockReset();
+    mocks.readExpectedMigrationHashes.mockReset();
     mocks.migrate.mockReset();
     mocks.ensureMigrationRunsTable.mockReset();
     mocks.recordMigrationOutcome.mockReset();
@@ -369,7 +375,43 @@ describe("strict startup ordering", () => {
       reason: "migration_failed",
       action: "check_migrations",
       impact: "migration_blocked",
+      // #1151 A4-R1: some bounded word for what failed, never the driver's
+      // own message (asserted below) -- `readAppliedMigrationHashes` is not
+      // mocked on this suite's `@/db/migration-integrity`, so this is the
+      // helper's own fallback, exactly as a dead connection would hit too.
+      detail: "migration failed, sqlstate unknown",
     });
+    expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain("private SQL detail");
+  });
+
+  it("names which migration and its sqlstate when the journal can say so (#1151 A4-R1)", async () => {
+    const { registerNode } = await import("./boot");
+    const failure = Object.assign(new Error("duplicate key value violates unique constraint \"users_email_key\""), {
+      code: "23505",
+    });
+    mocks.migrate.mockRejectedValueOnce(failure);
+    // The journal shows two migrations applied; the third -- the one
+    // migrate() was presumably mid-way through -- is what the operator
+    // needs named.
+    mocks.readAppliedMigrationHashes.mockResolvedValueOnce(["hash-a", "hash-b"]);
+    mocks.readExpectedMigrationHashes.mockResolvedValueOnce([
+      { tag: "0001_a", hash: "hash-a" },
+      { tag: "0002_b", hash: "hash-b" },
+      { tag: "0003_c", hash: "hash-c" },
+    ]);
+
+    await expect(registerNode()).rejects.toThrow("migration_failed");
+
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "startup.migration",
+      state: "exhausted",
+      reason: "migration_failed",
+      action: "check_migrations",
+      impact: "migration_blocked",
+      detail: "migration 0003_c failed, sqlstate 23505",
+    });
+    // Never the raw constraint-violation message or the email it names.
+    expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain("users_email_key");
   });
 
   it("still runs and completes migrate() when ensuring the outcome table fails, without masking success", async () => {
@@ -397,9 +439,11 @@ describe("strict startup ordering", () => {
       reason: "migration_failed",
       action: "check_migrations",
       impact: "migration_blocked",
+      detail: "migration failed, sqlstate unknown",
     });
     expect(JSON.stringify(mocks.log.error.mock.calls) + JSON.stringify(mocks.log.warn.mock.calls))
       .not.toContain("connection refused at 10.0.0.5");
+    expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain("private SQL detail");
   });
 
   it("still starts workers when recording a succeeded outcome row fails", async () => {
