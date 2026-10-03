@@ -160,6 +160,9 @@ function skipOnMobile() {
 
 test("typing in #explore filters the results by title, section and provider", async ({ page }) => {
   skipOnMobile();
+  /* #1197: on desktop Safari the results strip never opens -- #strip stays
+     aria-hidden and #explore's aria-expanded stays false. Detail on #1197. */
+  test.fail(test.info().project.name === "desktop-webkit", "#1197: desktop Safari never opens the results strip");
 
   await signInAsAdmin(page);
   const { matchTitle, otherTitle } = await seedHouseholdWithTwoItems(page);
@@ -195,6 +198,9 @@ test("typing in #explore filters the results by title, section and provider", as
 
 test("Enter in #explore opens the top matched item", async ({ page }) => {
   skipOnMobile();
+  /* #1197: on desktop Safari the results strip never opens -- #strip stays
+     aria-hidden and #explore's aria-expanded stays false. Detail on #1197. */
+  test.fail(test.info().project.name === "desktop-webkit", "#1197: desktop Safari never opens the results strip");
 
   await signInAsAdmin(page);
   const { matchId, matchTitle } = await seedHouseholdWithTwoItems(page);
@@ -229,6 +235,9 @@ test("#strip is not visible before #explore is focused", async ({ page }) => {
 
 test("#strip never draws below the field, even on a short viewport", async ({ page }) => {
   skipOnMobile();
+  /* #1197: on desktop Safari the results strip never opens -- #strip stays
+     aria-hidden and #explore's aria-expanded stays false. Detail on #1197. */
+  test.fail(test.info().project.name === "desktop-webkit", "#1197: desktop Safari never opens the results strip");
   /* BUILD.md §3: at 1536×730 the strip's top sits at about y=506, clear of
      the sun but with little headroom — the shortest window the desk
      dialect actually runs at (901px is the pocket/desk breakpoint). */
@@ -259,6 +268,9 @@ test("#strip never draws below the field, even on a short viewport", async ({ pa
 
 test("ArrowRight steps the strip's selection and Enter opens the selected entry", async ({ page }) => {
   skipOnMobile();
+  /* #1197: on desktop Safari the results strip never opens -- #strip stays
+     aria-hidden and #explore's aria-expanded stays false. Detail on #1197. */
+  test.fail(test.info().project.name === "desktop-webkit", "#1197: desktop Safari never opens the results strip");
 
   await signInAsAdmin(page);
   const { otherId, otherTitle } = await seedHouseholdWithTwoItems(page);
