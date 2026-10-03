@@ -49,8 +49,8 @@
   /** @typedef {AdminView["users"][number]} Person */
   /** @typedef {AdminView["households"][number]} System */
 
-  /** @type {{ view: AdminView | null, fixtures: boolean, actorHasPassword: boolean, provenIntent: string, draft: Draft, challenge: Challenge, reread: () => Promise<void>, spent: () => void }} */
-  let { view, fixtures, actorHasPassword, provenIntent, draft = $bindable(), challenge, reread, spent } = $props();
+  /** @type {{ view: AdminView | null, fixtures: boolean, actorHasPassword: boolean, provenIntent: string, resumedResendPersonId: string | null, draft: Draft, challenge: Challenge, reread: () => Promise<void>, spent: () => void }} */
+  let { view, fixtures, actorHasPassword, provenIntent, resumedResendPersonId, draft = $bindable(), challenge, reread, spent } = $props();
 
   /** @param {unknown} error */
   const said = (error) => /** @type {{ message?: string }} */ (error)?.message ?? String(error);
@@ -580,9 +580,26 @@
     const wanted = new URLSearchParams(location.search).get("localuser");
     if (wanted) delivery = /** @type {any} */ (SETUP_LINK_FIXTURES)[wanted] ?? SETUP_LINK_FIXTURES.sent;
   });
-  /* Back from the identity provider with a proof: pick the invitation up. */
+  /* Back from the identity provider with a proof: pick the errand up where
+     it was left (#1151 A1-F2) — one sheet per intent, the same way the
+     desk reopens its own form under each. `system_create` has nothing
+     typed to restore yet (the challenge fires before the name field is
+     ever shown), so reopening empty is already the fix; `setup_link_issue`
+     needs the person back, carried from the desk's sessionStorage draft
+     since this layout's own `resendFor` is a whole Person, not an id. */
   $effect(() => {
-    if (provenIntent === "local_user_create" && view) inviteOpen = true;
+    if (!view) return;
+    if (provenIntent === "local_user_create") inviteOpen = true;
+    if (provenIntent === "system_create") { systemName = ""; systemOpen = true; }
+    if (provenIntent === "setup_link_issue" && resumedResendPersonId) {
+      const person = view.users.find((one) => one.id === resumedResendPersonId);
+      if (person) {
+        resendFor = person;
+        resendDays = SETUP_LINK_DAYS.fallback;
+        resendPassword = "";
+        resendOpen = true;
+      }
+    }
   });
 </script>
 
