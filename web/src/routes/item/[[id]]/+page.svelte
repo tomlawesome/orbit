@@ -380,9 +380,30 @@
      `undo` is a real undo: there is no command that takes a completion back,
      and a reschedule would leave the completion in the item's history.
      Leaving the page sends it at once. */
-  /** @typedef {{ build: () => object, leave: boolean, timer: ReturnType<typeof setTimeout> | undefined, done: boolean }} HeldCompletion */
+  /** @typedef {{ command: object, leave: boolean, timer: ReturnType<typeof setTimeout> | undefined, done: boolean }} HeldCompletion */
   /** @type {HeldCompletion | null} */
   let pending = null;
+  /** The key a held completion is stashed under (#1151 W1-R5) so a flush cut
+      off by the page actually unloading — not merely refused — is picked up
+      on the next load instead of vanishing with no trace. One slot: this
+      screen only ever holds one completion at a time. */
+  const HELD_COMPLETION_KEY = "orbit:pending-completion";
+  /** @param {object} command */
+  function stashHeldCompletion(command) {
+    try { localStorage.setItem(HELD_COMPLETION_KEY, JSON.stringify({ command })); } catch { /* best effort */ }
+  }
+  function clearHeldCompletionStash() {
+    try { localStorage.removeItem(HELD_COMPLETION_KEY); } catch { /* best effort */ }
+  }
+  /** @returns {object | null} */
+  function readHeldCompletionStash() {
+    try {
+      const raw = localStorage.getItem(HELD_COMPLETION_KEY);
+      return raw ? JSON.parse(raw).command : null;
+    } catch {
+      return null;
+    }
+  }
   /** @param {ItemRecord} item */
   function tapComplete(item) {
     if (item.costMinor !== null && item.costMinor !== undefined) { act("complete", item); return; }
@@ -395,14 +416,25 @@
    */
   function holdCompletion(item, fields) {
     sendPending();
+    /* Built once, not per send (same reasoning as the create draft's id,
+       #1151 W1-R2/W1-R3): a retry reuses the exact command, version guard
+       included, rather than minting a new activity id each time it is
+       resent. */
+    const command = completeCommand(item, fields);
+    stashHeldCompletion(command);
     /** @type {HeldCompletion} */
-    const job = { build: () => completeCommand(item, fields), leave: !fields.nextDate, timer: undefined, done: false };
+    const job = { command, leave: !fields.nextDate, timer: undefined, done: false };
     job.timer = setTimeout(() => firePending(job), WAKE_HOLD_MS);
     pending = job;
     /* The date first: the wake is one line and ellipsises, and the card above
        already names the item; the live region still reads the whole line. */
     wake(`Completed${fields.nextDate ? ` · next due ${shortDate(fields.nextDate)}` : ""} · ${item.title}`, {
-      undo: () => { clearTimeout(job.timer); job.done = true; if (pending === job) pending = null; },
+      undo: () => {
+        clearTimeout(job.timer);
+        job.done = true;
+        if (pending === job) pending = null;
+        clearHeldCompletionStash();
+      },
     });
   }
   /** @param {HeldCompletion} job */
@@ -410,23 +442,46 @@
     if (job.done) return;
     job.done = true;
     if (pending === job) pending = null;
-    await run(job.build, { leave: job.leave });
+    await run(() => job.command, { leave: job.leave });
     if (problem) wake(problem, { failure: true });
+    else clearHeldCompletionStash();
   }
-  /* Leaving before the wake has gone: the completion is sent now, not lost. */
+  /* Leaving before the wake has gone: the completion is sent now, not lost
+     — and stashed before it is sent (above), so even a send this page never
+     lives to see the answer to is picked up on the next load (#1151 W1-R5). */
   function sendPending() {
     const job = pending;
     if (!job || job.done) return;
     clearTimeout(job.timer);
     job.done = true;
     pending = null;
-    applyCommand(job.build()).catch(() => {});
+    applyCommand(job.command).then(clearHeldCompletionStash).catch(() => {});
   }
   beforeNavigate(() => { sendPending(); });
   $effect(() => {
     addEventListener("pagehide", sendPending);
     return () => { removeEventListener("pagehide", sendPending); };
   });
+  /** A completion stashed by a previous visit that never confirmed it sent
+      (#1151 W1-R5): picked up here instead of the item just quietly staying
+      "not completed" with nothing said. A version conflict means somebody
+      already holds this change — most likely the original send landing
+      after all — so that alone is treated as the stash's own success. */
+  function retryHeldCompletionStash() {
+    const command = readHeldCompletionStash();
+    if (!command) return;
+    applyCommand(command).then(async () => {
+      clearHeldCompletionStash();
+      await rereadUnlessLeaving();
+    }).catch(async (error) => {
+      if (error instanceof WorkspaceError && error.code === "version_conflict") {
+        clearHeldCompletionStash();
+        await rereadUnlessLeaving();
+        return;
+      }
+      problem = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
+    });
+  }
 
   /* ---- the papers on a phone ---------------------------------------------
      A paper opens the preview sheet (§18: "on a phone it is the bottom
@@ -762,6 +817,7 @@
     if (sky) mountTiledSky(sky, "belt");
     /* Shallow routing is only legal once the router is up. */
     routerReady = true;
+    retryHeldCompletionStash();
   });
 
   /** The address follows the apex: centring another item makes the one in the

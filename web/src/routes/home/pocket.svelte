@@ -4,7 +4,7 @@
   import { beforeNavigate, goto, onNavigate } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { applyCommand, readItemDocuments } from "$lib/data/workspace.js";
+  import { WorkspaceError, applyCommand, readItemDocuments } from "$lib/data/workspace.js";
   import { completeCommand, nextDateAfter } from "$lib/data/commands.js";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf } from "$lib/data/chart.js";
   import { money } from "$lib/format.js";
@@ -472,9 +472,31 @@
      record sheet up; one with nothing to record completes on the tap, held
      for the wake's four seconds so `undo` is a real undo, and sent at once
      if the page is left first. */
-  /** @typedef {{ send: () => Promise<void>, timer: ReturnType<typeof setTimeout> | undefined, done: boolean }} HeldCompletion */
+  /** @typedef {{ command: object, timer: ReturnType<typeof setTimeout> | undefined, done: boolean }} HeldCompletion */
   /** @type {HeldCompletion | null} */
   let held = null;
+  /** The key a held completion is stashed under (#1151 W1-S3), the same
+      reasoning and the same literal key as item/[[id]]/+page.svelte's own
+      (W1-R5): a flush cut off by the page actually unloading — not merely
+      refused — is picked up on the next load instead of silently failing.
+      One slot: this screen only ever holds one completion at a time. */
+  const HELD_COMPLETION_KEY = "orbit:pending-completion";
+  /** @param {object} command */
+  function stashHeldCompletion(command) {
+    try { localStorage.setItem(HELD_COMPLETION_KEY, JSON.stringify({ command })); } catch { /* best effort */ }
+  }
+  function clearHeldCompletionStash() {
+    try { localStorage.removeItem(HELD_COMPLETION_KEY); } catch { /* best effort */ }
+  }
+  /** @returns {object | null} */
+  function readHeldCompletionStash() {
+    try {
+      const raw = localStorage.getItem(HELD_COMPLETION_KEY);
+      return raw ? JSON.parse(raw).command : null;
+    } catch {
+      return null;
+    }
+  }
   /** @param {{ id: string, title: string }} one */
   function completeRow(one) {
     const raw = rawItems.get(one.id);
@@ -488,19 +510,21 @@
     sendHeld();
     const completedDate = view.today;
     const nextDate = nextDateAfter(completedDate, raw.recurrenceMonths) ?? undefined;
+    /* Built once, not per send (#1151 W1-R2/W1-R3's own reasoning): a retry
+       reuses the exact command, version guard included. */
+    const command = completeCommand(/** @type {any} */ ({ ...raw, householdId }), { completedDate, nextDate });
+    stashHeldCompletion(command);
     /** @type {HeldCompletion} */
-    const job = {
-      done: false,
-      timer: undefined,
-      send: async () => {
-        await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId }), { completedDate, nextDate }));
-        await onchanged?.();
-      },
-    };
+    const job = { command, done: false, timer: undefined };
     job.timer = setTimeout(() => fireHeld(job), WAKE_HOLD_MS);
     held = job;
     wake(`Completed${nextDate ? ` · next due ${short(nextDate)}` : ""} · ${one.title}`, {
-      undo: () => { clearTimeout(job.timer); job.done = true; if (held === job) held = null; },
+      undo: () => {
+        clearTimeout(job.timer);
+        job.done = true;
+        if (held === job) held = null;
+        clearHeldCompletionStash();
+      },
     });
   }
   /** @param {HeldCompletion} job */
@@ -509,23 +533,50 @@
     job.done = true;
     if (held === job) held = null;
     try {
-      await job.send();
+      await applyCommand(job.command);
+      clearHeldCompletionStash();
+      await onchanged?.();
     } catch (error) {
       wake(/** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again", { failure: true });
     }
   }
+  /* Leaving before the wake has gone: the completion is sent now, not lost
+     — and stashed before it is sent (above), so even a send this screen
+     never lives to see the answer to is picked up on the next load
+     (#1151 W1-S3). */
   function sendHeld() {
     const job = held;
     if (!job || job.done) return;
     clearTimeout(job.timer);
     job.done = true;
     held = null;
-    job.send().catch(() => {});
+    applyCommand(job.command).then(clearHeldCompletionStash).catch(() => {});
   }
   beforeNavigate(() => { sendHeld(); });
   $effect(() => {
     addEventListener("pagehide", sendHeld);
     return () => { removeEventListener("pagehide", sendHeld); };
+  });
+  /** A completion stashed by a previous visit that never confirmed it sent
+      (#1151 W1-S3): picked up here instead of staying lost with nothing
+      said. A version conflict means somebody already holds this change —
+      most likely the original send landing after all — so that alone is
+      treated as the stash's own success. Runs once, on mount: nothing it
+      reads is reactive state. */
+  $effect(() => {
+    const command = readHeldCompletionStash();
+    if (!command) return;
+    applyCommand(command).then(async () => {
+      clearHeldCompletionStash();
+      await onchanged?.();
+    }).catch((error) => {
+      if (error instanceof WorkspaceError && error.code === "version_conflict") {
+        clearHeldCompletionStash();
+        onchanged?.();
+        return;
+      }
+      wake(/** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again", { failure: true });
+    });
   });
 
   /* `copy link`: the item's address, the desk's (+page.svelte addressOf),
