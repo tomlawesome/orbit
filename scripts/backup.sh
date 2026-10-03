@@ -151,7 +151,13 @@ create_bundle() {
     > "$work_directory/database.dump"
   [[ -s "$work_directory/database.dump" ]] || fail "PostgreSQL produced an empty backup."
   compose exec -T orbit-db pg_restore --list < "$work_directory/database.dump" >/dev/null
-  compose run --rm --no-deps --entrypoint tar orbit-app -C /var/lib/orbit/documents -cf - . > "$document_archive"
+  # The container's own DOCUMENTS_ROOT (env_file: .env-orbit), not a value
+  # read on the host: matches wherever the app actually writes documents,
+  # including the compose volume mount, which tracks the same variable and
+  # default (#1151 SF2-F1). `--entrypoint tar` cannot expand a variable in
+  # its own argument, so this runs through sh instead.
+  compose run --rm --no-deps --entrypoint sh orbit-app -c \
+    'exec tar -C "${DOCUMENTS_ROOT:-/var/lib/orbit/documents}" -cf - .' > "$document_archive"
   validate_document_archive "$document_archive"
   openssl enc -aes-256-cbc -pbkdf2 -iter 600000 -md sha256 -salt -pass "file:$document_kek_file" \
     -in "$document_archive" -out "$encrypted_documents"

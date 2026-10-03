@@ -38,7 +38,12 @@ services:
       MIGRATE_ON_START: "true"
       WORKER_ENABLED: "true"
     volumes:
-      - orbit-documents-data:/var/lib/orbit/documents
+      # Must track wherever the app actually writes documents (src/server/
+      # documents/config.ts's DOCUMENTS_ROOT, same default) -- mounting the
+      # volume at a fixed path while an operator-set DOCUMENTS_ROOT points
+      # elsewhere means the app writes outside the volume and backups never
+      # see those files (#1151 SF2-F1).
+      - orbit-documents-data:${DOCUMENTS_ROOT:-/var/lib/orbit/documents}
     tmpfs:
       - /tmp/orbit-document-quarantine:rw,noexec,nosuid,nodev,uid=1001,gid=1001,mode=0700,size=64m
       - /run/orbit-secrets:rw,noexec,nosuid,nodev,uid=0,gid=1001,mode=0750,size=1m
