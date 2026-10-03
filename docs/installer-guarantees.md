@@ -328,10 +328,12 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
   proves a release is genuinely signed, not that it is the newest one.
   Whoever controls what `get-orbit.sh` downloads from could silently serve
   an older, still-validly-signed release instead of the current `latest`.
-  Pinning `ORBIT_VERSION=vX.Y.Z` closes this: both `get-orbit.sh` and
-  `install.sh` refuse a manifest whose own `version` field does not equal
-  the pin (guarantee 6, and the matching check in `install.sh`), so an older
-  release can only ever be installed by asking for it by name.
+  Pinning to a specific release closes this, though the variable differs by
+  entry point: `get-orbit.sh` reads `ORBIT_VERSION=vX.Y.Z` (guarantee 6);
+  `install.sh` has no `ORBIT_VERSION` and is pinned instead with
+  `ORBIT_CHANNEL=vX.Y.Z`. Either way the script refuses a manifest whose own
+  `version` field does not equal the pin, so an older release can only ever
+  be installed by asking for it by name.
 
 ---
 
