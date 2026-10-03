@@ -167,12 +167,21 @@ export function warningDaysOrDefault(stored: number | null, fallback: number, fl
  * duplicate. Both channels are open at this level because the item said
  * nothing about channels; the recipient's own toggles still gate them in
  * `enabledDeliveryChannels`.
+ *
+ * Sorted furthest-out first on BOTH branches (#1151 A4-F1): item rules come
+ * from a plain `SELECT` with no `ORDER BY`, so returning them as-is handed
+ * back whatever order the database felt like that day. A reader that then
+ * calls index 0 "first" and anything else "final" (`warningFor` in
+ * notification-history.ts, which is the only reason order matters here at
+ * all) could label them backwards. Sorting once, at the source, is simpler
+ * than asking every reader to sort for itself and safer than asking none of
+ * them to.
  */
 export function effectiveReminderOffsets(
   itemRules: readonly ReminderOffset[],
   recipient: RecipientWarningDays,
 ): ReminderOffset[] {
-  if (itemRules.length) return [...itemRules];
+  if (itemRules.length) return [...itemRules].sort((left, right) => right.daysBefore - left.daysBefore);
   const first = warningDaysOrDefault(recipient.firstWarningDays, DEFAULT_FIRST_WARNING_DAYS, 1);
   const final = warningDaysOrDefault(recipient.finalWarningDays, DEFAULT_FINAL_WARNING_DAYS, 0);
   return [...new Set([first, final])]
