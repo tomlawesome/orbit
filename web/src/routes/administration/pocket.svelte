@@ -475,33 +475,39 @@
   }
   const mailOk = $derived(mailOutcome === "verified" || mailOutcome === "delivered");
 
-  /* The two tests (#1071): a pill on its row that stays until the next
-     test. The server does not remember the answer yet, so a reload forgets
-     it. */
-  /** @type {{ mailbox: (ReturnType<typeof testVerdict> & { at: string }) | null, relay: (ReturnType<typeof testVerdict> & { at: string }) | null }} */
-  let tests = $state({ mailbox: null, relay: null });
+  /* The two tests (#1071): the server remembers each one's last answer
+     (owner, 2026-09-19: "the server remembers the last mail-test result
+     so the pill survives a reload — Yes") — read the same way the desk
+     layout reads it, off the screen's own re-read, rather than the
+     throwaway local copy this used to keep, which forgot everything on a
+     reload (#1151 A1-Q6). */
+  const mailProbes = $derived(view?.operations?.mailProbes ?? { mailbox: null, relay: null });
   /** @type {"mailbox" | "relay" | null} */
   let testing = $state(null);
+  /** @type {string | null} */
+  let testProblem = $state(null);
   const TESTS = /** @type {const} */ (["mailbox", "relay"]);
   /** @param {"mailbox" | "relay"} which */
   async function runTest(which) {
     if (testing) return;
     testing = which;
+    testProblem = null;
     try {
-      const { result } = await testMail(which);
-      tests[which] = { ...testVerdict(result), at: new Date().toISOString() };
+      await testMail(which);
+      await reread();
     } catch (error) {
-      tests[which] = { word: "failed", tone: "over", reason: said(error), at: new Date().toISOString() };
+      testProblem = said(error);
     } finally {
       testing = null;
     }
   }
   /** @param {"mailbox" | "relay"} which */
   const testMeta = (which) => {
-    const test = tests[which];
     if (testing === which) return "checking now";
-    if (!test) return which === "mailbox" ? "not tested this visit" : "not tested this visit";
-    return [test.reason, "just now"].filter(Boolean).join(" · ");
+    const probe = mailProbes[which];
+    if (!probe) return "not tested yet";
+    const verdict = testVerdict(probe.result);
+    return verdict.reason || plainly(probe.result);
   };
 
   /* Rotate every address (§2.12 7): the administrator chooses how long the
@@ -779,16 +785,18 @@
           </div>
         </div>
         {#each TESTS as which (which)}
-          {@const test = tests[which]}
-          {#if test || testing === which}
+          {@const probe = mailProbes[which]}
+          {@const verdict = probe ? testVerdict(probe.result) : null}
+          {#if verdict || testing === which}
             <Row title={which === "mailbox" ? "incoming mailbox" : "outgoing relay"} metaFace="ui" meta={testMeta(which)}>
-              {#snippet mark()}<span class="p-body {testing === which ? 'up breathing' : test?.tone ?? 'ended'}"></span>{/snippet}
+              {#snippet mark()}<span class="p-body {testing === which ? 'up breathing' : verdict?.tone ?? 'ended'}"></span>{/snippet}
               {#snippet end()}
-                <span class="ad-state {testing === which ? 'up ad-checking' : test?.tone ?? ''}">{testing === which ? "checking…" : test?.word}</span>
+                <span class="ad-state {testing === which ? 'up ad-checking' : verdict?.tone ?? ''}">{testing === which ? "checking…" : verdict?.word}</span>
               {/snippet}
             </Row>
           {/if}
         {/each}
+        {#if testProblem}<p class="p-error ad-inset ad-lastline" role="alert">{testProblem}</p>{/if}
         {#each view.relay as [label, value, extra] (label)}
           <Row title={label} meta={label === "ingest" ? ingestShort(value) : value} trail={extra === "on" ? "on" : ""} trailTone="var(--ok-text)">
             {#snippet mark()}<span class="p-body {extra === 'on' ? 'ok' : 'ended'}"></span>{/snippet}
