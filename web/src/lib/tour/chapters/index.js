@@ -36,13 +36,15 @@ import yours from "./12-yours.js";
  */
 
 /**
- * The film, in order. Four of the twelve are cut; the rest arrive the same
- * way, each as its own file beside 01-arrive.js and one import line here.
+ * The film, in order (#1151 W3-Q3: all twelve are cut; this list used to
+ * say only four were, a stale work-in-progress note the imports above had
+ * already outgrown). A thirteenth chapter arrives the same way, as its own
+ * file beside 01-arrive.js and one import line here.
  *
- * The list is DELIBERATELY not padded with placeholders for the eight still
- * to come: the transport measures what is here and puts its ticks at the
+ * The list is DELIBERATELY not padded with placeholders for a chapter not
+ * yet cut: the transport measures what is here and puts its ticks at the
  * starts it can see, so an empty chapter would take a tick and a name and
- * teach nothing. The gaps close as the files land.
+ * teach nothing.
  *
  * @type {Chapter[]}
  */
