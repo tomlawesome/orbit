@@ -1423,6 +1423,12 @@ prepare_service_images() {
   installer_ui_event preparation database completed service-preparation pull
 
   installer_ui_component=application
+  # No actual pull call: the application image was already resolved and
+  # pulled during the identity phase above. Still emits the same
+  # starting/completed pair every sibling component in this phase gets
+  # (#1151 O1-Q2), so a UI tracking per-component state never sees a
+  # "completed" with no matching "starting".
+  installer_ui_event preparation application starting service-preparation pull
   installer_ui_event preparation application completed service-preparation pull
 
   installer_ui_component=clamav
