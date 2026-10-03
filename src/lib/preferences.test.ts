@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { defaultSections } from "./domain";
 import {
   DEFAULT_THEME_PACK,
+  effectiveReminderOffsets,
   legacyToThemePack,
   sectionPreferenceSchema,
   textSizes,
@@ -89,5 +90,49 @@ describe("personalisation preferences", () => {
 
   it("rejects duplicate section identifiers", () => {
     expect(sectionPreferenceSchema.safeParse([defaultSections[0], defaultSections[0]]).success).toBe(false);
+  });
+});
+
+describe("effectiveReminderOffsets (#1151 A4-F1)", () => {
+  const recipient = { firstWarningDays: 14, finalWarningDays: 3 };
+
+  it("returns an item's own rules furthest-out first, whatever order they were read in", () => {
+    // A plain SELECT with no ORDER BY can hand rows back in either order --
+    // this is the row order a reader (`warningFor`) must not be able to get
+    // backwards.
+    const closestFirst = effectiveReminderOffsets(
+      [
+        { daysBefore: 3, emailEnabled: true, pushEnabled: true },
+        { daysBefore: 14, emailEnabled: true, pushEnabled: true },
+      ],
+      recipient,
+    );
+    expect(closestFirst.map((offset) => offset.daysBefore)).toEqual([14, 3]);
+
+    const furthestFirst = effectiveReminderOffsets(
+      [
+        { daysBefore: 14, emailEnabled: true, pushEnabled: true },
+        { daysBefore: 3, emailEnabled: true, pushEnabled: true },
+      ],
+      recipient,
+    );
+    expect(furthestFirst.map((offset) => offset.daysBefore)).toEqual([14, 3]);
+  });
+
+  it("sorts three or more of an item's own rules the same way", () => {
+    const offsets = effectiveReminderOffsets(
+      [
+        { daysBefore: 1, emailEnabled: true, pushEnabled: true },
+        { daysBefore: 30, emailEnabled: true, pushEnabled: true },
+        { daysBefore: 7, emailEnabled: true, pushEnabled: true },
+      ],
+      recipient,
+    );
+    expect(offsets.map((offset) => offset.daysBefore)).toEqual([30, 7, 1]);
+  });
+
+  it("still sorts the fallback pair furthest-out first, as it always has", () => {
+    const offsets = effectiveReminderOffsets([], recipient);
+    expect(offsets.map((offset) => offset.daysBefore)).toEqual([14, 3]);
   });
 });
