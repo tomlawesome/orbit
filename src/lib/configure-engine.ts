@@ -708,12 +708,35 @@ export function applySetOidcSecret(deployDir: string, secret: string): string {
   ensureSecretsDirectory(deployDir);
 
   const secretPath = join(deployDir, OIDC_SECRET_RELATIVE_PATH);
+  // O1-R10: captured before the write below, so the failure handling that
+  // follows can tell a brand-new secret (safe to remove again on failure)
+  // from a rotation of one .env-orbit already points at (never removed —
+  // its content is already overwritten either way, but the live pointer
+  // must never end up referencing a file this call just deleted).
+  const secretExistedBefore = pathInfo(secretPath).existsFollowing;
   atomicWriteFile(secretPath, secret, 0o600, "installing");
 
-  updateManagedKeys(deployDir, [
-    ["OIDC_CLIENT_SECRET", ""],
-    ["OIDC_CLIENT_SECRET_FILE", CANONICAL_OIDC_SECRET_FILE_PATH],
-  ]);
+  try {
+    updateManagedKeys(deployDir, [
+      ["OIDC_CLIENT_SECRET", ""],
+      ["OIDC_CLIENT_SECRET_FILE", CANONICAL_OIDC_SECRET_FILE_PATH],
+    ]);
+  } catch (error) {
+    // O1-R10: these are two separate atomic writes (the secret file, then
+    // its .env-orbit pointer) — anything short of an uncatchable kill
+    // between them (a lock conflict, a full disk, ...) must not leave a
+    // secret this call just created sitting on disk with nothing pointing
+    // at it, so a first-time write is rolled back on failure rather than
+    // left orphaned.
+    if (!secretExistedBefore) {
+      try {
+        rmSync(secretPath, { force: true });
+      } catch {
+        /* best effort */
+      }
+    }
+    throw error;
+  }
 
   return `Orbit saved the OIDC client secret to ${OIDC_SECRET_RELATIVE_PATH}.`;
 }

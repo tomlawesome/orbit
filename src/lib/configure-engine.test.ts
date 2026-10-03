@@ -478,6 +478,44 @@ describe("applySetOidcSecret", () => {
       expect((error as Error).message).not.toContain(secret);
     }
   });
+
+  // O1-R10: the secret file and its .env-orbit pointer are two separate
+  // atomic writes — anything that stops the second one (here, simulated by
+  // pre-holding the O1-R8 deployment lock) must not leave a first-time
+  // secret orphaned on disk with nothing pointing at it.
+  describe("O1-R10: rolls back a first-time secret write when the .env-orbit pointer update fails", () => {
+    it("removes the just-written secret file", () => {
+      ensureEnvironmentFile(deployDir);
+      const path = join(deployDir, OIDC_SECRET_RELATIVE_PATH);
+      expect(() => statSync(path)).toThrow();
+
+      const lockPath = join(deployDir, ".orbit-engine.lock");
+      writeFileSync(lockPath, "");
+      try {
+        expect(() => applySetOidcSecret(deployDir, "a-brand-new-secret")).toThrow(ConfigureEngineRefusal);
+      } finally {
+        rmSync(lockPath, { force: true });
+      }
+      expect(() => statSync(path)).toThrow();
+    });
+
+    it("never removes a rotation's existing secret, even though its content is already overwritten", () => {
+      ensureEnvironmentFile(deployDir);
+      ensureSecretsDirectory(deployDir);
+      const path = join(deployDir, OIDC_SECRET_RELATIVE_PATH);
+      writeFileSync(path, "the-previous-secret", { mode: 0o600 });
+
+      const lockPath = join(deployDir, ".orbit-engine.lock");
+      writeFileSync(lockPath, "");
+      try {
+        expect(() => applySetOidcSecret(deployDir, "a-rotated-secret")).toThrow(ConfigureEngineRefusal);
+      } finally {
+        rmSync(lockPath, { force: true });
+      }
+      // Still there — a rotation's file is never deleted on this failure path.
+      expect(readFileSync(path, "utf8")).toBe("a-rotated-secret");
+    });
+  });
 });
 
 describe("applyGuidedInit", () => {
