@@ -35,6 +35,9 @@
 .relay-page .kv:last-of-type{border:0}
 .relay-page .kv b{color:var(--ok-text);font-weight:500}
 .relay-page .note{font:10.5px var(--mono);color:var(--ink-quiet);margin-top:16px;line-height:1.8}
+/* #1151 W2-R6: rotate/pause/resume used to swallow a failure outright — same
+   shape as .note, toned as the problem it is rather than small print. */
+.relay-page .problem{font:10.5px var(--mono);color:var(--warm-text);margin-top:16px;line-height:1.8}
 .relay-page .btns{display:flex;gap:10px;margin-top:16px}
 .relay-page .btns button{flex:1;font:12px var(--mono);padding:9px;border-radius:9px;cursor:pointer;
              background:none;border:1px solid var(--line);color:var(--ink-mid)}
