@@ -132,7 +132,7 @@ check_file_safety() {
 
 parse_file() {
   local file="$1" line key value line_number=0 assignment_count=0
-  local -A seen=()
+  local -A seen=() values=()
   parsed_keys=(); schema_present=0; applied_version_present=0; applied_digest_present=0; compose_project_present=0
   schema_value=""; orbit_image_value=""; applied_version_value=""; applied_digest_value=""; compose_project_value=""
   check_file_safety "$file"
@@ -147,6 +147,7 @@ parse_file() {
     key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
     [[ -z "${seen[$key]:-}" ]] || fail_code configuration_syntax
     seen["$key"]=1
+    values["$key"]="$value"
     assignment_count=$((assignment_count + 1)); parsed_keys+=("$key")
     if ! is_allowed "$key"; then
       if is_removed "$key"; then
@@ -171,7 +172,13 @@ parse_file() {
   local secret_file_pair direct_key file_key
   for secret_file_pair in $secret_file_pairs; do
     direct_key="${secret_file_pair%%:*}"; file_key="${secret_file_pair#*:}"
-    if [[ -n "${seen[$direct_key]:-}" && -n "${seen[$file_key]:-}" ]]; then
+    # Mirrors src/lib/config-contract.ts's own `record[direct] &&
+    # record[file]` check: a key present with an empty value is JS-falsy
+    # there, so an empty direct placeholder sitting alongside a populated
+    # _FILE value (the shape configure.sh itself writes, e.g.
+    # "OIDC_CLIENT_SECRET=" beside "OIDC_CLIENT_SECRET_FILE=...") is not a
+    # conflict — only two actually-populated values are.
+    if [[ -n "${values[$direct_key]:-}" && -n "${values[$file_key]:-}" ]]; then
       fail_code configuration_secret_conflict
     fi
   done
