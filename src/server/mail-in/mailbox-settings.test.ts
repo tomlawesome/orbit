@@ -168,12 +168,48 @@ vi.mock("@/db", async () => {
       const name = getTableName(table as never);
       return {
         values(values: Row | Row[]) {
-          const inserted = (Array.isArray(values) ? values : [values])
-            .map((value) => ({ ...defaults[name]?.(), ...value }));
-          rowsOf(name).push(...inserted);
+          const raw = Array.isArray(values) ? values : [values];
+          /* Deferred so onConflictDoNothing/onConflictDoUpdate (A2-R5's
+             ensureRelayRow/materialiseRelayAliases, the first callers this
+             mock has had) can pick the conflict behaviour before anything is
+             applied. `conflictKeys` names the natural key to check: the
+             explicit `target` columns for onConflictDoUpdate, or -- since
+             real callers that use bare onConflictDoNothing() never name one
+             -- every key the caller actually supplied (ensureRelayRow's own
+             `{ userId }`), never a default this mock filled in. */
+          const run = (conflict?: { onUpdate?: Row; conflictKeys: string[] }): Row[] => {
+            const existing = rowsOf(name);
+            const applied: Row[] = [];
+            for (const value of raw) {
+              const keys = conflict?.conflictKeys ?? [];
+              const clash = keys.length > 0
+                ? existing.find((row) => keys.every((key) => (row[key] ?? null) === (value[key] ?? null)))
+                : undefined;
+              if (clash) {
+                if (conflict?.onUpdate) Object.assign(clash, conflict.onUpdate);
+                applied.push(clash);
+                continue;
+              }
+              const inserted = { ...defaults[name]?.(), ...value };
+              existing.push(inserted);
+              applied.push(inserted);
+            }
+            return applied;
+          };
+          const keysOf = (target: unknown[]): string[] =>
+            target.map((column) => columnKeys.get(column)?.key).filter((key): key is string => Boolean(key));
           return {
-            returning: (projection?: unknown) => Promise.resolve(inserted.map((row) => project(projection, name, row))),
-            then: (onFulfilled: (value: number) => unknown) => Promise.resolve(inserted.length).then(onFulfilled),
+            onConflictDoNothing: () => ({
+              then: (onFulfilled: (value: number) => unknown) =>
+                Promise.resolve(run({ conflictKeys: [...new Set(raw.flatMap((value) => Object.keys(value)))] }).length)
+                  .then(onFulfilled),
+            }),
+            onConflictDoUpdate: (config: { target: unknown[]; set: Row }) => ({
+              then: (onFulfilled: (value: number) => unknown) =>
+                Promise.resolve(run({ onUpdate: config.set, conflictKeys: keysOf(config.target) }).length).then(onFulfilled),
+            }),
+            returning: (projection?: unknown) => Promise.resolve(run().map((row) => project(projection, name, row))),
+            then: (onFulfilled: (value: number) => unknown) => Promise.resolve(run().length).then(onFulfilled),
           };
         },
       };
@@ -277,7 +313,7 @@ vi.mock("@/lib/logger", () => ({
 
 import { randomUUID } from "node:crypto";
 import { getTableName } from "drizzle-orm";
-import { auditLog, imapRecipientAliases, mailInMailbox, mailInSecrets } from "@/db/schema";
+import { auditLog, imapRecipientAliases, mailInMailbox, mailInRelays, mailInSecrets, users } from "@/db/schema";
 import { AppError } from "@/lib/errors";
 import { decryptMailInSecret } from "./core/secret-crypto";
 import { imapAliasBaseFromAccount, normalizeImapRecipientAlias } from "./core/imap-recipient";
@@ -286,6 +322,7 @@ import {
   mailboxSettingsInputSchema,
   readMailboxSettings,
   removeMailboxCredential,
+  rotateMailboxAliasKey,
   rotateMailboxPassword,
   runMailboxSetupProbe,
   setMailboxIngestEnabled,
@@ -892,6 +929,46 @@ describe("the alias key follows the account, not the edit", () => {
     await configureMailbox({ ...settings, pollSeconds: 600 });
 
     expect(rows(imapRecipientAliases).map((row) => row.status)).toEqual(["active"]);
+  });
+});
+
+describe("rotateMailboxAliasKey (#1151 A2-R5)", () => {
+  it("rotates every member's relay, keeping the superseded key until its grace lapses", async () => {
+    await configureMailbox();
+    const originalKeyId = mailbox()?.aliasKeySecretId;
+    const userA = randomUUID();
+    const userB = randomUUID();
+    mocks.tables[getTableName(users)] = [{ id: userA }, { id: userB }];
+
+    const result = await rotateMailboxAliasKey(ADMIN, 1, 7);
+
+    expect(mailbox()?.aliasKeySecretId).not.toBe(originalKeyId);
+    // The pointer swap is a short transaction on its own (A2-R5); the
+    // member loop that follows no longer runs inside it, but the end state
+    // is the same: every member rotated, nothing deleted.
+    expect(secretsOfKind("alias_key").map((row) => row.id)).toContain(originalKeyId);
+    expect(secretsOfKind("alias_key")).toHaveLength(2);
+    const relayRows = rows(mailInRelays);
+    expect(relayRows).toHaveLength(2);
+    for (const relay of relayRows) {
+      expect(relay.currentGeneration).toBe(2);
+      expect(relay.previousGeneration).toBe(1);
+    }
+    expect(auditActions()).toContain("mail_in_alias_key_rotated");
+    const rotationAudit = rows(auditLog).find((row) => row.action === "mail_in_alias_key_rotated");
+    expect(rotationAudit?.changes).toMatchObject({ users: 2 });
+    expect(result.aliasPattern).toBe("intake+<code>@example.test");
+  });
+
+  it("seats a member with no relay row yet at generation 1 before rotating them to 2", async () => {
+    await configureMailbox();
+    mocks.tables[getTableName(users)] = [{ id: randomUUID() }];
+    expect(rows(mailInRelays)).toHaveLength(0);
+
+    await rotateMailboxAliasKey(ADMIN, 1, 0);
+
+    expect(rows(mailInRelays)).toHaveLength(1);
+    expect(rows(mailInRelays)[0].currentGeneration).toBe(2);
   });
 });
 
