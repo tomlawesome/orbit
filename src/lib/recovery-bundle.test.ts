@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHmac } from "node:crypto";
 import * as fs from "node:fs";
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -23,12 +23,14 @@ import {
   computeBundleHmac,
   createTar,
   decryptDocumentArchive,
+  decryptDocumentArchiveToFile,
   decryptDocumentKek,
   documentKekFingerprint,
   encryptDocumentArchive,
   encryptDocumentArchiveToFile,
   encryptDocumentKek,
   extractTar,
+  internal,
   isValidBundleHmac,
   isValidDocumentKekFingerprint,
   isValidDocumentKekHex,
@@ -513,6 +515,81 @@ describe("encryptDocumentArchiveToFile streams in bounded chunks (#383)", () => 
     const outputStat = fs.statSync(outputPath);
     expect(outputStat.size).toBeLessThanOrEqual(size + 8 + 8 + 16);
   }, 30_000);
+});
+
+// decryptDocumentArchiveToFile is decryptDocumentArchive's bounded-memory
+// sibling (O2-R9/SR2-R3), modeled on encryptDocumentArchiveToFile above:
+// validateBackupBundleContents now uses it instead of
+// readRegularFileNoFollow + decryptDocumentArchive + one big writeSync,
+// which held the whole encrypted file, the whole decrypted tar, and (via
+// Buffer.concat) a third copy all in memory on the restore/verify path.
+describe("decryptDocumentArchiveToFile streams in bounded chunks (O2-R9/SR2-R3)", () => {
+  it("round-trips a multi-chunk plaintext, byte-identical to decryptDocumentArchive's in-memory result", () => {
+    const plaintextPath = join(workDir, "stream-documents.tar");
+    const envelopePath = join(workDir, "stream-documents.tar.enc");
+    const outputPath = join(workDir, "stream-documents.tar.decrypted");
+    const size = 6 * 1024 * 1024;
+    const content = Buffer.alloc(size, 7);
+    writeFileSync(plaintextPath, content);
+    encryptDocumentArchiveToFile(plaintextPath, KEK_A, envelopePath);
+
+    decryptDocumentArchiveToFile(envelopePath, KEK_A, outputPath);
+
+    const streamedResult = readFileSync(outputPath);
+    const bufferedResult = decryptDocumentArchive(readFileSync(envelopePath), KEK_A);
+    expect(streamedResult.equals(bufferedResult)).toBe(true);
+    expect(streamedResult.equals(content)).toBe(true);
+  });
+
+  it("refuses an envelope missing the Salted__ header, without writing a decrypted output", () => {
+    const envelopePath = join(workDir, "bad-header.enc");
+    writeFileSync(envelopePath, Buffer.from("short"));
+    const outputPath = join(workDir, "bad-header.out");
+    expect(() => decryptDocumentArchiveToFile(envelopePath, KEK_A, outputPath)).toThrow(RecoveryBundleRefusal);
+  });
+
+  it("decrypts a 100 MB envelope without an RSS spike proportional to its size", () => {
+    const plaintextPath = join(workDir, "large-stream-documents.tar");
+    const envelopePath = join(workDir, "large-stream-documents.tar.enc");
+    const outputPath = join(workDir, "large-stream-documents.tar.decrypted");
+    const size = 100 * 1024 * 1024;
+    writeFileSync(plaintextPath, Buffer.alloc(size, 9));
+    encryptDocumentArchiveToFile(plaintextPath, KEK_A, envelopePath);
+
+    const before = process.memoryUsage().rss;
+    decryptDocumentArchiveToFile(envelopePath, KEK_A, outputPath);
+    const after = process.memoryUsage().rss;
+
+    expect(after - before).toBeLessThan(60 * 1024 * 1024);
+    expect(fs.statSync(outputPath).size).toBe(size);
+  }, 30_000);
+});
+
+// O2-R9/SR2-R3: before this, validateBackupBundleContents fully decrypted
+// the document archive into memory and wrote it unbounded to disk before
+// the only capacity check (restore-engine.ts's checkRestoreCapacity, run on
+// the *extracted* tree) ever ran. requireCapacityForDocumentArchive is the
+// bounded first pass that now runs first: the envelope's own file size,
+// read via one stat with nothing decrypted, stands in for the decrypted
+// size it is about to produce (AES-256-CBC's ciphertext is always at least
+// as long as its plaintext). A sparse file reports a real, huge logical
+// size via stat while consuming ~0 actual disk blocks, so this is a real,
+// unmocked exercise of statfsSync rather than a stubbed one — and safely
+// environment-independent, since no real filesystem reports anywhere near
+// a petabyte of available space.
+describe("requireCapacityForDocumentArchive (O2-R9/SR2-R3)", () => {
+  it("refuses when the envelope's own size already exceeds available space", () => {
+    const envelopePath = join(workDir, "huge-sparse.tar.enc");
+    writeFileSync(envelopePath, "");
+    truncateSync(envelopePath, 2 ** 50); // 1 PiB, sparse — no real disk consumed.
+    expect(() => internal.requireCapacityForDocumentArchive(envelopePath, workDir)).toThrow(RecoveryBundleRefusal);
+  });
+
+  it("does not refuse a small envelope", () => {
+    const envelopePath = join(workDir, "tiny.tar.enc");
+    writeFileSync(envelopePath, "a few bytes");
+    expect(() => internal.requireCapacityForDocumentArchive(envelopePath, workDir)).not.toThrow();
+  });
 });
 
 // #383 (addon): checksums.sha256 member names must be plain basenames.
