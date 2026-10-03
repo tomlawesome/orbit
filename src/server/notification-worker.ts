@@ -1091,18 +1091,33 @@ export async function sweepEndedExpiries(db: NotificationDatabase, now: Date): P
   for (const row of ended) {
     const activityId = randomUUID();
     await db.transaction(async (transaction) => {
-      const [updated] = await transaction.update(items).set({
+      // Compare-and-set against everything that justified expiring this item
+      // (#1151 A4-S2): the earlier guard only re-checked `items.status`, so
+      // an item RESCHEDULED between the select above and this write -- which
+      // updates the same `due_events` row's `due_date` in place
+      // (`workspace-repository.ts`) -- still looked active and still got
+      // flipped to expired, taking its brand-new reminder rules with it.
+      // `for("update")` locks both joined rows, so a reschedule racing this
+      // transaction waits for it rather than landing invisibly in between.
+      const [current] = await transaction.select({
+        itemStatus: items.status,
+        dueDate: dueEvents.dueDate,
+        completedAt: dueEvents.completedAt,
+      })
+        .from(dueEvents)
+        .innerJoin(items, eq(items.id, dueEvents.itemId))
+        .where(eq(dueEvents.id, row.eventId))
+        .for("update")
+        .limit(1);
+      if (!current || current.itemStatus !== "active" || current.completedAt || current.dueDate !== row.dueDate) return;
+
+      await transaction.update(items).set({
         status: "expired",
         version: sql`${items.version} + 1`,
         updatedAt: now,
-      })
-        /* Still active when the write lands, or somebody changed it between the
-           read above and here and their change is the current one. */
-        .where(and(eq(items.id, row.itemId), eq(items.status, "active")))
-        .returning({ id: items.id });
-      if (!updated) return;
+      }).where(eq(items.id, row.itemId));
       await transaction.update(dueEvents).set({ completedAt: now })
-        .where(and(eq(dueEvents.id, row.eventId), isNull(dueEvents.completedAt)));
+        .where(eq(dueEvents.id, row.eventId));
       await transaction.delete(reminderRules).where(eq(reminderRules.itemId, row.itemId));
       await transaction.insert(auditLog).values({
         id: activityId,
