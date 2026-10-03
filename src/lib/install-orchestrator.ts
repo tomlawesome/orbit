@@ -635,10 +635,18 @@ export async function runInstall(
         }
 
         if (guidedStaged) {
-          transaction.writeStagedFile(ENVIRONMENT_FILE, readFileSync(join(scratchDir, ENVIRONMENT_FILE)));
-          transaction.commitMove(ENVIRONMENT_FILE, "file");
+          // SR1-R6: secrets committed *before* the environment file that
+          // references them, not after — a crash between the two commits
+          // must never leave a committed .env-orbit whose DOCUMENT_KEK_FILE/
+          // SESSION_SECRET_FILE/etc. point at a .orbit-secrets tree that
+          // does not exist yet. The other order was exactly backwards:
+          // without .orbit-secrets, Orbit cannot start at all either way,
+          // but with .orbit-secrets and no .env-orbit yet, a retry simply
+          // redoes guided staging — a strictly safer crash state.
           stageSecretsDirectoryTree(transaction, join(scratchDir, SECRETS_DIRECTORY), SECRETS_DIRECTORY);
           transaction.commitMove(SECRETS_DIRECTORY, "directory");
+          transaction.writeStagedFile(ENVIRONMENT_FILE, readFileSync(join(scratchDir, ENVIRONMENT_FILE)));
+          transaction.commitMove(ENVIRONMENT_FILE, "file");
         }
 
         // Assets are not secret-bearing (unlike the environment file/secrets
