@@ -395,9 +395,15 @@ const fakeDockerScript = [
   '        parse_flags "-f --filter --format" "-q --quiet" 0 125 "${@:3}"',
   '        if [[ -n "${FAKE_DOCKER_VOLUME_NAMES:-}" ]]; then',
   '          printf "%s\\n" "${FAKE_DOCKER_VOLUME_NAMES}"',
+  '        elif [[ -f "${FAKE_PROBE_COUNTER_DIR:-}/created-volume-names" ]]; then',
+  '          cat -- "${FAKE_PROBE_COUNTER_DIR}/created-volume-names"',
   '        elif [[ "${FAKE_DOCKER_EXISTING_DB_VOLUME:-}" == "1" ]]; then',
   "          printf 'orbit_orbit-db-data\\n'",
   "        fi",
+  "        ;;",
+  "      rm)",
+  '        parse_flags "" "-f --force" 1 125 "${@:3}"',
+  '        [[ "${FAKE_DOCKER_VOLUME_RM_FAIL:-0}" != "1" ]] || exit 1',
   "        ;;",
   "      inspect)",
   '        parse_flags "-f --format" "" 0 125 "${@:3}"',
@@ -503,6 +509,12 @@ const fakeDockerScript = [
   '    if [[ "$*" == *"exec -T orbit-ollama"*"ollama pull"* ]]; then',
   '      [[ "${FAKE_OLLAMA_PULL_FAIL:-0}" != "1" ]]',
   "      exit $?",
+  "    fi",
+  '    if [[ "${FAKE_COMPOSE_UP_FAIL:-}" == "1" && " $* " == *" up "* ]]; then',
+  '      if [[ -n "${FAKE_COMPOSE_UP_CREATES_VOLUME:-}" ]]; then',
+  '        printf "%s\\n" "${FAKE_COMPOSE_UP_CREATES_VOLUME}" > "${FAKE_PROBE_COUNTER_DIR:?}/created-volume-names"',
+  "      fi",
+  "      exit 23",
   "    fi",
   '    if [[ "${FAKE_COMPOSE_FAIL:-}" == "1" && " $* " != *" version "* && " $* " != *" config "* ]]; then',
   "      exit 23",
@@ -2230,13 +2242,18 @@ describe("install.sh", () => {
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
-  it("refuses a new target when an existing Orbit database volume is present", () => {
+  it("refuses a new target when an existing Orbit database volume is present, naming it and the command to remove it (#1151 O1-S3)", () => {
     const targetDir = makeTarget();
 
     const result = runInstall(targetDir, { FAKE_DOCKER_EXISTING_DB_VOLUME: "1" });
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("existing Orbit database volume");
+    // Previously left the operator to find the volume themselves; now
+    // names it and the exact removal command, for exactly the case a prior
+    // failed install's own cleanup (tested below) could not reach.
+    expect(result.stderr).toContain("orbit_orbit-db-data");
+    expect(result.stderr).toContain("docker volume rm -- orbit_orbit-db-data");
     expect(result.calls).toContain("docker volume ls");
     expect(result.calls).not.toContain("docker pull");
     expect(result.calls).not.toContain("curl");
@@ -2259,6 +2276,38 @@ describe("install.sh", () => {
     expect(result.calls).not.toContain("curl");
     expect(managedSnapshot(targetDir)).toEqual(before);
     expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("removes the database volume it created when a fresh install's compose up fails, so a retry is not doomed forever (#1151 O1-S3)", () => {
+    const targetDir = makeTarget();
+
+    // compose up itself creates the named volume only once it actually
+    // runs; FAKE_COMPOSE_UP_CREATES_VOLUME simulates that by only making
+    // `docker volume ls` report it after the fake `up` call has run (and
+    // failed) -- unlike FAKE_DOCKER_VOLUME_NAMES/FAKE_DOCKER_EXISTING_DB_VOLUME,
+    // which report it from the start and would trip the earlier "existing
+    // Orbit database volume" preflight refusal before compose up ever runs.
+    const result = runInstall(targetDir, {
+      FAKE_COMPOSE_UP_FAIL: "1",
+      FAKE_COMPOSE_UP_CREATES_VOLUME: "orbit_orbit-db-data",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Orbit services could not be created or started.");
+    expect(result.calls).toContain("docker volume rm -- orbit_orbit-db-data");
+  });
+
+  it("never removes a database volume on a failed update (only a fresh install owns what compose up just created)", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+
+    const result = runInstall(targetDir, {
+      FAKE_COMPOSE_UP_FAIL: "1",
+      FAKE_DOCKER_EXISTING_DB_VOLUME: "1",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.calls).not.toContain("docker volume rm");
   });
 
   it("refuses a fresh target when a renamed-directory Orbit volume is orphaned", () => {
