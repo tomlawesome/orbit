@@ -740,6 +740,19 @@ export async function readSchemaContract(client: PostgresClient): Promise<Schema
         ON attribute.attrelid = table_class.oid
        AND attribute.attnum = index_key.attnum
       WHERE table_namespace.nspname = 'public'
+        -- T-Q1 (#1151): a primary key or a table-level UNIQUE always backs
+        -- itself with an index of this exact shape, and that index is
+        -- already the "p"/"u" row in the constraints query above -- indexed
+        -- here too it would double-count every table's own primary key as
+        -- an "extra" index EXPECTED_INDEXES never lists. Excluded by
+        -- backing relationship (conindid), not by name, so a drizzle
+        -- uniqueIndex()/index() call -- the only two creators of anything in
+        -- EXPECTED_INDEXES -- is never excluded by this, only a constraint's
+        -- own index is.
+        AND NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE pg_constraint.conindid = index_data.indexrelid
+        )
       GROUP BY table_class.relname, index_class.relname, index_data.indisunique
       ORDER BY index_class.relname
     `),
@@ -773,16 +786,18 @@ export async function readSchemaContract(client: PostgresClient): Promise<Schema
     constraints[String(row.constraint_name)] = constraint;
   }
 
+  // T-Q1 (#1151): report every index the query returns, not only ones already
+  // named in EXPECTED_INDEXES. Pre-filtering by name meant a stray extra
+  // index was dropped before the caller's `toEqual(EXPECTED_INDEXES)` ever
+  // ran, so the schema-contract test could never catch one.
   const indexes: Record<string, ExpectedIndex> = {};
   for (const row of indexRows) {
     const name = String(row.index_name);
-    if (name in EXPECTED_INDEXES) {
-      indexes[name] = {
-        table: String(row.table_name),
-        columns: (row.columns as string[]).map(String),
-        unique: Boolean(row.is_unique),
-      };
-    }
+    indexes[name] = {
+      table: String(row.table_name),
+      columns: (row.columns as string[]).map(String),
+      unique: Boolean(row.is_unique),
+    };
   }
 
   return { enums, tables, constraints, indexes };
