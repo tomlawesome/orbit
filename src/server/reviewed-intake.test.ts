@@ -8,7 +8,11 @@ import {
 } from "./reviewed-intake";
 
 describe("reviewed intake contract", () => {
-  it("accepts only the two explicit approval actions and bounded final values", () => {
+  // #1151 A3-Q8: this schema places no bound on `item` -- it is a plain
+  // z.record(string, unknown) -- so the title no longer claims one. Any
+  // bound on a final value is the service's job (canonicalItem and what it
+  // feeds), not this schema's.
+  it("accepts only the two explicit approval actions, and requires a target item for attach_existing", () => {
     const parsed = reviewedIntakeApprovalSchema.parse({
       operationId: "11111111-1111-4111-8111-111111111111",
       source: {
