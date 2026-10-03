@@ -5,11 +5,16 @@
  */
 
 /* `ended` is the expiry's own band (#1005): a one-off past its date is not
-   overdue, so it wears the quiet ink tone rather than the alarm colour. */
+   overdue, so it wears the quiet ink tone rather than the alarm colour.
+   `unscheduled` (#1151 W1-F3) is chart.js's bandOfKind(…, null) answer for
+   an active item with no due date — it carries no urgency either, so it
+   wears the same quiet tone as `ended` rather than leaving BAND_VAR[band]
+   undefined, which rendered as the invalid custom property `var(undefined)`
+   and silently dropped the colour. */
 /** @type {Record<string, string>} */
-export const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok", ended: "--ink-mid" };
+export const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok", ended: "--ink-mid", unscheduled: "--ink-mid" };
 /** @type {Record<string, string>} */
-export const T_CLASS = { overdue: "over", "due-soon": "soon", upcoming: "up", ok: "ok", ended: "ended" };
+export const T_CLASS = { overdue: "over", "due-soon": "soon", upcoming: "up", ok: "ok", ended: "ended", unscheduled: "ended" };
 
 /** @param {{ days: number }} b */
 export const tlabel = (b) => (b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
