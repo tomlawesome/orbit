@@ -530,6 +530,18 @@ export async function applyWorkspaceCommand(
       // a client that sends `metadataStatus` to slip past that check is
       // refused here rather than storing a nameless item.
       if (!command.item.title.trim()) throw new AppError("invalid_item", "Give this a name", 422);
+      // #1151 A4-S4: `command.item.version` is optional in the wire schema,
+      // but an update with none omitted used to fall back to "whatever the
+      // row's current version already is" -- a check against the value it
+      // had just read a moment earlier, which can never fail. That silently
+      // turned the optimistic-concurrency check off for exactly the caller
+      // who skipped it, overwriting another member's edit with no conflict
+      // ever reported. An existing row now always requires the version it is
+      // meant to replace; only a brand new item, which has no version to
+      // race against, may omit it.
+      if (existing && command.item.version === undefined) {
+        throw new AppError("version_required", "This item changed on another device; refresh and try again", 409);
+      }
       // Tier 1 and Tier 2 (ADR-0024 decision 3): encrypt and clear the
       // plaintext in the same statement, so the row is never in both states at
       // once. Writing a damaged field is also the repair for it: the new value
@@ -560,7 +572,10 @@ export async function applyWorkspaceCommand(
         ...itemDates(command.item.scheduleKind, command.item.dueDate),
       };
       if (existing) {
-        const expectedVersion = Math.max(1, (command.item.version ?? existing.version + 1) - 1);
+        // `command.item.version` is the version the client wants this write
+        // to become, guaranteed present by the guard above; the row it
+        // replaces must be one less than that.
+        const expectedVersion = Math.max(1, command.item.version! - 1);
         const [updated] = await transaction.update(items)
           .set({ ...values, version: sql`${items.version} + 1` })
           .where(and(
