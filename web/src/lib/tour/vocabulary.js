@@ -546,12 +546,19 @@ export function createFilmContext({
    * use this — the guard would race the real wait for real, not stand
    * aside from it.
    *
-   * @template T
-   * @param {Promise<T>} promise
-   * @returns {Promise<T>}
+   * No caller reads the resolved value — every call site is a bare
+   * `await cancellable(...)` for the ordering/cancellation alone — so the
+   * honest return type is void, not the raced promise's own T: the
+   * wait(0) side of the race can legitimately resolve first (undefined),
+   * which svelte-check's gate caught as a real type mismatch (#1151
+   * W3-R1 W3-R2, this function's own origin). Discarded explicitly
+   * (`.then(() => {})`) rather than merely declared away, so the type
+   * matches what the function actually ever hands back.
+   * @param {Promise<any>} promise
+   * @returns {Promise<void>}
    */
   function cancellable(promise) {
-    return Promise.race([promise, clock.wait(0)]);
+    return Promise.race([promise, clock.wait(0)]).then(() => {});
   }
 
   /**
