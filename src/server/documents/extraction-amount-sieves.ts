@@ -117,6 +117,11 @@ export interface AmountPageFacts {
    */
   blockOfIndex: Map<number, number>;
   candidatesByBlock: Map<number, AmountCandidate[]>;
+  /** Distinct term lengths (2 or more months) the page prints anywhere
+   * (A3-Q3): `termMultiple` used to re-run `printedTerms`'s regex scans
+   * over the whole page once per candidate, even though the page's own
+   * printed terms do not change between candidates. */
+  termMonths: number[];
 }
 
 /** A printed money amount, for reading a block rather than sieving a page:
@@ -212,7 +217,8 @@ export function amountPageFacts(
     if (bucket) bucket.push(candidate);
     else candidatesByBlock.set(at, [candidate]);
   }
-  return { text, blocks, labelled, labelAt, instalmentTotals: instalmentTotals(text), blockOfIndex, candidatesByBlock };
+  const termMonths = [...new Set(printedTerms(text).map((term) => term.months))].filter((term) => term >= 2);
+  return { text, blocks, labelled, labelAt, instalmentTotals: instalmentTotals(text), blockOfIndex, candidatesByBlock, termMonths };
 }
 
 /** The trigger table's reading as a vote, on the same scale as the rest. */
@@ -659,7 +665,7 @@ const termMultiple: AmountSieve = {
   read: (candidate, all, page) => {
     const value = Number(candidate.value);
     if (!Number.isInteger(value) || value <= 0) return [];
-    const months = [...new Set(printedTerms(page.text).map((term) => term.months))].filter((term) => term >= 2);
+    const months = page.termMonths;
     for (const other of all) {
       if (other.value === candidate.value) continue;
       const otherValue = Number(other.value);
