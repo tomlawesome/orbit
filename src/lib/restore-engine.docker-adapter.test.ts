@@ -1,7 +1,19 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// O2-Q12: spawnSync is mocked (not spied) because it's a Node builtin ESM
+// export — vi.spyOn can't redefine it directly (see vitest's module-mocking
+// docs). The mock delegates to the real implementation so every other test
+// in this file (which spawns the real `tar` binary throughout) is unaffected;
+// only the one test below reads `spawnSyncMock.mock.calls`.
+const spawnSyncMock = vi.hoisted(() => vi.fn());
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  spawnSyncMock.mockImplementation(actual.spawnSync);
+  return { ...actual, spawnSync: spawnSyncMock };
+});
 
 import { createTar, extractTar } from "./recovery-bundle";
 import {
@@ -757,5 +769,28 @@ describe("createDockerComposeRestoreAdapter's psql maxBuffer (#383)", () => {
     const adapter = createDockerComposeRestoreAdapter({ envFile, env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` } });
     const report = adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto);
     expect(report.length).toBeGreaterThan(1024 * 1024);
+  });
+});
+
+describe("createCheckpoint document-archive validation (O2-Q12)", () => {
+  beforeEach(() => {
+    spawnSyncMock.mockClear();
+  });
+
+  it("validates the checkpoint's documents.tar only once, not once directly and again inside self-verification", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+
+    run.createCheckpoint();
+    expect(run.isCheckpointVerified()).toBe(true);
+
+    const checkpointDocuments = join(run.checkpointDirectory, "documents.tar");
+    const verboseListingsOfCheckpointDocuments = spawnSyncMock.mock.calls.filter(
+      (call) => call[0] === "tar" && Array.isArray(call[1]) && call[1][0] === "-tvf" && call[1][1] === checkpointDocuments,
+    );
+    expect(verboseListingsOfCheckpointDocuments.length).toBe(1);
   });
 });
