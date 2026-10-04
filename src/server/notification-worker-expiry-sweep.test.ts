@@ -307,8 +307,17 @@ describe("sweepEndedExpiries's compare-and-set (#1151 A4-S2)", () => {
   });
 
   it("does not expire an item that stopped being active after the sweep read it", async () => {
+    // Seeded active, same as the other race tests, so the batch SELECT's own
+    // `eq(items.status, "active")` still picks it up -- the race this test
+    // names is the per-row recheck inside the transaction finding it no
+    // longer active, not the outer query excluding it from the start
+    // (#1151 F15). Flipping the status before calling `sweepEndedExpiries`
+    // proved only the batch query's filter, which no change to the
+    // recheck's own status guard could ever have failed.
     const { itemId } = seedOverdueItem();
-    store.items.find((row) => row.id === itemId)!.status = "retired";
+    onBeforeRecheck = () => {
+      store.items.find((row) => row.id === itemId)!.status = "retired";
+    };
 
     const swept = await sweepEndedExpiries(fakeDatabase(), NOW);
 
