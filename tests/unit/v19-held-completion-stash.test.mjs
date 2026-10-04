@@ -37,7 +37,7 @@ describe("#1151 W1-R5/W1-S3: a held completion is stashed before it is sent", ()
       // already covers the failure case, and is cleared only once the send
       // actually confirms.
       expect(source).toMatch(/localStorage\.setItem\(HELD_COMPLETION_KEY/u);
-      expect(source).toMatch(/applyCommand\(job\.command\)\.then\(clearHeldCompletionStash\)\.catch/u);
+      expect(source).toMatch(/applyCommand\(job\.command\)\.then\((\(\) => )?clearHeldCompletionStash(\(job\.command\))?\)\.catch/u);
     });
 
     it(`${name}: a leftover stash is retried and a version conflict counts as success`, () => {
