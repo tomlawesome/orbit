@@ -1,5 +1,15 @@
-import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -383,6 +393,57 @@ describe("configuration.sh", () => {
   });
 });
 
+// #1151 RANGE-F6: the new cross-process deploy lock (.orbit-engine.lock)
+// was given to scripts/configure.sh's update_managed_keys but not to
+// migrate_file here, even though install.sh's `--migrate` run and a
+// concurrent `orbit configure` both read-modify-write the same
+// deployment's .env-orbit. Same lock file (next to $file, since this
+// script never cd's to the deployment directory itself), same "already
+// running" refusal, same stale-after-10-minute takeover as
+// configure.sh's own acquire_deploy_lock/release_deploy_lock, copied here
+// rather than sourced (this script is deliberately standalone and
+// source-less).
+describe("configuration.sh migrate_file deploy lock (#1151 RANGE-F6)", () => {
+  it("refuses a migration while another run's deploy lock is held, without mutating the file", () => {
+    const original = "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n";
+    const { file } = run(original, ["--check"]);
+    const lockPath = join(dirname(file), ".orbit-engine.lock");
+    writeFileSync(lockPath, "12345:1:2\n");
+
+    const result = failOnProcessDeadline(spawnSync("bash", [script, ...migrationArgs(), "--file", file], { encoding: "utf8", ...processGuard() }), { label: "locked" });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr.trim()).toBe("configuration_migration");
+    expect(readFileSync(file, "utf8")).toBe(original);
+    // The other run's lock is left untouched, not stolen or deleted.
+    expect(readFileSync(lockPath, "utf8")).toBe("12345:1:2\n");
+  });
+
+  it("reclaims a stale deploy lock left by a crashed run instead of blocking forever", () => {
+    const original = "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n";
+    const { file } = run(original, ["--check"]);
+    const lockPath = join(dirname(file), ".orbit-engine.lock");
+    writeFileSync(lockPath, "99999:1:1\n");
+    const staleTime = (Date.now() - 11 * 60 * 1000) / 1000;
+    utimesSync(lockPath, staleTime, staleTime);
+
+    const result = failOnProcessDeadline(spawnSync("bash", [script, ...migrationArgs(), "--file", file], { encoding: "utf8", ...processGuard() }), { label: "stale" });
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(file, "utf8")).toContain(`ORBIT_IMAGE=${appliedImage}\n`);
+    // Released again after the (successful) run that reclaimed it.
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it("releases the lock after a successful migration", () => {
+    const original = "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n";
+    const migrated = run(original, migrationArgs());
+
+    expect(migrated.status).toBe(0);
+    expect(existsSync(join(dirname(migrated.file), ".orbit-engine.lock"))).toBe(false);
+  });
+});
+
 // #1151 O1-R4: migrate_file's own "${file}.migrating.XXXXXX" scratch file
 // used to have no cleanup at all for a Ctrl-C or SIGTERM mid-migration --
 // each of its own error paths removed it on an ordinary failure, but
@@ -428,6 +489,9 @@ describe("configuration.sh's migration scratch file is removed on a signal (#115
       "#!/usr/bin/env bash",
       "set -Eeuo pipefail",
       extractLine(source, /^migration_temp_file=""$/mu),
+      extractLine(source, /^deploy_lock_path_value=""$/mu),
+      extractLine(source, /^deploy_lock_owner_value=""$/mu),
+      extractFunction(source, "release_deploy_lock"),
       extractFunction(source, "cleanup_migration_temp"),
       extractLine(source, /^trap cleanup_migration_temp EXIT$/mu),
       `migration_temp_file=${JSON.stringify(scratchFile)}`,
