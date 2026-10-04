@@ -36,7 +36,6 @@ import {
   senderAddressFromHeaders,
   senderDomainOf,
   senderIsAuthenticated,
-  SENDER_AUTHENTICATION_HEADERS,
   type ParsedHeader,
 } from "./core/sender-authentication";
 import { userForVerifiedSender } from "./sender-addresses";
@@ -65,6 +64,14 @@ export type ImapPreflightStatus = "not_configured" | "disabled" | "verification_
  * a forwarded document should survive a long holiday.
  */
 export const RECEIPT_RETENTION_MS = 45 * 86_400_000;
+
+/* The one header part runImapIngestionCycle asks the IMAP server for. The
+   key must be a bare IMAP atom (no spaces, parentheses or quotes), or
+   imapflow quotes it and the server rejects the whole FETCH; the byte
+   ceiling is a real partial fetch and is kept equal to
+   core/sender-authentication.ts's own MAX_HEADER_BYTES by hand, since that
+   constant is not exported. */
+export const IMAP_HEADER_FETCH_PART = { key: "HEADER", maxLength: 64 * 1_024 } as const;
 
 /**
  * How often the worker looks again when there is no mailbox configured. It is
@@ -945,16 +952,17 @@ export async function runImapIngestionCycle(
          convenience option (SR2-R1): the latter has no size bound at all, so
          a message with one pathologically large header value would be read
          in full before core/sender-authentication.ts's own 64KB check ever
-         saw it. A `HEADER.FIELDS (...)` bodyParts entry still lands in
-         `message.headers`, same as the `headers` option -- imapflow folds
-         both into the same field -- but a `maxLength` here is a true
-         partial fetch: the server is asked for at most that many bytes, so
-         the client never buffers more than the ceiling in the first place.
-         Kept equal to sender-authentication.ts's own MAX_HEADER_BYTES by
-         hand, since that constant is not exported. */
-      const HEADER_FETCH_LIMIT_BYTES = 64 * 1_024;
-      const headerFieldNames = [config.trustedRecipientHeader, ...SENDER_AUTHENTICATION_HEADERS];
-      const fetchOptions = { uid: true, bodyParts: [{ key: `HEADER.FIELDS (${headerFieldNames.join(" ")})`, maxLength: HEADER_FETCH_LIMIT_BYTES }], source: { maxLength: IMAP_ATTACHMENT_LIMITS.rawMessageBytes }, internalDate: true, size: true, bodyStructure: true };
+         saw it. The whole header block is fetched, not a HEADER.FIELDS
+         list: imapflow's compiler quotes a bodyParts key that contains a
+         space or parenthesis, and a quoted section is not valid IMAP, so a
+         server rejects every such FETCH. A bare `HEADER` key is an atom,
+         still lands in `message.headers` (imapflow folds a `header` part
+         into that field), and the `maxLength` is a true partial fetch: the
+         server is asked for at most that many bytes, so the client never
+         buffers more than the ceiling in the first place. The readers below
+         pick the fields they need out of the block by name, as they always
+         did. */
+      const fetchOptions = { uid: true, bodyParts: [IMAP_HEADER_FETCH_PART], source: { maxLength: IMAP_ATTACHMENT_LIMITS.rawMessageBytes }, internalDate: true, size: true, bodyStructure: true };
       const processMessage = async (message: { uid: number; source?: Buffer; headers?: Buffer; size?: number; bodyStructure?: MessageStructureObject; internalDate?: Date | string }) => {
         try {
         const source = message.source;
