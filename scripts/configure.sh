@@ -44,6 +44,9 @@ environment_file_was_created=0
 # -- read by ensure_secret_file below (#1151 RANGE-F1), mirroring
 # src/lib/configure-engine.ts's hadSecretsDirectory/isFreshInstall.
 secrets_directory_was_created=0
+# Set by acquire_deploy_lock, read by release_deploy_lock (#1151 RANGE-F6).
+deploy_lock_path_value=""
+deploy_lock_owner_value=""
 installer_ui_input_loaded=0
 installer_ui_path="$repo_dir/scripts/installer-ui.sh"
 if [[ -f "$installer_ui_path" && ! -L "$installer_ui_path" ]]; then
@@ -104,6 +107,7 @@ cleanup() {
     machine_prompt_fd=""
   fi
   [[ -z "$temporary_file" ]] || rm -f -- "$temporary_file"
+  release_deploy_lock
 }
 
 trap cleanup EXIT
@@ -264,6 +268,65 @@ is_fresh_install() {
   [[ "$environment_file_was_created" == 1 && "$secrets_directory_was_created" == 1 ]]
 }
 
+# Shares the Orbit engine's cross-process deploy lock (#1151 RANGE-F6):
+# src/lib/configure-engine.ts's acquireDeployLock and
+# install-transaction.ts's own copy both take ".orbit-engine.lock" in the
+# deployment directory before a read-modify-write of $environment_file, but
+# bash's own update_managed_keys took no lock at all, so two concurrent
+# default (bash-engine) `orbit configure` runs against the same deployment
+# directory could each read-modify-write it and lose one writer's keys --
+# exactly the race O1-R8 closed only for the opt-in container engine. Same
+# lock file (so the two engines exclude each other), same
+# stale-after-10-minutes takeover (a crashed process leaves no PID to check
+# across a container boundary), same rename-based reclaim so two processes
+# racing a stale lock cannot both believe they hold it.
+readonly deploy_lock_file=".orbit-engine.lock"
+readonly deploy_lock_stale_seconds=600
+
+acquire_deploy_lock() {
+  local operation_label="$1" lock_path="$deploy_lock_file" owner lock_age reclaimed
+
+  if ! ( set -o noclobber; : > "$lock_path" ) 2>/dev/null; then
+    lock_age="$deploy_lock_stale_seconds"
+    if [[ -e "$lock_path" ]]; then
+      lock_age=$(( $(date +%s) - $(stat -c %Y -- "$lock_path" 2>/dev/null || printf '0') ))
+    fi
+    if (( lock_age <= deploy_lock_stale_seconds )); then
+      fail "Another ${operation_label} is already running against this deployment (lock held at ${lock_path}). Wait for it to finish, or remove the lock file yourself once you are certain no other run is active."
+    fi
+    # Reclaim by rename, not unlink-then-create: two processes that both saw
+    # the stale lock would otherwise each unlink and recreate it, and the
+    # slower unlink removes the faster one's fresh lock. Only one rename
+    # succeeds; the other tries the plain create once more and refuses if
+    # that is taken too.
+    reclaimed="${lock_path}.stale-$$"
+    if mv -- "$lock_path" "$reclaimed" 2>/dev/null; then
+      rm -f -- "$reclaimed"
+    fi
+    if ! ( set -o noclobber; : > "$lock_path" ) 2>/dev/null; then
+      fail "Another ${operation_label} is already running against this deployment (lock held at ${lock_path})."
+    fi
+  fi
+
+  owner="$$:$RANDOM:$RANDOM"
+  printf '%s\n' "$owner" > "$lock_path"
+  deploy_lock_path_value="$lock_path"
+  deploy_lock_owner_value="$owner"
+}
+
+# Never removes a lock that was reclaimed from this process as stale and now
+# belongs to another run: only a lock file that still names this process's
+# own owner token is removed. Safe to call more than once (cleanup's EXIT
+# trap calls it again as a backstop after any fail() exit mid-update).
+release_deploy_lock() {
+  [[ -n "$deploy_lock_path_value" ]] || return 0
+  if [[ "$(cat -- "$deploy_lock_path_value" 2>/dev/null)" == "$deploy_lock_owner_value" ]]; then
+    rm -f -- "$deploy_lock_path_value"
+  fi
+  deploy_lock_path_value=""
+  deploy_lock_owner_value=""
+}
+
 # Reusable atomic updater for installer-managed keys in $environment_file. It
 # accepts one or more KEY VALUE pairs, rewrites the first active "KEY=..."
 # assignment for each in place, drops any further duplicate active
@@ -272,6 +335,7 @@ is_fresh_install() {
 # including comments, is copied through byte-for-byte. All pairs are applied
 # in a single atomic rewrite.
 update_managed_keys() {
+  acquire_deploy_lock "orbit configure"
   local temp line key found final_newline=1 output_line index last_byte=""
   # mapfile -t strips the newline but not a preceding carriage return, so a
   # CRLF file arrives with one still attached to every line. Unmanaged lines
@@ -377,6 +441,7 @@ update_managed_keys() {
   mv -- "$temp" "$environment_file" ||
     fail "Could not persist configuration in ${environment_file}."
   temporary_file=""
+  release_deploy_lock
 }
 
 persist_orbit_image() {
