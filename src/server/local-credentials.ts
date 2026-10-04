@@ -574,9 +574,10 @@ export function mintSetupToken(
  * a superseded one is a table that cannot answer whether a link was used.
  *
  * Call this only once the mail (or whatever else carries the token) is
- * confirmed sent: calling it first and mailing second is the bug this
- * function's split from `issueSetupToken` exists to make impossible again —
- * a failed send used to retire the one link the reader already had.
+ * confirmed sent, or once `hasLiveSetupLink` has said there is nothing to
+ * retire: calling it first and mailing second is the bug this function's
+ * split from `issueSetupToken` exists to make impossible again — a failed
+ * send used to retire the one link the reader already had.
  *
  * Locked per user (#1151 A1-R4): the "supersede, then insert" pair below
  * reads the table before it writes it, so two calls for the same user with
@@ -622,6 +623,27 @@ export async function persistSetupToken(
       changes: { userId, purpose: minted.purpose },
     });
   });
+}
+
+/**
+ * True while `userId` holds a link that could still be redeemed: unspent and
+ * not yet expired. `setup-mail.ts` asks before deciding what a failed send
+ * leaves behind (#1151 A1-S1): a live link is kept out of harm's way, a
+ * reader with none gets the one that was minted, so there is something to
+ * send again.
+ */
+export async function hasLiveSetupLink(userId: string): Promise<boolean> {
+  const now = new Date();
+  const [live] = await getDb()
+    .select({ id: credentialSetupTokens.id })
+    .from(credentialSetupTokens)
+    .where(and(
+      eq(credentialSetupTokens.userId, userId),
+      isNull(credentialSetupTokens.consumedAt),
+      gt(credentialSetupTokens.expiresAt, now),
+    ))
+    .limit(1);
+  return live !== undefined;
 }
 
 /**

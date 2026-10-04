@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   locked: false,
   auditRows: [] as Array<Record<string, unknown>>,
   persisted: [] as string[],
+  liveLink: false,
   key: { scope: "instance", householdId: null, keyId: "test-key", dataKey: Buffer.alloc(32, 9) },
 }));
 
@@ -52,6 +53,7 @@ vi.mock("@/server/local-credentials", async (importOriginal) => {
     persistSetupToken: async (userId: string) => {
       mocks.persisted.push(userId);
     },
+    hasLiveSetupLink: async () => mocks.liveLink,
   };
 });
 
@@ -91,6 +93,7 @@ beforeEach(() => {
   mocks.locked = false;
   mocks.auditRows = [];
   mocks.persisted = [];
+  mocks.liveLink = false;
   sent.length = 0;
 });
 
@@ -166,6 +169,7 @@ describe("sendSetupLink with an encrypted address (#969)", () => {
 
 describe("a resend that cannot be delivered (#1151 A1-S1)", () => {
   it("never writes the new token, so the reader's earlier link stays live", async () => {
+    mocks.liveLink = true;
     mocks.row = {
       id: USER,
       email: "ada@example.invalid",
@@ -185,6 +189,30 @@ describe("a resend that cannot be delivered (#1151 A1-S1)", () => {
     /* The send failed, so the old link -- whatever it was -- must still be
        the live one: nothing here may have superseded it. */
     expect(mocks.persisted).toEqual([]);
+    expect(mocks.auditRows).toEqual([]);
+  });
+
+  it("writes the link for a reader who holds none, so a failed send can be sent again", async () => {
+    mocks.liveLink = false;
+    mocks.row = {
+      id: USER,
+      email: "ada@example.invalid",
+      emailEnc: null,
+      displayName: "Ada Lovelace",
+      credential: null,
+    };
+    const failingMailer = {
+      sendEmail: async () => {
+        throw new Error("connection refused");
+      },
+    };
+
+    const delivery = await sendSetupLink(ADMIN, USER, { mailer: failingMailer });
+
+    expect(delivery.sendError).not.toBeNull();
+    /* Nothing to retire, so the minted link is the account's: issued, and
+       never claimed as sent. */
+    expect(mocks.persisted).toEqual([USER]);
     expect(mocks.auditRows).toEqual([]);
   });
 });
