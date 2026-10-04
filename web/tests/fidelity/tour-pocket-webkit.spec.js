@@ -835,6 +835,29 @@ async function shareDiffering(page, a, b) {
 }
 
 /**
+ * A box photographed once it has stopped changing (#1208): shot after shot,
+ * about 100ms apart, until two in a row are the same picture -- the way
+ * Playwright's own `toHaveScreenshot` waits for a settled page. A fixed
+ * wait guessed how long WebKit takes to paint, and on a loaded CI runner,
+ * late in the run, it sometimes had not finished. Bounded: after 20 shots
+ * whatever is there is judged, so a page that never settles still fails
+ * on what it shows rather than on the clock.
+ * @param {import("@playwright/test").Page} page
+ * @param {{ x: number, y: number, width: number, height: number }} box
+ */
+async function settledShot(page, box) {
+  const shot = () => page.screenshot({ clip: box, animations: "disabled", caret: "hide" });
+  let last = await shot();
+  for (let k = 1; k < 20; k++) {
+    await page.waitForTimeout(100);
+    const next = await shot();
+    if (next.equals(last)) return next;
+    last = next;
+  }
+  return last;
+}
+
+/**
  * Whether a field's own placeholder can be seen in its box: the box
  * photographed as it is, and again with the placeholder taken off the
  * field. The same picture both times means nothing of it shows.
@@ -851,7 +874,7 @@ async function placeholderShows(page, id) {
   }, id);
   if (!box) return null;
   const shot = () => page.screenshot({ clip: box, animations: "disabled", caret: "hide" });
-  const as = await shot();
+  const as = await settledShot(page, box);
   await page.evaluate((one) => {
     const el = /** @type {HTMLInputElement} */ (document.getElementById(one));
     el.dataset.heldPlaceholder = el.placeholder;
@@ -899,8 +922,9 @@ test.describe("suggested values give way to real text (#1174 round 4)", () => {
           wrong.push(`${mark}: never reached`);
           continue;
         }
-        await page.waitForTimeout(350);
-        /* the fields with a film line over them, on the screen */
+        /* the fields with a film line over them, on the screen; each is
+           judged from a settled frame (placeholderShows), not after a
+           fixed wait (#1208) */
         const ids = await page.evaluate(() => {
           const ghosts = [...document.querySelectorAll(".tourfilm-typed")].map((g) => g.getBoundingClientRect());
           return [...document.querySelectorAll("#pocket-entry input[placeholder], #pocket-entry textarea[placeholder]")]
