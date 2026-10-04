@@ -3151,7 +3151,8 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     });
 
     // O2-S1: restoring .env-orbit from a staging snapshot is never
-    // automatic (see the dedicated describe block below) — explicitly
+    // automatic (see the "live secrets are never restored automatically"
+    // tests below) — explicitly
     // confirm via the machine-prompt channel, exactly like the dangerous
     // batch's own never-automatable approval.
     const result = runRepair(targetDir, ["--execute", "--safe-only"], {}, {
@@ -3193,6 +3194,45 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       "execute action=restore-transaction resolves=staging-evidence-present result=done",
     );
     expect(statSync(join(targetDir, "docker-compose.mail.yml"), { throwIfNoEntry: false })).toBeFalsy();
+  });
+
+  // --- restore-transaction: live secrets are never restored automatically ---
+  // The guard do_restore_transaction runs when the staging snapshot carries a
+  // backup of .env-orbit or .orbit-secrets (the "dedicated" tests the three
+  // comments above point at).
+
+  it("restore-transaction: refuses to restore a live .env-orbit unattended, leaving the live file and the staging directory untouched", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    const stagingDir = makeStagingTransaction(targetDir, {
+      envBackupLines: ["APP_URL=https://orbit.old-good-state.internal", "COMPOSE_PROJECT_NAME=repairtest"],
+    });
+    const liveBefore = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+
+    // No terminal, no ORBIT_REPAIR_PROMPTS=machine: the --safe-only automation path.
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stderr).toContain("this is never automatic");
+    expect(result.stdout).not.toContain("execute action=restore-transaction resolves=staging-evidence-present result=done");
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(liveBefore);
+    expect(statSync(stagingDir).isDirectory()).toBe(true);
+  });
+
+  it("restore-transaction: a confirmed restore keeps the live .env-orbit as a dated .pre-restore copy rather than deleting it", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    makeStagingTransaction(targetDir, {
+      envBackupLines: ["APP_URL=https://orbit.old-good-state.internal", "COMPOSE_PROJECT_NAME=repairtest"],
+    });
+    const liveBefore = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {}, {
+      env: { ORBIT_REPAIR_PROMPTS: "machine" },
+      input: "y\n",
+    });
+
+    expect(result.stdout).toContain("execute action=restore-transaction resolves=staging-evidence-present result=done");
+    const kept = readdirSync(targetDir).filter((name) => name.startsWith(".env-orbit.pre-restore."));
+    expect(kept).toHaveLength(1);
+    expect(readFileSync(join(targetDir, kept[0]), "utf8")).toBe(liveBefore);
   });
 
   it("restore-transaction: self-restores every path it already touched and leaves the staging directory intact when a later path fails", () => {
@@ -3301,8 +3341,8 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       committed: false,
     });
 
-    // O2-S1: explicit confirmation required — see the dedicated describe
-    // block below.
+    // O2-S1: explicit confirmation required — see the "live secrets are
+    // never restored automatically" tests above.
     const result = runRepair(targetDir, ["--execute", "--safe-only"], {}, {
       env: { ORBIT_REPAIR_PROMPTS: "machine" },
       input: "y\n",

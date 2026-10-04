@@ -3104,28 +3104,21 @@ do_restore_transaction() {
   # credentials, unlike every other path in restore_transaction_paths —
   # restoring them from an install-staging snapshot is never "safe" the
   # way a managed-file restore is, however old or however it got left
-  # behind. Two checks before anything is touched, and only when this
-  # staging snapshot actually carries a backup of one of them:
-  #   - never restore from a snapshot older than the live file it would
-  #     replace. An old snapshot restoring over a newer, possibly already
-  #     rotated, live secret is exactly the failure this guard exists to
-  #     prevent — age alone proves nothing is still in sync.
-  #   - never run unattended. This finding fires precisely because
-  #     `--safe-only`'s non-interactive automation path (confirm_safe_batch)
-  #     proceeds with no prompt at all; a live-secret restore must have a
-  #     real confirmation channel (a human at a controlling terminal, or an
-  #     explicit ORBIT_REPAIR_PROMPTS=machine caller) before it may run,
-  #     exactly like the dangerous batch's own "never automatable" rule.
+  # behind. Before anything is touched, and only when this staging snapshot
+  # actually carries a backup of one of them: never run unattended. This
+  # finding fires precisely because `--safe-only`'s non-interactive
+  # automation path (confirm_safe_batch) proceeds with no prompt at all; a
+  # live-secret restore must have a real confirmation channel (a human at a
+  # controlling terminal, or an explicit ORBIT_REPAIR_PROMPTS=machine
+  # caller) before it may run, exactly like the dangerous batch's own
+  # "never automatable" rule. (A "snapshot older than the live file"
+  # refusal was tried and withdrawn: an interrupted install has by
+  # construction rewritten the live file after snapshotting it, so that
+  # rule refused the one case this restore exists for; the live copy is
+  # kept beside the restored one below instead.)
   for live_secret_path in .env-orbit .orbit-secrets; do
     live_secret_backup_path="$staging_root/rollback/original/$live_secret_path"
     [[ -e "$live_secret_backup_path" || -L "$live_secret_backup_path" ]] || continue
-
-    if [[ -e "$live_secret_path" && "$live_secret_path" -nt "$live_secret_backup_path" ]]; then
-      printf 'Orbit repair: refusing restore-transaction; the live %s is newer than the install-staging snapshot at %s.\n' \
-        "$live_secret_path" "$staging_root" >&2
-      printf 'Orbit repair: restoring it would silently revert live credentials to an older, possibly superseded value. Remove the stale staging directory by hand once you have confirmed the current deployment is correct.\n' >&2
-      return 1
-    fi
 
     if [[ "$interactive" != 1 && "$machine_prompts" != 1 ]]; then
       printf 'Orbit repair: refusing restore-transaction; %s would restore the live %s from an install-staging snapshot.\n' \
