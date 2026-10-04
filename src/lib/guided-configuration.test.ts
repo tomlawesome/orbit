@@ -470,14 +470,19 @@ describe("prepareConfiguration (install.sh:947-1008)", () => {
     });
   });
 
-  it("reports ready when the first readiness check already passes (install.sh:977-979, 999-1005)", async () => {
+  it("reports ready when the first readiness check already passes, without a redundant second check (O1-Q3, install.sh:977-979, 999-1005)", async () => {
     const dir = makeSandbox();
     const context = seedValidDeployment(dir);
-    const { adapter, calls } = fakeAdapter({ check: [{ status: 0, stdout: "ready APP_URL\n" }, { status: 0, stdout: "ready APP_URL\n" }] });
+    const { adapter, calls } = fakeAdapter({ check: [{ status: 0, stdout: "ready APP_URL\n" }] });
     const outcome = await prepareConfiguration(context, adapter, noopAnswers);
     expect(outcome).toEqual({ status: "ready" });
     expect(calls.init).toHaveLength(0);
     expect(calls.setOidcSecret).toBe(0);
+    // O1-Q3: nothing happened between the first check and returning
+    // "ready", so a second configure.sh --check subprocess (install.sh's
+    // own prepare_configuration runs one unconditionally here too) is
+    // never spawned.
+    expect(calls.check).toBe(1);
   });
 
   it("guarantee #24: non-interactively refuses with install.sh's exact remediation guidance when required fields are missing and there is no controlling terminal (install.sh:993-996)", async () => {
@@ -529,9 +534,13 @@ describe("prepareConfiguration (install.sh:947-1008)", () => {
   it("skips --init when only non-guided required fields are missing, but still checks for a missing OIDC secret (install.sh:982-983,988-992)", async () => {
     const dir = makeSandbox();
     const context = { ...seedValidDeployment(dir), hasControllingTerminal: true };
+    // Only two checks (O1-Q3): no guided field is missing, so --init never
+    // runs and there is nothing to re-check before deciding the OIDC secret
+    // is still missing — the initial check's own stdout already answers
+    // that. The second check is the one genuinely new state, taken after
+    // --set-oidc-secret actually runs.
     const { adapter, calls } = fakeAdapter({
       check: [
-        { status: 1, stdout: "missing OIDC_CLIENT_SECRET\n" },
         { status: 1, stdout: "missing OIDC_CLIENT_SECRET\n" },
         { status: 0, stdout: "ready everything\n" },
       ],
@@ -539,6 +548,7 @@ describe("prepareConfiguration (install.sh:947-1008)", () => {
     const outcome = await prepareConfiguration(context, adapter, noopAnswers);
     expect(calls.init).toHaveLength(0);
     expect(calls.setOidcSecret).toBe(1);
+    expect(calls.check).toBe(2);
     expect(outcome).toEqual({ status: "ready" });
   });
 
@@ -571,12 +581,16 @@ describe("prepareConfiguration (install.sh:947-1008)", () => {
     expect(outcome).toEqual({ status: "ready" });
   });
 
+  // These two reach the final composed-field-list check via a genuine
+  // recheck (after --init actually ran), not via a pointless second check
+  // of an already-passed first one (O1-Q3 removed that path: see "reports
+  // ready ... without a redundant second check" above).
   it("fails closed with install.sh's composed field list when the final readiness check still fails (install.sh:1001-1005)", async () => {
     const dir = makeSandbox();
-    const context = seedValidDeployment(dir);
+    const context = { ...seedValidDeployment(dir), hasControllingTerminal: true };
     const { adapter } = fakeAdapter({
       check: [
-        { status: 0, stdout: "ready everything\n" },
+        { status: 1, stdout: "missing APP_URL\n" },
         { status: 1, stdout: "missing APP_URL\nmissing ai\n" },
       ],
     });
@@ -589,10 +603,10 @@ describe("prepareConfiguration (install.sh:947-1008)", () => {
 
   it("falls back to install.sh's exact default field list when the final check fails with no parsed missing fields (install.sh:1002-1003)", async () => {
     const dir = makeSandbox();
-    const context = seedValidDeployment(dir);
+    const context = { ...seedValidDeployment(dir), hasControllingTerminal: true };
     const { adapter } = fakeAdapter({
       check: [
-        { status: 0, stdout: "ready everything\n" },
+        { status: 1, stdout: "missing APP_URL\n" },
         { status: 1, stdout: "" },
       ],
     });

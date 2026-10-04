@@ -109,7 +109,6 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   audit_household_activity_idx: { table: "audit_log", columns: ["household_id", "entity_type", "created_at"], unique: false },
   audit_household_entity_idx: { table: "audit_log", columns: ["household_id", "entity_type", "entity_id"], unique: false },
   document_crypto_storage_key_unique: { table: "document_crypto", columns: ["storage_key"], unique: true },
-  document_draft_document_unique: { table: "document_drafts", columns: ["document_id"], unique: true },
   document_draft_household_status_idx: { table: "document_drafts", columns: ["household_id", "status"], unique: false },
   document_household_item_created_idx: { table: "documents", columns: ["household_id", "item_id", "created_at"], unique: false },
   document_household_lifecycle_created_idx: { table: "documents", columns: ["household_id", "lifecycle", "created_at"], unique: false },
@@ -117,14 +116,11 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   document_job_lease_idx: { table: "document_jobs", columns: ["status", "lease_expires_at"], unique: false },
   document_job_once: { table: "document_jobs", columns: ["document_id", "kind", "generation"], unique: true },
   document_staging_expiry_idx: { table: "document_staging_objects", columns: ["status", "recovery_expires_at"], unique: false },
-  document_staging_objects_storage_key_unique: { table: "document_staging_objects", columns: ["storage_key"], unique: true },
   due_event_completion_key: { table: "due_events", columns: ["household_id", "completion_key"], unique: true },
   due_event_household_date_idx: { table: "due_events", columns: ["household_id", "due_date"], unique: false },
   external_identity_issuer_subject: { table: "external_identities", columns: ["issuer", "subject"], unique: true },
   household_deletion_due_idx: { table: "households", columns: ["delete_after"], unique: false },
-  imap_attachment_message_hash_unique: { table: "imap_ingestion_attachments", columns: ["message_id", "content_sha256"], unique: true },
   imap_attachment_message_status_idx: { table: "imap_ingestion_attachments", columns: ["message_id", "status"], unique: false },
-  imap_ingestion_attachments_storage_key_unique: { table: "imap_ingestion_attachments", columns: ["storage_key"], unique: true },
   imap_ingestion_review_item_idx: { table: "imap_ingestion_messages", columns: ["review_item_id"], unique: false },
   imap_message_recipient_content_idx: { table: "imap_ingestion_messages", columns: ["user_id", "content_sha256"], unique: false },
   imap_message_approval_operation_unique: { table: "imap_ingestion_messages", columns: ["approval_operation_id"], unique: true },
@@ -147,7 +143,6 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   imap_staging_object_created_idx: { table: "imap_ingestion_staging_objects", columns: ["status", "created_at"], unique: false },
   imap_notification_message_kind_unique: { table: "imap_notification_deliveries", columns: ["message_id", "kind"], unique: true },
   imap_notification_claim_idx: { table: "imap_notification_deliveries", columns: ["status", "next_attempt_at", "locked_at"], unique: false },
-  imap_ingestion_staging_objects_storage_key_unique: { table: "imap_ingestion_staging_objects", columns: ["storage_key"], unique: true },
   imap_receipt_claim_idx: { table: "imap_ingestion_messages", columns: ["receipt_status", "receipt_locked_at", "created_at"], unique: false },
   imap_receipt_delivery_idx: { table: "imap_ingestion_messages", columns: ["receipt_status", "created_at"], unique: false },
   imap_recipient_alias_active_digest_unique: { table: "imap_recipient_aliases", columns: ["generation", "alias_sha256"], unique: true },
@@ -186,12 +181,9 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   notification_state_household_idx: { table: "notification_states", columns: ["household_id", "user_id"], unique: false },
   portable_archive_expiry_idx: { table: "portable_archives", columns: ["expires_at"], unique: false },
   portable_archive_household_created_idx: { table: "portable_archives", columns: ["household_id", "created_at"], unique: false },
-  portable_archives_storage_key_unique: { table: "portable_archives", columns: ["storage_key"], unique: true },
-  push_subscriptions_endpoint_unique: { table: "push_subscriptions", columns: ["endpoint"], unique: true },
   reminder_item_offset: { table: "reminder_rules", columns: ["item_id", "days_before"], unique: true },
   section_household_position: { table: "sections", columns: ["household_id", "position"], unique: false },
   section_household_slug: { table: "sections", columns: ["household_id", "slug"], unique: true },
-  sessions_token_hash_unique: { table: "sessions", columns: ["token_hash"], unique: true },
   user_email_lookup_idx: { table: "users", columns: ["email"], unique: false },
   // "One account per address", carried across the encryption (#969). Unlike
   // user_email_unique_ci below this one is over a plain column, so it does
@@ -740,6 +732,19 @@ export async function readSchemaContract(client: PostgresClient): Promise<Schema
         ON attribute.attrelid = table_class.oid
        AND attribute.attnum = index_key.attnum
       WHERE table_namespace.nspname = 'public'
+        -- T-Q1 (#1151): a primary key or a table-level UNIQUE always backs
+        -- itself with an index of this exact shape, and that index is
+        -- already the "p"/"u" row in the constraints query above -- indexed
+        -- here too it would double-count every table's own primary key as
+        -- an "extra" index EXPECTED_INDEXES never lists. Excluded by
+        -- backing relationship (conindid), not by name, so a drizzle
+        -- uniqueIndex()/index() call -- the only two creators of anything in
+        -- EXPECTED_INDEXES -- is never excluded by this, only a constraint's
+        -- own index is.
+        AND NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE pg_constraint.conindid = index_data.indexrelid
+        )
       GROUP BY table_class.relname, index_class.relname, index_data.indisunique
       ORDER BY index_class.relname
     `),
@@ -773,16 +778,18 @@ export async function readSchemaContract(client: PostgresClient): Promise<Schema
     constraints[String(row.constraint_name)] = constraint;
   }
 
+  // T-Q1 (#1151): report every index the query returns, not only ones already
+  // named in EXPECTED_INDEXES. Pre-filtering by name meant a stray extra
+  // index was dropped before the caller's `toEqual(EXPECTED_INDEXES)` ever
+  // ran, so the schema-contract test could never catch one.
   const indexes: Record<string, ExpectedIndex> = {};
   for (const row of indexRows) {
     const name = String(row.index_name);
-    if (name in EXPECTED_INDEXES) {
-      indexes[name] = {
-        table: String(row.table_name),
-        columns: (row.columns as string[]).map(String),
-        unique: Boolean(row.is_unique),
-      };
-    }
+    indexes[name] = {
+      table: String(row.table_name),
+      columns: (row.columns as string[]).map(String),
+      unique: Boolean(row.is_unique),
+    };
   }
 
   return { enums, tables, constraints, indexes };

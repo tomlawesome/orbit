@@ -1,11 +1,11 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard, processWatchdog } from "../../scripts/process-budget.mjs";
 
 // Issue #296 slice 4 safety requirement: `orbit backup` / `orbit restore` /
 // `orbit export-recovery-bundle` / `orbit import-recovery-bundle` must be
@@ -307,4 +307,178 @@ describe("in-container fail-closed guard (ORBIT_ENGINE_CONTEXT=container)", () =
     expect(result.stderr).not.toContain("docker-command-forbidden-in-container");
     expect(readFileSync(callLogPath, "utf8")).not.toBe("");
   });
+});
+
+// #1151 O1-R1: Ctrl-C (SIGINT) or a supervisor's SIGTERM during `orbit
+// backup`/`orbit restore` used to leave the private mkdtempSync scratch
+// directory — which can hold decrypted document bytes and database dumps —
+// behind in os.tmpdir() forever. Two distinct bugs, both fixed by
+// withScratchDirectory in src/cli/orbit.ts: (1) commandBackup/commandRestore
+// called `process.exit(0)` *inside* their try block on the success path, and
+// process.exit() does not run a pending `finally` — confirmed directly: a
+// bare `try { process.exit(0) } finally { ... }` never runs the finally at
+// all, signal or no signal, so every successful run leaked its scratch
+// directory, not only an interrupted one; (2) a signal is not JS-exception
+// unwinding, so it never ran a pending `finally` either.
+//
+// The hidden `__scratch-directory-signal-rehearse` subcommand exercises the
+// same withScratchDirectory/signal-handler code those commands now share,
+// blocking on a real `spawnSync("sleep", ...)` call — the same blocking
+// shape the real docker-compose adapters use — rather than needing a real
+// docker backup/restore run to create a window to test against.
+//
+// Run through `node --import tsx` (a loader hook, not tsx's own CLI, which
+// spawns the script as a forked child and relays signals to it on its own
+// schedule): that would test tsx's relay behavior, not this file's.
+const nodeImportTsxArgs = ["--import", "tsx", cli];
+
+describe("backup/restore scratch directories are cleaned up on exit and on SIGINT/SIGTERM (#1151 O1-R1)", () => {
+  it("removes the scratch directory on ordinary successful completion (the process.exit(0)-inside-try bug)", async () => {
+    const workDir = await new Promise<string>((resolvePromise, reject) => {
+      const child = spawn("node", [...nodeImportTsxArgs, "__scratch-directory-signal-rehearse", "0.2"]);
+      let stdout = "";
+      let stderr = "";
+      let capturedWorkDir: string | undefined;
+      const watchdog = processWatchdog({ label: "scratchRehearsalNormalExit", kill: () => child.kill("SIGKILL") });
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString();
+        watchdog.touch();
+        const match = stdout.match(/^workDir=(.+)$/m);
+        if (match) capturedWorkDir = match[1];
+      });
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString();
+        watchdog.touch();
+      });
+      child.on("error", (error) => {
+        watchdog.stop();
+        reject(error);
+      });
+      child.on("close", (status, signal) => {
+        watchdog.stop();
+        if (watchdog.reason) {
+          reject(watchdog.error({ stdout, stderr }));
+          return;
+        }
+        if (capturedWorkDir === undefined) {
+          reject(new Error(`the rehearsal process closed before printing its workDir (status ${status}, signal ${signal}; stdout: ${stdout}; stderr: ${stderr})`));
+          return;
+        }
+        if (status !== 0 || signal !== null) {
+          reject(new Error(`expected a clean exit 0, got status ${status} signal ${signal} (stdout: ${stdout}; stderr: ${stderr})`));
+          return;
+        }
+        resolvePromise(capturedWorkDir);
+      });
+    });
+    expect(existsSync(workDir)).toBe(false);
+  });
+
+  it.each([["SIGINT"], ["SIGTERM"]] as const)(
+    "removes the scratch directory, without needing SIGKILL, when %s is sent to the whole process group mid-run",
+    async (signal) => {
+      const { workDir, killedOnDeadline } = await new Promise<{ workDir: string; killedOnDeadline: boolean }>((resolvePromise, reject) => {
+        // detached: true gives this process its own process group (pgid ===
+        // its own pid), matching src/lib/install-transaction.interruption.test.ts's
+        // established convention — and matching the real mechanism a
+        // terminal Ctrl-C uses: the signal reaches every process in the
+        // group at once, including whatever the rehearsal (or a real `orbit
+        // backup`) has blocked on via spawnSync, which is what actually lets
+        // that blocking call return.
+        const child = spawn("node", [...nodeImportTsxArgs, "__scratch-directory-signal-rehearse", "20"], {
+          detached: true,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        let stdout = "";
+        let stderr = "";
+        let capturedWorkDir: string | undefined;
+        let killedOnDeadline = false;
+        const watchdog = processWatchdog({
+          label: "scratchRehearsalSignalled",
+          kill: () => {
+            killedOnDeadline = true;
+            process.kill(-child.pid!, "SIGKILL");
+          },
+        });
+        child.stdout.on("data", (chunk: Buffer) => {
+          stdout += chunk.toString();
+          watchdog.touch();
+          if (capturedWorkDir === undefined) {
+            const match = stdout.match(/^workDir=(.+)$/m);
+            if (match) {
+              capturedWorkDir = match[1];
+              if (!existsSync(capturedWorkDir)) {
+                reject(new Error(`expected the scratch directory to exist before signalling it: ${capturedWorkDir}`));
+                return;
+              }
+              // A short delay rather than signalling the instant the
+              // "workDir=" line arrives: printing that line and starting
+              // the blocking spawnSync("sleep", ...) call are two separate
+              // steps in the child, and signalling the process group before
+              // the sleep grandchild actually exists sends the signal to a
+              // group that does not yet contain it — the signal is not
+              // "lost" exactly, but spawnSync's own wait loop (confirmed
+              // separately not to service the default loop's pending signal
+              // data) then blocks for the full sleep duration regardless.
+              setTimeout(() => process.kill(-child.pid!, signal), 300);
+            }
+          }
+        });
+        child.stderr.on("data", (chunk: Buffer) => {
+          stderr += chunk.toString();
+          watchdog.touch();
+        });
+        child.on("error", (error) => {
+          watchdog.stop();
+          reject(error);
+        });
+        child.on("close", () => {
+          watchdog.stop();
+          if (capturedWorkDir === undefined) {
+            reject(new Error(`the rehearsal process closed before printing its workDir (stdout: ${stdout}; stderr: ${stderr})`));
+            return;
+          }
+          resolvePromise({ workDir: capturedWorkDir, killedOnDeadline });
+        });
+      });
+      // The point of this test: the process actually exits on its own —
+      // via withScratchDirectory's finally or the signal handler, either is
+      // a correct cleanup — rather than needing the watchdog's SIGKILL.
+      expect(killedOnDeadline).toBe(false);
+      expect(existsSync(workDir)).toBe(false);
+    },
+  );
+});
+
+// #1151 O1-R6: commandEndMaintenance, commandAuthRecoveryLink and
+// commandAuthClearAddresses each resolve their dynamic import()s inside a
+// `void (async () => {...})()` IIFE; a module-load failure in one of those
+// imports used to escape as an unhandled promise rejection instead of the
+// command's own clean, bounded failure message, because the imports ran
+// before any try block. Driving a real import failure would mean breaking
+// a real module file out from under a real CLI process, which risks leaving
+// it broken for whatever else reads the same checkout; this instead proves
+// the structural fix directly from the source: each command's own
+// `import(` call sites are now textually inside that function's own `try`,
+// not before it, so a regression moving them back out fails here.
+describe("orbit end-maintenance/auth commands keep their dynamic imports inside a try (#1151 O1-R6)", () => {
+  const source = readFileSync(cli, "utf8");
+
+  function functionBody(name: string): string {
+    const match = source.match(new RegExp(`function ${name}\\([^)]*\\): void \\{([\\s\\S]*?)\\n\\}\\n`, "mu"));
+    if (!match) throw new Error(`Could not find function ${name} in ${cli}`);
+    return match[1];
+  }
+
+  it.each(["commandEndMaintenance", "commandAuthRecoveryLink", "commandAuthClearAddresses"])(
+    "%s's first import( call comes after its first try {",
+    (name) => {
+      const body = functionBody(name);
+      const firstTry = body.indexOf("try {");
+      const firstImport = body.indexOf("import(");
+      expect(firstTry).toBeGreaterThanOrEqual(0);
+      expect(firstImport).toBeGreaterThanOrEqual(0);
+      expect(firstTry).toBeLessThan(firstImport);
+    },
+  );
 });

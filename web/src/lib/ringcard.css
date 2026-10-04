@@ -130,6 +130,11 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
    `position:relative;z-index:1` because the glass takes a transform while it
    closes, and a transformed sibling paints above plain in-flow boxes — without
    this the glass would slide over the line for the length of the close. */
+/* #1151 W3-Q2: static/screens/notfound.css's .errring carries this exact
+   4.2px/#8791b3 stroke, independently — the 404 page never loads this file
+   (+error.svelte links plain CSS only, deliberately, see its own header),
+   so there is no shared variable to tie the two to. A retune here needs the
+   same numbers carried over there by hand. */
 :where(.arrival, .ringcard) .bigring .ringstroke{width:500px;height:500px;border-radius:50%;
       border:4.2px solid #8791b3;
       position:relative;z-index:1;
@@ -146,6 +151,9 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
        animation:spinback 40s linear infinite;
        transition:width .5s cubic-bezier(.55,0,.2,1),
                   height .5s cubic-bezier(.55,0,.2,1)}
+/* #1151 W3-Q2: notfound.css's .errring i carries this exact
+   left/top/size/margin/colour recipe, independently — see the note on
+   .ringstroke above for why there is no shared variable. */
 :where(.arrival, .ringcard) .bigring .ringorbit i{position:absolute;left:93.26%;top:24.94%;
          width:29.4px;height:29.4px;margin:-14.7px 0 0 -14.7px;
          border-radius:50%;background:#d8b45a}

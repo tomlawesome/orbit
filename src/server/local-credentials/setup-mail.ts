@@ -31,6 +31,7 @@ import { getDb } from "@/db";
 import { auditLog, localCredentials, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import {
+  absoluteAppLink,
   sendBoundedMail,
   type InvitationMailer,
   type InvitationSendError,
@@ -38,7 +39,8 @@ import {
 import {
   assertSetupTokenLifetime,
   createLocalUser,
-  issueSetupToken,
+  mintSetupToken,
+  persistSetupToken,
   type CredentialSetupTokenPurpose,
   type LocalUser,
 } from "@/server/local-credentials";
@@ -53,18 +55,11 @@ export type SetupSendError = InvitationSendError;
 
 /**
  * One absolute link, from the instance's public base URL and nothing else —
- * built exactly the way `invitationLink` builds an invitation's.
+ * `absoluteAppLink` (#1151 A1-Q4), the one builder `invitationLink` and
+ * `approvalLink` also use.
  */
 export function setupLink(token: string, environment: NodeJS.ProcessEnv = process.env): string {
-  const configured = environment.APP_URL;
-  if (!configured) throw new AppError("unsafe_input", "The setup link cannot be built", 503);
-  try {
-    const url = new URL(configured);
-    if (!url.hostname || !["http:", "https:"].includes(url.protocol)) throw new Error("unsafe application origin");
-    return new URL(`/setup/${encodeURIComponent(token)}`, url.origin).href;
-  } catch {
-    throw new AppError("unsafe_input", "The setup link cannot be built", 503);
-  }
+  return absoluteAppLink("setup", token, "The setup link cannot be built", environment);
 }
 
 /** What an administrator is told about a send. Never the link, never the token. */
@@ -120,8 +115,21 @@ function unreadableAddressError(state: MetadataFieldState | undefined): AppError
 }
 
 /**
- * Mints a link for `recipient` and mails it, and records `setup_link_sent`
- * when — and only when — the mail actually went.
+ * Mails a link for `recipient`, writes it as the account's live link, and
+ * records `setup_link_sent` once the mail is confirmed sent.
+ *
+ * Send first, write second (#1151 A1-S1) — the same order
+ * `resendSignInApproval` already uses for a sign-in approval's own token, and
+ * for the same reason: writing the new link first would retire whatever link
+ * the reader already had before the new one was proven to have gone out, so
+ * a failed send would leave them with nothing valid at all. On a failed send
+ * the earlier link, if there is one, stays the live one and can be sent
+ * again. A reader with no live link — a just-created account, or one whose
+ * link has lapsed — has nothing to protect, and gets the minted one written
+ * anyway: that is what makes the administrator's "send again" possible, and
+ * what ADR-0023 §3 means by an account that holds a link that can be sent
+ * again. Either way `setup_link_issued` says it was written and
+ * `setup_link_sent` is only ever recorded for a mail that went.
  *
  * The audit record is the instance's only durable answer to "did that link
  * reach them", because the token table deliberately stores nothing about
@@ -140,24 +148,25 @@ async function issueAndSend(
      delivered. */
   if (!recipient.email) throw unreadableAddressError(addressState);
   const email = recipient.email;
-  const { token, expiresAt } = await issueSetupToken(recipient.id, purpose, {
-    createdByUserId: actorUserId,
-    expiresInDays: options.expiresInDays,
-  });
+  const minted = mintSetupToken(purpose, options.expiresInDays);
 
   const outcome = await sendBoundedMail(
     email,
     renderSetupMail({
       displayName: recipient.displayName,
       email,
-      link: setupLink(token),
-      expiresAt,
+      link: setupLink(minted.token),
+      expiresAt: minted.expiresAt,
       purpose,
     }),
     options.mailer,
     options.now ?? new Date(),
   );
 
+  /* "Nothing live to retire" is persistSetupToken's own decision, under its
+     per-user lock, so a concurrent send that has just written its delivered
+     link is never superseded by this one that went nowhere. */
+  await persistSetupToken(recipient.id, minted, actorUserId, { onlyIfNoLiveLink: Boolean(outcome.sendError) });
   if (!outcome.sendError) {
     await getDb().insert(auditLog).values({
       householdId: null,
@@ -169,7 +178,7 @@ async function issueAndSend(
     });
   }
 
-  return { sentTo: email, expiresAt, sendError: outcome.sendError };
+  return { sentTo: email, expiresAt: minted.expiresAt, sendError: outcome.sendError };
 }
 
 export interface CreatedLocalUser extends SetupLinkDelivery {

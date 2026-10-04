@@ -124,6 +124,19 @@ export interface ReminderOffset {
   pushEnabled: boolean;
 }
 
+/**
+ * Both channels, on (#1151 A4-Q5): what an offset gets when nothing --
+ * neither an item's own reminder rule nor a stored column -- says otherwise.
+ * Shared by `effectiveReminderOffsets`'s fallback pair below,
+ * `src/lib/notifications.ts`'s in-app reminder list, and
+ * `notification-worker.ts`'s own candidate offsets, which used to each carry
+ * their own copy of this same default.
+ */
+export const DEFAULT_ENABLED_CHANNELS: { emailEnabled: true; pushEnabled: true } = {
+  emailEnabled: true,
+  pushEnabled: true,
+};
+
 /** The recipient's own stored pair, as read from `user_preferences` (#468). */
 export interface RecipientWarningDays {
   firstWarningDays: number | null;
@@ -167,17 +180,26 @@ export function warningDaysOrDefault(stored: number | null, fallback: number, fl
  * duplicate. Both channels are open at this level because the item said
  * nothing about channels; the recipient's own toggles still gate them in
  * `enabledDeliveryChannels`.
+ *
+ * Sorted furthest-out first on BOTH branches (#1151 A4-F1): item rules come
+ * from a plain `SELECT` with no `ORDER BY`, so returning them as-is handed
+ * back whatever order the database felt like that day. A reader that then
+ * calls index 0 "first" and anything else "final" (`warningFor` in
+ * notification-history.ts, which is the only reason order matters here at
+ * all) could label them backwards. Sorting once, at the source, is simpler
+ * than asking every reader to sort for itself and safer than asking none of
+ * them to.
  */
 export function effectiveReminderOffsets(
   itemRules: readonly ReminderOffset[],
   recipient: RecipientWarningDays,
 ): ReminderOffset[] {
-  if (itemRules.length) return [...itemRules];
+  if (itemRules.length) return [...itemRules].sort((left, right) => right.daysBefore - left.daysBefore);
   const first = warningDaysOrDefault(recipient.firstWarningDays, DEFAULT_FIRST_WARNING_DAYS, 1);
   const final = warningDaysOrDefault(recipient.finalWarningDays, DEFAULT_FINAL_WARNING_DAYS, 0);
   return [...new Set([first, final])]
     .sort((left, right) => right - left)
-    .map((daysBefore) => ({ daysBefore, emailEnabled: true, pushEnabled: true }));
+    .map((daysBefore) => ({ daysBefore, ...DEFAULT_ENABLED_CHANNELS }));
 }
 
 /**

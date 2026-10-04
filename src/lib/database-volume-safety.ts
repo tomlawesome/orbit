@@ -263,8 +263,15 @@ export function verifyDatabaseVolumeSafety(
     return { ...nextState, databaseVolumeChecked: true };
   }
   if (nextState.targetWasEmpty) {
+    // O1-S3: names the volume and the exact removal command, mirroring
+    // install.sh's own fail() text exactly (candidates joined with a single
+    // space, matching bash's "${candidates[*]}" under the default IFS) —
+    // the normal case this now reaches is a volume a prior interruption's
+    // own failure path could not remove, since on a fresh install nothing
+    // else could have created it.
+    const candidateList = candidates.join(" ");
     throw new DatabaseVolumeSafetyRefusal(
-      "An existing Orbit database volume requires a recognized deployment with its preserved database credentials; refusing to start Compose.",
+      `An existing Orbit database volume (${candidateList}) requires a recognized deployment with its preserved database credentials; refusing to start Compose. If this is leftover from a previous failed install rather than a deployment you want to keep, remove it first: docker volume rm -- ${candidateList}`,
     );
   }
   if (candidates.length !== 1) {

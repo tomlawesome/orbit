@@ -23,6 +23,7 @@ import { verificationGate } from "@/lib/auth/verification-gate";
 import { getAuthConfig, type AuthConfig } from "@/lib/env";
 import type { CookieSink } from "@/lib/http";
 import { getLogFormat, log } from "@/lib/logger";
+import { lockoutMs } from "@/server/local-credentials";
 
 /** RFC 4648 base32, upper case: no lower/upper confusion when read off a log. */
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -46,15 +47,15 @@ export const CLAIM_COOKIE_TTL_SECONDS = 300;
 /** Longer than any real code; bounds the work a hostile body can ask for. */
 const MAX_CLAIM_INPUT_LENGTH = 256;
 
-/* The same shape as the sign-in backoff (ADR-0023 §4), keyed on the one
-   literal `bootstrap` because there is exactly one claim per process. It is
-   held in memory rather than in a row: the secret it protects is itself only
-   in memory, so a backoff that outlived the process would be guarding a code
-   that no longer exists, and a restart already replaces the code it would
-   have been protecting. */
-const CLAIM_FREE_ATTEMPTS = 5;
-const CLAIM_BACKOFF_FLOOR_MS = 1_000;
-const CLAIM_BACKOFF_CEILING_MS = 900_000;
+/* The claim's own backoff shares `lockoutMs` with the sign-in backoff
+   (ADR-0023 §4, #1151 A1-Q3) -- one rule, used here and there, rather than a
+   second copy of the formula and its three constants. What differs is where
+   the count lives: a row for a credential, versus this module-level
+   variable, keyed on the one literal `bootstrap` because there is exactly
+   one claim per process. It is held in memory rather than in a row: the
+   secret it protects is itself only in memory, so a backoff that outlived
+   the process would be guarding a code that no longer exists, and a restart
+   already replaces the code it would have been protecting. */
 
 interface ClaimBackoff {
   failures: number;
@@ -234,10 +235,7 @@ export async function verifyClaim(input: string): Promise<ClaimVerdict> {
   }
 
   const failures = backoff.failures + 1;
-  const overrun = failures - CLAIM_FREE_ATTEMPTS;
-  const penaltyMs = overrun <= 0
-    ? 0
-    : Math.min(CLAIM_BACKOFF_FLOOR_MS * 2 ** (overrun - 1), CLAIM_BACKOFF_CEILING_MS);
+  const penaltyMs = lockoutMs(failures);
   backoff = { failures, lockedUntil: penaltyMs > 0 ? now + penaltyMs : 0 };
   log.warn({
     event: "auth.configuration",

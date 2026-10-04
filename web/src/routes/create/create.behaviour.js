@@ -1,8 +1,8 @@
 import { goto } from "$app/navigation";
-import { activeHousehold, applyCommand } from "$lib/data/workspace.js";
+import { WorkspaceError, activeHousehold, applyCommand } from "$lib/data/workspace.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
 import { screenScope } from "$lib/teardown.js";
-import { kindHasDate, kindRecurs, recurrenceOfChoice, refusalOf, scheduleOf } from "./entry.js";
+import { createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, refusalOf } from "./entry.js";
 
 /**
  * The new-entry form's behaviour, carried across from design/v19/create-v3.html
@@ -77,32 +77,58 @@ export function mountCreate() {
   /** @type {string | null} */
   let chosenSection = null;
   let saving = false;
+  /** Set the moment a save lands, so leaving for /home is never read as
+      discarding what was typed. */
+  let committed = false;
+  /* Only until the next edit: after a save that kept the form open (the
+     attachment branch of the submit handler) further typing is unsaved
+     work again, and leaving must ask about it (#1151 W1-S1). Bound on the
+     card, so every field's input or change bubbles to it; the type chips,
+     the section buttons and a dropped file change the entry without either
+     event, so their handlers call `edited` themselves. */
+  const edited = () => { committed = false; };
+  on(card, "input", edited);
+  on(card, "change", edited);
   /** A message from the last save attempt (a loud failure, or "saved, the
       document was not attached"), held until the NEXT attempt — same as the
       pocket's own `problem`, which nothing typed clears early. */
   /** @type {string | null} */
   let sticky = null;
+  /** Minted once for this draft, not per save attempt (#1151 W1-R2): a retry
+      after a dropped response reuses it, so the server's upsert-by-id
+      idempotency absorbs the retry instead of creating a second item. */
+  const draftId = crypto.randomUUID();
 
   /** The recurrence select's value, in months — 0 is once (#1058d). */
   const monthsOf = () => recurrenceOfChoice(recurSelect.value, recurMonths.value);
 
-  /** Why the entry cannot be saved yet, in entry.js's own refusal vocabulary. */
-  function currentRefusal() {
-    /** @type {import('./entry.js').Entry} */
-    const asEntry = {
+  /** The form's own entry.js-shaped Entry (#1151 W1-Q9), read fresh each
+   *  time and used for both the refusal check and the save payload below —
+   *  entry.js is the one place the kind→fields mapping, the recurrence
+   *  bound and the cost parsing live, shared with the pocket's own form
+   *  (pocket.svelte's save() already calls createCommandOf this same way);
+   *  this used to re-derive all four by hand instead, with its own,
+   *  differently-gated recurrence condition. */
+  /** @returns {import('./entry.js').Entry} */
+  function entryFromForm() {
+    return {
       kind: chosenType,
       name: nameInput.value,
       householdId: null,
       sectionId: chosenSection,
-      provider: "",
-      reference: "",
+      provider: value("f-provider"),
+      reference: value("f-ref"),
       dueDate: value("f-date"),
       recurrence: monthsOf(),
       cost: value("f-cost"),
-      reminderDays: [],
-      notes: "",
+      reminderDays: [Number(value("f-reminder"))],
+      notes: value("f-notes"),
     };
-    return refusalOf(asEntry);
+  }
+
+  /** Why the entry cannot be saved yet, in entry.js's own refusal vocabulary. */
+  function currentRefusal() {
+    return refusalOf(entryFromForm());
   }
 
   /**
@@ -138,6 +164,7 @@ export function mountCreate() {
       for (const other of typeButtons) other.setAttribute("aria-pressed", "false");
       button.setAttribute("aria-pressed", "true");
       chosenType = /** @type {import('./entry.js').Kind} */ (button.dataset.type);
+      edited();
       applyKindVisibility();
       reveal();
       updateRefusal();
@@ -178,6 +205,7 @@ export function mountCreate() {
           for (const other of [...sections.querySelectorAll("button")]) other.setAttribute("aria-pressed", "false");
           button.setAttribute("aria-pressed", "true");
           chosenSection = section.id;
+          edited();
           reveal();
           updateRefusal();
         });
@@ -213,6 +241,7 @@ export function mountCreate() {
   function takeFile(/** @type {File | null | undefined} */ file) {
     if (!file) return;
     attachment = file;
+    edited();
     reveal();
     document.body.classList.add("doc");
     if (heldName) heldName.textContent = file.name;
@@ -265,7 +294,6 @@ export function mountCreate() {
       return;
     }
 
-    const title = nameInput.value.trim();
     saving = true;
     sticky = null;
     save.disabled = true;
@@ -277,33 +305,23 @@ export function mountCreate() {
 
     try {
       const active = household ?? await activeHousehold();
-      const { scheduleKind, subtype } = scheduleOf(chosenType);
-      const dueDate = value("f-date");
-      const cost = value("f-cost");
-      const notes = value("f-notes");
-      const months = monthsOf();
-
-      await applyCommand({
-        type: "item.upsert",
-        householdId: active.id,
-        item: {
-          id: crypto.randomUUID(),
-          sectionId: /** @type {string} */ (chosenSection),
-          title,
-          subtype,
-          provider: value("f-provider") || undefined,
-          reference: value("f-ref") || undefined,
-          costMinor: cost ? Math.round(Number(cost) * 100) : undefined,
-          currency: active.currency,
-          dueDate: dueDate || undefined,
-          scheduleKind: dueDate ? scheduleKind : undefined,
-          recurrenceMonths: dueDate && scheduleKind && kindRecurs(chosenType) && months > 0 ? months : undefined,
-          reminderDays: [Number(value("f-reminder"))],
-          notes: notes || undefined,
-          status: "active",
-        },
+      // FormHousehold.currency is optional (entry.js) even though
+      // Household.currency is not — active can be either here, so this is
+      // really possibly undefined; the same fallback pocket.svelte's own
+      // save() already uses for the identical gap (#1151 W1-Q9).
+      await applyCommand(createCommandOf(entryFromForm(), {
+        householdId: active.id, currency: active.currency ?? "GBP", id: draftId,
+      })).catch((error) => {
+        /* This draft id is new to the server, so "this item changed on another
+           device" can only mean the earlier send landed and its answer was
+           lost (same reading as pocket.svelte's save). */
+        if (error instanceof WorkspaceError && error.code === "version_required") return;
+        throw error;
       });
 
+      /* Before either branch: the server holds the entry from here, so
+         leaving must not ask about discarding it (#1151 W1-S1). */
+      committed = true;
       if (attachment) {
         /* Deliberately not silent: the entry is saved, the document is not,
            because that path is unbuilt. Saying so beats losing the file. */
@@ -362,9 +380,17 @@ export function mountCreate() {
      listener above is attached. */
   card.dataset.ready = "true";
 
-  return () => {
-    teardown();
-    delete card.dataset.ready;
-    document.body.classList.remove("doc");
+  return {
+    teardown: () => {
+      teardown();
+      delete card.dataset.ready;
+      document.body.classList.remove("doc");
+    },
+    /** Whether a misclick or a close would discard something typed
+        (#1151 W1-S1). `reveal()`'s own one-way "the form grows as you
+        commit to it" is already exactly this signal — a real name, a
+        chosen type or a dropped document — so it is read rather than
+        tracked twice. */
+    isDirty: () => !committed && disclose.classList.contains("open"),
   };
 }

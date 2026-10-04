@@ -12,11 +12,20 @@ governance decision is
 `ai/orbit-base-image` (GitLab) is part of this project, not a sibling: standing
 authorisation to raise issues and make changes there (owner, 2026-08-30).
 
-`orbit-site` (GitHub `tomlawesome/orbit-site`) is Orbit's website, built by
-another agent. It lives on GitHub only for now, to use cloud credit that
-works nowhere else, and will move to GitLab later. It is a sibling project,
-read-only from here: report what one needs from the other rather than
-changing it (owner, 2026-09-30).
+`ai/orbit-launcher` (GitLab, project 50) is part of this project too, not a
+sibling (owner, 2026-10-03). When one needs something from the other, or
+something there is not working as intended, act on it -- file the issue,
+tell the launcher session -- without asking first. Asking costs the owner a
+round trip on a question with only one answer.
+
+`orbit-site` (GitHub `tomlawesome/orbit-site`) is Orbit's public-facing
+website, built by another agent and largely complete (owner, 2026-10-03). It
+lives on GitHub only for now, to use cloud credit that works nowhere else,
+and will move to GitLab later. It is a sibling project, read-only from here:
+report what one needs from the other rather than changing it (owner,
+2026-09-30). Anything that describes Orbit to the public -- a feature claim,
+an install step, a screenshot -- belongs there, so check it when Orbit's
+behaviour changes.
 
 ## Where the work lives
 

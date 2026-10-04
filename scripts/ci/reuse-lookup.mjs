@@ -211,22 +211,63 @@ export async function lookupReuse({
     return decided;
   }
 
+  // Jobs already fetched for a pipeline, keyed by pipeline id, so chasing
+  // `stands_on_pipeline` below never re-fetches a pipeline this walk has
+  // already asked for.
+  const jobsByPipeline = new Map();
+
+  async function jobsForPipeline(id) {
+    if (jobsByPipeline.has(id)) return jobsByPipeline.get(id);
+    const list = await requestJson(
+      `${base}/projects/${encodeURIComponent(projectId)}/pipelines/${id}/jobs?per_page=100`,
+      options,
+    ).then((result) => (Array.isArray(result) ? result : []));
+    jobsByPipeline.set(id, list);
+    return list;
+  }
+
+  /*
+   * D1-S2 (#1151): the age that must bound reuse is the finish time of the
+   * job that actually did the work, not of `candidate` -- a proxy job that
+   * itself stood on an earlier run always finishes "just now", in whichever
+   * pipeline asked for it, however old the run it stands on really is. A
+   * chain of same-day reuses would otherwise keep one old pass alive
+   * indefinitely, against this file's own seven-day rule. `evidence.stands_on`
+   * already names the job that really ran -- it is never one hop short,
+   * because every evidence file in the chain carries it forward rather than
+   * its own immediate parent -- so this fetches that job's own pipeline
+   * instead of trusting `candidate.finished_at`.
+   */
+  async function realFinishedAt(candidate, evidence, pipeline) {
+    const realJobId = Number(evidence.stands_on ?? candidate.id);
+    if (realJobId === Number(candidate.id)) return candidate.finished_at;
+    const realPipelineId = Number(evidence.stands_on_pipeline ?? evidence.pipeline ?? pipeline.id);
+    let jobs;
+    try {
+      jobs = await jobsForPipeline(realPipelineId);
+    } catch (error) {
+      log(`  the run job ${realJobId} stands on (pipeline ${realPipelineId}) could not be read (${error.message})`);
+      return undefined;
+    }
+    return jobs.find((entry) => Number(entry.id) === realJobId)?.finished_at;
+  }
+
   for (const pipeline of earlier) {
     if (pending.size === 0) break;
     let jobs;
     try {
-      jobs = await requestJson(
-        `${base}/projects/${encodeURIComponent(projectId)}/pipelines/${pipeline.id}/jobs?per_page=100`,
-        options,
-      );
+      jobs = await jobsForPipeline(pipeline.id);
     } catch (error) {
       log(`  pipeline ${pipeline.id}: its jobs could not be listed (${error.message})`);
       continue;
     }
-    const succeeded = successfulJobs(Array.isArray(jobs) ? jobs : []);
+    const succeeded = successfulJobs(jobs);
     for (const job of [...pending]) {
       const candidate = succeeded.get(job);
       if (!candidate) continue;
+      // A job can only stand on work that finished no later than itself, so
+      // a candidate this stale already proves the real run is at least as
+      // stale -- rejected here, with no evidence read, same as before D1-S2.
       if (!withinAgeLimit(candidate.finished_at, now)) {
         log(`  ${job}: job ${candidate.id} finished too long ago (${candidate.finished_at ?? "no finish time"})`);
         continue;
@@ -239,10 +280,18 @@ export async function lookupReuse({
       }
       // Evidence written by a run that itself stood on an older one names that
       // older run, so this follows the chain to the job that did the work.
-      decided.set(job, {
-        jobId: Number(evidence.stands_on ?? candidate.id),
-        pipelineId: Number(evidence.stands_on_pipeline ?? evidence.pipeline ?? pipeline.id),
-      });
+      const jobId = Number(evidence.stands_on ?? candidate.id);
+      const pipelineIdForJob = Number(evidence.stands_on_pipeline ?? evidence.pipeline ?? pipeline.id);
+      // The candidate passing the check above is not enough on its own: a
+      // candidate that itself only stood on an older run is recent (it ran
+      // "just now"), however old the run it stands on really is. Resolve
+      // that real run's own age whenever this is a chain.
+      const finishedAt = await realFinishedAt(candidate, evidence, pipeline);
+      if (!withinAgeLimit(finishedAt, now)) {
+        log(`  ${job}: job ${jobId}, the one that really ran, finished too long ago (${finishedAt ?? "no finish time"})`);
+        continue;
+      }
+      decided.set(job, { jobId, pipelineId: pipelineIdForJob });
       pending.delete(job);
     }
   }

@@ -58,6 +58,8 @@ import { formatRunScore, scoreCorpus, type ExtractedFields } from "../../src/ser
 import type { TaggedCandidate } from "../../src/server/documents/extraction-stages";
 import { undoTikaMarkdownEscapes } from "../../src/server/documents/tika";
 import { readTruthFile, TRUTH_HELP, truthCsv } from "./truth";
+import { TIKA_VERSION } from "./tika-version.mjs";
+import { dockerRunFailure } from "./docker-run-outcome.mjs";
 
 /** As the application: what Tika sends past this point is not read. */
 const MAX_EXTRACTED_CHARACTERS = 250_000;
@@ -69,8 +71,12 @@ const MEDIA_TYPES: Record<string, string> = {
   ".png": "image/png",
 };
 
-const TIKA_IMAGE = "apache/tika:4.0.0-full@sha256:6c244af88e8575ebe8bf0bc5e2da03c49663dd0acc7809cd99c8e9ff8741cbfb";
-const TIKA_JAR = "tika-server-standard-4.0.0.jar";
+// O2-Q11 (#1151): the version number comes from tika-version.mjs, the one
+// place build.mjs also reads it from, so the two cannot drift apart. The
+// image digest is still pinned here directly -- it is a property of that
+// specific build, not of the version number alone.
+const TIKA_IMAGE = `apache/tika:${TIKA_VERSION}-full@sha256:6c244af88e8575ebe8bf0bc5e2da03c49663dd0acc7809cd99c8e9ff8741cbfb`;
+const TIKA_JAR = `tika-server-standard-${TIKA_VERSION}.jar`;
 const LOCAL_TIKA = "http://127.0.0.1:9998";
 const CONTAINER = "orbit-extract-tika";
 
@@ -136,9 +142,30 @@ async function findTika(bundleDir: string): Promise<Tika> {
     const stop = () => new Promise<void>((done) => {
       execFile("docker", ["stop", CONTAINER], { windowsHide: true }, () => done());
     });
+    // O2-R4 (#1151): `docker run -d` always exits right after it starts the
+    // container or fails to -- it is never the long-lived process, Tika
+    // inside the container is. Going straight to the two-minute poll below
+    // regardless used to hide a `docker run` failure (a leftover container
+    // from an interrupted earlier run, for instance) behind the unrelated
+    // "Tika never answered" message. Check its own exit first.
+    // Bounded: a first run pulls the image, and a stuck pull used to sit
+    // here forever with nothing said.
+    const runExitCode = await new Promise<number | null | "timeout">((resolve) => {
+      const deadline = setTimeout(() => resolve("timeout"), 10 * 60_000);
+      child.once("exit", (code) => { clearTimeout(deadline); resolve(code); });
+    });
+    if (runExitCode === "timeout") {
+      // The child first: a `docker run` still pulling has no container for
+      // `docker stop` to find, and left running it would start one later
+      // that nothing tracks -- the leftover the check above exists for.
+      child.kill("SIGTERM");
+      await stop();
+      throw new Error("docker run did not return within ten minutes (image pull stuck?)");
+    }
+    const failure = dockerRunFailure(runExitCode);
+    if (failure !== undefined) throw new Error(failure);
     if (await waitForTika(LOCAL_TIKA, undefined, 120)) return { url: LOCAL_TIKA, stop };
     await stop();
-    child.kill();
     throw new Error("Docker started but Tika never answered on port 9998");
   }
   if (await commandExists("java")) {

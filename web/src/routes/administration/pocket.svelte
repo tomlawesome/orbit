@@ -45,12 +45,12 @@
 
   /** @typedef {NonNullable<Awaited<ReturnType<typeof import('$lib/data/workspace.js').readAdminScreen>>>} AdminView */
   /** @typedef {{ email: string, displayName: string, expiresInDays: number }} Draft */
-  /** @typedef {(intent: string, open: () => void, report?: (message: string) => void) => Promise<void>} Challenge */
+  /** @typedef {(intent: string, open: () => void, report?: (message: string) => void, about?: { resend?: { personId: string, days: number } }) => Promise<void>} Challenge */
   /** @typedef {AdminView["users"][number]} Person */
   /** @typedef {AdminView["households"][number]} System */
 
-  /** @type {{ view: AdminView | null, fixtures: boolean, actorHasPassword: boolean, provenIntent: string, draft: Draft, challenge: Challenge, reread: () => Promise<void>, spent: () => void }} */
-  let { view, fixtures, actorHasPassword, provenIntent, draft = $bindable(), challenge, reread, spent } = $props();
+  /** @type {{ view: AdminView | null, fixtures: boolean, actorHasPassword: boolean, provenIntent: string, resumedResendPersonId: string | null, draft: Draft, challenge: Challenge, reread: () => Promise<void>, spent: () => void }} */
+  let { view, fixtures, actorHasPassword, provenIntent, resumedResendPersonId, draft = $bindable(), challenge, reread, spent } = $props();
 
   /** @param {unknown} error */
   const said = (error) => /** @type {{ message?: string }} */ (error)?.message ?? String(error);
@@ -103,10 +103,18 @@
     if (failing.length > 2) list.push({ id: "ad-operations", word: `${failing.length - 2} more failing` });
     const failedJobs = jobs.filter((job) => job.status === "failed").length;
     if (failedJobs) list.unshift({ id: "ad-documents", word: `${count(failedJobs, "job")} failed` });
-    if (tests.relay?.word === "failed") list.push({ id: "ad-mail", word: "relay failed" });
-    if (tests.mailbox?.word === "failed" || (!tests.mailbox && view.mailbox?.verificationState === "failed")) {
-      list.push({ id: "ad-mail", word: "mailbox failed" });
+    /* #1151 A1-Q6: carried over from `tests` (#1071's throwaway,
+       reload-forgetting local copy), removed when A1-Q6 moved this screen
+       onto the server-backed `mailProbes` the desk layout already reads —
+       left unconverted here, so svelte-check's "Cannot find name 'tests'"
+       was a real dangling reference, not a false positive. */
+    if (mailProbes.relay && testVerdict(mailProbes.relay.result).tone === "over") {
+      list.push({ id: "ad-mail", word: "relay failed" });
     }
+    const mailboxFailed = mailProbes.mailbox
+      ? testVerdict(mailProbes.mailbox.result).tone === "over"
+      : view.mailbox?.verificationState === "failed";
+    if (mailboxFailed) list.push({ id: "ad-mail", word: "mailbox failed" });
     return list;
   });
 
@@ -206,7 +214,7 @@
       resendPassword = "";
       resendProblem = null;
       resendOpen = true;
-    }, (message) => (peopleProblem = message));
+    }, (message) => (peopleProblem = message), { resend: { personId: person.id, days: SETUP_LINK_DAYS.fallback } });
   }
 
   async function resend() {
@@ -475,33 +483,39 @@
   }
   const mailOk = $derived(mailOutcome === "verified" || mailOutcome === "delivered");
 
-  /* The two tests (#1071): a pill on its row that stays until the next
-     test. The server does not remember the answer yet, so a reload forgets
-     it. */
-  /** @type {{ mailbox: (ReturnType<typeof testVerdict> & { at: string }) | null, relay: (ReturnType<typeof testVerdict> & { at: string }) | null }} */
-  let tests = $state({ mailbox: null, relay: null });
+  /* The two tests (#1071): the server remembers each one's last answer
+     (owner, 2026-09-19: "the server remembers the last mail-test result
+     so the pill survives a reload — Yes") — read the same way the desk
+     layout reads it, off the screen's own re-read, rather than the
+     throwaway local copy this used to keep, which forgot everything on a
+     reload (#1151 A1-Q6). */
+  const mailProbes = $derived(view?.operations?.mailProbes ?? { mailbox: null, relay: null });
   /** @type {"mailbox" | "relay" | null} */
   let testing = $state(null);
+  /** @type {string | null} */
+  let testProblem = $state(null);
   const TESTS = /** @type {const} */ (["mailbox", "relay"]);
   /** @param {"mailbox" | "relay"} which */
   async function runTest(which) {
     if (testing) return;
     testing = which;
+    testProblem = null;
     try {
-      const { result } = await testMail(which);
-      tests[which] = { ...testVerdict(result), at: new Date().toISOString() };
+      await testMail(which);
+      await reread();
     } catch (error) {
-      tests[which] = { word: "failed", tone: "over", reason: said(error), at: new Date().toISOString() };
+      testProblem = said(error);
     } finally {
       testing = null;
     }
   }
   /** @param {"mailbox" | "relay"} which */
   const testMeta = (which) => {
-    const test = tests[which];
     if (testing === which) return "checking now";
-    if (!test) return which === "mailbox" ? "not tested this visit" : "not tested this visit";
-    return [test.reason, "just now"].filter(Boolean).join(" · ");
+    const probe = mailProbes[which];
+    if (!probe) return "not tested yet";
+    const verdict = testVerdict(probe.result);
+    return verdict.reason || plainly(probe.result);
   };
 
   /* Rotate every address (§2.12 7): the administrator chooses how long the
@@ -580,9 +594,26 @@
     const wanted = new URLSearchParams(location.search).get("localuser");
     if (wanted) delivery = /** @type {any} */ (SETUP_LINK_FIXTURES)[wanted] ?? SETUP_LINK_FIXTURES.sent;
   });
-  /* Back from the identity provider with a proof: pick the invitation up. */
+  /* Back from the identity provider with a proof: pick the errand up where
+     it was left (#1151 A1-F2) — one sheet per intent, the same way the
+     desk reopens its own form under each. `system_create` has nothing
+     typed to restore yet (the challenge fires before the name field is
+     ever shown), so reopening empty is already the fix; `setup_link_issue`
+     needs the person back, carried from the desk's sessionStorage draft
+     since this layout's own `resendFor` is a whole Person, not an id. */
   $effect(() => {
-    if (provenIntent === "local_user_create" && view) inviteOpen = true;
+    if (!view) return;
+    if (provenIntent === "local_user_create") inviteOpen = true;
+    if (provenIntent === "system_create") { systemName = ""; systemOpen = true; }
+    if (provenIntent === "setup_link_issue" && resumedResendPersonId) {
+      const person = view.users.find((one) => one.id === resumedResendPersonId);
+      if (person) {
+        resendFor = person;
+        resendDays = SETUP_LINK_DAYS.fallback;
+        resendPassword = "";
+        resendOpen = true;
+      }
+    }
   });
 </script>
 
@@ -762,16 +793,18 @@
           </div>
         </div>
         {#each TESTS as which (which)}
-          {@const test = tests[which]}
-          {#if test || testing === which}
+          {@const probe = mailProbes[which]}
+          {@const verdict = probe ? testVerdict(probe.result) : null}
+          {#if verdict || testing === which}
             <Row title={which === "mailbox" ? "incoming mailbox" : "outgoing relay"} metaFace="ui" meta={testMeta(which)}>
-              {#snippet mark()}<span class="p-body {testing === which ? 'up breathing' : test?.tone ?? 'ended'}"></span>{/snippet}
+              {#snippet mark()}<span class="p-body {testing === which ? 'up breathing' : verdict?.tone ?? 'ended'}"></span>{/snippet}
               {#snippet end()}
-                <span class="ad-state {testing === which ? 'up ad-checking' : test?.tone ?? ''}">{testing === which ? "checking…" : test?.word}</span>
+                <span class="ad-state {testing === which ? 'up ad-checking' : verdict?.tone ?? ''}">{testing === which ? "checking…" : verdict?.word}</span>
               {/snippet}
             </Row>
           {/if}
         {/each}
+        {#if testProblem}<p class="p-error ad-inset ad-lastline" role="alert">{testProblem}</p>{/if}
         {#each view.relay as [label, value, extra] (label)}
           <Row title={label} meta={label === "ingest" ? ingestShort(value) : value} trail={extra === "on" ? "on" : ""} trailTone="var(--ok-text)">
             {#snippet mark()}<span class="p-body {extra === 'on' ? 'ok' : 'ended'}"></span>{/snippet}

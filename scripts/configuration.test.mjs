@@ -1,10 +1,10 @@
-import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { spawnSync } from "node:child_process";
-import { describe, expect, it, vi } from "vitest";
+import { spawn, spawnSync } from "node:child_process";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
+import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard, processWatchdog } from "./process-budget.mjs";
 
 // Every test here runs scripts/configuration.sh under bash; a spawn that
 // takes tens of milliseconds quiet takes seconds on a starved core (#698).
@@ -173,19 +173,34 @@ describe("configuration.sh", () => {
 
   it("classifies every documented example key without values", () => {
     const example = readFileSync(join(process.cwd(), ".env-orbit.example"), "utf8");
-    const keys = new Set();
-    for (const match of example.matchAll(/^(?:#\s*)?([A-Z][A-Z0-9_]*)=/gmu)) keys.add(match[1]);
-    const result = run([...keys].map((key) => {
-      if (key === "ORBIT_CONFIG_SCHEMA_VERSION") return `${key}=1`;
-      if (key === "ORBIT_IMAGE") return `${key}=${appliedImage}`;
-      if (key === "ORBIT_CONFIG_APPLIED_VERSION") return `${key}=${appliedVersion}`;
-      if (key === "ORBIT_CONFIG_APPLIED_DIGEST") return `${key}=${appliedDigest}`;
-      if (key === "COMPOSE_PROJECT_NAME") return `${key}=${appliedProject}`;
-      return `${key}=value`;
-    }).join("\n") + "\n");
-    expect(result.status).toBe(0);
-    for (const key of keys) expect(result.stdout).toMatch(new RegExp(`^(?:current|deprecated_supported) ${key}$`, "mu"));
-    expect(result.stdout).not.toContain("value");
+    const allKeys = new Set();
+    for (const match of example.matchAll(/^(?:#\s*)?([A-Z][A-Z0-9_]*)=/gmu)) allKeys.add(match[1]);
+    // .env-orbit.example documents both the direct and _FILE form of each
+    // secret as alternatives; setting both together is the exact pair
+    // configuration.sh now refuses (#1151 O1-Q1). Run the fixture twice —
+    // once keeping each pair's direct form, once keeping its _FILE form —
+    // so every documented key is still exercised, just never alongside its
+    // own mutually-exclusive counterpart.
+    const directKeys = ["SESSION_SECRET", "DOCUMENT_KEK", "DOCUMENT_KEK_NEXT", "POSTGRES_PASSWORD", "OIDC_CLIENT_SECRET", "VAPID_PRIVATE_KEY", "SMTP_PASSWORD", "DATABASE_URL", "SMTP_URL"];
+    for (const preferFile of [false, true]) {
+      const keys = new Set(allKeys);
+      for (const directKey of directKeys) {
+        const fileKey = `${directKey}_FILE`;
+        if (!keys.has(directKey) || !keys.has(fileKey)) continue;
+        keys.delete(preferFile ? directKey : fileKey);
+      }
+      const result = run([...keys].map((key) => {
+        if (key === "ORBIT_CONFIG_SCHEMA_VERSION") return `${key}=1`;
+        if (key === "ORBIT_IMAGE") return `${key}=${appliedImage}`;
+        if (key === "ORBIT_CONFIG_APPLIED_VERSION") return `${key}=${appliedVersion}`;
+        if (key === "ORBIT_CONFIG_APPLIED_DIGEST") return `${key}=${appliedDigest}`;
+        if (key === "COMPOSE_PROJECT_NAME") return `${key}=${appliedProject}`;
+        return `${key}=value`;
+      }).join("\n") + "\n");
+      expect(result.status).toBe(0);
+      for (const key of keys) expect(result.stdout).toMatch(new RegExp(`^(?:current|deprecated_supported) ${key}$`, "mu"));
+      expect(result.stdout).not.toContain("value");
+    }
   });
 
   it("rejects duplicates, unknown keys, interpolation and unsafe modes", () => {
@@ -298,6 +313,67 @@ describe("configuration.sh", () => {
     expect(`${result.stdout}${result.stderr}`).not.toContain("orbit.example.invalid");
   });
 
+  it("a migration interrupted before it ever touched the file can be retried, not refused forever (#1151 O1-R5)", () => {
+    const original = "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n";
+    const { file } = run(original, ["--check"]);
+    // Simulates the exact half-done state a crash between "write the
+    // rollback backup" and "rename the migrated temp file into place"
+    // leaves: a backup that is byte-identical to the still-unmigrated file.
+    writeFileSync(`${file}.orbit-config.rollback`, original);
+    chmodSync(`${file}.orbit-config.rollback`, 0o600);
+
+    const retry = failOnProcessDeadline(spawnSync("bash", [script, ...migrationArgs(), "--file", file], { encoding: "utf8", ...processGuard() }), { label: "retry" });
+    expect(retry.status).toBe(0);
+    expect(readFileSync(file, "utf8")).toContain(`ORBIT_IMAGE=${appliedImage}\n`);
+    // The regenerated backup is the fresh pre-migration copy, not the stale one.
+    expect(readFileSync(`${file}.orbit-config.rollback`, "utf8")).toBe(original);
+  });
+
+  it("a leftover backup that differs from the current file is still protected, never silently replaced", () => {
+    const original = "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n";
+    const { file } = run(original, ["--check"]);
+    const unrelatedRollback = "APP_URL=https://a-genuinely-different-prior-deployment.invalid\n";
+    writeFileSync(`${file}.orbit-config.rollback`, unrelatedRollback);
+    chmodSync(`${file}.orbit-config.rollback`, 0o600);
+
+    const retry = failOnProcessDeadline(spawnSync("bash", [script, ...migrationArgs(), "--file", file], { encoding: "utf8", ...processGuard() }), { label: "retry" });
+    expect(retry.status).not.toBe(0);
+    expect(retry.stderr.trim()).toBe("configuration_migration");
+    expect(readFileSync(file, "utf8")).toBe(original);
+    expect(readFileSync(`${file}.orbit-config.rollback`, "utf8")).toBe(unrelatedRollback);
+  });
+
+  it("refuses a direct secret value set together with its _FILE counterpart, matching the app's own contract (#1151 O1-Q1)", () => {
+    for (const action of ["--check", "--preflight"]) {
+      const result = run(
+        "APP_URL=https://orbit.example.invalid\nSESSION_SECRET=abc123\nSESSION_SECRET_FILE=/run/secrets/orbit-session-secret\n",
+        [action],
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.stderr.trim()).toBe("configuration_secret_conflict");
+    }
+  });
+
+  it("accepts either form of a secret alone, only rejecting the pair", () => {
+    for (const content of [
+      "APP_URL=https://orbit.example.invalid\nSESSION_SECRET=abc123\n",
+      "APP_URL=https://orbit.example.invalid\nSESSION_SECRET_FILE=/run/secrets/orbit-session-secret\n",
+    ]) {
+      const result = run(content, ["--preflight"]);
+      expect(result.status).toBe(0);
+    }
+  });
+
+  it("accepts an empty direct placeholder beside a populated _FILE value, matching config-contract.ts's own falsy-string check", () => {
+    // configure.sh itself writes exactly this shape for OIDC_CLIENT_SECRET
+    // (an empty direct assignment left in place beside the real
+    // _FILE value) — src/lib/config-contract.ts's `record[direct] &&
+    // record[file]` treats an empty string as not-set, so this is not the
+    // conflict configuration_secret_conflict exists to catch.
+    const result = run("APP_URL=https://orbit.example.invalid\nOIDC_CLIENT_SECRET=\nOIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n", ["--preflight"]);
+    expect(result.status).toBe(0);
+  });
+
   it("reports future and gap schema versions with a distinct bounded code", () => {
     for (const value of ["2", "0"]) {
       const result = run(`ORBIT_CONFIG_SCHEMA_VERSION=${value}\nAPP_URL=https://a.example.invalid\n`);
@@ -305,4 +381,79 @@ describe("configuration.sh", () => {
       expect(result.stderr.trim()).toBe("configuration_version");
     }
   });
+});
+
+// #1151 O1-R4: migrate_file's own "${file}.migrating.XXXXXX" scratch file
+// used to have no cleanup at all for a Ctrl-C or SIGTERM mid-migration --
+// each of its own error paths removed it on an ordinary failure, but
+// nothing ran if the process was simply killed between them, leaking the
+// scratch file forever. A trap now runs cleanup_migration_temp on any exit.
+//
+// This extracts the real migration_temp_file global, cleanup_migration_temp
+// function and its `trap ... EXIT` line from the live script (never a
+// hand-typed duplicate) into a minimal harness that blocks in a `read`
+// builtin on a FIFO -- standing in for migrate_file's own while/read loop,
+// which never forks an external command either -- rather than an external
+// `sleep`: bash defers running a trap until a foreground EXTERNAL command
+// returns, so a harness blocked in `sleep` would "pass" only because the
+// signal gets queued and actually lands once sleep finishes on its own,
+// never proving the trap fires promptly. Blocking in the `read` builtin
+// matches the real interruption window and lets SIGTERM land immediately.
+describe("configuration.sh's migration scratch file is removed on a signal (#1151 O1-R4)", () => {
+  const scratchDirs = [];
+  afterEach(() => {
+    while (scratchDirs.length > 0) rmSync(scratchDirs.pop(), { recursive: true, force: true });
+  });
+
+  function extractLine(source, pattern) {
+    const match = source.match(pattern);
+    if (!match) throw new Error(`Could not find ${pattern} in the given source`);
+    return match[0];
+  }
+
+  function extractFunction(source, name) {
+    return extractLine(source, new RegExp(`^${name}\\(\\) \\{[\\s\\S]*?\\n\\}`, "mu"));
+  }
+
+  it("removes the scratch file when the process is killed while it is tracked", async () => {
+    const source = readFileSync(script, "utf8");
+    const directory = mkdtempSync(join(tmpdir(), "orbit-configuration-migrate-signal-"));
+    scratchDirs.push(directory);
+    const scratchFile = join(directory, ".env-orbit.migrating.rehearse");
+    const fifo = join(directory, "block.fifo");
+    writeFileSync(scratchFile, "mid-migration content");
+    spawnSync("mkfifo", [fifo]);
+
+    const harness = [
+      "#!/usr/bin/env bash",
+      "set -Eeuo pipefail",
+      extractLine(source, /^migration_temp_file=""$/mu),
+      extractFunction(source, "cleanup_migration_temp"),
+      extractLine(source, /^trap cleanup_migration_temp EXIT$/mu),
+      `migration_temp_file=${JSON.stringify(scratchFile)}`,
+      'printf "READY\\n"',
+      `read -r _line < ${JSON.stringify(fifo)}`,
+    ].join("\n");
+
+    const child = spawn("bash", ["-c", harness]);
+    const watchdog = processWatchdog({ label: "migration-signal-rehearse", kill: () => child.kill("SIGKILL") });
+    let stdout = "";
+    const ready = new Promise((resolve) => {
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk.toString();
+        watchdog.touch();
+        if (stdout.includes("READY")) resolve();
+      });
+    });
+    const closed = new Promise((resolve) => child.on("close", resolve));
+
+    await ready;
+    expect(existsSync(scratchFile)).toBe(true);
+    child.kill("SIGTERM");
+    await closed;
+    watchdog.stop();
+    if (watchdog.reason) throw watchdog.error({ stdout });
+
+    expect(existsSync(scratchFile)).toBe(false);
+  }, PROCESS_TEST_TIMEOUT_MS);
 });

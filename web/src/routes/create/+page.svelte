@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { goto } from "$app/navigation";
+  import { beforeNavigate, goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import "./create.css";
   import { mountCreate } from "./create.behaviour.js";
@@ -39,8 +39,32 @@
   /** @type {Awaited<ReturnType<typeof readHome>> | null} */
   let chrome = $state(null);
 
+  /** The mounted form's own dirty check (#1151 W1-S1), null until onMount —
+      which is also the whole of the window a misclick has no guard, since
+      nothing can be typed before the form exists either. */
+  /** @type {ReturnType<typeof mountCreate> | null} */
+  let form = null;
+
+  /* A misclick on the light-dismiss stage below, a chrome link away, or any
+     other in-app navigation while the form holds something typed (#1151
+     W1-S1): no confirm sheet exists on the desk the way the pocket's own
+     form has one, so this is the browser's own confirm() — no new layout,
+     same "discard changes" question the pocket's sheet asks. */
+  beforeNavigate(({ cancel }) => {
+    if (form?.isDirty() && !confirm("Discard this entry? What you've typed will be lost.")) cancel();
+  });
+
+  /** Closing the tab or reloading: beforeNavigate never sees this, so the
+      browser's own beforeunload prompt is the only honest warning left.
+      @param {BeforeUnloadEvent} event */
+  function onBeforeUnload(event) {
+    if (!form?.isDirty()) return;
+    event.preventDefault();
+    event.returnValue = "";
+  }
+
   onMount(() => {
-    const formTeardown = mountCreate();
+    form = mountCreate();
     let disposed = false;
     let backdropTeardown = () => {};
     /* The backdrop's households come through the same seam home's sky does
@@ -61,7 +85,8 @@
     });
     return () => {
       disposed = true;
-      formTeardown();
+      form?.teardown();
+      form = null;
       backdropTeardown();
     };
   });
@@ -71,6 +96,8 @@
   <link rel="stylesheet" href="/screens/family.css" />
   <title>Orbit — new entry</title>
 </svelte:head>
+
+<svelte:window onbeforeunload={onBeforeUnload} />
 
 <div class="create-page">
 <div class="backdrop" bind:this={backdropRoot} aria-hidden="true"></div>

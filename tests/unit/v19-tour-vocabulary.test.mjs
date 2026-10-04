@@ -127,14 +127,27 @@ describe("a control is a selector", () => {
     expect(ctx.ctl({ sel: ".minisys" }).els).toHaveLength(1);
   });
 
-  it("measures the ring from a different element when one is named", () => {
+  it("measures the ring from a different element when one is named", async () => {
     /* Round 6's chapter 8: the end-cap's lift ring wraps its hit box, not
        the 9.5px ink that is actually pressed. */
     document.body.innerHTML = '<g class="endcap-hit"><rect class="endtarget"></rect></g>';
-    const { ctx } = stage();
+    box(document.querySelector(".endcap-hit"), { x: 0, y: 0, w: 60, h: 60 });
+    box(document.querySelector(".endtarget"), { x: 10, y: 10, w: 20, h: 20 });
+    const { clock, ctx } = stage();
     const cap = ctx.ctl({ sel: ".endcap-hit", ring: ".endtarget" });
     expect(cap.els[0].className).toBe("endcap-hit");
     expect(cap.ringEls[0].className).toBe("endtarget");
+
+    // T-Q12 (#1151): the assertions above only prove `ring` resolved the
+    // right element -- they never prove the drawn ring is actually
+    // MEASURED from it rather than from `els[0]` (the hit box). Light the
+    // control for real and check the rendered ring's own box.
+    await playOut(clock, ctx.goto(cap, { willPress: false }));
+    const ring = document.querySelector(".tourfilm-ring");
+    expect(parseFloat(ring.style.left)).toBe(10);
+    expect(parseFloat(ring.style.top)).toBe(10);
+    expect(parseFloat(ring.style.width)).toBe(20);
+    expect(parseFloat(ring.style.height)).toBe(20);
   });
 });
 

@@ -222,8 +222,14 @@ describe("the beats, against a recorder", () => {
     await timeRuns.play(ctx);
     const marks = log.filter(([word]) => word === "mark").map(([, name]) => name);
     expect(marks).toEqual(["time-warmed"]);
-    /* the second mark rides inside the reminder callout's own options, which
-       the recorder's `callout` stub does not see -- pinned for real below. */
+    // T-Q9 (#1151): time-toast was never actually checked here -- the stub
+    // comment claimed it was "pinned for real below", but nothing in this
+    // file ever asserted it. 05-time-runs.js fires it by passing `{ mark:
+    // "time-toast", ... }` as the reminder callout's own options, which the
+    // stub's `callout` does capture (as the logged tuple's 5th element), so
+    // it can be checked here directly.
+    const reminder = log.find(([word, text]) => word === "callout" && text?.startsWith("Orbit reminds you"));
+    expect(reminder?.[4]?.mark).toBe("time-toast");
   });
 
   it("pins the reminder line at the dial's top on the pocket, and never on the desk (#1174)", async () => {

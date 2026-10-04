@@ -379,7 +379,7 @@ export const SIGNED_IN = [
     await page.getByRole("textbox", { name: "name", exact: true }).fill("Boiler service");
     await page.locator(".pc-sec", { hasText: "Home" }).first().click();
     await page.getByRole("textbox", { name: "cost", exact: true }).fill("lots");
-    await page.locator(".pk-refusal", { hasText: "cost" }).waitFor();
+    await page.locator(".pk-refusal", { hasText: "dot for pence" }).waitFor();
   } },
   { route: "/create", state: "leave-sheet", reach: async (page) => {
     await go(page, "/create");
@@ -579,16 +579,6 @@ export const SIGNED_IN = [
     await go(page, "/settings");
     await page.locator("#st-tab-sent").click();
     await page.locator("#st-panel-sent:not([hidden])").waitFor();
-  } },
-  { route: "/settings", state: "first-warning-sheet", reach: async (page) => {
-    await go(page, "/settings");
-    await row(page, ".st-pocket", "first warning").locator("[data-row-face]").click();
-    await sheetUp(page);
-  } },
-  { route: "/settings", state: "final-warning-sheet", reach: async (page) => {
-    await go(page, "/settings");
-    await row(page, ".st-pocket", "final warning").locator("[data-row-face]").click();
-    await sheetUp(page);
   } },
   { route: "/settings", state: "session-open", reach: async (page) => {
     await go(page, "/settings");

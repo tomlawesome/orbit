@@ -9,7 +9,7 @@
   import { applyTheme } from "$lib/theme-swatches.js";
   import { agoLong } from "$lib/format.js";
   import { watchTour } from "$lib/tour/watch.js";
-  import { alertsSupported, currentSubscription, disableAlerts, enableAlerts } from "$lib/push/alerts.js";
+  import { alertsSupported, currentSubscription, disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
   import {
     readSentLately,
     readSignInMethods,
@@ -65,6 +65,8 @@
    *   emailApproval: boolean,
    *   methodsProblem: string | null,
    *   sessionsProblem: string | null,
+   *   screenProblem?: string | null,
+   *   onretry?: () => void,
    *   resumed: string | null,
    *   fixtures: boolean,
    * }}
@@ -79,6 +81,8 @@
     emailApproval,
     methodsProblem,
     sessionsProblem,
+    screenProblem = null,
+    onretry = undefined,
     resumed,
     fixtures,
   } = $props();
@@ -144,61 +148,16 @@
     }
   }
 
-  /* The two warnings (#468). The route has always taken the pair; the
-     phone draws the picker the proposal gives it (§2.7 step 4). The server
-     holds the rule (1-365 days, the final closer than the first), so the
-     picker offers only choices it will accept. */
-  const FIRST_CHOICES = [60, 30, 21, 14, 7];
-  const FINAL_CHOICES = [7, 3, 1, 0];
-  let picking = $state(/** @type {"first" | "final" | null} */ (null));
-  let pickerOpen = $state(false);
-  let timingSaving = $state(/** @type {"first" | "final" | null} */ (null));
+  /* The two warnings (#468): VALUES only, same as the desk. #1151 W2-Q6 —
+     this layout used to carry its own picker sheet letting a reader change
+     14/3, which the desk screen's own comment on this exact card names the
+     rule for: "A timing editor is undrawn: changing 14/3 has no approved
+     surface, and inventing one here would put UI on this screen the owner
+     has not seen." That rule is not desk-only — it removed the picker here
+     too, not just desk's copy of it. */
 
   /** @param {number} days */
   const daysWord = (days) => (days === 0 ? "on the day" : `${days} day${days === 1 ? "" : "s"}`);
-  /** @param {number} days */
-  const beforeWord = (days) => (days === 0 ? "on the day" : `${daysWord(days)} before`);
-
-  const choices = $derived.by(() => {
-    if (!view || !picking) return [];
-    /* Unset offsets read as the server's own defaults (14 and 3). */
-    const first = view.reminders.firstWarningDays ?? 14;
-    const final = view.reminders.finalWarningDays ?? 3;
-    const pool = picking === "first" ? [...FIRST_CHOICES, first] : [...FINAL_CHOICES, final];
-    const allowed = pool.filter((days) => (picking === "first" ? days > final : days < first));
-    return [...new Set(allowed)].sort((a, b) => b - a);
-  });
-
-  /** @param {"first" | "final"} which */
-  function openPicker(which) {
-    picking = which;
-    pickerOpen = true;
-  }
-
-  /** @param {number} days */
-  async function pick(days) {
-    if (!view || !picking) return;
-    const which = picking;
-    pickerOpen = false;
-    const reminders = view.reminders;
-    const current = which === "first" ? reminders.firstWarningDays : reminders.finalWarningDays;
-    if (days === current) return;
-    timingSaving = which;
-    reminderProblem = null;
-    try {
-      const saved = await writeReminders({
-        emailEnabled: reminders.emailEnabled,
-        firstWarningDays: which === "first" ? days : reminders.firstWarningDays,
-        finalWarningDays: which === "final" ? days : reminders.finalWarningDays,
-      });
-      if (view) view = { ...view, reminders: saved };
-      wake(`saved · ${which} warning ${beforeWord(days)}`);
-    } catch {
-      reminderProblem = `not saved — the ${which} warning is still ${beforeWord(current ?? 0)}`;
-    } finally {
-      timingSaving = null;
-    }
-  }
 
   /* SENT TO YOU LATELY (#1003, §20, proposal §2.8). `GET /api/settings/sent`
      read in onMount below; `null` is the "couldn't load" state the panel
@@ -396,7 +355,7 @@
       }
     }
     alertsAvailable = alertsSupported();
-    if (alertsAvailable) browserAlerts = Boolean(await currentSubscription());
+    if (alertsAvailable) browserAlerts = Boolean(await syncAlerts());
   });
   /* The gate's both-off scene: email reminders off in the loaded view. */
   $effect(() => {
@@ -413,6 +372,13 @@
       <h1 class="p-title">Settings</h1>
       <p class="st-levers p-prose">your controls, and only yours</p>
     </header>
+
+    <!-- The desk's own failed-read note lives in its .page, which this
+         dialect hides, so the phone says it here (#1195). -->
+    {#if screenProblem && !view}
+      <p class="st-problem p-prose" role="alert">{screenProblem}
+        {#if onretry}<button class="p-pill filled" onclick={onretry}>try again</button>{/if}</p>
+    {/if}
 
     <!-- YOU, with how you sign in folded in (§2.7 step 2). -->
     <section class="p-card" style:--i="1" aria-labelledby="st-you">
@@ -522,14 +488,13 @@
                         aria-label="Browser alerts on this device" disabled={!alertsAvailable} onclick={toggleAlerts}><i></i></button>
               {/snippet}
             </Row>
+            <!-- #1151 W2-Q6: values only, same as the desk — no picker. -->
             <Row title="first warning" meta="before it’s due"
-                 trail={timingSaving === "first" ? "saving…" : daysWord(view.reminders.firstWarningDays ?? 0)}
-                 trailTone="var(--accent-text)" onactivate={() => openPicker("first")}>
+                 trail={daysWord(view.reminders.firstWarningDays ?? 0)} trailTone="var(--accent-text)">
               {#snippet mark()}<span class="p-body soon"></span>{/snippet}
             </Row>
             <Row title="final warning" meta={view.reminders.finalWarningDays === 0 ? "the day itself" : "before it’s due"}
-                 trail={timingSaving === "final" ? "saving…" : daysWord(view.reminders.finalWarningDays ?? 0)}
-                 trailTone="var(--accent-text)" onactivate={() => openPicker("final")}>
+                 trail={daysWord(view.reminders.finalWarningDays ?? 0)} trailTone="var(--accent-text)">
               {#snippet mark()}<span class="p-body over"></span>{/snippet}
             </Row>
             <Row title="outbound mail" meta="administrator’s setting" metaFace="ui"
@@ -661,22 +626,6 @@
     </section>
   </main>
 
-  <!-- The warning picker (§2.7 step 4): a callout, one tap chooses. -->
-  <Sheet bind:open={pickerOpen} size="list" title={picking === "final" ? "Final warning" : "First warning"}>
-    <p class="st-say p-prose">
-      {picking === "final" ? "How close to the date the last reminder lands." : "How far ahead Orbit first tells you."}
-      Items with their own timing keep it.
-    </p>
-    <div class="st-choices" role="radiogroup" aria-label={picking === "final" ? "Final warning" : "First warning"}>
-      {#each choices as days (days)}
-        {@const chosen = view ? (picking === "first" ? view.reminders.firstWarningDays : view.reminders.finalWarningDays) === days : false}
-        <button class="st-choice" role="radio" aria-checked={chosen} onclick={() => pick(days)}>
-          <span>{beforeWord(days)}</span>{#if chosen}<b aria-hidden="true">●</b>{/if}
-        </button>
-      {/each}
-    </div>
-  </Sheet>
-
   <!-- The recent-authentication callout (§17): the door's card, asking the
        reader to prove it is them before a sign-in method changes. -->
   <Sheet bind:open={methodOpen} size="callout" title={methodTitle}>
@@ -732,6 +681,7 @@
       calc(96px + env(safe-area-inset-bottom))}
   .st-head{margin:4px 0 20px}
   .st-levers{margin:8px 0 0;color:var(--ink-quiet)}
+  .st-problem{margin:16px 0 0;display:flex;flex-wrap:wrap;gap:12px;align-items:center;color:var(--warm-text)}
 
   /* Rows run to the card's edge, as the household's do. */
   .st-rows{margin:0 calc(var(--p-card-pad) * -1)}
@@ -861,15 +811,6 @@
   .st-foot{margin:12px 0 0}
 
   /* The callouts. */
-  .st-choices{display:flex;flex-direction:column;margin:0 0 4px}
-  .st-choice{appearance:none;display:flex;align-items:center;justify-content:space-between;min-height:52px;
-    padding:0 4px;border:0;border-bottom:1px solid var(--line-soft);background:none;cursor:pointer;
-    font:var(--p-type-body)/1.2 var(--ui);color:var(--ink);text-align:left}
-  .st-choice:last-child{border-bottom:0}
-  .st-choice[aria-checked=true]{color:var(--accent-text)}
-  .st-choice b{font-size:var(--p-type-meta);color:var(--accent)}
-  .st-choice:active{background:var(--panel-raised)}
-  .st-choice:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:8px}
   .st-form{display:flex;flex-direction:column}
   .st-label{display:block;font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);
     text-transform:uppercase;color:var(--ink-quiet);margin:4px 0 6px}

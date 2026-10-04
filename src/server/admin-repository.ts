@@ -7,6 +7,7 @@ import { AppError } from "@/lib/app-error";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY, ADMINISTRATOR_LOCK_KEY } from "@/lib/auth/authority-locks";
 import type { RecentAuthentication } from "@/lib/auth/recent-auth";
 import { cloneSections } from "@/lib/workspace";
+import { identitiesAreUsable } from "@/server/local-credentials";
 import { openInstanceMetadataReader, type MetadataCipher, type MetadataFieldState } from "@/server/metadata/fields";
 import { requireInstanceAdministrator } from "@/server/authorization";
 import { sectionSlug } from "@/server/workspace-access";
@@ -98,6 +99,19 @@ function compareEmail(left: string | null, right: string | null): number {
 
 export async function listInstanceUsers(actorUserId: string): Promise<InstanceUserList> {
   await requireInstanceAdministrator(actorUserId);
+  return instanceUserList();
+}
+
+/**
+ * `listInstanceUsers`'s own body, without the admin check (#1151 A1-Q1): a
+ * mutation elsewhere in this file already re-reads and verifies the actor
+ * as part of its own transaction before it ever gets here, so calling the
+ * guarded export afterwards to build its return value re-ran a check that
+ * had already passed, a moment earlier, on the same actor. Only
+ * `listInstanceUsers` is exported; a caller with no transaction of its own
+ * to have already verified from must still go through it.
+ */
+async function instanceUserList(): Promise<InstanceUserList> {
   const db = getDb();
   const [authority] = await db
     .select({ primaryUserId: instanceAuthority.primaryUserId })
@@ -223,7 +237,7 @@ export async function setInstanceAdministrator(
     });
   });
 
-  return listInstanceUsers(actorUserId);
+  return instanceUserList();
 }
 
 /**
@@ -315,7 +329,7 @@ export async function setInstanceUserDisabled(
     });
   });
 
-  return listInstanceUsers(actorUserId);
+  return instanceUserList();
 }
 
 /**
@@ -392,7 +406,12 @@ export async function transferPrimaryAdministrator(
     /* The target must be able to sign in. Since M7 that is a password OR a
        linked provider identity (ADR-0023 §6): on a local-only instance nobody
        has an identity, and requiring one would leave the authority
-       untransferable. */
+       untransferable.
+       A password always counts; an identity only counts while its provider
+       is still switched on (#1151 SS1-S1) -- the same rule the unlink checks
+       in local-credentials.ts already apply to their own caller. Without it,
+       an identity row left over from a since-disabled provider satisfied
+       this check while giving the target no way to actually sign in. */
     const [identity] = await transaction
       .select({ id: externalIdentities.id })
       .from(externalIdentities)
@@ -403,7 +422,7 @@ export async function transferPrimaryAdministrator(
       .from(localCredentials)
       .where(eq(localCredentials.userId, targetUserId))
       .limit(1);
-    if (!identity && !credential) {
+    if (!credential && !(identity && identitiesAreUsable())) {
       throw new AppError(
         "transfer_target_ineligible",
         "Choose a different active administrator to receive primary authority",
@@ -423,7 +442,7 @@ export async function transferPrimaryAdministrator(
     });
   });
 
-  return listInstanceUsers(actorUserId);
+  return instanceUserList();
 }
 
 /**

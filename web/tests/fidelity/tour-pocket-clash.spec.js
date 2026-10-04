@@ -88,17 +88,29 @@ for (const width of WIDTHS) {
 
     /** @type {Record<string, number>} */
     const counts = {};
+    // W3-Q6 (#1151): sampleClashes() returns null both while the film has
+    // not started yet AND when the pill never renders at all -- the old
+    // loop treated both the same (nothing to count), so a regression that
+    // kept the pill from ever appearing sampled nothing but null for the
+    // whole run and still reported "zero clashes". Track whether a real
+    // sample (the pill actually present and sized) was ever seen.
+    let sawPill = false;
     let ended = false;
     const start = Date.now();
     while (!ended && Date.now() - start < 220_000) {
       const clashes = await page.evaluate(sampleClashes);
-      if (clashes) for (const clash of clashes) counts[clash] = (counts[clash] ?? 0) + 1;
+      if (clashes) {
+        sawPill = true;
+        for (const clash of clashes) counts[clash] = (counts[clash] ?? 0) + 1;
+      }
       ended = await page.evaluate(() => {
         const reading = /** @type {any} */ (window).__reading?.();
         return Boolean(reading && reading.total > 0 && reading.cursor >= reading.total);
       });
       await page.waitForTimeout(250);
     }
+
+    expect(sawPill, `the pocket transport pill never appeared at ${width.name}`).toBe(true);
 
     const total = Object.values(counts).reduce((sum, n) => sum + n, 0);
     /* the owner's acceptance evidence, printed for the PR */

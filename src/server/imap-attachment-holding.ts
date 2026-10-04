@@ -1,7 +1,8 @@
 /**
- * @deprecated Moved to `@/server/mail-in/imap-attachment-holding` as part of
- * the #298 mail-in module split. This stub exists only so pre-existing
- * import paths keep working; new code should import from the new location
- * directly.
+ * Re-exports `@/server/mail-in/imap-attachment-holding` under its pre-#298
+ * import path. Not inert legacy glue: `reviewed-intake.ts` still imports
+ * through here, so this stays live, not merely kept for an external caller
+ * nobody has anymore (A2-Q5). Update that importer to the new path before
+ * calling this safe to remove.
  */
 export * from "@/server/mail-in/imap-attachment-holding";

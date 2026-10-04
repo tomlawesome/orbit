@@ -317,6 +317,20 @@ export function classifyProvider(expected: string, actual: string | undefined): 
   return "wrong";
 }
 
+/**
+ * A reader's ruler for a provider name, looser than `classifyProvider`: a
+ * short form of the right name counts as a hit ("Acme" for "Acme Cover
+ * Ltd"). Shared by the provider eval CLIs (`provider-bins-cli.ts`,
+ * `provider-stage1-cli.ts`), which each used to carry their own identical
+ * copy of this exact comparison (#1151 X-Q3).
+ */
+export function looseProviderNameMatch(wanted: string, got: string): boolean {
+  const fold = (value: string): string => value.toLowerCase().replaceAll(/[^a-z0-9]+/gu, " ").trim();
+  const a = fold(wanted);
+  const b = fold(got);
+  return a === b || (b.length >= 4 && a.includes(b)) || (a.length >= 4 && b.includes(a));
+}
+
 /** An expected date missing from an extractor that returned nothing at all
  * is a blank. Missing from an extractor that returned other dates instead
  * is wrong: something was offered, and it was not this. */

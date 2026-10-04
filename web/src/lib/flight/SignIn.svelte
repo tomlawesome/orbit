@@ -7,7 +7,7 @@
   import Waiting from "./Waiting.svelte";
   import { clearLaunch, markLaunch } from "./arrival.js";
   import {
-    CLAIM, DOOR, LOCAL, STARTING, STARTING_BACKSTOP_MS,
+    APPROVAL_BACKSTOP_MS, CLAIM, DOOR, LOCAL, STARTING, STARTING_BACKSTOP_MS,
     applyStartingBackstop, availabilityOf, cardMessageFor, claimFromHash, doorMessageFor,
     doorModeOf, nextDoorState, phaseOf, readinessOf,
   } from "./door-state.js";
@@ -144,6 +144,13 @@
   let approvalTimer;
   /** Set by the component's own teardown, so a poll in flight lands nowhere. */
   let approvalStopped = false;
+  /** Epoch ms after which the approval poll gives up (#1151 W1-R1), the same
+      kind of backstop the STARTING poll already keeps — read once when the
+      waiting card goes up. */
+  let approvalDeadlineAt = 0;
+  /** Consecutive unreadable rounds (a non-ok response or a failing fetch),
+      so an outage backs the poll off instead of hammering it every 2s. */
+  let approvalFailures = 0;
 
   let claimCode = $state("");
   let email = $state("");
@@ -291,11 +298,14 @@
     canResendAt = Date.parse(pending.canResendAt) || 0;
     card = "waiting";
     showCard(true);
+    approvalFailures = 0;
+    approvalDeadlineAt = Date.now() + APPROVAL_BACKSTOP_MS;
     askAgain();
   }
 
   /**
-   * One round of "has anybody answered yet", every two seconds.
+   * One round of "has anybody answered yet", every two seconds while
+   * healthy.
    *
    * The claim cookie the sign-in route handed this browser is the whole of the
    * request: nothing is sent in the body, and a tab without that cookie gets
@@ -303,10 +313,20 @@
    *
    * An unreadable answer is not an end -- a proxy hiccup must not throw a
    * reader out of a sign-in that is still perfectly live -- so only the
-   * server's own three words stop the loop.
+   * server's own three words stop the loop on their own account. But an
+   * unreadable answer backs the poll off (#1151 W1-R1) instead of hammering
+   * an outage every 2s, and either way the poll gives up once
+   * `approvalDeadlineAt` passes, the same kind of backstop the STARTING poll
+   * already keeps (door-state.js's `applyStartingBackstop`) -- surfaced as
+   * the waiting card's own "lapsed" words, not a silent stop.
    */
   function askAgain() {
     if (approvalStopped) return;
+    if (Date.now() >= approvalDeadlineAt) {
+      pendingState = "lapsed";
+      return;
+    }
+    const delay = Math.min(2000 * 2 ** approvalFailures, 16_000);
     approvalTimer = setTimeout(async () => {
       if (approvalStopped) return;
       let answer = null;
@@ -339,36 +359,25 @@
         pendingState = "lapsed";
         return;
       }
+      approvalFailures = answer === null ? approvalFailures + 1 : 0;
       askAgain();
-    }, 2000);
+    }, delay);
   }
 
-  /** "Send it again", inside ADR-0027 §8's limits, which the server keeps. */
+  /** "Send it again", inside ADR-0027 §8's limits, which the server keeps.
+   *  #1151 W1-Q5: this used to re-implement present()'s own
+   *  busy/message/fetch/error scaffolding by hand (and, on a non-ok
+   *  response, always fell back to the generic cardMessageFor(undefined)
+   *  rather than present()'s own reading of the error code) — reusing it
+   *  here means a future revision of present()'s refusal wording answers
+   *  this card too, not just the three that already call it. */
   async function resendApproval() {
     if (busy) return;
-    busy = true;
-    message = "";
-    try {
-      const response = await fetch("/api/auth/local/login/resend", {
-        method: "POST",
-        credentials: "same-origin",
-        cache: "no-store",
-        headers: { "content-type": "application/json" },
-        body: "{}",
-      });
-      const answer = response.ok ? await response.json() : null;
-      if (!answer) {
-        message = cardMessageFor(undefined);
-        return;
-      }
-      if (answer.state === "limited") limited = true;
-      else if (answer.state === "unknown") pendingState = "lapsed";
-      else canResendAt = Date.parse(answer.canResendAt) || 0;
-    } catch {
-      message = cardMessageFor(undefined);
-    } finally {
-      busy = false;
-    }
+    const answer = await present("/api/auth/local/login/resend", {});
+    if (!answer) return;
+    if (answer.state === "limited") limited = true;
+    else if (answer.state === "unknown") pendingState = "lapsed";
+    else canResendAt = Date.parse(answer.canResendAt) || 0;
   }
 
   /** Mixed mode's quiet line: the same card, opened rather than offered. */

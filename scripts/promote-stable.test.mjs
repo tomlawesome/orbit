@@ -580,9 +580,15 @@ describe(".gitlab-ci.yml promote_stable job", () => {
 
   it("is reachable only from a main pipeline or a web/api pipeline carrying PREVIEW_DIGEST", () => {
     expect(job).toContain('$CI_COMMIT_BRANCH == "main"');
-    expect(job).toMatch(/CI_PIPELINE_SOURCE == "web"/);
-    expect(job).toMatch(/CI_PIPELINE_SOURCE == "api"/);
-    expect(job).toContain("$PREVIEW_DIGEST");
+    // D1-Q2 (#1151): pinned as one rule, not as four independent substrings.
+    // Splitting the web/api check and the PREVIEW_DIGEST check into two
+    // separate `if:` rules would satisfy every substring below while
+    // promoting on EITHER a bare web/api pipeline OR any pipeline carrying
+    // PREVIEW_DIGEST -- widening who can promote well past what this job's
+    // name promises.
+    expect(job).toContain(
+      'if: ($CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "api") && $PREVIEW_DIGEST',
+    );
     expect(job).not.toContain("$VERSION");
   });
 

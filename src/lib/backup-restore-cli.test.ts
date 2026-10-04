@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -72,6 +72,7 @@ function buildDocumentTree(root: string, storageKey: string, contentLength: numb
  */
 class FakeAdapter implements RestoreDockerAdapter {
   appRunning = true;
+  stopOk = true;
   healthOk = true;
   replaceDocumentsOk = true;
   restoreActiveDatabaseOk = true;
@@ -93,6 +94,7 @@ class FakeAdapter implements RestoreDockerAdapter {
   }
 
   stopApp(): boolean {
+    if (!this.stopOk) return false;
     this.appRunning = false;
     return true;
   }
@@ -836,5 +838,152 @@ describe("runImportRecoveryBundle (import-recovery-bundle.sh's orchestration, li
       }),
     ).toThrow(RecoveryBundleRefusal);
     expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(LIVE_KEK);
+  });
+
+  // O2-F3: a failed stop must abort before the key swap, never run it anyway.
+  it("O2-F3: aborts before the key swap when the app cannot be stopped", () => {
+    const passphrase = "correct horse battery staple";
+    const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+
+    const liveDocumentsRoot = join(sandbox, "live-docs-import-stopfail");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const liveDocumentKekFile = join(sandbox, "live-document-kek-stopfail");
+    writeFileSync(liveDocumentKekFile, `${LIVE_KEK}\n`, { mode: 0o600 });
+    const backupDirectory = join(sandbox, "import-target-backups-stopfail");
+    const adapter = new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    adapter.stopOk = false;
+
+    expect(() =>
+      runImportRecoveryBundle({
+        recoveryBundlePath,
+        passphrase,
+        liveDocumentKekFile,
+        backupDirectory,
+        adapter,
+        importConfirmed: true,
+        confirmRestore: () => true,
+      }),
+    ).toThrow(BackupRestoreCliRefusal);
+    // The live KEK was never touched, and nothing was ever staged.
+    expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(LIVE_KEK);
+    expect(existsSync(`${liveDocumentKekFile}.import-rollback`)).toBe(false);
+  });
+
+  describe("O2-S3: key-swap staging and revert safety", () => {
+    it("refuses up front when a leftover rollback file already exists, rather than silently reusing or overwriting it", () => {
+      const passphrase = "correct horse battery staple";
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+
+      const liveDocumentsRoot = join(sandbox, "live-docs-import-leftover");
+      buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+      const liveDocumentKekFile = join(sandbox, "live-document-kek-leftover");
+      writeFileSync(liveDocumentKekFile, `${LIVE_KEK}\n`, { mode: 0o600 });
+      const backupDirectory = join(sandbox, "import-target-backups-leftover");
+      const adapter = new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+      const leftoverPath = `${liveDocumentKekFile}.import-rollback`;
+      writeFileSync(leftoverPath, `${"f".repeat(64)}\n`, { mode: 0o600 });
+
+      let caught: unknown;
+      try {
+        runImportRecoveryBundle({
+          recoveryBundlePath,
+          passphrase,
+          liveDocumentKekFile,
+          backupDirectory,
+          adapter,
+          importConfirmed: true,
+          confirmRestore: () => true,
+        });
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(BackupRestoreCliRefusal);
+      expect((caught as Error).message).toContain(leftoverPath);
+      // Untouched — never reused, never overwritten.
+      expect(readFileSync(leftoverPath, "utf8").trim()).toBe("f".repeat(64));
+      expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(LIVE_KEK);
+      expect(adapter.appRunning).toBe(true);
+    });
+
+    it("when the revert itself fails, the previous KEK is preserved (never deleted with the scratch workDir) and the refusal names where it is", () => {
+      const passphrase = "correct horse battery staple";
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+
+      // Its own directory (not the shared `sandbox`), because the fault
+      // injection below removes write permission on it for the duration of
+      // the call — doing that to the shared sandbox would risk every other
+      // test's cleanup in this file.
+      const liveDir = mkdtempSync(join(sandbox, "live-document-kek-revertfail-dir-"));
+      const liveDocumentsRoot = join(sandbox, "live-docs-import-revertfail");
+      buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+      const liveDocumentKekFile = join(liveDir, "live-document-kek-revertfail");
+      writeFileSync(liveDocumentKekFile, `${LIVE_KEK}\n`, { mode: 0o600 });
+      const backupDirectory = join(sandbox, "import-target-backups-revertfail");
+      const adapter = new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+      const previousKekPath = `${liveDocumentKekFile}.import-rollback`;
+
+      let caught: unknown;
+      try {
+        runImportRecoveryBundle({
+          recoveryBundlePath,
+          passphrase,
+          liveDocumentKekFile,
+          backupDirectory,
+          adapter,
+          importConfirmed: true,
+          // By the time this runs, the outer key swap has already happened
+          // (runRestore's confirm() fires only after preflight/capacity, well
+          // after runImportRecoveryBundle's own swap). Removing write
+          // permission on liveDir here — a real fault, not a mock — means
+          // the revert's own rename (previousKekPath -> liveDocumentKekFile,
+          // both in liveDir) genuinely fails with EACCES, while every other
+          // renameSync call in the run (elsewhere on disk) is unaffected.
+          // No journal evidence is left behind either way, so the code
+          // takes the revert branch rather than the restore-unfinished one.
+          confirmRestore: () => {
+            chmodSync(liveDir, 0o500);
+            return false;
+          },
+        });
+      } catch (error) {
+        caught = error;
+      } finally {
+        chmodSync(liveDir, 0o700);
+      }
+
+      expect(caught).toBeInstanceOf(BackupRestoreCliRefusal);
+      expect((caught as Error).message).toContain(previousKekPath);
+      // The old key still exists, outside the (now-deleted) scratch workDir.
+      expect(readFileSync(previousKekPath, "utf8").trim()).toBe(LIVE_KEK);
+    });
+  });
+});
+
+describe("runRestore cross-process lock (O2-R7)", () => {
+  it("refuses when another restore already holds the lock against the same backup directory", () => {
+    const liveDocumentsRoot = join(sandbox, "live-docs-restore-lock");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const backupDirectory = join(sandbox, "restore-lock-backups");
+    const documentKekFile = join(sandbox, "restore-lock-document-kek");
+    writeFileSync(documentKekFile, `${ORIGINAL_KEY}\n`, { mode: 0o600 });
+    const backupTarPath = buildBundle(join(sandbox, "restore-lock-source"), ORIGINAL_KEY, 10, ORIGINAL_KEY, join(sandbox, "restore-lock-source-backups"));
+    const adapter = new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const paths = deriveRestorePaths(backupDirectory, documentKekFile);
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+    writeFileSync(join(backupDirectory, ".orbit-restore.lock"), "");
+
+    const workDir = mkdtempSync(join(sandbox, "restore-lock-work-"));
+    expect(() =>
+      runRestore({
+        backupTarPath,
+        documentKekHex: ORIGINAL_KEY,
+        paths,
+        adapter,
+        workDir,
+        confirm: () => true,
+      }),
+    ).toThrow(BackupRestoreCliRefusal);
+    // Refused before the journal-exists check even ran.
+    expect(existsSync(paths.journalPath)).toBe(false);
   });
 });

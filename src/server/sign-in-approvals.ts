@@ -40,11 +40,12 @@ import { createHash, randomBytes } from "node:crypto";
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { base64url } from "jose";
 import { getDb } from "@/db";
-import { auditLog, localCredentials, signInApprovals, users } from "@/db/schema";
-import { AppError } from "@/lib/app-error";
+import { auditLog, signInApprovals, users } from "@/db/schema";
 import { describeDevice } from "@/lib/auth/device";
+import { AuthError } from "@/lib/auth/errors";
 import { log } from "@/lib/logger";
-import { sendBoundedMail, type InvitationMailer, type InvitationSendError } from "@/server/invitations/send";
+import { recordLocalCredentialFailure } from "@/server/local-credentials";
+import { absoluteAppLink, sendBoundedMail, type InvitationMailer, type InvitationSendError } from "@/server/invitations/send";
 import { getNotificationWorkerConfig } from "@/server/notification-worker";
 import { openInstanceMetadataReader } from "@/server/metadata/fields";
 import { renderApprovalMail } from "@/server/sign-in-approvals/mail";
@@ -194,17 +195,10 @@ export interface SignInApprovalOptions {
   now?: Date;
 }
 
-/** One absolute approval link, built exactly the way `setupLink` builds a setup one. */
+/** One absolute approval link -- `absoluteAppLink` (#1151 A1-Q4), the one
+ *  builder `invitationLink` and `setupLink` also use. */
 export function approvalLink(token: string, environment: NodeJS.ProcessEnv = process.env): string {
-  const configured = environment.APP_URL;
-  if (!configured) throw new AppError("unsafe_input", "The approval link cannot be built", 503);
-  try {
-    const url = new URL(configured);
-    if (!url.hostname || !["http:", "https:"].includes(url.protocol)) throw new Error("unsafe application origin");
-    return new URL(`/approve/${encodeURIComponent(token)}`, url.origin).href;
-  } catch {
-    throw new AppError("unsafe_input", "The approval link cannot be built", 503);
-  }
+  return absoluteAppLink("approve", token, "The approval link cannot be built", environment);
 }
 
 /** What the sign-in route hands back to the waiting browser. */
@@ -331,11 +325,18 @@ async function mailApproval(
  * Opens a pending sign-in for a password that has already been verified, and
  * mails its approval link (ADR-0027 §1, §4-§6).
  *
- * The row is written whether or not the mail gets out: a pending sign-in that
- * could not be posted is still a sign-in nobody may complete, and writing it
- * anyway keeps the waiting tab's resend button pointed at something. It is
- * also what makes the hourly limit honest -- a suppressed send still leaves
- * the reader an earlier live link, and this tab waiting on its own.
+ * The row is written BEFORE the mail is attempted, and its send outcome
+ * recorded afterwards (#1151 A1-R1) -- the opposite order from the one this
+ * function used to use, which mailed a token no row yet existed for. A crash
+ * between the two halves used to leave the reader a mailed link with
+ * nothing in the database for it to resolve against: a dead link with no
+ * way even to ask for a fresh one, since collecting and resending both work
+ * by looking up an existing row. Writing the row first means that same
+ * crash instead leaves an unsent, harmless row that simply expires -- the
+ * waiting tab never got a response either, so it retries and gets a new one.
+ * A pending sign-in that could not be posted is still written and still
+ * counts toward the hourly limit once it does send, exactly as before; only
+ * the order changed.
  */
 export async function startSignInApproval(
   userId: string,
@@ -349,6 +350,19 @@ export async function startSignInApproval(
 
   const recipient = await readRecipient(userId);
   const limited = await sendsInWindow(userId, now) >= APPROVAL_SENDS_PER_HOUR;
+
+  const db = getDb();
+  const [row] = await db.insert(signInApprovals).values({
+    userId,
+    tokenHash: secretDigest(token),
+    claimHash: secretDigest(claim),
+    userAgent: facts.userAgent ? facts.userAgent.slice(0, 256) : null,
+    clientAddress: facts.clientAddress,
+    expiresAt,
+    sendCount: 0,
+    lastSentAt: null,
+  }).returning({ id: signInApprovals.id });
+
   /* An account that vanished between the password check and this read is a
      send that did not happen, never a send that silently counted: `sent`
      decides whether the hour's allowance is spent, so it has to mean "a mail
@@ -360,16 +374,11 @@ export async function startSignInApproval(
       : "unknown";
   const sent = !limited && sendError === null;
 
-  await getDb().insert(signInApprovals).values({
-    userId,
-    tokenHash: secretDigest(token),
-    claimHash: secretDigest(claim),
-    userAgent: facts.userAgent ? facts.userAgent.slice(0, 256) : null,
-    clientAddress: facts.clientAddress,
-    expiresAt,
-    sendCount: sent ? 1 : 0,
-    lastSentAt: sent ? now : null,
-  });
+  if (sent) {
+    await db.update(signInApprovals)
+      .set({ sendCount: 1, lastSentAt: now })
+      .where(eq(signInApprovals.id, row.id));
+  }
 
   return {
     claim,
@@ -507,34 +516,28 @@ export async function decideSignInApproval(
         action: "sign_in_refused",
         changes: {},
       });
-      await countRefusalAsFailure(transaction, row.userId);
+      /* One refusal, counted -- and scheduled -- exactly as an ordinary wrong
+         password is (ADR-0027 §8, #1151 A1-F1): `recordLocalCredentialFailure`
+         is the one place the backoff schedule is applied, so a correct
+         password that is then denied locks the credential the same way a
+         wrong one does, rather than only incrementing a count nothing reads. */
+      await recordLocalCredentialFailure(transaction, row.userId);
     }
 
     return { recorded: true };
   });
 }
 
-type Executor = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
-
-/**
- * One refusal, counted in the same column an ordinary wrong password is
- * counted in (ADR-0027 §8). The schedule itself stays where it already lives;
- * this only adds to the count, so the two cannot drift into two backoffs.
- */
-async function countRefusalAsFailure(executor: Executor, userId: string): Promise<void> {
-  await executor
-    .update(localCredentials)
-    .set({
-      failedAttemptCount: sql`${localCredentials.failedAttemptCount} + 1`,
-      updatedAt: new Date(),
-    })
-    .where(eq(localCredentials.userId, userId));
+/** What a caller's own session mint hands back, once spending the approval has succeeded. */
+export interface MintedApprovalSession {
+  token: string;
+  expiresAt: Date;
 }
 
 /** Where a waiting tab stands. `unknown` covers every dead end at once. */
 export type PendingSignInState =
   | { state: "waiting" }
-  | { state: "approved"; userId: string }
+  | { state: "approved"; userId: string; session?: MintedApprovalSession }
   | { state: "denied" }
   | { state: "unknown" };
 
@@ -546,8 +549,21 @@ export type PendingSignInState =
  * is the only one that may collect, so polling with a link somebody read over
  * a shoulder gets nothing. The approved answer is spent under a conditional
  * update, so two tabs sharing a cookie still leave exactly one session.
+ *
+ * `mintSession`, when given, is called with the spend already committed
+ * (#1151 SR1-R7). Session creation lives in `@/lib/auth/session` and opens
+ * its own transaction there, so it cannot share one with the update above;
+ * without this, a crash or a transient failure between the two used to
+ * strand a correctly approved sign-in forever -- the claim is single-use,
+ * the mailed link is already consumed, and nothing was left to retry. A
+ * callback that throws has its spend undone, conditioned on the row still
+ * carrying the exact mark this call just wrote (never somebody else's), so
+ * the next poll finds the approval open again rather than gone.
  */
-export async function collectSignInApproval(claim: string): Promise<PendingSignInState> {
+export async function collectSignInApproval(
+  claim: string,
+  mintSession?: (userId: string) => Promise<MintedApprovalSession>,
+): Promise<PendingSignInState> {
   if (claim.length === 0) return { state: "unknown" };
   const db = getDb();
   const [row] = await db
@@ -568,12 +584,28 @@ export async function collectSignInApproval(claim: string): Promise<PendingSignI
   if (row.expiresAt.getTime() <= Date.now()) return { state: "unknown" };
   if (row.outcome !== "approved") return { state: "waiting" };
 
+  const spentAt = new Date();
   const [claimed] = await db
     .update(signInApprovals)
-    .set({ consumedAt: new Date() })
+    .set({ consumedAt: spentAt })
     .where(and(eq(signInApprovals.id, row.id), isNull(signInApprovals.consumedAt)))
     .returning({ id: signInApprovals.id });
-  return claimed ? { state: "approved", userId: row.userId } : { state: "unknown" };
+  if (!claimed) return { state: "unknown" };
+  if (!mintSession) return { state: "approved", userId: row.userId };
+
+  try {
+    const session = await mintSession(row.userId);
+    return { state: "approved", userId: row.userId, session };
+  } catch (error) {
+    // A disabled account is an answer, not a hiccup: the approval stays
+    // spent, or re-enabling the account within the TTL would let the old
+    // emailed link sign in with no new approval asked for.
+    if (error instanceof AuthError && error.code === "account_disabled") return { state: "denied" };
+    await db.update(signInApprovals)
+      .set({ consumedAt: null })
+      .where(and(eq(signInApprovals.id, row.id), eq(signInApprovals.consumedAt, spentAt)));
+    throw error;
+  }
 }
 
 /** What a resend did, in the words the waiting card has for each. */

@@ -1465,7 +1465,9 @@ journey_successful_rollback() {
   # evidence and the restore is the only executable action. The running
   # container keeps its published port either way; only the file moves.
   sed -i 's|^ORBIT_PORT=.*|ORBIT_PORT=3212|' "$live"
-  [[ "$(sha256sum "$live" | awk '{print $1}')" != "$expected" ]] ||
+  local drifted
+  drifted="$(sha256sum "$live" | awk '{print $1}')"
+  [[ "$drifted" != "$expected" ]] ||
     fail 'successful-rollback: the drifted live file still matches the backup, so the fixture proves nothing'
   mark_setup_done successful-rollback-fixture-staged
 
@@ -1500,10 +1502,32 @@ journey_successful_rollback() {
   compgen -G "$target/.orbit-install-staging.*" >/dev/null 2>&1 &&
     fail 'successful-rollback: the staging evidence survived a completed rollback'
 
+  # The restore never deletes a live secret path: it moves the one it
+  # replaces to a dated copy beside it (repair.sh, #1151 O2-S1), so a
+  # rollback that restored the wrong thing still leaves the operator what
+  # was live. Both live secret paths get one: .env-orbit (the drifted file)
+  # and the .orbit-secrets directory (staged too, so restored too, though
+  # nothing in it moved). Prove each copy, then leave them out of the
+  # manifest comparison below — they are the two entries a correct
+  # rollback adds.
+  local kept
+  kept="$(compgen -G "$target/.env-orbit.pre-restore.*" || true)"
+  [[ -n "$kept" && "$(wc -l <<<"$kept")" == 1 ]] ||
+    fail "successful-rollback: expected exactly one .env-orbit.pre-restore.* copy, found: ${kept:-none}"
+  [[ "$(sha256sum "$kept" | awk '{print $1}')" == "$drifted" ]] ||
+    fail 'successful-rollback: the pre-restore copy does not hold the live file the rollback replaced'
+  [[ "$(stat -c '%a' "$kept")" == 600 ]] ||
+    fail 'successful-rollback: the pre-restore copy is not mode 600'
+  kept="$(compgen -G "$target/.orbit-secrets.pre-restore.*" || true)"
+  [[ -n "$kept" && "$(wc -l <<<"$kept")" == 1 && -d "$kept" ]] ||
+    fail "successful-rollback: expected exactly one .orbit-secrets.pre-restore.* directory, found: ${kept:-none}"
+  diff -r -- "$kept" "$target/.orbit-secrets" >/dev/null ||
+    fail 'successful-rollback: the pre-restore secrets directory differs from the restored one, though nothing in it drifted'
+
   status=0
   repair --check >/dev/null 2>&1 || status=$?
   [[ "$status" == 0 ]] || fail "successful-rollback: --check after the rollback exited $status, expected 0"
-  [[ "$(deployment_manifest)" == "$before" ]] ||
+  [[ "$(deployment_manifest | grep -vE '^\./\.(env-orbit|orbit-secrets)\.pre-restore\.')" == "$before" ]] ||
     fail 'successful-rollback: the rolled-back deployment does not match its pre-drift manifest'
   health_check || fail 'successful-rollback: the deployment is unhealthy after the rollback'
   [[ "$(household_name)" == 'repair-journeys-household' ]] ||

@@ -7,7 +7,7 @@ import {
   stepUpProofCookieName,
   type RecentAuthentication,
 } from "@/lib/auth/recent-auth";
-import { getAuthConfig } from "@/lib/env";
+import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import {
   setInstanceAdministrator,
   setInstanceUserDisabled,
@@ -21,9 +21,19 @@ import {
 } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 
+/* The transfer targets below are provider-backed accounts, and an identity
+   only counts as a way in while the provider is switched on (#1151 SS1-S1),
+   so the key is on for this file and restored at the end. */
+const previousOidcKey = process.env.ORBIT_AUTH_OIDC;
+process.env.ORBIT_AUTH_OIDC = "true";
+resetAuthConfigForTests();
+
 const { POST: transferPrimary } = await loadRoute("admin/primary");
 
 afterAll(async () => {
+  if (previousOidcKey === undefined) delete process.env.ORBIT_AUTH_OIDC;
+  else process.env.ORBIT_AUTH_OIDC = previousOidcKey;
+  resetAuthConfigForTests();
   await cleanupIntegrationEnvironment();
 });
 

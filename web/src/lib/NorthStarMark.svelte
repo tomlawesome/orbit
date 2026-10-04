@@ -23,6 +23,13 @@
       <stop offset=".55" stop-color="var(--upcoming)"/>
       <stop offset="1" stop-color="var(--accent)"/>
     </linearGradient>
+    <!-- #1151 W1-Q4: the one place the two reticle ticks are drawn, at the
+         glint's own fixed ±13.4 footprint — tron and sonde each style the
+         enclosing <g> differently (colour/width/opacity), but <use> shares
+         the actual geometry, so if this footprint ever moves both glints
+         move with it from one edit instead of two. Per-instance id for the
+         same reason the gradient above is. -->
+    <g id="{uid}-reticle"><line x1="-13.4" y1="0" x2="-10" y2="0"/><line x1="10" y1="0" x2="13.4" y2="0"/></g>
   </defs>
   <!-- the mark has THREE forms and only one is ever up: the four-point
        glint every pack has always had, retrograde's neon wireframe beacon
@@ -42,8 +49,7 @@
     <path d="M 0 -4.6 L 3.2 0 L 0 4.6 L -3.2 0 Z" fill="none"
           stroke="var(--accent)" stroke-width="1" opacity=".9"/>
     <g stroke="url(#{uid}-edge)" stroke-width="1.3" stroke-linecap="round" opacity=".75">
-      <line x1="-13.4" y1="0" x2="-10" y2="0"/>
-      <line x1="10" y1="0" x2="13.4" y2="0"/>
+      <use href="#{uid}-reticle"/>
     </g>
   </g>
   <!-- CLOUDS' OWN MARK — THE SOUNDING BALLOON (§15: every theme earns its
@@ -107,8 +113,7 @@
           fill="var(--accent-text)"/>
     <!-- and the reticle ticks, at the glint's own ±13.4 -->
     <g stroke="var(--ink)" stroke-width="1.2" stroke-linecap="round" opacity=".78">
-      <line x1="-13.4" y1="0" x2="-10" y2="0"/>
-      <line x1="10" y1="0" x2="13.4" y2="0"/>
+      <use href="#{uid}-reticle"/>
     </g>
   </g>
 </svg>

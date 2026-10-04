@@ -19,7 +19,7 @@
   import Reader from "./Reader.svelte";
   import StagedPage from "$lib/pocket/StagedPage.svelte";
   import EntryForm from "../../create/EntryForm.svelte";
-  import { entryOf, fieldsOf, refusalOf } from "../../create/entry.js";
+  import { COST_FORMAT_HINT, entryChanged, entryOf, fieldsOf, minorOf, refusalOf } from "../../create/entry.js";
   import { beltManifestOf, documentPreviewStateOf } from "$lib/data/belt.js";
   import { loadStagedPage } from "$lib/data/staged-page.js";
   import {
@@ -135,6 +135,21 @@
   let problem = $state(null);
   /** @type {PanelForm} */
   let form = $state({});
+  /** What the open panel's own form started as (#1151 W1-S5), captured by
+      open() the same moment it builds a fresh one. Null while no panel is
+      open, which is what lets panelDirty() read "nothing to lose" from it
+      alone. */
+  /** @type {string | null} */
+  let formStart = null;
+  /** The phone edit sheet's own baseline (#1151 W1-S5): the "edit" panel's
+      desktop inputs bind `form`, but its phone face binds `editEntry`
+      (EntryForm.svelte) instead, so it needs the same before-and-after
+      capture entry.js's own entryChanged compares. */
+  /** @type {import('../../create/entry.js').Entry | null} */
+  let editStart = null;
+  /** Typed but not a sum of money (#1151 W1-F1/W1-S4): the complete and edit
+      panels' own cost field, desktop and phone alike. */
+  const formCostInvalid = $derived(Number.isNaN(minorOf(form.cost)));
 
   /* ---- THE POCKET (#1072, proposal §2.3) ---------------------------------
      Below the CON-10 switch the same belt is drawn closer — a low arc across
@@ -167,11 +182,6 @@
      ordinary seat, in place: the belt re-reads with the new item at the
      apex. On dismissal it leaves the belt and the apex moves to the
      neighbour it sat beside. The separate suggestion page is gone. */
-  /** @param {string} text */
-  const minorOfText = (text) => {
-    const value = Number.parseFloat(String(text).replace(",", "."));
-    return Number.isFinite(value) ? Math.round(value * 100) : undefined;
-  };
   const proposal = $derived(seatedSuggestion?.proposal ?? {});
   /** The desk card's form, from what the relay read.
       @param {import('$lib/data/workspace.js').ItemView | null} one */
@@ -264,12 +274,13 @@
   /** The desk card's own form, sent as the amended item. */
   function acceptAmendedOnDesk() {
     if (!receipt) return;
+    const cost = minorOf(sform.cost);
+    if (Number.isNaN(cost)) { acceptProblem = COST_FORMAT_HINT; return; }
     /** @type {import('$lib/data/workspace.js').ItemProposal} */
     const amended = { title: sform.title.trim() || "Forwarded email", currency: receipt.currency };
     if (proposal.subtype) amended.subtype = proposal.subtype;
     if (sform.provider.trim()) amended.provider = sform.provider.trim();
     if (sform.reference.trim()) amended.reference = sform.reference.trim();
-    const cost = minorOfText(sform.cost);
     if (cost !== undefined) amended.costMinor = cost;
     if (sform.dueDate) {
       amended.dueDate = sform.dueDate;
@@ -369,6 +380,10 @@
       @param {ItemRecord} item */
   function act(name, item) {
     if (!pocket) { open(name, item); return; }
+    // Asked here, not left to open(): the sheet is reopened rather than
+    // toggled, so the panel is cleared first, and open()'s own question
+    // would then find nothing to ask about (#1151 W1-S5).
+    if (panel !== null && panelDirty() && !confirm("Discard changes to this panel?")) return;
     panel = null;
     open(name, item);
     raise(name);
@@ -381,9 +396,45 @@
      `undo` is a real undo: there is no command that takes a completion back,
      and a reschedule would leave the completion in the item's history.
      Leaving the page sends it at once. */
-  /** @typedef {{ build: () => object, leave: boolean, timer: ReturnType<typeof setTimeout> | undefined, done: boolean }} HeldCompletion */
+  /** @typedef {{ command: object, leave: boolean, timer: ReturnType<typeof setTimeout> | undefined, done: boolean }} HeldCompletion */
   /** @type {HeldCompletion | null} */
   let pending = null;
+  /** The key a held completion is stashed under (#1151 W1-R5) so a flush cut
+      off by the page actually unloading — not merely refused — is picked up
+      on the next load instead of vanishing with no trace. One slot: this
+      screen only ever holds one completion at a time. */
+  const HELD_COMPLETION_KEY = "orbit:pending-completion";
+  /* The same list the home pocket keeps under this key, in the same shape:
+     one entry per held completion, each leaving on its own send. One slot
+     here overwrote whatever the pocket had left waiting, and read the
+     pocket's list as nothing at all (#1151 W1-R5). */
+  /** @returns {object[]} */
+  function readHeldCompletionStash() {
+    try {
+      const raw = localStorage.getItem(HELD_COMPLETION_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [parsed.command].filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+  /** @param {object[]} commands */
+  function writeHeldCompletionStash(commands) {
+    try {
+      if (commands.length === 0) localStorage.removeItem(HELD_COMPLETION_KEY);
+      else localStorage.setItem(HELD_COMPLETION_KEY, JSON.stringify(commands));
+    } catch { /* best effort */ }
+  }
+  /** @param {object} command */
+  function stashHeldCompletion(command) {
+    writeHeldCompletionStash([...readHeldCompletionStash(), command]);
+  }
+  /** @param {object} command */
+  function clearHeldCompletionStash(command) {
+    const key = JSON.stringify(command);
+    writeHeldCompletionStash(readHeldCompletionStash().filter((one) => JSON.stringify(one) !== key));
+  }
   /** @param {ItemRecord} item */
   function tapComplete(item) {
     if (item.costMinor !== null && item.costMinor !== undefined) { act("complete", item); return; }
@@ -396,14 +447,25 @@
    */
   function holdCompletion(item, fields) {
     sendPending();
+    /* Built once, not per send (same reasoning as the create draft's id,
+       #1151 W1-R2/W1-R3): a retry reuses the exact command, version guard
+       included, rather than minting a new activity id each time it is
+       resent. */
+    const command = completeCommand(item, fields);
+    stashHeldCompletion(command);
     /** @type {HeldCompletion} */
-    const job = { build: () => completeCommand(item, fields), leave: !fields.nextDate, timer: undefined, done: false };
+    const job = { command, leave: !fields.nextDate, timer: undefined, done: false };
     job.timer = setTimeout(() => firePending(job), WAKE_HOLD_MS);
     pending = job;
     /* The date first: the wake is one line and ellipsises, and the card above
        already names the item; the live region still reads the whole line. */
     wake(`Completed${fields.nextDate ? ` · next due ${shortDate(fields.nextDate)}` : ""} · ${item.title}`, {
-      undo: () => { clearTimeout(job.timer); job.done = true; if (pending === job) pending = null; },
+      undo: () => {
+        clearTimeout(job.timer);
+        job.done = true;
+        if (pending === job) pending = null;
+        clearHeldCompletionStash(job.command);
+      },
     });
   }
   /** @param {HeldCompletion} job */
@@ -411,23 +473,44 @@
     if (job.done) return;
     job.done = true;
     if (pending === job) pending = null;
-    await run(job.build, { leave: job.leave });
+    await run(() => job.command, { leave: job.leave });
     if (problem) wake(problem, { failure: true });
+    else clearHeldCompletionStash(job.command);
   }
-  /* Leaving before the wake has gone: the completion is sent now, not lost. */
+  /* Leaving before the wake has gone: the completion is sent now, not lost
+     — and stashed before it is sent (above), so even a send this page never
+     lives to see the answer to is picked up on the next load (#1151 W1-R5). */
   function sendPending() {
     const job = pending;
     if (!job || job.done) return;
     clearTimeout(job.timer);
     job.done = true;
     pending = null;
-    applyCommand(job.build()).catch(() => {});
+    applyCommand(job.command).then(() => clearHeldCompletionStash(job.command)).catch(() => {});
   }
   beforeNavigate(() => { sendPending(); });
   $effect(() => {
     addEventListener("pagehide", sendPending);
     return () => { removeEventListener("pagehide", sendPending); };
   });
+  /** A completion stashed by a previous visit that never confirmed it sent
+      (#1151 W1-R5): picked up here instead of the item just quietly staying
+      "not completed" with nothing said. A version conflict means somebody
+      already holds this change — most likely the original send landing
+      after all — so that alone is treated as the stash's own success. */
+  function retryHeldCompletionStash() {
+    for (const command of readHeldCompletionStash()) applyCommand(command).then(async () => {
+      clearHeldCompletionStash(command);
+      await rereadUnlessLeaving();
+    }).catch(async (error) => {
+      if (error instanceof WorkspaceError && error.code === "version_conflict") {
+        clearHeldCompletionStash(command);
+        await rereadUnlessLeaving();
+        return;
+      }
+      problem = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
+    });
+  }
 
   /* ---- the papers on a phone ---------------------------------------------
      A paper opens the preview sheet (§18: "on a phone it is the bottom
@@ -550,6 +633,15 @@
   let previewCloseTimer;
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let previewBeatTimer;
+  /** #1151 W1-R10: an accepted document's preview is a bare `<img src>`
+   *  with only onload/onerror — unlike the staged path, which has its own
+   *  AbortController (loadStagedPage) — so a hung preview request left
+   *  previewImgLoaded/Failed never set and the reticle/"drawing" line
+   *  spinning forever, with no way to tell stuck from still loading.
+   *  Cleared the instant either handler actually fires. */
+  const PREVIEW_LOAD_TIMEOUT_MS = 15_000;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let previewLoadTimer;
 
   const previewDocState = $derived(previewDoc ? documentPreviewStateOf(previewDoc) : null);
   /* A document Orbit believed showable but whose actual page failed to load
@@ -573,6 +665,7 @@
   function openPreview(doc, side) {
     clearTimeout(previewCloseTimer);
     clearTimeout(previewBeatTimer);
+    clearTimeout(previewLoadTimer);
     previewAbort?.abort();
     previewAbort = null;
     revokePreviewSrc();
@@ -591,6 +684,11 @@
     }
     if (!previewOpen) tick().then(() => { previewOpen = true; });
 
+    if (!doc.staged && previewSrc) {
+      previewLoadTimer = setTimeout(() => {
+        if (token === previewToken) previewFailed();
+      }, PREVIEW_LOAD_TIMEOUT_MS);
+    }
     if (doc.staged && doc.previewHref) {
       const controller = new AbortController();
       previewAbort = controller;
@@ -605,10 +703,24 @@
       });
     }
   }
+  /** Shared by both the desk reticle's and the pocket sheet's own <img>
+   *  (#1151 W1-R10): clears the stuck-preview deadline the instant a real
+   *  answer arrives. */
+  function previewLoaded() {
+    clearTimeout(previewLoadTimer);
+    previewImgLoaded = true;
+    previewImgFailed = false; // a slow load that arrives is not a failed one
+  }
+  function previewFailed() {
+    clearTimeout(previewLoadTimer);
+    previewImgLoaded = true;
+    previewImgFailed = true;
+  }
   function closePreview() {
     if (!previewDoc) return;
     previewOpen = false;
     clearTimeout(previewBeatTimer);
+    clearTimeout(previewLoadTimer);
     previewAbort?.abort();
     previewAbort = null;
     /* The card stays mounted through its own fade-out, same choreography as
@@ -633,14 +745,24 @@
      rather than through the reader this issue does not build). */
   async function restorePreviewDoc() {
     if (!previewDoc || previewRestoring) return;
+    /* #1151 W1-R12: the target, and the preview's own generation, taken
+       now — openPreview's `previewToken` already says when the reader has
+       moved on to a different document while something async for the old
+       one is still in flight. Without this, closing or blaming the wrong
+       document was always possible, not merely likely: `await
+       restoreDocument(...)` has no deadline of its own. */
+    const target = previewDoc;
+    const token = previewToken;
     previewRestoring = true;
     previewProblem = null;
     try {
-      await restoreDocument(previewDoc.id);
-      belt?.closeDoc();
+      await restoreDocument(target.id);
+      if (token === previewToken) belt?.closeDoc();
       await invalidateAll();
     } catch (error) {
-      previewProblem = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
+      if (token === previewToken) {
+        previewProblem = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
+      }
     } finally {
       previewRestoring = false;
     }
@@ -763,6 +885,7 @@
     if (sky) mountTiledSky(sky, "belt");
     /* Shallow routing is only legal once the router is up. */
     routerReady = true;
+    retryHeldCompletionStash();
   });
 
   /** The address follows the apex: centring another item makes the one in the
@@ -802,30 +925,25 @@
   const itemCount = $derived(bodies.filter((b) => b.kind === "item" && !b.item.suggestion).length);
   const suggestedCount = $derived(bodies.filter((b) => b.kind === "item" && b.item.suggestion).length);
   const suggestedNote = $derived(suggestedCount ? ` · ${suggestedCount} suggested` : "");
-  const findnote = $derived(
-    !bodies.length
-      ? "the belt is empty"
-      : !query.trim()
-        /* #1062: the note says what ORDER the belt is in, not which keys move
-           it. The end-caps are the visible way along it now, and the arrow
-           keys keep working as the shortcut they always were. */
-        ? `${itemCount} items${suggestedNote} · in date order, sooner to later`
-        : hitList.length
-          ? `${hitList.length} of ${itemCount} lit · enter centres the nearest`
-          : "nothing matches · the belt keeps its shape",
-  );
-  /* round-3 §3.2: the phone's caps head drops "in date order" -- the belt's
-     own shape says the order, and the cap is 40 characters at rest. The
-     desk's own find note under the `.find` box keeps the fuller line. */
-  const pocketFindnote = $derived(
-    !bodies.length
-      ? "the belt is empty"
-      : !query.trim()
-        ? `${itemCount} items${suggestedNote} · sooner to later`
-        : hitList.length
-          ? `${hitList.length} of ${itemCount} lit · enter centres the nearest`
-          : "nothing matches · the belt keeps its shape",
-  );
+  /** #1151 W1-Q17: the one place both find-notes' shared selection formula
+   *  (empty belt / no query / hit count / no match) lives — only the
+   *  no-query branch's wording actually differs between desk and phone
+   *  (round-3 §3.2: the phone's caps head drops "in date order" — the
+   *  belt's own shape says the order, and the cap is 40 characters at
+   *  rest), taken here as the one parameter that does.
+   *  @param {string} noQuerySuffix */
+  function findnoteFor(noQuerySuffix) {
+    if (!bodies.length) return "the belt is empty";
+    /* #1062: the note says what ORDER the belt is in, not which keys move
+       it. The end-caps are the visible way along it now, and the arrow
+       keys keep working as the shortcut they always were. */
+    if (!query.trim()) return `${itemCount} items${suggestedNote} · ${noQuerySuffix}`;
+    return hitList.length
+      ? `${hitList.length} of ${itemCount} lit · enter centres the nearest`
+      : "nothing matches · the belt keeps its shape";
+  }
+  const findnote = $derived(findnoteFor("in date order, sooner to later"));
+  const pocketFindnote = $derived(findnoteFor("sooner to later"));
 
   /** @param {KeyboardEvent} event */
   function onFindKey(event) {
@@ -897,7 +1015,7 @@
     /* #1088: Esc closes the reading card first — the belt's own dead-space
        law (owner-decisions.md §18) — and only then a command panel. */
     if (event.key === "Escape" && previewDoc) { event.preventDefault(); belt?.closeDoc(); return; }
-    if (event.key === "Escape" && panel) { panel = null; armed = null; return; }
+    if (event.key === "Escape" && panel) { closePanel(); return; }
     if (typing(event.target)) return;
     if (event.key === "ArrowLeft") {
       event.preventDefault();
@@ -918,11 +1036,6 @@
   const todayISO = () => data.today ?? new Date().toISOString().slice(0, 10);
   /** @type {(minor?: number | null) => string} */
   const pounds = (minor) => (minor === null || minor === undefined ? "" : (minor / 100).toFixed(2));
-  /** @type {(text?: string) => number | undefined} */
-  const minorOf = (text) => {
-    const value = Number.parseFloat(String(text).replace(",", "."));
-    return Number.isFinite(value) ? Math.round(value * 100) : undefined;
-  };
 
   /**
    * A panel is always about the record at the apex, so it is handed the one
@@ -933,6 +1046,9 @@
    * @param {ItemRecord} item
    */
   function open(name, item) {
+    // Leaving an open panel, for another one or to close it, discards what
+    // was typed there exactly as closePanel would: ask the same question.
+    if (panel !== null && panelDirty() && !confirm("Discard changes to this panel?")) return;
     problem = null;
     armed = null;
     panel = panel === name ? null : name;
@@ -949,6 +1065,7 @@
     if (panel === "snooze") form = { until: item.snoozedUntil ?? todayISO() };
     if (panel === "edit") {
       editEntry = entryOf(item);
+      editStart = $state.snapshot(editEntry);
       form = {
         title: item.title,
         provider: item.provider ?? "",
@@ -958,7 +1075,33 @@
         recurrenceMonths: item.recurrenceMonths ?? "",
         notes: item.notes ?? "",
       };
+    } else {
+      editStart = null;
     }
+    formStart = panel ? JSON.stringify(form) : null;
+  }
+
+  /** Whether the open panel's own form differs from what it opened with
+      (#1151 W1-S5) — the same comparison entry.js's own entryChanged
+      makes for the create form. Checks both halves of the "edit" panel:
+      the desktop inputs (`form`) and the phone sheet's own EntryForm
+      (`editEntry`) — only one of the two is ever actually touched for a
+      given dialect, so checking both costs nothing on the other. */
+  function panelDirty() {
+    if (panel === null) return false;
+    if (editEntry && editStart && entryChanged(editEntry, editStart)) return true;
+    return formStart !== null && JSON.stringify(form) !== formStart;
+  }
+
+  /** Closes whatever panel is open, asking first if it would discard
+      something typed — the dirty-check-and-confirm W1-S1 built for the
+      desktop create form, reused here for the same reason: no desktop
+      confirm pattern already existed either. A decline leaves the panel
+      open and typed. */
+  function closePanel() {
+    if (panelDirty() && !confirm("Discard changes to this panel?")) return;
+    panel = null;
+    armed = null;
   }
 
   /** One writer. Success re-reads the belt — the item may have moved in time,
@@ -1355,16 +1498,18 @@
               <input id="a-cnotes" bind:value={form.notes} placeholder="optional"></div>
             {#if locked}
               <div class="note">{COST_LOCKED}</div>
+            {:else if formCostInvalid}
+              <div class="note">{COST_FORMAT_HINT}</div>
             {/if}
             <div class="save-row">
-              <button class="btn-primary" disabled={busy || !form.completedDate}
+              <button class="btn-primary" disabled={busy || !form.completedDate || formCostInvalid}
                 onclick={() => run(() => completeCommand(record, {
                   completedDate: form.completedDate,
                   nextDate: form.nextDate || undefined,
                   costMinor: minorOf(form.cost),
                   notes: (form.notes ?? "").trim() || undefined,
                 }), { leave: !form.nextDate })}>complete</button>
-              <button class="cancel-link" onclick={() => (panel = null)}>never mind</button>
+              <button class="cancel-link" onclick={closePanel}>never mind</button>
             </div>
           </div>
         {/if}
@@ -1376,7 +1521,7 @@
             <div class="save-row">
               <button class="btn-primary" disabled={busy || !form.dueDate}
                 onclick={() => run(() => rescheduleCommand(record, form.dueDate))}>reschedule</button>
-              <button class="cancel-link" onclick={() => (panel = null)}>never mind</button>
+              <button class="cancel-link" onclick={closePanel}>never mind</button>
             </div>
           </div>
         {/if}
@@ -1388,7 +1533,7 @@
             <div class="save-row">
               <button class="btn-primary" disabled={busy || !form.until}
                 onclick={() => run(() => snoozeCommand(record, form.until))}>snooze</button>
-              <button class="cancel-link" onclick={() => (panel = null)}>never mind</button>
+              <button class="cancel-link" onclick={closePanel}>never mind</button>
             </div>
           </div>
         {/if}
@@ -1424,11 +1569,13 @@
                         placeholder={notesState === DAMAGED ? DAMAGED_PLACEHOLDER : "optional"}></textarea></div>
             {#if locked}
               <div class="note">{PANEL_LOCKED}</div>
+            {:else if formCostInvalid}
+              <div class="note">{COST_FORMAT_HINT}</div>
             {/if}
             <div class="save-row">
-              <button class="btn-primary" disabled={busy || locked || !form.title?.trim()}
+              <button class="btn-primary" disabled={busy || locked || !form.title?.trim() || formCostInvalid}
                 onclick={() => run(() => upsertCommand(record, editsOf()))}>save changes</button>
-              <button class="cancel-link" onclick={() => (panel = null)}>never mind</button>
+              <button class="cancel-link" onclick={closePanel}>never mind</button>
             </div>
           </div>
         {/if}
@@ -1448,7 +1595,7 @@
                   onclick={() => tap("cancel", () => run(() => statusCommand(record, "cancelled")))}>
                   {armed === "cancel" ? "tap again to cancel" : "cancel item"}</button>
               {/if}
-              <button class="cancel-link" onclick={() => { panel = null; armed = null; }}>never mind</button>
+              <button class="cancel-link" onclick={closePanel}>never mind</button>
             </div>
           </div>
         {/if}
@@ -1588,8 +1735,7 @@
                    ever made; a non-staged document's previewSrc is never empty,
                    so this changes nothing for it. -->
               <img src={previewSrc || undefined} alt="Page one of {previewDoc.name}"
-                   onload={() => (previewImgLoaded = true)}
-                   onerror={() => { previewImgLoaded = true; previewImgFailed = true; }} />
+                   onload={previewLoaded} onerror={previewFailed} />
             </div>
           </div>
         {/if}
@@ -1654,7 +1800,8 @@
 <!-- #1072: every panel, list and preview on a phone is this one kit Sheet;
      `face` says which. On a desk it is never raised. -->
 <Sheet bind:open={sheetOpen} size={face ? SHEET_SIZE[face] : "callout"} title={sheetTitle}
-       hideTitle={face === "search" || face === "preview"} onclose={sheetClosed}>
+       hideTitle={face === "search" || face === "preview"} onclose={sheetClosed}
+       confirmDiscard={panelDirty}>
   <!-- The search field rides in the sheet's head (§2.4). Declared in here
        rather than at the top of the markup: a top-level snippet trips the
        production bundler (#1130). -->
@@ -1685,7 +1832,8 @@
              placeholder="optional" disabled={locked}></div>
     <div class="bp-field"><label for="p-cnotes">note</label>
       <input id="p-cnotes" bind:value={form.notes} placeholder="optional" enterkeyhint="done"></div>
-    {#if locked}<p class="bp-note">{COST_LOCKED}</p>{/if}
+    {#if locked}<p class="bp-note">{COST_LOCKED}</p>
+    {:else if formCostInvalid}<p class="bp-note">{COST_FORMAT_HINT}</p>{/if}
   {:else if face === "reschedule" && record}
     <p class="bp-lede">{row?.title} · due {row?.longWhen}</p>
     <div class="bp-field"><label for="p-due">new due date</label>
@@ -1746,8 +1894,7 @@
               aria-label="Read {previewDoc.name}" onclick={() => { readerOpen = true; }}>
         <span class="bp-under" aria-hidden="true"></span>
         <img src={previewSrc} alt="Page one of {previewDoc.name}"
-             onload={() => (previewImgLoaded = true)}
-             onerror={() => { previewImgLoaded = true; previewImgFailed = true; }} />
+             onload={previewLoaded} onerror={previewFailed} />
       </button>
       {#if !previewShowing}<p class="bp-line quiet" aria-live="polite">Orbit is drawing the page</p>{/if}
     {:else}
@@ -1799,7 +1946,7 @@
   {#snippet foot()}
     {#if face === "complete" && record}
       <button class="p-pill filled bp-go" style="--act:var(--ok);--act-text:var(--ok-text)"
-              disabled={busy || !form.completedDate}
+              disabled={busy || !form.completedDate || formCostInvalid}
               onclick={() => {
                 const fields = {
                   completedDate: /** @type {string} */ (form.completedDate),

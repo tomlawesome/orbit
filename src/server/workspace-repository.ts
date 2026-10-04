@@ -49,6 +49,10 @@ import { isInstanceAdministrator } from "@/server/authorization";
 // (#383).
 const MAX_ITEMS_PER_HOUSEHOLD = 500;
 const MAX_NOTIFICATION_IDS_PER_HOUSEHOLD = 2_000;
+/** #1151 A4-R5: an administrator's read otherwise loads every household in
+ *  the instance with nothing bounding the count, unlike every other list
+ *  this read returns. */
+const MAX_INSTANCE_HOUSEHOLDS = 2_000;
 
 /** Truncates to the outbound schema cap instead of letting workspaceSchema.parse fail on stored data (#383). */
 function clampedForRead<T>(values: T[], limit: number): T[] {
@@ -74,13 +78,13 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     deletionRequestedAt: households.deletionRequestedAt,
     deleteAfter: households.deleteAfter,
   };
-  const householdRows = administrator
+  const householdRows = clampedForRead(administrator
     ? await getDb().select(householdSelection).from(households).where(isNull(households.deletionRequestedAt)).orderBy(asc(households.createdAt))
     : await getDb().select(householdSelection)
       .from(memberships)
       .innerJoin(households, eq(households.id, memberships.householdId))
       .where(and(eq(memberships.userId, userId), isNull(households.deletionRequestedAt)))
-      .orderBy(asc(households.createdAt));
+      .orderBy(asc(households.createdAt)), MAX_INSTANCE_HOUSEHOLDS);
 
   const recoverableHouseholds = administrator
     ? await getDb().select({ id: households.id, name: households.name, deleteAfter: households.deleteAfter }).from(households).where(and(isNotNull(households.deletionRequestedAt), sql`${households.deleteAfter} > now()`)).orderBy(asc(households.deleteAfter))
@@ -118,7 +122,17 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     getDb().select().from(dueEvents)
       .where(and(inArray(dueEvents.householdId, householdIds), isNull(dueEvents.completedAt)))
       .orderBy(asc(dueEvents.dueDate)),
-    getDb().select().from(reminderRules),
+    // #1151 A4-R4: scoped to this read's own households, the same way every
+    // other query here is. `reminder_rules` carries no household column of
+    // its own -- only `itemId` -- so the join runs through `items`, which
+    // already pins the join to the right instance's rows; a plain
+    // `.from(reminderRules)` used to scan and load the entire instance's
+    // reminder rules on every workspace read, for every household, however
+    // many other households and instances the table held.
+    getDb().select({ itemId: reminderRules.itemId, daysBefore: reminderRules.daysBefore })
+      .from(reminderRules)
+      .innerJoin(items, eq(items.id, reminderRules.itemId))
+      .where(inArray(items.householdId, householdIds)),
     // Only recordActivity's inserts (entityType "item", changes: { activity })
     // feed the item history timeline; every other audit_log write (document
     // lifecycle, membership, household lifecycle, ...) is filtered out by the
@@ -516,6 +530,18 @@ export async function applyWorkspaceCommand(
       // a client that sends `metadataStatus` to slip past that check is
       // refused here rather than storing a nameless item.
       if (!command.item.title.trim()) throw new AppError("invalid_item", "Give this a name", 422);
+      // #1151 A4-S4: `command.item.version` is optional in the wire schema,
+      // but an update with none omitted used to fall back to "whatever the
+      // row's current version already is" -- a check against the value it
+      // had just read a moment earlier, which can never fail. That silently
+      // turned the optimistic-concurrency check off for exactly the caller
+      // who skipped it, overwriting another member's edit with no conflict
+      // ever reported. An existing row now always requires the version it is
+      // meant to replace; only a brand new item, which has no version to
+      // race against, may omit it.
+      if (existing && command.item.version === undefined) {
+        throw new AppError("version_required", "This item changed on another device; refresh and try again", 409);
+      }
       // Tier 1 and Tier 2 (ADR-0024 decision 3): encrypt and clear the
       // plaintext in the same statement, so the row is never in both states at
       // once. Writing a damaged field is also the repair for it: the new value
@@ -546,7 +572,10 @@ export async function applyWorkspaceCommand(
         ...itemDates(command.item.scheduleKind, command.item.dueDate),
       };
       if (existing) {
-        const expectedVersion = Math.max(1, (command.item.version ?? existing.version + 1) - 1);
+        // `command.item.version` is the version the client wants this write
+        // to become, guaranteed present by the guard above; the row it
+        // replaces must be one less than that.
+        const expectedVersion = Math.max(1, command.item.version! - 1);
         const [updated] = await transaction.update(items)
           .set({ ...values, version: sql`${items.version} + 1` })
           .where(and(

@@ -103,9 +103,21 @@ function readyReceipt(householdId: string) {
   };
 }
 
-async function interceptMail(page: Page, householdId: string, approvals: Record<string, unknown>[], options: { firstPartial?: boolean } = {}) {
+async function interceptMail(
+  page: Page,
+  householdId: string,
+  approvals: Record<string, unknown>[],
+  options: { firstPartial?: boolean; approvedItemId?: string } = {},
+) {
   let approved = false;
   const receipt = readyReceipt(householdId);
+  // SQ2-Q2 (#1151): ApprovalOutcome's own `itemId` field is a plain
+  // `string`, never optional or nullable (src/server/reviewed-intake.ts) --
+  // the item is created before a partial transfer can fail, so even a
+  // `partial_success` answer always names it ("never a second item" on
+  // retry, same id both times). A null here could never come from the real
+  // route.
+  const itemId = options.approvedItemId ?? randomUUID();
   await page.route("**/api/imap-inbox", async (route) => {
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ receipts: approved ? [] : [receipt], households: [{ id: householdId, name: "Mail Proving Ground", currency: "GBP" }] }) });
   });
@@ -138,13 +150,11 @@ async function interceptMail(page: Page, householdId: string, approvals: Record<
   await page.route("**/api/reviewed-intake/approve", async (route) => {
     approvals.push(route.request().postDataJSON() as Record<string, unknown>);
     if (options.firstPartial && approvals.length === 1) {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ outcome: "partial_success", itemId: null }) });
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ outcome: "partial_success", itemId }) });
       return;
     }
     approved = true;
-    const body = route.request().postDataJSON() as { itemId?: string };
-    void body;
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ outcome: "approved", itemId: (options as { approvedItemId?: string }).approvedItemId ?? null }) });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ outcome: "approved", itemId }) });
   });
 }
 
@@ -205,7 +215,7 @@ test("amend then accept from the item view", async ({ page }) => {
 
   try {
     const approvals: Record<string, unknown>[] = [];
-    await interceptMail(page, householdId, approvals, { approvedItemId: itemId } as { firstPartial?: boolean });
+    await interceptMail(page, householdId, approvals, { approvedItemId: itemId });
 
     await page.goto(`/item/${receiptId}`);
     if (test.info().project.name.startsWith("mobile")) {

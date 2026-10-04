@@ -21,6 +21,44 @@
 /** @param {string} text */
 const fold = (text) => text.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 
+/** #1151 W1-Q8/W1-R9: the desk and the pocket each had their own copy of
+ *  "read every carrying item's documents for search", which had silently
+ *  drifted (the pocket also set its own papersReady) and would have had to
+ *  be fixed twice for the same N+1-fetch gap. Shared here, alongside the
+ *  pure match logic above, with the per-screen bits (the
+ *  searchDocumentsFor cache check, papersReady) left to each caller.
+ *  At most this many readItemDocuments() calls in flight at once: a
+ *  household with hundreds of items carrying documents used to fire every
+ *  one of them at once with no cap at all. */
+export const SEARCH_DOC_CONCURRENCY = 6;
+
+/**
+ * @template {{ id: string, title: string }} T
+ * @param {T[]} carrying
+ * @param {(householdId: string, itemId: string) => Promise<Omit<SearchDocument, "itemTitle">[]>} readItemDocuments
+ * @param {string} householdId
+ * @param {() => boolean} stale true once the caller's own household has moved on and this read should stop filling in
+ * @returns {Promise<SearchDocument[]>}
+ */
+export async function readSearchDocuments(carrying, readItemDocuments, householdId, stale) {
+  /** @type {SearchDocument[]} */
+  const found = [];
+  let cursor = 0;
+  async function worker() {
+    while (cursor < carrying.length && !stale()) {
+      const item = carrying[cursor++];
+      try {
+        const papers = await readItemDocuments(householdId, item.id);
+        found.push(...papers.map((doc) => ({ ...doc, itemTitle: item.title })));
+      } catch { /* this item's papers drop out, not the whole search */ }
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(SEARCH_DOC_CONCURRENCY, carrying.length) }, worker),
+  );
+  return found;
+}
+
 /**
  * @template {SearchItem} T
  * @template {SearchDocument} D

@@ -34,6 +34,33 @@ import { packOf, setSwatch, syncSwatches } from "./swatches.js";
 /** @type {(id: string) => string} */
 export const sunHref = (id) => `/household/${encodeURIComponent(id)}`;
 
+/*
+ * THE CONSTELLATION MARKER'S OWN GEOMETRY (#1151 W1-Q12): the ring centre
+ * and the leader-line's "extends away from the dial" veer path (owner,
+ * 2026-08-16), shared between the live sky's renderGalaxy() below and the
+ * newcomer's labelled sky's mountEmptySky() further down — one builds its
+ * marker as an innerHTML SVG string, the other with createElementNS, but
+ * both drew the identical ring/veer numbers from scratch before this. mx()
+ * mirrors any drawn x through the 210-wide viewBox: a constellation left of
+ * centre reads leftward (the original layout, ring at svg x 118), one right
+ * of centre is the horizontal mirror (ring at x 92, text end-anchored).
+ */
+/** @param {number} x @param {boolean} away */
+function markerX(x, away) {
+  return away ? 210 - x : x;
+}
+/** @param {boolean} away */
+function markerRingX(away) {
+  return markerX(118, away);
+}
+/** The arrow extends underneath the text, then veers toward the ring.
+ *  @param {number} width @param {boolean} away */
+function markerVeer(width, away) {
+  return away
+    ? `M 206 21 H ${200 - width} L ${184 - width} 40`
+    : `M 4 21 H ${width + 10} L ${width + 26} 40`;
+}
+
 /**
  * @param {object} options
  * @param {Record<string, any>} options.galaxy
@@ -150,9 +177,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
        * any drawn x through the 210-wide viewBox.
        */
       const away = ox > 0;
-      /** @type {(x: number) => number} */
-      const mx = (x) => (away ? 210 - x : x);
-      const ringX = mx(118);
+      const ringX = markerRingX(away);
       // anchored so the RING CENTRE sits at the bearing point — a flight
       // translating by -delta therefore lands the ring centre EXACTLY on the
       // hero centre, concentric with the dial's sun
@@ -165,14 +190,9 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
       div.style.setProperty("--dim", dim);
       const label = hh.name.toUpperCase();
       const tw = Math.min(150, label.length * 6.6);
-      // the arrow extends underneath the text, then veers toward the ring
-      /** @type {(width: number) => string} */
-      const veerFor = (width) => (away
-        ? `M 206 21 H ${200 - width} L ${184 - width} 40`
-        : `M 4 21 H ${width + 10} L ${width + 26} 40`);
       div.innerHTML = `<svg width="210" height="160" viewBox="0 0 210 160">
-        <text x="${mx(6)}" y="14" font-size="9.5" letter-spacing=".14em"${away ? ' text-anchor="end"' : ""} style="fill:var(--accent-text)" opacity=".85">${label}</text>
-        <path d="${veerFor(tw)}" fill="none" style="stroke:var(--accent)" stroke-width="1" opacity=".55"/>
+        <text x="${markerX(6, away)}" y="14" font-size="9.5" letter-spacing=".14em"${away ? ' text-anchor="end"' : ""} style="fill:var(--accent-text)" opacity=".85">${label}</text>
+        <path d="${markerVeer(tw, away)}" fill="none" style="stroke:var(--accent)" stroke-width="1" opacity=".55"/>
         <circle class="msring" cx="${ringX}" cy="95" r="40" fill="none" style="stroke:var(--chart-line)" stroke-opacity=".5" stroke-width="1"/>
         <!-- #638: the real hit target — fill="none" above doesn't hit-test,
              fill="transparent" does. home.css turns off pointer events on the
@@ -184,7 +204,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
       </svg>`;
       div.addEventListener("click", () => flyTo(key, div));
       hero.appendChild(div);
-      corrections.push({ div, veerFor });
+      corrections.push({ div, away });
     }
     /*
      * The leader rule runs under the label and then veers to the ring, so its
@@ -197,10 +217,10 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
      * Measured in a second pass over the appended nodes, so the run costs one
      * layout for the first measurement instead of one per constellation (#448).
      */
-    for (const { div, veerFor } of corrections) {
+    for (const { div, away } of corrections) {
       const measured = Math.min(150, /** @type {SVGTextElement} */ (div.querySelector("text")).getComputedTextLength());
       if (measured) {
-        /** @type {SVGPathElement} */ (div.querySelector("path")).setAttribute("d", veerFor(measured));
+        /** @type {SVGPathElement} */ (div.querySelector("path")).setAttribute("d", markerVeer(measured, away));
       }
     }
     /* the marks are new nodes, so anything that dresses them — dawn's crossing
@@ -713,9 +733,7 @@ export function mountEmptySky({ galaxy, onAsk }) {
     for (const { id, household: hh, ox, oy, undrawn } of placed) {
       if (undrawn) continue;
       const away = ox > 0;
-      /** @type {(x: number) => number} */
-      const mx = (x) => (away ? 210 - x : x);
-      const ringX = mx(118);
+      const ringX = markerRingX(away);
       const div = document.createElement("div");
       div.className = "minisys";
       div.setAttribute("role", "button");
@@ -724,7 +742,7 @@ export function mountEmptySky({ galaxy, onAsk }) {
       div.style.top = (h / 2 + oy - 95) + "px";
       const label = hh.name.toUpperCase();
       const tw = Math.min(150, label.length * 6.6);
-      const veer = away ? `M 206 21 H ${200 - tw} L ${184 - tw} 40` : `M 4 21 H ${tw + 10} L ${tw + 26} 40`;
+      const veer = markerVeer(tw, away);
       const svgNS = "http://www.w3.org/2000/svg";
       const svg = document.createElementNS(svgNS, "svg");
       svg.setAttribute("width", "210"); svg.setAttribute("height", "160");
@@ -741,7 +759,7 @@ export function mountEmptySky({ galaxy, onAsk }) {
         svg.appendChild(el);
         return el;
       };
-      const name = put("text", { x: mx(6), y: 14, "font-size": "9.5", "letter-spacing": ".14em", style: "fill:var(--accent-text)", opacity: ".85" }, label);
+      const name = put("text", { x: markerX(6, away), y: 14, "font-size": "9.5", "letter-spacing": ".14em", style: "fill:var(--accent-text)", opacity: ".85" }, label);
       if (away) name.setAttribute("text-anchor", "end");
       put("path", { d: veer, fill: "none", style: "stroke:var(--accent)", "stroke-width": "1", opacity: ".55" });
       put("circle", { class: "msring", cx: ringX, cy: 95, r: 40, fill: "none", style: "stroke:var(--chart-line)", "stroke-opacity": ".5", "stroke-width": "1" });
@@ -749,7 +767,7 @@ export function mountEmptySky({ galaxy, onAsk }) {
       put("circle", { class: "mshit", cx: ringX, cy: 95, r: 40, fill: "transparent" });
       put("circle", { cx: ringX, cy: 95, r: 3, style: "fill:var(--ink)", opacity: ".8" });
       if (hh.requested) {
-        const asked = put("text", { x: mx(6), y: 30, "font-size": "8.5", "letter-spacing": ".14em", style: "fill:var(--ink-faint)" }, "ASKED TO JOIN · WAITING");
+        const asked = put("text", { x: markerX(6, away), y: 30, "font-size": "8.5", "letter-spacing": ".14em", style: "fill:var(--ink-faint)" }, "ASKED TO JOIN · WAITING");
         if (away) asked.setAttribute("text-anchor", "end");
       }
       div.appendChild(svg);

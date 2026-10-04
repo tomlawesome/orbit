@@ -108,6 +108,20 @@ export interface AmountPageFacts {
   labelAt: Map<number, Tag<"amount">>;
   /** Totals the page's own instalment arithmetic implies. */
   instalmentTotals: Array<{ value: number; trigger: string }>;
+  /**
+   * Which block each candidate (by its own `index`) sits in, and the
+   * reverse: which candidates sit in a given block (A3-R2). Built once
+   * here, from the same candidates `blocks` was built alongside, so
+   * `blockOf` and `rowLabel` look these up instead of each re-scanning
+   * every block or every candidate on every call.
+   */
+  blockOfIndex: Map<number, number>;
+  candidatesByBlock: Map<number, AmountCandidate[]>;
+  /** Distinct term lengths (2 or more months) the page prints anywhere
+   * (A3-Q3): `termMultiple` used to re-run `printedTerms`'s regex scans
+   * over the whole page once per candidate, even though the page's own
+   * printed terms do not change between candidates. */
+  termMonths: number[];
 }
 
 /** A printed money amount, for reading a block rather than sieving a page:
@@ -188,7 +202,23 @@ export function amountPageFacts(
       if (!labelled.has(candidate.value)) labelled.set(candidate.value, label.value);
     }
   });
-  return { text, blocks, labelled, labelAt, instalmentTotals: instalmentTotals(text) };
+  // Each candidate's block, resolved once (A3-R2): `rowLabel` used to
+  // filter every candidate against `blockOf` -- itself a scan of every
+  // block -- for every block it was asked about, which is quadratic on a
+  // dense page. One pass here replaces all of that with two map lookups.
+  const blockOfIndex = new Map<number, number>();
+  const candidatesByBlock = new Map<number, AmountCandidate[]>();
+  for (const candidate of candidates) {
+    const at = blocks.findIndex(
+      (block) => candidate.index >= block.index && candidate.index < block.index + block.line.length + 1,
+    );
+    blockOfIndex.set(candidate.index, at);
+    const bucket = candidatesByBlock.get(at);
+    if (bucket) bucket.push(candidate);
+    else candidatesByBlock.set(at, [candidate]);
+  }
+  const termMonths = [...new Set(printedTerms(text).map((term) => term.months))].filter((term) => term >= 2);
+  return { text, blocks, labelled, labelAt, instalmentTotals: instalmentTotals(text), blockOfIndex, candidatesByBlock, termMonths };
 }
 
 /** The trigger table's reading as a vote, on the same scale as the rest. */
@@ -304,8 +334,13 @@ const HEADING_WORDS = 4;
 
 const HEADING_REACH_BLOCKS = 6;
 
-/** Which block an offset sits in. */
+/** Which block an offset sits in. Every caller passes a candidate's own
+ * `index`, already resolved once in `amountPageFacts` (A3-R2); the scan
+ * here is only a fallback for an offset that, unusually, is not one of
+ * them. */
 function blockOf(page: AmountPageFacts, index: number): number {
+  const known = page.blockOfIndex.get(index);
+  if (known !== undefined) return known;
   return page.blocks.findIndex(
     (block) => index >= block.index && index < block.index + block.line.length + 1,
   );
@@ -537,7 +572,7 @@ function rowLabel(page: AmountPageFacts, all: readonly AmountCandidate[], at: nu
   // your pet from illness or injury up to £2,000"), so the test is only
   // that it is not a sentence.
   if (block === undefined || block.line.length > 80 || /[.!?;]$/u.test(block.line)) return null;
-  const figures = all.filter((entry) => blockOf(page, entry.index) === at);
+  const figures = page.candidatesByBlock.get(at) ?? all.filter((entry) => blockOf(page, entry.index) === at);
   if (figures.length !== 1) return null;
   const label = page.labelAt.get(figures[0].index);
   if (label === undefined) return undefined;
@@ -579,7 +614,7 @@ const tableNeighbours: AmountSieve = {
  * a row. */
 function rowFigure(page: AmountPageFacts, all: readonly AmountCandidate[], at: number): AmountCandidate | null {
   if (rowLabel(page, all, at) === null) return null;
-  return all.find((entry) => blockOf(page, entry.index) === at) ?? null;
+  return (page.candidatesByBlock.get(at) ?? all.filter((entry) => blockOf(page, entry.index) === at))[0] ?? null;
 }
 
 /**
@@ -630,7 +665,7 @@ const termMultiple: AmountSieve = {
   read: (candidate, all, page) => {
     const value = Number(candidate.value);
     if (!Number.isInteger(value) || value <= 0) return [];
-    const months = [...new Set(printedTerms(page.text).map((term) => term.months))].filter((term) => term >= 2);
+    const months = page.termMonths;
     for (const other of all) {
       if (other.value === candidate.value) continue;
       const otherValue = Number(other.value);

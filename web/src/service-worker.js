@@ -38,6 +38,14 @@ self.addEventListener("push", (event) => {
  * A reader tapped the notification. Reuse an Orbit tab already open on that
  * address rather than piling up duplicates; open a new one only when none
  * exists.
+ *
+ * #1151 W2-R7: the matching tab found by `matchAll()` can still close in the
+ * window before `.focus()` runs on it -- a real race, not a hypothetical
+ * one, since both happen across task boundaries this worker does not
+ * control. `.focus()` on a client that is already gone rejects, and with no
+ * `.catch()` that sank the whole `waitUntil` promise: the tap was simply
+ * dropped, no window opened at all. Falling back to `openWindow` on that
+ * rejection is the same answer `matchAll` finding nothing already gives.
  */
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
@@ -45,7 +53,8 @@ self.addEventListener("notificationclick", (event) => {
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
       const existing = clientList.find((client) => client.url === target);
-      return existing ? existing.focus() : self.clients.openWindow(target);
+      if (!existing) return self.clients.openWindow(target);
+      return existing.focus().catch(() => self.clients.openWindow(target));
     }),
   );
 });

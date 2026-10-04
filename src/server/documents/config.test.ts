@@ -29,6 +29,11 @@ describe("document configuration", () => {
     expect(() => getDocumentConfig({ NODE_ENV: "test", ...changes })).toThrow(message);
   });
 
+  it("treats an empty DOCUMENT_SCAN_MODE as unset, like the install-time contract does (#1151 SF2-F3)", () => {
+    const config = getDocumentConfig({ NODE_ENV: "test", DOCUMENT_KEK: key, DOCUMENT_SCAN_MODE: "" });
+    expect(config.scanMode).toBe("required");
+  });
+
   it("#954: holds a second key only while DOCUMENT_KEK_NEXT is set, distinct from the current one", () => {
     const config = getDocumentConfig({ NODE_ENV: "test", DOCUMENT_KEK: key, DOCUMENT_KEK_NEXT: nextKey });
     expect(config.nextKeyEncryptionKey).toEqual(Buffer.from(nextKey, "hex"));

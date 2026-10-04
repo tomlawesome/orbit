@@ -68,22 +68,34 @@ export async function readHeldImapAttachmentPreview(
     .limit(1);
   if (!row) throw inboxReceiptNotFound();
 
-  const bytes = await readHeldImapAttachment({
-    id: row.id,
-    mediaType: row.mediaType,
-    sizeBytes: row.sizeBytes,
-    storageKey: row.storageKey,
-    envelope: {
-      envelopeVersion: row.envelopeVersion as 1,
-      algorithm: "aes-256-gcm",
-      contentIv: row.contentIv,
-      contentAuthTag: row.contentAuthTag,
-      wrappedDek: row.wrappedDek,
-      wrapIv: row.wrapIv,
-      wrapAuthTag: row.wrapAuthTag,
-      keyId: row.keyId,
-    },
-  }, { recipientUserId: userId, receiptId });
+  let bytes: Buffer;
+  try {
+    bytes = await readHeldImapAttachment({
+      id: row.id,
+      mediaType: row.mediaType,
+      sizeBytes: row.sizeBytes,
+      storageKey: row.storageKey,
+      envelope: {
+        envelopeVersion: row.envelopeVersion as 1,
+        algorithm: "aes-256-gcm",
+        contentIv: row.contentIv,
+        contentAuthTag: row.contentAuthTag,
+        wrappedDek: row.wrappedDek,
+        wrapIv: row.wrapIv,
+        wrapAuthTag: row.wrapAuthTag,
+        keyId: row.keyId,
+      },
+    }, { recipientUserId: userId, receiptId });
+  } catch (error) {
+    // A concurrent purge or discard can remove the ciphertext between the
+    // row read above and this one; that is the same "not available to you
+    // right now" case every other reason in this function's own docstring
+    // answers with 404, not a raw storage error surfacing as a 500 (A2-R2).
+    // Only that case, though: a missing key or corrupt bytes stays a real
+    // failure, or the administrator never learns it happened.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw inboxReceiptNotFound();
+    throw error;
+  }
   try {
     // The row's real mediaType, not reviewAttachmentMediaType() -- that one
     // narrows to pdf/octet-stream for the list display and would misdraw

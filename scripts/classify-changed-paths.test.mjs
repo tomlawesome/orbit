@@ -31,9 +31,7 @@ describe("changed-path CI risk classification", () => {
 
   it("keeps deterministic governance and policy controls in the fast lane", () => {
     for (const path of [
-      ".github/supply-chain-policy.json",
       "supply-chain/licence-policy.yml",
-      "scripts/supply-chain-policy.mjs",
       "scripts/supply-chain-policy.test.mjs",
       "scripts/stable-promotion-policy.mjs",
       "scripts/stable-promotion-policy.test.mjs",
@@ -41,6 +39,16 @@ describe("changed-path CI risk classification", () => {
       "scripts/esbuild-override-policy.test.mjs",
     ]) {
       expect(pathRisk(path)).toBe(CI_RISK.FAST);
+    }
+  });
+
+  // D1-F2 (#1151): a change confined to the vulnerability policy or its
+  // evaluator must build and scan an image against it, not skip straight to
+  // the fast lane.
+  it("runs exact-image system validation for the vulnerability policy and its evaluator", () => {
+    for (const path of [".github/supply-chain-policy.json", "scripts/supply-chain-policy.mjs"]) {
+      expect(pathRisk(path)).toBe(CI_RISK.SYSTEM);
+      expect(isNonExecutablePath(path)).toBe(false);
     }
   });
 

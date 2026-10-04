@@ -339,6 +339,7 @@ describe("validateBackupBundleContents (in-memory adapter)", () => {
     expect(error).toBeInstanceOf(RecoveryBundleRefusal);
     expect((error as RecoveryBundleRefusal).code).toBe("wrong-key");
   });
+
 });
 
 describe("publishBundleAtomically", () => {
@@ -661,6 +662,9 @@ describe("createDockerComposeBackupAdapter (PATH-shim fake docker, no real daemo
       "orbit-app",
       "-C",
       "/var/lib/orbit/documents",
+      // SS2-S1: excludes the household portable-archive export, which is
+      // not a format validateDocumentArchiveEntries's allow-list recognizes.
+      "--exclude=./portable-archives",
       "-cf",
       "-",
       ".",

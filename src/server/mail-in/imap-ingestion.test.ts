@@ -19,7 +19,7 @@ const draftMocks = vi.hoisted(() => ({
 vi.mock("@/server/documents/tika", () => ({ extractTextWithTika: draftMocks.extract }));
 vi.mock("@/server/metadata/fields", () => ({ requireReceiptMetadataWriter: draftMocks.requireReceiptMetadataWriter }));
 
-import { draftProposalColumnsForTests, draftProposalTextForTests, imapAttachmentRetryDelayMs, imapProviderConfigCommitment, imapProviderConnectionOptions, imapRecipientAlias, matchesImapRecipientAlias, verifyImapIngestionProviders } from "./imap-ingestion";
+import { IMAP_HEADER_FETCH_PART, draftProposalColumnsForTests, draftProposalTextForTests, imapAttachmentRetryDelayMs, imapProviderConfigCommitment, imapProviderConnectionOptions, imapRecipientAlias, matchesImapRecipientAlias, verifyImapIngestionProviders } from "./imap-ingestion";
 // ADR-0017 slice 1 (orbit#742): `getImapIngestionConfig` from `./imap-ingestion`
 // is now the database-backed runtime config. These fixtures only need a
 // plain ImapIngestionConfig built from env-shaped values, which is exactly
@@ -342,5 +342,12 @@ describe("receipt draft proposal", () => {
     const logged = JSON.stringify([...infoSpy.mock.calls, ...warnSpy.mock.calls]);
     expect(logged).not.toContain("unlogged-metadata-failure-detail");
     expect(logged).not.toContain("Acme Cover");
+  });
+});
+
+describe("IMAP header fetch part", () => {
+  it("is a bare IMAP atom with a byte ceiling: a key with spaces or parentheses is quoted by imapflow and the server rejects the FETCH", () => {
+    expect(IMAP_HEADER_FETCH_PART.key).toMatch(/^[A-Z0-9.]+$/u);
+    expect(IMAP_HEADER_FETCH_PART.maxLength).toBe(64 * 1024);
   });
 });

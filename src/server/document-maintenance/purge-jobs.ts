@@ -12,9 +12,9 @@ import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentDrafts, documentJobs, documents } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { getDocumentConfig } from "@/server/documents/config";
-import { LocalDocumentStorage } from "@/server/documents/storage";
+import { LocalDocumentStorage, STORAGE_KEY_PATTERN } from "@/server/documents/storage";
 import { processOwnedPurge, type OwnedPurgeState } from "@/server/documents/purge";
-import { operationalDocumentReason, type ClaimedDocumentJob } from "@/server/document-maintenance/claims";
+import { JOB_CLAIM_UPDATE, operationalDocumentReason, type ClaimedDocumentJob } from "@/server/document-maintenance/claims";
 
 interface OwnedPurgeRecord {
   householdId: string;
@@ -42,16 +42,7 @@ export async function claimExpiredPurgeJobs(limit = 25): Promise<ClaimedDocument
       for update of job skip locked
       limit ${limit}
     ), claimed as (
-      update document_jobs as job
-      set status = 'processing',
-          attempts = job.attempts + 1,
-          locked_at = now(),
-          lease_expires_at = now() + interval '10 minutes',
-          lease_token = gen_random_uuid(),
-          updated_at = now()
-      from claimable
-      where job.id = claimable.id
-      returning job.id, job.document_id, job.generation, job.lease_token
+      ${JOB_CLAIM_UPDATE}
     )
     select claimed.id, claimed.document_id as "documentId", claimed.generation,
       claimed.lease_token as "leaseToken", claimable.previous_status as "previousStatus"
@@ -97,7 +88,7 @@ export async function processPurgeJob(job: ClaimedDocumentJob): Promise<"complet
           || record.lifecycle !== "pending_deletion"
           || record.generation !== claimedJob.generation
         ) return undefined;
-        if (!record.storageKey || !/^[a-f0-9]{64}$/u.test(record.storageKey)) {
+        if (!record.storageKey || !STORAGE_KEY_PATTERN.test(record.storageKey)) {
           throw new Error("Invalid document purge storage metadata");
         }
         return {

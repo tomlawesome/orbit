@@ -79,6 +79,7 @@ export interface InstallOrchestratorAdapters {
     composePull(service: string): boolean;
     composeUp(): boolean;
     composeDown(): void;
+    removeLeftoverDatabaseVolume(): void;
     composeConfigValidate(): boolean;
     probeDatabaseHealth(): boolean;
     probeApplicationHealth(): boolean;
@@ -635,10 +636,18 @@ export async function runInstall(
         }
 
         if (guidedStaged) {
-          transaction.writeStagedFile(ENVIRONMENT_FILE, readFileSync(join(scratchDir, ENVIRONMENT_FILE)));
-          transaction.commitMove(ENVIRONMENT_FILE, "file");
+          // SR1-R6: secrets committed *before* the environment file that
+          // references them, not after — a crash between the two commits
+          // must never leave a committed .env-orbit whose DOCUMENT_KEK_FILE/
+          // SESSION_SECRET_FILE/etc. point at a .orbit-secrets tree that
+          // does not exist yet. The other order was exactly backwards:
+          // without .orbit-secrets, Orbit cannot start at all either way,
+          // but with .orbit-secrets and no .env-orbit yet, a retry simply
+          // redoes guided staging — a strictly safer crash state.
           stageSecretsDirectoryTree(transaction, join(scratchDir, SECRETS_DIRECTORY), SECRETS_DIRECTORY);
           transaction.commitMove(SECRETS_DIRECTORY, "directory");
+          transaction.writeStagedFile(ENVIRONMENT_FILE, readFileSync(join(scratchDir, ENVIRONMENT_FILE)));
+          transaction.commitMove(ENVIRONMENT_FILE, "file");
         }
 
         // Assets are not secret-bearing (unlike the environment file/secrets
@@ -853,7 +862,12 @@ export async function runInstall(
     // wait_for_deployment_readiness (install.sh:1164-1219).
     onEvent({ phase: "database", component: "database", state: "starting", reason: "database-health", action: "start" });
     if (!adapters.docker.composeUp()) {
-      if (targetWasEmpty) adapters.docker.composeDown();
+      // install.sh:1471-1483: on a fresh install the database volume this
+      // attempt created is removed too, or every retry refuses on it.
+      if (targetWasEmpty) {
+        adapters.docker.composeDown();
+        adapters.docker.removeLeftoverDatabaseVolume();
+      }
       // install.sh:1172's `fail_with docker-host repair` — defaultFailureReason("host")
       // already matches ("docker-host"), but defaultFailureAction("host") is
       // "retry", not the "repair" bash actually routes this to (issue #383).

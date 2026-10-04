@@ -286,6 +286,29 @@ describe("the seven-day limit", () => {
     expect(seen.paths.join("\n")).not.toContain("ci-evidence");
   });
 
+  // D1-S2 (#1151): the candidate here is the job that *found* the pass, not
+  // the job that ran it, and it always finishes "just now" -- so without
+  // following stands_on to check the real run's own age, a chain of same-day
+  // reuses would keep one pass from 8 days ago alive forever.
+  it("does not reuse a chain of reuses standing on a pass older than seven days", async () => {
+    await start({
+      pipelines: [
+        { id: 299, jobs: [passed(9001, "fast", RECENT)] },
+        { id: 100, jobs: [passed(7000, "fast", STALE)] },
+      ],
+      evidence: {
+        9001: {
+          fast: { inputs: KEY, pipeline: 299, job_id: 9001, stands_on: 7000, stands_on_pipeline: 100 },
+        },
+      },
+    });
+
+    await run({ env: environment(), envFile, now: NOW, log });
+
+    expect(emitted()).not.toContain("ORBIT_REUSE_FAST");
+    expect(lines()).toContain("the one that really ran, finished too long ago");
+  });
+
   it("does not reuse a pass whose finish time the API did not report", async () => {
     await start({
       pipelines: [{ id: 299, jobs: [{ id: 9001, name: "fast", status: "success" }] }],

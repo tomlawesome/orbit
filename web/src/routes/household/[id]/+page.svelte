@@ -1,5 +1,5 @@
 <script>
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { invalidateAll } from "$app/navigation";
   import Chrome from "$lib/Chrome.svelte";
   import Mark from "$lib/Mark.svelte";
@@ -161,15 +161,44 @@
    */
   const editorRowOf = (row) => ({ ...row });
 
-  /* Reset every local edit when the screen's data is replaced — a save
-     reloads through the seam, and stale dirt on a field the server has since
-     answered for would be a lie about what is stored. */
+  /**
+   * A section row stripped of `open` (the tray's own UI state, never sent
+   * and never meaningful to compare) so two row lists can be compared by
+   * content alone.
+   * @param {EditorRow[]} list
+   */
+  const sectionsSnapshot = (list) => JSON.stringify(list.map(({ open, ...rest }) => rest));
+  /** What `rows` looked like the moment it last matched the server — i.e.
+      right after load, or right after a section save round-trips. */
+  let sectionsBaseline = $state("[]");
+  /** True while the section editor holds an edit the server has not seen. */
+  const sectionsDirty = $derived(sectionsSnapshot(rows) !== sectionsBaseline);
+
+  /* Reset local edits when the screen's data is replaced — any save on this
+     page (identity, sections, members, invitations, join requests) reloads
+     through the same `invalidateAll`, and this effect used to resync
+     EVERYTHING unconditionally. That is right for a field the server has
+     since answered for; it is a silent data loss for a field still being
+     typed elsewhere on the page when somebody else's save lands (#1151
+     W2-R2) — saving your own name used to also throw away an unsaved time
+     zone edit, or an in-progress section rename, with no warning.
+     `untrack` keeps this effect watching only `data.household` itself: the
+     dirty checks below read current state without turning that state into
+     a second reason to re-run. */
   $effect(() => {
     const household = data.household;
-    form = { name: household.name, timezone: household.timezone, currency: household.currency };
-    dirty = { name: false, timezone: false, currency: false };
-    rows = household.sections.map(editorRowOf);
-    heir = null;
+    untrack(() => {
+      /* Per field, not the whole object at once — a save elsewhere on this
+         page must not overwrite a field that is still being typed here. */
+      if (!dirty.name) form.name = household.name;
+      if (!dirty.timezone) form.timezone = household.timezone;
+      if (!dirty.currency) form.currency = household.currency;
+      if (!sectionsDirty) {
+        rows = household.sections.map(editorRowOf);
+        sectionsBaseline = sectionsSnapshot(rows);
+      }
+      heir = null;
+    });
   });
 
   /* The mockup's own lists. A household whose stored value is not among them
@@ -218,7 +247,17 @@
   async function saveField(field) {
     identityProblem = null;
     try {
-      await writeHouseholdIdentity(v.id, form);
+      /* The command only ever carries all three fields (§2c), but ONLY the
+         one being saved here may be unconfirmed: the other two go over as
+         the server's own last-known values, never as whatever this editor
+         happens to be holding for them. Without this, saving "name" while
+         "time zone" sat dirty-but-unsaved silently committed that typed
+         time zone too, with no notice naming it (#1151 W2-S2). */
+      await writeHouseholdIdentity(v.id, {
+        name: field === "name" ? form.name : v.name,
+        timezone: field === "timezone" ? form.timezone : v.timezone,
+        currency: field === "currency" ? form.currency : v.currency,
+      });
       dirty[field] = false;
       saved[field] = true;
       clearTimeout(savedTimers[field]);
@@ -328,8 +367,16 @@
     sectionsProblem = null;
     saidSections = false;
     try {
+      /* Taken before the send: a section added while the save is in flight
+         was not sent, so it must not be marked saved. */
+      const sent = sectionsSnapshot(rows);
       await writeSections(v.id, rows);
       saidSections = true;
+      /* This editor's own rows just became the server's truth — mark them
+         as the baseline BEFORE the reload below, so the refresh effect
+         knows it is safe to resync `rows` from the fresh read rather than
+         reading this save as still in progress (#1151 W2-R2). */
+      sectionsBaseline = sent;
       await invalidateAll();
     } catch (error) {
       sectionsProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
@@ -803,8 +850,11 @@
     <!-- ── the system ────────────────────────────────────────────────────
          2c: three fields, three saves TO THE EYE — "it's more human". Each
          field owns its little save; you finish a thought and put it away.
-         UNDERNEATH IT IS STILL ONE COMMAND: the client sends the bundled
-         household.update carrying name + time zone + currency together. -->
+         UNDERNEATH IT IS STILL ONE COMMAND: household.update always carries
+         all three. Saving one field sends the OTHER two as the server's own
+         last-known values, never as whatever this editor is holding for
+         them, so a save here can never carry an unconfirmed sibling field
+         along with it (#1151 W2-S2; saveField builds that payload). -->
     <div class="card c-system">
       <div class="cardhead"><h2>The system</h2></div>
       <div class="field" class:dirty={dirty.name}>

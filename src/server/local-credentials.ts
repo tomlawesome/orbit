@@ -80,8 +80,12 @@ const MAX_DISPLAY_NAME_LENGTH = 128;
  * How long a credential is locked after `failures` consecutive failures.
  * Zero while the free attempts last, then 1 s doubling to the 15 minute
  * ceiling — so the sixth failure costs a second and the tenth costs sixteen.
+ *
+ * Exported for `bootstrap.ts`'s claim backoff (#1151 A1-Q3), which is the
+ * same shape for the same reason and used to carry its own copy of this
+ * formula and these three constants under different names.
  */
-function lockoutMs(failures: number): number {
+export function lockoutMs(failures: number): number {
   const overrun = failures - LOCAL_SIGN_IN_FREE_ATTEMPTS;
   if (overrun <= 0) return 0;
   return Math.min(LOCAL_LOCKOUT_FLOOR_MS * 2 ** (overrun - 1), LOCAL_LOCKOUT_CEILING_MS);
@@ -392,31 +396,43 @@ async function attemptVerification(email: string, password: string): Promise<Cre
 }
 
 /**
- * Counts one failure and applies the schedule. Read and write happen inside
- * one transaction with the row locked, so two simultaneous wrong guesses count
- * as two rather than racing to write the same number twice.
+ * Counts one failure and applies the schedule, under an executor the caller
+ * already holds a transaction on (a refused sign-in approval, ADR-0027 §8) or
+ * `getDb()` on its own (an ordinary wrong password). Read and write happen
+ * under the same row lock either way, so two simultaneous failures -- a wrong
+ * password and a refused approval landing together -- count as two rather
+ * than racing to write the same number twice.
+ *
+ * This is the one place the lockout schedule is applied: a wrong password and
+ * a refused approval both reach it, so the two cannot drift into two
+ * backoffs the way a second, hand-rolled increment once did (#1151 A1-F1).
  */
-async function recordFailure(userId: string): Promise<void> {
-  await getDb().transaction(async (transaction) => {
-    const [current] = await transaction
-      .select({ failedAttemptCount: localCredentials.failedAttemptCount })
-      .from(localCredentials)
-      .where(eq(localCredentials.userId, userId))
-      .for("update")
-      .limit(1);
-    if (!current) return;
+export async function recordLocalCredentialFailure(
+  executor: Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0],
+  userId: string,
+): Promise<void> {
+  const [current] = await executor
+    .select({ failedAttemptCount: localCredentials.failedAttemptCount })
+    .from(localCredentials)
+    .where(eq(localCredentials.userId, userId))
+    .for("update")
+    .limit(1);
+  if (!current) return;
 
-    const failures = current.failedAttemptCount + 1;
-    const penaltyMs = lockoutMs(failures);
-    await transaction
-      .update(localCredentials)
-      .set({
-        failedAttemptCount: failures,
-        lockedUntil: penaltyMs > 0 ? new Date(Date.now() + penaltyMs) : null,
-        updatedAt: new Date(),
-      })
-      .where(eq(localCredentials.userId, userId));
-  });
+  const failures = current.failedAttemptCount + 1;
+  const penaltyMs = lockoutMs(failures);
+  await executor
+    .update(localCredentials)
+    .set({
+      failedAttemptCount: failures,
+      lockedUntil: penaltyMs > 0 ? new Date(Date.now() + penaltyMs) : null,
+      updatedAt: new Date(),
+    })
+    .where(eq(localCredentials.userId, userId));
+}
+
+async function recordFailure(userId: string): Promise<void> {
+  await getDb().transaction((transaction) => recordLocalCredentialFailure(transaction, userId));
 }
 
 /**
@@ -516,35 +532,91 @@ function setupTokenTtlMs(purpose: CredentialSetupTokenPurpose, expiresInDays?: n
   return (expiresInDays ?? SETUP_TOKEN_DEFAULT_DAYS) * DAY_MS;
 }
 
+/** A freshly minted setup or recovery token, not yet written anywhere (#1151 A1-S1). */
+export interface MintedSetupToken {
+  token: string;
+  tokenHash: string;
+  purpose: CredentialSetupTokenPurpose;
+  expiresAt: Date;
+}
+
 /**
- * Mints a one-use setup or recovery link for `userId` and records
- * `setup_link_issued` in the same transaction (ADR-0023 §8). The token is
- * returned once and is not retrievable afterwards — only its digest is
- * stored, so a caller that fails to hand it to its recipient has lost it for
- * good, exactly like an invitation.
+ * Builds a one-use setup or recovery token and its expiry. Pure: touches no
+ * storage, so a caller can hold the result, try to send it, and only ask for
+ * it to be written once the send is known to have gone out — the way
+ * `resendSignInApproval` already treats a sign-in approval's own token
+ * (#1151 A1-S1).
+ */
+export function mintSetupToken(
+  purpose: CredentialSetupTokenPurpose,
+  expiresInDays?: number,
+): MintedSetupToken {
+  const token = createSetupToken();
+  return {
+    token,
+    tokenHash: setupTokenDigest(token),
+    purpose,
+    expiresAt: new Date(Date.now() + setupTokenTtlMs(purpose, expiresInDays)),
+  };
+}
+
+/**
+ * Writes a token `mintSetupToken` built, and records `setup_link_issued` in
+ * the same transaction (ADR-0023 §8). The token itself is not retrievable
+ * afterwards — only its digest is stored, so a caller that fails to hand it
+ * to its recipient has lost it for good, exactly like an invitation.
  *
- * Issuing invalidates every earlier unspent link this user holds, whatever
+ * Writing it invalidates every earlier unspent link this user holds, whatever
  * its purpose (ADR-0023 §3: "sends a new one ... which invalidates any
  * earlier link"). They are invalidated by expiring them — `expires_at` moved
  * to now — rather than by marking them consumed, because `consumed_at` means
  * somebody redeemed the link, and a table that cannot tell a spent link from
  * a superseded one is a table that cannot answer whether a link was used.
+ *
+ * Call this only once the mail (or whatever else carries the token) is
+ * confirmed sent, or with `onlyIfNoLiveLink` so that nothing live is ever
+ * retired by it: calling it first and mailing second is the bug this
+ * function's split from `issueSetupToken` exists to make impossible again
+ * — a failed send used to retire the one link the reader already had.
+ * With that option it answers whether it wrote.
+ *
+ * Locked per user (#1151 A1-R4): the "supersede, then insert" pair below
+ * reads the table before it writes it, so two calls for the same user with
+ * no lock between them both see "nothing to supersede" and both insert,
+ * leaving two live links to the same mailbox instead of one — a double
+ * click on "resend", or two administrators issuing at once. The advisory
+ * lock serializes them, same as `acquireActiveHouseholdLock` does for a
+ * household.
  */
-export async function issueSetupToken(
+export async function persistSetupToken(
   userId: string,
-  purpose: CredentialSetupTokenPurpose,
-  options: IssueSetupTokenOptions = {},
-): Promise<{ token: string; expiresAt: Date }> {
-  const token = createSetupToken();
-  const tokenHash = setupTokenDigest(token);
-  const expiresAt = new Date(Date.now() + setupTokenTtlMs(purpose, options.expiresInDays));
-  const createdByUserId = options.createdByUserId ?? null;
-
-  await getDb().transaction(async (transaction) => {
+  minted: MintedSetupToken,
+  createdByUserId: string | null,
+  options: { onlyIfNoLiveLink?: boolean } = {},
+): Promise<boolean> {
+  return await getDb().transaction(async (transaction) => {
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:setup-token:${userId}`}, 0))`);
     const [target] = await transaction.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1);
     if (!target) throw new AppError("user_not_found", "That registered Orbit user is no longer available", 404);
 
     const supersededAt = new Date();
+    // Decided under the same lock as the supersede below, not read first
+    // and acted on after (#1151 A1-S1): a plain read racing a concurrent
+    // send's own persist saw "no link" a moment before that send wrote the
+    // one it had actually delivered, then superseded it with one nobody
+    // received -- a lockout the audit log could not explain.
+    if (options.onlyIfNoLiveLink) {
+      const [live] = await transaction
+        .select({ id: credentialSetupTokens.id })
+        .from(credentialSetupTokens)
+        .where(and(
+          eq(credentialSetupTokens.userId, userId),
+          isNull(credentialSetupTokens.consumedAt),
+          gt(credentialSetupTokens.expiresAt, supersededAt),
+        ))
+        .limit(1);
+      if (live) return false;
+    }
     await transaction
       .update(credentialSetupTokens)
       .set({ expiresAt: supersededAt })
@@ -556,9 +628,9 @@ export async function issueSetupToken(
 
     await transaction.insert(credentialSetupTokens).values({
       userId,
-      tokenHash,
-      purpose,
-      expiresAt,
+      tokenHash: minted.tokenHash,
+      purpose: minted.purpose,
+      expiresAt: minted.expiresAt,
       createdByUserId,
     });
     await transaction.insert(auditLog).values({
@@ -567,11 +639,28 @@ export async function issueSetupToken(
       entityType: "user",
       entityId: userId,
       action: "setup_link_issued",
-      changes: { userId, purpose },
+      changes: { userId, purpose: minted.purpose },
     });
+    return true;
   });
+}
 
-  return { token, expiresAt };
+/**
+ * Mints a one-use setup or recovery link for `userId` and writes it
+ * immediately (ADR-0023 §8). For a caller that does not itself send the
+ * link -- the CLI and the administration screen's direct callers -- there is
+ * no send to wait on, so minting and writing stay one step; `setup-mail.ts`
+ * uses `mintSetupToken`/`persistSetupToken` directly instead, because it does
+ * have a send to wait on.
+ */
+export async function issueSetupToken(
+  userId: string,
+  purpose: CredentialSetupTokenPurpose,
+  options: IssueSetupTokenOptions = {},
+): Promise<{ token: string; expiresAt: Date }> {
+  const minted = mintSetupToken(purpose, options.expiresInDays);
+  await persistSetupToken(userId, minted, options.createdByUserId ?? null);
+  return { token: minted.token, expiresAt: minted.expiresAt };
 }
 
 /** Sets `userId`'s password hash inside whatever transaction the caller holds. */
@@ -775,8 +864,13 @@ const uuidSchema = z.uuid();
  * (ADR-0023 §1, §3). Read at the moment of the decision rather than cached:
  * an operator who has just turned the provider off has changed what "usable"
  * means for the next request.
+ *
+ * Exported for `admin-repository.ts`'s primary-administrator transfer
+ * (#1151 SS1-S1), which owes the target the same answer the unlink checks
+ * below give their own caller: an external identity row that still exists
+ * is not the same fact as a provider that is still switched on.
  */
-function identitiesAreUsable(): boolean {
+export function identitiesAreUsable(): boolean {
   return getAuthConfig().oidc !== null;
 }
 

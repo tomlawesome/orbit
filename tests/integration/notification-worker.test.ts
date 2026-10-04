@@ -922,7 +922,13 @@ describe("notification worker PostgreSQL contracts", () => {
       defaultFinalWarningTime.toISOString(),
     ]);
     expect(afterFinal.every((delivery) => delivery.status === "sent")).toBe(true);
-    expect(recipients).toHaveLength(2);
+    // Only this recipient's two: the worker is instance-wide and nothing in
+    // this file cleans its fixtures up, so a cycle eleven days on also sends
+    // the rows sibling tests left pending. Those rows carry the real clock's
+    // created_at, which is after every date this file runs at, so the
+    // catch-up rule (#1151 A4-S3) takes them for just-written and sends them
+    // rather than cancelling them as stale, as it did before.
+    expect(recipients.filter((to) => to === fixture.users.owner.email)).toHaveLength(2);
   });
 
   it("#479: uses the documented defaults for a recipient who has no stored preferences at all", async () => {

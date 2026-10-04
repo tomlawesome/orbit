@@ -293,6 +293,10 @@
    * @type {string}
    */
   let provenIntent = $state("");
+  /** Which person's "setup_link_issue" step-up this is resuming, for the
+      phone layout's own sheet — it keeps a whole Person, not just an id,
+      so it looks this up once `view` loads (#1151 A1-F2). */
+  let resumedResendPersonId = $state(/** @type {string | null} */ (null));
 
   /**
    * The typed draft, carried across a step-up (#915). Leaving for the provider
@@ -300,18 +304,49 @@
    * come back to an empty form and have to type the person in again. Session
    * storage, not local: it belongs to this tab and this errand, and it holds
    * only what the administrator typed — never a password, never a link.
+   *
+   * Covers all three challenged intents this screen has (#1151 A1-F2): the
+   * local-user form's own fields always ride along, and `intent` says which
+   * OTHER form — new system, or a resend row — to reopen and refill, since
+   * only one of those can be in flight for a given step-up. A fourth
+   * intent arriving later just adds a branch here, not a new mechanism.
    */
   const DRAFT_KEY = "orbit-local-user-draft";
 
-  function stashDraft() {
-    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(localDraft)); } catch { /* storage refused: the form simply starts empty */ }
+  /** @param {string} intent */
+  /**
+   * @param {string} intent
+   * @param {{ resend?: { personId: string, days: number } | null }} [about]
+   */
+  function stashDraft(intent, about = {}) {
+    // `about` names what the challenged tap was opening: it is stashed
+    // before the tap's own state is set, so reading that state here would
+    // capture the form before it opened.
+    const payload = {
+      intent,
+      local: localDraft,
+      systemName,
+      resend: about.resend ?? (resendFor ? { personId: resendFor, days: resendDays } : null),
+    };
+    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(payload)); } catch { /* storage refused: the form simply starts empty */ }
   }
 
   function restoreDraft() {
     try {
       const held = sessionStorage.getItem(DRAFT_KEY);
       sessionStorage.removeItem(DRAFT_KEY);
-      if (held) localDraft = { ...localDraft, ...JSON.parse(held) };
+      if (!held) return;
+      const draft = JSON.parse(held);
+      if (draft.local) localDraft = { ...localDraft, ...draft.local };
+      if (draft.intent === "system_create") {
+        systemName = draft.systemName ?? "";
+        creatingSystem = true;
+      }
+      if (draft.intent === "setup_link_issue" && draft.resend?.personId) {
+        resendFor = draft.resend.personId;
+        resendDays = draft.resend.days ?? SETUP_LINK_DAYS.fallback;
+        resumedResendPersonId = draft.resend.personId;
+      }
     } catch { /* nothing held, or unreadable: the form starts empty */ }
   }
 
@@ -337,13 +372,14 @@
    * @param {string} intent
    * @param {() => void} openField
    * @param {(message: string) => void} [report]
+   * @param {{ resend?: { personId: string, days: number } | null }} [about] what the tap is opening, for stashDraft
    */
-  async function challengeThen(intent, openField, report = (message) => (localProblem = message)) {
+  async function challengeThen(intent, openField, report = (message) => (localProblem = message), about = {}) {
     localProblem = null;
     resendProblem = null;
     if (actorHasPassword || provenIntent === intent) { openField(); return; }
     try {
-      stashDraft();
+      stashDraft(intent, about);
       await startStepUp({ intent, returnTo: `/administration?stepup=${encodeURIComponent(intent)}` });
     } catch (error) {
       report(setupWords(error));
@@ -436,6 +472,34 @@
   let editing = $state(false);
   let rotating = $state(false);
   let password = $state("");
+  /* ROTATE EVERY ADDRESS (#1151 A1-F3): the phone layout's own `aliasOpen`
+     sheet, built here for the desk — the only mailbox act the desk card was
+     missing. Same default grace period as the phone's STANDARD_GRACE_DAYS. */
+  const ALIAS_STANDARD_GRACE_DAYS = 14;
+  let aliasRotating = $state(false);
+  let aliasGraceDays = $state(ALIAS_STANDARD_GRACE_DAYS);
+  /* Two-tap for this card's destructive single-click acts (#1151 A1-S2):
+     "remove credential" fired on one click here while the phone already
+     armed it first; "rotate every address" gets the same protocol from the
+     start rather than shipping unarmed and needing its own fix later.
+     Local to this card, like the household and archive cards' own copies
+     of the same protocol — armed relaxes on its own after 5s. */
+  /** @type {string | null} */
+  let mailboxArmed = $state(null);
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let mailboxArmTimer = null;
+  /** @param {string} key @param {() => void} fire */
+  function twoTapMailbox(key, fire) {
+    if (mailboxArmed === key) {
+      clearTimeout(mailboxArmTimer ?? undefined);
+      mailboxArmed = null;
+      fire();
+      return;
+    }
+    clearTimeout(mailboxArmTimer ?? undefined);
+    mailboxArmed = key;
+    mailboxArmTimer = setTimeout(() => (mailboxArmed = null), 5_000);
+  }
   /** @type {{ host: string, port: number, accountUser: string, mailbox: string, tlsServerName: string, providerProfile: string, trustedRecipientHeader: string, pollSeconds: number }} */
   let draft = $state({
     host: "", port: 993, accountUser: "", mailbox: "INBOX", tlsServerName: "",
@@ -472,26 +536,39 @@
     mailboxBusy = label;
     mailboxProblem = null;
     mailboxOutcome = null;
+    /** @type {Awaited<ReturnType<typeof commandMailbox>> | undefined} */
+    let answer;
     try {
-      const answer = await commandMailbox(command);
+      answer = await commandMailbox(command);
+    } catch (error) {
+      /* The command itself refused — nothing changed server-side, so this
+         really is "not done". */
+      mailboxProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      mailboxBusy = null;
+      return;
+    }
+    mailboxOutcome = answer.outcome ?? null;
+    /* Only a verified credential closes the form; a refused one leaves it
+       open with what was typed, minus the password, so the administrator
+       can correct a host or a port without retyping everything. */
+    if (!answer.outcome || answer.outcome === "verified") {
+      editing = false;
+      rotating = false;
+      aliasRotating = false;
+    }
+    password = "";
+    try {
       /* The whole screen is re-read rather than patched, the same way placing
          a person does: the machinery rows are derived from the mailbox, so a
-         patch would leave them describing the previous state. */
+         patch would leave them describing the previous state. A failure HERE
+         is a second, separate thing from the command above: that one already
+         landed, so this is never read back as "not done" with the version
+         left stale until a reload (#1151 A1-R5). */
       view = await readAdminScreen();
-      mailboxOutcome = answer.outcome ?? null;
-      /* Only a verified credential closes the form; a refused one leaves it
-         open with what was typed, minus the password, so the administrator
-         can correct a host or a port without retyping everything. */
-      if (!answer.outcome || answer.outcome === "verified") {
-        editing = false;
-        rotating = false;
-      }
-      password = "";
-    } catch (error) {
-      mailboxProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
-    } finally {
-      mailboxBusy = null;
+    } catch {
+      mailboxProblem = "done — Orbit could not refresh this screen, so reload to see the new version";
     }
+    mailboxBusy = null;
   }
 
   /* DOCUMENT JOBS AND THE TWO MAIL TESTS (#1071, design/v19/administration-ops/
@@ -500,7 +577,7 @@
      pill: bad (failed), warm (retrying), run (running), ok (passed),
      quiet-and-breathing (checking). */
   /** @type {Record<string, string>} */
-  const ROLE_TONE = { over: "bad", soon: "warn", up: "run", "": "" };
+  const ROLE_TONE = { over: "bad", soon: "warn", up: "run", ok: "ok", "": "" };
 
   /* Document jobs: a People row without an avatar, ordered by what needs the
      reader, `retry` on FAILED rows only. Retrying flips the row to QUEUED at
@@ -724,7 +801,7 @@
 <!-- #1123, proposal §2.12: administration on a phone, chosen by CSS. It
      shares this page's state and acts (the step-up challenge, the re-read),
      so both dialects answer the server the same way. -->
-<Pocket {view} fixtures={Boolean(data?.fixtures)} {actorHasPassword} {provenIntent} bind:draft={localDraft}
+<Pocket {view} fixtures={Boolean(data?.fixtures)} {actorHasPassword} {provenIntent} {resumedResendPersonId} bind:draft={localDraft}
         challenge={challengeThen} reread={async () => { view = await readAdminScreen(); }}
         spent={() => (provenIntent = "")} />
 
@@ -939,7 +1016,7 @@
                         resendDays = SETUP_LINK_DAYS.fallback;
                         resendPassword = "";
                         resendDelivery = null;
-                      })}
+                      }, undefined, { resend: { personId: person.id, days: SETUP_LINK_DAYS.fallback } })}
                       aria-expanded={resendFor === person.id}
                       aria-label={`send a new setup link to ${person.displayName}`}>send a new setup link…</button>
             {/if}
@@ -1205,7 +1282,7 @@
               <div class="kv"><span>tls name</span><b>{mailbox.tlsServerName || mailbox.host}</b></div>
             {/if}
 
-            {#if mailbox.configured && !editing && !rotating}
+            {#if mailbox.configured && !editing && !rotating && !aliasRotating}
               <!-- "check connection" is gone (#1071): "test this mailbox"
                    above runs the same IMAP verify, plus the relay half. -->
               <div class="placerow mailboxrow">
@@ -1218,10 +1295,42 @@
                         })}>{mailbox.enabled ? "pause ingest" : "resume ingest"}</button>
                 <button disabled={mailboxBusy !== null} onclick={() => { rotating = true; password = ""; }}>
                   rotate password…</button>
+                <!-- #1151 A1-F3: the phone layout's own "rotate every address",
+                     missing here until now. -->
                 <button disabled={mailboxBusy !== null}
-                        onclick={() => mailboxAction("remove", { action: "remove", expectedVersion: mailbox.version })}>
-                  remove credential</button>
+                        onclick={() => { aliasRotating = true; aliasGraceDays = ALIAS_STANDARD_GRACE_DAYS; }}>
+                  rotate every address…</button>
+                <!-- #1151 A1-S2: armed first, same two-tap as the phone's own
+                     remove-credential ArmButton — this used to fire on one
+                     unconfirmed click. -->
+                <button class="dangerbtn" class:armed={mailboxArmed === "remove"} disabled={mailboxBusy !== null}
+                        onclick={() => twoTapMailbox("remove",
+                          () => mailboxAction("remove", { action: "remove", expectedVersion: mailbox.version }))}>
+                  {mailboxArmed === "remove" ? "tap again to remove the credential" : "remove credential"}</button>
               </div>
+            {/if}
+
+            {#if aliasRotating}
+              <!-- #1151 A1-F3: every member's relay address gets a fresh one;
+                   old addresses keep collecting for the grace period below.
+                   Same act, same default grace, same two-tap as the phone's
+                   own "rotate every address" sheet. -->
+              <form class="mailboxform" onsubmit={(event) => {
+                event.preventDefault();
+                twoTapMailbox("alias", () => mailboxAction("alias", {
+                  action: "rotate_alias_key", expectedVersion: mailbox.version, graceDays: aliasGraceDays,
+                }));
+              }}>
+                <p class="mailboxnote">Every member gets a new relay address. Mail sent to an old one still arrives until its
+                  grace period runs out.</p>
+                <label>old addresses keep working for (days)
+                  <input type="number" min="0" max="90" bind:value={aliasGraceDays} required /></label>
+                <div class="placerow mailboxrow">
+                  <button type="submit" class="dangerbtn" class:armed={mailboxArmed === "alias"} disabled={mailboxBusy !== null}>
+                    {mailboxArmed === "alias" ? "tap again to rotate every address" : "rotate every address"}</button>
+                  <button type="button" onclick={() => { aliasRotating = false; mailboxArmed = null; }}>cancel</button>
+                </div>
+              </form>
             {/if}
 
             {#if rotating}

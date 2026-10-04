@@ -58,9 +58,25 @@ describe("loadStagedPage", () => {
     expect(await loadStagedPage("href")).toEqual({ kind: "undrawable" });
   });
 
-  it("an aborted fetch answers no result, never a kind", async () => {
+  it("the caller's own abort answers no result, never a kind", async () => {
     const abortError = new DOMException("aborted", "AbortError");
     fetched.mockRejectedValueOnce(abortError);
-    await expect(loadStagedPage("href", new AbortController().signal)).rejects.toBe(abortError);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(loadStagedPage("href", controller.signal)).rejects.toBe(abortError);
   });
+
+  it(
+    "#1151 W2-R5: a preview server that never answers resolves undrawable instead of hanging forever",
+    async () => {
+      /* Nothing in this loader's own code ever aborts on a timer by itself --
+         fetch does that once past STAGED_PAGE_TIMEOUT_MS. Standing in for
+         that here: the caller passed no signal of its own, so an AbortError
+         with the caller's signal unset (or un-aborted) can only be this
+         loader's own deadline, not a close the reader asked for. */
+      const abortError = new DOMException("aborted", "AbortError");
+      fetched.mockRejectedValueOnce(abortError);
+      await expect(loadStagedPage("href")).resolves.toEqual({ kind: "undrawable" });
+    },
+  );
 });

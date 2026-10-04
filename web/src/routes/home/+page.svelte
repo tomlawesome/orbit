@@ -19,7 +19,7 @@
   import { ago, agoLong, money } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
-  import { searchPocket } from "./pocket-search.js";
+  import { readSearchDocuments, searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
   import { tlabel } from "./bands.js";
   import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
@@ -57,6 +57,10 @@
   /** @type {HomeView | null} */
   // svelte-ignore state_referenced_locally
   let view = $state(data?.view ?? null);
+  /** The onMount re-read's own failure (#1151 W1-R4): null while that read
+      has not failed, or has not been tried yet. */
+  /** @type {string | null} */
+  let homeLoadProblem = $state(null);
   /* The system-status drawer's real data (#863), read server-side alongside
      `view` (see +page.server.js). Null only when that read failed; the
      drawer then shows no service rows rather than the fake, always-degraded
@@ -203,12 +207,20 @@
   let flight = $state(null);
   let leaving = $state(fixtureFlight === "down");
   let armedOut = $state(false);
+  /** Set for the span of the actual signOut() request (#1151 W1-R7):
+      armedOut alone stays true for that whole span too, so a third rapid
+      tap — while the second tap's request is still in flight — fell
+      through the `if (!armedOut)` guard and fired a second, concurrent
+      signOut() call. */
+  let signingOut = $state(false);
   /** @type {string | null} */
   let signOutProblem = $state(null);
 
   async function tapSignOut() {
     /* Two taps, as every destructive control in this app arms and fires. */
     if (!armedOut) { armedOut = true; return; }
+    if (signingOut) return;
+    signingOut = true;
     signOutProblem = null;
     /*
      * THE REVOCATION BEAT, chosen deliberately: BEFORE the first frame.
@@ -223,6 +235,7 @@
       redirectTo = await signOut();
     } catch (error) {
       armedOut = false;
+      signingOut = false;
       signOutProblem = /** @type {any} */ (error)?.message ?? "still signed in — try again";
       return;
     }
@@ -574,6 +587,9 @@
   /** @type {object | null} */
   let searchDocumentsFor = null;
 
+  /** #1151 W1-Q8: shared with the pocket's own copy (home/pocket.svelte)
+   *  via pocket-search.js's readSearchDocuments, which also carries the
+   *  concurrency cap (#1151 W1-R9) this copy never had. */
   async function loadSearchDocuments() {
     const household = view?.household;
     const householdId = view?.primary;
@@ -582,15 +598,10 @@
     const carrying = (household.items ?? []).filter((item) => item.status === "active" && (item.documentCount ?? 0) > 0);
     // Additive: an item whose papers cannot be read loses its papers from the
     // results, not the search.
-    const found = await Promise.all(carrying.map(async (item) => {
-      try {
-        const papers = await readItemDocuments(householdId, item.id);
-        return papers.map((doc) => ({ ...doc, itemTitle: item.title }));
-      } catch {
-        return [];
-      }
-    }));
-    if (searchDocumentsFor === household) searchDocuments = found.flat();
+    const found = await readSearchDocuments(
+      carrying, readItemDocuments, householdId, () => searchDocumentsFor !== household,
+    );
+    if (searchDocumentsFor === household) searchDocuments = found;
   }
 
   const searchRows = $derived(groups ? [...groups.attention, ...groups.later] : []);
@@ -1024,6 +1035,13 @@
         restoreScroll = null;
         requestAnimationFrame(() => window.scrollTo(0, y));
       }
+    }).catch((error) => {
+      /* #1151 W1-R4: this read had no `.catch()` at all, so a backend outage
+         left the server-rendered page up with nothing behind it ever bound
+         — no listeners, no error, just a screen that looked alive and
+         answered nothing. */
+      if (disposed) return;
+      homeLoadProblem = /** @type {any} */ (error)?.message ?? String(error);
     });
     return () => {
       disposed = true;
@@ -1044,6 +1062,10 @@
      company with §14's drawer rule, deliberately. -->
 <svelte:window onkeydown={onWindowKeydown} onclick={onWindowClick} />
 
+{#if homeLoadProblem}
+  <p class="p-error" role="alert">Orbit could not reach your home: {homeLoadProblem}</p>
+{/if}
+
 <!-- #466/#1120: the pocket's two-tap decisions land on the same idempotent
      approve protocol the desk rows use (one operation id per receipt), and
      answer with the problem, if any, for the sheet to show. -->
@@ -1051,7 +1073,16 @@
         onapprove={async (suggestion) => { armed = { id: suggestion.id, act: "approve" }; await tapReceipt(suggestion, "approve"); return mailProblem; }}
         ondismiss={async (suggestion) => { armed = { id: suggestion.id, act: "dismiss" }; await tapReceipt(suggestion, "dismiss"); return mailProblem; }}
         onamend={amendReceipt}
-        onchanged={async () => { view = await readHome(); }} />
+        onchanged={async () => {
+          /* #1151 W1-R4: the same unguarded read as the onMount one above —
+             a failure here left the pocket's own re-read silently going
+             nowhere, with no error shown. */
+          try {
+            view = await readHome();
+          } catch (error) {
+            homeLoadProblem = /** @type {any} */ (error)?.message ?? String(error);
+          }
+        }} />
 
 <!-- The flight's surfaces: the dawn the climb leaves from, the dusk the
      descent lands on, and the canvas, mark and void-name between them. Each
@@ -1274,7 +1305,7 @@
   <!-- Two taps to leave, and the second one revokes the session before a
        single frame of the descent is drawn (§15: logout is the login played
        backwards, and it is a real sign-out, not an animation about one). -->
-  <button class="signout" onclick={tapSignOut}>
+  <button class="signout" onclick={tapSignOut} disabled={signingOut}>
     {armedOut ? "tap again to sign out" : "sign out →"}
   </button>
   {#if signOutProblem}<div class="signout-problem">{signOutProblem}</div>{/if}

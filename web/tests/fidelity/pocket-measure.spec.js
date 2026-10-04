@@ -545,6 +545,14 @@ for (const phone of MEASURED) {
         const defect = state.defect?.[phone.name] ?? state.defect?.["*"];
         test.fail(Boolean(defect), defect);
         await state.reach(page);
+        if (state.state === "rest") {
+          // W3-Q5 (#1151): every signed-in route renders Chrome.svelte's
+          // pocket orb (.porb) at rest. A page that failed to render at
+          // all -- a blank or crashed load -- has no tappable elements for
+          // the floor checks below to find violations in, so it passed
+          // silently. Require the orb to actually be visible first.
+          await expect(page.locator(".porb")).toBeVisible();
+        }
         const problems = await inspect(page, { rest: state.state === "rest" });
         expect(problems, problems.join("\n")).toEqual([]);
       });

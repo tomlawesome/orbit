@@ -44,23 +44,30 @@ export const POST = api(
     assertSameOrigin(event.request.headers, config);
 
     const claim = event.cookies.get(pendingSignInCookieName(config)) ?? "";
-    const pending = await collectSignInApproval(claim);
+    /* Session creation is the spend's own mint callback (#1151 SR1-R7), not a
+       separate call made after: collectSignInApproval reverts the spend when
+       this throws, so a crash or a transient failure here no longer strands
+       a correctly approved sign-in with the claim already burned and nothing
+       left to retry. */
+    let pending;
+    try {
+      pending = await collectSignInApproval(
+        claim,
+        (userId) => createSession(userId, config, event.request.headers.get("user-agent")),
+      );
+    } catch (error) {
+      /* The account was disabled between the approval and this insert. The
+         sign-in route answers that race generically and so does this one. */
+      if (error instanceof AuthError && error.code === "account_disabled") {
+        return answer({ state: "unknown" });
+      }
+      throw error;
+    }
 
     if (pending.state === "approved") {
       clearPendingSignInCookie(event.cookies, config);
       await deleteSessionToken(event.cookies.get(sessionCookieName(config)));
-      let session;
-      try {
-        session = await createSession(pending.userId, config, event.request.headers.get("user-agent"));
-      } catch (error) {
-        /* The account was disabled between the approval and this insert. The
-           sign-in route answers that race generically and so does this one. */
-        if (error instanceof AuthError && error.code === "account_disabled") {
-          return answer({ state: "unknown" });
-        }
-        throw error;
-      }
-      setSessionCookie(event.cookies, session.token, config);
+      setSessionCookie(event.cookies, /** @type {{token: string}} */ (pending.session).token, config);
       return answer({ state: "approved", authenticated: true });
     }
 

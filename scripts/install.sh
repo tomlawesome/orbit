@@ -15,7 +15,7 @@ readonly registry="${ORBIT_REGISTRY:-ghcr.io}"
 readonly channel="${ORBIT_CHANNEL:-latest}"
 readonly environment_file=".env-orbit"
 readonly compose_file="docker-compose.yml"
-readonly secrets_directory=".orbit-secrets"
+readonly secrets_directory="${ORBIT_SECRETS_DIR:-.orbit-secrets}"
 readonly database_volume_key="orbit-db-data"
 readonly image_repository="${registry}/${repository}"
 readonly oidc_discovery_max_bytes=1048576
@@ -671,7 +671,12 @@ verify_database_volume_safety() {
     return 0
   fi
   if [[ "$target_was_empty" == 1 ]]; then
-    fail "An existing Orbit database volume requires a recognized deployment with its preserved database credentials; refusing to start Compose."
+    # #1151 O1-S3: names the volume and the exact command, rather than
+    # leaving the operator to guess -- the normal case this now reaches is
+    # a volume a prior interruption's own failure path (wait_for_deployment_
+    # readiness) could not remove, since on a fresh install nothing else
+    # could have created it.
+    fail "An existing Orbit database volume (${candidates[*]}) requires a recognized deployment with its preserved database credentials; refusing to start Compose. If this is leftover from a previous failed install rather than a deployment you want to keep, remove it first: docker volume rm -- ${candidates[*]}"
   fi
   [[ "${#candidates[@]}" == 1 ]] ||
     fail "Multiple Orbit database volumes were found; refusing to start Compose until exactly one recognized deployment can be proven."
@@ -743,7 +748,7 @@ read_environment_value() {
 is_valid_local_model() {
   local value="$1"
   [[ ${#value} -ge 1 && ${#value} -le 128 ]] || return 1
-  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?$ ]]
+  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?(@sha256:[0-9a-f]{64})?$ ]]
 }
 
 check_local_ai_capacity() {
@@ -1185,7 +1190,12 @@ self_fetch_release_manifest() {
       fail "Asked for ${channel} but the signed release manifest is for v${manifest_version}; refusing."
   fi
 
-  printf '%s\n' "$manifest_json"
+  # Set the global directly rather than printing it for a caller to capture
+  # via $(...): command substitution runs this whole function in a subshell,
+  # so release_manifest_work_dir above would only ever be set in that
+  # subshell and cleanup() in the parent shell would never see it -- leaking
+  # orbit-install-manifest.* on every self-fetch run (#1151 #1201).
+  release_manifest_path="$manifest_json"
 }
 
 prepare_configuration() {
@@ -1194,7 +1204,11 @@ prepare_configuration() {
   installer_ui_phase=configuration
   installer_ui_component=configuration
   installer_ui_event configuration configuration starting configuration-migration configure
-  if ! ORBIT_IMAGE="$resolved_reference" bash scripts/configure.sh; then
+  # ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1 is configure.sh's own opt-in marker
+  # (#1151 O1-S4): it never trusts an ambient ORBIT_IMAGE on an existing
+  # deployment without it, since install.sh is the only caller that has
+  # already run this image through the registry and signature checks above.
+  if ! ORBIT_IMAGE="$resolved_reference" ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1 bash scripts/configure.sh; then
     fail "Configuration failed; restoring the previous deployment."
   fi
   is_regular_non_symlink_file "$environment_file" ||
@@ -1302,7 +1316,8 @@ stage_guided_install_configuration() {
   installer_ui_event configuration configuration starting configuration-migration configure
   ORBIT_IMAGE="$resolved_reference" bash "$staging_dir/scripts/configure.sh" --init ||
     fail_with configuration-failure retry "Guided configuration was cancelled or invalid; the target remains unchanged."
-  ORBIT_IMAGE="$resolved_reference" bash "$staging_dir/scripts/configure.sh" ||
+  # See prepare_configuration's identical call for ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE (#1151 O1-S4).
+  ORBIT_IMAGE="$resolved_reference" ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1 bash "$staging_dir/scripts/configure.sh" ||
     fail_with configuration-failure retry "Secret generation failed; the target remains unchanged."
 
   # --init just asked the sign-in mode question (ADR-0023 section 1) and
@@ -1408,6 +1423,12 @@ prepare_service_images() {
   installer_ui_event preparation database completed service-preparation pull
 
   installer_ui_component=application
+  # No actual pull call: the application image was already resolved and
+  # pulled during the identity phase above. Still emits the same
+  # starting/completed pair every sibling component in this phase gets
+  # (#1151 O1-Q2), so a UI tracking per-component state never sees a
+  # "completed" with no matching "starting".
+  installer_ui_event preparation application starting service-preparation pull
   installer_ui_event preparation application completed service-preparation pull
 
   installer_ui_component=clamav
@@ -1445,6 +1466,20 @@ wait_for_deployment_readiness() {
   if ! compose up -d --no-build --remove-orphans >/dev/null 2>&1; then
     if [[ "$target_was_empty" == 1 ]]; then
       compose down --remove-orphans >/dev/null 2>&1 || true
+      # #1151 O1-S3: `compose up` creates the named database volume on first
+      # run, and verify_database_volume_safety already refused earlier (see
+      # its own "An existing Orbit database volume requires a recognized
+      # deployment" check) if one existed before this attempt started -- so
+      # on a fresh install (target_was_empty), any matching volume here was
+      # created by the attempt that just failed, never a deployment worth
+      # protecting. Leaving it behind (compose down has no --volumes) meant
+      # every retry failed that exact same check again, forever, with no
+      # way out it ever named.
+      local leftover_volume=""
+      leftover_volume="$(docker volume ls --filter "name=$database_volume_key" --format '{{.Name}}' 2>/dev/null | grep -E "(^|_)orbit-db-data\$" | head -n1)" || true
+      if [[ -n "$leftover_volume" ]]; then
+        docker volume rm -- "$leftover_volume" >/dev/null 2>&1 || true
+      fi
     fi
     fail_with docker-host repair "Orbit services could not be created or started."
   fi
@@ -1569,7 +1604,10 @@ if [[ -n "${ORBIT_RELEASE_MANIFEST:-}" ]]; then
     fail "ORBIT_RELEASE_MANIFEST does not point at a readable file: ${ORBIT_RELEASE_MANIFEST}."
   release_manifest_path="$ORBIT_RELEASE_MANIFEST"
 else
-  release_manifest_path="$(self_fetch_release_manifest)"
+  # Called directly, not via $(...): see the comment at the end of
+  # self_fetch_release_manifest for why command substitution here would
+  # silently drop its cleanup of release_manifest_work_dir.
+  self_fetch_release_manifest
 fi
 
 manifest_digest="$(manifest_field "$release_manifest_path" digest)"

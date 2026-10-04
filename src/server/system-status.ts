@@ -143,13 +143,13 @@ async function computeSystemStatus(): Promise<SystemStatus> {
  * several members open at once, one tab regaining focus, a client retry --
  * turns into that many concurrent sidecar probes.
  *
- * 5 seconds, the same interval `src/server/boot.ts`'s own
- * `SCANNER_READINESS_RETRY_INTERVAL_MS` already re-probes ClamAV at during
- * startup -- this reuses that instance's own idea of how often the scanner
- * is worth asking again, rather than inventing a second number. Short enough
- * that an operator watching during a real incident sees it recover within a
- * couple of reloads; long enough to collapse the common case (a burst of
- * `/home` renders within the same few seconds) into one probe.
+ * 5 seconds -- a separate literal from `src/server/boot.ts`'s own
+ * `SCANNER_READINESS_RETRY_INTERVAL_MS` (#1151 A4-Q6), which is private to
+ * that module and not reused here; the two just happen to agree because the
+ * same reasoning picked both. Short enough that an operator watching during
+ * a real incident sees it recover within a couple of reloads; long enough to
+ * collapse the common case (a burst of `/home` renders within the same few
+ * seconds) into one probe.
  */
 const STATUS_CACHE_TTL_MS = 5_000;
 

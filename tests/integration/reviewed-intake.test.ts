@@ -54,6 +54,24 @@ describe("private reviewed intake approval boundary", () => {
       attachmentIds: [],
     };
 
+    // T-Q6 (#1151): this used to check outsider's inbox before anything had
+    // ever been written for anyone, so it was empty regardless of whether
+    // listImapInbox actually scopes by user -- it could never have caught a
+    // leak. Give member a real receipt first, so an outsider seeing it would
+    // be a genuine privacy failure, not a trivial pass.
+    const [memberReceipt] = await getDb().insert(imapIngestionMessages).values({
+      mailbox: "reviewed-intake-privacy-check",
+      mailboxUidValidity: "reviewed-intake-privacy-check",
+      mailboxUid: 1,
+      contentSha256: operation("eeeeeeee"),
+      recipientAliasSha256: operation("ffffffff"),
+      userId: member.userId,
+      status: "pending_review",
+      householdId: null,
+      receiptStatus: "cancelled",
+      expiresAt: new Date(Date.now() + 86_400_000),
+    }).returning({ id: imapIngestionMessages.id });
+    expect((await listImapInbox(member.userId)).receipts.map((r) => r.id)).toContain(memberReceipt.id);
     expect((await listImapInbox(outsider.userId)).receipts).toHaveLength(0);
     const first = await approveReviewedIntake(member.userId, input);
     const second = await approveReviewedIntake(member.userId, input);
