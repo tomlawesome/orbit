@@ -508,6 +508,18 @@ export interface MaterializedDelivery {
  * recipient gets one "you missed this" rather than a pile of redundant stale
  * ones or silence.
  */
+/**
+ * A delivery is stale when it has sat past the catch-up window since it was
+ * meant to go. The one overdue catch-up row materializeDeliveriesForCandidate
+ * writes keeps its real (old) scheduledFor, so it is judged from when it was
+ * written instead: created just now, it is the reminder the outage swallowed,
+ * not a stale one, and cancelling it as stale sent nothing at all.
+ */
+export function deliveryIsStale(delivery: { scheduledFor: Date; createdAt: Date }, now: Date): boolean {
+  const staleBoundary = new Date(now.getTime() - notificationCatchUpWindowMs);
+  return delivery.scheduledFor < staleBoundary && delivery.createdAt < staleBoundary;
+}
+
 export function materializeDeliveriesForCandidate(
   candidate: MaterializationCandidate,
   now: Date,
@@ -830,6 +842,7 @@ async function deliverClaimed(
       leaseToken: notificationDeliveries.leaseToken,
       channel: notificationDeliveries.channel,
       scheduledFor: notificationDeliveries.scheduledFor,
+      createdAt: notificationDeliveries.createdAt,
       attempts: notificationDeliveries.attempts,
       userId: notificationDeliveries.userId,
       householdId: notificationDeliveries.householdId,
@@ -898,8 +911,7 @@ async function deliverClaimed(
     const leaseToken = leaseTokens.get(delivery.id);
     if (!leaseToken || delivery.leaseToken !== leaseToken) continue;
     try {
-      const staleBoundary = new Date(now.getTime() - notificationCatchUpWindowMs);
-      const isStale = delivery.scheduledFor < staleBoundary;
+      const isStale = deliveryIsStale(delivery, now);
       const matchingRule = effectiveReminderOffsets(rulesByItem.get(delivery.itemId) ?? [], delivery).find((offset) => (
         householdReminderTime(delivery.dueDate, offset.daysBefore, delivery.timezone).getTime() === delivery.scheduledFor.getTime()
         && (delivery.channel === "email" ? offset.emailEnabled : offset.pushEnabled)
