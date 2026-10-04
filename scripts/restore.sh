@@ -1097,6 +1097,9 @@ else
   read -r -p 'Type RESTORE to continue: ' confirmation </dev/tty || fail 'confirmation failed; an interactive terminal is required.'
   [[ "$confirmation" == RESTORE ]] || fail 'confirmation failed; restore cancelled.'
 fi
+# The prompt above is open-ended and a rotation can open while it waits;
+# nothing destructive has run yet at this point, so refusing here is still safe.
+refuse_if_rotation_open
 
 create_checkpoint
 if [[ "${ORBIT_RESTORE_TEST_MODE:-false}" == true && "${ORBIT_RESTORE_TEST_HARD_INTERRUPT_STAGE:-}" == after-checkpoint ]]; then
