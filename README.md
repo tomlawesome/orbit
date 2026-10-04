@@ -9,9 +9,9 @@
 <h3>
   <a href="https://tomlawesome.github.io/orbit-site/">Website</a>
   &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="SECURITY.md">Report a vulnerability</a>
+  <a href="https://github.com/tomlawesome/orbit/security/policy">Report a vulnerability</a>
   &nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="LICENSE">Licence</a>
+  <a href="https://github.com/tomlawesome/orbit/blob/main/LICENSE">Licence</a>
 </h3>
 
 <p>
