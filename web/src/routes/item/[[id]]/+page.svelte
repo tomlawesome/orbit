@@ -692,6 +692,7 @@
   function previewLoaded() {
     clearTimeout(previewLoadTimer);
     previewImgLoaded = true;
+    previewImgFailed = false; // a slow load that arrives is not a failed one
   }
   function previewFailed() {
     clearTimeout(previewLoadTimer);
@@ -1028,6 +1029,9 @@
    * @param {ItemRecord} item
    */
   function open(name, item) {
+    // Leaving an open panel, for another one or to close it, discards what
+    // was typed there exactly as closePanel would: ask the same question.
+    if (panel !== null && panelDirty() && !confirm("Discard changes to this panel?")) return;
     problem = null;
     armed = null;
     panel = panel === name ? null : name;
