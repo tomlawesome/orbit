@@ -6,6 +6,7 @@ import { homeIsLive } from "./support/keyboard";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { entrancesSettled } from "./support/motion";
+import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -383,6 +384,7 @@ test.describe("the signed-in v19 sweep", () => {
 
   for (const route of PLAIN_ROUTES) {
     test(`${route.path} has no automated WCAG A/AA violations`, async ({ page }) => {
+      await answerPushWithoutAService(page);
       await signIn(page, route.path);
       await route.ready(page);
       await axeCheck(page);

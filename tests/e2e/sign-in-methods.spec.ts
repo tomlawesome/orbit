@@ -5,6 +5,7 @@ import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { ensureLocalPassword } from "./support/local-credentials";
 import { ensureWorkerAdministrator, workerAccount, workerFixturePassword } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -117,6 +118,7 @@ async function signInAs(page: Page, account: string, options: { household?: bool
 
 /** The helm, loaded — every card is gated on the screen's own fetch. */
 async function openSettings(page: Page) {
+  await answerPushWithoutAService(page);
   await page.goto("/settings");
   await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
 }

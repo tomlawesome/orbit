@@ -6,6 +6,7 @@ import { settleArrival } from "./support/arrival";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: this file's own copy of the seed-restore discipline every spec
    under tests/e2e/ follows -- see support/database.ts for why. */
@@ -81,6 +82,7 @@ async function signInAs(page: Page, account: string) {
  * signal one step earlier in the same fetch.
  */
 async function openSettings(page: Page) {
+  await answerPushWithoutAService(page);
   await page.goto("/settings");
   const isMobile = test.info().project.name.startsWith("mobile");
   const loaded = isMobile ? page.locator(".st-id") : page.locator(".cards");
