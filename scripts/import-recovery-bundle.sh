@@ -141,6 +141,9 @@ if ! flock -n "$lock_fd"; then
   printf 'Orbit recovery import: another backup or restore is already running; waiting for it to finish...\n' >&2
   flock "$lock_fd" || fail "preflight/lock failed; could not acquire the backup/restore lock at ${lock_file}."
 fi
+# And once more with the lock held: the wait above can last a whole backup,
+# and a rotation opened during it must still be refused before the swap.
+refuse_if_rotation_open
 [[ -f "$live_kek" && ! -L "$live_kek" ]] || fail "The current document KEK must be a regular file."
 compose stop orbit-app >/dev/null
 app_stopped=true
