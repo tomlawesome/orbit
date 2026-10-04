@@ -53,6 +53,11 @@ async function writeItem(input: {
   id?: string;
 }): Promise<string> {
   const itemId = input.id ?? randomUUID();
+  // Writing over an existing row carries the version it replaces, as every
+  // real caller must (#1151 A4-S4); a new item has none to race against.
+  const [existing] = input.id
+    ? await getDb().select({ version: items.version }).from(items).where(eq(items.id, input.id))
+    : [];
   await applyWorkspaceCommand(input.userId, "metadata-tier1-test", {
     type: "item.upsert",
     householdId: input.householdId,
@@ -64,6 +69,7 @@ async function writeItem(input: {
       status: "active",
       reference: input.reference,
       notes: input.notes,
+      version: existing?.version,
     },
   });
   return itemId;
