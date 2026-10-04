@@ -307,3 +307,18 @@ Each is one commit, in order; files named.
 12. Owner-run end-to-end on a throwaway tag, as #1075 requires; then the
     orbit-launcher issue for §6/§8 is delivered and the old
     `get-orbit-launcher.sh` route is retired for users.
+
+## Amendment 2026-10-04: the launcher is the only supported install entry (#1215)
+
+The signed launcher, fetched and verified by `scripts/get-orbit.sh`, is the
+one supported way to install Orbit. The direct command that fetches
+`install.sh` from `main` and pipes it to bash is no longer documented
+anywhere a reader is sent: the README and the pages under `docs/` give
+only the `get-orbit.sh` command.
+
+`install.sh` stays. It is the engine the launcher runs, and it keeps its own
+manifest verification (§6): run without a manifest it still fetches and
+checks one for its channel, so a direct run is no less safe than before. It
+is simply not offered to readers as an install path. The Context section
+above and §6's "plain `install.sh | bash` path" describe the position when
+this ADR was written and are left as they were.

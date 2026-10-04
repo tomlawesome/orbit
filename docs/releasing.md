@@ -346,8 +346,9 @@ pointing at `ORBIT_RELEASE_MANIFEST` for a preview install instead. If
 countersignature bundle, and refuses without one: the self-fetch path is
 stable-only, so the bundle is always expected. `install.sh` run on its own
 does the same manifest fetch, check and stable-only restriction for whichever
-channel it is given, so the plain `install.sh | bash` path is
-signature-checked too. Passing `ORBIT_RELEASE_MANIFEST` directly still works
+channel it is given, so a direct run is signature-checked too, although
+the launcher is the only supported install entry (ADR-0031, amendment
+2026-10-04). Passing `ORBIT_RELEASE_MANIFEST` directly still works
 for any channel, including `preview`; only the self-fetch is restricted.
 
 **Key fingerprint.** The key built into `get-orbit.sh` and `install.sh` is
