@@ -332,6 +332,7 @@ export function relayLookupGenerations(relay: RelayGenerationState, now: Date): 
 
 /** Users per rotation chunk (A2-R5). Bounded so one chunk's transaction is
  * cheap regardless of instance size; tuned, not load-bearing for correctness. */
+const ROTATION_CHUNK_RETRIES = 3;
 const ROTATION_CHUNK_SIZE = 500;
 
 /**
@@ -379,7 +380,11 @@ export async function rotateAllRelaysForNewAliasKey(
       .orderBy(asc(users.id))
       .limit(ROTATION_CHUNK_SIZE);
     if (candidates.length === 0) break;
-    await getDb().transaction(async (transaction) => {
+    // A member rotating their own relay while this runs bumps their row's
+    // version and conflicts the whole chunk. Re-reading and retrying the
+    // chunk finishes the rotation; giving up left it half done, with the
+    // mailbox already on the new key and nothing written down about it.
+    const rotateChunk = () => getDb().transaction(async (transaction) => {
       for (const candidate of candidates) {
         const relay = await ensureRelayRow(candidate.id, transaction);
         const next = nextRelayGeneration(relay, graceMs, now);
@@ -400,6 +405,14 @@ export async function rotateAllRelaysForNewAliasKey(
         );
       }
     });
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await rotateChunk();
+        break;
+      } catch (error) {
+        if (!(error instanceof RelayConflictError) || attempt >= ROTATION_CHUNK_RETRIES) throw error;
+      }
+    }
     rotated += candidates.length;
     lastUserId = candidates[candidates.length - 1].id;
     if (candidates.length < ROTATION_CHUNK_SIZE) break;
