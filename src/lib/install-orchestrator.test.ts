@@ -305,6 +305,9 @@ function createFakeDockerAdapter(options: FakeDockerOptions = {}) {
       composeDown: (...args: unknown[]) => {
         record("composeDown", composeProjectName, ...args);
       },
+      removeLeftoverDatabaseVolume: (...args: unknown[]) => {
+        record("removeLeftoverDatabaseVolume", composeProjectName, ...args);
+      },
       composeConfigValidate: (...args: unknown[]) => {
         record("composeConfigValidate", composeProjectName, ...args);
         return options.composeConfigValidateOk ?? true;
@@ -1187,6 +1190,8 @@ describe("runInstall — service start and bounded health-wait wiring (guarantee
     const outcome = await scenario.run();
     expect(outcome).toMatchObject({ status: "failed", phase: "host" });
     expect(scenario.docker.calls.some((call) => call.method === "composeDown")).toBe(true);
+    // ...and the database volume that attempt created, or the retry refuses on it.
+    expect(scenario.docker.calls.some((call) => call.method === "removeLeftoverDatabaseVolume")).toBe(true);
   });
 
   it("never tears down services when `compose up` fails on an update against a pre-existing deployment", async () => {
@@ -1197,6 +1202,7 @@ describe("runInstall — service start and bounded health-wait wiring (guarantee
     const outcome = await scenario.run();
     expect(outcome).toMatchObject({ status: "failed", phase: "host" });
     expect(scenario.docker.calls.some((call) => call.method === "composeDown")).toBe(false);
+    expect(scenario.docker.calls.some((call) => call.method === "removeLeftoverDatabaseVolume")).toBe(false);
   });
 
   it("labels a `compose up` failure docker-host/repair, not the phase's default retry action (install.sh:1172's fail_with docker-host repair, issue #383 addon finding 2b)", async () => {

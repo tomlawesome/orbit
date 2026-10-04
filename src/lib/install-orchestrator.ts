@@ -79,6 +79,7 @@ export interface InstallOrchestratorAdapters {
     composePull(service: string): boolean;
     composeUp(): boolean;
     composeDown(): void;
+    removeLeftoverDatabaseVolume(): void;
     composeConfigValidate(): boolean;
     probeDatabaseHealth(): boolean;
     probeApplicationHealth(): boolean;
@@ -861,7 +862,12 @@ export async function runInstall(
     // wait_for_deployment_readiness (install.sh:1164-1219).
     onEvent({ phase: "database", component: "database", state: "starting", reason: "database-health", action: "start" });
     if (!adapters.docker.composeUp()) {
-      if (targetWasEmpty) adapters.docker.composeDown();
+      // install.sh:1471-1483: on a fresh install the database volume this
+      // attempt created is removed too, or every retry refuses on it.
+      if (targetWasEmpty) {
+        adapters.docker.composeDown();
+        adapters.docker.removeLeftoverDatabaseVolume();
+      }
       // install.sh:1172's `fail_with docker-host repair` — defaultFailureReason("host")
       // already matches ("docker-host"), but defaultFailureAction("host") is
       // "retry", not the "repair" bash actually routes this to (issue #383).

@@ -168,6 +168,8 @@ export interface InstallDockerAdapter extends DatabaseVolumeSafetyAdapter, Image
   composeUp(): boolean;
   /** docker compose --project-name ... --env-file ... down --remove-orphans (install.sh:1171, only ever called on a failed fresh install). */
   composeDown(): void;
+  /** install.sh's leftover-volume cleanup beside composeDown: `compose down` has no --volumes, so the database volume the failed attempt created is removed by name, or every retry refuses on "an existing Orbit database volume". */
+  removeLeftoverDatabaseVolume(): void;
   /** docker compose --project-name ... --env-file ... config --quiet (install.sh:1539-1541, guarantee #55). */
   composeConfigValidate(): boolean;
   /** bounded (5s/1s-kill-after) `compose exec -T orbit-db sh -ec 'exec pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'` (install.sh:1084-1089, guarantee #33). */
@@ -376,6 +378,11 @@ export function createInstallDockerAdapter(options: InstallDockerAdapterOptions)
       ),
     composeDown: () => {
       run(composeArgs("down", "--remove-orphans"), { stdio: ["ignore", "ignore", "ignore"], timeout: timeouts.down, killSignal: "SIGTERM" });
+    },
+    removeLeftoverDatabaseVolume: () => {
+      const listed = runCaptured(["volume", "ls", "--filter", "name=orbit-db-data", "--format", "{{.Name}}"]) ?? "";
+      const leftover = listed.split("\n").find((name) => /(^|_)orbit-db-data$/.test(name));
+      if (leftover) run(["volume", "rm", "--", leftover], { stdio: ["ignore", "ignore", "ignore"], timeout: timeouts.quick, killSignal: "SIGTERM" });
     },
     composeConfigValidate: () =>
       statusOk(
