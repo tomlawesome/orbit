@@ -971,6 +971,16 @@ ensure_oidc_secret_placeholder() {
     return
   fi
 
+  # #1151 RANGE-F5: once OIDC_CLIENT_SECRET_FILE is itself already configured,
+  # a missing file here means the real secret was lost or deleted, not a
+  # first bootstrap -- writing a fresh zero-byte placeholder over it would
+  # silently and permanently disable OIDC sign-in while reporting success.
+  # Mirrors configure-engine.ts's ensureOidcSecretPlaceholder fileModeActive
+  # refusal exactly.
+  if environment_key_is_nonempty OIDC_CLIENT_SECRET_FILE; then
+    fail "${oidc_secret_file} is missing but OIDC_CLIENT_SECRET_FILE is already configured. Refusing to replace it with an empty placeholder, which would silently disable OIDC sign-in. Restore the OIDC client secret to ${oidc_secret_file}, or run \`orbit configure --set-oidc-secret\` again, then retry."
+  fi
+
   temporary_file="$(mktemp "$secrets_directory/.installing.XXXXXX")" ||
     fail "Could not create a temporary Orbit secret file."
   chmod 600 "$temporary_file" ||
