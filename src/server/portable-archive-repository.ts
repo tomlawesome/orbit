@@ -108,15 +108,17 @@ async function openExportMetadataReader(householdId: string): Promise<MetadataCi
     if (!metadataCryptoAvailable()) throw new MetadataKeyLockedError();
     return new MetadataCipher(await loadMetadataKey(scope.scope, scope.householdId));
   } catch (error) {
-    if (error instanceof MetadataKeyLockedError) {
-      throw new AppError(
-        "archive_metadata_locked",
-        "Orbit can't export while the encryption key is locked; its titles would come out blank. Unlock the key first.",
-        503,
-      );
-    }
+    if (error instanceof MetadataKeyLockedError) throw archiveMetadataLockedError();
     throw error;
   }
+}
+
+function archiveMetadataLockedError(): AppError {
+  return new AppError(
+    "archive_metadata_locked",
+    "Orbit can't export while the encryption key is locked; its titles would come out blank. Unlock the key first.",
+    503,
+  );
 }
 
 /** Builds a normalized, household-scoped payload. Document bytes are opt-in and bounded. */
@@ -144,6 +146,13 @@ export async function createPortableArchive(input: {
   ]);
   if (!household) throw new AppError("household_not_found", "That household is not available", 404);
   const metadata = await openExportMetadataReader(input.householdId);
+  // No key minted is only harmless while nothing was ever encrypted under
+  // it. A row carrying ciphertext with no key row to read it (a lost or
+  // deleted metadata_keys row, a partial restore) would export blank the
+  // same way a locked instance would, so it is refused the same way.
+  if (metadata.locked && householdItems.some((item) => item.titleEnc || item.providerEnc || item.referenceEnc || item.notesEnc || item.costMinorEnc)) {
+    throw archiveMetadataLockedError();
+  }
   const exportedItems = householdItems.map((item) => ({
     ...item,
     reference: metadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference }).value,

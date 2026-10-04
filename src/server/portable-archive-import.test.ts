@@ -165,6 +165,19 @@ describe("portable archive export refusal (#1151 A2-F2)", () => {
     expect((caught as AppError).code).toBe("archive_metadata_locked");
   });
 
+  it("refuses when no key row exists but a row still carries ciphertext", async () => {
+    queue(mocks.selectQueues, "households", [{ id: householdId, administrator: true, membershipUserId: null, role: "owner" }]);
+    queue(mocks.selectQueues, "households", [{ id: householdId, name: "Home", timezone: "Europe/London", defaultCurrency: "GBP" }]);
+    queue(mocks.selectQueues, "sections", []);
+    queue(mocks.selectQueues, "items", [{ id: "item-1", sectionId: "section-1", title: null, titleEnc: Buffer.from("enc"), provider: null, providerEnc: null, reference: null, referenceEnc: null, notes: null, notesEnc: null, costMinor: null, costMinorEnc: null }]);
+    queue(mocks.selectQueues, "due_events", []);
+    queue(mocks.selectQueues, "reminder_rules", []);
+    queue(mocks.selectQueues, "documents", []);
+
+    await expect(createPortableArchive({ userId, householdId, passphrase, includeDocuments: false }))
+      .rejects.toMatchObject({ code: "archive_metadata_locked", status: 503 });
+  });
+
   it("refuses when the household's key exists but will not unwrap", async () => {
     queue(mocks.selectQueues, "households", [{ id: householdId, administrator: true, membershipUserId: null, role: "owner" }]);
     queue(mocks.selectQueues, "households", [{ id: householdId, name: "Home", timezone: "Europe/London", defaultCurrency: "GBP" }]);
