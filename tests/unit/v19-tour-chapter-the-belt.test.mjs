@@ -329,6 +329,27 @@ describe("the beats, in round 6's order", () => {
     expect(log.filter(([word, sel]) => word === "goto" && sel === SELECTORS.DESK.body)).toEqual([]);
   });
 
+  it("names the carrying body's own item on the desk (#1151 F10), not the bare apex route", async () => {
+    const { log, ctx } = recorder();
+    /* Same two-body sky as the #1191 test above, but the carrying body is a
+       real element with the `data-body` id home's own markup gives it
+       (+page.svelte's `data-body={b.id}`), so the route can be read back. */
+    const carrying = document.createElement("a");
+    carrying.setAttribute("data-body", "volvo-v60");
+    const bare = ctx.ctl;
+    ctx.ctl = (spec) => {
+      const control = bare(spec);
+      if (spec.sel === SELECTORS.DESK.bodyWithPapers) return { ...control, els: [carrying], ringEls: [carrying] };
+      return control;
+    };
+    await belt.play(ctx);
+    const setScreens = log.filter(([word]) => word === "setScreen").map(([, route]) => route);
+    /* Bare "/item" redirects to whichever item is soonest due (+page.js's
+       primaryArrival()), which is not necessarily the body this chapter
+       just rang and pressed — it must name that body's own item instead. */
+    expect(setScreens).toEqual(["/home", "/item/volvo-v60"]);
+  });
+
   it("reads a paper for real right after pressing it, and unreads it right after the read callout", async () => {
     const { log, ctx } = recorder();
     await belt.play(ctx);
