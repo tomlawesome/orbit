@@ -246,11 +246,15 @@ describe("ORBIT_ENGINE_CHECK=container: composes the documented one-off invocati
     // sandbox tolerated) but failed in CI, where the same missing dependency
     // sent the script down a different, wrong error path ("docker is
     // unavailable") before ever reaching the timeout check this test means
-    // to exercise.
-    for (const tool of ["bash", "basename", "dirname", "sed", "tr", "cat", "rm", "printf", "docker"]) {
+    // to exercise. docker is a stub, never the host's: CI's fast job has no
+    // docker binary, so a symlink to it was silently skipped and the script
+    // stopped at its docker check first.
+    for (const tool of ["bash", "basename", "dirname", "sed", "tr", "cat", "rm", "printf"]) {
       const realPath = failOnProcessDeadline(spawnSync("which", [tool], SPAWN_OPTS), { label: "makeNoTimeoutBinDir" }).stdout.trim();
       if (realPath) symlinkSync(realPath, join(binDir, tool));
     }
+    writeFileSync(join(binDir, "docker"), "#!/bin/sh\nexit 99\n");
+    chmodSync(join(binDir, "docker"), 0o755);
 
     // PATH set directly in env (not pathPrefix), the same way the existing
     // "docker is unavailable" test excludes docker below: pathPrefix always
