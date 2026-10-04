@@ -1,4 +1,8 @@
 <p align="center">
+  <strong>Development disclosure:</strong> Orbit was coded by Claude under human direction.
+</p>
+
+<p align="center">
   <img src="docs/images/orbit-banner.png" alt="Orbit — your year, in orbit" width="100%" />
 </p>
 
@@ -9,10 +13,6 @@
   &nbsp;·&nbsp;
   <a href="LICENSE">Licence</a>
 </h2>
-
-<p align="center">
-  <strong>Development disclosure:</strong> Orbit was coded by Claude under human direction.
-</p>
 
 <p align="center">
   <strong>Everything in your orbit, on track.</strong><br />
