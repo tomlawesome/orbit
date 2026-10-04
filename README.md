@@ -1,20 +1,10 @@
-> [!IMPORTANT]
-> **Development disclosure:** Orbit was coded by Claude under human
-> direction.
-
-<p align="center">
-  <img src="docs/images/orbit-mark.svg" alt="Orbit logo" width="132" />
-</p>
-
-<h1 align="center">Orbit</h1>
-
-<p align="center">
-  <strong>your year, in orbit</strong>
-</p>
-
 <p align="center">
   <img src="docs/images/orbit-banner.png" alt="Orbit — your year, in orbit" width="100%" />
 </p>
+
+> [!IMPORTANT]
+> **Development disclosure:** Orbit was coded by Claude under human
+> direction.
 
 Boilers need servicing. Insurance renews. Cars need inspections. Devices
 leave warranty. Contracts roll over. Orbit brings those scattered
@@ -74,9 +64,3 @@ through what it asks and what it sets up.
   modified Orbit for others over a network, the AGPL's remote-interaction
   clause applies. The three bundled typefaces are separately licensed under
   the SIL OFL 1.1; their licence text ships with the application.
-
-<p align="center">
-  <img src="docs/images/orbit-mark.svg" alt="" width="52" />
-  <br />
-  <strong>your year, in orbit</strong>
-</p>
