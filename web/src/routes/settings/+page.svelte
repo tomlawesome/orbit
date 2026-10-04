@@ -19,7 +19,7 @@
   import { SIGN_IN_METHODS_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { SENT_LATELY_FIXTURE } from "$lib/data/fixtures/settings.js";
   import { agoLong } from "$lib/format.js";
-  import { alertsSupported, currentSubscription, disableAlerts, enableAlerts } from "$lib/push/alerts.js";
+  import { alertsSupported, currentSubscription, disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
   import { watchTour } from "$lib/tour/watch.js";
   import { fillStarTiles } from "$lib/sky.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
@@ -125,7 +125,7 @@
        compares against one ratified mockup — and would give the reader a
        missing control rather than a held one. */
     if (!alertsAvailable) alertsProblem = "this browser can't show alerts";
-    else browserAlerts = Boolean(await currentSubscription());
+    else browserAlerts = Boolean(await syncAlerts());
   });
 
   async function toggleBrowserAlerts() {
@@ -476,7 +476,7 @@
      household's is. It shares what this page loads rather than reading it
      twice, and hides this page's sky and cards below the switch; the chrome
      stays, because on a phone Chrome.svelte draws the kit's top chrome. -->
-<Pocket bind:view bind:methods bind:sessions bind:active {initials} {providerOffered} {emailApproval}
+<Pocket bind:view bind:methods bind:sessions bind:active {initials} {providerOffered} {emailApproval} {screenProblem} onretry={loadScreen}
         {methodsProblem} {sessionsProblem} resumed={resumedMethod} fixtures={Boolean(data?.fixtures)} />
 
 <div class="helm-page">
