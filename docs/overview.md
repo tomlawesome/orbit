@@ -1,146 +1,116 @@
 # What Orbit does
 
-A tour of Orbit's screens and features, and the small set of services it
-runs on. The [v1 charter](v1-charter.md) is the formal statement of what a
-stable release must do.
+Orbit keeps track of the things a home has to remember: servicing, renewals,
+inspections, contracts and cover, and who in the household shares them. It
+runs on your own server. The [website](https://tomlawesome.github.io/orbit-site/)
+tells the story; this page is the plain description behind it. The
+[v1 charter](v1-charter.md) is the formal statement of what a stable release
+must do.
 
-## A quick visual tour
+## The screens
 
-These screenshots show the real Orbit application using deterministic synthetic
-household, item, document and mailbox data. They contain no live accounts,
-provider settings or infrastructure details.
+The screenshots below are the real app, filled with made-up data for a
+made-up household. They hold no real accounts or settings.
 
-<p align="center">
-  <img src="assets/product-tour/overview.png" alt="Orbit desktop overview showing three upcoming synthetic household records" width="100%" />
-</p>
-
-<p align="center">
-  <img src="assets/product-tour/item-detail.png" alt="Orbit item details for a synthetic annual boiler service, including schedule and reminders" width="100%" />
-</p>
+### Your sky
 
 <p align="center">
-  <img src="assets/product-tour/settings.png" alt="Orbit desktop settings page showing appearance, data, inbox and household sections" width="100%" />
+  <img src="assets/product-tour/overview.png" alt="Your sky: the year as a dial round the household, each item a body on its own orbit, the nearest due soonest" width="100%" />
 </p>
+
+The home screen is "your sky": the year drawn as a dial, with your household
+at the centre and today at the top. Each thing you look after is a body on
+its own orbit. The closer it sits to the centre, the sooner it is due;
+overdue items sit inside the inner ring. The "key" tab on the right explains
+the colours and sizes. The search box at the bottom, "explore your world",
+finds items and documents.
+
+### One item
 
 <p align="center">
-  <img src="assets/product-tour/inbox.png" alt="Orbit incoming-documents view showing one synthetic mailbox review" width="100%" />
+  <img src="assets/product-tour/item-detail.png" alt="One item open: its due date, how often it comes round, cost, provider, reminders, actions and notes, with its document beside it" width="100%" />
 </p>
 
-The captures show synthetic data only. They are static assets under
-`docs/assets/product-tour/`: the browser test that used to regenerate them
-went with the Next application (#735), and ordinary browser tests do not
-write documentation assets.
+Open any body in the sky to see that item: when it is due, how often it comes
+round, what it costs, who provides it, its reference and its reminders. From
+here you can complete it, reschedule it, snooze it, edit it or retire it.
+Complete it and Orbit works out the next date for you. Documents attached to
+the item sit beside it, stored encrypted. The items before and after it in
+date order sit either side, so you can step through them.
 
-<table>
-  <tr>
-    <td width="33%" valign="top">
-      <h3>See what is next</h3>
-      <p>A focused, urgency-aware workspace brings upcoming work, overdue items, and recently completed tasks into view.</p>
-    </td>
-    <td width="33%" valign="top">
-      <h3>Keep the rhythm</h3>
-      <p>Complete, renew, reschedule, snooze, cancel, restore, and automatically calculate the next recurring date.</p>
-    </td>
-    <td width="33%" valign="top">
-      <h3>Share the load</h3>
-      <p>Household owners can add existing Orbit users by display name—without invitations or exposed email addresses.</p>
-    </td>
-  </tr>
-</table>
+### The inbox
 
-## Designed around your household
+<p align="center">
+  <img src="assets/product-tour/inbox.png" alt="The inbox: one forwarded insurance renewal waiting for review, with what Orbit read from it and buttons to add it or dismiss it" width="100%" />
+</p>
 
-- **A workspace that reads at a glance** — responsive Due Next view, search,
-  urgency filters, household switching, section views, and mobile navigation.
-- **Sections that fit your life** — add, rename, reorder, recolour, hide, or
-  restore sections, with Home, Vehicles, Devices, and Services included by
-  default.
-- **Appearance with personality** — independent light, dark, and system modes
-  across Orbit After Dark, Verdant, Coast, Berry, and Ember colourways, three
-  in-app text sizes, and traditional or theme-matched due-date heat maps.
-- **A complete record of care** — item details, schedule history, activity
-  timelines, archived records, reminders, notification state, and encrypted
-  supporting documents.
-- **Installable without private offline storage** — a PWA shell and
-  service-worker push handling, while authenticated workspace data remains
-  server-authoritative and changes are never queued for later replay.
-- **Private by design** — local password accounts are always available, and
-  an identity provider is optional. Sign-in state stays on the server, and
-  every request is checked to be genuine and to come from Orbit's own
-  address before it can touch household data.
+Everyone gets their own relay address. Forward a bill or a policy to it and
+the inbox shows "what your relay has caught": what Orbit read from the
+attachment, and whether the attachment passed the malware scan. Nothing is
+added until you choose "Add to orbit". Anything left unreviewed is removed
+after 45 days, and Orbit only ever reads copies of your mail. An
+administrator sets up the mailbox first: see
+[the mailbox](administrator-operations.md#mailbox-provider-operation).
 
-## One app. Standard supporting services.
+### Settings
 
-Orbit deliberately keeps the operational footprint small:
+<p align="center">
+  <img src="assets/product-tour/settings.png" alt="Settings: your sign-in methods, the five themes, reminder choices and your relay address" width="100%" />
+</p>
+
+Settings holds your own choices: how you sign in, which of the five themes
+your sky uses (star-chart, after dark, clouds, dawn and retrograde; after dark
+is the default), when reminders arrive and whether by email or browser alert,
+and your relay address. "Watch the tour" replays the short tour film
+that Orbit offers once you have a household. Settings for the whole instance live on the
+administration screen instead.
+
+## Around your household
+
+- **Share the load.** A household's owner can add people who already have an
+  Orbit account, or send an invitation by email. Owners can also hand the
+  household over to someone else.
+- **Sections that fit.** Home, Vehicles, Devices and Services to begin with.
+  Add, rename, reorder and recolour your own.
+- **On your phone.** The main screens have their own phone layout. Orbit
+  installs like an app and can send browser alerts. Your household's data
+  stays on your server: the app keeps no copy of it on the phone, and changes
+  are never saved up to send later.
+- **Private by design.** Use Orbit's own accounts, or an identity provider you
+  already run (any OpenID Connect provider, such as Authentik). Nobody sees a
+  household without signing in. See [Authentication](authentication.md).
+
+## One app. Standard parts.
 
 ```mermaid
 flowchart LR
-    browser["Browser or installed PWA"]
-    orbit["orbit application container"]
-    postgres[("orbit-postgres")]
-    documents[("encrypted document volume")]
-    scanner["official ClamAV scanner"]
-    identity["OIDC identity provider (optional)"]
-    delivery["SMTP and Web Push providers"]
+    browser["Your browser or phone"]
+    orbit["Orbit"]
+    postgres[("PostgreSQL 18")]
+    documents[("Encrypted documents")]
+    scanner["ClamAV malware scanner"]
+    optional["Optional: identity provider, email, browser alerts, mailbox"]
 
     browser <-->|HTTPS| orbit
-    orbit <-->|PostgreSQL| postgres
-    orbit -->|ciphertext only| documents
-    orbit -->|quarantined stream| scanner
-    orbit <-.->|OpenID Connect, when enabled| identity
-    orbit -->|Notifications| delivery
+    orbit <--> postgres
+    orbit --> documents
+    orbit -->|each upload| scanner
+    orbit <-.-> optional
 ```
 
-- `orbit` is the whole Orbit application: the interface, the signed-in APIs,
-  the database migrations and the notification scheduler. It is either built
-  from source or pulled by exact build fingerprint (`ORBIT_IMAGE` must name a
-  registry digest).
-- `orbit-postgres` is the official PostgreSQL 18 Alpine image, pinned to one
-  exact build, with a persistent volume.
-- `orbit-clamav` is the official malware scanner image. It receives only
-  quarantined file streams over a private network and has no port on the host,
-  no database credentials, no document volume and no Orbit secrets.
-
-There is no custom PostgreSQL image and no separate frontend and backend to
-maintain. ClamAV is on by default and normally needs about 4 GiB of memory.
-An administrator can turn it off, but Orbit then shows a permanent warning and
-marks every later upload as unscanned.
-## Production foundation
-
-Orbit already includes:
-
-- a first-run setup wizard, instance administrators, and household membership
-  controlled by each household's owner;
-- create, edit, schedule, remind, archive, undo and restore;
-- recurrence suggestions and calendar-date rules that follow the household's
-  own timezone;
-- a notification centre that knows the schedule, with read, dismiss and
-  snooze;
-- per-user choices for email and browser-push delivery;
-- household ownership transfer that happens all at once and is written to
-  the audit history;
-- a PostgreSQL database (managed with Drizzle) for users, sessions,
-  households, memberships, items, events, reminders, push devices, delivery
-  state and audit history;
-- local password accounts, always available, plus optional sign-in through
-  any standard OpenID Connect provider using the recommended flow
-  (Authorization Code with PKCE) — see
-  [authentication.md](authentication.md);
-- when a provider is on, accounts are created at first sign-in and tied
-  permanently to that provider's identity for the person;
-- email and browser-push delivery through a scheduler that uses PostgreSQL
-  to make sure each notification is claimed once;
-- a sign-in gate that shows nothing about a workspace or a household to
-  signed-out visitors;
-- production health checks, a standalone server build, a purpose-built
-  browser favicon, and version-controlled migrations;
-- document uploads (PDF, JPEG, PNG) with size limits, malware rejection by
-  ClamAV, a separate encryption key for each document, quotas, audited
-  downloads, soft deletion, timed purge and storage reconciliation — see
-  [Encryption at rest](encryption-at-rest.md) for what this protects,
-  what it does not, and why.
-
-Orbit does not keep workspace data or pending changes in the browser's own
-storage. It removes the old preview-build IndexedDB database before a session
-starts and on sign-out, and its service worker never caches API or sign-in
-responses. Production images contain no sample households or seeded records.
+- **You bring** a Linux machine with Docker, and an HTTPS address for it.
+- **It runs** three containers: Orbit itself, the official PostgreSQL 18
+  image for your records, and the official ClamAV image, which checks every
+  upload before it is kept. ClamAV wants about 4 GiB of memory. An
+  administrator can turn scanning off, and Orbit then marks later uploads as
+  not scanned.
+- **If you like**, add email reminders, browser alerts, an identity provider
+  and the mailbox your relay forwards into. Two heavier services are also
+  optional: a document text reader (Apache Tika) and a private AI model
+  server (Ollama). See [Running Orbit](operating.md#optional-local-processing-stack).
+- **Your data** stays on your own disk: records in the database, documents
+  encrypted with a separate key for each one. [Encryption at
+  rest](encryption-at-rest.md) says what that protects and what it does not.
+- **Updates**: run the launcher again and choose Update. Every release is
+  pinned to one exact build, and your settings carry over. See
+  [Installing Orbit](installing.md).
