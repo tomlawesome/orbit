@@ -40,7 +40,7 @@ describe("#1151 W1-Q9: the desktop create form reuses entry.js's own mapping", (
 
   it("the submit handler calls createCommandOf instead of hand-building the item", () => {
     const submitHandler = BEHAVIOUR.slice(BEHAVIOUR.indexOf('on(card, "submit"'));
-    expect(submitHandler).toMatch(/await applyCommand\(createCommandOf\(entryFromForm\(\), \{\s*\n\s*householdId: active\.id, currency: active\.currency \?\? "GBP", id: draftId,\s*\n\s*\}\)\);/u);
+    expect(submitHandler).toMatch(/await applyCommand\(createCommandOf\(entryFromForm\(\), \{\s*\n\s*householdId: active\.id, currency: active\.currency \?\? "GBP", id: draftId,\s*\n\s*\}\)\)/u);
     // the hand-rolled recurrence/cost logic this used to carry is gone
     expect(submitHandler).not.toMatch(/kindRecurs\(chosenType\)/u);
     expect(submitHandler).not.toMatch(/Math\.round\(Number\(cost\)/u);

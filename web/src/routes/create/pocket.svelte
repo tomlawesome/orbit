@@ -2,7 +2,7 @@
   import { beforeNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { applyCommand, readWorkspace } from "$lib/data/workspace.js";
+  import { WorkspaceError, applyCommand, readWorkspace } from "$lib/data/workspace.js";
   import { saveProblem } from "$lib/data/metadata-status.js";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
@@ -75,7 +75,14 @@
     saving = true;
     problem = null;
     try {
-      await applyCommand(createCommandOf(entry, { householdId: household.id, currency: household.currency ?? "GBP", id: draftId }));
+      await applyCommand(createCommandOf(entry, { householdId: household.id, currency: household.currency ?? "GBP", id: draftId })).catch((error) => {
+        /* This draft id is new to the server, so "this item changed on another
+           device" can only mean the earlier send landed and its answer was
+           lost; refreshing would mint a new id and create the duplicate the
+           retry exists to avoid. */
+        if (error instanceof WorkspaceError && error.code === "version_required") return;
+        throw error;
+      });
       saved = true;
       wake(attachment ? `added to your orbit · ${attachment.name} was not kept` : `added to your orbit · ${entry.name.trim()}`);
       /* The approach (§2.5): the new item, seated on its belt. */
