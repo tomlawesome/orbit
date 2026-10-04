@@ -2,6 +2,7 @@ import {
   chmodSync,
   closeSync,
   constants,
+  existsSync,
   fstatSync,
   lstatSync,
   mkdirSync,
@@ -463,6 +464,13 @@ describe("applySetOidcSecret", () => {
     expect(() => applySetOidcSecret(deployDir, "")).toThrow(ConfigureEngineRefusal);
   });
 
+  it("refuses while another run holds the deploy lock, before writing any secret file", () => {
+    ensureEnvironmentFile(deployDir);
+    writeFileSync(join(deployDir, ".orbit-engine.lock"), "");
+    expect(() => applySetOidcSecret(deployDir, "super-secret-value")).toThrow(ConfigureEngineRefusal);
+    expect(existsSync(join(deployDir, OIDC_SECRET_RELATIVE_PATH))).toBe(false);
+  });
+
   it("guarantee #22: refuses a secret exceeding the maximum byte size", () => {
     ensureEnvironmentFile(deployDir);
     expect(() => applySetOidcSecret(deployDir, "a".repeat(MAXIMUM_SECRET_BYTES + 1))).toThrow(ConfigureEngineRefusal);
@@ -499,7 +507,7 @@ describe("applySetOidcSecret", () => {
       expect(() => statSync(path)).toThrow();
     });
 
-    it("never removes a rotation's existing secret, even though its content is already overwritten", () => {
+    it("never removes a rotation's existing secret: a refused rotation leaves the file exactly as it was", () => {
       ensureEnvironmentFile(deployDir);
       ensureSecretsDirectory(deployDir);
       const path = join(deployDir, OIDC_SECRET_RELATIVE_PATH);
@@ -512,8 +520,9 @@ describe("applySetOidcSecret", () => {
       } finally {
         rmSync(lockPath, { force: true });
       }
-      // Still there — a rotation's file is never deleted on this failure path.
-      expect(readFileSync(path, "utf8")).toBe("a-rotated-secret");
+      // Still there, and untouched: the deploy lock is taken before the
+      // secret is written, so a refusal happens before either write.
+      expect(readFileSync(path, "utf8")).toBe("the-previous-secret");
     });
   });
 });
@@ -662,6 +671,20 @@ describe("runConfigureApply (bare flow, minus ensure_vapid_keys)", () => {
     expect(second.messages.some((m) => m.includes("Created"))).toBe(false);
     expect(second.messages.some((m) => m.includes("Generated"))).toBe(false);
     expect(readFileSync(sessionSecretPath, "utf8")).toBe(generated);
+  });
+
+  it("an existing deployment keeps its pinned image unless the installer's trust marker says otherwise (configure.sh's persist_orbit_image rule)", () => {
+    runConfigureApply(deployDir, "orbit-local:abcdef123456");
+    expect(readEnv()).toMatch(/^ORBIT_IMAGE=orbit-local:abcdef123456$/mu);
+
+    // A stale value left in the shell, through the container engine: ignored, and said so.
+    const ignored = runConfigureApply(deployDir, "orbit-local:0000000aaaaa");
+    expect(readEnv()).toMatch(/^ORBIT_IMAGE=orbit-local:abcdef123456$/mu);
+    expect(ignored.messages.some((m) => m.includes("ignoring the environment's ORBIT_IMAGE value"))).toBe(true);
+
+    // The installer, which checked the image itself, says so and the pin moves.
+    runConfigureApply(deployDir, "orbit-local:111111bbbbbb", { trustOrbitImage: true });
+    expect(readEnv()).toMatch(/^ORBIT_IMAGE=orbit-local:111111bbbbbb$/mu);
   });
 
   it("leaves .env-orbit and .orbit-secrets in place for the (bash-owned) VAPID step and final message to follow", () => {

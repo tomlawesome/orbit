@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -11,8 +11,9 @@ import {
   renameSync,
   rmSync,
   statSync,
-  writeFileSync,
   type Stats,
+  writeFileSync,
+  writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -224,13 +225,29 @@ function acquireDeployLock(deployDir: string, operationLabel: string): () => voi
         "locked",
       );
     }
+    // Reclaim by rename, not unlink-then-create (same shape as
+    // install-transaction.ts's copy): two processes that both saw the stale
+    // lock would otherwise each unlink and recreate it, and the slower unlink
+    // removed the faster one's fresh lock, leaving both believing they held
+    // it. Only one rename succeeds; the other tries the plain create once
+    // more and refuses if it is taken.
+    const reclaimed = `${lockPath}.stale-${process.pid}`;
     try {
-      rmSync(lockPath, { force: true });
+      renameSync(lockPath, reclaimed);
+      rmSync(reclaimed, { force: true });
+    } catch {
+      /* the other process reclaimed it first; the create below decides */
+    }
+    try {
       fd = takeLock();
     } catch {
       refuse(`Another ${operationLabel} is already running against this deployment (lock held at ${lockPath}).`, "locked");
     }
   }
+  // The lock names its holder, so a release never removes a lock that was
+  // reclaimed from this process as stale and now belongs to another run.
+  const owner = `${process.pid}:${randomUUID()}\n`;
+  writeSync(fd, owner);
   closeSync(fd);
 
   let released = false;
@@ -238,7 +255,7 @@ function acquireDeployLock(deployDir: string, operationLabel: string): () => voi
     if (released) return;
     released = true;
     try {
-      rmSync(lockPath, { force: true });
+      if (readFileSync(lockPath, "utf8") === owner) rmSync(lockPath, { force: true });
     } catch {
       /* best effort */
     }
@@ -714,11 +731,20 @@ export function applySetOidcSecret(deployDir: string, secret: string): string {
   // from a rotation of one .env-orbit already points at (never removed —
   // its content is already overwritten either way, but the live pointer
   // must never end up referencing a file this call just deleted).
+  // Both writes under the one deploy lock: otherwise the losing one of two
+  // overlapping calls rolled back the secret file the winner had just
+  // written and pointed .env-orbit at.
+  const releaseLock = acquireDeployLock(deployDir, "orbit configure");
   const secretExistedBefore = pathInfo(secretPath).existsFollowing;
-  atomicWriteFile(secretPath, secret, 0o600, "installing");
+  try {
+    atomicWriteFile(secretPath, secret, 0o600, "installing");
+  } catch (error) {
+    releaseLock();
+    throw error;
+  }
 
   try {
-    updateManagedKeys(deployDir, [
+    updateManagedKeysLocked(deployDir, [
       ["OIDC_CLIENT_SECRET", ""],
       ["OIDC_CLIENT_SECRET_FILE", CANONICAL_OIDC_SECRET_FILE_PATH],
     ]);
@@ -737,6 +763,8 @@ export function applySetOidcSecret(deployDir: string, secret: string): string {
       }
     }
     throw error;
+  } finally {
+    releaseLock();
   }
 
   return `Orbit saved the OIDC client secret to ${OIDC_SECRET_RELATIVE_PATH}.`;
@@ -917,7 +945,11 @@ export interface ConfigureApplyResult {
  * "Orbit configuration is ready..." message itself, in that order, so
  * combined output stays in the same sequence configure.sh has always used.
  */
-export function runConfigureApply(deployDir: string, orbitImage: string | undefined): ConfigureApplyResult {
+export function runConfigureApply(
+  deployDir: string,
+  orbitImage: string | undefined,
+  options: { trustOrbitImage?: boolean } = {},
+): ConfigureApplyResult {
   const messages: string[] = [];
 
   // Captured before anything below creates either path: O1-S1/SS1-S2's
@@ -941,7 +973,16 @@ export function runConfigureApply(deployDir: string, orbitImage: string | undefi
     refuse("Configuration preflight failed; restoring the previous deployment.", preflight.code);
   }
 
-  persistOrbitImage(deployDir, orbitImage);
+  // persist_orbit_image's rule (configure.sh): an existing deployment only
+  // changes its pinned image through the installer, which says so with
+  // ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1. Without it, a stale ORBIT_IMAGE
+  // left in the shell re-pinned the deployment through the container
+  // engine while the bash path refused.
+  if (orbitImage && hadEnvironmentFile && !options.trustOrbitImage) {
+    messages.push(`Orbit configure: ignoring the environment's ORBIT_IMAGE value ${orbitImage}; an existing deployment only changes its pinned image through the installer.`);
+  } else {
+    persistOrbitImage(deployDir, orbitImage);
+  }
   ensureSecretsDirectory(deployDir);
 
   for (const relativePath of GENERATED_SECRET_RELATIVE_PATHS) {
