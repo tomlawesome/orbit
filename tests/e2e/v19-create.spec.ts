@@ -4,6 +4,7 @@ import { settleArrival } from "./support/arrival";
 import { gotoCreate } from "./support/keyboard";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -48,6 +49,7 @@ async function seedHousehold(page: Page): Promise<{ id: string; name: string }> 
 }
 
 test("the create form saves a real item into the orbit", async ({ page }) => {
+  await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: workerAccount("administrator") }).click();
   await settleArrival(page);

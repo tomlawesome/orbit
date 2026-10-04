@@ -5,6 +5,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { householdRegister, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -37,6 +38,7 @@ const FIXTURE_PATH = resolve(__dirname, "../support/fixtures/chromium-synthetic.
 const households = householdRegister();
 
 async function signInAsAdmin(page: Page) {
+  await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: "Orbit Administrator" }).click();
   await settleArrival(page);

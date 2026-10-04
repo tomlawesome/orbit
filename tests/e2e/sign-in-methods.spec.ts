@@ -110,6 +110,7 @@ test.afterAll(async ({ browser }) => {
 });
 
 async function signInAs(page: Page, account: string, options: { household?: boolean } = {}) {
+  await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
   await settleArrival(page);
@@ -118,7 +119,6 @@ async function signInAs(page: Page, account: string, options: { household?: bool
 
 /** The helm, loaded — every card is gated on the screen's own fetch. */
 async function openSettings(page: Page) {
-  await answerPushWithoutAService(page);
   await page.goto("/settings");
   await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
 }

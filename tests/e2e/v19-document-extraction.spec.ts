@@ -5,6 +5,7 @@ import { householdRegister, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -55,6 +56,7 @@ test("a real PDF uploaded through the product is extracted by the real Tika side
   test.skip(test.info().project.name.startsWith("mobile"), "API-only proof; nothing here differs by viewport");
   test.setTimeout(90_000);
 
+  await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: workerAccount("administrator") }).click();
   await settleArrival(page);

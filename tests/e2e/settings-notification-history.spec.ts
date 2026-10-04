@@ -67,6 +67,7 @@ function runSql(statements: string): string {
 }
 
 async function signInAs(page: Page, account: string) {
+  await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
   await settleArrival(page);
@@ -82,7 +83,6 @@ async function signInAs(page: Page, account: string) {
  * signal one step earlier in the same fetch.
  */
 async function openSettings(page: Page) {
-  await answerPushWithoutAService(page);
   await page.goto("/settings");
   const isMobile = test.info().project.name.startsWith("mobile");
   const loaded = isMobile ? page.locator(".st-id") : page.locator(".cards");

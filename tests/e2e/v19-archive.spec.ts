@@ -8,6 +8,7 @@ import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { ensureLocalPassword } from "./support/local-credentials";
 import { ensureWorkerAdministrator, workerAccount, workerFixturePassword } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
@@ -39,6 +40,7 @@ const PASSPHRASE = "correct-horse-battery-staple";
 const READER_PASSWORD = () => workerFixturePassword(READER());
 
 async function signIn(page: Page, returnTo: string) {
+  await answerPushWithoutAService(page);
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
   await page.getByRole("link", { name: READER() }).click();
   /* #1183, #1096's race: the reader has no household yet, so this lands on

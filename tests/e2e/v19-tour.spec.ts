@@ -3,6 +3,7 @@ import { householdRegister } from "./support/households";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { dismissTourIfShown, homeIsLive } from "./support/keyboard";
+import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    record this spec depends on (below) starts from the same place every run,
@@ -79,6 +80,7 @@ async function sessionHeaders(page: Page) {
  * through the product's own routes before any landing can act on either.
  */
 async function signInAwayFromHome(page: Page) {
+  await answerPushWithoutAService(page);
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent("/inbox")}`);
   await page.getByRole("link", { name: READER() }).click();
   /* #1080: waits for the session, then holds administrator access — the

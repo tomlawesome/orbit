@@ -4,6 +4,7 @@ import { expect, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./households";
 import { homeIsLive } from "./keyboard";
 import { ensureWorkerAdministrator, workerAccount } from "./worker-identity";
+import { answerPushWithoutAService } from "./webkit-push";
 
 /**
  * #1178: the signed-in fixtures v19-axe-sweep.spec.ts grew (#496), lifted
@@ -26,6 +27,7 @@ export const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 export const DECORATIVE_BACKDROP = '.layer[aria-hidden="true"]';
 
 export async function signIn(page: Page, returnTo: string) {
+  await answerPushWithoutAService(page);
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
   await page.getByRole("link", { name: READER() }).click();
   /* #1080: waits for the session, then holds administrator access. */
