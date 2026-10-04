@@ -2303,6 +2303,24 @@ describe("install.sh", () => {
     expect(result.calls).toContain("docker volume rm -- orbit_orbit-db-data");
   });
 
+  it("removes only its own leftover database volume by exact name, never another deployment's (#1207)", () => {
+    const targetDir = makeTarget();
+
+    // Another Orbit deployment's volume lists first. The old broad match took
+    // the first `(^|_)orbit-db-data` line and removed that deployment's live
+    // database. The fake prints this value verbatim, so the newline makes
+    // `docker volume ls` list both names.
+    const result = runInstall(targetDir, {
+      FAKE_COMPOSE_UP_FAIL: "1",
+      FAKE_COMPOSE_UP_CREATES_VOLUME: "other-household_orbit-db-data\norbit_orbit-db-data",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.calls).toContain("docker volume rm -- orbit_orbit-db-data");
+    const removals = result.calls.split("\n").filter((line) => line.includes("volume rm"));
+    expect(removals.some((line) => line.includes("other-household_orbit-db-data"))).toBe(false);
+  });
+
   it("never removes a database volume on a failed update (only a fresh install owns what compose up just created)", () => {
     const targetDir = makeTarget();
     makeFullExistingDeployment(targetDir);
