@@ -398,7 +398,9 @@ All citations are `file.sh:line` against `/home/codex/projects/orbit/scripts/<fi
 
 ### Before and after an upgrade
 
-This is the operator procedure around an upgrade. It uses `backup.sh`,
+This is the operator procedure around an upgrade: running the install line
+again and choosing Update (see [Installing Orbit](installing.md#what-the-installer-asks)).
+Run every command here from the deployment directory. It uses `backup.sh`,
 `restore.sh` and `configuration.sh`, whose guarantees are catalogued in
 their own sections.
 
@@ -457,7 +459,7 @@ giving it the new build's details:
 ```sh
 bash scripts/configuration.sh --migrate --orbit-image \
   'registry.example/orbit@sha256:<64 lowercase hexadecimal characters>' \
-  --applied-version v1.2.3 \
+  --applied-version v0.3.0 \
   --applied-digest 'sha256:<64 lowercase hexadecimal characters>' \
   --compose-project-name orbit
 ```
@@ -467,7 +469,9 @@ copy beside the file, changes the file all at once or not at all, is safe to
 run again, and never rewrites your own values or secrets.
 
 If Orbit has started but the database migration or sign-in then fails, stop
-it and restore both the checked backup and the saved configuration:
+it and restore both the checked backup and the saved configuration. Run this
+in the same shell as the backup steps above, so `$preupgrade_config`,
+`$preupgrade_dir` and `$backup_path` are still set:
 
 ```sh
 docker compose --env-file .env-orbit stop orbit-app
@@ -478,7 +482,8 @@ ORBIT_BACKUP_DIR="$preupgrade_dir" bash scripts/restore.sh "$backup_path"
 ```
 
 The restored `.env-orbit` names the previous build exactly; do not swap in a
-version name or edit only `ORBIT_IMAGE`. Follow the restore prompts, check
+version name or edit only `ORBIT_IMAGE`. Type `RESTORE` when the restore
+asks, then check
 `/api/health` and that you can sign in on the previous build, and only then
 delete the saved copy with `rm -f -- "$preupgrade_config"`. Keep it until
 health is confirmed.
