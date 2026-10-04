@@ -55,6 +55,11 @@ function readArgvLog(logPath: string): string[][] {
 // shipped `docker exec -T` past 66 green tests against the bash shim.
 const fakeDockerScript = [
   "#!/usr/bin/env bash",
+  // #1151 RANGE-R4: a real wedged daemon/container ignores SIGTERM, unlike
+  // this shim's plain `sleep`, which dies on it by default. Trapping TERM
+  // here reproduces that so a test can prove the adapter's timeout still
+  // bounds the call (via SIGKILL) instead of hanging past it.
+  'if [[ -n "${ORBIT_IGNORE_TERM:-}" ]]; then trap "" TERM; fi',
   'if [[ -n "${ORBIT_ARGV_LOG:-}" ]]; then',
   "  {",
   '    for arg in "$@"; do printf \'%s\\0\' "$arg"; done',
@@ -536,6 +541,48 @@ describe("createInstallDockerAdapter — compose-lifecycle timeouts (O1-R11)", (
       composeTimeoutsMs: { quick: 200 },
     });
     expect(adapter.checkDockerAvailable()).toBe(true);
+  });
+});
+
+// #1151 RANGE-R4: the O1-R11 tests above only prove the *timeout* fires —
+// their fake docker's plain `sleep` already dies on the default SIGTERM
+// killSignal, so they pass whether or not SIGKILL escalation exists. These
+// use ORBIT_IGNORE_TERM to model the actual hazard the finding names (a
+// daemon/container that ignores SIGTERM), proving composePull/composeUp/
+// composeDown are still bounded by their timeout rather than hanging past
+// it for the rest of the fake's (deliberately much longer) sleep.
+describe("createInstallDockerAdapter — compose-lifecycle SIGKILL escalation (#1151 RANGE-R4)", () => {
+  function wedgedAdapterFor(binDir: string, overrides: Partial<Record<"quick" | "pull" | "up" | "down" | "ollamaPull", number>>) {
+    return createInstallDockerAdapter({
+      envFile: ".env-orbit",
+      composeProjectName: "orbit",
+      env: shimEnv(binDir, { ORBIT_SLEEP_SECONDS: "30", ORBIT_IGNORE_TERM: "1" }),
+      composeTimeoutsMs: overrides,
+    });
+  }
+
+  it("composeUp returns false within its bound, not after the full 30s hang, when the daemon ignores SIGTERM", () => {
+    const binDir = makeFakeDockerBin();
+    const adapter = wedgedAdapterFor(binDir, { up: 200 });
+    const start = Date.now();
+    expect(adapter.composeUp()).toBe(false);
+    expect(Date.now() - start).toBeLessThan(4000);
+  });
+
+  it("composePull returns false within its bound when the registry pull ignores SIGTERM", () => {
+    const binDir = makeFakeDockerBin();
+    const adapter = wedgedAdapterFor(binDir, { pull: 200 });
+    const start = Date.now();
+    expect(adapter.composePull("orbit-db")).toBe(false);
+    expect(Date.now() - start).toBeLessThan(4000);
+  });
+
+  it("composeDown does not hang past its bound when the daemon ignores SIGTERM", () => {
+    const binDir = makeFakeDockerBin();
+    const adapter = wedgedAdapterFor(binDir, { down: 200 });
+    const start = Date.now();
+    expect(() => adapter.composeDown()).not.toThrow();
+    expect(Date.now() - start).toBeLessThan(4000);
   });
 });
 
