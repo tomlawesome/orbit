@@ -221,7 +221,7 @@ export function noninteractiveConfigurationGuidance(missing: readonly string[]):
   return [
     `Orbit installer: configuration fields requiring attention: ${missing.join(" ")}.`,
     "Orbit installer: non-interactive use requires a complete .env-orbit and, when ORBIT_AUTH_OIDC=true, an existing owner-only .orbit-secrets/oidc-client-secret file.",
-    "Orbit installer: safe next command in a controlling terminal: curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/install.sh | bash",
+    "Orbit installer: safe next command in a controlling terminal: curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/get-orbit.sh | bash",
     "Orbit installer: configure with --init, provide the secret with --set-oidc-secret if OIDC is on, then verify with --check before rerunning automation.",
   ];
 }
