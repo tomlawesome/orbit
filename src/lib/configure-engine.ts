@@ -985,9 +985,22 @@ export function runConfigureApply(
   }
   ensureSecretsDirectory(deployDir);
 
-  for (const relativePath of GENERATED_SECRET_RELATIVE_PATHS) {
-    const result = ensureSecretFile(deployDir, relativePath, isFreshInstall);
-    if (result.message) messages.push(result.message);
+  // #1151 RANGE-R5: two concurrent first-time `orbit configure` runs both
+  // see every secret missing and each generate their own; whichever
+  // finishes last previously overwrote the other's file unchallenged,
+  // exactly the read-modify-write race acquireDeployLock exists to close
+  // elsewhere. ensureSecretFile itself never takes this lock (it has no
+  // caller-independent reason to serialize on its own), so the loop takes
+  // it here, same lock, same deployDir, safe to nest after persistOrbitImage's
+  // own acquire/release above has already completed.
+  const releaseSecretsLock = acquireDeployLock(deployDir, "orbit configure");
+  try {
+    for (const relativePath of GENERATED_SECRET_RELATIVE_PATHS) {
+      const result = ensureSecretFile(deployDir, relativePath, isFreshInstall);
+      if (result.message) messages.push(result.message);
+    }
+  } finally {
+    releaseSecretsLock();
   }
 
   ensureOidcSecretPlaceholder(deployDir);
