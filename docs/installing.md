@@ -23,12 +23,6 @@ to the launcher, which runs the same installer described below. See
 what is checked, and [docs/releasing.md](releasing.md) for how the
 signatures are made.
 
-The older direct command still works and is signature-checked the same way:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/install.sh | bash
-```
-
 ### What the installer asks
 
 Run from a terminal, the installer shows a menu: Install, Update, Repair or

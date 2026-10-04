@@ -192,7 +192,9 @@ Check the list before building a test rig or handing a check to the owner.
 - `scripts/test-install-acceptance.sh` — real fresh install to a healthy
   `/api/health`, asserting `docs/installer-guarantees.md`; OIDC discovery is a
   fixture, so no provider credentials are needed
-- `scripts/test-install-bootstrap.sh` — the documented operator path: fetches
+- `scripts/test-install-bootstrap.sh` — the direct bootstrap path (not a
+  supported install entry since ADR-0031's 2026-10-04 amendment;
+  `get-orbit.sh` is): fetches
   `install.sh` over the network from a branch, pipes it to bash, and proves the
   channel tag resolved to the digest the registry serves right now. Real
   network and registry; only OIDC discovery is redirected, to the `tests/oidc`
