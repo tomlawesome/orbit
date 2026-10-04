@@ -107,7 +107,7 @@ flowchart LR
 - **If you like**, add email reminders, browser alerts, an identity provider
   and the mailbox your relay forwards into. Two heavier services are also
   optional: a document text reader (Apache Tika) and a private AI model
-  server (Ollama). See [Running Orbit](operating.md#optional-local-processing-stack).
+  server (Ollama). See [Running Orbit](operating.md#optional-document-services).
 - **Your data** stays on your own disk: records in the database, documents
   encrypted with a separate key for each one. [Encryption at
   rest](encryption-at-rest.md) says what that protects and what it does not.
