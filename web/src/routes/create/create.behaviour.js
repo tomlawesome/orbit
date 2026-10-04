@@ -80,6 +80,12 @@ export function mountCreate() {
   /** Set the moment a save lands, so leaving for /home is never read as
       discarding what was typed. */
   let committed = false;
+  /* Only until the next edit: after a save that kept the form open (the
+     attachment branch of the submit handler) further typing is unsaved
+     work again, and leaving must ask about it (#1151 W1-S1). Bound on the
+     card, so every field's input or change bubbles to it. */
+  on(card, "input", () => { committed = false; });
+  on(card, "change", () => { committed = false; });
   /** A message from the last save attempt (a loud failure, or "saved, the
       document was not attached"), held until the NEXT attempt — same as the
       pocket's own `problem`, which nothing typed clears early. */
