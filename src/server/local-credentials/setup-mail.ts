@@ -39,6 +39,7 @@ import {
 import {
   assertSetupTokenLifetime,
   createLocalUser,
+  hasLiveSetupLink,
   mintSetupToken,
   persistSetupToken,
   type CredentialSetupTokenPurpose,
@@ -115,16 +116,21 @@ function unreadableAddressError(state: MetadataFieldState | undefined): AppError
 }
 
 /**
- * Mails a link for `recipient` and, only once that mail is confirmed sent,
- * writes it as the account's live link and records `setup_link_sent`.
+ * Mails a link for `recipient`, writes it as the account's live link, and
+ * records `setup_link_sent` once the mail is confirmed sent.
  *
  * Send first, write second (#1151 A1-S1) — the same order
  * `resendSignInApproval` already uses for a sign-in approval's own token, and
  * for the same reason: writing the new link first would retire whatever link
  * the reader already had before the new one was proven to have gone out, so
  * a failed send would leave them with nothing valid at all. On a failed send
- * nothing is written here — the earlier link, if there was one, is still the
- * live one and can be sent again.
+ * the earlier link, if there is one, stays the live one and can be sent
+ * again. A reader with no live link — a just-created account, or one whose
+ * link has lapsed — has nothing to protect, and gets the minted one written
+ * anyway: that is what makes the administrator's "send again" possible, and
+ * what ADR-0023 §3 means by an account that holds a link that can be sent
+ * again. Either way `setup_link_issued` says it was written and
+ * `setup_link_sent` is only ever recorded for a mail that went.
  *
  * The audit record is the instance's only durable answer to "did that link
  * reach them", because the token table deliberately stores nothing about
@@ -158,8 +164,10 @@ async function issueAndSend(
     options.now ?? new Date(),
   );
 
-  if (!outcome.sendError) {
+  if (!outcome.sendError || !(await hasLiveSetupLink(recipient.id))) {
     await persistSetupToken(recipient.id, minted, actorUserId);
+  }
+  if (!outcome.sendError) {
     await getDb().insert(auditLog).values({
       householdId: null,
       actorUserId,
