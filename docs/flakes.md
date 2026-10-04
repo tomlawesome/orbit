@@ -320,6 +320,7 @@ page's URL at failure, which this one has to infer.
 - 2026-10-01 · b6154cd4 · the test alone, 10.1 frames a second · the same fault, 2 samples. Fourth sighting. The same test passed on round 4's tour code (dad90e83) at 11.3 frames a second, and then on b6154cd4 at 9.7 frames a second. Round 5 changes nothing in chapter 2, /create or the pill. Past the third sighting, so it needs an issue; not filed from this session (#1174 round 5 note).
 - 2026-10-01 · 854f84a4 · local `pocket-webkit`, the sibling play "plays through chapter 3 at 390x844", run with four other tests, 6.0 frames a second · "pill faint (dim raised) · /create · ch2", 8 samples: the same pill at the same place, caught at low opacity rather than marked as moving. Green on a rerun of the test alone on the same code (9.8 frames a second). Round 6 changes nothing in chapters 2 or 3, /create or the pill. Fifth sighting; the issue is #1184.
 - 2026-10-03 · 60ada53e (!1018) · pipeline 1987 / fidelity_webkit (job 29946) · "pill moving between places (dim raised) · /create · ch2", 5 samples, 7.0 frames a second at 430x932 — same shape and the same degraded-host range as every sighting above. Sixth sighting, still #1184.
+- 2026-10-04 · bc9ba29e (!1021) · pipeline 2064 / fidelity_webkit (job 31042) · "pill faint (dim raised) · /create · ch2", 6 samples, in the 24.5-minute run alongside the full acceptance stage. Seventh sighting, still #1184.
 
 ## tour-pocket-webkit.spec.js "suggested values give way to real text (#1174 round 4)" — at 430x932 only
 
