@@ -379,7 +379,7 @@ export const SIGNED_IN = [
     await page.getByRole("textbox", { name: "name", exact: true }).fill("Boiler service");
     await page.locator(".pc-sec", { hasText: "Home" }).first().click();
     await page.getByRole("textbox", { name: "cost", exact: true }).fill("lots");
-    await page.locator(".pk-refusal", { hasText: "cost" }).waitFor();
+    await page.locator(".pk-refusal", { hasText: "dot for pence" }).waitFor();
   } },
   { route: "/create", state: "leave-sheet", reach: async (page) => {
     await go(page, "/create");
