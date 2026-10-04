@@ -307,6 +307,9 @@ export function mountCreate() {
         throw error;
       });
 
+      /* Before either branch: the server holds the entry from here, so
+         leaving must not ask about discarding it (#1151 W1-S1). */
+      committed = true;
       if (attachment) {
         /* Deliberately not silent: the entry is saved, the document is not,
            because that path is unbuilt. Saying so beats losing the file. */
@@ -318,7 +321,6 @@ export function mountCreate() {
         return;
       }
 
-      committed = true;
       await goto("/home");
     } catch (error) {
       /* #1058e: loud, not small print — the button goes back to "Add to
