@@ -2,6 +2,14 @@
   <img src="docs/images/orbit-banner.png" alt="Orbit — your year, in orbit" width="100%" />
 </p>
 
+<h2 align="center">
+  <a href="https://tomlawesome.github.io/orbit-site/">Website</a>
+  &nbsp;·&nbsp;
+  <a href="SECURITY.md">Report a vulnerability</a>
+  &nbsp;·&nbsp;
+  <a href="LICENSE">Licence</a>
+</h2>
+
 > [!IMPORTANT]
 > **Development disclosure:** Orbit was coded by Claude under human
 > direction.
@@ -62,19 +70,3 @@ Three containers on a Linux machine of your own, set up by one command.
 Nothing exotic to learn, nothing to babysit. Your data stays on your own
 disk: records in the database, documents encrypted at rest. No paywall. No
 plan. No account with us.
-
-## Get into Orbit
-
-The one-line install, what it checks before it runs, the demo and the
-documentation are all on the website:
-[tomlawesome.github.io/orbit-site](https://tomlawesome.github.io/orbit-site/#install).
-
-## Security and licence
-
-- [SECURITY.md](SECURITY.md): how to report a vulnerability privately, and
-  which releases receive fixes.
-- Orbit is free software under the
-  [GNU Affero General Public License v3.0 or later](LICENSE). If you run a
-  modified Orbit for others over a network, the AGPL's remote-interaction
-  clause applies. The three bundled typefaces are separately licensed under
-  the SIL OFL 1.1; their licence text ships with the application.
