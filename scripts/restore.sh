@@ -10,6 +10,12 @@ readonly restore_root="$backup_directory/.orbit-restore"
 readonly journal_path="$restore_root/restore.journal"
 readonly secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
 readonly document_kek_file="$secrets_directory/document-kek"
+# The sibling file an online document-KEK rotation's compose overlay
+# (docker-compose.kek-rotation.yml's DOCUMENT_KEK_NEXT_FILE) binds to, next
+# to the live document-kek file itself. Same path
+# src/lib/restore-engine.ts's refuseIfDocumentKekRotationOpen and
+# import-recovery-bundle.sh's refuse_if_rotation_open already check.
+readonly document_kek_next_file="$secrets_directory/document-kek-next"
 readonly bundle_format_version="1"
 # Shared with backup.sh (#1151 O2-R3): both scripts stop orbit-app and cut
 # over the document tree/database, and nothing serialized a restore against
@@ -115,6 +121,17 @@ materialize_document_kek_from_direct_value() {
   printf '%s' "$direct_value" > "$temp" || { rm -f -- "$temp"; return 1; }
   chmod 600 -- "$temp" 2>/dev/null || { rm -f -- "$temp"; return 1; }
   mv -f -- "$temp" "$document_kek_file" 2>/dev/null || { rm -f -- "$temp"; return 1; }
+}
+
+# #1151 RANGE-S1: a restore must never run while a second document-KEK is
+# active in the running app. Overwriting the database/document tree
+# underneath an open rotation would leave the rotation's own audit trail
+# and bookkeeping permanently out of sync with the data it is supposed to
+# be migrating. Mirrors src/lib/restore-engine.ts's
+# refuseIfDocumentKekRotationOpen exactly (same marker file, same check).
+refuse_if_rotation_open() {
+  [[ ! -f "$document_kek_next_file" || -L "$document_kek_next_file" ]] ||
+    fail "preflight/rotation failed; a document-KEK rotation is open (${document_kek_next_file} exists). Finish the rotation (complete the rewrap and remove the compose kek-rotation overlay) or abort it before restoring."
 }
 
 read_document_kek() {
@@ -962,6 +979,11 @@ recover_restore() {
   local checkpoint_stage
   temporary_directory="$(mktemp -d "${TMPDIR:-/tmp}/orbit-recover.XXXXXX")"
   load_recovery_journal
+  # Recovery writes the checkpoint's document-kek back over the live one, so
+  # it must refuse during an open rotation for the same reason the plain
+  # restore path above does: otherwise the rewrap worker reads two unrelated
+  # keys. Mirrors restore-engine.ts's own recoverRestore() call.
+  refuse_if_rotation_open
   validate_checkpoint_integrity ||
     fail 'recovery/integrity failed; a durable checkpoint artifact changed; keep Orbit stopped and preserve the recovery evidence.'
   validate_checkpoint_key ||
@@ -1062,6 +1084,7 @@ fi
 
 [[ -n "$backup_file" ]] || fail 'usage failed; use bash scripts/restore.sh [--yes] <backup.tar>.'
 [[ ! -f "$journal_path" ]] || fail 'preflight/journal failed; an unfinished restore exists; run bash scripts/restore.sh --recover before starting a new restore.'
+refuse_if_rotation_open
 read_document_kek
 prepare_staged_bundle
 check_capacity
