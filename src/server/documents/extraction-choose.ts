@@ -1007,8 +1007,16 @@ function amountKey(claim: AmountClaim): string {
  * no total and no amount due at all -- and within either group, the figure
  * the most sieves agree about wins.
  */
-export function rankedAmounts(candidates: readonly TaggedCandidate[], text?: string): AmountClaim[] {
-  const cluster = amountCluster(candidates, text);
+export function rankedAmounts(
+  candidates: readonly TaggedCandidate[],
+  text?: string,
+  precomputedCluster?: Map<string, number>,
+): AmountClaim[] {
+  // Accepts an already-computed cluster (A3-Q4): chooseCost needs this same
+  // map for its own tie-break and used to call amountCluster a second time
+  // with identical arguments, which can re-run the whole date-ranking pass
+  // (clusterAnchor -> chooseDates) a second time for nothing.
+  const cluster = precomputedCluster ?? amountCluster(candidates, text);
   // What the figure gains for being printed with the field this document
   // settled: a tie-break under every other reason, or a modest weight beside
   // the strengths -- never a reason of its own (item 99).
@@ -1159,7 +1167,11 @@ function chooseCost(
   costMinor?: number;
   currency?: string;
 } {
-  const ranked = rankedAmounts(candidates, text);
+  // Computed once (A3-Q4) and handed to rankedAmounts, which would
+  // otherwise recompute the identical map -- including, where no
+  // reference anchor is clear, re-running the whole date-ranking pass.
+  const cluster = amountCluster(candidates, text);
+  const ranked = rankedAmounts(candidates, text, cluster);
   const best = ranked[0];
   if (best === undefined) return {};
   if (!enoughReason(best)) return {};
@@ -1169,7 +1181,6 @@ function chooseCost(
   // the panel that carries the reference carries the price beside it. With
   // the pass off, or with neither figure near the anchor, both boosts are
   // zero and the tie stands as it always did.
-  const cluster = amountCluster(candidates, text);
   const near = (claim: AmountClaim): number => cluster.get(amountKey(claim)) ?? 0;
   // A tie on how well the page spoke for two figures is a genuine tie and
   // blank is the answer -- unless the page's own arithmetic breaks it

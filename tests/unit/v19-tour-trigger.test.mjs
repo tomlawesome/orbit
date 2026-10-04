@@ -58,14 +58,24 @@ describe("beginFilm — a pocket viewport (#1083, ending §24)", () => {
   it("starts the film and writes once on end, the same as a desk arrival", async () => {
     const run = fakeFilmRun();
     const writeSeen = vi.fn();
+    // T-Q11 (#1151): this used to be byte-for-byte the desk test above, with
+    // nothing pocket-related in it at all. beginFilm genuinely never
+    // receives a viewport flag -- Tour.svelte reads isPocket() only inside
+    // its own createFilmRun closure, threading it into createFilm() instead
+    // (see Tour.svelte and film.js) -- which is exactly the mechanism that
+    // lets a pocket viewport take this same path: createFilmRun decides
+    // pocket-ness entirely on its own, so beginFilm must call it with
+    // nothing. That is the one pocket-related fact this layer can check.
+    const createFilmRun = vi.fn(() => run);
     const outcome = await beginFilm({
       readTour: async () => ({ tourSeenAt: null }),
       hasHousehold: () => true,
-      createFilmRun: () => run,
+      createFilmRun,
       writeSeen,
     });
 
     expect(outcome).toBe("started");
+    expect(createFilmRun).toHaveBeenCalledWith();
     expect(writeSeen).not.toHaveBeenCalled();
 
     /* The pocket cut spends `tourSeenAt` the same way the desk cut does:
@@ -156,19 +166,29 @@ describe("the wiring", () => {
     resolve(import.meta.dirname, "../../web/src/lib/tour/Tour.svelte"),
     "utf8",
   );
+  // T-Q14 (#1151): a plain `toContain` proves only that the substring
+  // exists somewhere in the file -- including inside a `<!-- -->` template
+  // comment or a `//`/`/* */` disabled line in the `<script>` block, which
+  // would make the call look wired while actually being dead. Comments are
+  // stripped first, so what the checks below see is only what Svelte would
+  // actually compile and run.
+  const liveSource = tourSource
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
 
   it("Tour.svelte calls beginFilm, and hands the real film its pocket reading (#1083)", () => {
-    expect(tourSource).toContain("beginFilm({");
-    expect(tourSource).toContain("pocket: isPocket()");
+    expect(liveSource).toContain("beginFilm({");
+    expect(liveSource).toContain("pocket: isPocket()");
   });
 
   it("Tour.svelte no longer draws the superseded card (§23)", () => {
-    expect(tourSource).not.toContain("tourcard");
-    expect(tourSource).not.toContain("./engine.js");
-    expect(tourSource).not.toContain("./stops.js");
+    expect(liveSource).not.toContain("tourcard");
+    expect(liveSource).not.toContain("./engine.js");
+    expect(liveSource).not.toContain("./stops.js");
   });
 
   it("Tour.svelte builds the real film via createFilm", () => {
-    expect(tourSource).toContain("createFilm({");
+    expect(liveSource).toContain("createFilm({");
   });
 });

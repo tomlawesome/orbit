@@ -128,6 +128,12 @@ body{background:#04070f}
       margin-top:clamp(calc(env(safe-area-inset-top, 0px) + 28px), calc(40dvh - 151.2px),
                        calc(env(safe-area-inset-top, 0px) + 200px))}
   .stage .station>*{grid-area:1/1}
+  /* #1151 W3-Q2: web/src/lib/ringcard.css's .bigring .ringstroke/.ringorbit
+     i carry this exact same stroke/orb recipe (4.2px #8791b3 stroke, 29.4px
+     #d8b45a orb at left:93.26%/top:24.94%), independently — this page never
+     loads ringcard.css (+error.svelte links plain CSS only, deliberately,
+     see its own header), so there is no shared variable to tie the two to.
+     A retune there needs the same numbers carried over here by hand. */
   .stage .errring{display:block;width:100%;height:100%;border-radius:50%;border:4.2px solid #8791b3;position:relative}
   .stage .errring i{position:absolute;left:93.26%;top:24.94%;width:29.4px;height:29.4px;margin:-14.7px 0 0 -14.7px;
       border-radius:50%;background:#d8b45a}

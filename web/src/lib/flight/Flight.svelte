@@ -167,12 +167,19 @@
       { duration: ms, easing: "cubic-bezier(.35,0,.2,1)", fill: "none" },
     );
   }
-  function dropMark() {
-    markEl.classList.remove("on");
-    markEl.classList.add("collapse");
+  /** #1151 W1-Q3: the one place both dropMark() and reset() restore the
+   *  lockup glyphs' visibility, so a glyph added or renamed here is added
+   *  or renamed for both call sites, not just whichever one a future edit
+   *  happens to touch. */
+  function restoreGlyphVisibility() {
     for (const el of /** @type {NodeListOf<SVGElement>} */ (
       document.querySelectorAll("#login-glyph svg,#dusk-glyph svg")
     )) el.style.visibility = "";
+  }
+  function dropMark() {
+    markEl.classList.remove("on");
+    markEl.classList.add("collapse");
+    restoreGlyphVisibility();
   }
   /* the way down: the mark appears at centre and rides to the lockup's glyph.
      Same FLIP treatment as liftMark above, mirrored: the box goes straight to
@@ -282,9 +289,7 @@
                             "farewell", "pinned", "counting", "belong");
     markEl?.classList.remove("on", "collapse");
     nameEl?.classList.remove("on");
-    for (const el of /** @type {NodeListOf<SVGElement>} */ (
-      document.querySelectorAll("#login-glyph svg,#dusk-glyph svg")
-    )) el.style.visibility = "";
+    restoreGlyphVisibility();
   }
 
   /**

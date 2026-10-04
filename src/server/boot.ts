@@ -10,6 +10,53 @@ const SCANNER_STARTUP_WINDOW_MS = 180_000;
 const SCANNER_READINESS_RETRY_INTERVAL_MS = 5_000;
 
 /**
+ * Where migrations are read from -- the one resolver both the running boot
+ * and the documented manual `pnpm db:migrate` (`src/db/migrate.ts`) call, so
+ * the two can never validate or apply a different set from each other
+ * (#1151 A4-Q2). Boot honoured `DRIZZLE_MIGRATIONS_PATH` already; the manual
+ * command used to hard-code `"drizzle"` regardless.
+ */
+export function resolveMigrationsFolder(environment: NodeJS.ProcessEnv = process.env): string {
+  return environment.DRIZZLE_MIGRATIONS_PATH ?? "drizzle";
+}
+
+/**
+ * What the operator needs when `migrate()` throws (#1151 A4-R1): never the
+ * raw driver message, which can embed table or column text and, depending on
+ * the failure, a connection string -- but the two safe facts that actually
+ * say which migration and what kind of failure. `nextTag` is the first
+ * migration this database's own journal has not recorded yet (so, almost
+ * always, the one `migrate()` was mid-way through); `sqlstate` is the five
+ * character code Postgres itself assigns the error, which identifies the
+ * KIND of failure (a constraint violation reads differently from a syntax
+ * error) without naming a single value, table or credential.
+ *
+ * Reading the journal to say which migration is itself best-effort: a
+ * connection already gone must not turn one failure into a more confusing
+ * second one, so this never throws -- it falls back to the sqlstate alone.
+ */
+export async function describeMigrationFailureDetail(
+  client: import("@/db/migration-integrity").SqlClient,
+  migrationsFolder: string,
+  error: unknown,
+): Promise<import("@/lib/logger").OperationalDetail> {
+  const { operationalDetail } = await import("@/lib/logger");
+  const rawCode = (error as { code?: unknown } | null)?.code;
+  const sqlstate = typeof rawCode === "string" && /^[0-9A-Za-z_-]{1,10}$/u.test(rawCode) ? rawCode : "unknown";
+  try {
+    const { readAppliedMigrationHashes, readExpectedMigrationHashes } = await import("@/db/migration-integrity");
+    const [applied, expected] = await Promise.all([
+      readAppliedMigrationHashes(client),
+      readExpectedMigrationHashes(migrationsFolder),
+    ]);
+    const nextTag = expected[applied.length]?.tag ?? "unknown_migration";
+    return operationalDetail`migration ${nextTag} failed, sqlstate ${sqlstate}`;
+  } catch {
+    return operationalDetail`migration failed, sqlstate ${sqlstate}`;
+  }
+}
+
+/**
  * The two words `GET /api/auth/availability` exposes as `phase` (#869): a
  * strict, terminating fact the process itself holds, so the sign-in door can
  * stop inferring boot from a content-free `degraded` readiness answer.
@@ -276,8 +323,12 @@ export async function registerNode(): Promise<void> {
       action: "inspect_admin_diagnostics",
       impact: "none",
     });
+    // Resolved once and reused below (#1151 A4-Q2): the integrity check, the
+    // migrate() call and the post-migration journal check must all read the
+    // one folder this boot decided on, not three independent re-reads of the
+    // environment that could in principle disagree.
+    const migrationsFolder = resolveMigrationsFolder();
     try {
-      const migrationsFolder = process.env.DRIZZLE_MIGRATIONS_PATH ?? "drizzle";
       log.info({ event: "startup.migration", state: "starting", action: "check_migrations" });
       await verifyMigrationIntegrity(getDatabaseClient(), migrationsFolder);
     } catch (error) {
@@ -325,14 +376,22 @@ export async function registerNode(): Promise<void> {
     }
     const migrationStartedAt = new Date();
     try {
-      await migrate(getDb(), { migrationsFolder: process.env.DRIZZLE_MIGRATIONS_PATH ?? "drizzle" });
-    } catch {
+      await migrate(getDb(), { migrationsFolder });
+    } catch (error) {
+      // #1151 A4-R1: this used to be a bare `catch {}`, so the one person who
+      // could act on a failed migration -- an operator reading the log --
+      // was never told which migration or what kind of failure. The detail
+      // is built from the journal and the error's own SQLSTATE, never the
+      // raw driver message, which can carry table definitions or a
+      // connection string.
+      const detail = await describeMigrationFailureDetail(getDatabaseClient(), migrationsFolder, error);
       log.error({
         event: "startup.migration",
         state: "exhausted",
         reason: "migration_failed",
         action: "check_migrations",
         impact: "migration_blocked",
+        detail,
       });
       try {
         await recordMigrationOutcome(getDatabaseClient(), {
@@ -357,7 +416,7 @@ export async function registerNode(): Promise<void> {
       logMigrationOutcomeUnavailable();
     }
     try {
-      await verifyMigrationJournalComplete(getDatabaseClient(), process.env.DRIZZLE_MIGRATIONS_PATH ?? "drizzle");
+      await verifyMigrationJournalComplete(getDatabaseClient(), migrationsFolder);
     } catch {
       log.error({
         event: "startup.migration",

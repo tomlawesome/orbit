@@ -45,6 +45,20 @@ export interface InstallDockerAdapterOptions {
    * DockerComposeAdapterOptions.
    */
   env?: NodeJS.ProcessEnv;
+  /**
+   * Overrides this adapter's compose-lifecycle bounds (milliseconds),
+   * each defaulting to the deliberately generous production constant
+   * below (O1-R11). Exists so a test can prove a hung call actually gets
+   * killed and reported as a failure without waiting for the real,
+   * minutes-long production ceiling.
+   */
+  composeTimeoutsMs?: Partial<{
+    quick: number;
+    pull: number;
+    up: number;
+    down: number;
+    ollamaPull: number;
+  }>;
 }
 
 /**
@@ -154,6 +168,8 @@ export interface InstallDockerAdapter extends DatabaseVolumeSafetyAdapter, Image
   composeUp(): boolean;
   /** docker compose --project-name ... --env-file ... down --remove-orphans (install.sh:1171, only ever called on a failed fresh install). */
   composeDown(): void;
+  /** install.sh's leftover-volume cleanup beside composeDown: `compose down` has no --volumes, so the database volume the failed attempt created is removed by name, or every retry refuses on "an existing Orbit database volume". */
+  removeLeftoverDatabaseVolume(): void;
   /** docker compose --project-name ... --env-file ... config --quiet (install.sh:1539-1541, guarantee #55). */
   composeConfigValidate(): boolean;
   /** bounded (5s/1s-kill-after) `compose exec -T orbit-db sh -ec 'exec pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'` (install.sh:1084-1089, guarantee #33). */
@@ -191,6 +207,20 @@ export interface InstallDockerAdapter extends DatabaseVolumeSafetyAdapter, Image
 
 const BOUNDED_PROBE_TIMEOUT_MS = 5000;
 
+// O1-R11: unlike the bounded health probes above, these compose lifecycle
+// calls had no timeout at all — an unresponsive daemon, a stalled registry
+// pull, or a container that never answers SIGTERM could hang the installer
+// forever with no way out. install.sh has the identical gap (only its own
+// health probe uses GNU `timeout`), so there is no existing bash rule to
+// mirror here; these are new, deliberately generous ceilings — long enough
+// never to cut off a real pull/start/stop, short enough that the installer
+// always eventually reports a failure instead of hanging indefinitely.
+const COMPOSE_QUICK_TIMEOUT_MS = 15_000; // version check / local config validation, no network or container I/O.
+const COMPOSE_PULL_TIMEOUT_MS = 10 * 60_000; // image pull over the network.
+const COMPOSE_UP_TIMEOUT_MS = 5 * 60_000; // starting containers (not waiting for health — that's the bounded probes).
+const COMPOSE_DOWN_TIMEOUT_MS = 2 * 60_000; // stopping/removing containers.
+const OLLAMA_MODEL_PULL_TIMEOUT_MS = 30 * 60_000; // a large local-model download.
+
 function statusOk(result: SpawnSyncReturns<string>): boolean {
   return result.status === 0;
 }
@@ -204,6 +234,13 @@ export function createInstallDockerAdapter(options: InstallDockerAdapterOptions)
   // `$compose_project_name` global rather than a value frozen at
   // construction time.
   let composeProjectName = options.composeProjectName;
+  const timeouts = {
+    quick: options.composeTimeoutsMs?.quick ?? COMPOSE_QUICK_TIMEOUT_MS,
+    pull: options.composeTimeoutsMs?.pull ?? COMPOSE_PULL_TIMEOUT_MS,
+    up: options.composeTimeoutsMs?.up ?? COMPOSE_UP_TIMEOUT_MS,
+    down: options.composeTimeoutsMs?.down ?? COMPOSE_DOWN_TIMEOUT_MS,
+    ollamaPull: options.composeTimeoutsMs?.ollamaPull ?? OLLAMA_MODEL_PULL_TIMEOUT_MS,
+  };
 
   function run(args: string[], extra: Partial<SpawnSyncOptionsWithStringEncoding> = {}): SpawnSyncReturns<string> {
     return spawnSync(dockerBinary, args, { cwd, env, encoding: "utf8", ...extra });
@@ -324,14 +361,38 @@ export function createInstallDockerAdapter(options: InstallDockerAdapterOptions)
       return statusOk(result);
     },
 
-    checkDockerAvailable: () => statusOk(run(["compose", "version"], { stdio: ["ignore", "ignore", "ignore"] })),
+    checkDockerAvailable: () =>
+      statusOk(run(["compose", "version"], { stdio: ["ignore", "ignore", "ignore"], timeout: timeouts.quick, killSignal: "SIGTERM" })),
 
-    composePull: (service) => statusOk(run(composeArgs("pull", service), { stdio: ["ignore", "ignore", "ignore"] })),
-    composeUp: () => statusOk(run(composeArgs("up", "-d", "--no-build", "--remove-orphans"), { stdio: ["ignore", "ignore", "ignore"] })),
+    composePull: (service) =>
+      statusOk(
+        run(composeArgs("pull", service), { stdio: ["ignore", "ignore", "ignore"], timeout: timeouts.pull, killSignal: "SIGTERM" }),
+      ),
+    composeUp: () =>
+      statusOk(
+        run(composeArgs("up", "-d", "--no-build", "--remove-orphans"), {
+          stdio: ["ignore", "ignore", "ignore"],
+          timeout: timeouts.up,
+          killSignal: "SIGTERM",
+        }),
+      ),
     composeDown: () => {
-      run(composeArgs("down", "--remove-orphans"), { stdio: ["ignore", "ignore", "ignore"] });
+      run(composeArgs("down", "--remove-orphans"), { stdio: ["ignore", "ignore", "ignore"], timeout: timeouts.down, killSignal: "SIGTERM" });
     },
-    composeConfigValidate: () => statusOk(run(composeArgs("config", "--quiet"), { stdio: ["ignore", "ignore", "ignore"] })),
+    removeLeftoverDatabaseVolume: () => {
+      // This project's volume by its exact name, never "the first one that
+      // looks like ours": the host may carry another deployment's live
+      // database under the same suffix, and a failed install must not take
+      // that with it. No project name, nothing removed.
+      if (!composeProjectName) return;
+      const own = `${composeProjectName}_orbit-db-data`;
+      const listed = runCaptured(["volume", "ls", "--filter", `name=${own}`, "--format", "{{.Name}}"]) ?? "";
+      if (listed.split("\n").includes(own)) run(["volume", "rm", "--", own], { stdio: ["ignore", "ignore", "ignore"], timeout: timeouts.quick, killSignal: "SIGTERM" });
+    },
+    composeConfigValidate: () =>
+      statusOk(
+        run(composeArgs("config", "--quiet"), { stdio: ["ignore", "ignore", "ignore"], timeout: timeouts.quick, killSignal: "SIGTERM" }),
+      ),
 
     probeDatabaseHealth: () =>
       boundedComposeExec(["exec", "-T", "orbit-db", "sh", "-ec", 'exec pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"']),
@@ -342,7 +403,13 @@ export function createInstallDockerAdapter(options: InstallDockerAdapterOptions)
     probeApplicationLiveness: () => boundedComposeExec(["exec", "-T", "orbit-app", "true"]),
 
     pullOllamaModel: (model) =>
-      statusOk(run(composeArgs("exec", "-T", "orbit-ollama", "ollama", "pull", model), { stdio: ["ignore", "ignore", "inherit"] })),
+      statusOk(
+        run(composeArgs("exec", "-T", "orbit-ollama", "ollama", "pull", model), {
+          stdio: ["ignore", "ignore", "inherit"],
+          timeout: timeouts.ollamaPull,
+          killSignal: "SIGTERM",
+        }),
+      ),
 
     setComposeProjectName(name) {
       composeProjectName = name;

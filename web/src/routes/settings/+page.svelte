@@ -19,7 +19,7 @@
   import { SIGN_IN_METHODS_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { SENT_LATELY_FIXTURE } from "$lib/data/fixtures/settings.js";
   import { agoLong } from "$lib/format.js";
-  import { alertsSupported, currentSubscription, disableAlerts, enableAlerts } from "$lib/push/alerts.js";
+  import { alertsSupported, currentSubscription, disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
   import { watchTour } from "$lib/tour/watch.js";
   import { fillStarTiles } from "$lib/sky.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
@@ -44,6 +44,8 @@
   let { data } = $props();
   /** @type {Awaited<ReturnType<typeof readSettingsScreen>> | null} */
   let view = $state(null);
+  /** @type {string | null} */
+  let screenProblem = $state(null);
 
   /* The roster and its offer live in helm.js, shared with the phone layout. */
   let active = $state(DEFAULT_THEME);
@@ -123,7 +125,7 @@
        compares against one ratified mockup — and would give the reader a
        missing control rather than a held one. */
     if (!alertsAvailable) alertsProblem = "this browser can't show alerts";
-    else browserAlerts = Boolean(await currentSubscription());
+    else browserAlerts = Boolean(await syncAlerts());
   });
 
   async function toggleBrowserAlerts() {
@@ -387,6 +389,22 @@
   /** The armed action a step-up came back for; the phone layout reopens its sheet (#1125). */
   let resumedMethod = $state(/** @type {string | null} */ (null));
 
+  /**
+   * The screen's own read, broken out so a failed fetch can be retried
+   * (#1195): additive like every other read below it, rather than the one
+   * fetch that used to take the whole page down with it.
+   */
+  async function loadScreen() {
+    screenProblem = null;
+    try {
+      const screen = await readSettingsScreen();
+      view = screen;
+      emailReminders = screen.reminders.emailEnabled;
+    } catch {
+      screenProblem = "not shown — Orbit could not reach your settings";
+    }
+  }
+
   const initials = $derived(
     (/** @type {Awaited<ReturnType<typeof readSettingsScreen>> | null} */ (view)?.user?.displayName ?? "")
       .split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
@@ -398,8 +416,7 @@
       /** @type {SVGGElement} */ (/** @type {unknown} */ (document.getElementById("neartile"))),
     );
     active = document.documentElement.dataset.theme || DEFAULT_THEME;
-    view = await readSettingsScreen();
-    emailReminders = /** @type {Awaited<ReturnType<typeof readSettingsScreen>>} */ (view).reminders.emailEnabled;
+    await loadScreen();
     try {
       sessions = await readSessions();
     } catch {
@@ -459,7 +476,7 @@
      household's is. It shares what this page loads rather than reading it
      twice, and hides this page's sky and cards below the switch; the chrome
      stays, because on a phone Chrome.svelte draws the kit's top chrome. -->
-<Pocket bind:view bind:methods bind:sessions bind:active {initials} {providerOffered} {emailApproval}
+<Pocket bind:view bind:methods bind:sessions bind:active {initials} {providerOffered} {emailApproval} {screenProblem} onretry={loadScreen}
         {methodsProblem} {sessionsProblem} resumed={resumedMethod} fixtures={Boolean(data?.fixtures)} />
 
 <div class="helm-page">
@@ -480,6 +497,15 @@
     <div class="sub">your controls, and only yours · the instance’s levers live on administration</div>
   </header>
 
+  {#if screenProblem && !view}
+    <div class="cards">
+      <div class="card wide">
+        <p class="note">{screenProblem}</p>
+        <button onclick={loadScreen}>try again</button>
+      </div>
+    </div>
+  {/if}
+
   {#if view}
     <div class="cards">
     <div class="card wide">
@@ -487,7 +513,6 @@
       <div class="idrow">
         <span class="avatar" aria-hidden="true">{initials}</span>
         <div class="who"><b>{view.user?.displayName ?? ""}</b><span>{view.user?.email ?? ""}</span></div>
-        <button>edit name</button>
       </div>
 
       <!-- Sign-in methods (#915, ADR-0023 §6; composition §2.7). This replaces
@@ -626,6 +651,9 @@
       <div role="tabpanel" id="rem-panel-reminders" aria-labelledby="rem-tab-reminders" hidden={tab !== "reminders"}>
         <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed={emailReminders} aria-label="Email reminders" onclick={toggleEmailReminders}><i></i></button></div>
         <div class="kv"><span>browser alerts · this device</span><button class="toggle" aria-pressed={browserAlerts} aria-label="Browser alerts on this device" disabled={alertsBusy || !alertsAvailable} onclick={toggleBrowserAlerts}><i></i></button></div>
+        <!-- #1151 W2-S4: this used to show only on the "sent" tab, downstream
+             of the switches that actually cause it rather than beside them. -->
+        {#if bothOff}<p class="sent-off">both switches are off · nothing more will be sent until one is on</p>{/if}
         <div class="kv"><span>first warning</span><b>{view.reminders.firstWarning}</b></div>
         <div class="kv"><span>final warning</span><b>{view.reminders.finalWarning}</b></div>
         <div class="kv"><span>outbound mail</span><span><b class="on">{view.reminders.outboundMail}</b> · by your administrator</span></div>

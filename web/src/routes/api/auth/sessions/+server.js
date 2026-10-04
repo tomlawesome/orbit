@@ -5,6 +5,7 @@ import { authErrorResponse } from "orbit/lib/auth/http";
 import { listSessions } from "orbit/lib/auth/session";
 
 import { read } from "$lib/server/api.js";
+import { SESSION_LIST_LIMIT } from "$lib/server/session-limits.js";
 
 /**
  * "Where you're signed in" (#482): every session the caller holds, reduced
@@ -18,7 +19,9 @@ import { read } from "$lib/server/api.js";
  *
  * Sorted current session first, then by most recently seen: the device the
  * reader is looking at right now is the one they least need to hunt for, and
- * after that the list reads as "most active first".
+ * after that the list reads as "most active first". Capped at
+ * SESSION_LIST_LIMIT after that sort, so the cap always keeps the current
+ * session and the ones most worth acting on.
  */
 export const GET = read(async (_event, session) => {
   const rows = await listSessions(session.user.id);
@@ -35,7 +38,8 @@ export const GET = read(async (_event, session) => {
       const leftSeen = left.lastSeenAt ? Date.parse(left.lastSeenAt) : -Infinity;
       const rightSeen = right.lastSeenAt ? Date.parse(right.lastSeenAt) : -Infinity;
       return rightSeen - leftSeen;
-    });
+    })
+    .slice(0, SESSION_LIST_LIMIT);
   return json({ sessions: list }, { headers: { "cache-control": "no-store" } });
 }, {
   /* Two rows, one of them current: enough for the fidelity gate and a

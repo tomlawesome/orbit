@@ -69,11 +69,29 @@ vi.mock("@/db", async () => {
     return sources[meta.table]?.[meta.key] ?? null;
   }
 
-  /** Only `eq` is used by this module, so pairs of operands are enough. */
+  /**
+   * Only `eq`, bare or combined with `and`, is used by this module, so
+   * pairs of operands are enough. `and(eq(a, A), eq(b, B))` nests its two
+   * `eq` conditions inside its own `queryChunks` rather than putting their
+   * Column/Param operands at the top level, so collection walks down into
+   * any chunk that is itself a condition (has its own `queryChunks`) rather
+   * than reading one level only; the flattened order is still `[a, A, b,
+   * B, ...]`, so every pair must match for the whole condition to (AND
+   * semantics), exactly as the loop below already assumed.
+   */
+  function collectOperands(node: unknown, into: unknown[]): void {
+    if (is(node, Column) || is(node, Param)) {
+      into.push(node);
+      return;
+    }
+    const chunks = (node as { queryChunks?: unknown[] })?.queryChunks;
+    if (Array.isArray(chunks)) for (const chunk of chunks) collectOperands(chunk, into);
+  }
+
   function matches(condition: unknown, sources: Sources): boolean {
     if (!condition) return true;
-    const operands = ((condition as { queryChunks?: unknown[] }).queryChunks ?? [])
-      .filter((chunk) => is(chunk, Column) || is(chunk, Param));
+    const operands: unknown[] = [];
+    collectOperands(condition, operands);
     for (let index = 0; index + 1 < operands.length; index += 2) {
       const left = resolve(operands[index], sources);
       const right = resolve(operands[index + 1], sources);
@@ -150,12 +168,48 @@ vi.mock("@/db", async () => {
       const name = getTableName(table as never);
       return {
         values(values: Row | Row[]) {
-          const inserted = (Array.isArray(values) ? values : [values])
-            .map((value) => ({ ...defaults[name]?.(), ...value }));
-          rowsOf(name).push(...inserted);
+          const raw = Array.isArray(values) ? values : [values];
+          /* Deferred so onConflictDoNothing/onConflictDoUpdate (A2-R5's
+             ensureRelayRow/materialiseRelayAliases, the first callers this
+             mock has had) can pick the conflict behaviour before anything is
+             applied. `conflictKeys` names the natural key to check: the
+             explicit `target` columns for onConflictDoUpdate, or -- since
+             real callers that use bare onConflictDoNothing() never name one
+             -- every key the caller actually supplied (ensureRelayRow's own
+             `{ userId }`), never a default this mock filled in. */
+          const run = (conflict?: { onUpdate?: Row; conflictKeys: string[] }): Row[] => {
+            const existing = rowsOf(name);
+            const applied: Row[] = [];
+            for (const value of raw) {
+              const keys = conflict?.conflictKeys ?? [];
+              const clash = keys.length > 0
+                ? existing.find((row) => keys.every((key) => (row[key] ?? null) === (value[key] ?? null)))
+                : undefined;
+              if (clash) {
+                if (conflict?.onUpdate) Object.assign(clash, conflict.onUpdate);
+                applied.push(clash);
+                continue;
+              }
+              const inserted = { ...defaults[name]?.(), ...value };
+              existing.push(inserted);
+              applied.push(inserted);
+            }
+            return applied;
+          };
+          const keysOf = (target: unknown[]): string[] =>
+            target.map((column) => columnKeys.get(column)?.key).filter((key): key is string => Boolean(key));
           return {
-            returning: (projection?: unknown) => Promise.resolve(inserted.map((row) => project(projection, name, row))),
-            then: (onFulfilled: (value: number) => unknown) => Promise.resolve(inserted.length).then(onFulfilled),
+            onConflictDoNothing: () => ({
+              then: (onFulfilled: (value: number) => unknown) =>
+                Promise.resolve(run({ conflictKeys: [...new Set(raw.flatMap((value) => Object.keys(value)))] }).length)
+                  .then(onFulfilled),
+            }),
+            onConflictDoUpdate: (config: { target: unknown[]; set: Row }) => ({
+              then: (onFulfilled: (value: number) => unknown) =>
+                Promise.resolve(run({ onUpdate: config.set, conflictKeys: keysOf(config.target) }).length).then(onFulfilled),
+            }),
+            returning: (projection?: unknown) => Promise.resolve(run().map((row) => project(projection, name, row))),
+            then: (onFulfilled: (value: number) => unknown) => Promise.resolve(run().length).then(onFulfilled),
           };
         },
       };
@@ -243,6 +297,7 @@ vi.mock("@/server/documents/config", async (importOriginal) => ({
 }));
 
 vi.mock("./imap-ingestion", () => ({
+  IMAP_HEADER_FETCH_PART: { key: "HEADER", maxLength: 64 * 1_024 },
   verifyImapProvider: mocks.verifyImap,
   getImapProviderPreflightState: mocks.preflight,
   createImapClient: mocks.createImapClient,
@@ -259,7 +314,7 @@ vi.mock("@/lib/logger", () => ({
 
 import { randomUUID } from "node:crypto";
 import { getTableName } from "drizzle-orm";
-import { auditLog, imapRecipientAliases, mailInMailbox, mailInSecrets } from "@/db/schema";
+import { auditLog, imapRecipientAliases, mailInMailbox, mailInRelays, mailInSecrets, users } from "@/db/schema";
 import { AppError } from "@/lib/errors";
 import { decryptMailInSecret } from "./core/secret-crypto";
 import { imapAliasBaseFromAccount, normalizeImapRecipientAlias } from "./core/imap-recipient";
@@ -268,6 +323,7 @@ import {
   mailboxSettingsInputSchema,
   readMailboxSettings,
   removeMailboxCredential,
+  rotateMailboxAliasKey,
   rotateMailboxPassword,
   runMailboxSetupProbe,
   setMailboxIngestEnabled,
@@ -526,6 +582,32 @@ describe("verification outcomes are a bounded vocabulary", () => {
     expect(after?.verificationState).toBe("verified");
     expect(secretsOfKind("imap_password")).toHaveLength(1);
     expect(auditActions()).toContain("mail_in_credential_verified");
+  });
+
+  it("does not let a slow verify overwrite a rotation that landed while it was running (#1151 A2-R4)", async () => {
+    await configureMailbox();
+    const versionAtStart = mailbox()?.version as number;
+
+    // The verify call is slow enough that a credential rotation completes,
+    // and bumps the version, before this verify's own write runs.
+    const { outcome } = await verifyMailboxCredential(ADMIN, {
+      verifyImap: async () => {
+        const row = mailbox();
+        if (row) {
+          row.version = versionAtStart + 1;
+          row.verificationState = "verified";
+          row.verifiedAt = new Date("2026-01-01T00:00:00Z");
+        }
+        return "imap_unavailable";
+      },
+    });
+
+    expect(outcome).toBe("provider_unavailable");
+    // The rotation's version and state survive; the stale verify neither
+    // bumped the version again nor stamped its own "failed" over it.
+    expect(mailbox()?.version).toBe(versionAtStart + 1);
+    expect(mailbox()?.verificationState).toBe("verified");
+    expect((mailbox()?.verifiedAt as Date).toISOString()).toBe("2026-01-01T00:00:00.000Z");
   });
 
   it("marks the stored mailbox verified or failed when the credential is checked on its own", async () => {
@@ -797,18 +879,34 @@ describe("the alias key follows the account, not the edit", () => {
     expect((await readMailboxSettings(ADMIN)).aliasPattern).toBe("post+<code>@example.test");
   });
 
-  it("re-keys when the host moves too, because the key is bound to host as well as account", async () => {
+  it("re-wraps, but never resets, the alias key when only the host moves (#1151 A2-S1)", async () => {
     await configureMailbox();
     const aliasKeyId = mailbox()?.aliasKeySecretId;
+    const aliasKeyValue = decryptStored(secretsOfKind("alias_key")[0], { host: settings.host, user: settings.accountUser });
 
     await configureMailbox({ ...settings, host: "imap2.example.test" });
 
-    /* The alias key's own AAD names the host, so a key kept across a host
-       change would never decrypt again. Addresses are unchanged in shape
-       because they are derived from the account, which did not move. */
+    /* The alias key's own AAD names the host, so its ciphertext has to move
+       with a host correction -- a stale AAD would never decrypt again. But
+       accountUser, the only thing an address is derived from, did not move,
+       so the key's VALUE (and therefore every member's address) must not
+       move either: this is a provider migration, not an account change. */
     expect(mailbox()?.aliasKeySecretId).not.toBe(aliasKeyId);
     expect(secretsOfKind("alias_key")).toHaveLength(1);
+    expect(decryptStored(secretsOfKind("alias_key")[0], { host: "imap2.example.test", user: settings.accountUser }))
+      .toBe(aliasKeyValue);
     expect((await readMailboxSettings(ADMIN)).aliasPattern).toBe("intake+<code>@example.test");
+  });
+
+  it("leaves every alias row alone when only the host moves, same as any other non-account edit", async () => {
+    await configureMailbox();
+    mocks.tables[getTableName(imapRecipientAliases)] = [
+      { id: randomUUID(), userId: randomUUID(), generation: 1, aliasSha256: "a".repeat(64), status: "active", activeUntil: null },
+    ];
+
+    await configureMailbox({ ...settings, host: "imap2.example.test" });
+
+    expect(rows(imapRecipientAliases).map((row) => row.status)).toEqual(["active"]);
   });
 
   it("retires every alias row when a new alias key is generated, so no dead address stays eligible", async () => {
@@ -832,6 +930,46 @@ describe("the alias key follows the account, not the edit", () => {
     await configureMailbox({ ...settings, pollSeconds: 600 });
 
     expect(rows(imapRecipientAliases).map((row) => row.status)).toEqual(["active"]);
+  });
+});
+
+describe("rotateMailboxAliasKey (#1151 A2-R5)", () => {
+  it("rotates every member's relay, keeping the superseded key until its grace lapses", async () => {
+    await configureMailbox();
+    const originalKeyId = mailbox()?.aliasKeySecretId;
+    const userA = randomUUID();
+    const userB = randomUUID();
+    mocks.tables[getTableName(users)] = [{ id: userA }, { id: userB }];
+
+    const result = await rotateMailboxAliasKey(ADMIN, 1, 7);
+
+    expect(mailbox()?.aliasKeySecretId).not.toBe(originalKeyId);
+    // The pointer swap is a short transaction on its own (A2-R5); the
+    // member loop that follows no longer runs inside it, but the end state
+    // is the same: every member rotated, nothing deleted.
+    expect(secretsOfKind("alias_key").map((row) => row.id)).toContain(originalKeyId);
+    expect(secretsOfKind("alias_key")).toHaveLength(2);
+    const relayRows = rows(mailInRelays);
+    expect(relayRows).toHaveLength(2);
+    for (const relay of relayRows) {
+      expect(relay.currentGeneration).toBe(2);
+      expect(relay.previousGeneration).toBe(1);
+    }
+    expect(auditActions()).toContain("mail_in_alias_key_rotated");
+    const rotationAudit = rows(auditLog).find((row) => row.action === "mail_in_alias_key_rotated");
+    expect(rotationAudit?.changes).toMatchObject({ users: 2 });
+    expect(result.aliasPattern).toBe("intake+<code>@example.test");
+  });
+
+  it("seats a member with no relay row yet at generation 1 before rotating them to 2", async () => {
+    await configureMailbox();
+    mocks.tables[getTableName(users)] = [{ id: randomUUID() }];
+    expect(rows(mailInRelays)).toHaveLength(0);
+
+    await rotateMailboxAliasKey(ADMIN, 1, 0);
+
+    expect(rows(mailInRelays)).toHaveLength(1);
+    expect(rows(mailInRelays)[0].currentGeneration).toBe(2);
   });
 });
 
@@ -977,6 +1115,7 @@ describe("finding the probe's own message in the mailbox", () => {
     deleted: string[];
     loggedOut: number;
     released: number;
+    fetchQueries: unknown[];
   }
 
   function installClient(options: {
@@ -985,7 +1124,7 @@ describe("finding the probe's own message in the mailbox", () => {
     refuseDelete?: boolean;
     sentTo: () => string;
   }): FakeClientCalls {
-    const calls: FakeClientCalls = { searched: [], deleted: [], loggedOut: 0, released: 0 };
+    const calls: FakeClientCalls = { searched: [], deleted: [], loggedOut: 0, released: 0, fetchQueries: [] };
     mocks.createImapClient.mockImplementation(() => ({
       connect: async () => undefined,
       getMailboxLock: async () => ({ release: () => { calls.released += 1; } }),
@@ -993,9 +1132,12 @@ describe("finding the probe's own message in the mailbox", () => {
         calls.searched.push(query);
         return options.uids;
       },
-      fetchOne: async () => ({
-        headers: Buffer.from(options.headers ? options.headers(options.sentTo()) : "", "utf8"),
-      }),
+      fetchOne: async (_uid: string, query: unknown) => {
+        calls.fetchQueries.push(query);
+        return {
+          headers: Buffer.from(options.headers ? options.headers(options.sentTo()) : "", "utf8"),
+        };
+      },
       messageDelete: async (uid: string) => {
         calls.deleted.push(uid);
         if (options.refuseDelete) throw new Error("EXPUNGE refused");
@@ -1027,6 +1169,27 @@ describe("finding the probe's own message in the mailbox", () => {
     expect(calls.deleted).toEqual(["42"]);
     expect(calls.released).toBe(1);
     expect(calls.loggedOut).toBe(1);
+  });
+
+  it("reads the header as a bounded partial fetch, not the unbounded headers:true option (#1151 SR2-R2)", async () => {
+    await configureMailbox();
+    let sentTo = "";
+    const calls = installClient({
+      uids: [7],
+      headers: (to) => `X-Original-To: ${to}\r\n`,
+      sentTo: () => sentTo,
+    });
+
+    await runMailboxSetupProbe(ADMIN, {
+      smtpConfig: () => smtp,
+      sendProbeMail: async (message) => { sentTo = message.to; },
+    });
+
+    expect(calls.fetchQueries).toEqual([
+      { bodyParts: [{ key: "HEADER", maxLength: expect.any(Number) }] },
+    ]);
+    const [query] = calls.fetchQueries as Array<{ bodyParts: Array<{ maxLength: number }> }>;
+    expect(query.bodyParts[0].maxLength).toBeGreaterThan(0);
   });
 
   it("reports delivered_without_recipient_header when the provider stripped the header", async () => {

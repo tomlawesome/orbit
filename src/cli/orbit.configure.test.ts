@@ -126,6 +126,25 @@ describe("orbit configure --init", () => {
     expect(content).toContain("OIDC_CLIENT_ID=cli-machine-client");
   });
 
+  it("ORBIT_CONFIGURE_AUTH_MODE=local, machine-prompt mode: asks for APP_URL only and saves local-only auth (#1151 O1-F1)", () => {
+    const transcript = ["https://orbit.cli-local-test.invalid", ""].join("\n");
+    const result = runCli(["configure", "--init", "--dir", sandbox], {
+      input: transcript,
+      env: { ...process.env, ORBIT_CONFIGURE_PROMPTS: "machine", ORBIT_CONFIGURE_AUTH_MODE: "local" },
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("prompt field=APP_URL kind=url required=true attempt=1");
+    expect(result.stdout).not.toContain("field=OIDC_ISSUER");
+    expect(result.stdout).not.toContain("field=OIDC_CLIENT_ID");
+    const content = readFileSync(join(sandbox, ".env-orbit"), "utf8");
+    expect(content).toContain("APP_URL=https://orbit.cli-local-test.invalid");
+    expect(content).toContain("ORBIT_AUTH_OIDC=false");
+    // Local-only never touches OIDC_*: switching the provider off must not
+    // force deleting its configuration (ADR-0023 section 1) — the example
+    // template's own placeholder OIDC_ISSUER survives untouched.
+    expect(content).toContain("OIDC_ISSUER=https://auth.example.com/application/o/orbit/");
+  });
+
   it("ORBIT_CONFIGURE_PROMPTS=machine rejects, retries, and aborts cleanly on repeated invalid answers, writing nothing", () => {
     const transcript = ["not-https", "still-not-https", "nope-again", ""].join("\n");
     const result = runCli(["configure", "--init", "--dir", sandbox], {

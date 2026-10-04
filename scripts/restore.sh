@@ -11,6 +11,12 @@ readonly journal_path="$restore_root/restore.journal"
 readonly secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
 readonly document_kek_file="$secrets_directory/document-kek"
 readonly bundle_format_version="1"
+# Shared with backup.sh (#1151 O2-R3): both scripts stop orbit-app and cut
+# over the document tree/database, and nothing serialized a restore against
+# a concurrent backup -- a backup finishing mid-restore could start
+# orbit-app back up during restore's own document-tree cutover.
+readonly lock_file="${ORBIT_BACKUP_RESTORE_LOCK_FILE:-$backup_directory/.orbit-backup-restore.lock}"
+lock_fd=""
 # An empty report means either "no rows" or "the query never ran", and only the
 # second is a reason to stop. The database emits this as the last line of every
 # report so execution is proven positively, independently of psql's exit code,
@@ -55,10 +61,66 @@ require_tools() {
   command -v stat >/dev/null 2>&1 || fail 'preflight/tools failed; stat is required.'
   command -v sync >/dev/null 2>&1 || fail 'preflight/tools failed; sync is required.'
   command -v curl >/dev/null 2>&1 || fail 'preflight/tools failed; curl is required.'
+  command -v flock >/dev/null 2>&1 || fail 'preflight/tools failed; flock is required.'
   [[ -f "$environment_file" ]] || fail 'preflight/configuration failed; the Orbit environment file is missing.'
 }
 
+# #1151 O2-R3: held for the whole run (both --recover and a normal restore),
+# shared with backup.sh's identical lock file. Opening the fd keeps the
+# lock held until this process exits (bash closes every fd it opened on
+# exit), so there is no separate unlock step.
+acquire_backup_restore_lock() {
+  # import-recovery-bundle.sh takes this lock itself, before it stops the app
+  # and swaps the key, and says so; its descriptor is inherited, so taking
+  # the lock again here would wait on ourselves forever.
+  [[ "${ORBIT_BACKUP_RESTORE_LOCK_HELD:-}" != 1 ]] || return 0
+  exec {lock_fd}>"$lock_file" || fail "preflight/lock failed; could not open the backup/restore lock file at ${lock_file}."
+  if ! flock -n "$lock_fd"; then
+    printf 'Orbit restore: another backup or restore is already running; waiting for it to finish...\n' >&2
+    flock "$lock_fd" || fail "preflight/lock failed; could not acquire the backup/restore lock at ${lock_file}."
+  fi
+}
+
+# The contract (src/lib/config-contract.ts) accepts DOCUMENT_KEK as either a
+# direct hexadecimal value in .env-orbit or a DOCUMENT_KEK_FILE path (the
+# usual case: configure.sh/install.sh never write anything else). This
+# script -- and the docker-compose.yml secrets stanza every `compose run`/
+# `exec` call below depends on -- otherwise assumes the file-backed form
+# unconditionally, so a direct-value deployment (accepted for upgrades,
+# configuration.sh's deprecated_supported classification) failed closed
+# here before anything else ran (#1151 SF2-F11). A later call never sources
+# .env-orbit as shell (matching configuration.sh's own discipline), so this
+# reads the direct value the same inert, line-based way.
+read_env_value() {
+  local requested_key="$1" file="$2" line value="" found=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == "${requested_key}="* ]]; then
+      value="${line#*=}"
+      value="${value%$'\r'}"
+      found=$((found + 1))
+    fi
+  done < "$file"
+  [[ "$found" == 1 ]] || return 1
+  printf '%s' "$value"
+}
+
+materialize_document_kek_from_direct_value() {
+  local direct_value temp
+  direct_value="$(read_env_value DOCUMENT_KEK "$environment_file")" || return 1
+  [[ "$direct_value" =~ ^[0-9a-fA-F]{64}$ ]] || return 1
+  mkdir -p -- "$secrets_directory" || return 1
+  chmod 700 -- "$secrets_directory" 2>/dev/null || true
+  umask 077
+  temp="$(mktemp "${document_kek_file}.XXXXXX" 2>/dev/null)" || return 1
+  printf '%s' "$direct_value" > "$temp" || { rm -f -- "$temp"; return 1; }
+  chmod 600 -- "$temp" 2>/dev/null || { rm -f -- "$temp"; return 1; }
+  mv -f -- "$temp" "$document_kek_file" 2>/dev/null || { rm -f -- "$temp"; return 1; }
+}
+
 read_document_kek() {
+  if [[ ! -f "$document_kek_file" || -L "$document_kek_file" ]]; then
+    materialize_document_kek_from_direct_value || true
+  fi
   [[ -f "$document_kek_file" && ! -L "$document_kek_file" ]] ||
     fail 'preflight/key failed; the configured document key is missing.'
   [[ "$(tr -d '\r\n' < "$document_kek_file")" =~ ^[0-9a-fA-F]{64}$ ]] ||
@@ -409,8 +471,12 @@ check_capacity() {
   [[ "$current_database_bytes" =~ ^[0-9]+$ ]] ||
     fail 'preflight/capacity failed; current database size is not numeric.'
   current_database_kib=$(( (current_database_bytes + 1023) / 1024 ))
+  # The container's own DOCUMENTS_ROOT (env_file: .env-orbit), not a value
+  # read on the host: matches wherever the app actually writes documents,
+  # including the compose volume mount, which tracks the same variable and
+  # default (#1151 SF2-F1).
   current_document_kib="$(compose run --rm --no-deps --entrypoint sh orbit-app -c \
-    'du -sk /var/lib/orbit/documents | awk '\''NR == 1 { print $1 }'\''' 2>/dev/null | tr -d '[:space:]')" ||
+    'du -sk "${DOCUMENTS_ROOT:-/var/lib/orbit/documents}" | awk '\''NR == 1 { print $1 }'\''' 2>/dev/null | tr -d '[:space:]')" ||
     fail 'preflight/capacity failed; current document usage could not be measured.'
   [[ "$current_document_kib" =~ ^[0-9]+$ ]] ||
     fail 'preflight/capacity failed; current document usage is not numeric.'
@@ -425,7 +491,7 @@ check_capacity() {
   [[ "$temp_available_kib" =~ ^[0-9]+$ && "$temp_available_kib" -ge "$temp_required_kib" ]] ||
     fail 'preflight/capacity failed; reserve temporary filesystem space for checkpoint extraction.'
   volume_available_kib="$(compose run --rm --no-deps --entrypoint sh orbit-app -c \
-    'df -Pk /var/lib/orbit/documents | awk '\''NR == 2 { print $4 }'\''' 2>/dev/null | tr -d '[:space:]')" ||
+    'df -Pk "${DOCUMENTS_ROOT:-/var/lib/orbit/documents}" | awk '\''NR == 2 { print $4 }'\''' 2>/dev/null | tr -d '[:space:]')" ||
     fail 'preflight/capacity failed; document-volume capacity could not be checked.'
   [[ "$volume_available_kib" =~ ^[0-9]+$ ]] ||
     fail 'preflight/capacity failed; document-volume capacity is not numeric.'
@@ -542,6 +608,48 @@ write_journal() {
   rm -f -- "$previous_journal" >/dev/null 2>&1 || true
 }
 
+# #1151 O2-R6: a process killed hard (SIGKILL, or an OOM kill) during
+# create_checkpoint -- before its own write_journal call durably records
+# the checkpoint -- left a full-size database dump and document tar behind
+# forever. Nothing reports or removes it: it predates the journal that
+# --recover and the "an unfinished restore exists" refusal both key off of,
+# so neither ever sees it. Same shape as O2-R10 in the TypeScript engine
+# (restore-engine.ts), which fixed it with a marker file create_checkpoint
+# writes before capture and recoverRestore() later sweeps; this bash
+# script already has an equivalent invariant for free, from the
+# backup/restore lock (#1151 O2-R3): only one restore process can ever hold
+# acquire_backup_restore_lock, so a checkpoint-* directory found while
+# holding it, with no journal entry naming it, cannot belong to a run still
+# in progress -- it can only be a prior run's abandoned checkpoint. Run
+# once, early, while the lock is held and before create_checkpoint picks a
+# new directory.
+#
+# A journal that exists but does not name a restore_id is left alone
+# entirely: the checkpoint it points at may be the only rollback the
+# operator has, and load_recovery_journal is about to refuse the run with
+# "the restore journal is invalid and must be reviewed by an operator" --
+# sweeping first would delete the very evidence that review needs.
+sweep_orphaned_checkpoints() {
+  local directory referenced_restore_id=""
+  [[ -d "$restore_root" ]] || return 0
+  # Anything at the journal's path that is not a plain readable file naming
+  # a restore -- a symlink, a directory, an unreadable or malformed file --
+  # is the "exists but unreadable" case too, and leaves every checkpoint
+  # alone. Only a path with nothing there at all means no restore is open.
+  if [[ -e "$journal_path" || -L "$journal_path" ]]; then
+    [[ -f "$journal_path" && ! -L "$journal_path" ]] || return 0
+    referenced_restore_id="$(awk -F= '$1 == "restore_id" { print $2 }' "$journal_path" 2>/dev/null)" || return 0
+    [[ "$referenced_restore_id" =~ ^[A-Za-z0-9_-]+$ ]] || return 0
+  fi
+  for directory in "$restore_root"/checkpoint-*; do
+    [[ -d "$directory" && ! -L "$directory" ]] || continue
+    if [[ -n "$referenced_restore_id" && "$directory" == "$restore_root/checkpoint-$referenced_restore_id" ]]; then
+      continue
+    fi
+    rm -rf -- "$directory"
+  done
+}
+
 copy_checkpoint_key() {
   local source_key="${ORBIT_RESTORE_ROLLBACK_KEK_FILE:-$document_kek_file}"
   [[ -f "$source_key" && ! -L "$source_key" ]] || return 1
@@ -572,7 +680,9 @@ create_checkpoint() {
   if ! compose exec -T orbit-db pg_restore --list < "$checkpoint_dump" >/dev/null 2>&1; then
     fail 'checkpoint/database failed; the captured PostgreSQL archive is invalid.'
   fi
-  if ! compose run --rm --no-deps --entrypoint tar orbit-app -C /var/lib/orbit/documents -cf - . > "$checkpoint_documents" 2>/dev/null; then
+  # The container's own DOCUMENTS_ROOT (#1151 SF2-F1); see check_capacity above.
+  if ! compose run --rm --no-deps --entrypoint sh orbit-app -c \
+    'exec tar -C "${DOCUMENTS_ROOT:-/var/lib/orbit/documents}" -cf - .' > "$checkpoint_documents" 2>/dev/null; then
     fail 'checkpoint/documents failed; the current document tree could not be captured.'
   fi
   validate_document_archive "$checkpoint_documents"
@@ -606,8 +716,9 @@ create_checkpoint() {
 replace_documents_from_archive() {
   local archive_path="$1"
   documents_replaced=true
+  # The container's own DOCUMENTS_ROOT (#1151 SF2-F1); see check_capacity above.
   if ! compose run --rm --no-deps --entrypoint sh orbit-app -c \
-    'set -eu; find /var/lib/orbit/documents -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; exec tar -C /var/lib/orbit/documents -xf -' \
+    'set -eu; documents_root="${DOCUMENTS_ROOT:-/var/lib/orbit/documents}"; find "$documents_root" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; exec tar -C "$documents_root" -xf -' \
     < "$archive_path" >/dev/null 2>&1; then
     return 1
   fi
@@ -641,7 +752,9 @@ capture_active_documents() {
   local archive_path="$temporary_directory/active-documents.tar"
   local active_root="$temporary_directory/active-documents"
   mkdir -p "$active_root"
-  if ! compose run --rm --no-deps --entrypoint tar orbit-app -C /var/lib/orbit/documents -cf - . > "$archive_path" 2>/dev/null; then
+  # The container's own DOCUMENTS_ROOT (#1151 SF2-F1); see check_capacity above.
+  if ! compose run --rm --no-deps --entrypoint sh orbit-app -c \
+    'exec tar -C "${DOCUMENTS_ROOT:-/var/lib/orbit/documents}" -cf - .' > "$archive_path" 2>/dev/null; then
     return 1
   fi
   validate_document_archive "$archive_path"
@@ -938,6 +1051,8 @@ require_tools
 mkdir -p "$backup_directory"
 chmod 700 "$backup_directory"
 [[ ! -L "$restore_root" ]] || fail 'preflight/configuration failed; the restore evidence directory must not be a symbolic link.'
+acquire_backup_restore_lock
+sweep_orphaned_checkpoints
 
 if [[ "$recover_mode" == true ]]; then
   [[ -z "$backup_file" ]] || fail 'usage failed; --recover does not accept a new backup bundle.'

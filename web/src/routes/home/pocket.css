@@ -129,6 +129,17 @@
 .pocket.pk-flying .mdial{transform:translate(var(--fx), var(--fy)) scale(.08);opacity:0}
 .pocket .msearch,.pocket .pk-below{transition:opacity 400ms ease}
 .pocket.pk-flying .msearch,.pocket.pk-flying .pk-below{opacity:.2}
+/* #1151 W1-R8: one suggestion's accept/dismiss or the complete button in
+   flight shares a single `busy` flag with every other row's act — this is
+   the only feedback a second tap gets, since ArmButton/Row carry no
+   disabled concept of their own: the group visibly dims and stops taking
+   taps instead of looking dead while quietly doing nothing. */
+/* .pk-results and .pk-foot-busy are not scoped under .pocket, unlike
+   .pk-below: both live inside the search Sheet, which portal.js moves to
+   the end of <body>, so neither is a descendant of .pocket by the time this
+   applies (the existing .p-sheet-layer .pk-results rules below are scoped
+   the same way for the same reason). */
+.pocket .pk-below.pk-busy,.pk-results.pk-busy,.pk-foot-busy{pointer-events:none;opacity:.55;transition:opacity 150ms ease}
 
 /* ---- the search line: a button drawn as the desk's field (§2.1) ------- */
 .pocket .msearch{appearance:none;display:block;width:88%;min-height:var(--p-hit);margin:8px auto 4px;padding:0 8px;

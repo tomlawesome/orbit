@@ -96,30 +96,14 @@ export async function reconcileDocumentStorage(): Promise<void> {
     try {
       ciphertextExists = await storage.ciphertextExists(record.storageKey);
     } catch {
-      if (record.lifecycle === "pending_deletion") continue;
-      const rejected = await getDb().transaction(async (transaction) => {
-        const [changed] = await transaction.update(documents).set({
-          lifecycle: "rejected",
-          failureCode: "storage_object_invalid",
-          updatedAt: new Date(),
-        }).where(and(
-          eq(documents.id, record.documentId),
-          eq(documents.lifecycle, "available"),
-        )).returning({ id: documents.id });
-        if (!changed) return false;
-        await transaction.insert(auditLog).values({
-          householdId: record.householdId,
-          actorUserId: null,
-          entityType: "document",
-          entityId: record.documentId,
-          action: "document_storage_invalid",
-          changes: { itemId: record.itemId },
-        });
-        return true;
-      });
-      if (rejected) {
-        log.warn({ event: "document.lifecycle", state: "exhausted", reason: "storage_object_invalid", action: "inspect_admin_diagnostics", impact: "document_processing_blocked" });
-      }
+      // `ciphertextExists` already turns a confirmed-absent file (ENOENT)
+      // into `false` without throwing; whatever reaches here is some other,
+      // transient stat() failure (permissions, disk I/O) that says nothing
+      // about whether the document's bytes are actually gone. Only a
+      // confirmed-absent file may reject a live document -- rejecting on a
+      // transient error would permanently reject a live, undamaged one.
+      // Leave it alone for the next sweep (SS2-S2).
+      log.warn({ event: "document.lifecycle", state: "degraded", reason: "unexpected_failure", action: "inspect_admin_diagnostics", impact: "worker_degraded" });
       continue;
     }
     if (ciphertextExists) continue;

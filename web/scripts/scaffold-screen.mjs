@@ -82,7 +82,11 @@ if (positional.length < 3 || positional.length > 4) {
   console.error(
     "usage: node scripts/scaffold-screen.mjs <mockup.html> <out.css> <out-markup.svelte> [out.js] [--check]",
   );
-  process.exit(positional.length === 0 && process.argv.includes("--check") ? 0 : 2);
+  // X-Q5 (#1151): this used to exit 0 for --check with no other arguments,
+  // reporting success on the exact path that just printed the usage error
+  // above. Nothing calls it that way -- --check still needs to know which
+  // screen to check -- so a usage mistake is always a usage mistake.
+  process.exit(2);
 }
 const TARGETS = [
   { from: positional[0], css: positional[1], markup: positional[2], js: positional[3] },

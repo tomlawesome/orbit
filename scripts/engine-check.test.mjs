@@ -103,6 +103,28 @@ function makeFakeDockerBin({ exitCode = 0, argvLogPath }) {
   return binDir;
 }
 
+// #1151 O1-R2: a fake `timeout` placed ahead of the real one, alongside a
+// fake `docker`, so the test can see that engine-check.sh's container-mode
+// delegation is actually wrapped in `timeout` (never visible in docker's own
+// argv, since timeout is a separate wrapping process) rather than invoked
+// unbounded. Logs timeout's own argv, then strips the exact
+// `--signal=TERM --kill-after=1s <duration>` prefix engine-check.sh emits
+// and execs the rest, so the fake docker underneath still runs and reports
+// its usual exit code.
+function makeFakeDockerBinWithTimeoutCapture({ exitCode = 0, argvLogPath, timeoutArgvLogPath }) {
+  const binDir = makeFakeDockerBin({ exitCode, argvLogPath });
+  const script = [
+    "#!/usr/bin/env bash",
+    `printf '%s\\n' "$@" > '${timeoutArgvLogPath}'`,
+    "shift 3",
+    'exec "$@"',
+    "",
+  ].join("\n");
+  writeFileSync(join(binDir, "timeout"), script);
+  chmodSync(join(binDir, "timeout"), 0o755);
+  return binDir;
+}
+
 // A PATH containing bash and the handful of coreutils engine-check.sh's
 // container-mode branch calls (basename, tr) but deliberately no `docker`
 // at all — proving the script's own `command -v docker` gate, not a fake
@@ -153,7 +175,7 @@ describe("default mode (ORBIT_ENGINE_CHECK unset): behavior-preserving proxy", (
     expect(result.status).toBe(direct.status);
   });
 
-  it("rejects an unrecognised flag with a usage error (exit 2), before touching docker or configure.sh", () => {
+  it("rejects an unrecognised flag with a usage error (exit 2)", () => {
     const targetDir = makeFixture();
     const result = runEngineCheck(targetDir, ["--bogus"]);
     expect(result.status).toBe(2);
@@ -191,6 +213,57 @@ describe("ORBIT_ENGINE_CHECK=container: composes the documented one-off invocati
       "--dir",
       "/orbit-deploy",
     ]);
+  });
+
+  it("bounds the container delegation with timeout, unlike every other Compose call in install.sh before this fix (#1151 O1-R2)", () => {
+    const targetDir = makeFixture({ composeProjectName: "enginechecktest" });
+    const argvLogPath = join(targetDir, "docker-argv.log");
+    const timeoutArgvLogPath = join(targetDir, "timeout-argv.log");
+    const binDir = makeFakeDockerBinWithTimeoutCapture({ exitCode: 0, argvLogPath, timeoutArgvLogPath });
+
+    const result = runEngineCheck(targetDir, [], { pathPrefix: binDir, env: { ORBIT_ENGINE_CHECK: "container" } });
+
+    expect(result.status).toBe(0);
+    const timeoutArgv = readFileSync(timeoutArgvLogPath, "utf8").split("\n").filter((line) => line.length > 0);
+    expect(timeoutArgv.slice(0, 3)).toEqual(["--signal=TERM", "--kill-after=1s", "60s"]);
+    expect(timeoutArgv[3]).toBe("docker");
+    // The underlying docker call still ran and reported its real exit code
+    // through the timeout wrapper, unchanged from the no-timeout shape.
+    const argv = readFileSync(argvLogPath, "utf8").split("\n").filter((line) => line.length > 0);
+    expect(argv[0]).toBe("compose");
+  });
+
+  it("refuses (exit 5) when timeout is unavailable", () => {
+    const targetDir = makeFixture({ composeProjectName: "enginechecktest" });
+    const binDir = mkdtempSync(join(tmpdir(), "orbit-engine-check-notimeout-"));
+    scratchDirs.push(binDir);
+    // Every coreutils binary engine-check.sh itself actually shells out to
+    // (dirname and sed for repo_dir/project-name resolution, rm for its
+    // cleanup paths) plus basename/tr/cat/printf for interface parity with
+    // makeDockerlessBinDir below -- deliberately everything *except*
+    // timeout. Omitting dirname here once passed locally (an absent
+    // dirname happens to leave repo_dir resolving to "/", which this
+    // sandbox tolerated) but failed in CI, where the same missing dependency
+    // sent the script down a different, wrong error path ("docker is
+    // unavailable") before ever reaching the timeout check this test means
+    // to exercise. docker is a stub, never the host's: CI's fast job has no
+    // docker binary, so a symlink to it was silently skipped and the script
+    // stopped at its docker check first.
+    for (const tool of ["bash", "basename", "dirname", "sed", "tr", "cat", "rm", "printf"]) {
+      const realPath = failOnProcessDeadline(spawnSync("which", [tool], SPAWN_OPTS), { label: "makeNoTimeoutBinDir" }).stdout.trim();
+      if (realPath) symlinkSync(realPath, join(binDir, tool));
+    }
+    writeFileSync(join(binDir, "docker"), "#!/bin/sh\nexit 99\n");
+    chmodSync(join(binDir, "docker"), 0o755);
+
+    // PATH set directly in env (not pathPrefix), the same way the existing
+    // "docker is unavailable" test excludes docker below: pathPrefix always
+    // falls back to process.env.PATH afterward, which would still resolve
+    // the real /usr/bin/timeout and defeat the point of this test.
+    const result = runEngineCheck(targetDir, [], { env: { ORBIT_ENGINE_CHECK: "container", PATH: binDir } });
+
+    expect(result.status).toBe(5);
+    expect(result.stderr).toContain("timeout");
   });
 
   it("propagates a nonzero docker compose exit code unchanged", () => {
@@ -233,7 +306,7 @@ describe("ORBIT_ENGINE_CHECK=container: composes the documented one-off invocati
     expect(argv[projectNameIndex + 1]).toBe("env-supplied-project");
   });
 
-  it("refuses (exit 5) when docker is unavailable, before ever changing directory into a Compose invocation", () => {
+  it("refuses (exit 5) when docker is unavailable", () => {
     const targetDir = makeFixture();
     const dockerlessBinDir = makeDockerlessBinDir();
     const result = runEngineCheck(targetDir, [], {

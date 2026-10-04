@@ -1,3 +1,5 @@
+import { json } from "@sveltejs/kit";
+
 import { setTransactionCookie } from "orbit/lib/auth/cookies";
 import { randomUrlSafe, safeReturnPath, sealLoginTransaction } from "orbit/lib/auth/crypto";
 import { AuthError } from "orbit/lib/auth/errors";
@@ -24,7 +26,12 @@ import { write } from "$lib/server/api.js";
  *
  * The 302 is built by hand for the same reason `GET /api/auth/login` builds
  * its own: SvelteKit's `redirect()` signals by throwing, and the wrapper would
- * render that as an error.
+ * render that as an error. A plain form post still gets that 302; the front
+ * end's own `handToProvider` (web/src/lib/data/workspace.js) calls this with
+ * `redirect: "manual"` so it can drive the hand-off itself, which turns any
+ * redirect response into an opaque one it cannot read a location from — so
+ * it asks for JSON instead, the same way `POST /api/auth/logout` already
+ * answers its own caller (#1151 SF1-F1).
  */
 export const POST = write(
   async (event, session) => {
@@ -59,12 +66,13 @@ export const POST = write(
     };
     setTransactionCookie(event.cookies, await sealLoginTransaction(transaction, config), config);
 
+    const location = createAuthorizationUrl(config.oidc, metadata, transaction).href;
+    if (event.request.headers.get("accept")?.includes("application/json")) {
+      return json({ location }, { headers: { "cache-control": "no-store" } });
+    }
     return new Response(null, {
       status: 302,
-      headers: {
-        location: createAuthorizationUrl(config.oidc, metadata, transaction).href,
-        "cache-control": "no-store",
-      },
+      headers: { location, "cache-control": "no-store" },
     });
   },
   { errorResponse: authErrorResponse },

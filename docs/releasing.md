@@ -373,12 +373,15 @@ release was actually signed with.
 **A limit worth stating plainly:** on the `latest` channel there is no
 freshness check. Whoever controls what `get-orbit.sh` downloads from could
 serve an *older*, correctly signed release instead of the newest one. A
-signature proves a release is real, not that it is the newest. Pinning
-`ORBIT_VERSION=vX.Y.Z` closes this: both `get-orbit.sh` and `install.sh`
-refuse a manifest whose own `version` field does not match the pin, so an
-older release can only be installed by asking for it by name, never served
-silently in place of a newer one. See `docs/installer-guarantees.md` for the
-full list of what is and is not checked.
+signature proves a release is real, not that it is the newest. Pinning to a
+specific release closes this, but the variable depends on which script is
+doing the fetching: `get-orbit.sh` reads `ORBIT_VERSION=vX.Y.Z`; `install.sh`
+has no such variable and is instead pinned by setting
+`ORBIT_CHANNEL=vX.Y.Z` directly (the default is `latest`). Either way, the
+script refuses a manifest whose own `version` field does not match the pin,
+so an older release can only be installed by asking for it by name, never
+served silently in place of a newer one. See `docs/installer-guarantees.md`
+for the full list of what is and is not checked.
 
 ### Version tags in GHCR start at v1.3.0
 

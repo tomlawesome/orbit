@@ -174,11 +174,20 @@ function collectServerFiles(dir, routePrefix = "/api") {
 // resolve inside a SvelteKit/vite context, not plain Vitest. A regex over the
 // exported bindings is enough to prove a real handler is exported, without
 // needing to execute the module.
+//
+// T-Q5 (#1151): comments are stripped first. The regex alone matched a
+// commented-out or dead `// export function GET() {}` just as readily as a
+// live one -- a route stubbed out mid-edit still "satisfied" this contract.
+function stripComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+}
+
 function exportedHandlers(source) {
+  const live = stripComments(source);
   return HANDLER_NAMES.filter((name) => {
     const asFunction = new RegExp(`export\\s+(?:async\\s+)?function\\s+${name}\\b`);
     const asConst = new RegExp(`export\\s+const\\s+${name}\\s*=`);
-    return asFunction.test(source) || asConst.test(source);
+    return asFunction.test(live) || asConst.test(live);
   });
 }
 
@@ -206,4 +215,15 @@ describe("SvelteKit API route-set contract (#735)", () => {
       ).toBeGreaterThan(0);
     },
   );
+});
+
+describe("exportedHandlers (#1151 T-Q5)", () => {
+  it("does not count a commented-out export as a live handler", () => {
+    expect(exportedHandlers("// export function GET() {}")).toEqual([]);
+    expect(exportedHandlers("/* export const POST = async () => {}; */")).toEqual([]);
+  });
+
+  it("still finds a real handler sitting next to a dead one", () => {
+    expect(exportedHandlers("// export function GET() {}\nexport function POST() {}")).toEqual(["POST"]);
+  });
 });

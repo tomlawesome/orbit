@@ -57,6 +57,69 @@ import { GATE_HOOK_TIMEOUT_MS, enterSpecFile, leaveSpecFile, stillInsideSpecFile
 const SEED_SCHEMA = "e2e_seed";
 
 /**
+ * The project name shape scripts/test-e2e-local.sh derives for every run
+ * (`worktree_hash-$$` appended to this), so a real one is never guessable in
+ * advance and never shared between two runs.
+ */
+const E2E_PROJECT_PREFIX = "orbit-e2e-local-";
+
+/**
+ * T-S1 (#1151): this reset truncates every table in `public` and restores it
+ * from a seed snapshot, so pointing it at the wrong database is not a test
+ * failure -- it is data loss in whatever stack it actually hit. The old code
+ * read `COMPOSE_PROJECT_NAME` and, when unset, ran `docker compose` with no
+ * `-p` at all: Compose then resolves the project the same way it would for a
+ * real deployment run from this checkout (docker-compose.yml's own top-level
+ * `name: orbit`, same as a developer's own stack started by hand -- see
+ * scripts/compose-isolation-preflight.sh's header comment for the near-miss
+ * this is), so an e2e run started outside scripts/test-e2e-local.sh --
+ * directly through Playwright, say -- silently reset whatever "orbit" stack
+ * was already running on the machine.
+ *
+ * Refuses unless the project is provably this suite's own:
+ *
+ *   - `COMPOSE_PROJECT_NAME` set to the `orbit-e2e-local-` shape
+ *     scripts/test-e2e-local.sh always derives;
+ *   - `ORBIT_E2E_REUSE=true`, which that script sets only for `--reuse`
+ *     (#947) -- a project name the user named explicitly, and the one place
+ *     the derived shape does not have to hold, because the script already
+ *     checked that project is a real, healthy, previously-claimed Orbit
+ *     stack before handing it to Playwright at all;
+ *   - `CI=true` with no `COMPOSE_PROJECT_NAME` at all, which is CI's own
+ *     documented shape (scripts/ci/start-acceptance-stack.sh runs the exact
+ *     bare `docker compose up` with no `-p` this guard exists to catch
+ *     elsewhere, but only after its own compose-isolation-preflight.sh has
+ *     already refused to touch a project that was not empty).
+ *
+ * Anything else -- unset outside CI, or set to a name that is neither of the
+ * above -- throws rather than guessing, naming the variable so whoever hits
+ * this knows which one to set and how.
+ */
+export function resolvedComposeProject(): string | undefined {
+  const project = process.env.COMPOSE_PROJECT_NAME;
+  if (project) {
+    // ORBIT_E2E_OWNED_PROJECT: scripts/test-e2e-local.sh names the project it
+    // brought up itself, whatever it is called -- its header invites
+    // COMPOSE_PROJECT_NAME, so the derived-shape rule alone refused the
+    // script's own documented override.
+    if (project.startsWith(E2E_PROJECT_PREFIX) || process.env.ORBIT_E2E_REUSE === "true" || project === process.env.ORBIT_E2E_OWNED_PROJECT) return project;
+    throw new Error(
+      `#1077: COMPOSE_PROJECT_NAME is '${project}', which is not an e2e stack (scripts/test-e2e-local.sh `
+      + `always names its own '${E2E_PROJECT_PREFIX}<worktree-hash>-<pid>'). Refusing to reset a database `
+      + "this suite did not create -- if this is a --reuse project, test-e2e-local.sh sets ORBIT_E2E_REUSE "
+      + "itself; running this file some other way needs that variable set explicitly.",
+    );
+  }
+  if (process.env.CI === "true") return undefined;
+  throw new Error(
+    "#1077: COMPOSE_PROJECT_NAME is not set, so this would reset whatever stack Compose's default project "
+    + "name resolves to -- which may be a real deployment, not this suite's own. Run through "
+    + "scripts/test-e2e-local.sh, which sets COMPOSE_PROJECT_NAME for you, rather than invoking Playwright "
+    + "directly.",
+  );
+}
+
+/**
  * The stack's own database, reached the way `support/bootstrap.ts` reaches
  * its log: `COMPOSE_PROJECT_NAME` is exported by scripts/test-e2e-local.sh
  * and unset in CI, which runs the stack without `-p`. The compose file
@@ -64,7 +127,7 @@ const SEED_SCHEMA = "e2e_seed";
  * placeholder is supplied exactly as that helper does.
  */
 function composeCapture(args: string[]): string {
-  const project = process.env.COMPOSE_PROJECT_NAME;
+  const project = resolvedComposeProject();
   return execFileSync(
     "docker",
     [

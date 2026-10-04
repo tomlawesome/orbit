@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   closeSync,
   constants,
@@ -432,7 +433,9 @@ function usageExit(message: string): never {
 
 function commandConfigureApply(deployDir: string): never {
   try {
-    const result = runConfigureApply(deployDir, process.env.ORBIT_IMAGE);
+    const result = runConfigureApply(deployDir, process.env.ORBIT_IMAGE, {
+      trustOrbitImage: process.env.ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE === "1",
+    });
     for (const message of result.messages) {
       process.stdout.write(`${message}\n`);
     }
@@ -443,17 +446,31 @@ function commandConfigureApply(deployDir: string): never {
   }
 }
 
+/** O1-F1: ORBIT_CONFIGURE_AUTH_MODE, read the same way guided_init reads it in configure.sh (unset means "let the rest of commandConfigureInit decide"). */
+function readConfigureAuthMode(): "local" | "oidc" | undefined {
+  const raw = process.env.ORBIT_CONFIGURE_AUTH_MODE;
+  if (raw === undefined || raw === "") return undefined;
+  if (raw === "local" || raw === "oidc") return raw;
+  fail("orbit: ORBIT_CONFIGURE_AUTH_MODE must be 'local' or 'oidc'.");
+}
+
 function commandConfigureInit(deployDir: string): never {
   const envAppUrl = process.env.ORBIT_CONFIGURE_APP_URL;
   const envIssuer = process.env.ORBIT_CONFIGURE_OIDC_ISSUER;
   const envClientId = process.env.ORBIT_CONFIGURE_OIDC_CLIENT_ID;
   const providedCount = [envAppUrl, envIssuer, envClientId].filter((value) => !!value).length;
+  const authMode = readConfigureAuthMode();
 
   let appUrl: string;
-  let issuer: string;
-  let clientId: string;
+  let issuer: string | undefined;
+  let clientId: string | undefined;
+  let resolvedAuthMode: "local" | "oidc";
 
   if (providedCount === 3) {
+    if (authMode === "local") {
+      fail("orbit: ORBIT_CONFIGURE_AUTH_MODE=local conflicts with a supplied OIDC issuer/client ID environment set.");
+    }
+    resolvedAuthMode = "oidc";
     appUrl = envAppUrl as string;
     issuer = envIssuer as string;
     clientId = envClientId as string;
@@ -462,8 +479,12 @@ function commandConfigureInit(deployDir: string): never {
       "orbit: guided configuration requires all of ORBIT_CONFIGURE_APP_URL, ORBIT_CONFIGURE_OIDC_ISSUER and ORBIT_CONFIGURE_OIDC_CLIENT_ID together, not a partial set.",
     );
   } else if (isConfigureMachinePromptMode()) {
+    // O1-F1: a local-only machine-prompt init only ever needs APP_URL —
+    // this previously always collected (and so always demanded) the OIDC
+    // fields too, regardless of ORBIT_CONFIGURE_AUTH_MODE.
+    resolvedAuthMode = authMode ?? "oidc";
     try {
-      const collected = collectMachineGuidedInit(stdoutConfigureMachineDriver());
+      const collected = collectMachineGuidedInit(stdoutConfigureMachineDriver(), resolvedAuthMode);
       appUrl = collected.appUrl;
       issuer = collected.issuer;
       clientId = collected.clientId;
@@ -478,7 +499,7 @@ function commandConfigureInit(deployDir: string): never {
   }
 
   try {
-    const message = applyGuidedInit(deployDir, { appUrl, issuer, clientId });
+    const message = applyGuidedInit(deployDir, { appUrl, authMode: resolvedAuthMode, issuer, clientId });
     process.stdout.write(`${message}\n`);
     process.exit(0);
   } catch (error) {
@@ -563,6 +584,86 @@ function commandConfigure(deployDir: string, args: string[]): never {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Scratch-directory cleanup for backup/restore (#1151 O1-R1). Each of
+// commandBackup's --verify branch and commandRestore's --recover and
+// <backup.tar> branches creates a private mkdtempSync workDir under
+// os.tmpdir() that can hold decrypted document bytes and database dumps
+// while the command runs. A try/finally alone misses two cases: (1) a
+// signal (Ctrl-C/SIGINT, or SIGTERM from a supervisor) does not unwind JS
+// try/finally at all by default, so the directory is orphaned in /tmp
+// forever; (2) the success path in each branch calls `process.exit(0)`
+// *inside* the try, and process.exit() terminates immediately without
+// running a pending `finally` — confirmed empirically, not merely assumed —
+// so a plain try/finally around a process.exit() call never actually ran
+// its cleanup either. withScratchDirectory fixes both: callers never call
+// process.exit() from inside the wrapped callback, and the same tracked-set
+// cleanup runs on normal completion, on a thrown error, and on SIGINT/SIGTERM.
+const activeScratchDirectories = new Set<string>();
+let scratchCleanupSignalHandlersInstalled = false;
+
+function removeScratchDirectory(workDir: string): void {
+  try {
+    rmSync(workDir, { recursive: true, force: true });
+  } catch {
+    // Best effort: nothing more useful to do if removal itself fails.
+  }
+}
+
+function installScratchCleanupSignalHandlers(): void {
+  if (scratchCleanupSignalHandlersInstalled) return;
+  scratchCleanupSignalHandlersInstalled = true;
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => {
+      for (const workDir of activeScratchDirectories) removeScratchDirectory(workDir);
+      activeScratchDirectories.clear();
+      // 128 + signal number, the conventional shell-reported exit status
+      // (SIGINT=2, SIGTERM=15); matches the 130 already used for Ctrl-C
+      // during masked TTY entry above.
+      process.exit(signal === "SIGINT" ? 130 : 143);
+    });
+  }
+}
+
+/** Runs `run` with `workDir` tracked for signal cleanup, always removing it afterward — on normal return, on a thrown error, and (via the signal handlers above) on SIGINT/SIGTERM. `run` must never call process.exit() itself; callers call it, with the result of `run`, only after this returns. */
+function withScratchDirectory<T>(workDir: string, run: () => T): T {
+  installScratchCleanupSignalHandlers();
+  activeScratchDirectories.add(workDir);
+  try {
+    return run();
+  } finally {
+    activeScratchDirectories.delete(workDir);
+    removeScratchDirectory(workDir);
+  }
+}
+
+// Hidden/experimental, mirroring __install-transaction-rehearse and
+// __restore-engine-rehearse above: exercises withScratchDirectory's signal
+// cleanup end-to-end for src/cli/orbit.test.ts, without needing a real
+// docker backup/restore run to create a window to signal during.
+//
+// Blocks the same way the real docker-compose adapters block (a
+// synchronous spawnSync call), rather than a pure-JS wait: that is not a
+// cosmetic choice. A tight synchronous loop (e.g. Atomics.wait) never
+// returns control to the event loop, so a signal arriving during one is
+// never actually delivered to a `process.on` listener until the loop is
+// unblocked some other way — proven directly against this file's own
+// mkdtempSync/spawnSync pattern before writing this comment. What actually
+// happens on a real Ctrl-C is: the terminal's SIGINT reaches the whole
+// foreground process group, so the blocked `docker` child dies from the
+// same signal, spawnSync returns, and only then does the event loop
+// deliver the pending SIGINT/SIGTERM callback registered below. Spawning a
+// real `sleep` child here, signalled as a process group, reproduces that
+// exact sequence instead of a shape nothing in production ever hits.
+function commandScratchDirectorySignalRehearse(sleepSeconds: string): never {
+  const workDir = mkdtempSync(join(tmpdir(), "orbit-scratch-signal-rehearse-"));
+  withScratchDirectory(workDir, () => {
+    process.stdout.write(`workDir=${workDir}\n`);
+    spawnSync("sleep", [sleepSeconds]);
+  });
+  process.exit(0);
+}
+
 function commandBackup(deployDir: string, args: string[]): never {
   refuseDockerInContainer("backup");
   const paths = resolveBackupRestorePaths(deployDir);
@@ -573,13 +674,11 @@ function commandBackup(deployDir: string, args: string[]): never {
     if (args.length !== 2 || !args[1]) fail("orbit: usage: orbit backup --verify <backup.tar>");
     const target = resolve(args[1]);
     const workDir = mkdtempSync(join(tmpdir(), "orbit-backup-verify-"));
-    try {
+    withScratchDirectory(workDir, () => {
       verifyBackupBundle(target, documentKekHex, workDir, adapter);
       process.stdout.write(`Orbit backup is valid: ${args[1]}\n`);
-      process.exit(0);
-    } finally {
-      rmSync(workDir, { recursive: true, force: true });
-    }
+    });
+    process.exit(0);
   }
 
   if (args.length !== 0) fail("orbit: usage: orbit backup [--verify <backup.tar>]");
@@ -616,19 +715,17 @@ function commandRestore(deployDir: string, args: string[]): never {
   if (recoverMode) {
     if (backupFile !== undefined || yesFlag) fail("orbit: usage: --recover accepts no other arguments");
     const workDir = mkdtempSync(join(tmpdir(), "orbit-restore-recover-"));
-    try {
+    withScratchDirectory(workDir, () => {
       recoverRestore({ adapter, paths: restorePaths, workDir });
       process.stdout.write("Orbit recovery completed; the prior database, document tree, and key state were restored.\n");
-      process.exit(0);
-    } finally {
-      rmSync(workDir, { recursive: true, force: true });
-    }
+    });
+    process.exit(0);
   }
 
   if (backupFile === undefined) fail("orbit: usage: orbit restore [--yes] <backup.tar> | orbit restore --recover");
   const documentKekHex = readDocumentKekHex(paths.documentKekFile);
   const workDir = mkdtempSync(join(tmpdir(), "orbit-restore-"));
-  try {
+  withScratchDirectory(workDir, () => {
     runRestore({
       backupTarPath: resolve(backupFile),
       documentKekHex,
@@ -638,10 +735,8 @@ function commandRestore(deployDir: string, args: string[]): never {
       confirm: makeRestoreConfirmer(yesFlag),
     });
     process.stdout.write("Orbit restore completed successfully.\n");
-    process.exit(0);
-  } finally {
-    rmSync(workDir, { recursive: true, force: true });
-  }
+  });
+  process.exit(0);
 }
 
 function commandExportRecoveryBundle(deployDir: string, args: string[]): never {
@@ -1003,15 +1098,15 @@ function commandRestoreEngineRehearse(scenarioPath: string): never {
 // deployment target, so silently defaulting to cwd is a materially higher-
 // stakes mistake than for a read-only readiness report.
 
-/** install.sh:134-138 (ORBIT_CHANNEL). */
+/** install.sh:148-151 (ORBIT_CHANNEL). */
 const CHANNEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-/** install.sh:138-141 (ORBIT_REPOSITORY). */
+/** install.sh:152-155 (ORBIT_REPOSITORY). */
 const REPOSITORY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}\/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
-/** install.sh:142-145 (ORBIT_REGISTRY). */
+/** install.sh:156-159 (ORBIT_REGISTRY). */
 const REGISTRY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?$/;
-/** install.sh:125-126 (ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: 1-999 by pattern, further bounded to <=900). */
+/** install.sh:139-143 (ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: 1-999 by pattern, further bounded to <=900). */
 const READINESS_TIMEOUT_PATTERN = /^[1-9][0-9]{0,2}$/;
-/** install.sh:130 (ORBIT_INSTALLER_POLL_INTERVAL_SECONDS: a single digit, 1-9). */
+/** install.sh:144-147 (ORBIT_INSTALLER_POLL_INTERVAL_SECONDS: a single digit, 1-9). */
 const READINESS_POLL_PATTERN = /^[1-9]$/;
 
 interface InstallEnvironmentConfig {
@@ -1026,7 +1121,7 @@ interface InstallEnvironmentConfig {
  * Reads and validates ORBIT_REPOSITORY/ORBIT_REGISTRY/ORBIT_CHANNEL/
  * ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS/ORBIT_INSTALLER_POLL_INTERVAL_SECONDS
  * exactly the way install.sh does at its own top-of-script argument/env
- * validation (install.sh:13-15,123-145) — install-orchestrator.ts itself
+ * validation (install.sh:13-15,137-159) — install-orchestrator.ts itself
  * has no reason to own environment-variable parsing (it takes an already-
  * validated context), so this is this CLI's own responsibility, the same
  * way it already owns `--dir` parsing for `check`. Fails closed with
@@ -1206,33 +1301,43 @@ function commandInstallOrUpdate(action: "install" | "update", deployDirArg: stri
 function commandEndMaintenance(args: string[]): void {
   if (args.length > 0) fail(`orbit: unknown option ${args[0]} (usage: orbit end-maintenance)`);
   void (async () => {
-    const [{ endMaintenanceFromOperatorShell }, { closeDatabase }] = await Promise.all([
-      import("../server/maintenance"),
-      import("../db"),
-    ]);
     try {
-      const { changed, cancelledWindows } = await endMaintenanceFromOperatorShell();
-      if (!changed) {
-        process.stdout.write("orbit: maintenance was not active; nothing to change\n");
-      } else if (cancelledWindows > 0) {
-        const plural = cancelledWindows === 1 ? "window" : "windows";
-        process.stdout.write(
-          `orbit: maintenance ended; cancelled ${cancelledWindows} due scheduled ${plural}\n`,
-        );
-      } else {
-        process.stdout.write("orbit: maintenance ended\n");
+      const [{ endMaintenanceFromOperatorShell }, { closeDatabase }] = await Promise.all([
+        import("../server/maintenance"),
+        import("../db"),
+      ]);
+      try {
+        const { changed, cancelledWindows } = await endMaintenanceFromOperatorShell();
+        if (!changed) {
+          process.stdout.write("orbit: maintenance was not active; nothing to change\n");
+        } else if (cancelledWindows > 0) {
+          const plural = cancelledWindows === 1 ? "window" : "windows";
+          process.stdout.write(
+            `orbit: maintenance ended; cancelled ${cancelledWindows} due scheduled ${plural}\n`,
+          );
+        } else {
+          process.stdout.write("orbit: maintenance ended\n");
+        }
+      } catch {
+        // Category only, like every other refusal this CLI surfaces: a
+        // connection failure's own message can carry the connection string,
+        // and this command runs in the one place an operator is most likely to
+        // be pasting output to someone else. The container's logs hold the
+        // detail if it is needed.
+        process.stderr.write("orbit: end-maintenance failed; the database could not be updated\n");
+        await closeDatabase().catch(() => {});
+        process.exit(1);
       }
+      await closeDatabase();
     } catch {
-      // Category only, like every other refusal this CLI surfaces: a
-      // connection failure's own message can carry the connection string,
-      // and this command runs in the one place an operator is most likely to
-      // be pasting output to someone else. The container's logs hold the
-      // detail if it is needed.
+      // #1151 O1-R6: the dynamic import() above used to run outside any
+      // try/catch, so a module-load failure (a broken image, a missing
+      // file) became an unhandled promise rejection instead of this
+      // command's own clean, bounded failure message. There is no
+      // closeDatabase to call here -- a failed import never produced one.
       process.stderr.write("orbit: end-maintenance failed; the database could not be updated\n");
-      await closeDatabase().catch(() => {});
       process.exit(1);
     }
-    await closeDatabase();
   })();
 }
 
@@ -1256,51 +1361,60 @@ function commandEndMaintenance(args: string[]): void {
 function commandAuthRecoveryLink(): void {
   process.env.ORBIT_LOG_LEVEL = "error";
   void (async () => {
-    const [{ getDb, closeDatabase }, { instanceAuthority, auditLog }, { issueSetupToken }, { revokeUserSessions }, { getAuthConfig }] =
-      await Promise.all([
-        import("../db"),
-        import("../db/schema"),
-        import("../server/local-credentials"),
-        import("../lib/auth/session"),
-        import("../lib/env"),
-      ]);
     try {
-      const db = getDb();
-      const [authority] = await db.select({ primaryUserId: instanceAuthority.primaryUserId }).from(instanceAuthority).limit(1);
-      const primaryUserId = authority?.primaryUserId ?? null;
-      if (!primaryUserId) {
-        process.stderr.write("orbit: this Orbit instance has no primary administrator to recover\n");
+      const [{ getDb, closeDatabase }, { instanceAuthority, auditLog }, { issueSetupToken }, { revokeUserSessions }, { getAuthConfig }] =
+        await Promise.all([
+          import("../db"),
+          import("../db/schema"),
+          import("../server/local-credentials"),
+          import("../lib/auth/session"),
+          import("../lib/env"),
+        ]);
+      try {
+        const db = getDb();
+        const [authority] = await db.select({ primaryUserId: instanceAuthority.primaryUserId }).from(instanceAuthority).limit(1);
+        const primaryUserId = authority?.primaryUserId ?? null;
+        if (!primaryUserId) {
+          process.stderr.write("orbit: this Orbit instance has no primary administrator to recover\n");
+          await closeDatabase().catch(() => {});
+          process.exit(1);
+          return;
+        }
+
+        const { token } = await issueSetupToken(primaryUserId, "recovery", { createdByUserId: null });
+        await revokeUserSessions(primaryUserId);
+        await db.insert(auditLog).values({
+          householdId: null,
+          actorUserId: primaryUserId,
+          entityType: "user",
+          entityId: primaryUserId,
+          action: "recovery_link_issued",
+          changes: {},
+        });
+
+        const config = getAuthConfig();
+        const url = new URL(`/setup/${token}`, config.appUrl).toString();
+        process.stdout.write(`${url}\n`);
+      } catch {
+        // Category only, like every other refusal this CLI surfaces (see
+        // commandEndMaintenance's own comment): a connection or driver failure
+        // can carry the connection string, and this command's output is the
+        // one thing an operator recovering access is most likely to paste
+        // somewhere else.
+        process.stderr.write("orbit: recovery-link failed; the database could not be updated\n");
         await closeDatabase().catch(() => {});
         process.exit(1);
         return;
       }
-
-      const { token } = await issueSetupToken(primaryUserId, "recovery", { createdByUserId: null });
-      await revokeUserSessions(primaryUserId);
-      await db.insert(auditLog).values({
-        householdId: null,
-        actorUserId: primaryUserId,
-        entityType: "user",
-        entityId: primaryUserId,
-        action: "recovery_link_issued",
-        changes: {},
-      });
-
-      const config = getAuthConfig();
-      const url = new URL(`/setup/${token}`, config.appUrl).toString();
-      process.stdout.write(`${url}\n`);
+      await closeDatabase();
     } catch {
-      // Category only, like every other refusal this CLI surfaces (see
-      // commandEndMaintenance's own comment): a connection or driver failure
-      // can carry the connection string, and this command's output is the
-      // one thing an operator recovering access is most likely to paste
-      // somewhere else.
+      // #1151 O1-R6: see commandEndMaintenance's matching comment -- the
+      // dynamic imports above used to run outside any try/catch, turning a
+      // module-load failure into an unhandled promise rejection instead of
+      // this command's own clean, bounded failure message.
       process.stderr.write("orbit: recovery-link failed; the database could not be updated\n");
-      await closeDatabase().catch(() => {});
       process.exit(1);
-      return;
     }
-    await closeDatabase();
   })();
 }
 
@@ -1330,58 +1444,67 @@ const CLEAR_ADDRESSES_CONFIRMATION_PHRASE = "CLEAR ADDRESSES";
 function commandAuthClearAddresses(): void {
   process.env.ORBIT_LOG_LEVEL = "error";
   void (async () => {
-    const [{ closeDatabase }, { clearUnreadableAddresses, encryptionKeyIsUsable }] = await Promise.all([
-      import("../db"),
-      import("../server/account-addresses-reset"),
-    ]);
     try {
-      /* The refusal that matters most. An operator who sees "instance locked"
-         and assumes the worst would otherwise destroy addresses that were
-         perfectly recoverable — the key was fine, and only the bundle needed
-         restoring. Checked before a single word about clearing anything. */
-      if (await encryptionKeyIsUsable()) {
-        process.stderr.write(
-          "orbit: refused — this instance can still read its encrypted data, so its addresses are not lost.\n"
-          + "orbit: if members cannot sign in, the fault is elsewhere; this command would destroy addresses for nothing.\n",
+      const [{ closeDatabase }, { clearUnreadableAddresses, encryptionKeyIsUsable }] = await Promise.all([
+        import("../db"),
+        import("../server/account-addresses-reset"),
+      ]);
+      try {
+        /* The refusal that matters most. An operator who sees "instance locked"
+           and assumes the worst would otherwise destroy addresses that were
+           perfectly recoverable — the key was fine, and only the bundle needed
+           restoring. Checked before a single word about clearing anything. */
+        if (await encryptionKeyIsUsable()) {
+          process.stderr.write(
+            "orbit: refused — this instance can still read its encrypted data, so its addresses are not lost.\n"
+            + "orbit: if members cannot sign in, the fault is elsewhere; this command would destroy addresses for nothing.\n",
+          );
+          await closeDatabase().catch(() => {});
+          process.exit(1);
+          return;
+        }
+
+        process.stdout.write(
+          "This does NOT recover anything. Documents and encrypted details stay unreadable.\n"
+          + "It clears the account addresses this instance can no longer read, so that people can be let back in:\n"
+          + "  - every unreadable account address is removed; the accounts themselves survive\n"
+          + "  - every unreadable mail-forwarding address is removed, and must be added and proved again\n"
+          + "  - addresses this instance CAN still read are left alone\n"
+          + "Afterwards, run `orbit auth recovery-link` to get back in as the primary administrator,\n"
+          + "then re-enter members' addresses by hand.\n",
         );
+        const answer = readTtyLine(`Type ${CLEAR_ADDRESSES_CONFIRMATION_PHRASE} to continue: `);
+        if (answer !== CLEAR_ADDRESSES_CONFIRMATION_PHRASE) {
+          process.stderr.write("orbit: not confirmed; nothing was changed\n");
+          await closeDatabase().catch(() => {});
+          process.exit(1);
+          return;
+        }
+
+        const outcome = await clearUnreadableAddresses();
+        process.stdout.write(
+          `orbit: cleared ${outcome.users} account address(es) and removed ${outcome.senderAddresses} `
+          + "mail-forwarding address(es).\n"
+          + "orbit: next, run `orbit auth recovery-link`.\n",
+        );
+      } catch {
+        // Category only, for the same reason recovery-link gives above: a driver
+        // failure can carry the connection string, and an operator in the middle
+        // of this is the likeliest person to paste their terminal somewhere.
+        process.stderr.write("orbit: clear-addresses failed; the database could not be updated\n");
         await closeDatabase().catch(() => {});
         process.exit(1);
         return;
       }
-
-      process.stdout.write(
-        "This does NOT recover anything. Documents and encrypted details stay unreadable.\n"
-        + "It clears the account addresses this instance can no longer read, so that people can be let back in:\n"
-        + "  - every unreadable account address is removed; the accounts themselves survive\n"
-        + "  - every unreadable mail-forwarding address is removed, and must be added and proved again\n"
-        + "  - addresses this instance CAN still read are left alone\n"
-        + "Afterwards, run `orbit auth recovery-link` to get back in as the primary administrator,\n"
-        + "then re-enter members' addresses by hand.\n",
-      );
-      const answer = readTtyLine(`Type ${CLEAR_ADDRESSES_CONFIRMATION_PHRASE} to continue: `);
-      if (answer !== CLEAR_ADDRESSES_CONFIRMATION_PHRASE) {
-        process.stderr.write("orbit: not confirmed; nothing was changed\n");
-        await closeDatabase().catch(() => {});
-        process.exit(1);
-        return;
-      }
-
-      const outcome = await clearUnreadableAddresses();
-      process.stdout.write(
-        `orbit: cleared ${outcome.users} account address(es) and removed ${outcome.senderAddresses} `
-        + "mail-forwarding address(es).\n"
-        + "orbit: next, run `orbit auth recovery-link`.\n",
-      );
+      await closeDatabase();
     } catch {
-      // Category only, for the same reason recovery-link gives above: a driver
-      // failure can carry the connection string, and an operator in the middle
-      // of this is the likeliest person to paste their terminal somewhere.
+      // #1151 O1-R6: see commandEndMaintenance's matching comment -- the
+      // dynamic imports above used to run outside any try/catch, turning a
+      // module-load failure into an unhandled promise rejection instead of
+      // this command's own clean, bounded failure message.
       process.stderr.write("orbit: clear-addresses failed; the database could not be updated\n");
-      await closeDatabase().catch(() => {});
       process.exit(1);
-      return;
     }
-    await closeDatabase();
   })();
 }
 
@@ -1410,6 +1533,11 @@ function main(): void {
     const scenarioPath = rest[0];
     if (!scenarioPath) fail("orbit: __restore-engine-rehearse requires a scenario file path");
     commandRestoreEngineRehearse(scenarioPath);
+    return;
+  }
+
+  if (command === "__scratch-directory-signal-rehearse") {
+    commandScratchDirectorySignalRehearse(rest[0] ?? "5");
     return;
   }
 

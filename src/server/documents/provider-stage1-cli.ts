@@ -22,7 +22,7 @@
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
 import { EXTRACTION_HOLDOUT3_FULLPAGE } from "./extraction-holdout3-fullpage";
 import { providerTaggedOrganisations, providerWordRuns } from "./extraction-provider-runs";
-import { classifyProvider } from "./extraction-scoring";
+import { classifyProvider, looseProviderNameMatch } from "./extraction-scoring";
 import { sieve } from "./extraction-sieve";
 import { tagCandidates } from "./extraction-tags";
 import { providerCandidates } from "./provider-stage1-sieve";
@@ -36,12 +36,7 @@ const strict = (wanted: string, got: string): boolean =>
   classifyProvider(wanted, got) === "correct";
 
 /** A reader's ruler: a short form of the right name is the right name. */
-const fold = (value: string): string => value.toLowerCase().replaceAll(/[^a-z0-9]+/gu, " ").trim();
-const byEye = (wanted: string, got: string): boolean => {
-  const a = fold(wanted);
-  const b = fold(got);
-  return a === b || (b.length >= 4 && a.includes(b)) || (a.length >= 4 && b.includes(a));
-};
+const byEye = looseProviderNameMatch;
 
 interface Tally { hits: number; of: number; candidates: number }
 const empty = (): Tally => ({ hits: 0, of: 0, candidates: 0 });

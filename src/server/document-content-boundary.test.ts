@@ -106,6 +106,11 @@ function accessRow(overrides: Record<string, unknown> = {}) {
     availableAt: new Date("2026-07-31T12:00:00.000Z"),
     administrator: false,
     membershipUserId: "user-id",
+    // The caller is the uploader (#1151 A3-S1's deletion/restore gate), so
+    // these boundary tests keep exercising the scan-status short-circuit
+    // rather than the separate ownership check.
+    uploadedByUserId: "user-id",
+    membershipRole: "member",
     ...overrides,
   };
 }

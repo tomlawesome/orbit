@@ -6,7 +6,7 @@ cd "$repo_dir"
 
 readonly environment_file=".env-orbit"
 readonly environment_example=".env-orbit.example"
-readonly secrets_directory=".orbit-secrets"
+readonly secrets_directory="${ORBIT_SECRETS_DIR:-.orbit-secrets}"
 readonly oidc_secret_file="$secrets_directory/oidc-client-secret"
 readonly oidc_secret_file_path="/run/orbit-secrets/orbit-oidc-client-secret"
 readonly maximum_secret_bytes=65536
@@ -37,6 +37,9 @@ fi
 temporary_file=""
 terminal_fd=""
 terminal_echo_disabled=0
+# Set by ensure_environment_file when .env-orbit did not exist yet -- read
+# by persist_orbit_image below (#1151 O1-S4).
+environment_file_was_created=0
 installer_ui_input_loaded=0
 installer_ui_path="$repo_dir/scripts/installer-ui.sh"
 if [[ -f "$installer_ui_path" && ! -L "$installer_ui_path" ]]; then
@@ -217,6 +220,7 @@ ensure_environment_file() {
     return
   fi
 
+  environment_file_was_created=1
   temporary_file="$(mktemp "$PWD/.env-orbit.installing.XXXXXX")" ||
     fail "Could not create a temporary Orbit environment file."
   chmod 600 "$temporary_file" ||
@@ -363,6 +367,24 @@ update_managed_keys() {
 persist_orbit_image() {
   local orbit_image="${ORBIT_IMAGE:-}"
   [[ -n "$orbit_image" ]] || return 0
+  # A bare `bash scripts/configure.sh` picks up whatever ORBIT_IMAGE is
+  # exported in the invoking shell -- including a stale value left over
+  # from an earlier session -- and previously persisted it unconditionally,
+  # silently rewriting an existing deployment's pinned image without going
+  # through install.sh's own registry/signature checks (#1151 O1-S4). A
+  # brand-new .env-orbit has no prior pin to protect and needs this value to
+  # seed itself (install.sh's own fresh-install call relies on exactly
+  # that), so only an EXISTING deployment requires the installer's explicit
+  # trust marker, ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1 (set by install.sh
+  # itself alongside ORBIT_IMAGE; never set by a human invocation).
+  if [[ "$environment_file_was_created" != 1 && "${ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE:-}" != 1 ]]; then
+    # Worded without a literal "ORBIT_IMAGE=" (#1151 O1-S4 follow-up):
+    # scripts/supply-chain-policy.test.mjs scans this file for exactly that
+    # assignment shape to prove every deployment reference is pinned, and a
+    # message built the same way as a real assignment tripped it.
+    printf 'Orbit configure: ignoring the environment'"'"'s ORBIT_IMAGE value %s; an existing deployment only changes its pinned image through the installer.\n' "$orbit_image" >&2
+    return 0
+  fi
   if ! is_valid_orbit_image "$orbit_image"; then
     fail "ORBIT_IMAGE must be an immutable registry digest or the installer-generated local build tag."
   fi
@@ -372,7 +394,7 @@ persist_orbit_image() {
 is_valid_local_model() {
   local value="$1"
   [[ ${#value} -ge 1 && ${#value} -le 128 ]] || return 1
-  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?$ ]]
+  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?(@sha256:[0-9a-f]{64})?$ ]]
 }
 
 set_deployment_profile() {
@@ -1352,8 +1374,20 @@ run_engine() {
   if [[ "$machine_prompts" == 1 ]]; then
     extra_env+=(-e "ORBIT_CONFIGURE_PROMPTS=machine")
   fi
+  # The installer's trust marker travels with ORBIT_IMAGE, so the engine
+  # applies persist_orbit_image's own existing-deployment rule rather than
+  # re-pinning on whatever the shell happened to export.
+  if [[ "${ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE:-}" == 1 ]]; then
+    extra_env+=(-e "ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1")
+  fi
   local env_var
-  for env_var in ORBIT_CONFIGURE_APP_URL ORBIT_CONFIGURE_OIDC_ISSUER ORBIT_CONFIGURE_OIDC_CLIENT_ID; do
+  # O1-F1: ORBIT_CONFIGURE_AUTH_MODE forwarded alongside the OIDC triad — a
+  # machine-prompt --init that delegates (run above) must carry the same
+  # local/oidc choice guided_init's own bash path reads, or the containerized
+  # engine (which has no local-only path to fall back on) always assumes
+  # oidc and demands OIDC_ISSUER/OIDC_CLIENT_ID answers a local-only operator
+  # never intended to give.
+  for env_var in ORBIT_CONFIGURE_APP_URL ORBIT_CONFIGURE_OIDC_ISSUER ORBIT_CONFIGURE_OIDC_CLIENT_ID ORBIT_CONFIGURE_AUTH_MODE; do
     if [[ -n "${!env_var:-}" ]]; then
       extra_env+=(-e "${env_var}=${!env_var}")
     fi

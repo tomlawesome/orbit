@@ -27,12 +27,12 @@
  * README).
  */
 import { randomBytes, randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog, mailInMailbox, mailInSecrets, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
-import { getDocumentConfig, wrappingKey } from "@/server/documents/config";
+import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { requireInstanceAdministrator } from "@/server/authorization";
 import {
   createSmtpTransport,
@@ -40,12 +40,13 @@ import {
   type NotificationWorkerConfig,
 } from "@/server/notification-worker";
 import {
+  IMAP_HEADER_FETCH_PART,
   createImapClient,
   getImapProviderPreflightState,
   verifyImapProvider,
 } from "./imap-ingestion";
 import { deriveImapRecipientAlias, imapAliasBaseFromAccount, normalizeImapRecipientAlias } from "./core/imap-recipient";
-import { encryptMailInSecret, type MailInSecretKind } from "./core/secret-crypto";
+import { decryptMailInSecret, encryptMailInSecret, type MailInSecretKind } from "./core/secret-crypto";
 import { getImapIngestionConfig, imapConfigFromMailbox, MailInCredentialLockedError, resolveTrustedAuthservId } from "./mailbox-config";
 import { resetAllRelaysForMovedAccount, rotateAllRelaysForNewAliasKey } from "./relays";
 import { RELAY_MAX_GRACE_MS } from "./core/relay-generations";
@@ -89,6 +90,9 @@ export type MailboxProbeOutcome = typeof mailboxProbeOutcomes[number];
  */
 const PROBE_DEADLINE_MS = 30_000;
 const PROBE_POLL_INTERVAL_MS = 3_000;
+/** Kept equal to imap-ingestion.ts's own header fetch bound by hand (SR2-R1,
+ * SR2-R2), since neither constant is exported across the mail-in/core
+ * boundary. */
 
 /** Alias keys are 32 random bytes; the legacy shape check required at least 32 characters. */
 const ALIAS_KEY_BYTES = 32;
@@ -259,6 +263,51 @@ async function insertSecret(
   return { id, keyId };
 }
 
+/**
+ * Moves a secret to a new host's AAD without changing its plaintext: decrypts
+ * under the old host, re-encrypts under the new one, as a fresh row (A2-S1).
+ * Used for the alias key on a hostname-only correction, where the account
+ * (and therefore every member's derived address) has not moved, so the key
+ * itself must not either — only its ciphertext's host binding needs to catch
+ * up, the same way `insertSecret` already treats a superseded row as
+ * something to replace, not mutate in place.
+ */
+async function rewrapSecretForNewHost(
+  transaction: Transaction,
+  secretId: string,
+  kind: MailInSecretKind,
+  oldAccount: { host: string; user: string },
+  newAccount: { host: string; user: string },
+  actorUserId: string,
+): Promise<{ id: string; keyId: string }> {
+  const [row] = await transaction.select().from(mailInSecrets).where(eq(mailInSecrets.id, secretId)).limit(1);
+  if (!row) throw new AppError("mailbox_not_configured", "Mail-in has not been set up", 409);
+  const documentConfig = getDocumentConfig();
+  const keyEncryptionKey = keyEncryptionKeyFor(documentConfig, row.keyId);
+  if (!keyEncryptionKey) throw new MailInCredentialLockedError(row.keyId);
+  const envelope = {
+    envelopeVersion: row.envelopeVersion as 1,
+    algorithm: "aes-256-gcm" as const,
+    keyId: row.keyId,
+    contentIv: row.contentIv,
+    contentAuthTag: row.contentAuthTag,
+    wrappedDek: row.wrappedDek,
+    wrapIv: row.wrapIv,
+    wrapAuthTag: row.wrapAuthTag,
+  };
+  const plaintext = decryptMailInSecret(
+    row.ciphertext,
+    { secretId: row.id, kind, host: oldAccount.host, user: oldAccount.user },
+    envelope,
+    keyEncryptionKey,
+  );
+  try {
+    return await insertSecret(transaction, kind, plaintext, newAccount, actorUserId);
+  } finally {
+    plaintext.fill(0);
+  }
+}
+
 async function recordMailboxAudit(
   transaction: Transaction,
   mailboxId: string,
@@ -396,15 +445,16 @@ export async function setMailboxSettings(
     const account = { host: input.host, user: input.accountUser };
     const password = await insertSecret(transaction, "imap_password", Buffer.from(input.password, "utf8"), account, actorUserId);
     const supersededPasswordId = row?.passwordSecretId ?? null;
-    /* An alias key row is bound to host and account by its own AAD, so a
-       re-set that moves the mailbox to a different account cannot keep it —
-       it would never decrypt again. Every address is derived from the
-       account anyway, so moving account already changes them all; a fresh
-       key costs nothing extra. A correction that leaves the account alone
-       keeps the key, and therefore every member's address, untouched. */
+    /* Every derived address comes from accountUser alone (imapAliasBaseFromAccount
+       reads only IMAP_USER); host and port name where that same account is
+       reached, not who it is. So only accountUser changing is the account
+       moving -- a provider migration that keeps the mailbox address (host
+       changes, nothing else) must not reset a single member's relay (A2-S1):
+       the addresses everyone already has printed on paper are still correct. */
     let aliasKeySecretId = row?.aliasKeySecretId ?? null;
     let supersededAliasKeyId: string | null = null;
-    const accountMoved = row !== undefined && (row.host !== input.host || row.accountUser !== input.accountUser);
+    const accountMoved = row !== undefined && row.accountUser !== input.accountUser;
+    const hostOnlyChanged = row !== undefined && !accountMoved && row.host !== input.host;
     if (!aliasKeySecretId || accountMoved) {
       const aliasSecret = randomBytes(ALIAS_KEY_BYTES).toString("base64url");
       const created = await insertSecret(transaction, "alias_key", Buffer.from(aliasSecret, "utf8"), account, actorUserId);
@@ -416,6 +466,17 @@ export async function setMailboxSettings(
          every old alias row goes inactive. The next poll cycle materialises
          each member's new row under the new key (ADR-0017 slice 3). */
       await resetAllRelaysForMovedAccount(transaction, now);
+    } else if (hostOnlyChanged && row && aliasKeySecretId) {
+      /* The key's own ciphertext is bound to host by its AAD (core/secret-
+         crypto.ts), so it must move with a host correction even though its
+         VALUE -- and therefore every address it derives -- does not. Rewrap
+         rather than rotate: no relay reset, no new generation, nothing a
+         member would ever notice. */
+      const rewrapped = await rewrapSecretForNewHost(
+        transaction, aliasKeySecretId, "alias_key", { host: row.host, user: row.accountUser }, account, actorUserId,
+      );
+      supersededAliasKeyId = aliasKeySecretId;
+      aliasKeySecretId = rewrapped.id;
     }
     const values = {
       host: input.host,
@@ -583,10 +644,14 @@ export async function setMailboxIngestEnabled(
  *
  * This is the ONE operation that changes every member's address, and it is
  * deliberately not something a member can trigger: a new `alias_key` row is
- * minted, the mailbox is re-pointed at it, and every relay is rotated in the
- * same transaction with the grace the administrator chose — 0 to 90 days,
- * which is the same ceiling the environment-era configuration capped an alias
- * transition at.
+ * minted and the mailbox is re-pointed at it in one short transaction, then
+ * every relay is rotated in bounded chunks outside it (A2-R5) with the grace
+ * the administrator chose — 0 to 90 days, which is the same ceiling the
+ * environment-era configuration capped an alias transition at. The mailbox's
+ * `FOR UPDATE` lock covers only the pointer swap: holding it, or one giant
+ * transaction, for however long a full-membership rotation takes is what
+ * risked timing out on a large instance; see rotateAllRelaysForNewAliasKey's
+ * own comment for what that trades away.
  *
  * The superseded key row is KEPT, not deleted, unlike a password rotation:
  * every outgoing address is spelt in its bytes, and deleting it would cut the
@@ -602,7 +667,7 @@ export async function rotateMailboxAliasKey(
   await requireInstanceAdministrator(actorUserId);
   const grace = graceDaysSchema.parse(graceDays);
   const now = dependencies.now?.() ?? new Date();
-  await getDb().transaction(async (transaction) => {
+  const { config, aliasKeySecretId } = await getDb().transaction(async (transaction) => {
     const row = requireMailbox(await lockMailbox(transaction, expectedVersion));
     if (!row.passwordSecretId) throw new AppError("mailbox_not_configured", "Mail-in has not been set up", 409);
     const account = { host: row.host, user: row.accountUser };
@@ -617,8 +682,9 @@ export async function rotateMailboxAliasKey(
       currentId: created.id,
       byId: { [created.id]: aliasSecret },
     });
-    await rotateAllRelaysForNewAliasKey(transaction, actorUserId, config, created.id, grace * 86_400_000, now);
+    return { config, aliasKeySecretId: created.id };
   });
+  await rotateAllRelaysForNewAliasKey(actorUserId, config, aliasKeySecretId, grace * 86_400_000, now);
   return readMailboxSettings(actorUserId);
 }
 
@@ -649,11 +715,16 @@ async function recordVerificationOutcome(
   if (!row) return;
   await getDb().transaction(async (transaction) => {
     if (markState) {
+      // Compare-and-set on the version read alongside `row` (A2-R4): a slow
+      // verify must not overwrite a rotation that landed while it was
+      // running. When the version has moved on, that newer row already
+      // carries state fresher than this outcome, so there is nothing to fix.
       await transaction.update(mailInMailbox).set({
         verificationState: outcome === "verified" ? "verified" : "failed",
         verifiedAt: outcome === "verified" ? new Date() : row.verifiedAt,
         updatedAt: new Date(),
-      }).where(eq(mailInMailbox.singleton, true));
+        version: row.version + 1,
+      }).where(and(eq(mailInMailbox.singleton, true), eq(mailInMailbox.version, row.version)));
     }
     await recordMailboxAudit(transaction, row.id, actorUserId, "mail_in_credential_verified", { outcome });
   });
@@ -790,7 +861,19 @@ async function findProbeMessage(config: ImapIngestionConfig, token: string): Pro
         const uids = await client.search({ subject }, { uid: true });
         const uid = Array.isArray(uids) ? uids.at(-1) : undefined;
         if (uid !== undefined) {
-          const message = await client.fetchOne(String(uid), { headers: true }, { uid: true });
+          // A true bounded partial fetch (SR2-R2), not the unbounded
+          // `headers: true` convenience option this used to call: that one
+          // has no size limit at all, so the comment below's claim of
+          // matching the receipt path's bound (imap-ingestion.ts, SR2-R1)
+          // was not actually true until this read the header the same way.
+          // The same bare, bounded HEADER part the receipt path fetches
+          // (SR2-R1): a HEADER.FIELDS list is quoted by imapflow's compiler
+          // and refused by the server, so this probe never read anything.
+          const message = await client.fetchOne(
+            String(uid),
+            { bodyParts: [IMAP_HEADER_FETCH_PART] },
+            { uid: true },
+          );
           const headers = message && typeof message === "object" && "headers" in message
             ? (message as { headers?: Buffer }).headers
             : undefined;

@@ -66,9 +66,7 @@
  * and never touches `document.documentElement.dataset.theme` itself. The
  * closing chapter's only cleanup is its own: the demo body it drew.
  */
-import { dialPlacement } from "../../data/chart.js";
-
-const SVG_NS = "http://www.w3.org/2000/svg";
+import { drawDemoBody, ease, positionDemoBody } from "./demo-body.js";
 
 /** Ratified beat: the year makes one more circuit, 381 days out to 20 and
  *  back to 381, each leg 1500ms — the mockup's own numbers, not data. */
@@ -109,38 +107,18 @@ export const SELECTORS = Object.freeze({
   }),
 });
 
-/** Eased 0..1, matching chapter 5's own and the mockup's own `walk`.
- *  @param {number} t */
-function ease(t) {
-  return 1 - Math.pow(1 - t, 3);
-}
-
 /**
  * @param {Document} doc
  * @param {Element} dial
  * @param {number} days
  */
 function drawYearBody(doc, dial, days) {
-  const group = doc.createElementNS(SVG_NS, "g");
-  group.setAttribute("class", "tourfilm-year-body");
-  group.setAttribute("aria-hidden", "true");
-  const dot = doc.createElementNS(SVG_NS, "circle");
-  dot.setAttribute("class", "tourfilm-year-dot");
-  dot.setAttribute("r", "5.5");
-  dot.setAttribute("style", "fill:var(--accent)");
-  group.appendChild(dot);
-  dial.appendChild(group);
-  positionYearBody(group, days);
-  return group;
+  return drawDemoBody(doc, dial, days, "tourfilm-year-body", "tourfilm-year-dot");
 }
 
 /** @param {Element} group @param {number} days */
 function positionYearBody(group, days) {
-  const { x, y } = dialPlacement(days);
-  const dot = group.querySelector(".tourfilm-year-dot");
-  if (!dot) return;
-  dot.setAttribute("cx", String(x));
-  dot.setAttribute("cy", String(y));
+  positionDemoBody(group, days, "tourfilm-year-dot");
 }
 
 /** @type {import("./index.js").Chapter} */

@@ -753,6 +753,29 @@ describe("exact-image publication workflow", () => {
       expect(block).toContain("ci: acceptance");
     }
   });
+
+  // SQ1-Q2/SQ1-Q3 (#1151): GitLab's own sidecar_images job was fixed twice
+  // on real failures -- a blanket allow-failure that hid a real one (#810),
+  // and trivy's 5-minute default timeout that a cold-cache pull of a large
+  // image on a busy runner already reached (pipeline 1534) -- and this job
+  // runs the identical scan, so both fixes have to carry over rather than
+  // reopen either failure here.
+  it("sidecar image scan: never swallows a crash or a timeout behind a blanket allow-failure", () => {
+    const sidecarImages = jobBlock("sidecar_images", "fidelity");
+    expect(sidecarImages).not.toContain("continue-on-error");
+    // The one soft outcome this job accepts: blocked findings, proven by a
+    // non-empty evidence file, exit the policy step at 0. Anything that
+    // never got that far -- the evidence file missing or empty -- still
+    // exits 1 and fails the job, same as GitLab's own exit-code-3 carve-out.
+    expect(sidecarImages).toContain('if [ "${policy_status}" -eq 0 ]; then\n            exit 0\n          fi');
+    expect(sidecarImages).toContain("if [ ! -s .orbit-supply-chain/sidecar-evidence.json ]; then");
+    expect(sidecarImages).toContain("exit 1");
+  });
+
+  it("sidecar image scan: gives trivy an explicit timeout longer than its 5-minute default", () => {
+    const sidecarImages = jobBlock("sidecar_images", "fidelity");
+    expect(sidecarImages).toMatch(/"\$\{TRIVY_IMAGE\}" image \\\n\s+--timeout 10m \\/);
+  });
 });
 
 describe("publication workflow token scope", () => {

@@ -26,6 +26,7 @@ import {
   SCANNER_RECOVERY_MAX_ATTEMPTS,
 } from "@/server/documents/staging";
 import {
+  JOB_CLAIM_UPDATE,
   operationalDocumentReason,
   type ClaimedScanJob,
   type ScanRecoveryRecord,
@@ -58,16 +59,7 @@ export async function claimScannerRecoveryJobs(limit = 25): Promise<ClaimedScanJ
       for update of job skip locked
       limit ${limit}
     ), claimed as (
-      update document_jobs as job
-      set status = 'processing',
-          attempts = job.attempts + 1,
-          locked_at = now(),
-          lease_expires_at = now() + interval '10 minutes',
-          lease_token = gen_random_uuid(),
-          updated_at = now()
-      from claimable
-      where job.id = claimable.id
-      returning job.id, job.document_id, job.generation, job.lease_token
+      ${JOB_CLAIM_UPDATE}
     )
     select claimed.id, claimed.document_id as "documentId", claimed.generation,
       claimed.lease_token as "leaseToken", claimable.previous_status as "previousStatus"

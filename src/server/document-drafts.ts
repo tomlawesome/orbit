@@ -210,12 +210,21 @@ export async function approveDocumentDraft(
     }
     if (mode === "merge") {
       await transaction.update(items).set({
+        title: reviewed.title,
         provider: reviewed.provider,
         ...referenceColumns,
         updatedAt: new Date(),
       }).where(eq(items.id, itemId));
     }
-    await transaction.update(documents).set({ itemId, updatedAt: new Date() }).where(eq(documents.id, draft.documentId));
+    // Conditional on the document still being `available`: a concurrent
+    // deletion (requestDocumentDeletion) could have moved it to
+    // `pending_deletion` or beyond between requireDocumentMember's read and
+    // here, and this approval must not resurrect a link to a document on its
+    // way out (SR1-R1).
+    const [linked] = await transaction.update(documents).set({ itemId, updatedAt: new Date() })
+      .where(and(eq(documents.id, draft.documentId), eq(documents.lifecycle, "available")))
+      .returning({ id: documents.id });
+    if (!linked) throw new AppError("document_not_found", "That document is not available", 404);
     const [approved] = await transaction.update(documentDrafts)
       .set({ status: "approved", approvedItemId: itemId, updatedAt: new Date() })
       .where(and(eq(documentDrafts.id, draftId), eq(documentDrafts.status, "pending_review")))

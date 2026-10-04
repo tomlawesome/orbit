@@ -89,9 +89,15 @@ describe("mounting", () => {
     expect(overlay().style.opacity).toBe("0.62");
   });
 
-  it("never blocks a click on the real control under a hole", () => {
+  it("blocks every tap and click while showing, holes included (#1151 W3-S1)", () => {
+    // Owner decision, 2026-10-03: a hole only lets the real control show
+    // through, it never lets it be pressed — the mask is paint only, and
+    // this div still covers the full viewport for hit-testing. Tour chrome
+    // (the callout layer, the transport bar) stays pressable because it
+    // paints above this layer's own z-index, not because this div lets
+    // clicks through it.
     showVeil();
-    expect(overlay().style.pointerEvents).toBe("none");
+    expect(overlay().style.pointerEvents).toBe("auto");
   });
 });
 

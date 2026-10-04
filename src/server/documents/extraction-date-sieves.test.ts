@@ -136,6 +136,31 @@ describe("the arithmetic between two dates and a printed term", () => {
     expect(roles("term-arithmetic", bare, "2027-04-01")).toEqual([]);
   });
 
+  it("bounds how many other dates one candidate is paired against (#1151 A3-R1)", () => {
+    const text = "Renews for a further 12 months from the start date.";
+    const sieveEntry = DATE_SIEVES.find((entry) => entry.name === "term-arithmetic");
+    if (!sieveEntry) throw new Error("no sieve term-arithmetic");
+    const candidate: DateCandidate = { value: "2026-01-01", index: 0, length: 10, line: text };
+    const partner: DateCandidate = { value: "2027-01-01", index: 30, length: 10, line: text };
+    // 200 unrelated dates, none of which forms an anniversary pair with
+    // `candidate`, standing in for a long garbled scan's spurious matches.
+    const noise: DateCandidate[] = Array.from({ length: 200 }, (_, index) => ({
+      value: `2030-06-${((index % 27) + 1).toString().padStart(2, "0")}`,
+      index: 0,
+      length: 10,
+      line: text,
+    }));
+
+    // Within the cap: still read, exactly as an ordinary page's handful of
+    // dates always were.
+    expect(sieveEntry.read(text, candidate, [...noise.slice(0, 199), partner]).map((vote) => vote.role))
+      .toEqual(["start"]);
+    // Past the cap: the valid pairing is never reached, which is the
+    // deliberate bound, not a missed case -- an ordinary page never has
+    // 200 other dates to begin with.
+    expect(sieveEntry.read(text, candidate, [...noise, partner])).toEqual([]);
+  });
+
   it("reads a term printed a long way from the dates it governs", () => {
     const gym = [
       "Membership start date 2 March 2026",

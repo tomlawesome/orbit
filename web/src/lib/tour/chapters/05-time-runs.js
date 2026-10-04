@@ -45,7 +45,7 @@
  * tween frame purely to re-sync the ring to the body's new box. Nothing here
  * reaches past the vocabulary into veil.js directly.
  */
-import { dialPlacement } from "../../data/chart.js";
+import { drawDemoBody, ease, positionDemoBody } from "./demo-body.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -141,37 +141,18 @@ function drawDanger(doc, dial) {
   return { group, wash, swell, line };
 }
 
-/** Eased 0..1, matching the mockup's own `walk`. @param {number} t */
-function ease(t) {
-  return 1 - Math.pow(1 - t, 3);
-}
-
 /**
  * @param {Document} doc
  * @param {Element} dial
  * @param {number} days
  */
 function drawTimeBody(doc, dial, days) {
-  const group = doc.createElementNS(SVG_NS, "g");
-  group.setAttribute("class", "tourfilm-time-body");
-  group.setAttribute("aria-hidden", "true");
-  const dot = doc.createElementNS(SVG_NS, "circle");
-  dot.setAttribute("class", "tourfilm-time-dot");
-  dot.setAttribute("r", "5.5");
-  dot.setAttribute("style", "fill:var(--accent)");
-  group.appendChild(dot);
-  dial.appendChild(group);
-  positionTimeBody(group, days);
-  return group;
+  return drawDemoBody(doc, dial, days, "tourfilm-time-body", "tourfilm-time-dot");
 }
 
 /** @param {Element} group @param {number} days */
 function positionTimeBody(group, days) {
-  const { x, y } = dialPlacement(days);
-  const dot = group.querySelector(".tourfilm-time-dot");
-  if (!dot) return;
-  dot.setAttribute("cx", String(x));
-  dot.setAttribute("cy", String(y));
+  positionDemoBody(group, days, "tourfilm-time-dot");
 }
 
 /** @type {import("./index.js").Chapter} */

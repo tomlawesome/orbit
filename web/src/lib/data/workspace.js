@@ -408,11 +408,16 @@ export class WorkspaceError extends Error {
  * decode into, so the shape is written down next to the URL that produces it
  * and TypeScript infers T from that annotation.
  *
+ * Exported only so tests/unit/workspace-json.test.js can drive it directly
+ * with a fake response, the way alerts.js's own helpers take fakes rather
+ * than a mocked global — every real caller in this module already reached
+ * it as a plain local function, and still does.
+ *
  * @template T
  * @param {Response} response
  * @returns {Promise<T>}
  */
-async function json(response) {
+export async function json(response) {
   const body = await response.json().catch(() => null);
   if (!response.ok) {
     /* Signed out is not an error state the screens handle — it is a journey:
@@ -432,6 +437,17 @@ async function json(response) {
     throw new WorkspaceError(message, {
       status: response.status,
       code: body?.error?.code,
+    });
+  }
+  if (body === null) {
+    /* A 2xx whose body does not parse as JSON — a proxy restart, a cached
+       offline page a service worker served with status 200, anything that
+       answered but was never the real route — is exactly as unreachable as
+       a non-2xx with no body. Every caller here already expects a decoded
+       object back and dereferences it immediately, so without this they hit
+       their own bare TypeError instead of the message above (#1151 W2-R3). */
+    throw new WorkspaceError(`Orbit could not be reached (${response.status})`, {
+      status: response.status,
     });
   }
   return body;
@@ -764,7 +780,15 @@ function todayOf(workspace) {
 export async function readHome(fetchImpl) {
   const [workspace, session, inbox] = await Promise.all([
     readWorkspace(fetchImpl),
-    readSession({}, fetchImpl),
+    /* Additive, the same way every other read in this Promise.all is
+       (#1151 W2-R4): every caller below only ever reads `session?.user`,
+       so a session-endpoint hiccup should cost the reader that one field,
+       not the whole screen it arrives alongside — which had already
+       loaded by the time Promise.all would otherwise have thrown. This
+       was the one unguarded read standing out among guarded neighbours,
+       repeated at every screen below that takes workspace and session
+       together. */
+    readSession({}, fetchImpl).catch(() => null),
     /* Additive: mail-in suggestions enrich home, they must never sink it. */
     readInbox(fetchImpl).catch(() => /** @type {Inbox} */ ({ receipts: [] })),
   ]);
@@ -810,23 +834,6 @@ export async function readHome(fetchImpl) {
 }
 
 /**
- * Everything the corridor renders (#461): the whole workspace (the corridor
- * spans every system), the signed-in user for the chrome, and the reckoning
- * date. The transform itself (corridorOf) is pure and lives in chart.js.
- */
-export async function readDueNext() {
-  const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
-  const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
-  return {
-    workspace,
-    primary,
-    household: workspace.households.find((one) => one.id === primary) ?? null,
-    user: session?.user ?? null,
-    today: todayOf(workspace),
-  };
-}
-
-/**
  * Everything the inbox screen renders (#463): the raw receipts in their
  * bounded groups, the approvable ones ALSO in suggestion shape (the approve
  * protocol's input), the relay summary, and a pinned "now" so elapsed-time
@@ -835,7 +842,7 @@ export async function readDueNext() {
 export async function readInboxScreen() {
   const [workspace, session, inbox, relay] = await Promise.all([
     readWorkspace(),
-    readSession(),
+    readSession().catch(() => null),
     readInbox().catch(() => /** @type {Inbox} */ ({ receipts: [] })),
     /* Additive: the relaybar is a summary line, not the screen's subject. */
     readRelay().catch(() => UNAVAILABLE_RELAY),
@@ -843,7 +850,7 @@ export async function readInboxScreen() {
   const receipts = inbox.receipts ?? [];
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   const caught = receipts
-    .filter((receipt) => receipt.classification !== "waiting")
+    .filter((receipt) => receipt.classification !== "waiting" && receipt.receivedAt)
     .map((receipt) => receipt.receivedAt)
     .sort()
     .pop() ?? null;
@@ -887,7 +894,7 @@ export async function readInboxScreen() {
 export async function readSettingsScreen() {
   const [workspace, session, inbox, relay, reminders] = await Promise.all([
     readWorkspace(),
-    readSession(),
+    readSession().catch(() => null),
     readInbox().catch(() => /** @type {Inbox} */ ({ receipts: [] })),
     /* Additive: the helm's relay card is a summary, not the screen's subject. */
     readRelay().catch(() => UNAVAILABLE_RELAY),
@@ -1038,7 +1045,7 @@ export async function readAdminScreen() {
   const [workspace, session, users, mailbox, contact, rotation, metadata, recoveryBundle, health, operations] =
     await Promise.all([
     readWorkspace(),
-    readSession(),
+    readSession().catch(() => null),
     json(await fetch("/api/admin/users", { credentials: "same-origin" }))
       .then(
         (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean, disabledAt?: ?string }[] }} */ body) =>
@@ -1359,8 +1366,13 @@ function instanceLineOf(build) {
   return parts.join(" · ");
 }
 
-/** @param {string} iso */
-const shortDate = (iso) =>
+/**
+ * Named apart from format.js's and belt.js's own `shortDate` (#1151 W2-Q5):
+ * those take a bare date and append T00:00:00Z themselves; this one takes a
+ * document's full `availableAt` instant as it already arrives from the API.
+ * @param {string} iso  a full ISO instant, not a bare date
+ */
+const shortAddedDate = (iso) =>
   new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 
 /** @param {number} bytes */
@@ -1377,10 +1389,13 @@ const sizeLabel = (bytes) =>
  * `version`/`updatedAt`/`snoozedUntil` ride along for #424's writes.
  *
  * @param {string} id  an item id, or (#434) a mail-in receipt id
+ * @param {Workspace} [workspace]  a workspace the caller already holds
+ *   (#1151 W2-Q4: readBelt reads one for itself before falling back to
+ *   this for a mail-in suggestion, and must not read a second one)
  * @returns {Promise<?ItemView>}
  */
-export async function readItem(id) {
-  const workspace = await readWorkspace();
+export async function readItem(id, workspace) {
+  workspace ??= await readWorkspace();
   for (const household of workspace.households) {
     const item = (household.items ?? []).find((one) => one.id === id);
     if (!item) continue;
@@ -1398,7 +1413,7 @@ export async function readItem(id) {
       section: sections.get(item.sectionId) ?? null,
       documents: (body.documents ?? []).map((doc) => ({
         name: doc.displayName,
-        meta: `added ${shortDate(doc.availableAt)} · ${sizeLabel(doc.sizeBytes)}`,
+        meta: `added ${shortAddedDate(doc.availableAt)} · ${sizeLabel(doc.sizeBytes)}`,
       })),
     };
   }
@@ -1452,7 +1467,7 @@ export async function readItemDocuments(householdId, itemId) {
     name: doc.displayName,
     meta: [
       sizeLabel(doc.sizeBytes),
-      `added ${shortDate(doc.availableAt)}`,
+      `added ${shortAddedDate(doc.availableAt)}`,
       doc.lifecycle === "pending_deletion" ? "removed" : null,
     ].filter(Boolean).join(" · "),
   }));
@@ -2101,7 +2116,7 @@ export async function sendSetupLink(userId, options = {}) {
  * @param {string} householdId
  */
 export async function readHouseholdScreen(householdId) {
-  const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
+  const [workspace, session] = await Promise.all([readWorkspace(), readSession().catch(() => null)]);
   const [roster, joinRequests, invitations] = await Promise.all([
     /** @type {Promise<Partial<Roster>>} */ (
       json(await fetch(`/api/households/${householdId}/members`, { credentials: "same-origin" }))
@@ -2325,7 +2340,7 @@ export async function withdrawInvitation(householdId, invitationId) {
  * @param {string} id  the centred item, or (#434) a mail-in receipt
  */
 export async function readBelt(id) {
-  const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
+  const [workspace, session] = await Promise.all([readWorkspace(), readSession().catch(() => null)]);
   const today = todayOf(workspace);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   let household = workspace.households.find((one) =>
@@ -2334,7 +2349,7 @@ export async function readBelt(id) {
   /** @type {?ItemView} */
   let suggestion = null;
   if (!household) {
-    const found = await readItem(id);
+    const found = await readItem(id, workspace);
     if (!found?.suggestion) return null;
     suggestion = found;
     household = workspace.households.find((one) => one.id === (found.householdId ?? primary))

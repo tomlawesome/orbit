@@ -1,7 +1,19 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// O2-Q12: spawnSync is mocked (not spied) because it's a Node builtin ESM
+// export — vi.spyOn can't redefine it directly (see vitest's module-mocking
+// docs). The mock delegates to the real implementation so every other test
+// in this file (which spawns the real `tar` binary throughout) is unaffected;
+// only the one test below reads `spawnSyncMock.mock.calls`.
+const spawnSyncMock = vi.hoisted(() => vi.fn());
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  spawnSyncMock.mockImplementation(actual.spawnSync);
+  return { ...actual, spawnSync: spawnSyncMock };
+});
 
 import { createTar, extractTar } from "./recovery-bundle";
 import {
@@ -13,6 +25,7 @@ import {
   RestoreRun,
   createDockerComposeRestoreAdapter,
   deriveRestorePaths,
+  listOrphanedCheckpoints,
   loadRestoreJournal,
   preflightValidateBundle,
   recoverRestore,
@@ -64,6 +77,7 @@ function lookupReportField(reports: CorrespondenceReports, query: string): strin
 class FakeRestoreAdapter implements RestoreDockerAdapter {
   stopCalls = 0;
   startCalls = 0;
+  stopOk = true;
   healthOk = true;
   pgRestoreOk = true;
   replaceDocumentsOk = true;
@@ -97,6 +111,7 @@ class FakeRestoreAdapter implements RestoreDockerAdapter {
   }
   stopApp(): boolean {
     this.stopCalls += 1;
+    if (!this.stopOk) return false;
     this.appRunning = false;
     return true;
   }
@@ -325,6 +340,35 @@ describe("Interruption-test matrix: every mutating step has a journal entry befo
     expect(readFileSync(join(liveDocumentsRoot, "objects", ORIGINAL_KEY.slice(0, 2), ORIGINAL_KEY.slice(2, 4), `${ORIGINAL_KEY}.bin`))).toHaveLength(10);
   });
 
+  it("O2-R8: a failed stop during rollback aborts before reapplying the checkpoint, instead of running pg_restore/document-replace under a still-running app", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    run.createCheckpoint();
+
+    const newDocumentsRoot = join(sandbox, "new-documents");
+    buildDocumentTree(newDocumentsRoot, NEW_KEY, 20);
+    run.cutoverDocuments(tarOf(newDocumentsRoot, join(sandbox, "new-documents.tar")));
+    const newDatabaseDump = join(sandbox, "new-database.dump");
+    writeFileSync(newDatabaseDump, JSON.stringify(reportsFor(NEW_KEY, 20)));
+    run.cutoverDatabase(newDatabaseDump);
+
+    // Simulated interruption right here (no finalize): dispose() attempts
+    // automatic rollback, and this time stopApp() itself fails.
+    adapter.stopOk = false;
+    const result = run.dispose();
+    expect(result.outcome).toBe("rollback-failed");
+    // The live document tree still holds the post-cutover (NEW_KEY) content
+    // — rollback() must never have reached applyCheckpointState's
+    // replaceDocumentsFromArchive/restoreActiveDatabase once stopApp()
+    // failed, which the old code ignored and proceeded regardless.
+    expect(
+      readFileSync(join(liveDocumentsRoot, "objects", NEW_KEY.slice(0, 2), NEW_KEY.slice(2, 4), `${NEW_KEY}.bin`)),
+    ).toHaveLength(20);
+  });
+
   it("rollback itself failing (e.g. health never returns) durably records rollback-failed and leaves the checkpoint for --recover, without deleting it", () => {
     const liveDocumentsRoot = join(sandbox, "live-documents");
     buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
@@ -450,6 +494,95 @@ describe("recoverRestore (`--recover` equivalent, restore.sh:798-831, guarantees
     expect(recoverRestore({ adapter, paths, workDir: recoverWorkDir1 }).outcome).toBe("completed");
     expect(readFileSync(join(liveDocumentsRoot, "objects", ORIGINAL_KEY.slice(0, 2), ORIGINAL_KEY.slice(2, 4), `${ORIGINAL_KEY}.bin`))).toHaveLength(10);
     expect(() => readFileSync(paths.journalPath)).toThrow();
+  });
+
+  // O2-R10: a checkpoint directory createCheckpoint never finished
+  // journaling (crash, kill, or a capture-step refusal between prepare()
+  // and the first writeRestoreJournal call) used to be invisible to
+  // --recover — it only ever looks at the journal's own restoreId — and to
+  // every later restore's own fresh mkdtempSync, so it stayed on disk
+  // forever.
+  it("O2-R10: --recover finds and removes a checkpoint directory orphaned before its journal ever existed", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    // prepare() alone: creates the checkpoint directory and its marker,
+    // then simulate a crash before createCheckpoint() ever runs — exactly
+    // the window the marker exists to cover.
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    const orphanDirectory = run.checkpointDirectory;
+    expect(existsSync(join(orphanDirectory, ".preparing"))).toBe(true);
+    expect(existsSync(paths.journalPath)).toBe(false);
+
+    expect(listOrphanedCheckpoints(paths.restoreRoot)).toEqual([{ restoreId: run.restoreId, checkpointDirectory: orphanDirectory }]);
+
+    const recoverWorkDir = mkdtempSync(join(sandbox, "recover-work-"));
+    expect(recoverRestore({ adapter, paths, workDir: recoverWorkDir }).outcome).toBe("no-checkpoint");
+    expect(existsSync(orphanDirectory)).toBe(false);
+    expect(listOrphanedCheckpoints(paths.restoreRoot)).toEqual([]);
+  });
+
+  it("O2-R10: a checkpoint that does get journaled is never reported or removed as an orphan", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    expect(existsSync(join(run.checkpointDirectory, ".preparing"))).toBe(true);
+    run.createCheckpoint();
+    // Once journaled, the marker is gone and the checkpoint is no longer an orphan.
+    expect(existsSync(join(run.checkpointDirectory, ".preparing"))).toBe(false);
+    expect(listOrphanedCheckpoints(paths.restoreRoot)).toEqual([]);
+    run.dispose();
+  });
+});
+
+describe("document-KEK rotation guard on restore (SS1-S3)", () => {
+  it("refuses to prepare a restore while a rotation is open (DOCUMENT_KEK_NEXT_FILE's conventional sibling file exists)", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    writeFileSync(join(sandbox, "document-kek-next"), `${"b".repeat(64)}\n`, { mode: 0o600 });
+
+    expect(() => RestoreRun.prepare({ adapter, paths, workDir })).toThrow(RestoreEngineRefusal);
+    // Refused before any live mutation or even a restoreRoot/checkpoint directory.
+    expect(existsSync(paths.restoreRoot)).toBe(false);
+  });
+
+  it("proceeds normally once the rotation marker is gone", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    run.createCheckpoint();
+    run.dispose();
+  });
+
+  it("refuses --recover while a rotation is open, leaving the live key and the checkpoint untouched", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    run.createCheckpoint();
+    const newDocumentsRoot = join(sandbox, "new-documents");
+    buildDocumentTree(newDocumentsRoot, NEW_KEY, 20);
+    run.cutoverDocuments(tarOf(newDocumentsRoot, join(sandbox, "new-documents.tar")));
+    adapter.healthOk = false;
+    expect(run.dispose().outcome).toBe("rollback-failed");
+
+    // A rotation opens between the failed restore and the operator's --recover.
+    writeFileSync(join(sandbox, "document-kek-next"), `${"b".repeat(64)}\n`, { mode: 0o600 });
+    adapter.healthOk = true;
+    const liveKeyBefore = readFileSync(paths.documentKekFile, "utf8");
+    const recoverWorkDir = mkdtempSync(join(sandbox, "recover-work-"));
+
+    expect(() => recoverRestore({ adapter, paths, workDir: recoverWorkDir })).toThrow(RestoreEngineRefusal);
+    expect(readFileSync(paths.documentKekFile, "utf8")).toBe(liveKeyBefore);
+    expect(readFileSync(paths.journalPath, "utf8")).toContain("state=rollback-failed\n");
   });
 });
 
@@ -660,5 +793,28 @@ describe("createDockerComposeRestoreAdapter's psql maxBuffer (#383)", () => {
     const adapter = createDockerComposeRestoreAdapter({ envFile, env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` } });
     const report = adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto);
     expect(report.length).toBeGreaterThan(1024 * 1024);
+  });
+});
+
+describe("createCheckpoint document-archive validation (O2-Q12)", () => {
+  beforeEach(() => {
+    spawnSyncMock.mockClear();
+  });
+
+  it("validates the checkpoint's documents.tar only once, not once directly and again inside self-verification", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+
+    run.createCheckpoint();
+    expect(run.isCheckpointVerified()).toBe(true);
+
+    const checkpointDocuments = join(run.checkpointDirectory, "documents.tar");
+    const verboseListingsOfCheckpointDocuments = spawnSyncMock.mock.calls.filter(
+      (call) => call[0] === "tar" && Array.isArray(call[1]) && call[1][0] === "-tvf" && call[1][1] === checkpointDocuments,
+    );
+    expect(verboseListingsOfCheckpointDocuments.length).toBe(1);
   });
 });

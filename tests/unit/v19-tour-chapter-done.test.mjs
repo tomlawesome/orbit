@@ -268,14 +268,16 @@ describe("the beats, against a recorder", () => {
     expect(pressed).toEqual([SELECTORS.DESK.done]);
   });
 
-  it("marks done-complete, done-swung and done-round", async () => {
+  // T-Q8 (#1151): renamed from "marks done-complete, done-swung and
+  // done-round", which promised all three but only ever checked one --
+  // done-complete and done-round ride inside their callouts' own options,
+  // which this recorder's `callout` stub does not see. All three are
+  // pinned for real below, against "the chapter played for real".
+  it("marks done-swung", async () => {
     const { log, ctx } = recorder();
     await done.play(ctx);
     const marks = log.filter(([word]) => word === "mark").map(([, name]) => name);
     expect(marks).toEqual(["done-swung"]);
-    /* done-complete and done-round ride inside their callouts' own options,
-       which this recorder's `callout` stub does not see -- pinned for real
-       below. */
   });
 });
 

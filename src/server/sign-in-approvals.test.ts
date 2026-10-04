@@ -164,7 +164,15 @@ vi.mock("@/db", async () => {
           ...value,
         };
         rowsFor(table).push(row);
-        return Promise.resolve();
+        const keys = columnKeys(table as Record<string, { name?: string }>);
+        return {
+          returning(selection: Record<string, unknown>) {
+            return Promise.resolve([project(row, selection, keys)]);
+          },
+          then(resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) {
+            return Promise.resolve().then(resolve, reject);
+          },
+        };
       },
     };
   }
@@ -378,6 +386,29 @@ describe("a pending sign-in, from the password to the session (ADR-0027 §4-§6)
     expect(JSON.stringify(store.approvals[0])).not.toContain(pending.claim);
   });
 
+  it("writes the pending row before the mail is sent, so a crash before the send leaves a row to expire rather than a dead link (#1151 A1-R1)", async () => {
+    let rowExistedBeforeSend = false;
+    const orderedMailer = {
+      async sendEmail(notification: { to: string; subject: string; text: string }) {
+        // The row must already exist, unsent, by the time the provider is
+        // asked to send -- that is the whole of the fix: a crash right here
+        // leaves a harmless, unsent row rather than a mailed link nothing in
+        // the database can resolve.
+        rowExistedBeforeSend = store.approvals.length === 1
+          && store.approvals[0].sendCount === 0
+          && store.approvals[0].lastSentAt === null;
+        posted.push({ to: notification.to, subject: notification.subject, text: notification.text });
+      },
+    };
+
+    await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer: orderedMailer });
+
+    expect(rowExistedBeforeSend).toBe(true);
+    // The outcome still lands once the send completes.
+    expect(store.approvals[0].sendCount).toBe(1);
+    expect(store.approvals[0].lastSentAt).not.toBeNull();
+  });
+
   it("holds the tab until somebody presses Approve, then hands it one session", async () => {
     const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: "203.0.113.9" }, { mailer });
     const token = tokenFromLatestMail();
@@ -388,6 +419,27 @@ describe("a pending sign-in, from the password to the session (ADR-0027 §4-§6)
     expect(await collectSignInApproval(pending.claim)).toEqual({ state: "approved", userId: USER });
     /* Spent: a second tab sharing the cookie gets nothing, so one approval is
        one session and never two. */
+    expect(await collectSignInApproval(pending.claim)).toEqual({ state: "unknown" });
+  });
+
+  it("un-spends the approval when minting the session fails, rather than stranding it (#1151 SR1-R7)", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: "203.0.113.9" }, { mailer });
+    const token = tokenFromLatestMail();
+    await decideSignInApproval(token, "approved");
+
+    const mintFailure = new Error("session insert unavailable");
+    await expect(collectSignInApproval(pending.claim, async () => { throw mintFailure; }))
+      .rejects.toThrow(mintFailure);
+    // A crash here used to be permanent: consumedAt was already set, the
+    // claim is single-use and the mailed link already spent, with nothing
+    // left to retry against. It must come back open instead.
+    expect(store.approvals[0].consumedAt).toBeNull();
+
+    // The next poll -- this time minting succeeds -- gets the session.
+    const minted = { token: "session-token", expiresAt: new Date(NINE.getTime() + 60_000) };
+    await expect(collectSignInApproval(pending.claim, async () => minted))
+      .resolves.toEqual({ state: "approved", userId: USER, session: minted });
+    // Spent for good this time: a third attempt gets nothing.
     expect(await collectSignInApproval(pending.claim)).toEqual({ state: "unknown" });
   });
 
@@ -459,6 +511,27 @@ describe("a refusal (ADR-0027 §8 and consequences)", () => {
     expect(await collectSignInApproval(pending.claim)).toEqual({ state: "denied" });
     expect(store.credentials[0].failedAttemptCount).toBe(1);
     expect(store.audit.map((row) => row.action)).toContain("sign_in_refused");
+  });
+
+  it("locks the credential after enough refusals, the same way enough wrong passwords would (#1151 A1-F1)", async () => {
+    /* An attacker who holds the correct password but keeps getting denied
+       must be slowed down exactly as a wrong-password guesser is -- not just
+       counted. Each send resets the clock well past the hourly mail limit so
+       every refusal below reaches a fresh pending sign-in, which is the only
+       thing the hourly cap bounds. */
+    let now = NINE;
+    for (let refusal = 0; refusal < 6; refusal += 1) {
+      now = at(now, refusal === 0 ? 0 : 61 * 60 * 1000);
+      const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: null }, { mailer, now });
+      const token = tokenFromLatestMail();
+      await decideSignInApproval(token, "denied");
+      void pending;
+    }
+
+    expect(store.credentials[0].failedAttemptCount).toBe(6);
+    const lockedUntil = store.credentials[0].lockedUntil as Date | null;
+    expect(lockedUntil).not.toBeNull();
+    expect((lockedUntil as Date).getTime()).toBeGreaterThan(now.getTime());
   });
 
   it("tells the account holder once, on their next successful sign-in", async () => {

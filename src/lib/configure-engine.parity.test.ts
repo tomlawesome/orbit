@@ -374,25 +374,32 @@ describe("re-run preserving secrets: an operator hand-edit survives untouched", 
 });
 
 describe("persistOrbitImage: bash vs engine", () => {
-  it("an existing active ORBIT_IMAGE assignment is updated identically in place", () => {
-    const bashDir = makeBashFixture("ORBIT_IMAGE=orbit-local:aaaaaaaaaaaa\nOTHER=1\n");
-    // configure.sh's persist_orbit_image is only reachable through the bare
-    // flow; drive it directly by sourcing the equivalent behaviour: run the
-    // bare flow with ORBIT_IMAGE set against a fixture that already has an
-    // active assignment, using the fake-docker-free session/secret steps'
-    // preconditions satisfied by a schema-versioned file.
-    writeFileSync(join(bashDir, ENVIRONMENT_FILE_NAME), "ORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_IMAGE=orbit-local:aaaaaaaaaaaa\nOTHER=1\n", {
-      mode: 0o600,
-    });
+  // O1-Q4: this used to build a hand-written "what bash would produce"
+  // fixture and compare the engine against that string, never actually
+  // spawning bash — so a real divergence between configure.sh's
+  // persist_orbit_image and this engine's persistOrbitImage could never be
+  // caught here. configure.sh's persist_orbit_image is only reachable
+  // through the bare flow, so (mirroring the --set-deployment-profile
+  // sibling tests' own two-step pattern) a first bare run establishes the
+  // baseline ORBIT_IMAGE, and a second run is what actually exercises
+  // "update an existing active assignment in place" on both sides.
+  it("configure.sh's bare-flow persist_orbit_image / engine persistOrbitImage update an existing active ORBIT_IMAGE assignment identically in place", () => {
+    const bashDir = makeBashFixture();
+    expect(runBashConfigure(bashDir, [], { ORBIT_IMAGE: "orbit-local:aaaaaaaaaaaa" }).status).toBe(0);
+    // The second run re-pins an EXISTING deployment, which a bare configure.sh
+    // refuses unless the installer's trust marker is present (#1151 O1-S4);
+    // install.sh sets it alongside ORBIT_IMAGE, and the engine's
+    // persistOrbitImage is only ever reached through that installer path, so
+    // the like-for-like comparison is the trusted one (#1204).
+    expect(
+      runBashConfigure(bashDir, [], { ORBIT_IMAGE: "orbit-local:bbbbbbbbbbbb", ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE: "1" }).status,
+    ).toBe(0);
 
     const engineDir = makeEngineFixture();
-    writeFileSync(join(engineDir, ENVIRONMENT_FILE_NAME), "ORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_IMAGE=orbit-local:aaaaaaaaaaaa\nOTHER=1\n", {
-      mode: 0o600,
-    });
+    runConfigureApply(engineDir, "orbit-local:aaaaaaaaaaaa");
     persistOrbitImage(engineDir, "orbit-local:bbbbbbbbbbbb");
 
-    expect(readFileSync(join(engineDir, ENVIRONMENT_FILE_NAME), "utf8")).toBe(
-      "ORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_IMAGE=orbit-local:bbbbbbbbbbbb\nOTHER=1\n",
-    );
+    expect(snapshotConfigureOutputs(engineDir)).toEqual(snapshotConfigureOutputs(bashDir));
+    expect(readFileSync(join(engineDir, ENVIRONMENT_FILE_NAME), "utf8")).toContain("ORBIT_IMAGE=orbit-local:bbbbbbbbbbbb\n");
   });
 });

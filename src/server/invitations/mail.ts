@@ -48,13 +48,20 @@ export function formatInvitationDate(when: Date): string {
   return `${when.getUTCDate()} ${MONTHS[when.getUTCMonth()]} ${when.getUTCFullYear()}`;
 }
 
-/** The first word of a chosen display name — "Sam would like you in theirs". */
-function firstName(name: string): string {
+/**
+ * The first word of a chosen display name — "Sam would like you in theirs".
+ *
+ * Exported for `local-credentials/mail.ts` and `sign-in-approvals/mail.ts`
+ * (#1151 A1-Q5), which already import `formatInvitationDate` from here and
+ * used to carry their own verbatim copy of this and `hostOf` instead of
+ * importing them too.
+ */
+export function firstName(name: string): string {
   return name.trim().split(/\s+/u)[0] || name.trim();
 }
 
 /** The instance's own host, read off the one link rather than passed twice. */
-function hostOf(link: string): string {
+export function hostOf(link: string): string {
   try {
     return new URL(link).host;
   } catch {

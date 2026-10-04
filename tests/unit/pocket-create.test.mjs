@@ -88,7 +88,7 @@ describe("the refusal beside the save button", () => {
 
   it("names the first thing missing, in order", () => {
     expect(refusalOf(filled({ name: "  " }))).toBe("not yet — give it a name");
-    expect(refusalOf(filled({ cost: "eighty" }))).toBe("not yet — the cost is not a sum of money");
+    expect(refusalOf(filled({ cost: "eighty" }))).toBe("not yet — use a dot for pence, for example 12.50");
     expect(refusalOf(filled({ dueDate: "" }))).toBe("not yet — a repeat needs a due date");
     expect(refusalOf(filled({ dueDate: "", recurrence: 0 }))).toBeNull();
     expect(refusalOf(filled())).toBeNull();
@@ -106,6 +106,19 @@ describe("the entry's fields", () => {
     expect(minorOf("84")).toBe(8400);
     expect(minorOf("£1,200.5")).toBe(120050);
     expect(minorOf("12.345")).toBeNaN();
+  });
+
+  // #1151 W1-F1/W1-S4: a comma is only ever a thousands separator (this is a
+  // UK product), and only in a valid grouping position — never silently
+  // reinterpreted as a decimal point.
+  it("accepts a comma only as a thousands separator in a valid position", () => {
+    expect(minorOf("12,50")).toBeNaN();
+    expect(minorOf("1,250")).toBe(125000);
+    expect(minorOf("1,250.00")).toBe(125000);
+    expect(minorOf("12.50")).toBe(1250);
+    expect(minorOf("1,25")).toBeNaN();
+    expect(minorOf("1,2500")).toBeNaN();
+    expect(minorOf("")).toBeUndefined();
   });
 
   it("keeps reminders furthest-first and toggles one day at a time", () => {

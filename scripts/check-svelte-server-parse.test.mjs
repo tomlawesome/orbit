@@ -8,7 +8,11 @@ describe("serverParseError (#1138)", () => {
   });
 
   it("flags one inside a nested function", () => {
-    expect(serverParseError("<script>function g(a) { return a.map((/** @type {string} */ p) => p); }</script>")).not.toBeNull();
+    // X-Q6 (#1151): a bare .not.toBeNull() passes for any non-null string,
+    // including an unrelated parse failure -- pin the same message the
+    // top-level case asserts, so this actually proves the nested case hits
+    // #1138's bug and not some other syntax error.
+    expect(serverParseError("<script>function g(a) { return a.map((/** @type {string} */ p) => p); }</script>")).toMatch(/destructuring|binding/i);
   });
 
   it("passes the same function typed on its variable", () => {

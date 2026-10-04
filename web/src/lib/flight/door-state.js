@@ -299,6 +299,11 @@ export function cardMessageFor(code) {
  * fallback, not the mechanism.
  */
 export const STARTING_BACKSTOP_MS = 120_000;
+/** How long the waiting card keeps asking after an approval mail goes out:
+    the server's own SIGN_IN_APPROVAL_TTL_MS (src/server/sign-in-approvals.ts),
+    kept equal by hand. Shorter and a legitimate late click on the emailed
+    link is told it lapsed while the server would still have taken it. */
+export const APPROVAL_BACKSTOP_MS = 10 * 60_000;
 
 /**
  * The other pure decision in this module (#869): given the state

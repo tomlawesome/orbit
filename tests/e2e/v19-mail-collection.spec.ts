@@ -375,7 +375,14 @@ test("a message with no readable document lands in a bounded state on the relay"
     contentType: "application/pdf",
   });
 
-  await waitForReceipts(page, 1);
+  // A2-Q8 (#1151): "waiting" (src/server/mail-in/core/review-state.ts) is
+  // the one classification still in flight -- "Orbit is still preparing
+  // this private review" -- so stopping at the first poll that merely
+  // *found* the receipt let this test land on that transient state and skip
+  // its only real assertion below without ever proving the hostile payload
+  // actually bounces. Same override as the canApprove wait above: hold for
+  // the classification to settle first.
+  await waitForReceipts(page, 1, 120_000, (receipt) => receipt.classification !== "waiting");
 
   // Whatever bounded state it reached, the user can SEE that mail arrived:
   // either it is reviewable (a suggestion) or its failure is dated on the
@@ -383,7 +390,8 @@ test("a message with no readable document lands in a bounded state on the relay"
   const inbox = (await (await page.request.get("/api/imap-inbox")).json()) as { receipts: Receipt[] };
   const receipt = inbox.receipts[0];
   expect(receipt.message.length).toBeGreaterThan(0);
-  if (!receipt.canApprove && receipt.classification !== "waiting") {
+  expect(receipt.classification).not.toBe("waiting");
+  if (!receipt.canApprove) {
     await page.goto("/settings/mail");
     await expect(page.locator(".failures")).toContainText("arrived, but could not be read");
   }

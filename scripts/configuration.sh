@@ -18,6 +18,18 @@ orbit_image_value=""
 applied_version_value=""
 applied_digest_value=""
 compose_project_value=""
+# migrate_file's own scratch file (#1151 O1-R4): Ctrl-C or a SIGTERM mid-
+# migration previously left "${file}.migrating.XXXXXX" behind forever --
+# migrate_file's own error paths each removed it on a normal failure, but
+# nothing ran if the process was simply killed between them. A trap fires
+# this cleanup on any exit, signalled or not; rm -f is a no-op once the
+# file is already gone (removed on an ordinary failure, or renamed away on
+# success).
+migration_temp_file=""
+cleanup_migration_temp() {
+  [[ -z "$migration_temp_file" ]] || rm -f -- "$migration_temp_file" 2>/dev/null || true
+}
+trap cleanup_migration_temp EXIT
 
 fail_code() {
   printf '%s\n' "$1" >&2
@@ -55,6 +67,12 @@ is_deprecated_secret() {
   esac
   return 1
 }
+
+# Direct-value/_FILE pairs the app's own contract (src/lib/config-contract.ts's
+# exclusivePairs) rejects as mutually exclusive: setting both certifies a file
+# the app refuses at runtime. Same nine pairs, same order, kept side by side
+# with that list.
+readonly secret_file_pairs='SESSION_SECRET:SESSION_SECRET_FILE DOCUMENT_KEK:DOCUMENT_KEK_FILE DOCUMENT_KEK_NEXT:DOCUMENT_KEK_NEXT_FILE POSTGRES_PASSWORD:POSTGRES_PASSWORD_FILE OIDC_CLIENT_SECRET:OIDC_CLIENT_SECRET_FILE VAPID_PRIVATE_KEY:VAPID_PRIVATE_KEY_FILE SMTP_PASSWORD:SMTP_PASSWORD_FILE DATABASE_URL:DATABASE_URL_FILE SMTP_URL:SMTP_URL_FILE'
 
 is_control_free() {
   local value="$1" char i
@@ -126,7 +144,7 @@ check_file_safety() {
 
 parse_file() {
   local file="$1" line key value line_number=0 assignment_count=0
-  local -A seen=()
+  local -A seen=() values=()
   parsed_keys=(); schema_present=0; applied_version_present=0; applied_digest_present=0; compose_project_present=0
   schema_value=""; orbit_image_value=""; applied_version_value=""; applied_digest_value=""; compose_project_value=""
   check_file_safety "$file"
@@ -141,6 +159,7 @@ parse_file() {
     key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
     [[ -z "${seen[$key]:-}" ]] || fail_code configuration_syntax
     seen["$key"]=1
+    values["$key"]="$value"
     assignment_count=$((assignment_count + 1)); parsed_keys+=("$key")
     if ! is_allowed "$key"; then
       if is_removed "$key"; then
@@ -162,6 +181,19 @@ parse_file() {
     esac
   done < "$file"
   [[ "$assignment_count" -gt 0 ]] || fail_code configuration_syntax
+  local secret_file_pair direct_key file_key
+  for secret_file_pair in $secret_file_pairs; do
+    direct_key="${secret_file_pair%%:*}"; file_key="${secret_file_pair#*:}"
+    # Mirrors src/lib/config-contract.ts's own `record[direct] &&
+    # record[file]` check: a key present with an empty value is JS-falsy
+    # there, so an empty direct placeholder sitting alongside a populated
+    # _FILE value (the shape configure.sh itself writes, e.g.
+    # "OIDC_CLIENT_SECRET=" beside "OIDC_CLIENT_SECRET_FILE=...") is not a
+    # conflict — only two actually-populated values are.
+    if [[ -n "${values[$direct_key]:-}" && -n "${values[$file_key]:-}" ]]; then
+      fail_code configuration_secret_conflict
+    fi
+  done
   if [[ -n "$schema_value" && "$schema_value" != "$schema_version" ]]; then
     [[ "$schema_value" =~ ^[0-9]+$ && "$schema_value" -gt "$schema_version" ]] && fail_code configuration_version
     fail_code configuration_version
@@ -243,12 +275,29 @@ migrate_file() {
 
   if [[ "$transaction" != 1 ]]; then
     backup="${file}${rollback_suffix}"
-    if [[ -e "$backup" || -L "$backup" ]]; then fail_code configuration_migration; fi
+    if [[ -e "$backup" || -L "$backup" ]]; then
+      # A leftover rollback backup only blocks a legitimate retry when it
+      # cannot be told apart from a fresh one: if it is byte-identical to
+      # $file right now, the only way that can be true is that an earlier
+      # --migrate run was interrupted after writing this same backup from
+      # this same pre-migration content but before its own final `mv`
+      # applied anything — $file was never actually changed, so the
+      # "already current" short-circuit above never got a chance to fire
+      # on retry either, and there is nothing here worth protecting. A
+      # backup that differs (or is a symlink) is a real rollback point from
+      # a genuinely different migration and must not be silently replaced.
+      if [[ ! -L "$backup" ]] && cmp -s -- "$file" "$backup" 2>/dev/null; then
+        rm -f -- "$backup" 2>/dev/null || fail_code configuration_migration
+      else
+        fail_code configuration_migration
+      fi
+    fi
     umask 077
     cp -- "$file" "$backup" 2>/dev/null || fail_code configuration_migration
     chmod 600 "$backup" 2>/dev/null || fail_code configuration_migration
   fi
   temp="$(mktemp "${file}.migrating.XXXXXX" 2>/dev/null)" || fail_code configuration_migration
+  migration_temp_file="$temp"
   chmod 600 "$temp" 2>/dev/null || { rm -f -- "$temp" 2>/dev/null; fail_code configuration_migration; }
   newline=$'\n'
   LC_ALL=C grep -q $'\r' "$file" && newline=$'\r\n'
@@ -283,6 +332,7 @@ migrate_file() {
     if [[ "$transaction" != 1 ]]; then cp -- "$backup" "$file" 2>/dev/null || true; fi
     fail_code configuration_migration
   fi
+  migration_temp_file=""
   printf 'Orbit configuration: migrated from schema %s version %s digest %s to schema v1 version %s digest %s\n' \
     "$prior_schema" "$prior_version" "$prior_digest" "$desired_version" "$desired_digest"
 }

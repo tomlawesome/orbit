@@ -10,7 +10,10 @@ import {
 import { dirname, join } from "node:path";
 import { AppError } from "@/lib/app-error";
 
-const STORAGE_KEY_PATTERN = /^[a-f0-9]{64}$/;
+/** A storage key's own shape: 32 bytes of hex. Exported so any caller that
+ * must validate a storage key outside this module (purge-jobs.ts's claim
+ * query, A2-Q4) checks the one pattern rather than restating it. */
+export const STORAGE_KEY_PATTERN = /^[a-f0-9]{64}$/;
 const DOCUMENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 export interface ReceivedDocument {

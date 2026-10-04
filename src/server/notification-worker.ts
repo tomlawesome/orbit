@@ -20,6 +20,7 @@ import {
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
 import { log, operationalReasons, type OperationalReason } from "@/lib/logger";
 import {
+  DEFAULT_ENABLED_CHANNELS,
   DEFAULT_FINAL_WARNING_DAYS,
   DEFAULT_FIRST_WARNING_DAYS,
   effectiveReminderOffsets,
@@ -41,7 +42,18 @@ export type { ReminderOffset, RecipientWarningDays };
 const notificationEnvironmentSchema = z.object({
   SMTP_HOST: z.string().trim().max(253).optional().default(""),
   SMTP_PORT: z.coerce.number().int().min(1).max(65535).optional(),
-  SMTP_SECURITY: z.enum(["starttls", "implicit_tls"]).optional().default("starttls"),
+  /* The install-time contract accepts "" as "not set" for every one of these
+     fields (#1151 SF2-F2): every other field here is a plain, unconstrained
+     string so an empty one parses fine on its own, but an enum has no empty
+     member to land on, so "" failed `.parse()` outright and crashed the
+     running app at boot instead of falling back to the default the way
+     every other unset field does. The preprocess step treats "" as "not
+     provided" before the enum ever sees it; anything else that is not a
+     real member still fails, exactly as it always has. */
+  SMTP_SECURITY: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.enum(["starttls", "implicit_tls"]).optional().default("starttls"),
+  ),
   SMTP_USER: z.string().trim().max(320).optional().default(""),
   SMTP_PASSWORD: z.string().optional().default(""),
   // Deprecated compatibility input. New deployments should use the fields above.
@@ -77,6 +89,13 @@ export const notificationFailureCategories = [
   "recipient_preferences_disabled",
   "household_pending_deletion",
   "membership_removed",
+  /* #1151 A4-S5: a delivery that went stale while it sat retrying -- its
+     scheduled instant older than the catch-up window honours -- used to be
+     cancelled with a bare `null` reason, the same as the row had going in.
+     An admin reading the Operations panel could not tell that one apart
+     from the several other conditions already cancelling it with no
+     diagnostic at all; this one at least now names itself. */
+  "reminder_stale",
   /* #963: the item's name is Tier 2 ciphertext and would not decrypt — a
      locked instance or a damaged value. Retried like any transient fault,
      because both causes are repairable and neither justifies a nameless
@@ -261,6 +280,16 @@ export function getNotificationWorkerConfig(environment: NodeJS.ProcessEnv = pro
 }
 
 /**
+ * Every outbound provider request's bound (#1151 SR2-R4, A4-R3): both
+ * channels' dispatch runs inside the household's own DB advisory lock
+ * (`dispatchUnderHouseholdLifecycleLock`), so an unbounded request to a
+ * blackholed provider holds that lock -- and therefore every ordinary
+ * workspace write for the household -- for as long as the provider never
+ * answers, rather than for this many seconds.
+ */
+export const NOTIFICATION_PROVIDER_TIMEOUT_MS = 5_000;
+
+/**
  * Builds a TLS-pinned Nodemailer transport without exposing provider details.
  *
  * nodemailer's `createTransport(urlString, secondArgument)` only ever reads
@@ -282,9 +311,9 @@ export function createSmtpTransport(config: NotificationWorkerConfig, timeouts =
   url.searchParams.set("tls.rejectUnauthorized", "true");
   if (url.hostname) url.searchParams.set("tls.servername", url.hostname);
   if (timeouts) {
-    url.searchParams.set("connectionTimeout", "5000");
-    url.searchParams.set("greetingTimeout", "5000");
-    url.searchParams.set("socketTimeout", "5000");
+    url.searchParams.set("connectionTimeout", String(NOTIFICATION_PROVIDER_TIMEOUT_MS));
+    url.searchParams.set("greetingTimeout", String(NOTIFICATION_PROVIDER_TIMEOUT_MS));
+    url.searchParams.set("socketTimeout", String(NOTIFICATION_PROVIDER_TIMEOUT_MS));
   }
   return nodemailer.createTransport(url.toString());
 }
@@ -372,8 +401,8 @@ function candidateReminderOffsets(candidate: {
       ? []
       : [{
         daysBefore: candidate.daysBefore,
-        emailEnabled: candidate.emailEnabled ?? true,
-        pushEnabled: candidate.pushEnabled ?? true,
+        emailEnabled: candidate.emailEnabled ?? DEFAULT_ENABLED_CHANNELS.emailEnabled,
+        pushEnabled: candidate.pushEnabled ?? DEFAULT_ENABLED_CHANNELS.pushEnabled,
       }],
     candidate,
   );
@@ -436,6 +465,100 @@ export function isAllowedPushEndpoint(endpoint: string): boolean {
   return true;
 }
 
+/** One materialization candidate's own facts: a due event joined to one offset-eligible recipient. */
+export interface MaterializationCandidate {
+  householdId: string;
+  eventId: string;
+  /** When the due event came to exist: nothing was pending before it. */
+  createdAt: Date;
+  dueDate: string;
+  timezone: string;
+  userId: string;
+  daysBefore: number | null;
+  emailEnabled: boolean | null;
+  pushEnabled: boolean | null;
+  userEmailEnabled: boolean;
+  userPushEnabled: boolean;
+  firstWarningDays: number | null;
+  finalWarningDays: number | null;
+  snoozedUntil: string | null;
+}
+
+/** One row {@link materializeDeliveriesForCandidate} is ready to insert into `notification_deliveries`. */
+export interface MaterializedDelivery {
+  householdId: string;
+  eventId: string;
+  userId: string;
+  channel: "email" | "web_push";
+  scheduledFor: Date;
+}
+
+/**
+ * Every delivery one candidate's reminders are due for, right now (#1151
+ * A4-S3). Pure and dependency-free of the database by design, so the catch-up
+ * rule is checkable without a fake query for every join this module's one
+ * caller needs.
+ *
+ * An offset whose computed time already fell due is normally sent as its own
+ * delivery. Past `catchUpBoundary` (`notificationCatchUpWindowMs`, 24h) it
+ * used to be dropped outright -- nothing written, nothing logged -- so an
+ * instance down for longer than that lost every reminder due in the gap with
+ * no trace. It is now collapsed, per channel, into the single most recent of
+ * the missed offsets: a real offset's own computed time, so the dispatch
+ * worker's own re-check (`effectiveReminderOffsets` matched against
+ * `delivery.scheduledFor`, in `deliverClaimed`) still finds it, and the
+ * recipient gets one "you missed this" rather than a pile of redundant stale
+ * ones or silence.
+ *
+ * Only a reminder that was actually pending can have been missed. An offset
+ * whose moment passed before the due event existed -- a ninety-day warning on
+ * an item entered nine days before it is due -- was never due to anyone, and
+ * #479 settled that it is not back-fired; the catch-up window used to drop it
+ * as a side effect, so catching up had to say so itself. An outage swallows
+ * only what was already waiting when it began.
+ */
+/**
+ * A delivery is stale when it has sat past the catch-up window since it was
+ * meant to go. The one overdue catch-up row materializeDeliveriesForCandidate
+ * writes keeps its real (old) scheduledFor, so it is judged from when it was
+ * written instead: created just now, it is the reminder the outage swallowed,
+ * not a stale one, and cancelling it as stale sent nothing at all.
+ */
+export function deliveryIsStale(delivery: { scheduledFor: Date; createdAt: Date }, now: Date): boolean {
+  const staleBoundary = new Date(now.getTime() - notificationCatchUpWindowMs);
+  return delivery.scheduledFor < staleBoundary && delivery.createdAt < staleBoundary;
+}
+
+export function materializeDeliveriesForCandidate(
+  candidate: MaterializationCandidate,
+  now: Date,
+  catchUpBoundary: Date,
+): MaterializedDelivery[] {
+  // Every offset this candidate's reminder actually fires at, already due
+  // (not scheduled for the future) and not snoozed away.
+  const due = candidateReminderOffsets(candidate)
+    .map((offset) => ({ offset, scheduledFor: householdReminderTime(candidate.dueDate, offset.daysBefore, candidate.timezone) }))
+    .filter(({ scheduledFor }) => scheduledFor <= now)
+    .filter(({ scheduledFor }) => !reminderIsSnoozed(scheduledFor, candidate.snoozedUntil, candidate.timezone));
+
+  return (["email", "web_push"] as const).flatMap((channel) => {
+    const eligible = due.filter(({ offset }) => enabledDeliveryChannels({ ...candidate, ...offset }).includes(channel));
+    const onTime = eligible.filter(({ scheduledFor }) => scheduledFor >= catchUpBoundary);
+    const overdue = eligible.filter(({ scheduledFor }) => scheduledFor < catchUpBoundary && scheduledFor >= candidate.createdAt);
+    const chosen = [...onTime];
+    if (overdue.length > 0) {
+      chosen.push(overdue.reduce((latest, missed) => (missed.scheduledFor > latest.scheduledFor ? missed : latest)));
+    }
+    return chosen.map(({ scheduledFor }) => ({
+      householdId: candidate.householdId,
+      eventId: candidate.eventId,
+      userId: candidate.userId,
+      channel,
+      scheduledFor,
+    }));
+  });
+}
+
 async function materializeDueDeliveries(db: NotificationDatabase, now: Date): Promise<void> {
   // #383 finding 1: without a date predicate this join is instance-wide and
   // time-unbounded, so every open due_event × reminder_rule × membership row
@@ -455,6 +578,7 @@ async function materializeDueDeliveries(db: NotificationDatabase, now: Date): Pr
     .select({
       eventId: dueEvents.id,
       householdId: dueEvents.householdId,
+      createdAt: dueEvents.createdAt,
       dueDate: dueEvents.dueDate,
       timezone: households.timezone,
       userId: memberships.userId,
@@ -497,19 +621,7 @@ async function materializeDueDeliveries(db: NotificationDatabase, now: Date): Pr
     ));
 
   const catchUpBoundary = new Date(now.getTime() - notificationCatchUpWindowMs);
-  const deliveries = candidates.flatMap((candidate) => candidateReminderOffsets(candidate).flatMap((offset) => {
-    const scheduledFor = householdReminderTime(candidate.dueDate, offset.daysBefore, candidate.timezone);
-    if (scheduledFor > now || scheduledFor < catchUpBoundary) return [];
-    if (reminderIsSnoozed(scheduledFor, candidate.snoozedUntil, candidate.timezone)) return [];
-    const channels = enabledDeliveryChannels({ ...candidate, ...offset });
-    return channels.map((channel) => ({
-      householdId: candidate.householdId,
-      eventId: candidate.eventId,
-      userId: candidate.userId,
-      channel,
-      scheduledFor,
-    }));
-  }));
+  const deliveries = candidates.flatMap((candidate) => materializeDeliveriesForCandidate(candidate, now, catchUpBoundary));
 
   if (deliveries.length) {
     await db.insert(notificationDeliveries).values(deliveries).onConflictDoNothing();
@@ -562,7 +674,10 @@ async function claimDeliveries(
   });
 }
 
-function createDefaultNotificationProviders(config: NotificationWorkerConfig): NotificationProviders {
+/** Exported for the fast suite (#1151 SR2-R4): the one place real `nodemailer`
+ *  and `web-push` calls are built, and therefore the one place their
+ *  outbound timeout can be pinned without a live provider. */
+export function createDefaultNotificationProviders(config: NotificationWorkerConfig): NotificationProviders {
   let transporter: ReturnType<typeof nodemailer.createTransport> | undefined;
   if (config.vapidSubject && config.vapidPublicKey && config.vapidPrivateKey) {
     webPush.setVapidDetails(config.vapidSubject, config.vapidPublicKey, config.vapidPrivateKey);
@@ -590,7 +705,20 @@ function createDefaultNotificationProviders(config: NotificationWorkerConfig): N
       });
     },
     async sendPush(notification) {
-      await webPush.sendNotification(notification.target, JSON.stringify(notification.payload));
+      // Bounded to the same NOTIFICATION_PROVIDER_TIMEOUT_MS the email
+      // transport uses, for the identical reason (#1151 SR2-R4, A4-R3): this
+      // send runs inside the household lifecycle advisory lock, one
+      // subscription at a time, so an endpoint that never answers used to
+      // hold that lock -- and every ordinary workspace write for the
+      // household -- open indefinitely rather than for a bounded few
+      // seconds per device. `web-push` turns its own timeout into a plain
+      // `Error` with no `.code` or `.statusCode`, which `categorizeProviderError`
+      // already answers as the generic `unknown` category -- a real failure,
+      // counted against this delivery's retry schedule, not a hang nothing
+      // ever resolves.
+      await webPush.sendNotification(notification.target, JSON.stringify(notification.payload), {
+        timeout: NOTIFICATION_PROVIDER_TIMEOUT_MS,
+      });
     },
   };
 }
@@ -724,6 +852,7 @@ async function deliverClaimed(
       leaseToken: notificationDeliveries.leaseToken,
       channel: notificationDeliveries.channel,
       scheduledFor: notificationDeliveries.scheduledFor,
+      createdAt: notificationDeliveries.createdAt,
       attempts: notificationDeliveries.attempts,
       userId: notificationDeliveries.userId,
       householdId: notificationDeliveries.householdId,
@@ -792,7 +921,7 @@ async function deliverClaimed(
     const leaseToken = leaseTokens.get(delivery.id);
     if (!leaseToken || delivery.leaseToken !== leaseToken) continue;
     try {
-      const staleBoundary = new Date(now.getTime() - notificationCatchUpWindowMs);
+      const isStale = deliveryIsStale(delivery, now);
       const matchingRule = effectiveReminderOffsets(rulesByItem.get(delivery.itemId) ?? [], delivery).find((offset) => (
         householdReminderTime(delivery.dueDate, offset.daysBefore, delivery.timezone).getTime() === delivery.scheduledFor.getTime()
         && (delivery.channel === "email" ? offset.emailEnabled : offset.pushEnabled)
@@ -800,13 +929,25 @@ async function deliverClaimed(
       const preferenceEnabled = delivery.channel === "email"
         ? delivery.userEmailEnabled
         : delivery.userPushEnabled;
-      if (delivery.householdDeletionRequestedAt || delivery.userDisabledAt || delivery.completedAt || delivery.itemStatus !== "active" || delivery.scheduledFor < staleBoundary || reminderIsSnoozed(delivery.scheduledFor, delivery.snoozedUntil, delivery.timezone) || !matchingRule || !delivery.isMember) {
+      if (delivery.householdDeletionRequestedAt || delivery.userDisabledAt || delivery.completedAt || delivery.itemStatus !== "active" || isStale || reminderIsSnoozed(delivery.scheduledFor, delivery.snoozedUntil, delivery.timezone) || !matchingRule || !delivery.isMember) {
         await cancelDelivery(
           db,
           delivery.id,
           leaseToken,
           now,
-          delivery.householdDeletionRequestedAt ? "household_pending_deletion" : (!delivery.isMember ? "membership_removed" : null),
+          // #1151 A4-S5: every branch of the OR above used to report `null`
+          // here except the first two, leaving an admin looking at
+          // "cancelled" with nothing to say why. This names the stale case
+          // the finding points at; the other untitled branches above
+          // (disabled account, completed item, inactive item, snoozed,
+          // no matching rule) are unchanged.
+          delivery.householdDeletionRequestedAt
+            ? "household_pending_deletion"
+            : !delivery.isMember
+              ? "membership_removed"
+              : isStale
+                ? "reminder_stale"
+                : null,
         );
         continue;
       }
@@ -949,7 +1090,7 @@ async function deliverClaimed(
         }
       }
     } catch (error) {
-      await failDelivery(
+      const status = await failDelivery(
         db,
         delivery.id,
         leaseToken,
@@ -959,7 +1100,16 @@ async function deliverClaimed(
         now,
         retryDelay,
       );
-      const exhausted = delivery.attempts + 1 >= config.maxAttempts;
+      /* #1151 A4-Q4: this used to re-derive its own threshold
+         (`delivery.attempts + 1 >= config.maxAttempts`) instead of reading
+         `failDelivery`'s own answer -- `delivery.attempts` is already the
+         post-claim count (`claimDeliveries` increments it when it claims the
+         row), so the extra `+ 1` double-counted and declared "exhausted" one
+         attempt before `deliveryFailureState` actually set the row to
+         `failed`. Reading the real status also means a `cancelled` outcome
+         (a category that never retries at all, whatever `attempts` says) is
+         "exhausted" too, rather than mislabelled "retrying". */
+      const exhausted = status !== "retry";
       log.warn({
         event: delivery.channel === "email" ? "delivery.smtp" : "delivery.push",
         state: exhausted ? "exhausted" : "retrying",
@@ -972,7 +1122,10 @@ async function deliverClaimed(
 }
 
 /** Persists only a bounded failure code, never an untrusted provider message. */
-async function failDelivery(
+/** Exported for the fast suite (#1151 A4-Q4): the one place a failed
+ *  attempt's real outcome is decided, so a caller logging "exhausted" can
+ *  read it back instead of re-deriving its own copy of the threshold. */
+export async function failDelivery(
   db: NotificationDatabase,
   id: string,
   leaseToken: string,
@@ -981,7 +1134,7 @@ async function failDelivery(
   category: NotificationFailureCategory,
   now: Date,
   retryDelay: (attempts: number) => number,
-): Promise<void> {
+): Promise<"cancelled" | "failed" | "retry"> {
   const status = deliveryFailureState(category, attempts, maxAttempts);
   const retryAt = status === "retry" ? new Date(now.getTime() + retryDelay(attempts)) : null;
   await db.update(notificationDeliveries).set({
@@ -995,6 +1148,7 @@ async function failDelivery(
     eq(notificationDeliveries.status, "processing"),
     eq(notificationDeliveries.leaseToken, leaseToken),
   ));
+  return status;
 }
 
 /**
@@ -1054,18 +1208,33 @@ export async function sweepEndedExpiries(db: NotificationDatabase, now: Date): P
   for (const row of ended) {
     const activityId = randomUUID();
     await db.transaction(async (transaction) => {
-      const [updated] = await transaction.update(items).set({
+      // Compare-and-set against everything that justified expiring this item
+      // (#1151 A4-S2): the earlier guard only re-checked `items.status`, so
+      // an item RESCHEDULED between the select above and this write -- which
+      // updates the same `due_events` row's `due_date` in place
+      // (`workspace-repository.ts`) -- still looked active and still got
+      // flipped to expired, taking its brand-new reminder rules with it.
+      // `for("update")` locks both joined rows, so a reschedule racing this
+      // transaction waits for it rather than landing invisibly in between.
+      const [current] = await transaction.select({
+        itemStatus: items.status,
+        dueDate: dueEvents.dueDate,
+        completedAt: dueEvents.completedAt,
+      })
+        .from(dueEvents)
+        .innerJoin(items, eq(items.id, dueEvents.itemId))
+        .where(eq(dueEvents.id, row.eventId))
+        .for("update")
+        .limit(1);
+      if (!current || current.itemStatus !== "active" || current.completedAt || current.dueDate !== row.dueDate) return;
+
+      await transaction.update(items).set({
         status: "expired",
         version: sql`${items.version} + 1`,
         updatedAt: now,
-      })
-        /* Still active when the write lands, or somebody changed it between the
-           read above and here and their change is the current one. */
-        .where(and(eq(items.id, row.itemId), eq(items.status, "active")))
-        .returning({ id: items.id });
-      if (!updated) return;
+      }).where(eq(items.id, row.itemId));
       await transaction.update(dueEvents).set({ completedAt: now })
-        .where(and(eq(dueEvents.id, row.eventId), isNull(dueEvents.completedAt)));
+        .where(eq(dueEvents.id, row.eventId));
       await transaction.delete(reminderRules).where(eq(reminderRules.itemId, row.itemId));
       await transaction.insert(auditLog).values({
         id: activityId,
@@ -1156,6 +1325,12 @@ export function startNotificationWorker(config = getNotificationWorkerConfig()):
     try {
       await runNotificationCycle(config);
       workerState.__orbitWorkerLastSuccessAt = new Date().toISOString();
+      /* #1151 A4-F2: the category was already cleared here on a success, but
+         the timestamp it belongs to was not -- so the admin Operations panel
+         kept showing the moment of the FIRST failure, forever, with no code
+         beside it, however many clean cycles ran since. The two travel
+         together; both clear together. */
+      workerState.__orbitWorkerLastErrorAt = undefined;
       workerState.__orbitWorkerLastErrorCategory = undefined;
       log.info({ event: "notification.worker", state: "ready", action: "none" });
     } catch {

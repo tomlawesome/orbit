@@ -117,6 +117,8 @@ describe("the image content ID", () => {
   });
 
   it("refuses to run without an image", () => {
-    expect(() => run(workspace([digest("base"), digest("stamp")]), { ORBIT_IMAGE_REF: "" })).toThrow();
+    expect(() => run(workspace([digest("base"), digest("stamp")]), { ORBIT_IMAGE_REF: "" })).toThrow(
+      /the image to read is required/,
+    );
   });
 });

@@ -40,6 +40,11 @@ export function backfillComplete(batch: MetadataBackfillBatch): boolean {
     && batch.users === 0 && batch.senderAddresses === 0;
 }
 
+/** Whether a JSONB draft column holds anything worth protecting. */
+function hasJsonContent(value: unknown): boolean {
+  return value !== null && typeof value === "object" && Object.keys(value as Record<string, unknown>).length > 0;
+}
+
 async function cipherFor(
   ciphers: Map<string, MetadataCipher>,
   householdId: string | null,
@@ -93,27 +98,54 @@ export async function runMetadataBackfillBatch(
 
     for (const row of itemRows) {
       const cipher = await cipherFor(ciphers, row.householdId, transaction);
-      const updated = await transaction.update(items).set({
-        reference: null,
-        referenceEnc: cipher.encryptText("items.reference", row.id, row.reference),
-        referenceIndex: cipher.referenceIndex(row.reference),
-        notes: null,
-        notesEnc: cipher.encryptText("items.notes", row.id, row.notes),
-        title: null,
-        titleEnc: cipher.encryptText("items.title", row.id, row.title),
-        provider: null,
-        providerEnc: cipher.encryptText("items.provider", row.id, row.provider),
-        costMinor: null,
-        costMinorEnc: cipher.encryptNumber("items.cost_minor", row.id, row.costMinor),
-      }).where(and(
-        eq(items.id, row.id),
-        isNull(items.referenceEnc),
-        isNull(items.notesEnc),
-        isNull(items.titleEnc),
-        isNull(items.providerEnc),
-        isNull(items.costMinorEnc),
-      )).returning({ id: items.id });
-      convertedItems += updated.length;
+      /* Each column pair converts independently (#1151 A3-F1): the old single
+         update required ALL FIVE *_enc columns to still be null, so an item
+         with even one pair already converted on its own -- the draft-approval
+         path encrypts `reference` by itself -- matched the select above
+         forever and never matched this update's guard, so it was "selected"
+         every batch and converted on none of them. `backfillComplete` only
+         counts conversions, so the job would log "completed" with that row
+         still carrying plaintext. */
+      let convertedThisRow = false;
+
+      if (row.reference !== null) {
+        const changed = await transaction.update(items).set({
+          reference: null,
+          referenceEnc: cipher.encryptText("items.reference", row.id, row.reference),
+          referenceIndex: cipher.referenceIndex(row.reference),
+        }).where(and(eq(items.id, row.id), isNull(items.referenceEnc))).returning({ id: items.id });
+        convertedThisRow ||= changed.length > 0;
+      }
+      if (row.notes !== null) {
+        const changed = await transaction.update(items).set({
+          notes: null,
+          notesEnc: cipher.encryptText("items.notes", row.id, row.notes),
+        }).where(and(eq(items.id, row.id), isNull(items.notesEnc))).returning({ id: items.id });
+        convertedThisRow ||= changed.length > 0;
+      }
+      if (row.title !== null) {
+        const changed = await transaction.update(items).set({
+          title: null,
+          titleEnc: cipher.encryptText("items.title", row.id, row.title),
+        }).where(and(eq(items.id, row.id), isNull(items.titleEnc))).returning({ id: items.id });
+        convertedThisRow ||= changed.length > 0;
+      }
+      if (row.provider !== null) {
+        const changed = await transaction.update(items).set({
+          provider: null,
+          providerEnc: cipher.encryptText("items.provider", row.id, row.provider),
+        }).where(and(eq(items.id, row.id), isNull(items.providerEnc))).returning({ id: items.id });
+        convertedThisRow ||= changed.length > 0;
+      }
+      if (row.costMinor !== null) {
+        const changed = await transaction.update(items).set({
+          costMinor: null,
+          costMinorEnc: cipher.encryptNumber("items.cost_minor", row.id, row.costMinor),
+        }).where(and(eq(items.id, row.id), isNull(items.costMinorEnc))).returning({ id: items.id });
+        convertedThisRow ||= changed.length > 0;
+      }
+
+      if (convertedThisRow) convertedItems += 1;
     }
 
     // An empty `{}` proposal is left alone: there is nothing in it to protect,
@@ -131,17 +163,34 @@ export async function runMetadataBackfillBatch(
 
     for (const row of receiptRows) {
       const cipher = await cipherFor(ciphers, row.householdId, transaction);
-      const updated = await transaction.update(imapIngestionMessages).set({
-        proposal: {},
-        proposalEnc: cipher.encryptJson("imap_ingestion_messages.proposal", row.id, row.proposal),
-        fieldEvidence: {},
-        fieldEvidenceEnc: cipher.encryptJson("imap_ingestion_messages.field_evidence", row.id, row.fieldEvidence),
-      }).where(and(
-        eq(imapIngestionMessages.id, row.id),
-        isNull(imapIngestionMessages.proposalEnc),
-        isNull(imapIngestionMessages.fieldEvidenceEnc),
-      )).returning({ id: imapIngestionMessages.id });
-      convertedReceipts += updated.length;
+      /* Same independent-pairs fix as items, above (#1151 A3-F1): the old
+         update required BOTH *_enc columns null, so a row with one already
+         converted on its own matched the select forever and this guard
+         never. */
+      let convertedThisRow = false;
+
+      if (hasJsonContent(row.proposal)) {
+        const changed = await transaction.update(imapIngestionMessages).set({
+          proposal: {},
+          proposalEnc: cipher.encryptJson("imap_ingestion_messages.proposal", row.id, row.proposal),
+        }).where(and(
+          eq(imapIngestionMessages.id, row.id),
+          isNull(imapIngestionMessages.proposalEnc),
+        )).returning({ id: imapIngestionMessages.id });
+        convertedThisRow ||= changed.length > 0;
+      }
+      if (hasJsonContent(row.fieldEvidence)) {
+        const changed = await transaction.update(imapIngestionMessages).set({
+          fieldEvidence: {},
+          fieldEvidenceEnc: cipher.encryptJson("imap_ingestion_messages.field_evidence", row.id, row.fieldEvidence),
+        }).where(and(
+          eq(imapIngestionMessages.id, row.id),
+          isNull(imapIngestionMessages.fieldEvidenceEnc),
+        )).returning({ id: imapIngestionMessages.id });
+        convertedThisRow ||= changed.length > 0;
+      }
+
+      if (convertedThisRow) convertedReceipts += 1;
     }
 
     // Invitations (#963). Only open ones are converted: a redeemed or
@@ -232,19 +281,45 @@ const workerState = globalThis as typeof globalThis & {
   __orbitMetadataBackfillStarted?: boolean;
 };
 
+/** The first retry waits this long after a batch fails outright. */
+export const BACKFILL_RETRY_FLOOR_MS = 1_000;
+
+/** The doubling stops here: five minutes, so a database that is down for a
+ *  while is not hammered, but a restart is never the only way to recover. */
+export const BACKFILL_RETRY_CEILING_MS = 5 * 60 * 1000;
+
+/** Past this many back-to-back failures, "retrying" stops being the whole
+ *  truth and the log says so (#1151 A3-R3): still retrying, but loudly. */
+export const BACKFILL_RETRY_SURFACE_THRESHOLD = 5;
+
+/** 1 s, 2 s, 4 s, ... capped at {@link BACKFILL_RETRY_CEILING_MS}. */
+export function backfillRetryDelayMs(consecutiveFailures: number): number {
+  return Math.min(BACKFILL_RETRY_FLOOR_MS * 2 ** (consecutiveFailures - 1), BACKFILL_RETRY_CEILING_MS);
+}
+
 /**
  * Drains the backlog, then stops for good: unlike the polling workers this is
  * a one-off conversion, not a recurring tick. A locked instance (no KEK) stops
  * without converting anything and without failing start-up, exactly as
  * document operations lock rather than block the application.
+ *
+ * A batch that throws for any other reason -- a database hiccup, most likely
+ * -- used to log "retrying" and then never run again: the drain loop simply
+ * returned, and everything still plaintext stayed that way until the next
+ * restart (#1151 A3-R3). It now actually retries, on a bounded back-off, and
+ * once enough attempts in a row have failed the log says so as "exhausted"
+ * rather than going on calling it "retrying" forever.
  */
 export function startMetadataBackfill(batchSize = METADATA_BACKFILL_BATCH): void {
   if (workerState.__orbitMetadataBackfillStarted) return;
   workerState.__orbitMetadataBackfillStarted = true;
 
+  let consecutiveFailures = 0;
+
   const drain = async () => {
     try {
       const batch = await runMetadataBackfillBatch(batchSize);
+      consecutiveFailures = 0;
       if (backfillComplete(batch)) {
         log.info({ event: "metadata.backfill", state: "completed", action: "none" });
         return;
@@ -261,13 +336,17 @@ export function startMetadataBackfill(batchSize = METADATA_BACKFILL_BATCH): void
         });
         return;
       }
+
+      consecutiveFailures += 1;
+      const exhausted = consecutiveFailures >= BACKFILL_RETRY_SURFACE_THRESHOLD;
       log.error({
         event: "metadata.backfill",
-        state: "retrying",
+        state: exhausted ? "exhausted" : "retrying",
         reason: "worker_cycle_failed",
-        action: "inspect_admin_diagnostics",
+        action: exhausted ? "inspect_admin_diagnostics" : "retry",
         impact: "worker_degraded",
       });
+      setTimeout(() => void drain(), backfillRetryDelayMs(consecutiveFailures)).unref();
     }
   };
   void drain();

@@ -3,7 +3,10 @@ import { log } from "@/lib/logger";
 import { getDocumentConfig } from "@/server/documents/config";
 import type { SupportedDocumentMediaType } from "@/server/documents/validation";
 
-const MAX_EXTRACTED_CHARACTERS = 250_000;
+/** Exported so a caller that double-checks the parser's own output bound
+ * (item-document-inspection.ts, A2-Q2) reads the one value this module
+ * truncates to, rather than a second copy that can drift from it. */
+export const MAX_EXTRACTED_CHARACTERS = 250_000;
 const MAX_EXTRACTED_BYTES = MAX_EXTRACTED_CHARACTERS * 4;
 
 /**

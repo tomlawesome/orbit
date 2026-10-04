@@ -49,6 +49,18 @@ export type { InvitationSendError } from "@/server/invitations/send";
 /** Past this many open invitations a household is asked to tidy up first. */
 export const MAX_OPEN_INVITATIONS = 20;
 
+/**
+ * Longer than `sendBoundedMail`'s own bounded connect/greeting/socket
+ * timeouts could ever leave a send unresolved (#1151 SR1-R5): a row still
+ * showing neither `sentAt` nor `sendError` past this age was never going to
+ * get an outcome on its own -- the process that owed it one crashed between
+ * committing the row and recording what the send did. Reading the list is
+ * what notices this, and reconciling it to the one bounded word already used
+ * for "we don't know what happened" is what turns a silently stuck
+ * invitation back into one the owner can see failed and resend.
+ */
+const INVITATION_SEND_RECONCILE_MS = 2 * 60 * 1000;
+
 /** What the household screen is told about one invitation. No token, ever. */
 export interface HouseholdInvitation {
   id: string;
@@ -128,6 +140,33 @@ const summaryColumns = {
 const stillOpen = and(isNull(householdInvitations.redeemedAt), isNull(householdInvitations.revokedAt));
 
 /**
+ * Marks an invitation stuck with neither outcome as a send Orbit cannot
+ * account for, the same word an unreadable provider failure already uses
+ * (#1151 SR1-R5). The conditional `where` guards against reconciling a row a
+ * real send has since resolved out from under this read.
+ */
+async function reconcileUnresolvedSends(rows: InvitationRow[], now: Date): Promise<InvitationRow[]> {
+  const stale = rows.filter((row) => (
+    row.sentAt === null
+    && row.sendError === null
+    && now.getTime() - row.createdAt.getTime() > INVITATION_SEND_RECONCILE_MS
+  ));
+  if (stale.length === 0) return rows;
+
+  const db = getDb();
+  await Promise.all(stale.map((row) => db.update(householdInvitations)
+    .set({ sendError: "unknown" })
+    .where(and(
+      eq(householdInvitations.id, row.id),
+      isNull(householdInvitations.sentAt),
+      isNull(householdInvitations.sendError),
+    ))));
+
+  const staleIds = new Set(stale.map((row) => row.id));
+  return rows.map((row) => (staleIds.has(row.id) ? { ...row, sendError: "unknown" } : row));
+}
+
+/**
  * The household's open invitations, for anyone who may see that household.
  *
  * Members get the same list an owner does. They typed none of it and can
@@ -135,15 +174,35 @@ const stillOpen = and(isNull(householdInvitations.redeemedAt), isNull(householdI
  * mail and nobody else can see it happening is not the household this product
  * describes (§11's "who sees what").
  */
-export async function listHouseholdInvitations(actorUserId: string, householdId: string): Promise<HouseholdInvitation[]> {
-  await requireHouseholdAccess(actorUserId, householdId);
+/**
+ * `listHouseholdInvitations`'s own body, given a cipher already open for
+ * this household (#1151 A1-Q2). A caller that just wrote under this
+ * household's lock -- `sendHouseholdInvitation` -- already holds both the
+ * access check and the key unwrap this would otherwise repeat; asking
+ * again inside the same request bought nothing a second time.
+ */
+async function householdInvitationsList(
+  householdId: string,
+  cipher: MetadataCipher,
+  now: Date,
+): Promise<HouseholdInvitation[]> {
   const rows = await getDb().select(summaryColumns)
     .from(householdInvitations)
     .where(and(eq(householdInvitations.householdId, householdId), stillOpen))
     .orderBy(asc(householdInvitations.createdAt));
+  const reconciled = await reconcileUnresolvedSends(rows, now);
+  return reconciled.map((row) => summarise(row, cipher));
+}
+
+export async function listHouseholdInvitations(
+  actorUserId: string,
+  householdId: string,
+  now: Date = new Date(),
+): Promise<HouseholdInvitation[]> {
+  await requireHouseholdAccess(actorUserId, householdId);
   // One DEK unwrap for the whole list (ADR-0024 decision 1), not one per row.
   const cipher = await openMetadataReader(householdId);
-  return rows.map((row) => summarise(row, cipher));
+  return householdInvitationsList(householdId, cipher, now);
 }
 
 /** The owner check, made again inside the lock the write is taken under. */
@@ -268,6 +327,7 @@ export async function sendHouseholdInvitation(
       row,
       householdName: household?.name ?? "",
       inviterName: inviter?.displayName ?? "",
+      metadata,
     };
   });
 
@@ -284,10 +344,18 @@ export async function sendHouseholdInvitation(
     .where(eq(householdInvitations.id, prepared.row.id))
     .returning(summaryColumns);
 
-  const cipher = await openMetadataReader(householdId);
+  // #1151 A1-Q2: the same writer the transaction above already unwrapped to
+  // encrypt the address decrypts it back here too, a `MetadataCipher` being
+  // both directions on the one key -- a second `openMetadataReader` call
+  // would unwrap the identical household key a second time in one request
+  // for nothing a fresh unwrap could tell this one hadn't already.
   return {
-    invitation: summarise(recorded ?? { ...prepared.row, ...outcome }, cipher),
-    invitations: await listHouseholdInvitations(actorUserId, householdId),
+    invitation: summarise(recorded ?? { ...prepared.row, ...outcome }, prepared.metadata),
+    // Access to this household was already proven twice over by the write
+    // above (the early check and, again, under its lock); building the
+    // fresh list reuses that same proof and the same unwrapped key rather
+    // than asking `listHouseholdInvitations` to re-ask both.
+    invitations: await householdInvitationsList(householdId, prepared.metadata, now),
   };
 }
 

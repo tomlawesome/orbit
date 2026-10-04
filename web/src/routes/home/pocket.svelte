@@ -4,7 +4,7 @@
   import { beforeNavigate, goto, onNavigate } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { applyCommand, readItemDocuments } from "$lib/data/workspace.js";
+  import { WorkspaceError, applyCommand, readItemDocuments } from "$lib/data/workspace.js";
   import { completeCommand, nextDateAfter } from "$lib/data/commands.js";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf } from "$lib/data/chart.js";
   import { money } from "$lib/format.js";
@@ -21,7 +21,8 @@
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
   import { markDoor } from "../household/[id]/door.js";
   import { HIT_R, spacedBodies } from "./pocket-dial.js";
-  import { searchPocket } from "./pocket-search.js";
+  import { readSearchDocuments, searchPocket } from "./pocket-search.js";
+  import { BAND_VAR, tlabel } from "./bands.js";
   import ItemDrawer from "./ItemDrawer.svelte";
   import SuggestionDrawer from "./SuggestionDrawer.svelte";
 
@@ -132,11 +133,10 @@
       label: MONTHS[((view ? new Date(view.today + "T00:00:00Z").getUTCMonth() : 7) + k * 3) % 12],
     })),
   );
-  // `ended` is the expiry past its date (#1005): quiet ink, never the alarm.
-  /** @type {Record<string, string>} */
-  const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok", ended: "--ink-mid" };
-  /** @type {(b: { days: number | null }) => string} */
-  const tlabel = (b) => (b.days === null ? "" : b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
+  // BAND_VAR/tlabel: #1151 W1-Q10, shared with CorridorRow.svelte and
+  // +page.svelte's own dial via bands.js, rather than a second, diverging
+  // copy (bands.js's own tlabel is now the null-safe version this file's
+  // old copy had, per #1151 W1-F3's unscheduled band).
   /** @type {(iso: string) => string} */
   const short = (iso) =>
     new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
@@ -316,6 +316,9 @@
   /** @type {object | null} */
   let searchDocumentsFor = null;
 
+  /** #1151 W1-Q8: shared with the desk's own copy (home/+page.svelte) via
+   *  pocket-search.js's readSearchDocuments, which also carries the
+   *  concurrency cap (#1151 W1-R9). */
   async function loadSearchDocuments() {
     const household = view?.household;
     const householdId = view?.primary;
@@ -324,16 +327,11 @@
     const carrying = (household.items ?? []).filter((item) => item.status === "active" && (item.documentCount ?? 0) > 0);
     // Additive: an item whose papers cannot be read loses its papers from the
     // results, not the search.
-    const found = await Promise.all(carrying.map(async (item) => {
-      try {
-        const papers = await readItemDocuments(householdId, item.id);
-        return papers.map((doc) => ({ ...doc, itemTitle: item.title }));
-      } catch {
-        return [];
-      }
-    }));
+    const found = await readSearchDocuments(
+      carrying, readItemDocuments, householdId, () => searchDocumentsFor !== household,
+    );
     if (searchDocumentsFor === household) {
-      searchDocuments = found.flat();
+      searchDocuments = found;
       papersReady = true;
     }
   }
@@ -472,9 +470,46 @@
      record sheet up; one with nothing to record completes on the tap, held
      for the wake's four seconds so `undo` is a real undo, and sent at once
      if the page is left first. */
-  /** @typedef {{ send: () => Promise<void>, timer: ReturnType<typeof setTimeout> | undefined, done: boolean }} HeldCompletion */
+  /** @typedef {{ command: object, timer: ReturnType<typeof setTimeout> | undefined, done: boolean }} HeldCompletion */
   /** @type {HeldCompletion | null} */
   let held = null;
+  /** The key a held completion is stashed under (#1151 W1-S3), the same
+      reasoning and the same literal key as item/[[id]]/+page.svelte's own
+      (W1-R5): a flush cut off by the page actually unloading — not merely
+      refused — is picked up on the next load instead of silently failing.
+      One slot: this screen only ever holds one completion at a time. */
+  const HELD_COMPLETION_KEY = "orbit:pending-completion";
+  /* A list, not one slot: completing a second item inside the first's undo
+     window sends the first at once, and its send can still fail or answer
+     late. One slot lost the first (overwritten) or the second (cleared by
+     the first's late success). Each entry leaves on its own send only. */
+  /** @returns {object[]} */
+  function readHeldCompletionStash() {
+    try {
+      const raw = localStorage.getItem(HELD_COMPLETION_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [parsed.command].filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+  /** @param {object[]} commands */
+  function writeHeldCompletionStash(commands) {
+    try {
+      if (commands.length === 0) localStorage.removeItem(HELD_COMPLETION_KEY);
+      else localStorage.setItem(HELD_COMPLETION_KEY, JSON.stringify(commands));
+    } catch { /* best effort */ }
+  }
+  /** @param {object} command */
+  function stashHeldCompletion(command) {
+    writeHeldCompletionStash([...readHeldCompletionStash(), command]);
+  }
+  /** @param {object} command */
+  function clearHeldCompletionStash(command) {
+    const key = JSON.stringify(command);
+    writeHeldCompletionStash(readHeldCompletionStash().filter((one) => JSON.stringify(one) !== key));
+  }
   /** @param {{ id: string, title: string }} one */
   function completeRow(one) {
     const raw = rawItems.get(one.id);
@@ -488,19 +523,21 @@
     sendHeld();
     const completedDate = view.today;
     const nextDate = nextDateAfter(completedDate, raw.recurrenceMonths) ?? undefined;
+    /* Built once, not per send (#1151 W1-R2/W1-R3's own reasoning): a retry
+       reuses the exact command, version guard included. */
+    const command = completeCommand(/** @type {any} */ ({ ...raw, householdId }), { completedDate, nextDate });
+    stashHeldCompletion(command);
     /** @type {HeldCompletion} */
-    const job = {
-      done: false,
-      timer: undefined,
-      send: async () => {
-        await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId }), { completedDate, nextDate }));
-        await onchanged?.();
-      },
-    };
+    const job = { command, done: false, timer: undefined };
     job.timer = setTimeout(() => fireHeld(job), WAKE_HOLD_MS);
     held = job;
     wake(`Completed${nextDate ? ` · next due ${short(nextDate)}` : ""} · ${one.title}`, {
-      undo: () => { clearTimeout(job.timer); job.done = true; if (held === job) held = null; },
+      undo: () => {
+        clearTimeout(job.timer);
+        job.done = true;
+        if (held === job) held = null;
+        clearHeldCompletionStash(job.command);
+      },
     });
   }
   /** @param {HeldCompletion} job */
@@ -509,23 +546,48 @@
     job.done = true;
     if (held === job) held = null;
     try {
-      await job.send();
+      await applyCommand(job.command);
+      clearHeldCompletionStash(job.command);
+      await onchanged?.();
     } catch (error) {
       wake(/** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again", { failure: true });
     }
   }
+  /* Leaving before the wake has gone: the completion is sent now, not lost
+     — and stashed before it is sent (above), so even a send this screen
+     never lives to see the answer to is picked up on the next load
+     (#1151 W1-S3). */
   function sendHeld() {
     const job = held;
     if (!job || job.done) return;
     clearTimeout(job.timer);
     job.done = true;
     held = null;
-    job.send().catch(() => {});
+    applyCommand(job.command).then(() => clearHeldCompletionStash(job.command)).catch(() => {});
   }
   beforeNavigate(() => { sendHeld(); });
   $effect(() => {
     addEventListener("pagehide", sendHeld);
     return () => { removeEventListener("pagehide", sendHeld); };
+  });
+  /** A completion stashed by a previous visit that never confirmed it sent
+      (#1151 W1-S3): picked up here instead of staying lost with nothing
+      said. A version conflict means somebody already holds this change —
+      most likely the original send landing after all — so that alone is
+      treated as the stash's own success. Runs once, on mount: nothing it
+      reads is reactive state. */
+  $effect(() => {
+    for (const command of readHeldCompletionStash()) applyCommand(command).then(async () => {
+      clearHeldCompletionStash(command);
+      await onchanged?.();
+    }).catch((error) => {
+      if (error instanceof WorkspaceError && error.code === "version_conflict") {
+        clearHeldCompletionStash(command);
+        onchanged?.();
+        return;
+      }
+      wake(/** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again", { failure: true });
+    });
   });
 
   /* `copy link`: the item's address, the desk's (+page.svelte addressOf),
@@ -822,7 +884,7 @@
   <!-- §2.1: a button drawn as the desk's field, never a field on the page,
        so iOS never scrolls to an input that is about to move into the sheet. -->
   <button class="msearch" onclick={openSearch}>explore your world</button>
-  <div class="pk-below">
+  <div class="pk-below" class:pk-busy={busy}>
   {#if groups?.attention.length}
     <h2 class="p-caps">Needs attention</h2>
     <div class="pk-list" data-row-group data-row-cards>
@@ -908,7 +970,7 @@
   {/snippet}
   <!-- #1057's phone half (§2.4; phone-search round 1, B). -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="pk-results" bind:this={resultList} onkeydown={listKey}>
+  <div class="pk-results" class:pk-busy={busy} bind:this={resultList} onkeydown={listKey}>
     {#if !results.query}
       {#each results.items as one (one.id)}
         <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
@@ -946,9 +1008,14 @@
   {#snippet foot()}
     {#if results.query && !results.nothing && results.complete}
       {@const top = results.complete}
-      <!-- The one accent action for the top match (§2.4). -->
-      <ArmButton label={`→ complete “${top.title}”`} armedLabel="tap again to complete" danger={false} wide
-                 class="pk-act" onfire={() => complete(top)} />
+      <!-- The one accent action for the top match (§2.4). Wrapped rather
+           than passed a disabled prop ArmButton has no concept of (#1151
+           W1-R8): dims and stops taking taps while any row act (or this
+           one) is already in flight, sharing the same `busy` flag. -->
+      <span class:pk-foot-busy={busy}>
+        <ArmButton label={`→ complete “${top.title}”`} armedLabel="tap again to complete" danger={false} wide
+                   class="pk-act" onfire={() => complete(top)} />
+      </span>
     {/if}
   {/snippet}
 </Sheet>

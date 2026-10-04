@@ -384,11 +384,29 @@ function betweenText(text: string, left: DateCandidate, right: DateCandidate): s
   return `${lead} ${left.line} ${text.slice(from, to)} ${right.line}`;
 }
 
+// Bounds how many other dates one candidate is paired against (A3-R1): an
+// ordinary page prints a handful of dates, nowhere near this, so every
+// pairing an ordinary page would have formed still happens and existing
+// results are unchanged. A long garbled scan can read back hundreds of
+// spurious date-shaped tokens; without a cap, every one of those pairs
+// re-runs the arithmetic below, which is what held the worker for minutes.
+const TERM_ARITHMETIC_PAIR_CAP = 200;
+
 const termArithmetic: DateSieve = {
   name: "term-arithmetic",
   read: (text, candidate, all) => {
     const votes: DateVote[] = [];
-    for (const other of all) {
+    // Hoisted out of the pair loop (A3-R1): `printedTerms` runs three
+    // full-text regex scans and does not depend on which pair is being
+    // considered, so it is the same result on every iteration. It used to
+    // re-run per pair, which is per candidate squared across a whole read.
+    const terms = printedTerms(text);
+    // The cap is a window around this candidate, not the first N dates of
+    // the page: a positional slice never pairs anything past the Nth date,
+    // so a term printed late in a long document was silently never found.
+    const at = all.indexOf(candidate);
+    const from = Math.max(0, Math.min(at - TERM_ARITHMETIC_PAIR_CAP / 2, all.length - TERM_ARITHMETIC_PAIR_CAP));
+    for (const other of all.slice(from, from + TERM_ARITHMETIC_PAIR_CAP)) {
       if (other === candidate || other.value === candidate.value) continue;
       const earlier = other.value < candidate.value ? other : candidate;
       const later = earlier === other ? candidate : other;
@@ -402,7 +420,7 @@ const termArithmetic: DateSieve = {
       // it governs. Two dates exactly a printed term apart are still one
       // weak reading, because a page can print "12 months" about something
       // else -- reading the term from anywhere is what makes it weak.
-      for (const term of printedTerms(text)) {
+      for (const term of terms) {
         const anniversary = addMonths(earlier.value, term.months);
         if (anniversary === undefined) continue;
         if (later.value !== anniversary && later.value !== dayBefore(anniversary)) continue;

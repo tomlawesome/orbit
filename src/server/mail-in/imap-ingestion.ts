@@ -36,7 +36,6 @@ import {
   senderAddressFromHeaders,
   senderDomainOf,
   senderIsAuthenticated,
-  SENDER_AUTHENTICATION_HEADERS,
   type ParsedHeader,
 } from "./core/sender-authentication";
 import { userForVerifiedSender } from "./sender-addresses";
@@ -66,12 +65,28 @@ export type ImapPreflightStatus = "not_configured" | "disabled" | "verification_
  */
 export const RECEIPT_RETENTION_MS = 45 * 86_400_000;
 
+/* The one header part runImapIngestionCycle asks the IMAP server for. The
+   key must be a bare IMAP atom (no spaces, parentheses or quotes), or
+   imapflow quotes it and the server rejects the whole FETCH; the byte
+   ceiling is a real partial fetch and is kept equal to
+   core/sender-authentication.ts's own MAX_HEADER_BYTES by hand, since that
+   constant is not exported. */
+export const IMAP_HEADER_FETCH_PART = { key: "HEADER", maxLength: 64 * 1_024 } as const;
+
 /**
  * How often the worker looks again when there is no mailbox configured. It is
  * a cheap database read, and it bounds how long an administrator waits after
  * saving a mailbox before collection starts (ADR-0017 slice 2).
  */
 const UNCONFIGURED_RECHECK_MS = 60_000;
+
+/**
+ * How long an attachment-processing lease (`attachmentProcessingLockedAt`)
+ * is honoured before a worker holding it is presumed dead and the row is
+ * free to be reclaimed (A2-Q6). Was written out as a literal ten-minute
+ * expression at every call site; one name now stands for the one window.
+ */
+const ATTACHMENT_LEASE_WINDOW_MS = 10 * 60_000;
 
 export interface ImapProviderPreflightState {
   status: ImapPreflightStatus;
@@ -488,7 +503,7 @@ export async function commitStagedAttachment(
   try {
     return await getDb().transaction(async (transaction) => {
       const [active] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
-        .where(and(eq(imapIngestionMessages.id, messageId), eq(imapIngestionMessages.status, "processing"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, leaseToken), gt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(Date.now() - 10 * 60_000))))
+        .where(and(eq(imapIngestionMessages.id, messageId), eq(imapIngestionMessages.status, "processing"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, leaseToken), gt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(Date.now() - ATTACHMENT_LEASE_WINDOW_MS))))
         .for("update").limit(1);
       if (!active) throw new Error("staging_lease_lost");
       const [inserted] = await transaction.insert(imapIngestionAttachments).values({
@@ -610,7 +625,7 @@ export async function reconcileImapStagingObjects(limit = 100): Promise<void> {
     parentLeaseToken: imapIngestionMessages.attachmentProcessingLeaseToken,
     parentLockedAt: imapIngestionMessages.attachmentProcessingLockedAt,
   }).from(imapIngestionStagingObjects).innerJoin(imapIngestionMessages, eq(imapIngestionMessages.id, imapIngestionStagingObjects.messageId)).orderBy(asc(imapIngestionStagingObjects.createdAt)).limit(limit);
-  const liveCutoff = Date.now() - 10 * 60_000;
+  const liveCutoff = Date.now() - ATTACHMENT_LEASE_WINDOW_MS;
   for (const row of rows) {
     if (row.parentStatus === "processing" && row.parentLeaseToken === row.leaseToken && row.parentLockedAt && row.parentLockedAt.getTime() > liveCutoff) continue;
     const [attachment] = await getDb().select({ id: imapIngestionAttachments.id, status: imapIngestionAttachments.status, purgePending: imapIngestionAttachments.purgePending })
@@ -619,7 +634,7 @@ export async function reconcileImapStagingObjects(limit = 100): Promise<void> {
       await getDb().transaction(async (transaction) => {
         const [parent] = await transaction.select({ status: imapIngestionMessages.status, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, lockedAt: imapIngestionMessages.attachmentProcessingLockedAt }).from(imapIngestionMessages)
           .where(eq(imapIngestionMessages.id, row.messageId)).for("update").limit(1);
-        if (parent?.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - 10 * 60_000) return;
+        if (parent?.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - ATTACHMENT_LEASE_WINDOW_MS) return;
         await transaction.delete(imapIngestionStagingObjects).where(and(eq(imapIngestionStagingObjects.id, row.id), eq(imapIngestionStagingObjects.leaseToken, row.leaseToken)));
       });
       continue;
@@ -628,7 +643,7 @@ export async function reconcileImapStagingObjects(limit = 100): Promise<void> {
       await getDb().transaction(async (transaction) => {
         const [parent] = await transaction.select({ status: imapIngestionMessages.status, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, lockedAt: imapIngestionMessages.attachmentProcessingLockedAt }).from(imapIngestionMessages)
           .where(eq(imapIngestionMessages.id, row.messageId)).for("update").limit(1);
-        if (parent?.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - 10 * 60_000) return;
+        if (parent?.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - ATTACHMENT_LEASE_WINDOW_MS) return;
         await transaction.delete(imapIngestionStagingObjects).where(and(eq(imapIngestionStagingObjects.id, row.id), eq(imapIngestionStagingObjects.leaseToken, row.leaseToken)));
       });
       continue;
@@ -636,7 +651,7 @@ export async function reconcileImapStagingObjects(limit = 100): Promise<void> {
     const marked = await getDb().transaction(async (transaction) => {
       const [parent] = await transaction.select({ status: imapIngestionMessages.status, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, lockedAt: imapIngestionMessages.attachmentProcessingLockedAt }).from(imapIngestionMessages)
         .where(eq(imapIngestionMessages.id, row.messageId)).for("update").limit(1);
-      if (!parent || (parent.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - 10 * 60_000)) return false;
+      if (!parent || (parent.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - ATTACHMENT_LEASE_WINDOW_MS)) return false;
       await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", updatedAt: new Date() })
         .where(eq(imapIngestionStagingObjects.id, row.id));
       if (attachment?.status === "stored") {
@@ -651,7 +666,7 @@ export async function reconcileImapStagingObjects(limit = 100): Promise<void> {
       await getDb().transaction(async (transaction) => {
         const [parent] = await transaction.select({ status: imapIngestionMessages.status, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, lockedAt: imapIngestionMessages.attachmentProcessingLockedAt }).from(imapIngestionMessages)
           .where(eq(imapIngestionMessages.id, row.messageId)).for("update").limit(1);
-        if (!parent || (parent.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - 10 * 60_000)) return;
+        if (!parent || (parent.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - ATTACHMENT_LEASE_WINDOW_MS)) return;
         if (attachment?.status === "stored") {
           await transaction.delete(imapIngestionAttachments).where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "stored"), eq(imapIngestionAttachments.purgePending, true)));
         } else if (attachment?.status === "assigned" && attachment.purgePending) {
@@ -664,7 +679,7 @@ export async function reconcileImapStagingObjects(limit = 100): Promise<void> {
       await getDb().transaction(async (transaction) => {
         const [parent] = await transaction.select({ status: imapIngestionMessages.status, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, lockedAt: imapIngestionMessages.attachmentProcessingLockedAt }).from(imapIngestionMessages)
           .where(eq(imapIngestionMessages.id, row.messageId)).for("update").limit(1);
-        if (!parent || (parent.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - 10 * 60_000)) return;
+        if (!parent || (parent.status === "processing" && parent.leaseToken === row.leaseToken && parent.lockedAt && parent.lockedAt.getTime() > Date.now() - ATTACHMENT_LEASE_WINDOW_MS)) return;
         await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeAttempts: sql`${imapIngestionStagingObjects.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
           .where(and(eq(imapIngestionStagingObjects.id, row.id), eq(imapIngestionStagingObjects.leaseToken, row.leaseToken)));
         if (attachment?.status === "stored") {
@@ -687,7 +702,7 @@ async function claimImapAttachmentProcessing(receiptId: string): Promise<ImapAtt
     eq(imapIngestionMessages.id, receiptId),
     eq(imapIngestionMessages.status, "processing"),
     sql`${imapIngestionMessages.attachmentProcessingAttempts} >= 5`,
-    or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - 10 * 60_000))),
+    or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - ATTACHMENT_LEASE_WINDOW_MS))),
   ));
   const token = randomUUID();
   const [claimed] = await getDb().update(imapIngestionMessages).set({
@@ -699,7 +714,7 @@ async function claimImapAttachmentProcessing(receiptId: string): Promise<ImapAtt
     eq(imapIngestionMessages.id, receiptId),
     eq(imapIngestionMessages.status, "processing"),
     lt(imapIngestionMessages.attachmentProcessingAttempts, 5),
-    or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - 10 * 60_000))),
+    or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - ATTACHMENT_LEASE_WINDOW_MS))),
     or(isNull(imapIngestionMessages.attachmentProcessingNextAttemptAt), lte(imapIngestionMessages.attachmentProcessingNextAttemptAt, now)),
   )).returning({ id: imapIngestionMessages.id, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, attempts: imapIngestionMessages.attachmentProcessingAttempts });
   return claimed?.leaseToken ? { id: claimed.id, leaseToken: claimed.leaseToken, attempts: claimed.attempts } : undefined;
@@ -903,7 +918,7 @@ export async function runImapIngestionCycle(
         eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
         eq(imapIngestionMessages.status, "processing"),
         or(isNull(imapIngestionMessages.attachmentProcessingNextAttemptAt), lte(imapIngestionMessages.attachmentProcessingNextAttemptAt, new Date())),
-        or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(Date.now() - 10 * 60_000))),
+        or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(Date.now() - ATTACHMENT_LEASE_WINDOW_MS))),
       )).orderBy(asc(imapIngestionMessages.mailboxUid)).limit(25);
       const [checkpoint] = await getDb().select({
         lastUid: sql<number | null>`max(${imapIngestionMessages.mailboxUid})`,
@@ -911,11 +926,59 @@ export async function runImapIngestionCycle(
         eq(imapIngestionMessages.mailbox, config.mailbox),
         eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
       ));
+      /* An unattributed message is deleted after this pass (below), in its
+         own read-write lock; a crash between the receipt committing here and
+         that delete running would otherwise strand the message in the
+         mailbox forever, since the checkpoint above already treats its UID
+         as seen (SR1-R4). Re-collecting every still-unattributed, unexpired
+         receipt for this UIDVALIDITY epoch each cycle makes the delete retry
+         until it actually lands; re-deleting an already-expunged UID is a
+         no-op. Bounded by the receipt's own retention window, the same one
+         that already governs how long an unattributed record is kept. */
+      const pendingExpungeRows = await getDb().select({
+        uid: imapIngestionMessages.mailboxUid,
+      }).from(imapIngestionMessages).where(and(
+        eq(imapIngestionMessages.mailbox, config.mailbox),
+        eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
+        eq(imapIngestionMessages.status, "unattributed"),
+        gt(imapIngestionMessages.expiresAt, new Date()),
+      )).orderBy(asc(imapIngestionMessages.mailboxUid)).limit(100);
+      for (const row of pendingExpungeRows) unattributedUids.push(row.uid);
+      // Paged past the first hundred: a row stays in this set until it ages
+      // out, so a fixed cap left everything behind it on the server for the
+      // whole retention period.
+      let lastPendingUid = pendingExpungeRows.at(-1)?.uid;
+      while (pendingExpungeRows.length === 100 && lastPendingUid !== undefined) {
+        const page = await getDb().select({ uid: imapIngestionMessages.mailboxUid }).from(imapIngestionMessages).where(and(
+          eq(imapIngestionMessages.mailbox, config.mailbox),
+          eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
+          eq(imapIngestionMessages.status, "unattributed"),
+          gt(imapIngestionMessages.expiresAt, new Date()),
+          gt(imapIngestionMessages.mailboxUid, lastPendingUid),
+        )).orderBy(asc(imapIngestionMessages.mailboxUid)).limit(100);
+        for (const row of page) unattributedUids.push(row.uid);
+        lastPendingUid = page.at(-1)?.uid;
+        if (page.length < 100) break;
+      }
       /* Both header sets in one fetch: the provider's envelope recipient, and
          everything the sender rules read (ADR-0017 decision 3). A header
          nobody fetched reads exactly like a header nobody sent, so the list
-         lives beside the rules in core/sender-authentication.ts. */
-      const fetchOptions = { uid: true, headers: [config.trustedRecipientHeader, ...SENDER_AUTHENTICATION_HEADERS], source: { maxLength: IMAP_ATTACHMENT_LIMITS.rawMessageBytes }, internalDate: true, size: true, bodyStructure: true };
+         lives beside the rules in core/sender-authentication.ts.
+         Requested as a bounded bodyParts range rather than the `headers`
+         convenience option (SR2-R1): the latter has no size bound at all, so
+         a message with one pathologically large header value would be read
+         in full before core/sender-authentication.ts's own 64KB check ever
+         saw it. The whole header block is fetched, not a HEADER.FIELDS
+         list: imapflow's compiler quotes a bodyParts key that contains a
+         space or parenthesis, and a quoted section is not valid IMAP, so a
+         server rejects every such FETCH. A bare `HEADER` key is an atom,
+         still lands in `message.headers` (imapflow folds a `header` part
+         into that field), and the `maxLength` is a true partial fetch: the
+         server is asked for at most that many bytes, so the client never
+         buffers more than the ceiling in the first place. The readers below
+         pick the fields they need out of the block by name, as they always
+         did. */
+      const fetchOptions = { uid: true, bodyParts: [IMAP_HEADER_FETCH_PART], source: { maxLength: IMAP_ATTACHMENT_LIMITS.rawMessageBytes }, internalDate: true, size: true, bodyStructure: true };
       const processMessage = async (message: { uid: number; source?: Buffer; headers?: Buffer; size?: number; bodyStructure?: MessageStructureObject; internalDate?: Date | string }) => {
         try {
         const source = message.source;
@@ -962,6 +1025,24 @@ export async function runImapIngestionCycle(
         if (receipt && userId !== (receipt.userId ?? undefined) && receipt.status === "processing") {
           await getDb().update(imapIngestionMessages).set({ status: "quarantined", receiptStatus: "cancelled", failureCode: "recipient_mismatch", attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, attachmentProcessingNextAttemptAt: null, updatedAt: new Date() })
             .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "processing")));
+        }
+        /* A resume can land between the pause check above and this receipt
+           being recorded (A2-R3): `setRelayIngestPaused`'s own bulk update
+           only moves rows that are already `held` at the moment it runs, so
+           a row inserted `held` from that stale check afterwards is not
+           caught and would otherwise sit there until the next pause/resume.
+           Re-check right away and catch up this one row if the member has
+           since resumed, the same transition the resume itself would apply. */
+        if (receipt && held && receipt.status === "held" && !(await relayIngestIsPaused(userId!))) {
+          await getDb().update(imapIngestionMessages).set({
+            status: "processing",
+            receiptStatus: "processing",
+            failureCode: null,
+            attachmentProcessingNextAttemptAt: new Date(),
+            attachmentProcessingLockedAt: null,
+            attachmentProcessingLeaseToken: null,
+            updatedAt: new Date(),
+          }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "held")));
         }
         /* Unattributed mail is answered once, where the conditions allow, and
            then deleted: nothing is kept for an administrator or anyone else.
@@ -1014,7 +1095,8 @@ export async function runImapIngestionCycle(
         for (const uid of batch) await fetchThenProcess(uid);
       }
     } finally { lock.release(); }
-    if (unattributedUids.length) await deleteUnattributedMessages(client, config, unattributedUids);
+    const uniqueUnattributedUids = [...new Set(unattributedUids)];
+    if (uniqueUnattributedUids.length) await deleteUnattributedMessages(client, config, uniqueUnattributedUids);
   } finally {
     try { await client.logout(); } catch { /* Network failure already has no raw-mail logging. */ }
   }

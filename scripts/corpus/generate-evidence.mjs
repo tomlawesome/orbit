@@ -30,6 +30,17 @@ const collapse = (s) => s.replace(/\s+/gu, " ").trim();
 const unescape_ = (s) => s.replace(/\\([&*_`#\[\]<>|~])/gu, "$1");
 const CAP = 200;
 
+// X-Q4 (#1151): each one of these characters inside a value gains one
+// escaping backslash in Tika's own output (the same class unescape_ strips
+// above), so the matched span in the *original* (escaped) text is longer
+// than collapse(value).length by exactly that many characters. The line
+// that uses this used to add a dead `? 0 : 0`, always zero regardless of
+// its own condition, undercounting the span whenever a value like
+// "Marks & Spencer" contained one of these characters.
+export function escapedCharacterCount(value) {
+  return (value.match(/[&*_`#\[\]<>|~]/gu) ?? []).length;
+}
+
 function dateForms(iso) {
   const [y, m, d] = iso.split("-").map(Number);
   const mi = m - 1, dd = String(d).padStart(2, "0"), mm = String(m).padStart(2, "0");
@@ -49,6 +60,7 @@ function window(text, value, before = 40, after = 70) {
   return w.length <= CAP ? w : collapse(text.slice(i, i + value.length + 40)).slice(0, CAP);
 }
 
+function main() {
 const out = [];
 for (const f of readdirSync(dir).filter((n) => n.endsWith(".truth.json")).sort()) {
   const base = f.replace(/\.truth\.json$/, "");
@@ -66,7 +78,7 @@ for (const f of readdirSync(dir).filter((n) => n.endsWith(".truth.json")).sort()
     // Map the position back: each stripped backslash shifted everything left.
     let real = 0, seen = 0;
     while (real < text.length && seen < idx) { if (!(text[real] === "\\" && /[&*_`#\[\]<>|~]/u.test(text[real + 1] ?? ""))) seen++; real++; }
-    const len = collapse(value).length + (unescape_(collapse(value)).length !== collapse(value).length ? 0 : 0);
+    const len = collapse(value).length + escapedCharacterCount(collapse(value));
     const w = idx === -1 ? null : window(text, text.slice(real, real + len + 2).replace(/\s+$/u, ""));
     if (w) lines.push(`    ${field}: ${JSON.stringify(w)},`);
     else miss.push(field);
@@ -99,3 +111,11 @@ for (const f of readdirSync(dir).filter((n) => n.endsWith(".truth.json")).sort()
   if (miss.length) console.error(`!! ${base}: could not place ${miss.join(", ")}`);
 }
 console.log(out.join("\n"));
+}
+
+// Guarded so escapedCharacterCount() above can be imported for testing
+// without re-running the scan against the real corpus every time (same
+// pattern as scripts/extract-bundle/build.mjs).
+if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+  main();
+}

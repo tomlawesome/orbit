@@ -40,9 +40,7 @@
  * (`mkHl(392, 152, 496, 496, { round: true })`) is the same 500px dial by a
  * different name.
  */
-import { dialPlacement } from "../../data/chart.js";
-
-const SVG_NS = "http://www.w3.org/2000/svg";
+import { drawDemoBody } from "./demo-body.js";
 
 /** Ratified beat: the mockup's own demo item lands 381 days out
  *  (`drawBody(381)`) — the same point chapter 5 walks away from. */
@@ -89,18 +87,10 @@ export const SELECTORS = Object.freeze({
  * @param {number} days
  */
 function drawLandedBody(doc, dial, days) {
-  const group = doc.createElementNS(SVG_NS, "g");
-  group.setAttribute("class", "tourfilm-lands-body");
-  group.setAttribute("aria-hidden", "true");
-  const dot = doc.createElementNS(SVG_NS, "circle");
-  dot.setAttribute("r", "5.5");
-  dot.setAttribute("style", "fill:var(--accent)");
-  const { x, y } = dialPlacement(days);
-  dot.setAttribute("cx", String(x));
-  dot.setAttribute("cy", String(y));
-  group.appendChild(dot);
-  dial.appendChild(group);
-  return group;
+  // This body never moves again (#1151 W3-Q4), so only the draw half of
+  // demo-body.js's pair is called — same one function the other three
+  // chapters' draw*Body use.
+  return drawDemoBody(doc, dial, days, "tourfilm-lands-body", "tourfilm-lands-dot");
 }
 
 /** @type {import("./index.js").Chapter} */

@@ -709,6 +709,11 @@ acceptance_oidc=()
 # (this variable unset) with exactly the graph it has today.
 reuse_env=()
 [[ -z "$reuse_project" ]] || reuse_env=(ORBIT_E2E_REUSE=true)
+# A project this script named itself, or was handed through COMPOSE_PROJECT_NAME
+# as the header invites, is one it brought up and health-checked here: say so,
+# or tests/e2e/support/database.ts refuses to reset a database it believes it
+# did not create.
+[[ -n "$reuse_project" ]] || reuse_env+=("ORBIT_E2E_OWNED_PROJECT=$project_name")
 # COMPOSE_PROJECT_NAME is handed to the suite because a spec may need to ask
 # the stack's own database a question -- tests/e2e/v19-tour.spec.ts proves the
 # tour's example body is never written down, which only the database can

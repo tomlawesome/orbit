@@ -12,6 +12,7 @@ import {
   readlinkSync,
   readdirSync,
   readFileSync,
+  renameSync,
   statSync,
   symlinkSync,
   unlinkSync,
@@ -394,9 +395,15 @@ const fakeDockerScript = [
   '        parse_flags "-f --filter --format" "-q --quiet" 0 125 "${@:3}"',
   '        if [[ -n "${FAKE_DOCKER_VOLUME_NAMES:-}" ]]; then',
   '          printf "%s\\n" "${FAKE_DOCKER_VOLUME_NAMES}"',
+  '        elif [[ -f "${FAKE_PROBE_COUNTER_DIR:-}/created-volume-names" ]]; then',
+  '          cat -- "${FAKE_PROBE_COUNTER_DIR}/created-volume-names"',
   '        elif [[ "${FAKE_DOCKER_EXISTING_DB_VOLUME:-}" == "1" ]]; then',
   "          printf 'orbit_orbit-db-data\\n'",
   "        fi",
+  "        ;;",
+  "      rm)",
+  '        parse_flags "" "-f --force" 1 125 "${@:3}"',
+  '        [[ "${FAKE_DOCKER_VOLUME_RM_FAIL:-0}" != "1" ]] || exit 1',
   "        ;;",
   "      inspect)",
   '        parse_flags "-f --format" "" 0 125 "${@:3}"',
@@ -502,6 +509,12 @@ const fakeDockerScript = [
   '    if [[ "$*" == *"exec -T orbit-ollama"*"ollama pull"* ]]; then',
   '      [[ "${FAKE_OLLAMA_PULL_FAIL:-0}" != "1" ]]',
   "      exit $?",
+  "    fi",
+  '    if [[ "${FAKE_COMPOSE_UP_FAIL:-}" == "1" && " $* " == *" up "* ]]; then',
+  '      if [[ -n "${FAKE_COMPOSE_UP_CREATES_VOLUME:-}" ]]; then',
+  '        printf "%s\\n" "${FAKE_COMPOSE_UP_CREATES_VOLUME}" > "${FAKE_PROBE_COUNTER_DIR:?}/created-volume-names"',
+  "      fi",
+  "      exit 23",
   "    fi",
   '    if [[ "${FAKE_COMPOSE_FAIL:-}" == "1" && " $* " != *" version "* && " $* " != *" config "* ]]; then',
   "      exit 23",
@@ -1335,6 +1348,12 @@ describe("install.sh", () => {
       "phase=configuration component=configuration state=completed reason=configuration-migration action=verify",
       "phase=oidc component=oidc state=completed reason=provider-discovery action=verify",
       "phase=compose component=compose state=completed reason=compose-validation action=check",
+      // #1151 O1-Q2: the application component gets the same starting/
+      // completed pair every sibling service-preparation component gets,
+      // even though no pull call runs here (it was already pulled during
+      // the identity phase) -- never a bare "completed" a UI tracking
+      // per-component state would see with no matching "starting".
+      "phase=preparation component=application state=starting reason=service-preparation action=pull",
       "phase=preparation component=application state=completed reason=service-preparation action=pull",
       "phase=database component=database state=healthy reason=database-health action=health",
       "phase=application component=application state=healthy reason=application-health action=health",
@@ -1621,6 +1640,24 @@ describe("install.sh", () => {
     expect(projectCalls.join("\n")).not.toContain(basename(targetDir));
     expect(result.calls).toContain("up -d");
     expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("recognizes an existing deployment through a custom ORBIT_SECRETS_DIR, instead of refusing it as an unrecognizable target (#1151 SF2-F8)", () => {
+    // validate_target's "this looks like an existing deployment, treat it
+    // as an update" branch only checks that $secrets_directory is a real,
+    // non-symlink directory -- it never looked at ORBIT_SECRETS_DIR before
+    // this fix, so a deployment whose secrets were ever renamed/relocated
+    // read as unrecognizable and fresh-install validation refused it
+    // outright, before configure.sh (which does honour the variable) ever
+    // ran.
+    const targetDir = makeTarget();
+    makeExistingDeployment(targetDir);
+    const customSecretsDir = join(targetDir, "renamed-secrets");
+    renameSync(join(targetDir, ".orbit-secrets"), customSecretsDir);
+
+    const result = runInstall(targetDir, { ORBIT_SECRETS_DIR: customSecretsDir });
+
+    expect(result.stderr).not.toContain("Refusing to install here");
   });
 
   it("keeps backup and restore commands on the persisted env-file project", () => {
@@ -2211,13 +2248,18 @@ describe("install.sh", () => {
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
-  it("refuses a new target when an existing Orbit database volume is present", () => {
+  it("refuses a new target when an existing Orbit database volume is present, naming it and the command to remove it (#1151 O1-S3)", () => {
     const targetDir = makeTarget();
 
     const result = runInstall(targetDir, { FAKE_DOCKER_EXISTING_DB_VOLUME: "1" });
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("existing Orbit database volume");
+    // Previously left the operator to find the volume themselves; now
+    // names it and the exact removal command, for exactly the case a prior
+    // failed install's own cleanup (tested below) could not reach.
+    expect(result.stderr).toContain("orbit_orbit-db-data");
+    expect(result.stderr).toContain("docker volume rm -- orbit_orbit-db-data");
     expect(result.calls).toContain("docker volume ls");
     expect(result.calls).not.toContain("docker pull");
     expect(result.calls).not.toContain("curl");
@@ -2240,6 +2282,38 @@ describe("install.sh", () => {
     expect(result.calls).not.toContain("curl");
     expect(managedSnapshot(targetDir)).toEqual(before);
     expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("removes the database volume it created when a fresh install's compose up fails, so a retry is not doomed forever (#1151 O1-S3)", () => {
+    const targetDir = makeTarget();
+
+    // compose up itself creates the named volume only once it actually
+    // runs; FAKE_COMPOSE_UP_CREATES_VOLUME simulates that by only making
+    // `docker volume ls` report it after the fake `up` call has run (and
+    // failed) -- unlike FAKE_DOCKER_VOLUME_NAMES/FAKE_DOCKER_EXISTING_DB_VOLUME,
+    // which report it from the start and would trip the earlier "existing
+    // Orbit database volume" preflight refusal before compose up ever runs.
+    const result = runInstall(targetDir, {
+      FAKE_COMPOSE_UP_FAIL: "1",
+      FAKE_COMPOSE_UP_CREATES_VOLUME: "orbit_orbit-db-data",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Orbit services could not be created or started.");
+    expect(result.calls).toContain("docker volume rm -- orbit_orbit-db-data");
+  });
+
+  it("never removes a database volume on a failed update (only a fresh install owns what compose up just created)", () => {
+    const targetDir = makeTarget();
+    makeFullExistingDeployment(targetDir);
+
+    const result = runInstall(targetDir, {
+      FAKE_COMPOSE_UP_FAIL: "1",
+      FAKE_DOCKER_EXISTING_DB_VOLUME: "1",
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.calls).not.toContain("docker volume rm");
   });
 
   it("refuses a fresh target when a renamed-directory Orbit volume is orphaned", () => {
@@ -3116,6 +3190,32 @@ describe("install.sh release manifest (ADR-0031 #7)", () => {
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
     expect(result.stdout).toContain(`CONFIGURE_INVOKED ORBIT_IMAGE=${resolvedReference}`);
+  });
+
+  it("removes its own temporary manifest directory after a successful self-fetch (GitLab #1201)", () => {
+    const targetDir = makeTarget();
+    const dir = mkdtempSync(join(tmpdir(), "orbit-install-selffetch-"));
+    const { privatePem, publicPem } = generateKeyPair(dir);
+    const baseUrl = buildSelfFetchFixture(dir, privatePem);
+    // A private TMPDIR, never shared with anything else, so this test can
+    // assert the directory is empty afterward: self_fetch_release_manifest
+    // previously set release_manifest_work_dir inside the subshell forked
+    // for `release_manifest_path="$(self_fetch_release_manifest)"`, so
+    // cleanup()'s own copy of that variable, in the real shell, stayed
+    // empty and never removed the real orbit-install-manifest.* directory.
+    const privateTmpDir = mkdtempSync(join(tmpdir(), "orbit-install-selffetch-tmpdir-"));
+
+    const result = runInstall(targetDir, {
+      ORBIT_RELEASE_MANIFEST: "",
+      ORBIT_INSTALL_TEST_MANIFEST_BASE_URL: baseUrl,
+      ORBIT_INSTALL_TEST_PUBLIC_KEY_FILE: publicPem,
+      ORBIT_INSTALL_TEST_ALLOW_KEY_OVERRIDE: "1",
+      TMPDIR: privateTmpDir,
+    });
+
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(readdirSync(privateTmpDir).filter((name) => name.startsWith("orbit-install-manifest."))).toEqual([]);
   });
 
   it("refuses a self-fetched manifest signed by the wrong key, before any pull", () => {

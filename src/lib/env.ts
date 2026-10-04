@@ -2,6 +2,8 @@ import { z } from "zod";
 import {
   OIDC_CALLBACK_PATH,
   SESSION_SECRET_RUNTIME_MESSAGE,
+  SESSION_TTL_SECONDS_MAX,
+  SESSION_TTL_SECONDS_MIN,
   isValidSessionSecret,
 } from "@/lib/config-contract";
 import { readRuntimeSecret } from "@/lib/runtime-secret";
@@ -12,11 +14,25 @@ const baseEnvironmentSchema = z.object({
   // (issue #578): the runtime used to accept any 32-character string, so an
   // instance could start on a secret its own configure step refused.
   SESSION_SECRET: z.string().refine(isValidSessionSecret, { message: SESSION_SECRET_RUNTIME_MESSAGE }),
-  SESSION_TTL_SECONDS: z.coerce.number().int().min(900).max(2_592_000).default(604_800),
+  // Bounds shared with config-contract.ts's isValidSessionTtlSeconds
+  // (SF2-F6), so the readiness contract and this loader can never disagree
+  // about what's in range.
+  SESSION_TTL_SECONDS: z.coerce.number().int().min(SESSION_TTL_SECONDS_MIN).max(SESSION_TTL_SECONDS_MAX).default(604_800),
   // Explicit mode key (ADR-0023 §1): local sign-in is always available; OIDC
   // is enabled only when this is exactly "true" (default "false"). The OIDC
   // fields below are parsed and validated only when it is.
-  ORBIT_AUTH_OIDC: z.enum(["true", "false"]).default("false"),
+  //
+  // The .env-orbit contract (config-contract.ts's envOrbitSchema) accepts ""
+  // as well as "true"/"false" for this key — "" is how a key that is
+  // present but unset in the file round-trips — so this loader must treat
+  // it as "unset" too (SF2-F4): without the preprocess step, an empty
+  // ORBIT_AUTH_OIDC="" is contract-legal but z.enum(["true","false"]) still
+  // throws on it, because zod's own .default() only ever applies to a
+  // genuinely `undefined` field, never to a present-but-empty string.
+  ORBIT_AUTH_OIDC: z.preprocess(
+    (value) => (value === "" ? "false" : value),
+    z.enum(["true", "false"]).default("false"),
+  ),
 });
 
 const oidcEnvironmentSchema = z.object({

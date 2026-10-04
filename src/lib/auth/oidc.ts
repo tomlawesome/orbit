@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { OidcAuthConfig } from "@/lib/env";
 import { constantTimeEqual, createPkceChallenge, type LoginTransaction } from "@/lib/auth/crypto";
 import { AuthError, type TokenExchangeReason } from "@/lib/auth/errors";
+import { OIDC_DISCOVERY_MAX_BYTES } from "@/lib/oidc-discovery";
 
 const discoverySchema = z.object({
   issuer: z.url(),
@@ -72,6 +73,39 @@ function assertHttpsEndpoint(value: string, label: string): void {
   }
 }
 
+/**
+ * SR2-R5: every runtime OIDC fetch (discovery, token exchange, UserInfo) is
+ * time-bounded (AbortSignal.timeout) but, unlike install.sh's own discovery
+ * fetch (src/lib/oidc-discovery.ts's OIDC_DISCOVERY_MAX_BYTES, enforced by
+ * curl's --max-filesize plus an on-disk recheck), had no cap on response
+ * *size* — a provider (or a path that reaches these endpoints, e.g. after a
+ * redirect) could hand back an arbitrarily large body and have it buffered
+ * whole by `response.json()` before parsing ever starts. This reads the
+ * body through the stream directly, refusing as soon as more than
+ * `maxBytes` has arrived, so the memory cost of an oversized response is
+ * bounded to roughly `maxBytes` rather than the attacker's choice. Reuses
+ * the install-time path's own byte ceiling (OIDC_DISCOVERY_MAX_BYTES) so
+ * every OIDC-facing fetch in this project shares one cap.
+ */
+async function readBoundedJson(response: Response, maxBytes: number = OIDC_DISCOVERY_MAX_BYTES): Promise<unknown> {
+  const body = response.body;
+  if (!body) return response.json();
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw new Error(`Response body exceeded ${maxBytes} bytes`);
+    }
+    chunks.push(value);
+  }
+  return JSON.parse(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf8"));
+}
+
 export async function discoverProvider(config: OidcAuthConfig): Promise<OidcMetadata> {
   const cached = metadataCache.get(config.issuer);
   if (cached && cached.expiresAt > Date.now()) return cached.promise;
@@ -85,7 +119,7 @@ export async function discoverProvider(config: OidcAuthConfig): Promise<OidcMeta
         signal: AbortSignal.timeout(10_000),
       });
       if (!response.ok) throw new Error(`Discovery returned HTTP ${response.status}`);
-      const metadata = discoverySchema.parse(await response.json());
+      const metadata = discoverySchema.parse(await readBoundedJson(response));
       if (metadata.issuer !== config.issuer) throw new Error("Discovered issuer does not exactly match OIDC_ISSUER");
       assertHttpsEndpoint(metadata.authorization_endpoint, "Authorization endpoint");
       assertHttpsEndpoint(metadata.token_endpoint, "Token endpoint");
@@ -188,7 +222,7 @@ async function exchangeCode(config: OidcAuthConfig, metadata: OidcMetadata, code
 
   let payload: unknown;
   try {
-    payload = await response.json();
+    payload = await readBoundedJson(response);
   } catch {
     // A parser error can include provider-controlled response fragments.
     throw tokenExchangeFailure("invalid_response");
@@ -301,7 +335,7 @@ async function fetchUserInfo(metadata: OidcMetadata, accessToken: string, expect
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new Error(`UserInfo returned HTTP ${response.status}`);
-    const profile = z.record(z.string(), z.unknown()).parse(await response.json());
+    const profile = z.record(z.string(), z.unknown()).parse(await readBoundedJson(response));
     if (profile.sub !== expectedSubject) throw new Error("UserInfo subject does not match ID token");
     return profile;
   } catch (error) {

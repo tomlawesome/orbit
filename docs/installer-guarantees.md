@@ -19,8 +19,8 @@ boundary, MEDIUM = deployment correctness, LOW = UX).
   the fixed safe/reversible action set only: fix-permissions,
   restore-transaction, restart-services; stage two/dangerous actions remain
   unimplemented) was added 2026-08-13.
-- **Totals:** 381 guarantees — 219 HIGH, 128 MEDIUM, 34 LOW.
-  Install/configuration family: 217 (123 HIGH). Backup/recovery/deploy
+- **Totals:** 382 guarantees — 219 HIGH, 129 MEDIUM, 34 LOW.
+  Install/configuration family: 218 (123 HIGH). Backup/recovery/deploy
   family: 164 (96 HIGH).
 - **Maintenance:** a change to an operational script that adds, removes, or
   moves a guarantee must update this catalogue in the same pull request;
@@ -81,13 +81,14 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 16. If no explicit migration target is supplied, the source file must already carry valid schema + applied-version provenance, else migration refuses with `configuration_provenance_required` — migration never invents provenance data. — configuration.sh:194-196 — category: refusal/fail-closed — criticality: HIGH
 17. If the file already declares a `COMPOSE_PROJECT_NAME` and a different target project name is supplied, migration refuses with `configuration_project_mismatch` rather than silently renaming the deployment's Compose project (which would orphan existing containers/volumes). — configuration.sh:202-205 — category: refusal/fail-closed — criticality: HIGH
 18. Migration is idempotent: if image, version, digest, and project already equal the desired values, `migrate_file` reports "already current" and returns without writing anything. — configuration.sh:212-218 — category: idempotency — criticality: MEDIUM
-19. Before mutating, a rollback backup (`<file>.orbit-config.rollback`) is written; if a backup already exists at that path (file or symlink), migration refuses (`configuration_migration`) rather than overwriting a possibly-still-needed prior rollback point. — configuration.sh:229-231 — category: transactional/rollback — criticality: HIGH
+19. Before mutating, a rollback backup (`<file>.orbit-config.rollback`) is written. If a backup already exists at that path, migration refuses (`configuration_migration`) unless it is byte-identical to the current file — the only way that can be true is a prior `--migrate` run interrupted after writing this backup but before ever changing the file, so there is nothing to protect and the retry proceeds instead of refusing permanently; a backup that differs (a real rollback point from a different migration) or is a symlink still refuses. — configuration.sh:258-275 — category: transactional/rollback — criticality: HIGH
 20. The rollback backup and the in-progress replacement file are created under `umask 077` and explicitly `chmod 600`, so a secret-bearing config file is never briefly world/group-readable during migration. — configuration.sh:232-234,236-237,265 — category: permissions/ownership — criticality: HIGH
 21. The new configuration content is assembled entirely in a `mktemp` temp file and only `mv -f`'d onto the real file after every write and the final `chmod 600` succeed; any write failure deletes the temp file and fails closed without touching the original. — configuration.sh:236-264 — category: transactional/rollback — criticality: HIGH
 22. If the final atomic rename itself fails, the temp file is discarded and (outside of `--transaction` mode) the just-taken backup is copied back over the target — migration never leaves the deployment's `.env-orbit` missing or half-written after a failed rename. — configuration.sh:266-270 — category: transactional/rollback — criticality: HIGH
 23. Migration preserves the source file's original line-ending convention (LF vs CRLF, detected by presence of `\r`) rather than normalising it. — configuration.sh:238-239 — category: idempotency — criticality: LOW
 24. `--transaction` mode (used when an outer caller such as install.sh already owns a rollback point) is only accepted together with `--migrate`; requesting it with any other action fails closed (`configuration_migration`), preventing the flag from being silently ignored. — configuration.sh:293 — category: input-validation — criticality: MEDIUM
 25. `parse_file` distinguishes three outcomes for callers: fully valid current schema (0), valid-but-legacy/unversioned data needing migration (2, reported as `safely_migratable ORBIT_CONFIG_SCHEMA_VERSION`), or hard failure (any other exit) — callers (e.g. configure.sh's preflight) can require an explicit migration step rather than silently treating an old file as current. — configuration.sh:150-157,168-174,296-306 — category: provenance/immutability — criticality: MEDIUM
+26. A direct secret value and its `_FILE` counterpart (`SESSION_SECRET`, `DOCUMENT_KEK`, `DOCUMENT_KEK_NEXT`, `POSTGRES_PASSWORD`, `OIDC_CLIENT_SECRET`, `VAPID_PRIVATE_KEY`, `SMTP_PASSWORD`, `DATABASE_URL`, `SMTP_URL`) set together fail closed as `configuration_secret_conflict`, matching src/lib/config-contract.ts's own mutually-exclusive pairs — `--check`/`--preflight` never certifies a file the app refuses at runtime (#1151 O1-Q1). — configuration.sh:168-174 — category: input-validation — criticality: MEDIUM
 
 ## configure.sh (operator-run `--check`/`--init`/`--set-oidc-secret`/`--set-deployment-profile` entry point; also runs with no args to finish bootstrapping secrets)
 
@@ -328,10 +329,12 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
   proves a release is genuinely signed, not that it is the newest one.
   Whoever controls what `get-orbit.sh` downloads from could silently serve
   an older, still-validly-signed release instead of the current `latest`.
-  Pinning `ORBIT_VERSION=vX.Y.Z` closes this: both `get-orbit.sh` and
-  `install.sh` refuse a manifest whose own `version` field does not equal
-  the pin (guarantee 6, and the matching check in `install.sh`), so an older
-  release can only ever be installed by asking for it by name.
+  Pinning to a specific release closes this, though the variable differs by
+  entry point: `get-orbit.sh` reads `ORBIT_VERSION=vX.Y.Z` (guarantee 6);
+  `install.sh` has no `ORBIT_VERSION` and is pinned instead with
+  `ORBIT_CHANNEL=vX.Y.Z`. Either way the script refuses a manifest whose own
+  `version` field does not equal the pin, so an older release can only ever
+  be installed by asking for it by name.
 
 ---
 
@@ -345,13 +348,13 @@ Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `confi
 |---|---:|
 | install.sh | 57 |
 | configure.sh | 34 |
-| configuration.sh | 25 |
+| configuration.sh | 26 |
 | container-entrypoint.sh | 14 |
 | installer-ui.sh | 13 |
 | repair.sh | 56 |
 | installer-simulation.sh | 8 |
 | get-orbit.sh | 10 |
-| **Total** | **217** |
+| **Total** | **218** |
 
 **Guarantee count by category × criticality**
 
@@ -359,13 +362,13 @@ Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `confi
 |---|---:|---:|---:|---:|
 | refusal/fail-closed | 29 | 26 | 7 | 62 |
 | secret-handling | 31 | 5 | 0 | 36 |
-| input-validation | 6 | 21 | 8 | 35 |
+| input-validation | 6 | 22 | 8 | 36 |
 | provenance/immutability | 20 | 10 | 0 | 30 |
 | transactional/rollback | 18 | 3 | 0 | 21 |
 | permissions/ownership | 18 | 0 | 0 | 18 |
 | idempotency | 0 | 4 | 4 | 8 |
 | recovery | 1 | 5 | 1 | 7 |
-| **Total** | **123** | **74** | **20** | **217** |
+| **Total** | **123** | **75** | **20** | **218** |
 
 **Guarantees duplicated across scripts (up to 10, both citations)**
 

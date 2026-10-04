@@ -1,5 +1,6 @@
 <script>
   import { onMount } from "svelte";
+  import NorthStarMark from "$lib/NorthStarMark.svelte";
   import { NEWCOMER_FAR, NEWCOMER_NEAR } from "$lib/flight/starfields.js";
   import { belongRowsOf, discoveredCountOf, WAITING_APPROVAL_NOTE } from "./stage.js";
   /*
@@ -171,14 +172,8 @@
        it, the thing there is to create is a SYSTEM, so it opens the same three
        questions the card at the foot offers. -->
   <button class="nstar" type="button" onclick={oncreate}>
-    <svg width="30" height="30" viewBox="-15 -15 30 30" aria-hidden="true">
-      <g class="glint">
-        <circle r="9" fill="var(--ink)" opacity=".12" />
-        <path d="M 0 -12 L 1.7 -1.7 L 12 0 L 1.7 1.7 L 0 12 L -1.7 1.7 L -12 0 L -1.7 -1.7 Z"
-              fill="var(--ink)" opacity=".9" />
-        <circle r="2" fill="var(--ink)" />
-      </g>
-    </svg><span>create</span>
+    <NorthStarMark />
+    <span>create</span>
   </button>
   <div class="hero" bind:this={hero} aria-hidden="true">
     {#each cards as c (c.id)}

@@ -181,7 +181,11 @@ describe("the beats, against a recorder", () => {
         goto: async (c) => log.push(["goto", c.sel]),
         light: (c) => log.push(["light", c.sel]),
         unlight: (c) => log.push(["unlight", c.sel]),
-        callout: async (text, anchor) => log.push(["callout", text, anchor.sel]),
+        // T-Q10 (#1151): `o` (the callout's own options, carrying its
+        // `mark`) is captured too, as the 4th element -- previously dropped,
+        // which is why "marks yours-year after the walk" could not check
+        // yours-year-line/yours-close without this.
+        callout: async (text, anchor, side, o) => log.push(["callout", text, anchor.sel, o]),
         dropCallout: () => log.push(["dropCallout"]),
         tween: async (ms, fn) => { fn(1); log.push(["tween"]); },
         w: async () => log.push(["w"]),
@@ -243,14 +247,17 @@ describe("the beats, against a recorder", () => {
     expect(log.filter(([w]) => w === "veil").map(([, on]) => on)).toEqual([false]);
   });
 
-  it("marks yours-year after the walk", async () => {
+  it("marks yours-year after the walk, and yours-year-line/yours-close on its two closing lines", async () => {
     const { log, ctx } = recorder();
     await yours.play(ctx);
     const marks = log.filter(([word]) => word === "mark").map(([, name]) => name);
     expect(marks).toEqual(["yours-year"]);
-    /* yours-year-line and yours-close ride inside the two callouts' own
-       options, which the recorder's `callout` stub does not see -- pinned
-       for real below. */
+    // T-Q10 (#1151): yours-year-line and yours-close ride inside the two
+    // closing callouts' own options (12-yours.js's `{ mark: ... }`), not a
+    // direct ctx.mark() call -- this used to go unchecked entirely, with a
+    // comment claiming it was "pinned for real below", which it never was.
+    const calloutMarks = log.filter(([word]) => word === "callout").map(([, , , o]) => o?.mark);
+    expect(calloutMarks).toEqual(["yours-year-line", "yours-close"]);
   });
 
   it("presses nothing: chapter 12 only looks", async () => {

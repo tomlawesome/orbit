@@ -2,7 +2,7 @@
   import { beforeNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { applyCommand, readWorkspace } from "$lib/data/workspace.js";
+  import { WorkspaceError, applyCommand, readWorkspace } from "$lib/data/workspace.js";
   import { saveProblem } from "$lib/data/metadata-status.js";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
@@ -42,6 +42,10 @@
   let saved = $state(false);
   /** @type {string | null} */
   let problem = $state(null);
+  /** Minted once for this draft, not per save attempt (#1151 W1-R3): a retry
+      after a dropped response reuses it, so the server's upsert-by-id
+      idempotency absorbs the retry instead of creating a second item. */
+  const draftId = crypto.randomUUID();
 
   const refusal = $derived(phase === "ready" ? refusalOf(entry) : null);
   const dirty = $derived(!saved && (entryChanged(entry, start) || attachment !== null));
@@ -70,13 +74,19 @@
     if (!household) return;
     saving = true;
     problem = null;
-    const id = crypto.randomUUID();
     try {
-      await applyCommand(createCommandOf(entry, { householdId: household.id, currency: household.currency ?? "GBP", id }));
+      await applyCommand(createCommandOf(entry, { householdId: household.id, currency: household.currency ?? "GBP", id: draftId })).catch((error) => {
+        /* This draft id is new to the server, so "this item changed on another
+           device" can only mean the earlier send landed and its answer was
+           lost; refreshing would mint a new id and create the duplicate the
+           retry exists to avoid. */
+        if (error instanceof WorkspaceError && error.code === "version_required") return;
+        throw error;
+      });
       saved = true;
       wake(attachment ? `added to your orbit · ${attachment.name} was not kept` : `added to your orbit · ${entry.name.trim()}`);
       /* The approach (§2.5): the new item, seated on its belt. */
-      await goto(resolve("/item/[[id]]", { id }));
+      await goto(resolve("/item/[[id]]", { id: draftId }));
     } catch (error) {
       /* Loud (#1058): the reason stays above the bar until the next attempt,
          the button comes back, and nothing typed is lost. No wake. */

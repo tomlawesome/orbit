@@ -2,8 +2,9 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { readInboxScreen, approveReceipt, dismissReceipt } from "$lib/data/workspace.js";
-  import { money, ago, agoLong } from "$lib/format.js";
-  import { LOCKED, evidenceReadable, fieldState, receiptWords } from "$lib/data/metadata-status.js";
+  import { ago, agoLong } from "$lib/format.js";
+  import { LOCKED, fieldState, receiptWords } from "$lib/data/metadata-status.js";
+  import { papersOf, readingsOf } from "$lib/pocket/review.js";
   import { reasonWords } from "$lib/pocket/words.js";
   import { daysUntil } from "$lib/data/chart.js";
   import { fillStarTiles } from "$lib/sky.js";
@@ -95,20 +96,6 @@
   /* "Still reading" only ever holds receipts that have already arrived. */
   /** @param {import('$lib/data/workspace.js').Receipt} receipt */
   const readAgo = (receipt) => agoLong(/** @type {string} */ (receipt.receivedAt), need().now);
-  /* READ · SURE / READ · UNSURE — the parser's own confidence, two words. */
-  /**
-   * @param {import('$lib/data/workspace.js').Receipt} receipt
-   * @param {string} field
-   */
-  const mark = (receipt, field) => {
-    /* #941: fieldEvidence damaged on its own loses the provenance, not the
-       values, so the marks go and the values stay. A mark Orbit can no longer
-       stand behind is worse than no mark at all. */
-    if (!evidenceReadable(receipt.metadataStatus)) return null;
-    const evidence = receipt.fieldEvidence?.[field];
-    if (!evidence) return null;
-    return evidence.confidence === "low" ? "READ · UNSURE" : "READ · SURE";
-  };
   /* Why Orbit cannot read a message, in the member's words, or null when it
      can. Locked: intact, waiting for an administrator -- there is nothing to
      review and nothing to accept, so those two ways in go, and the receipt
@@ -119,21 +106,6 @@
   const unreadable = (receipt) => receiptWords(receipt.metadataStatus);
   /** @param {import('$lib/data/workspace.js').Receipt} receipt */
   const locked = (receipt) => fieldState(receipt.metadataStatus, "proposal") === LOCKED;
-  /* Every held attachment is named since #467; a receipt with none yet
-     named degrades to the honest count. The chip is the way into the belt
-     with that paper open (#1155): only a named attachment has an id to
-     press through with. */
-  /** @param {import('$lib/data/workspace.js').Receipt} receipt
-   *  @returns {{ id: string | null, name: string, size: string, clean: boolean }[]} */
-  const chips = (receipt) =>
-    receipt.attachments?.map((a) => ({
-      id: a.id, name: a.displayName, size: `${Math.round(a.sizeBytes / 1024)} KB`, clean: a.scanState === "clean",
-    })) ?? (receipt.attachmentCount
-      ? [{
-          id: null, name: `${receipt.attachmentCount} document${receipt.attachmentCount === 1 ? "" : "s"}`,
-          size: "", clean: false,
-        }]
-      : []);
   const emptyQueue = $derived.by(() => {
     if (!view) return null;
     const current = need();
@@ -202,25 +174,20 @@
               <small>caught {short(/** @type {string} */ (receipt.receivedAt))} · <span class="exp">burns up in {burnsIn(receipt)}d</span></small>
             </div>
             <div class="fields">
-              {#if receipt.proposal?.provider}
-                <div class="kv"><span>provider</span><b>{receipt.proposal.provider}{#if mark(receipt, "provider")}<span class="conf">{mark(receipt, "provider")}</span>{/if}</b></div>
-              {/if}
-              {#if receipt.proposal?.dueDate}
-                <div class="kv"><span>{receipt.proposal.scheduleKind === "expiry" ? "ends" : "renews"}</span><b>{fullDate(receipt.proposal.dueDate)}{#if mark(receipt, "dueDate")}<span class="conf">{mark(receipt, "dueDate")}</span>{/if}</b></div>
-              {/if}
-              {#if receipt.proposal?.costMinor}
-                <div class="kv"><span>cost</span><b>{money(receipt.proposal.costMinor, receipt.proposal.currency ?? "GBP", true)}{#if mark(receipt, "costMinor")}<span class="conf">{mark(receipt, "costMinor")}</span>{/if}</b></div>
-              {/if}
+              {#each readingsOf(receipt) as reading (reading.field)}
+                <div class="kv"><span>{reading.label}</span>
+                  <b>{reading.value}{#if reading.sure !== null}<span class="conf">{reading.sure ? "READ · SURE" : "READ · UNSURE"}</span>{/if}</b></div>
+              {/each}
             </div>
-            {#each chips(receipt) as chip (chip.id ?? chip.name)}
+            {#each papersOf(receipt) as paper (paper.id ?? paper.name)}
               {@const itemHref = resolve("/item/[[id]]", { id: receipt.id })}
-              {#if chip.id}
+              {#if paper.drawable}
                 <a class="attach" href={itemHref}
-                   onclick={(event) => { event.preventDefault(); goto(itemHref, { state: { pocketPaper: chip.id } }); }}>
-                  ◆ <span class="name">{chip.name}</span>{#if chip.size} · {chip.size}{/if}{#if chip.clean} · <span class="clean">scanned clean</span>{/if} · <span class="view">view →</span>
+                   onclick={(event) => { event.preventDefault(); goto(itemHref, { state: { pocketPaper: paper.id } }); }}>
+                  ◆ <span class="name">{paper.name}</span>{#if paper.meta} · {paper.meta}{/if}{#if paper.clean} · <span class="clean">scanned clean</span>{/if} · <span class="view">view →</span>
                 </a>
               {:else}
-                <span class="attach">◆ {chip.name}{#if chip.clean} · <span class="clean">scanned clean</span>{/if}</span>
+                <span class="attach">◆ {paper.name}{#if paper.clean} · <span class="clean">scanned clean</span>{/if}</span>
               {/if}
             {/each}
             <!-- The card's own quiet mono (.twotap), not an alarm colour: one

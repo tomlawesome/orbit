@@ -11,14 +11,12 @@ describe("missing document reconciliation", () => {
   it("preserves a deletion requested after the missing-object snapshot", async () => {
     const events: string[] = [];
     let lifecycle: string = "available";
-    let purgeJob: "pending" | "retry" = "pending";
     const driver: MissingDocumentReconciliationDriver = {
       withDocumentLock: async (_documentId, work) => {
         events.push("lock");
         // The deletion request committed after the outer snapshot but before
         // reconciliation acquired the same per-document lock.
         lifecycle = "pending_deletion";
-        purgeJob = "pending";
         return work({
           readCurrentLifecycle: async () => {
             events.push("recheck");
@@ -35,8 +33,10 @@ describe("missing document reconciliation", () => {
 
     await expect(reconcileMissingDocument(snapshot, driver)).resolves.toBe("preserved");
     expect(events).toEqual(["lock", "recheck"]);
+    // Unchanged, rather than flipped to "rejected": rejectAvailableDocument
+    // (the only thing that would move it) was never called, per `events`
+    // above having no "reject" entry.
     expect(lifecycle).toBe("pending_deletion");
-    expect(purgeJob).toBe("pending");
   });
 
   it("rejects only a document that is still available under the lock", async () => {

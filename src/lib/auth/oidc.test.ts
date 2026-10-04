@@ -235,6 +235,14 @@ describe("OIDC discovery and provider failure contracts", () => {
     await expectDiscoveryFailure(discoveryDocument(issuer, { code_challenge_methods_supported: ["plain"] }), issuer);
   });
 
+  // SR2-R5: an otherwise-valid document larger than the response-size cap
+  // must be refused rather than fully parsed and trusted — matching the
+  // install-time discovery path's own OIDC_DISCOVERY_MAX_BYTES ceiling.
+  it("rejects an otherwise-valid discovery document larger than the response-size cap", async () => {
+    const issuer = uniqueIssuer();
+    await expectDiscoveryFailure(discoveryDocument(issuer, { padding: "x".repeat(2_000_000) }), issuer);
+  });
+
   it.each([
     ["HTTP failure", () => new Response(JSON.stringify({ error: "unavailable" }), { status: 503 })],
     ["network failure", () => Promise.reject(new Error("discovery-network-sentinel"))],
@@ -301,10 +309,44 @@ describe("OIDC discovery and provider failure contracts", () => {
     return { providerMetadata, idToken, jwks: { keys: [publicJwk] } };
   }
 
+  // SR2-R5: the token endpoint's response also has no size cap today — an
+  // otherwise-valid, fully-parseable token payload padded past the cap must
+  // be refused rather than accepted whole.
+  it("rejects an otherwise-valid token response larger than the response-size cap", async () => {
+    const { providerMetadata, idToken, jwks } = await signedProviderFixture();
+    const fetchMock = vi.fn().mockImplementation((input: string | URL) => {
+      const url = String(input);
+      if (url === providerMetadata.token_endpoint) {
+        return Promise.resolve(new Response(JSON.stringify({
+          id_token: idToken,
+          padding: "x".repeat(2_000_000),
+        }), { headers: { "content-type": "application/json" } }));
+      }
+      if (url === providerMetadata.jwks_uri) {
+        return Promise.resolve(new Response(JSON.stringify(jwks), { headers: { "content-type": "application/json" } }));
+      }
+      return Promise.reject(new Error("unexpected endpoint"));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(completeAuthorization({ ...config, issuer: providerMetadata.issuer }, providerMetadata, "authorization-code-sentinel", {
+      state: "state",
+      nonce: "nonce",
+      codeVerifier: "verifier",
+      returnTo: "/",
+    })).rejects.toMatchObject({
+      code: "token_exchange_failed",
+      status: 502,
+      tokenExchangeReason: "invalid_response",
+    });
+  });
+
   it.each([
     ["HTTP failure", () => new Response(JSON.stringify({ error: "invalid_token" }), { status: 401 })],
     ["invalid body", () => new Response("{", { status: 200 })],
     ["subject mismatch", () => new Response(JSON.stringify({ sub: "different-subject" }), { status: 200 })],
+    // SR2-R5: an otherwise-valid UserInfo response larger than the cap.
+    ["oversized body", () => new Response(JSON.stringify({ sub: "immutable-subject", padding: "x".repeat(2_000_000) }), { status: 200 })],
   ])("maps UserInfo %s to a bounded error without provider values", async (_label, userInfoResponse) => {
     const { providerMetadata, idToken, jwks } = await signedProviderFixture();
     const fetchMock = vi.fn().mockImplementation((input: string | URL) => {
