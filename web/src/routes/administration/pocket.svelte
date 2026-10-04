@@ -45,7 +45,7 @@
 
   /** @typedef {NonNullable<Awaited<ReturnType<typeof import('$lib/data/workspace.js').readAdminScreen>>>} AdminView */
   /** @typedef {{ email: string, displayName: string, expiresInDays: number }} Draft */
-  /** @typedef {(intent: string, open: () => void, report?: (message: string) => void) => Promise<void>} Challenge */
+  /** @typedef {(intent: string, open: () => void, report?: (message: string) => void, about?: { resend?: { personId: string, days: number } }) => Promise<void>} Challenge */
   /** @typedef {AdminView["users"][number]} Person */
   /** @typedef {AdminView["households"][number]} System */
 
@@ -214,7 +214,7 @@
       resendPassword = "";
       resendProblem = null;
       resendOpen = true;
-    }, (message) => (peopleProblem = message));
+    }, (message) => (peopleProblem = message), { resend: { personId: person.id, days: SETUP_LINK_DAYS.fallback } });
   }
 
   async function resend() {
