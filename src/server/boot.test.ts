@@ -53,6 +53,7 @@ const mocks = vi.hoisted(() => ({
   ensureMigrationRunsTable: vi.fn(),
   recordMigrationOutcome: vi.fn(),
   workerCalls: [] as string[],
+  rollBackUnfinishedPortableImports: vi.fn(async () => undefined),
   /* Mirrors the real signature (code, detail?). It previously took a message
      and hardcoded code, which silently made every stubbed error look like a
      generic integrity failure - so a test asserting the database_floor path
@@ -124,6 +125,9 @@ vi.mock("@/server/notification-worker", () => ({ startNotificationWorker: () => 
 vi.mock("@/server/document-worker", () => ({ startDocumentWorker: () => mocks.workerCalls.push("document") }));
 vi.mock("@/server/imap-ingestion", () => ({ startImapIngestionWorker: () => mocks.workerCalls.push("imap") }));
 vi.mock("@/server/imap-receipt-worker", () => ({ startImapReceiptWorker: () => mocks.workerCalls.push("receipt") }));
+vi.mock("@/server/portable-archive-repository", () => ({
+  rollBackUnfinishedPortableImports: mocks.rollBackUnfinishedPortableImports,
+}));
 
 import { resetAuthObservabilityForTests } from "@/lib/auth/observability";
 /* The real helper: the mock above keeps every export except `log`. */
@@ -164,6 +168,7 @@ describe("strict startup ordering", () => {
     mocks.workerCalls.length = 0;
     mocks.getDatabaseClient.mockClear();
     mocks.getDb.mockClear();
+    mocks.rollBackUnfinishedPortableImports.mockClear();
     mocks.validateStartupConfiguration.mockReset();
     mocks.verifyMigrationIntegrity.mockReset();
     mocks.verifyMigrationJournalComplete.mockReset();
