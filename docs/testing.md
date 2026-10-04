@@ -175,7 +175,7 @@ evidence.
 
 ### Requirements
 
-- Node.js 22 or later
+- Node.js 22, the version Orbit's image runs
 - pnpm, at the version `package.json` pins under `packageManager`
 - PostgreSQL 18, or Docker for the database only
 
@@ -185,8 +185,11 @@ evidence.
 pnpm install
 bash scripts/configure.sh
 pnpm db:migrate
-pnpm dev
+pnpm --filter orbit-web dev
 ```
+
+The last command starts the development server for the app under `web/`;
+the repository root has no `dev` script of its own.
 
 To run only PostgreSQL in Docker:
 
