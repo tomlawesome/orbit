@@ -574,10 +574,11 @@ export function mintSetupToken(
  * a superseded one is a table that cannot answer whether a link was used.
  *
  * Call this only once the mail (or whatever else carries the token) is
- * confirmed sent, or once `hasLiveSetupLink` has said there is nothing to
- * retire: calling it first and mailing second is the bug this function's
- * split from `issueSetupToken` exists to make impossible again — a failed
- * send used to retire the one link the reader already had.
+ * confirmed sent, or with `onlyIfNoLiveLink` so that nothing live is ever
+ * retired by it: calling it first and mailing second is the bug this
+ * function's split from `issueSetupToken` exists to make impossible again
+ * — a failed send used to retire the one link the reader already had.
+ * With that option it answers whether it wrote.
  *
  * Locked per user (#1151 A1-R4): the "supersede, then insert" pair below
  * reads the table before it writes it, so two calls for the same user with
@@ -591,13 +592,31 @@ export async function persistSetupToken(
   userId: string,
   minted: MintedSetupToken,
   createdByUserId: string | null,
-): Promise<void> {
-  await getDb().transaction(async (transaction) => {
+  options: { onlyIfNoLiveLink?: boolean } = {},
+): Promise<boolean> {
+  return await getDb().transaction(async (transaction) => {
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:setup-token:${userId}`}, 0))`);
     const [target] = await transaction.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1);
     if (!target) throw new AppError("user_not_found", "That registered Orbit user is no longer available", 404);
 
     const supersededAt = new Date();
+    // Decided under the same lock as the supersede below, not read first
+    // and acted on after (#1151 A1-S1): a plain read racing a concurrent
+    // send's own persist saw "no link" a moment before that send wrote the
+    // one it had actually delivered, then superseded it with one nobody
+    // received -- a lockout the audit log could not explain.
+    if (options.onlyIfNoLiveLink) {
+      const [live] = await transaction
+        .select({ id: credentialSetupTokens.id })
+        .from(credentialSetupTokens)
+        .where(and(
+          eq(credentialSetupTokens.userId, userId),
+          isNull(credentialSetupTokens.consumedAt),
+          gt(credentialSetupTokens.expiresAt, supersededAt),
+        ))
+        .limit(1);
+      if (live) return false;
+    }
     await transaction
       .update(credentialSetupTokens)
       .set({ expiresAt: supersededAt })
@@ -622,28 +641,8 @@ export async function persistSetupToken(
       action: "setup_link_issued",
       changes: { userId, purpose: minted.purpose },
     });
+    return true;
   });
-}
-
-/**
- * True while `userId` holds a link that could still be redeemed: unspent and
- * not yet expired. `setup-mail.ts` asks before deciding what a failed send
- * leaves behind (#1151 A1-S1): a live link is kept out of harm's way, a
- * reader with none gets the one that was minted, so there is something to
- * send again.
- */
-export async function hasLiveSetupLink(userId: string): Promise<boolean> {
-  const now = new Date();
-  const [live] = await getDb()
-    .select({ id: credentialSetupTokens.id })
-    .from(credentialSetupTokens)
-    .where(and(
-      eq(credentialSetupTokens.userId, userId),
-      isNull(credentialSetupTokens.consumedAt),
-      gt(credentialSetupTokens.expiresAt, now),
-    ))
-    .limit(1);
-  return live !== undefined;
 }
 
 /**

@@ -39,7 +39,6 @@ import {
 import {
   assertSetupTokenLifetime,
   createLocalUser,
-  hasLiveSetupLink,
   mintSetupToken,
   persistSetupToken,
   type CredentialSetupTokenPurpose,
@@ -164,9 +163,10 @@ async function issueAndSend(
     options.now ?? new Date(),
   );
 
-  if (!outcome.sendError || !(await hasLiveSetupLink(recipient.id))) {
-    await persistSetupToken(recipient.id, minted, actorUserId);
-  }
+  /* "Nothing live to retire" is persistSetupToken's own decision, under its
+     per-user lock, so a concurrent send that has just written its delivered
+     link is never superseded by this one that went nowhere. */
+  await persistSetupToken(recipient.id, minted, actorUserId, { onlyIfNoLiveLink: Boolean(outcome.sendError) });
   if (!outcome.sendError) {
     await getDb().insert(auditLog).values({
       householdId: null,
