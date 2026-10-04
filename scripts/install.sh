@@ -1475,10 +1475,19 @@ wait_for_deployment_readiness() {
       # protecting. Leaving it behind (compose down has no --volumes) meant
       # every retry failed that exact same check again, forever, with no
       # way out it ever named.
-      local leftover_volume=""
-      leftover_volume="$(docker volume ls --filter "name=$database_volume_key" --format '{{.Name}}' 2>/dev/null | grep -E "(^|_)orbit-db-data\$" | head -n1)" || true
-      if [[ -n "$leftover_volume" ]]; then
-        docker volume rm -- "$leftover_volume" >/dev/null 2>&1 || true
+      #
+      # #1207: remove only this project's own volume, by its exact name. The
+      # first volume that merely ended in orbit-db-data could belong to another
+      # Orbit deployment on the same host, whose live database was then
+      # removed. No project name means no exact name, so nothing is removed.
+      # Twin: removeLeftoverDatabaseVolume in src/lib/install-docker-adapter.ts.
+      if [[ -n "$compose_project_name" ]]; then
+        local own_volume="${compose_project_name}_${database_volume_key}"
+        if docker volume ls --filter "name=$own_volume" --format '{{.Name}}' 2>/dev/null | grep -Fxq -- "$own_volume"; then
+          docker volume rm -- "$own_volume" >/dev/null 2>&1 || true
+        fi
+      else
+        printf 'The leftover database volume was not removed because the Compose project name is unknown.\n' >&2
       fi
     fi
     fail_with docker-host repair "Orbit services could not be created or started."
