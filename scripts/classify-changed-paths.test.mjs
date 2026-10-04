@@ -302,6 +302,7 @@ describe("changed-path CI risk classification", () => {
   it("arms launcher_install_compat for the launcher pin and its build script (ADR-0031)", () => {
     expect(touchesLauncherInstallCompat(["launcher/pin.json"])).toBe(true);
     expect(touchesLauncherInstallCompat(["scripts/ci/build-launcher.sh"])).toBe(true);
+    expect(touchesLauncherInstallCompat(["scripts/ci/checkout-launcher-source.sh"])).toBe(true);
     expect(ciRequirements(["launcher/pin.json"]).launcherCompat).toBe(true);
     // A different launcher/ file, or a different scripts/ci/ script, is
     // outside this job's reach.

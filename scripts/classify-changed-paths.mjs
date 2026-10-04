@@ -95,6 +95,7 @@ const launcherCompatPatterns = [
   /^scripts\/(?:configure|installer-ui|configuration|backup|restore|repair|engine-check)\.sh$/u,
   /^launcher\/pin\.json$/u,
   /^scripts\/ci\/build-launcher\.sh$/u,
+  /^scripts\/ci\/checkout-launcher-source\.sh$/u,
 ];
 
 // The ignore/policy lane (#889). Both files record what a scanner is allowed
