@@ -3853,9 +3853,12 @@ do_regenerate_secret_step() {
 # these targets (session-secret, postgres-password, document-kek) is
 # mounted into orbit-app. Without the restart the file on disk is new but
 # the running process still reads the old value, and reporting success
-# anyway would be dishonest. restart_compose_service memoizes per service,
-# so this is a no-op if something earlier in the same run already
-# restarted orbit-app.
+# anyway would be dishonest. restart_compose_service memoizes per service, so
+# this function clears orbit-app's own memo immediately before its restart
+# call (#1151 RANGE-F7) -- otherwise a restart-services memo left by
+# anything earlier in the same run, including rotate-database-credential's
+# own step 4, would make this restart a silent no-op despite the fresh
+# secret material just written above.
 run_regenerate_secret_steps() {
   local target
   dangerous_failure_reason=none
@@ -3867,6 +3870,15 @@ run_regenerate_secret_steps() {
       return 1
     fi
   done
+  # #1151 RANGE-F7: a restart-services memo left by anything earlier in this
+  # run -- including rotate-database-credential's own step 4, when it runs
+  # before this in the same combined --execute --dangerous batch -- must
+  # never make THIS restart a silent no-op. The secret material just
+  # written above always needs a fresh restart check, regardless of what
+  # ran earlier; otherwise the running container keeps reading the old
+  # secret file while repair reports the regenerate-secret step done. Same
+  # reasoning as run_dangerous_step's own restart-services memo clearing.
+  unset 'service_restart_result[orbit-app]'
   if ! restart_compose_service orbit-app; then
     dangerous_failure_reason="step-failed"
     printf 'Orbit repair: new secret material was written, but restarting orbit-app failed.\n' >&2
