@@ -195,7 +195,7 @@ async function requireDocumentAccess(userId: string, documentId: string) {
  * member can see the document but must not be able to purge or restore
  * someone else's upload.
  */
-async function requireDocumentDeletionAccess(userId: string, documentId: string) {
+export async function requireDocumentDeletionAccess(userId: string, documentId: string) {
   const record = await requireDocumentAccess(userId, documentId);
   const isUploader = record.uploadedByUserId !== null && record.uploadedByUserId === userId;
   if (!canManageDocumentDeletion(record.administrator, record.membershipRole, isUploader)) {

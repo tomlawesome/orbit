@@ -6,7 +6,7 @@ import { documents, households, imapIngestionAttachments, imapIngestionMessages,
 import { clearMetadataDamageForColumn } from "@/server/metadata/damage-sightings";
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
 import { purgeHeldImapAttachment } from "./imap-attachment-holding";
-import { requestDocumentDeletion } from "@/server/document-repository";
+import { requestDocumentDeletion, requireDocumentDeletionAccess } from "@/server/document-repository";
 import { clearedReviewDraftMetadata, sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
 import { validUuid } from "@/server/workspace-access";
@@ -395,6 +395,16 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
   if (!receipt) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   if (receipt.householdId && !(await hasHouseholdMembership(userId, receipt.householdId))) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   if (["discarded", "expired"].includes(receipt.status)) return;
+
+  // A legacy receipt's documents are deleted below through the accepted,
+  // authorised path. Check that authorisation now, before the receipt is
+  // claimed: refused after the claim, the claim stood (locked, then purged
+  // by the staging job) while the document and its item stayed behind, and
+  // the retry reported the discard done.
+  if (receipt.failureCode === "legacy_review_item" && receipt.reviewItemId) {
+    const legacyDocuments = await getDb().select({ id: documents.id }).from(documents).where(and(eq(documents.itemId, receipt.reviewItemId), eq(documents.lifecycle, "available")));
+    for (const document of legacyDocuments) await requireDocumentDeletionAccess(userId, document.id);
+  }
 
   const cleanupToken = randomUUID();
   const now = new Date();
