@@ -62,6 +62,28 @@ export async function currentSubscription(scope = globalThis) {
 }
 
 /**
+ * What the settings screens read at mount instead of currentSubscription:
+ * the browser's live subscription, re-sent to the server when there is one.
+ * The browser remembering a subscription says nothing about whether the
+ * server still has it (a failed write, a purge after a failed push), and a
+ * switch that reads "on" is only ever tapped to turn alerts OFF -- so the
+ * re-send in enableAlerts never ran for exactly the device that needed it.
+ * A server that cannot be reached leaves the switch reading what the
+ * browser says; the next visit tries again.
+ *
+ * @param {object} [deps] see resolvedDeps
+ * @returns {Promise<PushSubscription | null>}
+ */
+export async function syncAlerts(deps = {}) {
+  const d = resolvedDeps(deps);
+  const existing = await currentSubscription(d.scope);
+  if (existing) {
+    try { await d.writePushSubscription(/** @type {any} */ (existing.toJSON())); } catch { /* re-sent on the next visit */ }
+  }
+  return existing;
+}
+
+/**
  * The VAPID public key, base64url as the server hands it out, decoded into
  * the raw bytes `PushManager#subscribe` wants as `applicationServerKey`.
  * Copied from the retiring src/components/push-notification-control.tsx —

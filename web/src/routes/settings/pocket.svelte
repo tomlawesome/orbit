@@ -9,7 +9,7 @@
   import { applyTheme } from "$lib/theme-swatches.js";
   import { agoLong } from "$lib/format.js";
   import { watchTour } from "$lib/tour/watch.js";
-  import { alertsSupported, currentSubscription, disableAlerts, enableAlerts } from "$lib/push/alerts.js";
+  import { alertsSupported, currentSubscription, disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
   import {
     readSentLately,
     readSignInMethods,
@@ -65,6 +65,8 @@
    *   emailApproval: boolean,
    *   methodsProblem: string | null,
    *   sessionsProblem: string | null,
+   *   screenProblem?: string | null,
+   *   onretry?: () => void,
    *   resumed: string | null,
    *   fixtures: boolean,
    * }}
@@ -79,6 +81,8 @@
     emailApproval,
     methodsProblem,
     sessionsProblem,
+    screenProblem = null,
+    onretry = undefined,
     resumed,
     fixtures,
   } = $props();
@@ -351,7 +355,7 @@
       }
     }
     alertsAvailable = alertsSupported();
-    if (alertsAvailable) browserAlerts = Boolean(await currentSubscription());
+    if (alertsAvailable) browserAlerts = Boolean(await syncAlerts());
   });
   /* The gate's both-off scene: email reminders off in the loaded view. */
   $effect(() => {
@@ -368,6 +372,13 @@
       <h1 class="p-title">Settings</h1>
       <p class="st-levers p-prose">your controls, and only yours</p>
     </header>
+
+    <!-- The desk's own failed-read note lives in its .page, which this
+         dialect hides, so the phone says it here (#1195). -->
+    {#if screenProblem && !view}
+      <p class="st-problem p-prose" role="alert">{screenProblem}
+        {#if onretry}<button class="p-pill filled" onclick={onretry}>try again</button>{/if}</p>
+    {/if}
 
     <!-- YOU, with how you sign in folded in (§2.7 step 2). -->
     <section class="p-card" style:--i="1" aria-labelledby="st-you">
@@ -670,6 +681,7 @@
       calc(96px + env(safe-area-inset-bottom))}
   .st-head{margin:4px 0 20px}
   .st-levers{margin:8px 0 0;color:var(--ink-quiet)}
+  .st-problem{margin:16px 0 0;display:flex;flex-wrap:wrap;gap:12px;align-items:center;color:var(--warm-text)}
 
   /* Rows run to the card's edge, as the household's do. */
   .st-rows{margin:0 calc(var(--p-card-pad) * -1)}
