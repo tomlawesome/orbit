@@ -439,7 +439,14 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
   // bytes and foreign-key targets can be cleaned through the accepted path.
   if (receipt.failureCode === "legacy_review_item" && receipt.reviewItemId) {
     const documentRows = await getDb().select({ id: documents.id }).from(documents).where(and(eq(documents.itemId, receipt.reviewItemId), eq(documents.lifecycle, "available")));
-    for (const document of documentRows) await requestDocumentDeletion(userId, document.id);
+    // A document that left "available" between the read above and its
+    // deletion (another tab, the retention purge) is already gone as far as
+    // this discard is concerned; thrown here, with the claim standing, it
+    // left the receipt locked with its item behind -- the shape A3-S1 closes.
+    for (const document of documentRows) await requestDocumentDeletion(userId, document.id).catch((error: unknown) => {
+      if (error instanceof AppError && error.code === "document_not_found") return;
+      throw error;
+    });
     await getDb().delete(items).where(eq(items.id, receipt.reviewItemId));
   }
 
