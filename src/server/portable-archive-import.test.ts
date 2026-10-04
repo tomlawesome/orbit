@@ -26,7 +26,8 @@ const mocks = vi.hoisted(() => ({
   insertCalls: [] as Array<{ table: string; values: unknown }>,
   uploadItemDocument: vi.fn(async (_input: { filename: string; itemId: string }) => ({ id: "uploaded" })),
   requireMetadataWriter: vi.fn(),
-  openMetadataReader: vi.fn(),
+  kekAvailable: true,
+  loadMetadataKey: vi.fn(),
 }));
 
 function queue(map: Map<string, unknown[][]>, table: string, rows: unknown[]) {
@@ -84,10 +85,23 @@ vi.mock("@/server/workspace-access", () => ({
   acquireActiveHouseholdLock: vi.fn(async () => undefined),
 }));
 
-vi.mock("@/server/metadata/fields", () => ({
-  requireMetadataWriter: mocks.requireMetadataWriter,
-  openMetadataReader: mocks.openMetadataReader,
-}));
+vi.mock("@/server/metadata/fields", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/server/metadata/fields")>();
+  return {
+    MetadataCipher: original.MetadataCipher,
+    openMetadataReader: async () => new original.MetadataCipher(undefined),
+    requireMetadataWriter: mocks.requireMetadataWriter,
+  };
+});
+
+vi.mock("@/server/metadata/keys", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/server/metadata/keys")>();
+  return {
+    ...original,
+    metadataCryptoAvailable: () => mocks.kekAvailable,
+    loadMetadataKey: mocks.loadMetadataKey,
+  };
+});
 
 vi.mock("@/server/document-repository", () => ({
   readDocumentDownload: vi.fn(),
@@ -123,8 +137,11 @@ beforeEach(() => {
     encryptNumber: () => Buffer.from("enc"),
     referenceIndex: () => null,
   });
-  mocks.openMetadataReader.mockReset();
-  mocks.openMetadataReader.mockResolvedValue({ locked: false, text: () => ({ value: null }) });
+  mocks.kekAvailable = true;
+  mocks.loadMetadataKey.mockReset();
+  /* No key minted for the household: nothing of its was ever encrypted, so
+     its plaintext rows export as they are. */
+  mocks.loadMetadataKey.mockResolvedValue(undefined);
 });
 
 describe("portable archive export refusal (#1151 A2-F2)", () => {
@@ -136,7 +153,7 @@ describe("portable archive export refusal (#1151 A2-F2)", () => {
     queue(mocks.selectQueues, "due_events", []);
     queue(mocks.selectQueues, "reminder_rules", []);
     queue(mocks.selectQueues, "documents", []);
-    mocks.openMetadataReader.mockResolvedValueOnce({ locked: true, text: () => ({ value: null }) });
+    mocks.kekAvailable = false;
 
     let caught: unknown;
     try {
@@ -146,6 +163,21 @@ describe("portable archive export refusal (#1151 A2-F2)", () => {
     }
     expect(caught).toBeInstanceOf(AppError);
     expect((caught as AppError).code).toBe("archive_metadata_locked");
+  });
+
+  it("refuses when the household's key exists but will not unwrap", async () => {
+    queue(mocks.selectQueues, "households", [{ id: householdId, administrator: true, membershipUserId: null, role: "owner" }]);
+    queue(mocks.selectQueues, "households", [{ id: householdId, name: "Home", timezone: "Europe/London", defaultCurrency: "GBP" }]);
+    queue(mocks.selectQueues, "sections", []);
+    queue(mocks.selectQueues, "items", []);
+    queue(mocks.selectQueues, "due_events", []);
+    queue(mocks.selectQueues, "reminder_rules", []);
+    queue(mocks.selectQueues, "documents", []);
+    const { MetadataKeyLockedError } = await import("@/server/metadata/keys");
+    mocks.loadMetadataKey.mockRejectedValueOnce(new MetadataKeyLockedError());
+
+    await expect(createPortableArchive({ userId, householdId, passphrase, includeDocuments: false }))
+      .rejects.toMatchObject({ code: "archive_metadata_locked", status: 503 });
   });
 });
 
