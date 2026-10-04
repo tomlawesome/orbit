@@ -268,7 +268,10 @@ export function isValidOrbitImage(value: string): boolean {
 // configure-engine.ts (the configure side), with no shared source to keep
 // them from drifting. One rule, here, same discipline as
 // SECRET_HEX256_PATTERN/isValidOrbitImage above.
-const LOCAL_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?$/;
+// Accepts name, name:tag and the digest-pinned name@sha256:<64 hex> that
+// docs/administrator-operations.md tells an operator to set; configure.sh
+// and install.sh restate this regex by hand.
+const LOCAL_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?(@sha256:[0-9a-f]{64})?$/;
 
 export function isValidLocalModel(value: string): boolean {
   return value.length >= 1 && value.length <= 128 && LOCAL_MODEL_PATTERN.test(value);

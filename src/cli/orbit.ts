@@ -433,7 +433,9 @@ function usageExit(message: string): never {
 
 function commandConfigureApply(deployDir: string): never {
   try {
-    const result = runConfigureApply(deployDir, process.env.ORBIT_IMAGE);
+    const result = runConfigureApply(deployDir, process.env.ORBIT_IMAGE, {
+      trustOrbitImage: process.env.ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE === "1",
+    });
     for (const message of result.messages) {
       process.stdout.write(`${message}\n`);
     }

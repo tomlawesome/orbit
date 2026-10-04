@@ -394,7 +394,7 @@ persist_orbit_image() {
 is_valid_local_model() {
   local value="$1"
   [[ ${#value} -ge 1 && ${#value} -le 128 ]] || return 1
-  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?$ ]]
+  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?(@sha256:[0-9a-f]{64})?$ ]]
 }
 
 set_deployment_profile() {
@@ -1373,6 +1373,12 @@ run_engine() {
   local -a extra_env=(-e "ORBIT_IMAGE=$ORBIT_IMAGE")
   if [[ "$machine_prompts" == 1 ]]; then
     extra_env+=(-e "ORBIT_CONFIGURE_PROMPTS=machine")
+  fi
+  # The installer's trust marker travels with ORBIT_IMAGE, so the engine
+  # applies persist_orbit_image's own existing-deployment rule rather than
+  # re-pinning on whatever the shell happened to export.
+  if [[ "${ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE:-}" == 1 ]]; then
+    extra_env+=(-e "ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1")
   fi
   local env_var
   # O1-F1: ORBIT_CONFIGURE_AUTH_MODE forwarded alongside the OIDC triad — a
