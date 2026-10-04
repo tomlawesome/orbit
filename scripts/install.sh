@@ -748,7 +748,7 @@ read_environment_value() {
 is_valid_local_model() {
   local value="$1"
   [[ ${#value} -ge 1 && ${#value} -le 128 ]] || return 1
-  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?$ ]]
+  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?(@sha256:[0-9a-f]{64})?$ ]]
 }
 
 check_local_ai_capacity() {
