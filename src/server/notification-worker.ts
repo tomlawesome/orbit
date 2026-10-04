@@ -1216,14 +1216,21 @@ export async function sweepEndedExpiries(db: NotificationDatabase, now: Date): P
       // flipped to expired, taking its brand-new reminder rules with it.
       // `for("update")` locks both joined rows, so a reschedule racing this
       // transaction waits for it rather than landing invisibly in between.
+      //
+      // Driven from `items`, not `due_events` (#1151 R3): `item.reschedule`
+      // locks `items` first and `due_events` second, so this recheck filters
+      // on `items.id` -- already in hand as `row.itemId` -- and joins into
+      // `due_events`, rather than the other way round, so a reschedule
+      // racing this transaction cannot take the two locks in the opposite
+      // order and deadlock against it.
       const [current] = await transaction.select({
         itemStatus: items.status,
         dueDate: dueEvents.dueDate,
         completedAt: dueEvents.completedAt,
       })
-        .from(dueEvents)
-        .innerJoin(items, eq(items.id, dueEvents.itemId))
-        .where(eq(dueEvents.id, row.eventId))
+        .from(items)
+        .innerJoin(dueEvents, eq(dueEvents.itemId, items.id))
+        .where(and(eq(items.id, row.itemId), eq(dueEvents.id, row.eventId)))
         .for("update")
         .limit(1);
       if (!current || current.itemStatus !== "active" || current.completedAt || current.dueDate !== row.dueDate) return;
