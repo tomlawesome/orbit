@@ -755,7 +755,7 @@ function makeFixture({ withConfigure = true, withComposeAndEnv = true, withSecre
       "ORBIT_IMAGE=orbit-local:abcdef123456",
       // Every supported install writes this key (ADR-0016 gate, #681); the
       // floor itself is the representative supported value.
-      "ORBIT_CONFIG_APPLIED_VERSION=v1.3.0",
+      "ORBIT_CONFIG_APPLIED_VERSION=v0.3.0",
       "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
       "OIDC_CLIENT_ID=repair-test-client",
       "OIDC_CLIENT_SECRET=repair-test-secret",
@@ -787,7 +787,7 @@ function writeDigestPinnedEnv(targetDir, orbitImage) {
   const envLines = [
     "APP_URL=https://orbit.repair-test.internal",
     `ORBIT_IMAGE=${orbitImage}`,
-    "ORBIT_CONFIG_APPLIED_VERSION=v1.3.0",
+    "ORBIT_CONFIG_APPLIED_VERSION=v0.3.0",
     "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
     "OIDC_CLIENT_ID=repair-test-client",
     "OIDC_CLIENT_SECRET=repair-test-secret",
@@ -814,7 +814,7 @@ function writeFileBackedOidcSecretEnv(targetDir) {
   const envLines = [
     "APP_URL=https://orbit.repair-test.internal",
     "ORBIT_IMAGE=orbit-local:abcdef123456",
-    "ORBIT_CONFIG_APPLIED_VERSION=v1.3.0",
+    "ORBIT_CONFIG_APPLIED_VERSION=v0.3.0",
     "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
     "OIDC_CLIENT_ID=repair-test-client",
     "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret",
@@ -2209,9 +2209,11 @@ describe("scripts/repair.sh --check", () => {
 // ORBIT_CONFIG_APPLIED_VERSION is written by configuration.sh on every
 // supported install, so a readable .env-orbit without it is the signature
 // of a pre-floor (v1.0.0-era) or hand-assembled deployment — both fail
-// closed. Major version 0 is the development era and exempt. While the
-// finding is present, --execute refuses the whole batch: even the safe
-// executors must not mutate a layout repair was never proven against.
+// closed. The floor is v0.3.0 (ADR-0016 amendment, #1213): releases are
+// numbered 0.x, so there is no longer a major-0 exemption, and the 1.x tags
+// are retracted alphas below the floor. While the finding is present,
+// --execute refuses the whole batch: even the safe executors must not mutate
+// a layout repair was never proven against.
 
 // Rewrites makeFixture()'s .env-orbit with the given
 // ORBIT_CONFIG_APPLIED_VERSION line (or no such line when null), keeping
@@ -2234,8 +2236,12 @@ function writeVersionedEnv(targetDir, versionLine) {
 
 describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion 9)", () => {
   it.each([
-    ["v1.2.0", "a published release below the floor"],
+    ["v1.2.0", "a retracted 1.x alpha"],
     ["v1.0.0", "the pre-configuration.sh era"],
+    ["v1.3.0", "the retracted 1.x line"],
+    ["v2.0.0", "a major version above the retracted 1.x line"],
+    ["v0.2.9", "a 0.x release below the floor"],
+    ["v0.0.0", "a development build, no longer exempt"],
     ["v0.9", "a malformed (two-component) version"],
     ["v1.3.0-rc1", "a malformed (pre-release-suffixed) version"],
     ["1.3.0", "a malformed (unprefixed) version"],
@@ -2259,7 +2265,7 @@ describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion
     expect(result.stdout).toContain("finding class=deployment-version-unsupported target=deployment severity=fail");
   });
 
-  it.each([["v0.0.0"], ["v1.3.0"], ["v1.3.1"], ["v1.4.0"], ["v2.0.0"]])(
+  it.each([["v0.3.0"], ["v0.3.1"], ["v0.4.0"], ["v0.10.0"]])(
     "accepts %s with no version finding",
     (version) => {
       const targetDir = makeFixture();
