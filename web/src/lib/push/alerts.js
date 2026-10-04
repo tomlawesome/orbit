@@ -69,7 +69,12 @@ export async function currentSubscription(scope = globalThis) {
  * switch that reads "on" is only ever tapped to turn alerts OFF -- so the
  * re-send in enableAlerts never ran for exactly the device that needed it.
  * A server that cannot be reached leaves the switch reading what the
- * browser says; the next visit tries again.
+ * browser says; the next visit tries again. A server that answers and
+ * REFUSES the subscription -- it belongs to another account, on a shared
+ * device the last person never signed out of -- is a different thing: the
+ * browser is subscribed, this account is not, and a switch reading "on"
+ * would promise alerts that never come. That reads as off, so the reader
+ * can turn it on for themselves.
  *
  * @param {object} [deps] see resolvedDeps
  * @returns {Promise<PushSubscription | null>}
@@ -77,10 +82,24 @@ export async function currentSubscription(scope = globalThis) {
 export async function syncAlerts(deps = {}) {
   const d = resolvedDeps(deps);
   const existing = await currentSubscription(d.scope);
-  if (existing) {
-    try { await d.writePushSubscription(/** @type {any} */ (existing.toJSON())); } catch { /* re-sent on the next visit */ }
+  if (!existing) return null;
+  try {
+    await d.writePushSubscription(/** @type {any} */ (existing.toJSON()));
+  } catch (error) {
+    if (serverRefused(error)) return null;
+    /* unreachable: re-sent on the next visit */
   }
   return existing;
+}
+
+/**
+ * True for an answer the server gave on purpose (a 4xx), as opposed to no
+ * answer at all. The fetch layer records the status on its error.
+ * @param {unknown} error
+ */
+function serverRefused(error) {
+  const status = /** @type {{ status?: number }} */ (error)?.status;
+  return typeof status === "number" && status >= 400 && status < 500;
 }
 
 /**
