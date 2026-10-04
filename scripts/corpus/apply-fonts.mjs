@@ -565,6 +565,10 @@ for (const [key, { faces, swap }] of Object.entries(DOCS)) {
   // "whichever directory --dir selected", as before.
   const qualified = key.includes("/");
   const file = qualified ? key.slice(key.lastIndexOf("/") + 1) : key;
+  // A qualified key is still only run for the directory --dir selected:
+  // otherwise `--only <file> --dir sources` also rewrote the same-named
+  // hold-out document, which nobody asked for.
+  if (qualified && resolve(dir, "..", key.slice(0, key.lastIndexOf("/"))) !== resolve(dir)) continue;
   if (only && file !== only) continue;
   const path = qualified ? resolve(dir, "..", key) : `${dir}/${file}`;
   // Documents arrive in waves, so the table lists files that may not be
