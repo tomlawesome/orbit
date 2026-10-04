@@ -124,8 +124,17 @@
       pushed = true;
       if (!mine) pushState("", { ...page.state, pocketSheet: uid });
     } else if (open && pushed && !mine) {
+      /* #1151 R8/S5: the browser already popped our history entry, but a
+         dirty form still goes through the same confirmDiscard guard as
+         every other dismiss. dismiss() only touches `open`; if the reader
+         declines (armed, not yet confirmed), `open` stays true and the
+         entry has to be pushed back so the sheet is still backed by one. */
       pushed = false;
-      open = false; // back was pressed
+      dismiss(); // back was pressed
+      if (open) {
+        pushed = true;
+        pushState("", { ...page.state, pocketSheet: uid });
+      }
     } else if (!open && pushed) {
       pushed = false;
       if (mine) window.history.back();

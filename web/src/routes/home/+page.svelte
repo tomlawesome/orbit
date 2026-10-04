@@ -1018,6 +1018,10 @@
     readHome().then(async (data) => {
       if (disposed) return;
       view = data;
+      /* #1151 F8: a later successful read must clear an earlier failure's
+         banner — it never did, so the page kept claiming it could not
+         reach the home even once it plainly could again. */
+      homeLoadProblem = null;
       await tick();
       if (disposed) return;
       sync();
@@ -1079,6 +1083,9 @@
              nowhere, with no error shown. */
           try {
             view = await readHome();
+            // #1151 F8: same reset as the onMount read above — a success
+            // here must clear a banner an earlier failure left behind.
+            homeLoadProblem = null;
           } catch (error) {
             homeLoadProblem = /** @type {any} */ (error)?.message ?? String(error);
           }

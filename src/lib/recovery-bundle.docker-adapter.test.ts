@@ -460,6 +460,20 @@ const fakeDockerScript = [
   "    tar -cf - -T /dev/null",
   "    exit 0",
   "    ;;",
+  '  *"--entrypoint sh"*)',
+  '    if [[ "${ORBIT_TEST_TAR_EXIT:-0}" != "0" ]]; then exit "${ORBIT_TEST_TAR_EXIT}"; fi',
+  '    if [[ -n "${DOCUMENTS_ROOT:-}" ]]; then',
+  "      # positionals here (after the run-specific parse_flags above) are",
+  '      # ["orbit-app", "-c", "<script>"]: hand the script to a real sh so a',
+  "      # test can prove DOCUMENTS_ROOT actually expands (#1151 RANGE-F2). A",
+  "      # test that does not set DOCUMENTS_ROOT falls through to the same",
+  '      # empty-tar fake the old `--entrypoint tar` case always produced.',
+  '      sh -c "${positionals[2]}"',
+  "      exit 0",
+  "    fi",
+  "    tar -cf - -T /dev/null",
+  "    exit 0",
+  "    ;;",
   "  *psql*)",
   '    exit "${ORBIT_TEST_PSQL_EXIT:-0}"',
   "    ;;",
@@ -657,18 +671,39 @@ describe("createDockerComposeBackupAdapter (PATH-shim fake docker, no real daemo
       "run",
       "--rm",
       "--no-deps",
+      // `--entrypoint tar` cannot expand ${DOCUMENTS_ROOT} in its own
+      // argument, so this goes through sh -c (#1151 RANGE-F2).
       "--entrypoint",
-      "tar",
+      "sh",
       "orbit-app",
-      "-C",
-      "/var/lib/orbit/documents",
+      "-c",
       // SS2-S1: excludes the household portable-archive export, which is
       // not a format validateDocumentArchiveEntries's allow-list recognizes.
-      "--exclude=./portable-archives",
-      "-cf",
-      "-",
-      ".",
+      'exec tar -C "${DOCUMENTS_ROOT:-/var/lib/orbit/documents}" --exclude=./portable-archives -cf - .',
     ]);
+  });
+
+  it("collectDocumentsArchive reads the container's own DOCUMENTS_ROOT instead of the hardcoded default (#1151 RANGE-F2)", () => {
+    // Before the fix, this ran `--entrypoint tar ... -C /var/lib/orbit/documents`,
+    // which cannot expand ${DOCUMENTS_ROOT} and silently tarred the wrong
+    // directory for an operator with a non-default documents root.
+    const sandbox = newSandbox("orbit-adapter-collect-custom-root-");
+    const binDir = makeFakeDockerBin();
+    const envFile = join(sandbox, ".env-orbit");
+    writeFileSync(envFile, "FAKE=1\n");
+    const customRoot = join(sandbox, "custom-documents-root");
+    mkdirSync(join(customRoot, "objects"), { recursive: true });
+    writeFileSync(join(customRoot, "marker.txt"), "custom-root-contents");
+    const adapter = createDockerComposeBackupAdapter({ envFile, env: shimEnv(binDir, { DOCUMENTS_ROOT: customRoot }) });
+    const outputPath = join(sandbox, "documents.tar");
+
+    adapter.collectDocumentsArchive(outputPath);
+
+    const listing = failOnProcessDeadline(spawnSync("tar", ["-tf", outputPath], { encoding: "utf8", ...processGuard() }), {
+      label: "tar -tf",
+    });
+    expect(listing.status).toBe(0);
+    expect(listing.stdout).toContain("marker.txt");
   });
 
   it("collectDocumentsArchive refuses as document-archive-collection-failed on a nonzero exit", () => {

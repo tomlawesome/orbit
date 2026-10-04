@@ -55,3 +55,28 @@ describe("#1151 W1-S2: Sheet.svelte arms a dismiss instead of firing it blind", 
     expect(SHEET).toMatch(/confirmDiscard\s*=\s*undefined,/u);
   });
 });
+
+/*
+ * #1151 R8/S5: the history-popstate $effect (the OS/browser back gesture) set
+ * `open = false` directly, never calling `dismiss()` — so confirmDiscard,
+ * read only inside dismiss(), was never consulted on that path and a dirty
+ * form was discarded with no "tap again to close" prompt. The fix routes the
+ * same branch through dismiss(); when the reader declines (dismiss() leaves
+ * `open` true because the tap only armed), the entry the browser already
+ * popped is pushed back so the sheet stays backed by one.
+ */
+describe("#1151 R8/S5: the OS/browser back gesture goes through the same guard", () => {
+  const popstateBranch = SHEET.slice(
+    SHEET.indexOf("} else if (open && pushed && !mine)"),
+    SHEET.indexOf("} else if (!open && pushed)"),
+  );
+
+  it("calls dismiss() rather than setting open = false directly", () => {
+    expect(popstateBranch).toMatch(/dismiss\(\);/u);
+    expect(popstateBranch).not.toMatch(/^\s*open = false;/mu);
+  });
+
+  it("pushes the popped history entry back when dismiss() declines (open stays true)", () => {
+    expect(popstateBranch).toMatch(/if \(open\)\s*\{[\s\S]*pushState\(/u);
+  });
+});

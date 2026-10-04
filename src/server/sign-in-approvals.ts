@@ -600,7 +600,30 @@ export async function collectSignInApproval(
     // A disabled account is an answer, not a hiccup: the approval stays
     // spent, or re-enabling the account within the TTL would let the old
     // emailed link sign in with no new approval asked for.
-    if (error instanceof AuthError && error.code === "account_disabled") return { state: "denied" };
+    //
+    // It is answered as "unknown", not "denied" (#1151 F12, S2): nobody
+    // pressed "this wasn't me", so the human-refusal wording is false here,
+    // and the pending endpoint has always documented this exact race as the
+    // generic, no-retry-button "unknown" -- this is the only place that
+    // promise was not kept. It still leaves the trail a real refusal
+    // leaves: an audit row and a credential failure, so a sign-in that
+    // slipped through right as the account was disabled still costs what a
+    // wrong password costs, and the attempt is visible in the log rather
+    // than invisible.
+    if (error instanceof AuthError && error.code === "account_disabled") {
+      await db.transaction(async (transaction) => {
+        await transaction.insert(auditLog).values({
+          householdId: null,
+          actorUserId: row.userId,
+          entityType: "user",
+          entityId: row.userId,
+          action: "sign_in_refused",
+          changes: {},
+        });
+        await recordLocalCredentialFailure(transaction, row.userId);
+      });
+      return { state: "unknown" };
+    }
     await db.update(signInApprovals)
       .set({ consumedAt: null })
       .where(and(eq(signInApprovals.id, row.id), eq(signInApprovals.consumedAt, spentAt)));

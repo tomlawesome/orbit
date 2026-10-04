@@ -300,6 +300,11 @@ export async function sendHouseholdInvitation(
          yet, so a stale success or failure must not be read as this one's. */
       sentAt: null,
       sendError: null,
+      /* Reset on a resend, not just on first insert (#1151 F11): this send's
+         own staleness clock (`reconcileUnresolvedSends`, `createdAt` below)
+         has to start now, or a resend of any invitation over two minutes old
+         reads as already stuck before its mail has even been attempted. */
+      createdAt: now,
     };
     const [row] = existing
       ? await transaction.update(householdInvitations).set(values)

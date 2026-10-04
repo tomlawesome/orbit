@@ -5010,11 +5010,12 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
     const targetDir = makeFixture({ withConfigure: false });
     rmSync(join(targetDir, ".orbit-secrets", "postgres-password"));
     rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+    const restartLogPath = join(scratchDir(), "restart.log");
 
     const result = runRepair(
       targetDir,
       ["--execute", "--dangerous"],
-      { volumes: ["repairtest_orbit-db-data"] },
+      { volumes: ["repairtest_orbit-db-data"], restartLogPath },
       { input: "rotate\nregenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
@@ -5034,6 +5035,19 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
     expect(
       readFileSync(join(targetDir, ".orbit-secrets", "session-secret"), "utf8").trim(),
     ).toMatch(HEX_SECRET_PATTERN);
+
+    // #1151 RANGE-F7: rotate runs first (its own restart-services step
+    // restarts orbit-db then orbit-app, memoizing
+    // service_restart_result[orbit-app]=done), then regenerate-secret
+    // writes a fresh session-secret and must restart orbit-app itself
+    // rather than silently skipping on that same memo -- otherwise the
+    // running container keeps the OLD session-secret despite the batch
+    // reporting done. Three restarts, not two: orbit-db, orbit-app
+    // (rotation), orbit-app again (regenerate) -- container ids
+    // 1111aaaa2222 (orbit-db) and 3333bbbb4444 (orbit-app), same fixture
+    // the #629 rotation-restart test above uses.
+    const restarted = readFileSync(restartLogPath, "utf8").trim().split("\n").filter(Boolean);
+    expect(restarted).toEqual(["1111aaaa2222", "3333bbbb4444", "3333bbbb4444"]);
   });
 
   it("in a mixed batch, refusing the SECOND word (regenerate) refuses the WHOLE batch — the credential is never rotated either, even though 'rotate' was typed correctly", () => {

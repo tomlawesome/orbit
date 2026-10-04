@@ -9,7 +9,7 @@
   import { applyTheme } from "$lib/theme-swatches.js";
   import { agoLong } from "$lib/format.js";
   import { watchTour } from "$lib/tour/watch.js";
-  import { alertsSupported, currentSubscription, disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
+  import { alertsSupported, disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
   import {
     readSentLately,
     readSignInMethods,
@@ -136,7 +136,14 @@
       else { await enableAlerts(); browserAlerts = true; }
       wake(`saved · browser alerts ${browserAlerts ? "on" : "off"} on this device`);
     } catch (error) {
-      browserAlerts = Boolean(await currentSubscription());
+      /* #1151 RANGE-F9: reconcile against the server the same way the
+         onMount read below does. currentSubscription() only reports
+         whether the browser still holds a subscription object, which
+         stays true even after the server has refused it (e.g. it belongs
+         to another account on a shared device) — exactly the case
+         syncAlerts() exists to catch, so falling back to the raw browser
+         read here undid it. */
+      browserAlerts = Boolean(await syncAlerts());
       const reason = /** @type {{ code?: string }} */ (error)?.code;
       alertsProblem = reason === "permission_denied"
         ? "your browser is refusing alerts. allow notifications for Orbit, then try again"

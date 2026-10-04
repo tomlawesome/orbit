@@ -9,6 +9,7 @@ import {
   statSync,
   symlinkSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1477,5 +1478,176 @@ describe("configure.sh", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Could not secure the temporary Orbit environment file");
     expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+});
+
+// #1151 RANGE-F1: a missing DOCUMENT_KEK or SESSION_SECRET file on an
+// existing deployment is a lost or corrupted secret, not a first run.
+// scripts/configure.sh is the default engine (ORBIT_CONFIGURE_ENGINE=container
+// is opt-in; install.sh never sets it), and before this fix its
+// ensure_secret_file unconditionally generated a brand-new secret whenever
+// the file was missing, silently making every existing encrypted document
+// unreadable (document-kek) or signing out every session (session-secret).
+// Mirrors src/lib/configure-engine.ts's ensureSecretFile isFreshInstall
+// refusal. A deployment is existing when any of the three generated secrets
+// already exists before the run -- not when .env-orbit does, because
+// install.sh runs `configure.sh --init` and then a bare `configure.sh`.
+describe("scripts/configure.sh ensure_secret_file existing-deployment refusal (#1151 RANGE-F1)", () => {
+  it("refuses to regenerate a missing document-kek on an existing deployment instead of silently replacing it", () => {
+    const targetDir = makeFixture("ORBIT_IMAGE=old\n");
+    const validSecret = `${"a".repeat(64)}\n`;
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+    writeFileSync(join(targetDir, ".orbit-secrets", "session-secret"), validSecret);
+    chmodSync(join(targetDir, ".orbit-secrets", "session-secret"), 0o600);
+    writeFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), validSecret);
+    chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o600);
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(".orbit-secrets/document-kek is missing on an existing Orbit deployment");
+    expect(result.stderr).toContain("Refusing to generate a replacement");
+    expect(existsSync(join(targetDir, ".orbit-secrets", "document-kek"))).toBe(false);
+  });
+
+  it("generates all three secrets on the install shape: --init writes .env-orbit, then a bare run in a second process", () => {
+    const targetDir = makeFixture(undefined);
+
+    const initResult = runConfigure(targetDir, ["--init"], {
+      ORBIT_CONFIGURE_APP_URL: "https://orbit.install-shape.internal",
+      ORBIT_CONFIGURE_OIDC_ISSUER: "https://auth.install-shape.internal/application/o/orbit/",
+      ORBIT_CONFIGURE_OIDC_CLIENT_ID: "install-shape-client-id",
+    });
+    expect(initResult.status).toBe(0);
+    expect(existsSync(join(targetDir, ".env-orbit"))).toBe(true);
+
+    const result = runConfigure(targetDir);
+
+    expect(result.stderr).not.toContain("is missing on an existing Orbit deployment");
+    expect(result.status).toBe(0);
+    for (const name of ["session-secret", "postgres-password", "document-kek"]) {
+      expect(existsSync(join(targetDir, ".orbit-secrets", name))).toBe(true);
+    }
+  });
+
+  it("still generates secrets normally on a genuinely fresh install (neither .env-orbit nor .orbit-secrets existed before this run)", () => {
+    const targetDir = makeFixture(undefined);
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).toBe(0);
+    for (const name of ["session-secret", "postgres-password", "document-kek"]) {
+      expect(existsSync(join(targetDir, ".orbit-secrets", name))).toBe(true);
+    }
+  });
+
+  it("refuses for postgres-password and generates nothing when only session-secret already exists", () => {
+    const targetDir = makeFixture("ORBIT_IMAGE=old\n");
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+    writeFileSync(join(targetDir, ".orbit-secrets", "session-secret"), `${"a".repeat(64)}\n`);
+    chmodSync(join(targetDir, ".orbit-secrets", "session-secret"), 0o600);
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(".orbit-secrets/postgres-password is missing on an existing Orbit deployment");
+    expect(existsSync(join(targetDir, ".orbit-secrets", "postgres-password"))).toBe(false);
+    expect(existsSync(join(targetDir, ".orbit-secrets", "document-kek"))).toBe(false);
+  });
+});
+
+// #1151 RANGE-F5: once OIDC_CLIENT_SECRET_FILE is already configured, a
+// missing oidc-client-secret file means the real secret was lost, not a
+// first bootstrap. Before this fix, ensure_oidc_secret_placeholder silently
+// wrote a fresh zero-byte placeholder over it and reported success, leaving
+// OIDC sign-in broken for everyone with no warning. Mirrors
+// src/lib/configure-engine.ts's ensureOidcSecretPlaceholder fileModeActive
+// refusal.
+describe("scripts/configure.sh ensure_oidc_secret_placeholder fileModeActive refusal (#1151 RANGE-F5)", () => {
+  it("refuses to replace a missing OIDC client secret file with an empty placeholder when OIDC_CLIENT_SECRET_FILE is already configured", () => {
+    const initial = "ORBIT_AUTH_OIDC=true\nOIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n";
+    const targetDir = makeFixture(initial);
+    const validSecret = `${"a".repeat(64)}\n`;
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+    for (const name of ["session-secret", "postgres-password", "document-kek"]) {
+      writeFileSync(join(targetDir, ".orbit-secrets", name), validSecret);
+      chmodSync(join(targetDir, ".orbit-secrets", name), 0o600);
+    }
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      ".orbit-secrets/oidc-client-secret is missing but OIDC_CLIENT_SECRET_FILE is already configured",
+    );
+    expect(existsSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"))).toBe(false);
+  });
+});
+
+// #1151 RANGE-F6: the new cross-process deploy lock (O1-R7/O1-R8,
+// .orbit-engine.lock) only ever guarded the opt-in container/TS engine.
+// scripts/configure.sh's own update_managed_keys took no lock at all, so two
+// concurrent default (bash-engine) `orbit configure` runs against the same
+// deployment directory could each read-modify-write .env-orbit and lose one
+// writer's keys. Mirrors src/lib/configure-engine.ts's acquireDeployLock:
+// same lock file, same "already running" refusal, same stale-after-10-minute
+// takeover.
+describe("scripts/configure.sh update_managed_keys deploy lock (#1151 RANGE-F6)", () => {
+  it("refuses a write while another run's deploy lock is held", () => {
+    const targetDir = makeFixture(undefined);
+    writeFileSync(join(targetDir, ".orbit-engine.lock"), "12345:1:2\n");
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Another orbit configure is already running against this deployment");
+    expect(result.stderr).toContain(".orbit-engine.lock");
+    // The other run's lock is left untouched, not stolen or deleted.
+    expect(readFileSync(join(targetDir, ".orbit-engine.lock"), "utf8")).toBe("12345:1:2\n");
+  });
+
+  it("reclaims a stale deploy lock left by a crashed run instead of blocking forever", () => {
+    const targetDir = makeFixture(undefined);
+    const lockPath = join(targetDir, ".orbit-engine.lock");
+    writeFileSync(lockPath, "99999:1:1\n");
+    const staleTime = (Date.now() - 11 * 60 * 1000) / 1000;
+    utimesSync(lockPath, staleTime, staleTime);
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).toBe(0);
+    // Released again after the (successful) run that reclaimed it.
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it("releases the lock after each successful update, so later steps in the same run do not see it as held", () => {
+    const targetDir = makeFixture(undefined);
+
+    // The bare flow calls update_managed_keys more than once in a single
+    // process (persist_orbit_image, then ensure_vapid_keys); every existing
+    // passing test exercises this already, but assert it directly too.
+    const result = runConfigure(targetDir);
+
+    expect(result.status).toBe(0);
+    expect(existsSync(join(targetDir, ".orbit-engine.lock"))).toBe(false);
+  });
+
+  // #1151 RANGE-R5: the lock must cover the generated-secret loop itself, not
+  // only update_managed_keys. An existing .env-orbit with a pinned image and
+  // no trust marker makes persist_orbit_image skip its own update, so the
+  // secret loop is the first thing that can take the lock.
+  it("refuses to generate secrets while another run's deploy lock is held", () => {
+    const pinnedImage = `registry.example.invalid/orbit@sha256:${"a".repeat(64)}`;
+    const targetDir = makeFixture(`APP_URL=https://orbit.example.invalid\nORBIT_IMAGE=${pinnedImage}\n`);
+    writeFileSync(join(targetDir, ".orbit-engine.lock"), "12345:1:2\n");
+
+    const result = runConfigure(targetDir, [], { ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE: "" });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Another orbit configure is already running against this deployment");
+    for (const name of ["session-secret", "postgres-password", "document-kek"]) {
+      expect(existsSync(join(targetDir, ".orbit-secrets", name))).toBe(false);
+    }
+    expect(readFileSync(join(targetDir, ".orbit-engine.lock"), "utf8")).toBe("12345:1:2\n");
   });
 });

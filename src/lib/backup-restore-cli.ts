@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   closeSync,
@@ -15,7 +15,6 @@ import {
   rmSync,
   statSync,
   unlinkSync,
-  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -120,78 +119,76 @@ function isSymlinkPath(path: string): boolean {
   }
 }
 
-// --- cross-process restore lock (O2-R7) -------------------------------------
+// --- cross-process backup/restore lock (O2-R7, #1151 RANGE-R6/S3/S4) -------
 //
-// Before this, two concurrent `orbit restore` runs were only ever
+// Before O2-R7, two concurrent `orbit restore` runs were only ever
 // distinguished by the journal restore.sh/writeRestoreJournal writes at the
 // *end* of checkpointing — so both could pass the "no journal yet" check,
 // stage, capacity-check and confirm concurrently, and both reach the
 // checkpoint/cutover machinery at once. Taking this lock as the very first
 // step closes that window; a second run against the same backup directory
 // fails fast instead of racing.
-const RESTORE_LOCK_FILE_NAME = ".orbit-restore.lock";
-const RESTORE_LOCK_STALE_MS = 10 * 60 * 1000;
+//
+// `runBackup` originally took no lock at all, reopening the identical O2-R3
+// hazard (a backup's stopApp/startApp racing a restore's cutover) inside the
+// new code, and did so under a different file name than the Bash scripts'
+// shared lock (scripts/backup.sh / scripts/restore.sh / scripts/
+// import-recovery-bundle.sh's `.orbit-backup-restore.lock`). `--dir`'s backup
+// directory matches the Bash scripts' default `ORBIT_BACKUP_DIR` (both
+// `<root>/backups`), so by default both sides contend for the same file.
+//
+// The lock is the same flock(2) the Bash scripts hold (#1151 RANGE-R6/S3/S4):
+// `exec {fd}>file; flock -n $fd`, held on the open file description until
+// the process closes it or exits. An earlier version here created the file
+// with O_EXCL, wrote an owner marker and closed it. That gave no mutual
+// exclusion against the Bash scripts at all: their `exec {fd}>file`
+// truncated the marker and `flock -n` succeeded at once, since nobody held a
+// flock, so a Bash backup/restore ran its own stop/start and cutover
+// alongside a TS one. Here the fd stays open for the whole run and the
+// `flock` utility locks it through inheritance (the child's fd 3 is our open
+// file description, which is what flock(2) locks belong to), so the lock
+// outlives the child. The kernel drops it on close, exit or crash, so there
+// is no stale state to reclaim. The file is never removed: a Bash run
+// blocked in `flock` on the old inode would wake holding a lock nobody else
+// can see. The TS CLI runs on the host (src/cli/orbit.ts refuses backup and
+// restore in the container), where the Bash scripts already require flock.
+const BACKUP_RESTORE_LOCK_FILE_NAME = ".orbit-backup-restore.lock";
 
-function acquireRestoreLock(backupDirectory: string): () => void {
+function acquireBackupRestoreLock(backupDirectory: string): () => void {
   mkdirSync(backupDirectory, { recursive: true });
   chmodSync(backupDirectory, SECURE_DIRECTORY_MODE);
-  const lockPath = join(backupDirectory, RESTORE_LOCK_FILE_NAME);
-
-  const takeLock = (): number => openSync(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
+  const lockPath = join(backupDirectory, BACKUP_RESTORE_LOCK_FILE_NAME);
 
   let fd: number;
   try {
-    fd = takeLock();
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-      refuse("restore-locked", `Could not take the orbit restore lock at ${lockPath}.`);
-    }
-    let staleEnough: boolean;
-    try {
-      staleEnough = Date.now() - statSync(lockPath).mtimeMs > RESTORE_LOCK_STALE_MS;
-    } catch {
-      staleEnough = true; // Lock vanished between the EEXIST and this stat; retry once below.
-    }
-    if (!staleEnough) {
+    fd = openSync(lockPath, constants.O_CREAT | constants.O_WRONLY, 0o600);
+  } catch {
+    refuse("restore-locked", `Could not open the orbit backup/restore lock at ${lockPath}.`);
+  }
+  const result = spawnSync("flock", ["-n", "3"], { stdio: ["ignore", "pipe", "pipe", fd], encoding: "utf8" });
+  if (result.status !== 0) {
+    closeSync(fd);
+    if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
       refuse(
         "restore-locked",
-        `Another orbit restore is already running against this backup directory (lock held at ${lockPath}). Wait for it to finish, or remove the lock file yourself once you are certain no other run is active.`,
+        "The `flock` command (util-linux) is required to take the orbit backup/restore lock, as scripts/backup.sh and scripts/restore.sh already require. Install util-linux and retry.",
       );
     }
-    // Reclaim by rename, not unlink-then-create (same shape as
-    // install-transaction.ts's deploy lock): two processes that both saw the
-    // stale lock would otherwise each unlink and recreate it, and the slower
-    // unlink removed the faster one's fresh lock, leaving both believing
-    // they held it. Only one rename succeeds; the other tries the plain
-    // create once more and refuses if it is taken.
-    const reclaimed = `${lockPath}.stale-${process.pid}`;
-    try {
-      renameSync(lockPath, reclaimed);
-      rmSafely(reclaimed);
-    } catch {
-      /* the other process reclaimed it first; the create below decides */
+    if (result.status === 1) {
+      refuse(
+        "restore-locked",
+        `Another orbit backup or restore is already running against this backup directory (lock held at ${lockPath}). Wait for it to finish.`,
+      );
     }
-    try {
-      fd = takeLock();
-    } catch {
-      refuse("restore-locked", `Another orbit restore is already running against this backup directory (lock held at ${lockPath}).`);
-    }
+    const detail = result.error ? result.error.message : (result.stderr ?? "").trim();
+    refuse("restore-locked", `Could not take the orbit backup/restore lock at ${lockPath}: ${detail || `flock exited with status ${String(result.status)}`}.`);
   }
-  // The lock names its holder, so a release never removes a lock that was
-  // reclaimed from this process as stale and now belongs to another run.
-  const owner = `${process.pid}:${randomUUID()}\n`;
-  writeSync(fd, owner);
-  closeSync(fd);
 
   let released = false;
   return () => {
     if (released) return;
     released = true;
-    try {
-      if (readFileSync(lockPath, "utf8") === owner) rmSafely(lockPath);
-    } catch {
-      /* already gone, or not ours */
-    }
+    closeSync(fd);
   };
 }
 
@@ -305,10 +302,18 @@ export interface RunBackupOptions {
 }
 
 export function runBackup(options: RunBackupOptions): CreateBackupBundleResult {
-  mkdirSync(options.backupDirectory, { recursive: true });
-  chmodSync(options.backupDirectory, SECURE_DIRECTORY_MODE);
-  const finalTarPath = join(options.backupDirectory, `orbit-${formatBundleTimestamp(options.now)}.tar`);
-  return createBackupBundle(options.backupDirectory, finalTarPath, options.documentKekHex, options.adapter, formatManifestTimestamp(options.now));
+  // #1151 RANGE-R6/RANGE-S3: taken before anything else, same as runRestore
+  // — otherwise a backup's own stopApp/startApp (inside createBackupBundle)
+  // can race a concurrent restore's document-tree/database cutover.
+  const releaseLock = acquireBackupRestoreLock(options.backupDirectory);
+  try {
+    mkdirSync(options.backupDirectory, { recursive: true });
+    chmodSync(options.backupDirectory, SECURE_DIRECTORY_MODE);
+    const finalTarPath = join(options.backupDirectory, `orbit-${formatBundleTimestamp(options.now)}.tar`);
+    return createBackupBundle(options.backupDirectory, finalTarPath, options.documentKekHex, options.adapter, formatManifestTimestamp(options.now));
+  } finally {
+    releaseLock();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -386,7 +391,7 @@ export function runRestore(options: RunRestoreOptions): RestoreDisposeResult | {
   // below — the journal written at the end of checkpointing was the only
   // thing stopping two concurrent restores, and both could pass that check
   // before either got far enough to write it.
-  const releaseLock = acquireRestoreLock(options.paths.backupDirectory);
+  const releaseLock = acquireBackupRestoreLock(options.paths.backupDirectory);
   try {
     return withScratchCleanupOnSignal(options.workDir, () => runRestoreLocked(options));
   } finally {

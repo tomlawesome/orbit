@@ -52,6 +52,7 @@ function extractFunction(name) {
 const healthProbeUrlSource = extractFunction("health_probe_url");
 const waitForHealthSource = extractFunction("wait_for_health");
 const sweepOrphanedCheckpointsSource = extractFunction("sweep_orphaned_checkpoints");
+const refuseIfRotationOpenSource = extractFunction("refuse_if_rotation_open");
 
 // Issue #678: the same two constants and four functions the live script uses,
 // extracted rather than retyped, so this suite cannot pass against a copy that
@@ -602,5 +603,100 @@ describe("scripts/restore.sh sweep_orphaned_checkpoints (#1151 O2-R6)", () => {
     const result = runSweep(restoreRoot, null);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("returned-cleanly");
+  });
+});
+
+// #1151 RANGE-S1: a plain `bash scripts/restore.sh <backup.tar>` had no
+// check for an open document-KEK rotation, unlike src/lib/restore-engine.ts
+// (refuseIfDocumentKekRotationOpen, called from both prepare() and
+// recoverRestore()) and scripts/import-recovery-bundle.sh
+// (refuse_if_rotation_open), which this release gave the same guard to.
+// Overwriting the database/document tree while DOCUMENT_KEK_NEXT is staged
+// leaves the rotation's own bookkeeping permanently out of sync with the
+// data it is migrating. This tests the real refuse_if_rotation_open
+// function extracted from the live scripts/restore.sh, never a hand-typed
+// duplicate, and the two places restore.sh now calls it.
+describe("scripts/restore.sh refuse_if_rotation_open (#1151 RANGE-S1)", () => {
+  const scratchDirs = [];
+  afterEach(() => {
+    while (scratchDirs.length > 0) rmSync(scratchDirs.pop(), { recursive: true, force: true });
+  });
+
+  function makeSecretsDirectory() {
+    const directory = mkdtempSync(join(tmpdir(), "orbit-restore-rotation-"));
+    scratchDirs.push(directory);
+    return directory;
+  }
+
+  function runRefuseIfRotationOpen(secretsDirectory) {
+    const harness = [
+      "#!/usr/bin/env bash",
+      "set -Eeuo pipefail",
+      "fail() { printf 'Orbit restore: %s\\n' \"$*\" >&2; exit 1; }",
+      `secrets_directory=${JSON.stringify(secretsDirectory)}`,
+      'document_kek_next_file="$secrets_directory/document-kek-next"',
+      refuseIfRotationOpenSource,
+      "refuse_if_rotation_open",
+      'printf "returned-cleanly\\n"',
+    ].join("\n");
+    return failOnProcessDeadline(spawnSync("bash", ["-c", harness], { encoding: "utf8", ...processGuard() }), { label: "runRefuseIfRotationOpen" });
+  }
+
+  it("returns cleanly when no rotation is open", () => {
+    const secretsDirectory = makeSecretsDirectory();
+
+    const result = runRefuseIfRotationOpen(secretsDirectory);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("returned-cleanly");
+  });
+
+  it("refuses when a document-KEK rotation is open (DOCUMENT_KEK_NEXT exists)", () => {
+    const secretsDirectory = makeSecretsDirectory();
+    const nextKeyPath = join(secretsDirectory, "document-kek-next");
+    writeFileSync(nextKeyPath, `${"a".repeat(64)}\n`);
+
+    const result = runRefuseIfRotationOpen(secretsDirectory);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("preflight/rotation failed; a document-KEK rotation is open");
+    expect(result.stderr).toContain(nextKeyPath);
+  });
+
+  it("does not treat a symlinked document-kek-next as an open rotation", () => {
+    const secretsDirectory = makeSecretsDirectory();
+    const elsewhere = mkdtempSync(join(tmpdir(), "orbit-restore-rotation-elsewhere-"));
+    scratchDirs.push(elsewhere);
+    writeFileSync(join(elsewhere, "document-kek-next"), `${"a".repeat(64)}\n`);
+    symlinkSync(join(elsewhere, "document-kek-next"), join(secretsDirectory, "document-kek-next"));
+
+    const result = runRefuseIfRotationOpen(secretsDirectory);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("returned-cleanly");
+  });
+
+  it("calls refuse_if_rotation_open before read_document_kek in the plain restore path, and inside recover_restore", () => {
+    const calls = [...restoreScriptSource.matchAll(/^refuse_if_rotation_open$/gm)];
+    expect(calls.length).toBe(2);
+    const readKekIndex = restoreScriptSource.indexOf("\nread_document_kek\n");
+    const callIndex = restoreScriptSource.indexOf("\nrefuse_if_rotation_open\n");
+    expect(callIndex).toBeGreaterThan(-1);
+    expect(callIndex).toBeLessThan(readKekIndex);
+    expect(restoreScriptSource).toContain("  refuse_if_rotation_open\n  validate_checkpoint_integrity");
+  });
+
+  // The confirmation prompt can wait indefinitely, and a rotation can open
+  // while it does, so the early check alone is not enough. Source-shape only:
+  // driving restore.sh past prepare_staged_bundle/check_capacity needs docker,
+  // so the race itself is not exercised here.
+  it("re-checks after the RESTORE confirmation and before create_checkpoint", () => {
+    const promptIndex = restoreScriptSource.indexOf("Type RESTORE to continue");
+    const checkpointIndex = restoreScriptSource.indexOf("\ncreate_checkpoint\n");
+    const recheckIndex = restoreScriptSource.indexOf("\nrefuse_if_rotation_open\n", promptIndex);
+    expect(promptIndex).toBeGreaterThan(-1);
+    expect(checkpointIndex).toBeGreaterThan(promptIndex);
+    expect(recheckIndex).toBeGreaterThan(promptIndex);
+    expect(recheckIndex).toBeLessThan(checkpointIndex);
   });
 });

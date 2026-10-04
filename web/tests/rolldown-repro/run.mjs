@@ -121,9 +121,21 @@ let cleaningUp = false;
 function cleanUpAndExit(code) {
   if (cleaningUp) return;
   cleaningUp = true;
-  currentChild?.kill("SIGTERM");
-  rmSync(scratchRoute, { recursive: true, force: true });
-  process.exit(code);
+  const finish = () => {
+    rmSync(scratchRoute, { recursive: true, force: true });
+    process.exit(code);
+  };
+  if (!currentChild) {
+    finish();
+    return;
+  }
+  // RANGE-S8 (#1151): wait for the build child to actually close before
+  // removing the scratch route it may still be reading, rather than
+  // racing it. The timeout is a bound, not the normal path -- SIGTERM
+  // should finish it well inside 5s.
+  currentChild.once("close", finish);
+  currentChild.kill("SIGTERM");
+  setTimeout(finish, 5000).unref();
 }
 process.on("SIGINT", () => cleanUpAndExit(130));
 process.on("SIGTERM", () => cleanUpAndExit(143));

@@ -246,6 +246,11 @@ export const operationalEvents = {
      "document.job" rather than reusing it, because this is a whole rotation's
      outcome across all three key populations, not one job's. */
   "document.kek_rotation": "document",
+  /* Portable-archive import rollback (#1151 RANGE-R2): a crash-recovery sweep
+     or an aborted document restore that could not fully clean up. Reports
+     beside the document events because what it names is document ciphertext
+     left behind, not a portable-archive export file. */
+  "portable_archive.import": "document",
 } as const;
 export type OperationalEventName = keyof typeof operationalEvents;
 export type OperationalComponent = typeof operationalEvents[OperationalEventName];
