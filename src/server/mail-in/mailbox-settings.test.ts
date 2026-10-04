@@ -297,6 +297,7 @@ vi.mock("@/server/documents/config", async (importOriginal) => ({
 }));
 
 vi.mock("./imap-ingestion", () => ({
+  IMAP_HEADER_FETCH_PART: { key: "HEADER", maxLength: 64 * 1_024 },
   verifyImapProvider: mocks.verifyImap,
   getImapProviderPreflightState: mocks.preflight,
   createImapClient: mocks.createImapClient,
@@ -1185,7 +1186,7 @@ describe("finding the probe's own message in the mailbox", () => {
     });
 
     expect(calls.fetchQueries).toEqual([
-      { bodyParts: [{ key: expect.stringContaining("HEADER.FIELDS"), maxLength: expect.any(Number) }] },
+      { bodyParts: [{ key: "HEADER", maxLength: expect.any(Number) }] },
     ]);
     const [query] = calls.fetchQueries as Array<{ bodyParts: Array<{ maxLength: number }> }>;
     expect(query.bodyParts[0].maxLength).toBeGreaterThan(0);
