@@ -13,6 +13,28 @@ temporary_directory=""
 temporary_path=""
 
 fail() { printf 'Orbit recovery export: %s\n' "$*" >&2; exit 1; }
+
+# Race-free equivalent of `mv --no-clobber`: `ln` succeeds atomically only
+# if $final_path does not already exist (POSIX EEXIST). `mv --no-clobber`'s
+# own existence check is a separate stat-then-rename, not atomic, and on a
+# same-second timestamp collision it silently exits 0 without moving
+# anything -- the script then reports success naming the OLD recovery
+# bundle, while the new one is forgotten as a stale .tar.installing file
+# cleanup never runs for, since temporary_path is cleared right after.
+# Mirrors publish_bundle_atomically in scripts/backup.sh.
+# $temporary_path and $final_path must be on the same filesystem, which they
+# already are (both under $backup_directory).
+publish_bundle_atomically() {
+  local link_error=""
+  if ! link_error="$(ln -- "$temporary_path" "$final_path" 2>&1)"; then
+    # Only a name that is really taken is a collision; anything else (a
+    # full or read-only disk) is reported as what it is, or the operator
+    # retries a timestamp forever.
+    [[ -e "$final_path" ]] && fail "A recovery bundle already exists at $final_path; rerun to get a distinct timestamp."
+    fail "Could not publish the recovery bundle at $final_path: ${link_error#ln: }"
+  fi
+  rm -f -- "$temporary_path"
+}
 cleanup() { [[ -z "$temporary_directory" ]] || rm -rf -- "$temporary_directory"; [[ -z "$temporary_path" ]] || rm -f -- "$temporary_path"; }
 trap cleanup EXIT
 
@@ -65,6 +87,8 @@ printf 'format_version=1\nkey_encryption=aes-256-gcm-scrypt-n131072-r8-p1\n' > "
 temporary_path="$backup_directory/orbit-recovery-$timestamp.tar.installing"
 tar -C "$temporary_directory" -cf "$temporary_path" manifest checksums.sha256 orbit-backup.tar document-kek.enc
 final_path="$backup_directory/orbit-recovery-$timestamp.tar"
-mv --no-clobber -- "$temporary_path" "$final_path"
+publish_bundle_atomically
+# Cleared only once the publish succeeded: a refused publish exits above
+# with temporary_path still set, so the cleanup trap removes it.
 temporary_path=""
 printf 'Orbit recovery bundle created: %s\n' "$final_path"
