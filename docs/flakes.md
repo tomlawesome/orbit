@@ -299,6 +299,10 @@ page's URL at failure, which this one has to infer.
 
 - 2026-09-30 · 0135f516 (!1006, M14 pocket-film batch plus `dev`'s base-image re-pin; nothing near archives) · pipeline 1855 / smoke (job 27172) · a `toHaveCount` assertion failed on the first attempt and on Playwright's in-job retry, so the job failed outright. Job retried as 27269 on the same commit: green, 221 passed. First sighting; an issue on the third.
 
+## v19-tour-transport.test.mjs — "window is not defined" from veil.js's fade timer after the file ended
+
+- 2026-10-04 · 91a3ada2 (!1021; the batch's only veil change, W3-S1, adds no timer, and the fade timer itself dates from 2026-09-22) · local `scripts/test-backend.sh` (full 393-file run, two integration suites sharing the host) · every test passed, but Vitest caught one unhandled `ReferenceError: window is not defined` at `removeListeners web/src/lib/tour/veil.js:280`, from `hideVeil`'s `setTimeout` teardown firing after the file's jsdom window was gone, and exited 1. The same file alone passed three times in a row straight after on the same code, and CI's `fast` job was green on `bc9ba29e`. First sighting; an issue on the third.
+
 ## pocket-measure.spec.js:540 "/home · film-create meets the pocket floors" — pocket-measure, 390x664
 
 - 2026-09-30 · 0135f516 (!1006, the batch that built this film chapter) · pipeline 1855 / fidelity (job 27168) · `page.waitForFunction` hit the 60000ms test timeout. The same test passed on pipeline 1836 (same film code), and the job retried as 27270 on the same commit was green. First sighting; an issue on the third.
