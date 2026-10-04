@@ -1551,3 +1551,31 @@ describe("scripts/configure.sh ensure_secret_file existing-deployment refusal (#
     }
   });
 });
+
+// #1151 RANGE-F5: once OIDC_CLIENT_SECRET_FILE is already configured, a
+// missing oidc-client-secret file means the real secret was lost, not a
+// first bootstrap. Before this fix, ensure_oidc_secret_placeholder silently
+// wrote a fresh zero-byte placeholder over it and reported success, leaving
+// OIDC sign-in broken for everyone with no warning. Mirrors
+// src/lib/configure-engine.ts's ensureOidcSecretPlaceholder fileModeActive
+// refusal.
+describe("scripts/configure.sh ensure_oidc_secret_placeholder fileModeActive refusal (#1151 RANGE-F5)", () => {
+  it("refuses to replace a missing OIDC client secret file with an empty placeholder when OIDC_CLIENT_SECRET_FILE is already configured", () => {
+    const initial = "ORBIT_AUTH_OIDC=true\nOIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n";
+    const targetDir = makeFixture(initial);
+    const validSecret = `${"a".repeat(64)}\n`;
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+    for (const name of ["session-secret", "postgres-password", "document-kek"]) {
+      writeFileSync(join(targetDir, ".orbit-secrets", name), validSecret);
+      chmodSync(join(targetDir, ".orbit-secrets", name), 0o600);
+    }
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      ".orbit-secrets/oidc-client-secret is missing but OIDC_CLIENT_SECRET_FILE is already configured",
+    );
+    expect(existsSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"))).toBe(false);
+  });
+});
