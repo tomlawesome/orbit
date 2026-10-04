@@ -40,6 +40,7 @@ import {
   type NotificationWorkerConfig,
 } from "@/server/notification-worker";
 import {
+  IMAP_HEADER_FETCH_PART,
   createImapClient,
   getImapProviderPreflightState,
   verifyImapProvider,
@@ -92,7 +93,6 @@ const PROBE_POLL_INTERVAL_MS = 3_000;
 /** Kept equal to imap-ingestion.ts's own header fetch bound by hand (SR2-R1,
  * SR2-R2), since neither constant is exported across the mail-in/core
  * boundary. */
-const HEADER_FETCH_LIMIT_BYTES = 64 * 1_024;
 
 /** Alias keys are 32 random bytes; the legacy shape check required at least 32 characters. */
 const ALIAS_KEY_BYTES = 32;
@@ -866,9 +866,12 @@ async function findProbeMessage(config: ImapIngestionConfig, token: string): Pro
           // has no size limit at all, so the comment below's claim of
           // matching the receipt path's bound (imap-ingestion.ts, SR2-R1)
           // was not actually true until this read the header the same way.
+          // The same bare, bounded HEADER part the receipt path fetches
+          // (SR2-R1): a HEADER.FIELDS list is quoted by imapflow's compiler
+          // and refused by the server, so this probe never read anything.
           const message = await client.fetchOne(
             String(uid),
-            { bodyParts: [{ key: `HEADER.FIELDS (${config.trustedRecipientHeader})`, maxLength: HEADER_FETCH_LIMIT_BYTES }] },
+            { bodyParts: [IMAP_HEADER_FETCH_PART] },
             { uid: true },
           );
           const headers = message && typeof message === "object" && "headers" in message
