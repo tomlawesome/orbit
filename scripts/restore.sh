@@ -70,6 +70,10 @@ require_tools() {
 # lock held until this process exits (bash closes every fd it opened on
 # exit), so there is no separate unlock step.
 acquire_backup_restore_lock() {
+  # import-recovery-bundle.sh takes this lock itself, before it stops the app
+  # and swaps the key, and says so; its descriptor is inherited, so taking
+  # the lock again here would wait on ourselves forever.
+  [[ "${ORBIT_BACKUP_RESTORE_LOCK_HELD:-}" != 1 ]] || return 0
   exec {lock_fd}>"$lock_file" || fail "preflight/lock failed; could not open the backup/restore lock file at ${lock_file}."
   if ! flock -n "$lock_fd"; then
     printf 'Orbit restore: another backup or restore is already running; waiting for it to finish...\n' >&2
@@ -92,6 +96,7 @@ read_env_value() {
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "${requested_key}="* ]]; then
       value="${line#*=}"
+      value="${value%$'\r'}"
       found=$((found + 1))
     fi
   done < "$file"

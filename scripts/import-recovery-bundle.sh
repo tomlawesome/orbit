@@ -11,6 +11,9 @@ readonly live_kek="$secrets_directory/document-kek"
 readonly document_kek_next="$secrets_directory/document-kek-next"
 readonly backup_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
 readonly restore_journal="$backup_directory/.orbit-restore/restore.journal"
+# Same file backup.sh and restore.sh lock on.
+readonly lock_file="${ORBIT_BACKUP_RESTORE_LOCK_FILE:-$backup_directory/.orbit-backup-restore.lock}"
+lock_fd=""
 temporary_directory=""
 previous_kek=""
 key_replaced=false
@@ -77,8 +80,11 @@ command -v docker >/dev/null 2>&1 || fail "Docker is required."
 # DOCUMENT_KEK under a rotation in progress would leave the rewrap worker
 # reading one key from this file and a different, unrelated one from
 # DOCUMENT_KEK_NEXT -- never a state this script may create.
-[[ ! -e "$document_kek_next" && ! -L "$document_kek_next" ]] ||
-  fail "preflight/rotation failed; a document-KEK rotation is open ($document_kek_next exists). Finish it (pnpm rewrap-kek --next-key-file $document_kek_next, then mv $document_kek_next $live_kek and redeploy) or abort it (remove $document_kek_next and redeploy without the docker-compose.kek-rotation.yml overlay) before importing a recovery bundle."
+refuse_if_rotation_open() {
+  [[ ! -e "$document_kek_next" && ! -L "$document_kek_next" ]] ||
+    fail "preflight/rotation failed; a document-KEK rotation is open ($document_kek_next exists). Finish it (pnpm rewrap-kek --next-key-file $document_kek_next, then mv $document_kek_next $live_kek and redeploy) or abort it (remove $document_kek_next and redeploy without the docker-compose.kek-rotation.yml overlay) before importing a recovery bundle."
+}
+refuse_if_rotation_open
 
 temporary_directory="$(mktemp -d "${TMPDIR:-/tmp}/orbit-recovery-import.XXXXXX")"
 if ! tar -tf "$recovery_bundle" 2>/dev/null | sort > "$temporary_directory/contents"; then
@@ -121,6 +127,20 @@ else
   read -r -p 'Type IMPORT RECOVERY to continue: ' confirmation </dev/tty || fail "An interactive terminal is required."
 fi
 [[ "$confirmation" == 'IMPORT RECOVERY' ]] || fail "Recovery import cancelled."
+# The passphrase and confirmation prompts above can sit open for as long as
+# the operator takes; a rotation opened meanwhile must still be refused, so
+# the check runs again here, right before anything is swapped.
+refuse_if_rotation_open
+# Taken here, not left to restore.sh: the app stop and the key swap below
+# happen before restore.sh starts, and a scheduled backup landing in that gap
+# would otherwise encrypt a bundle with the swapped key. restore.sh inherits
+# this descriptor and, told so, does not take the lock a second time.
+mkdir -p "$backup_directory"
+exec {lock_fd}>"$lock_file" || fail "preflight/lock failed; could not open the backup/restore lock file at ${lock_file}."
+if ! flock -n "$lock_fd"; then
+  printf 'Orbit recovery import: another backup or restore is already running; waiting for it to finish...\n' >&2
+  flock "$lock_fd" || fail "preflight/lock failed; could not acquire the backup/restore lock at ${lock_file}."
+fi
 [[ -f "$live_kek" && ! -L "$live_kek" ]] || fail "The current document KEK must be a regular file."
 compose stop orbit-app >/dev/null
 app_stopped=true
@@ -135,7 +155,7 @@ mv -- "$temporary_directory/document-kek" "$live_kek"
 
 # restore.sh authenticates the inner bundle with the recovered KEK. Revert the
 # key automatically if the inner restore fails, keeping the prior deployment usable.
-if ORBIT_RESTORE_ROLLBACK_KEK_FILE="$previous_kek" bash scripts/restore.sh "$temporary_directory/orbit-backup.tar"; then
+if ORBIT_RESTORE_ROLLBACK_KEK_FILE="$previous_kek" ORBIT_BACKUP_RESTORE_LOCK_HELD=1 bash scripts/restore.sh "$temporary_directory/orbit-backup.tar"; then
   app_stopped=false
   key_replaced=false
   rm -f -- "$previous_kek"
