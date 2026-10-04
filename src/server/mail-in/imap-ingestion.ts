@@ -944,6 +944,22 @@ export async function runImapIngestionCycle(
         gt(imapIngestionMessages.expiresAt, new Date()),
       )).orderBy(asc(imapIngestionMessages.mailboxUid)).limit(100);
       for (const row of pendingExpungeRows) unattributedUids.push(row.uid);
+      // Paged past the first hundred: a row stays in this set until it ages
+      // out, so a fixed cap left everything behind it on the server for the
+      // whole retention period.
+      let lastPendingUid = pendingExpungeRows.at(-1)?.uid;
+      while (pendingExpungeRows.length === 100 && lastPendingUid !== undefined) {
+        const page = await getDb().select({ uid: imapIngestionMessages.mailboxUid }).from(imapIngestionMessages).where(and(
+          eq(imapIngestionMessages.mailbox, config.mailbox),
+          eq(imapIngestionMessages.mailboxUidValidity, uidValidity),
+          eq(imapIngestionMessages.status, "unattributed"),
+          gt(imapIngestionMessages.expiresAt, new Date()),
+          gt(imapIngestionMessages.mailboxUid, lastPendingUid),
+        )).orderBy(asc(imapIngestionMessages.mailboxUid)).limit(100);
+        for (const row of page) unattributedUids.push(row.uid);
+        lastPendingUid = page.at(-1)?.uid;
+        if (page.length < 100) break;
+      }
       /* Both header sets in one fetch: the provider's envelope recipient, and
          everything the sender rules read (ADR-0017 decision 3). A header
          nobody fetched reads exactly like a header nobody sent, so the list
