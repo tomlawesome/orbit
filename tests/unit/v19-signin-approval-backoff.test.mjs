@@ -24,8 +24,15 @@ const SIGNIN = readFileSync(
 );
 
 describe("#1151 W1-R1: the approval poll backs off and gives up", () => {
-  it("reads a deadline set from the STARTING poll's own backstop constant", () => {
-    expect(SIGNIN).toMatch(/approvalDeadlineAt\s*=\s*Date\.now\(\)\s*\+\s*STARTING_BACKSTOP_MS/u);
+  it("reads a deadline set from the approval backstop, which is the server's own approval TTL", () => {
+    expect(SIGNIN).toMatch(/approvalDeadlineAt\s*=\s*Date\.now\(\)\s*\+\s*APPROVAL_BACKSTOP_MS/u);
+    // Kept equal by hand: the client giving up sooner than the server tells
+    // a legitimate late click the link lapsed when it had not.
+    const doorState = readFileSync(resolve(import.meta.dirname, "../../web/src/lib/flight/door-state.js"), "utf8");
+    const server = readFileSync(resolve(import.meta.dirname, "../../src/server/sign-in-approvals.ts"), "utf8");
+    const client = doorState.match(/export const APPROVAL_BACKSTOP_MS = ([^;]+);/u)?.[1];
+    const ttl = server.match(/export const SIGN_IN_APPROVAL_TTL_MS = ([^;]+);/u)?.[1];
+    expect(client && ttl && eval(client) === eval(ttl)).toBe(true);
   });
 
   it("stops polling, visibly, once the deadline has passed", () => {
