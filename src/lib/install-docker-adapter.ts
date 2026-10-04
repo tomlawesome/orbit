@@ -364,20 +364,33 @@ export function createInstallDockerAdapter(options: InstallDockerAdapterOptions)
     checkDockerAvailable: () =>
       statusOk(run(["compose", "version"], { stdio: ["ignore", "ignore", "ignore"], timeout: timeouts.quick, killSignal: "SIGTERM" })),
 
+    // #1151 RANGE-R4: these three, unlike the bounded health probes above,
+    // kill with SIGKILL rather than SIGTERM. spawnSync's `timeout` sends
+    // `killSignal` exactly once and then blocks until the child actually
+    // exits — it never escalates on its own — so a daemon or container that
+    // ignores SIGTERM (the wedged case this file's own O1-R11 comment names)
+    // would hang past these multi-minute ceilings exactly as before they
+    // existed. A real TERM-then-KILL grace period would need either an
+    // async wait (changing these methods' synchronous return type, which
+    // install-orchestrator.ts depends on) or wrapping the fixed argv in a
+    // shell string to add escalation inside the child (which the header
+    // comment's "never a shell string" rule rules out) — going straight to
+    // SIGKILL stays synchronous and shell-free, and a signal the target
+    // cannot ignore is what actually bounds the hang.
     composePull: (service) =>
       statusOk(
-        run(composeArgs("pull", service), { stdio: ["ignore", "ignore", "ignore"], timeout: timeouts.pull, killSignal: "SIGTERM" }),
+        run(composeArgs("pull", service), { stdio: ["ignore", "ignore", "ignore"], timeout: timeouts.pull, killSignal: "SIGKILL" }),
       ),
     composeUp: () =>
       statusOk(
         run(composeArgs("up", "-d", "--no-build", "--remove-orphans"), {
           stdio: ["ignore", "ignore", "ignore"],
           timeout: timeouts.up,
-          killSignal: "SIGTERM",
+          killSignal: "SIGKILL",
         }),
       ),
     composeDown: () => {
-      run(composeArgs("down", "--remove-orphans"), { stdio: ["ignore", "ignore", "ignore"], timeout: timeouts.down, killSignal: "SIGTERM" });
+      run(composeArgs("down", "--remove-orphans"), { stdio: ["ignore", "ignore", "ignore"], timeout: timeouts.down, killSignal: "SIGKILL" });
     },
     removeLeftoverDatabaseVolume: () => {
       // This project's volume by its exact name, never "the first one that
