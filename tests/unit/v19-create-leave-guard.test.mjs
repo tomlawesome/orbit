@@ -42,6 +42,14 @@ describe("#1151 W1-S1: the desktop create form warns before discarding", () => {
     // Set before the attachment branch, so an entry the server already
     // holds is committed whether or not a file was waiting to go with it.
     expect(behaviour).toMatch(/committed = true;\s*\n\s*if \(attachment\) \{/u);
+    // ...and only until the next edit. Typing reaches the card as input or
+    // change; a type chip, a section button and a dropped file do not, so
+    // each of those paths resets the flag by hand (fix review round 4).
+    expect(behaviour).toMatch(/const edited = \(\) => \{ committed = false; \};/u);
+    expect(behaviour).toMatch(/on\(card, "input", edited\);\s*\n\s*on\(card, "change", edited\);/u);
+    expect(behaviour).toMatch(/chosenType = [^\n]*\n\s*edited\(\);/u);
+    expect(behaviour).toMatch(/chosenSection = section\.id;\s*\n\s*edited\(\);/u);
+    expect(behaviour).toMatch(/attachment = file;\s*\n\s*edited\(\);/u);
     expect(tail).toMatch(/teardown:/u);
   });
 
