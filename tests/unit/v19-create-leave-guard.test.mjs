@@ -39,7 +39,9 @@ describe("#1151 W1-S1: the desktop create form warns before discarding", () => {
     // ...and a save that landed is not something to discard: leaving for
     // /home after it must not ask.
     expect(tail).toMatch(/isDirty:\s*\(\)\s*=>\s*!committed && disclose\.classList\.contains\("open"\)/u);
-    expect(behaviour).toMatch(/committed = true;\s*\n\s*await goto\("\/home"\);/u);
+    // Set before the attachment branch, so an entry the server already
+    // holds is committed whether or not a file was waiting to go with it.
+    expect(behaviour).toMatch(/committed = true;\s*\n\s*if \(attachment\) \{/u);
     expect(tail).toMatch(/teardown:/u);
   });
 
