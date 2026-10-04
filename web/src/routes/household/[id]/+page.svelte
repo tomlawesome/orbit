@@ -367,13 +367,16 @@
     sectionsProblem = null;
     saidSections = false;
     try {
+      /* Taken before the send: a section added while the save is in flight
+         was not sent, so it must not be marked saved. */
+      const sent = sectionsSnapshot(rows);
       await writeSections(v.id, rows);
       saidSections = true;
       /* This editor's own rows just became the server's truth — mark them
          as the baseline BEFORE the reload below, so the refresh effect
          knows it is safe to resync `rows` from the fresh read rather than
          reading this save as still in progress (#1151 W2-R2). */
-      sectionsBaseline = sectionsSnapshot(rows);
+      sectionsBaseline = sent;
       await invalidateAll();
     } catch (error) {
       sectionsProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
