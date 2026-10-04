@@ -3,8 +3,8 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -407,6 +407,24 @@ describe("cross-process deployment lock (O1-R7)", () => {
     const tx = InstallTransaction.begin(targetDir, []);
     tx.commit();
     tx.dispose();
+  });
+
+  it("a run whose own lock went stale and was taken over by another run does not remove that run's lock when it releases", () => {
+    const lockPath = join(targetDir, ".orbit-engine.lock");
+    const first = InstallTransaction.begin(targetDir, []);
+    // The first run stalls long enough for its lock to go stale...
+    const old = new Date(Date.now() - 20 * 60 * 1000);
+    utimesSync(lockPath, old, old);
+    // ...a second run takes it over...
+    const second = InstallTransaction.begin(targetDir, []);
+    const secondOwner = readFileSync(lockPath, "utf8");
+    // ...and the first run's release must leave the second's lock in place.
+    first.commit();
+    first.dispose();
+    expect(readFileSync(lockPath, "utf8")).toBe(secondOwner);
+    second.commit();
+    second.dispose();
+    expect(existsSync(lockPath)).toBe(false);
   });
 });
 

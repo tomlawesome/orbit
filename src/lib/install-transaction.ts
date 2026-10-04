@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -9,9 +10,10 @@ import {
   mkdtempSync,
   openSync,
   readdirSync,
+  readFileSync,
   renameSync,
-  rmSync,
   rmdirSync,
+  rmSync,
   statSync,
   writeFileSync,
   writeSync,
@@ -117,13 +119,28 @@ function acquireDeployLock(targetDir: string, operationLabel: string): () => voi
         "locked",
       );
     }
+    // Reclaim by rename, not unlink-then-create: two processes that both saw
+    // the stale lock would otherwise each unlink and recreate it, and the
+    // slower unlink removed the faster one's fresh lock, leaving both
+    // believing they held it. Only one rename of the stale file succeeds;
+    // the other gets ENOENT and simply tries the plain create once more.
+    const reclaimed = `${lockPath}.stale-${process.pid}`;
     try {
-      rmSync(lockPath, { force: true });
+      renameSync(lockPath, reclaimed);
+      rmSync(reclaimed, { force: true });
+    } catch {
+      /* the other process reclaimed it first; the create below decides */
+    }
+    try {
       fd = takeLock();
     } catch {
       throw new InstallTransactionRefusal(`Another ${operationLabel} is already running against this deployment (lock held at ${lockPath}).`, "locked");
     }
   }
+  // The lock names its holder, so a release never removes a lock that was
+  // reclaimed from this process as stale and now belongs to another run.
+  const owner = `${process.pid}:${randomUUID()}\n`;
+  writeSync(fd, owner);
   closeSync(fd);
 
   let released = false;
@@ -131,7 +148,7 @@ function acquireDeployLock(targetDir: string, operationLabel: string): () => voi
     if (released) return;
     released = true;
     try {
-      rmSync(lockPath, { force: true });
+      if (readFileSync(lockPath, "utf8") === owner) rmSync(lockPath, { force: true });
     } catch {
       /* best effort */
     }

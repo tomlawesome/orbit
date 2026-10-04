@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -14,6 +15,7 @@ import {
   rmSync,
   statSync,
   unlinkSync,
+  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -102,7 +104,9 @@ function refuse(code: BackupRestoreCliRefusalCode, message: string): never {
 
 function rmSafely(path: string): void {
   try {
-    rmSync(path, { force: true });
+    // recursive: withScratchCleanupOnSignal hands this a directory, and a
+    // non-recursive rmSync of one throws, which the catch below would hide.
+    rmSync(path, { force: true, recursive: true });
   } catch {
     // Best-effort, matching restore.sh/import-recovery-bundle.sh's own `|| true` cleanup.
   }
@@ -154,20 +158,40 @@ function acquireRestoreLock(backupDirectory: string): () => void {
         `Another orbit restore is already running against this backup directory (lock held at ${lockPath}). Wait for it to finish, or remove the lock file yourself once you are certain no other run is active.`,
       );
     }
+    // Reclaim by rename, not unlink-then-create (same shape as
+    // install-transaction.ts's deploy lock): two processes that both saw the
+    // stale lock would otherwise each unlink and recreate it, and the slower
+    // unlink removed the faster one's fresh lock, leaving both believing
+    // they held it. Only one rename succeeds; the other tries the plain
+    // create once more and refuses if it is taken.
+    const reclaimed = `${lockPath}.stale-${process.pid}`;
     try {
-      rmSafely(lockPath);
+      renameSync(lockPath, reclaimed);
+      rmSafely(reclaimed);
+    } catch {
+      /* the other process reclaimed it first; the create below decides */
+    }
+    try {
       fd = takeLock();
     } catch {
       refuse("restore-locked", `Another orbit restore is already running against this backup directory (lock held at ${lockPath}).`);
     }
   }
+  // The lock names its holder, so a release never removes a lock that was
+  // reclaimed from this process as stale and now belongs to another run.
+  const owner = `${process.pid}:${randomUUID()}\n`;
+  writeSync(fd, owner);
   closeSync(fd);
 
   let released = false;
   return () => {
     if (released) return;
     released = true;
-    rmSafely(lockPath);
+    try {
+      if (readFileSync(lockPath, "utf8") === owner) rmSafely(lockPath);
+    } catch {
+      /* already gone, or not ours */
+    }
   };
 }
 
