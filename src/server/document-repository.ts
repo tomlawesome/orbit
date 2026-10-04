@@ -466,6 +466,12 @@ export async function uploadItemDocument(input: {
     // I/O -- so that path reuses this buffer instead of reading again.
     const reuseValidationBytesForEncrypt = config.scanMode === "disabled";
     const validationBytes = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
+    // Reuse only covers a validated buffer handed on to the encrypt stage
+    // below, which is the only place that zeroes it on that path. A buffer
+    // this block is about to discard instead -- structure validation failed,
+    // or threw -- has nowhere else left to be wiped, so it must be zeroed
+    // here regardless of `reuseValidationBytesForEncrypt` (#1151 F13).
+    let structureValid = false;
     try {
       if (!await validateSupportedDocumentStructure(validationBytes, mediaType)) {
         throw new AppError(
@@ -474,8 +480,9 @@ export async function uploadItemDocument(input: {
           422,
         );
       }
+      structureValid = true;
     } finally {
-      if (!reuseValidationBytesForEncrypt) validationBytes.fill(0);
+      if (!reuseValidationBytesForEncrypt || !structureValid) validationBytes.fill(0);
     }
     await reserveDocumentMetadata({
       documentId,
