@@ -40,6 +40,13 @@ terminal_echo_disabled=0
 # Set by ensure_environment_file when .env-orbit did not exist yet -- read
 # by persist_orbit_image below (#1151 O1-S4).
 environment_file_was_created=0
+# Set once in the bare flow, before the first secret is generated -- read by
+# ensure_secret_file below (#1151 RANGE-F1), mirroring
+# src/lib/configure-engine.ts's runConfigureApply isFreshInstall.
+generated_secret_existed_before_run=0
+# Set by acquire_deploy_lock, read by release_deploy_lock (#1151 RANGE-F6).
+deploy_lock_path_value=""
+deploy_lock_owner_value=""
 installer_ui_input_loaded=0
 installer_ui_path="$repo_dir/scripts/installer-ui.sh"
 if [[ -f "$installer_ui_path" && ! -L "$installer_ui_path" ]]; then
@@ -100,6 +107,7 @@ cleanup() {
     machine_prompt_fd=""
   fi
   [[ -z "$temporary_file" ]] || rm -f -- "$temporary_file"
+  release_deploy_lock
 }
 
 trap cleanup EXIT
@@ -249,6 +257,84 @@ ensure_secrets_directory() {
     fail "Could not restrict ${secrets_directory} permissions."
 }
 
+# #1151 RANGE-F1: a deployment is EXISTING when any of the three generated
+# secrets (session-secret, postgres-password, document-kek) already exists
+# before this run; .env-orbit and the secrets directory are not signals,
+# because install.sh runs `configure.sh --init` (which writes .env-orbit) and
+# then a bare `configure.sh` in a second process. Checked once for the whole
+# set, before the first is generated, so writing one cannot make the next
+# look existing. Mirrors src/lib/configure-engine.ts's runConfigureApply.
+record_generated_secret_presence() {
+  local name path
+  generated_secret_existed_before_run=0
+  for name in session-secret postgres-password document-kek; do
+    path="$secrets_directory/$name"
+    if [[ -e "$path" || -L "$path" ]]; then
+      generated_secret_existed_before_run=1
+      return
+    fi
+  done
+}
+
+# Shares the Orbit engine's cross-process deploy lock (#1151 RANGE-F6):
+# src/lib/configure-engine.ts's acquireDeployLock and
+# install-transaction.ts's own copy both take ".orbit-engine.lock" in the
+# deployment directory before a read-modify-write of $environment_file, but
+# bash's own update_managed_keys took no lock at all, so two concurrent
+# default (bash-engine) `orbit configure` runs against the same deployment
+# directory could each read-modify-write it and lose one writer's keys --
+# exactly the race O1-R8 closed only for the opt-in container engine. Same
+# lock file (so the two engines exclude each other), same
+# stale-after-10-minutes takeover (a crashed process leaves no PID to check
+# across a container boundary), same rename-based reclaim so two processes
+# racing a stale lock cannot both believe they hold it.
+readonly deploy_lock_file=".orbit-engine.lock"
+readonly deploy_lock_stale_seconds=600
+
+acquire_deploy_lock() {
+  local operation_label="$1" lock_path="$deploy_lock_file" owner lock_age reclaimed
+
+  if ! ( set -o noclobber; : > "$lock_path" ) 2>/dev/null; then
+    lock_age="$deploy_lock_stale_seconds"
+    if [[ -e "$lock_path" ]]; then
+      lock_age=$(( $(date +%s) - $(stat -c %Y -- "$lock_path" 2>/dev/null || printf '0') ))
+    fi
+    if (( lock_age <= deploy_lock_stale_seconds )); then
+      fail "Another ${operation_label} is already running against this deployment (lock held at ${lock_path}). Wait for it to finish, or remove the lock file yourself once you are certain no other run is active."
+    fi
+    # Reclaim by rename, not unlink-then-create: two processes that both saw
+    # the stale lock would otherwise each unlink and recreate it, and the
+    # slower unlink removes the faster one's fresh lock. Only one rename
+    # succeeds; the other tries the plain create once more and refuses if
+    # that is taken too.
+    reclaimed="${lock_path}.stale-$$"
+    if mv -- "$lock_path" "$reclaimed" 2>/dev/null; then
+      rm -f -- "$reclaimed"
+    fi
+    if ! ( set -o noclobber; : > "$lock_path" ) 2>/dev/null; then
+      fail "Another ${operation_label} is already running against this deployment (lock held at ${lock_path})."
+    fi
+  fi
+
+  owner="$$:$RANDOM:$RANDOM"
+  printf '%s\n' "$owner" > "$lock_path"
+  deploy_lock_path_value="$lock_path"
+  deploy_lock_owner_value="$owner"
+}
+
+# Never removes a lock that was reclaimed from this process as stale and now
+# belongs to another run: only a lock file that still names this process's
+# own owner token is removed. Safe to call more than once (cleanup's EXIT
+# trap calls it again as a backstop after any fail() exit mid-update).
+release_deploy_lock() {
+  [[ -n "$deploy_lock_path_value" ]] || return 0
+  if [[ "$(cat -- "$deploy_lock_path_value" 2>/dev/null)" == "$deploy_lock_owner_value" ]]; then
+    rm -f -- "$deploy_lock_path_value"
+  fi
+  deploy_lock_path_value=""
+  deploy_lock_owner_value=""
+}
+
 # Reusable atomic updater for installer-managed keys in $environment_file. It
 # accepts one or more KEY VALUE pairs, rewrites the first active "KEY=..."
 # assignment for each in place, drops any further duplicate active
@@ -257,6 +343,7 @@ ensure_secrets_directory() {
 # including comments, is copied through byte-for-byte. All pairs are applied
 # in a single atomic rewrite.
 update_managed_keys() {
+  acquire_deploy_lock "orbit configure"
   local temp line key found final_newline=1 output_line index last_byte=""
   # mapfile -t strips the newline but not a preceding carriage return, so a
   # CRLF file arrives with one still attached to every line. Unmanaged lines
@@ -362,6 +449,7 @@ update_managed_keys() {
   mv -- "$temp" "$environment_file" ||
     fail "Could not persist configuration in ${environment_file}."
   temporary_file=""
+  release_deploy_lock
 }
 
 persist_orbit_image() {
@@ -899,6 +987,17 @@ ensure_secret_file() {
     return
   fi
 
+  # #1151 RANGE-F1: a missing secret file on an EXISTING deployment is a lost
+  # or corrupted secret, not a first run -- generating a replacement here
+  # would make existing encrypted data unreadable (document-kek) or sign out
+  # every user (session-secret). Mirrors configure-engine.ts's ensureSecretFile
+  # isFreshInstall refusal exactly; only a fresh install (none of the three
+  # generated secrets existed before this run, see
+  # record_generated_secret_presence) may generate one.
+  if [[ "$generated_secret_existed_before_run" == 1 ]]; then
+    fail "${path} is missing on an existing Orbit deployment. Refusing to generate a replacement, which would make existing encrypted data unreadable or sign out every user. Restore ${path} from backup (or Orbit's recovery bundle) to the exact path ${repo_dir}/${path}, then run \`orbit configure\` again."
+  fi
+
   secret="$(generate_hex_secret)"
   temporary_file="$(mktemp "$secrets_directory/.installing.XXXXXX")" ||
     fail "Could not create a temporary Orbit secret file."
@@ -943,6 +1042,16 @@ ensure_oidc_secret_placeholder() {
     chmod 600 "$oidc_secret_file" ||
       fail "Could not restrict permissions on ${oidc_secret_file}."
     return
+  fi
+
+  # #1151 RANGE-F5: once OIDC_CLIENT_SECRET_FILE is itself already configured,
+  # a missing file here means the real secret was lost or deleted, not a
+  # first bootstrap -- writing a fresh zero-byte placeholder over it would
+  # silently and permanently disable OIDC sign-in while reporting success.
+  # Mirrors configure-engine.ts's ensureOidcSecretPlaceholder fileModeActive
+  # refusal exactly.
+  if environment_key_is_nonempty OIDC_CLIENT_SECRET_FILE; then
+    fail "${oidc_secret_file} is missing but OIDC_CLIENT_SECRET_FILE is already configured. Refusing to replace it with an empty placeholder, which would silently disable OIDC sign-in. Restore the OIDC client secret to ${oidc_secret_file}, or run \`orbit configure --set-oidc-secret\` again, then retry."
   fi
 
   temporary_file="$(mktemp "$secrets_directory/.installing.XXXXXX")" ||
@@ -1506,10 +1615,18 @@ else
   run_configuration_preflight
   persist_orbit_image
   ensure_secrets_directory
+  # #1151 RANGE-R5: two concurrent first-time runs both see every secret
+  # missing and each generate their own; the later mv silently overwrote the
+  # earlier one's file. Same lock, same reason as the container engine's
+  # secret loop (runConfigureApply). persist_orbit_image's own
+  # acquire/release has already completed above, so this never nests.
+  acquire_deploy_lock "orbit configure"
+  record_generated_secret_presence
   ensure_secret_file "$secrets_directory/session-secret"
   ensure_secret_file "$secrets_directory/postgres-password"
   # A 32-byte hexadecimal KEK is generated only when absent and is never printed.
   ensure_secret_file "$secrets_directory/document-kek"
+  release_deploy_lock
   ensure_oidc_secret_placeholder
 fi
 # ensure_vapid_keys always runs here, delegated or not: it is the one

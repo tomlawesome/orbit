@@ -84,4 +84,63 @@ describe("run.mjs's Ctrl-C cleanup", () => {
       rmSync(fakeBuildDir, { recursive: true, force: true });
     }
   });
+
+  it("waits for the build child to actually close before exiting (#1151 RANGE-S8)", async () => {
+    rmSync(scratchRoute, { recursive: true, force: true });
+
+    const fakeBuildDir = mkdtempSync(path.join(tmpdir(), "rolldown-repro-fake-build-"));
+    const fakeBuild = path.join(fakeBuildDir, "fake-build.mjs");
+    const readyMarker = path.join(fakeBuildDir, "ready");
+    // Ignores the default SIGTERM disposition and takes 300ms to actually
+    // exit after receiving it -- standing in for a build tool slow to shut
+    // down, so a run.mjs that exits the instant it SENDS SIGTERM (rather
+    // than once the child's own "close" event fires) finishes in well
+    // under that 300ms. Writes `readyMarker` as its very first act, so the
+    // test below can wait for THIS process to exist rather than for the
+    // scratch route, which run.mjs creates a few milliseconds before it
+    // actually spawns this child (spawn()'s own fork+exec overhead) --
+    // racing on the route alone sent SIGINT before currentChild was set.
+    writeFileSync(
+      fakeBuild,
+      [
+        'import { writeFileSync } from "node:fs";',
+        `writeFileSync(${JSON.stringify(readyMarker)}, "");`,
+        "let closing = false;",
+        'process.on("SIGTERM", () => {',
+        "  closing = true;",
+        "  setTimeout(() => process.exit(0), 300);",
+        "});",
+        "await new Promise((resolve) => setTimeout(resolve, 60_000));",
+      ].join("\n"),
+    );
+
+    const child = spawn(process.execPath, [runScript], {
+      cwd: here,
+      env: {
+        ...process.env,
+        ROLLDOWN_REPRO_BUILD_CMD: process.execPath,
+        ROLLDOWN_REPRO_BUILD_ARGS: fakeBuild,
+      },
+      stdio: "ignore",
+    });
+
+    try {
+      const appeared = await waitUntil(() => existsSync(readyMarker));
+      assert.ok(appeared, "the fake build child never started -- this is a test-setup problem, not the fix under test");
+
+      const sentAt = Date.now();
+      child.kill("SIGINT");
+      await new Promise((resolve) => child.once("exit", resolve));
+      const elapsedMs = Date.now() - sentAt;
+
+      assert.ok(
+        elapsedMs >= 250,
+        `run.mjs exited ${elapsedMs}ms after SIGINT -- it must wait for the build child's own close, which here takes 300ms`,
+      );
+    } finally {
+      if (!child.killed) child.kill("SIGKILL");
+      rmSync(scratchRoute, { recursive: true, force: true });
+      rmSync(fakeBuildDir, { recursive: true, force: true });
+    }
+  });
 });

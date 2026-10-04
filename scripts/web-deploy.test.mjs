@@ -227,4 +227,22 @@ describe("scripts/web-deploy.sh serializes concurrent runs (#1151 D1-S3)", () =>
     expect(result.status).toBe(0);
     expect(existsSync(lockDir)).toBe(false);
   });
+
+  it("reclaims a lock dir left with no pid file at all, rather than hanging forever (#1151 RANGE-F4)", () => {
+    // Stands in for a run killed (SIGKILL) between `mkdir "$lock_dir"`
+    // succeeding and its pid file being written: the directory exists, but
+    // held_pid can never become non-empty, so nothing will ever reclaim it
+    // except a bound on how long "exists with no pid file" is tolerated.
+    mkdirSync(lockDir);
+
+    stubPnpm(stubDir);
+    const result = failOnProcessDeadline(spawnSync("sh", [join(repoRoot, "scripts", "web-deploy.sh"), join(stubDir, "target")], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${stubDir}:${process.env.PATH}` },
+      ...processGuard(),
+    }), { label: "runDeploy (lock dir with no pid file)" });
+
+    expect(result.status).toBe(0);
+    expect(existsSync(lockDir)).toBe(false);
+  });
 });

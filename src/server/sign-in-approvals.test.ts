@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AuthError } from "@/lib/auth/errors";
 
 /**
  * The second factor's own arithmetic (#1033, ADR-0027), against an in-memory
@@ -440,6 +441,28 @@ describe("a pending sign-in, from the password to the session (ADR-0027 §4-§6)
     await expect(collectSignInApproval(pending.claim, async () => minted))
       .resolves.toEqual({ state: "approved", userId: USER, session: minted });
     // Spent for good this time: a third attempt gets nothing.
+    expect(await collectSignInApproval(pending.claim)).toEqual({ state: "unknown" });
+  });
+
+  it("answers an account disabled mid-collection as unknown, not as a human denial, and leaves the same trail a refusal does (#1151 F12, S2)", async () => {
+    const pending = await startSignInApproval(USER, { userAgent: CHROME, clientAddress: "203.0.113.9" }, { mailer });
+    const token = tokenFromLatestMail();
+    await decideSignInApproval(token, "approved");
+
+    const disabled = new AuthError("account_disabled", "This account has been disabled", 403);
+    await expect(collectSignInApproval(pending.claim, async () => { throw disabled; }))
+      .resolves.toEqual({ state: "unknown" });
+
+    // The approval stays spent -- re-enabling the account must not let the
+    // old emailed link sign in with no new approval asked for.
+    expect(store.approvals[0].consumedAt).not.toBeNull();
+    // And it leaves the same marks a real refusal leaves, so the attempt is
+    // visible in the log and costs what a wrong password costs.
+    expect(store.audit.map((row) => row.action)).toContain("sign_in_refused");
+    expect(store.credentials[0].failedAttemptCount).toBe(1);
+
+    // A later poll finds the approval already spent, exactly as it would
+    // for any other collected approval -- not stuck repeating the race.
     expect(await collectSignInApproval(pending.claim)).toEqual({ state: "unknown" });
   });
 

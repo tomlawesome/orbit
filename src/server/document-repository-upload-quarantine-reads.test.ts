@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   updateReturningQueues: new Map<string, unknown[][]>(),
   readQuarantineCalls: 0,
   scanStatus: "clean" as "clean" | "infected",
+  structureValid: true,
+  lastQuarantineBuffer: null as Buffer | null,
 }));
 
 function queue(map: Map<string, unknown[][]>, table: string, rows: unknown[]) {
@@ -102,7 +104,7 @@ vi.mock("@/server/documents/config", () => ({
 vi.mock("@/server/documents/validation", () => ({
   detectDocumentMediaType: () => "application/pdf",
   normalizedDocumentFilename: (name: string) => name,
-  validateSupportedDocumentStructure: async () => true,
+  validateSupportedDocumentStructure: async () => mocks.structureValid,
 }));
 
 vi.mock("@/server/documents/crypto", () => ({
@@ -131,7 +133,9 @@ vi.mock("@/server/documents/storage", () => ({
     }
     async readQuarantine() {
       mocks.readQuarantineCalls += 1;
-      return Buffer.from("plaintext");
+      const buffer = Buffer.from("plaintext");
+      mocks.lastQuarantineBuffer = buffer;
+      return buffer;
     }
     createStorageKey() {
       return "a".repeat(64);
@@ -165,6 +169,8 @@ beforeEach(() => {
   mocks.updateReturningQueues.clear();
   mocks.readQuarantineCalls = 0;
   mocks.scanStatus = "clean";
+  mocks.structureValid = true;
+  mocks.lastQuarantineBuffer = null;
   configState.scanMode = "disabled";
 });
 
@@ -189,5 +195,24 @@ describe("uploadItemDocument quarantine reads (#1151 A2-Q1)", () => {
     });
 
     expect(mocks.readQuarantineCalls).toBe(2);
+  });
+});
+
+describe("quarantine buffer zeroing on a rejected upload (#1151 F13)", () => {
+  it("zeroes the reused validation buffer when structure validation fails with scanning disabled", async () => {
+    configState.scanMode = "disabled";
+    mocks.structureValid = false;
+    seedUploadHappyPath();
+
+    await expect(uploadItemDocument({
+      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
+    })).rejects.toMatchObject({ code: "document_structure_invalid" });
+
+    // With scanning disabled the encrypt stage would have reused this same
+    // buffer and zeroed it there -- but the throw above means that stage is
+    // never reached, so it must be zeroed before this function exits instead
+    // of being dropped unwiped.
+    expect(mocks.lastQuarantineBuffer).not.toBeNull();
+    expect(mocks.lastQuarantineBuffer!.every((byte) => byte === 0)).toBe(true);
   });
 });

@@ -952,15 +952,19 @@ export function runConfigureApply(
 ): ConfigureApplyResult {
   const messages: string[] = [];
 
-  // Captured before anything below creates either path: O1-S1/SS1-S2's
-  // "existing deployment" signal for ensureSecretFile. Once ensureEnvironmentFile
-  // and ensureSecretsDirectory run, both paths exist unconditionally
-  // (freshly created, on a true fresh install) — checking after them would
-  // always read as "existing deployment" and wrongly refuse a real fresh
-  // install, so this has to run first and be threaded through.
+  // #1151 RANGE-F1 (O1-S1/SS1-S2's "existing deployment" signal for
+  // ensureSecretFile): a deployment is existing when any of the three
+  // generated secrets already exists before this run (a symlink counts).
+  // .env-orbit and the secrets directory are not signals: install.sh runs
+  // `configure.sh --init` (which writes .env-orbit) and then a bare
+  // configure in a second process. Checked once for the whole set, before
+  // the first is generated, so writing one cannot make the next look existing.
+  // hadEnvironmentFile is only for persist_orbit_image's rule below.
   const hadEnvironmentFile = pathInfo(join(deployDir, ENVIRONMENT_FILE_NAME)).existsFollowing;
-  const hadSecretsDirectory = pathInfo(join(deployDir, SECRETS_DIRECTORY_NAME)).existsFollowing;
-  const isFreshInstall = !hadEnvironmentFile && !hadSecretsDirectory;
+  const isFreshInstall = !GENERATED_SECRET_RELATIVE_PATHS.some((relativePath) => {
+    const info = pathInfo(join(deployDir, relativePath));
+    return info.existsFollowing || info.isSymlink;
+  });
 
   const envResult = ensureEnvironmentFile(deployDir);
   if (envResult.message) messages.push(envResult.message);
@@ -985,9 +989,22 @@ export function runConfigureApply(
   }
   ensureSecretsDirectory(deployDir);
 
-  for (const relativePath of GENERATED_SECRET_RELATIVE_PATHS) {
-    const result = ensureSecretFile(deployDir, relativePath, isFreshInstall);
-    if (result.message) messages.push(result.message);
+  // #1151 RANGE-R5: two concurrent first-time `orbit configure` runs both
+  // see every secret missing and each generate their own; whichever
+  // finishes last previously overwrote the other's file unchallenged,
+  // exactly the read-modify-write race acquireDeployLock exists to close
+  // elsewhere. ensureSecretFile itself never takes this lock (it has no
+  // caller-independent reason to serialize on its own), so the loop takes
+  // it here, same lock, same deployDir, safe to nest after persistOrbitImage's
+  // own acquire/release above has already completed.
+  const releaseSecretsLock = acquireDeployLock(deployDir, "orbit configure");
+  try {
+    for (const relativePath of GENERATED_SECRET_RELATIVE_PATHS) {
+      const result = ensureSecretFile(deployDir, relativePath, isFreshInstall);
+      if (result.message) messages.push(result.message);
+    }
+  } finally {
+    releaseSecretsLock();
   }
 
   ensureOidcSecretPlaceholder(deployDir);

@@ -988,22 +988,21 @@ export function createDockerComposeBackupAdapter(options: DockerComposeAdapterOp
             "run",
             "--rm",
             "--no-deps",
+            // The container's own DOCUMENTS_ROOT (env_file: .env-orbit), not
+            // a value read on the host: matches wherever the app actually
+            // writes documents (#1151 RANGE-F2, the TS-side counterpart of
+            // SF2-F1's backup.sh fix). `--entrypoint tar` cannot expand a
+            // variable in its own argument, so this runs through sh instead.
             "--entrypoint",
-            "tar",
+            "sh",
             "orbit-app",
-            "-C",
-            "/var/lib/orbit/documents",
-            // SS2-S1: excluded, not backed up. portable-archives/ holds the
-            // household portable-archive export (ADR-0024's deliberate
-            // plaintext escape hatch) — time-limited, re-creatable on
-            // request, and not an entry validateDocumentArchiveEntries's
-            // allow-list recognizes. Before this exclusion, any export
-            // sitting on disk made `orbit backup` refuse outright the
-            // moment it re-validated its own freshly collected archive.
-            "--exclude=./portable-archives",
-            "-cf",
-            "-",
-            ".",
+            "-c",
+            // SS2-S1: excludes the household portable-archive export, not
+            // an entry validateDocumentArchiveEntries's allow-list
+            // recognizes. Before this exclusion, any export sitting on disk
+            // made `orbit backup` refuse outright the moment it
+            // re-validated its own freshly collected archive.
+            'exec tar -C "${DOCUMENTS_ROOT:-/var/lib/orbit/documents}" --exclude=./portable-archives -cf - .',
           ),
           { cwd, env, stdio: ["ignore", descriptor, "inherit"] },
         );

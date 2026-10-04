@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   auditRows: [] as Array<Record<string, unknown>>,
   persisted: [] as string[],
   liveLink: false,
+  persistError: null as Error | null,
   key: { scope: "instance", householdId: null, keyId: "test-key", dataKey: Buffer.alloc(32, 9) },
 }));
 
@@ -51,6 +52,7 @@ vi.mock("@/server/local-credentials", async (importOriginal) => {
       expiresAt: new Date("2026-09-22T09:00:00.000Z"),
     }),
     persistSetupToken: async (userId: string, _minted: unknown, _actor: unknown, options: { onlyIfNoLiveLink?: boolean } = {}) => {
+      if (mocks.persistError) throw mocks.persistError;
       if (options.onlyIfNoLiveLink && mocks.liveLink) return false;
       mocks.persisted.push(userId);
       return true;
@@ -95,6 +97,7 @@ beforeEach(() => {
   mocks.auditRows = [];
   mocks.persisted = [];
   mocks.liveLink = false;
+  mocks.persistError = null;
   sent.length = 0;
 });
 
@@ -215,5 +218,28 @@ describe("a resend that cannot be delivered (#1151 A1-S1)", () => {
        never claimed as sent. */
     expect(mocks.persisted).toEqual([USER]);
     expect(mocks.auditRows).toEqual([]);
+  });
+});
+
+describe("a mail that goes out but is never persisted (#1151 R1)", () => {
+  it("still leaves an audit record when persistSetupToken fails after a successful send", async () => {
+    mocks.row = {
+      id: USER,
+      email: "ada@example.invalid",
+      emailEnc: null,
+      displayName: "Ada Lovelace",
+      credential: null,
+    };
+    mocks.persistError = new Error("connection dropped");
+
+    await expect(sendSetupLink(ADMIN, USER, { mailer })).rejects.toThrow("connection dropped");
+
+    // The mail genuinely went out, so that must be on the audit trail even
+    // though the token behind it never made it into the table -- otherwise
+    // the account is stuck with a dead link and nothing ever flags it.
+    expect(sent).toHaveLength(1);
+    expect(mocks.persisted).toEqual([]);
+    expect(mocks.auditRows).toHaveLength(1);
+    expect(mocks.auditRows[0]).toMatchObject({ action: "setup_link_sent", entityId: USER });
   });
 });

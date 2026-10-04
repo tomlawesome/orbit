@@ -250,7 +250,10 @@ export default {
     await goto(body);
     await press(body);
     /** Where the item screen is: the row's own `open →` act on the pocket
-     *  (its href names the item the body opened), the apex on the desk. */
+     *  (its href names the item the body opened), the pressed body's own
+     *  `data-body` id on the desk (#1151 F10) — bare `/item` redirects to
+     *  whichever item is soonest due, which is not necessarily the body
+     *  `carrying` picked above. */
     let itemRoute = "/item";
     if (pocket) {
       open(body);
@@ -264,6 +267,8 @@ export default {
       unlight(openAct);
       unlight(body);
     } else {
+      const id = body.els[0]?.getAttribute("data-body") ?? "";
+      if (id) itemRoute = `/item/${encodeURIComponent(id)}`;
       await mark("belt-arrive");
       unlight(body);
     }

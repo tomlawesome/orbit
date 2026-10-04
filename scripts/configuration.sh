@@ -26,8 +26,12 @@ compose_project_value=""
 # file is already gone (removed on an ordinary failure, or renamed away on
 # success).
 migration_temp_file=""
+# Set by acquire_deploy_lock, read by release_deploy_lock (#1151 RANGE-F6).
+deploy_lock_path_value=""
+deploy_lock_owner_value=""
 cleanup_migration_temp() {
   [[ -z "$migration_temp_file" ]] || rm -f -- "$migration_temp_file" 2>/dev/null || true
+  release_deploy_lock
 }
 trap cleanup_migration_temp EXIT
 
@@ -220,9 +224,79 @@ report_classification() {
   [[ "$compose_project_present" == 1 ]] || printf 'safely_migratable COMPOSE_PROJECT_NAME\n'
 }
 
+# Shares the Orbit engine's cross-process deploy lock (#1151 RANGE-F6) with
+# scripts/configure.sh's update_managed_keys and
+# src/lib/configure-engine.ts's/install-transaction.ts's acquireDeployLock:
+# all three read-modify-write the same deployment's $file (.env-orbit)
+# under the same deployment directory, so all three must exclude each
+# other. install.sh's --migrate run and a concurrent `orbit configure` were
+# otherwise free to race the same read-modify-write .env-orbit update and
+# lose one writer's keys, exactly like O1-R8 before it was closed for
+# update_managed_keys.
+#
+# Copied here rather than sourced from configure.sh: this script is
+# deliberately standalone and source-less (the same convention
+# read_compose_project_name's five verbatim copies follow, proven identical
+# by scripts/compose-project-name-resolution.test.mjs) and is always
+# invoked as its own subprocess (`bash scripts/configuration.sh ...`),
+# never sourced into a caller's shell. Unlike configure.sh -- which cd's to
+# the deployment directory first and uses a lock path relative to its own
+# cwd -- this script never cd's anywhere and takes $file as a path handed
+# in by its caller (absolute in this suite's own tests), so the lock lives
+# next to $file's own directory rather than assuming cwd is the deployment
+# directory.
+readonly deploy_lock_stale_seconds=600
+
+acquire_deploy_lock() {
+  local file_for_lock="$1" lock_path lock_dir owner lock_age reclaimed
+  lock_dir="$(dirname -- "$file_for_lock")"
+  lock_path="$lock_dir/.orbit-engine.lock"
+
+  if ! ( set -o noclobber; : > "$lock_path" ) 2>/dev/null; then
+    lock_age="$deploy_lock_stale_seconds"
+    if [[ -e "$lock_path" ]]; then
+      lock_age=$(( $(date +%s) - $(stat -c %Y -- "$lock_path" 2>/dev/null || printf '0') ))
+    fi
+    if (( lock_age <= deploy_lock_stale_seconds )); then
+      fail_code configuration_migration
+    fi
+    # Reclaim by rename, not unlink-then-create: two processes that both saw
+    # the stale lock would otherwise each unlink and recreate it, and the
+    # slower unlink removes the faster one's fresh lock. Only one rename
+    # succeeds; the other tries the plain create once more and refuses if
+    # that is taken too.
+    reclaimed="${lock_path}.stale-$$"
+    if mv -- "$lock_path" "$reclaimed" 2>/dev/null; then
+      rm -f -- "$reclaimed"
+    fi
+    if ! ( set -o noclobber; : > "$lock_path" ) 2>/dev/null; then
+      fail_code configuration_migration
+    fi
+  fi
+
+  owner="$$:$RANDOM:$RANDOM"
+  printf '%s\n' "$owner" > "$lock_path"
+  deploy_lock_path_value="$lock_path"
+  deploy_lock_owner_value="$owner"
+}
+
+# Never removes a lock that was reclaimed from this process as stale and now
+# belongs to another run: only a lock file that still names this process's
+# own owner token is removed. Safe to call more than once (the EXIT trap
+# calls it again as a backstop after any fail_code exit mid-migration).
+release_deploy_lock() {
+  [[ -n "$deploy_lock_path_value" ]] || return 0
+  if [[ "$(cat -- "$deploy_lock_path_value" 2>/dev/null)" == "$deploy_lock_owner_value" ]]; then
+    rm -f -- "$deploy_lock_path_value"
+  fi
+  deploy_lock_path_value=""
+  deploy_lock_owner_value=""
+}
+
 migrate_file() {
   local file="$1" state temp newline backup transaction="$2"
   local target_image="$3" target_version="$4" target_digest="$5" target_project="$6"
+  acquire_deploy_lock "$file"
   local desired_image desired_version desired_digest desired_project prior_schema prior_version prior_digest
   local line_without_cr key replaced
   local -a managed_order=(ORBIT_IMAGE ORBIT_CONFIG_SCHEMA_VERSION ORBIT_CONFIG_APPLIED_VERSION ORBIT_CONFIG_APPLIED_DIGEST COMPOSE_PROJECT_NAME)
@@ -261,6 +335,7 @@ migrate_file() {
     "$applied_digest_value" == "$desired_digest" && "$compose_project_present" == 1 &&
     "$compose_project_value" == "$desired_project" ]]; then
     printf 'Orbit configuration: already current schema v1 version %s digest %s\n' "$desired_version" "$desired_digest"
+    release_deploy_lock
     return 0
   fi
 
@@ -335,6 +410,7 @@ migrate_file() {
   migration_temp_file=""
   printf 'Orbit configuration: migrated from schema %s version %s digest %s to schema v1 version %s digest %s\n' \
     "$prior_schema" "$prior_version" "$prior_digest" "$desired_version" "$desired_digest"
+  release_deploy_lock
 }
 
 file="$environment_file_default"; action=check; transaction=0

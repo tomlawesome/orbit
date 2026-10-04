@@ -45,6 +45,8 @@
      ArmButton gives it (pocket.svelte). "pause ingest" beside it is
      reversible and stays a single tap. */
   let armedRotate = $state(false);
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let armTimer = null;
   /** @type {string | null} */
   let problem = $state(null);
   const relay = $derived(rotated ?? data.relay);
@@ -81,12 +83,33 @@
       working = false;
     }
   };
-  const tapRotate = () => {
-    if (!armedRotate) { armedRotate = true; return; }
+  /* #1151 S7: the same two-tap protocol as the household page's own
+     twoTap() (§14) — the first tap arms, the second fires, and an unfired
+     arm relaxes on its own after five seconds so nothing is left cocked on
+     the desk. It previously had neither: a stray tap stayed armed forever,
+     so a later, unrelated tap on this same button could fire the rotate
+     with no fresh confirmation. */
+  const disarmRotate = () => {
+    clearTimeout(armTimer ?? undefined);
+    armTimer = null;
     armedRotate = false;
-    act("rotate");
   };
-  const toggleIngest = () => act(relay.ingest === "paused" ? "resume" : "pause");
+  const tapRotate = () => {
+    if (armedRotate) {
+      disarmRotate();
+      act("rotate");
+      return;
+    }
+    clearTimeout(armTimer ?? undefined);
+    armedRotate = true;
+    armTimer = setTimeout(disarmRotate, 5000);
+  };
+  const toggleIngest = () => {
+    // Any other tap disarms a pending rotate, same as tapping a different
+    // key disarms the household page's twoTap().
+    disarmRotate();
+    act(relay.ingest === "paused" ? "resume" : "pause");
+  };
 
   /** @type {?HTMLDivElement} */
   let backdropRoot = null;

@@ -81,6 +81,11 @@ export function createFilm({
        sky is asked once it has (bounded: a home that never says so is
        read as it stands). */
     await homeSettled();
+    /* #1151 R10: a destroy() that landed while this was waiting on
+       homeSettled() already tore the player down and is now a no-op
+       (destroyed guard, below) — carrying on would measure and mount a
+       transport nothing will ever destroy, leaking a second bar. */
+    if (destroyed) return;
     ctx.setCarriesPapers(householdCarriesPapers(doc, pocket));
     const { offsets, total } = await player.measure();
     /* transport.js decides its own dialect (isPocket(), at mount inside

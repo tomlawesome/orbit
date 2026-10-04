@@ -1,4 +1,5 @@
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -37,6 +38,38 @@ const DOCUMENT_ID = "11111111-1111-4111-8111-111111111111";
 const LIVE_KEK = "a".repeat(64);
 const ORIGINAL_KEY = "c".repeat(64);
 const UPDATED_KEY = "d".repeat(64);
+
+// The other party in the backup/restore lock tests is the real `flock`
+// utility, used the way scripts/backup.sh and scripts/restore.sh use it.
+function sleepMs(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** True when nobody holds the flock: `flock -n <file> true` exits 0. */
+function lockIsFree(lockPath: string): boolean {
+  return spawnSync("flock", ["-n", lockPath, "true"]).status === 0;
+}
+
+function waitForLock(lockPath: string, free: boolean): void {
+  const deadline = Date.now() + 10_000;
+  while (lockIsFree(lockPath) !== free) {
+    if (Date.now() > deadline) throw new Error(`flock at ${lockPath} never became ${free ? "free" : "held"}`);
+    sleepMs(20);
+  }
+}
+
+/** Holds the flock from another process, as a running backup.sh/restore.sh does. */
+function holdLockInAnotherProcess(lockPath: string): ChildProcess {
+  const holder = spawn("flock", [lockPath, "-c", "sleep 30"], { detached: true, stdio: "ignore" });
+  waitForLock(lockPath, false);
+  return holder;
+}
+
+function killLockHolder(holder: ChildProcess, lockPath: string): void {
+  // The process group: flock -c runs `sleep` in a child that shares the fd.
+  if (holder.pid !== undefined) process.kill(-holder.pid, "SIGKILL");
+  waitForLock(lockPath, true);
+}
 
 function reportsFor(storageKey: string, contentLength: number): CorrespondenceReports {
   return {
@@ -242,6 +275,75 @@ describe("runBackup", () => {
     const result = runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter, now: new Date("2026-03-04T05:06:07Z") });
 
     expect(result.finalTarPath).toBe(join(backupDirectory, "orbit-20260304-050607.tar"));
+    expect(existsSync(result.finalTarPath)).toBe(true);
+  });
+
+  // #1151 RANGE-R6/RANGE-S3: runBackup used to take no lock at all, so it
+  // could race a concurrent orbit restore's stopApp/startApp and document-
+  // tree/database cutover — the exact O2-R3 hazard the Bash scripts' shared
+  // flock closes. RANGE-S4 is the same gap seen from the other direction:
+  // the TS lock was a create-and-close marker file the Bash scripts'
+  // `exec {fd}>file; flock -n $fd` neither saw nor respected, so the TS side
+  // now takes that same flock on .orbit-backup-restore.lock.
+  it("refuses while another process holds the shared flock, and runs once it is released (#1151 RANGE-R6/S3/S4)", () => {
+    const documentsRoot = join(sandbox, "docs-backup-lock");
+    buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
+    const backupDirectory = join(sandbox, "backup-lock-backups");
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+    const lockPath = join(backupDirectory, ".orbit-backup-restore.lock");
+    const holder = holdLockInAnotherProcess(lockPath);
+
+    try {
+      let caught: unknown;
+      try {
+        runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter, now: new Date("2026-03-04T05:06:07Z") });
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(BackupRestoreCliRefusal);
+      expect((caught as BackupRestoreCliRefusal).code).toBe("restore-locked");
+      expect(adapter.appRunning).toBe(true); // stopApp was never reached.
+      expect(readdirSync(backupDirectory)).toEqual([".orbit-backup-restore.lock"]); // Nothing written.
+    } finally {
+      killLockHolder(holder, lockPath);
+    }
+
+    const result = runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter, now: new Date("2026-03-04T05:06:07Z") });
+    expect(existsSync(result.finalTarPath)).toBe(true);
+  });
+
+  it("holds the shared flock for the whole run and releases it afterwards, leaving the file in place", () => {
+    const documentsRoot = join(sandbox, "docs-backup-lock-release");
+    buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
+    const backupDirectory = join(sandbox, "backup-lock-release-backups");
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    const lockPath = join(backupDirectory, ".orbit-backup-restore.lock");
+    let freeDuringRun: boolean | undefined;
+    const stopApp = adapter.stopApp.bind(adapter);
+    adapter.stopApp = () => {
+      freeDuringRun = lockIsFree(lockPath);
+      return stopApp();
+    };
+
+    runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter, now: new Date("2026-03-04T05:06:07Z") });
+
+    expect(freeDuringRun).toBe(false); // A Bash `flock -n` would have refused.
+    expect(lockIsFree(lockPath)).toBe(true);
+    // Never unlinked: a Bash run blocked on the old inode would hold a lock nobody else sees.
+    expect(existsSync(lockPath)).toBe(true);
+  });
+
+  it("takes the lock at once when the file exists but nobody holds it (what every Bash run leaves behind)", () => {
+    const documentsRoot = join(sandbox, "docs-backup-lock-leftover");
+    buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
+    const backupDirectory = join(sandbox, "backup-lock-leftover-backups");
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+    writeFileSync(join(backupDirectory, ".orbit-backup-restore.lock"), "");
+
+    const result = runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter, now: new Date("2026-03-04T05:06:07Z") });
+
     expect(existsSync(result.finalTarPath)).toBe(true);
   });
 });
@@ -959,8 +1061,8 @@ describe("runImportRecoveryBundle (import-recovery-bundle.sh's orchestration, li
   });
 });
 
-describe("runRestore cross-process lock (O2-R7)", () => {
-  it("refuses when another restore already holds the lock against the same backup directory", () => {
+describe("runRestore cross-process lock (O2-R7, shared file name #1151 RANGE-S4)", () => {
+  it("refuses while another process holds the shared flock against the same backup directory", () => {
     const liveDocumentsRoot = join(sandbox, "live-docs-restore-lock");
     buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
     const backupDirectory = join(sandbox, "restore-lock-backups");
@@ -970,20 +1072,26 @@ describe("runRestore cross-process lock (O2-R7)", () => {
     const adapter = new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
     const paths = deriveRestorePaths(backupDirectory, documentKekFile);
     mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
-    writeFileSync(join(backupDirectory, ".orbit-restore.lock"), "");
+    const lockPath = join(backupDirectory, ".orbit-backup-restore.lock");
+    const holder = holdLockInAnotherProcess(lockPath);
 
     const workDir = mkdtempSync(join(sandbox, "restore-lock-work-"));
-    expect(() =>
-      runRestore({
-        backupTarPath,
-        documentKekHex: ORIGINAL_KEY,
-        paths,
-        adapter,
-        workDir,
-        confirm: () => true,
-      }),
-    ).toThrow(BackupRestoreCliRefusal);
-    // Refused before the journal-exists check even ran.
-    expect(existsSync(paths.journalPath)).toBe(false);
+    try {
+      expect(() =>
+        runRestore({
+          backupTarPath,
+          documentKekHex: ORIGINAL_KEY,
+          paths,
+          adapter,
+          workDir,
+          confirm: () => true,
+        }),
+      ).toThrow(expect.objectContaining({ code: "restore-locked" }));
+      // Refused before the journal-exists check even ran.
+      expect(existsSync(paths.journalPath)).toBe(false);
+      expect(adapter.appRunning).toBe(true);
+    } finally {
+      killLockHolder(holder, lockPath);
+    }
   });
 });
