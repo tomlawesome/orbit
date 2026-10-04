@@ -40,6 +40,10 @@ terminal_echo_disabled=0
 # Set by ensure_environment_file when .env-orbit did not exist yet -- read
 # by persist_orbit_image below (#1151 O1-S4).
 environment_file_was_created=0
+# Set by ensure_secrets_directory when $secrets_directory did not exist yet
+# -- read by ensure_secret_file below (#1151 RANGE-F1), mirroring
+# src/lib/configure-engine.ts's hadSecretsDirectory/isFreshInstall.
+secrets_directory_was_created=0
 installer_ui_input_loaded=0
 installer_ui_path="$repo_dir/scripts/installer-ui.sh"
 if [[ -f "$installer_ui_path" && ! -L "$installer_ui_path" ]]; then
@@ -243,10 +247,21 @@ ensure_secrets_directory() {
     [[ -d "$secrets_directory" && ! -L "$secrets_directory" ]] ||
       fail "Refusing to use ${secrets_directory} because it is not a regular directory."
   else
+    secrets_directory_was_created=1
     mkdir -- "$secrets_directory"
   fi
   chmod 700 "$secrets_directory" ||
     fail "Could not restrict ${secrets_directory} permissions."
+}
+
+# A fresh install is the one case where ensure_secret_file generating a
+# missing secret is correct: nothing deployed here could be relying on it
+# yet. On an existing deployment (#1151 RANGE-F1, mirroring
+# src/lib/configure-engine.ts's ensureSecretFile/isFreshInstall) it must be
+# read after both ensure_environment_file and ensure_secrets_directory have
+# run, the same ordering runConfigureApply uses.
+is_fresh_install() {
+  [[ "$environment_file_was_created" == 1 && "$secrets_directory_was_created" == 1 ]]
 }
 
 # Reusable atomic updater for installer-managed keys in $environment_file. It
@@ -897,6 +912,17 @@ ensure_secret_file() {
       fail "Could not restrict permissions on ${path}."
     unset existing_value
     return
+  fi
+
+  # #1151 RANGE-F1: a missing secret file on an EXISTING deployment is a lost
+  # or corrupted secret, not a first run -- generating a replacement here
+  # would make existing encrypted data unreadable (document-kek) or sign out
+  # every user (session-secret). Mirrors configure-engine.ts's ensureSecretFile
+  # isFreshInstall refusal exactly; only a genuinely fresh install (neither
+  # .env-orbit nor the secrets directory existed before this run) may
+  # generate one.
+  if ! is_fresh_install; then
+    fail "${path} is missing on an existing Orbit deployment. Refusing to generate a replacement, which would make existing encrypted data unreadable or sign out every user. Restore ${path} from backup (or Orbit's recovery bundle) to the exact path ${repo_dir}/${path}, then run \`orbit configure\` again."
   fi
 
   secret="$(generate_hex_secret)"
