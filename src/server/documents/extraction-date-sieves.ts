@@ -401,7 +401,12 @@ const termArithmetic: DateSieve = {
     // considered, so it is the same result on every iteration. It used to
     // re-run per pair, which is per candidate squared across a whole read.
     const terms = printedTerms(text);
-    for (const other of all.slice(0, TERM_ARITHMETIC_PAIR_CAP)) {
+    // The cap is a window around this candidate, not the first N dates of
+    // the page: a positional slice never pairs anything past the Nth date,
+    // so a term printed late in a long document was silently never found.
+    const at = all.indexOf(candidate);
+    const from = Math.max(0, Math.min(at - TERM_ARITHMETIC_PAIR_CAP / 2, all.length - TERM_ARITHMETIC_PAIR_CAP));
+    for (const other of all.slice(from, from + TERM_ARITHMETIC_PAIR_CAP)) {
       if (other === candidate || other.value === candidate.value) continue;
       const earlier = other.value < candidate.value ? other : candidate;
       const later = earlier === other ? candidate : other;
