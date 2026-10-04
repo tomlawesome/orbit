@@ -86,12 +86,15 @@ export async function readHeldImapAttachmentPreview(
         keyId: row.keyId,
       },
     }, { recipientUserId: userId, receiptId });
-  } catch {
+  } catch (error) {
     // A concurrent purge or discard can remove the ciphertext between the
     // row read above and this one; that is the same "not available to you
     // right now" case every other reason in this function's own docstring
     // answers with 404, not a raw storage error surfacing as a 500 (A2-R2).
-    throw inboxReceiptNotFound();
+    // Only that case, though: a missing key or corrupt bytes stays a real
+    // failure, or the administrator never learns it happened.
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw inboxReceiptNotFound();
+    throw error;
   }
   try {
     // The row's real mediaType, not reviewAttachmentMediaType() -- that one
