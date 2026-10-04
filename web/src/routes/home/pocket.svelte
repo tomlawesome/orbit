@@ -479,21 +479,36 @@
       refused — is picked up on the next load instead of silently failing.
       One slot: this screen only ever holds one completion at a time. */
   const HELD_COMPLETION_KEY = "orbit:pending-completion";
-  /** @param {object} command */
-  function stashHeldCompletion(command) {
-    try { localStorage.setItem(HELD_COMPLETION_KEY, JSON.stringify({ command })); } catch { /* best effort */ }
-  }
-  function clearHeldCompletionStash() {
-    try { localStorage.removeItem(HELD_COMPLETION_KEY); } catch { /* best effort */ }
-  }
-  /** @returns {object | null} */
+  /* A list, not one slot: completing a second item inside the first's undo
+     window sends the first at once, and its send can still fail or answer
+     late. One slot lost the first (overwritten) or the second (cleared by
+     the first's late success). Each entry leaves on its own send only. */
+  /** @returns {object[]} */
   function readHeldCompletionStash() {
     try {
       const raw = localStorage.getItem(HELD_COMPLETION_KEY);
-      return raw ? JSON.parse(raw).command : null;
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [parsed.command].filter(Boolean);
     } catch {
-      return null;
+      return [];
     }
+  }
+  /** @param {object[]} commands */
+  function writeHeldCompletionStash(commands) {
+    try {
+      if (commands.length === 0) localStorage.removeItem(HELD_COMPLETION_KEY);
+      else localStorage.setItem(HELD_COMPLETION_KEY, JSON.stringify(commands));
+    } catch { /* best effort */ }
+  }
+  /** @param {object} command */
+  function stashHeldCompletion(command) {
+    writeHeldCompletionStash([...readHeldCompletionStash(), command]);
+  }
+  /** @param {object} command */
+  function clearHeldCompletionStash(command) {
+    const key = JSON.stringify(command);
+    writeHeldCompletionStash(readHeldCompletionStash().filter((one) => JSON.stringify(one) !== key));
   }
   /** @param {{ id: string, title: string }} one */
   function completeRow(one) {
@@ -521,7 +536,7 @@
         clearTimeout(job.timer);
         job.done = true;
         if (held === job) held = null;
-        clearHeldCompletionStash();
+        clearHeldCompletionStash(job.command);
       },
     });
   }
@@ -532,7 +547,7 @@
     if (held === job) held = null;
     try {
       await applyCommand(job.command);
-      clearHeldCompletionStash();
+      clearHeldCompletionStash(job.command);
       await onchanged?.();
     } catch (error) {
       wake(/** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again", { failure: true });
@@ -548,7 +563,7 @@
     clearTimeout(job.timer);
     job.done = true;
     held = null;
-    applyCommand(job.command).then(clearHeldCompletionStash).catch(() => {});
+    applyCommand(job.command).then(() => clearHeldCompletionStash(job.command)).catch(() => {});
   }
   beforeNavigate(() => { sendHeld(); });
   $effect(() => {
@@ -562,14 +577,12 @@
       treated as the stash's own success. Runs once, on mount: nothing it
       reads is reactive state. */
   $effect(() => {
-    const command = readHeldCompletionStash();
-    if (!command) return;
-    applyCommand(command).then(async () => {
-      clearHeldCompletionStash();
+    for (const command of readHeldCompletionStash()) applyCommand(command).then(async () => {
+      clearHeldCompletionStash(command);
       await onchanged?.();
     }).catch((error) => {
       if (error instanceof WorkspaceError && error.code === "version_conflict") {
-        clearHeldCompletionStash();
+        clearHeldCompletionStash(command);
         onchanged?.();
         return;
       }
