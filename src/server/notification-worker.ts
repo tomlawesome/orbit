@@ -469,6 +469,8 @@ export function isAllowedPushEndpoint(endpoint: string): boolean {
 export interface MaterializationCandidate {
   householdId: string;
   eventId: string;
+  /** When the due event came to exist: nothing was pending before it. */
+  createdAt: Date;
   dueDate: string;
   timezone: string;
   userId: string;
@@ -507,6 +509,13 @@ export interface MaterializedDelivery {
  * `delivery.scheduledFor`, in `deliverClaimed`) still finds it, and the
  * recipient gets one "you missed this" rather than a pile of redundant stale
  * ones or silence.
+ *
+ * Only a reminder that was actually pending can have been missed. An offset
+ * whose moment passed before the due event existed -- a ninety-day warning on
+ * an item entered nine days before it is due -- was never due to anyone, and
+ * #479 settled that it is not back-fired; the catch-up window used to drop it
+ * as a side effect, so catching up had to say so itself. An outage swallows
+ * only what was already waiting when it began.
  */
 /**
  * A delivery is stale when it has sat past the catch-up window since it was
@@ -535,7 +544,7 @@ export function materializeDeliveriesForCandidate(
   return (["email", "web_push"] as const).flatMap((channel) => {
     const eligible = due.filter(({ offset }) => enabledDeliveryChannels({ ...candidate, ...offset }).includes(channel));
     const onTime = eligible.filter(({ scheduledFor }) => scheduledFor >= catchUpBoundary);
-    const overdue = eligible.filter(({ scheduledFor }) => scheduledFor < catchUpBoundary);
+    const overdue = eligible.filter(({ scheduledFor }) => scheduledFor < catchUpBoundary && scheduledFor >= candidate.createdAt);
     const chosen = [...onTime];
     if (overdue.length > 0) {
       chosen.push(overdue.reduce((latest, missed) => (missed.scheduledFor > latest.scheduledFor ? missed : latest)));
@@ -569,6 +578,7 @@ async function materializeDueDeliveries(db: NotificationDatabase, now: Date): Pr
     .select({
       eventId: dueEvents.id,
       householdId: dueEvents.householdId,
+      createdAt: dueEvents.createdAt,
       dueDate: dueEvents.dueDate,
       timezone: households.timezone,
       userId: memberships.userId,
