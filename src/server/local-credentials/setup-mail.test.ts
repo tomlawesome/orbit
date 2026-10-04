@@ -50,10 +50,11 @@ vi.mock("@/server/local-credentials", async (importOriginal) => {
       purpose: "setup" as const,
       expiresAt: new Date("2026-09-22T09:00:00.000Z"),
     }),
-    persistSetupToken: async (userId: string) => {
+    persistSetupToken: async (userId: string, _minted: unknown, _actor: unknown, options: { onlyIfNoLiveLink?: boolean } = {}) => {
+      if (options.onlyIfNoLiveLink && mocks.liveLink) return false;
       mocks.persisted.push(userId);
+      return true;
     },
-    hasLiveSetupLink: async () => mocks.liveLink,
   };
 });
 
