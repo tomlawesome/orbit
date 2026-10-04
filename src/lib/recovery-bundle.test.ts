@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHmac } from "node:crypto";
 import * as fs from "node:fs";
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -572,17 +572,25 @@ describe("decryptDocumentArchiveToFile streams in bounded chunks (O2-R9/SR2-R3)"
 // bounded first pass that now runs first: the envelope's own file size,
 // read via one stat with nothing decrypted, stands in for the decrypted
 // size it is about to produce (AES-256-CBC's ciphertext is always at least
-// as long as its plaintext). A sparse file reports a real, huge logical
-// size via stat while consuming ~0 actual disk blocks, so this is a real,
-// unmocked exercise of statfsSync rather than a stubbed one — and safely
-// environment-independent, since no real filesystem reports anywhere near
-// a petabyte of available space.
+// as long as its plaintext). The over-capacity branch is exercised by
+// injecting its measure/available callbacks rather than by creating a real
+// multi-petabyte file — even sparse, a file that large is bigger than some
+// CI filesystems allow at all (a real run hit `EFBIG` creating one). The
+// "does not refuse" case below still exercises the real stat/statfsSync
+// implementations end to end, just never past the comfortably-small sizes
+// any real filesystem actually reports.
 describe("requireCapacityForDocumentArchive (O2-R9/SR2-R3)", () => {
   it("refuses when the envelope's own size already exceeds available space", () => {
-    const envelopePath = join(workDir, "huge-sparse.tar.enc");
-    writeFileSync(envelopePath, "");
-    truncateSync(envelopePath, 2 ** 50); // 1 PiB, sparse — no real disk consumed.
-    expect(() => internal.requireCapacityForDocumentArchive(envelopePath, workDir)).toThrow(RecoveryBundleRefusal);
+    const envelopePath = join(workDir, "small.tar.enc");
+    writeFileSync(envelopePath, "not actually huge");
+    expect(() =>
+      internal.requireCapacityForDocumentArchive(
+        envelopePath,
+        workDir,
+        () => 2 ** 50, // 1 PiB envelope, injected
+        () => 10 * 1024 * 1024, // 10 MiB available
+      ),
+    ).toThrow(RecoveryBundleRefusal);
   });
 
   it("does not refuse a small envelope", () => {
