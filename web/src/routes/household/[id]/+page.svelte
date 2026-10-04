@@ -243,8 +243,26 @@
     clearTimeout(savedTimers[field]);
   }
 
+  /* #1151 R9: household.update always carries all three fields (see the
+     doc above writeHouseholdIdentity), so a save reads the other two off
+     `v` — the last server-confirmed view — at the moment it actually runs.
+     Two taps close together used to build their payloads from the SAME
+     stale `v` (the first save's invalidateAll had not landed yet), so
+     whichever request's response arrived last could silently carry the
+     other field back to its old value. Chaining every call through one
+     queue makes a later save always build its payload only after the
+     earlier one — and its invalidateAll — has finished, so it reads a
+     fresh `v` instead of a stale one. */
+  let saveQueue = Promise.resolve();
+
   /** @param {IdentityField} field */
-  async function saveField(field) {
+  function saveField(field) {
+    saveQueue = saveQueue.then(() => saveFieldNow(field));
+    return saveQueue;
+  }
+
+  /** @param {IdentityField} field */
+  async function saveFieldNow(field) {
     identityProblem = null;
     try {
       /* The command only ever carries all three fields (§2c), but ONLY the
