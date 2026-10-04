@@ -462,7 +462,7 @@ All citations are `file.sh:line` against `/home/codex/projects/orbit/scripts/<fi
     `backup.sh:169-170` — category: provenance/immutability — criticality: HIGH
 31. Completed bundle tar is validated (`tar -tf`) before being treated as the deliverable.
     `backup.sh:172` — category: input-validation — criticality: MEDIUM
-32. Final bundle is written via a `.installing` temp name and moved into place with `mv --no-clobber`, giving an atomic publish and refusing to silently overwrite an existing same-named backup.
+32. Final bundle is written via a `.installing` temp name and published atomically with a hard link (`ln`, which fails on an existing name), refusing loudly to overwrite an existing same-named backup; `mv --no-clobber` was a separate check-then-rename that on a same-second collision silently exited 0 and reported the old bundle.
     `backup.sh:139-140,173-175` — category: transactional/rollback / idempotency — criticality: HIGH
 33. `temporary_path` is cleared only after a successful move, so the `EXIT` cleanup trap never deletes a successfully published backup, but does clean up any half-built one.
     `backup.sh:175,22-24` — category: transactional/rollback — criticality: MEDIUM
@@ -476,37 +476,37 @@ All citations are `file.sh:line` against `/home/codex/projects/orbit/scripts/<fi
 ## export-recovery-bundle.sh
 
 1. Source bundle argument is required and must be an existing, regular, non-symlink file, or usage fails.
-   `export-recovery-bundle.sh:28-29` — category: input-validation — criticality: MEDIUM
+   `export-recovery-bundle.sh:50-51` — category: input-validation — criticality: MEDIUM
 2. Requires sha256sum, tar, docker, and the env file to be present before doing anything.
-   `export-recovery-bundle.sh:30-33` — category: input-validation — criticality: MEDIUM
+   `export-recovery-bundle.sh:52-55` — category: input-validation — criticality: MEDIUM
 3. Document KEK file must be a regular, non-symlink file or export refuses to run.
-   `export-recovery-bundle.sh:34` — category: secret-handling / refusal — criticality: HIGH
+   `export-recovery-bundle.sh:56` — category: secret-handling / refusal — criticality: HIGH
 4. The source backup bundle must pass full `backup.sh --verify` (format, HMAC, checksums, KEK-fingerprint match, decryptability, archive-shape checks) before a recovery bundle is produced from it — a corrupt/tampered/wrong-key backup cannot be exported.
-   `export-recovery-bundle.sh:35` — category: provenance/immutability / refusal — criticality: HIGH
+   `export-recovery-bundle.sh:57` — category: provenance/immutability / refusal — criticality: HIGH
 5. Recovery passphrase is read from the controlling TTY (`/dev/tty`) in normal operation, requiring an interactive terminal (test mode allows stdin injection only under `ORBIT_RECOVERY_TEST_MODE`).
-   `export-recovery-bundle.sh:19-26` — category: secret-handling — criticality: MEDIUM
+   `export-recovery-bundle.sh:41-48` — category: secret-handling — criticality: MEDIUM
 6. Recovery passphrase must be at least 12 characters or export refuses to proceed.
-   `export-recovery-bundle.sh:38` — category: input-validation / secret-handling — criticality: MEDIUM
+   `export-recovery-bundle.sh:60` — category: input-validation / secret-handling — criticality: MEDIUM
 7. Recovery passphrase requires a matching confirmation entry before proceeding (typo protection for a passphrase that gates future disaster recovery).
-   `export-recovery-bundle.sh:39-45` — category: input-validation — criticality: MEDIUM
+   `export-recovery-bundle.sh:61-67` — category: input-validation — criticality: MEDIUM
 8. Passphrase confirmation variable is `unset` immediately after comparison rather than lingering in shell memory.
-   `export-recovery-bundle.sh:46` — category: secret-handling — criticality: LOW
+   `export-recovery-bundle.sh:68` — category: secret-handling — criticality: LOW
 9. Recovery bundle work directory is created under the backup directory with mode 700 and `umask 077`, so recovery material (encrypted KEK, backup copy) is not world/group readable.
-   `export-recovery-bundle.sh:48-50` — category: permissions/ownership — criticality: HIGH
+   `export-recovery-bundle.sh:70-72` — category: permissions/ownership — criticality: HIGH
 10. The document KEK-encrypting passphrase is piped to the container over stdin only — never as a CLI argument or environment variable.
-    `export-recovery-bundle.sh:56-59` — category: secret-handling — criticality: HIGH
+    `export-recovery-bundle.sh:78-81` — category: secret-handling — criticality: HIGH
 11. `recovery_passphrase` shell variable is `unset` immediately after use.
-    `export-recovery-bundle.sh:60` — category: secret-handling — criticality: MEDIUM
+    `export-recovery-bundle.sh:82` — category: secret-handling — criticality: MEDIUM
 12. The encrypted document-KEK envelope is checked for the `ORBKEK01` magic header before being trusted as a valid authenticated envelope.
-    `export-recovery-bundle.sh:61-62` — category: input-validation / provenance — criticality: HIGH
+    `export-recovery-bundle.sh:83-84` — category: input-validation / provenance — criticality: HIGH
 13. Checksums (SHA-256) are recorded for both the embedded backup copy and the encrypted KEK envelope.
-    `export-recovery-bundle.sh:63` — category: provenance/immutability — criticality: MEDIUM
+    `export-recovery-bundle.sh:85` — category: provenance/immutability — criticality: MEDIUM
 14. Manifest declares `format_version` and the exact key-encryption algorithm string (`aes-256-gcm-scrypt-n131072-r8-p1`) used to wrap the KEK.
-    `export-recovery-bundle.sh:64` — category: provenance/immutability — criticality: MEDIUM
-15. Final recovery bundle is written via a `.installing` temp name and published atomically with `mv --no-clobber`, never overwriting an existing same-named recovery bundle.
-    `export-recovery-bundle.sh:65-69` — category: transactional/rollback / idempotency — criticality: HIGH
+    `export-recovery-bundle.sh:86` — category: provenance/immutability — criticality: MEDIUM
+15. Final recovery bundle is written via a `.installing` temp name and published atomically with a hard link (`ln`, which fails on an existing name), refusing loudly rather than overwriting or silently skipping an existing same-named recovery bundle; the temp name is cleared only after the publish succeeded, so a refused publish is still cleaned up.
+    `export-recovery-bundle.sh:17-37,87-93` — category: transactional/rollback / idempotency — criticality: HIGH
 16. `EXIT` trap removes the temp working directory and any half-written bundle on any failure path.
-    `export-recovery-bundle.sh:12-17` — category: transactional/rollback — criticality: MEDIUM
+    `export-recovery-bundle.sh:12-15,38-39` — category: transactional/rollback — criticality: MEDIUM
 
 ---
 
@@ -851,7 +851,7 @@ the original 8-category taxonomy and is called out separately.
 ### Guarantees duplicated across scripts (up to 10, both citations)
 
 1. Document KEK must be a regular, non-symlink file.
-   `backup.sh:44-45` and `restore.sh:53-54` (also `export-recovery-bundle.sh:34`, `import-recovery-bundle.sh:95`)
+   `backup.sh:44-45` and `restore.sh:53-54` (also `export-recovery-bundle.sh:56`, `import-recovery-bundle.sh:95`)
 2. Document KEK content must be exactly 64 hex characters (32 bytes).
    `backup.sh:46-47` and `restore.sh:56-57`
 3. Bundle manifest + checksums are HMAC-recomputed and byte-compared before any bundle content is trusted.
@@ -865,9 +865,9 @@ the original 8-category taxonomy and is called out separately.
 7. A new destructive operation refuses to start while an unfinished-restore journal exists; operator must run `restore.sh --recover` first.
    `restore.sh:898` and `import-recovery-bundle.sh:51-52`
 8. Working/backup directories that will hold key material or backups are created with mode 700 under `umask 077`.
-   `backup.sh:136-138` and `export-recovery-bundle.sh:48-50`
-9. Final published artifact is written via a `.installing`/temp name and atomically published with `mv --no-clobber`, never overwriting an existing file.
-   `backup.sh:139-140,173-175` and `export-recovery-bundle.sh:65-69`
+   `backup.sh:136-138` and `export-recovery-bundle.sh:70-72`
+9. Final published artifact is written via a `.installing`/temp name and atomically published with a hard link that fails on an existing name, never overwriting an existing file and never silently skipping the publish.
+   `backup.sh:139-140,173-175` and `export-recovery-bundle.sh:17-37,87-93`
 10. Document-KEK fingerprint (SHA-256 of the key) is computed and format-validated, then compared against the bundle's recorded fingerprint to refuse bundles encrypted with a different key.
     `backup.sh:61-67,120-121` and `restore.sh:71-79,142-143`
 
