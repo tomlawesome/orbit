@@ -238,15 +238,14 @@ export default {
 
     /* #1174, pocket: a body that carries documents, so the belt the film
        lands in has papers to teach with — the apex item may have none, and
-       the pocket folds every other item's papers away. The dry run and a
-       sky where no body carries any take the plain first body. */
+       the pocket folds every other item's papers away. #1191: the desk the
+       same — its first body in DOM order may carry nothing either (the
+       review fixture's "Gutter clearing"), and the beat then had no papers
+       to point at. The dry run and a sky where no body carries any take
+       the plain first body. */
     let body = ctl({ sel: S.body, round: true, optional: true });
-    if (pocket) {
-      const carrying = ctl({
-        sel: SELECTORS.POCKET.bodyWithPapers, all: true, round: true, optional: true, visible: true,
-      });
-      if (carrying.els.length > 0) body = { ...carrying, els: [carrying.els[0]], ringEls: [carrying.els[0]] };
-    }
+    const carrying = ctl({ sel: S.bodyWithPapers, all: true, round: true, optional: true, visible: true });
+    if (carrying.els.length > 0) body = { ...carrying, els: [carrying.els[0]], ringEls: [carrying.els[0]] };
     veil(true);
     await goto(body);
     await press(body);
