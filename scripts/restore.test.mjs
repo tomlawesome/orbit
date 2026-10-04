@@ -566,6 +566,21 @@ describe("scripts/restore.sh sweep_orphaned_checkpoints (#1151 O2-R6)", () => {
     expect(existsSync(orphan)).toBe(false);
   });
 
+  it("leaves every checkpoint alone when a journal exists but names no readable restore_id", () => {
+    // The unreadable journal is what load_recovery_journal refuses on next;
+    // the checkpoint beside it may be the operator's only rollback.
+    const restoreRoot = makeRestoreRoot();
+    const checkpoint = join(restoreRoot, "checkpoint-current1");
+    mkdirSync(checkpoint, { recursive: true });
+    writeFileSync(join(checkpoint, "database.dump"), "last-good-dump-bytes");
+
+    const result = runSweep(restoreRoot, "format_version=1\nstate=checkpointed\n");
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("returned-cleanly");
+    expect(existsSync(checkpoint)).toBe(true);
+  });
+
   it("does nothing when the restore root does not exist yet", () => {
     const restoreRoot = join(makeRestoreRoot(), "never-created");
     const result = runSweep(restoreRoot, null);

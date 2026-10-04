@@ -618,11 +618,18 @@ write_journal() {
 # in progress -- it can only be a prior run's abandoned checkpoint. Run
 # once, early, while the lock is held and before create_checkpoint picks a
 # new directory.
+#
+# A journal that exists but does not name a restore_id is left alone
+# entirely: the checkpoint it points at may be the only rollback the
+# operator has, and load_recovery_journal is about to refuse the run with
+# "the restore journal is invalid and must be reviewed by an operator" --
+# sweeping first would delete the very evidence that review needs.
 sweep_orphaned_checkpoints() {
   local directory referenced_restore_id=""
   [[ -d "$restore_root" ]] || return 0
   if [[ -f "$journal_path" && ! -L "$journal_path" ]]; then
     referenced_restore_id="$(awk -F= '$1 == "restore_id" { print $2 }' "$journal_path" 2>/dev/null)"
+    [[ "$referenced_restore_id" =~ ^[A-Za-z0-9_-]+$ ]] || return 0
   fi
   for directory in "$restore_root"/checkpoint-*; do
     [[ -d "$directory" && ! -L "$directory" ]] || continue
