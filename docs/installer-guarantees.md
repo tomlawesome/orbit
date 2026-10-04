@@ -555,8 +555,8 @@ health is confirmed.
 31. Completed bundle tar is validated (`tar -tf`) before being treated as the deliverable.
     `backup.sh:172` — category: input-validation — criticality: MEDIUM
 32. Final bundle is written via a `.installing` temp name and published atomically with a hard link (`ln`, which fails on an existing name), refusing loudly to overwrite an existing same-named backup; `mv --no-clobber` was a separate check-then-rename that on a same-second collision silently exited 0 and reported the old bundle.
-    `backup.sh:139-140,173-175` — category: transactional/rollback / idempotency — criticality: HIGH
-33. `temporary_path` is cleared only after a successful move, so the `EXIT` cleanup trap never deletes a successfully published backup, but does clean up any half-built one.
+    `backup.sh:28-48,217,257` — category: transactional/rollback / idempotency — criticality: HIGH
+33. `temporary_path` is cleared only after a successful publish, so the `EXIT` cleanup trap never deletes a successfully published backup, but does clean up any half-built one.
     `backup.sh:175,22-24` — category: transactional/rollback — criticality: MEDIUM
 34. `orbit-app` is explicitly restarted at the end of a successful backup (independent of the trap).
     `backup.sh:176-177` — category: transactional/rollback — criticality: HIGH
@@ -957,9 +957,9 @@ the original 8-category taxonomy and is called out separately.
 7. A new destructive operation refuses to start while an unfinished-restore journal exists; operator must run `restore.sh --recover` first.
    `restore.sh:898` and `import-recovery-bundle.sh:51-52`
 8. Working/backup directories that will hold key material or backups are created with mode 700 under `umask 077`.
-   `backup.sh:136-138` and `export-recovery-bundle.sh:70-72`
+   `backup.sh:213-215` and `export-recovery-bundle.sh:70-72`
 9. Final published artifact is written via a `.installing`/temp name and atomically published with a hard link that fails on an existing name, never overwriting an existing file and never silently skipping the publish.
-   `backup.sh:139-140,173-175` and `export-recovery-bundle.sh:17-37,87-93`
+   `backup.sh:28-48,217,257` and `export-recovery-bundle.sh:17-37,87-93`
 10. Document-KEK fingerprint (SHA-256 of the key) is computed and format-validated, then compared against the bundle's recorded fingerprint to refuse bundles encrypted with a different key.
     `backup.sh:61-67,120-121` and `restore.sh:71-79,142-143`
 
