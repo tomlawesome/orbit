@@ -69,15 +69,12 @@ describe("launcher install compatibility gate", () => {
 
     // The test *source* still comes from a checkout -- cloned to
     // .orbit-launcher-src, not `launcher`, because launcher/pin.json (ADR-0031
-    // #2) already occupies that path in this checkout -- but at the pin's own
-    // tag, read from launcher/pin.json, rather than an overridable ref.
-    expect(job).toContain(
-      'launcher_tag="$(sed -n \'s/.*"tag"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p\' launcher/pin.json | head -1)"',
-    );
-    expect(job).toContain(
-      "git clone --quiet https://github.com/tomlawesome/orbit-launcher.git .orbit-launcher-src",
-    );
-    expect(job).toContain('git -C .orbit-launcher-src checkout --quiet "$launcher_tag"');
+    // #2) already occupies that path in this checkout -- at the pin's own tag,
+    // which scripts/ci/checkout-launcher-source.sh refuses unless it resolves
+    // to the pinned commit, the same refusal build-launcher.sh makes.
+    expect(job).toContain("bash scripts/ci/checkout-launcher-source.sh .orbit-launcher-src");
+    expect(job).not.toContain("git clone --quiet https://github.com/tomlawesome/orbit-launcher.git");
+    expect(job).not.toContain('checkout --quiet "$launcher_tag"');
     expect(job).toContain("(cd .orbit-launcher-src && go test -tags live -count=1 -v -timeout 30m ./test/live/...)");
   });
 
@@ -188,6 +185,7 @@ describe("launcher install compatibility gate", () => {
       "scripts/engine-check.sh",
       "launcher/pin.json",
       "scripts/ci/build-launcher.sh",
+      "scripts/ci/checkout-launcher-source.sh",
     ];
     for (const path of concretePaths) {
       expect(touchesLauncherInstallCompat([path]), path).toBe(true);
