@@ -1631,4 +1631,23 @@ describe("scripts/configure.sh update_managed_keys deploy lock (#1151 RANGE-F6)"
     expect(result.status).toBe(0);
     expect(existsSync(join(targetDir, ".orbit-engine.lock"))).toBe(false);
   });
+
+  // #1151 RANGE-R5: the lock must cover the generated-secret loop itself, not
+  // only update_managed_keys. An existing .env-orbit with a pinned image and
+  // no trust marker makes persist_orbit_image skip its own update, so the
+  // secret loop is the first thing that can take the lock.
+  it("refuses to generate secrets while another run's deploy lock is held", () => {
+    const pinnedImage = `registry.example.invalid/orbit@sha256:${"a".repeat(64)}`;
+    const targetDir = makeFixture(`APP_URL=https://orbit.example.invalid\nORBIT_IMAGE=${pinnedImage}\n`);
+    writeFileSync(join(targetDir, ".orbit-engine.lock"), "12345:1:2\n");
+
+    const result = runConfigure(targetDir, [], { ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE: "" });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Another orbit configure is already running against this deployment");
+    for (const name of ["session-secret", "postgres-password", "document-kek"]) {
+      expect(existsSync(join(targetDir, ".orbit-secrets", name))).toBe(false);
+    }
+    expect(readFileSync(join(targetDir, ".orbit-engine.lock"), "utf8")).toBe("12345:1:2\n");
+  });
 });

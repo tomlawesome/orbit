@@ -1615,11 +1615,18 @@ else
   run_configuration_preflight
   persist_orbit_image
   ensure_secrets_directory
+  # #1151 RANGE-R5: two concurrent first-time runs both see every secret
+  # missing and each generate their own; the later mv silently overwrote the
+  # earlier one's file. Same lock, same reason as the container engine's
+  # secret loop (runConfigureApply). persist_orbit_image's own
+  # acquire/release has already completed above, so this never nests.
+  acquire_deploy_lock "orbit configure"
   record_generated_secret_presence
   ensure_secret_file "$secrets_directory/session-secret"
   ensure_secret_file "$secrets_directory/postgres-password"
   # A 32-byte hexadecimal KEK is generated only when absent and is never printed.
   ensure_secret_file "$secrets_directory/document-kek"
+  release_deploy_lock
   ensure_oidc_secret_placeholder
 fi
 # ensure_vapid_keys always runs here, delegated or not: it is the one
