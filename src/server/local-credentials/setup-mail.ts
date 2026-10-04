@@ -163,10 +163,15 @@ async function issueAndSend(
     options.now ?? new Date(),
   );
 
-  /* "Nothing live to retire" is persistSetupToken's own decision, under its
-     per-user lock, so a concurrent send that has just written its delivered
-     link is never superseded by this one that went nowhere. */
-  await persistSetupToken(recipient.id, minted, actorUserId, { onlyIfNoLiveLink: Boolean(outcome.sendError) });
+  // Recorded now, before persistSetupToken, not after it (#1151 R1).
+  // persistSetupToken runs its own locked transaction and can still fail --
+  // a dropped connection, lock contention, anything that aborts it -- after
+  // a mail has genuinely gone out, and that failure must not also be the
+  // only thing standing between a real delivered link and any record that
+  // it was ever sent. Recording it here means a mail that was sent is
+  // always on the audit trail, whether or not the token behind it ends up
+  // persisted; `setup_link_issued` still says whether the write itself
+  // landed.
   if (!outcome.sendError) {
     await getDb().insert(auditLog).values({
       householdId: null,
@@ -177,6 +182,10 @@ async function issueAndSend(
       changes: { userId: recipient.id, purpose },
     });
   }
+  /* "Nothing live to retire" is persistSetupToken's own decision, under its
+     per-user lock, so a concurrent send that has just written its delivered
+     link is never superseded by this one that went nowhere. */
+  await persistSetupToken(recipient.id, minted, actorUserId, { onlyIfNoLiveLink: Boolean(outcome.sendError) });
 
   return { sentTo: email, expiresAt: minted.expiresAt, sendError: outcome.sendError };
 }
