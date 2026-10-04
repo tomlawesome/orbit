@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog, documents, dueEvents, households, items, memberships, portableArchives, reminderRules, sections, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
+import { log, operationalDetail } from "@/lib/logger";
 import { optionalText } from "@/lib/workspace";
 import { getDocumentConfig } from "@/server/documents/config";
 import { readDocumentDownload, uploadItemDocument } from "@/server/document-repository";
@@ -461,8 +462,16 @@ export async function importPortableArchive(input: { userId: string; householdId
         declaredBytes: bytes.length,
       });
       documentsRestored++;
-    } catch {
-      // Left unrestored; counted below.
+    } catch (error) {
+      // Left unrestored and counted below -- but named here, or a scanner
+      // outage and a document that never existed look the same afterwards.
+      log.warn({
+        event: "document.lifecycle",
+        state: "degraded",
+        reason: error instanceof AppError ? "rejected" : "dependency_unavailable",
+        action: "retry",
+        detail: operationalDetail`${document.id}.${error instanceof AppError ? error.code : (error instanceof Error ? error.name : "unknown")}`,
+      });
     } finally {
       bytes.fill(0);
     }
