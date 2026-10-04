@@ -678,11 +678,25 @@ describe("scripts/restore.sh refuse_if_rotation_open (#1151 RANGE-S1)", () => {
 
   it("calls refuse_if_rotation_open before read_document_kek in the plain restore path, and inside recover_restore", () => {
     const calls = [...restoreScriptSource.matchAll(/^refuse_if_rotation_open$/gm)];
-    expect(calls.length).toBe(1);
+    expect(calls.length).toBe(2);
     const readKekIndex = restoreScriptSource.indexOf("\nread_document_kek\n");
     const callIndex = restoreScriptSource.indexOf("\nrefuse_if_rotation_open\n");
     expect(callIndex).toBeGreaterThan(-1);
     expect(callIndex).toBeLessThan(readKekIndex);
     expect(restoreScriptSource).toContain("  refuse_if_rotation_open\n  validate_checkpoint_integrity");
+  });
+
+  // The confirmation prompt can wait indefinitely, and a rotation can open
+  // while it does, so the early check alone is not enough. Source-shape only:
+  // driving restore.sh past prepare_staged_bundle/check_capacity needs docker,
+  // so the race itself is not exercised here.
+  it("re-checks after the RESTORE confirmation and before create_checkpoint", () => {
+    const promptIndex = restoreScriptSource.indexOf("Type RESTORE to continue");
+    const checkpointIndex = restoreScriptSource.indexOf("\ncreate_checkpoint\n");
+    const recheckIndex = restoreScriptSource.indexOf("\nrefuse_if_rotation_open\n", promptIndex);
+    expect(promptIndex).toBeGreaterThan(-1);
+    expect(checkpointIndex).toBeGreaterThan(promptIndex);
+    expect(recheckIndex).toBeGreaterThan(promptIndex);
+    expect(recheckIndex).toBeLessThan(checkpointIndex);
   });
 });
