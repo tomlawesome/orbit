@@ -1465,7 +1465,9 @@ journey_successful_rollback() {
   # evidence and the restore is the only executable action. The running
   # container keeps its published port either way; only the file moves.
   sed -i 's|^ORBIT_PORT=.*|ORBIT_PORT=3212|' "$live"
-  [[ "$(sha256sum "$live" | awk '{print $1}')" != "$expected" ]] ||
+  local drifted
+  drifted="$(sha256sum "$live" | awk '{print $1}')"
+  [[ "$drifted" != "$expected" ]] ||
     fail 'successful-rollback: the drifted live file still matches the backup, so the fixture proves nothing'
   mark_setup_done successful-rollback-fixture-staged
 
@@ -1500,10 +1502,24 @@ journey_successful_rollback() {
   compgen -G "$target/.orbit-install-staging.*" >/dev/null 2>&1 &&
     fail 'successful-rollback: the staging evidence survived a completed rollback'
 
+  # The restore never deletes a live secret file: it moves the one it
+  # replaces to a dated copy beside it (repair.sh, #1151 O2-S1), so a
+  # rollback that restored the wrong thing still leaves the operator the
+  # file that was live. Prove that copy, then leave it out of the manifest
+  # comparison below — it is the one file a correct rollback adds.
+  local kept
+  kept="$(compgen -G "$target/.env-orbit.pre-restore.*" || true)"
+  [[ -n "$kept" && "$(wc -l <<<"$kept")" == 1 ]] ||
+    fail "successful-rollback: expected exactly one .env-orbit.pre-restore.* copy, found: ${kept:-none}"
+  [[ "$(sha256sum "$kept" | awk '{print $1}')" == "$drifted" ]] ||
+    fail 'successful-rollback: the pre-restore copy does not hold the live file the rollback replaced'
+  [[ "$(stat -c '%a' "$kept")" == 600 ]] ||
+    fail 'successful-rollback: the pre-restore copy is not mode 600'
+
   status=0
   repair --check >/dev/null 2>&1 || status=$?
   [[ "$status" == 0 ]] || fail "successful-rollback: --check after the rollback exited $status, expected 0"
-  [[ "$(deployment_manifest)" == "$before" ]] ||
+  [[ "$(deployment_manifest | grep -vF './.env-orbit.pre-restore.')" == "$before" ]] ||
     fail 'successful-rollback: the rolled-back deployment does not match its pre-drift manifest'
   health_check || fail 'successful-rollback: the deployment is unhealthy after the rollback'
   [[ "$(household_name)" == 'repair-journeys-household' ]] ||
