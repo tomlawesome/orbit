@@ -19,7 +19,7 @@
   import { SIGN_IN_METHODS_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { SENT_LATELY_FIXTURE } from "$lib/data/fixtures/settings.js";
   import { agoLong } from "$lib/format.js";
-  import { alertsSupported, currentSubscription, disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
+  import { alertsSupported, disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
   import { watchTour } from "$lib/tour/watch.js";
   import { fillStarTiles } from "$lib/sky.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
@@ -144,7 +144,13 @@
         browserAlerts = true;
       }
     } catch (error) {
-      browserAlerts = Boolean(await currentSubscription());
+      /* #1151 F9: reconcile against the server the same way the onMount
+         read above does. currentSubscription() only reports whether the
+         browser still holds a subscription object, which stays true even
+         after the server has refused it (e.g. it belongs to another
+         account on a shared device) — exactly the case syncAlerts() exists
+         to catch, so falling back to the raw browser read here undid it. */
+      browserAlerts = Boolean(await syncAlerts());
       /* alerts.js throws AlertsError, which carries the reason as a code so
          this screen never has to match on a message. */
       const reason = /** @type {{ code?: string }} */ (error)?.code;
