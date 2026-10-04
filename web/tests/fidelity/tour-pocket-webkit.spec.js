@@ -877,14 +877,17 @@ async function placeholderShows(page, id) {
     return right - x < 8 || bottom - y < 8 ? null : { x, y, width: right - x, height: bottom - y };
   }, id);
   if (!box) return null;
-  const shot = () => page.screenshot({ clip: box, animations: "disabled", caret: "hide" });
   const as = await settledShot(page, box);
   await page.evaluate((one) => {
     const el = /** @type {HTMLInputElement} */ (document.getElementById(one));
     el.dataset.heldPlaceholder = el.placeholder;
     el.placeholder = "";
   }, id);
-  const bare = await shot();
+  /* Both pictures are settled frames, the second only after the field has
+     been repainted without its placeholder: an immediate shot could still
+     be the old frame, equal to `as`, and prove nothing (#1208). */
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(undefined)))));
+  const bare = await settledShot(page, box);
   await page.evaluate((one) => {
     const el = /** @type {HTMLInputElement} */ (document.getElementById(one));
     el.placeholder = el.dataset.heldPlaceholder ?? "";
@@ -953,6 +956,7 @@ test.describe("suggested values give way to real text (#1174 round 4)", () => {
     });
 
     test(`at ${phone.width}x${phone.height} the pocket form's suggestions go while a field holds real text and come back when it is emptied`, async ({ browser }) => {
+      test.setTimeout(150_000);
       const context = await browser.newContext({
         viewport: { width: phone.width, height: phone.height }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
       });
