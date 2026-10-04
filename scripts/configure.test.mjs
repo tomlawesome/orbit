@@ -104,20 +104,6 @@ function makeFixture(envOrbitContent) {
   return targetDir;
 }
 
-// A fixture with .env-orbit already present but no .orbit-secrets directory
-// is, per #1151 RANGE-F1, an EXISTING deployment that simply never had its
-// generated secrets created -- not a fresh install -- so ensure_secret_file
-// now refuses rather than generating replacements. Tests that only care
-// about some other assertion call this first so the bare run still succeeds.
-function seedExistingSecrets(targetDir) {
-  const validSecret = `${"a".repeat(64)}\n`;
-  mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700, recursive: true });
-  for (const name of ["session-secret", "postgres-password", "document-kek"]) {
-    writeFileSync(join(targetDir, ".orbit-secrets", name), validSecret);
-    chmodSync(join(targetDir, ".orbit-secrets", name), 0o600);
-  }
-}
-
 function runConfigure(targetDir, args = [], envOverrides = {}, input = undefined) {
   const binDir = makeFakeBin();
   return failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "configure.sh"), ...args], {
@@ -294,7 +280,6 @@ describe("configure.sh", () => {
   it("ignores a stale ambient ORBIT_IMAGE on an existing deployment without the installer's trust marker, printing what it ignored (#1151 O1-S4)", () => {
     const pinnedImage = `old-registry.example/orbit@sha256:${"a".repeat(64)}`;
     const targetDir = makeFixture(`APP_URL=https://orbit.example.invalid\nORBIT_IMAGE=${pinnedImage}\n`);
-    seedExistingSecrets(targetDir);
     const binDir = makeFakeBin();
 
     // Deliberately bypasses the runConfigure helper (which now always
@@ -436,7 +421,6 @@ describe("configure.sh", () => {
       "",
     ].join("\n");
     const targetDir = makeFixture(initial);
-    seedExistingSecrets(targetDir);
 
     const result = runConfigure(targetDir);
 
@@ -453,7 +437,6 @@ describe("configure.sh", () => {
   it("appends ORBIT_IMAGE when no active assignment exists", () => {
     const initial = ["UNRELATED_KEY=keep-me", "# ORBIT_IMAGE=commented-out-stays", ""].join("\n");
     const targetDir = makeFixture(initial);
-    seedExistingSecrets(targetDir);
 
     const result = runConfigure(targetDir);
 
@@ -474,7 +457,6 @@ describe("configure.sh", () => {
       "",
     ].join("\n");
     const targetDir = makeFixture(initial);
-    seedExistingSecrets(targetDir);
 
     const result = runConfigure(targetDir);
 
@@ -496,7 +478,6 @@ describe("configure.sh", () => {
       "",
     ].join("\n");
     const targetDir = makeFixture(initial);
-    seedExistingSecrets(targetDir);
 
     const result = runConfigure(targetDir);
 
@@ -518,7 +499,7 @@ describe("configure.sh", () => {
       "VAPID_PRIVATE_KEY_FILE=/run/orbit-secrets/orbit-vapid-private-key",
     ].join("\n");
     const targetDir = makeFixture(initial);
-    seedExistingSecrets(targetDir);
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
     writeFileSync(join(targetDir, ".orbit-secrets", "vapid-private-key"), "existing-private-key\n");
     chmodSync(join(targetDir, ".orbit-secrets", "vapid-private-key"), 0o600);
 
@@ -573,7 +554,6 @@ describe("configure.sh", () => {
 
   it("keeps .env-orbit restricted to owner-only permissions", () => {
     const targetDir = makeFixture("ORBIT_IMAGE=old\n");
-    seedExistingSecrets(targetDir);
     chmodSync(join(targetDir, ".env-orbit"), 0o640);
 
     const result = runConfigure(targetDir);
@@ -899,7 +879,6 @@ describe("configure.sh", () => {
 
   it("preserves a valid direct OIDC client secret without creating a conflicting file form", () => {
     const targetDir = makeFixture("OIDC_CLIENT_SECRET=existing-direct-secret\n");
-    seedExistingSecrets(targetDir);
 
     const result = runConfigure(targetDir);
 
@@ -912,7 +891,7 @@ describe("configure.sh", () => {
 
   it("preserves an existing OIDC client secret file byte-for-byte on an ordinary run", () => {
     const targetDir = makeFixture(undefined);
-    seedExistingSecrets(targetDir);
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
     writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "existing-oidc-secret-value");
     chmodSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), 0o640);
 
@@ -926,7 +905,7 @@ describe("configure.sh", () => {
 
   it("rejects a symlinked OIDC client secret file on an ordinary run", () => {
     const targetDir = makeFixture(undefined);
-    seedExistingSecrets(targetDir);
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
     const elsewhere = mkdtempSync(join(tmpdir(), "orbit-configure-elsewhere-"));
     writeFileSync(join(elsewhere, "oidc-client-secret"), "not-safe");
     symlinkSync(join(elsewhere, "oidc-client-secret"), join(targetDir, ".orbit-secrets", "oidc-client-secret"));
@@ -1475,7 +1454,6 @@ describe("configure.sh", () => {
 
   it("leaves no temporary files behind after success or a later failure", () => {
     const targetDir = makeFixture("ORBIT_IMAGE=old\n");
-    seedExistingSecrets(targetDir);
     const successResult = runConfigure(targetDir);
     expect(successResult.status).toBe(0);
     expect(stagingLeftovers(targetDir)).toEqual([]);
@@ -1511,7 +1489,9 @@ describe("configure.sh", () => {
 // the file was missing, silently making every existing encrypted document
 // unreadable (document-kek) or signing out every session (session-secret).
 // Mirrors src/lib/configure-engine.ts's ensureSecretFile isFreshInstall
-// refusal.
+// refusal. A deployment is existing when any of the three generated secrets
+// already exists before the run -- not when .env-orbit does, because
+// install.sh runs `configure.sh --init` and then a bare `configure.sh`.
 describe("scripts/configure.sh ensure_secret_file existing-deployment refusal (#1151 RANGE-F1)", () => {
   it("refuses to regenerate a missing document-kek on an existing deployment instead of silently replacing it", () => {
     const targetDir = makeFixture("ORBIT_IMAGE=old\n");
@@ -1530,15 +1510,24 @@ describe("scripts/configure.sh ensure_secret_file existing-deployment refusal (#
     expect(existsSync(join(targetDir, ".orbit-secrets", "document-kek"))).toBe(false);
   });
 
-  it("refuses to regenerate a missing session-secret on an existing deployment whose secrets directory already exists but is otherwise empty", () => {
-    const targetDir = makeFixture("ORBIT_IMAGE=old\n");
-    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+  it("generates all three secrets on the install shape: --init writes .env-orbit, then a bare run in a second process", () => {
+    const targetDir = makeFixture(undefined);
+
+    const initResult = runConfigure(targetDir, ["--init"], {
+      ORBIT_CONFIGURE_APP_URL: "https://orbit.install-shape.internal",
+      ORBIT_CONFIGURE_OIDC_ISSUER: "https://auth.install-shape.internal/application/o/orbit/",
+      ORBIT_CONFIGURE_OIDC_CLIENT_ID: "install-shape-client-id",
+    });
+    expect(initResult.status).toBe(0);
+    expect(existsSync(join(targetDir, ".env-orbit"))).toBe(true);
 
     const result = runConfigure(targetDir);
 
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain(".orbit-secrets/session-secret is missing on an existing Orbit deployment");
-    expect(existsSync(join(targetDir, ".orbit-secrets", "session-secret"))).toBe(false);
+    expect(result.stderr).not.toContain("is missing on an existing Orbit deployment");
+    expect(result.status).toBe(0);
+    for (const name of ["session-secret", "postgres-password", "document-kek"]) {
+      expect(existsSync(join(targetDir, ".orbit-secrets", name))).toBe(true);
+    }
   });
 
   it("still generates secrets normally on a genuinely fresh install (neither .env-orbit nor .orbit-secrets existed before this run)", () => {
@@ -1550,6 +1539,20 @@ describe("scripts/configure.sh ensure_secret_file existing-deployment refusal (#
     for (const name of ["session-secret", "postgres-password", "document-kek"]) {
       expect(existsSync(join(targetDir, ".orbit-secrets", name))).toBe(true);
     }
+  });
+
+  it("refuses for postgres-password and generates nothing when only session-secret already exists", () => {
+    const targetDir = makeFixture("ORBIT_IMAGE=old\n");
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+    writeFileSync(join(targetDir, ".orbit-secrets", "session-secret"), `${"a".repeat(64)}\n`);
+    chmodSync(join(targetDir, ".orbit-secrets", "session-secret"), 0o600);
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(".orbit-secrets/postgres-password is missing on an existing Orbit deployment");
+    expect(existsSync(join(targetDir, ".orbit-secrets", "postgres-password"))).toBe(false);
+    expect(existsSync(join(targetDir, ".orbit-secrets", "document-kek"))).toBe(false);
   });
 });
 

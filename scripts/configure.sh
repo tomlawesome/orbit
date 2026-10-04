@@ -40,10 +40,10 @@ terminal_echo_disabled=0
 # Set by ensure_environment_file when .env-orbit did not exist yet -- read
 # by persist_orbit_image below (#1151 O1-S4).
 environment_file_was_created=0
-# Set by ensure_secrets_directory when $secrets_directory did not exist yet
-# -- read by ensure_secret_file below (#1151 RANGE-F1), mirroring
-# src/lib/configure-engine.ts's hadSecretsDirectory/isFreshInstall.
-secrets_directory_was_created=0
+# Set once in the bare flow, before the first secret is generated -- read by
+# ensure_secret_file below (#1151 RANGE-F1), mirroring
+# src/lib/configure-engine.ts's runConfigureApply isFreshInstall.
+generated_secret_existed_before_run=0
 # Set by acquire_deploy_lock, read by release_deploy_lock (#1151 RANGE-F6).
 deploy_lock_path_value=""
 deploy_lock_owner_value=""
@@ -251,21 +251,29 @@ ensure_secrets_directory() {
     [[ -d "$secrets_directory" && ! -L "$secrets_directory" ]] ||
       fail "Refusing to use ${secrets_directory} because it is not a regular directory."
   else
-    secrets_directory_was_created=1
     mkdir -- "$secrets_directory"
   fi
   chmod 700 "$secrets_directory" ||
     fail "Could not restrict ${secrets_directory} permissions."
 }
 
-# A fresh install is the one case where ensure_secret_file generating a
-# missing secret is correct: nothing deployed here could be relying on it
-# yet. On an existing deployment (#1151 RANGE-F1, mirroring
-# src/lib/configure-engine.ts's ensureSecretFile/isFreshInstall) it must be
-# read after both ensure_environment_file and ensure_secrets_directory have
-# run, the same ordering runConfigureApply uses.
-is_fresh_install() {
-  [[ "$environment_file_was_created" == 1 && "$secrets_directory_was_created" == 1 ]]
+# #1151 RANGE-F1: a deployment is EXISTING when any of the three generated
+# secrets (session-secret, postgres-password, document-kek) already exists
+# before this run; .env-orbit and the secrets directory are not signals,
+# because install.sh runs `configure.sh --init` (which writes .env-orbit) and
+# then a bare `configure.sh` in a second process. Checked once for the whole
+# set, before the first is generated, so writing one cannot make the next
+# look existing. Mirrors src/lib/configure-engine.ts's runConfigureApply.
+record_generated_secret_presence() {
+  local name path
+  generated_secret_existed_before_run=0
+  for name in session-secret postgres-password document-kek; do
+    path="$secrets_directory/$name"
+    if [[ -e "$path" || -L "$path" ]]; then
+      generated_secret_existed_before_run=1
+      return
+    fi
+  done
 }
 
 # Shares the Orbit engine's cross-process deploy lock (#1151 RANGE-F6):
@@ -983,10 +991,10 @@ ensure_secret_file() {
   # or corrupted secret, not a first run -- generating a replacement here
   # would make existing encrypted data unreadable (document-kek) or sign out
   # every user (session-secret). Mirrors configure-engine.ts's ensureSecretFile
-  # isFreshInstall refusal exactly; only a genuinely fresh install (neither
-  # .env-orbit nor the secrets directory existed before this run) may
-  # generate one.
-  if ! is_fresh_install; then
+  # isFreshInstall refusal exactly; only a fresh install (none of the three
+  # generated secrets existed before this run, see
+  # record_generated_secret_presence) may generate one.
+  if [[ "$generated_secret_existed_before_run" == 1 ]]; then
     fail "${path} is missing on an existing Orbit deployment. Refusing to generate a replacement, which would make existing encrypted data unreadable or sign out every user. Restore ${path} from backup (or Orbit's recovery bundle) to the exact path ${repo_dir}/${path}, then run \`orbit configure\` again."
   fi
 
@@ -1607,6 +1615,7 @@ else
   run_configuration_preflight
   persist_orbit_image
   ensure_secrets_directory
+  record_generated_secret_presence
   ensure_secret_file "$secrets_directory/session-secret"
   ensure_secret_file "$secrets_directory/postgres-password"
   # A 32-byte hexadecimal KEK is generated only when absent and is never printed.
