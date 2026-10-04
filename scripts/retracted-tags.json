@@ -1,0 +1,4 @@
+{
+  "tags": ["v1.0.0", "v1.1.0", "v1.2.0"],
+  "reason": "Mislabelled alphas of the rebuild; the release line restarts at v0.3.0 (#1213, ADR-0016 amendment of 2026-10-04)."
+}
