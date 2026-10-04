@@ -244,6 +244,37 @@ describe("runBackup", () => {
     expect(result.finalTarPath).toBe(join(backupDirectory, "orbit-20260304-050607.tar"));
     expect(existsSync(result.finalTarPath)).toBe(true);
   });
+
+  // #1151 RANGE-R6/RANGE-S3: runBackup used to take no lock at all, so it
+  // could race a concurrent orbit restore's stopApp/startApp and document-
+  // tree/database cutover — the exact O2-R3 hazard the Bash scripts' shared
+  // flock closes. RANGE-S4 is the same gap seen from the other direction:
+  // the TS lock used a different file name than the Bash scripts' shared
+  // one, so .orbit-backup-restore.lock is what both now share.
+  it("refuses when a restore already holds the shared backup/restore lock against the same directory (#1151 RANGE-R6/S3)", () => {
+    const documentsRoot = join(sandbox, "docs-backup-lock");
+    buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
+    const backupDirectory = join(sandbox, "backup-lock-backups");
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+    writeFileSync(join(backupDirectory, ".orbit-backup-restore.lock"), "");
+
+    expect(() => runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter, now: new Date("2026-03-04T05:06:07Z") })).toThrow(
+      BackupRestoreCliRefusal,
+    );
+    expect(adapter.appRunning).toBe(true); // stopApp was never reached.
+  });
+
+  it("releases the shared lock after a successful backup, leaving it free for a subsequent restore", () => {
+    const documentsRoot = join(sandbox, "docs-backup-lock-release");
+    buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
+    const backupDirectory = join(sandbox, "backup-lock-release-backups");
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+
+    runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter, now: new Date("2026-03-04T05:06:07Z") });
+
+    expect(existsSync(join(backupDirectory, ".orbit-backup-restore.lock"))).toBe(false);
+  });
 });
 
 describe("stageAndPreflightRestoreBundle (restore.sh's prepare_staged_bundle, guarantees #7-10)", () => {
@@ -959,7 +990,7 @@ describe("runImportRecoveryBundle (import-recovery-bundle.sh's orchestration, li
   });
 });
 
-describe("runRestore cross-process lock (O2-R7)", () => {
+describe("runRestore cross-process lock (O2-R7, shared file name #1151 RANGE-S4)", () => {
   it("refuses when another restore already holds the lock against the same backup directory", () => {
     const liveDocumentsRoot = join(sandbox, "live-docs-restore-lock");
     buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
@@ -970,7 +1001,7 @@ describe("runRestore cross-process lock (O2-R7)", () => {
     const adapter = new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
     const paths = deriveRestorePaths(backupDirectory, documentKekFile);
     mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
-    writeFileSync(join(backupDirectory, ".orbit-restore.lock"), "");
+    writeFileSync(join(backupDirectory, ".orbit-backup-restore.lock"), "");
 
     const workDir = mkdtempSync(join(sandbox, "restore-lock-work-"));
     expect(() =>

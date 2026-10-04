@@ -120,22 +120,33 @@ function isSymlinkPath(path: string): boolean {
   }
 }
 
-// --- cross-process restore lock (O2-R7) -------------------------------------
+// --- cross-process backup/restore lock (O2-R7, #1151 RANGE-R6/S3/S4) -------
 //
-// Before this, two concurrent `orbit restore` runs were only ever
+// Before O2-R7, two concurrent `orbit restore` runs were only ever
 // distinguished by the journal restore.sh/writeRestoreJournal writes at the
 // *end* of checkpointing — so both could pass the "no journal yet" check,
 // stage, capacity-check and confirm concurrently, and both reach the
 // checkpoint/cutover machinery at once. Taking this lock as the very first
 // step closes that window; a second run against the same backup directory
 // fails fast instead of racing.
-const RESTORE_LOCK_FILE_NAME = ".orbit-restore.lock";
+//
+// `runBackup` originally took no lock at all, reopening the identical O2-R3
+// hazard (a backup's stopApp/startApp racing a restore's cutover) inside the
+// new code, and did so under a different file name than the Bash scripts'
+// shared flock (scripts/backup.sh / scripts/restore.sh / scripts/
+// import-recovery-bundle.sh's `.orbit-backup-restore.lock`), so the two
+// implementations never serialized against each other either. Using this
+// same file name for both `runBackup` and `runRestore` closes both gaps:
+// `--dir`'s backup directory matches the Bash scripts' default
+// `ORBIT_BACKUP_DIR` (both `<root>/backups`), so by default they contend for
+// the same file.
+const BACKUP_RESTORE_LOCK_FILE_NAME = ".orbit-backup-restore.lock";
 const RESTORE_LOCK_STALE_MS = 10 * 60 * 1000;
 
-function acquireRestoreLock(backupDirectory: string): () => void {
+function acquireBackupRestoreLock(backupDirectory: string): () => void {
   mkdirSync(backupDirectory, { recursive: true });
   chmodSync(backupDirectory, SECURE_DIRECTORY_MODE);
-  const lockPath = join(backupDirectory, RESTORE_LOCK_FILE_NAME);
+  const lockPath = join(backupDirectory, BACKUP_RESTORE_LOCK_FILE_NAME);
 
   const takeLock = (): number => openSync(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
 
@@ -144,7 +155,7 @@ function acquireRestoreLock(backupDirectory: string): () => void {
     fd = takeLock();
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-      refuse("restore-locked", `Could not take the orbit restore lock at ${lockPath}.`);
+      refuse("restore-locked", `Could not take the orbit backup/restore lock at ${lockPath}.`);
     }
     let staleEnough: boolean;
     try {
@@ -155,7 +166,7 @@ function acquireRestoreLock(backupDirectory: string): () => void {
     if (!staleEnough) {
       refuse(
         "restore-locked",
-        `Another orbit restore is already running against this backup directory (lock held at ${lockPath}). Wait for it to finish, or remove the lock file yourself once you are certain no other run is active.`,
+        `Another orbit backup or restore is already running against this backup directory (lock held at ${lockPath}). Wait for it to finish, or remove the lock file yourself once you are certain no other run is active.`,
       );
     }
     // Reclaim by rename, not unlink-then-create (same shape as
@@ -174,7 +185,7 @@ function acquireRestoreLock(backupDirectory: string): () => void {
     try {
       fd = takeLock();
     } catch {
-      refuse("restore-locked", `Another orbit restore is already running against this backup directory (lock held at ${lockPath}).`);
+      refuse("restore-locked", `Another orbit backup or restore is already running against this backup directory (lock held at ${lockPath}).`);
     }
   }
   // The lock names its holder, so a release never removes a lock that was
@@ -305,10 +316,18 @@ export interface RunBackupOptions {
 }
 
 export function runBackup(options: RunBackupOptions): CreateBackupBundleResult {
-  mkdirSync(options.backupDirectory, { recursive: true });
-  chmodSync(options.backupDirectory, SECURE_DIRECTORY_MODE);
-  const finalTarPath = join(options.backupDirectory, `orbit-${formatBundleTimestamp(options.now)}.tar`);
-  return createBackupBundle(options.backupDirectory, finalTarPath, options.documentKekHex, options.adapter, formatManifestTimestamp(options.now));
+  // #1151 RANGE-R6/RANGE-S3: taken before anything else, same as runRestore
+  // — otherwise a backup's own stopApp/startApp (inside createBackupBundle)
+  // can race a concurrent restore's document-tree/database cutover.
+  const releaseLock = acquireBackupRestoreLock(options.backupDirectory);
+  try {
+    mkdirSync(options.backupDirectory, { recursive: true });
+    chmodSync(options.backupDirectory, SECURE_DIRECTORY_MODE);
+    const finalTarPath = join(options.backupDirectory, `orbit-${formatBundleTimestamp(options.now)}.tar`);
+    return createBackupBundle(options.backupDirectory, finalTarPath, options.documentKekHex, options.adapter, formatManifestTimestamp(options.now));
+  } finally {
+    releaseLock();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -386,7 +405,7 @@ export function runRestore(options: RunRestoreOptions): RestoreDisposeResult | {
   // below — the journal written at the end of checkpointing was the only
   // thing stopping two concurrent restores, and both could pass that check
   // before either got far enough to write it.
-  const releaseLock = acquireRestoreLock(options.paths.backupDirectory);
+  const releaseLock = acquireBackupRestoreLock(options.paths.backupDirectory);
   try {
     return withScratchCleanupOnSignal(options.workDir, () => runRestoreLocked(options));
   } finally {
