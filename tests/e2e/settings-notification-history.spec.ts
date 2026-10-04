@@ -133,10 +133,6 @@ async function seedHouseholdAndItem(page: Page, name: string, itemTitle: string)
 test.describe.configure({ mode: "serial" });
 
 test("a member sees their own last sent reminders, plainly, on both dialects", async ({ page, browser }) => {
-  /* #1195: on desktop Safari, /settings draws only its header -- one
-     aborted fetch blanks every card, including this one, so there is
-     nothing here for the panel checks below to find. */
-  test.fail(test.info().project.name === "desktop-webkit", "#1195: desktop Safari leaves /settings with only its header; the cards never render");
   test.setTimeout(120_000);
 
   await claimInstanceAsAdministrator(browser);

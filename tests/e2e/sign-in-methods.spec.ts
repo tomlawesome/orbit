@@ -126,17 +126,6 @@ const passwordRow = (page: Page) => page.locator(".kv", { hasText: "password" })
 
 test.describe.configure({ mode: "serial" });
 
-/* #1195: on desktop Safari, /settings draws only its header -- one aborted
-   fetch blanks every card. Every test below calls openSettings, so the mark
-   has to cover the whole file, not just one test: in serial mode, a single
-   unmarked test's real (unexpected) failure reruns the whole group, which
-   is exactly how pipeline 2005 saw this test's OWN rerun time out instead
-   of failing -- marked only here, it stayed uncovered on `:162`, the first
-   test to actually fail that pipeline. */
-test.beforeEach(() => {
-  test.fail(test.info().project.name === "desktop-webkit", "#1195: desktop Safari leaves /settings with only its header; the cards never render");
-});
-
 test("the helm lists the sign-in methods an account actually has", async ({ page, browser }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the block is asserted on the desk dialect");
   test.setTimeout(90_000);
