@@ -12,6 +12,7 @@ vi.mock("web-push", () => ({ default: webPushMock }));
 import {
   categorizeProviderError,
   createDefaultNotificationProviders,
+  deliveryIsStale,
   deliveryFailureState,
   effectiveReminderOffsets,
   enabledDeliveryChannels,
@@ -292,6 +293,19 @@ describe("notification worker scheduling", () => {
     expect(isAllowedPushEndpoint("https://localhost/probe")).toBe(false);
     // Malformed input must fail closed rather than throw.
     expect(isAllowedPushEndpoint("not a url")).toBe(false);
+  });
+
+  describe("deliveryIsStale", () => {
+    const NOW = new Date("2026-09-20T09:00:00.000Z");
+    const twoDaysAgo = new Date(NOW.getTime() - 48 * 60 * 60_000);
+
+    it("the catch-up row written just now for an old reminder time is not stale, so it is actually sent", () => {
+      expect(deliveryIsStale({ scheduledFor: twoDaysAgo, createdAt: NOW }, NOW)).toBe(false);
+    });
+
+    it("a row that has sat unclaimed past the window is stale as before", () => {
+      expect(deliveryIsStale({ scheduledFor: twoDaysAgo, createdAt: twoDaysAgo }, NOW)).toBe(true);
+    });
   });
 
   describe("materializeDeliveriesForCandidate (#1151 A4-S3)", () => {
