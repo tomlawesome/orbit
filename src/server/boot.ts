@@ -430,6 +430,21 @@ export async function registerNode(): Promise<void> {
     log.info({ event: "startup.migration", state: "ready", action: "none" });
   }
 
+  // Portable-archive crash recovery (#1151 RANGE-R2): a row left open by a
+  // crash or restart mid-document-restore is rolled back before anything
+  // else runs -- awaited, not fire-and-forget, so the document worker never
+  // starts beside an import that is still half-done.
+  const { rollBackUnfinishedPortableImports } = await import("@/server/portable-archive-repository");
+  await rollBackUnfinishedPortableImports().catch(() => {
+    log.error({
+      event: "portable_archive.import",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "inspect_admin_diagnostics",
+      impact: "application_degraded",
+    });
+  });
+
   if (process.env.WORKER_ENABLED === "true") {
     const [{ startNotificationWorker }, { startDocumentWorker }, { startImapIngestionWorker }, { startImapReceiptWorker }, { startMaintenanceWorker }] = await Promise.all([
       import("@/server/notification-worker"),

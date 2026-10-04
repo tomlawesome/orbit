@@ -2,11 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lt } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { auditLog, documents, dueEvents, households, items, memberships, portableArchives, reminderRules, sections, users } from "@/db/schema";
+import { auditLog, documentCrypto, documents, dueEvents, households, items, memberships, portableArchiveImports, portableArchives, reminderRules, sections, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { log, operationalDetail } from "@/lib/logger";
 import { optionalText } from "@/lib/workspace";
 import { getDocumentConfig } from "@/server/documents/config";
+import { LocalDocumentStorage } from "@/server/documents/storage";
 import { readDocumentDownload, uploadItemDocument } from "@/server/document-repository";
 import { decryptPortableArchive, encryptPortableArchive, isEncryptedPortableArchive, type EncryptedPortableArchive } from "@/server/portable-archive";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
@@ -430,26 +431,166 @@ export async function previewPortableImport(userId: string, householdId: string,
 }
 
 /**
+ * Past this age an unfinished import row (`finished_at` still null) is not a
+ * concurrent request in flight -- it is a crash or timeout mid-restore
+ * (#1151 RANGE-R2). Deliberately generous: the document-restore loop can
+ * legitimately take a while for a large archive, and rolling back a request
+ * that is merely slow would be worse than leaving it a little longer.
+ */
+const STALE_UNFINISHED_IMPORT_MS = 60 * 60 * 1_000;
+
+function documentStorage(): LocalDocumentStorage {
+  const config = getDocumentConfig();
+  return new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+}
+
+/** Why a document restore failed, in words the admin can act on without a stack trace. */
+function documentFailureReason(error: unknown): string {
+  if (error instanceof AppError && error.code === "document_malware_detected") return "malware was detected in that file";
+  if (error instanceof AppError) return error.message;
+  return "the document could not be restored";
+}
+
+/**
+ * Undoes exactly what one import row recorded: the documents it restored for
+ * its created items, those items, and any section it created that holds no
+ * other item. Idempotent -- a row that is missing or already finished is a
+ * no-op, so calling this twice (a retry racing the boot-time sweep) is safe.
+ *
+ * Mirrors `hardDeleteHousehold` (household-lifecycle.ts): database rows go
+ * first, inside the transaction that also closes the import row, and the
+ * encrypted ciphertext is deleted from local storage afterwards, tolerantly
+ * -- a failed local delete leaves only an orphaned blob, never a dangling
+ * database reference.
+ */
+export async function rollBackPortableImport(importId: string): Promise<void> {
+  const outcome = await getDb().transaction(async (transaction) => {
+    const [importRow] = await transaction.select().from(portableArchiveImports)
+      .where(eq(portableArchiveImports.id, importId)).limit(1);
+    if (!importRow || importRow.finishedAt) return undefined;
+
+    const createdItemIds: string[] = importRow.createdItemIds ?? [];
+    const createdSectionIds: string[] = importRow.createdSectionIds ?? [];
+
+    const documentRows = createdItemIds.length > 0
+      ? await transaction.select({ documentId: documents.id, storageKey: documentCrypto.storageKey })
+          .from(documents)
+          .leftJoin(documentCrypto, eq(documentCrypto.documentId, documents.id))
+          .where(inArray(documents.itemId, createdItemIds))
+      : [];
+    if (documentRows.length > 0) {
+      await transaction.delete(documents).where(inArray(documents.id, documentRows.map((row) => row.documentId)));
+    }
+    if (createdItemIds.length > 0) {
+      await transaction.delete(items).where(inArray(items.id, createdItemIds));
+    }
+
+    let sectionsRemoved = 0;
+    for (const sectionId of createdSectionIds) {
+      const [remainingItem] = await transaction.select({ id: items.id }).from(items).where(eq(items.sectionId, sectionId)).limit(1);
+      if (!remainingItem) {
+        await transaction.delete(sections).where(eq(sections.id, sectionId));
+        sectionsRemoved++;
+      }
+    }
+
+    await transaction.insert(auditLog).values({
+      householdId: importRow.householdId,
+      actorUserId: importRow.actorUserId,
+      entityType: "portable_archive",
+      entityId: importId,
+      action: "portable_archive_import_rolled_back",
+      changes: { itemsRemoved: createdItemIds.length, sectionsRemoved, documentsRemoved: documentRows.length },
+    });
+    await transaction.update(portableArchiveImports).set({ finishedAt: new Date(), outcome: "rolled_back" })
+      .where(eq(portableArchiveImports.id, importId));
+
+    return { documentStorageKeys: documentRows.flatMap((row) => row.storageKey ? [row.storageKey] : []) };
+  });
+  if (!outcome) return;
+
+  // Database access to these documents is already gone; a failed local
+  // delete here leaves an orphan blob, never a row pointing at missing bytes.
+  const storage = documentStorage();
+  const results = await Promise.allSettled(outcome.documentStorageKeys.map((storageKey) => storage.deleteCiphertext(storageKey)));
+  const failed = results.filter((result) => result.status === "rejected");
+  if (failed.length > 0) {
+    log.error({
+      event: "portable_archive.import",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "inspect_admin_diagnostics",
+      impact: "application_degraded",
+      detail: operationalDetail`${importId}.ciphertext_cleanup`,
+    });
+  }
+}
+
+/** Rolls back every import row a crash left open, oldest first. One row's failure does not stop the rest. */
+export async function rollBackUnfinishedPortableImports(): Promise<void> {
+  const unfinished = await getDb().select({ id: portableArchiveImports.id }).from(portableArchiveImports)
+    .where(isNull(portableArchiveImports.finishedAt)).orderBy(asc(portableArchiveImports.startedAt));
+  for (const row of unfinished) {
+    try {
+      await rollBackPortableImport(row.id);
+    } catch (error) {
+      log.error({
+        event: "portable_archive.import",
+        state: "degraded",
+        reason: "unexpected_failure",
+        action: "inspect_admin_diagnostics",
+        impact: "application_degraded",
+        detail: operationalDetail`${row.id}.${error instanceof Error ? error.name : "unknown"}`,
+      });
+    }
+  }
+}
+
+/** Rolls back this household's own stranded import before starting a new one, if it is old enough to be a crash rather than a concurrent request. */
+async function rollBackStaleUnfinishedPortableImport(householdId: string): Promise<void> {
+  const cutoff = new Date(Date.now() - STALE_UNFINISHED_IMPORT_MS);
+  const stale = await getDb().select({ id: portableArchiveImports.id }).from(portableArchiveImports)
+    .where(and(eq(portableArchiveImports.householdId, householdId), isNull(portableArchiveImports.finishedAt), lt(portableArchiveImports.startedAt, cutoff)));
+  for (const row of stale) await rollBackPortableImport(row.id);
+}
+
+/**
  * Imports normalized metadata atomically, then restores any documents whose
  * bytes travelled with the archive (A2-S2) through the same upload path —
  * same validation, malware scan and encryption — a direct upload takes.
  * Document restoration happens after the metadata transaction commits,
  * because `uploadItemDocument` manages its own scan/encrypt transactions and
  * must see the newly imported items already committed.
+ *
+ * The whole import is all-or-nothing (#1151 RANGE-R2): a `portable_archive_imports`
+ * row is opened inside the metadata transaction, recording exactly what it
+ * created, and a document that fails to restore -- for any reason, including
+ * an infected upload -- rolls everything back and throws, rather than leaving
+ * items with some of their documents permanently unrestorable (a prior
+ * attempt at this mapped skipped duplicates onto existing items instead; the
+ * owner rejected that, because a retry must either finish the whole import or
+ * leave nothing behind to retry against).
  */
 export async function importPortableArchive(input: { userId: string; householdId: string; archive: unknown; passphrase: string; conflictItemIds: string[] }) {
   await requireHouseholdAccess(input.userId, input.householdId);
+  await rollBackStaleUnfinishedPortableImport(input.householdId);
   const archive = decodeImportArchive(input.archive, input.passphrase);
   const skipped = new Set(input.conflictItemIds);
   const documentBytesById = new Map((archive.documentBytes ?? []).map((entry) => [entry.id, entry.contentBase64]));
+  const importId = randomUUID();
+  const importStartedAt = new Date();
   const { imported, itemIdMap } = await getDb().transaction(async (transaction) => {
     await acquireActiveHouseholdLock(transaction, input.householdId);
     const existingSections = await transaction.select({ id: sections.id, slug: sections.slug }).from(sections).where(eq(sections.householdId, input.householdId));
     const sectionMap = new Map<string, string>();
+    const createdSectionIds: string[] = [];
     for (const source of archive.sections) {
       const current = existingSections.find((section) => section.slug === source.slug);
       const id = current?.id ?? randomUUID();
-      if (!current) await transaction.insert(sections).values({ id, householdId: input.householdId, slug: source.slug, name: source.name, icon: source.icon, accent: source.accent, position: source.position, visible: source.visible, archivedAt: source.archivedAt ? new Date(source.archivedAt) : null });
+      if (!current) {
+        await transaction.insert(sections).values({ id, householdId: input.householdId, slug: source.slug, name: source.name, icon: source.icon, accent: source.accent, position: source.position, visible: source.visible, archivedAt: source.archivedAt ? new Date(source.archivedAt) : null });
+        createdSectionIds.push(id);
+      }
       sectionMap.set(source.id, id);
     }
     const existing = await existingItemTitles(transaction, input.householdId);
@@ -467,14 +608,24 @@ export async function importPortableArchive(input: { userId: string; householdId
       count++;
     }
     const restorableDocuments = archive.documents.filter((document) => document.lifecycle === "available" && document.itemId && itemIdMap.has(document.itemId) && documentBytesById.has(document.id));
+    await transaction.insert(portableArchiveImports).values({
+      id: importId,
+      householdId: input.householdId,
+      actorUserId: input.userId,
+      startedAt: importStartedAt,
+      finishedAt: null,
+      createdSectionIds,
+      createdItemIds: Array.from(itemIdMap.values()),
+    });
     await transaction.insert(auditLog).values({ householdId: input.householdId, actorUserId: input.userId, entityType: "portable_archive", entityId: randomUUID(), action: "portable_archive_imported", changes: { importedItems: count, skippedConflicts: skipped.size, documentsTotal: archive.documents.length, documentsRestorable: restorableDocuments.length } });
     return { imported: count, itemIdMap };
   });
 
   // Outside the metadata transaction: `uploadItemDocument` runs its own
   // scan/encrypt transactions and must see the items above as committed. A
-  // document that fails to re-validate or re-scan on the way back in is left
-  // unrestored rather than failing metadata the person already approved.
+  // document that fails to restore now aborts the whole import (#1151
+  // RANGE-R2): anything restoring unattended, mid-crash, cannot be retried
+  // piecemeal, so it is undone instead of left half-done.
   let documentsRestored = 0;
   for (const document of archive.documents) {
     if (document.lifecycle !== "available" || !document.itemId) continue;
@@ -493,18 +644,16 @@ export async function importPortableArchive(input: { userId: string; householdId
       });
       documentsRestored++;
     } catch (error) {
-      // Left unrestored and counted below -- but named here, or a scanner
-      // outage and a document that never existed look the same afterwards.
-      log.warn({
-        event: "document.lifecycle",
-        state: "degraded",
-        reason: error instanceof AppError ? "rejected" : "dependency_unavailable",
-        action: "retry",
-        detail: operationalDetail`${document.id}.${error instanceof AppError ? error.code : (error instanceof Error ? error.name : "unknown")}`,
-      });
+      await rollBackPortableImport(importId);
+      throw new AppError(
+        "archive_import_failed",
+        `Nothing was imported: restoring "${document.displayName}" failed because ${documentFailureReason(error)}. Fix the problem and try the import again.`,
+        422,
+      );
     } finally {
       bytes.fill(0);
     }
   }
+  await getDb().update(portableArchiveImports).set({ finishedAt: new Date(), outcome: "completed" }).where(eq(portableArchiveImports.id, importId));
   return { importedItems: imported, documentsExcluded: archive.documents.length - documentsRestored };
 }
