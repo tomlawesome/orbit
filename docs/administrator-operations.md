@@ -851,9 +851,18 @@ is touched until there is a proven-good way back.
 If one of the rotation's own later steps then fails — writing the new
 credential to the database, landing the new secret file, or restarting the
 containers to pick it up — repair.sh stops and names which checkpoint file
-holds the password the database still actually has. Two different situations
-reach this message, and the recovery is not the same for both; the stderr text
+holds the password the database still actually has. Three different situations
+reach this message, and the recovery is not the same for each; the stderr text
 tells you which one you are in:
+
+- **The database already has the new password, but the secret file was not
+  updated** (the rotation step succeeded and the next step, landing the new
+  secret file, failed). stderr also says `a newly rotated credential is
+  already staged at <path>` and names the file. Do not restore the checkpoint:
+  the database no longer accepts the old password. Move the staged file into
+  place as `.orbit-secrets/postgres-password`, restart the containers, and run
+  the diagnosis again. Only if the database refuses the staged value too does
+  the checkpoint path below apply.
 
 - **The database was never changed** (the rotation step itself failed,
   before anything new was written). Decrypt the checkpoint and put the
