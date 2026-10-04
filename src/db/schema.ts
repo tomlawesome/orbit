@@ -845,6 +845,28 @@ export const portableArchives = pgTable("portable_archives", {
   index("portable_archive_household_created_idx").on(table.householdId, table.createdAt),
 ]);
 
+/**
+ * One row per portable-archive import attempt, open from the moment its
+ * metadata transaction commits until the document-restore phase finishes or
+ * is rolled back (#1151 RANGE-R2). The import is all-or-nothing: a row left
+ * with `finished_at` null past a boot or an hour is a crash mid-restore, and
+ * `rollBackUnfinishedPortableImports`/the next import for the same household
+ * undoes exactly what it recorded here rather than leaving it stranded.
+ */
+export const portableArchiveImports = pgTable("portable_archive_imports", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+  actorUserId: uuid("actor_user_id").references(() => users.id),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  outcome: text("outcome"),
+  createdSectionIds: uuid("created_section_ids").array().notNull().default([]),
+  createdItemIds: uuid("created_item_ids").array().notNull().default([]),
+}, (table) => [
+  index("portable_archive_import_household_idx").on(table.householdId, table.finishedAt),
+  check("portable_archive_imports_outcome", sql`${table.outcome} IS NULL OR ${table.outcome} IN ('completed','rolled_back')`),
+]);
+
 /** Durable, content-free receipts for messages observed in the dedicated IMAP mailbox. */
 export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   id: uuid("id").primaryKey().defaultRandom(),
