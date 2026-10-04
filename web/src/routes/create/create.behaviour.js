@@ -83,9 +83,12 @@ export function mountCreate() {
   /* Only until the next edit: after a save that kept the form open (the
      attachment branch of the submit handler) further typing is unsaved
      work again, and leaving must ask about it (#1151 W1-S1). Bound on the
-     card, so every field's input or change bubbles to it. */
-  on(card, "input", () => { committed = false; });
-  on(card, "change", () => { committed = false; });
+     card, so every field's input or change bubbles to it; the type chips,
+     the section buttons and a dropped file change the entry without either
+     event, so their handlers call `edited` themselves. */
+  const edited = () => { committed = false; };
+  on(card, "input", edited);
+  on(card, "change", edited);
   /** A message from the last save attempt (a loud failure, or "saved, the
       document was not attached"), held until the NEXT attempt — same as the
       pocket's own `problem`, which nothing typed clears early. */
@@ -161,6 +164,7 @@ export function mountCreate() {
       for (const other of typeButtons) other.setAttribute("aria-pressed", "false");
       button.setAttribute("aria-pressed", "true");
       chosenType = /** @type {import('./entry.js').Kind} */ (button.dataset.type);
+      edited();
       applyKindVisibility();
       reveal();
       updateRefusal();
@@ -201,6 +205,7 @@ export function mountCreate() {
           for (const other of [...sections.querySelectorAll("button")]) other.setAttribute("aria-pressed", "false");
           button.setAttribute("aria-pressed", "true");
           chosenSection = section.id;
+          edited();
           reveal();
           updateRefusal();
         });
@@ -236,6 +241,7 @@ export function mountCreate() {
   function takeFile(/** @type {File | null | undefined} */ file) {
     if (!file) return;
     attachment = file;
+    edited();
     reveal();
     document.body.classList.add("doc");
     if (heldName) heldName.textContent = file.name;
