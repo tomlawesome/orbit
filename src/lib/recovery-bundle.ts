@@ -627,16 +627,35 @@ export function decryptDocumentArchiveToFile(envelopePath: string, documentKekHe
  * (checkRestoreCapacity, run later by restore-engine.ts on the *extracted*
  * tree) ever ran.
  */
-function requireCapacityForDocumentArchive(envelopePath: string, destinationDir: string): void {
+function measureEnvelopeBytes(envelopePath: string): number {
   const descriptor = openSync(envelopePath, constants.O_RDONLY | constants.O_NOFOLLOW);
-  let envelopeBytes: number;
   try {
-    envelopeBytes = fstatSync(descriptor).size;
+    return fstatSync(descriptor).size;
   } finally {
     closeSync(descriptor);
   }
+}
+
+function measureAvailableBytes(destinationDir: string): number {
   const stats = statfsSync(destinationDir);
-  const availableBytes = stats.bavail * stats.bsize;
+  return stats.bavail * stats.bsize;
+}
+
+/**
+ * `measureEnvelope`/`measureAvailable` default to the real stat/statfs
+ * calls above; a test injects them instead of the real implementation so
+ * the over-capacity branch can be exercised with an ordinary small file,
+ * never a real multi-petabyte (even sparse) file a CI runner's filesystem
+ * may refuse to create at all (EFBIG).
+ */
+function requireCapacityForDocumentArchive(
+  envelopePath: string,
+  destinationDir: string,
+  measureEnvelope: (envelopePath: string) => number = measureEnvelopeBytes,
+  measureAvailable: (destinationDir: string) => number = measureAvailableBytes,
+): void {
+  const envelopeBytes = measureEnvelope(envelopePath);
+  const availableBytes = measureAvailable(destinationDir);
   if (availableBytes < envelopeBytes) {
     refuse("document-archive-invalid", "Document archive decryption failed; not enough space to stage the decrypted document tree.");
   }
