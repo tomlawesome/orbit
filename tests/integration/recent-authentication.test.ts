@@ -32,11 +32,18 @@ import {
 } from "@/lib/auth/recent-auth";
 import type { VerifiedIdentity } from "@/lib/auth/oidc";
 import { createSession, csrfTokenForSession, readSession } from "@/lib/auth/session";
-import { getAuthConfig } from "@/lib/env";
+import { getAuthConfig, resetAuthConfigForTests } from "@/lib/env";
 import { createLocalUser } from "@/server/local-credentials";
 import { cleanupIntegrationEnvironment } from "./support/fixtures";
 import { callRoute, loadRoute } from "./support/request-event";
 import { readSetCookie } from "./support/set-cookie";
+
+/* The transfer targets below are provider-backed accounts, and an identity
+   only counts as a way in while the provider is switched on (#1151 SS1-S1),
+   so the key is on for this file and restored at the end. */
+const previousOidcKey = process.env.ORBIT_AUTH_OIDC;
+process.env.ORBIT_AUTH_OIDC = "true";
+resetAuthConfigForTests();
 
 const { POST: transferPrimary } = await loadRoute("admin/primary");
 
@@ -64,6 +71,9 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
+  if (previousOidcKey === undefined) delete process.env.ORBIT_AUTH_OIDC;
+  else process.env.ORBIT_AUTH_OIDC = previousOidcKey;
+  resetAuthConfigForTests();
   await cleanupIntegrationEnvironment();
 });
 
