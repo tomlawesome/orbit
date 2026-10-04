@@ -380,6 +380,10 @@
       @param {ItemRecord} item */
   function act(name, item) {
     if (!pocket) { open(name, item); return; }
+    // Asked here, not left to open(): the sheet is reopened rather than
+    // toggled, so the panel is cleared first, and open()'s own question
+    // would then find nothing to ask about (#1151 W1-S5).
+    if (panel !== null && panelDirty() && !confirm("Discard changes to this panel?")) return;
     panel = null;
     open(name, item);
     raise(name);
@@ -400,21 +404,36 @@
       on the next load instead of vanishing with no trace. One slot: this
       screen only ever holds one completion at a time. */
   const HELD_COMPLETION_KEY = "orbit:pending-completion";
-  /** @param {object} command */
-  function stashHeldCompletion(command) {
-    try { localStorage.setItem(HELD_COMPLETION_KEY, JSON.stringify({ command })); } catch { /* best effort */ }
-  }
-  function clearHeldCompletionStash() {
-    try { localStorage.removeItem(HELD_COMPLETION_KEY); } catch { /* best effort */ }
-  }
-  /** @returns {object | null} */
+  /* The same list the home pocket keeps under this key, in the same shape:
+     one entry per held completion, each leaving on its own send. One slot
+     here overwrote whatever the pocket had left waiting, and read the
+     pocket's list as nothing at all (#1151 W1-R5). */
+  /** @returns {object[]} */
   function readHeldCompletionStash() {
     try {
       const raw = localStorage.getItem(HELD_COMPLETION_KEY);
-      return raw ? JSON.parse(raw).command : null;
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [parsed.command].filter(Boolean);
     } catch {
-      return null;
+      return [];
     }
+  }
+  /** @param {object[]} commands */
+  function writeHeldCompletionStash(commands) {
+    try {
+      if (commands.length === 0) localStorage.removeItem(HELD_COMPLETION_KEY);
+      else localStorage.setItem(HELD_COMPLETION_KEY, JSON.stringify(commands));
+    } catch { /* best effort */ }
+  }
+  /** @param {object} command */
+  function stashHeldCompletion(command) {
+    writeHeldCompletionStash([...readHeldCompletionStash(), command]);
+  }
+  /** @param {object} command */
+  function clearHeldCompletionStash(command) {
+    const key = JSON.stringify(command);
+    writeHeldCompletionStash(readHeldCompletionStash().filter((one) => JSON.stringify(one) !== key));
   }
   /** @param {ItemRecord} item */
   function tapComplete(item) {
@@ -445,7 +464,7 @@
         clearTimeout(job.timer);
         job.done = true;
         if (pending === job) pending = null;
-        clearHeldCompletionStash();
+        clearHeldCompletionStash(job.command);
       },
     });
   }
@@ -456,7 +475,7 @@
     if (pending === job) pending = null;
     await run(() => job.command, { leave: job.leave });
     if (problem) wake(problem, { failure: true });
-    else clearHeldCompletionStash();
+    else clearHeldCompletionStash(job.command);
   }
   /* Leaving before the wake has gone: the completion is sent now, not lost
      — and stashed before it is sent (above), so even a send this page never
@@ -467,7 +486,7 @@
     clearTimeout(job.timer);
     job.done = true;
     pending = null;
-    applyCommand(job.command).then(clearHeldCompletionStash).catch(() => {});
+    applyCommand(job.command).then(() => clearHeldCompletionStash(job.command)).catch(() => {});
   }
   beforeNavigate(() => { sendPending(); });
   $effect(() => {
@@ -480,14 +499,12 @@
       already holds this change — most likely the original send landing
       after all — so that alone is treated as the stash's own success. */
   function retryHeldCompletionStash() {
-    const command = readHeldCompletionStash();
-    if (!command) return;
-    applyCommand(command).then(async () => {
-      clearHeldCompletionStash();
+    for (const command of readHeldCompletionStash()) applyCommand(command).then(async () => {
+      clearHeldCompletionStash(command);
       await rereadUnlessLeaving();
     }).catch(async (error) => {
       if (error instanceof WorkspaceError && error.code === "version_conflict") {
-        clearHeldCompletionStash();
+        clearHeldCompletionStash(command);
         await rereadUnlessLeaving();
         return;
       }
