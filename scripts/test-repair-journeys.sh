@@ -225,8 +225,11 @@ install_deployment() {
   else
     image="orbit-repair-journeys-local:$revision"
     note 'building working-tree image (this takes several minutes)'
+    # Stamped at ADR-0016's supported-install floor, not v0.0.0: repair.sh
+    # refuses every version below the floor (#1213 withdrew the major-0
+    # exemption), and these journeys need repair to act on the deployment.
     docker build --quiet -t "$image" \
-      --build-arg ORBIT_VERSION=v0.0.0 \
+      --build-arg ORBIT_VERSION=v0.3.0 \
       --build-arg ORBIT_REVISION="$revision" \
       --build-arg ORBIT_CHANNEL=ci "$repo_root" >/dev/null ||
       fail 'working-tree image build failed'

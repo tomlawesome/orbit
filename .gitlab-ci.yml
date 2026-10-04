@@ -2916,8 +2916,9 @@ launcher_install_compat:
 #                    and only then creates the consumer-visible channel tag,
 #                    registry-side. Retrying it alone re-publishes without
 #                    re-running validation -- a failed publication costs a
-#                    re-publish, not the full bar (v1.3.0 took three
-#                    promotions in an afternoon the other way).
+#                    re-publish, not the full bar (v0.3.0, then numbered
+#                    v1.3.0, took three promotions in an afternoon the
+#                    other way).
 #
 # Why a runner mount and not CI/CD variables: this instance is GitLab CE
 # (19.3.1, verified 2026-09-08), which has no protected environments and no
@@ -3490,12 +3491,12 @@ install_bootstrap:
 # makes the harness set ORBIT_CHANNEL=latest for the piped install, which is
 # exactly what a truly default, no-flags install receives.
 #
-# Expected RED until the v1.3.0 promotion: today `latest` on GHCR is still
-# the v1.2.0 image, built before ADR-0019's asset bundling, so install.sh
+# Expected RED until the v0.3.0 promotion: today `latest` on GHCR is still
+# the retracted v1.2.0 image, built before ADR-0019's asset bundling, so install.sh
 # refuses it (see the io.orbit.deployment-assets label check and #1038). A
 # red run here before that promotion is the known, accepted state -- do not
 # silence it with allow_failure, which would hide the one thing this job
-# exists to catch: a red run *after* v1.3.0 promotes is a release defect,
+# exists to catch: a red run *after* v0.3.0 promotes is a release defect,
 # not an expected gap, and must fail the schedule loudly.
 #
 # Same shape and rules as install_bootstrap otherwise -- same runner, image,
