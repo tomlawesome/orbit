@@ -326,6 +326,7 @@ page's URL at failure, which this one has to infer.
 - 2026-10-03 · 60ada53e (!1018) · pipeline 1987 / fidelity_webkit (job 29946) · "pill moving between places (dim raised) · /create · ch2", 5 samples, 7.0 frames a second at 430x932 — same shape and the same degraded-host range as every sighting above. Sixth sighting, still #1184.
 - 2026-10-04 · bc9ba29e (!1021) · pipeline 2064 / fidelity_webkit (job 31042) · "pill faint (dim raised) · /create · ch2", 6 samples, in the 24.5-minute run alongside the full acceptance stage. Seventh sighting, still #1184.
 - 2026-10-04 · 0bfe9636 (!1021; its tour changes are W3's shared demo-body scaffolding, film vocabulary and veil tap blocking, none in the pill's motion) · pipeline 2079 / fidelity_webkit (job 31206) · "pill moving between places (dim raised) · /create · ch2", 4 samples, in a 23.6-minute run alongside fidelity and repair_journeys. Eighth sighting, still #1184.
+- 2026-10-04 · 0d43ca97 (`dev` after !1021; the batch's tour changes are the film's own transport leak fix, not chapter 2, /create or the pill) · pipeline 2087 / fidelity_webkit (job 31334, 22.0 minutes, alongside `fidelity` and the acceptance stack on the shared runner) · the same assertion at line 671, "the pill in front and never faint; the callouts and rings where the design puts them", failed on every attempt including Playwright's in-job retry; 25 of 26 passed. First sighting in CI rather than locally; still #1174.
 
 ## tour-pocket-webkit.spec.js "suggested values give way to real text (#1174 round 4)" — at 430x932 only (#1208)
 
