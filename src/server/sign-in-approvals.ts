@@ -42,6 +42,7 @@ import { base64url } from "jose";
 import { getDb } from "@/db";
 import { auditLog, signInApprovals, users } from "@/db/schema";
 import { describeDevice } from "@/lib/auth/device";
+import { AuthError } from "@/lib/auth/errors";
 import { log } from "@/lib/logger";
 import { recordLocalCredentialFailure } from "@/server/local-credentials";
 import { absoluteAppLink, sendBoundedMail, type InvitationMailer, type InvitationSendError } from "@/server/invitations/send";
@@ -596,6 +597,10 @@ export async function collectSignInApproval(
     const session = await mintSession(row.userId);
     return { state: "approved", userId: row.userId, session };
   } catch (error) {
+    // A disabled account is an answer, not a hiccup: the approval stays
+    // spent, or re-enabling the account within the TTL would let the old
+    // emailed link sign in with no new approval asked for.
+    if (error instanceof AuthError && error.code === "account_disabled") return { state: "denied" };
     await db.update(signInApprovals)
       .set({ consumedAt: null })
       .where(and(eq(signInApprovals.id, row.id), eq(signInApprovals.consumedAt, spentAt)));
