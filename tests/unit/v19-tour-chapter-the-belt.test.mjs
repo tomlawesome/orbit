@@ -311,6 +311,24 @@ describe("the beats, in round 6's order", () => {
     expect(pressed).toEqual([SELECTORS.DESK.body, SELECTORS.DESK.docBody]);
   });
 
+  it("presses a body that carries documents when the first body has none (#1191), as the pocket does", async () => {
+    const { log, ctx } = recorder();
+    /* Two bodies on the sky: the first bare, the second carrying papers. The
+       recorder's ctl answers every other selector with nothing, so only the
+       carrying lookup finds an element. */
+    const carrying = document.createElement("a");
+    const bare = ctx.ctl;
+    ctx.ctl = (spec) => {
+      const control = bare(spec);
+      if (spec.sel === SELECTORS.DESK.bodyWithPapers) return { ...control, els: [carrying], ringEls: [carrying] };
+      return control;
+    };
+    await belt.play(ctx);
+    const pressed = log.filter(([word]) => word === "press").map(([, sel]) => sel);
+    expect(pressed).toEqual([SELECTORS.DESK.bodyWithPapers, SELECTORS.DESK.docBody]);
+    expect(log.filter(([word, sel]) => word === "goto" && sel === SELECTORS.DESK.body)).toEqual([]);
+  });
+
   it("reads a paper for real right after pressing it, and unreads it right after the read callout", async () => {
     const { log, ctx } = recorder();
     await belt.play(ctx);
