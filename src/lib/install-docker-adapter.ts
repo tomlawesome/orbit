@@ -380,9 +380,14 @@ export function createInstallDockerAdapter(options: InstallDockerAdapterOptions)
       run(composeArgs("down", "--remove-orphans"), { stdio: ["ignore", "ignore", "ignore"], timeout: timeouts.down, killSignal: "SIGTERM" });
     },
     removeLeftoverDatabaseVolume: () => {
-      const listed = runCaptured(["volume", "ls", "--filter", "name=orbit-db-data", "--format", "{{.Name}}"]) ?? "";
-      const leftover = listed.split("\n").find((name) => /(^|_)orbit-db-data$/.test(name));
-      if (leftover) run(["volume", "rm", "--", leftover], { stdio: ["ignore", "ignore", "ignore"], timeout: timeouts.quick, killSignal: "SIGTERM" });
+      // This project's volume by its exact name, never "the first one that
+      // looks like ours": the host may carry another deployment's live
+      // database under the same suffix, and a failed install must not take
+      // that with it. No project name, nothing removed.
+      if (!composeProjectName) return;
+      const own = `${composeProjectName}_orbit-db-data`;
+      const listed = runCaptured(["volume", "ls", "--filter", `name=${own}`, "--format", "{{.Name}}"]) ?? "";
+      if (listed.split("\n").includes(own)) run(["volume", "rm", "--", own], { stdio: ["ignore", "ignore", "ignore"], timeout: timeouts.quick, killSignal: "SIGTERM" });
     },
     composeConfigValidate: () =>
       statusOk(
