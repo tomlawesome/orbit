@@ -155,6 +155,10 @@ async function findTika(bundleDir: string): Promise<Tika> {
       child.once("exit", (code) => { clearTimeout(deadline); resolve(code); });
     });
     if (runExitCode === "timeout") {
+      // The child first: a `docker run` still pulling has no container for
+      // `docker stop` to find, and left running it would start one later
+      // that nothing tracks -- the leftover the check above exists for.
+      child.kill("SIGTERM");
       await stop();
       throw new Error("docker run did not return within ten minutes (image pull stuck?)");
     }
