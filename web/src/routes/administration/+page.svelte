@@ -314,12 +314,19 @@
   const DRAFT_KEY = "orbit-local-user-draft";
 
   /** @param {string} intent */
-  function stashDraft(intent) {
+  /**
+   * @param {string} intent
+   * @param {{ resend?: { personId: string, days: number } | null }} [about]
+   */
+  function stashDraft(intent, about = {}) {
+    // `about` names what the challenged tap was opening: it is stashed
+    // before the tap's own state is set, so reading that state here would
+    // capture the form before it opened.
     const payload = {
       intent,
       local: localDraft,
       systemName,
-      resend: resendFor ? { personId: resendFor, days: resendDays } : null,
+      resend: about.resend ?? (resendFor ? { personId: resendFor, days: resendDays } : null),
     };
     try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(payload)); } catch { /* storage refused: the form simply starts empty */ }
   }
@@ -331,8 +338,8 @@
       if (!held) return;
       const draft = JSON.parse(held);
       if (draft.local) localDraft = { ...localDraft, ...draft.local };
-      if (draft.intent === "system_create" && draft.systemName) {
-        systemName = draft.systemName;
+      if (draft.intent === "system_create") {
+        systemName = draft.systemName ?? "";
         creatingSystem = true;
       }
       if (draft.intent === "setup_link_issue" && draft.resend?.personId) {
@@ -365,13 +372,14 @@
    * @param {string} intent
    * @param {() => void} openField
    * @param {(message: string) => void} [report]
+   * @param {{ resend?: { personId: string, days: number } | null }} [about] what the tap is opening, for stashDraft
    */
-  async function challengeThen(intent, openField, report = (message) => (localProblem = message)) {
+  async function challengeThen(intent, openField, report = (message) => (localProblem = message), about = {}) {
     localProblem = null;
     resendProblem = null;
     if (actorHasPassword || provenIntent === intent) { openField(); return; }
     try {
-      stashDraft(intent);
+      stashDraft(intent, about);
       await startStepUp({ intent, returnTo: `/administration?stepup=${encodeURIComponent(intent)}` });
     } catch (error) {
       report(setupWords(error));
@@ -1008,7 +1016,7 @@
                         resendDays = SETUP_LINK_DAYS.fallback;
                         resendPassword = "";
                         resendDelivery = null;
-                      })}
+                      }, undefined, { resend: { personId: person.id, days: SETUP_LINK_DAYS.fallback } })}
                       aria-expanded={resendFor === person.id}
                       aria-label={`send a new setup link to ${person.displayName}`}>send a new setup link…</button>
             {/if}
