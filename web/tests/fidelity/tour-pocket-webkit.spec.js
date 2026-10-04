@@ -869,20 +869,31 @@ async function settledShot(page, box) {
  * @param {string} id the field's id
  */
 async function placeholderShows(page, id) {
-  const box = await page.evaluate((one) => {
+  const found = await page.evaluate((one) => {
     const el = /** @type {HTMLElement} */ (document.getElementById(one));
     const r = el.getBoundingClientRect();
     const x = Math.max(0, r.left + 2), y = Math.max(0, r.top + 2);
     const right = Math.min(window.innerWidth, r.right - 2), bottom = Math.min(window.innerHeight, r.bottom - 2);
-    return right - x < 8 || bottom - y < 8 ? null : { x, y, width: right - x, height: bottom - y };
+    const at = { x: window.scrollX, y: window.scrollY };
+    return { at, box: right - x < 8 || bottom - y < 8 ? null : { x, y, width: right - x, height: bottom - y } };
   }, id);
+  const { at, box } = found;
   if (!box) return null;
+  /* WebKit's scroll anchoring moves the page when a half-visible field's
+     placeholder goes (or comes back), so without this the second picture
+     would be of a different strip of the page. Put the page back where it
+     was, at once (the page's own smooth scrolling would take a while). */
+  /** @param {{ x: number, y: number }} to */
+  const scrollBack = (to) => page.evaluate((p) => {
+    if (window.scrollX !== p.x || window.scrollY !== p.y) window.scrollTo({ left: p.x, top: p.y, behavior: "instant" });
+  }, to);
   const as = await settledShot(page, box);
   await page.evaluate((one) => {
     const el = /** @type {HTMLInputElement} */ (document.getElementById(one));
     el.dataset.heldPlaceholder = el.placeholder;
     el.placeholder = "";
   }, id);
+  await scrollBack(at);
   /* Both pictures are settled frames, the second only after the field has
      been repainted without its placeholder: an immediate shot could still
      be the old frame, equal to `as`, and prove nothing (#1208). */
@@ -893,6 +904,7 @@ async function placeholderShows(page, id) {
     el.placeholder = el.dataset.heldPlaceholder ?? "";
     delete el.dataset.heldPlaceholder;
   }, id);
+  await scrollBack(at);
   return (await shareDiffering(page, as, bare)) > 0.004;
 }
 
