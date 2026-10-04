@@ -36,7 +36,10 @@ describe("#1151 W1-S1: the desktop create form warns before discarding", () => {
 
   it("mountCreate() exposes isDirty() off reveal()'s own signal", () => {
     const tail = behaviour.slice(behaviour.lastIndexOf("return {"));
-    expect(tail).toMatch(/isDirty:\s*\(\)\s*=>\s*disclose\.classList\.contains\("open"\)/u);
+    // ...and a save that landed is not something to discard: leaving for
+    // /home after it must not ask.
+    expect(tail).toMatch(/isDirty:\s*\(\)\s*=>\s*!committed && disclose\.classList\.contains\("open"\)/u);
+    expect(behaviour).toMatch(/committed = true;\s*\n\s*await goto\("\/home"\);/u);
     expect(tail).toMatch(/teardown:/u);
   });
 

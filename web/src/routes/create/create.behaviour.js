@@ -1,5 +1,5 @@
 import { goto } from "$app/navigation";
-import { activeHousehold, applyCommand } from "$lib/data/workspace.js";
+import { WorkspaceError, activeHousehold, applyCommand } from "$lib/data/workspace.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
 import { screenScope } from "$lib/teardown.js";
 import { createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, refusalOf } from "./entry.js";
@@ -77,6 +77,9 @@ export function mountCreate() {
   /** @type {string | null} */
   let chosenSection = null;
   let saving = false;
+  /** Set the moment a save lands, so leaving for /home is never read as
+      discarding what was typed. */
+  let committed = false;
   /** A message from the last save attempt (a loud failure, or "saved, the
       document was not attached"), held until the NEXT attempt — same as the
       pocket's own `problem`, which nothing typed clears early. */
@@ -296,7 +299,13 @@ export function mountCreate() {
       // save() already uses for the identical gap (#1151 W1-Q9).
       await applyCommand(createCommandOf(entryFromForm(), {
         householdId: active.id, currency: active.currency ?? "GBP", id: draftId,
-      }));
+      })).catch((error) => {
+        /* This draft id is new to the server, so "this item changed on another
+           device" can only mean the earlier send landed and its answer was
+           lost (same reading as pocket.svelte's save). */
+        if (error instanceof WorkspaceError && error.code === "version_required") return;
+        throw error;
+      });
 
       if (attachment) {
         /* Deliberately not silent: the entry is saved, the document is not,
@@ -309,6 +318,7 @@ export function mountCreate() {
         return;
       }
 
+      committed = true;
       await goto("/home");
     } catch (error) {
       /* #1058e: loud, not small print — the button goes back to "Add to
@@ -367,6 +377,6 @@ export function mountCreate() {
         commit to it" is already exactly this signal — a real name, a
         chosen type or a dropped document — so it is read rather than
         tracked twice. */
-    isDirty: () => disclose.classList.contains("open"),
+    isDirty: () => !committed && disclose.classList.contains("open"),
   };
 }
