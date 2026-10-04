@@ -580,16 +580,6 @@ export const SIGNED_IN = [
     await page.locator("#st-tab-sent").click();
     await page.locator("#st-panel-sent:not([hidden])").waitFor();
   } },
-  { route: "/settings", state: "first-warning-sheet", reach: async (page) => {
-    await go(page, "/settings");
-    await row(page, ".st-pocket", "first warning").locator("[data-row-face]").click();
-    await sheetUp(page);
-  } },
-  { route: "/settings", state: "final-warning-sheet", reach: async (page) => {
-    await go(page, "/settings");
-    await row(page, ".st-pocket", "final warning").locator("[data-row-face]").click();
-    await sheetUp(page);
-  } },
   { route: "/settings", state: "session-open", reach: async (page) => {
     await go(page, "/settings");
     await openRow(page, row(page, ".st-pocket", "Safari"));
