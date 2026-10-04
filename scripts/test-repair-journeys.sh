@@ -1502,11 +1502,14 @@ journey_successful_rollback() {
   compgen -G "$target/.orbit-install-staging.*" >/dev/null 2>&1 &&
     fail 'successful-rollback: the staging evidence survived a completed rollback'
 
-  # The restore never deletes a live secret file: it moves the one it
+  # The restore never deletes a live secret path: it moves the one it
   # replaces to a dated copy beside it (repair.sh, #1151 O2-S1), so a
-  # rollback that restored the wrong thing still leaves the operator the
-  # file that was live. Prove that copy, then leave it out of the manifest
-  # comparison below — it is the one file a correct rollback adds.
+  # rollback that restored the wrong thing still leaves the operator what
+  # was live. Both live secret paths get one: .env-orbit (the drifted file)
+  # and the .orbit-secrets directory (staged too, so restored too, though
+  # nothing in it moved). Prove each copy, then leave them out of the
+  # manifest comparison below — they are the two entries a correct
+  # rollback adds.
   local kept
   kept="$(compgen -G "$target/.env-orbit.pre-restore.*" || true)"
   [[ -n "$kept" && "$(wc -l <<<"$kept")" == 1 ]] ||
@@ -1515,11 +1518,16 @@ journey_successful_rollback() {
     fail 'successful-rollback: the pre-restore copy does not hold the live file the rollback replaced'
   [[ "$(stat -c '%a' "$kept")" == 600 ]] ||
     fail 'successful-rollback: the pre-restore copy is not mode 600'
+  kept="$(compgen -G "$target/.orbit-secrets.pre-restore.*" || true)"
+  [[ -n "$kept" && "$(wc -l <<<"$kept")" == 1 && -d "$kept" ]] ||
+    fail "successful-rollback: expected exactly one .orbit-secrets.pre-restore.* directory, found: ${kept:-none}"
+  diff -r -- "$kept" "$target/.orbit-secrets" >/dev/null ||
+    fail 'successful-rollback: the pre-restore secrets directory differs from the restored one, though nothing in it drifted'
 
   status=0
   repair --check >/dev/null 2>&1 || status=$?
   [[ "$status" == 0 ]] || fail "successful-rollback: --check after the rollback exited $status, expected 0"
-  [[ "$(deployment_manifest | grep -vF './.env-orbit.pre-restore.')" == "$before" ]] ||
+  [[ "$(deployment_manifest | grep -vE '^\./\.(env-orbit|orbit-secrets)\.pre-restore\.')" == "$before" ]] ||
     fail 'successful-rollback: the rolled-back deployment does not match its pre-drift manifest'
   health_check || fail 'successful-rollback: the deployment is unhealthy after the rollback'
   [[ "$(household_name)" == 'repair-journeys-household' ]] ||
