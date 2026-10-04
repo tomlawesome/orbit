@@ -136,3 +136,37 @@ describe("backup.sh and restore.sh share one backup/restore lock (#1151 O2-R3)",
     expect(secondAcquired > firstReleased).toBe(true);
   }, PROCESS_TEST_TIMEOUT_MS);
 });
+
+// #1151 RANGE-R7: backup.sh used to read/materialize the document KEK
+// (read_document_kek) before taking this same lock, unlike restore.sh,
+// which already locks first. import-recovery-bundle.sh swaps the live
+// document-kek file by two renames under this same lock; a backup started
+// in the narrow window between those two renames saw the live key file
+// transiently absent and hard-failed with "Missing regular document KEK
+// file" even though nothing was actually wrong with the key. Locking
+// first, like restore.sh, serializes a backup against that swap instead of
+// racing it.
+describe("backup.sh reads the document KEK after acquiring the backup/restore lock, not before (#1151 RANGE-R7)", () => {
+  it("acquire_backup_restore_lock is called before read_document_kek in the bare (no-argument) dispatch path", () => {
+    const bareDispatchMatch = backupScriptSource.match(
+      /elif \[\[ "\$#" == 0 \]\]; then\n([\s\S]*?)\nelse\n/u,
+    );
+    expect(bareDispatchMatch).not.toBeNull();
+    const bareDispatchBody = bareDispatchMatch[1];
+    const lockIndex = bareDispatchBody.indexOf("acquire_backup_restore_lock");
+    const readKekIndex = bareDispatchBody.indexOf("read_document_kek");
+    expect(lockIndex).toBeGreaterThan(-1);
+    expect(readKekIndex).toBeGreaterThan(-1);
+    expect(lockIndex).toBeLessThan(readKekIndex);
+  });
+
+  it("--verify still reads the document KEK (it needs it to decrypt the bundle) without taking the backup/restore lock", () => {
+    const verifyDispatchMatch = backupScriptSource.match(
+      /if \[\[ "\$\{1:-\}" == "--verify" \]\]; then\n([\s\S]*?)\nelif /u,
+    );
+    expect(verifyDispatchMatch).not.toBeNull();
+    const verifyDispatchBody = verifyDispatchMatch[1];
+    expect(verifyDispatchBody).toContain("read_document_kek");
+    expect(verifyDispatchBody).not.toContain("acquire_backup_restore_lock");
+  });
+});

@@ -263,14 +263,22 @@ EOF
 
 trap cleanup EXIT
 require_tools
-read_document_kek
 
 if [[ "${1:-}" == "--verify" ]]; then
   [[ "$#" == 2 ]] || fail "Usage: bash scripts/backup.sh --verify <backup.tar>"
+  # --verify reads an existing bundle and never mutates the live key file,
+  # so it takes no lock; the ordering fix below is scoped to the bare path.
+  read_document_kek
   validate_bundle "$2" >/dev/null
   printf 'Orbit backup is valid: %s\n' "$2"
 elif [[ "$#" == 0 ]]; then
+  # #1151 RANGE-R7: lock first, then read the live key -- the same order
+  # restore.sh already uses. Reading it before the lock left a window where
+  # import-recovery-bundle.sh's own two-rename key swap (taken under the
+  # same lock) could make the live key file transiently absent, aborting a
+  # backup with nothing actually wrong with its key.
   acquire_backup_restore_lock
+  read_document_kek
   create_bundle
 else
   fail "Usage: bash scripts/backup.sh [--verify <backup.tar>]"
