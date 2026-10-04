@@ -1423,6 +1423,10 @@ export function recoverRestore(options: RecoverRestoreOptions): RestoreDisposeRe
     }
     throw error;
   }
+  // Recovery writes the checkpoint's document-kek back over the live one,
+  // so it must refuse during an open rotation for the same reason prepare()
+  // does: otherwise the rewrap worker reads two unrelated keys.
+  refuseIfDocumentKekRotationOpen(options.paths.documentKekFile);
   const { fields, checkpointDirectory } = loaded;
   const digests: RestoreCheckpointDigests = {
     databaseSha256: fields.databaseSha256,

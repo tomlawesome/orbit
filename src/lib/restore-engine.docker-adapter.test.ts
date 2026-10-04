@@ -560,6 +560,30 @@ describe("document-KEK rotation guard on restore (SS1-S3)", () => {
     run.createCheckpoint();
     run.dispose();
   });
+
+  it("refuses --recover while a rotation is open, leaving the live key and the checkpoint untouched", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    run.createCheckpoint();
+    const newDocumentsRoot = join(sandbox, "new-documents");
+    buildDocumentTree(newDocumentsRoot, NEW_KEY, 20);
+    run.cutoverDocuments(tarOf(newDocumentsRoot, join(sandbox, "new-documents.tar")));
+    adapter.healthOk = false;
+    expect(run.dispose().outcome).toBe("rollback-failed");
+
+    // A rotation opens between the failed restore and the operator's --recover.
+    writeFileSync(join(sandbox, "document-kek-next"), `${"b".repeat(64)}\n`, { mode: 0o600 });
+    adapter.healthOk = true;
+    const liveKeyBefore = readFileSync(paths.documentKekFile, "utf8");
+    const recoverWorkDir = mkdtempSync(join(sandbox, "recover-work-"));
+
+    expect(() => recoverRestore({ adapter, paths, workDir: recoverWorkDir })).toThrow(RestoreEngineRefusal);
+    expect(readFileSync(paths.documentKekFile, "utf8")).toBe(liveKeyBefore);
+    expect(readFileSync(paths.journalPath, "utf8")).toContain("state=rollback-failed\n");
+  });
 });
 
 // --- (3) #383: a failed/refused createStageDatabase must still be dropped --
