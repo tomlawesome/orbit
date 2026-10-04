@@ -170,3 +170,123 @@ metadata. The Playwright trace is kept only on the first retry. Checks on
 real devices and with real assistive technology are still part of release
 acceptance and are not implied by the automated Chromium, Firefox and WebKit
 evidence.
+
+## Local development
+
+### Requirements
+
+- Node.js 22 or later
+- pnpm, at the version `package.json` pins under `packageManager`
+- PostgreSQL 18, or Docker for the database only
+
+### Start the development stack
+
+```sh
+pnpm install
+bash scripts/configure.sh
+pnpm db:migrate
+pnpm dev
+```
+
+To run only PostgreSQL in Docker:
+
+```sh
+docker compose --env-file .env-orbit up -d orbit-db
+```
+
+The default host and database settings in `.env-orbit.example` use the same
+generated PostgreSQL password file as the container.
+
+### Quality checks
+
+```sh
+bash scripts/test-backend.sh
+pnpm test:coverage
+bash scripts/test-frontend.sh
+bash scripts/test-all.sh
+```
+
+The frontend script targets `http://127.0.0.1:3000` by default; set
+`PLAYWRIGHT_BASE_URL` to test another non-production deployment. Use
+`ORBIT_SKIP_E2E=true bash scripts/test-all.sh` for the fast static and unit
+suite when no browser target is running.
+
+The authenticated acceptance checks use a separate Compose overlay with a
+disposable local OIDC provider. It performs discovery, PKCE, code exchange and
+signed ID-token validation; it does not add an Orbit sign-in bypass. Run it only
+against disposable data.
+
+`bash scripts/test-e2e-local.sh` is the safe default: it brings up this same
+overlay, plus the mail overlay, under an isolated Compose project derived from
+this worktree and process (so it can never collide with a real deployment or
+another concurrent run on the same host), waits for health, runs the browser
+suite, and guarantees teardown, all mirroring the acceptance stage of the
+container-validation workflow:
+
+```sh
+bash scripts/test-e2e-local.sh
+bash scripts/test-e2e-local.sh --spec tests/e2e/v19-mail-review.spec.ts --project mobile-chromium
+```
+
+Re-running one failing spec need not pay for a fresh build and start each
+time: `--keep` leaves the stack up, and a later `--reuse PROJECT` (the
+project name that run's startup log line names) skips straight to Playwright
+against it. `--reuse` identifies and health-checks that stack itself --
+never assumes it is still healthy, and never tears it down:
+
+```sh
+bash scripts/test-e2e-local.sh --keep
+# ... a spec fails; fix it, then:
+bash scripts/test-e2e-local.sh --reuse <project> --spec tests/e2e/v19-mail-review.spec.ts
+```
+
+If you run the Compose commands by hand (for example to inspect a stack
+between steps), always pass an isolating `-p`, or you can silently attach to
+your real deployment's containers and data. `docker-compose.yml`'s
+`name: orbit` and `.env-orbit`'s `COMPOSE_PROJECT_NAME` both default to the
+same project name a real deployment uses, from any checkout, so a bare
+`--env-file .env-orbit` command with no `-p` reuses that deployment's
+containers and named volumes instead of creating its own. AGENTS.md documents
+this trap and issue #536 hit it for real. The `--keep` output prints the
+exact teardown line to use:
+
+```sh
+docker compose -p orbit-acceptance-local --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.acceptance.yml up --build --wait
+ORBIT_ACCEPTANCE_OIDC=true bash scripts/test-frontend.sh
+docker compose -p orbit-acceptance-local --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.acceptance.yml down --volumes --remove-orphans
+```
+
+`scripts/compose-isolation-preflight.sh` is the scripted version of the same
+check: source it and call `resolve_compose_project` and
+`compose_isolation_preflight` before an `up`, and it refuses -- naming the
+resolved project and the safe `-p` alternative -- when that project already
+has containers running.
+
+Install Playwright's local Chromium build once, then repeat browser tests
+without using an AI service:
+
+```sh
+bash scripts/install-test-browser.sh
+bash scripts/test-frontend.sh
+```
+
+The current measured suite and its known gaps are recorded in the
+[engineering baseline](engineering-baseline.md). Playwright verifies
+signed-out privacy in desktop and mobile Chromium and uses the disposable OIDC
+profile for authenticated household-lifecycle acceptance. Coverage is
+diagnostic while the database/API integration baseline is established; it is
+not an arbitrary release percentage.
+
+Every corpus committed to the repository is invented — real paperwork must
+never be committed. If you want to know how extraction does against your own
+real documents, [private local evaluation](private-eval.md) runs
+entirely on your machine, against a directory you choose outside the repo,
+and prints only per-field and overall scores; it structurally refuses to run
+against anything inside the repository and never prints document content.
+
+The [v1 charter](v1-charter.md) defines the supported release,
+[architecture and ADRs](architecture.md) record durable system decisions,
+and the [quality strategy](quality-strategy.md) defines test and CI
+evidence. GitHub milestones and issues own delivery status. Product directions
+outside the stable contract remain in the
+[feature register](feature-register.md).
