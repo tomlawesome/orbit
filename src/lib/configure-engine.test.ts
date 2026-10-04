@@ -715,6 +715,25 @@ describe("runConfigureApply (bare flow, minus ensure_vapid_keys)", () => {
     expect(() => statSync(documentKekPath)).toThrow();
     expect(originalKek).toMatch(/^[0-9a-f]{64}\n$/);
   });
+
+  // #1151 RANGE-R5: two concurrent first-time `orbit configure` runs used to
+  // both see every generated secret missing and each write their own,
+  // whichever finished last silently overwriting the other's file. Taking
+  // the deploy lock around the generation loop makes a second, concurrent
+  // run refuse instead of racing — simulated, as the O1-R8 tests above do,
+  // by pre-holding the lock rather than actually racing two threads.
+  it("RANGE-R5: refuses while another run holds the deploy lock, before generating any secret", () => {
+    const lockPath = join(deployDir, ".orbit-engine.lock");
+    writeFileSync(lockPath, "");
+    try {
+      expect(() => runConfigureApply(deployDir, "orbit-local:abcdef123456")).toThrow(ConfigureEngineRefusal);
+    } finally {
+      rmSync(lockPath, { force: true });
+    }
+    expect(() => statSync(join(deployDir, SECRETS_DIRECTORY_NAME, "session-secret"))).toThrow();
+    expect(() => statSync(join(deployDir, SECRETS_DIRECTORY_NAME, "postgres-password"))).toThrow();
+    expect(() => statSync(join(deployDir, SECRETS_DIRECTORY_NAME, "document-kek"))).toThrow();
+  });
 });
 
 describe("machine prompts (v0) — configure.sh field vocabulary", () => {
