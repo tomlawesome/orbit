@@ -632,8 +632,13 @@ write_journal() {
 sweep_orphaned_checkpoints() {
   local directory referenced_restore_id=""
   [[ -d "$restore_root" ]] || return 0
-  if [[ -f "$journal_path" && ! -L "$journal_path" ]]; then
-    referenced_restore_id="$(awk -F= '$1 == "restore_id" { print $2 }' "$journal_path" 2>/dev/null)"
+  # Anything at the journal's path that is not a plain readable file naming
+  # a restore -- a symlink, a directory, an unreadable or malformed file --
+  # is the "exists but unreadable" case too, and leaves every checkpoint
+  # alone. Only a path with nothing there at all means no restore is open.
+  if [[ -e "$journal_path" || -L "$journal_path" ]]; then
+    [[ -f "$journal_path" && ! -L "$journal_path" ]] || return 0
+    referenced_restore_id="$(awk -F= '$1 == "restore_id" { print $2 }' "$journal_path" 2>/dev/null)" || return 0
     [[ "$referenced_restore_id" =~ ^[A-Za-z0-9_-]+$ ]] || return 0
   fi
   for directory in "$restore_root"/checkpoint-*; do

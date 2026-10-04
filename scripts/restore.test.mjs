@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -575,6 +575,22 @@ describe("scripts/restore.sh sweep_orphaned_checkpoints (#1151 O2-R6)", () => {
     writeFileSync(join(checkpoint, "database.dump"), "last-good-dump-bytes");
 
     const result = runSweep(restoreRoot, "format_version=1\nstate=checkpointed\n");
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("returned-cleanly");
+    expect(existsSync(checkpoint)).toBe(true);
+  });
+
+  it("leaves every checkpoint alone when the journal path is a symlink", () => {
+    const restoreRoot = makeRestoreRoot();
+    const checkpoint = join(restoreRoot, "checkpoint-current1");
+    mkdirSync(checkpoint, { recursive: true });
+    writeFileSync(join(checkpoint, "database.dump"), "last-good-dump-bytes");
+    const elsewhere = join(restoreRoot, "elsewhere.journal");
+    writeFileSync(elsewhere, "format_version=1\nrestore_id=current1\n");
+    symlinkSync(elsewhere, join(restoreRoot, "restore.journal"));
+
+    const result = runSweep(restoreRoot, null);
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("returned-cleanly");
