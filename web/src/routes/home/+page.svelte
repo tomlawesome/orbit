@@ -670,6 +670,14 @@
   function onExploreBlur() {
     setTimeout(() => { stripOpen = false; completeArm.disarm(); }, 150);
   }
+  /* #1197: the server draws #explore (#842), so a reader can be in the field
+     before hydration binds onfocus, and focus does not fire again: the strip
+     stayed shut while the typed query filtered nothing visible. Catch up on
+     the focus nobody was listening for, as #856 and #1064 did for a missed
+     keystroke and press. */
+  onMount(() => {
+    if (document.activeElement?.id === "explore") onExploreFocus();
+  });
 
   /* At rest (empty query) the strip shows the same two rows the palette
      showed (BUILD.md §1): the attention group's own due-or-later two, not
