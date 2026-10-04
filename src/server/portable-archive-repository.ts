@@ -11,7 +11,8 @@ import { readDocumentDownload, uploadItemDocument } from "@/server/document-repo
 import { decryptPortableArchive, encryptPortableArchive, isEncryptedPortableArchive, type EncryptedPortableArchive } from "@/server/portable-archive";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
 import { normalizeComparableMetadata } from "@/server/metadata/crypto";
-import { openMetadataReader, requireMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
+import { MetadataCipher, openMetadataReader, requireMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
+import { loadMetadataKey, metadataCryptoAvailable, MetadataKeyLockedError, receiptKeyScope } from "@/server/metadata/keys";
 import { acquireActiveHouseholdLock } from "@/server/workspace-access";
 
 const ARCHIVE_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -86,6 +87,38 @@ function rejectOversizedCiphertext(archive: EncryptedPortableArchive): void {
   }
 }
 
+/**
+ * The household's cipher for an export. The portable archive is the
+ * deliberate plaintext escape hatch (ADR-0024 decision 6): it exports
+ * decrypted values, and therefore needs the KEK. A locked instance cannot
+ * decrypt anything, so an export taken now would write every title as "" --
+ * a file that imports but is useless. Refuse the export instead of producing
+ * it (#1151 A2-F2).
+ *
+ * Not `openMetadataReader`: that one answers "locked" for a household whose
+ * key has not been minted yet as well, and never throws, because a plain
+ * read of such a household is fine -- nothing of its has ever been
+ * encrypted, so its rows still hold plaintext and read normally. The same
+ * is true of its export. The refusal belongs to the key that exists but
+ * cannot be used: no KEK, or one that will not unwrap it.
+ */
+async function openExportMetadataReader(householdId: string): Promise<MetadataCipher> {
+  const scope = receiptKeyScope(householdId);
+  try {
+    if (!metadataCryptoAvailable()) throw new MetadataKeyLockedError();
+    return new MetadataCipher(await loadMetadataKey(scope.scope, scope.householdId));
+  } catch (error) {
+    if (error instanceof MetadataKeyLockedError) {
+      throw new AppError(
+        "archive_metadata_locked",
+        "Orbit can't export while the encryption key is locked; its titles would come out blank. Unlock the key first.",
+        503,
+      );
+    }
+    throw error;
+  }
+}
+
 /** Builds a normalized, household-scoped payload. Document bytes are opt-in and bounded. */
 export async function createPortableArchive(input: {
   userId: string;
@@ -110,19 +143,7 @@ export async function createPortableArchive(input: {
     db.select().from(documents).where(and(eq(documents.householdId, input.householdId), eq(documents.lifecycle, "available"))),
   ]);
   if (!household) throw new AppError("household_not_found", "That household is not available", 404);
-  // The portable archive is the deliberate plaintext escape hatch (ADR-0024
-  // decision 6): it exports decrypted values, and therefore needs the KEK. A
-  // locked instance cannot decrypt anything, so an export taken now would
-  // write every title as "" — a file that imports but is useless. Refuse
-  // the export instead of producing it (A2-F2).
-  const metadata = await openMetadataReader(input.householdId);
-  if (metadata.locked) {
-    throw new AppError(
-      "archive_metadata_locked",
-      "Orbit can't export while the encryption key is locked; its titles would come out blank. Unlock the key first.",
-      503,
-    );
-  }
+  const metadata = await openExportMetadataReader(input.householdId);
   const exportedItems = householdItems.map((item) => ({
     ...item,
     reference: metadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference }).value,
