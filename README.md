@@ -1,6 +1,6 @@
-<p align="center">
-  <strong>Development disclosure:</strong> Orbit was coded by Claude under human direction.
-</p>
+> [!IMPORTANT]
+> **Development disclosure:** Orbit was coded by Claude under human
+> direction.
 
 <p align="center">
   <img src="docs/images/orbit-banner.png" alt="Orbit — your year, in orbit" width="100%" />
