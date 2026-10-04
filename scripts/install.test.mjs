@@ -38,7 +38,7 @@ const installScript = fileURLToPath(new URL("./install.sh", import.meta.url));
 const configurationScriptPath = fileURLToPath(new URL("./configuration.sh", import.meta.url));
 const backupScriptPath = fileURLToPath(new URL("./backup.sh", import.meta.url));
 const restoreScriptPath = fileURLToPath(new URL("./restore.sh", import.meta.url));
-const readmePath = fileURLToPath(new URL("../README.md", import.meta.url));
+const upgradeProcedurePath = fileURLToPath(new URL("../docs/installer-guarantees.md", import.meta.url));
 
 const repository = "example/orbit-fixture";
 const registry = "fake-registry.example";
@@ -1586,16 +1586,16 @@ describe("install.sh", () => {
   });
 
   it("documents the configuration and database recovery identity contract", () => {
-    const readme = readFileSync(readmePath, "utf8");
+    const procedure = readFileSync(upgradeProcedurePath, "utf8");
 
-    expect(readme).toContain('preupgrade_config="$preupgrade_dir/orbit-pre-upgrade.env"');
-    expect(readme).toContain('chmod 600 "$preupgrade_config"');
-    expect(readme).toContain("configuration or pre-start failure automatically restores");
-    expect(readme).toContain(".orbit-install-staging.*");
-    expect(readme).toContain('cp -- "$preupgrade_config" .env-orbit');
-    expect(readme).toContain('bash scripts/restore.sh "$backup_path"');
-    expect(readme).toContain('rm -f -- "$preupgrade_config"');
-    expect(readme).toContain("validated `COMPOSE_PROJECT_NAME`");
+    expect(procedure).toContain('preupgrade_config="$preupgrade_dir/orbit-pre-upgrade.env"');
+    expect(procedure).toContain('chmod 600 "$preupgrade_config"');
+    expect(procedure).toContain("configuration or pre-start failure automatically restores");
+    expect(procedure).toContain(".orbit-install-staging.*");
+    expect(procedure).toContain('cp -- "$preupgrade_config" .env-orbit');
+    expect(procedure).toContain('bash scripts/restore.sh "$backup_path"');
+    expect(procedure).toContain('rm -f -- "$preupgrade_config"');
+    expect(procedure).toContain("validated `COMPOSE_PROJECT_NAME`");
   });
 
   it("persists a validated Compose project identity for fresh installs", () => {
