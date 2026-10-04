@@ -9,6 +9,7 @@ import {
   statSync,
   symlinkSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1577,5 +1578,54 @@ describe("scripts/configure.sh ensure_oidc_secret_placeholder fileModeActive ref
       ".orbit-secrets/oidc-client-secret is missing but OIDC_CLIENT_SECRET_FILE is already configured",
     );
     expect(existsSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"))).toBe(false);
+  });
+});
+
+// #1151 RANGE-F6: the new cross-process deploy lock (O1-R7/O1-R8,
+// .orbit-engine.lock) only ever guarded the opt-in container/TS engine.
+// scripts/configure.sh's own update_managed_keys took no lock at all, so two
+// concurrent default (bash-engine) `orbit configure` runs against the same
+// deployment directory could each read-modify-write .env-orbit and lose one
+// writer's keys. Mirrors src/lib/configure-engine.ts's acquireDeployLock:
+// same lock file, same "already running" refusal, same stale-after-10-minute
+// takeover.
+describe("scripts/configure.sh update_managed_keys deploy lock (#1151 RANGE-F6)", () => {
+  it("refuses a write while another run's deploy lock is held", () => {
+    const targetDir = makeFixture(undefined);
+    writeFileSync(join(targetDir, ".orbit-engine.lock"), "12345:1:2\n");
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Another orbit configure is already running against this deployment");
+    expect(result.stderr).toContain(".orbit-engine.lock");
+    // The other run's lock is left untouched, not stolen or deleted.
+    expect(readFileSync(join(targetDir, ".orbit-engine.lock"), "utf8")).toBe("12345:1:2\n");
+  });
+
+  it("reclaims a stale deploy lock left by a crashed run instead of blocking forever", () => {
+    const targetDir = makeFixture(undefined);
+    const lockPath = join(targetDir, ".orbit-engine.lock");
+    writeFileSync(lockPath, "99999:1:1\n");
+    const staleTime = (Date.now() - 11 * 60 * 1000) / 1000;
+    utimesSync(lockPath, staleTime, staleTime);
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).toBe(0);
+    // Released again after the (successful) run that reclaimed it.
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it("releases the lock after each successful update, so later steps in the same run do not see it as held", () => {
+    const targetDir = makeFixture(undefined);
+
+    // The bare flow calls update_managed_keys more than once in a single
+    // process (persist_orbit_image, then ensure_vapid_keys); every existing
+    // passing test exercises this already, but assert it directly too.
+    const result = runConfigure(targetDir);
+
+    expect(result.status).toBe(0);
+    expect(existsSync(join(targetDir, ".orbit-engine.lock"))).toBe(false);
   });
 });
