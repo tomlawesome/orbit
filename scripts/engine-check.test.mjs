@@ -237,7 +237,17 @@ describe("ORBIT_ENGINE_CHECK=container: composes the documented one-off invocati
     const targetDir = makeFixture({ composeProjectName: "enginechecktest" });
     const binDir = mkdtempSync(join(tmpdir(), "orbit-engine-check-notimeout-"));
     scratchDirs.push(binDir);
-    for (const tool of ["bash", "basename", "tr", "cat", "printf", "docker"]) {
+    // Every coreutils binary engine-check.sh itself actually shells out to
+    // (dirname and sed for repo_dir/project-name resolution, rm for its
+    // cleanup paths) plus basename/tr/cat/printf for interface parity with
+    // makeDockerlessBinDir below -- deliberately everything *except*
+    // timeout. Omitting dirname here once passed locally (an absent
+    // dirname happens to leave repo_dir resolving to "/", which this
+    // sandbox tolerated) but failed in CI, where the same missing dependency
+    // sent the script down a different, wrong error path ("docker is
+    // unavailable") before ever reaching the timeout check this test means
+    // to exercise.
+    for (const tool of ["bash", "basename", "dirname", "sed", "tr", "cat", "rm", "printf", "docker"]) {
       const realPath = failOnProcessDeadline(spawnSync("which", [tool], SPAWN_OPTS), { label: "makeNoTimeoutBinDir" }).stdout.trim();
       if (realPath) symlinkSync(realPath, join(binDir, tool));
     }
