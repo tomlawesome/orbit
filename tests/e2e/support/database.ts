@@ -98,7 +98,11 @@ const E2E_PROJECT_PREFIX = "orbit-e2e-local-";
 export function resolvedComposeProject(): string | undefined {
   const project = process.env.COMPOSE_PROJECT_NAME;
   if (project) {
-    if (project.startsWith(E2E_PROJECT_PREFIX) || process.env.ORBIT_E2E_REUSE === "true") return project;
+    // ORBIT_E2E_OWNED_PROJECT: scripts/test-e2e-local.sh names the project it
+    // brought up itself, whatever it is called -- its header invites
+    // COMPOSE_PROJECT_NAME, so the derived-shape rule alone refused the
+    // script's own documented override.
+    if (project.startsWith(E2E_PROJECT_PREFIX) || process.env.ORBIT_E2E_REUSE === "true" || project === process.env.ORBIT_E2E_OWNED_PROJECT) return project;
     throw new Error(
       `#1077: COMPOSE_PROJECT_NAME is '${project}', which is not an e2e stack (scripts/test-e2e-local.sh `
       + `always names its own '${E2E_PROJECT_PREFIX}<worktree-hash>-<pid>'). Refusing to reset a database `

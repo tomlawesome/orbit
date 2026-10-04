@@ -148,9 +148,16 @@ async function findTika(bundleDir: string): Promise<Tika> {
     // regardless used to hide a `docker run` failure (a leftover container
     // from an interrupted earlier run, for instance) behind the unrelated
     // "Tika never answered" message. Check its own exit first.
-    const runExitCode = await new Promise<number | null>((resolve) => {
-      child.once("exit", resolve);
+    // Bounded: a first run pulls the image, and a stuck pull used to sit
+    // here forever with nothing said.
+    const runExitCode = await new Promise<number | null | "timeout">((resolve) => {
+      const deadline = setTimeout(() => resolve("timeout"), 10 * 60_000);
+      child.once("exit", (code) => { clearTimeout(deadline); resolve(code); });
     });
+    if (runExitCode === "timeout") {
+      await stop();
+      throw new Error("docker run did not return within ten minutes (image pull stuck?)");
+    }
     const failure = dockerRunFailure(runExitCode);
     if (failure !== undefined) throw new Error(failure);
     if (await waitForTika(LOCAL_TIKA, undefined, 120)) return { url: LOCAL_TIKA, stop };
