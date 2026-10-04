@@ -15,6 +15,7 @@ import {
 import { entrancesSettled } from "./support/motion";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -82,6 +83,7 @@ test.beforeEach(({ isMobile }) => {
 });
 
 async function signIn(page: Page, returnTo: string) {
+  await answerPushWithoutAService(page);
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
   await page.getByRole("link", { name: READER() }).click();
   /* #1080: waits for the session, then holds administrator access. */

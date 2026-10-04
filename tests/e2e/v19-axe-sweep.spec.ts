@@ -39,6 +39,7 @@ const READER = () => workerAccount("administrator");
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
 async function signIn(page: Page, returnTo: string) {
+  await answerPushWithoutAService(page);
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
   await page.getByRole("link", { name: READER() }).click();
   /* #1080: waits for the session, then holds administrator access. */
@@ -384,7 +385,6 @@ test.describe("the signed-in v19 sweep", () => {
 
   for (const route of PLAIN_ROUTES) {
     test(`${route.path} has no automated WCAG A/AA violations`, async ({ page }) => {
-      await answerPushWithoutAService(page);
       await signIn(page, route.path);
       await route.ready(page);
       await axeCheck(page);

@@ -3,6 +3,7 @@ import { householdRegister } from "./support/households";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -63,6 +64,7 @@ let seeded = false;
 
 /** The way every other spec signs in: straight at the engine's login route. */
 async function signInAs(page: Page, account: string, returnTo = "/") {
+  await answerPushWithoutAService(page);
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
   await page.getByRole("link", { name: account }).click();
 }
