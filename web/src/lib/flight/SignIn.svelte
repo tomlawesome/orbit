@@ -7,7 +7,7 @@
   import Waiting from "./Waiting.svelte";
   import { clearLaunch, markLaunch } from "./arrival.js";
   import {
-    CLAIM, DOOR, LOCAL, STARTING, STARTING_BACKSTOP_MS,
+    APPROVAL_BACKSTOP_MS, CLAIM, DOOR, LOCAL, STARTING, STARTING_BACKSTOP_MS,
     applyStartingBackstop, availabilityOf, cardMessageFor, claimFromHash, doorMessageFor,
     doorModeOf, nextDoorState, phaseOf, readinessOf,
   } from "./door-state.js";
@@ -299,7 +299,7 @@
     card = "waiting";
     showCard(true);
     approvalFailures = 0;
-    approvalDeadlineAt = Date.now() + STARTING_BACKSTOP_MS;
+    approvalDeadlineAt = Date.now() + APPROVAL_BACKSTOP_MS;
     askAgain();
   }
 
