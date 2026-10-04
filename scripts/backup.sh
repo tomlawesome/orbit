@@ -36,8 +36,14 @@ fail() {
 # $temporary_path and $final_path must be on the same filesystem, which they
 # already are (both under $backup_directory).
 publish_bundle_atomically() {
-  ln -- "$temporary_path" "$final_path" 2>/dev/null ||
-    fail "A backup already exists at $final_path; rerun to get a distinct timestamp."
+  local link_error=""
+  if ! link_error="$(ln -- "$temporary_path" "$final_path" 2>&1)"; then
+    # Only a name that is really taken is a collision; anything else (a
+    # full or read-only disk) is reported as what it is, or the operator
+    # retries a timestamp forever.
+    [[ -e "$final_path" ]] && fail "A backup already exists at $final_path; rerun to get a distinct timestamp."
+    fail "Could not publish the backup bundle at $final_path: ${link_error#ln: }"
+  fi
   rm -f -- "$temporary_path"
 }
 
@@ -87,6 +93,7 @@ read_env_value() {
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == "${requested_key}="* ]]; then
       value="${line#*=}"
+      value="${value%$'\r'}"
       found=$((found + 1))
     fi
   done < "$file"
