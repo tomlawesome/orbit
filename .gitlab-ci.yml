@@ -2582,6 +2582,7 @@ repair_journeys:
         - scripts/engine-check.sh
         - launcher/pin.json
         - scripts/ci/build-launcher.sh
+        - scripts/ci/checkout-launcher-source.sh
   - when: manual
     allow_failure: true
 
@@ -2707,12 +2708,9 @@ launcher_install_compat:
     # a tracked launcher/ directory (launcher/pin.json, ADR-0031 #2), and
     # `git clone` refuses a destination that already exists and is non-empty.
     - apt-get install -y -qq --no-install-recommends git
-    - |
-      set -eu
-      launcher_tag="$(sed -n 's/.*"tag"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' launcher/pin.json | head -1)"
-      [ -n "$launcher_tag" ] || { echo "launcher/pin.json has no tag"; exit 1; }
-      git clone --quiet https://github.com/tomlawesome/orbit-launcher.git .orbit-launcher-src
-      git -C .orbit-launcher-src checkout --quiet "$launcher_tag"
+    # Checks out launcher/pin.json's tag and refuses unless it resolves to the
+    # pinned commit, as build_launcher does for the shipped binary.
+    - bash scripts/ci/checkout-launcher-source.sh .orbit-launcher-src
     # go-version-file equivalent: read the toolchain orbit-launcher's own
     # go.mod asks for rather than pinning a copy of it here, so a launcher
     # bump cannot drift silently out of step with what this job's live suite
