@@ -6,21 +6,20 @@ investigation and remediation.
 
 ## Supported versions
 
-Orbit has not yet published a stable v1 release. Until then, fixes are developed
-on the active development line and included in subsequent immutable preview
-images. Development and versioned-release previews are evaluation artifacts,
-not supported stable releases.
-
-After v1, the latest stable release receives security fixes. An older release
-is supported only when its release notes explicitly designate a maintenance
-line.
+Orbit has not yet published a stable v1 release. Releases are numbered 0.x,
+and the latest 0.x release receives security fixes; an older one is supported
+only when its release notes designate a maintenance line. The tags v1.0.0 to
+v1.2.0 were mislabelled early builds of the rebuild, and are retracted and
+unsupported. Preview images and the development line are evaluation
+artifacts, where fixes are developed first, and reports against them are
+welcome.
 
 | Release | Security support |
 | --- | --- |
-| Active pre-v1 development and versioned-release lines | Fixes are developed and validated here |
-| Preview images | Evaluation only; reports are welcome |
-| Latest stable release after v1 | Supported |
-| Older commits and superseded images | Unsupported unless release notes say otherwise |
+| Latest 0.x release | Supported |
+| Preview images and the development line | Fixes are developed and validated here; evaluation only |
+| Tags v1.0.0 to v1.2.0 (retracted) | Unsupported |
+| Older releases and superseded images | Unsupported unless release notes say otherwise |
 
 Deploy published images by immutable digest. Back up the database, encrypted
 document storage, secrets and separate recovery material before updating.
