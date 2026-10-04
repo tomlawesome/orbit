@@ -163,13 +163,13 @@ set -Eeuo pipefail
 #                                   ORBIT_CONFIG_APPLIED_VERSION is absent,
 #                                   malformed, or names a published release
 #                                   below ADR-0016's supported-install floor
-#                                   (v1.3.0). Absence fails closed: every
-#                                   supported install writes the key, so a
-#                                   readable file without it is the
-#                                   signature of a pre-floor or
-#                                   hand-assembled deployment. Major
-#                                   version 0 (development builds) is
-#                                   exempt, and the check is skipped (never
+#                                   (v0.3.0), or on the retracted 1.x alpha
+#                                   line (any major version 1 or above).
+#                                   Absence fails closed: every supported
+#                                   install writes the key, so a readable
+#                                   file without it is the signature of a
+#                                   pre-floor or hand-assembled deployment.
+#                                   The check is skipped (never
 #                                   failed) while a configuration finding
 #                                   is present this run — a half-written
 #                                   .env-orbit legitimately lacks the key,
@@ -1390,8 +1390,9 @@ readonly configuration_rollback_suffix=".orbit-config.rollback"
 
 # ADR-0016's supported-install floor, as comparable components. repair.sh is
 # deliberately source-less, so the floor is mirrored here rather than shared
-# — the authoritative statement is docs/adr/0016.
-readonly supported_floor_major=1
+# — the authoritative statement is docs/adr/0016 (amended 2026-10-04, #1213:
+# the floor is v0.3.0 and the 1.x tags are retracted).
+readonly supported_floor_major=0
 readonly supported_floor_minor=3
 readonly supported_floor_patch=0
 readonly database_volume_key="orbit-db-data"
@@ -1643,7 +1644,7 @@ readonly -A manual_guidance=(
   # itself never applies, retries, or reverses a migration.
   [migration-failed]="restore this deployment from the pre-update recovery point captured before the migration ran, per the supported-upgrade recovery contract"
   [image-identity-mismatch]="recreate the flagged container from the locally pinned image so its running image identity matches; repair never recreates a container on the operator's behalf"
-  [deployment-version-unsupported]="this deployment was installed by a release below the supported floor (docs/adr/0016); reinstall or upgrade it with a supported release before running repair here"
+  [deployment-version-unsupported]="this deployment was installed by a release below the supported floor (docs/adr/0016); reinstall or upgrade it with a supported release before running repair here. The 1.x versions were mislabelled early builds and are retracted, so a 1.x deployment is below the floor too"
   [document-volume-retained-without-key]="a document volume is retained for this deployment while document-kek is missing; restore the original key from backup, or knowingly accept the retained documents are unreadable, before creating a new key"
   # Keyed by the reason class (secret-missing), not by target, like every
   # other entry here — but this one only ever fires for one specific target:
@@ -2254,9 +2255,12 @@ run_diagnosis() {
   # gap to shrug at: it is the signature of a deployment installed before
   # the floor existed (a v1.0.0-era install carries no configuration.sh at
   # all), or of a hand-assembled file this script has no business mutating.
-  # Both refuse — fail closed. Major version 0 is the development era
-  # (working-tree and CI builds stamp v0.0.0) and is exempt: it is not a
-  # published release, and ADR-0016's floor is about published releases.
+  # Both refuse — fail closed. Releases are numbered 0.x (ADR-0016
+  # amendment of 2026-10-04, #1213), so the old major-0 development
+  # exemption is withdrawn: a version is supported only when its major is
+  # the floor's and (minor, patch) is at or above the floor's. Any major of
+  # 1 or above is the retracted alpha line (scripts/retracted-tags.json) and
+  # is refused like any other version below the floor.
   # When .env-orbit itself is untrustworthy (missing, symlink, wrong mode)
   # this check is skipped rather than failed: those states are findings of
   # their own, fixing them is exactly what repair is for, and the version
@@ -2274,11 +2278,7 @@ run_diagnosis() {
       version_major="${BASH_REMATCH[1]}"
       version_minor="${BASH_REMATCH[2]}"
       version_patch="${BASH_REMATCH[3]}"
-      if ((version_major == 0)); then
-        version_supported=1
-      elif ((version_major > supported_floor_major)); then
-        version_supported=1
-      elif ((version_major == supported_floor_major && version_minor > supported_floor_minor)); then
+      if ((version_major == supported_floor_major && version_minor > supported_floor_minor)); then
         version_supported=1
       elif ((version_major == supported_floor_major && version_minor == supported_floor_minor && version_patch >= supported_floor_patch)); then
         version_supported=1
