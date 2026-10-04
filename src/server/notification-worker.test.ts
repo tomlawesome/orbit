@@ -316,6 +316,7 @@ describe("notification worker scheduling", () => {
       return {
         householdId: "household-1",
         eventId: "event-1",
+        createdAt: new Date("2026-09-01T00:00:00.000Z"),
         dueDate: "2026-09-20",
         timezone: "UTC",
         userId: "user-1",
@@ -380,6 +381,26 @@ describe("notification worker scheduling", () => {
       const pushDeliveries = deliveries.filter((d) => d.channel === "web_push");
       expect(pushDeliveries).toHaveLength(1);
       expect(pushDeliveries[0].scheduledFor.toISOString()).toBe("2026-09-17T09:00:00.000Z");
+    });
+
+    it("never back-fires an offset whose moment passed before the event existed (#479's reach)", () => {
+      // Entered on the 18th, due on the 20th, with the default pair: the
+      // 14-day warning's moment (the 6th) was never pending for anyone, so
+      // catching up does not invent it. The 3-day one (the 17th) was not
+      // pending either; only an offset the event was waiting on counts.
+      const entered = new Date("2026-09-18T12:00:00.000Z");
+      expect(materializeDeliveriesForCandidate(candidate({ createdAt: entered }), NOW, CATCH_UP_BOUNDARY)).toEqual([]);
+      // Entered on the 10th, the 3-day warning was pending through an outage
+      // and is caught up; the 14-day one still predates the event.
+      const deliveries = materializeDeliveriesForCandidate(
+        candidate({ createdAt: new Date("2026-09-10T12:00:00.000Z") }),
+        NOW,
+        CATCH_UP_BOUNDARY,
+      );
+      expect(deliveries.map((d) => d.scheduledFor.toISOString())).toEqual([
+        "2026-09-17T09:00:00.000Z",
+        "2026-09-17T09:00:00.000Z",
+      ]);
     });
 
     it("never sends a reminder the household snoozed, overdue or not", () => {
