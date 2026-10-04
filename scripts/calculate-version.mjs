@@ -25,14 +25,23 @@ function compareVersions(left, right) {
 /**
  * Calculates one candidate version for a release train. Stable tags are the
  * durable source of truth; package.json is used only to bootstrap repositories
- * that predate the first stable Git tag.
+ * that predate the first stable Git tag. Retracted tags (published versions
+ * that must never be stood on) are dropped before the baseline is chosen.
  */
-export function calculateReleaseTrainVersion({ tags, fallbackVersion, channel }) {
+export function calculateReleaseTrainVersion({
+  tags,
+  fallbackVersion,
+  channel,
+  retractedTags = [],
+}) {
   if (!CHANNELS.has(channel)) {
     throw new Error("Version channel must be preview or hotfix.");
   }
 
-  const stableVersions = tags.map(parseVersion).filter((version) => version !== null);
+  const retracted = new Set(retractedTags);
+  const stableVersions = tags
+    .filter((tag) => !retracted.has(tag))
+    .map(parseVersion).filter((version) => version !== null);
   let baseline;
   if (stableVersions.length > 0) {
     baseline = stableVersions.reduce((latest, version) =>
@@ -62,6 +71,16 @@ function repositoryTags(repositoryRoot) {
   return result.stdout.split(/\r?\n/u).filter(Boolean);
 }
 
+function retractedTagList(repositoryRoot) {
+  const manifest = JSON.parse(
+    readFileSync(resolve(repositoryRoot, "scripts", "retracted-tags.json"), "utf8"),
+  );
+  if (!Array.isArray(manifest.tags) || !manifest.tags.every((tag) => typeof tag === "string")) {
+    throw new Error("scripts/retracted-tags.json must list retracted tags as strings.");
+  }
+  return manifest.tags;
+}
+
 function requestedChannel(argv) {
   const channelIndex = argv.indexOf("--channel");
   if (channelIndex < 0 || !argv[channelIndex + 1] || argv.length !== 2) {
@@ -79,6 +98,7 @@ function runCli() {
     tags: repositoryTags(repositoryRoot),
     fallbackVersion: packageManifest.version,
     channel: requestedChannel(process.argv.slice(2)),
+    retractedTags: retractedTagList(repositoryRoot),
   });
   process.stdout.write(`${version}\n`);
 }
