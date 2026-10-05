@@ -11,7 +11,7 @@
 # `apk upgrade` this replaces is no longer needed here. #649 also stops
 # applying: that upgrade froze behind the layer cache, and there is no upgrade
 # layer left to freeze.
-FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:2817d3836a9eb513974b8cb2bdb7af509dbd910eb0b8114aed5160618a03bce7 AS base
+FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:8c4f684bf363c1bfd3858bd569d63392780322fb9ec57954b2d04b69b739824f AS base
 
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
@@ -79,7 +79,7 @@ RUN pnpm run build:cli
 
 # The runtime stage starts from the base image again rather than from `base`,
 # so it pins the same digest for the same reasons (see the base stage).
-FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:2817d3836a9eb513974b8cb2bdb7af509dbd910eb0b8114aed5160618a03bce7 AS runner
+FROM ghcr.io/tomlawesome/orbit-base-image:latest@sha256:8c4f684bf363c1bfd3858bd569d63392780322fb9ec57954b2d04b69b739824f AS runner
 
 # The three release-metadata patterns, copied in early because this layer's
 # content never varies between builds; the values themselves are declared,
