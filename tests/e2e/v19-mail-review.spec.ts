@@ -34,6 +34,21 @@ const attachmentId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1";
 const HOUSEHOLD_PREFIX = "Mail Proving Ground";
 const households = householdRegister();
 
+/* #1219: interceptMail is `page.route`, and Playwright does not route a
+   request the service worker handles (its documentation says to block
+   service workers wherever routing is relied on). On desktop-webkit the
+   `page.goto("/home")` after sign-in loads a page Orbit's worker controls,
+   so `/api/imap-inbox` reached the real, empty inbox and the synthetic row
+   never drew (pipeline 2131; #1196 measured the same gap). Nothing here is
+   about the worker, so on that project it is kept out. Desktop only: the
+   phone project's two #1196 `fail` marks below stand until that issue is
+   taken up, and Chromium and Firefox already route these requests. */
+test.use({
+  serviceWorkers: async ({}, use, testInfo) => {
+    await use(testInfo.project.name === "desktop-webkit" ? "block" : "allow");
+  },
+});
+
 async function signInToHome(page: Page) {
   await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");

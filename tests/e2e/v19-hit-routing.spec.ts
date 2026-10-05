@@ -196,6 +196,15 @@ async function packUntilOverlapping(page: Page) {
 
 test.describe.configure({ mode: "serial" });
 
+/* #1219: stubSky is a `page.route`, and Playwright does not route a request
+   the service worker handles (its documentation says to block service
+   workers wherever routing is relied on). On desktop-webkit the stub was
+   applied once, during the arrival, and every `/home` load after Orbit's
+   worker took control went to the real server instead (pipeline 2131: the
+   real one-household sky, "1 drawn" at all four viewports; #1196 measured
+   the same gap). Nothing here is about the worker, so it is kept out. */
+test.use({ serviceWorkers: "block" });
+
 test.beforeEach(async ({ page, browser }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the labelled sky is the desk dialect; the pocket draws no constellations");
   await stubSky(page, FULL_SKY);
