@@ -28,7 +28,9 @@ To ship a stable release:
 
 1. Merge `dev` into `preview`. CI tests the build, signs the evidence and
    publishes the image to GHCR as `:preview`.
-2. Deploy that preview by its digest and do release acceptance.
+2. Deploy that preview by its digest and do release acceptance: the
+   charter's list ([v1 charter](v1-charter.md#release-acceptance), item 4),
+   checked off on the release's acceptance issue.
 3. Merge `preview` into `main`.
 4. On GitLab, start a pipeline on `main` with `PREVIEW_DIGEST` set to the
    accepted digest, and run the manual `promote_stable` job. It tags the image
