@@ -380,3 +380,17 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 ## v19-feedback-recovery.spec.ts:331 and :348 — "Expected to fail, but passed" — desktop-webkit (#1196)
 
 - 2026-10-04 · ba984c1b (!1017) · pipeline 2099 / smoke_webkit · the two journeys marked `fail` on desktop-webkit for #1196 passed instead. Measured locally: WebKit's driver applies the `page.route` mock until the service worker controls the page and not after (route hits stayed at 1 on WebKit against 3 on Chromium), so whether the staged failure appears depends on timing. Not load. A ruling on the mark is with the owner; blocking service workers for the file was tried and exposed the #1178 disabled-button focus checks failing and passing by chance (1, 1 and 3 failures in three runs on unchanged code), so it was not kept.
+
+## v19-administration.spec.ts:76 "household recovery on the clock (#1001) › restores a household within its window, then hard-deletes another by the two-tap protocol" — desktop-webkit
+
+- 2026-10-05 · dac67650 (!1017) · pipeline 2131 / smoke_webkit (job 31782) · `page.evaluate: TypeError: Load failed` (WebKit's words for a fetch that did not complete) inside `createHousehold`'s in-page `fetch` at line 35, 7.2s in, straight after sign-in; the in-job retry passed (11.8s). Only the passing retry was traced, so the failing attempt's network is not recorded. Suspected, not established: the arrival at `/` navigating on to `/home` while the in-page fetch was out (support/arrival.ts describes that #840 race; this file's sign-in does not wait for it), made likelier on WebKit by the multi-second sky rasterising stall measured on #1219. First sighting; an issue on the third.
+
+## v19-feedback-recovery.spec.ts:352 "a mail suggestion whose approval fails, on /inbox leaves focus where the reader was" — desktop-webkit
+
+- 2026-10-05 · dac67650 (!1017) · pipeline 2131 / smoke_webkit (job 31782) · `page.goto: Navigation to "/inbox" is interrupted by another navigation to "/home"` at line 243, 6.3s in, right after `signIn(page, "/home")`; the in-job retry passed (4.1s). Only the passing retry was traced. Same suspected shape as the heading above: the arrival's own hand-on to `/home` landing after the spec's next `goto`. First sighting; an issue on the third.
+
+## v19-feedback-recovery.spec.ts journeys, `page.goto: net::ERR_ABORTED` straight after sign-in — desktop-chromium (local)
+
+- 2026-10-05 · 6b57ac93 + the #1219 test changes (none reach these journeys) · local kept stack, uncapped, two workers · `:362` "a household deletion request that fails leaves focus where the reader was": `page.goto: net::ERR_ABORTED` at `/household/<id>` (line 297). First sighting.
+- 2026-10-05 · same code · local, the file alone · `:344` "a save on /create that cannot reach Orbit is announced…": `net::ERR_ABORTED` at `/create`; the other ten passed. Second sighting.
+- 2026-10-05 · 6b57ac93 unchanged (HEAD's copy of the file) · local, the file twice · the same `:344` failure once in 21 runs. Third sighting: needs an issue (not filed from this session). The symptom is the one support/arrival.ts names for the #840 race -- the arrival at `/` handing on to `/home` after the spec's next `goto` -- and `signIn` (support/signed-in.ts) does not wait for the arrival to settle; the two desktop-webkit headings above may be the same race.
