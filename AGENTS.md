@@ -112,7 +112,7 @@ Three facts about that host live in its `config.toml` and root cron, not here.
 note. `pull_policy = ["if-not-present"]` covers a job's own image but not a
 service's, which needs its own line in `.gitlab-ci.yml`. And
 `/usr/local/sbin/runner-docker-tidy.sh` prunes containers, volumes, untagged
-images and the builder cache (3 GB reserve) at 03:15 nightly, logging to
+images and the builder cache (3 GB reserve) at 02:15 nightly, logging to
 `/var/log/runner-docker-tidy.log`; pinned job images survive it (owner, 2026-09-08).
 
 A push starts a pipeline only on `dev`, `preview`, `main` and `hotfix/*`; a
