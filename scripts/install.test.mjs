@@ -514,6 +514,11 @@ const fakeDockerScript = [
   '      [[ "${FAKE_OLLAMA_PULL_FAIL:-0}" != "1" ]]',
   "      exit $?",
   "    fi",
+  // #1227: lose APP_URL once the transaction has committed, so only the
+  // completion screen's read of it can fail.
+  '    if [[ "${FAKE_COMPOSE_UP_DROPS_APP_URL:-}" == "1" && " $* " == *" up "* ]]; then',
+  '      sed -i "/^APP_URL=/d" .env-orbit',
+  "    fi",
   '    if [[ "${FAKE_COMPOSE_UP_FAIL:-}" == "1" && " $* " == *" up "* ]]; then',
   '      if [[ -n "${FAKE_COMPOSE_UP_CREATES_VOLUME:-}" ]]; then',
   '        printf "%s\\n" "${FAKE_COMPOSE_UP_CREATES_VOLUME}" > "${FAKE_PROBE_COUNTER_DIR:?}/created-volume-names"',
@@ -1813,6 +1818,11 @@ describe("install.sh", () => {
         env: { FAKE_CONFIGURE_OPTIONAL_MISSING: "1" },
         message: "Configuration fields require attention (processing); refusing to start Compose.",
       },
+      {
+        name: "an OIDC discovery answer that is not 2xx",
+        env: { FAKE_OIDC_HTTP_STATUS: "404" },
+        message: "OIDC provider configuration could not be validated",
+      },
     ])("copies the tree on $name, then still rolls back", ({ env, message }) => {
       const targetDir = makeTarget();
       const tree = makeLauncherTree();
@@ -1863,6 +1873,24 @@ describe("install.sh", () => {
         expect(result.status).toBe(1);
         expect(result.stderr).toContain("Bundled docker-compose.yml is empty");
         expect(`${result.stdout}${result.stderr}`).toContain("reason=image-registry");
+        expect(noticeLines(result.stderr)).toEqual([]);
+        expect(readdirSync(tree)).toEqual([]);
+      } finally {
+        cleanUp(targetDir, tree);
+      }
+    });
+
+    it("reports a completion-screen failure after commit as reason=failure and writes nothing (#1227)", () => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      try {
+        const result = runInstall(targetDir, { FAKE_COMPOSE_UP_DROPS_APP_URL: "1", ORBIT_LAUNCHER_CONFIG_TREE: tree });
+
+        expect(result.status).toBe(1);
+        expect(result.calls).toContain("up -d");
+        expect(result.stderr).toContain("The validated public URL could not be read for completion.");
+        expect(`${result.stdout}${result.stderr}`).toContain("reason=failure action=retry");
+        expect(`${result.stdout}${result.stderr}`).not.toContain("reason=configuration-failure");
         expect(noticeLines(result.stderr)).toEqual([]);
         expect(readdirSync(tree)).toEqual([]);
       } finally {
