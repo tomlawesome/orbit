@@ -93,6 +93,18 @@
         "@image"
       ]
     },
+    "smoke_webkit": {
+      "artefact": "image",
+      "deny": [
+        "@image"
+      ]
+    },
+    "smoke_webkit_mobile": {
+      "artefact": "image",
+      "deny": [
+        "@image"
+      ]
+    },
     "smoke_local_only": {
       "artefact": "image",
       "deny": [

@@ -237,7 +237,7 @@ describe("the pipeline and the declarations agree", () => {
     }
   });
 
-  it("puts the image-running jobs on the image artefact: ADR-0028's six, and smoke_firefox (#1183)", () => {
+  it("puts the image-running jobs on the image artefact: ADR-0028's six, smoke_firefox (#1183) and the two webkit jobs (#1192)", () => {
     expect(jobsOnArtefact(config, "image")).toEqual([
       "acceptance",
       "launcher_install_compat",
@@ -245,6 +245,8 @@ describe("the pipeline and the declarations agree", () => {
       "smoke",
       "smoke_firefox",
       "smoke_local_only",
+      "smoke_webkit",
+      "smoke_webkit_mobile",
       "supply_chain_image",
     ]);
     for (const job of ["fast", "fast_docker", "fidelity", "fidelity_webkit", "integration", "sidecar_images"]) {

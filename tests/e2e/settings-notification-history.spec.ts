@@ -6,6 +6,7 @@ import { settleArrival } from "./support/arrival";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: this file's own copy of the seed-restore discipline every spec
    under tests/e2e/ follows -- see support/database.ts for why. */
@@ -66,6 +67,7 @@ function runSql(statements: string): string {
 }
 
 async function signInAs(page: Page, account: string) {
+  await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
   await settleArrival(page);

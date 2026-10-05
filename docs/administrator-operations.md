@@ -401,6 +401,120 @@ directly or as a file, never both. Ordinary configuration runs and recognised
 upgrades keep the OIDC secret file. Never put credentials in command
 arguments, terminal history, issue text, chat or logs.
 
+## Configuration
+
+Every supported setting is listed, with comments, in
+[`.env-orbit.example`](../.env-orbit.example). A sensitive setting can be given
+either directly (for example `SESSION_SECRET`) or as the path to a file
+holding it (`SESSION_SECRET_FILE`). Set one form or the other, never both.
+
+The generated `.env-orbit` is short and grouped into Core, Authentication,
+Generated secrets and keys, Deployment, Optional services and Observability.
+Defaults and tuning examples stay in `.env-orbit.example` for reference. Fill
+in an optional group completely or not at all, then run
+`bash scripts/configure.sh --check` before starting or updating Orbit. The
+check prints setting names and their state, never values.
+
+The examples below show the expected shape only. Generate real secrets; never
+copy a placeholder into a real deployment.
+
+The installer creates the database password, session secret, document key
+and private push key files in `.orbit-secrets/`, and Compose hands each one to
+Orbit under `/run/orbit-secrets/`. If you choose a different `_FILE` setting,
+create that file yourself and add a matching read-only secret mount to the
+Compose service.
+
+In the table, "Orbit" means the Orbit container, which also runs the
+notification scheduler; there is no separate worker. A "digest" is a build's
+fingerprint: it identifies one exact build and nothing else. The "document
+key-encryption key" is the master key that protects each document's own key.
+
+| Variable | Used by | Purpose | Example value |
+| --- | --- | --- | --- |
+| `APP_URL` | Orbit | The address people use in the browser; also used for cookies and request checks. Use HTTPS except on loopback. | `https://orbit.example.com` |
+| `ORBIT_AUTH_OIDC` | Orbit | `true` turns on sign-in through an identity provider and makes the `OIDC_*` settings required. While `false`, those settings may stay filled in and are ignored. | `false` |
+| `ORBIT_IMAGE` | Compose | Exact `registry/repository@sha256:...` identity for pulled deployments. Repository build scripts supply a revision-specific local tag instead. | `ghcr.io/tomlawesome/orbit@sha256:<64 lowercase hexadecimal characters>` |
+| `COMPOSE_PROJECT_NAME` | Compose | The Compose project name the installer recorded. Written by the installer; do not edit it after installation. | `orbit` |
+| `ORBIT_CONFIG_APPLIED_VERSION` / `ORBIT_CONFIG_APPLIED_DIGEST` | Installer | The version and build fingerprint that last checked this file. Written by the installer; never edit them. | `v0.3.0` / `sha256:<64 lowercase hexadecimal characters>` |
+| `ORBIT_CONFIG_SCHEMA_VERSION` | Installer | The layout version of `.env-orbit` itself. Written by the installer. | `1` |
+| `ORBIT_LOG_LEVEL` | Orbit | How much the log says: `error`, `warn`, `info` or `debug`. Document content, file names and recipients are never logged. | `info` |
+| `ORBIT_LOG_FORMAT` | Orbit | `text` or `json`, for a log collector. Both carry the same fields. | `text` |
+| `COMPOSE_PROFILES` | Compose | Optional services to run: `processing` for the document text reader, `ai` for the private model server, or both. Empty runs the standard stack. | `processing,ai` |
+| `ORBIT_BIND_ADDRESS` | Compose | Host interface that publishes Orbit. Use loopback when a reverse proxy is on the same host. | `0.0.0.0` |
+| `ORBIT_PORT` | Compose | Host TCP port mapped to container port 3000. | `3000` |
+| `SESSION_SECRET` | Orbit | Direct session-signing secret. Leave empty when `SESSION_SECRET_FILE` is set. | `<64-character-random-hex>` |
+| `SESSION_SECRET_FILE` | Orbit | File containing the session-signing secret. The Compose stack sets this to `/run/orbit-secrets/orbit-session-secret`. | `.orbit-secrets/session-secret` |
+| `SESSION_TTL_SECONDS` | Orbit | How long a sign-in lasts, in seconds. | `604800` |
+| `DOCUMENTS_ROOT` | Orbit | Where encrypted documents are kept inside the container. | `/var/lib/orbit/documents` |
+| `DOCUMENTS_QUARANTINE_ROOT` | Orbit | Temporary holding area for an upload while it is scanned; Compose supplies a private in-memory folder that disappears on restart. | `/tmp/orbit-document-quarantine` |
+| `DOCUMENT_KEK` | Orbit | Direct 32-byte hexadecimal document key-encryption key. Leave empty when the file form is used. | `<64-character-random-hex>` |
+| `DOCUMENT_KEK_FILE` | Orbit | File containing the document key-encryption key. Compose mounts the generated file at `/run/orbit-secrets/orbit-document-kek`. | `.orbit-secrets/document-kek` |
+| `DOCUMENT_KEK_NEXT` / `DOCUMENT_KEK_NEXT_FILE` | Orbit | Second document key-encryption key, held alongside the first only while a key rotation is in progress (#954). Set only via the `docker-compose.kek-rotation.yml` overlay — see "Rotating the document key-encryption key" in `docs/administrator-operations.md`. | `<64-character-random-hex>` |
+| `DOCUMENT_MAX_BYTES` | Orbit | Largest upload accepted, in bytes. | `26214400` |
+| `DOCUMENT_HOUSEHOLD_QUOTA_BYTES` | Orbit | Most document storage one household may keep. | `5368709120` |
+| `DOCUMENT_INSTANCE_QUOTA_BYTES` | Orbit | Most document storage the whole instance may keep. | `21474836480` |
+| `DOCUMENT_RETENTION_DAYS` | Orbit | Days a deleted document can still be restored before it is purged for good. | `30` |
+| `DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS` | Orbit | Hours an upload is kept, encrypted, waiting for the malware scanner to come back before it is discarded. | `24` |
+| `DOCUMENT_SCAN_MODE` | Orbit | `required` refuses uploads when ClamAV is unavailable; `disabled` skips scanning and shows a permanent warning. | `required` |
+| `CLAMAV_HOST` | Orbit | Private Compose hostname of the ClamAV daemon. | `orbit-clamav` |
+| `CLAMAV_PORT` | Orbit | Private ClamAV daemon port; do not publish it on the host. | `3310` |
+| `CLAMAV_TIMEOUT_MS` | Orbit | Longest a malware scan may take per upload. | `30000` |
+| `CLAMAV_MEMORY_LIMIT` | Compose | Memory limit for the scanner container. | `4g` |
+| `TIKA_URL` | Orbit | Private address of the document text reader, when the `processing` profile is on. | `http://orbit-tika:9998` |
+| `TIKA_TIMEOUT_MS` | Orbit | Longest the text reader may take per document. | `45000` |
+| `TIKA_MEMORY_LIMIT` | Compose | Memory limit for the text reader container. | `1g` |
+| `OLLAMA_MODEL` | Orbit and Compose | The local model the private model server uses and the pull helper fetches. | `<a-local-model-name>` |
+| `OLLAMA_MEMORY_LIMIT` / `OLLAMA_CPUS` | Compose | Memory and CPU limits for the model server. | `6g` / `2.0` |
+| `OLLAMA_MAX_QUEUE` / `OLLAMA_KEEP_ALIVE` | Compose | Most requests the model server queues, and how long it keeps a model loaded after use. | `8` / `0` |
+| `DATABASE_URL` | Orbit | Complete PostgreSQL connection URL. Leave empty when using the individual PostgreSQL settings. | `postgres://orbit:example-password@postgres:5432/orbit` |
+| `DATABASE_URL_FILE` | Orbit | File containing a complete database URL instead of `DATABASE_URL`. | `/run/secrets/orbit-database-url` |
+| `POSTGRES_HOST` | Orbit | PostgreSQL hostname. Compose overrides the host-local default with the database service name. | `localhost` |
+| `POSTGRES_PORT` | Orbit | PostgreSQL TCP port. | `5432` |
+| `POSTGRES_DB` | Orbit and PostgreSQL | Database created and used by Orbit. | `orbit` |
+| `POSTGRES_USER` | Orbit and PostgreSQL | PostgreSQL role created and used by Orbit. | `orbit` |
+| `POSTGRES_PASSWORD` | Orbit and PostgreSQL | Direct database password. Leave empty when the password file is used. | `<generated-random-password>` |
+| `POSTGRES_PASSWORD_FILE` | Orbit and PostgreSQL | File containing the generated PostgreSQL password. | `.orbit-secrets/postgres-password` |
+| `OIDC_ISSUER` | Orbit | The identity provider's HTTPS address, which Orbit also uses to discover its settings. | `https://auth.example.com/application/o/orbit/` |
+| `OIDC_CLIENT_ID` | Orbit | The client ID the identity provider gave Orbit. | `orbit` |
+| `OIDC_CLIENT_SECRET` | Orbit | Direct OIDC client secret. Leave empty when the file form is used. | `<provider-generated-secret>` |
+| `OIDC_CLIENT_SECRET_FILE` | Orbit | File containing the OIDC client secret. | `/run/orbit-secrets/orbit-oidc-client-secret` |
+| `OIDC_CALLBACK_URL` | Orbit | The exact return address registered with the identity provider. | `https://orbit.example.com/api/auth/callback` |
+| `OIDC_SCOPES` | Orbit | Space-separated scopes requested during sign-in; must contain `openid`. | `openid profile email` |
+| `OIDC_EMAIL_CLAIM` | Orbit | Which field of the provider's ID token holds the email address. | `email` |
+| `OIDC_EMAIL_VERIFIED_CLAIM` | Orbit | Which field says whether the email is verified. | `email_verified` |
+| `OIDC_NAME_CLAIM` | Orbit | Which field becomes the person's display name. | `name` |
+| `OIDC_AVATAR_CLAIM` | Orbit | Optional field holding the avatar URL. | `picture` |
+| `SMTP_HOST` / `SMTP_PORT` | Orbit | SMTP server host and port. | `smtp.example.com` / `587` |
+| `SMTP_SECURITY` | Orbit | `starttls` (port 587) or `implicit_tls` (port 465); plaintext SMTP is unsupported. | `starttls` |
+| `SMTP_USER` / `SMTP_PASSWORD_FILE` | Orbit | SMTP login and a file containing its password. | `orbit@example.com` / `/run/orbit-secrets/orbit-smtp-password` |
+| `SMTP_URL` / `SMTP_URL_FILE` | Orbit | Deprecated compatibility form, given directly or as a file; do not set it with the individual SMTP settings. | `smtps://orbit%40example.com:password@smtp.example.com:465` |
+| `SMTP_FROM` | Orbit | Display name and sender address for reminder email. | `Orbit <orbit@example.com>` |
+| `VAPID_SUBJECT` | Orbit | Contact address sent with browser push notifications. VAPID is the standard for browser and PWA push; it is not Pushover. | `mailto:admin@example.com` |
+| `VAPID_PUBLIC_KEY` | Orbit and the browser | Public push key generated for this deployment. | `<base64url-public-key>` |
+| `VAPID_PRIVATE_KEY` | Orbit | Direct private push key. Leave empty when the file form is used. | `<base64url-private-key>` |
+| `VAPID_PRIVATE_KEY_FILE` | Orbit | File containing the private push key. | `/run/orbit-secrets/orbit-vapid-private-key` |
+| `WORKER_POLL_SECONDS` | Orbit | Seconds between checks of the notification queue. | `60` |
+| `MAINTENANCE_TICK_SECONDS` | Orbit | Seconds between checks for a scheduled maintenance notice that is due. Maintenance begins at its scheduled time regardless; this only records the change. | `30` |
+| `NOTIFICATION_MAX_ATTEMPTS` | Orbit | Delivery attempts before a notification is marked failed. | `5` |
+| `MIGRATE_ON_START` | Orbit | Applies pending database migrations at startup. Compose sets this to `true`. | `false` |
+| `WORKER_ENABLED` | Orbit | Runs the notification scheduler inside the application container. Compose sets this to `true`. | `false` |
+| `DRIZZLE_MIGRATIONS_PATH` | Orbit | Directory containing versioned SQL migrations. | `drizzle` |
+| `ORBIT_SECRETS_DIR` | Compose | Host directory containing files mounted as Compose secrets. | `./.orbit-secrets` |
+
+Inbound mail (the mailbox Orbit polls for incoming statements and documents)
+is not set here any more. An instance administrator sets it on the
+administration screen, and Orbit stores the credential encrypted in the
+database (ADR-0017). No `IMAP_*` setting is accepted.
+
+Reminder email needs the SMTP password in `.orbit-secrets/smtp-password` and
+the `docker-compose.mail.yml` overlay, which hands that file to Orbit. Inbound
+mail is covered in [Mailbox provider operation](#mailbox-provider-operation).
+
+For production, use HTTPS, file-backed secrets, a private PostgreSQL
+connection, and working identity-provider, SMTP and push credentials. Keep
+recovery bundles somewhere other than the Docker host before storing real
+household data.
+
 ## Mailbox provider operation
 
 Mailbox ingestion is optional. An installation that does not use mail runs the

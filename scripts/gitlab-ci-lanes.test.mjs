@@ -171,6 +171,8 @@ describe("pipeline lanes", () => {
       "smoke",
       "smoke_firefox",
       "smoke_local_only",
+      "smoke_webkit",
+      "smoke_webkit_mobile",
       "supply_chain_image",
       "supply_chain_source",
     ]);
@@ -281,10 +283,10 @@ describe("pipeline lanes", () => {
     expect(runClassifyEnv({ CI_COMMIT_BRANCH: "dev" }).variables.ORBIT_SYSTEM).toBe("false");
   });
 
-  // #1181: the browser suite has its own axis, and both jobs that run it read
-  // that axis rather than the front-end one `fidelity` reads.
-  it("gates both browser-suite jobs on ORBIT_E2E", () => {
-    for (const name of ["smoke", "smoke_firefox"]) {
+  // #1181: the browser suite has its own axis, and every job that runs it
+  // reads that axis rather than the front-end one `fidelity` reads.
+  it("gates every browser-suite job on ORBIT_E2E", () => {
+    for (const name of ["smoke", "smoke_firefox", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       const suite = block.indexOf("bash scripts/test-frontend.sh");
       const gate = block.lastIndexOf('if [ "${ORBIT_E2E:-true}" != "true" ]; then', suite);
@@ -335,7 +337,7 @@ describe("pipeline lanes", () => {
    * whether the shell gets as far as `*reuse_evidence`.
    */
   it("leaves no reuse evidence when a smoke job skips its browser suite (#1187)", () => {
-    for (const name of ["smoke", "smoke_firefox"]) {
+    for (const name of ["smoke", "smoke_firefox", "smoke_webkit", "smoke_webkit_mobile"]) {
       const block = allBlocks.get(name);
       const scriptStart = block.indexOf("\n  script:\n");
       const scriptEnd = block.indexOf("\n  after_script:\n");

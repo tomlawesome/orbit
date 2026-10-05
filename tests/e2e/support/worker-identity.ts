@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { claimInstanceAsAdministrator } from "./bootstrap";
 import { sessionHeaders } from "./households";
+import { answerPushWithoutAService } from "./webkit-push";
 
 /**
  * #1080: one administrator per Playwright worker.
@@ -227,6 +228,7 @@ export async function ensureWorkerAdministrator(page: Page): Promise<void> {
  * still do that themselves — this establishes identity, not location.
  */
 export async function signInAsWorkerAdministrator(page: Page, returnTo = "/home"): Promise<string> {
+  await answerPushWithoutAService(page);
   const account = workerAccount("administrator");
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
   await page.getByRole("link", { name: account }).click();

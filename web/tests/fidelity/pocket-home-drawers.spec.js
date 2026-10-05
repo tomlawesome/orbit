@@ -103,9 +103,13 @@ test("the dial arrives on a forward arrival, never on Back", async ({ page }) =>
   await openRow(page, mot);
   await mot.getByRole("link", { name: "Open Car MOT — Volvo V60" }).tap();
   await expect(page).toHaveURL(/\/item\/i-mot/);
+  /* Back is pressed only once the item screen is on the page, as a person would (#1164);
+     pressed before then, the item screen can stay under /home, which is #1217. */
+  await expect(page.locator(".item-card h2", { hasText: "Car MOT" })).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/home/);
-  await expect(dial).not.toHaveClass(/arrive/);
+  await expect(dial).toBeAttached({ timeout: 30000 });
+  expect(await dial.getAttribute("class"), "Back replayed the arrival").not.toMatch(/\barrive\b/);
   expect(await arriving(), "Back replayed the arrival").toBe(false);
   await page.goForward();
   await expect(page).toHaveURL(/\/item\/i-mot/);

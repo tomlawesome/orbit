@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { expect, type Browser, type Page } from "@playwright/test";
+import { answerPushWithoutAService } from "./webkit-push";
 
 /**
  * Claiming the instance, the way an operator does (ADR-0022).
@@ -89,6 +90,7 @@ export interface ClaimOptions {
 export async function claimInstanceAsAdministrator(browser: Browser, options: ClaimOptions = {}): Promise<void> {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
+  await answerPushWithoutAService(page);
   try {
     if (!(await isClaimed(page))) {
       const code = claimCodeFromLog(stackLog());

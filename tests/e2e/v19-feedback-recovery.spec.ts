@@ -50,6 +50,7 @@ resetDatabaseBetweenSpecFiles();
 
 const isPocket = () => test.info().project.name.startsWith("mobile");
 const isFirefox = () => test.info().project.use.defaultBrowserType === "firefox";
+const isWebkit = () => test.info().project.use.defaultBrowserType === "webkit";
 
 /** Focus on `selector` by keyboard: already there, or Tab onward to it. */
 async function reach(page: Page, selector: string, screen: string, cap = 60) {
@@ -67,9 +68,23 @@ type Journey = {
   withItem?: boolean;
   /** Drives up to the failing act and fires it; returns the keyboard retry. */
   fire: (page: Page, household: Household) => Promise<() => Promise<void>>;
+  /** The failure itself is never shown, so neither check below can run:
+   *  both tests expect-fail on it ahead of their own defect. */
+  shownDefect?: () => string | undefined;
   announceDefect?: () => string | undefined;
   focusDefect?: () => string | undefined;
 };
+
+/* #1196: WebKit's driver stops applying a `page.route` mock once the service
+   worker controls the page -- the request reaches Orbit for real -- so a
+   journey whose failure is staged by a mock shows one or not by timing. A
+   timing-dependent expected failure cannot be marked `fail`, so on the
+   desktop-webkit project these journeys are `fixme` until the driver gap
+   closes (owner, 2026-10-05). Detail on #1196. */
+const ROUTE_MOCK_SKIPPED_ON_DESKTOP_WEBKIT = (what: string) =>
+  test.info().project.name === "desktop-webkit"
+    ? `#1196: desktop Safari applies the route mock only until the service worker controls the page, so by timing ${what}`
+    : undefined;
 
 /* The defect common to three journeys: the button that was pressed disables
    itself (or is swapped for a disabled copy) while the request is out, and a
@@ -89,6 +104,16 @@ const FOCUS_LOST_TO_DISABLED_BUTTON = (where: string) =>
 const FOCUS_DEFECT_RACES_ON_FIREFOX =
   "DEFECT (#1178), timing-dependent on Firefox: the pressed button, disabled while its request is out, sometimes "
   + "keeps focus and sometimes drops it to <body>, so this check cannot report either way until the button keeps focus";
+
+/* #1219: the desk /create card's document save races the same way on
+   desktop-webkit: six runs on unchanged code (2026-10-05, pinned Playwright
+   image) dropped focus to <body> four times and kept it twice, so its
+   `fail` mark held or broke by timing (pipeline 2131: "Expected to fail, but
+   passed"). A timing-dependent expected failure is fixme, never fail (owner,
+   2026-10-05, #1196). */
+const FOCUS_DEFECT_RACES_ON_DESKTOP_WEBKIT =
+  "DEFECT (#1178), timing-dependent on desktop Safari (#1219): the pressed button, disabled while its request is out, "
+  + "sometimes keeps focus and sometimes drops it to <body>, so this check cannot report either way until the button keeps focus";
 
 /* ── online-workspace policy ───────────────────────────────────────────── */
 
@@ -126,7 +151,12 @@ const createOffline: Journey = {
       await expect(page).toHaveURL(isPocket() ? /\/item\/[0-9a-f-]{36}$/ : /\/home$/, { timeout: 30_000 });
     };
   },
-  focusDefect: () => FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket create bar (.pk-save)" : "the desk create card (#card .btn-primary)"),
+  /* #1192: WebKit keeps focus on the pressed button while it is disabled
+     (pipeline 1989, mobile-webkit) -- the opposite of Chromium's #1178
+     defect, not a timing race like Firefox's. Nothing to expect-fail here. */
+  focusDefect: () => isWebkit() ? undefined : FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket create bar (.pk-save)" : "the desk create card (#card .btn-primary)"),
+  /* The mock on /api/workspace/commands above (pipeline 2011: both checks). */
+  shownDefect: () => ROUTE_MOCK_SKIPPED_ON_DESKTOP_WEBKIT("the save succeeds and no failure is shown"),
 };
 
 /* ── IMAP review ───────────────────────────────────────────────────────── */
@@ -209,6 +239,10 @@ const itemViewApproval: Journey = {
     };
   },
   focusDefect: () => FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket suggestion card's Add to orbit" : "the desk amend card's accept into orbit"),
+  /* The GET mock on /api/imap-inbox/<id> (interceptFailingMail): without it
+     the item view has no synthetic receipt to draw, so the amend card's act
+     never appears (pipeline 2011, :207 toBeEnabled). */
+  shownDefect: () => ROUTE_MOCK_SKIPPED_ON_DESKTOP_WEBKIT("the item view never draws the synthetic suggestion"),
 };
 
 const inboxApproval: Journey = {
@@ -239,7 +273,14 @@ const inboxApproval: Journey = {
       ? undefined
       : "DEFECT (#1178): the desk /inbox draws an approve or dismiss failure as a plain <div class=\"mail-problem\"> "
         + "(web/src/routes/inbox/+page.svelte) with no role=\"alert\" or live region, so a screen reader is never told",
-  focusDefect: () => FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket inbox's ReviewCard" : "the desk /inbox row's Add to orbit"),
+  /* Desktop Safari keeps focus on the disabled button here (pipeline 2011
+     passed the focus check twice under an expect-fail), as every WebKit
+     does on /create above; the pocket keeps its mark, which held on
+     mobile-webkit in the same run. */
+  focusDefect: () =>
+    test.info().project.name === "desktop-webkit"
+      ? undefined
+      : FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket inbox's ReviewCard" : "the desk /inbox row's Add to orbit"),
 };
 
 /* ── signed-in lifecycle ───────────────────────────────────────────────── */
@@ -301,7 +342,8 @@ const JOURNEYS = [createOffline, itemViewApproval, inboxApproval, householdDelet
 
 for (const journey of JOURNEYS) {
   test(`${journey.name} is announced, and the act can be repeated by keyboard`, async ({ page }) => {
-    const defect = journey.announceDefect?.();
+    const defect = journey.shownDefect?.() ?? journey.announceDefect?.();
+    test.fixme(Boolean(journey.shownDefect?.()), journey.shownDefect?.());
     test.fail(Boolean(defect), defect);
     test.setTimeout(90_000);
     await signIn(page, "/home");
@@ -318,7 +360,8 @@ for (const journey of JOURNEYS) {
   });
 
   test(`${journey.name} leaves focus where the reader was`, async ({ page }) => {
-    const defect = journey.focusDefect?.();
+    const defect = journey.shownDefect?.() ?? journey.focusDefect?.();
+    test.fixme(Boolean(journey.shownDefect?.()), journey.shownDefect?.());
     test.fixme(Boolean(defect) && isFirefox(), FOCUS_DEFECT_RACES_ON_FIREFOX);
     test.fail(Boolean(defect), defect);
     test.setTimeout(90_000);
@@ -393,6 +436,7 @@ test("a document picked on /create leaves focus where the reader was", async ({ 
      starting over is SvelteKit's own reset, not a loss. The desk stays put. */
   test.skip(isPocket(), "the pocket save navigates to the new item; focus starting over there is not a loss");
   test.fixme(isFirefox(), FOCUS_DEFECT_RACES_ON_FIREFOX);
+  test.fixme(test.info().project.name === "desktop-webkit", FOCUS_DEFECT_RACES_ON_DESKTOP_WEBKIT);
   const defect = FOCUS_LOST_TO_DISABLED_BUTTON("the desk create card (#card .btn-primary)");
   test.fail(Boolean(defect), defect);
   test.setTimeout(90_000);

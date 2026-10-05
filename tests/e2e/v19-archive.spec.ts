@@ -8,6 +8,7 @@ import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { ensureLocalPassword } from "./support/local-credentials";
 import { ensureWorkerAdministrator, workerAccount, workerFixturePassword } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
@@ -39,6 +40,7 @@ const PASSPHRASE = "correct-horse-battery-staple";
 const READER_PASSWORD = () => workerFixturePassword(READER());
 
 async function signIn(page: Page, returnTo: string) {
+  await answerPushWithoutAService(page);
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
   await page.getByRole("link", { name: READER() }).click();
   /* #1183, #1096's race: the reader has no household yet, so this lands on
@@ -68,6 +70,33 @@ async function signIn(page: Page, returnTo: string) {
  */
 async function ensureReaderCanAnswerTheChallenge(page: Page) {
   await ensureLocalPassword(page, READER(), READER_PASSWORD());
+}
+
+/**
+ * #1192: the first navigation after `ensureReaderCanAnswerTheChallenge`'s
+ * OIDC round trip, on WebKit only, throws "Cannot find web frame for the
+ * frame id" -- WebKit swaps the main frame's internal id on a navigation
+ * like that, and Playwright loses the race. It is not a slow page --
+ * waiting longer first did not help, nor did one retry (a9b37e67) or three
+ * bounded attempts (e7dd790c): pipeline 2005 lost the race all three times
+ * and then hung the suite's own retry to its deadline -- the page itself is
+ * unusable after this, not racing it. A fresh page in the same context
+ * keeps the session and step-up proof (both live in its cookies).
+ *
+ * That fresh page opens on `about:blank`, though: no origin, so the next
+ * caller's own `fetch` (`seedHousehold`'s `page.evaluate`) has nowhere to
+ * send those cookies and gets a 403 (pipeline 2009, `v19-archive.spec.ts:141`
+ * via `:175`). Land it on `/home` first -- same origin, already signed in
+ * via the context's cookies, so this is arriving, not signing in again --
+ * and wait for that arrival the same way `signIn` above does.
+ */
+async function pageAfterStepUp(page: Page): Promise<Page> {
+  if (page.context().browser()?.browserType().name() !== "webkit") return page;
+  const fresh = await page.context().newPage();
+  await page.close();
+  await fresh.goto("/home");
+  await settleArrival(fresh);
+  return fresh;
 }
 
 /**
@@ -151,67 +180,68 @@ test("write an archive, then bring it into a second household — a clash stays 
   await signIn(page, "/home");
   const source = await seedHousehold(page, ["Boiler service", "Car insurance"]);
   await ensureReaderCanAnswerTheChallenge(page);
+  const desk = await pageAfterStepUp(page);
   /* The clash: a household that already holds an entry with the same title
      (case-insensitive, portable-archive-repository.ts's own rule). */
-  const target = await seedHousehold(page, ["Boiler service"]);
+  const target = await seedHousehold(desk, ["Boiler service"]);
   const scratch = mkdtempSync(path.join(tmpdir(), "orbit-archive-e2e-"));
   try {
     // ── write it ──────────────────────────────────────────────────────────
-    await page.goto(`/household/${source.id}`);
-    await expect(page.locator(".c-archive")).toBeVisible({ timeout: 30_000 });
-    await expect(page.locator(".c-archive .man li").first()).toContainText("2"); // 2 entries
+    await desk.goto(`/household/${source.id}`);
+    await expect(desk.locator(".c-archive")).toBeVisible({ timeout: 30_000 });
+    await expect(desk.locator(".c-archive .man li").first()).toContainText("2"); // 2 entries
 
-    await page.getByRole("button", { name: "write an archive →" }).click();
-    await page.getByLabel("a passphrase for the file").fill(PASSPHRASE);
-    await page.getByLabel("the passphrase again").fill("a-different-phrase-entirely");
-    await expect(page.locator(".c-archive .refuse")).toBeVisible();
-    await page.getByLabel("the passphrase again").fill(PASSPHRASE);
+    await desk.getByRole("button", { name: "write an archive →" }).click();
+    await desk.getByLabel("a passphrase for the file").fill(PASSPHRASE);
+    await desk.getByLabel("the passphrase again").fill("a-different-phrase-entirely");
+    await expect(desk.locator(".c-archive .refuse")).toBeVisible();
+    await desk.getByLabel("the passphrase again").fill(PASSPHRASE);
 
-    const writeButton = page.getByRole("button", { name: "write the archive" });
+    const writeButton = desk.getByRole("button", { name: "write the archive" });
     await expect(writeButton).toBeEnabled();
     await writeButton.click(); // arm
-    await page.getByRole("button", { name: "tap again to write the archive" }).click(); // fire
-    await answerArchiveChallenge(page);
-    await expect(page.locator(".c-archive .said.show")).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator(".c-archive .said.show")).toContainText("written · orbit-archive.json");
+    await desk.getByRole("button", { name: "tap again to write the archive" }).click(); // fire
+    await answerArchiveChallenge(desk);
+    await expect(desk.locator(".c-archive .said.show")).toBeVisible({ timeout: 15_000 });
+    await expect(desk.locator(".c-archive .said.show")).toContainText("written · orbit-archive.json");
 
-    const downloadHref = await page.getByRole("link", { name: "download the file" }).getAttribute("href");
+    const downloadHref = await desk.getByRole("link", { name: "download the file" }).getAttribute("href");
     expect(downloadHref).toBeTruthy();
-    const downloaded = await page.request.get(downloadHref as string);
+    const downloaded = await desk.request.get(downloadHref as string);
     expect(downloaded.ok()).toBe(true);
     const archivePath = path.join(scratch, "orbit-archive.json");
     writeFileSync(archivePath, await downloaded.body());
 
     // ── bring it in ──────────────────────────────────────────────────────
-    await page.goto(`/household/${target.id}`);
-    await expect(page.locator(".c-archive")).toBeVisible({ timeout: 30_000 });
-    await page.getByRole("tab", { name: "bring one in" }).click();
-    await page.getByRole("button", { name: "bring in an archive →" }).click();
-    await page.locator('.c-archive input[type="file"]').setInputFiles(archivePath);
-    await page.getByLabel("the file's passphrase").fill(PASSPHRASE);
-    await page.getByRole("button", { name: "look inside" }).click();
+    await desk.goto(`/household/${target.id}`);
+    await expect(desk.locator(".c-archive")).toBeVisible({ timeout: 30_000 });
+    await desk.getByRole("tab", { name: "bring one in" }).click();
+    await desk.getByRole("button", { name: "bring in an archive →" }).click();
+    await desk.locator('.c-archive input[type="file"]').setInputFiles(archivePath);
+    await desk.getByLabel("the file's passphrase").fill(PASSPHRASE);
+    await desk.getByRole("button", { name: "look inside" }).click();
 
-    const preview = page.locator(".c-archive .inside");
+    const preview = desk.locator(".c-archive .inside");
     await expect(preview).toBeVisible({ timeout: 15_000 });
     await expect(preview.locator(".dup li")).toContainText("Boiler service");
     await expect(preview.locator(".dup li")).toContainText("already here · stays out");
 
-    const bringButton = page.getByRole("button", { name: "bring in 1 entry" });
+    const bringButton = desk.getByRole("button", { name: "bring in 1 entry" });
     await bringButton.click(); // arm
-    await page.getByRole("button", { name: "tap again to bring in 1 entry" }).click(); // fire
+    await desk.getByRole("button", { name: "tap again to bring in 1 entry" }).click(); // fire
     /* A fresh challenge: archive_export's proof cannot pay for archive_import
        (recent-auth.ts binds a proof to the one intent it was taken for). */
-    await answerArchiveChallenge(page);
-    await expect(page.locator(".c-archive .said.show")).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator(".c-archive .said.show")).toContainText(`brought in 1 entry from ${source.name}`);
+    await answerArchiveChallenge(desk);
+    await expect(desk.locator(".c-archive .said.show")).toBeVisible({ timeout: 15_000 });
+    await expect(desk.locator(".c-archive .said.show")).toContainText(`brought in 1 entry from ${source.name}`);
 
     // ── the entry that was not a clash actually landed ──────────────────
-    await page.goto("/home");
-    await expect(page.locator(".item", { hasText: "Car insurance" })).toBeVisible({ timeout: 30_000 });
+    await desk.goto("/home");
+    await expect(desk.locator(".item", { hasText: "Car insurance" })).toBeVisible({ timeout: 30_000 });
   } finally {
     rmSync(scratch, { recursive: true, force: true });
-    await cleanup(page, source);
-    await cleanup(page, target);
+    await cleanup(desk, source);
+    await cleanup(desk, target);
   }
 });
 
@@ -220,36 +250,37 @@ test("a wrong passphrase is refused, and nothing is read", async ({ page }) => {
   await signIn(page, "/home");
   const source = await seedHousehold(page, ["Boiler service"]);
   await ensureReaderCanAnswerTheChallenge(page);
+  const desk = await pageAfterStepUp(page);
   const scratch = mkdtempSync(path.join(tmpdir(), "orbit-archive-e2e-"));
   try {
-    await page.goto(`/household/${source.id}`);
-    await expect(page.locator(".c-archive")).toBeVisible({ timeout: 30_000 });
+    await desk.goto(`/household/${source.id}`);
+    await expect(desk.locator(".c-archive")).toBeVisible({ timeout: 30_000 });
 
-    await page.getByRole("button", { name: "write an archive →" }).click();
-    await page.getByLabel("a passphrase for the file").fill(PASSPHRASE);
-    await page.getByLabel("the passphrase again").fill(PASSPHRASE);
-    await page.getByRole("button", { name: "write the archive" }).click();
-    await page.getByRole("button", { name: "tap again to write the archive" }).click();
-    await answerArchiveChallenge(page);
-    await expect(page.locator(".c-archive .said.show")).toBeVisible({ timeout: 15_000 });
+    await desk.getByRole("button", { name: "write an archive →" }).click();
+    await desk.getByLabel("a passphrase for the file").fill(PASSPHRASE);
+    await desk.getByLabel("the passphrase again").fill(PASSPHRASE);
+    await desk.getByRole("button", { name: "write the archive" }).click();
+    await desk.getByRole("button", { name: "tap again to write the archive" }).click();
+    await answerArchiveChallenge(desk);
+    await expect(desk.locator(".c-archive .said.show")).toBeVisible({ timeout: 15_000 });
 
-    const downloadHref = await page.getByRole("link", { name: "download the file" }).getAttribute("href");
-    const downloaded = await page.request.get(downloadHref as string);
+    const downloadHref = await desk.getByRole("link", { name: "download the file" }).getAttribute("href");
+    const downloaded = await desk.request.get(downloadHref as string);
     const archivePath = path.join(scratch, "orbit-archive.json");
     writeFileSync(archivePath, await downloaded.body());
 
-    await page.getByRole("tab", { name: "bring one in" }).click();
-    await page.getByRole("button", { name: "bring in an archive →" }).click();
-    await page.locator('.c-archive input[type="file"]').setInputFiles(archivePath);
-    await page.getByLabel("the file's passphrase").fill("not-the-right-phrase-at-all");
-    await page.getByRole("button", { name: "look inside" }).click();
+    await desk.getByRole("tab", { name: "bring one in" }).click();
+    await desk.getByRole("button", { name: "bring in an archive →" }).click();
+    await desk.locator('.c-archive input[type="file"]').setInputFiles(archivePath);
+    await desk.getByLabel("the file's passphrase").fill("not-the-right-phrase-at-all");
+    await desk.getByRole("button", { name: "look inside" }).click();
 
-    await expect(page.locator(".c-archive .refuse")).toBeVisible({ timeout: 15_000 });
-    await expect(page.locator(".c-archive .refuse")).toContainText("The passphrase or archive is invalid");
+    await expect(desk.locator(".c-archive .refuse")).toBeVisible({ timeout: 15_000 });
+    await expect(desk.locator(".c-archive .refuse")).toContainText("The passphrase or archive is invalid");
     // Refused, not merely unread: the preview never appears.
-    await expect(page.locator(".c-archive .inside")).toHaveCount(0);
+    await expect(desk.locator(".c-archive .inside")).toHaveCount(0);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
-    await cleanup(page, source);
+    await cleanup(desk, source);
   }
 });

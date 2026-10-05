@@ -24,8 +24,8 @@ not redrawn here.
 
 Served at:
 
-- Guide — http://<LAN address>:8335/v19/tour/round-3/c-guide.html
-- Lift — http://<LAN address>:8335/v19/tour/round-3/d-lift.html
+- Guide — design host, port 8335: /v19/tour/round-3/c-guide.html
+- Lift — design host, port 8335: /v19/tour/round-3/d-lift.html
 
 Reviewer controls as rounds 1–2: next / back / skip, `←` `→` `Esc`, `#beat-n`
 in the address bar (1, 2, 3, 7), plus **`r` to replay the current beat** —

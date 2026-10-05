@@ -756,6 +756,8 @@ jobs:
           pnpm exec playwright install --with-deps --only-shell chromium
           # #1183: desktop-firefox and maintenance-firefox run in the same suite.
           pnpm exec playwright install --with-deps firefox
+          # #1192: desktop-webkit and mobile-webkit run in the same suite too.
+          pnpm exec playwright install --with-deps webkit
           bash scripts/test-frontend.sh
 
       - name: Upload browser test report
