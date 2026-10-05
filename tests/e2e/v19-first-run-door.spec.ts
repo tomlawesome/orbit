@@ -195,6 +195,30 @@ async function instance(page: Page, availability: Record<string, unknown>) {
   );
 }
 
+/**
+ * Opens the door and waits for its sky to finish rasterising (#1219).
+ *
+ * Dawn.svelte and Grain.svelte draw their filtered SVG layers to images on
+ * mount and mark their hosts `data-rasterised="ready"` when done -- the same
+ * flag the fidelity gate waits on (web/tests/fidelity/screens.spec.js).
+ * WebKit does that drawing on the page's main thread: measured on
+ * desktop-webkit in the pinned Playwright image (2026-10-05), the thread was
+ * held for 3.1 s after load, the sky reported ready at 3.3 s, and the door's
+ * already-answered `/api/health` read could only be delivered at 3.4 s. The
+ * card is chosen from that read, so it lands about 4 s after `goto` there,
+ * and later on a loaded runner (pipeline 2131: past the 5 s visibility
+ * wait on both attempts). Chromium is held for 0.4 s. Waiting for the
+ * rasterising to end is waiting for the event, not lengthening a budget:
+ * every assertion about the card keeps its own default timeout.
+ */
+async function openDoor(page: Page, path: string) {
+  await page.goto(path);
+  await page.waitForFunction(() => {
+    const surfaces = [...document.querySelectorAll<HTMLElement>(".world[data-rasterised], .grain[data-rasterised]")];
+    return surfaces.length > 0 && surfaces.every((surface) => surface.dataset.rasterised === "ready");
+  }, undefined, { timeout: 30_000 });
+}
+
 /** The WCAG sweep every card has to pass (the pattern in signed-out.spec.ts). */
 async function sweep(page: Page) {
   const results = await new AxeBuilder({ page })
@@ -210,7 +234,7 @@ test.describe("the door's cards", () => {
 
   test("unclaimed shows the claim card in the ring, and no gate at all", async ({ page }) => {
     await instance(page, { claimed: false, methods: { local: true, oidc: true } });
-    await page.goto("/login");
+    await openDoor(page, "/login");
 
     await expect(page.locator("#claimcode")).toBeVisible();
     /* The whole of the ruling's first line: no Sign in gate. Not hidden --
@@ -241,7 +265,7 @@ test.describe("the door's cards", () => {
       });
     });
 
-    await page.goto("/login#claim=ABCD-EFGH-2345");
+    await openDoor(page, "/login#claim=ABCD-EFGH-2345");
 
     /* CREATE MODE: the identity of the first administrator, three fields. */
     await expect(page.locator("#idname")).toBeVisible();
@@ -264,7 +288,7 @@ test.describe("the door's cards", () => {
 
   test("a claimed local-only instance shows the sign-in card in the ring", async ({ page }) => {
     await instance(page, { claimed: true, methods: { local: true, oidc: false, localAccounts: true } });
-    await page.goto("/login");
+    await openDoor(page, "/login");
 
     await expect(page.locator("#idemail")).toBeVisible();
     await expect(page.locator("#idpassword")).toBeVisible();
@@ -280,7 +304,7 @@ test.describe("the door's cards", () => {
 
   test("mixed mode is the ratified door plus one line, which opens the same card", async ({ page }) => {
     await instance(page, { claimed: true, methods: { local: true, oidc: true, localAccounts: true } });
-    await page.goto("/login");
+    await openDoor(page, "/login");
 
     /* THE RATIFIED DOOR, UNCHANGED: the gate, the lockup, no card. */
     await expect(page.locator("#gate")).toBeVisible();
@@ -305,7 +329,7 @@ test.describe("the door's cards", () => {
        ordinary state of every deployment that never used local sign-in, and
        offering it a way in that cannot work would be worse than silence. */
     await instance(page, { claimed: true, methods: { local: true, oidc: true, localAccounts: false } });
-    await page.goto("/login");
+    await openDoor(page, "/login");
 
     await expect(page.locator("#gate")).toBeVisible();
     await expect(page.locator("#localopen")).toHaveCount(0);
