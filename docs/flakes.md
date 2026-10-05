@@ -389,8 +389,8 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 
 - 2026-10-05 · dac67650 (!1017) · pipeline 2131 / smoke_webkit (job 31782) · `page.goto: Navigation to "/inbox" is interrupted by another navigation to "/home"` at line 243, 6.3s in, right after `signIn(page, "/home")`; the in-job retry passed (4.1s). Only the passing retry was traced. Same suspected shape as the heading above: the arrival's own hand-on to `/home` landing after the spec's next `goto`. First sighting; an issue on the third.
 
-## v19-feedback-recovery.spec.ts journeys, `page.goto: net::ERR_ABORTED` straight after sign-in — desktop-chromium (local)
+## v19-feedback-recovery.spec.ts journeys, `page.goto: net::ERR_ABORTED` straight after sign-in — desktop-chromium (local) (#1221)
 
 - 2026-10-05 · 6b57ac93 + the #1219 test changes (none reach these journeys) · local kept stack, uncapped, two workers · `:362` "a household deletion request that fails leaves focus where the reader was": `page.goto: net::ERR_ABORTED` at `/household/<id>` (line 297). First sighting.
 - 2026-10-05 · same code · local, the file alone · `:344` "a save on /create that cannot reach Orbit is announced…": `net::ERR_ABORTED` at `/create`; the other ten passed. Second sighting.
-- 2026-10-05 · 6b57ac93 unchanged (HEAD's copy of the file) · local, the file twice · the same `:344` failure once in 21 runs. Third sighting: needs an issue (not filed from this session). The symptom is the one support/arrival.ts names for the #840 race -- the arrival at `/` handing on to `/home` after the spec's next `goto` -- and `signIn` (support/signed-in.ts) does not wait for the arrival to settle; the two desktop-webkit headings above may be the same race.
+- 2026-10-05 · 6b57ac93 unchanged (HEAD's copy of the file) · local, the file twice · the same `:344` failure once in 21 runs. Third sighting: filed as #1221. The symptom is the one support/arrival.ts names for the #840 race -- the arrival at `/` handing on to `/home` after the spec's next `goto` -- and `signIn` (support/signed-in.ts) does not wait for the arrival to settle; the two desktop-webkit headings above may be the same race.
