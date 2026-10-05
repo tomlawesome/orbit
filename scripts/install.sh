@@ -1660,8 +1660,11 @@ wait_for_deployment_readiness() {
 
 print_completion_screen() {
   local public_url
+  # The deployment is committed and running by now, so this is the generic
+  # failure, never configuration-failure: that reason tells the launcher to
+  # reconfigure and hands it the configure tree (#1227).
   public_url="$(read_environment_value APP_URL)" ||
-    fail_with configuration-failure retry "The validated public URL could not be read for completion."
+    fail_with failure retry "The validated public URL could not be read for completion."
 
   printf '\nOrbit is ready.\n'
   printf 'Public URL: %s\n' "$public_url"
