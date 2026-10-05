@@ -109,6 +109,9 @@ const fakeConfigureScript =
     "printf 'CONFIGURE_INVOKED ORBIT_IMAGE=%s\\n' \"${ORBIT_IMAGE:-}\"",
     "case \"${1:-}\" in",
     "  --check)",
+    // #1225: only an optional field missing, so prepare_configuration passes
+    // its required-field check and refuses at the final --check instead.
+    "    if [[ \"${FAKE_CONFIGURE_OPTIONAL_MISSING:-}\" == \"1\" ]]; then printf '%s\\n' 'ready APP_URL' 'missing processing'; exit 1; fi",
     '    if [[ -f .env-orbit ]] && grep -q "^APP_URL=" .env-orbit && [[ -s .orbit-secrets/oidc-client-secret ]]; then',
     "      printf '%s\\n' 'ready APP_URL' 'ready ORBIT_IMAGE' 'ready OIDC_ISSUER' 'ready OIDC_CLIENT_ID' 'ready OIDC_CLIENT_SECRET' 'ready OIDC_CALLBACK_URL'",
     "      exit 0",
@@ -810,16 +813,31 @@ const fakeCosignScript = [
 
 // Shadows stat for one question only: the owner of the directory named by
 // FAKE_STAT_FOREIGN_OWNER_PATH is reported as another uid (#1225), since an
-// unprivileged test cannot chown a directory away from itself. Every other
-// call is the real stat.
+// unprivileged test cannot chown a directory away from itself. Paths are
+// compared resolved, because install.sh asks about "." from inside that
+// directory. Every other call is the real stat.
 const fakeStatScript = [
   "#!/usr/bin/env bash",
   "set -Eeuo pipefail",
-  'if [[ -n "${FAKE_STAT_FOREIGN_OWNER_PATH:-}" && "$#" -eq 4 && "$1 $2 $3" == "-c %u --" && "$4" == "${FAKE_STAT_FOREIGN_OWNER_PATH}" ]]; then',
+  'if [[ -n "${FAKE_STAT_FOREIGN_OWNER_PATH:-}" && "$#" -eq 4 && "$1 $2 $3" == "-c %u --" && "$(realpath -- "$4")" == "$(realpath -- "${FAKE_STAT_FOREIGN_OWNER_PATH}")" ]]; then',
   '  printf \'%s\\n\' "$(( $(id -u) + 1 ))"',
   "  exit 0",
   "fi",
   "exec /bin/stat \"$@\"",
+  "",
+].join("\n");
+
+// Shadows cat to fail one read (#1225): any argument ending in
+// FAKE_CAT_FAIL_PATH makes it exit 1. Every other call is the real cat.
+const fakeCatScript = [
+  "#!/usr/bin/env bash",
+  "set -Eeuo pipefail",
+  'if [[ -n "${FAKE_CAT_FAIL_PATH:-}" ]]; then',
+  '  for argument in "$@"; do',
+  '    [[ "$argument" != *"${FAKE_CAT_FAIL_PATH}" ]] || exit 1',
+  "  done",
+  "fi",
+  'exec /bin/cat "$@"',
   "",
 ].join("\n");
 
@@ -835,6 +853,8 @@ function makeFakeBin() {
   chmodSync(join(binDir, "cosign"), 0o755);
   writeFileSync(join(binDir, "stat"), fakeStatScript);
   chmodSync(join(binDir, "stat"), 0o755);
+  writeFileSync(join(binDir, "cat"), fakeCatScript);
+  chmodSync(join(binDir, "cat"), 0o755);
   return binDir;
 }
 
@@ -1703,7 +1723,7 @@ describe("install.sh", () => {
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 
-  describe("ORBIT_LAUNCHER_CONFIG_TREE handover on the non-interactive refusal (#1225)", () => {
+  describe("ORBIT_LAUNCHER_CONFIG_TREE handover on a configuration-failure exit (#1225)", () => {
     const handedOver = [
       "scripts/configure.sh",
       "scripts/configuration.sh",
@@ -1732,19 +1752,18 @@ describe("install.sh", () => {
       expect(stagingLeftovers(targetDir)).toEqual([]);
     }
 
-    function cleanUp(...paths) {
-      for (const path of paths) rmSync(path, { recursive: true, force: true });
+    function expectRolledBack(result, targetDir) {
+      expect(result.status).toBe(1);
+      expect(`${result.stdout}${result.stderr}`).toContain("reason=configuration-failure");
+      expect(result.calls).not.toContain("up -d");
+      expect(targetEntries(targetDir)).toEqual([]);
+      expect(stagingLeftovers(targetDir)).toEqual([]);
     }
 
-    it("copies the image-verified configure tree before rolling the target back", () => {
-      const targetDir = makeTarget();
-      const tree = makeLauncherTree();
+    // The four files, byte-identical to what the image bundles, owner-only.
+    function expectTreeHandedOver(tree) {
       const bundle = makeImageDeployFixture({});
       try {
-        const result = runInstall(targetDir, { FAKE_CONFIGURE_READY: "0", ORBIT_LAUNCHER_CONFIG_TREE: tree });
-
-        expectRefusalUnchanged(result, targetDir);
-        expect(noticeLines(result.stderr)).toEqual([]);
         expect(readdirSync(tree, { recursive: true }).sort()).toEqual([
           ".env-orbit.example",
           "scripts",
@@ -1752,14 +1771,60 @@ describe("install.sh", () => {
           "scripts/configure.sh",
           "scripts/installer-ui.sh",
         ]);
+        expect(lstatSync(join(tree, "scripts")).isDirectory()).toBe(true);
+        expect(lstatSync(join(tree, "scripts")).mode & 0o7777).toBe(0o700);
         for (const asset of handedOver) {
           const path = join(tree, asset);
           expect(lstatSync(path).isFile()).toBe(true);
-          expect(lstatSync(path).mode & 0o7777).toBe(stagedAssetMode);
+          expect(lstatSync(path).mode & 0o7777).toBe(0o600);
           expect(readFileSync(path)).toEqual(readFileSync(join(bundle, asset)));
         }
       } finally {
-        cleanUp(targetDir, tree, bundle);
+        rmSync(bundle, { recursive: true, force: true });
+      }
+    }
+
+    function cleanUp(...paths) {
+      for (const path of paths) rmSync(path, { recursive: true, force: true });
+    }
+
+    it("copies the image-verified configure tree on the non-interactive refusal, then still rolls back", () => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      try {
+        const result = runInstall(targetDir, { FAKE_CONFIGURE_READY: "0", ORBIT_LAUNCHER_CONFIG_TREE: tree });
+
+        expectRefusalUnchanged(result, targetDir);
+        expect(noticeLines(result.stderr)).toEqual([]);
+        expectTreeHandedOver(tree);
+      } finally {
+        cleanUp(targetDir, tree);
+      }
+    });
+
+    it.each([
+      {
+        name: "configure.sh failing",
+        env: { FAKE_CONFIGURE_FAIL: "1" },
+        message: "Configuration failed",
+      },
+      {
+        name: "the final --check refusal",
+        env: { FAKE_CONFIGURE_OPTIONAL_MISSING: "1" },
+        message: "Configuration fields require attention (processing); refusing to start Compose.",
+      },
+    ])("copies the tree on $name, then still rolls back", ({ env, message }) => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      try {
+        const result = runInstall(targetDir, { ...env, ORBIT_LAUNCHER_CONFIG_TREE: tree });
+
+        expectRolledBack(result, targetDir);
+        expect(result.stderr).toContain(message);
+        expect(noticeLines(result.stderr)).toEqual([]);
+        expectTreeHandedOver(tree);
+      } finally {
+        cleanUp(targetDir, tree);
       }
     });
 
@@ -1777,19 +1842,72 @@ describe("install.sh", () => {
       }
     });
 
-    it("writes nothing on a configuration failure other than the non-interactive refusal", () => {
+    it("treats an empty value as unset", () => {
+      const targetDir = makeTarget();
+      try {
+        const result = runInstall(targetDir, { FAKE_CONFIGURE_READY: "0", ORBIT_LAUNCHER_CONFIG_TREE: "" });
+
+        expectRefusalUnchanged(result, targetDir);
+        expect(noticeLines(result.stderr)).toEqual([]);
+      } finally {
+        cleanUp(targetDir);
+      }
+    });
+
+    it("writes nothing on a failure whose reason is not configuration-failure", () => {
       const targetDir = makeTarget();
       const tree = makeLauncherTree();
       try {
-        const result = runInstall(targetDir, { FAKE_CONFIGURE_FAIL: "1", ORBIT_LAUNCHER_CONFIG_TREE: tree });
+        const result = runInstall(targetDir, { FAKE_EMPTY_ASSET: "docker-compose.yml", ORBIT_LAUNCHER_CONFIG_TREE: tree });
 
         expect(result.status).toBe(1);
-        expect(result.stderr).toContain("Configuration failed");
+        expect(result.stderr).toContain("Bundled docker-compose.yml is empty");
+        expect(`${result.stdout}${result.stderr}`).toContain("reason=image-registry");
         expect(noticeLines(result.stderr)).toEqual([]);
         expect(readdirSync(tree)).toEqual([]);
-        expect(targetEntries(targetDir)).toEqual([]);
       } finally {
         cleanUp(targetDir, tree);
+      }
+    });
+
+    it("removes everything it wrote when one copy fails, and says so once", () => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      try {
+        const result = runInstall(targetDir, {
+          FAKE_CONFIGURE_READY: "0",
+          ORBIT_LAUNCHER_CONFIG_TREE: tree,
+          FAKE_CAT_FAIL_PATH: "/launcher-config-tree/scripts/installer-ui.sh",
+        });
+
+        expectRefusalUnchanged(result, targetDir);
+        expect(noticeLines(result.stderr)).toEqual([
+          "Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because scripts/installer-ui.sh could not be written.",
+        ]);
+        expect(readdirSync(tree)).toEqual([]);
+      } finally {
+        cleanUp(targetDir, tree);
+      }
+    });
+
+    it("writes owner-only files even under umask 000", () => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      const bashEnvDir = mkdtempSync(join(tmpdir(), "orbit-launcher-umask-"));
+      const bashEnv = join(bashEnvDir, "umask-000.sh");
+      writeFileSync(bashEnv, "umask 000\n");
+      try {
+        const result = runInstall(targetDir, {
+          FAKE_CONFIGURE_READY: "0",
+          ORBIT_LAUNCHER_CONFIG_TREE: tree,
+          BASH_ENV: bashEnv,
+        });
+
+        expectRefusalUnchanged(result, targetDir);
+        expect(noticeLines(result.stderr)).toEqual([]);
+        expectTreeHandedOver(tree);
+      } finally {
+        cleanUp(targetDir, tree, bashEnvDir);
       }
     });
 
@@ -1806,6 +1924,17 @@ describe("install.sh", () => {
         },
       },
       {
+        name: "a symlink given with a trailing slash",
+        reason: "it is a symlink",
+        arrange: (parent) => {
+          const real = join(parent, "real");
+          mkdirSync(real, { mode: 0o700 });
+          const link = join(parent, "link");
+          symlinkSync(real, link);
+          return { tree: `${link}//`, unchanged: () => expect(readdirSync(real)).toEqual([]) };
+        },
+      },
+      {
         name: "not empty",
         reason: "it is not empty",
         arrange: (parent) => {
@@ -1819,6 +1948,16 @@ describe("install.sh", () => {
               expect(readFileSync(join(tree, ".launcher-own"), "utf8")).toBe("KEEP\n");
             },
           };
+        },
+      },
+      {
+        name: "not mode 0700",
+        reason: "it is not mode 0700",
+        arrange: (parent) => {
+          const tree = join(parent, "tree");
+          mkdirSync(tree);
+          chmodSync(tree, 0o755);
+          return { tree, unchanged: () => expect(readdirSync(tree)).toEqual([]) };
         },
       },
       {

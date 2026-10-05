@@ -12,13 +12,14 @@ set -Eeuo pipefail
 #
 # Environment (besides the settings read below):
 #   ORBIT_LAUNCHER_CONFIG_TREE  set by orbit-launcher to an empty directory it
-#     created, mode 0700 and owned by the running user. On the non-interactive
-#     configuration refusal (reason=configuration-failure) the installer copies
+#     created, mode 0700 and owned by the running user. On any exit whose
+#     event reason is configuration-failure the installer copies
 #     scripts/configure.sh, scripts/configuration.sh, scripts/installer-ui.sh
 #     and .env-orbit.example, as verified from the image, into it before
-#     rolling back. It writes nothing, and says so in one stderr line, if the
-#     directory is missing, not a directory, a symlink, not empty or not owned
-#     by the current user (#1225, docs/engine-events.md).
+#     rolling back, owner-only (0600/0700), all or nothing. It writes nothing,
+#     and says so in one stderr line, if the directory is missing, not a
+#     directory, a symlink, not mode 0700, not empty or not owned by the
+#     current user (#1225, docs/engine-events.md).
 
 readonly repository="${ORBIT_REPOSITORY:-tomlawesome/orbit}"
 readonly registry="${ORBIT_REGISTRY:-ghcr.io}"
@@ -206,6 +207,8 @@ profile_change=0
 model_pull_requested=0
 model_pull_value=""
 launcher_tree_snapshot=""
+launcher_tree_path=""
+launcher_tree_state=idle
 guided_configuration_staged=0
 declare -a created_directories=()
 declare -A managed_was_present=()
@@ -271,6 +274,7 @@ default_failure_action() {
 fail() {
   local reason action phase component elapsed
   reason="${installer_failure_reason:-$(default_failure_reason)}"
+  [[ "$reason" == configuration-failure ]] && hand_over_launcher_config_tree
   action="${installer_failure_action:-$(default_failure_action)}"
   phase="${installer_ui_phase:-host}"
   component="${installer_ui_component:-host}"
@@ -323,55 +327,97 @@ is_owned_by_current_user() {
   [[ "$(stat -c '%u' -- "$1" 2>/dev/null)" == "$EUID" ]]
 }
 
-directory_is_empty() {
-  local entries
-  shopt -s nullglob dotglob
-  entries=("$1"/*)
-  shopt -u nullglob dotglob
-  [[ ${#entries[@]} -eq 0 ]]
+# ORBIT_LAUNCHER_CONFIG_TREE (#1225): leave the launcher the configure tree
+# this run verified, on any exit whose event reason is configuration-failure
+# (fail calls this before the event and before rollback). Writing into a
+# directory another program owns follows the installer's own write and
+# rollback rules: never through a symlink, never over an existing entry
+# (noclobber creates, as configure.sh's lock does), and only from the private
+# copy taken out of the digest-pinned image at staging. The copy is
+# all-or-nothing with cleanup on failure: a failed or mismatched copy removes
+# everything written, and cleanup does the same if a signal interrupts it.
+# Every outcome returns 0: the exit it precedes is unchanged.
+launcher_tree_notice() {
+  printf 'Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because %s.\n' "$1" >&2
 }
 
-# ORBIT_LAUNCHER_CONFIG_TREE (#1225): leave the launcher the configure tree
-# this run verified, which the rollback is about to take back out of the
-# target. Writing into a directory another program owns follows the same
-# rules as the installer's own writes and rollback: never through a symlink,
-# never over an existing entry (noclobber creates, as configure.sh's lock
-# does), and only from the private copy taken out of the digest-pinned image
-# at staging. Every outcome returns 0: the refusal it precedes is unchanged.
+# Runs with the launcher's directory as the working directory: prints why it
+# must not be written, or nothing.
+launcher_tree_refusal() {
+  if ! is_owned_by_current_user .; then
+    printf 'it is not owned by the current user'
+  elif ! has_mode . 700; then
+    printf 'it is not mode 0700'
+  elif ! target_is_empty; then
+    printf 'it is not empty'
+  fi
+}
+
+# Runs with the launcher's directory as the working directory and umask 077,
+# so the files are 0600 and scripts is 0700. The refusal checks are repeated
+# from inside the directory being written, so a path swapped since the first
+# check is refused rather than written.
+launcher_tree_write() {
+  local snapshot="$1" reason asset
+
+  reason="$(launcher_tree_refusal)"
+  if [[ -n "$reason" ]]; then
+    launcher_tree_notice "$reason"
+    return 1
+  fi
+  if ! mkdir -- scripts 2>/dev/null; then
+    launcher_tree_notice "its scripts directory could not be created"
+    return 1
+  fi
+  for asset in "${launcher_config_tree_assets[@]}"; do
+    if ! is_real_non_symlink_directory scripts || [[ -e "$asset" || -L "$asset" ]] ||
+      ! (set -o noclobber; cat -- "$snapshot/$asset" > "$asset") 2>/dev/null ||
+      ! cmp -s -- "$snapshot/$asset" "$asset"; then
+      rm -rf -- scripts .env-orbit.example
+      launcher_tree_notice "${asset} could not be written"
+      return 1
+    fi
+  done
+}
+
 hand_over_launcher_config_tree() {
-  local tree="$launcher_config_tree" asset destination reason=""
+  local tree="$launcher_config_tree" snapshot="" reason=""
 
   [[ -n "$tree" ]] || return 0
+  while [[ "$tree" == */ && "$tree" != / ]]; do
+    tree="${tree%/}"
+  done
   if [[ -L "$tree" ]]; then
     reason="it is a symlink"
   elif [[ ! -e "$tree" ]]; then
     reason="it does not exist"
   elif [[ ! -d "$tree" ]]; then
     reason="it is not a directory"
-  elif ! is_owned_by_current_user "$tree"; then
-    reason="it is not owned by the current user"
-  elif ! directory_is_empty "$tree"; then
-    reason="it is not empty"
-  elif [[ -z "$launcher_tree_snapshot" ]]; then
+  elif ! reason="$(cd -- "$tree" 2>/dev/null && launcher_tree_refusal)"; then
+    reason="it could not be entered"
+  elif [[ -z "$reason" ]] &&
+    ! snapshot="$(cd -- "${launcher_tree_snapshot:-/nonexistent}" 2>/dev/null && pwd -P)"; then
     reason="the verified copies are unavailable"
   fi
   if [[ -n "$reason" ]]; then
-    printf 'Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because %s.\n' "$reason" >&2
+    launcher_tree_notice "$reason"
     return 0
   fi
 
-  if ! mkdir -- "$tree/scripts" 2>/dev/null || ! is_real_non_symlink_directory "$tree/scripts"; then
-    printf 'Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because its scripts directory could not be created.\n' >&2
-    return 0
+  launcher_tree_path="$tree"
+  launcher_tree_state=writing
+  if (
+    cd -- "$tree" 2>/dev/null || {
+      launcher_tree_notice "it could not be entered"
+      exit 1
+    }
+    umask 077
+    launcher_tree_write "$snapshot"
+  ); then
+    launcher_tree_state=complete
+  else
+    launcher_tree_state=failed
   fi
-  for asset in "${launcher_config_tree_assets[@]}"; do
-    destination="$tree/$asset"
-    if [[ -e "$destination" || -L "$destination" ]] ||
-      ! (set -o noclobber; cat -- "$launcher_tree_snapshot/$asset" > "$destination") 2>/dev/null; then
-      printf 'Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE is incomplete because %s could not be written.\n' "$asset" >&2
-      return 0
-    fi
-  done
   return 0
 }
 
@@ -491,6 +537,11 @@ remove_deploy_container() {
 
 cleanup() {
   local exit_status=$?
+
+  # A signal during the launcher handover leaves nothing half-written (#1225).
+  if [[ "$launcher_tree_state" == writing && ! -L "$launcher_tree_path" ]]; then
+    rm -rf -- "$launcher_tree_path/scripts" "$launcher_tree_path/.env-orbit.example" 2>/dev/null || true
+  fi
 
   remove_deploy_container
 
@@ -1335,7 +1386,6 @@ prepare_configuration() {
           fail "OIDC client secret collection was cancelled or invalid; restoring the previous deployment."
       fi
     elif [[ -n "$missing" ]]; then
-      hand_over_launcher_config_tree
       print_noninteractive_configuration_guidance "$missing"
       fail "Required configuration fields require attention; refusing to start Compose."
     fi
