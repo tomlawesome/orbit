@@ -227,6 +227,10 @@ const PACK_DEFECTS: Record<string, string> = {
   /* #1183: the same .zero contrast failure, found again by desktop-firefox. */
   "/household/[id] clouds desktop-firefox": ZERO_ON_LIGHT_PACK,
   "/household/[id] dawn desktop-firefox": ZERO_ON_LIGHT_PACK,
+  /* #1219: and by desktop-webkit (pipeline 2131), the same rule on the same
+     node in ten runs of ten in the pinned Playwright image. */
+  "/household/[id] clouds desktop-webkit": ZERO_ON_LIGHT_PACK,
+  "/household/[id] dawn desktop-webkit": ZERO_ON_LIGHT_PACK,
 };
 
 const VIEWPORTS = [
