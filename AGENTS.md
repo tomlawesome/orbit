@@ -417,7 +417,7 @@ than fix a surface that will not ship (#566, #300, 2026-09-01).
   `stages-rerun` pattern: `docker run --network … -v $PWD:/app -w /app
   --entrypoint sh node:22 -c '…'`); from the host `orbit-ollama` does not
   resolve, every answer is blank and the run scores 0% in seconds. The
-  owner reads the log at http://<LAN address>:8090/ (container
+  owner reads the log at port 8090 on the design host (container
   `orbit-experiments`, nginx over `tmp/experiment-log/`); re-render after
   recording.
 - How extraction work is tested (owner, 2026-09-12), which is not a ruling on

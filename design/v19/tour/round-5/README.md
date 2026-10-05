@@ -3,7 +3,7 @@
 Round 4 was "very close now" (verdict verbatim in `../round-4/README.md`), so
 round 5 carries it forward verbatim except the four things the verdict named.
 One direction: **F — one take**, at
-http://<LAN address>:8335/v19/tour/round-5/f-one-take.html
+design host, port 8335: /v19/tour/round-5/f-one-take.html
 
 Same twelve chapters, same ratified copy, same Lift mechanic, same holds, same
 backdrops (copied from round 4 so the round browses on its own).
