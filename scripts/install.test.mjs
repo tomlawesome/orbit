@@ -13,6 +13,7 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
   symlinkSync,
   unlinkSync,
@@ -807,6 +808,21 @@ const fakeCosignScript = [
   "",
 ].join("\n");
 
+// Shadows stat for one question only: the owner of the directory named by
+// FAKE_STAT_FOREIGN_OWNER_PATH is reported as another uid (#1225), since an
+// unprivileged test cannot chown a directory away from itself. Every other
+// call is the real stat.
+const fakeStatScript = [
+  "#!/usr/bin/env bash",
+  "set -Eeuo pipefail",
+  'if [[ -n "${FAKE_STAT_FOREIGN_OWNER_PATH:-}" && "$#" -eq 4 && "$1 $2 $3" == "-c %u --" && "$4" == "${FAKE_STAT_FOREIGN_OWNER_PATH}" ]]; then',
+  '  printf \'%s\\n\' "$(( $(id -u) + 1 ))"',
+  "  exit 0",
+  "fi",
+  "exec /bin/stat \"$@\"",
+  "",
+].join("\n");
+
 function makeFakeBin() {
   const binDir = mkdtempSync(join(tmpdir(), "orbit-install-fakebin-"));
   writeFileSync(join(binDir, "docker"), fakeDockerScript);
@@ -817,6 +833,8 @@ function makeFakeBin() {
   chmodSync(join(binDir, "mv"), 0o755);
   writeFileSync(join(binDir, "cosign"), fakeCosignScript);
   chmodSync(join(binDir, "cosign"), 0o755);
+  writeFileSync(join(binDir, "stat"), fakeStatScript);
+  chmodSync(join(binDir, "stat"), 0o755);
   return binDir;
 }
 
@@ -1683,6 +1701,173 @@ describe("install.sh", () => {
     expect(result.calls).not.toContain("up -d");
     expect(targetEntries(targetDir)).toEqual([]);
     expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  describe("ORBIT_LAUNCHER_CONFIG_TREE handover on the non-interactive refusal (#1225)", () => {
+    const handedOver = [
+      "scripts/configure.sh",
+      "scripts/configuration.sh",
+      "scripts/installer-ui.sh",
+      ".env-orbit.example",
+    ];
+    const treeNotice = "ORBIT_LAUNCHER_CONFIG_TREE";
+
+    function makeLauncherTree() {
+      const tree = mkdtempSync(join(tmpdir(), "orbit-launcher-tree-"));
+      chmodSync(tree, 0o700);
+      return tree;
+    }
+
+    function noticeLines(stderr) {
+      return stderr.split("\n").filter((line) => line.includes(treeNotice));
+    }
+
+    function expectRefusalUnchanged(result, targetDir) {
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("configuration fields requiring attention: APP_URL");
+      expect(result.stderr).toContain("Required configuration fields require attention; refusing to start Compose.");
+      expect(result.calls).not.toContain("config --quiet");
+      expect(result.calls).not.toContain("up -d");
+      expect(targetEntries(targetDir)).toEqual([]);
+      expect(stagingLeftovers(targetDir)).toEqual([]);
+    }
+
+    function cleanUp(...paths) {
+      for (const path of paths) rmSync(path, { recursive: true, force: true });
+    }
+
+    it("copies the image-verified configure tree before rolling the target back", () => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      const bundle = makeImageDeployFixture({});
+      try {
+        const result = runInstall(targetDir, { FAKE_CONFIGURE_READY: "0", ORBIT_LAUNCHER_CONFIG_TREE: tree });
+
+        expectRefusalUnchanged(result, targetDir);
+        expect(noticeLines(result.stderr)).toEqual([]);
+        expect(readdirSync(tree, { recursive: true }).sort()).toEqual([
+          ".env-orbit.example",
+          "scripts",
+          "scripts/configuration.sh",
+          "scripts/configure.sh",
+          "scripts/installer-ui.sh",
+        ]);
+        for (const asset of handedOver) {
+          const path = join(tree, asset);
+          expect(lstatSync(path).isFile()).toBe(true);
+          expect(lstatSync(path).mode & 0o7777).toBe(stagedAssetMode);
+          expect(readFileSync(path)).toEqual(readFileSync(join(bundle, asset)));
+        }
+      } finally {
+        cleanUp(targetDir, tree, bundle);
+      }
+    });
+
+    it("writes nothing when the variable is unset", () => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      try {
+        const result = runInstall(targetDir, { FAKE_CONFIGURE_READY: "0" });
+
+        expectRefusalUnchanged(result, targetDir);
+        expect(noticeLines(result.stderr)).toEqual([]);
+        expect(readdirSync(tree)).toEqual([]);
+      } finally {
+        cleanUp(targetDir, tree);
+      }
+    });
+
+    it("writes nothing on a configuration failure other than the non-interactive refusal", () => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      try {
+        const result = runInstall(targetDir, { FAKE_CONFIGURE_FAIL: "1", ORBIT_LAUNCHER_CONFIG_TREE: tree });
+
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain("Configuration failed");
+        expect(noticeLines(result.stderr)).toEqual([]);
+        expect(readdirSync(tree)).toEqual([]);
+        expect(targetEntries(targetDir)).toEqual([]);
+      } finally {
+        cleanUp(targetDir, tree);
+      }
+    });
+
+    it.each([
+      {
+        name: "a symlink",
+        reason: "it is a symlink",
+        arrange: (parent) => {
+          const real = join(parent, "real");
+          mkdirSync(real, { mode: 0o700 });
+          const link = join(parent, "link");
+          symlinkSync(real, link);
+          return { tree: link, unchanged: () => expect(readdirSync(real)).toEqual([]) };
+        },
+      },
+      {
+        name: "not empty",
+        reason: "it is not empty",
+        arrange: (parent) => {
+          const tree = join(parent, "tree");
+          mkdirSync(tree, { mode: 0o700 });
+          writeFileSync(join(tree, ".launcher-own"), "KEEP\n");
+          return {
+            tree,
+            unchanged: () => {
+              expect(readdirSync(tree)).toEqual([".launcher-own"]);
+              expect(readFileSync(join(tree, ".launcher-own"), "utf8")).toBe("KEEP\n");
+            },
+          };
+        },
+      },
+      {
+        name: "owned by another user",
+        reason: "it is not owned by the current user",
+        arrange: (parent) => {
+          const tree = join(parent, "tree");
+          mkdirSync(tree, { mode: 0o700 });
+          return {
+            tree,
+            env: { FAKE_STAT_FOREIGN_OWNER_PATH: tree },
+            unchanged: () => expect(readdirSync(tree)).toEqual([]),
+          };
+        },
+      },
+      {
+        name: "missing",
+        reason: "it does not exist",
+        arrange: (parent) => {
+          const tree = join(parent, "absent");
+          return { tree, unchanged: () => expect(existsSync(tree)).toBe(false) };
+        },
+      },
+      {
+        name: "not a directory",
+        reason: "it is not a directory",
+        arrange: (parent) => {
+          const tree = join(parent, "file");
+          writeFileSync(tree, "NOT-A-DIRECTORY\n");
+          return { tree, unchanged: () => expect(readFileSync(tree, "utf8")).toBe("NOT-A-DIRECTORY\n") };
+        },
+      },
+    ])("refuses a tree that is $name with one stderr line and an unchanged refusal", ({ reason, arrange }) => {
+      const targetDir = makeTarget();
+      const parent = mkdtempSync(join(tmpdir(), "orbit-launcher-parent-"));
+      try {
+        const { tree, env = {}, unchanged } = arrange(parent);
+
+        const result = runInstall(targetDir, { FAKE_CONFIGURE_READY: "0", ORBIT_LAUNCHER_CONFIG_TREE: tree, ...env });
+
+        expectRefusalUnchanged(result, targetDir);
+        expect(noticeLines(result.stderr)).toEqual([
+          `Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because ${reason}.`,
+        ]);
+        unchanged();
+      } finally {
+        cleanUp(targetDir, parent);
+      }
+    });
   });
 
   it("keeps OIDC discovery input attached to the isolated parser container", () => {
