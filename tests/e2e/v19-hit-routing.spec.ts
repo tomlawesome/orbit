@@ -314,6 +314,13 @@ test("a household the packed sky cannot draw is still reachable by name", async 
     await stubSky(newcomer, OVERFULL_SKY);
     await signIn(newcomer, workerAccount("outsider"));
     await newcomer.goto("/");
+    /* #1219: the arrival decides from its own /api/workspace read, which
+       WebKit holds behind the sky's rasterising: in pipeline 2144 that read
+       left 5.19 s after `GET /`, the stub answered it 4.90 s into the group's
+       5 s wait, and the group never drew in time (local runs: 4.16-4.91 s).
+       The route was applied every time; the decision was late. So wait for
+       the decision itself, as signIn does, before reading the list. */
+    await settleArrival(newcomer);
     const belong = newcomer.getByRole("group", { name: "Where do you belong?" });
     await expect(belong).toBeVisible();
     for (const name of undrawn) {
