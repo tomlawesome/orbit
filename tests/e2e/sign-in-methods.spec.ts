@@ -5,6 +5,7 @@ import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { ensureLocalPassword } from "./support/local-credentials";
 import { ensureWorkerAdministrator, workerAccount, workerFixturePassword } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -109,6 +110,7 @@ test.afterAll(async ({ browser }) => {
 });
 
 async function signInAs(page: Page, account: string, options: { household?: boolean } = {}) {
+  await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
   await settleArrival(page);

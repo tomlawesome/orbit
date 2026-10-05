@@ -136,3 +136,27 @@ export async function sweepNamed(page: Page, names: readonly string[]) {
     throw new Error(`#730: ${failures.length} household(s) left behind:\n  ${failures.join("\n  ")}`);
   }
 }
+
+/**
+ * `unrouteAll` then `sweep`, tolerant of the page already being gone.
+ *
+ * #1192 (mobile WebKit, v19-mail-review.spec.ts): when the test's own action
+ * does not resolve within its budget, Playwright's test timeout tears the
+ * page and context down while this `finally` block is still running.
+ * `unrouteAll`'s own `ignoreErrors` option covers a route handler of its own
+ * throwing during cleanup -- not the target already being closed -- so
+ * `unrouteAll` and `sweep`'s `page.request` calls still throw "Target page,
+ * context or browser has been closed", and thrown from a `finally` that
+ * replaces the test's real timeout error rather than adding to it. A closed
+ * target here is never this cleanup's own failure to report: swallow
+ * exactly that, so whatever actually failed is what the test shows.
+ */
+export async function unrouteAndSweep(page: Page, households: ReturnType<typeof householdRegister>) {
+  try {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await households.sweep(page);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("has been closed")) return;
+    throw error;
+  }
+}

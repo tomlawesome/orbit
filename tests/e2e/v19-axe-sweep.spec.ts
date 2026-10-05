@@ -6,6 +6,7 @@ import { homeIsLive } from "./support/keyboard";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { entrancesSettled } from "./support/motion";
+import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -38,6 +39,7 @@ const READER = () => workerAccount("administrator");
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
 async function signIn(page: Page, returnTo: string) {
+  await answerPushWithoutAService(page);
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
   await page.getByRole("link", { name: READER() }).click();
   /* #1080: waits for the session, then holds administrator access. */
@@ -350,6 +352,19 @@ test.describe("the signed-in v19 sweep", () => {
       path: "/settings",
       ready: async (page) => {
         await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+        if (!test.info().project.name.startsWith("mobile")) {
+          /* #1195: on desktop Safari, /settings draws only its header, and
+             axe's own `.analyze()` then hangs for the whole test timeout
+             scanning the blanked page (pipeline 2005's trace: this ready
+             function had already resolved -- heading visible, `.st-pocket`
+             present but hidden, same as it always is on the desk dialect --
+             so the 60s was lost inside `AxeBuilder.analyze()` itself, not
+             here). Asserting the desk's own cards exist turns that hang
+             into a bounded, catchable failure instead: true on every
+             desktop engine, not a WebKit special case, and scoped off
+             mobile, whose dialect has no `.cards` to find. */
+          await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
+        }
         await entrancesSettled(page.locator(".st-pocket"));
       },
     },

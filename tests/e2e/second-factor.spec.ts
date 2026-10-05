@@ -6,6 +6,7 @@ import { ensureLocalPassword } from "./support/local-credentials";
 import { workerAccount, workerEmail, workerFixturePassword } from "./support/worker-identity";
 import { newestApprovalUid, waitForApprovalLink } from "./support/mail";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -136,6 +137,7 @@ test.beforeAll(async ({ request }) => {
 
 /** Signs a reader in through the provider, the way every other spec does. */
 async function signInWithProvider(page: Page, account: string): Promise<void> {
+  await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
   await settleArrival(page);

@@ -65,6 +65,19 @@ export async function ensureLocalPassword(page: Page, account: string, password:
   await page.getByRole("link", { name: account }).click();
   /* The callback mints the proof and sends the browser back to `returnTo`. */
   await page.waitForURL(/\/settings/, { timeout: 20_000 });
+  /* #1192: WebKit only -- this round trip is a cross-origin navigate away to
+     the provider and back, and WebKit swaps the main frame's internal id on
+     that kind of navigation. A caller whose very next step is its own
+     `page.goto` can lose a race with Playwright's own bookkeeping catching
+     up to that swap: the call fails immediately with "Cannot find web frame
+     for the frame id" rather than timing out, so waiting longer here
+     (38ab8ca2's `waitForLoadState("load")`, removed) does not help -- the
+     frame object only becomes valid for Playwright's purposes after that
+     error has already been raised once, and on WebKit retrying the
+     navigation itself is not reliable either (pipeline 2005). The caller
+     must continue on a fresh page on WebKit instead: v19-archive.spec.ts's
+     own `pageAfterStepUp` is the real fix, right where this round trip
+     ends. */
 
   const set = await page.request.post("/api/auth/local/password", {
     /* Read again, not reused: setting a password that REPLACES one revokes

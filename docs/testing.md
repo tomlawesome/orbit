@@ -101,9 +101,12 @@ Merge requests and pushes to `dev` run:
 - the licence-policy check over the whole installed dependency tree;
 - PostgreSQL integration;
 - the container build, then the smoke, browser and recovery journeys against
-  that build. The browser suite is two jobs side by side: `smoke` runs it in
-  Chromium and `smoke_firefox` in Firefox. With Firefox inside `smoke`, that
-  one job took 29.9 of its 30 minutes, so it has its own (#1183).
+  that build. The browser suite is four jobs side by side: `smoke` runs it in
+  Chromium, `smoke_firefox` in Firefox, and `smoke_webkit` /
+  `smoke_webkit_mobile` in WebKit, desktop and phone. With Firefox inside
+  `smoke`, that one job took 29.9 of its 30 minutes, so it has its own
+  (#1183); WebKit's desktop and phone projects together ran close to the same
+  limit, so they split the same way (#1192).
 - the appearance checks, also two jobs: `fidelity` (Chromium appearance and
   the phone-floor measurements) and `fidelity_webkit` (the phone film in
   WebKit), split in #1174 so neither risks the 30-minute job limit.
@@ -126,17 +129,22 @@ the run reported; do not use broad Docker prune or delete commands.
 
 ## What the accessibility checks cover
 
-The `smoke` and `smoke_firefox` jobs run the Playwright suite in `tests/e2e/`
-against the production container just built, with the throwaway OIDC
-profile. The suite has three browser projects: desktop Chromium and mobile
-Chromium (a Pixel 7 profile) in `smoke`, and desktop Firefox in
-`smoke_firefox`. The two Chromium projects cover both of Orbit's layouts, and
-Firefox repeats the desktop layout on a second browser engine (#1183). WebKit
-is not run yet. The maintenance-window spec runs once per project, after the
-rest, one project at a time. Locally, `scripts/test-e2e-local.sh` runs all
-three unless told otherwise; `ORBIT_E2E_ENGINES=chromium` or `=firefox` picks
-one engine the way the two jobs do. The automated checks are deliberately
-representative, not device certification:
+The `smoke`, `smoke_firefox`, `smoke_webkit` and `smoke_webkit_mobile` jobs
+run the Playwright suite in `tests/e2e/` against the production container
+just built, with the throwaway OIDC profile. The suite has five browser
+projects: desktop Chromium and mobile Chromium (a Pixel 7 profile) in
+`smoke`, desktop Firefox in `smoke_firefox`, and desktop WebKit (Safari) and
+mobile WebKit (an iPhone 15 profile) in `smoke_webkit` and
+`smoke_webkit_mobile`. The two Chromium projects cover both of Orbit's
+layouts, and Firefox and WebKit repeat them on their own engines (#1183,
+#1192). The maintenance-window spec runs once per project, after the rest,
+one project at a time, for the Chromium and Firefox projects only -- WebKit
+has no maintenance pass of its own yet. Locally, `scripts/test-e2e-local.sh`
+runs all five unless told otherwise; `ORBIT_E2E_ENGINES=chromium`, `=firefox`
+or `=webkit` picks one engine the way the jobs do, and
+`ORBIT_E2E_WEBKIT_DEVICES=desktop` or `=mobile` narrows WebKit further the
+way `smoke_webkit` and `smoke_webkit_mobile` do. The automated checks are
+deliberately representative, not device certification:
 
 | Contract | Automated evidence |
 | --- | --- |
@@ -160,4 +168,128 @@ fault named instead. Today that is the dropped-focus fault in
 Fixtures use throwaway made-up households, items, documents and mailbox
 metadata. The Playwright trace is kept only on the first retry. Checks on
 real devices and with real assistive technology are still part of release
-acceptance and are not implied by the automated Chromium and Firefox evidence.
+acceptance and are not implied by the automated Chromium, Firefox and WebKit
+evidence.
+
+## Local development
+
+### Requirements
+
+- Node.js 22, the version Orbit's image runs
+- pnpm, at the version `package.json` pins under `packageManager`
+- PostgreSQL 18, or Docker for the database only
+
+### Start the development stack
+
+```sh
+pnpm install
+bash scripts/configure.sh
+pnpm db:migrate
+pnpm --filter orbit-web dev
+```
+
+The last command starts the development server for the app under `web/`;
+the repository root has no `dev` script of its own.
+
+To run only PostgreSQL in Docker:
+
+```sh
+docker compose --env-file .env-orbit up -d orbit-db
+```
+
+The default host and database settings in `.env-orbit.example` use the same
+generated PostgreSQL password file as the container.
+
+### Quality checks
+
+```sh
+bash scripts/test-backend.sh
+pnpm test:coverage
+bash scripts/test-frontend.sh
+bash scripts/test-all.sh
+```
+
+The frontend script targets `http://127.0.0.1:3000` by default; set
+`PLAYWRIGHT_BASE_URL` to test another non-production deployment. Use
+`ORBIT_SKIP_E2E=true bash scripts/test-all.sh` for the fast static and unit
+suite when no browser target is running.
+
+The authenticated acceptance checks use a separate Compose overlay with a
+disposable local OIDC provider. It performs discovery, PKCE, code exchange and
+signed ID-token validation; it does not add an Orbit sign-in bypass. Run it only
+against disposable data.
+
+`bash scripts/test-e2e-local.sh` is the safe default: it brings up this same
+overlay, plus the mail overlay, under an isolated Compose project derived from
+this worktree and process (so it can never collide with a real deployment or
+another concurrent run on the same host), waits for health, runs the browser
+suite, and guarantees teardown, all mirroring the acceptance stage of the
+container-validation workflow:
+
+```sh
+bash scripts/test-e2e-local.sh
+bash scripts/test-e2e-local.sh --spec tests/e2e/v19-mail-review.spec.ts --project mobile-chromium
+```
+
+Re-running one failing spec need not pay for a fresh build and start each
+time: `--keep` leaves the stack up, and a later `--reuse PROJECT` (the
+project name that run's startup log line names) skips straight to Playwright
+against it. `--reuse` identifies and health-checks that stack itself --
+never assumes it is still healthy, and never tears it down:
+
+```sh
+bash scripts/test-e2e-local.sh --keep
+# ... a spec fails; fix it, then:
+bash scripts/test-e2e-local.sh --reuse <project> --spec tests/e2e/v19-mail-review.spec.ts
+```
+
+If you run the Compose commands by hand (for example to inspect a stack
+between steps), always pass an isolating `-p`, or you can silently attach to
+your real deployment's containers and data. `docker-compose.yml`'s
+`name: orbit` and `.env-orbit`'s `COMPOSE_PROJECT_NAME` both default to the
+same project name a real deployment uses, from any checkout, so a bare
+`--env-file .env-orbit` command with no `-p` reuses that deployment's
+containers and named volumes instead of creating its own. AGENTS.md documents
+this trap and issue #536 hit it for real. The `--keep` output prints the
+exact teardown line to use:
+
+```sh
+docker compose -p orbit-acceptance-local --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.acceptance.yml up --build --wait
+ORBIT_ACCEPTANCE_OIDC=true bash scripts/test-frontend.sh
+docker compose -p orbit-acceptance-local --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.acceptance.yml down --volumes --remove-orphans
+```
+
+`scripts/compose-isolation-preflight.sh` is the scripted version of the same
+check: source it and call `resolve_compose_project` and
+`compose_isolation_preflight` before an `up`, and it refuses -- naming the
+resolved project and the safe `-p` alternative -- when that project already
+has containers running.
+
+Install Playwright's local Chromium build once, then repeat browser tests
+without using an AI service:
+
+```sh
+bash scripts/install-test-browser.sh
+bash scripts/test-frontend.sh
+```
+
+The current measured suite and its known gaps are recorded in the
+[engineering baseline](engineering-baseline.md). Playwright verifies
+signed-out privacy in desktop and mobile Chromium and uses the disposable OIDC
+profile for authenticated household-lifecycle acceptance. Coverage is
+diagnostic while the database/API integration baseline is established; it is
+not an arbitrary release percentage.
+
+Every corpus committed to the repository is invented — real paperwork must
+never be committed. If you want to know how extraction does against your own
+real documents, [private local evaluation](private-eval.md) runs
+entirely on your machine, against a directory you choose outside the repo,
+and prints only per-field and overall scores; it structurally refuses to run
+against anything inside the repository and never prints document content.
+
+The [v1 charter](v1-charter.md) defines the supported release,
+[architecture and ADRs](architecture.md) record durable system decisions,
+and the [quality strategy](quality-strategy.md) defines test and CI
+evidence. GitHub milestones and issues own delivery status. Product directions
+outside the stable contract remain in the
+[feature register](feature-register.md).

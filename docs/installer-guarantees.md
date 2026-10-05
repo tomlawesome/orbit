@@ -396,6 +396,98 @@ self-contained); `recovery-crypto.mjs` is invoked as a one-off `node` entrypoint
 
 All citations are `file.sh:line` against `/home/codex/projects/orbit/scripts/<file>`.
 
+### Before and after an upgrade
+
+This is the operator procedure around an upgrade: running the install line
+again and choosing Update (see [Installing Orbit](installing.md#what-the-installer-asks)).
+Run every command here from the deployment directory. It uses `backup.sh`,
+`restore.sh` and `configuration.sh`, whose guarantees are catalogued in
+their own sections.
+
+Before an upgrade, take a backup, check it, and keep a copy of the current
+`.env-orbit` beside it, readable only by you. The backup deliberately holds
+no configuration or secrets; the saved `.env-orbit` records exactly which
+build was running, so you can go back to it:
+
+```sh
+umask 077
+preupgrade_dir="${ORBIT_BACKUP_DIR:-backups}"
+mkdir -p -- "$preupgrade_dir"
+chmod 700 -- "$preupgrade_dir"
+preupgrade_config="$preupgrade_dir/orbit-pre-upgrade.env"
+cp -- .env-orbit "$preupgrade_config"
+chmod 600 "$preupgrade_config"
+backup_output="$(ORBIT_BACKUP_DIR="$preupgrade_dir" bash scripts/backup.sh)" || exit 1
+case "$backup_output" in
+  "Orbit backup created: "*) backup_path="${backup_output#Orbit backup created: }" ;;
+  *) exit 1 ;;
+esac
+ORBIT_BACKUP_DIR="$preupgrade_dir" bash scripts/backup.sh --verify "$backup_path" >/dev/null
+```
+
+What the installer guarantees during an upgrade:
+
+- It checks the new build's configuration rules before touching an existing
+  `.env-orbit`, and keeps a private rollback copy. Until it reports success, a
+  configuration or pre-start failure automatically restores the original
+  files.
+- Each successful upgrade records the version and build fingerprint it applied
+  in `ORBIT_CONFIG_APPLIED_VERSION` and `ORBIT_CONFIG_APPLIED_DIGEST`. They
+  must match `ORBIT_IMAGE`; never edit them by hand.
+- A fresh install, or a recognised rename of the deployment directory, records
+  the validated `COMPOSE_PROJECT_NAME` (the Compose project name). Keep running
+  `docker compose --env-file .env-orbit`, `scripts/backup.sh` and
+  `scripts/restore.sh` from the deployment directory, and do not pass a
+  remembered `--project-name`, so every command keeps addressing the same
+  containers and volumes after a reboot.
+- If the installer is killed mid-run, `.env-orbit` is either the old file or
+  the complete new one, never half-written. Private
+  `.orbit-install-staging.*` files may be left behind with owner-only
+  permissions; keep them until recovery is complete.
+- Before reusing an existing deployment it proves the deployment is really
+  this one: the Compose project, the database volume's labels, who owns the
+  stopped containers, and the previous build. Moving the directory therefore
+  never quietly creates an empty database. A fresh install is refused if any
+  Orbit database volume already exists, and an update is refused if ownership
+  cannot be proven. Orbit never deletes or resets a database volume by itself.
+  Keep `.orbit-secrets/postgres-password` exactly as it is.
+
+A configuration file from an older Orbit that no installer has migrated can be
+inspected with `scripts/configuration.sh --preflight` and upgraded explicitly,
+giving it the new build's details:
+
+```sh
+bash scripts/configuration.sh --migrate --orbit-image \
+  'registry.example/orbit@sha256:<64 lowercase hexadecimal characters>' \
+  --applied-version v0.3.0 \
+  --applied-digest 'sha256:<64 lowercase hexadecimal characters>' \
+  --compose-project-name orbit
+```
+
+The two digests must be the same. The command keeps one owner-only rollback
+copy beside the file, changes the file all at once or not at all, is safe to
+run again, and never rewrites your own values or secrets.
+
+If Orbit has started but the database migration or sign-in then fails, stop
+it and restore both the checked backup and the saved configuration. Run this
+in the same shell as the backup steps above, so `$preupgrade_config`,
+`$preupgrade_dir` and `$backup_path` are still set:
+
+```sh
+docker compose --env-file .env-orbit stop orbit-app
+cp -- "$preupgrade_config" .env-orbit
+chmod 600 .env-orbit
+docker compose --env-file .env-orbit pull orbit-app
+ORBIT_BACKUP_DIR="$preupgrade_dir" bash scripts/restore.sh "$backup_path"
+```
+
+The restored `.env-orbit` names the previous build exactly; do not swap in a
+version name or edit only `ORBIT_IMAGE`. Type `RESTORE` when the restore
+asks, then check
+`/api/health` and that you can sign in on the previous build, and only then
+delete the saved copy with `rm -f -- "$preupgrade_config"`. Keep it until
+health is confirmed.
+
 ---
 
 ## backup.sh
@@ -463,8 +555,8 @@ All citations are `file.sh:line` against `/home/codex/projects/orbit/scripts/<fi
 31. Completed bundle tar is validated (`tar -tf`) before being treated as the deliverable.
     `backup.sh:172` — category: input-validation — criticality: MEDIUM
 32. Final bundle is written via a `.installing` temp name and published atomically with a hard link (`ln`, which fails on an existing name), refusing loudly to overwrite an existing same-named backup; `mv --no-clobber` was a separate check-then-rename that on a same-second collision silently exited 0 and reported the old bundle.
-    `backup.sh:139-140,173-175` — category: transactional/rollback / idempotency — criticality: HIGH
-33. `temporary_path` is cleared only after a successful move, so the `EXIT` cleanup trap never deletes a successfully published backup, but does clean up any half-built one.
+    `backup.sh:28-48,217,257` — category: transactional/rollback / idempotency — criticality: HIGH
+33. `temporary_path` is cleared only after a successful publish, so the `EXIT` cleanup trap never deletes a successfully published backup, but does clean up any half-built one.
     `backup.sh:175,22-24` — category: transactional/rollback — criticality: MEDIUM
 34. `orbit-app` is explicitly restarted at the end of a successful backup (independent of the trap).
     `backup.sh:176-177` — category: transactional/rollback — criticality: HIGH
@@ -865,9 +957,9 @@ the original 8-category taxonomy and is called out separately.
 7. A new destructive operation refuses to start while an unfinished-restore journal exists; operator must run `restore.sh --recover` first.
    `restore.sh:898` and `import-recovery-bundle.sh:51-52`
 8. Working/backup directories that will hold key material or backups are created with mode 700 under `umask 077`.
-   `backup.sh:136-138` and `export-recovery-bundle.sh:70-72`
+   `backup.sh:213-215` and `export-recovery-bundle.sh:70-72`
 9. Final published artifact is written via a `.installing`/temp name and atomically published with a hard link that fails on an existing name, never overwriting an existing file and never silently skipping the publish.
-   `backup.sh:139-140,173-175` and `export-recovery-bundle.sh:17-37,87-93`
+   `backup.sh:28-48,217,257` and `export-recovery-bundle.sh:17-37,87-93`
 10. Document-KEK fingerprint (SHA-256 of the key) is computed and format-validated, then compared against the bundle's recorded fingerprint to refuse bundles encrypted with a different key.
     `backup.sh:61-67,120-121` and `restore.sh:71-79,142-143`
 

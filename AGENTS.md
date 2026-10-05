@@ -112,7 +112,7 @@ Three facts about that host live in its `config.toml` and root cron, not here.
 note. `pull_policy = ["if-not-present"]` covers a job's own image but not a
 service's, which needs its own line in `.gitlab-ci.yml`. And
 `/usr/local/sbin/runner-docker-tidy.sh` prunes containers, volumes, untagged
-images and the builder cache (3 GB reserve) at 03:15 nightly, logging to
+images and the builder cache (3 GB reserve) at 02:15 nightly, logging to
 `/var/log/runner-docker-tidy.log`; pinned job images survive it (owner, 2026-09-08).
 
 A push starts a pipeline only on `dev`, `preview`, `main` and `hotfix/*`; a
@@ -192,7 +192,9 @@ Check the list before building a test rig or handing a check to the owner.
 - `scripts/test-install-acceptance.sh` — real fresh install to a healthy
   `/api/health`, asserting `docs/installer-guarantees.md`; OIDC discovery is a
   fixture, so no provider credentials are needed
-- `scripts/test-install-bootstrap.sh` — the documented operator path: fetches
+- `scripts/test-install-bootstrap.sh` — the direct bootstrap path (not a
+  supported install entry since ADR-0031's 2026-10-04 amendment;
+  `get-orbit.sh` is): fetches
   `install.sh` over the network from a branch, pipes it to bash, and proves the
   channel tag resolved to the digest the registry serves right now. Real
   network and registry; only OIDC discovery is redirected, to the `tests/oidc`
@@ -415,7 +417,7 @@ than fix a surface that will not ship (#566, #300, 2026-09-01).
   `stages-rerun` pattern: `docker run --network … -v $PWD:/app -w /app
   --entrypoint sh node:22 -c '…'`); from the host `orbit-ollama` does not
   resolve, every answer is blank and the run scores 0% in seconds. The
-  owner reads the log at http://<LAN address>:8090/ (container
+  owner reads the log at port 8090 on the design host (container
   `orbit-experiments`, nginx over `tmp/experiment-log/`); re-render after
   recording.
 - How extraction work is tested (owner, 2026-09-12), which is not a ruling on

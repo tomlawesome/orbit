@@ -3,7 +3,7 @@
 # Is the runner host's nightly Docker tidy still running? (#1023)
 #
 # `/usr/local/sbin/runner-docker-tidy.sh` prunes containers, volumes, untagged
-# images and the builder cache at 03:15 nightly on the runner host. It failed
+# images and the builder cache at 02:15 nightly on the runner host. It failed
 # every night from 2026-09-06 to 2026-09-15 with `runuser: not found` and
 # nobody noticed until CI stopped with a full disk (#823). The error went to
 # `/var/log/runner-docker-tidy.log`, which nothing reads.
@@ -27,14 +27,20 @@
 # that cannot show a successful tidy.
 #
 # 1. Root's crontab writes the marker after a zero exit. Replace the existing
-#    03:15 line with:
+#    02:15 lines (nightly Monday to Saturday, `weekly` on Sunday) with:
 #
-#      15 3 * * * /usr/local/sbin/runner-docker-tidy.sh >> /var/log/runner-docker-tidy.log 2>&1 && mkdir -p /var/lib/orbit-runner-health && date -u +%s > /var/lib/orbit-runner-health/.docker-tidy.new && mv /var/lib/orbit-runner-health/.docker-tidy.new /var/lib/orbit-runner-health/docker-tidy.ok
+#      15 2 * * 1-6 /usr/local/sbin/runner-docker-tidy.sh >> /var/log/runner-docker-tidy.log 2>&1 && date -u +\%s > /var/lib/orbit-runner-health/.docker-tidy.new && mv /var/lib/orbit-runner-health/.docker-tidy.new /var/lib/orbit-runner-health/docker-tidy.ok
+#      15 2 * * 0 /usr/local/sbin/runner-docker-tidy.sh weekly >> /var/log/runner-docker-tidy.log 2>&1 && date -u +\%s > /var/lib/orbit-runner-health/.docker-tidy.new && mv /var/lib/orbit-runner-health/.docker-tidy.new /var/lib/orbit-runner-health/docker-tidy.ok
+#
+#    The `\%` is not optional: in a crontab an unescaped `%` ends the command
+#    and feeds the rest of the line to it as input, so `+%s` would never write
+#    the marker (#1220). The directory already exists: it is the one change
+#    2 mounts.
 #
 #    The `&&` is the whole point: cron's own exit status decides, so nothing
 #    inside the script has to be trusted to report its own failure -- which is
 #    what went wrong in #823. The write is a temp file and a rename so a job
-#    reading at 03:15 sees either the old marker or the new one, never a
+#    reading at 02:15 sees either the old marker or the new one, never a
 #    half-written file. The directory needs mode 0755 and the marker 0644,
 #    which a root umask of 022 gives.
 #

@@ -572,21 +572,25 @@ test.describe("the pocket film in WebKit (#1174)", () => {
        *  to be read (the chrome re-measures a frame after the page moves, a
        *  callout fades over 180ms). The pill's own move between places is a
        *  fade through nothing over 350ms (owner's call, round 8), so a pill
-       *  fault counts once it has lasted a second of wall time — a pill at
-       *  38% or 16% is faint for whole chapters.
-       *  @type {Map<string, { run: number, since: number }>} */
+       *  fault counts once it has lasted a second's worth of painted frames
+       *  — a pill at 38% or 16% is faint for whole chapters. Counted in the
+       *  page's own frames (`__frames`), not wall time (#1184): at 6 frames
+       *  a second a 350ms fade outlasts a wall-clock second.
+       *  @type {Map<string, { run: number, sinceFrame: number }>} */
       let streak = new Map();
-      const PILL_FAULT_MS = 1000;
+      /* 1000ms and 3000ms at 60 frames a second; they do not stretch on a slow host. */
+      const PILL_FAULT_FRAMES = 60;
       /** A move between places is 350ms; one still under way after three
-       *  seconds is a pill that never arrived. */
-      const PILL_MOVE_MS = 3000;
+       *  seconds' worth of frames is a pill that never arrived. */
+      const PILL_MOVE_FRAMES = 180;
       let tapped = false;
       let tapTook = false;
       let done = false;
       let samples = 0;
       const started = Date.now();
       while (!done && Date.now() - started < (phone.through === "yours" ? 480_000 : 200_000)) {
-        const [s, first] = await Promise.all([page.evaluate(sampleTransport), page.evaluate(sample)]);
+        const [s, first, frame] = await Promise.all([page.evaluate(sampleTransport), page.evaluate(sample),
+          page.evaluate(() => /** @type {number} */ (/** @type {any} */ (window).__frames))]);
         /* A ring off its element is looked at again two painted frames on:
            the chrome re-measures once a frame, and a busy host paints few
            of them — a ring that is back on its element by then was a frame
@@ -613,10 +617,10 @@ test.describe("the pocket film in WebKit (#1174)", () => {
                a fade in progress is one fault lasting, not several */
             const key = `${pill ? f.replace(/\(opacity [\d.]+, /u, "(") : f} · ${s.url} · ch${s.chapter + 1}`;
             const was = streak.get(key);
-            const run = { run: (was?.run ?? 0) + 1, since: was?.since ?? Date.now() };
+            const run = { run: (was?.run ?? 0) + 1, sinceFrame: was?.sinceFrame ?? frame };
             now.set(key, run);
-            const limit = f.startsWith("pill moving") ? PILL_MOVE_MS : PILL_FAULT_MS;
-            if (pill ? Date.now() - run.since >= limit : run.run >= need) faults[key] = (faults[key] ?? 0) + 1;
+            const limit = f.startsWith("pill moving") ? PILL_MOVE_FRAMES : PILL_FAULT_FRAMES;
+            if (pill ? frame - run.sinceFrame >= limit : run.run >= need) faults[key] = (faults[key] ?? 0) + 1;
           }
           streak = now;
           for (const one of s.flicker) flicker.push(`${one} · ${s.url} · ch${s.chapter + 1}`);
@@ -835,6 +839,29 @@ async function shareDiffering(page, a, b) {
 }
 
 /**
+ * A box photographed once it has stopped changing (#1208): shot after shot,
+ * about 100ms apart, until two in a row are the same picture -- the way
+ * Playwright's own `toHaveScreenshot` waits for a settled page. A fixed
+ * wait guessed how long WebKit takes to paint, and on a loaded CI runner,
+ * late in the run, it sometimes had not finished. Bounded: after 20 shots
+ * whatever is there is judged, so a page that never settles still fails
+ * on what it shows rather than on the clock.
+ * @param {import("@playwright/test").Page} page
+ * @param {{ x: number, y: number, width: number, height: number }} box
+ */
+async function settledShot(page, box) {
+  const shot = () => page.screenshot({ clip: box, animations: "disabled", caret: "hide" });
+  let last = await shot();
+  for (let k = 1; k < 20; k++) {
+    await page.waitForTimeout(100);
+    const next = await shot();
+    if (next.equals(last)) return next;
+    last = next;
+  }
+  return last;
+}
+
+/**
  * Whether a field's own placeholder can be seen in its box: the box
  * photographed as it is, and again with the placeholder taken off the
  * field. The same picture both times means nothing of it shows.
@@ -842,27 +869,44 @@ async function shareDiffering(page, a, b) {
  * @param {string} id the field's id
  */
 async function placeholderShows(page, id) {
-  const box = await page.evaluate((one) => {
+  const found = await page.evaluate((one) => {
     const el = /** @type {HTMLElement} */ (document.getElementById(one));
     const r = el.getBoundingClientRect();
     const x = Math.max(0, r.left + 2), y = Math.max(0, r.top + 2);
     const right = Math.min(window.innerWidth, r.right - 2), bottom = Math.min(window.innerHeight, r.bottom - 2);
-    return right - x < 8 || bottom - y < 8 ? null : { x, y, width: right - x, height: bottom - y };
+    const at = { x: window.scrollX, y: window.scrollY };
+    return { at, box: right - x < 8 || bottom - y < 8 ? null : { x, y, width: right - x, height: bottom - y } };
   }, id);
+  const { at, box } = found;
   if (!box) return null;
-  const shot = () => page.screenshot({ clip: box, animations: "disabled", caret: "hide" });
-  const as = await shot();
+  const twoFrames = () => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(undefined)))));
+  /* WebKit's scroll anchoring moves the page a frame after a half-visible
+     field's placeholder goes or returns, so each picture is taken only
+     after the page has been put back where it was -- at once, as the
+     page's own smooth scrolling would take a while. */
+  const atRest = async () => {
+    await twoFrames();
+    await page.evaluate((p) => window.scrollTo({ left: p.x, top: p.y, behavior: "instant" }), at);
+    await twoFrames();
+  };
+  await atRest();
+  const as = await settledShot(page, box);
   await page.evaluate((one) => {
     const el = /** @type {HTMLInputElement} */ (document.getElementById(one));
     el.dataset.heldPlaceholder = el.placeholder;
     el.placeholder = "";
   }, id);
-  const bare = await shot();
+  /* Both pictures are settled frames, the second only after the field has
+     been repainted without its placeholder: an immediate shot could still
+     be the old frame, equal to `as`, and prove nothing (#1208). */
+  await atRest();
+  const bare = await settledShot(page, box);
   await page.evaluate((one) => {
     const el = /** @type {HTMLInputElement} */ (document.getElementById(one));
     el.placeholder = el.dataset.heldPlaceholder ?? "";
     delete el.dataset.heldPlaceholder;
   }, id);
+  await atRest();
   return (await shareDiffering(page, as, bare)) > 0.004;
 }
 
@@ -899,8 +943,9 @@ test.describe("suggested values give way to real text (#1174 round 4)", () => {
           wrong.push(`${mark}: never reached`);
           continue;
         }
-        await page.waitForTimeout(350);
-        /* the fields with a film line over them, on the screen */
+        /* the fields with a film line over them, on the screen; each is
+           judged from a settled frame (placeholderShows), not after a
+           fixed wait (#1208) */
         const ids = await page.evaluate(() => {
           const ghosts = [...document.querySelectorAll(".tourfilm-typed")].map((g) => g.getBoundingClientRect());
           return [...document.querySelectorAll("#pocket-entry input[placeholder], #pocket-entry textarea[placeholder]")]
@@ -925,6 +970,7 @@ test.describe("suggested values give way to real text (#1174 round 4)", () => {
     });
 
     test(`at ${phone.width}x${phone.height} the pocket form's suggestions go while a field holds real text and come back when it is emptied`, async ({ browser }) => {
+      test.setTimeout(150_000);
       const context = await browser.newContext({
         viewport: { width: phone.width, height: phone.height }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
       });

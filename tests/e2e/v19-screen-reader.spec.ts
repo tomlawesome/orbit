@@ -6,6 +6,7 @@ import { householdRegister, sessionHeaders } from "./support/households";
 import { gotoCreate } from "./support/keyboard";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -53,6 +54,7 @@ const UNBOUNDED_TEXT_PATTERNS: [RegExp, string][] = [
 ];
 
 async function signIn(page: Page, returnTo = "/home") {
+  await answerPushWithoutAService(page);
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
   await page.getByRole("link", { name: READER() }).click();
   // The click starts a redirect chain through the identity provider and back

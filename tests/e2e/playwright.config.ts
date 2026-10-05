@@ -58,6 +58,14 @@ const reuseKeptStack = process.env.ORBIT_E2E_REUSE === "true";
 // moves the fixed in-container 4443 to wherever TEST_OIDC_PORT published it.
 // forcePort is global to the browser, which is safe here because nothing
 // else the suite opens uses 4443. In CI the port is 4443 and no remap is set.
+//
+// #1192: WebKit has neither switch, and Playwright exposes no third way to
+// do this from inside a browser's own launch options. Its redirect happens
+// outside this file instead, in CI: smoke_webkit/smoke_webkit_mobile add
+// orbit-oidc to the job container's /etc/hosts (.gitlab-ci.yml,
+// `.webkit_oidc_hosts`), which is where that job's Playwright process and
+// the stack's published ports already live. See the desktop-webkit/
+// mobile-webkit projects below for the launchOptions half of this.
 const oidcHostPort = process.env.TEST_OIDC_PORT ?? "4443";
 const firefoxLaunchOptions = process.env.ORBIT_ACCEPTANCE_OIDC === "true"
   ? {
@@ -69,11 +77,14 @@ const firefoxLaunchOptions = process.env.ORBIT_ACCEPTANCE_OIDC === "true"
   : undefined;
 
 // #1183: which engines' projects this run has. Every engine by default, so a
-// local run is the whole suite; CI splits it across two jobs because Firefox
+// local run is the whole suite; CI splits it across jobs because Firefox
 // inside `smoke` took that job to 29.9 of its 30 minutes (pipeline 1926):
-// `smoke` sets chromium, `smoke_firefox` sets firefox (.gitlab-ci.yml).
+// `smoke` sets chromium, `smoke_firefox` sets firefox (.gitlab-ci.yml). #1192
+// adds webkit the same way; webkit's own two jobs (smoke_webkit,
+// smoke_webkit_mobile) split further by device -- see ORBIT_E2E_WEBKIT_DEVICES
+// below -- because desktop and phone together ran close to the same 30m limit.
 // "unclaimed" and "setup" are not per engine and are always present.
-const ENGINES = ["chromium", "firefox"] as const;
+const ENGINES = ["chromium", "firefox", "webkit"] as const;
 const selectedEngines = (process.env.ORBIT_E2E_ENGINES || ENGINES.join(","))
   .split(",").map((engine) => engine.trim()).filter(Boolean);
 for (const engine of selectedEngines) {
@@ -82,6 +93,20 @@ for (const engine of selectedEngines) {
   }
 }
 const runs = (engine: (typeof ENGINES)[number]) => selectedEngines.includes(engine);
+
+// #1192: within the webkit engine, which device class(es) this run has. Both
+// by default (a local run is the whole engine); smoke_webkit sets desktop,
+// smoke_webkit_mobile sets mobile (.gitlab-ci.yml). No equivalent split
+// exists for chromium/firefox because neither needed one yet.
+const WEBKIT_DEVICES = ["desktop", "mobile"] as const;
+const selectedWebkitDevices = (process.env.ORBIT_E2E_WEBKIT_DEVICES || WEBKIT_DEVICES.join(","))
+  .split(",").map((device) => device.trim()).filter(Boolean);
+for (const device of selectedWebkitDevices) {
+  if (!(WEBKIT_DEVICES as readonly string[]).includes(device)) {
+    throw new Error(`ORBIT_E2E_WEBKIT_DEVICES names "${device}"; expected a comma-separated list of ${WEBKIT_DEVICES.join(", ")}`);
+  }
+}
+const runsWebkit = (device: (typeof WEBKIT_DEVICES)[number]) => runs("webkit") && selectedWebkitDevices.includes(device);
 
 const BULK_IGNORE = [/bootstrap-protection\.spec\.ts/, /maintenance\.spec\.ts/];
 const deviceProjects: Project[] = [
@@ -103,6 +128,48 @@ const deviceProjects: Project[] = [
       dependencies: ["setup"],
     }]
     : []),
+  // #1192: the release audit (#1192) wants the suite on WebKit too, phone
+  // first because Orbit's WebKit users are mostly on iPhones -- desktop
+  // alongside it on the owner's instruction. Same ignore list and `setup`
+  // dependency as the Chromium/Firefox projects.
+  //
+  // launchOptions: {} here, not left unset, and not `undefined`. The
+  // top-level `use.launchOptions` below is a Chromium switch
+  // (--host-resolver-rules) that redirects the orbit-oidc sign-in host for
+  // the OIDC profile, and WebKit's launcher does not understand it
+  // ("Cannot parse arguments: Unknown option --host-resolver-rules=...",
+  // pipeline 1982, 12 failures across these two projects). Playwright merges
+  // a project's `use` over the top-level one key at a time
+  // (playwright/lib/util.js's mergeObjects) and SKIPS a key whose value is
+  // literally `undefined`, keeping the parent's -- which is exactly why the
+  // first attempt at this (`launchOptions: undefined`) still inherited the
+  // Chromium args and still failed. `{}` is a real value, so it replaces the
+  // inherited object outright and WebKit launches with no extra args.
+  //
+  // WebKit still needs orbit-oidc redirected somewhere it can reach -- it
+  // has no --host-resolver-rules and no Firefox-style user-pref equivalent
+  // (no documented one exists). That redirect happens one layer out, in CI:
+  // smoke_webkit/smoke_webkit_mobile (.gitlab-ci.yml, `.webkit_oidc_hosts`)
+  // add orbit-oidc to the job container's own /etc/hosts, which is the
+  // mechanism a `use.launchOptions` in this file cannot express at all (no
+  // browser flag involved). A local `--project desktop-webkit`/`mobile-webkit`
+  // run has no equivalent yet -- see that CI comment for why.
+  ...(runsWebkit("desktop")
+    ? [{
+      name: "desktop-webkit",
+      testIgnore: BULK_IGNORE,
+      use: { ...devices["Desktop Safari"], launchOptions: {} },
+      dependencies: ["setup"],
+    }]
+    : []),
+  ...(runsWebkit("mobile")
+    ? [{
+      name: "mobile-webkit",
+      testIgnore: BULK_IGNORE,
+      use: { ...devices["iPhone 15"], launchOptions: {} },
+      dependencies: ["setup"],
+    }]
+    : []),
 ];
 
 // #1080: maintenance.spec.ts opens an INSTANCE-WIDE maintenance window — the
@@ -114,7 +181,10 @@ const deviceProjects: Project[] = [
 // Tail rather than head so a red spec in the bulk never runs UNDER a
 // maintenance window; the cost is that a red bulk skips these projects,
 // which that run's rerun covers. #1183: the maintenance page is a screen
-// people see, so Firefox gets its own pass, last in the chain.
+// people see, so Firefox gets its own pass, last in the chain. #1192 does
+// not add one for WebKit -- out of scope for the issue that added
+// desktop-webkit/mobile-webkit above; they still gate maintenance-desktop's
+// start via deviceProjects.map() below like any other device project.
 const maintenanceProjects: Project[] = [
   ...(runs("chromium")
     ? [

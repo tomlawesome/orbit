@@ -7,7 +7,7 @@ Round 4 changes the shape of the thing: beats are gone, and the walk is one
 continuous film with a transport under it.
 
 One direction: **E — one take**, at
-http://<LAN address>:8335/v19/tour/round-4/e-one-take.html
+design host, port 8335: /v19/tour/round-4/e-one-take.html
 
 ## The owner's steer (2026-09-19, verbatim)
 

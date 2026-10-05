@@ -4,6 +4,7 @@ import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -69,6 +70,7 @@ type Overlap = {
 };
 
 async function signIn(page: Page, account: string) {
+  await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
   await settleArrival(page);
@@ -194,6 +196,15 @@ async function packUntilOverlapping(page: Page) {
 
 test.describe.configure({ mode: "serial" });
 
+/* #1219: stubSky is a `page.route`, and Playwright does not route a request
+   the service worker handles (its documentation says to block service
+   workers wherever routing is relied on). On desktop-webkit the stub was
+   applied once, during the arrival, and every `/home` load after Orbit's
+   worker took control went to the real server instead (pipeline 2131: the
+   real one-household sky, "1 drawn" at all four viewports; #1196 measured
+   the same gap). Nothing here is about the worker, so it is kept out. */
+test.use({ serviceWorkers: "block" });
+
 test.beforeEach(async ({ page, browser }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the labelled sky is the desk dialect; the pocket draws no constellations");
   await stubSky(page, FULL_SKY);
@@ -303,6 +314,13 @@ test("a household the packed sky cannot draw is still reachable by name", async 
     await stubSky(newcomer, OVERFULL_SKY);
     await signIn(newcomer, workerAccount("outsider"));
     await newcomer.goto("/");
+    /* #1219: the arrival decides from its own /api/workspace read, which
+       WebKit holds behind the sky's rasterising: in pipeline 2144 that read
+       left 5.19 s after `GET /`, the stub answered it 4.90 s into the group's
+       5 s wait, and the group never drew in time (local runs: 4.16-4.91 s).
+       The route was applied every time; the decision was late. So wait for
+       the decision itself, as signIn does, before reading the list. */
+    await settleArrival(newcomer);
     const belong = newcomer.getByRole("group", { name: "Where do you belong?" });
     await expect(belong).toBeVisible();
     for (const name of undrawn) {

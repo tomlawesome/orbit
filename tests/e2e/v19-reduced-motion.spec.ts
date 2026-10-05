@@ -4,6 +4,7 @@ import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -40,6 +41,7 @@ resetDatabaseBetweenSpecFiles();
 const NAME_PREFIX = "reduced-motion-";
 
 async function signIn(page: Page) {
+  await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: workerAccount("administrator") }).click();
   await settleArrival(page);
@@ -143,6 +145,32 @@ async function runningMotion(page: Page) {
  * clears every screen that has no ongoing violation. */
 async function settle(page: Page) {
   await page.waitForLoadState("load");
+  await page.waitForTimeout(3000);
+}
+
+/**
+ * settle() for the signed-out screens, whose one-shot entrances cannot begin
+ * until their sky has rasterised (#1219). Every one of them -- the door, the
+ * logout, the error page, maintenance -- mounts a `.world` and the grain,
+ * which mark themselves `data-rasterised="ready"` when their filtered layers
+ * are drawn (the fidelity gate waits on the same flag). WebKit does that
+ * drawing on the page's main thread: measured on desktop-webkit in the
+ * pinned Playwright image under reduced motion (2026-10-05), the thread was
+ * held 3.2-3.7 s on / and /login and the error page re-rasterised its world
+ * until 2.5 s, so the same 400-900 ms opacity fades Chromium finishes by
+ * 1.5 s ran from 3.4 s to 4.6 s, and a reading 3 s after `load` caught them
+ * mid-fade (pipeline 2144). Every one of them ended. So the 3 s window opens
+ * once the sky is ready rather than at `load` -- which fires before the
+ * surfaces are even marked, hence a `.world` must be present -- and anything
+ * still running after it is still reported.
+ */
+async function settleSignedOut(page: Page) {
+  await page.waitForLoadState("load");
+  await page.waitForFunction(() => {
+    const surfaces = [...document.querySelectorAll<HTMLElement>(".world[data-rasterised], .grain[data-rasterised]")];
+    return surfaces.some((surface) => surface.classList.contains("world"))
+      && surfaces.every((surface) => surface.dataset.rasterised === "ready");
+  }, undefined, { timeout: 30_000 });
   await page.waitForTimeout(3000);
 }
 
@@ -258,12 +286,16 @@ test.describe("reduced motion", () => {
 
   test("signed-out screens hold still", async ({ page, isMobile }) => {
     test.skip(isMobile, "desktop-chromium only");
+    /* Five screens, each the sky's rasterising plus settle()'s 3 s: 30-33 s
+       on desktop-webkit locally, so the 60 s default is too close for a
+       slower runner (the signed-in sibling above declares 150 s). */
+    test.setTimeout(90_000);
 
     const problems: string[] = [];
     for (const route of ["/", "/login", "/logout"]) {
       await test.step(route, async () => {
         await page.goto(route);
-        await settle(page);
+        await settleSignedOut(page);
         const motion = await runningMotion(page);
         if (motion.length > 0) problems.push(`${route}: still animating -> ${motion.join(", ")}`);
       });
@@ -271,7 +303,7 @@ test.describe("reduced motion", () => {
 
     await test.step("a 404", async () => {
       await page.goto(`/orbit-does-not-exist-${randomUUID()}`);
-      await settle(page);
+      await settleSignedOut(page);
       const motion = await runningMotion(page);
       if (motion.length > 0) problems.push(`404: still animating -> ${motion.join(", ")}`);
     });
@@ -282,7 +314,7 @@ test.describe("reduced motion", () => {
     // without motion coverage does not go unnoticed silently.
     await test.step("/maintenance (if reachable)", async () => {
       await page.goto("/maintenance");
-      await settle(page);
+      await settleSignedOut(page);
       if (new URL(page.url()).pathname === "/maintenance") {
         const motion = await runningMotion(page);
         if (motion.length > 0) problems.push(`/maintenance: still animating -> ${motion.join(", ")}`);
