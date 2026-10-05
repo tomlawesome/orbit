@@ -879,32 +879,34 @@ async function placeholderShows(page, id) {
   }, id);
   const { at, box } = found;
   if (!box) return null;
-  /* WebKit's scroll anchoring moves the page when a half-visible field's
-     placeholder goes (or comes back), so without this the second picture
-     would be of a different strip of the page. Put the page back where it
-     was, at once (the page's own smooth scrolling would take a while). */
-  /** @param {{ x: number, y: number }} to */
-  const scrollBack = (to) => page.evaluate((p) => {
-    if (window.scrollX !== p.x || window.scrollY !== p.y) window.scrollTo({ left: p.x, top: p.y, behavior: "instant" });
-  }, to);
+  const twoFrames = () => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(undefined)))));
+  /* WebKit's scroll anchoring moves the page a frame after a half-visible
+     field's placeholder goes or returns, so each picture is taken only
+     after the page has been put back where it was -- at once, as the
+     page's own smooth scrolling would take a while. */
+  const atRest = async () => {
+    await twoFrames();
+    await page.evaluate((p) => window.scrollTo({ left: p.x, top: p.y, behavior: "instant" }), at);
+    await twoFrames();
+  };
+  await atRest();
   const as = await settledShot(page, box);
   await page.evaluate((one) => {
     const el = /** @type {HTMLInputElement} */ (document.getElementById(one));
     el.dataset.heldPlaceholder = el.placeholder;
     el.placeholder = "";
   }, id);
-  await scrollBack(at);
   /* Both pictures are settled frames, the second only after the field has
      been repainted without its placeholder: an immediate shot could still
      be the old frame, equal to `as`, and prove nothing (#1208). */
-  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(undefined)))));
+  await atRest();
   const bare = await settledShot(page, box);
   await page.evaluate((one) => {
     const el = /** @type {HTMLInputElement} */ (document.getElementById(one));
     el.placeholder = el.dataset.heldPlaceholder ?? "";
     delete el.dataset.heldPlaceholder;
   }, id);
-  await scrollBack(at);
+  await atRest();
   return (await shareDiffering(page, as, bare)) > 0.004;
 }
 
