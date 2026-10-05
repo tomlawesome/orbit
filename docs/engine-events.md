@@ -38,9 +38,25 @@ The engine never prompts without a controlling terminal. In a
 non-interactive run with incomplete configuration it refuses before
 starting Compose, prints guidance naming only the missing field names, and
 emits a terminal `state=failed` event (`reason=configuration-failure` for
-the configuration phase). A consumer that receives this outcome should
+the configuration phase). That reason is never emitted once the deployment
+files are committed: a failure after that point is the generic `failure`
+(#1227). A consumer that receives this outcome should
 re-run configuration interactively (for `orbit-launcher`: the terminal
 handoff stretch), then retry.
+
+A consumer that wants to run that configuration itself sets
+`ORBIT_LAUNCHER_CONFIG_TREE` to an empty directory it created (mode 0700,
+owned by the running user) (#1225). On any exit whose event reason is
+`configuration-failure`, before the event and before rolling back,
+`install.sh` copies the configure tree it verified from the digest-pinned
+image into it at the same relative paths: `scripts/configure.sh`,
+`scripts/configuration.sh`, `scripts/installer-ui.sh` and
+`.env-orbit.example`, as owner-only (0600/0700) regular files, all or
+nothing: a failed copy removes what it wrote. If the directory is missing,
+not a directory, a symlink, not mode 0700, not empty or not owned by the
+current user, it writes nothing and prints one stderr line; the event,
+guidance and exit status are unchanged either way. Unset or empty, nothing
+is written.
 
 ## Vocabulary
 

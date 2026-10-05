@@ -9,6 +9,17 @@ set -Eeuo pipefail
 # deployment needs compose assets and a published image, not source or tests.
 #
 # Building from source is a separate developer workflow; see the README.
+#
+# Environment (besides the settings read below):
+#   ORBIT_LAUNCHER_CONFIG_TREE  set by orbit-launcher to an empty directory it
+#     created, mode 0700 and owned by the running user. On any exit whose
+#     event reason is configuration-failure the installer copies
+#     scripts/configure.sh, scripts/configuration.sh, scripts/installer-ui.sh
+#     and .env-orbit.example, as verified from the image, into it before
+#     rolling back, owner-only (0600/0700), all or nothing. It writes nothing,
+#     and says so in one stderr line, if the directory is missing, not a
+#     directory, a symlink, not mode 0700, not empty or not owned by the
+#     current user (#1225, docs/engine-events.md).
 
 readonly repository="${ORBIT_REPOSITORY:-tomlawesome/orbit}"
 readonly registry="${ORBIT_REGISTRY:-ghcr.io}"
@@ -16,6 +27,7 @@ readonly channel="${ORBIT_CHANNEL:-latest}"
 readonly environment_file=".env-orbit"
 readonly compose_file="docker-compose.yml"
 readonly secrets_directory="${ORBIT_SECRETS_DIR:-.orbit-secrets}"
+readonly launcher_config_tree="${ORBIT_LAUNCHER_CONFIG_TREE:-}"
 readonly database_volume_key="orbit-db-data"
 readonly image_repository="${registry}/${repository}"
 readonly oidc_discovery_max_bytes=1048576
@@ -194,6 +206,9 @@ selected_model=""
 profile_change=0
 model_pull_requested=0
 model_pull_value=""
+launcher_tree_snapshot=""
+launcher_tree_path=""
+launcher_tree_state=idle
 guided_configuration_staged=0
 declare -a created_directories=()
 declare -A managed_was_present=()
@@ -259,6 +274,7 @@ default_failure_action() {
 fail() {
   local reason action phase component elapsed
   reason="${installer_failure_reason:-$(default_failure_reason)}"
+  [[ "$reason" == configuration-failure ]] && hand_over_launcher_config_tree
   action="${installer_failure_action:-$(default_failure_action)}"
   phase="${installer_ui_phase:-host}"
   component="${installer_ui_component:-host}"
@@ -305,6 +321,104 @@ target_is_empty() {
 
 has_mode() {
   [[ "$(stat -c '%a' -- "$1" 2>/dev/null)" == "$2" ]]
+}
+
+is_owned_by_current_user() {
+  [[ "$(stat -c '%u' -- "$1" 2>/dev/null)" == "$EUID" ]]
+}
+
+# ORBIT_LAUNCHER_CONFIG_TREE (#1225): leave the launcher the configure tree
+# this run verified, on any exit whose event reason is configuration-failure
+# (fail calls this before the event and before rollback). Writing into a
+# directory another program owns follows the installer's own write and
+# rollback rules: never through a symlink, never over an existing entry
+# (noclobber creates, as configure.sh's lock does), and only from the private
+# copy taken out of the digest-pinned image at staging. The copy is
+# all-or-nothing with cleanup on failure: a failed or mismatched copy removes
+# everything written, and cleanup does the same if a signal interrupts it.
+# Every outcome returns 0: the exit it precedes is unchanged.
+launcher_tree_notice() {
+  printf 'Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because %s.\n' "$1" >&2
+}
+
+# Runs with the launcher's directory as the working directory: prints why it
+# must not be written, or nothing.
+launcher_tree_refusal() {
+  if ! is_owned_by_current_user .; then
+    printf 'it is not owned by the current user'
+  elif ! has_mode . 700; then
+    printf 'it is not mode 0700'
+  elif ! target_is_empty; then
+    printf 'it is not empty'
+  fi
+}
+
+# Runs with the launcher's directory as the working directory and umask 077,
+# so the files are 0600 and scripts is 0700. The refusal checks are repeated
+# from inside the directory being written, so a path swapped since the first
+# check is refused rather than written.
+launcher_tree_write() {
+  local snapshot="$1" reason asset
+
+  reason="$(launcher_tree_refusal)"
+  if [[ -n "$reason" ]]; then
+    launcher_tree_notice "$reason"
+    return 1
+  fi
+  if ! mkdir -- scripts 2>/dev/null; then
+    launcher_tree_notice "its scripts directory could not be created"
+    return 1
+  fi
+  for asset in "${launcher_config_tree_assets[@]}"; do
+    if ! is_real_non_symlink_directory scripts || [[ -e "$asset" || -L "$asset" ]] ||
+      ! (set -o noclobber; cat -- "$snapshot/$asset" > "$asset") 2>/dev/null ||
+      ! cmp -s -- "$snapshot/$asset" "$asset"; then
+      rm -rf -- scripts .env-orbit.example
+      launcher_tree_notice "${asset} could not be written"
+      return 1
+    fi
+  done
+}
+
+hand_over_launcher_config_tree() {
+  local tree="$launcher_config_tree" snapshot="" reason=""
+
+  [[ -n "$tree" ]] || return 0
+  while [[ "$tree" == */ && "$tree" != / ]]; do
+    tree="${tree%/}"
+  done
+  if [[ -L "$tree" ]]; then
+    reason="it is a symlink"
+  elif [[ ! -e "$tree" ]]; then
+    reason="it does not exist"
+  elif [[ ! -d "$tree" ]]; then
+    reason="it is not a directory"
+  elif ! reason="$(cd -- "$tree" 2>/dev/null && launcher_tree_refusal)"; then
+    reason="it could not be entered"
+  elif [[ -z "$reason" ]] &&
+    ! snapshot="$(cd -- "${launcher_tree_snapshot:-/nonexistent}" 2>/dev/null && pwd -P)"; then
+    reason="the verified copies are unavailable"
+  fi
+  if [[ -n "$reason" ]]; then
+    launcher_tree_notice "$reason"
+    return 0
+  fi
+
+  launcher_tree_path="$tree"
+  launcher_tree_state=writing
+  if (
+    cd -- "$tree" 2>/dev/null || {
+      launcher_tree_notice "it could not be entered"
+      exit 1
+    }
+    umask 077
+    launcher_tree_write "$snapshot"
+  ); then
+    launcher_tree_state=complete
+  else
+    launcher_tree_state=failed
+  fi
+  return 0
 }
 
 is_preprovisioned_input() {
@@ -423,6 +537,11 @@ remove_deploy_container() {
 
 cleanup() {
   local exit_status=$?
+
+  # A signal during the launcher handover leaves nothing half-written (#1225).
+  if [[ "$launcher_tree_state" == writing && ! -L "$launcher_tree_path" ]]; then
+    rm -rf -- "$launcher_tree_path/scripts" "$launcher_tree_path/.env-orbit.example" 2>/dev/null || true
+  fi
 
   remove_deploy_container
 
@@ -1541,8 +1660,11 @@ wait_for_deployment_readiness() {
 
 print_completion_screen() {
   local public_url
+  # The deployment is committed and running by now, so this is the generic
+  # failure, never configuration-failure: that reason tells the launcher to
+  # reconfigure and hands it the configure tree (#1227).
   public_url="$(read_environment_value APP_URL)" ||
-    fail_with configuration-failure retry "The validated public URL could not be read for completion."
+    fail_with failure retry "The validated public URL could not be read for completion."
 
   printf '\nOrbit is ready.\n'
   printf 'Public URL: %s\n' "$public_url"
@@ -1734,6 +1856,14 @@ readonly deployment_scripts=(
   "scripts/repair.sh"
   "scripts/engine-check.sh"
 )
+# What hand_over_launcher_config_tree copies; every entry is also a
+# deployment asset, so it is staged and checked with the rest.
+readonly launcher_config_tree_assets=(
+  "scripts/configure.sh"
+  "scripts/configuration.sh"
+  "scripts/installer-ui.sh"
+  ".env-orbit.example"
+)
 declare -a asset_directories=()
 declare -A asset_directory_seen=()
 for asset in "${deployment_assets[@]}"; do
@@ -1845,6 +1975,24 @@ for script in "${deployment_scripts[@]}"; do
   bash -n "$staging_dir/$script" 2>/dev/null ||
     fail "Bundled ${script} failed a syntax check."
 done
+
+# The staged files move into the target below and leave with the rollback on
+# a refusal, so the launcher's copy is taken now, while they are exactly what
+# was extracted and checked, into the private staging directory (#1225).
+if [[ -n "$launcher_config_tree" ]]; then
+  launcher_tree_snapshot="$staging_dir/launcher-config-tree"
+  if mkdir -- "$launcher_tree_snapshot" 2>/dev/null && chmod 700 "$launcher_tree_snapshot" &&
+    mkdir -- "$launcher_tree_snapshot/scripts" 2>/dev/null; then
+    for asset in "${launcher_config_tree_assets[@]}"; do
+      cp -- "$staging_dir/$asset" "$launcher_tree_snapshot/$asset" 2>/dev/null || {
+        launcher_tree_snapshot=""
+        break
+      }
+    done
+  else
+    launcher_tree_snapshot=""
+  fi
+fi
 
 load_installer_ui || fail "Bundled installer UI helper is unavailable."
 installer_ui_event assets assets completed assets-verified fetch
@@ -2025,7 +2173,11 @@ file_transaction_committed=1
 # revert a successful install/update back to the pre-update files (issue
 # #383 finding 2). repair.sh's do_restore_transaction refuses outright when
 # this marker is present.
-: > "$staging_dir/committed" || fail "Could not record the installer's commit marker."
+# The files are committed by this line, so a failure here is the generic one,
+# never configuration-failure: that reason tells the launcher to reconfigure
+# and hands it the configure tree (#1227).
+: > "$staging_dir/committed" ||
+  fail_with failure retry "Could not record the installer's commit marker."
 
 prepare_service_images
 wait_for_deployment_readiness

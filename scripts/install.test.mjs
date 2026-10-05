@@ -13,6 +13,7 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
   symlinkSync,
   unlinkSync,
@@ -108,6 +109,9 @@ const fakeConfigureScript =
     "printf 'CONFIGURE_INVOKED ORBIT_IMAGE=%s\\n' \"${ORBIT_IMAGE:-}\"",
     "case \"${1:-}\" in",
     "  --check)",
+    // #1225: only an optional field missing, so prepare_configuration passes
+    // its required-field check and refuses at the final --check instead.
+    "    if [[ \"${FAKE_CONFIGURE_OPTIONAL_MISSING:-}\" == \"1\" ]]; then printf '%s\\n' 'ready APP_URL' 'missing processing'; exit 1; fi",
     '    if [[ -f .env-orbit ]] && grep -q "^APP_URL=" .env-orbit && [[ -s .orbit-secrets/oidc-client-secret ]]; then',
     "      printf '%s\\n' 'ready APP_URL' 'ready ORBIT_IMAGE' 'ready OIDC_ISSUER' 'ready OIDC_CLIENT_ID' 'ready OIDC_CLIENT_SECRET' 'ready OIDC_CALLBACK_URL'",
     "      exit 0",
@@ -510,6 +514,16 @@ const fakeDockerScript = [
   '      [[ "${FAKE_OLLAMA_PULL_FAIL:-0}" != "1" ]]',
   "      exit $?",
   "    fi",
+  // #1227: the commit marker is the first write after the files are
+  // committed; a directory squatting on its name makes that write fail.
+  '    if [[ "${FAKE_COMPOSE_CONFIG_BLOCKS_COMMIT_MARKER:-}" == "1" && " $* " == *" config "* ]]; then',
+  '      for staging in ./.orbit-install-staging.*; do mkdir -p "$staging/committed"; done',
+  "    fi",
+  // #1227: lose APP_URL once the transaction has committed, so only the
+  // completion screen's read of it can fail.
+  '    if [[ "${FAKE_COMPOSE_UP_DROPS_APP_URL:-}" == "1" && " $* " == *" up "* ]]; then',
+  '      sed -i "/^APP_URL=/d" .env-orbit',
+  "    fi",
   '    if [[ "${FAKE_COMPOSE_UP_FAIL:-}" == "1" && " $* " == *" up "* ]]; then',
   '      if [[ -n "${FAKE_COMPOSE_UP_CREATES_VOLUME:-}" ]]; then',
   '        printf "%s\\n" "${FAKE_COMPOSE_UP_CREATES_VOLUME}" > "${FAKE_PROBE_COUNTER_DIR:?}/created-volume-names"',
@@ -807,6 +821,36 @@ const fakeCosignScript = [
   "",
 ].join("\n");
 
+// Shadows stat for one question only: the owner of the directory named by
+// FAKE_STAT_FOREIGN_OWNER_PATH is reported as another uid (#1225), since an
+// unprivileged test cannot chown a directory away from itself. Paths are
+// compared resolved, because install.sh asks about "." from inside that
+// directory. Every other call is the real stat.
+const fakeStatScript = [
+  "#!/usr/bin/env bash",
+  "set -Eeuo pipefail",
+  'if [[ -n "${FAKE_STAT_FOREIGN_OWNER_PATH:-}" && "$#" -eq 4 && "$1 $2 $3" == "-c %u --" && "$(realpath -- "$4")" == "$(realpath -- "${FAKE_STAT_FOREIGN_OWNER_PATH}")" ]]; then',
+  '  printf \'%s\\n\' "$(( $(id -u) + 1 ))"',
+  "  exit 0",
+  "fi",
+  "exec /bin/stat \"$@\"",
+  "",
+].join("\n");
+
+// Shadows cat to fail one read (#1225): any argument ending in
+// FAKE_CAT_FAIL_PATH makes it exit 1. Every other call is the real cat.
+const fakeCatScript = [
+  "#!/usr/bin/env bash",
+  "set -Eeuo pipefail",
+  'if [[ -n "${FAKE_CAT_FAIL_PATH:-}" ]]; then',
+  '  for argument in "$@"; do',
+  '    [[ "$argument" != *"${FAKE_CAT_FAIL_PATH}" ]] || exit 1',
+  "  done",
+  "fi",
+  'exec /bin/cat "$@"',
+  "",
+].join("\n");
+
 function makeFakeBin() {
   const binDir = mkdtempSync(join(tmpdir(), "orbit-install-fakebin-"));
   writeFileSync(join(binDir, "docker"), fakeDockerScript);
@@ -817,6 +861,10 @@ function makeFakeBin() {
   chmodSync(join(binDir, "mv"), 0o755);
   writeFileSync(join(binDir, "cosign"), fakeCosignScript);
   chmodSync(join(binDir, "cosign"), 0o755);
+  writeFileSync(join(binDir, "stat"), fakeStatScript);
+  chmodSync(join(binDir, "stat"), 0o755);
+  writeFileSync(join(binDir, "cat"), fakeCatScript);
+  chmodSync(join(binDir, "cat"), 0o755);
   return binDir;
 }
 
@@ -1683,6 +1731,352 @@ describe("install.sh", () => {
     expect(result.calls).not.toContain("up -d");
     expect(targetEntries(targetDir)).toEqual([]);
     expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  describe("ORBIT_LAUNCHER_CONFIG_TREE handover on a configuration-failure exit (#1225)", () => {
+    const handedOver = [
+      "scripts/configure.sh",
+      "scripts/configuration.sh",
+      "scripts/installer-ui.sh",
+      ".env-orbit.example",
+    ];
+    const treeNotice = "ORBIT_LAUNCHER_CONFIG_TREE";
+
+    function makeLauncherTree() {
+      const tree = mkdtempSync(join(tmpdir(), "orbit-launcher-tree-"));
+      chmodSync(tree, 0o700);
+      return tree;
+    }
+
+    function noticeLines(stderr) {
+      return stderr.split("\n").filter((line) => line.includes(treeNotice));
+    }
+
+    function expectRefusalUnchanged(result, targetDir) {
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("configuration fields requiring attention: APP_URL");
+      expect(result.stderr).toContain("Required configuration fields require attention; refusing to start Compose.");
+      expect(result.calls).not.toContain("config --quiet");
+      expect(result.calls).not.toContain("up -d");
+      expect(targetEntries(targetDir)).toEqual([]);
+      expect(stagingLeftovers(targetDir)).toEqual([]);
+    }
+
+    function expectRolledBack(result, targetDir) {
+      expect(result.status).toBe(1);
+      expect(`${result.stdout}${result.stderr}`).toContain("reason=configuration-failure");
+      expect(result.calls).not.toContain("up -d");
+      expect(targetEntries(targetDir)).toEqual([]);
+      expect(stagingLeftovers(targetDir)).toEqual([]);
+    }
+
+    // The four files, byte-identical to what the image bundles, owner-only.
+    function expectTreeHandedOver(tree) {
+      const bundle = makeImageDeployFixture({});
+      try {
+        expect(readdirSync(tree, { recursive: true }).sort()).toEqual([
+          ".env-orbit.example",
+          "scripts",
+          "scripts/configuration.sh",
+          "scripts/configure.sh",
+          "scripts/installer-ui.sh",
+        ]);
+        expect(lstatSync(join(tree, "scripts")).isDirectory()).toBe(true);
+        expect(lstatSync(join(tree, "scripts")).mode & 0o7777).toBe(0o700);
+        for (const asset of handedOver) {
+          const path = join(tree, asset);
+          expect(lstatSync(path).isFile()).toBe(true);
+          expect(lstatSync(path).mode & 0o7777).toBe(0o600);
+          expect(readFileSync(path)).toEqual(readFileSync(join(bundle, asset)));
+        }
+      } finally {
+        rmSync(bundle, { recursive: true, force: true });
+      }
+    }
+
+    function cleanUp(...paths) {
+      for (const path of paths) rmSync(path, { recursive: true, force: true });
+    }
+
+    it("copies the image-verified configure tree on the non-interactive refusal, then still rolls back", () => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      try {
+        const result = runInstall(targetDir, { FAKE_CONFIGURE_READY: "0", ORBIT_LAUNCHER_CONFIG_TREE: tree });
+
+        expectRefusalUnchanged(result, targetDir);
+        expect(noticeLines(result.stderr)).toEqual([]);
+        expectTreeHandedOver(tree);
+      } finally {
+        cleanUp(targetDir, tree);
+      }
+    });
+
+    it.each([
+      {
+        name: "configure.sh failing",
+        env: { FAKE_CONFIGURE_FAIL: "1" },
+        message: "Configuration failed",
+      },
+      {
+        name: "the final --check refusal",
+        env: { FAKE_CONFIGURE_OPTIONAL_MISSING: "1" },
+        message: "Configuration fields require attention (processing); refusing to start Compose.",
+      },
+      {
+        name: "an OIDC discovery answer that is not 2xx",
+        env: { FAKE_OIDC_HTTP_STATUS: "404" },
+        message: "OIDC provider configuration could not be validated",
+      },
+    ])("copies the tree on $name, then still rolls back", ({ env, message }) => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      try {
+        const result = runInstall(targetDir, { ...env, ORBIT_LAUNCHER_CONFIG_TREE: tree });
+
+        expectRolledBack(result, targetDir);
+        expect(result.stderr).toContain(message);
+        expect(noticeLines(result.stderr)).toEqual([]);
+        expectTreeHandedOver(tree);
+      } finally {
+        cleanUp(targetDir, tree);
+      }
+    });
+
+    it("writes nothing when the variable is unset", () => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      try {
+        const result = runInstall(targetDir, { FAKE_CONFIGURE_READY: "0" });
+
+        expectRefusalUnchanged(result, targetDir);
+        expect(noticeLines(result.stderr)).toEqual([]);
+        expect(readdirSync(tree)).toEqual([]);
+      } finally {
+        cleanUp(targetDir, tree);
+      }
+    });
+
+    it("treats an empty value as unset", () => {
+      const targetDir = makeTarget();
+      try {
+        const result = runInstall(targetDir, { FAKE_CONFIGURE_READY: "0", ORBIT_LAUNCHER_CONFIG_TREE: "" });
+
+        expectRefusalUnchanged(result, targetDir);
+        expect(noticeLines(result.stderr)).toEqual([]);
+      } finally {
+        cleanUp(targetDir);
+      }
+    });
+
+    it("writes nothing on a failure whose reason is not configuration-failure", () => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      try {
+        const result = runInstall(targetDir, { FAKE_EMPTY_ASSET: "docker-compose.yml", ORBIT_LAUNCHER_CONFIG_TREE: tree });
+
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain("Bundled docker-compose.yml is empty");
+        expect(`${result.stdout}${result.stderr}`).toContain("reason=image-registry");
+        expect(noticeLines(result.stderr)).toEqual([]);
+        expect(readdirSync(tree)).toEqual([]);
+      } finally {
+        cleanUp(targetDir, tree);
+      }
+    });
+
+    it("writes nothing when OIDC discovery is unreachable, which is provider-unavailable", () => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      try {
+        const result = runInstall(targetDir, { FAKE_OIDC_NETWORK_FAIL: "1", ORBIT_LAUNCHER_CONFIG_TREE: tree });
+
+        expect(result.status).toBe(1);
+        expect(result.calls).not.toContain("up -d");
+        expect(targetEntries(targetDir)).toEqual([]);
+        expect(stagingLeftovers(targetDir)).toEqual([]);
+        expect(result.stderr).toContain("OIDC provider is unavailable");
+        expect(`${result.stdout}${result.stderr}`).toContain("reason=provider-unavailable action=retry");
+        expect(`${result.stdout}${result.stderr}`).not.toContain("reason=configuration-failure");
+        expect(noticeLines(result.stderr)).toEqual([]);
+        expect(readdirSync(tree)).toEqual([]);
+      } finally {
+        cleanUp(targetDir, tree);
+      }
+    });
+
+    it("reports a commit-marker failure after commit as reason=failure and writes nothing (#1227)", () => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      try {
+        const result = runInstall(targetDir, { FAKE_COMPOSE_CONFIG_BLOCKS_COMMIT_MARKER: "1", ORBIT_LAUNCHER_CONFIG_TREE: tree });
+
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain("Could not record the installer's commit marker.");
+        expect(`${result.stdout}${result.stderr}`).toContain("reason=failure action=retry");
+        expect(`${result.stdout}${result.stderr}`).not.toContain("reason=configuration-failure");
+        expect(noticeLines(result.stderr)).toEqual([]);
+        expect(readdirSync(tree)).toEqual([]);
+      } finally {
+        cleanUp(targetDir, tree);
+      }
+    });
+
+    it("reports a completion-screen failure after commit as reason=failure and writes nothing (#1227)", () => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      try {
+        const result = runInstall(targetDir, { FAKE_COMPOSE_UP_DROPS_APP_URL: "1", ORBIT_LAUNCHER_CONFIG_TREE: tree });
+
+        expect(result.status).toBe(1);
+        expect(result.calls).toContain("up -d");
+        expect(result.stderr).toContain("The validated public URL could not be read for completion.");
+        expect(`${result.stdout}${result.stderr}`).toContain("reason=failure action=retry");
+        expect(`${result.stdout}${result.stderr}`).not.toContain("reason=configuration-failure");
+        expect(noticeLines(result.stderr)).toEqual([]);
+        expect(readdirSync(tree)).toEqual([]);
+      } finally {
+        cleanUp(targetDir, tree);
+      }
+    });
+
+    it("removes everything it wrote when one copy fails, and says so once", () => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      try {
+        const result = runInstall(targetDir, {
+          FAKE_CONFIGURE_READY: "0",
+          ORBIT_LAUNCHER_CONFIG_TREE: tree,
+          FAKE_CAT_FAIL_PATH: "/launcher-config-tree/scripts/installer-ui.sh",
+        });
+
+        expectRefusalUnchanged(result, targetDir);
+        expect(noticeLines(result.stderr)).toEqual([
+          "Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because scripts/installer-ui.sh could not be written.",
+        ]);
+        expect(readdirSync(tree)).toEqual([]);
+      } finally {
+        cleanUp(targetDir, tree);
+      }
+    });
+
+    it("writes owner-only files even under umask 000", () => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      const bashEnvDir = mkdtempSync(join(tmpdir(), "orbit-launcher-umask-"));
+      const bashEnv = join(bashEnvDir, "umask-000.sh");
+      writeFileSync(bashEnv, "umask 000\n");
+      try {
+        const result = runInstall(targetDir, {
+          FAKE_CONFIGURE_READY: "0",
+          ORBIT_LAUNCHER_CONFIG_TREE: tree,
+          BASH_ENV: bashEnv,
+        });
+
+        expectRefusalUnchanged(result, targetDir);
+        expect(noticeLines(result.stderr)).toEqual([]);
+        expectTreeHandedOver(tree);
+      } finally {
+        cleanUp(targetDir, tree, bashEnvDir);
+      }
+    });
+
+    it.each([
+      {
+        name: "a symlink",
+        reason: "it is a symlink",
+        arrange: (parent) => {
+          const real = join(parent, "real");
+          mkdirSync(real, { mode: 0o700 });
+          const link = join(parent, "link");
+          symlinkSync(real, link);
+          return { tree: link, unchanged: () => expect(readdirSync(real)).toEqual([]) };
+        },
+      },
+      {
+        name: "a symlink given with a trailing slash",
+        reason: "it is a symlink",
+        arrange: (parent) => {
+          const real = join(parent, "real");
+          mkdirSync(real, { mode: 0o700 });
+          const link = join(parent, "link");
+          symlinkSync(real, link);
+          return { tree: `${link}//`, unchanged: () => expect(readdirSync(real)).toEqual([]) };
+        },
+      },
+      {
+        name: "not empty",
+        reason: "it is not empty",
+        arrange: (parent) => {
+          const tree = join(parent, "tree");
+          mkdirSync(tree, { mode: 0o700 });
+          writeFileSync(join(tree, ".launcher-own"), "KEEP\n");
+          return {
+            tree,
+            unchanged: () => {
+              expect(readdirSync(tree)).toEqual([".launcher-own"]);
+              expect(readFileSync(join(tree, ".launcher-own"), "utf8")).toBe("KEEP\n");
+            },
+          };
+        },
+      },
+      {
+        name: "not mode 0700",
+        reason: "it is not mode 0700",
+        arrange: (parent) => {
+          const tree = join(parent, "tree");
+          mkdirSync(tree);
+          chmodSync(tree, 0o755);
+          return { tree, unchanged: () => expect(readdirSync(tree)).toEqual([]) };
+        },
+      },
+      {
+        name: "owned by another user",
+        reason: "it is not owned by the current user",
+        arrange: (parent) => {
+          const tree = join(parent, "tree");
+          mkdirSync(tree, { mode: 0o700 });
+          return {
+            tree,
+            env: { FAKE_STAT_FOREIGN_OWNER_PATH: tree },
+            unchanged: () => expect(readdirSync(tree)).toEqual([]),
+          };
+        },
+      },
+      {
+        name: "missing",
+        reason: "it does not exist",
+        arrange: (parent) => {
+          const tree = join(parent, "absent");
+          return { tree, unchanged: () => expect(existsSync(tree)).toBe(false) };
+        },
+      },
+      {
+        name: "not a directory",
+        reason: "it is not a directory",
+        arrange: (parent) => {
+          const tree = join(parent, "file");
+          writeFileSync(tree, "NOT-A-DIRECTORY\n");
+          return { tree, unchanged: () => expect(readFileSync(tree, "utf8")).toBe("NOT-A-DIRECTORY\n") };
+        },
+      },
+    ])("refuses a tree that is $name with one stderr line and an unchanged refusal", ({ reason, arrange }) => {
+      const targetDir = makeTarget();
+      const parent = mkdtempSync(join(tmpdir(), "orbit-launcher-parent-"));
+      try {
+        const { tree, env = {}, unchanged } = arrange(parent);
+
+        const result = runInstall(targetDir, { FAKE_CONFIGURE_READY: "0", ORBIT_LAUNCHER_CONFIG_TREE: tree, ...env });
+
+        expectRefusalUnchanged(result, targetDir);
+        expect(noticeLines(result.stderr)).toEqual([
+          `Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because ${reason}.`,
+        ]);
+        unchanged();
+      } finally {
+        cleanUp(targetDir, parent);
+      }
+    });
   });
 
   it("keeps OIDC discovery input attached to the isolated parser container", () => {
