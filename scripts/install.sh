@@ -2173,7 +2173,11 @@ file_transaction_committed=1
 # revert a successful install/update back to the pre-update files (issue
 # #383 finding 2). repair.sh's do_restore_transaction refuses outright when
 # this marker is present.
-: > "$staging_dir/committed" || fail "Could not record the installer's commit marker."
+# The files are committed by this line, so a failure here is the generic one,
+# never configuration-failure: that reason tells the launcher to reconfigure
+# and hands it the configure tree (#1227).
+: > "$staging_dir/committed" ||
+  fail_with failure retry "Could not record the installer's commit marker."
 
 prepare_service_images
 wait_for_deployment_readiness

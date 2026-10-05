@@ -38,7 +38,9 @@ The engine never prompts without a controlling terminal. In a
 non-interactive run with incomplete configuration it refuses before
 starting Compose, prints guidance naming only the missing field names, and
 emits a terminal `state=failed` event (`reason=configuration-failure` for
-the configuration phase). A consumer that receives this outcome should
+the configuration phase). That reason is never emitted once the deployment
+files are committed: a failure after that point is the generic `failure`
+(#1227). A consumer that receives this outcome should
 re-run configuration interactively (for `orbit-launcher`: the terminal
 handoff stretch), then retry.
 
