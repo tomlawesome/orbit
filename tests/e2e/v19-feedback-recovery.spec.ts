@@ -105,6 +105,16 @@ const FOCUS_DEFECT_RACES_ON_FIREFOX =
   "DEFECT (#1178), timing-dependent on Firefox: the pressed button, disabled while its request is out, sometimes "
   + "keeps focus and sometimes drops it to <body>, so this check cannot report either way until the button keeps focus";
 
+/* #1219: the desk /create card's document save races the same way on
+   desktop-webkit: six runs on unchanged code (2026-10-05, pinned Playwright
+   image) dropped focus to <body> four times and kept it twice, so its
+   `fail` mark held or broke by timing (pipeline 2131: "Expected to fail, but
+   passed"). A timing-dependent expected failure is fixme, never fail (owner,
+   2026-10-05, #1196). */
+const FOCUS_DEFECT_RACES_ON_DESKTOP_WEBKIT =
+  "DEFECT (#1178), timing-dependent on desktop Safari (#1219): the pressed button, disabled while its request is out, "
+  + "sometimes keeps focus and sometimes drops it to <body>, so this check cannot report either way until the button keeps focus";
+
 /* ── online-workspace policy ───────────────────────────────────────────── */
 
 const failCommands = (route: Route) =>
@@ -426,6 +436,7 @@ test("a document picked on /create leaves focus where the reader was", async ({ 
      starting over is SvelteKit's own reset, not a loss. The desk stays put. */
   test.skip(isPocket(), "the pocket save navigates to the new item; focus starting over there is not a loss");
   test.fixme(isFirefox(), FOCUS_DEFECT_RACES_ON_FIREFOX);
+  test.fixme(test.info().project.name === "desktop-webkit", FOCUS_DEFECT_RACES_ON_DESKTOP_WEBKIT);
   const defect = FOCUS_LOST_TO_DISABLED_BUTTON("the desk create card (#card .btn-primary)");
   test.fail(Boolean(defect), defect);
   test.setTimeout(90_000);
