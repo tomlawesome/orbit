@@ -514,6 +514,11 @@ const fakeDockerScript = [
   '      [[ "${FAKE_OLLAMA_PULL_FAIL:-0}" != "1" ]]',
   "      exit $?",
   "    fi",
+  // #1227: the commit marker is the first write after the files are
+  // committed; a directory squatting on its name makes that write fail.
+  '    if [[ "${FAKE_COMPOSE_CONFIG_BLOCKS_COMMIT_MARKER:-}" == "1" && " $* " == *" config "* ]]; then',
+  '      for staging in ./.orbit-install-staging.*; do mkdir -p "$staging/committed"; done',
+  "    fi",
   // #1227: lose APP_URL once the transaction has committed, so only the
   // completion screen's read of it can fail.
   '    if [[ "${FAKE_COMPOSE_UP_DROPS_APP_URL:-}" == "1" && " $* " == *" up "* ]]; then',
@@ -1873,6 +1878,43 @@ describe("install.sh", () => {
         expect(result.status).toBe(1);
         expect(result.stderr).toContain("Bundled docker-compose.yml is empty");
         expect(`${result.stdout}${result.stderr}`).toContain("reason=image-registry");
+        expect(noticeLines(result.stderr)).toEqual([]);
+        expect(readdirSync(tree)).toEqual([]);
+      } finally {
+        cleanUp(targetDir, tree);
+      }
+    });
+
+    it("writes nothing when OIDC discovery is unreachable, which is provider-unavailable", () => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      try {
+        const result = runInstall(targetDir, { FAKE_OIDC_NETWORK_FAIL: "1", ORBIT_LAUNCHER_CONFIG_TREE: tree });
+
+        expect(result.status).toBe(1);
+        expect(result.calls).not.toContain("up -d");
+        expect(targetEntries(targetDir)).toEqual([]);
+        expect(stagingLeftovers(targetDir)).toEqual([]);
+        expect(result.stderr).toContain("OIDC provider is unavailable");
+        expect(`${result.stdout}${result.stderr}`).toContain("reason=provider-unavailable action=retry");
+        expect(`${result.stdout}${result.stderr}`).not.toContain("reason=configuration-failure");
+        expect(noticeLines(result.stderr)).toEqual([]);
+        expect(readdirSync(tree)).toEqual([]);
+      } finally {
+        cleanUp(targetDir, tree);
+      }
+    });
+
+    it("reports a commit-marker failure after commit as reason=failure and writes nothing (#1227)", () => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      try {
+        const result = runInstall(targetDir, { FAKE_COMPOSE_CONFIG_BLOCKS_COMMIT_MARKER: "1", ORBIT_LAUNCHER_CONFIG_TREE: tree });
+
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain("Could not record the installer's commit marker.");
+        expect(`${result.stdout}${result.stderr}`).toContain("reason=failure action=retry");
+        expect(`${result.stdout}${result.stderr}`).not.toContain("reason=configuration-failure");
         expect(noticeLines(result.stderr)).toEqual([]);
         expect(readdirSync(tree)).toEqual([]);
       } finally {
