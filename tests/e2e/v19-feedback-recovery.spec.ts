@@ -75,12 +75,15 @@ type Journey = {
   focusDefect?: () => string | undefined;
 };
 
-/* #1196: WebKit's driver does not apply a `page.route` mock on the desktop
-   project -- the request reaches Orbit for real -- so a journey whose
-   failure is staged by a mock never shows one. Detail on #1196. */
+/* #1196: WebKit's driver stops applying a `page.route` mock once the service
+   worker controls the page -- the request reaches Orbit for real -- so a
+   journey whose failure is staged by a mock shows one or not by timing. A
+   timing-dependent expected failure cannot be marked `fail`, so on the
+   desktop-webkit project these journeys are `fixme` until the driver gap
+   closes (owner, 2026-10-05). Detail on #1196. */
 const ROUTE_MOCK_SKIPPED_ON_DESKTOP_WEBKIT = (what: string) =>
   test.info().project.name === "desktop-webkit"
-    ? `#1196: desktop Safari does not apply the route mock, so ${what}`
+    ? `#1196: desktop Safari applies the route mock only until the service worker controls the page, so by timing ${what}`
     : undefined;
 
 /* The defect common to three journeys: the button that was pressed disables
@@ -330,6 +333,7 @@ const JOURNEYS = [createOffline, itemViewApproval, inboxApproval, householdDelet
 for (const journey of JOURNEYS) {
   test(`${journey.name} is announced, and the act can be repeated by keyboard`, async ({ page }) => {
     const defect = journey.shownDefect?.() ?? journey.announceDefect?.();
+    test.fixme(Boolean(journey.shownDefect?.()), journey.shownDefect?.());
     test.fail(Boolean(defect), defect);
     test.setTimeout(90_000);
     await signIn(page, "/home");
@@ -347,6 +351,7 @@ for (const journey of JOURNEYS) {
 
   test(`${journey.name} leaves focus where the reader was`, async ({ page }) => {
     const defect = journey.shownDefect?.() ?? journey.focusDefect?.();
+    test.fixme(Boolean(journey.shownDefect?.()), journey.shownDefect?.());
     test.fixme(Boolean(defect) && isFirefox(), FOCUS_DEFECT_RACES_ON_FIREFOX);
     test.fail(Boolean(defect), defect);
     test.setTimeout(90_000);
