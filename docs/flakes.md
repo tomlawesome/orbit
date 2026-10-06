@@ -390,6 +390,14 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 
 - 2026-10-05 · dac67650 (!1017) · pipeline 2131 / smoke_webkit (job 31782) · `page.goto: Navigation to "/inbox" is interrupted by another navigation to "/home"` at line 243, 6.3s in, right after `signIn(page, "/home")`; the in-job retry passed (4.1s). Only the passing retry was traced. Same suspected shape as the heading above: the arrival's own hand-on to `/home` landing after the spec's next `goto`. First sighting; an issue on the third.
 
+## sign-in-methods.spec.ts:281 "an administrator sends a new setup link from somebody's row" — desktop-webkit
+
+- 2026-10-06 · 3eb5c4dc (!1032, dev -> preview; `web/` and `tests/` identical to 0ef8f497, on which pipeline 2193 ran this job green) · pipeline 2199 / smoke_webkit (job 32442) · `toContainText("Setup link sent to")` on `.adminproblem.ok` found no element within 5 s, on the attempt and the in-job retry. `:243` "an administrator adds a local user and is told where the link went" failed once in the same run and passed on retry (flaky), with a strict-mode violation: `.person` filtered on "Newcomer Lawson" resolved to 2 elements, so the earlier attempt's newcomer was still listed. Job retried as 32450. First sighting; an issue on the third.
+
+## v19-archive.spec.ts:248 "a wrong passphrase is refused, and nothing is read" — desktop-webkit
+
+- 2026-10-06 · 3eb5c4dc (same run and unchanged web tree as the heading above) · pipeline 2199 / smoke_webkit (job 32442) · `toHaveCount(0)` on `.c-archive .challenge` kept resolving to 1 for the whole 5 s, on the attempt (25.7 s) and the in-job retry (27.8 s): the passphrase challenge stayed on screen after the refusal. Both failing attempts were traced. First sighting; an issue on the third.
+
 ## v19-feedback-recovery.spec.ts:344 "a mail suggestion whose approval fails, on /inbox is announced, and the act can be repeated by keyboard" — mobile-webkit
 
 - 2026-10-05 · c352cf77 (!1029: install.sh, its tests and docs; `web/` and `tests/` identical to c2d17eda, on which pipelines 2152 and 2184 ran this job green) · pipeline 2188 / smoke_webkit_mobile (job 32287) · `expect(locator).toBeVisible()` on `button[aria-label="Add Mailed renewal … to your orbit"]` gave up after 30 s at line 256, on both the attempt (33.3 s) and the in-job retry (37.7 s): the mail suggestion never appeared on /inbox. The two sibling journeys at the same line (/create, item view) passed in the same run. The job failed on this one. First sighting; an issue on the third.
