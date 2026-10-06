@@ -126,8 +126,15 @@ WORKDIR /opt/orbit
 # only the literal orbit:orbit is ever passed to su-exec, never a numeric
 # id. Reconsider if numeric IDs are ever passed here, or if su-exec goes
 # unmaintained.
+# postgresql18-client (owner, 2026-10-06, #1211 answer 11a): pg_dump,
+# pg_restore and psql for the backup/restore engine, which runs inside this
+# image against orbit-db rather than exec-ing into the database container
+# (#1211 build note E2). Its major must match docker-compose.yml's
+# postgres server; src/lib/postgres-client-major.test.ts holds the two
+# together. Licence: PostgreSQL. BusyBox already provides the flock the
+# engine's backup/restore lock uses, so util-linux is not needed.
 RUN apk_retry() { "$@" || { sleep 5; "$@"; } || { sleep 10; "$@"; }; } \
-  && apk_retry apk add --no-cache su-exec \
+  && apk_retry apk add --no-cache su-exec postgresql18-client \
   && rm -rf /usr/local/lib/node_modules /opt/yarn-v* \
   && rm -f \
     /usr/local/bin/corepack \

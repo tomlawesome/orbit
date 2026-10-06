@@ -21,7 +21,7 @@ const dockerfile = readFileSync(new URL("../Dockerfile", import.meta.url), "utf8
 // loudly if every attempt fails.
 const retrySnippet = (() => {
   const match = dockerfile.match(
-    /RUN (apk_retry\(\) \{[^\n]*\}) \\\n\s*&& (apk_retry apk add --no-cache su-exec) \\/,
+    /RUN (apk_retry\(\) \{[^\n]*\}) \\\n\s*&& (apk_retry apk add --no-cache su-exec[a-z0-9 -]*?) \\/,
   );
   if (!match) {
     throw new Error("could not find the apk_retry helper and its call site in Dockerfile");
