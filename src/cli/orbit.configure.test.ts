@@ -42,8 +42,8 @@ afterEach(() => {
   rmSync(sandbox, { recursive: true, force: true });
 });
 
-describe("orbit configure (bare, no flags): the write side minus VAPID", () => {
-  it("creates .env-orbit and .orbit-secrets, generating the three non-VAPID secrets", () => {
+describe("orbit configure (bare, no flags): the whole write side", () => {
+  it("creates .env-orbit and .orbit-secrets, generating the three secrets and the VAPID pair", () => {
     const result = runCli(["configure", "--dir", sandbox]);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Created .env-orbit from .env-orbit.example.");
@@ -54,9 +54,9 @@ describe("orbit configure (bare, no flags): the write side minus VAPID", () => {
       expect(readFileSync(secretPath, "utf8")).toMatch(/^[0-9a-f]{64}\n$/);
       expect(statSync(secretPath).mode & 0o777).toBe(0o600);
     }
-    // The engine never touches VAPID (bash-only, docker-backed) or prints
-    // the bash script's own final "ready" message — see configure-engine.ts.
-    expect(existsSync(join(sandbox, ".orbit-secrets", "vapid-private-key"))).toBe(false);
+    // #1210 D7: the engine generates the VAPID pair itself now.
+    expect(existsSync(join(sandbox, ".orbit-secrets", "vapid-private-key"))).toBe(true);
+    expect(result.stdout).toContain("Generated VAPID push keys.\n");
   });
 
   it("guarantee #33: is idempotent — a second run preserves already-generated secrets", () => {
