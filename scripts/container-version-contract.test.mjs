@@ -98,6 +98,17 @@ describe("immutable container version identity", () => {
     expect(configureScript).not.toContain("docker build --target runner");
   });
 
+  it("removes the VAPID bootstrap image once the keys are made, so no per-commit tag is left behind (#1241)", () => {
+    const build = configureScript.indexOf('docker build --target vapid-generator --tag "$bootstrap_image"');
+    const run = configureScript.indexOf('docker run --rm "$bootstrap_image"', build);
+    const remove = configureScript.indexOf('docker image rm "$bootstrap_image"', run);
+
+    expect(build).toBeGreaterThanOrEqual(0);
+    expect(run).toBeGreaterThan(build);
+    expect(remove).toBeGreaterThan(run);
+    expect(configureScript.slice(run, remove)).not.toContain("fail ");
+  });
+
   it("handles --version before root and secret bootstrap checks", () => {
     const versionOutput = entrypoint.indexOf('printf "Orbit %s\\n" "$orbit_version"');
     const rootCheck = entrypoint.indexOf('[ "$(id -u)" = "0" ]');
