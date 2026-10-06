@@ -284,11 +284,15 @@ const inboxApproval: Journey = {
   /* Desktop Safari keeps focus on the disabled button here (pipeline 2011
      passed the focus check twice under an expect-fail), as every WebKit
      does on /create above; the pocket keeps its mark, which held on
-     mobile-webkit in the same run. */
+     mobile-webkit in the same run. Then on 2026-10-06 a traced local
+     desktop-webkit run (#1235) dropped it to <body> -- so on desktop
+     WebKit this one is the same race the item view has (line 253), not a
+     certainty either way, and cannot report either way: fixme there. */
   focusDefect: () =>
     test.info().project.name === "desktop-webkit"
       ? undefined
       : FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket inbox's ReviewCard" : "the desk /inbox row's Add to orbit"),
+  focusFixme: () => test.info().project.name === "desktop-webkit" ? FOCUS_DEFECT_RACES_ON_DESKTOP_WEBKIT : undefined,
 };
 
 /* ── signed-in lifecycle ───────────────────────────────────────────────── */

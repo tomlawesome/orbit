@@ -4,6 +4,21 @@ import { settleArrival } from "./support/arrival";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { ensureLocalPassword } from "./support/local-credentials";
 import { ensureWorkerAdministrator, workerAccount, workerFixturePassword, workerScopedAddress } from "./support/worker-identity";
+
+/* #1235's first traced local WebKit run: the "press before home goes live"
+   test below holds home back by delaying `/api/workspace` through
+   page.route, and on desktop-webkit the trace showed both workspace reads
+   answered in 13 ms and 36 ms -- the delay never applied, home went live,
+   and the test's own precondition (`body[data-home-ready]` absent) failed.
+   WebKit serves a request the service worker handles without going through
+   Playwright's route. Same cure as v19-feedback-recovery.spec.ts,
+   v19-mail-review.spec.ts and v19-hit-routing.spec.ts (#1219): nothing
+   here is about the worker, so on WebKit it is kept out. */
+test.use({
+  serviceWorkers: async ({}, use, testInfo) => {
+    await use(testInfo.project.use.defaultBrowserType === "webkit" ? "block" : "allow");
+  },
+});
 import {
   auditLightDismiss,
   auditTabOrder,
