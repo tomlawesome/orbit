@@ -216,6 +216,7 @@ function buildDriverScript(): string {
     'readonly compose_file="docker-compose.yml"',
     'readonly secrets_directory=".orbit-secrets"',
     'readonly database_volume_key="orbit-db-data"',
+    'readonly bundled_compose_project_name="orbit"',
     "",
     functions,
     "",
@@ -471,6 +472,40 @@ describe("verify_database_volume_safety parity — fresh check", () => {
       message = (error as DatabaseVolumeSafetyRefusal).message;
     }
     expect(bash.stderr).toBe(message);
+  });
+
+  it("agrees: on an empty target another project's volume is skipped, an explicit project's own volume refuses (#1239)", () => {
+    const dir = makeSandbox();
+    seedTargetWithImage(dir);
+    const password = seedReadyPassword(dir);
+    writeScenario({ volumeLsSubstring: { "orbit-db-data": "demo_orbit-db-data" } });
+
+    const bash = runDriver("verify", dir, "1", "mine");
+    expect(bash.status).toBe(0);
+    expect(bash.stdout).toContain("database_volume_checked=1");
+    expect(bash.stdout).toContain("database_volume_seen=0");
+    const result = verifyDatabaseVolumeSafety(
+      dir,
+      "mine",
+      "fallback",
+      freshState({ targetWasEmpty: true }),
+      password,
+      referenceAdapter,
+    );
+    expect(result.databaseVolumeChecked).toBe(true);
+    expect(result.databaseVolumeSeen).toBe(false);
+
+    writeScenario({ volumeLsSubstring: { "orbit-db-data": "demo_orbit-db-data\nmine_orbit-db-data" } });
+    const ownBash = runDriver("verify", dir, "1", "mine");
+    expect(ownBash.status).toBe(1);
+    let message = "";
+    try {
+      verifyDatabaseVolumeSafety(dir, "mine", "fallback", freshState({ targetWasEmpty: true }), password, referenceAdapter);
+    } catch (error) {
+      message = (error as DatabaseVolumeSafetyRefusal).message;
+    }
+    expect(message).toContain("(mine_orbit-db-data)");
+    expect(ownBash.stderr).toBe(message);
   });
 
   it("agrees: a proven volume with no preserved postgres-password refuses with install.sh's exact message (#18)", () => {
