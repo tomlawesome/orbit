@@ -11,13 +11,11 @@ import type { ManagedPath } from "./install-transaction";
 // port uses, rather than a behavioural bash-vs-TS comparison.
 
 /**
- * install.sh:1313-1325's deployment_assets array, in the installer's own
- * fetch order. scripts/repair.sh and scripts/engine-check.sh were added by
- * issue #383's shipping-gap fix: both are operator-facing host scripts
- * meant to run directly against a deployed target (repair.sh's own header;
- * engine-check.sh's header states it works "exactly like configure.sh/
- * repair.sh"), so omitting them here left every deployed target without
- * `bash scripts/repair.sh`/`bash scripts/engine-check.sh` ever working.
+ * install.sh's deployment_assets array, in the installer's own fetch order.
+ * scripts/repair.sh was added by issue #383's shipping-gap fix (an
+ * operator-facing host script meant to run against a deployed target).
+ * scripts/configuration.sh and scripts/engine-check.sh left the list with
+ * #1210: the engine inside the image does their work now.
  */
 export const DEPLOYMENT_ASSETS: readonly string[] = [
   "docker-compose.yml",
@@ -26,22 +24,18 @@ export const DEPLOYMENT_ASSETS: readonly string[] = [
   "config/tika-config.json",
   "scripts/configure.sh",
   "scripts/installer-ui.sh",
-  "scripts/configuration.sh",
   "scripts/backup.sh",
   "scripts/restore.sh",
   "scripts/repair.sh",
-  "scripts/engine-check.sh",
 ];
 
 /** install.sh:1326-1334's deployment_scripts array — the subset that must pass `bash -n` before being sourced/executed (guarantee #45). */
 export const DEPLOYMENT_SCRIPTS: readonly string[] = [
   "scripts/configure.sh",
   "scripts/installer-ui.sh",
-  "scripts/configuration.sh",
   "scripts/backup.sh",
   "scripts/restore.sh",
   "scripts/repair.sh",
-  "scripts/engine-check.sh",
 ];
 
 /**
