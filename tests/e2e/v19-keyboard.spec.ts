@@ -588,7 +588,7 @@ test("inbox: reachable via the account panel, and keyboard-navigable", async ({ 
   }
 });
 
-test("sign out: the two-tap control ends the session by keyboard alone", async ({ page }) => {
+test("sign out: the one-press control ends the session by keyboard alone", async ({ page }) => {
   test.setTimeout(60_000);
   const household = await arriveAtHome(page);
   try {
@@ -597,16 +597,14 @@ test("sign out: the two-tap control ends the session by keyboard alone", async (
     await tabTo(page, { selector: ".signout" }, { screen: "home account panel" });
     const signOut = await currentFocus(page);
     expect(signOut?.focusVisible, "home: the sign-out control has no visible focus indicator").toBe(true);
-    await page.keyboard.press("Enter"); // arms
-    await expect(page.locator(".signout")).toHaveText(/tap again/);
-    await page.keyboard.press("Enter"); // fires — revokes the session, then plays the descent
+    await page.keyboard.press("Enter"); // revokes the session, then plays the descent (one press: owner, 2026-10-06)
 
     await expect(page).toHaveURL(/\/logout$/, { timeout: 15_000 });
     const session = await page.evaluate(async () => {
       const response = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
       return (await response.json()) as { authenticated?: boolean };
     });
-    expect(session.authenticated, "sign out: the session is still authenticated after the two-tap control fired").toBeFalsy();
+    expect(session.authenticated, "sign out: the session is still authenticated after the sign-out control fired").toBeFalsy();
 
     /* Cleanup needs a live session again — sign back in the same keyboard way
        the arrival journey proved, so this test's own household can still be

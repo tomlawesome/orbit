@@ -412,9 +412,9 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
 
   /**
    * Sign-out, last: this is the one destructive journey, so it runs after
-   * every other screen has been walked. It uses Chrome.svelte's own two-tap
-   * control (arm, then confirm) reached from a sub-screen, which is the real
-   * product path: the confirm tap revokes the session for real before
+   * every other screen has been walked. It uses Chrome.svelte's own sign-out
+   * control reached from a sub-screen, which is the real product path: its
+   * one press (owner, 2026-10-06) revokes the session for real before
    * handing the reader to /logout.
    */
   test("sign-out screen", async ({ page }, testInfo) => {
@@ -422,17 +422,15 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     await page.goto("/settings");
     if (test.info().project.name.startsWith("mobile")) {
       /* #1120: on a phone the sub-screen chrome's orb opens the hatch, and
-         its sign-out pill arms on the first tap and fires on the second --
-         the same two-tap control, in the pocket's own sheet. */
+         its sign-out pill is the same one-press control, in the pocket's
+         own sheet. */
       await page.getByRole("button", { name: "Account and menu" }).click();
       const signOutPill = page.getByRole("dialog").getByRole("button", { name: /sign out/ });
-      await signOutPill.click();
-      await expect(signOutPill).toHaveAccessibleName("tap again to sign out");
+      await expect(signOutPill).toHaveAccessibleName("sign out →");
       await signOutPill.click();
     } else {
       await page.locator("button.orb").click();
       const signOutButton = page.locator(".account .signout");
-      await signOutButton.click();
       await signOutButton.click();
     }
     await expect(page).toHaveURL(/\/logout$/, { timeout: 30_000 });
