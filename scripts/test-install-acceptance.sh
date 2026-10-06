@@ -426,12 +426,14 @@ positive_scenario() {
   docker tag "$image" "127.0.0.1:$registry_port/$repository:latest"
   docker push --quiet "127.0.0.1:$registry_port/$repository:latest" >/dev/null ||
     fail "push to the local registry failed"
-  # grep -m1, not `| head -1` (issue #809): docker inspect's one line can hold
-  # more than one digest, and head -1 exiting after the first would SIGPIPE
-  # grep while it still had output queued, turning a captured digest into a
-  # 141. -m1 makes grep itself the one process that stops once it has enough.
+  # docker inspect's one line can hold more than one digest -- a pulled
+  # ORBIT_ACCEPTANCE_IMAGE carries its registry's digest beside the local
+  # one -- and `grep -m1 -o` stops after the first LINE, not the first
+  # match, so it printed both and the manifest refused a two-line digest
+  # (#1238). Not `| head -1` either (issue #809): head exiting early would
+  # SIGPIPE grep into a 141. sed reads to the end and prints the first.
   digest="$(docker inspect --format '{{index .RepoDigests}}' "127.0.0.1:$registry_port/$repository:latest" |
-    grep -m1 -oE 'sha256:[0-9a-f]{64}')"
+    grep -oE 'sha256:[0-9a-f]{64}' | sed -n '1p')"
   [[ -n "$digest" ]] || fail "could not capture the pushed digest"
 
   # ADR-0031 #7: install.sh now refuses to run without a release manifest it
