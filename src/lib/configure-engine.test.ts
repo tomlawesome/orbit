@@ -197,6 +197,34 @@ describe("updateManagedKeys", () => {
     expect(readEnv()).toBe("OTHER=1\nAPP_URL=https://new.example.com\n");
   });
 
+  it("#1210: a CRLF file keeps CRLF on rewritten and appended lines, leaving untouched lines byte-identical", () => {
+    writeFileSync(envPath(), "# note\r\nAPP_URL=https://old.example.com\r\nOTHER=1\r\n", { mode: 0o600 });
+    updateManagedKeys(deployDir, [
+      ["APP_URL", "https://new.example.com"],
+      ["ORBIT_IMAGE", "img"],
+    ]);
+    const content = readEnv();
+    expect(content).toBe("# note\r\nAPP_URL=https://new.example.com\r\nOTHER=1\r\nORBIT_IMAGE=img\r\n");
+    expect(content.replace(/\r\n/g, "")).not.toContain("\n");
+  });
+
+  it("#1210: a CRLF file with no final newline gains no stray CR on a rewritten last line", () => {
+    writeFileSync(envPath(), "OTHER=1\r\nAPP_URL=https://old.example.com", { mode: 0o600 });
+    updateManagedKeys(deployDir, [["APP_URL", "https://new.example.com"]]);
+    expect(readEnv()).toBe("OTHER=1\r\nAPP_URL=https://new.example.com");
+  });
+
+  it("#1210: an LF file stays all LF with no CR added", () => {
+    writeFileSync(envPath(), "# note\nAPP_URL=https://old.example.com\nOTHER=1\n", { mode: 0o600 });
+    updateManagedKeys(deployDir, [
+      ["APP_URL", "https://new.example.com"],
+      ["ORBIT_IMAGE", "img"],
+    ]);
+    const content = readEnv();
+    expect(content).toBe("# note\nAPP_URL=https://new.example.com\nOTHER=1\nORBIT_IMAGE=img\n");
+    expect(content).not.toContain("\r");
+  });
+
   it("guarantee #8: relocates OIDC_CLIENT_SECRET_FILE to the commented placeholder position", () => {
     const original = [
       "OIDC_CLIENT_SECRET_FILE=/some/stale/path",
