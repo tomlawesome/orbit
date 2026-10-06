@@ -1149,7 +1149,12 @@ ensure_vapid_keys() {
     printf 'Building the Orbit bootstrap image to generate VAPID keys.\n'
     bootstrap_image="orbit-vapid-bootstrap:$(git rev-parse --short=12 HEAD)"
     docker build --target vapid-generator --tag "$bootstrap_image" . >/dev/null || fail "Could not build the Orbit bootstrap image."
-    generated="$(docker run --rm "$bootstrap_image")" || fail "Could not generate VAPID keys."
+    local run_status=0
+    generated="$(docker run --rm "$bootstrap_image")" || run_status=$?
+    # The image exists only to make these keys; a tag left per commit piled
+    # up 23 of them on one host (#1241). The build cache keeps a rebuild cheap.
+    docker image rm "$bootstrap_image" >/dev/null 2>&1 || true
+    [[ "$run_status" -eq 0 ]] || fail "Could not generate VAPID keys."
   fi
   public_key="$(printf '%s\n' "$generated" | sed -n 's/^public=//p')"
   private_key="$(printf '%s\n' "$generated" | sed -n 's/^private=//p')"
