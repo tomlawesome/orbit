@@ -752,7 +752,14 @@ reuse_env=()
 # can abort trying to repair a node_modules it does not own (#858, same
 # reasoning as install-test-browser.sh's header comment). Same binary.
 suite_env=(PLAYWRIGHT_BASE_URL="$base_url" COMPOSE_PROJECT_NAME="$project_name" "${acceptance_oidc[@]}" "${reuse_env[@]}")
-playwright_cmd=(node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts "${playwright_args[@]}")
+# tests/e2e/playwright.config.ts records a trace "on-first-retry", and local
+# runs retry nothing, so a local failure used to leave only a page snapshot
+# -- not enough to tell a harness race from a product one (docs/flakes.md,
+# the 2026-10-06 spoofed-PDF sighting). Locally, keep a trace of every
+# failure; ORBIT_E2E_TRACE overrides (Playwright's own values: off, on,
+# retain-on-failure, on-first-retry).
+playwright_cmd=(node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts \
+  "--trace=${ORBIT_E2E_TRACE:-retain-on-failure}" "${playwright_args[@]}")
 
 # #1235: WebKit cannot launch on this host -- its system packages need root
 # -- so a run that includes a WebKit project happens inside the Playwright
