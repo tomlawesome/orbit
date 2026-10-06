@@ -17,7 +17,10 @@ import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./
 // run the engine, then start the app and wait for health, unless the
 // engine left an unfinished-restore journal behind (Orbit stays stopped for
 // `restore.sh --recover`) or another backup/restore holds the lock (that run
-// owns the app). No test reaches a real daemon.
+// owns the app). restore.sh <bundle> and import-recovery-bundle.sh first
+// validate the bundle with an engine `--preflight` run while Orbit is still
+// up, and stop it only once that passed (#1211 amendment E3a). No test
+// reaches a real daemon.
 
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
@@ -37,7 +40,11 @@ function scratchDir(prefix) {
 
 // The fake docker. `compose ... run` stands in for the engine: it prints
 // FAKE_ENGINE_STDOUT, creates FAKE_ENGINE_JOURNAL (an unfinished restore)
-// when set, and exits FAKE_ENGINE_STATUS.
+// when set, and exits FAKE_ENGINE_STATUS. A `--preflight` run does none of
+// that: it exits FAKE_PREFLIGHT_STATUS (default 0), as the engine's
+// preflight leaves no journal and prints nothing on success. Every run
+// appends to FAKE_ENGINE_STDIN_KIND_LOG whether its standard input was
+// /dev/null.
 const FAKE_DOCKER = `#!/usr/bin/env node
 const { appendFileSync, mkdirSync, writeFileSync } = require("node:fs");
 const { dirname } = require("node:path");
@@ -50,6 +57,13 @@ const verb = argv[3];
 if (verb === "stop") process.exit(Number(process.env.FAKE_STOP_STATUS || 0));
 if (verb === "start") process.exit(Number(process.env.FAKE_START_STATUS || 0));
 if (verb === "run") {
+  if (process.env.FAKE_ENGINE_STDIN_KIND_LOG) {
+    const { fstatSync, statSync } = require("node:fs");
+    const stdin = fstatSync(0);
+    const devNull = statSync("/dev/null");
+    appendFileSync(process.env.FAKE_ENGINE_STDIN_KIND_LOG, (stdin.isCharacterDevice() && stdin.rdev === devNull.rdev ? "devnull" : "other") + "\\n");
+  }
+  if (argv.includes("--preflight")) process.exit(Number(process.env.FAKE_PREFLIGHT_STATUS || 0));
   if (process.env.FAKE_ENGINE_STDIN_LOG) {
     let input = "";
     try { input = require("node:fs").readFileSync(0, "utf8"); } catch {}
@@ -117,10 +131,18 @@ function verbs(calls) {
   return calls.filter((call) => call[0] === "compose" && call[1] === "--env-file").map((call) => call[3]);
 }
 
-/** The pieces of the `compose run` argv these tests assert on. */
+/** Every `compose run` in call order, parsed by parseRun. */
+function engineRuns(calls) {
+  return calls.filter((entry) => entry[0] === "compose" && entry[3] === "run").map(parseRun);
+}
+
+/** The engine run that does the work: the last one (a restore or import first runs a --preflight). */
 function engineRun(calls) {
-  const call = calls.find((entry) => entry[0] === "compose" && entry[3] === "run");
-  if (!call) return undefined;
+  return engineRuns(calls).at(-1);
+}
+
+/** The pieces of a `compose run` argv these tests assert on. */
+function parseRun(call) {
   const flags = call.slice(4, call.indexOf("--entrypoint"));
   const env = {};
   const volumes = [];
@@ -308,52 +330,48 @@ describe("the stop / engine / start rule (E3)", () => {
     expect(verbs(run(deployment, "export-recovery-bundle.sh", [bundle]).calls)).toEqual(["run"]);
   });
 
-  it.each(["backup.sh", "restore.sh", "import-recovery-bundle.sh"])(
-    "%s leaves the app to the run that holds the backup/restore lock (engine exit 75)",
-    (script) => {
-      const deployment = makeDeployment();
-      const bundle = join(deployment.deployDir, "b.tar");
-      writeFileSync(bundle, "bundle");
-      const result = run(deployment, script, script === "backup.sh" ? [] : [bundle], { env: { FAKE_ENGINE_STATUS: String(ENGINE_LOCKED_EXIT) } });
-      expect(result.status).toBe(ENGINE_LOCKED_EXIT);
-      expect(verbs(result.calls)).toEqual(["stop", "run"]);
-      expect(result.probes).toEqual([]);
-    },
-  );
-
   it.each([
-    ["restore.sh", ["--yes"]],
-    ["restore.sh", ["--recover"]],
-    ["import-recovery-bundle.sh", []],
-  ])("%s %j: success starts the app and waits for health", (script, flags) => {
+    ["backup.sh", ["stop", "run"]],
+    ["restore.sh", ["run", "stop", "run"]],
+    ["import-recovery-bundle.sh", ["run", "stop", "run"]],
+  ])("%s leaves the app to the run that holds the backup/restore lock (engine exit 75)", (script, expected) => {
+    const deployment = makeDeployment();
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const result = run(deployment, script, script === "backup.sh" ? [] : [bundle], { env: { FAKE_ENGINE_STATUS: String(ENGINE_LOCKED_EXIT) } });
+    expect(result.status).toBe(ENGINE_LOCKED_EXIT);
+    expect(verbs(result.calls)).toEqual(expected);
+    expect(result.probes).toEqual([]);
+  });
+
+  // A bundle is validated while Orbit runs (E3a); --recover has none, so it stops first as before.
+  const RESTORE_CASES = [
+    ["restore.sh", ["--yes"], ["run", "stop", "run"]],
+    ["restore.sh", ["--recover"], ["stop", "run"]],
+    ["import-recovery-bundle.sh", [], ["run", "stop", "run"]],
+  ];
+
+  it.each(RESTORE_CASES)("%s %j: success starts the app and waits for health", (script, flags, engineVerbs) => {
     const deployment = makeDeployment();
     const bundle = join(deployment.deployDir, "b.tar");
     writeFileSync(bundle, "bundle");
     const result = run(deployment, script, flags[0] === "--recover" ? flags : [...flags, bundle]);
     expect(result.status).toBe(0);
-    expect(verbs(result.calls)).toEqual(["stop", "run", "start"]);
+    expect(verbs(result.calls)).toEqual([...engineVerbs, "start"]);
     expect(result.probes).toEqual(["--fail --silent --max-time 2 http://127.0.0.1:3000/api/health"]);
   });
 
-  it.each([
-    ["restore.sh", ["--yes"]],
-    ["restore.sh", ["--recover"]],
-    ["import-recovery-bundle.sh", []],
-  ])("%s %j: a failure with no journal starts the app and waits for health", (script, flags) => {
+  it.each(RESTORE_CASES)("%s %j: a failure with no journal starts the app and waits for health", (script, flags, engineVerbs) => {
     const deployment = makeDeployment();
     const bundle = join(deployment.deployDir, "b.tar");
     writeFileSync(bundle, "bundle");
     const result = run(deployment, script, flags[0] === "--recover" ? flags : [...flags, bundle], { env: { FAKE_ENGINE_STATUS: "1" } });
     expect(result.status).toBe(1);
-    expect(verbs(result.calls)).toEqual(["stop", "run", "start"]);
+    expect(verbs(result.calls)).toEqual([...engineVerbs, "start"]);
     expect(result.probes.length).toBeGreaterThan(0);
   });
 
-  it.each([
-    ["restore.sh", ["--yes"]],
-    ["restore.sh", ["--recover"]],
-    ["import-recovery-bundle.sh", []],
-  ])("%s %j: an unfinished-restore journal keeps Orbit stopped and points at --recover", (script, flags) => {
+  it.each(RESTORE_CASES)("%s %j: an unfinished-restore journal keeps Orbit stopped and points at --recover", (script, flags, engineVerbs) => {
     const deployment = makeDeployment();
     const bundle = join(deployment.deployDir, "b.tar");
     writeFileSync(bundle, "bundle");
@@ -361,7 +379,7 @@ describe("the stop / engine / start rule (E3)", () => {
       env: { FAKE_ENGINE_STATUS: "1", FAKE_ENGINE_JOURNAL: deployment.journal },
     });
     expect(result.status).toBe(1);
-    expect(verbs(result.calls)).toEqual(["stop", "run"]);
+    expect(verbs(result.calls)).toEqual(engineVerbs);
     expect(result.probes).toEqual([]);
     expect(result.stderr).toContain("bash scripts/restore.sh --recover");
   });
@@ -372,7 +390,7 @@ describe("the stop / engine / start rule (E3)", () => {
     writeFileSync(bundle, "bundle");
     const result = run(deployment, "restore.sh", ["--yes", bundle], { env: { FAKE_ENGINE_STATUS: "137", FAKE_ENGINE_JOURNAL: deployment.journal } });
     expect(result.status).toBe(137);
-    expect(verbs(result.calls)).toEqual(["stop", "run"]);
+    expect(verbs(result.calls)).toEqual(["run", "stop", "run"]);
   });
 
   it("restore.sh reports a restore that never became healthy, and fails", () => {
@@ -384,13 +402,86 @@ describe("the stop / engine / start rule (E3)", () => {
     expect(result.stderr).toContain("Orbit did not become healthy");
   });
 
-  it("restore.sh refuses before running the engine when orbit-app cannot be stopped", () => {
+  it("restore.sh refuses before the full engine run when orbit-app cannot be stopped", () => {
     const deployment = makeDeployment();
     const bundle = join(deployment.deployDir, "b.tar");
     writeFileSync(bundle, "bundle");
     const result = run(deployment, "restore.sh", ["--yes", bundle], { env: { FAKE_STOP_STATUS: "1" } });
     expect(result.status).toBe(1);
-    expect(verbs(result.calls)).toEqual(["stop"]);
+    expect(verbs(result.calls)).toEqual(["run", "stop"]);
+    expect(engineRun(result.calls).command).toContain("--preflight");
+  });
+});
+
+// Amendment E3a: a bundle Orbit cannot restore must never cost the running
+// instance anything, so restore.sh <bundle> and import-recovery-bundle.sh
+// validate it with the engine's --preflight while Orbit is still up, and
+// only then stop it for the full run.
+describe("validate the bundle before stopping Orbit (E3a)", () => {
+  const PREFLIGHT_CASES = [
+    ["restore.sh", ["--yes"], ["restore", "--preflight", "/orbit-input/bundle.tar"]],
+    ["restore.sh", [], ["restore", "--preflight", "/orbit-input/bundle.tar"]],
+    ["import-recovery-bundle.sh", [], ["import-recovery-bundle", "--preflight", "/orbit-input/bundle.tar"]],
+  ];
+
+  it.each(PREFLIGHT_CASES)("%s %j runs the engine's preflight first, then stops, runs and starts", (script, flags, preflightCommand) => {
+    const deployment = makeDeployment();
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const stdinKinds = join(deployment.binDir, "stdin-kinds.log");
+    const result = run(deployment, script, [...flags, bundle], { env: { FAKE_ENGINE_STDIN_KIND_LOG: stdinKinds } });
+    expect(result.status).toBe(0);
+    expect(verbs(result.calls)).toEqual(["run", "stop", "run", "start"]);
+    const [preflight, full] = engineRuns(result.calls);
+    expect(preflight.command).toEqual(["/opt/orbit/cli/orbit.js", ...preflightCommand, "--dir", "/orbit-deploy"]);
+    expect(preflight.command).not.toContain("--yes");
+    expect(preflight.flags).toContain("-T");
+    expect(preflight.flags).not.toContain("-t");
+    expect(preflight.volumes).toContain(`${bundle}:/orbit-input/bundle.tar:ro`);
+    expect(full.command).not.toContain("--preflight");
+    // The preflight never reads the operator's terminal: its standard input
+    // is /dev/null, which is also what makes run_engine pick -T. The full
+    // run keeps the shell's own standard input for prompts.
+    expect(readFileSync(stdinKinds, "utf8")).toBe("devnull\nother\n");
+  });
+
+  it.each(PREFLIGHT_CASES)("%s %j: a preflight refusal is the engine run alone; Orbit is never stopped", (script, flags) => {
+    const deployment = makeDeployment();
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const result = run(deployment, script, [...flags, bundle], { env: { FAKE_PREFLIGHT_STATUS: "1" } });
+    expect(result.status).toBe(1);
+    expect(verbs(result.calls)).toEqual(["run"]);
+    expect(result.probes).toEqual([]);
+  });
+
+  it.each(PREFLIGHT_CASES)("%s %j: a preflight that finds the lock held (exit 75) touches nothing", (script, flags) => {
+    const deployment = makeDeployment();
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    const result = run(deployment, script, [...flags, bundle], { env: { FAKE_PREFLIGHT_STATUS: String(ENGINE_LOCKED_EXIT) } });
+    expect(result.status).toBe(ENGINE_LOCKED_EXIT);
+    expect(verbs(result.calls)).toEqual(["run"]);
+    expect(result.probes).toEqual([]);
+  });
+
+  it("restore.sh --recover has no bundle to validate: it stops, runs and starts as before", () => {
+    const deployment = makeDeployment();
+    const result = run(deployment, "restore.sh", ["--recover"]);
+    expect(verbs(result.calls)).toEqual(["stop", "run", "start"]);
+    expect(engineRuns(result.calls).map((engine) => engine.command)).toEqual([["/opt/orbit/cli/orbit.js", "restore", "--recover", "--dir", "/orbit-deploy"]]);
+  });
+
+  it("import-recovery-bundle.sh asks for the passphrase once, in the full run", () => {
+    const deployment = makeDeployment();
+    const bundle = join(deployment.deployDir, "r.tar");
+    writeFileSync(bundle, "bundle");
+    const stdinLog = join(deployment.binDir, "stdin.txt");
+    const passphrase = "orbit-test-recovery-passphrase";
+    const result = run(deployment, "import-recovery-bundle.sh", [bundle], { env: { FAKE_ENGINE_STDIN_LOG: stdinLog }, input: `${passphrase}\n` });
+    expect(result.status).toBe(0);
+    expect(engineRuns(result.calls)).toHaveLength(2);
+    expect(readFileSync(stdinLog, "utf8")).toBe(`${passphrase}\n`);
   });
 });
 
