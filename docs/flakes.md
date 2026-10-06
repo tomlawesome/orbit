@@ -369,3 +369,11 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 
 - 2026-10-05 · c352cf77 (same run and same unchanged web tree as the heading above) · pipeline 2188 / smoke_webkit_mobile (job 32287) · `focus is not dropped to the page` at line 373: `focusedElement` was `body` after the staged failure was shown, 5.9 s in; the in-job retry passed (6.5 s), so Playwright counted it flaky. First sighting; an issue on the third.
 
+
+## v19-archive.spec.ts:262 "a wrong passphrase is refused, and nothing is read" on desktop-webkit (#1233)
+
+- 2026-10-06 · 4bb20449 (dev, !1035 merged) · local full suite, both WebKit projects, inside CI's Playwright image (#1235), local worker count · `page.waitForResponse: Timeout 30000ms exceeded` on the slow POST; the same test passed in a five-file targeted run minutes earlier and in a second full desktop-webkit run an hour later. Error context lost to a later run clearing `test-results/`.
+
+## v19-mail-collection.spec.ts:288 "a spoofed PDF travels the real pipe" on desktop-webkit
+
+- 2026-10-06 · 4bb20449 (dev, !1035 merged) · local full desktop-webkit suite inside CI's Playwright image (#1235), four workers · the pipe worked (mail collected, suggestion row shown, drawer opened, "Add to orbit" tapped), then the test spent its 240 s budget waiting for "tap again to approve": the page snapshot at timeout has neither the drawer nor the suggestion row. The app log shows no receipt approval, dismissal or error in that window. Passed in a targeted run 3 minutes later (56 s). Not the scanner (ready in 15 ms at every check) and not the certificate (#1236, fixed before this run). Candidates: the cross-file database reset gate wiping the receipt under a parallel worker, or a WebKit race on the first tap; a trace is needed to tell, and local runs keep none.

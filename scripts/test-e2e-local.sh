@@ -72,7 +72,12 @@
 #   --project NAME  Playwright project from tests/e2e/playwright.config.ts:
 #                    desktop-chromium, mobile-chromium, desktop-firefox,
 #                    desktop-webkit or mobile-webkit. Default: all of them,
-#                    plus the maintenance-* tail.
+#                    plus the maintenance-* tail. A run that includes WebKit
+#                    (either WebKit project, or the default) runs Playwright
+#                    inside CI's Playwright image, because WebKit cannot
+#                    launch on this host (#1235); see the comment above the
+#                    `docker run` below. Chromium and Firefox runs stay on
+#                    the host.
 #   --keep          Leave the stack up on exit instead of tearing it down, so a
 #                    failed run can be inspected: query the database, read the
 #                    container logs, open the app. The run logs its own
@@ -569,8 +574,15 @@ else
     chmod 600 .orbit-secrets/oidc-client-secret
   fi
 
+  # dev-greenmail-cert.sh signs for 30 days. Past that, Orbit refuses the
+  # sidecar's certificate, every mail step fails with "no mail arrived", and
+  # nothing says why -- the stack passed its health check. So an expired or
+  # nearly expired CA is regenerated the same as a missing one (#1236).
   if [[ ! -f .orbit-secrets/greenmail.p12 || ! -f .orbit-secrets/greenmail-ca.pem || ! -f .orbit-secrets/greenmail-key.pem ]]; then
     log "generating GreenMail TLS material (missing from .orbit-secrets/)"
+    bash scripts/dev-greenmail-cert.sh
+  elif ! openssl x509 -in .orbit-secrets/greenmail-ca.pem -noout -checkend 86400 >/dev/null 2>&1; then
+    log "regenerating GreenMail TLS material (.orbit-secrets/greenmail-ca.pem has expired or expires within a day)"
     bash scripts/dev-greenmail-cert.sh
   fi
   for required in .orbit-secrets/greenmail.p12 .orbit-secrets/greenmail-ca.pem; do
@@ -685,11 +697,22 @@ fi
 # --- Run the Playwright suite -------------------------------------------------
 # playwright_args was assembled right after argument parsing, above.
 
+# #1235: a run that includes a WebKit project happens inside CI's Playwright
+# image (the `docker run` below says why and how); the decision is made here
+# so the host browser download can skip WebKit, whose download on this host
+# only ends in a "missing dependencies" warning nobody can act on.
+in_image=0
+if [[ "$playwright_project" == *webkit* ]]; then
+  in_image=1
+elif [[ -z "$playwright_project" ]]; then
+  case "${ORBIT_E2E_ENGINES:-}" in chromium | firefox) ;; *) in_image=1 ;; esac
+fi
+
 log "installing Playwright's Chromium, Firefox and WebKit builds"
 # scripts/install-test-browser.sh (README "Local development"): a plain
 # --only-shell install, not CI's --with-deps. --with-deps apt-get-installs
 # system libraries and needs root; a local checkout is not guaranteed sudo.
-bash scripts/install-test-browser.sh
+ORBIT_E2E_SKIP_WEBKIT_DOWNLOAD="$in_image" bash scripts/install-test-browser.sh
 
 log "running the Playwright suite (profile: ${profile})${spec:+ (spec: $spec)}${playwright_project:+ (project: $playwright_project)}"
 suite_status=0
@@ -728,9 +751,68 @@ reuse_env=()
 # in a worktree `pnpm exec` re-verifies node_modules against the lockfile and
 # can abort trying to repair a node_modules it does not own (#858, same
 # reasoning as install-test-browser.sh's header comment). Same binary.
-env PLAYWRIGHT_BASE_URL="$base_url" COMPOSE_PROJECT_NAME="$project_name" "${acceptance_oidc[@]}" "${reuse_env[@]}" \
-  node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts \
-  "${playwright_args[@]}" || suite_status=$?
+suite_env=(PLAYWRIGHT_BASE_URL="$base_url" COMPOSE_PROJECT_NAME="$project_name" "${acceptance_oidc[@]}" "${reuse_env[@]}")
+# tests/e2e/playwright.config.ts records a trace "on-first-retry", and local
+# runs retry nothing, so a local failure used to leave only a page snapshot
+# -- not enough to tell a harness race from a product one (docs/flakes.md,
+# the 2026-10-06 spoofed-PDF sighting). Locally, keep a trace of every
+# failure; ORBIT_E2E_TRACE overrides (Playwright's own values: off, on,
+# retain-on-failure, on-first-retry).
+playwright_cmd=(node node_modules/@playwright/test/cli.js test --config tests/e2e/playwright.config.ts \
+  "--trace=${ORBIT_E2E_TRACE:-retain-on-failure}" "${playwright_args[@]}")
+
+# #1235: WebKit cannot launch on this host -- its system packages need root
+# -- so a run that includes a WebKit project happens inside the Playwright
+# image CI runs it in, on the host network with this checkout bind-mounted
+# at its own path. The image is read from .gitlab-ci.yml so local and CI use
+# the same browser build. Chromium-only and Firefox-only runs stay on the
+# host: nothing there needs the container and the host browsers are already
+# downloaded. Inside the image:
+#   - `--network host` puts the browsers where the stack's published ports
+#     are; `--ipc=host` is what Playwright's own image documentation asks for.
+#   - the suite shells out to `docker` (tests/e2e/support/database.ts,
+#     bootstrap.ts), so the host CLI, its compose plugin and the rootless
+#     socket are bind-mounted in.
+#   - WebKit has no host-resolver or port-forcing option, so, exactly as the
+#     `.webkit_oidc_hosts` jobs in .gitlab-ci.yml do, `orbit-oidc` is mapped
+#     to 127.0.0.1 and a forward from 4443 -- the port in the fixed
+#     https://orbit-oidc:4443/ issuer URL -- reaches the random host port the
+#     sidecar was actually published on. The suite is told TEST_OIDC_PORT=4443
+#     for the same reason.
+#   - Only `node` runs on the mounted tree: never `pnpm install` in here, which
+#     rewrites the host's node_modules (environment skill, 2026-08-24).
+# in_image was decided above, before the browser download.
+if [[ "$in_image" == 1 ]]; then
+  # grep -m1, not `| head` (scripts/acceptance-sigpipe-safety.test.mjs, #809).
+  playwright_image="$(grep -m1 '^  PLAYWRIGHT_IMAGE: ' .gitlab-ci.yml | sed 's/^  PLAYWRIGHT_IMAGE: *//')"
+  [[ -n "$playwright_image" ]] || fail "could not read PLAYWRIGHT_IMAGE from .gitlab-ci.yml; the WebKit run needs CI's Playwright image."
+  docker_cli="$(command -v docker)"
+  compose_plugin="$(docker info --format '{{range .ClientInfo.Plugins}}{{if eq .Name "compose"}}{{.Path}}{{end}}{{end}}')"
+  [[ -n "$compose_plugin" ]] || fail "docker's compose plugin was not found; the suite needs it inside the image."
+  docker_sock="$(docker context inspect --format '{{(index .Endpoints "docker").Host}}')"
+  docker_sock="${docker_sock#unix://}"
+  [[ -S "$docker_sock" ]] || fail "docker socket not found at ${docker_sock}; the suite needs it inside the image."
+  image_env=()
+  for kv in "${suite_env[@]}"; do image_env+=(-e "$kv"); done
+  for name in TEST_SMTP_PORT TEST_IMAPS_PORT ORBIT_E2E_ENGINES ORBIT_E2E_WEBKIT_DEVICES ORBIT_E2E_WORKERS ORBIT_IMAGE ORBIT_SECRETS_DIR; do
+    [[ -z "${!name:-}" ]] || image_env+=(-e "${name}=${!name}")
+  done
+  oidc_forward=""
+  if [[ "$profile" == "oidc" ]]; then
+    image_env+=(-e TEST_OIDC_PORT=4443)
+    oidc_forward="node -e 'const n=require(\"net\");n.createServer(s=>{const c=n.connect(${TEST_OIDC_PORT},\"127.0.0.1\");s.pipe(c).pipe(s);s.on(\"error\",()=>c.destroy());c.on(\"error\",()=>s.destroy())}).listen(4443,\"127.0.0.1\")' & sleep 1;"
+  fi
+  log "running Playwright inside ${playwright_image} (WebKit needs it; #1235)"
+  docker run --rm --network host --ipc=host --add-host orbit-oidc:127.0.0.1 \
+    -v "${repo_dir}:${repo_dir}" -w "$repo_dir" \
+    -v "${docker_cli}:/usr/local/bin/docker:ro" \
+    -v "$(dirname -- "$compose_plugin"):/usr/local/lib/docker/cli-plugins:ro" \
+    -v "${docker_sock}:/var/run/docker.sock" -e DOCKER_HOST=unix:///var/run/docker.sock \
+    "${image_env[@]}" "$playwright_image" \
+    sh -c "${oidc_forward} exec \"\$@\"" sh "${playwright_cmd[@]}" || suite_status=$?
+else
+  env "${suite_env[@]}" "${playwright_cmd[@]}" || suite_status=$?
+fi
 
 if [[ "$keep" == 1 ]]; then
   log "stack still up: ${base_url}"
