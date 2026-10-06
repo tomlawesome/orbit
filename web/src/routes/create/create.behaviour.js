@@ -175,9 +175,6 @@ export function mountCreate() {
     if (nameInput.value.trim().length >= 3) reveal();
     updateRefusal();
   });
-  /* The heading arrives pre-filled ("New Entry", owner 2026-08-15): first
-     focus selects it whole, so typing replaces rather than appends. */
-  on(nameInput, "focus", () => nameInput.select());
 
   /* ---- section (#1058b): a row of buttons, none pre-selected; the entry
      cannot be saved until one is chosen. Populated once the household loads
@@ -362,12 +359,10 @@ export function mountCreate() {
      keyboard as soon as the page loads. Two things follow.
 
      First, catch up on what was typed while nobody was listening (the name
-     prefill above included). The `value` ATTRIBUTE is the default the markup
-     ships ("New Entry"); `.value` is what is in the field now. They differ
-     only once something has written to it, so this reveals for a real edit
-     and never for the untouched default — progressive disclosure is
+     prefill above included). The heading ships empty (#1251), so anything
+     in it now was written by someone — progressive disclosure is
      unchanged. */
-  if (nameInput.value.trim().length >= 3 && nameInput.value !== nameInput.getAttribute("value")) reveal();
+  if (nameInput.value.trim().length >= 3) reveal();
 
   /* The section refusal (#1058b) holds the button disabled from the start,
      same as the pocket's own form does the moment it is ready. */
