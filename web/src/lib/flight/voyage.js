@@ -33,7 +33,7 @@
  */
 
 import { chore, fetchOnce, note } from "./chores.js";
-import { fitsFrame, gpu } from "./fitness.js";
+import { frameCost, gpu, sayVerdict } from "./fitness.js";
 
 const TEX = {
   lights: "/flight/world/earth-lights.webp",
@@ -542,7 +542,8 @@ function createVoyage() {
   /* the page's one context, if the page may use the GPU at all (fitness.js);
      never a second one made here */
   const g = gpu();
-  if (!g || g.gl.isContextLost() || !g.gl.getExtension("EXT_color_buffer_float")) return null;
+  if (!g || g.gl.isContextLost()) return null;
+  if (!g.gl.getExtension("EXT_color_buffer_float")) { sayVerdict("off: no float colour buffers (EXT_color_buffer_float)"); return null; }
   const { canvas, gl } = g;
   canvas.id = "warpgl"; canvas.setAttribute("aria-hidden", "true");
   gl.getExtension("OES_texture_float_linear");
@@ -709,9 +710,10 @@ function createVoyage() {
     try { draw(st); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4)); } catch { /* fine */ }
     gl.disable(gl.SCISSOR_TEST); lastDraw = 0;
   }
-  /* the fitness test: one whole frame at the heaviest point of the flight,
-     timed at the smallest drawing the measure would ever choose; fit if
-     that leaves room for about 30 frames a second */
+  /* the fitness test: whole frames at the heaviest point of the flight, at
+     the smallest drawing the measure would ever choose, warmed first and
+     judged on their median (fitness.js frameCost); fit if that leaves room
+     for about 30 frames a second. Says its verdict in the console. */
   let fit = false;
   function fitness() {
     if (!ok) return false;
@@ -721,8 +723,9 @@ function createVoyage() {
     /** @type {VoyageFrame} */
     const st = { t: 1900, v: 1, K: 7.4, vp: [W / 2, -0.55 * H], rmax: Math.hypot(W, H) * 1.55, tint: [1, 0.8, 0.4],
       progress: 0.4, world: null, bloom: 0, tu: 1900, star: true, dt: 0 };
-    const fits = fitsFrame(gl, () => draw(st));
+    const { fit: fits, ms } = frameCost(gl, () => draw(st));
     part = was; CW = 0; resize(W, H); lastDraw = 0;
+    sayVerdict(fits ? `on (frame ${Math.round(ms)} ms)` : `off: frame ${Number.isFinite(ms) ? Math.round(ms) : "failed to draw"}${Number.isFinite(ms) ? " ms" : ""}`);
     return fits;
   }
   /* the measure: a few whole frames at the heaviest point of the flight (the

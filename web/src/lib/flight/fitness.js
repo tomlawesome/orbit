@@ -1,28 +1,61 @@
 /*
- * WHETHER THIS MACHINE CAN DRAW IT (#1253): one whole frame, timed with the
- * GPU made to finish it, against a budget that leaves room for about 30
+ * WHETHER THIS MACHINE CAN DRAW IT (#1253): whole frames, timed with the
+ * GPU made to finish each, against a budget that leaves room for about 30
  * frames a second. A GPU that cannot (software rendering, a remote desktop)
  * would make every frame a long stall, so whatever fails this is drawn
- * without WebGL instead. The flight's world (voyage.js) and the dial's sun
- * (lib/sun/furnace.js) both ask it, so there is one rule, not two.
+ * without WebGL instead. The flight's world (voyage.js) asks it.
+ *
+ * WARM FIRST, THEN THE MEDIAN. The first frames at a new size carry the
+ * driver's last shader work, the pictures' upload and the render targets'
+ * allocation; on Firefox (ANGLE, no parallel compile) that alone is past
+ * the budget on a real GPU, which then flew the canvas flight. So a couple
+ * of frames are drawn untimed first, and then a few are timed one by one
+ * and judged on their median: one hitch is not a slow machine. It stops as
+ * soon as most of the timed frames have agreed.
  */
 
 /** the most one frame may take, in milliseconds */
 export const FIT_MS = 30;
+/** frames drawn (and finished) before any is timed */
+export const WARM_FRAMES = 2;
+/** frames timed; the verdict is their median */
+export const TIMED_FRAMES = 5;
 
 /**
- * @param {WebGLRenderingContext | WebGL2RenderingContext} gl
+ * @param {Pick<WebGLRenderingContext, "readPixels" | "RGBA" | "UNSIGNED_BYTE">} gl
  * @param {() => void} draw  draws the heaviest frame the caller will ask for
- * @returns {boolean}
+ * @param {{ now?: () => number, warm?: number, timed?: number }} [how]
+ * @returns {{ fit: boolean, ms: number }}  ms: the median timed frame
  */
-export function fitsFrame(gl, draw) {
-  let ms = Infinity;
+export function frameCost(gl, draw, { now = () => performance.now(), warm = WARM_FRAMES, timed = TIMED_FRAMES } = {}) {
+  const sync = () => gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
   try {
-    const t0 = performance.now();
-    draw(); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
-    ms = performance.now() - t0;
-  } catch { /* unfit */ }
-  return ms <= FIT_MS;
+    for (let i = 0; i < warm; i++) { draw(); sync(); }
+    /** @type {number[]} */
+    const times = [];
+    let over = 0;
+    for (let i = 0; i < timed; i++) {
+      const t0 = now();
+      draw(); sync();
+      const ms = now() - t0;
+      times.push(ms);
+      if (ms > FIT_MS) over++;
+      /* the median is settled once more than half lie on one side */
+      if (over > timed / 2 || times.length - over > timed / 2) break;
+    }
+    /* the median of the frames timed; stopped early, the lower middle one,
+       which always lies on the side that decided it */
+    const sorted = [...times].sort((a, b) => a - b);
+    const ms = sorted[Math.floor((sorted.length - 1) / 2)] ?? Infinity;
+    return { fit: ms <= FIT_MS, ms };
+  } catch {
+    return { fit: false, ms: Infinity };
+  }
+}
+
+/** The one line that says whether the flight's world is drawn, and why. @param {string} verdict */
+export function sayVerdict(verdict) {
+  try { console.info(`orbit · flight world: ${verdict}`); } catch { /* fine */ }
 }
 
 /*
@@ -55,12 +88,15 @@ export function gpu() {
     if (gl) {
       const info = gl.getExtension("WEBGL_debug_renderer_info");
       const renderer = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : "";
-      if (SOFTWARE.test(renderer)) gl.getExtension("WEBGL_lose_context")?.loseContext();
+      if (SOFTWARE.test(renderer)) {
+        gl.getExtension("WEBGL_lose_context")?.loseContext();
+        sayVerdict(`off: software renderer (${renderer})`);
+      }
       /* asked of this same context: whether shaders are made off the page's
          thread (KHR_parallel_shader_compile) */
       else verdict = { canvas, gl, parallel: !!gl.getExtension("KHR_parallel_shader_compile") };
-    }
-  } catch { /* refused */ }
+    } else sayVerdict("off: no WebGL2 here, or the browser calls it a major performance caveat");
+  } catch { sayVerdict("off: WebGL2 refused"); }
   return verdict;
 }
 
