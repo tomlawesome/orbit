@@ -333,3 +333,34 @@ test("/item on an empty household shows the empty state, not a 404", async ({ pa
     await households.sweep(page);
   }
 });
+
+/**
+ * #1248: on the desk, editing widens the card from 480px to 720px and drops
+ * the detail rows the form repeats; closing the panel brings both back. A
+ * phone's edit is already a full-height sheet, so this is desk-only.
+ */
+test("editing on the desk widens the card and drops the repeated rows", async ({ page }) => {
+  test.skip(test.info().project.name.startsWith("mobile"), "a phone edits in a full-height sheet");
+  await signInAsAdmin(page);
+
+  const { itemId } = await seedHouseholdWithItem(page);
+
+  try {
+    await page.goto(`/item/${itemId}`);
+    await expect(page.getByRole("heading", { name: "Boiler service proving" })).toBeVisible();
+    const card = page.locator("#cardwrap");
+    const width = async () => (await card.boundingBox())?.width ?? 0;
+    expect(await width()).toBeLessThanOrEqual(480);
+
+    await page.locator(".acts button", { hasText: /^edit$/ }).click();
+    await expect.poll(width).toBeGreaterThanOrEqual(700);
+    await expect(page.locator("#e-title")).toBeVisible();
+    await expect(page.locator(".item-card .kv")).toHaveCount(0);
+
+    await page.keyboard.press("Escape");
+    await expect.poll(width).toBeLessThanOrEqual(480);
+    await expect(page.locator(".item-card .kv", { hasText: /^due/ })).toBeVisible();
+  } finally {
+    await households.sweep(page);
+  }
+});

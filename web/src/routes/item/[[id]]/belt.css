@@ -282,7 +282,8 @@
      what makes it read as riding IN the belt rather than floating above it.
      The 16px backdrop blur is doing real work here — the rubble streaming
      behind the card is visible through it, smeared. */
-  .belt-page .cardwrap{position:fixed;left:50%;z-index:4;width:min(480px,calc(100vw - 56px));
+  .belt-page .cardwrap{position:fixed;left:50%;z-index:4;width:min(var(--cardw,480px),calc(100vw - 56px));
+    transition:width .75s cubic-bezier(.4,.5,.15,1);
     max-height:calc(100vh - 150px);overflow:auto;
     --cdx:0px; --cdy:0px; --csc:1;
     transform:translate(calc(-50% + var(--cdx)),calc(-34% + var(--cdy))) scale(var(--csc));
@@ -450,6 +451,7 @@
        stay put, at rest), and the band's drift holds still. */
     .belt-page *{animation:none!important}
     .belt-page .cardwrap{transition:none!important}
+    .belt-page .lanes{transition:none!important}
   }
 
 /* ---- the command panels — item.css's vocabulary, scoped -----------------
@@ -652,6 +654,15 @@
  * belt.behaviour.js. Everything the desk unfolds in or beside the card is
  * a kit Sheet on a phone, styled by the .bp-* rules after this block.
  * ========================================================================== */
+/* #1248: while the edit panel is open on the desk the card widens to 720px
+   (each .row2 field gets room, the whole form fits under the card's own
+   max-height at 1280×720) and drops the detail rows the form repeats; the
+   width rides the lanes' own transition. belt.behaviour.js's layout() writes
+   the resting width inline, on both the card and --cardw, so these two win
+   with !important; closing the panel hands the inline values straight back. */
+.belt-page .lanes.editing{--cardw:720px!important}
+.belt-page .lanes.editing .cardwrap{width:min(var(--cardw),calc(100vw - 56px))!important}
+
 .belt-page .ip-find,.belt-page .ip-count{display:none}
 @media (max-width:900px), (max-height:600px){
   /* A page that scrolls, not a stage: the chrome retracts over it (§1.3). */
