@@ -757,9 +757,10 @@ bash scripts/backup.sh
 bash scripts/export-recovery-bundle.sh backups/orbit-<timestamp>.tar
 ```
 
-Run them from the deployment directory. Each runs the Orbit engine inside the
-deployment, as a one-off container on the app service, so the host needs
-Docker and nothing else.
+Run them from the deployment directory. Each runs the Orbit engine's own
+command (`orbit backup`, then `orbit export-recovery-bundle <backup.tar>`)
+inside the deployment, as a one-off container on the app service, so the host
+needs Docker and nothing else.
 
 `export-recovery-bundle.sh` asks for the passphrase twice, then locks the live
 `DOCUMENT_KEK` under it
