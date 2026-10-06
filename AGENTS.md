@@ -188,7 +188,15 @@ Check the list before building a test rig or handing a check to the owner.
   anything runs; it never tears that stack down (#947). `--ci-cap` adds the
   cpu/memory overlay CI's acceptance stack always runs under, so a local
   timing measurement transfers; off by default because an uncapped stack is
-  the faster iteration loop (#1080)
+  the faster iteration loop (#1080). **WebKit runs on this host only inside
+  the CI Playwright image** (`mcr.microsoft.com/playwright:v1.63.0-noble`,
+  already pulled): the host lacks WebKit's system packages, and that is not
+  a reason to leave the check to a pipeline. The script does this itself
+  for any run that includes a WebKit project (#1235); `--project
+  desktop-webkit --spec <file>` with `--reuse` runs one file in WebKit
+  alone. A change to a WebKit-affected e2e test is run
+  locally on both WebKit projects before it is pushed; the pipeline is the
+  second check, not the first (owner, 2026-10-06).
 - `scripts/test-install-acceptance.sh` — real fresh install to a healthy
   `/api/health`, asserting `docs/installer-guarantees.md`; OIDC discovery is a
   fixture, so no provider credentials are needed

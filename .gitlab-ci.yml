@@ -2239,12 +2239,11 @@ smoke_firefox:
 # just the hostname. Writing /etc/hosts needs root, which this job container
 # already is (`.docker_in_job` above installs packages with no sudo).
 #
-# CI-only: a local `--project desktop-webkit`/`mobile-webkit` run
-# (scripts/test-e2e-local.sh) still has no way to resolve orbit-oidc --
-# editing /etc/hosts needs root this host does not grant (same constraint
-# scripts/test-install-bootstrap.sh hit) and TEST_OIDC_PORT is deliberately a
-# random free port locally, not 4443, so there would be a port to rewrite as
-# well as a name. Unsolved here; use desktop-chromium/firefox locally instead.
+# The same trick works locally from inside the CI Playwright image on the
+# host network, where the process is root: `--add-host orbit-oidc:127.0.0.1`
+# plus a forward from 4443 to the port the local stack published for the
+# sidecar (TEST_OIDC_PORT is a random free port there). scripts/test-e2e-local.sh
+# does exactly that for any run that includes a WebKit project (#1235).
 .webkit_oidc_hosts: &webkit_oidc_hosts |
   grep -q '[[:space:]]orbit-oidc$' /etc/hosts || echo "127.0.0.1 orbit-oidc" >> /etc/hosts
 
