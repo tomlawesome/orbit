@@ -251,11 +251,13 @@ Check the list before building a test rig or handing a check to the owner.
   `--red` proves the comparison fires, `--dry-run` stops before any commit,
   push or merge-request call
 - `scripts/cleanup-stacks.sh` — lists every `orbit*` Compose project on the
-  host (containers, volumes, networks, stopped and profile ones included, and
-  networks left with no container); `--remove` tears them down, `--project
-  NAME` limits it to one. Keeps `orbit-ollama` and its model volume unless
-  `--include-ollama`. Containers Compose did not create are listed, never
-  removed (#1241)
+  host, marked running or stale (containers, volumes, networks, stopped and
+  profile ones included, and networks left with no container). `--remove`
+  tears down only stale projects and skips any with a running container, since
+  other sessions share the host; `--project NAME --remove` removes that one
+  even if running, `--remove --all` removes running ones too. Keeps
+  `orbit-ollama` and its model volume unless `--include-ollama`. Containers
+  Compose did not create are listed, never removed (#1241)
 
 ## Traps when running things locally
 
@@ -263,7 +265,9 @@ Twelve known ways to lose an afternoon, or worse.
 
 **A stack a script started is torn down by the same script; stale containers
 are a defect, not housekeeping.** Run `bash scripts/cleanup-stacks.sh` at
-session end and before an acceptance run, and `--remove` what it lists (#1241).
+session end and before an acceptance run. Plain `--remove` clears stale stacks
+and skips running ones (another session may own them); a running stack you
+started yourself goes with `--project NAME --remove` (#1241).
 
 **`pnpm db:generate` refuses to run, on purpose.** `drizzle/meta/` holds
 snapshots only up to 0004, so `drizzle-kit generate` would diff against a

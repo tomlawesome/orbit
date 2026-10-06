@@ -27,6 +27,7 @@ const containers = [
   "orbit-b|c5|orbit-b-app-1|Up 1 minute|orbit-app|orbit-app|orbit-b_default",
   "orbit|c6|orbit-postgres|Up 1 hour|postgres:18-alpine|orbit-db|orbit_default",
   "other|c7|other-web-1|Up 1 hour|web:1|web|other_default",
+  "orbit-stale|c10|orbit-stale-app-1|Exited (0) 3 hours ago|orbit-app|orbit-app|orbit-stale_default",
   "|c8|review-nginx|Up 5 hours|nginx:alpine||bridge",
   "|c9|orbit-lookalike-by-hand|Exited (0) 1 hour ago|nginx:alpine||bridge",
 ];
@@ -35,6 +36,7 @@ const volumes = [
   "orbit-a|orbit-a_orbit-ollama-data",
   "orbit-b|orbit-b_orbit-db-data",
   "orbit-gone|orbit-gone_orbit-db-data",
+  "orbit-stale|orbit-stale_orbit-db-data",
   "other|other_data",
 ];
 const networks = [
@@ -42,6 +44,7 @@ const networks = [
   "orbit-a|orbit-a_models",
   "orbit-b|orbit-b_default",
   "orbit-gone|orbit-gone_default",
+  "orbit-stale|orbit-stale_default",
   "other|other_default",
 ];
 
@@ -50,10 +53,10 @@ afterEach(() => {
   while (scratchDirs.length > 0) rmSync(scratchDirs.pop(), { recursive: true, force: true });
 });
 
-function fakeDocker({ failOn = [] } = {}) {
+function fakeDocker({ failOn = [], psRows = containers } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "orbit-cleanup-stacks-"));
   scratchDirs.push(dir);
-  writeFileSync(join(dir, "ps.txt"), `${containers.join("\n")}\n`);
+  writeFileSync(join(dir, "ps.txt"), `${psRows.join("\n")}\n`);
   writeFileSync(join(dir, "volumes.txt"), `${volumes.join("\n")}\n`);
   writeFileSync(join(dir, "networks.txt"), `${networks.join("\n")}\n`);
   writeFileSync(join(dir, "fail.txt"), `${failOn.join("\n")}\n`);
@@ -103,7 +106,7 @@ describe("cleanup-stacks.sh", () => {
     const r = run([]);
     expect(r.status).toBe(0);
     expect(r.calls.some(mutating)).toBe(false);
-    for (const project of ["orbit", "orbit-a", "orbit-b", "orbit-gone"]) {
+    for (const project of ["orbit (running)", "orbit-a (running)", "orbit-b (running)", "orbit-gone (stale)", "orbit-stale (stale)"]) {
       expect(r.stdout).toContain(`Project: ${project}\n`);
     }
     expect(r.stdout).toContain("orbit-a-db-1 (Exited (0) 2 hours ago) image postgres:18-alpine");
@@ -129,35 +132,67 @@ describe("cleanup-stacks.sh", () => {
     expect(r.stdout + r.stderr).not.toMatch(/\u001b\[/);
   });
 
-  it("--remove removes the containers, volumes and networks of every orbit* project", () => {
-    const r = run(["--remove"]);
+  it("--remove --all removes the containers, volumes and networks of every orbit* project", () => {
+    const r = run(["--remove", "--all"]);
     expect(r.status).toBe(0);
-    // stopped (c2) and profile (c3) containers included; ollama (c4) kept
-    expect(r.removed.containers.sort()).toEqual(["c1", "c2", "c3", "c5", "c6"]);
+    // stopped (c2, c10) and profile (c3) containers included; ollama (c4) kept
+    expect(r.removed.containers.sort()).toEqual(["c1", "c10", "c2", "c3", "c5", "c6"]);
     expect(r.removed.volumes.sort()).toEqual([
       "orbit-a_orbit-db-data",
       "orbit-b_orbit-db-data",
       "orbit-gone_orbit-db-data",
+      "orbit-stale_orbit-db-data",
     ]);
     expect(r.removed.networks.sort()).toEqual([
       "orbit-a_default",
       "orbit-b_default",
       "orbit-gone_default",
+      "orbit-stale_default",
     ]);
     expect(r.stdout).toContain("Removed container orbit-a-db-1");
     expect(r.stdout).toContain("Removed volume orbit-gone_orbit-db-data");
     expect(r.stdout).toContain("Removed network orbit-gone_default");
   });
 
-  it("removes containers before the networks and volumes they hold", () => {
+  it("plain --remove removes only stale projects and skips every running one, naming what runs", () => {
     const r = run(["--remove"]);
+    expect(r.status).toBe(0);
+    expect(r.removed.containers).toEqual(["c10"]);
+    expect(r.removed.volumes.sort()).toEqual(["orbit-gone_orbit-db-data", "orbit-stale_orbit-db-data"]);
+    expect(r.removed.networks.sort()).toEqual(["orbit-gone_default", "orbit-stale_default"]);
+    expect(r.stdout).toContain(
+      "orbit-a skipped: running (orbit-a-app-1) -- remove it with --project orbit-a --remove, or --all",
+    );
+    expect(r.stdout).toContain("orbit-b skipped: running (orbit-b-app-1)");
+    expect(r.stdout).toContain("orbit skipped: running (orbit-postgres)");
+    expect(r.stdout).not.toContain("orbit-stale skipped");
+    expect(r.stdout).not.toContain("orbit-gone skipped");
+  });
+
+  it("a project whose only running container is the kept orbit-ollama counts as stale", () => {
+    const r = run(["--remove"], {
+      psRows: [
+        "orbit-a|c2|orbit-a-db-1|Exited (0) 2 hours ago|postgres:18-alpine|orbit-db|orbit-a_default",
+        "orbit-a|c4|orbit-ollama|Up 2 days (healthy)|ollama/ollama:0.33.3|orbit-ollama|orbit-a_models",
+      ],
+    });
+    expect(r.removed.containers).toEqual(["c2"]);
+    expect(r.stdout).toContain("Project: orbit-a (stale)");
+    // with --include-ollama the running model service shields it again
+    const included = run(["--remove", "--include-ollama"], { psRows: ["orbit-a|c4|orbit-ollama|Up 2 days|ollama/ollama:0.33.3|orbit-ollama|orbit-a_models"] });
+    expect(included.removed.containers).toEqual([]);
+    expect(included.stdout).toContain("orbit-a skipped: running (orbit-ollama)");
+  });
+
+  it("removes containers before the networks and volumes they hold", () => {
+    const r = run(["--remove", "--all"]);
     const lastContainer = Math.max(...r.calls.map((c, i) => (c.startsWith("rm -f") ? i : -1)));
     const firstOther = r.calls.findIndex((c) => c.startsWith("volume rm") || c.startsWith("network rm"));
     expect(lastContainer).toBeLessThan(firstOther);
   });
 
   it("never removes a container Compose did not create, or a project not named orbit*", () => {
-    const r = run(["--remove", "--include-ollama"]);
+    const r = run(["--remove", "--all", "--include-ollama"]);
     expect(r.removed.containers).not.toContain("c7");
     expect(r.removed.containers).not.toContain("c8");
     expect(r.removed.containers).not.toContain("c9");
@@ -168,7 +203,7 @@ describe("cleanup-stacks.sh", () => {
   it("keeps orbit-ollama and its model volume by default and says how to include them", () => {
     const listing = run([]);
     expect(listing.stdout).toContain("--include-ollama");
-    const r = run(["--remove"]);
+    const r = run(["--remove", "--all"]);
     expect(r.removed.containers).not.toContain("c4");
     expect(r.removed.volumes).not.toContain("orbit-a_orbit-ollama-data");
     // a network the kept container still sits on cannot go either
@@ -178,7 +213,7 @@ describe("cleanup-stacks.sh", () => {
   });
 
   it("--include-ollama removes orbit-ollama, its model volume and its network", () => {
-    const r = run(["--remove", "--include-ollama"]);
+    const r = run(["--remove", "--all", "--include-ollama"]);
     expect(r.status).toBe(0);
     expect(r.removed.containers).toContain("c4");
     expect(r.removed.volumes).toContain("orbit-a_orbit-ollama-data");
@@ -188,12 +223,14 @@ describe("cleanup-stacks.sh", () => {
 
   it("--project limits the listing to one project", () => {
     const r = run(["--project", "orbit-b"]);
-    expect(r.stdout).toContain("Project: orbit-b\n");
+    expect(r.stdout).toContain("Project: orbit-b (running)\n");
+    // orbit-b has no model service, so no note about keeping one
+    expect(r.stdout).not.toContain("orbit-ollama");
     expect(r.stdout).not.toContain("Project: orbit-a");
     expect(r.stdout).not.toContain("Project: orbit\n");
   });
 
-  it("--project limits removal to one project", () => {
+  it("--project removes that one project even though it is running, and only it", () => {
     const r = run(["--remove", "--project", "orbit-a"]);
     expect(r.removed.containers.sort()).toEqual(["c1", "c2", "c3"]);
     expect(r.removed.volumes).toEqual(["orbit-a_orbit-db-data"]);
@@ -214,7 +251,7 @@ describe("cleanup-stacks.sh", () => {
   });
 
   it("exits non-zero and names what it could not remove, but still removes the rest", () => {
-    const r = run(["--remove"], { failOn: ["c2", "orbit-b_default"] });
+    const r = run(["--remove", "--all"], { failOn: ["c2", "orbit-b_default"] });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("COULD NOT REMOVE container orbit-a-db-1");
     expect(r.stderr).toContain("COULD NOT REMOVE network orbit-b_default");
