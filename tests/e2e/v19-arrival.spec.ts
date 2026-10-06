@@ -298,12 +298,14 @@ test("naming your own system: the sealed refusal, then the create, then the laun
   test.skip(test.info().project.name.startsWith("mobile"), "the journey is asserted on the desk dialect");
   test.setTimeout(180_000);
 
-  /* The same reader, still belonging to nothing: a pending request is not a
-     membership. Straight at the login route this time — no marker, so no climb;
-     the question is served already arrived at, the way /logout serves the
-     goodbye already arrived at. */
-  await signInAs(page, workerAccount("newcomer"));
+  /* #1263: ONE FLIGHT PER ARRIVAL. The same reader, still belonging to
+     nothing (a pending request is not a membership), through the door by its
+     own button, so a launch is owed and the climb plays here on `/`. The
+     witness records every class <body> wears in each document. */
+  await witnessBodyClasses(page);
+  await signInThroughTheDoor(page, workerAccount("newcomer"));
   await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
+  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: 20_000 }).toBe(true);
   await expect(page.getByRole("heading", { name: "where do you belong?" })).toBeVisible({ timeout: 30_000 });
   expect((await workspaceOf(page)).households).toEqual([]);
 
@@ -348,6 +350,9 @@ test("naming your own system: the sealed refusal, then the create, then the laun
   await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 });
   await expect(page.locator("body")).toHaveClass(/instrument/, { timeout: 60_000 });
   await expect(page.locator("#dial-name")).toHaveText(OWN_SYSTEM);
+  /* #1263 reproduction: the arrival already flew once on `/`, so /home must
+     not fly a second time. Today it does. */
+  expect(await bodyClassSeen(page, "showwarp"), "showwarp seen on /home").toBe(true);
 
   /* The server's own account of it: one system, theirs, with the four default
      sections the command applied and the answers the card asked for. */
