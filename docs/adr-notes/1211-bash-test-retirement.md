@@ -113,3 +113,15 @@ Test files named below:
   category; the engine's wording differs from the script's.
 - `backup-restore-cli.parity.test.ts`: the import-recovery-bundle.sh run
   became the engine's own import preflight accepting the exported bundle.
+
+## Amendment E3a: validate before stopping Orbit
+
+Build note E3 stopped Orbit for the whole restore, preflight included.
+Amendment E3a (2026-10-06, on #1211) restores the bash-era order instead:
+`restore.sh <bundle>` and `import-recovery-bundle.sh` first run the engine
+with `--preflight` while Orbit is up, and stop it only once that passes, so
+a bundle Orbit cannot restore costs the running instance nothing. Asserted
+by backup-restore-shell.test.mjs › validate the bundle before stopping
+Orbit (E3a); the two `preflightOnly` blocks in backup-restore-cli.test.ts
+(under runRestore and runImportRecoveryBundle); and orbit.test.ts ›
+restore %s %s is a usage error.

@@ -719,12 +719,20 @@ docker compose --env-file "$environment_file" \
   supported). A run that finds the lock held refuses at once and exits `75`;
   the shell then leaves `orbit-app` to the run that holds it.
 - The shell stops and starts `orbit-app`; the engine never does. `backup.sh`
-  stops it, runs `backup`, and starts it again. `restore.sh` (with a bundle
-  or `--recover`) and `import-recovery-bundle.sh` stop it for the whole run,
-  preflight included, then start it and wait up to 45 seconds for
-  `/api/health` — unless `backups/.orbit-restore/restore.journal` exists
-  afterwards, which keeps Orbit stopped for `bash scripts/restore.sh
-  --recover`. `backup.sh --verify` and `export-recovery-bundle.sh` leave it
+  stops it, runs `backup`, and starts it again. `restore.sh <bundle>` and
+  `import-recovery-bundle.sh` validate first: while Orbit still runs, they
+  run the engine once with `--preflight` (`restore --preflight` or
+  `import-recovery-bundle --preflight`, standard input `/dev/null`, so `-T`
+  and no prompt; the passphrase is asked once, in the full run). It takes
+  and releases the same lock, creates no checkpoint or journal, drops its
+  stage database and scratch on exit, and prints nothing when the bundle
+  passes. Any refusal, or `75`, ends the script there with Orbit untouched
+  (amendment E3a on #1211: validate before taking the service down). Only
+  then do they stop `orbit-app` and run the full command, which repeats
+  every check; `restore.sh --recover` has no bundle and stops first. After
+  the full run they start it and wait up to 45 seconds for `/api/health` —
+  unless `backups/.orbit-restore/restore.journal` exists afterwards, which
+  keeps Orbit stopped for `bash scripts/restore.sh --recover`. `backup.sh --verify` and `export-recovery-bundle.sh` leave it
   running. The engine reports, once, on standard error, that it left the
   app's lifecycle to the shell:
   `phase=application component=application state=skipped reason=application-startup action=skip elapsed=0s`.
