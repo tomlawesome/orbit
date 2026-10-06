@@ -103,6 +103,7 @@
       cancelTimeline();
       clock.dispose();
       flightEngine.clear();
+      flightEngine.release();
       reset();
     };
   });
@@ -331,7 +332,8 @@
        seconds at most, and then the flight goes on its own canvas, as ever */
     let beats = newcomer ? newcomerAscentBeats() : ascentBeats();
     const engine = activeEngine();
-    const ready = readyFlight({ hurry: true }).then(() => engine.warm());
+    readyFlight({ hurry: true });
+    const ready = engine.warm();
     if (!engine.world) {
       const warp = beats.find((b) => b.act === "warp")?.at ?? 0;
       beats = beats.map((b) => (b.act === "mark" ? { ...b, at: Math.min(b.at, Math.max(0, warp - 80)) } : b));

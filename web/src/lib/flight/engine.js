@@ -860,7 +860,9 @@ export function createFlight(canvas, options = {}) {
        pinned fixture always draws as it always has, so its frame is the same
        every time */
     voyage = !pinned && world3d?.ready ? world3d : null;
-    if (world3d) world3d.canvas.style.display = voyage ? "" : "none";
+    /* visibility, not display: the canvas stays rendered (at opacity 0 until
+       the warp), so its fade in with #warp is a transition, never a cut */
+    if (world3d) world3d.canvas.style.visibility = voyage ? "" : "hidden";
     const dpr = sizeCanvas();
     setCamera(P); seedStars();
     for (const g of P.props) {
@@ -894,10 +896,17 @@ export function createFlight(canvas, options = {}) {
       if (earth && !earth.src) earth.src = "/flight/door/dawn.webp";
       if (!world3d) {
         world3d = make ? voyageOnce() : voyageIfMade();
-        if (world3d) { world3d.attach(canvas); world3d.canvas.style.display = "none"; }
+        if (world3d) { world3d.attach(canvas); world3d.canvas.style.visibility = "hidden"; }
       }
       const w3 = world3d;
       return Promise.all([earthReady, w3 ? w3.warm() : null]).then(() => {}, () => {});
+    },
+    /** the flight's canvas is going: take the world's out of the page too
+        (it stays made, for the next flight on this page to adopt) */
+    release() {
+      this.stop();
+      world3d?.canvas.remove();
+      world3d = null; voyage = null;
     },
     /** whether the next flight will be drawn over the WebGL2 world */
     get world() { return !!world3d?.ready; },
