@@ -33,7 +33,7 @@
  */
 
 import { chore, fetchOnce, note } from "./chores.js";
-import { fitsFrame } from "./fitness.js";
+import { fitsFrame, gpu } from "./fitness.js";
 
 const TEX = {
   lights: "/flight/world/earth-lights.webp",
@@ -539,12 +539,12 @@ function doorCamera() {
  */
 function createVoyage() {
   if (typeof document === "undefined") return null;
-  const canvas = document.createElement("canvas");
+  /* the page's one context, if the page may use the GPU at all (fitness.js);
+     never a second one made here */
+  const g = gpu();
+  if (!g || g.gl.isContextLost() || !g.gl.getExtension("EXT_color_buffer_float")) return null;
+  const { canvas, gl } = g;
   canvas.id = "warpgl"; canvas.setAttribute("aria-hidden", "true");
-  const asked = /** @type {WebGL2RenderingContext | null} */ (canvas.getContext("webgl2",
-    { antialias: false, alpha: false, depth: false, powerPreference: "high-performance" }));
-  if (!asked || !asked.getExtension("EXT_color_buffer_float")) return null;
-  const gl = asked;
   gl.getExtension("OES_texture_float_linear");
   const since = performance.now();
 
@@ -555,7 +555,7 @@ function createVoyage() {
   /* the shaders are made in the background where the browser can
      (KHR_parallel_shader_compile): asked for here, and only looked at once
      they are done, so making them never holds the page up */
-  const par = gl.getExtension("KHR_parallel_shader_compile");
+  const par = g.parallel ? gl.getExtension("KHR_parallel_shader_compile") : null;
   /** @param {number} type @param {string} src */
   const shader = (type, src) => {
     const s = /** @type {WebGLShader} */ (gl.createShader(type)); gl.shaderSource(s, src); gl.compileShader(s); return s;
@@ -662,15 +662,28 @@ function createVoyage() {
 
   /* the maps, the warm-up and the measure, asked for once; resolves when the
      world can be drawn as it should be (or never will be) */
+  /** @type {Promise<unknown> | null} */
+  let loading = null;
   /** @type {Promise<void> | null} */
   let warming = null;
-  function warm() {
+  /**
+   * `prove: false` (the door, #1253) makes the programs and puts the maps on
+   * the GPU and stops there: the drawn warm-up and the fitness test below
+   * (a resize and a read back each) wait for a call that proves, which is
+   * the flight's own when it starts.
+   * @param {{ prove?: boolean }} [how]
+   */
+  function warm({ prove = true } = {}) {
+    if (!loading) {
+      const sky = load("sky").then((had) => (had ? undefined : paintSky().catch((e) => console.warn("orbit: the galaxy could not be drawn", e))));
+      loading = Promise.all([made, sky, ...(/** @type {(keyof typeof TEX)[]} */ (["lights", "euro", "clouds", "day", "moon"])).map(load)]);
+    }
+    if (!prove) return loading.then(() => {});
     if (!warming) {
       /** @returns {VoyageFrame} */
       const ST = () => ({ t: 1900, v: 1, K: 7.4, vp: [W / 2, -0.55 * H], rmax: Math.hypot(W, H) * 1.55, tint: [1, 0.8, 0.4],
         progress: 0.4, world: null, bloom: 0, tu: 1900, star: true, dt: 0 });
-      const sky = load("sky").then((had) => (had ? undefined : paintSky().catch((e) => console.warn("orbit: the galaxy could not be drawn", e))));
-      warming = Promise.all([made, sky, ...(/** @type {(keyof typeof TEX)[]} */ (["lights", "euro", "clouds", "day", "moon"])).map(load)])
+      warming = loading
         /* each way the flight draws, drawn once into a corner of a few pixels,
            so the GPU has everything made for it (drivers finish their shaders
            on the first draw) before a flight, at no cost to see */
@@ -911,15 +924,10 @@ export function voyageIfMade() {
 /**
  * Whether this browser makes shaders in the background
  * (KHR_parallel_shader_compile). Where it does not, making them stops the page
- * for as long as it takes, so the door never asks for it. Asked of a context
- * made for the purpose and let go at once.
+ * for as long as it takes, so the door never asks for it. Asked of the page's
+ * one context (fitness.js); false where the page may not use the GPU.
  */
 export function compilesAside() {
-  try {
-    const gl = document.createElement("canvas").getContext("webgl2");
-    if (!gl) return false;
-    const yes = !!gl.getExtension("KHR_parallel_shader_compile");
-    gl.getExtension("WEBGL_lose_context")?.loseContext();
-    return yes;
-  } catch { return false; }
+  /* asked of the page's one context (fitness.js), never of a throwaway */
+  return gpu()?.parallel ?? false;
 }

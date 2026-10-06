@@ -20,9 +20,17 @@
  *   · the flight itself asks, hurried, when a journey starts (Flight.svelte).
  *
  * Under reduced motion there is no flight, so nothing is readied.
+ *
+ * FIRST, WHETHER THE GPU MAY BE USED AT ALL (fitness.js `gpu()`, #1253): one
+ * context, made as a chore of its own. Refused (a performance caveat, a
+ * software renderer), the flight is drawn on its own canvas and nothing more
+ * is asked of the GPU on this page, nor are the world's pictures fetched.
+ * The door never draws the world's test frames either (`prove: false`):
+ * those wait for the flight itself.
  */
 import { chore, fetchOnce, hurryChores, openChores } from "./chores.js";
-import { compilesAside, fetchVoyage, voyageOnce } from "./voyage.js";
+import { fetchVoyage, voyageOnce } from "./voyage.js";
+import { gpu } from "./fitness.js";
 
 const EARTH = "/flight/door/dawn.webp";
 
@@ -33,25 +41,28 @@ const reduced = () =>
 let asked = null;
 
 /**
- * @param {{ hurry?: boolean, gentle?: boolean }} [how]
+ * @param {{ hurry?: boolean, gentle?: boolean, prove?: boolean }} [how]
  *   hurry: the flight is wanted now. gentle: only where the compile cannot
- *   stop the page (the door).
+ *   stop the page (the door). prove: false leaves the world's test frames
+ *   for the flight (the door).
  */
-export function readyFlight({ hurry = false, gentle = false } = {}) {
+export function readyFlight({ hurry = false, gentle = false, prove = true } = {}) {
   if (reduced() || typeof document === "undefined") return Promise.resolve();
   if (!asked) {
-    fetchVoyage();
     fetchOnce(EARTH).catch(() => {});
-    asked = gentle && !compilesAside()
-      ? Promise.resolve()
+    asked = chore(() => gpu(), 60, "flight").then((g) => {
+      if (!g) return null;
+      fetchVoyage();
+      if (gentle && !g.parallel) return null;
       /* the world made (its shaders set compiling) as a chore of its own, so
          even that waits for the page's say-so */
-      : chore(() => {
+      return chore(() => {
         /* wrapped, so this chore ends here: the warm-up queues chores of its
            own, and a chore that waited on them would never let them run */
         const world = voyageOnce();
-        return { warming: world ? world.warm() : null };
-      }, 60, "flight").then(({ warming }) => warming).then(() => {}, () => {});
+        return { warming: world ? world.warm({ prove }) : null };
+      }, 60, "flight").then(({ warming }) => warming);
+    }).then(() => {}, () => {});
   }
   if (hurry) hurryChores("flight"); else openChores();
   return asked;
@@ -63,5 +74,5 @@ export function readyFlight({ hurry = false, gentle = false } = {}) {
  * not got to it yet). Still never a compile that would stop the page.
  */
 export function hurryFlight() {
-  return readyFlight({ hurry: true, gentle: true });
+  return readyFlight({ hurry: true, gentle: true, prove: false });
 }
