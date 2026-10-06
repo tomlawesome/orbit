@@ -48,17 +48,21 @@ const networks = [
   "other|other_default",
 ];
 
-// images: repository|tag|id|created since|size. containerImages: the image id
+// images: repository|tag|id|created since|size|created at. containerImages: the image id
 // each container (by id) was created from, as `docker inspect` reports it.
+// A sixth column is the creation time as `docker image ls` prints CreatedAt.
+const createdAt = (hoursAgo) =>
+  `${new Date(Date.now() - hoursAgo * 3600_000).toISOString().replace("T", " ").slice(0, 19)} +0000 UTC`;
 const images = [
-  "orbit-local|aaa111|sha256:1|2 days ago|419MB",
-  "orbit-local|bbb222|sha256:2|1 day ago|419MB",
-  "orbit-local|ccc333|sha256:8|3 hours ago|419MB",
-  "orbit-vapid-bootstrap|v1|sha256:3|5 days ago|100MB",
-  "orbit-acceptance-local|x1|sha256:4|4 days ago|200MB",
-  "orbit-local-extra|t1|sha256:5|1 day ago|50MB",
-  "orbit|latest|sha256:6|1 day ago|300MB",
-  "postgres|18-alpine|sha256:7|1 week ago|270MB",
+  `orbit-local|aaa111|sha256:1|2 days ago|419MB|${createdAt(48)}`,
+  `orbit-local|bbb222|sha256:2|1 day ago|419MB|${createdAt(26)}`,
+  `orbit-local|ccc333|sha256:8|30 hours ago|419MB|${createdAt(30)}`,
+  `orbit-local|ddd444|sha256:9|2 hours ago|419MB|${createdAt(2)}`,
+  `orbit-vapid-bootstrap|v1|sha256:3|5 days ago|100MB|${createdAt(120)}`,
+  `orbit-acceptance-local|x1|sha256:4|4 days ago|200MB|${createdAt(96)}`,
+  `orbit-local-extra|t1|sha256:5|1 day ago|50MB|${createdAt(24)}`,
+  `orbit|latest|sha256:6|1 day ago|300MB|${createdAt(24)}`,
+  `postgres|18-alpine|sha256:7|1 week ago|270MB|${createdAt(168)}`,
 ];
 const containerImages = [
   "c5|sha256:2", // orbit-b's running container uses orbit-local:bbb222
@@ -296,7 +300,8 @@ describe("cleanup-stacks.sh", () => {
       expect(r.stdout).toContain("orbit-vapid-bootstrap:v1 (5 days ago, 100MB) unused");
       expect(r.stdout).toContain("orbit-acceptance-local:x1 (4 days ago, 200MB) unused");
       expect(r.stdout).toContain("orbit-local:bbb222 (1 day ago, 419MB) in use, kept");
-      expect(r.stdout).toContain("orbit-local:ccc333 (3 hours ago, 419MB) in use, kept");
+      expect(r.stdout).toContain("orbit-local:ccc333 (30 hours ago, 419MB) in use, kept");
+      expect(r.stdout).toContain("orbit-local:ddd444 (2 hours ago, 419MB) under a day old, kept");
     });
 
     it("plain --remove removes the unused images by name and keeps the used ones", () => {
@@ -311,6 +316,13 @@ describe("cleanup-stacks.sh", () => {
       ]);
       expect(r.removed.images).not.toContain("orbit-local:bbb222");
       expect(r.stdout).toContain("Removed image orbit-local:aaa111");
+    });
+
+    it("never removes an image under a day old, even with --all: another session may have just built it", () => {
+      for (const args of [["--remove"], ["--remove", "--all"]]) {
+        const r = run(args);
+        expect(r.removed.images).not.toContain("orbit-local:ddd444");
+      }
     });
 
     it("--remove --all removes unused images too", () => {

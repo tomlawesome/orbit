@@ -141,12 +141,15 @@ selected_for_removal() {
 
 # Sets $images to one row per locally built image:
 #   repository|tag|id|age|size|used     (used is "yes" when any container, in any
-# state and any project, was created from it). Returns non-zero when Docker
-# cannot say, so nothing is ever removed on a guess.
+# state and any project, was created from it, and "recent" when the image is
+# under a day old: another session may have just built it and not yet started
+# a container from it). Returns non-zero when Docker cannot say, so nothing is
+# ever removed on a guess.
 images=""
 fetch_images() {
-  local listed ids used_ids="" repo tag id age size row keep r
-  listed="$(docker image ls --no-trunc --format '{{.Repository}}|{{.Tag}}|{{.ID}}|{{.CreatedSince}}|{{.Size}}')" || return 1
+  local listed ids used_ids="" repo tag id age size created created_epoch row keep r now
+  listed="$(docker image ls --no-trunc --format '{{.Repository}}|{{.Tag}}|{{.ID}}|{{.CreatedSince}}|{{.Size}}|{{.CreatedAt}}')" || return 1
+  now="$(date +%s)"
   ids="$(docker ps -a -q)" || return 1
   if [ -n "$ids" ]; then
     local -a id_array
@@ -154,7 +157,7 @@ fetch_images() {
     used_ids="$(docker inspect --format '{{.Image}}' "${id_array[@]}")" || return 1
   fi
   images=""
-  while IFS='|' read -r repo tag id age size; do
+  while IFS='|' read -r repo tag id age size created; do
     [ -n "$repo" ] || continue
     keep=false
     for r in $IMAGE_REPOS; do
@@ -162,8 +165,13 @@ fetch_images() {
     done
     [ "$keep" = true ] || continue
     row="$repo|$tag|$id|$age|$size|no"
+    # CreatedAt ends in a zone name date(1) may not know; the offset before it
+    # is enough. An unreadable time counts as recent, so it is kept.
+    created_epoch="$(date -d "$(printf '%s' "$created" | cut -d' ' -f1-3)" +%s 2>/dev/null || echo "$now")"
     if [ -n "$used_ids" ] && printf '%s\n' "$used_ids" | grep -qxF -- "$id"; then
       row="$repo|$tag|$id|$age|$size|yes"
+    elif [ $((now - created_epoch)) -lt 86400 ]; then
+      row="$repo|$tag|$id|$age|$size|recent"
     fi
     images="${images:+$images$'\n'}$row"
   done <<<"$listed"
@@ -267,6 +275,8 @@ if [ "$images_ok" = true ] && [ -n "$images" ]; then
   while IFS='|' read -r repo tag _ age size used; do
     if [ "$used" = yes ]; then
       echo "    $repo:$tag ($age, $size) in use, kept"
+    elif [ "$used" = recent ]; then
+      echo "    $repo:$tag ($age, $size) under a day old, kept"
     else
       echo "    $repo:$tag ($age, $size) unused"
       unused_images=$((unused_images + 1))
