@@ -16,6 +16,7 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { writeEngineDockerShim } from "./engine-docker-shim.mjs";
 import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard, processWatchdog } from "./process-budget.mjs";
 
 // Tests here run scripts/repair.sh under bash, some asynchronously; a spawn
@@ -34,9 +35,21 @@ const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const repoDir = join(scriptsDir, "..");
 const repairScriptSource = readFileSync(join(scriptsDir, "repair.sh"), "utf8");
 const configureScriptSource = readFileSync(join(scriptsDir, "configure.sh"), "utf8");
-const configurationScriptSource = readFileSync(join(scriptsDir, "configuration.sh"), "utf8");
 const installerUiSource = readFileSync(join(scriptsDir, "installer-ui.sh"), "utf8");
 const environmentExampleSource = readFileSync(join(repoDir, ".env-orbit.example"), "utf8");
+
+// The engine behind configure.sh --check (#1210) refuses ORBIT_CONFIG_APPLIED_VERSION
+// without a matching ORBIT_CONFIG_APPLIED_DIGEST, and the digest must be the
+// one ORBIT_IMAGE is pinned to, so every healthy fixture pins a digest image.
+const FIXTURE_IMAGE_DIGEST = `sha256:${"d".repeat(64)}`;
+const FIXTURE_IMAGE = `ghcr.io/tomlawesome/orbit@${FIXTURE_IMAGE_DIGEST}`;
+
+// The ORBIT_CONFIG_APPLIED_DIGEST line that agrees with `image`, or nothing
+// when `image` is not digest-pinned (there is no digest to record).
+function appliedDigestLines(image) {
+  const match = /@(sha256:[0-9a-f]{64})$/.exec(image);
+  return match ? [`ORBIT_CONFIG_APPLIED_DIGEST=${match[1]}`] : [];
+}
 
 const scratchDirs = [];
 
@@ -103,13 +116,13 @@ function dockerShimScript({
   composeFails = false,
   db = { present: true, ready: true, authResult: "ok" },
   // SF2-F9: matches makeFixture()'s own default ORBIT_IMAGE
-  // ("orbit-local:abcdef123456") so an ordinary test sees pinned_image ==
+  // (FIXTURE_IMAGE) so an ordinary test sees pinned_image ==
   // actual_image and never trips stale-container by accident now that
   // repair.sh recognizes the installer-local tag form as well as a
   // digest. A test that wants a mismatch already overrides this (and/or
   // calls writeDigestPinnedEnv) explicitly — see e.g. the restart-services
   // and image-identity-mismatch tests below.
-  app = { present: true, image: "orbit-local:abcdef123456", health: "healthy" },
+  app = { present: true, image: FIXTURE_IMAGE, health: "healthy" },
   argvLogPath = "",
   // --execute's restart-services support: `restartFails` makes every
   // `docker restart` invocation fail (exit 1); `healthMarkerPath`, when
@@ -230,9 +243,29 @@ function dockerShimScript({
   // `appSecretDelayCounterPath`: each exec is its own process).
   appReaderFailAttempts = 0,
   appReaderFailCounterPath = "",
+  // #1210: configure.sh (which repair.sh runs for --check/--check-rollback) is
+  // a thin shell over `docker image inspect <image>`, `docker pull`,
+  // `docker info` and `docker run ... /opt/orbit/cli/orbit.js ...`. When set,
+  // those are handed to this engine shim (see writeEngineDockerShim), which
+  // runs this checkout's orbit CLI. The `image inspect --format` probe
+  // repair.sh itself issues (Step 13) stays with this shim's own branch.
+  engineDockerPath = "",
 } = {}) {
   if (unavailable) {
-    return "#!/usr/bin/env bash\nexit 1\n";
+    // #1210: configure.sh --check now runs through docker too, so the engine
+    // calls stay answerable (repair.sh would otherwise report the missing
+    // daemon as a configuration finding, not docker-unavailable).
+    return engineDockerPath
+      ? [
+          "#!/usr/bin/env bash",
+          'case "${1:-}" in',
+          `  run|info|pull) exec '${engineDockerPath}' "$@" ;;`,
+          `  image) [[ "\${2:-}" == "inspect" ]] && exec '${engineDockerPath}' "$@" ;;`,
+          "esac",
+          "exit 1",
+          "",
+        ].join("\n")
+      : "#!/usr/bin/env bash\nexit 1\n";
   }
   const volumeLines = volumes.map((name) => `    printf '%s\\n' '${name}'`).join("\n");
   const containerLines = containers
@@ -325,6 +358,18 @@ function dockerShimScript({
     "#!/usr/bin/env bash",
     "set -Eeuo pipefail",
     logLine,
+    engineDockerPath
+      ? [
+          'if [[ "${1:-}" == "run" || "${1:-}" == "info" || "${1:-}" == "pull" ]]; then',
+          `  exec '${engineDockerPath}' "$@"`,
+          "fi",
+          'if [[ "${1:-}" == "image" && "${2:-}" == "inspect" ]]; then',
+          "  engine_inspect_format=0",
+          '  for a in "$@"; do [[ "$a" == "--format" || "$a" == "-f" ]] && engine_inspect_format=1; done',
+          `  if [[ "$engine_inspect_format" == 0 ]]; then exec '${engineDockerPath}' "$@"; fi`,
+          "fi",
+        ].join("\n")
+      : "true",
     'case "${1:-}" in',
     "  ps)",
     // Real `docker ps` refuses a flag it does not know, with exit 125 (see
@@ -727,7 +772,10 @@ function dockerShimScript({
 function makeFakeBin(dockerOptions) {
   const binDir = mkdtempSync(join(tmpdir(), "orbit-repair-fakebin-"));
   scratchDirs.push(binDir);
-  writeFileSync(join(binDir, "docker"), dockerShimScript(dockerOptions));
+  const engineDir = mkdtempSync(join(tmpdir(), "orbit-repair-engine-"));
+  scratchDirs.push(engineDir);
+  const engineDockerPath = writeEngineDockerShim(engineDir);
+  writeFileSync(join(binDir, "docker"), dockerShimScript({ engineDockerPath, ...dockerOptions }));
   chmodSync(join(binDir, "docker"), 0o755);
   return binDir;
 }
@@ -752,10 +800,11 @@ function makeFixture({ withConfigure = true, withComposeAndEnv = true, withSecre
     writeFileSync(join(targetDir, "docker-compose.yml"), "services:\n  orbit-app:\n    image: busybox\n");
     const envLines = [
       "APP_URL=https://orbit.repair-test.internal",
-      "ORBIT_IMAGE=orbit-local:abcdef123456",
+      `ORBIT_IMAGE=${FIXTURE_IMAGE}`,
       // Every supported install writes this key (ADR-0016 gate, #681); the
       // floor itself is the representative supported value.
       "ORBIT_CONFIG_APPLIED_VERSION=v0.3.0",
+      ...appliedDigestLines(FIXTURE_IMAGE),
       "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
       "OIDC_CLIENT_ID=repair-test-client",
       "OIDC_CLIENT_SECRET=repair-test-secret",
@@ -776,10 +825,9 @@ function makeFixture({ withConfigure = true, withComposeAndEnv = true, withSecre
   return targetDir;
 }
 
-// Overwrites .env-orbit with a digest-pinned ORBIT_IMAGE — one of the two
-// forms check_application_container's regex in repair.sh accepts (SF2-F9:
-// the other is makeFixture()'s own default installer-local tag,
-// "orbit-local:abcdef123456", which is equally comparable). Tests that want
+// Overwrites .env-orbit with the given ORBIT_IMAGE — one of the two forms
+// check_application_container's regex in repair.sh accepts (SF2-F9: a digest
+// or an installer-local tag such as "orbit-local:abcdef123456"). Tests that want
 // a stale-container/image-identity comparison use this helper (and/or an
 // explicit `app: { image: ... }` override) to get a specific, deliberately
 // matched or mismatched value rather than relying on either default.
@@ -788,6 +836,7 @@ function writeDigestPinnedEnv(targetDir, orbitImage) {
     "APP_URL=https://orbit.repair-test.internal",
     `ORBIT_IMAGE=${orbitImage}`,
     "ORBIT_CONFIG_APPLIED_VERSION=v0.3.0",
+    ...appliedDigestLines(orbitImage),
     "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
     "OIDC_CLIENT_ID=repair-test-client",
     "OIDC_CLIENT_SECRET=repair-test-secret",
@@ -813,8 +862,9 @@ function writeDigestPinnedEnv(targetDir, orbitImage) {
 function writeFileBackedOidcSecretEnv(targetDir) {
   const envLines = [
     "APP_URL=https://orbit.repair-test.internal",
-    "ORBIT_IMAGE=orbit-local:abcdef123456",
+    `ORBIT_IMAGE=${FIXTURE_IMAGE}`,
     "ORBIT_CONFIG_APPLIED_VERSION=v0.3.0",
+    ...appliedDigestLines(FIXTURE_IMAGE),
     "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
     "OIDC_CLIENT_ID=repair-test-client",
     "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret",
@@ -1221,9 +1271,12 @@ describe("scripts/repair.sh --check", () => {
 
   it("reports configuration-incomplete when configure.sh --check fails without stderr output", () => {
     const targetDir = makeFixture();
+    // ORBIT_IMAGE stays so configure.sh can resolve an engine image (#1210);
+    // without it that is a refusal on stderr, i.e. configuration-invalid.
+    // APP_URL is what is missing: the engine reports it and exits 1 quietly.
     writeFileSync(
       join(targetDir, ".env-orbit"),
-      "APP_URL=https://orbit.repair-test.internal\n",
+      `ORBIT_IMAGE=${FIXTURE_IMAGE}\n`,
     );
     chmodSync(join(targetDir, ".env-orbit"), 0o600);
 
@@ -1334,7 +1387,7 @@ describe("scripts/repair.sh --check", () => {
     expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=18 skipped=0"]);
   });
 
-  it("the .orbit-config.rollback suffix literal agrees across configuration.sh (writes it), repair.sh (restores it), and configure.sh (checks it) — ADR-0014 decision 7's mirroring bargain", () => {
+  it("the .orbit-config.rollback suffix literal agrees across the engine (writes it), repair.sh (restores it), and configure.sh (checks it) — ADR-0014 decision 7's mirroring bargain", () => {
     const extractReadonlyString = (source, varName) => {
       const match = source.match(new RegExp(`readonly ${varName}=("[^"]*")`));
       if (!match) {
@@ -1342,14 +1395,21 @@ describe("scripts/repair.sh --check", () => {
       }
       return JSON.parse(match[1]);
     };
-
-    const fromConfiguration = extractReadonlyString(configurationScriptSource, "rollback_suffix");
+    // #1210: configuration.sh is gone; the suffix is written by the engine
+    // (src/lib/configuration-migration.ts), which configure.sh now runs.
+    const engineSource = readFileSync(join(repoDir, "src", "lib", "configuration-migration.ts"), "utf8");
+    const engineMatch = engineSource.match(/export const CONFIGURATION_ROLLBACK_SUFFIX = ("[^"]*")/);
+    if (!engineMatch) {
+      throw new Error("Could not find CONFIGURATION_ROLLBACK_SUFFIX in configuration-migration.ts");
+    }
+    const fromEngine = JSON.parse(engineMatch[1]);
     const fromRepair = extractReadonlyString(repairScriptSource, "configuration_rollback_suffix");
-    const fromConfigure = extractReadonlyString(configureScriptSource, "configuration_rollback_suffix");
 
-    expect(fromConfiguration).toBe(".orbit-config.rollback");
-    expect(fromRepair).toBe(fromConfiguration);
-    expect(fromConfigure).toBe(fromConfiguration);
+    expect(fromEngine).toBe(".orbit-config.rollback");
+    expect(fromRepair).toBe(fromEngine);
+    // configure.sh no longer keeps its own constant: it only names the
+    // rollback copy beside .env-orbit to resolve the engine image from it.
+    expect(configureScriptSource).toContain(`\${environment_file}${fromEngine}`);
   });
 
   it("reports compose-interpolation-failed when docker compose config fails", () => {
@@ -1789,7 +1849,7 @@ describe("scripts/repair.sh --check", () => {
 
   it("does not report stale-container when ORBIT_IMAGE matches neither accepted form (nothing safe to compare)", () => {
     // SF2-F9: repair.sh accepts BOTH a digest-pinned reference and
-    // makeFixture()'s own default installer-local tag
+    // an installer-local tag
     // ("orbit-local:abcdef123456") — neither is silently dropped any more.
     // Only a value matching neither form leaves nothing safe to compare.
     const targetDir = makeFixture({ withConfigure: false });
@@ -1803,7 +1863,8 @@ describe("scripts/repair.sh --check", () => {
   });
 
   it("reports stale-container when the installer-local ORBIT_IMAGE tag no longer matches the running container (SF2-F9)", () => {
-    const targetDir = makeFixture(); // default ORBIT_IMAGE=orbit-local:abcdef123456
+    const targetDir = makeFixture({ withConfigure: false });
+    writeDigestPinnedEnv(targetDir, "orbit-local:abcdef123456");
 
     const result = runRepair(targetDir, ["--check"], {
       app: { present: true, image: "orbit-local:fedcba987654", health: "healthy" },
@@ -2221,8 +2282,8 @@ describe("scripts/repair.sh --check", () => {
 function writeVersionedEnv(targetDir, versionLine) {
   const envLines = [
     "APP_URL=https://orbit.repair-test.internal",
-    "ORBIT_IMAGE=orbit-local:abcdef123456",
-    ...(versionLine === null ? [] : [versionLine]),
+    `ORBIT_IMAGE=${FIXTURE_IMAGE}`,
+    ...(versionLine === null ? [] : [versionLine, ...appliedDigestLines(FIXTURE_IMAGE)]),
     "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
     "OIDC_CLIENT_ID=repair-test-client",
     "OIDC_CLIENT_SECRET=repair-test-secret",
@@ -2242,9 +2303,6 @@ describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion
     ["v2.0.0", "a major version above the retracted 1.x line"],
     ["v0.2.9", "a 0.x release below the floor"],
     ["v0.0.0", "a development build, no longer exempt"],
-    ["v0.9", "a malformed (two-component) version"],
-    ["v1.3.0-rc1", "a malformed (pre-release-suffixed) version"],
-    ["1.3.0", "a malformed (unprefixed) version"],
   ])("reports deployment-version-unsupported for %s (%s)", (version) => {
     const targetDir = makeFixture();
     writeVersionedEnv(targetDir, `ORBIT_CONFIG_APPLIED_VERSION=${version}`);
@@ -2253,6 +2311,24 @@ describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion
 
     expect(result.status).toBe(4);
     expect(result.stdout).toContain("finding class=deployment-version-unsupported target=deployment severity=fail");
+  });
+
+  // #1210: the engine behind configure.sh --check refuses a malformed
+  // applied version itself, and repair skips the version gate while a
+  // configuration finding is present, so these surface as
+  // configuration-invalid rather than deployment-version-unsupported.
+  it.each([
+    ["v0.9", "a malformed (two-component) version"],
+    ["v1.3.0-rc1", "a malformed (pre-release-suffixed) version"],
+    ["1.3.0", "a malformed (unprefixed) version"],
+  ])("reports configuration-invalid for %s (%s)", (version) => {
+    const targetDir = makeFixture();
+    writeVersionedEnv(targetDir, `ORBIT_CONFIG_APPLIED_VERSION=${version}`);
+
+    const result = runRepair(targetDir, ["--check"]);
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=configuration-invalid target=configuration severity=fail");
   });
 
   it("fails closed when ORBIT_CONFIG_APPLIED_VERSION is absent from a readable .env-orbit", () => {
@@ -2654,7 +2730,10 @@ describe("scripts/repair.sh --plan", () => {
 
   it("plans configuration-incomplete as rerun-configuration (no mutation)", () => {
     const targetDir = makeFixture();
-    writeFileSync(join(targetDir, ".env-orbit"), "APP_URL=https://orbit.repair-test.internal\n");
+    writeFileSync(
+      join(targetDir, ".env-orbit"),
+      `ORBIT_IMAGE=${FIXTURE_IMAGE}\n`,
+    );
     chmodSync(join(targetDir, ".env-orbit"), 0o600);
 
     const result = runRepair(targetDir, ["--plan"]);
@@ -4216,7 +4295,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     // though the exec call for it did happen (proven by the `-f -` fixture
     // matching in the log below).
     expect(argvLog).not.toContain("ALTER ROLE");
-    expect(argvLog).not.toMatch(/[0-9a-f]{64}/);
+    expect(argvLog.replaceAll(FIXTURE_IMAGE_DIGEST, "<image digest>")).not.toMatch(/[0-9a-f]{64}/);
     expect(argvLog).toMatch(/ -f -(\s|$)/m);
 
     // ...and it DID genuinely arrive over stdin: the shim's `-f -` branch
@@ -4341,7 +4420,7 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     // succeeded), and its SQL — including the staged credential — still
     // arrived only over stdin, never argv, even on this failing attempt.
     expect(argvLog).not.toContain("ALTER ROLE");
-    expect(argvLog).not.toMatch(/[0-9a-f]{64}/);
+    expect(argvLog.replaceAll(FIXTURE_IMAGE_DIGEST, "<image digest>")).not.toMatch(/[0-9a-f]{64}/);
     expect(existsSync(execStdinLogPath)).toBe(true);
     expect(readFileSync(execStdinLogPath, "utf8")).toContain('ALTER ROLE "orbit" WITH PASSWORD');
 
