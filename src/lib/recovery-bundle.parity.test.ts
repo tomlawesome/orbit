@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,18 +7,12 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
 import {
-  BACKUP_BUNDLE_MEMBERS,
-  RECOVERY_BUNDLE_MEMBERS,
-  buildBackupManifest,
-  buildRecoveryManifest,
   computeBundleHmac,
-  createTar,
   decryptDocumentArchive,
   documentKekFingerprint,
   encryptDocumentArchive,
   encryptDocumentKek,
   decryptDocumentKek,
-  sha256File,
 } from "./recovery-bundle";
 
 // Cross-implementation parity for issue #296 slice 1, following the pattern
@@ -30,29 +24,11 @@ import {
 //      available, so the ORBKEK envelope and HMAC/fingerprint primitives are
 //      compared byte-for-byte against the real script via literal subprocess
 //      spawns, not extracted or hand-copied.
-//   2. scripts/import-recovery-bundle.sh's own archive/checksum preflight
-//      (lines 44-71) runs entirely before its first `docker compose run`
-//      call — verified by inspection and by these tests actually running it
-//      with no Docker daemon reachable. That means the *whole,
-//      unmodified script* can be spawned directly for every fixture that is
-//      rejected at or before that stage, exactly like
-//      config-contract.parity.test.ts spawns the whole of configure.sh
-//      --check. This is strictly stronger than install-transaction's
-//      function-extraction fallback (see docs/adr-notes/296-backup-port-plan.md,
-//      Flags) and is used instead wherever the rejection happens early
-//      enough.
-//   3. scripts/backup.sh --verify's validate_bundle runs its tar-listing,
-//      link/special-file, member-set, and format_version checks (lines
-//      104-119) before its own first Docker call
-//      (document_kek_fingerprint, line 120). The same whole-script spawn
-//      technique applies for fixtures rejected at or before that line.
-//
-// Neither (2) nor (3) attempts parity for the *later* Docker-dependent
-// checks (HMAC verification via the app container, document-KEK fingerprint
-// match, or pg_restore --list) — those are exercised instead via
-// recovery-bundle.docker-adapter.test.ts's PATH-shim seam (issue #296 slice
-// 2), since they genuinely need a live daemon and cannot be spawned
-// Docker-free.
+//   2./3. import-recovery-bundle.sh's archive/checksum preflight and
+//      backup.sh --verify's layout/format checks are thin shells around the
+//      engine since #1211; what they printed was captured once into
+//      src/lib/__fixtures__/ and src/cli/orbit.backup-restore.test.ts
+//      compares the engine with it.
 //
 //   4. (slice 2) The AES-256-CBC/PBKDF2-SHA256 document-archive envelope
 //      (backup.sh:128-130,156-157) is not a Bash script at all — it is a
@@ -64,8 +40,6 @@ import {
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const nodeCryptoScript = join(repoRoot, "scripts", "recovery-crypto.mjs");
-const importScript = join(repoRoot, "scripts", "import-recovery-bundle.sh");
-const backupScript = join(repoRoot, "scripts", "backup.sh");
 
 const sandboxes: string[] = [];
 
@@ -267,163 +241,5 @@ describe("AES-256-CBC document-archive crypto parity (openssl enc -pbkdf2, no Do
     const opensslResult = opensslDecrypt(envelopePath, wrongKeyFilePath, decryptedPath);
     expect(opensslResult.status).not.toBe(0);
     expect(() => decryptDocumentArchive(readFileSync(envelopePath), KEK_B)).toThrow(/Document archive decryption failed/);
-  });
-});
-
-// --- (2) import-recovery-bundle.sh whole-script preflight parity -----------
-
-function newImportSandbox(): { sandbox: string; env: NodeJS.ProcessEnv } {
-  const sandbox = newSandbox("orbit-import-parity-");
-  writeFileSync(join(sandbox, "env-orbit"), "FAKE=1\n");
-  mkdirSync(join(sandbox, "secrets"));
-  writeFileSync(join(sandbox, "secrets", "document-kek"), `${KEK_A}\n`);
-  chmodSync(join(sandbox, "secrets", "document-kek"), 0o600);
-  return {
-    sandbox,
-    env: {
-      ...process.env,
-      ORBIT_ENV_FILE: join(sandbox, "env-orbit"),
-      ORBIT_SECRETS_DIR: join(sandbox, "secrets"),
-      ORBIT_BACKUP_DIR: join(sandbox, "backups"),
-      ORBIT_RECOVERY_TEST_MODE: "true",
-    },
-  };
-}
-
-function runImportScript(bundlePath: string, env: NodeJS.ProcessEnv): { stdout: string; stderr: string; status: number } {
-  const result = failOnProcessDeadline(spawnSync("bash", [importScript, bundlePath], { env, encoding: "utf8", input: "", ...processGuard() }), { label: "runImportScript" });
-  return { stdout: result.stdout, stderr: result.stderr, status: result.status ?? -1 };
-}
-
-describe("import-recovery-bundle.sh whole-script preflight parity (no Docker daemon reachable)", () => {
-  it("malformed archive: bash and TS agree it is rejected as an invalid archive", () => {
-    const { sandbox, env } = newImportSandbox();
-    const bundlePath = join(sandbox, "malformed.tar");
-    writeFileSync(bundlePath, "not a tar archive\n");
-    const result = runImportScript(bundlePath, env);
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("preflight/archive failed");
-    expect(result.stderr).not.toContain("tar:");
-  });
-
-  it("unexpected member: bash and TS agree it is rejected without leaking the member name", () => {
-    const { sandbox, env } = newImportSandbox();
-    const contentsDir = join(sandbox, "unexpected");
-    mkdirSync(contentsDir);
-    writeFileSync(join(contentsDir, "attacker-controlled-member"), "attacker-controlled-content\n");
-    const bundlePath = join(sandbox, "unexpected.tar");
-    createTar(contentsDir, bundlePath, ["attacker-controlled-member"]);
-    const result = runImportScript(bundlePath, env);
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("preflight/archive failed");
-    expect(result.stderr).not.toContain("attacker-controlled-member");
-  });
-
-  it("corrupt checksum: bash and TS agree it is rejected without leaking raw checksum output or a member name", () => {
-    const { sandbox, env } = newImportSandbox();
-    const passphrase = "correct-horse-battery-staple";
-    const envelope = encryptDocumentKek(KEK_A, passphrase);
-    const contentsDir = join(sandbox, "checksum-bad");
-    mkdirSync(contentsDir);
-    writeFileSync(join(contentsDir, "manifest"), buildRecoveryManifest());
-    writeFileSync(join(contentsDir, "orbit-backup.tar"), "fake-inner-bundle-bytes");
-    writeFileSync(join(contentsDir, "document-kek.enc"), envelope);
-    const badChecksums = `${"0".repeat(64)}  orbit-backup.tar\n${sha256File(join(contentsDir, "document-kek.enc"))}  document-kek.enc\n`;
-    writeFileSync(join(contentsDir, "checksums.sha256"), badChecksums);
-    const bundlePath = join(sandbox, "checksum-bad.tar");
-    createTar(contentsDir, bundlePath, [...RECOVERY_BUNDLE_MEMBERS]);
-
-    const result = runImportScript(bundlePath, env);
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("preflight/checksum failed");
-    expect(result.stderr).not.toContain("sha256sum:");
-    expect(result.stderr).not.toContain("orbit-backup.tar");
-  });
-
-  it("refuses to start when a prior restore journal exists (#4), identically to the TS layer's own preflight ordering", () => {
-    const { sandbox, env } = newImportSandbox();
-    mkdirSync(join(sandbox, "backups", ".orbit-restore"), { recursive: true });
-    writeFileSync(join(sandbox, "backups", ".orbit-restore", "restore.journal"), "format_version=1\n");
-    const bundlePath = join(sandbox, "irrelevant.tar");
-    writeFileSync(bundlePath, "not a tar archive\n");
-    const result = runImportScript(bundlePath, env);
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("preflight/journal failed");
-  });
-});
-
-// --- (3) backup.sh --verify whole-script layout/format-version parity ------
-
-function newBackupSandbox(): { sandbox: string; env: NodeJS.ProcessEnv } {
-  const sandbox = newSandbox("orbit-backup-verify-parity-");
-  writeFileSync(join(sandbox, "env-orbit"), "FAKE=1\n");
-  mkdirSync(join(sandbox, "secrets"));
-  writeFileSync(join(sandbox, "secrets", "document-kek"), `${KEK_A}\n`);
-  chmodSync(join(sandbox, "secrets", "document-kek"), 0o600);
-  return {
-    sandbox,
-    env: {
-      ...process.env,
-      ORBIT_ENV_FILE: join(sandbox, "env-orbit"),
-      ORBIT_SECRETS_DIR: join(sandbox, "secrets"),
-      ORBIT_BACKUP_DIR: join(sandbox, "backups"),
-    },
-  };
-}
-
-function runBackupVerify(bundlePath: string, env: NodeJS.ProcessEnv): { stdout: string; stderr: string; status: number } {
-  const result = failOnProcessDeadline(spawnSync("bash", [backupScript, "--verify", bundlePath], { env, encoding: "utf8", ...processGuard() }), { label: "runBackupVerify" });
-  return { stdout: result.stdout, stderr: result.stderr, status: result.status ?? -1 };
-}
-
-describe("backup.sh --verify whole-script layout/format-version parity (no Docker daemon reachable)", () => {
-  it("malformed archive: rejected as invalid before any Docker call", () => {
-    const { sandbox, env } = newBackupSandbox();
-    const bundlePath = join(sandbox, "malformed.tar");
-    writeFileSync(bundlePath, "not a tar archive\n");
-    const result = runBackupVerify(bundlePath, env);
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Bundle archive is invalid.");
-  });
-
-  it("missing member: rejected as not containing the expected recovery files", () => {
-    const { sandbox, env } = newBackupSandbox();
-    const contentsDir = join(sandbox, "missing-member");
-    mkdirSync(contentsDir);
-    for (const name of BACKUP_BUNDLE_MEMBERS) {
-      if (name === "manifest.hmac") continue;
-      writeFileSync(join(contentsDir, name), "x");
-    }
-    const bundlePath = join(sandbox, "missing-member.tar");
-    createTar(contentsDir, bundlePath, BACKUP_BUNDLE_MEMBERS.filter((name) => name !== "manifest.hmac"));
-    const result = runBackupVerify(bundlePath, env);
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Bundle does not contain the expected recovery files.");
-  });
-
-  it("unsupported format_version: rejected before the Docker-dependent KEK-fingerprint check", () => {
-    const { sandbox, env } = newBackupSandbox();
-    const contentsDir = join(sandbox, "bad-version");
-    const manifest = buildBackupManifest({
-      createdAt: "2026-08-13T00:00:00Z",
-      databaseDump: "database.dump",
-      documentsArchive: "documents.tar.enc",
-      documentsEncryption: "aes-256-cbc-pbkdf2-sha256-iter-600000",
-      documentKekSha256: documentKekFingerprint(KEK_A),
-    }).replace("format_version=1", "format_version=2");
-    mkdirSync(contentsDir);
-    writeFileSync(join(contentsDir, "manifest"), manifest);
-    writeFileSync(join(contentsDir, "database.dump"), "x");
-    writeFileSync(join(contentsDir, "documents.tar.enc"), "x");
-    writeFileSync(
-      join(contentsDir, "checksums.sha256"),
-      `${sha256File(join(contentsDir, "database.dump"))}  database.dump\n${sha256File(join(contentsDir, "documents.tar.enc"))}  documents.tar.enc\n`,
-    );
-    writeFileSync(join(contentsDir, "manifest.hmac"), "not-a-real-hmac");
-    const bundlePath = join(sandbox, "bad-version.tar");
-    createTar(contentsDir, bundlePath, [...BACKUP_BUNDLE_MEMBERS]);
-    const result = runBackupVerify(bundlePath, env);
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("Unsupported bundle format.");
   });
 });

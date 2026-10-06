@@ -55,9 +55,13 @@ import {
   checkRestoreCapacity,
   deriveRestorePaths,
   directoryUsageKib,
+  type RecoverRestoreOptions,
   filesystemAvailableKib,
+  listOrphanedCheckpoints,
   preflightValidateBundle,
+  recoverRestore,
   refuseIfDocumentKekRotationOpen,
+  removeOrphanedCheckpoint,
 } from "./restore-engine";
 
 // Orchestration tying slices 1-3 (src/lib/recovery-bundle.ts's bundle-format
@@ -420,9 +424,19 @@ export function runRestore(options: RunRestoreOptions): RestoreDisposeResult | {
 
 function runRestoreLocked(options: RunRestoreOptions): RestoreDisposeResult | { outcome: "completed" } {
   ensureBackupDirectorySafe(options.paths);
-  if (existsSync(options.paths.journalPath)) {
+  // A link at the journal's path counts as an unfinished restore too, as it
+  // did for restore.sh: only nothing at all means no restore is open.
+  if (existsSync(options.paths.journalPath) || isSymlinkPath(options.paths.journalPath)) {
     refuse("restore-journal-exists", "preflight/journal failed; an unfinished restore exists; run bash scripts/restore.sh --recover before starting a new restore.");
   }
+  // restore.sh checked for an open document-KEK rotation before reading the
+  // key or staging anything; RestoreRun.prepare() checks again, after the
+  // confirmation, before the checkpoint.
+  refuseIfDocumentKekRotationOpen(options.paths.documentKekFile);
+  // #1151 O2-R6/O2-R10: with the lock held and no journal, a checkpoint
+  // directory still marked as being prepared can only be a killed run's
+  // leftover; remove it rather than leave a full dump on disk forever.
+  for (const orphan of listOrphanedCheckpoints(options.paths.restoreRoot)) removeOrphanedCheckpoint(options.paths.restoreRoot, orphan);
 
   const stagingWorkDir = join(options.workDir, "staging");
   mkdirSync(stagingWorkDir, { recursive: true });
@@ -471,6 +485,20 @@ function runRestoreLocked(options: RunRestoreOptions): RestoreDisposeResult | { 
     // to call after a successful finalize() too (RestoreRun.dispose() is
     // idempotent and, once completed=true, only removes runWorkDir).
     run.dispose();
+  }
+}
+
+/**
+ * `restore --recover` under the same backup/restore lock as every other run,
+ * as restore.sh held it for both paths (#1151 O2-R3): a backup must not stop
+ * and start orbit-app while a recovery is reapplying a checkpoint.
+ */
+export function runRecoverRestore(options: RecoverRestoreOptions): RestoreDisposeResult {
+  const releaseLock = acquireBackupRestoreLock(options.paths.backupDirectory);
+  try {
+    return recoverRestore(options);
+  } finally {
+    releaseLock();
   }
 }
 

@@ -3,7 +3,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { CORRESPONDENCE_QUERIES, type CorrespondenceReports, RestoreEngineRefusal, internal, preflightValidateBundle } from "./restore-engine";
+import { createTar } from "./recovery-bundle";
+import {
+  CORRESPONDENCE_QUERIES,
+  type CorrespondenceReports,
+  type RestoreDockerAdapter,
+  RestoreEngineRefusal,
+  RestoreRun,
+  computeCheckpointDigests,
+  deriveRestorePaths,
+  internal,
+  preflightValidateBundle,
+} from "./restore-engine";
 
 // #678, ported from restore.sh's accept_report/fail_correspondence when the
 // engine took over restore (#1211): a correspondence report that could not
@@ -110,5 +121,62 @@ describe("beforeCheckpointRestore hook (restore.sh's ORBIT_RESTORE_TEST_FAILURE_
     });
     expect(result).toBe(false);
     expect(touched).toBe(false);
+  });
+});
+
+describe("every correspondence call site names its stage and check (#678 call sites)", () => {
+  function runFixture(): { run: RestoreRun; adapter: RestoreDockerAdapter; root: string } {
+    const root = stagedTree();
+    const documentsRoot = join(root, "live");
+    mkdirSync(join(documentsRoot, "objects"), { recursive: true });
+    const keyFile = join(root, "document-kek");
+    writeFileSync(keyFile, `${"a".repeat(64)}\n`, { mode: 0o600 });
+    const adapter = {
+      stopApp: () => true,
+      startApp: () => true,
+      waitForHealth: () => true,
+      dumpDatabase: (path: string) => writeFileSync(path, "dump"),
+      pgRestoreListOk: () => true,
+      collectDocumentsArchive: (path: string) => createTar(documentsRoot, path, ["."]),
+      createStageDatabase: () => undefined,
+      dropStageDatabase: () => undefined,
+      restoreDumpToDatabase: () => true,
+      queryReport: () => {
+        throw new RestoreEngineRefusal("A correspondence report did not run to completion.", "query-report-failed");
+      },
+      queryActiveReport: () => {
+        throw new RestoreEngineRefusal("A correspondence report did not run to completion.", "query-report-failed");
+      },
+    } as unknown as RestoreDockerAdapter;
+    const paths = deriveRestorePaths(join(root, "backups"), keyFile);
+    mkdirSync(paths.backupDirectory, { recursive: true });
+    mkdirSync(join(root, "work"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir: join(root, "work") });
+    return { run, adapter, root };
+  }
+
+  it("checkpoint: the self-verification of a new checkpoint", () => {
+    const { run } = runFixture();
+    expect(() => run.createCheckpoint()).toThrow("checkpoint/correspondence-incomplete failed; the crypto check did not run to completion");
+    run.dispose();
+  });
+
+  it("recovery: --recover's re-verification of the journaled checkpoint", () => {
+    const { run, adapter, root } = runFixture();
+    writeFileSync(join(run.checkpointDirectory, "database.dump"), "dump");
+    createTar(join(root, "live"), join(run.checkpointDirectory, "documents.tar"), ["."]);
+    writeFileSync(join(run.checkpointDirectory, "document-kek"), `${"a".repeat(64)}\n`);
+    const resumed = RestoreRun.resume(
+      { adapter, paths: deriveRestorePaths(join(root, "backups"), join(root, "document-kek")), workDir: join(root, "work-recover") },
+      run.checkpointDirectory,
+      run.restoreId,
+      computeCheckpointDigests(run.checkpointDirectory),
+    );
+    expect(() => resumed.reverifyCheckpointForRecovery()).toThrow("recovery/correspondence-incomplete failed; the crypto check did not run to completion");
+  });
+
+  it("cutover: the active check after the cutover, which a rollback then follows", () => {
+    const { run } = runFixture();
+    expect(() => run.finalize()).toThrow("cutover/correspondence-incomplete failed; the crypto check did not run to completion");
   });
 });

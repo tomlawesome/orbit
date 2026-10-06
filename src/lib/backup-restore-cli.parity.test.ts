@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
-import { runBackup, runExportRecoveryBundle } from "./backup-restore-cli";
+import { runBackup, runExportRecoveryBundle, runImportRecoveryBundle } from "./backup-restore-cli";
 import { type BackupDockerAdapter, createTar } from "./recovery-bundle";
 import { type CorrespondenceReports, type RestoreDockerAdapter } from "./restore-engine";
 
@@ -17,26 +17,19 @@ import { type CorrespondenceReports, type RestoreDockerAdapter } from "./restore
 // runExportRecoveryBundle (the same function `orbit export-recovery-bundle`
 // itself calls), not a hand-built envelope.
 //
-// Full live-Docker whole-script round-trip (a Bash-created bundle restored
-// by the CLI, and vice versa, per the issue's own test plan) is out of
-// reach in this sandbox for the same reason slice 2/3 flagged: create_bundle
-// and export-recovery-bundle.sh's own source-bundle verification both
-// require a live Postgres/orbit-app deployment before their first Docker
-// call ever completes successfully — see docs/adr-notes/296-backup-port-plan.md,
-// Slice 4 Flags. What *is* reachable Docker-free is characterized here:
-// recovery-crypto.mjs's standalone `node` entrypoint (no container hop,
-// exactly like slice 1), and import-recovery-bundle.sh's own archive/
-// checksum/manifest preflight, which — like slice 1's own whole-script
-// spawns — runs entirely before the script's first `docker compose` call.
+// A bash-era bundle restored by the engine is the real-stack drill's job
+// (scripts/test-backup-restore.sh). What is reachable without a deployment
+// is characterized here: recovery-crypto.mjs's standalone `node` entrypoint
+// (no container hop, exactly like slice 1) against our own output, and the
+// engine's import preflight accepting it.
 
-// This file spawns real tar, node and bash (import-recovery-bundle.sh); a
-// spawn that takes 0.7s quiet took 4.3s on a starved core (#698). Budget
-// and reasoning: scripts/process-budget.mjs.
+// This file spawns real tar and node; a spawn that takes 0.7s quiet took
+// 4.3s on a starved core (#698). Budget and reasoning:
+// scripts/process-budget.mjs.
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const nodeCryptoScript = join(repoRoot, "scripts", "recovery-crypto.mjs");
-const importScript = join(repoRoot, "scripts", "import-recovery-bundle.sh");
 
 const sandboxes: string[] = [];
 
@@ -151,45 +144,33 @@ describe("recovery-crypto.mjs cross-implementation parity against runExportRecov
   });
 });
 
-describe("import-recovery-bundle.sh's own archive/checksum/manifest preflight accepts our orchestration's bundle (:44-71, runs before any Docker call)", () => {
-  it("the real, unmodified script gets past every structural preflight check for a bundle runExportRecoveryBundle produced", () => {
+// import-recovery-bundle.sh became a thin shell around the engine (#1211):
+// its archive/manifest/checksum preflight is the engine's own, and what the
+// script printed for each refusal is compared with the engine in
+// src/cli/orbit.backup-restore.test.ts. What stays here is that a bundle
+// this orchestration exports gets past every one of those checks.
+describe("the import preflight accepts our orchestration's bundle", () => {
+  it("gets past the archive, manifest and checksum checks to the passphrase for a bundle runExportRecoveryBundle produced", () => {
     const passphrase = "correct horse battery staple";
     const recoveryBundlePath = buildRecoveryBundleViaOrchestration(passphrase);
-
-    const sandbox = newSandbox("orbit-slice4-parity-import-sh-");
-    // Enough of a deployment shape for the script's own early preflight
-    // (env-file/secrets-directory presence, tool checks) to get past —
-    // never enough for its later Docker calls to succeed, which is exactly
-    // the boundary this test characterizes.
-    writeFileSync(join(sandbox, ".env-orbit"), "COMPOSE_PROJECT_NAME=orbit-slice4-parity-nonexistent\n");
-    mkdirSync(join(sandbox, ".orbit-secrets"), { recursive: true, mode: 0o700 });
-    writeFileSync(join(sandbox, ".orbit-secrets", "document-kek"), `${LIVE_KEK}\n`, { mode: 0o600 });
-
-    const result = spawnSync("bash", [importScript, recoveryBundlePath], {
-      cwd: sandbox,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        ORBIT_ENV_FILE: join(sandbox, ".env-orbit"),
-        ORBIT_SECRETS_DIR: join(sandbox, ".orbit-secrets"),
-        ORBIT_BACKUP_DIR: join(sandbox, "backups"),
-        ORBIT_RECOVERY_TEST_MODE: "true",
-      },
-      // A real docker daemon may or may not be reachable in this
-      // environment; either way it must fail (no matching compose project
-      // exists here), and quickly — bounded so a hung daemon call can never
-      // stall the suite.
-      input: `${passphrase}\n`,
-      timeout: 20_000,
-    });
-
-    expect(result.status).not.toBe(0);
-    // The refusal must come from *past* the structural preflight this slice
-    // characterizes (archive/manifest/checksum), never from it — proving
-    // our bundle's shape, member set, and checksums are exactly what the
-    // real script expects.
-    expect(result.stderr).not.toMatch(/preflight\/archive failed/);
-    expect(result.stderr).not.toMatch(/preflight\/manifest failed/);
-    expect(result.stderr).not.toMatch(/preflight\/checksum failed/);
+    const sandbox = newSandbox("orbit-slice4-parity-import-");
+    const liveDocumentKekFile = join(sandbox, "document-kek");
+    writeFileSync(liveDocumentKekFile, `${LIVE_KEK}\n`, { mode: 0o600 });
+    let reachedPassphrase = false;
+    expect(() =>
+      runImportRecoveryBundle({
+        recoveryBundlePath,
+        passphrase: () => {
+          reachedPassphrase = true;
+          throw new Error("stop at the passphrase");
+        },
+        liveDocumentKekFile,
+        backupDirectory: join(sandbox, "backups"),
+        adapter: {} as RestoreDockerAdapter,
+        importConfirmed: true,
+        confirmRestore: () => true,
+      }),
+    ).toThrow("stop at the passphrase");
+    expect(reachedPassphrase).toBe(true);
   });
 });
