@@ -8,10 +8,12 @@
 #   bash scripts/dev/test-bed.sh up --image REF --host ADDR   REF is a registry digest (...@sha256:<64 hex>)
 #   bash scripts/dev/test-bed.sh up --build --host ADDR       build this checkout first (scripts/build-container.sh)
 #   bash scripts/dev/test-bed.sh restart [--host ADDR]        stop, then start the whole bed again
+#   bash scripts/dev/test-bed.sh run [--project P] -- CMD...  run CMD (e.g. bash scripts/backup.sh) against the running bed
 #   bash scripts/dev/test-bed.sh status                       what is running
 #   bash scripts/dev/test-bed.sh down [--include-ollama]      remove everything, test data included
 #
-# Options: --host ADDR   the LAN address of this machine (or set DEMO_HOST)
+# Options: --host ADDR   the LAN address of this machine (or set DEMO_HOST);
+#                        `run` reads it from the running app container if not given
 #          --project P   Compose project name (default: orbit, which is what
 #                        scripts/backup.sh and scripts/restore.sh address)
 #
@@ -21,6 +23,10 @@
 # `up --build` tagged, then checks by Compose label that nothing is left. The
 # orbit-ollama service, its model volume and the networks it is attached to are
 # kept (the model download is large) unless --include-ollama is given.
+# `run` is for the operator scripts: they call docker compose with .env-orbit
+# alone, which has no image or demo address, so `run` exports ORBIT_IMAGE (read
+# from the running orbit-app container), DEMO_HOST, ORBIT_BIND_ADDRESS,
+# ORBIT_PORT and COMPOSE_PROJECT_NAME for CMD, then execs it unchanged.
 # Only one bed can run at a time: docker-compose.yml fixes container names.
 set -Eeuo pipefail
 
@@ -52,21 +58,29 @@ project="$default_project"
 image=""
 host="${DEMO_HOST:-}"
 build=false
+run_args=()
 
 # The one place the project, file list and overrides are written down, so up,
 # restart, status and down cannot drift apart. Extra arguments go after the
 # file list, so `--profile '*'` (global) and the subcommand both fit.
+bed_vars=()
+bed_overrides() {
+  bed_vars=(
+    "ORBIT_IMAGE=${image:-orbit-local:test-bed-teardown}"
+    "DEMO_HOST=${host:-127.0.0.1}"
+    ORBIT_BIND_ADDRESS=127.0.0.1
+    ORBIT_PORT=3001
+  )
+}
+
 compose() {
   local args=(-p "$project" --env-file "$env_file")
   local file
   for file in "${compose_files[@]}"; do
     args+=(-f "$file")
   done
-  ORBIT_IMAGE="${image:-orbit-local:test-bed-teardown}" \
-    DEMO_HOST="${host:-127.0.0.1}" \
-    ORBIT_BIND_ADDRESS=127.0.0.1 \
-    ORBIT_PORT=3001 \
-    docker compose "${args[@]}" "$@"
+  bed_overrides
+  env "${bed_vars[@]}" docker compose "${args[@]}" "$@"
 }
 
 readonly ollama_service="orbit-ollama"
@@ -75,7 +89,7 @@ include_ollama=false
 # One row per container of the project: id|name|image|service|networks. Found
 # by label, so a stopped container counts.
 project_rows() {
-  docker ps -a --filter "label=${project_label}=${project}" \
+  docker ps -a --filter "label=${project_label}=${project}" "$@" \
     --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Label "com.docker.compose.service"}}|{{.Networks}}'
 }
 
@@ -258,6 +272,7 @@ cmd_up() {
   if [[ "$project" != "$default_project" ]]; then
     printf 'backup.sh / restore.sh need: COMPOSE_PROJECT_NAME=%s bash scripts/backup.sh ...\n' "$project"
   fi
+  printf 'Operator scripts against the bed: bash scripts/dev/test-bed.sh run%s -- bash scripts/backup.sh\n' "$project_flag"
   printf 'When finished: bash scripts/dev/test-bed.sh down%s\n' "$project_flag"
 }
 
@@ -277,6 +292,37 @@ cmd_restart() {
   printf 'Test bed restarted (project %s).\n' "$project"
 }
 
+# The running orbit-app container of the project: id|image. Empty if none.
+running_app_row() {
+  local id name img service nets
+  while IFS='|' read -r id name img service nets; do
+    [[ "$service" == orbit-app ]] && { printf '%s|%s\n' "$id" "$img"; return 0; }
+  done <<<"$(project_rows --filter status=running)"
+  return 0
+}
+
+cmd_run() {
+  [[ -z "$image" ]] || die "--image does not apply to run: the image is the one the bed is running."
+  [[ "${#run_args[@]}" -gt 0 ]] || die "give the command after --, e.g. run -- bash scripts/backup.sh"
+  validate_common
+  local row app_id
+  row="$(running_app_row)"
+  [[ -n "$row" ]] || die "project $project has no running orbit-app container; use up first."
+  app_id="${row%%|*}"
+  image="${row#*|}"
+  if [[ -z "$host" ]]; then
+    # APP_URL is https://<DEMO_HOST>:3443 in the bed's app container.
+    local line url=""
+    while IFS= read -r line; do
+      [[ "$line" == APP_URL=* ]] && url="${line#APP_URL=https://}"
+    done < <(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$app_id" 2>/dev/null || true)
+    host="${url%%:3443*}"
+  fi
+  require_host
+  bed_overrides
+  exec env "${bed_vars[@]}" "COMPOSE_PROJECT_NAME=$project" "${run_args[@]}"
+}
+
 cmd_status() {
   validate_common
   docker ps -a --filter "label=${project_label}=${project}" \
@@ -293,7 +339,7 @@ cmd_down() {
 [[ "$#" -gt 0 ]] || { usage; exit 1; }
 case "$1" in
   -h | --help | help) usage; exit 0 ;;
-  up | restart | status | down) command_name="$1"; shift ;;
+  up | restart | run | status | down) command_name="$1"; shift ;;
   *) usage >&2; die "unknown command: $1" ;;
 esac
 while [[ "$#" -gt 0 ]]; do
@@ -302,6 +348,7 @@ while [[ "$#" -gt 0 ]]; do
     --host) [[ "$#" -ge 2 ]] || die "--host needs a value"; host="$2"; shift 2 ;;
     --project) [[ "$#" -ge 2 ]] || die "--project needs a value"; project="$2"; shift 2 ;;
     --build) build=true; shift ;;
+    --) [[ "$command_name" == run ]] || die "-- only applies to run."; shift; run_args=("$@"); break ;;
     --include-ollama) include_ollama=true; shift ;;
     -h | --help) usage; exit 0 ;;
     *) die "unknown option: $1" ;;

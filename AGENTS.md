@@ -403,7 +403,9 @@ and a built screen is the demo bed:
 `up --build` for this checkout), then `down` when finished -- it removes
 everything the bed made, test data included, and keeps `orbit-ollama` and its
 model volume unless `down --include-ollama`. `scripts/deploy-container.sh` is
-the real-install path and is not used for the bed. Hand over clickable
+the real-install path and is not used for the bed. Run `backup.sh` and the
+other operator scripts against it as `test-bed.sh run -- bash scripts/backup.sh`
+(it supplies the image and host the scripts lack). Hand over clickable
 `https://<DEMO_HOST>:3443/<route>` links plus the one-time self-signed cert
 warning on `:3443` and `:4443`. A screenshot or fidelity baseline is
 supporting evidence, not the review: sign-off is on the running code

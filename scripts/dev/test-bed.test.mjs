@@ -41,7 +41,7 @@ function lines(text) {
   return text.split("\n").filter(Boolean);
 }
 
-function setup({ containers = [], volumes = [], networks = [], failOn = [], keep = false } = {}) {
+function setup({ containers = [], volumes = [], networks = [], failOn = [], keep = false, stopped = false, appEnv = [`APP_URL=https://${host}:3443`] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "orbit-test-bed-"));
   scratchDirs.push(dir);
   const bin = join(dir, "bin");
@@ -57,6 +57,8 @@ function setup({ containers = [], volumes = [], networks = [], failOn = [], keep
   writeFileSync(join(state, "fail.txt"), failOn.map((l) => `${l}\n`).join(""));
   writeFileSync(join(state, "calls.log"), "");
   writeFileSync(join(state, "env.log"), "");
+  writeFileSync(join(state, "app-env.txt"), appEnv.map((l) => `${l}\n`).join(""));
+  if (stopped) writeFileSync(join(state, "stopped"), "");
   if (keep) writeFileSync(join(state, "keep"), "");
   writeFileSync(
     join(bin, "docker"),
@@ -71,7 +73,8 @@ while IFS= read -r pattern; do
 done < "$S/fail.txt"
 case "$1 $2" in
   "compose version") exit 0 ;;
-  "ps -a") cat "$S/containers.txt" ;;
+  "ps -a") [[ " $* " == *" status=running "* && -f "$S/stopped" ]] || cat "$S/containers.txt" ;;
+  "inspect --format") cat "$S/app-env.txt" ;;
   "volume ls") cat "$S/volumes.txt" ;;
   "network ls") cat "$S/networks.txt" ;;
   "volume rm") grep -vxF -- "$3" "$S/volumes.txt" > "$S/v.tmp"; mv "$S/v.tmp" "$S/volumes.txt" ;;
@@ -126,6 +129,7 @@ describe("test-bed.sh up", () => {
     expect(r.stdout).toContain(`https://${host}:4443/`);
     expect(r.stdout).toContain("browser warns once");
     expect(r.stdout).not.toContain("COMPOSE_PROJECT_NAME");
+    expect(r.stdout).toContain("Operator scripts against the bed: bash scripts/dev/test-bed.sh run -- bash scripts/backup.sh");
   });
 
   it("prints the project prefix for backup.sh when --project is not orbit", () => {
@@ -280,6 +284,46 @@ describe("test-bed.sh restart and status", () => {
     expect(r.status).toBe(0);
     expect(r.compose).toEqual([]);
     expect(r.calls.some((c) => c.startsWith("ps -a --filter label=com.docker.compose.project=orbit "))).toBe(true);
+  });
+});
+
+describe("test-bed.sh run", () => {
+  const probe = ["--", "bash", "-c", 'echo "$ORBIT_IMAGE $DEMO_HOST $ORBIT_BIND_ADDRESS $ORBIT_PORT $COMPOSE_PROJECT_NAME"; echo oops >&2; exit 7'];
+
+  it("refuses when the bed is not running, and does not run the command", () => {
+    for (const options of [{}, { containers: appRows, stopped: true }]) {
+      const r = run(["run", ...probe], options);
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain("no running orbit-app container");
+      expect(r.stdout).toBe("");
+    }
+  });
+
+  it("exports the five variables, reading the image from the container and the host from its config, and passes output and exit status through", () => {
+    const r = run(["run", ...probe], { containers: appRows });
+    expect(r.status).toBe(7);
+    expect(r.stdout).toBe(`${digest} ${host} 127.0.0.1 3001 orbit\n`);
+    expect(r.stderr).toBe("oops\n");
+    expect(readFileSync(join(r.tree, ".env-orbit"), "utf8")).toBe("ORBIT_TEST_ONLY=fixture\n");
+  });
+
+  it("uses --host over the container's config and exports the chosen project", () => {
+    const r = run(["run", "--host", "192.0.2.77", "--project", "orbit-demo", ...probe], { containers: appRows });
+    expect(r.status).toBe(7);
+    expect(r.stdout).toBe(`${digest} 192.0.2.77 127.0.0.1 3001 orbit-demo\n`);
+  });
+
+  it("asks for --host when the container's config does not give one", () => {
+    const r = run(["run", ...probe], { containers: appRows, appEnv: [] });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("--host");
+    expect(r.stdout).toBe("");
+  });
+
+  it("needs a command after --", () => {
+    const r = run(["run"], { containers: appRows });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("after --");
   });
 });
 
