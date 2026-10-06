@@ -44,6 +44,22 @@ const MESSAGES = {
   },
 };
 
+/*
+ * A refusal with a reason the person can act on keeps its face but says why
+ * (#1242). `link_required` (ADR-0023 §3): a provider identity whose email
+ * already belongs to an Orbit account is refused, and the ADR fixes the words
+ * — the same `refusals.link_required` message `src/lib/auth/provision.ts`
+ * throws. Its face stays INCOMPLETE because the way back to the door IS the
+ * remedy: sign in there with the existing account. Before this the screen
+ * said only "Nothing was changed.", which read as a broken sign-in.
+ */
+const MESSAGES_BY_CODE = {
+  link_required: {
+    primary: "Sign-in didn’t complete.",
+    sub: "An Orbit account already uses this email address. Sign in to it and link this provider from settings.",
+  },
+};
+
 /**
  * @param {string | null | undefined} code the callback's `code` query
  *   parameter, read exactly as the page finds it — untrusted, and never
@@ -56,8 +72,13 @@ export function authErrorStateFor(code) {
 
 /**
  * @param {typeof INCOMPLETE | typeof REFUSED} state
+ * @param {string | null | undefined} [code] the same untrusted `code`; only
+ *   picks a row, never shown
  * @returns {{ primary: string, sub: string }}
  */
-export function authErrorMessageFor(state) {
+export function authErrorMessageFor(state, code) {
+  if (state === INCOMPLETE && code && Object.hasOwn(MESSAGES_BY_CODE, code)) {
+    return MESSAGES_BY_CODE[/** @type {keyof typeof MESSAGES_BY_CODE} */ (code)];
+  }
   return MESSAGES[state] ?? MESSAGES[INCOMPLETE];
 }
