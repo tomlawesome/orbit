@@ -1,9 +1,8 @@
 /*
- * CREDITS FOR THE PICTURES ORBIT SHIPS (#1253).
- *
- * Data only: the About page that will show these is its own issue, so nothing
- * here is rendered yet. One entry per work, each meeting its own licence's
- * terms and no more:
+ * CREDITS FOR WHAT ORBIT SHIPS THAT NO PACKAGE MANAGER KNOWS ABOUT (#1253,
+ * #1256): the pictures, the typefaces and the sidecar images. The About page
+ * draws these beside the libraries its bill of materials lists. One entry per
+ * work, each meeting its own licence's terms and no more:
  *
  *   · `changes` is filled only where the licence requires adaptations to be
  *     marked (Creative Commons: the Milky Way). NASA's pictures are not
@@ -13,6 +12,12 @@
  *
  * `files` are the shipped copies, under web/static. They came from orbit-site
  * (assets/img, commit c189d38), whose tools made them from these sources.
+ *
+ * Fonts (#1256) are the three faces web/scripts/collect-font-licences.mjs
+ * bundles, and link the full OFL text that script writes at build time, as
+ * OFL requires. Sidecars are the four images docker-compose.yml pins; their
+ * `image` must match the compose file's tag, which tests/unit/about-credits
+ * checks, so a re-pin that forgets this file fails there.
  */
 
 /**
@@ -25,6 +30,29 @@
  * @property {string} sourceUrl
  * @property {string} [changes] what was changed, where the licence asks for it
  * @property {string[]} files the shipped copies, under web/static
+ */
+
+/**
+ * @typedef {object} FontCredit
+ * @property {string} name the face
+ * @property {string} author the copyright holder its licence names
+ * @property {string} licence
+ * @property {string} spdx
+ * @property {string} licenceUrl the bundled full text
+ * @property {string} sourceUrl
+ * @property {string} package the @fontsource package it ships from
+ */
+
+/**
+ * @typedef {object} SidecarCredit
+ * @property {string} name
+ * @property {string} service its docker-compose.yml service
+ * @property {string} image the pinned image and tag, without the digest
+ * @property {string} author
+ * @property {string} licence
+ * @property {string} spdx
+ * @property {string} licenceUrl
+ * @property {string} sourceUrl
  */
 
 /** @type {Credit[]} */
@@ -60,5 +88,80 @@ export const CREDITS = [
     sourceUrl: "https://svs.gsfc.nasa.gov/4851",
     changes: "Reduced in size and brought down from HDR (tone-mapped) for Orbit's flight, by orbit-site's tools/galaxy.py",
     files: ["flight/world/galaxy-2k.webp"],
+  },
+];
+
+/** @type {FontCredit[]} */
+export const FONTS = [
+  {
+    name: "Inter",
+    author: "The Inter Project Authors",
+    licence: "SIL Open Font License 1.1",
+    spdx: "OFL-1.1",
+    licenceUrl: "/licenses/fonts.txt",
+    sourceUrl: "https://github.com/rsms/inter",
+    package: "@fontsource-variable/inter",
+  },
+  {
+    name: "JetBrains Mono",
+    author: "The JetBrains Mono Project Authors",
+    licence: "SIL Open Font License 1.1",
+    spdx: "OFL-1.1",
+    licenceUrl: "/licenses/fonts.txt",
+    sourceUrl: "https://github.com/JetBrains/JetBrainsMono",
+    package: "@fontsource-variable/jetbrains-mono",
+  },
+  {
+    name: "Space Grotesk",
+    author: "The Space Grotesk Project Authors",
+    licence: "SIL Open Font License 1.1",
+    spdx: "OFL-1.1",
+    licenceUrl: "/licenses/fonts.txt",
+    sourceUrl: "https://github.com/floriankarsten/space-grotesk",
+    package: "@fontsource/space-grotesk",
+  },
+];
+
+/** @type {SidecarCredit[]} */
+export const SIDECARS = [
+  {
+    name: "PostgreSQL",
+    service: "orbit-db",
+    image: "postgres:18-alpine",
+    author: "The PostgreSQL Global Development Group",
+    licence: "PostgreSQL License",
+    spdx: "PostgreSQL",
+    licenceUrl: "https://www.postgresql.org/about/licence/",
+    sourceUrl: "https://www.postgresql.org/",
+  },
+  {
+    name: "Apache Tika",
+    service: "orbit-tika",
+    image: "apache/tika:4.1.0-full",
+    author: "The Apache Software Foundation",
+    licence: "Apache License 2.0",
+    spdx: "Apache-2.0",
+    licenceUrl: "https://www.apache.org/licenses/LICENSE-2.0",
+    sourceUrl: "https://tika.apache.org/",
+  },
+  {
+    name: "ClamAV",
+    service: "orbit-clamav",
+    image: "clamav/clamav:1.5.4-debian",
+    author: "Cisco Systems, Inc.",
+    licence: "GNU General Public License 2.0",
+    spdx: "GPL-2.0-only",
+    licenceUrl: "https://www.gnu.org/licenses/old-licenses/gpl-2.0.html",
+    sourceUrl: "https://github.com/Cisco-Talos/clamav",
+  },
+  {
+    name: "Ollama",
+    service: "orbit-ollama",
+    image: "ollama/ollama:0.35.1",
+    author: "Ollama",
+    licence: "MIT License",
+    spdx: "MIT",
+    licenceUrl: "https://spdx.org/licenses/MIT.html",
+    sourceUrl: "https://github.com/ollama/ollama",
   },
 ];
