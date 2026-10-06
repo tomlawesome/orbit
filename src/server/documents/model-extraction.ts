@@ -40,6 +40,9 @@ const MODEL_ENDPOINT = "http://orbit-ollama:11434/api/generate";
 /** The same fixed host, asked only whether it is answering (ADR-0025 section 5). */
 const MODEL_TAGS_ENDPOINT = "http://orbit-ollama:11434/api/tags";
 
+/** The same fixed host again, asked only which Ollama it is (the About page, #1256). */
+const MODEL_VERSION_ENDPOINT = "http://orbit-ollama:11434/api/version";
+
 /** The only configurable part of the model path, per ADR-0025 section 2. */
 const MODEL_ENVIRONMENT_KEY = "OLLAMA_MODEL";
 
@@ -676,6 +679,36 @@ export async function pingExtractionModel(options: { deadlineMs?: number } = {})
     return ready;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Ollama's own version, from the fixed endpoint's `/api/version`, for the
+ * About page (#1256). Null when it does not answer, answers anything but a
+ * short version string, or takes longer than the ping's own deadline: the
+ * page says "not known" rather than guess. Sends no document text.
+ */
+export async function readExtractionModelVersion(): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), MODEL_PING_DEADLINE_MS);
+  try {
+    const response = await fetch(MODEL_VERSION_ENDPOINT, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      redirect: "error",
+      signal: controller.signal,
+    });
+    if (!response.ok || response.redirected) {
+      await response.body?.cancel().catch(() => undefined);
+      return null;
+    }
+    const body = (await response.json()) as { version?: unknown };
+    return typeof body?.version === "string" ? body.version : null;
+  } catch {
+    return null;
   } finally {
     clearTimeout(timer);
   }
