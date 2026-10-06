@@ -116,7 +116,21 @@ async function pageAfterStepUp(page: Page): Promise<Page> {
 async function answerArchiveChallenge(page: Page) {
   const challenge = page.locator(".c-archive .challenge");
   await challenge.getByLabel("your password").fill(READER_PASSWORD());
+  /* #1233 (#1232): "confirm and carry on" re-fires the act with the proof,
+     and the server's half is slow by design -- the archive passphrase goes
+     through scrypt (N 16384, src/server/portable-archive.ts) and the proof
+     through argon2id (src/lib/auth/password.ts): the export answered 200
+     after 3978 ms and the import after 5062 ms on an idle runner (pipeline
+     2203, job 32537), against the 5 s the next line used to give it. The
+     challenge closes when that answer lands, so wait for the answer -- the
+     event -- and only then expect the close. Registered before the click so
+     it cannot catch the 403 that opened the challenge. */
+  const answered = page.waitForResponse(
+    (response) => response.request().method() === "POST" && /\/portable-archives(\/import)?$/.test(new URL(response.url()).pathname),
+    { timeout: 30_000 },
+  );
   await challenge.getByRole("button", { name: "confirm and carry on" }).click();
+  await answered;
   await expect(challenge).toHaveCount(0);
 }
 
