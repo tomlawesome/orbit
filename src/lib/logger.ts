@@ -121,6 +121,10 @@ export const operationalReasons = [
      because a provider that ignores `max_age` blocks every sensitive action;
      the record names no person and no provider text. */
   "step_up_rejected",
+  /* A new provider identity refused because its email already belongs to an
+     Orbit account (ADR-0023 §3, #1242): Orbit's rule, not a provider fault,
+     and the person's remedy is to sign in to that account and link. */
+  "link_required",
   /* Tier 1 metadata (ADR-0024 decision 5): one stored value would not
      authenticate. The record names the table, column and row so an
      administrator can find it; it never carries the value, the ciphertext or

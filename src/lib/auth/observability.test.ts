@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   log: {
     error: vi.fn(),
     info: vi.fn(),
+    warn: vi.fn(),
   },
 }));
 
@@ -11,6 +12,7 @@ vi.mock("@/lib/logger", () => ({ log: mocks.log }));
 
 import type { TokenExchangeReason } from "./errors";
 import {
+  reportAuthCallbackFailure,
   reportAuthConfiguration,
   reportAuthProviderDiscoveryFailure,
   reportAuthTokenExchangeFailure,
@@ -133,5 +135,24 @@ describe("authentication operational diagnostics", () => {
       impact: "sign_in_blocked",
     });
     expect(mocks.log.error).toHaveBeenCalledTimes(4);
+  });
+
+  it("records a provider sign-in refused for an address another account holds as that refusal, not a provider fault (#1242)", () => {
+    /* ADR-0023 §3: a new provider identity whose email already belongs to an
+       Orbit account is refused with `link_required`. That is Orbit's own rule
+       working, so the operator is told exactly that -- never
+       `unexpected_failure` with `check_provider`, which sent the reader of the
+       log to a provider that had done nothing wrong. */
+    reportAuthCallbackFailure("link_required");
+
+    expect(mocks.log.warn).toHaveBeenCalledWith({
+      event: "auth.provider",
+      state: "invalid",
+      reason: "link_required",
+      action: "none",
+      impact: "sign_in_blocked",
+    });
+    expect(mocks.log.warn).toHaveBeenCalledTimes(1);
+    expect(mocks.log.error).not.toHaveBeenCalled();
   });
 });
