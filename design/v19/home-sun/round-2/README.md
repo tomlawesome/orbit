@@ -134,4 +134,6 @@ round 1. No data palette is involved, so the dataviz validator does not apply.
 
 "Hmm chromosphere but ensure all stay on record as they're all good options."
 
-Chromosphere is chosen and goes into the app (#1250). Photosphere and Furnace are kept here as good options, not dropped.
+Chosen: Furnace (owner, 2026-10-06, after first picking Chromosphere). It
+goes into the app (#1250). Photosphere and Chromosphere stay on record here
+as good options, not dropped.
