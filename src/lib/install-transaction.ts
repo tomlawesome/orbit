@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -10,11 +9,9 @@ import {
   mkdtempSync,
   openSync,
   readdirSync,
-  readFileSync,
   renameSync,
   rmdirSync,
   rmSync,
-  statSync,
   writeFileSync,
   writeSync,
 } from "node:fs";

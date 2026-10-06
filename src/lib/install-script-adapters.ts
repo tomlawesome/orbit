@@ -1,4 +1,5 @@
 import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from "node:child_process";
+import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 
 import {
@@ -6,6 +7,7 @@ import {
   type ConfigurationScriptAdapter,
   buildMigrateArgv,
   buildPreflightArgv,
+  runConfigurationCommand,
 } from "./configuration-migration";
 import {
   type GuidedConfigurationAdapter,
@@ -16,8 +18,8 @@ import {
   parseMachinePromptLine,
 } from "./guided-configuration";
 
-// The real `bash scripts/configuration.sh` / `bash scripts/configure.sh`
-// subprocess adapters (issue #295 slice 5) — the shipped production
+// The install engine's configuration adapters: the configuration migration
+// (in-process since #1210) and the `bash scripts/configure.sh` subprocess (issue #295 slice 5) — the shipped production
 // implementations the plan deferred from slice 3
 // (ConfigurationScriptAdapter) and slice 4 (GuidedConfigurationAdapter).
 // Both spawn a fixed argv array built entirely from this module's caller-
@@ -37,27 +39,25 @@ export interface InstallScriptAdapterOptions {
 }
 
 /**
- * The real ConfigurationScriptAdapter (slice 3 deferral): `bash
- * <configurationScript> --preflight --file <environmentFile>` /
- * `bash <configurationScript> --migrate --transaction ...`, driven entirely
- * through configuration-migration.ts's own `buildPreflightArgv`/
- * `buildMigrateArgv` — the same technique configuration-migration.parity.
- * test.ts's local reference adapter already used to prove these argv
- * builders drive the live script correctly.
+ * The real ConfigurationScriptAdapter: since #1210 (build note D8) the
+ * preflight and migration are the TypeScript port in
+ * configuration-migration.ts, run in-process with the exact argv
+ * buildPreflightArgv/buildMigrateArgv produce. The script path argument is
+ * kept for the adapter's shape and ignored; a relative --file resolves
+ * against `options.cwd` as the subprocess's working directory did.
  */
 export function createInstallConfigurationScriptAdapter(options: InstallScriptAdapterOptions = {}): ConfigurationScriptAdapter {
-  const bashBinary = options.bashBinary ?? "bash";
-  const cwd = options.cwd;
-  const env = options.env ?? process.env;
+  const cwd = options.cwd ?? process.cwd();
 
-  function run(configurationScript: string, argv: string[]): { status: number; stdout: string } {
-    const result = spawnSync(bashBinary, [configurationScript, ...argv], { cwd, env, encoding: "utf8" });
-    return { status: result.status ?? -1, stdout: result.stdout };
+  function run(argv: string[]): { status: number; stdout: string } {
+    const absolute = argv.map((value, index) => (argv[index - 1] === "--file" ? resolve(cwd, value) : value));
+    const result = runConfigurationCommand(absolute, resolve(cwd, ".env-orbit"));
+    return { status: result.status, stdout: result.stdout };
   }
 
   return {
-    runPreflight: (configurationScript, environmentFile) => run(configurationScript, buildPreflightArgv(environmentFile)),
-    runMigrate: (configurationScript, target: ConfigurationMigrationTarget) => run(configurationScript, buildMigrateArgv(target)),
+    runPreflight: (_configurationScript, environmentFile) => run(buildPreflightArgv(environmentFile)),
+    runMigrate: (_configurationScript, target: ConfigurationMigrationTarget) => run(buildMigrateArgv(target)),
   };
 }
 

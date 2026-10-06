@@ -14,7 +14,8 @@ export type EnvOrbitFailureCode =
   | "configuration_removed_key"
   | "configuration_project"
   | "configuration_version"
-  | "configuration_provenance";
+  | "configuration_provenance"
+  | "configuration_secret_conflict";
 
 export type ParseEnvOrbitResult =
   | { ok: true; record: EnvOrbitRecord; schemaPresent: boolean }
@@ -94,7 +95,29 @@ function isValidImmutableImage(value: string): boolean {
   return /^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$/.test(value);
 }
 
-export function parseEnvOrbitContent(content: string): ParseEnvOrbitResult {
+// Direct-value/_FILE pairs the app's own contract (config-contract.ts's
+// exclusivePairs) rejects as mutually exclusive, in the same order. The
+// configuration migration refuses a file that sets both (#1151 O1-Q1);
+// `orbit check` reports readiness without this refusal, as configure.sh
+// --check always did.
+const SECRET_FILE_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ["SESSION_SECRET", "SESSION_SECRET_FILE"],
+  ["DOCUMENT_KEK", "DOCUMENT_KEK_FILE"],
+  ["DOCUMENT_KEK_NEXT", "DOCUMENT_KEK_NEXT_FILE"],
+  ["POSTGRES_PASSWORD", "POSTGRES_PASSWORD_FILE"],
+  ["OIDC_CLIENT_SECRET", "OIDC_CLIENT_SECRET_FILE"],
+  ["VAPID_PRIVATE_KEY", "VAPID_PRIVATE_KEY_FILE"],
+  ["SMTP_PASSWORD", "SMTP_PASSWORD_FILE"],
+  ["DATABASE_URL", "DATABASE_URL_FILE"],
+  ["SMTP_URL", "SMTP_URL_FILE"],
+];
+
+export interface ParseEnvOrbitOptions {
+  /** Refuse a populated direct secret beside its populated _FILE twin (configuration_secret_conflict). */
+  refuseSecretConflicts?: boolean;
+}
+
+export function parseEnvOrbitContent(content: string, options: ParseEnvOrbitOptions = {}): ParseEnvOrbitResult {
   const record: EnvOrbitRecord = {};
   const seen = new Set<string>();
   let assignmentCount = 0;
@@ -152,6 +175,14 @@ export function parseEnvOrbitContent(content: string): ParseEnvOrbitResult {
   }
 
   if (assignmentCount === 0) return { ok: false, code: "configuration_syntax" };
+  if (options.refuseSecretConflicts) {
+    const values = record as Record<string, string | undefined>;
+    for (const [direct, file] of SECRET_FILE_PAIRS) {
+      // An empty direct placeholder beside a populated _FILE value (the shape
+      // configure writes for OIDC_CLIENT_SECRET) is not a conflict.
+      if (values[direct] && values[file]) return { ok: false, code: "configuration_secret_conflict" };
+    }
+  }
   if (schemaValue && schemaValue !== String(ENV_ORBIT_SCHEMA_VERSION)) {
     return { ok: false, code: "configuration_version" };
   }

@@ -28,6 +28,7 @@ import {
   verifyBackupBundle,
 } from "../lib/backup-restore-cli";
 import { evaluateReadiness, type OidcSecretFileFacts } from "../lib/config-contract";
+import { runConfigurationCommand } from "../lib/configuration-migration";
 import { parseEnvOrbitContent } from "../lib/env-orbit-file";
 import { InstallTransaction, type ManagedPath } from "../lib/install-transaction";
 import {
@@ -557,11 +558,20 @@ function commandConfigureSetDeploymentProfile(deployDir: string, preset: string,
   }
 }
 
+/** `orbit configure --preflight|--migrate ...`: the retired scripts/configuration.sh's grammar over the port (#1210 D8). */
+function commandConfigureMigration(deployDir: string, args: string[]): never {
+  const result = runConfigurationCommand(args, join(deployDir, ".env-orbit"));
+  process.stdout.write(result.stdout);
+  process.stderr.write(result.stderr);
+  process.exit(result.status);
+}
+
 function commandConfigure(deployDir: string, args: string[]): never {
   if (args.length === 0) {
     commandConfigureApply(deployDir);
   }
   const [first, ...rest] = args;
+  if (first === "--preflight" || first === "--migrate") commandConfigureMigration(deployDir, args);
   switch (first) {
     case "--init":
       if (rest.length > 0) usageExit("orbit: usage: orbit configure --init");
@@ -580,7 +590,9 @@ function commandConfigure(deployDir: string, args: string[]): never {
       break;
     }
     default:
-      usageExit(`orbit: unknown option ${first} (usage: orbit configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]])`);
+      usageExit(
+        `orbit: unknown option ${first} (usage: orbit configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--preflight ...|--migrate ...])`,
+      );
   }
 }
 
