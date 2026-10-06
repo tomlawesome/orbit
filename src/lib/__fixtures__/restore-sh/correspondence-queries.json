@@ -1,0 +1,18 @@
+{
+  "queries": {
+    "crypto": "SELECT c.document_id::text, c.storage_key, c.ciphertext_size::text, COALESCE(d.lifecycle::text, '<missing-document>') FROM document_crypto c LEFT JOIN documents d ON d.id = c.document_id ORDER BY c.storage_key;",
+    "visible": "SELECT d.id::text, d.lifecycle::text, COALESCE(c.storage_key, ''), COALESCE(c.ciphertext_size::text, '') FROM documents d LEFT JOIN document_crypto c ON c.document_id = d.id WHERE d.lifecycle IN ('available', 'pending_deletion') ORDER BY d.id;",
+    "attachments": "SELECT a.id::text, a.storage_key, a.ciphertext_size::text, a.key_id FROM imap_ingestion_attachments a WHERE a.status = 'stored' OR (a.status = 'assigned' AND a.purge_pending = true) ORDER BY a.storage_key;",
+    "staging": "SELECT s.storage_key, s.status FROM imap_ingestion_staging_objects s WHERE s.status IN ('pending', 'purge_pending') ORDER BY s.storage_key;",
+    "documentStaging": "SELECT s.document_id::text, s.storage_key, s.status, s.ciphertext_size::text FROM document_staging_objects s WHERE s.status IN ('pending', 'purge_pending') ORDER BY s.storage_key;",
+    "transientCount": "SELECT count(*)::text FROM documents d WHERE d.lifecycle IN ('receiving', 'validating', 'quarantined', 'encrypting') OR (d.lifecycle = 'scanning' AND NOT EXISTS (SELECT 1 FROM document_staging_objects s WHERE s.document_id = d.id));"
+  },
+  "occurrences": {
+    "crypto": 2,
+    "visible": 2,
+    "attachments": 2,
+    "staging": 2,
+    "documentStaging": 2,
+    "transientCount": 2
+  }
+}

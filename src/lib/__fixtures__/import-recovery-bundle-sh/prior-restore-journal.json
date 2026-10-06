@@ -1,0 +1,5 @@
+{
+  "status": 1,
+  "stdout": "",
+  "stderr": "Orbit recovery import: preflight/journal failed; an unfinished restore exists; run bash scripts/restore.sh --recover before importing another recovery bundle.\n"
+}
