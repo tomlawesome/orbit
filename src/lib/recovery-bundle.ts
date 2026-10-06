@@ -27,6 +27,8 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 
+import { applyHostOwnership } from "./host-ownership";
+
 // The backup-bundle and recovery-bundle *format* core (issue #296 slice 1),
 // ported from:
 //   - scripts/recovery-crypto.mjs (the ORBKEK01 passphrase envelope, HMAC
@@ -76,6 +78,9 @@ export function writeSecretFile(path: string, content: string | Buffer, mode: nu
   const descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC, mode);
   try {
     fchmodSync(descriptor, mode);
+    // #1211 E6: written as root inside the deployment, owned by the operator
+    // on the host (a no-op outside the one-off, see host-ownership.ts).
+    applyHostOwnership(path);
     writeSync(descriptor, typeof content === "string" ? Buffer.from(content, "utf8") : content);
   } finally {
     closeSync(descriptor);
@@ -920,6 +925,7 @@ export interface DockerComposeAdapterOptions {
 function openWriteSecretDescriptor(path: string, mode: number = SECURE_FILE_MODE): number {
   const descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, mode);
   fchmodSync(descriptor, mode);
+  applyHostOwnership(path);
   return descriptor;
 }
 
@@ -1114,6 +1120,7 @@ export function createBackupBundle(
   createdAt: string,
 ): CreateBackupBundleResult {
   const workDir = mkdtempSync(join(backupDirectory, ".orbit-backup."));
+  applyHostOwnership(workDir);
   const temporaryPath = `${finalTarPath}.installing`;
   let published = false;
 

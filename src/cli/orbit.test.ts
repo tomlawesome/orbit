@@ -37,7 +37,10 @@ function runCli(args: string[], options: { input?: string; env?: NodeJS.ProcessE
   const result = failOnProcessDeadline(spawnSync("node", [tsx, cli, ...args], {
     encoding: "utf8",
     input: options.input,
-    env: options.env ?? process.env,
+    // backup, restore and the recovery-bundle commands run only inside the
+    // deployment since #1211; ORBIT_ENGINE_CONTEXT=container is what the
+    // image bakes in, so these tests set it too.
+    env: options.env ?? { ...process.env, ORBIT_ENGINE_CONTEXT: "container" },
     ...processGuard(),
   }), { label: "runCli" });
   return { status: result.status ?? -1, stdout: result.stdout, stderr: result.stderr };
@@ -146,7 +149,7 @@ describe("ORBIT_RECOVERY_PROMPTS=machine end-to-end (docs/engine-events.md's ext
     // bundle is missing, refusing before any prompt is ever written.
     const result = runCli(["export-recovery-bundle", join(sandbox, "missing.tar"), "--dir", sandbox], {
       input: "",
-      env: { ...process.env, ORBIT_RECOVERY_PROMPTS: "machine" },
+      env: { ...process.env, ORBIT_ENGINE_CONTEXT: "container", ORBIT_RECOVERY_PROMPTS: "machine" },
     });
     expect(result.status).not.toBe(0);
     expect(result.stdout).not.toContain("prompt field=");
@@ -166,7 +169,7 @@ describe("secrets hygiene: no argv, stdout, or stderr ever carries a passphrase"
     const passphrase = `${secretMarker}-0123456789ab`;
     const result = runCli(["export-recovery-bundle", join(sandbox, "missing.tar"), "--dir", sandbox], {
       input: `${passphrase}\n${passphrase}\n`,
-      env: { ...process.env, ORBIT_RECOVERY_PROMPTS: "machine" },
+      env: { ...process.env, ORBIT_ENGINE_CONTEXT: "container", ORBIT_RECOVERY_PROMPTS: "machine" },
     });
     expect(result.stdout).not.toContain(secretMarker);
     expect(result.stderr).not.toContain(secretMarker);
@@ -200,7 +203,9 @@ describe("orbit backup --verify: reaches real verification for a present-but-inv
 // booby-trapped `docker` ahead of the real one on PATH, so a passing test
 // means the code path was never reached, not merely that it failed cleanly.
 describe("in-container fail-closed guard (ORBIT_ENGINE_CONTEXT=container)", () => {
-  const DOCKER_NEEDING_COMMANDS = ["install", "update", "backup", "restore", "export-recovery-bundle", "import-recovery-bundle"];
+  const DOCKER_NEEDING_COMMANDS = ["install", "update"];
+  // #1211: these spawn no docker at all now; they run only inside the deployment.
+  const DEPLOYMENT_COMMANDS = ["backup", "restore", "export-recovery-bundle", "import-recovery-bundle"];
 
   // Placed inside `sandbox` (not a separate mkdtemp) so the shared afterEach
   // cleanup above removes it along with everything else.
@@ -224,6 +229,27 @@ describe("in-container fail-closed guard (ORBIT_ENGINE_CONTEXT=container)", () =
     expect(result.status).toBe(9);
     expect(result.stderr).toContain(`orbit: refused command=${command} reason=docker-command-forbidden-in-container`);
     expect(readFileSync(callLogPath, "utf8")).toBe("");
+  });
+
+  it.each(DEPLOYMENT_COMMANDS)("%s runs in container mode without ever calling docker", (command) => {
+    const callLogPath = join(sandbox, "docker-calls.log");
+    writeFileSync(callLogPath, "");
+    const trapBinDir = makeBoobyTrappedDockerBinDir(callLogPath);
+
+    const result = runCli([command, "--dir", sandbox], {
+      env: { ...process.env, PATH: `${trapBinDir}:${process.env.PATH}`, ORBIT_ENGINE_CONTEXT: "container" },
+    });
+
+    expect(result.status).not.toBe(9);
+    expect(result.stderr).not.toContain("docker-command-forbidden-in-container");
+    expect(readFileSync(callLogPath, "utf8")).toBe("");
+  });
+
+  it.each(DEPLOYMENT_COMMANDS)("%s refuses outside the deployment, naming the script that runs it there", (command) => {
+    const result = runCli([command, "--dir", sandbox], { env: { ...process.env, ORBIT_ENGINE_CONTEXT: "" } });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(new RegExp(`^orbit: ${command} runs inside the deployment; use bash scripts/[a-z-]+\\.sh\\.\\n$`));
+    expect(existsSync(join(sandbox, "backups"))).toBe(false);
   });
 
   it("check is completely unaffected: it works fully against a bind-mounted-shaped deploy directory in container mode", () => {

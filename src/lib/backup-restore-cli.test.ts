@@ -938,7 +938,7 @@ describe("runImportRecoveryBundle (import-recovery-bundle.sh's orchestration, li
         importConfirmed: true,
         confirmRestore: () => true,
       }),
-    ).toThrow(RecoveryBundleRefusal);
+    ).toThrow("preflight/decryption failed; the recovery key could not be decrypted.");
     expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(LIVE_KEK);
   });
 

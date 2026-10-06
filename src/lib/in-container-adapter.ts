@@ -3,6 +3,7 @@ import { closeSync, constants, fchmodSync, fstatSync, openSync, readFileSync, re
 import { join } from "node:path";
 
 import { formatEngineEventLine } from "./engine-event";
+import { applyHostOwnership } from "./host-ownership";
 import { type BackupDockerAdapter, RecoveryBundleRefusal, SECURE_FILE_MODE } from "./recovery-bundle";
 import {
   type RestoreDockerAdapter,
@@ -91,9 +92,11 @@ function readPassword(passwordFile: string): string {
   return password;
 }
 
+/** A private output file, owned by the host operator when it lands under a host mount (a checkpoint's dump and document tar, #1211 E6). */
 function openPrivateOutput(path: string): number {
   const descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, SECURE_FILE_MODE);
   fchmodSync(descriptor, SECURE_FILE_MODE);
+  applyHostOwnership(path);
   return descriptor;
 }
 

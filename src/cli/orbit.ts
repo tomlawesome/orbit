@@ -22,6 +22,7 @@ import { basename, join, resolve } from "node:path";
 
 import {
   BackupRestoreCliRefusal,
+  type RestoreOrchestrationTestHooks,
   runBackup,
   runExportRecoveryBundle,
   runImportRecoveryBundle,
@@ -39,13 +40,14 @@ import {
 import { CONFIGURATION_ROLLBACK_SUFFIX, runConfigurationCommand } from "../lib/configuration-migration";
 import { parseEnvOrbitContent } from "../lib/env-orbit-file";
 import { InstallTransaction, type ManagedPath } from "../lib/install-transaction";
+import { createInContainerAdapter, preflightPostgresClient } from "../lib/in-container-adapter";
 import {
   type BackupDockerAdapter,
   RecoveryBundleRefusal,
-  createDockerComposeBackupAdapter,
   createTar,
   extractTar,
   isValidDocumentKekHex,
+  isValidPassphrase,
   requireMatchingPassphrase,
   requireValidPassphrase,
 } from "../lib/recovery-bundle";
@@ -64,11 +66,12 @@ import {
   RestoreEngineRefusal,
   type CorrespondenceReports,
   type RestoreDockerAdapter,
-  createDockerComposeRestoreAdapter,
+  type RestoreDurabilityHooks,
   deriveRestorePaths,
   recoverRestore,
 } from "../lib/restore-engine";
 import { formatEngineEventLine } from "../lib/engine-event";
+import { HostOwnershipError } from "../lib/host-ownership";
 import { type InstallOrchestratorAdapters, type InstallOrchestratorContext, runInstall } from "../lib/install-orchestrator";
 import { createInstallDockerAdapter } from "../lib/install-docker-adapter";
 import { checkCurlAvailable, createInstallOidcFetchAdapter } from "../lib/install-curl-adapter";
@@ -96,8 +99,35 @@ import {
 // belongs to orbit-launcher.
 
 function fail(message: string): never {
-  process.stderr.write(`${message}\n`);
+  process.stderr.write(`${displayHostPaths(message)}\n`);
   process.exit(1);
+}
+
+// The backup/restore shells mount the deployment, an outside backup or
+// secrets directory, and the bundle being read at fixed container paths
+// (#1211 build note E5) and say where each came from on the host, so a path
+// the engine prints is one the operator can open: "Orbit backup created:
+// /srv/orbit/backups/...", never "/orbit-deploy/backups/...".
+const HOST_PATH_MAPPINGS: readonly (readonly [string, string])[] = [
+  ["/orbit-input/bundle.tar", "ORBIT_HOST_INPUT_FILE"],
+  ["/orbit-deploy", "ORBIT_HOST_DEPLOY_DIR"],
+  ["/orbit-backups", "ORBIT_HOST_BACKUP_DIR"],
+  ["/orbit-secrets", "ORBIT_HOST_SECRETS_DIR"],
+];
+
+function displayHostPaths(text: string): string {
+  let result = text;
+  for (const [mount, variable] of HOST_PATH_MAPPINGS) {
+    const hostPath = process.env[variable];
+    if (!hostPath || !hostPath.startsWith("/")) continue;
+    const escaped = mount.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    result = result.replace(new RegExp(`${escaped}(?=/|\\s|$|[).,;:])`, "g"), () => hostPath);
+  }
+  return result;
+}
+
+function writeResult(line: string): void {
+  process.stdout.write(`${displayHostPaths(line)}\n`);
 }
 
 // ---------------------------------------------------------------------------
@@ -118,13 +148,15 @@ function fail(message: string): never {
 // set. This is the single fact this guard trusts.
 //
 // Every command whose adapters spawn `docker` (install/update via
-// install-docker-adapter.ts; backup/restore/export-recovery-bundle/
-// import-recovery-bundle via recovery-bundle.ts's/restore-engine.ts's
-// createDockerCompose*Adapter) calls refuseDockerInContainer as the FIRST
+// install-docker-adapter.ts) calls refuseDockerInContainer as the FIRST
 // statement in its command function below — before any adapter is
 // constructed, so the code path that would spawn `docker` is never reached,
 // not merely made to fail once reached. `check` (and any other pure-logic
-// command) never calls this guard and is unaffected.
+// command) never calls this guard and is unaffected. backup, restore and
+// the recovery-bundle commands spawn no `docker` at all since #1211: they
+// run only here, inside the deployment, through the in-container adapter
+// (src/lib/in-container-adapter.ts), and refuse anywhere else
+// (requireDeploymentContext below).
 const ENGINE_CONTAINER_ENV_VAR = "ORBIT_ENGINE_CONTEXT";
 const ENGINE_CONTAINER_CONTEXT_VALUE = "container";
 
@@ -223,23 +255,44 @@ function commandCheck(deployDir: string, rollback = false): never {
 // ---------------------------------------------------------------------------
 
 interface BackupRestorePaths {
-  envFile: string;
   backupDirectory: string;
   documentKekFile: string;
 }
 
-// The TS CLI's own path convention: everything is derived from `--dir`
-// (matching `check`'s existing convention above), not from the Bash
-// scripts' ORBIT_ENV_FILE/ORBIT_BACKUP_DIR/ORBIT_SECRETS_DIR environment
-// variables — a deliberate, flagged simplification (see docs/adr-notes/
-// 296-backup-port-plan.md, Slice 4 Flags), not a behavioral gap in what's
-// characterized.
-function resolveBackupRestorePaths(deployDir: string): BackupRestorePaths {
+/** `--backup-dir`/`--secrets-dir`: where the shell mounted ORBIT_BACKUP_DIR/ORBIT_SECRETS_DIR when they lie outside the deployment (#1211 E5). */
+interface BackupRestoreDirectories {
+  backupDir?: string;
+  secretsDir?: string;
+}
+
+// Everything is derived from `--dir` (matching `check`'s convention above),
+// except the two directories an operator may keep elsewhere: the shells map
+// ORBIT_BACKUP_DIR and ORBIT_SECRETS_DIR onto mounts and pass them as
+// `--backup-dir`/`--secrets-dir` (#1211 build note E5).
+function resolveBackupRestorePaths(deployDir: string, directories: BackupRestoreDirectories): BackupRestorePaths {
+  const secretsDirectory = directories.secretsDir !== undefined ? resolve(directories.secretsDir) : join(deployDir, ".orbit-secrets");
   return {
-    envFile: join(deployDir, ".env-orbit"),
-    backupDirectory: join(deployDir, "backups"),
-    documentKekFile: join(deployDir, ".orbit-secrets", "document-kek"),
+    backupDirectory: directories.backupDir !== undefined ? resolve(directories.backupDir) : join(deployDir, "backups"),
+    documentKekFile: join(secretsDirectory, "document-kek"),
   };
+}
+
+const DEPLOYMENT_SHELLS: Record<string, string> = {
+  backup: "backup.sh",
+  restore: "restore.sh",
+  "export-recovery-bundle": "export-recovery-bundle.sh",
+  "import-recovery-bundle": "import-recovery-bundle.sh",
+};
+
+/**
+ * backup, restore and the recovery-bundle commands reach orbit-db, the
+ * mounted secrets and the document volume directly, so they run only inside
+ * the deployment, as the one-off scripts/backup.sh and its siblings start
+ * (#1211 build note E1). Anywhere else there is nothing for them to reach.
+ */
+function requireDeploymentContext(command: string): void {
+  if (isRunningAsEngineContainer()) return;
+  fail(`orbit: ${command} runs inside the deployment; use bash scripts/${DEPLOYMENT_SHELLS[command]}.`);
 }
 
 /**
@@ -357,9 +410,31 @@ function stdoutMachineDriver(): MachinePromptDriver {
   };
 }
 
+/**
+ * ORBIT_RECOVERY_TEST_MODE=true: the recovery-bundle scripts' own test mode,
+ * which scripts/test-backup-restore.sh drives — each answer is one line on
+ * standard input, with no prompt text, exactly as the bash scripts read it
+ * (`read -r -s -p ''`). The shell forwards the variable (#1211 build note E4).
+ */
+function isStdinLinePromptMode(): boolean {
+  return process.env.ORBIT_RECOVERY_TEST_MODE === "true";
+}
+
+function readStdinAnswer(missing: string): string {
+  const line = readSyncLine(0);
+  if (line === undefined) fail(`orbit: ${missing}`);
+  return line;
+}
+
 /** export-recovery-bundle.sh:37-45 (guarantees #6-7): passphrase, then its confirmation, entered twice with no retry loop in TTY mode (matching the Bash original's single-attempt fail-closed behavior exactly); machine mode gets the bounded-3-attempt retry protocol docs/engine-events.md now documents. */
 function collectRecoveryPassphraseWithConfirmation(): string {
   if (isMachinePromptMode()) return collectMachineRecoveryPassphrase(stdoutMachineDriver());
+  if (isStdinLinePromptMode()) {
+    const passphrase = readStdinAnswer("A recovery passphrase is required on standard input.");
+    requireValidPassphrase(passphrase);
+    requireMatchingPassphrase(passphrase, readStdinAnswer("A recovery passphrase confirmation is required on standard input."));
+    return passphrase;
+  }
   const passphrase = readTtyMaskedLine("Recovery passphrase: ");
   requireValidPassphrase(passphrase);
   const confirmation = readTtyMaskedLine("Confirm recovery passphrase: ");
@@ -370,7 +445,12 @@ function collectRecoveryPassphraseWithConfirmation(): string {
 /** import-recovery-bundle.sh:73-74: a single passphrase entry, no confirmation (only IMPORT_CONFIRMATION below is a typed phrase). */
 function collectImportPassphrase(): string {
   if (isMachinePromptMode()) return collectMachineRecoveryPassphraseNoConfirm(stdoutMachineDriver());
-  return readTtyMaskedLine("Recovery passphrase: ");
+  const passphrase = isStdinLinePromptMode()
+    ? readStdinAnswer("A recovery passphrase is required on standard input.")
+    : readTtyMaskedLine("Recovery passphrase: ");
+  // import-recovery-bundle.sh:76: refused before any decryption is attempted.
+  if (!isValidPassphrase(passphrase)) fail("orbit: A recovery passphrase of at least 12 characters is required.");
+  return passphrase;
 }
 
 /** import-recovery-bundle.sh:88-94 (guarantee #19): the literal "IMPORT RECOVERY" phrase, single attempt in TTY mode. */
@@ -384,8 +464,10 @@ function collectImportConfirmation(bundlePath: string): boolean {
       throw error;
     }
   }
-  process.stdout.write(`This will replace the local document KEK and restore:\n  ${bundlePath}\n`);
-  const answer = readTtyLine("Type IMPORT RECOVERY to continue: ");
+  writeResult(`This will replace the local document KEK and restore:\n  ${bundlePath}`);
+  const answer = isStdinLinePromptMode()
+    ? readStdinAnswer("A recovery confirmation is required on standard input.")
+    : readTtyLine("Type IMPORT RECOVERY to continue: ");
   return answer === IMPORT_CONFIRMATION_PHRASE;
 }
 
@@ -405,7 +487,9 @@ function makeRestoreConfirmer(useYesFlag: boolean): () => boolean {
       }
     }
     process.stdout.write("This will replace Orbit database contents and encrypted document bytes after a verified recovery checkpoint.\n");
-    const answer = readTtyLine("Type RESTORE to continue: ");
+    const answer = isStdinLinePromptMode()
+      ? readStdinAnswer("A restore confirmation is required on standard input.")
+      : readTtyLine("Type RESTORE to continue: ");
     return answer === RESTORE_CONFIRMATION_PHRASE;
   };
 }
@@ -820,34 +904,83 @@ function commandScratchDirectorySignalRehearse(sleepSeconds: string): never {
   process.exit(0);
 }
 
-function commandBackup(deployDir: string, args: string[]): never {
-  refuseDockerInContainer("backup");
-  const paths = resolveBackupRestorePaths(deployDir);
-  const documentKekHex = readDocumentKekHex(paths.documentKekFile);
-  const adapter: BackupDockerAdapter = createDockerComposeBackupAdapter({ envFile: paths.envFile, cwd: deployDir });
+/**
+ * restore.sh's test switches, which scripts/test-backup-restore.sh still sets
+ * on `bash scripts/restore.sh` and the shell forwards (#1211 build step 5).
+ * Inert unless ORBIT_RESTORE_TEST_MODE=true. Each maps onto a seam the
+ * engine already had: the durability hooks (journal sync failures), the
+ * orchestration hooks (a cutover failure, a hard kill) and
+ * beforeCheckpointRestore (a checkpoint that will not reapply).
+ */
+function restoreTestHooksFromEnvironment(): { hooks: RestoreDurabilityHooks; testHooks: RestoreOrchestrationTestHooks } {
+  const env = process.env;
+  if (env.ORBIT_RESTORE_TEST_MODE !== "true") return { hooks: {}, testHooks: {} };
+  const syncStage = env.ORBIT_RESTORE_TEST_SYNC_FAILURE_STAGE ?? "";
+  const failureStage = env.ORBIT_RESTORE_TEST_FAILURE_STAGE ?? "";
+  const requested = (): never => {
+    throw new Error("A restore test failure was requested.");
+  };
+  return {
+    hooks: {
+      beforeJournalFileSync: (state) => {
+        if (syncStage === "journal-file" || (syncStage === "journal-replacement" && state !== "checkpointed")) requested();
+      },
+      beforeJournalDirectorySync: (state) => {
+        if (syncStage === "journal-directory" || (syncStage === "journal-replacement-directory" && state !== "checkpointed")) requested();
+      },
+      beforeCheckpointRestore: () => {
+        if (failureStage === "checkpoint-restore" || env.ORBIT_RESTORE_TEST_CHECKPOINT_FAILURE === "true") requested();
+      },
+    },
+    testHooks: {
+      afterCheckpoint: () => {
+        if (env.ORBIT_RESTORE_TEST_HARD_INTERRUPT_STAGE !== "after-checkpoint") return;
+        // As abrupt as restore.sh's `kill -KILL "$$"`: no finally block, no
+        // dispose(). Inside the one-off, node is PID 1, which ignores a
+        // SIGKILL sent from inside its own namespace, so exit straight
+        // after with the status a SIGKILL would have left.
+        process.kill(process.pid, "SIGKILL");
+        process.exit(137);
+      },
+      afterDocumentsReplaced: () => {
+        if (failureStage === "after-document-replacement") {
+          throw new BackupRestoreCliRefusal("cutover/test-failure requested; prior state will be restored.", "test-failure-requested");
+        }
+      },
+    },
+  };
+}
+
+function commandBackup(deployDir: string, args: string[], directories: BackupRestoreDirectories): never {
+  requireDeploymentContext("backup");
+  const paths = resolveBackupRestorePaths(deployDir, directories);
+  const adapter = createInContainerAdapter();
 
   if (args[0] === "--verify") {
     if (args.length !== 2 || !args[1]) fail("orbit: usage: orbit backup --verify <backup.tar>");
+    const documentKekHex = readDocumentKekHex(paths.documentKekFile);
     const target = resolve(args[1]);
     const workDir = mkdtempSync(join(tmpdir(), "orbit-backup-verify-"));
     withScratchDirectory(workDir, () => {
       verifyBackupBundle(target, documentKekHex, workDir, adapter);
-      process.stdout.write(`Orbit backup is valid: ${args[1]}\n`);
+      writeResult(`Orbit backup is valid: ${target}`);
     });
     process.exit(0);
   }
 
   if (args.length !== 0) fail("orbit: usage: orbit backup [--verify <backup.tar>]");
-  const result = runBackup({ backupDirectory: paths.backupDirectory, documentKekHex, adapter, now: new Date() });
-  process.stdout.write(`Orbit backup created: ${result.finalTarPath}\n`);
+  preflightPostgresClient();
+  const result = runBackup({ backupDirectory: paths.backupDirectory, documentKekHex: () => readDocumentKekHex(paths.documentKekFile), adapter, now: new Date() });
+  writeResult(`Orbit backup created: ${result.finalTarPath}`);
   process.exit(0);
 }
 
-function commandRestore(deployDir: string, args: string[]): never {
-  refuseDockerInContainer("restore");
-  const paths = resolveBackupRestorePaths(deployDir);
+function commandRestore(deployDir: string, args: string[], directories: BackupRestoreDirectories): never {
+  requireDeploymentContext("restore");
+  const paths = resolveBackupRestorePaths(deployDir, directories);
   const restorePaths = deriveRestorePaths(paths.backupDirectory, paths.documentKekFile);
-  const adapter = createDockerComposeRestoreAdapter({ envFile: paths.envFile, cwd: deployDir });
+  const adapter = createInContainerAdapter();
+  const { hooks, testHooks } = restoreTestHooksFromEnvironment();
 
   let yesFlag = false;
   let recoverMode = false;
@@ -872,14 +1005,15 @@ function commandRestore(deployDir: string, args: string[]): never {
     if (backupFile !== undefined || yesFlag) fail("orbit: usage: --recover accepts no other arguments");
     const workDir = mkdtempSync(join(tmpdir(), "orbit-restore-recover-"));
     withScratchDirectory(workDir, () => {
-      recoverRestore({ adapter, paths: restorePaths, workDir });
-      process.stdout.write("Orbit recovery completed; the prior database, document tree, and key state were restored.\n");
+      recoverRestore({ adapter, paths: restorePaths, workDir, hooks });
+      writeResult("Orbit recovery completed; the prior database, document tree, and key state were restored.");
     });
     process.exit(0);
   }
 
   if (backupFile === undefined) fail("orbit: usage: orbit restore [--yes] <backup.tar> | orbit restore --recover");
   const documentKekHex = readDocumentKekHex(paths.documentKekFile);
+  preflightPostgresClient();
   const workDir = mkdtempSync(join(tmpdir(), "orbit-restore-"));
   withScratchDirectory(workDir, () => {
     runRestore({
@@ -889,50 +1023,55 @@ function commandRestore(deployDir: string, args: string[]): never {
       adapter,
       workDir,
       confirm: makeRestoreConfirmer(yesFlag),
+      hooks,
+      testHooks,
     });
-    process.stdout.write("Orbit restore completed successfully.\n");
+    writeResult("Orbit restore completed successfully.");
   });
   process.exit(0);
 }
 
-function commandExportRecoveryBundle(deployDir: string, args: string[]): never {
-  refuseDockerInContainer("export-recovery-bundle");
+function commandExportRecoveryBundle(deployDir: string, args: string[], directories: BackupRestoreDirectories): never {
+  requireDeploymentContext("export-recovery-bundle");
   if (args.length !== 1 || !args[0]) fail("orbit: usage: orbit export-recovery-bundle <backup.tar>");
-  const paths = resolveBackupRestorePaths(deployDir);
+  const paths = resolveBackupRestorePaths(deployDir, directories);
   const documentKekHex = readDocumentKekHex(paths.documentKekFile);
-  const adapter = createDockerComposeBackupAdapter({ envFile: paths.envFile, cwd: deployDir });
-  const passphrase = collectRecoveryPassphraseWithConfirmation();
+  const adapter = createInContainerAdapter();
   const result = runExportRecoveryBundle({
     sourceBundlePath: resolve(args[0]),
     documentKekHex,
-    passphrase,
-    passphraseConfirmation: passphrase,
+    // export-recovery-bundle.sh asked only once the source bundle had passed --verify.
+    collectPassphrase: collectRecoveryPassphraseWithConfirmation,
     backupDirectory: paths.backupDirectory,
     adapter,
     now: new Date(),
   });
-  process.stdout.write(`Orbit recovery bundle created: ${result.finalPath}\n`);
+  writeResult(`Orbit recovery bundle created: ${result.finalPath}`);
   process.exit(0);
 }
 
-function commandImportRecoveryBundle(deployDir: string, args: string[]): never {
-  refuseDockerInContainer("import-recovery-bundle");
+function commandImportRecoveryBundle(deployDir: string, args: string[], directories: BackupRestoreDirectories): never {
+  requireDeploymentContext("import-recovery-bundle");
   if (args.length !== 1 || !args[0]) fail("orbit: usage: orbit import-recovery-bundle <recovery.tar>");
   const recoveryBundlePath = resolve(args[0]);
-  const paths = resolveBackupRestorePaths(deployDir);
-  const adapter = createDockerComposeRestoreAdapter({ envFile: paths.envFile, cwd: deployDir });
-  const passphrase = collectImportPassphrase();
-  const importConfirmed = collectImportConfirmation(recoveryBundlePath);
+  const paths = resolveBackupRestorePaths(deployDir, directories);
+  const adapter = createInContainerAdapter();
+  const { hooks, testHooks } = restoreTestHooksFromEnvironment();
+  // import-recovery-bundle.sh's order: the archive is checked before the
+  // passphrase is asked for, and the key is decrypted before IMPORT RECOVERY.
   runImportRecoveryBundle({
     recoveryBundlePath,
-    passphrase,
+    passphrase: collectImportPassphrase,
     liveDocumentKekFile: paths.documentKekFile,
     backupDirectory: paths.backupDirectory,
     adapter,
-    importConfirmed,
+    importConfirmed: () => collectImportConfirmation(recoveryBundlePath),
     confirmRestore: makeRestoreConfirmer(false),
+    beforeRestore: preflightPostgresClient,
+    hooks,
+    testHooks,
   });
-  process.stdout.write("Orbit recovery import completed successfully.\n");
+  writeResult("Orbit recovery import completed successfully.");
   process.exit(0);
 }
 
@@ -1698,10 +1837,18 @@ function main(): void {
   }
 
   let deployDirArg: string | undefined;
+  const directories: BackupRestoreDirectories = {};
   const commandArgs: string[] = [];
+  const takesDirectories = command !== undefined && command in DEPLOYMENT_SHELLS;
   for (let index = 0; index < rest.length; index += 1) {
     if (rest[index] === "--dir" && rest[index + 1]) {
       deployDirArg = rest[index + 1];
+      index += 1;
+    } else if (takesDirectories && rest[index] === "--backup-dir" && rest[index + 1]) {
+      directories.backupDir = rest[index + 1];
+      index += 1;
+    } else if (takesDirectories && rest[index] === "--secrets-dir" && rest[index + 1]) {
+      directories.secretsDir = rest[index + 1];
       index += 1;
     } else {
       commandArgs.push(rest[index]);
@@ -1730,16 +1877,16 @@ function main(): void {
         commandInstallOrUpdate(command, deployDirArg);
         break;
       case "backup":
-        commandBackup(deployDir, commandArgs);
+        commandBackup(deployDir, commandArgs, directories);
         break;
       case "restore":
-        commandRestore(deployDir, commandArgs);
+        commandRestore(deployDir, commandArgs, directories);
         break;
       case "export-recovery-bundle":
-        commandExportRecoveryBundle(deployDir, commandArgs);
+        commandExportRecoveryBundle(deployDir, commandArgs, directories);
         break;
       case "import-recovery-bundle":
-        commandImportRecoveryBundle(deployDir, commandArgs);
+        commandImportRecoveryBundle(deployDir, commandArgs, directories);
         break;
       case "end-maintenance":
         commandEndMaintenance(commandArgs);
@@ -1756,7 +1903,12 @@ function main(): void {
     // attacker-controlled path/member names — asserted by each module's own
     // no-leak sweep), so surfacing `error.message` directly here is safe;
     // anything else is a genuine bug and should keep its stack trace.
-    if (error instanceof RecoveryBundleRefusal || error instanceof RestoreEngineRefusal || error instanceof BackupRestoreCliRefusal) {
+    if (
+      error instanceof RecoveryBundleRefusal ||
+      error instanceof RestoreEngineRefusal ||
+      error instanceof BackupRestoreCliRefusal ||
+      error instanceof HostOwnershipError
+    ) {
       fail(`orbit: ${error.message}`);
     }
     throw error;

@@ -175,10 +175,12 @@ describe("scripts/bundle-orbit-cli.mjs", () => {
     expect(readFileSync(callLogPath, "utf8")).toBe("");
   });
 
-  it("fail-closed guard covers every Docker-backed command (install, update, backup, restore, export-recovery-bundle, import-recovery-bundle)", () => {
+  // backup, restore and the recovery-bundle commands spawn no docker since
+  // #1211 (they run inside the deployment), so only install/update remain.
+  it("fail-closed guard covers every Docker-backed command (install, update)", () => {
     const targetDir = scratchDir();
     const dockerlessBinDir = makeDockerlessBinDir();
-    const dockerNeedingCommands = ["install", "update", "backup", "restore", "export-recovery-bundle", "import-recovery-bundle"];
+    const dockerNeedingCommands = ["install", "update"];
 
     for (const command of dockerNeedingCommands) {
       const result = failOnProcessDeadline(spawnSync("node", [bundlePath, command, "--dir", targetDir], {
