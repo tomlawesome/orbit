@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { CREDITS, FONTS, SIDECARS } from "../../web/src/lib/about/credits.js";
-import { creditsView, librariesOf, licencePartsOf, slug, spdxUrl } from "../../web/src/lib/about/group.js";
+import { creditsView, librariesOf, licencePartsOf, sidecarVersionOf, slug, spdxUrl } from "../../web/src/lib/about/group.js";
 
 /*
  * The About page's cards 2 and 3 (#1256): four groups, each alphabetical;
@@ -157,5 +157,40 @@ describe("the hand-kept credits match what ships (#1256)", () => {
     for (const file of CREDITS.flatMap((credit) => credit.files)) {
       expect(existsSync(new URL(`../../web/static/${file}`, import.meta.url)), file).toBe(true);
     }
+  });
+});
+
+describe("a sidecar's version on card 1 (#1256)", () => {
+  const compose = readFileSync(new URL("../../docker-compose.yml", import.meta.url), "utf8");
+  /** The tag docker-compose.yml itself pins for a service, read from the file, not from credits.js. */
+  const composeTag = (service) => {
+    const block = compose.split(/\n  (?=[a-z])/).find((one) => one.startsWith(`${service}:`));
+    return /\n    image: [^\s@]+:([^\s@]+)@sha256:/.exec(block ?? "")?.[1];
+  };
+  const SERVICES = { postgres: "orbit-db", tika: "orbit-tika", clamav: "orbit-clamav", ollama: "orbit-ollama" };
+
+  it("shows the sidecar's own answer when it gave one", () => {
+    expect(sidecarVersionOf({ id: "tika", state: "running", version: "4.1.0" }, SIDECARS))
+      .toEqual({ kind: "live", text: "4.1.0" });
+  });
+
+  it("falls back to the tag the compose file pins, marked as pinned, when the call failed", () => {
+    for (const id of Object.keys(SERVICES)) {
+      const shown = sidecarVersionOf({ id, state: "running", version: null }, SIDECARS);
+      expect(composeTag(SERVICES[id]), `${id} is pinned in compose`).toBeDefined();
+      expect(shown).toEqual({ kind: "pinned", text: composeTag(SERVICES[id]) });
+    }
+  });
+
+  it("says 'not known' only when neither a version nor a pin exists", () => {
+    expect(sidecarVersionOf({ id: "tika", state: "running", version: null }, []))
+      .toEqual({ kind: "unknown", text: "not known" });
+    expect(sidecarVersionOf({ id: "mystery", state: "running", version: null }, SIDECARS))
+      .toEqual({ kind: "unknown", text: "not known" });
+  });
+
+  it("keeps 'not running' for a sidecar that is off, whatever is pinned", () => {
+    expect(sidecarVersionOf({ id: "ollama", state: "off", version: null }, SIDECARS))
+      .toEqual({ kind: "off", text: "not running" });
   });
 });
