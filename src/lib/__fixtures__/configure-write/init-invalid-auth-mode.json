@@ -1,0 +1,8 @@
+{
+  "result": {
+    "status": 1,
+    "stdout": "",
+    "stderr": "Orbit configuration: ORBIT_CONFIGURE_AUTH_MODE must be 'local' or 'oidc'.\n"
+  },
+  "env": null
+}
