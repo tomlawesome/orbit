@@ -498,7 +498,7 @@
         if (!document.body.classList.contains("lit")) { after(120, whenLit); return; }
         /* two frames, so the lit sequence's transitions exist to be waited on */
         requestAnimationFrame(() => requestAnimationFrame(() => {
-          drawnIn().then(() => { if (!disposed) readyFlight({ gentle: true }); });
+          drawnIn().then(() => { if (!disposed) readyFlight({ gentle: true, prove: false }); });
         }));
       };
       whenLit();

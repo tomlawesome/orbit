@@ -9,12 +9,13 @@
  * the shader draws the sunrise sun: a warm haze and no corona.
  *
  * The still (sun.py's `furnace()`, the same formulas run once) stands in
- * under reduced motion, where WebGL2 is missing, where this machine is too
- * slow for it (the flight's own rule, lib/flight/fitness.js), and until the
- * shader has drawn its first frame. The shader draws only while the sun is
+ * under reduced motion, where WebGL2 is missing, where the page may not use
+ * the GPU at all (the flight's own verdict, lib/flight/fitness.js `gpu()`:
+ * a performance caveat or a software renderer), and until the shader has
+ * drawn its first frame. The shader draws only while the sun is
  * on screen and the tab is showing.
  */
-import { fitsFrame } from "$lib/flight/fitness.js";
+import { gpu } from "$lib/flight/fitness.js";
 
 /* The disc's radius in dial units (the 380-unit dial). Today's size; the
    owner has not ruled on the sample's 9.5 (round-2 README, "For the owner
@@ -152,6 +153,9 @@ export function mountFurnace(box, canvas) {
   }
   /** @returns {boolean} */
   function make() {
+    /* the page's verdict first: refused, the still stays and nothing here
+       touches the GPU */
+    if (!gpu()) return false;
     const ctx = canvas.getContext("webgl2", { alpha: true, premultipliedAlpha: true, antialias: false });
     if (!ctx) return false;
     gl = ctx;
@@ -172,10 +176,7 @@ export function mountFurnace(box, canvas) {
       const loc = ctx.getAttribLocation(pr, "p"); ctx.enableVertexAttribArray(loc); ctx.vertexAttribPointer(loc, 2, ctx.FLOAT, false, 0, 0);
       for (const n of ["uRes", "uT", "uPx", "uExpo", "uLight", "uLimb", "uMid", "uCore", "uRim", "uC0", "uC1", "uC2", "uHaze"]) u[n] = ctx.getUniformLocation(pr, n);
       size(); setSun(sunOf(root.dataset.theme));
-      /* the first draw finishes the driver's own compile; the second is the
-         one timed against the flight's rule */
       draw();
-      if (!fitsFrame(ctx, draw)) throw new Error("too slow here");
     } catch {
       ctx.getExtension("WEBGL_lose_context")?.loseContext();
       gl = null;
