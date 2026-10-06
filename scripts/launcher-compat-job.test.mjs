@@ -113,7 +113,6 @@ describe("launcher install compatibility gate", () => {
     for (const served of [
       "scripts/install.sh",
       "scripts/configure.sh",
-      "scripts/configuration.sh",
       "scripts/installer-ui.sh",
     ]) {
       expect(job).toContain(`["/${served}", "${served}"]`);
@@ -126,6 +125,9 @@ describe("launcher install compatibility gate", () => {
     // fails in seconds naming the file rather than after a full run naming
     // the hand-off.
     expect(job).toContain("did not serve $served_file byte for byte");
+    // #1210 deleted configuration.sh; serving a file that no longer exists
+    // would stop the job before it starts.
+    expect(job).not.toContain("scripts/configuration.sh");
   });
 
   it("always runs on a merge request into main and on every delivery branch, unconditionally (#944)", () => {
