@@ -19,10 +19,18 @@ command -v node >/dev/null 2>&1 || {
   printf 'Orbit build: Node.js is required to calculate the release-train version.\n' >&2
   exit 1
 }
-docker compose version >/dev/null 2>&1 || {
-  printf 'Orbit build: Docker Compose v2 is required.\n' >&2
-  exit 1
-}
+# DOCKER_BUILDKIT=0 selects the legacy builder (see
+# diagnose_registry_reachability below); otherwise the build is BuildKit's,
+# the same `docker buildx build` CI's build_image job runs.
+if [[ "${DOCKER_BUILDKIT:-}" == "0" ]]; then
+  build_command=(docker build)
+else
+  docker buildx version >/dev/null 2>&1 || {
+    printf 'Orbit build: Docker Buildx is required.\n' >&2
+    exit 1
+  }
+  build_command=(docker buildx build --load)
+fi
 export ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)"
 export ORBIT_VERSION="$(node scripts/calculate-version.mjs --channel preview)"
 export ORBIT_REVISION="$(git rev-parse HEAD)"
@@ -91,7 +99,7 @@ diagnose_registry_reachability() {
 # The image is built straight from the Dockerfile, not through Compose, so
 # producing it needs no .env-orbit: configuration runs inside this image
 # (#1210), so the image has to exist before configuration does.
-docker buildx build ${pull_option} \
+"${build_command[@]}" ${pull_option} \
   --build-arg ORBIT_VERSION \
   --build-arg ORBIT_REVISION \
   --build-arg ORBIT_CHANNEL \
