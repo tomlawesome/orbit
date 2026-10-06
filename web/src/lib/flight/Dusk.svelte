@@ -1,7 +1,6 @@
 <script>
   import { onMount } from "svelte";
   import { DUSK_FAR, DUSK_NEAR } from "./starfields.js";
-  import { rasteriseSvg } from "$lib/raster.js";
 
   /**
    * THE DUSK — where the descent sets down, and, since §15's 2026-08-17
@@ -26,126 +25,34 @@
    * As on the dawn, only the ARTWORK is aria-hidden: the farewell and the way
    * back in are the screen's whole point and must be readable.
    *
-   * #501 — the same fix as Dawn.svelte, for the same reason: d-b6/d-b14/
-   * d-b24 were still LIVE feGaussianBlur filters on static shapes, so Safari
-   * paid to software-rasterise them every repaint. Checked first: what
-   * animates here is `.afterglow` (breathe-ember) and `.belt` (zbreathe),
-   * both opacity-only, plus the shimmer's dash-offset sweep — which carries
-   * no filter at all, live or otherwise, so it is untouched either way.
-   * Everything else — d-glow, .belt's own shape, .afterglow's four rings,
-   * the blurred half of the rim — is a static shape, rasterised once at
-   * mount via $lib/raster.js (the same mechanism Grain.svelte and
-   * Dawn.svelte use) and composited back as a plain <image>, at the full
-   * 1600×1000 viewBox frame so it drops into the same slice-scaled <svg>
-   * the live shapes it replaces sit in. See Dawn.svelte's own note for the
-   * full reasoning; it applies here unchanged.
+   * #501/#1253 — the glow, the belt, the afterglow's rings and the blurred
+   * half of the rim are pictures (static/flight/dusk/), drawn once from their
+   * filter graphs by orbit-site's tools/glows.cjs, the same pictures the
+   * site's dusk shows; nothing is rasterised in the browser any more. What
+   * animates is still only `.afterglow` (breathe-ember) and `.belt`
+   * (zbreathe), both opacity, and the shimmer's dash sweep. The frame is laid
+   * from the bottom (xMidYMax slice), as the dawn and the canvas world are.
+   * `data-rasterised` is "pending" until every picture has loaded (or failed
+   * to), then "ready", for the fidelity gate.
    */
   let { children = undefined } = $props();
   /** @type {HTMLDivElement} */
   let world;
-  /** @type {SVGImageElement} */
-  let imgGlow;
-  /** @type {SVGImageElement} */
-  let imgBelt;
-  /** @type {SVGImageElement} */
-  let imgAfterglow;
-  /** @type {SVGImageElement} */
-  let imgRim;
-
-  const F_DB6 =
-    '<filter id="d-b6" filterUnits="userSpaceOnUse" x="-40" y="-40" width="1680" height="1080"><feGaussianBlur stdDeviation="6"/></filter>';
-  const F_DB14 =
-    '<filter id="d-b14" filterUnits="userSpaceOnUse" x="-70" y="-70" width="1740" height="1140"><feGaussianBlur stdDeviation="14"/></filter>';
-  const F_DB24 =
-    '<filter id="d-b24" filterUnits="userSpaceOnUse" x="-100" y="-100" width="1800" height="1200"><feGaussianBlur stdDeviation="24"/></filter>';
-  const G_DGLOW =
-    '<radialGradient id="d-glow" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#e08a3c" stop-opacity=".34"/><stop offset="55%" stop-color="#a2492a" stop-opacity=".12"/><stop offset="100%" stop-opacity="0"/></radialGradient>';
-  const G_DBELT =
-    '<radialGradient id="d-belt" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#d98fae" stop-opacity=".2"/><stop offset="100%" stop-opacity="0"/></radialGradient>';
-  const G_DRIM =
-    '<linearGradient id="d-rim" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#f0a35a"/><stop offset="100%" stop-color="#7a2c18"/></linearGradient>';
-
-  /* Verbatim shape markup per group, plus only the defs that group needs.
-     class= stays off the raster body — opacity/blend/animation are
-     display-time CSS applied to the live <image> below, not baked in. */
-  const GROUPS = {
-    glow: {
-      defs: F_DB24 + G_DGLOW,
-      body: '<ellipse cx="800" cy="960" rx="900" ry="300" fill="url(#d-glow)" filter="url(#d-b24)"/>',
-    },
-    belt: {
-      defs: F_DB24 + G_DBELT,
-      body: '<ellipse cx="800" cy="700" rx="1000" ry="180" fill="url(#d-belt)" filter="url(#d-b24)"/>',
-    },
-    afterglow: {
-      defs: F_DB24 + F_DB14 + F_DB6,
-      body:
-        '<circle cx="800" cy="3920" r="3086" fill="none" stroke="#5e2418" stroke-opacity=".12" stroke-width="130" filter="url(#d-b24)"/>' +
-        '<circle cx="800" cy="3920" r="3038" fill="none" stroke="#c2571f" stroke-opacity=".2" stroke-width="60" filter="url(#d-b24)"/>' +
-        '<circle cx="800" cy="3920" r="3014" fill="none" stroke="#e08a3c" stroke-opacity=".26" stroke-width="20" filter="url(#d-b14)"/>' +
-        '<circle cx="800" cy="3920" r="3004" fill="none" stroke="#ffd9a0" stroke-opacity=".3" stroke-width="5" filter="url(#d-b6)"/>',
-    },
-    rim: {
-      defs: F_DB6 + G_DRIM,
-      body:
-        '<circle cx="800" cy="3920" r="3000" fill="none" stroke="url(#d-rim)"' +
-        ' stroke-width="5" stroke-opacity=".28" filter="url(#d-b6)"/>',
-    },
-  };
-
-  /**
-   * @param {string} defs
-   * @param {string} body
-   * @param {number} w
-   * @param {number} h
-   */
-  function frame(defs, body, w, h) {
-    return (
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 1600 1000">` +
-      `<defs>${defs}</defs>${body}</svg>`
-    );
-  }
 
   onMount(() => {
     let cancelled = false;
-    /** @type {ReturnType<typeof setTimeout>} */
-    let timer;
-
-    async function build() {
-      const rect = world.getBoundingClientRect();
-      if (!rect.width || !rect.height) return;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const scale = Math.max(rect.width / 1600, rect.height / 1000) * dpr;
-      const w = Math.max(1, Math.round(1600 * scale));
-      const h = Math.max(1, Math.round(1000 * scale));
-
-      world.dataset.rasterised = "pending";
-      const built = await Promise.all(
-        Object.entries(GROUPS).map(async ([name, { defs, body }]) => {
-          const key = `dusk-${name}|${w}|${h}`;
-          const url = await rasteriseSvg(key, frame(defs, body, w, h), w, h);
-          return [name, url];
-        }),
-      );
-      if (cancelled) return;
-
-      const targets = { glow: imgGlow, belt: imgBelt, afterglow: imgAfterglow, rim: imgRim };
-      for (const [name, url] of built) targets[/** @type {keyof typeof targets} */ (name)]?.setAttribute("href", url);
-      world.dataset.rasterised = "ready";
-    }
-
-    function onResize() {
-      clearTimeout(timer);
-      timer = setTimeout(build, 120);
-    }
-
-    build();
-    window.addEventListener("resize", onResize);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-      window.removeEventListener("resize", onResize);
-    };
+    world.dataset.rasterised = "pending";
+    const images = /** @type {SVGImageElement[]} */ ([...world.querySelectorAll("image[data-href]")]);
+    /** @param {SVGImageElement} im */
+    const arrive = (im) => new Promise((resolve) => {
+      im.addEventListener("load", resolve, { once: true });
+      im.addEventListener("error", resolve, { once: true });
+      im.setAttribute("href", /** @type {string} */ (im.dataset.href));
+    });
+    const frame = requestAnimationFrame(() => {
+      Promise.all(images.map(arrive)).then(() => { if (!cancelled) world.dataset.rasterised = "ready"; });
+    });
+    return () => { cancelled = true; cancelAnimationFrame(frame); };
   });
 </script>
 
@@ -168,11 +75,10 @@
       {/each}
     </g><use href="#dk-near" x="1600"/></g>
   </svg></div>
-  <div class="world" aria-hidden="true" bind:this={world}><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <div class="world" aria-hidden="true" bind:this={world}><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMax slice">
     <defs>
-      <!-- d-rim stays live: the CRISP rim circle below (no filter) still
-           reads it. Its blurred sibling is rasterised (#501, GROUPS.rim)
-           and carries its own copy inside the offscreen SVG. -->
+      <!-- d-rim: the crisp rim circle below; its blurred sibling is a
+           picture (glow-rim.webp) -->
       <linearGradient id="d-rim" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="#f0a35a"/><stop offset="100%" stop-color="#7a2c18"/>
       </linearGradient>
@@ -185,33 +91,27 @@
         <stop offset="91%" stop-color="#a2492a" stop-opacity=".22"/>
         <stop offset="100%" stop-color="#c2571f" stop-opacity=".22"/>
       </linearGradient>
-      <!-- "d-glow" and "d-belt" no longer live here: their only users are
-           rasterised (#501, GROUPS.glow / GROUPS.belt) and each carries its
-           own copy of its gradient. -->
-      <!-- #498 pinned d-b6/d-b14/d-b24 to a userSpaceOnUse region matching
-           the viewBox — #501 rasterises every element that referenced them
-           (d-glow, .belt, .afterglow's four rings, the blurred half of the
-           rim) and removes the live defs entirely: each raster carries its
-           own copy of whichever of these three it needs (GROUPS above). -->
+      <!-- the glow, the belt, the afterglow and the blurred rim are pictures
+           (static/flight/dusk/), drawn from their own gradients and blurs -->
     </defs>
     <rect x="0" y="0" width="1600" height="1000" fill="url(#d-wash)"/>
-    <!-- #501: rasterised (GROUPS.glow). -->
-    <image bind:this={imgGlow} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
-    <!-- #501: rasterised (GROUPS.belt); class stays here since .belt's
+    <!-- #501: a picture (glow-glow.webp). -->
+    <image data-href="/flight/dusk/glow-glow.webp" x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
+    <!-- #501: a picture (glow-belt.webp); class stays here since .belt's
          opacity/blend animation is display-time CSS, not baked in. -->
-    <image class="belt" bind:this={imgBelt} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
+    <image class="belt" data-href="/flight/dusk/glow-belt.webp" x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
     <!-- afterglow hugging the limb: no white core, the sun is already under.
          It breathes, as the dawn's scattering does — slower and cooler.
-         #501: rasterised as one image (GROUPS.afterglow) so .afterglow's own
+         #501: a picture as one image (glow-afterglow.webp) so .afterglow's own
          breathe-ember animation still applies to the whole ring stack. -->
     <g class="afterglow">
-      <image bind:this={imgAfterglow} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
+      <image data-href="/flight/dusk/glow-afterglow.webp" x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
     </g>
     <circle cx="800" cy="3920" r="3000" fill="#03050b"/>
-    <!-- #501: rasterised (GROUPS.rim) — the blurred half of the rim. No
+    <!-- #501: a picture (glow-rim.webp) — the blurred half of the rim. No
          class here, matching the original: unlike Dawn's rim this one never
          had a fade-in transition. -->
-    <image bind:this={imgRim} x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
+    <image data-href="/flight/dusk/glow-rim.webp" x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
     <circle cx="800" cy="3920" r="3000" fill="none" stroke="url(#d-rim)"
             stroke-width="1.8" stroke-opacity=".6"/>
     <!-- the dawn's travelling shimmer, cooled to an ember and running the
