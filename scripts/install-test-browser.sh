@@ -30,4 +30,12 @@ node node_modules/@playwright/test/cli.js install firefox
 # #1192: desktop-webkit and mobile-webkit (tests/e2e/playwright.config.ts) need
 # Playwright's own WebKit build the same way; WebKit has no headless-shell
 # variant either.
-node node_modules/@playwright/test/cli.js install webkit
+# #1235: scripts/test-e2e-local.sh runs WebKit inside CI's Playwright image,
+# whose WebKit is already there, and sets this so the host download -- which
+# on a host without WebKit's system libraries only prints a warning -- is
+# skipped. Default on: anything else calling this script still gets WebKit.
+if [[ "${ORBIT_E2E_SKIP_WEBKIT_DOWNLOAD:-0}" == 1 ]]; then
+  echo "install-test-browser: skipping WebKit; the run uses CI's Playwright image (#1235)"
+else
+  node node_modules/@playwright/test/cli.js install webkit
+fi
