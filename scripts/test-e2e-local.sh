@@ -574,8 +574,15 @@ else
     chmod 600 .orbit-secrets/oidc-client-secret
   fi
 
+  # dev-greenmail-cert.sh signs for 30 days. Past that, Orbit refuses the
+  # sidecar's certificate, every mail step fails with "no mail arrived", and
+  # nothing says why -- the stack passed its health check. So an expired or
+  # nearly expired CA is regenerated the same as a missing one (#1236).
   if [[ ! -f .orbit-secrets/greenmail.p12 || ! -f .orbit-secrets/greenmail-ca.pem || ! -f .orbit-secrets/greenmail-key.pem ]]; then
     log "generating GreenMail TLS material (missing from .orbit-secrets/)"
+    bash scripts/dev-greenmail-cert.sh
+  elif ! openssl x509 -in .orbit-secrets/greenmail-ca.pem -noout -checkend 86400 >/dev/null 2>&1; then
+    log "regenerating GreenMail TLS material (.orbit-secrets/greenmail-ca.pem has expired or expires within a day)"
     bash scripts/dev-greenmail-cert.sh
   fi
   for required in .orbit-secrets/greenmail.p12 .orbit-secrets/greenmail-ca.pem; do
