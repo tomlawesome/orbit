@@ -326,7 +326,10 @@
           b.classList.add("showwarp");
           activeEngine().start(downProfile(), pinned === undefined
             ? {} : { at: Math.min(Math.max(0, pinned - D.warp), DOWN.dur) });
-          clock.stalls(activeEngine().drawingWorld);
+          /* #1262: no stall cap here. The reader is already signed out and
+             the dusk is owed on time, so the descent keeps real time as it
+             did on dev, and a slow frame is a dropped frame, never a later
+             farewell (descend() clears the climb's cap). */
           break;
         /* The mockup drops `descending` here because its home frame has a
            hidden base state to fall back to; a real screen does not, so the
@@ -413,6 +416,9 @@
    */
   export function descend({ at } = {}) {
     cancelTimeline();
+    /* #1262: the climb's warp left the stall cap on (ascentStep); the descent
+       keeps real time, or a slowly drawn world stretches it out of reach */
+    clock.stalls(false);
     subtitleText = "signing out";
     const pinned = typeof at === "number";
     if (pinned) body().classList.add("pinned");
