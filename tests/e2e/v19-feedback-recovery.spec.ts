@@ -72,6 +72,8 @@ type Journey = {
    *  both tests expect-fail on it ahead of their own defect. */
   announceDefect?: () => string | undefined;
   focusDefect?: () => string | undefined;
+  /** A reason the focus check cannot report either way on this project (#1233). */
+  focusFixme?: () => string | undefined;
 };
 
 /* #1233 (#1196, #1219): every journey here stages its failure with a
@@ -127,9 +129,10 @@ const createOffline: Journey = {
   name: "a save on /create that cannot reach Orbit",
   /* The desk shows the browser's own error words (create.behaviour.js
      saveProblem), which differ by engine: Chromium's "Failed to fetch",
-     Firefox's "NetworkError when attempting to fetch resource." (#1183);
-     the pocket prefixes "not saved". */
-  words: /^not saved|Failed to fetch|NetworkError when attempting to fetch resource/,
+     Firefox's "NetworkError when attempting to fetch resource." (#1183),
+     WebKit's "Load failed" (#1233: unseen until the #1196 fixme came off,
+     pipeline 2205); the pocket prefixes "not saved". */
+  words: /^not saved|Failed to fetch|NetworkError when attempting to fetch resource|Load failed/,
   fire: async (page) => {
     const name = `Offline proving ${randomUUID().slice(0, 8)}`;
     await gotoCreate(page);
@@ -239,7 +242,15 @@ const itemViewApproval: Journey = {
       await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 });
     };
   },
+  /* #1233: desktop WebKit kept focus on the amend card's button (pipeline
+     2205, "Expected to fail, but passed", the first run with the #1196 fixme
+     off), as it keeps it on the create card (#1192) -- and the create card's
+     check on desktop-webkit then raced (#1219). One observation is not a
+     certainty either way, so on desktop-webkit this check is fixme, as the
+     create card's document check is below; the phone and the other engines
+     keep their marks. */
   focusDefect: () => FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket suggestion card's Add to orbit" : "the desk amend card's accept into orbit"),
+  focusFixme: () => test.info().project.name === "desktop-webkit" ? FOCUS_DEFECT_RACES_ON_DESKTOP_WEBKIT : undefined,
 };
 
 const inboxApproval: Journey = {
@@ -357,6 +368,7 @@ for (const journey of JOURNEYS) {
 
   test(`${journey.name} leaves focus where the reader was`, async ({ page }) => {
     const defect = journey.focusDefect?.();
+    test.fixme(Boolean(journey.focusFixme?.()), journey.focusFixme?.());
     test.fixme(Boolean(defect) && isFirefox(), FOCUS_DEFECT_RACES_ON_FIREFOX);
     test.fail(Boolean(defect), defect);
     test.setTimeout(90_000);
