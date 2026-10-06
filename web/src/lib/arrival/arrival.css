@@ -1,9 +1,9 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   THE ARRIVAL (#410, §15) — the create-system card and the newcomer's landing.
+   THE ARRIVAL (#410, §15) — the newcomer's landing and its create drawer.
 
-   Verbatim from design/v19/first-run.html: block 2 (the card, third and fourth
-   pass) and block 4c (the newcomer's labelled sky, its boxless count and its
-   question). The flight itself, the dawn, the lockup, the mark and the name on
+   Verbatim from design/v19/first-run.html block 4c (the newcomer's labelled
+   sky, its boxless count and its question); the create questions stand in
+   the question's "name your own system" drawer since #1263. The flight itself, the dawn, the lockup, the mark and the name on
    the void are flight.css's and are not repeated here.
 
    Loaded only by the front door's arrival, so nothing in it can reach the
@@ -21,71 +21,11 @@
    files is emitted first — which is what keeps this card's fidelity baseline
    byte-identical across the lift. */
 
-/* THE RECLAIM. On submit the orbit logo and wordmark come back — the launch
-   takes the login screen back before it flies it — and from that moment the
-   ratified intro runs unchanged. The one and only difference: the identity
-   provider button never returns. We are already through it. */
-body.reclaimed #dawn .gate-wrap{display:none}
-/* the reclaim comes in faster than the chrome's ordinary .8s so that the
-   lockup is fully up and the card is fully gone before the ascent starts: the
-   frame the flight lifts off is the login screen, not a dissolve of two things
-   at once. */
-body.reclaimed #dawn .loginchrome{transition:opacity .5s ease,visibility .5s}
-
-/* ══ THE CREATE-SYSTEM CARD ═══════════════════════════════════════════════
-   THIRD PASS (owner, §15, verbatim): "First run, fails at the card,
-   seriously, you need to look at how stuffed full this looks. Can barely see
-   all the good work you did on the sunrise."
-
-   So the card is three fields, a button and air. Gone: the header band and its
-   mark lockup, the headline, the lede, the two explainers, the button-side
-   caption. One quiet mono line survives, because it is the only sentence that
-   admits to something the reader did not ask for.
-
-   And it sits HIGH — see `#formlayer` in $lib/ringcard.css, which draws the
-   layer the card stands on for this screen and for the door's alike. */
-body.showform.grounded #formlayer{animation:settleback .85s cubic-bezier(.2,.9,.3,1)}
-/* errors keep you grounded: the climb starts, catches, and sets back down */
-@keyframes settleback{0%{transform:translateY(0)}22%{transform:translateY(-13px)}
-                      58%{transform:translateY(4px)}100%{transform:translateY(0)}}
-
-/* THE RING ITSELF — `.bigring`, its glass and its orb — is
-   $lib/ringcard.css's (#914). What stays here is the create path's own
-   hand-over, which no other card has. */
-
-/* THE HAND-OVER. On create the circle closes to exactly the login ring's
-   302.4px, in its place, and the glass clears as it goes — the ring holds
-   full strength while it closes and clears in .16s once it has arrived, and
-   the reclaimed login chrome (flight.css/arrival.css) is held back to meet
-   it there. Both land before the ascent starts at 620ms, so the ratified
-   launch runs unchanged.
-
-   THREE BOXES CLOSE, NOT ONE (#873). Same 500ms, same easing, same landing
-   diameter; what changed is who does the work. The blurred glass closes by
-   `transform: scale(.6048)` — 302.4/500 — so the compositor scales one
-   already-painted layer instead of the engine re-laying-out and re-blurring
-   it every frame. The stroke and the orb carry no backdrop filter, so they
-   still close by width/height and the 4.2px line and the orb's station stay
-   exact. Geometry at rest, open and closed, is identical to what this rule
-   produced before the split. */
-body.reclaimed :where(.arrival) .bigring .ringglass{transform:scale(.6048);
-      background:rgba(7,11,24,0);
-      -webkit-backdrop-filter:blur(0px);backdrop-filter:blur(0px)}
-
-/* Desk only (#1175): on a phone the ring is already at the login ring's own
-   size, or 240px under 760px of visible height, and its stroke and orb are
-   100% of that box (door-phone.css) — a 302.4px stroke forced into a 240px
-   ring would spill out of it for the length of the hand-over. */
-@media (min-width:901px) and (min-height:601px){
-  body.reclaimed :where(.arrival) .bigring .ringstroke{width:302.4px;height:302.4px}
-
-  body.reclaimed :where(.arrival) .bigring .ringorbit{width:302.4px;height:302.4px}
-}
-
-/* `reclaimed` is the create path's hand-over beat and `igniting` is the
-   flight's own: the card leaves on the same curve for both, so the pre-beat
-   runs straight into the ascent with nothing to see at the joint. */
-body.igniting :where(.arrival) .card,body.reclaimed :where(.arrival) .card{
+/* `igniting` is the flight's own beat: a door card on this page leaves on
+   this curve, so the pre-beat runs straight into the ascent with nothing to
+   see at the joint. (#1263 retired the create card's `reclaimed` hand-over,
+   its `grounded` settle-back and the ring's close: the arrival flies once.) */
+body.igniting :where(.arrival) .card{
       opacity:0;transform:translateY(16px) scale(.965);pointer-events:none}
 body.arming :where(.arrival) .card{border-color:var(--accent);
       box-shadow:0 26px 70px -34px rgba(0,0,0,.62),0 0 0 1px var(--accent) inset,
@@ -99,14 +39,18 @@ body.arming :where(.arrival) .card{border-color:var(--accent);
    by any pack, so no per-pack line is needed here at all. Atlas is gone
    (#865); clouds never carried this rule. */
 
-/* THE FIELDS, THE ONE COLUMN, THE NOTE, THE REFUSAL LINE AND THE ACT are
-   $lib/ringcard.css's (#914). The three rules below are this card's alone:
-   the name's display face, and the warm outline the create path's own
-   `body.rejected` beat puts on it. */
+/* THE FIELDS, THE NOTE, THE REFUSAL LINE AND THE ACT are $lib/ringcard.css's
+   (#914). The three rules below are the create form's alone: the name's
+   display face, and the warm outline its `body.rejected` beat puts on it. */
 #hhname{font:600 16.5px var(--display);padding:10px 13px}
 body.rejected .err{display:block;animation:errin .35s ease}
 body.rejected #hhname{border-color:var(--warm);
      box-shadow:0 0 0 1px color-mix(in srgb,var(--warm) 40%,transparent)}
+
+/* The door's own card layer stays off the arrival once it has left the door
+   (#1263; Arrival.svelte's `past-door`): a local-only instance's sign-in card
+   would otherwise stand over the newcomer's sky and intercept its drawer. */
+.arrival.past-door .ringcard{display:none}
 
 /* ══ THE NEWCOMER'S LANDING (§15 second pass, ruling 4) ═══════════════════
    A reader who belongs to nothing yet flies exactly the same launch and sets
@@ -208,6 +152,40 @@ body.belong .nf .belong{opacity:1}
 .nf .belong .own button:hover{text-decoration:underline}
 .nf .belong .own span{display:block;font:10px var(--mono);color:var(--ink-quiet);margin-top:7px}
 
+/* ── THE "NAME YOUR OWN SYSTEM" DRAWER (#1263) ────────────────────────────
+   The footer's button is the handle (aria-expanded); opening it drops the
+   create form in below, in this card's own type, the heading read and not
+   seen. The row list gives way (38vh -> 22vh) so Create stays in view, and
+   the card is capped at 80vh and scrolls. Opens by grid-template-rows
+   0fr -> 1fr over .3s, with no measured height. */
+.nf .belong.drawn{max-height:80vh;overflow:auto}
+.nf .belong.drawn ul{max-height:22vh}
+.nf .belong .drawer{display:grid;grid-template-rows:0fr;transition:grid-template-rows .3s ease}
+.nf .belong .drawer.open{grid-template-rows:1fr}
+.nf .belong .drawerin{min-height:0;overflow:hidden}
+.nf .belong .create{padding:2px 24px 20px}
+.nf .belong .create .asklabel{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+     overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.nf .belong .create .field label{color:var(--ink-mid)}
+.nf .belong .create .field input,.nf .belong .create .field select{background:var(--panel-raised)}
+.nf .belong .create .note{margin:-4px 0 0;text-align:center}
+.nf .belong .create .err{text-align:left}
+
+/* The phone (door-phone.css's own query and floor): fields 48px at 16px,
+   the handle 13px mono on a 44px hit area, nothing in the drawer under 12px. */
+@media (max-width: 900px), (max-height: 600px){
+  .nf .belong .own button{font-size:var(--p-type-meta,13px);min-height:var(--p-hit,44px);
+       padding:0 12px;display:inline-flex;align-items:center}
+  .nf .belong .own span{font-size:var(--p-type-caps,12px);margin-top:2px}
+  .nf .belong .create{padding:2px 18px 18px}
+  .nf .belong .create .field{margin-bottom:14px}
+  .nf .belong .create .field label{font-size:var(--p-type-caps,12px)}
+  .nf .belong .create .field input,.nf .belong .create .field select,.nf .belong .create #hhname{height:48px;
+       font-size:var(--p-type-body,16px);padding:0 14px;border-radius:10px}
+  .nf .belong .create .note,.nf .belong .create .err{font-size:var(--p-type-caps,12px)}
+  .nf .belong .create #gobtn{width:100%;min-height:var(--p-hit,44px);font-size:14px}
+}
+
 /* ══ PINNED ══════════════════════════════════════════════════════════════
    A fixture asks for one millisecond of the journey and then holds it still,
    so the transitions must not play out from where they were — they are the
@@ -234,4 +212,6 @@ body.pinned .nf .minisys,body.pinned .nf .nstar{animation:none!important;opacity
   .nf .belong{transform:translate(-50%,-50%)!important}
   /* the count still appears and yields, with no fade and no drift */
   .nf .disc{transition:none!important;transform:translate(-50%,-50%)!important}
+  /* the drawer opens with no transition (#1263) */
+  .nf .belong .drawer{transition:none!important}
 }

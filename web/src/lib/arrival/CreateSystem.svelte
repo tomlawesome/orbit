@@ -1,46 +1,23 @@
 <script>
-  import { onDestroy } from "svelte";
-  import { ringFocusIn, ringFocusOut, ringOpens } from "$lib/flight/ring-closes.js";
   import {
     CURRENCIES, TIME_ZONES, NAME_LIMIT,
     sectionNote, sectionNoteTitle,
   } from "./stage.js";
 
-  /* #1175: on a phone the ring closes while a field has focus, the way it
-     does for every card on the door (ring-closes.js); the class it raises
-     goes with this card. */
-  onDestroy(ringOpens);
-
   /**
-   * THE CREATE-SYSTEM CARD (#410, §15 — design/v19/first-run.html, block 2;
-   * #862 round 3 — design/v19/first-run-card/round-3/ring.html, "the ring
-   * holds the questions").
+   * THE CREATE FORM (#410, §15; #1263). Three questions and nothing else
+   * (§15, "first-run asks three things only"): a name, a time zone, a
+   * currency. The four default sections are applied by the server and
+   * admitted to in one quiet mono line, the refusal is one warm line under
+   * the name, and the act reads `Create` — one word (#862).
    *
-   * Three fields and a button, standing inside the login ring itself — no
-   * card of its own any more. No wordmark, no glyph, no identity-provider
-   * button, no footer: the login's own hero ring is enlarged to 500px behind
-   * this form (the host's `.bigring`) and IS the card, which is what the
-   * flight closes back to 302.4px on submit.
+   * Since #1263 it stands in the belong card's "name your own system" drawer
+   * (Newcomer.svelte), in that card's own type, and no longer in the login
+   * ring: the arrival flies once, and the ring-held card and its reclaim are
+   * superseded for the arrival (they stand on the door's own cards).
    *
-   * The card asks three things and nothing else (§15, "first-run asks three
-   * things only"): a name, a time zone, a currency, one column, values and
-   * labels centred on the ring's own axis. The four default sections are
-   * applied by the server and admitted to in one quiet mono line. The
-   * refusal is one warm line under the field it is about. The act reads
-   * `Create` — one word, the ratified gate rule verbatim (#862).
-   *
-   * This component is the form and only the form: the host owns the stage, the
-   * ring, the submit, the reclaim and the launch.
-   *
-   * THE DRAWING IS SHARED NOW, not copied (#914): the ring, this card, its
-   * fields, its note, its refusal line and its act live in
-   * `$lib/ringcard.css`, because the owner's 2026-09-09 composition ruling
-   * makes this same card the sign-in door's claim, sign-in, first-administrator
-   * and setup cards. Nothing about this one moved a pixel — arrival.css keeps
-   * `#hhname` and the create path's own `body.rejected` and `body.reclaimed`
-   * beats, and every one of those outranks its shared base on specificity, so
-   * the cascade cannot turn on which file a bundler emits first. The markup
-   * below is untouched by that lift.
+   * This component is the form and only the form: the host owns the answers,
+   * the refusal and the submit.
    */
   /**
    * @type {{
@@ -71,20 +48,14 @@
   const trimmed = $derived(name.trim());
 </script>
 
-<div id="formlayer">
-  <!-- THIRD PASS: three fields, a button, air. Everything that was prose is
-       either gone or moved to a title attribute — the household screen and
-       settings say all of it again, later, where it is actually needed. -->
-  <form class="card" aria-labelledby="createask"
-        onfocusin={ringFocusIn} onfocusout={ringFocusOut}
-        onsubmit={(event) => { event.preventDefault(); onsubmit(); }}>
-    <!-- THE RING HOLDS THE QUESTION (#1175, as door-phone.css puts it for
-         every card on the door): on a phone this heading stands at the
-         ring's centre, 22px in the display face; on the desk it is read and
-         not seen (`.asklabel`), exactly as Identity.svelte's is, since the
-         ratified card carries no visible heading. The same words the form's
-         label already said. -->
-    <h2 class="ask asklabel" id="createask">Name your first system</h2>
+<!-- THIRD PASS: three fields, a button, air. Everything that was prose is
+     either gone or moved to a title attribute — the household screen and
+     settings say all of it again, later, where it is actually needed. -->
+<form class="create" aria-labelledby="createask"
+      onsubmit={(event) => { event.preventDefault(); onsubmit(); }}>
+    <!-- Read and not seen (#1263: "heading hidden"): the drawer's handle
+         already says it. -->
+    <h2 class="asklabel" id="createask">Name your own system</h2>
     <div class="field">
       <label for="hhname">name</label>
       <input id="hhname" placeholder="Your world" maxlength={NAME_LIMIT} autocomplete="off"
@@ -131,5 +102,4 @@
          whitespace inside the button: the label is centred, and a collapsed
          newline either side of it moves the word off the mockup's own pixels. -->
     <button class="btn act" id="gobtn" type="submit" disabled={!trimmed || busy}>Create</button>
-  </form>
-</div>
+</form>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  ASKING, CREATE, DOOR, INVITED, NEWCOMER, ONWARD,
+  ASKING, DOOR, INVITED, NEWCOMER, ONWARD,
   CURRENCIES, DEFAULT_SECTIONS, NAME_LIMIT, TIME_ZONES,
   arrivalStageOf, belongRowsOf, collidingHouseholdOf,
   createSystemCommand, discoveredCountOf, isInvitedLanding, preferredCurrency, preferredTimeZone,
@@ -12,8 +12,9 @@ import {
 } from "$lib/flight/timeline.js";
 import { NEWCOMER_FAR, NEWCOMER_NEAR } from "$lib/flight/starfields.js";
 import { labelledSkyOf } from "$lib/data/chart.js";
+import * as STAGES from "$lib/arrival/stage.js";
 import {
-  CREATE_ARRIVAL_FIXTURE, NEWCOMER_ARRIVAL_FIXTURE,
+  ARRIVAL_FIXTURES, NEWCOMER_ARRIVAL_FIXTURE,
 } from "$lib/data/fixtures/arrival.js";
 
 /*
@@ -36,9 +37,15 @@ describe("which surface an arrival lands on", () => {
     })).toBe(ONWARD);
   });
 
-  it("gives the first admin the create card: no households anywhere", () => {
-    expect(arrivalStageOf({ households: [], visibleHouseholds: [] })).toBe(CREATE);
-    expect(arrivalStageOf(CREATE_ARRIVAL_FIXTURE)).toBe(CREATE);
+  it("gives the first admin the newcomer's arrival too: no households anywhere (#1263)", () => {
+    /* one flight per arrival: the create questions are the belong card's
+       drawer, so an empty instance lands on the same stage */
+    expect(arrivalStageOf({ households: [], visibleHouseholds: [] })).toBe(NEWCOMER);
+  });
+
+  it("has retired the create stage altogether (#1263)", () => {
+    expect("CREATE" in STAGES).toBe(false);
+    expect(Object.keys(ARRIVAL_FIXTURES)).toEqual(["newcomer"]);
   });
 
   it("gives a newcomer the newcomer's arrival: none of theirs, some out there", () => {
@@ -57,7 +64,7 @@ describe("which surface an arrival lands on", () => {
   });
 
   it("treats a workspace with the fields missing as the empty instance it is", () => {
-    expect(arrivalStageOf({})).toBe(CREATE);
+    expect(arrivalStageOf({})).toBe(NEWCOMER);
   });
 });
 
@@ -87,7 +94,7 @@ describe("the invited landing, told apart from an ordinary return (#871)", () =>
 
   it("is its own stage, not one arrivalStageOf's workspace read could ever answer", () => {
     expect(INVITED).toBe("invited");
-    expect(new Set([DOOR, ASKING, CREATE, NEWCOMER, ONWARD, INVITED]).size).toBe(6);
+    expect(new Set([DOOR, ASKING, NEWCOMER, ONWARD, INVITED]).size).toBe(5);
   });
 });
 
@@ -338,8 +345,8 @@ describe("the newcomer's starfield", () => {
 });
 
 describe("the arrival's fixtures are the states the workspace fixture cannot be in", () => {
-  it("has no households of its own on either", () => {
-    for (const fixture of [CREATE_ARRIVAL_FIXTURE, NEWCOMER_ARRIVAL_FIXTURE]) {
+  it("has no households of its own on any", () => {
+    for (const fixture of Object.values(ARRIVAL_FIXTURES)) {
       expect(fixture.households).toEqual([]);
       expect(fixture.householdLanding).toBe("choose");
       expect(fixture.activeHouseholdId).toBeNull();

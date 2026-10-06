@@ -26,7 +26,7 @@ describe("#1151 W1-Q1: Newcomer's create button reuses NorthStarMark", () => {
   });
 
   it("the nstar button renders it, same shape as home/+page.svelte and pocket/NorthStar.svelte", () => {
-    expect(NEWCOMER).toMatch(/<button class="nstar" type="button" onclick=\{oncreate\}>\s*\n\s*<NorthStarMark \/>\s*\n\s*<span>create<\/span>/u);
+    expect(NEWCOMER).toMatch(/<button class="nstar" type="button" onclick=\{openDrawer\}>\s*\n\s*<NorthStarMark \/>\s*\n\s*<span>create<\/span>/u);
   });
 
   it("no longer inlines the glint's own path data", () => {

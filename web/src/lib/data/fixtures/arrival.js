@@ -1,10 +1,9 @@
 /**
  * THE ARRIVAL'S FIXTURES (#410, §15).
  *
- * The two states the arrival can be in are states the workspace fixture cannot
- * be in — it has households, and both of these have none — so the harness
- * carries its own pair, in the shape `GET /api/workspace` really answers with
- * on the choose branch (§11, #453: `householdLanding: "choose"`, `households`
+ * The newcomer's arrival is a state the workspace fixture cannot be in — it
+ * has households, and this has none — so the harness carries its own, in the
+ * shape `GET /api/workspace` really answers with on the choose branch (§11, #453: `householdLanding: "choose"`, `households`
  * empty, `visibleHouseholds` the whole instance).
  *
  * DETERMINISTIC BY CONSTRUCTION. The ids are fixed, so `constellationPosOf`
@@ -17,16 +16,6 @@
  *
  * Reachable only through the fixture flag: see the front door's +page.server.js.
  */
-
-/** The first admin: nothing of theirs, and nothing out there either. */
-export const CREATE_ARRIVAL_FIXTURE = {
-  version: 1,
-  householdLanding: "choose",
-  activeHouseholdId: null,
-  households: [],
-  recoverableHouseholds: [],
-  visibleHouseholds: [],
-};
 
 /** The newcomer: nothing of theirs, five systems out there. */
 export const NEWCOMER_ARRIVAL_FIXTURE = {
@@ -44,7 +33,8 @@ export const NEWCOMER_ARRIVAL_FIXTURE = {
   ],
 };
 
+/* #1263: no `create` fixture any more. The create questions are the belong
+   card's drawer, photographed as `?arrival=newcomer&drawer=1`. */
 export const ARRIVAL_FIXTURES = {
-  create: CREATE_ARRIVAL_FIXTURE,
   newcomer: NEWCOMER_ARRIVAL_FIXTURE,
 };

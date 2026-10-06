@@ -1,6 +1,7 @@
 <script>
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import NorthStarMark from "$lib/NorthStarMark.svelte";
+  import CreateSystem from "./CreateSystem.svelte";
   import { NEWCOMER_FAR, NEWCOMER_NEAR } from "$lib/flight/starfields.js";
   import { belongRowsOf, discoveredCountOf, WAITING_APPROVAL_NOTE } from "./stage.js";
   /*
@@ -32,8 +33,16 @@
    *   galaxy?: Record<string, import('$lib/data/chart.js').GalaxyEntry>,
    *   visibleHouseholds?: Array<{ id: string, name: string, requested?: boolean }>,
    *   onask?: (row: { id: string, name: string, requested?: boolean }) => void,
-   *   oncreate?: import('svelte/elements').MouseEventHandler<HTMLButtonElement>,
+   *   oncreate?: () => void,
    *   showChooser?: boolean,
+   *   drawerOpen?: boolean,
+   *   name?: string,
+   *   timezone?: string,
+   *   currency?: string,
+   *   rejected?: { name: string, reason: string, householdId?: string | null } | null,
+   *   busy?: boolean,
+   *   onsubmit?: () => void,
+   *   onnaming?: import('svelte/elements').FormEventHandler<HTMLInputElement>,
    * }}
    */
   let {
@@ -52,7 +61,54 @@
      * nothing here to reveal even if it did.
      */
     showChooser = true,
+    /*
+     * THE "NAME YOUR OWN SYSTEM" DRAWER (#1263). The pattern is
+     * administration's "new system" toggle: a button with `aria-expanded`
+     * and an `{#if}` of fields below it. The host opens it from the start on
+     * an empty instance; the answers, the refusal and the submit are the
+     * host's, so closing the drawer keeps them.
+     */
+    drawerOpen = $bindable(false),
+    name = $bindable(""),
+    timezone = $bindable(undefined),
+    currency = $bindable(undefined),
+    rejected = null,
+    busy = false,
+    onsubmit = () => {},
+    onnaming = () => {},
   } = $props();
+
+  /** The handle, and the north star's "create": both open the same drawer. */
+  function toggleDrawer() {
+    drawerOpen = !drawerOpen;
+    if (drawerOpen) oncreate();
+  }
+  async function openDrawer() {
+    drawerOpen = true;
+    oncreate();
+    await tick();
+    /** @type {HTMLInputElement | null} */ (document.getElementById("hhname"))?.focus();
+  }
+
+  /**
+   * "ask to join it →" under a refused name: the drawer closes and the row
+   * that holds the name takes focus. The request is NOT filed on the
+   * reader's behalf — asking to join is theirs to do.
+   * @param {{ householdId?: string | null }} refusal
+   */
+  async function askFromDrawer(refusal) {
+    drawerOpen = false;
+    await tick();
+    const id = refusal?.householdId;
+    if (!id) return;
+    /* the row's own button when it can still be pressed; a row already
+       waiting has a disabled one, so the row itself takes focus instead */
+    const row = /** @type {HTMLLIElement | null} */ (
+      document.querySelector(`.nf .belong li[data-id="${CSS.escape(id)}"]`));
+    const button = row?.querySelector("button");
+    if (button && !button.disabled) button.focus();
+    else row?.focus();
+  }
 
   /** @type {HTMLDivElement | null} */
   let hero = null;
@@ -171,7 +227,7 @@
   <!-- The north star, labelled as home labels it. On a sky with no household in
        it, the thing there is to create is a SYSTEM, so it opens the same three
        questions the card at the foot offers. -->
-  <button class="nstar" type="button" onclick={oncreate}>
+  <button class="nstar" type="button" onclick={openDrawer}>
     <NorthStarMark />
     <span>create</span>
   </button>
@@ -199,20 +255,25 @@
     {/each}
   </div>
   <!-- the count: a beat between the settled sky and the question. No box, no
-       border, no panel — the number and the words on the sky itself. -->
+       border, no panel — the number and the words on the sky itself. Not
+       drawn on an empty instance (#1263, owner 2026-10-06): there is nothing
+       to count, and the card lands straight away instead. -->
+  {#if discovered.count > 0}
   <div class="disc" aria-hidden="true">
     <div class="big">{discovered.count}</div>
     <p><b>{discovered.word}</b> discovered in this universe</p>
   </div>
+  {/if}
   {#if showChooser}
-  <div class="belong" role="group" aria-label="Where do you belong?">
+  <div class="belong" class:drawn={drawerOpen} role="group" aria-label="Where do you belong?">
     <div class="top">
       <h2>where do you belong?</h2>
       <p>the systems around you are labels until someone lets you in</p>
     </div>
+    {#if rows.length > 0}
     <ul>
       {#each rows as row (row.id)}
-        <li class:waiting={row.requested}>
+        <li class:waiting={row.requested} data-id={row.id} tabindex="-1">
           <button type="button" disabled={row.requested}
                   onclick={() => onask(row)}
                   aria-label={row.requested ? `Waiting to join ${row.name}` : `Request to join ${row.name}`}>
@@ -234,9 +295,22 @@
         </li>
       {/each}
     </ul>
+    {/if}
     <div class="own">
-      <button type="button" onclick={oncreate}>or name your own system →</button>
+      <button type="button" aria-expanded={drawerOpen} aria-controls="own-drawer"
+              onclick={toggleDrawer}>name your own system</button>
       <span>a name, a time zone, a currency — same three questions</span>
+    </div>
+    <!-- 0fr -> 1fr on grid-template-rows (arrival.css), so the drawer opens
+         by height without a measured one; the fields themselves come and go
+         with `{#if}`, the administration toggle's own pattern. -->
+    <div class="drawer" id="own-drawer" class:open={drawerOpen}>
+      <div class="drawerin">
+        {#if drawerOpen}
+          <CreateSystem bind:name bind:timezone bind:currency {rejected} {busy}
+                        {onsubmit} {onnaming} onask={askFromDrawer} />
+        {/if}
+      </div>
     </div>
   </div>
   {/if}
