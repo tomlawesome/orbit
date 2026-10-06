@@ -783,7 +783,8 @@ playwright_cmd=(node node_modules/@playwright/test/cli.js test --config tests/e2
 #     rewrites the host's node_modules (environment skill, 2026-08-24).
 # in_image was decided above, before the browser download.
 if [[ "$in_image" == 1 ]]; then
-  playwright_image="$(sed -n 's/^  PLAYWRIGHT_IMAGE: *//p' .gitlab-ci.yml | head -n1)"
+  # grep -m1, not `| head` (scripts/acceptance-sigpipe-safety.test.mjs, #809).
+  playwright_image="$(grep -m1 '^  PLAYWRIGHT_IMAGE: ' .gitlab-ci.yml | sed 's/^  PLAYWRIGHT_IMAGE: *//')"
   [[ -n "$playwright_image" ]] || fail "could not read PLAYWRIGHT_IMAGE from .gitlab-ci.yml; the WebKit run needs CI's Playwright image."
   docker_cli="$(command -v docker)"
   compose_plugin="$(docker info --format '{{range .ClientInfo.Plugins}}{{if eq .Name "compose"}}{{.Path}}{{end}}{{end}}')"
