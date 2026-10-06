@@ -258,6 +258,15 @@ body.lit[data-state="starting"] #dawn .dawnlayer{opacity:.45;
       animation:dawnswell 6s ease-in-out infinite alternate}
 body.lit[data-state="starting"] #dawn .sunpt{opacity:.6}
 @keyframes dawnswell{from{opacity:.32}to{opacity:.62}}
+/* the Earth's sunrise is lit by `body.lit` too, so it is held with the sky
+   (#1253 ruling 2); release rides its own 4.5s transition, so recovery is
+   still a sunrise. The night side (`.pre`) stays fully in. */
+body.lit[data-state="unconfigured"] #dawn .earth .up.in,
+body.lit[data-state="failed"] #dawn .earth .up.in,
+body.lit[data-state="incomplete"] #dawn .earth .up.in,
+body.lit[data-state="refused"] #dawn .earth .up.in{opacity:.35}
+body.lit[data-state="starting"] #dawn .earth .up.in{opacity:.45;
+      animation:dawnswell 6s ease-in-out infinite alternate}
 /* ready: no override left standing — the sky simply continues on toward
    `body.lit .dawnlayer{opacity:1}` etc. above, so recovery is the ordinary
    first-light transition finishing what it started. */
