@@ -1,10 +1,10 @@
 <script>
   import { onMount, tick } from "svelte";
   import { browser } from "$app/environment";
-  import { afterNavigate, pushState, replaceState } from "$app/navigation";
+  import { afterNavigate, goto, pushState, replaceState } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { mountEmptySky, mountHome } from "./home.behaviour.js";
+  import { mountAccount, mountEmptySky, mountHome } from "./home.behaviour.js";
   import Flight from "$lib/flight/Flight.svelte";
   import Dawn from "$lib/flight/Dawn.svelte";
   import Dusk from "$lib/flight/Dusk.svelte";
@@ -12,15 +12,20 @@
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { approveReceipt, dismissReceipt, readHome, readItem, requestToJoin, signOut } from "$lib/data/workspace.js";
+  import { applyCommand, approveReceipt, dismissReceipt, readHome, readItem, readItemDocuments, requestToJoin, signOut } from "$lib/data/workspace.js";
+  import { completeCommand, nextDateAfter } from "$lib/data/commands.js";
+  import { createArm } from "$lib/pocket/arm.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
-  import { money } from "$lib/format.js";
+  import { ago, agoLong, money } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
-  import { mountPocket } from "./pocket.behaviour.js";
+  import { readSearchDocuments, searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
   import { tlabel } from "./bands.js";
+  import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
   import CorridorRow from "./CorridorRow.svelte";
+  import NorthStarMark from "$lib/NorthStarMark.svelte";
+  import { watchTour } from "$lib/tour/watch.js";
   import "./home.css";
 
   /**
@@ -52,6 +57,39 @@
   /** @type {HomeView | null} */
   // svelte-ignore state_referenced_locally
   let view = $state(data?.view ?? null);
+  /** The onMount re-read's own failure (#1151 W1-R4): null while that read
+      has not failed, or has not been tried yet. */
+  /** @type {string | null} */
+  let homeLoadProblem = $state(null);
+  /* The system-status drawer's real data (#863), read server-side alongside
+     `view` (see +page.server.js). Null only when that read failed; the
+     drawer then shows no service rows rather than the fake, always-degraded
+     markup it used to carry. */
+  /** @type {import('orbit/server/system-status').SystemStatus | null} */
+  // svelte-ignore state_referenced_locally
+  let systemStatus = $state(data?.systemStatus ?? null);
+  /* The handle's colour is CSS, keyed off this body class exactly as the
+     mockup's own demo toggle was (design/v19/home.html) -- only now driven by
+     the real word instead of a fixed one. Effect, not onMount: it has to
+     react to a later `systemStatus` (a retry after a failed first read), and
+     its own cleanup is what stops a stale colour riding to the next screen. */
+  $effect(() => {
+    document.body.classList.toggle("health-degraded", systemStatus?.handle === "degraded");
+    return () => document.body.classList.remove("health-degraded");
+  });
+  /** Every word the drawer draws maps to one of three dot colours; anything unrecognised reads as unknown, not healthy. */
+  /** @type {Record<string, string>} */
+  const STATUS_DOT = {
+    healthy: "var(--ok)", ready: "var(--ok)", maintenance: "var(--ok)",
+    unreachable: "var(--degraded)", failed: "var(--degraded)", degraded: "var(--degraded)",
+    starting: "var(--ink-faint)", not_enabled: "var(--ink-faint)", disabled: "var(--ink-faint)",
+  };
+  /** @param {string} word */
+  const statusDot = (word) => STATUS_DOT[word] ?? "var(--ink-faint)";
+  /** @param {string} word */
+  const statusWord = (word) => (word === "not_enabled" ? "not enabled" : word);
+  /** @param {{observedAt?: string}} row */
+  const observedLabel = (row) => (row.observedAt ? ago(row.observedAt, view?.now ?? new Date().toISOString()) : null);
   /* Some of the $derived expressions below build a value from `view` inside a
      single ternary, and svelte-check's control-flow narrowing does not carry
      the `view ? ... : ...` guard through into the branch in that position —
@@ -86,7 +124,10 @@
    */
   /* The fixture harness (see +page.server.js): drives either journey to one
      millisecond and holds it there. Off unless the server says ORBIT_FIXTURES,
-     so the query string is inert in the product. */
+     so the query string is inert in the product. Reading `data` here once,
+     deliberately: the flight it drives is decided at load and held there
+     (see the launch note below), never recomputed off a later `data`. */
+  // svelte-ignore state_referenced_locally
   const fixtureFlight = browser && data?.fixtures ? page.url.searchParams.get("flight") : null;
   const fixtureAt = Number(page.url.searchParams.get("at") ?? 0) || 0;
 
@@ -105,6 +146,33 @@
        over home. A fixture waits for the household to arrive first, so the
        beats after the landing have a dial to land on. */
     if (launching && !fixtureFlight) flight?.ascend();
+  });
+
+  /* ---- A REFUSED SIGN-IN, SAID ONCE (#1033, ADR-0027 consequences) -------
+   * Somebody pressed "This wasn't me" on an approval mail, so nobody got in
+   * — and somebody knew this account's password. The sky is where that is
+   * said, because it is the first thing the account holder sees after the
+   * sign-in that DID work, and it is said in one line with the one action
+   * that answers it: change the password.
+   *
+   * Asking takes it, so it appears once and does not follow the reader
+   * around; never asked under fixtures, because a refusal is a real event on
+   * a real account and the fidelity gate must not photograph one.
+   */
+  /** @type {string | null} */
+  let refusedAt = $state(null);
+  onMount(async () => {
+    if (data?.fixtures) return;
+    try {
+      const response = await fetch("/api/auth/sign-in-notice", { cache: "no-store", credentials: "same-origin" });
+      if (!response.ok) return;
+      refusedAt = (await response.json())?.notice?.deniedAt ?? null;
+    } catch {
+      /* A notice that cannot be read is a notice not shown. It is still
+         unstamped, so the next load says it instead — which is the right way
+         round for something worth saying at all. */
+      refusedAt = null;
+    }
   });
   async function driveFixture() {
     if (!fixtureFlight) return;
@@ -139,12 +207,20 @@
   let flight = $state(null);
   let leaving = $state(fixtureFlight === "down");
   let armedOut = $state(false);
+  /** Set for the span of the actual signOut() request (#1151 W1-R7):
+      armedOut alone stays true for that whole span too, so a third rapid
+      tap — while the second tap's request is still in flight — fell
+      through the `if (!armedOut)` guard and fired a second, concurrent
+      signOut() call. */
+  let signingOut = $state(false);
   /** @type {string | null} */
   let signOutProblem = $state(null);
 
   async function tapSignOut() {
     /* Two taps, as every destructive control in this app arms and fires. */
     if (!armedOut) { armedOut = true; return; }
+    if (signingOut) return;
+    signingOut = true;
     signOutProblem = null;
     /*
      * THE REVOCATION BEAT, chosen deliberately: BEFORE the first frame.
@@ -159,6 +235,7 @@
       redirectTo = await signOut();
     } catch (error) {
       armedOut = false;
+      signingOut = false;
       signOutProblem = /** @type {any} */ (error)?.message ?? "still signed in — try again";
       return;
     }
@@ -335,6 +412,25 @@
     }
   }
 
+  /**
+   * A search result opens the same way a clicked row does (#424), plus a
+   * reveal: the row is very likely off-screen, unlike a row the reader was
+   * already looking at, so it rides the same `revealTarget` scroll the
+   * address bar's own arrival uses.
+   * @param {string} id
+   */
+  function openSearchResult(id) {
+    stripOpen = false;
+    if (expanded === id) return;
+    revealTarget = id;
+    if (expanded === null) {
+      pushedEntry = true;
+      pushState(resolve(`/home?item=${encodeURIComponent(id)}`), { orbitItem: id });
+    } else {
+      replaceState(resolve(`/home?item=${encodeURIComponent(id)}`), { orbitItem: id });
+    }
+  }
+
   async function copyAddress() {
     try {
       await navigator.clipboard.writeText(new URL(addressOf(expanded), location.origin).href);
@@ -408,6 +504,35 @@
     }
   }
 
+  /**
+   * The pocket's review sheet, raised in place from a suggestion's row or
+   * its hollow body on the dial (round 3 §4): approves what the reader
+   * amended into the section they chose, on the same idempotent protocol
+   * and operation id as the two-tap decision. Answers the problem, if any.
+   * @param {import('$lib/data/workspace.js').ReceiptSuggestion} suggestion
+   * @param {import('$lib/data/workspace.js').ItemProposal} item
+   * @param {string | null} sectionId
+   * @returns {Promise<string | null>}
+   */
+  async function amendReceipt(suggestion, item, sectionId) {
+    if (!suggestion.receiptId) return "not added — try again";
+    busyReceipt = suggestion.id;
+    try {
+      if (!operationIds.has(suggestion.receiptId)) operationIds.set(suggestion.receiptId, crypto.randomUUID());
+      const result = await approveReceipt(suggestion, asView(view).primary, operationIds.get(suggestion.receiptId), item, sectionId);
+      if (result.outcome === "partial_success") {
+        return "The item is recorded, but its documents need another try — add it again to finish.";
+      }
+      operationIds.delete(suggestion.receiptId);
+      view = await readHome();
+      return null;
+    } catch (error) {
+      return /** @type {any} */ (error)?.message ?? String(error);
+    } finally {
+      busyReceipt = null;
+    }
+  }
+
   /* Everything below the chrome is the view-model (#451): the same transform
      the unit tests pin renders the dial, the manifest and the palette. */
   /** @type {any[]} */
@@ -432,6 +557,271 @@
         : null;
     })(),
   );
+  // ---- the desk's own search strip (#1161, "C · unrolled"; §2.4's search
+  // shared with the phone via pocket-search.js rather than a second
+  // implementation — design/v19/search/round-1/BUILD.md)
+
+  /**
+   * @typedef {import('./pocket-search.js').SearchItem} SearchItem
+   * @typedef {import('./pocket-search.js').SearchDocument} SearchDoc
+   * @typedef {{ kind: string, paint: string, documentCount: number, suggestion?: boolean }} BodyPaint
+   * @typedef {BodyPaint & { days: number | null, size: number, costMinor: number | null,
+   *   currency: string, costIsEstimate: boolean }} DialBody
+   * @typedef {{ itemId: string, title: string, days: number | null, body: DialBody | null,
+   *   hitDocs: string[] }} StripMatch
+   */
+
+  /* `bodyMark`'s own neutral stand-in for an unscheduled match, which draws no
+     planet (BUILD.md §1) — and, doubling as the snippet parameter's default
+     value below, the only way to give `b` a real inferred shape rather than
+     `any`: a JSDoc annotation directly in a `{#snippet}` parameter list reads
+     fine to svelte-check but crashes the production rolldown build (see
+     scripts/check-rolldown-jsdoc-trap.mjs and CorridorRow.svelte's header). */
+  /** @type {BodyPaint} */
+  const EMPTY_BODY = { kind: "", paint: "", suggestion: false, documentCount: 0 };
+
+  let stripOpen = $state(false);
+  let searchQuery = $state("");
+  /** @type {import('./pocket-search.js').SearchDocument[]} */
+  let searchDocuments = $state([]);
+  /** @type {object | null} */
+  let searchDocumentsFor = null;
+
+  /** #1151 W1-Q8: shared with the pocket's own copy (home/pocket.svelte)
+   *  via pocket-search.js's readSearchDocuments, which also carries the
+   *  concurrency cap (#1151 W1-R9) this copy never had. */
+  async function loadSearchDocuments() {
+    const household = view?.household;
+    const householdId = view?.primary;
+    if (!household || !householdId || searchDocumentsFor === household) return;
+    searchDocumentsFor = household;
+    const carrying = (household.items ?? []).filter((item) => item.status === "active" && (item.documentCount ?? 0) > 0);
+    // Additive: an item whose papers cannot be read loses its papers from the
+    // results, not the search.
+    const found = await readSearchDocuments(
+      carrying, readItemDocuments, householdId, () => searchDocumentsFor !== household,
+    );
+    if (searchDocumentsFor === household) searchDocuments = found;
+  }
+
+  const searchRows = $derived(groups ? [...groups.attention, ...groups.later] : []);
+  const searchResults = $derived(
+    searchPocket(searchQuery, { items: searchRows, attention: groups?.attention ?? [], documents: searchDocuments }),
+  );
+
+  /* The raw item behind a manifest/search row, for the one command the strip
+     fires directly (#1162): completing the closest thing due. Same shape and
+     source as the pocket's own `rawItems` (home's pocket.svelte). */
+  const rawItems = $derived(new Map((view?.household?.items ?? []).map((item) => [item.id, item])));
+
+  /* #1162: the two note-line acts BUILD.md left inert. "complete" fires the
+     same completeCommand the item page and the pocket's own quick-complete
+     use, arm-then-fire (`$lib/pocket/arm.js`, the shared helper arm.js's own
+     header says the desk should reach for rather than a sixth inline copy).
+     "add" carries the typed name to /create exactly as the pocket's search
+     already does (#1120). Both show together at rest; a typed query with
+     real matches shows neither (BUILD.md §1). */
+  let completeArmed = $state(false);
+  const completeArm = createArm({ onchange: (next) => { completeArmed = next; } });
+  let stripProblem = $state(null);
+
+  const stripActs = $derived(stripActsOf({
+    searchQuery, nothing: searchResults.nothing, query: searchResults.query,
+    closest: groups?.closest ?? null, completeArmed,
+  }));
+
+  /** @param {{ id: string, title: string }} target */
+  async function fireCompleteAct(target) {
+    stripProblem = null;
+    if (!completeArm.tap()) return; // first tap only arms it
+    const raw = rawItems.get(target.id);
+    if (!raw || !view?.primary) return;
+    try {
+      const completedDate = asView(view).today;
+      await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId: view.primary }), {
+        completedDate,
+        nextDate: nextDateAfter(completedDate, raw.recurrenceMonths) ?? undefined,
+      }));
+      stripOpen = false;
+      view = await readHome();
+    } catch (error) {
+      stripProblem = /** @type {any} */ (error)?.message ?? "couldn't complete it — try again";
+    }
+  }
+
+  /** @param {string} name */
+  function goToCreate(name) {
+    stripOpen = false;
+    const query = name ? `?${new URLSearchParams({ name })}` : "";
+    goto(resolve(/** @type {any} */ (`/create${query}`)));
+  }
+
+  /** @param {{ kind: "complete" | "add", target?: any, name?: string }} a */
+  function fireAct(a) {
+    if (a.kind === "complete") fireCompleteAct(a.target);
+    else goToCreate(a.name ?? "");
+  }
+
+  function onExploreFocus() {
+    stripOpen = true;
+    stripProblem = null;
+    loadSearchDocuments();
+  }
+  function onExploreBlur() {
+    setTimeout(() => { stripOpen = false; completeArm.disarm(); }, 150);
+  }
+  /* #1197: the server draws #explore (#842), so a reader can be in the field
+     before hydration binds onfocus, and focus does not fire again: the strip
+     stayed shut while the typed query filtered nothing visible. Catch up on
+     the focus nobody was listening for, as #856 and #1064 did for a missed
+     keystroke and press. */
+  onMount(() => {
+    if (document.activeElement?.id === "explore") onExploreFocus();
+  });
+
+  /* At rest (empty query) the strip shows the same two rows the palette
+     showed (BUILD.md §1): the attention group's own due-or-later two, not
+     searchPocket's unfiltered empty branch. */
+  const emptyStripRows = $derived((groups?.attention ?? []).filter(dueOrLater).slice(0, 2));
+  /** @param {SearchItem} row */
+  function dueOrLater(row) { return row.days !== null && row.days >= 0; }
+  const stripItems = $derived(searchQuery ? searchResults.items : emptyStripRows);
+  const stripDocuments = $derived(searchQuery ? searchResults.documents : []);
+
+  /* The one selectable list, in the order §1 names: items (manifest order,
+     soonest first), then documents, then the note line's own act(s) (#1162)
+     — trailing, since a query with real matches never shows one at all
+     (BUILD.md §1). The no-match sentence itself carries no act and is never
+     in this list. */
+  /* Typed as declarations, not inline arrow parameters: a JSDoc comment on
+     an arrow's parameter compiles to server output vite dev cannot run
+     (#1138). */
+  /** @param {SearchItem} item */
+  function itemEntry(item) {
+    return { kind: /** @type {const} */ ("item"), itemId: item.id, title: item.title, days: item.days };
+  }
+  /** @param {SearchDoc} doc */
+  function docEntry(doc) {
+    return { kind: /** @type {const} */ ("doc"), itemId: doc.itemId, title: doc.name, itemTitle: doc.itemTitle };
+  }
+  const selectable = $derived([
+    ...stripItems.map(itemEntry),
+    ...stripDocuments.map(docEntry),
+    ...stripActs,
+  ]);
+  let selectedIndex = $state(0);
+  const selectedPos = $derived(selectable.length ? Math.min(selectedIndex, selectable.length - 1) : null);
+  const selectedEntry = $derived(selectedPos === null ? null : selectable[selectedPos]);
+
+  /** @param {number} direction */
+  function stepSelection(direction) {
+    if (!selectable.length) return;
+    const current = Math.min(selectedIndex, selectable.length - 1);
+    selectedIndex = (current + direction + selectable.length) % selectable.length;
+  }
+  /** @param {{ itemId: string }} mark */
+  function selectMark(mark) {
+    const idx = selectable.findIndex((entry) => entry.itemId === mark.itemId);
+    if (idx >= 0) selectedIndex = idx;
+  }
+  /** @param {{ itemId: string }} mark */
+  function openMark(mark) {
+    selectMark(mark);
+    openSearchResult(mark.itemId);
+  }
+  /** @param {{ kind: "complete" | "add" }} a */
+  function selectAct(a) {
+    const idx = selectable.indexOf(a);
+    if (idx >= 0) selectedIndex = idx;
+  }
+
+  /** @param {KeyboardEvent} event */
+  function onExploreKeydown(event) {
+    if (event.key === "Escape") {
+      completeArm.disarm();
+      /** @type {HTMLElement} */ (event.currentTarget).blur();
+      return;
+    }
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") { event.preventDefault(); stepSelection(1); return; }
+    if (event.key === "ArrowLeft" || event.key === "ArrowUp") { event.preventDefault(); stepSelection(-1); return; }
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    if (!selectedEntry) return;
+    if (selectedEntry.kind === "complete" || selectedEntry.kind === "add") { fireAct(selectedEntry); return; }
+    openSearchResult(selectedEntry.itemId);
+  }
+
+  /* ---- the strip's own layout: the dial's bodies, never recomputed, plus
+     the pure geometry in strip-layout.js (BUILD.md §3/§4). ---- */
+  const bodiesById = $derived(new Map(bodies.map((b) => [b.id, b])));
+  const stripToday = $derived(view ? asView(view).today : new Date().toISOString().slice(0, 10));
+  const stripTodayX = $derived(xOfDays(0));
+  const stripMonthTicks = $derived(stripOpen ? monthTicks(stripToday) : []);
+  /** @param {number} days */
+  const stripDateOf = (days) =>
+    new Date(Date.parse(`${stripToday}T00:00:00Z`) + days * 86400000)
+      .toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+
+  const stripMarks = $derived.by(() => {
+    if (!stripOpen) return [];
+    /** @type {Map<string, StripMatch>} */
+    const byItem = new SvelteMap();
+    for (const row of stripItems) {
+      const b = bodiesById.get(row.id) ?? null;
+      byItem.set(row.id, { itemId: row.id, title: row.title, days: b ? b.days : row.days, body: b, hitDocs: [] });
+    }
+    for (const doc of stripDocuments) {
+      let m = byItem.get(doc.itemId);
+      if (!m) {
+        const b = bodiesById.get(doc.itemId) ?? null;
+        const row = searchRows.find((r) => r.id === doc.itemId);
+        m = { itemId: doc.itemId, title: doc.itemTitle, days: b ? b.days : (row?.days ?? null), body: b, hitDocs: [] };
+        byItem.set(doc.itemId, m);
+      }
+      m.hitDocs.push(doc.name);
+    }
+    const raw = [...byItem.values()].map((m) => {
+      /* `days` rather than `m.days` from here on: a ternary keyed on a
+         separately-computed `unscheduled` boolean does not narrow `m.days`
+         itself, only one keyed on `days === null` directly does. */
+      const days = m.days;
+      const unscheduled = days === null;
+      const x = days === null ? UNSCHEDULED_X : xOfDays(days);
+      const meta = days === null
+        ? `no date · ${m.body ? money(m.body.costMinor, m.body.currency, m.body.costIsEstimate) : ""}`
+        : `${tlabel({ days })} · ${stripDateOf(days)} · ${money(m.body?.costMinor ?? null, m.body?.currency ?? "GBP", m.body?.costIsEstimate ?? false)}`;
+      const lines = [
+        { cls: "title", text: m.title, size: 12.5 },
+        { cls: "meta", text: meta, size: 11 },
+        ...m.hitDocs.map((name) => ({ cls: "docs hitdoc", text: `◆ ${name}`, size: 11 })),
+      ];
+      const width = Math.max(...lines.map((l) => textWidth(l.text, l.size)));
+      return { ...m, unscheduled, x, lines, width };
+    });
+    return assignTiers(raw).map((m) => {
+      const r = m.body ? Math.max(3.5, m.body.size * 1.1) : 3.5;
+      const tier = m.unscheduled ? 0 : m.tier;
+      const flip = m.unscheduled ? true : m.flip;
+      const showLabel = m.unscheduled || m.labelled || selectedEntry?.itemId === m.itemId;
+      const run = TIER_RUN_Y[tier];
+      const n = m.lines.length;
+      const lineNodes = m.lines.map((line, k) => ({
+        ...line,
+        y: tier === 0 ? run - 5 - (n - 1 - k) * 13 : run + 12 + k * 13,
+      }));
+      const leaderPath = leaderPathOf({ x: m.x, width: m.width, r, tier, flip });
+      return { ...m, r, tier, flip, showLabel, anchorX: flip ? m.x - 2 : m.x + 2, lineNodes, leaderPath };
+    });
+  });
+  const stripBusyX = $derived(stripMarks.map((m) => m.x));
+  /** @param {{ itemId: string }} m */
+  const isMarkSelected = (m) => selectedEntry?.itemId === m.itemId;
+
+  $effect(() => {
+    document.body.classList.toggle("searching", stripOpen);
+    return () => document.body.classList.remove("searching");
+  });
+
   const todayLine = $derived(
     view
       ? new Date(asView(view).today + "T00:00:00Z")
@@ -445,6 +835,9 @@
      rather than the whole view, so the row component's type is the slice it
      actually reads. */
   const suggestions = $derived(view ? asView(view).suggestions : undefined);
+  /* #1145: the suggestion drawer counts the days to burn-up from the
+     workspace's own today (pinned under fixtures), as the phone's does. */
+  const today = $derived(view ? asView(view).today : new Date().toISOString().slice(0, 10));
   /* #763: how many are overdue right now — the OS badge and the tab title
      both read this, never the server, so both hold whatever this browser's
      own chart just worked out. */
@@ -455,7 +848,7 @@
   const initials = $derived(
     (view ? (asView(view).user?.displayName ?? "") : "")
       .split(/\s+/)
-      .map((/** @type {string} */ word) => word[0] ?? "")
+      .map((word) => word[0] ?? "")
       .join("")
       .slice(0, 2)
       .toUpperCase(),
@@ -507,9 +900,15 @@
   );
   const closest = $derived(bodies.find((b) => b.closest) ?? null);
   const firstOverdue = $derived(bodies.find((b) => b.overdue) ?? null);
+  /* #1005: a one-off is a dashed ring in its own band's colour -- an outline
+     with nothing inside it, because there is nothing coming round. Past its
+     date it wears the quiet ink tone: ended, not owed. */
   /** @type {(b: any) => string} */
-  const crescent = (b) =>
-    `M ${b.placement.x} ${b.placement.y - b.size} A ${b.size} ${b.size} 0 0 1 ${b.placement.x} ${b.placement.y + b.size} Z`;
+  const expiryStroke = (b) =>
+    b.paint === "ended" ? "var(--ink-mid)"
+      : b.paint === "amber" ? "var(--warm)"
+        : b.paint === "sky" ? "var(--upcoming)"
+          : "var(--ok)";
 
 
   onMount(() => {
@@ -517,8 +916,58 @@
     /** @type {(() => void) | null} */
     let teardown = null;
     let disposed = false;
-    const sync = () => {
+
+    /* ---- #1064: HOME IS DRAWN LONG BEFORE IT CAN ANSWER -------------------
+     * The server renders home whole (#842) — the dial, the corridor, the
+     * avatar and the menu under it — but nothing on it answers a press until
+     * readHome() below has resolved and sync() has bound the behaviour. A
+     * press on the account orb inside that window lands on markup with no
+     * listener on it and is dropped, and nothing replays it: the panel simply
+     * never opens. That is the fault #856 fixed on /create, where the first
+     * keystroke was lost the same way, and it takes the same two answers —
+     * catch up on the press nobody was listening for, and say out loud when
+     * the screen went live.
+     */
+    /** @type {HTMLElement | null} */
+    let missedPress = null;
+    /** @param {Event} event */
+    const rememberPress = (event) => {
+      const target = event.target;
+      if (target instanceof Element)
+        missedPress = /** @type {HTMLElement | null} */ (target.closest("button.orb, #morb"));
+    };
+    /* Capture phase, so the press is recorded before anything else can stop
+       it. A keyboard reader is recorded here too: both dialects' toggles are
+       real <button>s, so Enter and Space fire a click of their own. */
+    document.addEventListener("click", rememberPress, { capture: true });
+    const stopRemembering = () => document.removeEventListener("click", rememberPress, { capture: true });
+    const applyMissedPress = () => {
+      stopRemembering();
+      /* The last press wins: two presses before the screen was live are one
+         reader pressing a second time because the first did nothing. */
+      if (missedPress?.isConnected) missedPress.click();
+      missedPress = null;
+    };
+
+    const mountDialect = () => {
       teardown?.();
+      /* ---- #1074: THE ACCOUNT PANEL IS CHROME, NOT HOUSEHOLD DATA --------
+       * The avatar, Inbox, Settings, the THEME row and sign-out belong to
+       * every reader on /home, and the server renders all of it whether or
+       * not this reader is in a household. It used to be bound inside
+       * mountHome/mountPocket, which only the branch below them runs — so a
+       * reader on the empty sky was shown the whole menu and could not open
+       * it, and Settings, Inbox, the theme and sign-out were unreachable
+       * from home for exactly the reader most likely to want them.
+       *
+       * It binds here, above the branches, so no branch can forget it: this
+       * is the one line every path through the mount shares.
+       */
+      /* #1120: on a phone the account menu is the kit's hatch, which
+         pocket.svelte owns and binds itself, so only the desk's needs a mount. */
+      const stopAccount = query.matches ? mountAccount() : () => {};
+      /** @param {() => void} stopDialect */
+      const withAccount = (stopDialect) => () => { stopDialect(); stopAccount(); };
       /* §11 (#453): no household means the labelled sky in either dialect —
          same bearings, label only, click to ask. */
       if (view?.emptySky) {
@@ -532,7 +981,7 @@
           document.getElementById("nstar")?.addEventListener(
             "click", () => location.assign("/"), { signal: controller.signal });
           const stopSky = mountEmptySky({ galaxy: view.galaxy, onAsk: (id, name, requested) => { if (!requested) askTarget = { id, name }; } });
-          teardown = () => { controller.abort(); stopSky(); };
+          teardown = withAccount(() => { controller.abort(); stopSky(); });
         } else {
           /* The pocket's labelled sky is a list; asking rides data attributes
              because the hidden dialect must never bind listeners. */
@@ -542,30 +991,32 @@
               if (row.dataset.askRequested !== "true") askTarget = { id: /** @type {string} */ (row.dataset.ask), name: /** @type {string} */ (row.dataset.askName) };
             }, { signal: controller.signal });
           }
-          teardown = () => controller.abort();
+          teardown = withAccount(() => controller.abort());
         }
         return;
       }
       /* Tear the old dialect down before standing the new one up. */
-      teardown = query.matches
+      teardown = withAccount(query.matches
         /* §15, the sky wave: the pack skies are seeded streams, so the fixture
            switch travels with the mount — alive per load in the product, pinned
            to the workspace under ORBIT_FIXTURES, which is what lets the gate
            photograph the same sky twice. */
         ? mountHome({ galaxy: asView(view).galaxy, primary: asView(view).primary,
                       fixtures: Boolean(data?.fixtures), workspace: asView(view).primary ?? "" })
-        : mountPocket({
-            /* #466: the sheet's two-tap lands on the same idempotent approve
-               protocol the desk rows use — one operation id per receipt. */
-            approve: (/** @type {string} */ id) => {
-              const suggestion = view?.suggestions.find((one) => one.receiptId === id);
-              if (suggestion) { armed = { id: suggestion.id, act: "approve" }; tapReceipt(suggestion, "approve"); }
-            },
-            dismiss: (/** @type {string} */ id) => {
-              const suggestion = view?.suggestions.find((one) => one.receiptId === id);
-              if (suggestion) { armed = { id: suggestion.id, act: "dismiss" }; tapReceipt(suggestion, "dismiss"); }
-            },
-          });
+        /* #1120: the pocket binds its own controls (pocket.svelte, the kit's
+           sheets and rows); its approve, dismiss and refresh are handed to it
+           as props below. */
+        : () => {});
+    };
+    const sync = () => {
+      delete document.body.dataset.homeReady;
+      mountDialect();
+      /* `body[data-home-ready]` is the observable moment home's listeners
+         exist, so a reader — or a test — can wait for the screen to be ABLE
+         to answer rather than for markup the server already sent. Set last,
+         after every listener above is attached, and taken away again whenever
+         the screen is torn down or re-mounted into the other dialect. */
+      document.body.dataset.homeReady = "true";
     };
     /* The home view comes through the seam, live (#451). onMount must stay
        synchronous — an async callback's return value is discarded, which
@@ -575,9 +1026,16 @@
     readHome().then(async (data) => {
       if (disposed) return;
       view = data;
+      /* #1151 F8: a later successful read must clear an earlier failure's
+         banner — it never did, so the page kept claiming it could not
+         reach the home even once it plainly could again. */
+      homeLoadProblem = null;
       await tick();
       if (disposed) return;
       sync();
+      /* Now that it can answer, answer the press that arrived while it could
+         not (#1064). Before openFromAddress() below, because it came first. */
+      applyMissedPress();
       resync = sync;
       query.addEventListener("change", sync);
       /* #424: the address may already name a row. Do it before the scroll
@@ -589,11 +1047,20 @@
         restoreScroll = null;
         requestAnimationFrame(() => window.scrollTo(0, y));
       }
+    }).catch((error) => {
+      /* #1151 W1-R4: this read had no `.catch()` at all, so a backend outage
+         left the server-rendered page up with nothing behind it ever bound
+         — no listeners, no error, just a screen that looked alive and
+         answered nothing. */
+      if (disposed) return;
+      homeLoadProblem = /** @type {any} */ (error)?.message ?? String(error);
     });
     return () => {
       disposed = true;
+      stopRemembering();
       query.removeEventListener("change", sync);
       teardown?.();
+      delete document.body.dataset.homeReady;
     };
   });
 </script>
@@ -607,7 +1074,30 @@
      company with §14's drawer rule, deliberately. -->
 <svelte:window onkeydown={onWindowKeydown} onclick={onWindowClick} />
 
-<Pocket {view} />
+{#if homeLoadProblem}
+  <p class="p-error" role="alert">Orbit could not reach your home: {homeLoadProblem}</p>
+{/if}
+
+<!-- #466/#1120: the pocket's two-tap decisions land on the same idempotent
+     approve protocol the desk rows use (one operation id per receipt), and
+     answer with the problem, if any, for the sheet to show. -->
+<Pocket {view} {arrive}
+        onapprove={async (suggestion) => { armed = { id: suggestion.id, act: "approve" }; await tapReceipt(suggestion, "approve"); return mailProblem; }}
+        ondismiss={async (suggestion) => { armed = { id: suggestion.id, act: "dismiss" }; await tapReceipt(suggestion, "dismiss"); return mailProblem; }}
+        onamend={amendReceipt}
+        onchanged={async () => {
+          /* #1151 W1-R4: the same unguarded read as the onMount one above —
+             a failure here left the pocket's own re-read silently going
+             nowhere, with no error shown. */
+          try {
+            view = await readHome();
+            // #1151 F8: same reset as the onMount read above — a success
+            // here must clear a banner an earlier failure left behind.
+            homeLoadProblem = null;
+          } catch (error) {
+            homeLoadProblem = /** @type {any} */ (error)?.message ?? String(error);
+          }
+        }} />
 
 <!-- The flight's surfaces: the dawn the climb leaves from, the dusk the
      descent lands on, and the canvas, mark and void-name between them. Each
@@ -629,6 +1119,16 @@
 <div class="desk" class:arrive role="main">
 <!-- #843: sr-only, since the wordmark and dial carry the title visually. -->
 <h1 class="sr-only">Orbit</h1>
+<!-- THE REFUSAL LINE (#1033). Above everything, because it is the one thing
+     on this screen that is about the reader rather than about their things,
+     and it is gone the moment they have read it: nothing dismisses it,
+     because asking for it already spent it. -->
+{#if refusedAt}
+  <p class="refused" role="status">
+    A sign-in with your password was refused {agoLong(refusedAt, new Date().toISOString())}.
+    Nobody got in — <a href={resolve("/settings")}>change your password</a>.
+  </p>
+{/if}
 <!-- ══ THE SKY WAVE (§15, the v1.3.0 roster) ═════════════════════════════════
      Three packs gained their own sky in the same batch, and every layer below
      belongs to exactly one of them. All of them live INSIDE .desk, which is
@@ -809,10 +1309,18 @@
     <button style="background:#080a14;box-shadow:inset 0 0 0 1px #ff4fd8" title="retrograde"
             aria-pressed="false"></button>
   </div>
+  <!-- "Watch the tour" (#1189), beside the theme as in every account menu.
+       The card closes the way home.behaviour.js's closeOverlays closes it,
+       so the film opens over the sky rather than under the card. -->
+  <button class="watch" onclick={() => {
+    document.getElementById("account")?.classList.remove("open");
+    document.querySelector("button.orb")?.setAttribute("aria-expanded", "false");
+    void watchTour();
+  }}>↻ watch the tour</button>
   <!-- Two taps to leave, and the second one revokes the session before a
        single frame of the descent is drawn (§15: logout is the login played
        backwards, and it is a real sign-out, not an animation about one). -->
-  <button class="signout" onclick={tapSignOut}>
+  <button class="signout" onclick={tapSignOut} disabled={signingOut}>
     {armedOut ? "tap again to sign out" : "sign out →"}
   </button>
   {#if signOutProblem}<div class="signout-problem">{signOutProblem}</div>{/if}
@@ -824,102 +1332,7 @@
        north star walks into the drawer's own controls next (#853); it is
        positioned absolutely, so this changes nothing on screen. -->
   <button class="nstar" id="nstar" aria-expanded="false" title="Add to your orbit">
-    <svg width="30" height="30" viewBox="-15 -15 30 30" aria-hidden="true">
-      <defs>
-        <linearGradient id="tron-edge" x1="0" y1="-11" x2="0" y2="11" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stop-color="var(--upcoming)"/>
-          <stop offset=".55" stop-color="var(--upcoming)"/>
-          <stop offset="1" stop-color="var(--accent)"/>
-        </linearGradient>
-      </defs>
-      <!-- the mark has THREE forms and only one is ever up: the four-point
-           glint every pack has always had, retrograde's neon wireframe beacon
-           (§15/#480), and clouds' sounding balloon (§15, the roster ruling:
-           "clouds needs ... its own custom symbols"). The pack chooses between
-           them in CSS. -->
-      <g class="glint classic" style="transform-origin:0 0">
-        <circle r="9" fill="var(--ink)" opacity=".12"/>
-        <path d="M 0 -12 L 1.7 -1.7 L 12 0 L 1.7 1.7 L 0 12 L -1.7 1.7 L -12 0 L -1.7 -1.7 Z"
-              fill="var(--ink)" opacity=".9"/>
-        <circle r="2" fill="var(--ink)"/>
-      </g>
-      <g class="glint tron" style="transform-origin:0 0">
-        <circle r="9.5" fill="var(--upcoming)" opacity=".06"/>
-        <path d="M 0 -11 L 7.6 0 L 0 11 L -7.6 0 Z" fill="none"
-              stroke="url(#tron-edge)" stroke-width="1.5" stroke-linejoin="miter"/>
-        <path d="M 0 -4.6 L 3.2 0 L 0 4.6 L -3.2 0 Z" fill="none"
-              stroke="var(--accent)" stroke-width="1" opacity=".9"/>
-        <g stroke="url(#tron-edge)" stroke-width="1.3" stroke-linecap="round" opacity=".75">
-          <line x1="-13.4" y1="0" x2="-10" y2="0"/>
-          <line x1="10" y1="0" x2="13.4" y2="0"/>
-        </g>
-      </g>
-      <!-- CLOUDS' OWN MARK — THE SOUNDING BALLOON (§15: every theme earns its
-           own symbols; only star-chart and after dark share theirs).
-
-           WHY IT CANNOT BE A STAR. This pack's sky is DAYLIGHT above a cloud
-           deck. There is no north star up there to steer by, and drawing one
-           anyway is the exact failure §12 forbids — a mark on the screen that
-           is not true of what the screen is showing. So the question the mark
-           has to answer is the honest one: at altitude, in daylight, what do
-           you send UP to put something new into the sky? A sounding. A pilot
-           balloon carrying an instrument, released to add one real reading to
-           the record — which is what this handle does when it opens the create
-           drawer, said in the vocabulary the pack already speaks.
-
-           WHAT IT KEEPS FROM THE GLINT, and why. Retrograde's beacon held the
-           old mark's silhouette on purpose ("still reads as a beacon at a
-           glance"), and the reasoning travels: this is the same 30px box, the
-           same vertical axis, and the two reticle ticks sit at exactly the same
-           ±13.4 the glint's horizontal arms did, so the mark's footprint in the
-           chrome is unchanged and the eye finds it in the same place. What
-           moves is only what it is made of.
-
-           WHAT IT IS MADE OF, and why that is not decoration. Light packs do
-           not glow — that law is older than this pack (#426: weight instead of
-           luminosity, flat ink instead of gloss) — so the balloon is drawn,
-           not lit: the envelope a thin engraved outline with a single pale
-           highlight where the low sun catches its shoulder, the rigging two
-           hairlines, and the instrument a small SOLID box in the accent at the
-           bottom of the axis. The solid box is the one loud element and it is
-           load-bearing twice over: it is the only filled shape, so it is what
-           the eye lands on, and it sits at the low end of the axis, pointing
-           at the drawer the handle pulls — the same job the tron diamond's
-           downward vertex does in retrograde. Nothing here is added for
-           prettiness; take any one part away and the mark stops reading as an
-           instrument going up. -->
-      <g class="glint sonde" style="transform-origin:0 0">
-        <!-- the envelope: a real pilot balloon is a slightly pear-shaped
-             sphere, wider than it is tall at the shoulder and drawn in by the
-             neck, which is what stops this reading as a lollipop -->
-        <path d="M 0 -12.6 C 5.2 -12.6 7.4 -8.6 7.4 -5.4
-                 C 7.4 -2.1 4.4 .1 1.5 1.6 L -1.5 1.6
-                 C -4.4 .1 -7.4 -2.1 -7.4 -5.4
-                 C -7.4 -8.6 -5.2 -12.6 0 -12.6 Z"
-              fill="none" stroke="var(--ink)" stroke-width="1.3"
-              stroke-linejoin="round" opacity=".9"/>
-        <!-- the shoulder the low sun catches. One stroke, on the sunward side
-             only, because there is one light source in this sky and it is the
-             reason the pack exists -->
-        <path d="M -4.6 -9.4 C -3.2 -11.2 -1.6 -11.8 -.2 -11.9"
-              fill="none" stroke="var(--sun)" stroke-width="1.1"
-              stroke-linecap="round" opacity=".85"/>
-        <!-- the rigging: two hairlines from the neck to the instrument -->
-        <g stroke="var(--ink)" stroke-width=".9" opacity=".78">
-          <line x1="-1.5" y1="1.9" x2="-1.1" y2="7.2"/>
-          <line x1="1.5" y1="1.9" x2="1.1" y2="7.2"/>
-        </g>
-        <!-- the instrument: the one solid shape, in the create colour, at the
-             low end of the axis, pointing at the drawer -->
-        <rect x="-3.1" y="7.2" width="6.2" height="5" rx="1.1"
-              fill="var(--accent-text)"/>
-        <!-- and the reticle ticks, at the glint's own ±13.4 -->
-        <g stroke="var(--ink)" stroke-width="1.2" stroke-linecap="round" opacity=".78">
-          <line x1="-13.4" y1="0" x2="-10" y2="0"/>
-          <line x1="10" y1="0" x2="13.4" y2="0"/>
-        </g>
-      </g>
-    </svg>
+    <NorthStarMark />
     <span>create</span>
   </button>
   <div class="inner">
@@ -950,6 +1363,37 @@
          tap one to ask to join, or follow the north star to start your own</p>
     </div>
     {:else}
+    <!-- #1161 (BUILD.md §2): the body-drawing chain lifted out of the dial's
+         own each-block so the strip below can draw the same matched planet
+         from the same tokens — never a second painting of the same body.
+         (b, cx, cy, r) rather than reading b.placement/b.size directly: the
+         strip's r is 1.1× the dial's own size, not the dial's own centre. -->
+    {#snippet bodyMark(b = EMPTY_BODY, cx = 0, cy = 0, r = 0)}
+      {#if b.suggestion}
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--accent)" stroke-width="1.6"/>
+      {:else if b.kind === "expiry"}
+        <!-- #1005: no fill, no core, no highlight -- the ring IS the body. -->
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke={expiryStroke(b)} stroke-width="2" stroke-dasharray="2.6 2.2"/>
+      {:else if b.paint === "ruby" || b.paint === "amber"}
+        <circle cx={cx} cy={cy} r={r} style="stroke:var(--bg);stroke-width:2" fill="url(#p-{b.paint})"/>
+      {:else if b.paint === "sky"}
+        <circle cx={cx} cy={cy} r={r} style="stroke:var(--upcoming);stroke-opacity:.25;stroke-width:2.6" fill="url(#p-sky)"/>
+      {:else if b.documentCount > 0}
+        <circle cx={cx} cy={cy} r={r} style="stroke:var(--ok);stroke-opacity:.25;stroke-width:3" fill="url(#p-jade)"/>
+      {:else}
+        <circle cx={cx} cy={cy} r={r} fill="url(#p-jade)"/>
+      {/if}
+      {#if !b.suggestion && b.kind === "inspection"}
+        <path d="M {cx} {cy - r} A {r} {r} 0 0 1 {cx} {cy + r} Z" fill="rgba(0,0,0,.42)"/>
+      {/if}
+      {#if !b.suggestion && b.kind === "renewal"}
+        <circle cx={cx} cy={cy} r={r * 0.57} style="fill:var(--bg)"/>
+        <circle cx={cx} cy={cy} r={r * 0.28} fill="url(#p-{b.paint})"/>
+      {/if}
+      {#if !b.suggestion && b.kind !== "expiry" && r >= 4}
+        <circle cx={cx - 0.2 * r} cy={cy + 0.25 * r} r={0.33 * r} fill="rgba(255,255,255,.38)"/>
+      {/if}
+    {/snippet}
     <!-- backdrop constellations are generated from the galaxy map -->
     <div class="dialwrap">
       <svg width="640" height="640" class="dial" viewBox="0 0 380 380" role="group"
@@ -1086,27 +1530,7 @@
              aria-label={`${b.title}, ${tlabel(b)} · ${money(b.costMinor, b.currency, b.costIsEstimate)}${b.documentCount > 0 ? `, ${b.documentCount} document${b.documentCount === 1 ? "" : "s"}` : ""}`}><g
              id={b.closest ? "b-closest" : undefined}
              class={b.overdue || b.paint === "amber" ? "breathe" : undefined}>
-            {#if b.paint === "ruby" || b.paint === "amber"}
-              <circle cx={b.placement.x} cy={b.placement.y} r={b.size}
-                      style="stroke:var(--bg);stroke-width:2" fill="url(#p-{b.paint})"/>
-            {:else if b.paint === "sky"}
-              <circle cx={b.placement.x} cy={b.placement.y} r={b.size}
-                      style="stroke:var(--upcoming);stroke-opacity:.25;stroke-width:2.6" fill="url(#p-sky)"/>
-            {:else if b.documentCount > 0}
-              <circle cx={b.placement.x} cy={b.placement.y} r={b.size}
-                      style="stroke:var(--ok);stroke-opacity:.25;stroke-width:3" fill="url(#p-jade)"/>
-            {:else}
-              <circle cx={b.placement.x} cy={b.placement.y} r={b.size} fill="url(#p-jade)"/>
-            {/if}
-            {#if b.kind === "inspection"}<path d={crescent(b)} fill="rgba(0,0,0,.42)"/>{/if}
-            {#if b.kind === "renewal"}
-              <circle cx={b.placement.x} cy={b.placement.y} r={b.size * 0.57} style="fill:var(--bg)"/>
-              <circle cx={b.placement.x} cy={b.placement.y} r={b.size * 0.28} fill="url(#p-{b.paint})"/>
-            {/if}
-            {#if b.size >= 4}
-              <circle cx={b.placement.x - 0.2 * b.size} cy={b.placement.y + 0.25 * b.size}
-                      r={0.33 * b.size} fill="rgba(255,255,255,.38)"/>
-            {/if}
+            {@render bodyMark(b, b.placement.x, b.placement.y, b.size)}
           </g></a>
         {/if}
       {/each}
@@ -1121,14 +1545,91 @@
     </div>
     <div class="hero-foot">
       <div class="splash-search" style="position:relative">
-        <input id="explore" placeholder="explore your world" aria-label="Search items and documents">
-        <div class="palette" data-polish="POL-9" id="palette">
-          {#each (groups?.attention ?? []).filter((/** @type {any} */ r) => r.days >= 0).slice(0, 2) as row (row.id)}
-            <div><b>{row.title}</b> <small>· {tlabel(row)}</small></div>
-          {/each}
-          {#if groups?.closest}<div class="act">→ complete "{groups.closest.title}"</div>{/if}
-          <div class="act">→ add an item</div>
+        <!-- #1161, "C · unrolled" (design/v19/search/round-1/BUILD.md): the
+             year drawn as a line above the field, replacing POL-9's command
+             palette. aria-hidden — #explore-results below is the accessible
+             read of the same results; the SVG is decoration. -->
+        <div class="strip" id="strip" aria-hidden="true" class:open={stripOpen}>
+          <svg id="stripsvg" width="820" height="150" viewBox="0 0 820 150">
+            {#if stripOpen}
+              <line class="past" x1={AXIS_X0} y1={AXIS_Y} x2={stripTodayX} y2={AXIS_Y}/>
+              <line class="axis" x1={stripTodayX} y1={AXIS_Y} x2={AXIS_X1} y2={AXIS_Y}/>
+              {#each stripMonthTicks as t (t.days)}
+                <line class="tick" x1={t.x} y1={AXIS_Y - 3} x2={t.x} y2={AXIS_Y + 3}/>
+                {#if !stripBusyX.some((bx) => Math.abs(bx - t.x) < 16)}
+                  <text class="month" x={t.x} y={AXIS_Y + 16} text-anchor="middle">{t.name}</text>
+                {/if}
+              {/each}
+              <path class="today" d="M{stripTodayX} {AXIS_Y + 4} l4.5 8 h-9 Z" style="fill:var(--accent)"/>
+              {#each stripMarks as m (m.itemId)}
+                <g class="match" class:sel={isMarkSelected(m)}
+                   role="presentation"
+                   onmouseenter={() => selectMark(m)}
+                   onmousedown={(event) => { event.preventDefault(); openMark(m); }}>
+                  {#if isMarkSelected(m)}
+                    <circle class="halo" cx={m.x} cy={AXIS_Y} r={m.r + 4} style="stroke:var(--accent)"/>
+                  {/if}
+                  {#if !m.unscheduled}
+                    <path class="lead" d={m.leaderPath} style={isMarkSelected(m) ? "stroke:var(--accent);stroke-opacity:.85" : undefined}/>
+                  {/if}
+                  {#if m.showLabel}
+                    {#each m.lineNodes as line, i (i)}
+                      <text class={line.cls} x={m.anchorX} text-anchor={m.flip ? "end" : undefined} y={line.y}>{line.text}</text>
+                    {/each}
+                  {/if}
+                  {#if !m.unscheduled}
+                    {@render bodyMark(m.body ?? EMPTY_BODY, m.x, AXIS_Y, m.r)}
+                  {/if}
+                </g>
+              {/each}
+            {/if}
+          </svg>
+          <div class="strip-note" id="strip-note">
+            {#if !searchQuery}
+              {#each stripActs as a, i (a.itemId)}
+                {#if i > 0}<span class="sep">·</span>{/if}
+                <span class="act" role="presentation"
+                      onmousedown={(event) => { event.preventDefault(); selectAct(a); fireAct(a); }}
+                      >{a.kind === "complete" && completeArmed ? a.title : `→ ${a.title}`}</span>
+              {/each}
+              {#if stripProblem}<span class="sep">·</span><span style="color:var(--overdue)">{stripProblem}</span>{/if}
+            {:else if searchResults.nothing}
+              <span>nothing in your orbit is called "{searchResults.query}"</span>
+              <span class="sep">·</span>
+              {#each stripActs as a (a.itemId)}
+                <span class="act" role="presentation"
+                      onmousedown={(event) => { event.preventDefault(); selectAct(a); fireAct(a); }}
+                      >→ {a.title}</span>
+              {/each}
+            {:else}
+              <span>{searchResults.items.length} in your orbit</span>
+              {#if searchResults.documents.length}
+                <span class="sep">·</span>
+                <span>{searchResults.documents.length} document{searchResults.documents.length === 1 ? "" : "s"}</span>
+              {/if}
+              <span class="sep">·</span>
+              <span class="hint">←→ step · ↵ open</span>
+            {/if}
+          </div>
         </div>
+        <input id="explore" placeholder="explore your world" aria-label="Search items and documents"
+               autocomplete="off" bind:value={searchQuery} role="combobox" aria-expanded={stripOpen}
+               aria-controls="explore-results" aria-autocomplete="list"
+               aria-activedescendant={!stripOpen || selectedPos === null ? undefined : `sr-opt-${selectedPos}`}
+               onfocus={onExploreFocus} onblur={onExploreBlur}
+               oninput={() => { selectedIndex = 0; stripProblem = null; }}
+               onkeydown={onExploreKeydown}>
+        {#if stripOpen}
+          <ul class="sr-only" id="explore-results" role="listbox" aria-label="Results">
+            {#each selectable as entry, i (i)}
+              <li id="sr-opt-{i}" role="option" aria-selected={i === selectedPos}>
+                {entry.kind === "item" ? `${entry.title} · ${tlabel({ days: entry.days })}`
+                  : entry.kind === "doc" ? `document ${entry.title} · ${entry.itemTitle}`
+                  : entry.title}
+              </li>
+            {/each}
+          </ul>
+        {/if}
       </div>
     </div>
     {/if}
@@ -1143,7 +1644,7 @@
         {#if corridor.overdue.length}
           <div class="redzone">
             {#each corridor.overdue as row (row.id)}
-              <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+              <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
                 onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
                 onCopyAddress={copyAddress} />
             {/each}
@@ -1151,20 +1652,20 @@
         {/if}
         <div class="today"><span class="sunmark" aria-hidden="true"><i></i><b></b></span><span>TODAY · {todayLine}</span><div class="rule"></div></div>
         {#each corridor.current as row (row.id)}
-          <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+          <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
             onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
             onCopyAddress={copyAddress} />
         {/each}
         {#each corridor.months as month (month.key)}
           <div class="month"><span>{month.label}</span><div class="rule"></div><small>{month.rows.length} approaching</small></div>
           {#each month.rows as row (row.id)}
-            <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+            <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
               onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
               onCopyAddress={copyAddress} />
           {/each}
         {/each}
         {#each corridor.undated as row (row.id)}
-          <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {expanded}
+          <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
             onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
             onCopyAddress={copyAddress} />
         {/each}
@@ -1180,18 +1681,18 @@
 
 <aside class="drawer drawer-left" id="statusdrawer" role="region" aria-live="polite" aria-label="System status">
   <button class="handle" id="edge-health" aria-expanded="false">
-    <i></i><span>degraded</span></button>
+    <i></i><span>{systemStatus?.handle ?? "unknown"}</span></button>
   <h2>System status</h2>
-  <div class="svc"><i style="background:var(--ok)"></i><b>orbit-app</b><small>healthy &middot; 40s ago</small></div>
-  <div class="svc"><i style="background:var(--ok)"></i><b>orbit-postgres</b><small>healthy &middot; 40s ago</small></div>
-  <div class="svc"><i style="background:var(--degraded)"></i><b>orbit-clamav</b><small>unreachable &middot; 2m ago</small></div>
-  <div class="svc"><i style="background:var(--ink-faint)"></i><b>orbit-tika</b><small>not enabled</small></div>
-  <div class="svc"><i style="background:var(--ok)"></i><b>scheduler</b><small>running &middot; 12s ago</small></div>
-  <h2>Last health check</h2>
-  <div class="svc"><i style="background:var(--degraded)"></i><b>scan readiness</b><small>failed &middot; scanner-unreachable</small></div>
-  <div class="svc"><i style="background:var(--ok)"></i><b>application</b><small>ready</small></div>
-  <h2>Full diagnostics</h2>
-  <div class="svc" style="color:var(--ink-quiet)">container logs &middot; or the launcher repair flow</div>
+  {#each systemStatus?.services ?? [] as row (row.service)}
+    <div class="svc"><i style="background:{statusDot(row.state)}"></i><b>{row.service}</b><small>{statusWord(row.state)}{#if observedLabel(row)} &middot; {observedLabel(row)}{/if}</small></div>
+  {/each}
+  {#if systemStatus?.lastCheck}
+    <h2>Last health check</h2>
+    {#if systemStatus.lastCheck.scan}
+      <div class="svc"><i style="background:{statusDot(systemStatus.lastCheck.scan)}"></i><b>scan readiness</b><small>{statusWord(systemStatus.lastCheck.scan)}</small></div>
+    {/if}
+    <div class="svc"><i style="background:{statusDot(systemStatus.lastCheck.application)}"></i><b>application</b><small>{statusWord(systemStatus.lastCheck.application)}</small></div>
+  {/if}
 </aside>
 {#if !view?.emptySky}
 <aside class="drawer drawer-right" id="keydrawer" role="region" aria-label="Chart key">
@@ -1205,6 +1706,7 @@
   <h2>Types</h2>
   <div class="keyrow"><span class="sw" style="background:var(--ink-mid)"></span>routine service</div>
   <div class="keyrow"><span class="sw" style="background:radial-gradient(circle,var(--ink-mid) 24%,var(--panel-raised) 34%,var(--ink-mid) 52%)"></span>renewal / contract</div>
+  <div class="keyrow"><span class="sw" style="background:none;border:2px dashed var(--ink-mid)"></span>expiry &mdash; ends, does not come round</div>
   <div class="keyrow"><span class="sw" style="background:linear-gradient(90deg,var(--ink-mid) 50%,rgba(0,0,0,.55) 50%)"></span>inspection / certification</div>
   <div class="keyrow"><span class="sw" style="background:none;border:1.6px solid var(--accent)"></span>suggestion &mdash; not yet accepted</div>
   <h2>Physics</h2>

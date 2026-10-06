@@ -148,9 +148,10 @@ recoverable state.
   private tmpfs, and mounts only its read-only configuration.
 - Orbit sends bytes only to the fixed `/tika` endpoint with fixed
   no-embedded-recursion and no-OCR headers. The server configuration also
-  excludes `TesseractOCRParser`. OCR is disabled in v1 and requires a separate
-  opt-in design with bounded pages, languages, resources and adversarial
-  evidence before it can be enabled.
+  excludes `TesseractOCRParser` and also sets Tika 4.1's `text-recognizers: []`,
+  so two independent settings keep OCR off. OCR is disabled in v1 and
+  requires a separate opt-in design with bounded pages, languages, resources
+  and adversarial evidence before it can be enabled.
 - Parser and OCR output is bounded untrusted evidence. It may populate only
   allowlisted, type- and length-validated editable suggestions; it cannot
   select authority, read secrets or unrelated records, fetch URLs, invoke
@@ -275,6 +276,85 @@ recoverable state.
   upload/download/rotation operations remain locked. Orbit never generates a
   replacement key automatically.
 
+## Household metadata encryption (Tiers 1 and 2)
+
+ADR-0024 extends the same envelope encryption to household metadata, in the
+tiers #365 names.
+
+**Tier 1** is `items.notes`, `items.reference`,
+`imap_ingestion_messages.proposal` and `.field_evidence`.
+
+**Tier 2** is `items.title`, `items.provider` (a provider *name*), the cost
+`items.cost_minor`, and the invited member address
+`household_invitations.email`. It uses the same household key, the same
+envelope and the same rotation path as Tier 1 — no second key and no second
+cipher. What it costs is queries: the database can no longer search titles,
+match provider names or add up costs, so Orbit does all three in the
+application over one household's decrypted rows. Measured on a seeded
+database, that decrypt-and-scan takes about 4.5 ms for a 100-item household
+and about 28 ms at 500 items, the most one household's item list can hold —
+against a whole workspace read of roughly 48 ms and 105 ms respectively.
+
+**Tier 3 stays deliberately in plaintext**: due dates, statuses, recurrence,
+and household and member relationships. That is the scheduling engine's
+operating data — the dial, the reminder workers and the due-window queries all
+run on it in SQL — and encrypting it would move those queries into the
+application for no gain the threat model recognises. Host-disk encryption is
+the answer for Tier 3, not this. It is a decision, not an omission.
+
+**The boundary this buys, stated plainly.** It protects against leakage of the
+database file: an exfiltrated volume, a SQL dump, a filesystem backup, a stolen
+disk. It does **not** protect against live compromise of the host, because the
+key-encryption key lives there and a running Orbit can read every value. It is
+the same boundary document encryption already has, no stronger, and no Orbit
+surface may describe it as more than this.
+
+- One random 32-byte metadata data-encryption key per household, wrapped under
+  the existing instance KEK (`DOCUMENT_KEK`), plus one instance-scope key for
+  mail-in receipts that are not attributed to a household yet. Deleting a
+  household deletes its key, which crypto-shreds any stray copy of that
+  household's ciphertext.
+- Each value is one AES-256-GCM envelope, `mdv1.<iv>.<tag>.<ciphertext>`,
+  bound to its table, column and row: a value moved to another row or column
+  fails authentication instead of decrypting.
+- Two columns carry a blind index, and only two: `items.reference` and
+  `household_invitations.email`. Nothing else does, because nothing else is
+  looked up by exact match — titles, provider names and costs are compared by
+  readers that already read every row of the household, so an index would
+  serve no query while leaking equality for nothing. The invitation address
+  has one because the database itself enforces "one open invitation per
+  household and address", and clearing the plaintext would otherwise have
+  retired that rule silently.
+- The blind index is HMAC-SHA-256 over the
+  normalised value, keyed by a key derived from the household's own data key
+  and never stored, and derived separately per column so two columns never
+  correlate. Within one household it reveals which rows share an equal value
+  and how many distinct values exist; it reveals nothing about the values
+  themselves, and because the key is per-household, equal values in different
+  households produce unrelated digests. That residual leak is accepted and is
+  the stated price of exact-match lookup.
+- A value that fails authentication is refused as `metadata_integrity_failed`:
+  a distinct marker, never an empty value and never fabricated plaintext, while
+  the rest of the row renders normally. Each failure logs an administrator
+  diagnostic naming the column and row and nothing else. Writing to the field
+  is the repair.
+- A missing KEK is the separate, already-defined state: the application stays
+  usable, encrypted fields read as locked rather than damaged, and writes to
+  them are refused, exactly as document operations lock today. Signing in is
+  not affected: the account address `users.email` is deliberately not
+  encrypted, so a missing KEK never locks anybody out of the instance. Whether
+  that stays true is the open decision on #966 (the Tier 2 remainder), which
+  records the trade in full.
+- A reminder whose item name will not decrypt is not sent with an empty or
+  invented name: the delivery is retried, like any other transient fault,
+  until the key or the value is repaired.
+- Rows written before this release keep their plaintext until a resumable
+  start-up job encrypts them. Two releases are needed before dumps stop
+  carrying this plaintext: the expand release still holds the plaintext
+  columns until the contract release drops them.
+- The portable archive is the deliberate plaintext escape hatch: it exports
+  decrypted values and therefore itself requires a working KEK.
+
 ## Key generation, recovery, and loss
 
 - `scripts/configure.sh` generates the KEK once using a cryptographically secure
@@ -294,8 +374,8 @@ recoverable state.
 - Restore validation checks key ID and a non-sensitive verification value
   before enabling document access.
 - If both the KEK and recovery bundle/passphrase are lost, encrypted documents
-  are unrecoverable by design. Orbit must state this plainly during setup and
-  backup.
+  **and Tier 1 and Tier 2 household metadata** are unrecoverable by design. Orbit must
+  state this plainly during setup and backup.
 
 The recovery-bundle implementation must use a reviewed, available primitive in
 the supported runtime. It must not introduce a custom cipher construction.
@@ -310,7 +390,12 @@ the supported runtime. It must not introduce a custom cipher construction.
 - Restore validates the archive and manifest before stopping Orbit, restores to
   staged storage, verifies database/blob correspondence, and only then switches
   the active document tree.
-- Restore never silently overwrites an existing KEK.
+- Restore never silently overwrites an existing KEK, and requires the same KEK
+  to read encrypted metadata as it does to read documents.
+- Once the contract release has dropped the plaintext columns, an ordinary
+  database dump no longer contains readable notes, references, mail-in
+  extracts, item names, provider names, costs or invited addresses. During the
+  expand release it still does.
 - Mixed lifecycle states, missing blobs, corrupt tags, and a wrong KEK are
   covered by restore tests. In-flight scanner stages and their document/job
   correspondence are included; restore clears leases and requeues recoverable
@@ -377,6 +462,93 @@ create an item or transfer a staged attachment through the secure document
 lifecycle. Quarantined and failed views expose technical classifications and
 opaque identifiers only.
 
-Inline previews, OCR, model-dependent semantic extraction, public sharing, S3
-storage, archive uploads, and automatic duplicate merging remain deferred.
-Each must extend this threat model before implementation.
+Inline previews, OCR, public sharing, S3 storage, archive uploads, and
+automatic duplicate merging remain deferred. Each must extend this threat
+model before implementation. Model-dependent semantic extraction is no longer
+deferred as a design: its boundary is recorded below.
+
+## Local model extraction boundary
+
+[ADR-0025](adr/0025-local-model-extraction.md) sections 1-4 decide this
+boundary; the client that implements it is
+`src/server/documents/model-extraction.ts`.
+
+Document text goes to one destination and no other. The endpoint is the
+compile-time constant `http://orbit-ollama:11434`: Orbit has no base-URL,
+host, port, proxy or API-key setting for it, so no deployment, environment
+variable or administrator can point document text at a different host. The
+only knob is the model name, and the Compose `ai` profile that supplies the
+service. Reaching anywhere else needs a code change to that constant, which
+needs an ADR superseding ADR-0025. Confining `orbit-ollama` to the egress-free
+processing network that already holds Tika and ClamAV is the matching
+structural control: the service carries no default-network route and no
+published port, so the container that holds document text has no path to the
+internet whatever image or model is loaded into it. Compose validation refuses
+a configuration that adds one. The server cannot fetch its own model as a
+result, so a separate one-shot puller reaches the model registry on the
+default network, writes into the shared model volume, and exits; it never
+receives document text and never runs as a side effect of starting the stack.
+
+At most two requests are made per document: a blind pass, for exactly one
+JSON object, and an adjudicating pass that runs only where the blind reading
+and the heuristic reading disagree on a field. Every axis of both passes is
+bounded by the same constant in code: a fixed input character budget over the
+same normalised text any other untrusted evidence gets, schema-constrained
+decoding so the reply cannot be prose, temperature 0, a fixed seed, a
+generation-token cap, a response-size cap checked before parsing, and a
+wall-clock deadline - no pass relaxes any of them, and that deadline bounds
+the whole flow rather than each pass, so two sequential passes cannot double
+what the interactive path already waits for. A reply that is late, oversized,
+refused, malformed or absent is discarded whole - no partial salvage, no
+repair prompt, no retry. Where it is the blind pass that fails, the upload
+keeps the heuristic proposal alone, exactly as before. Where it is the
+adjudicating pass that fails, the heuristic value stands for the disputed
+field, not the blind model value, because a failed adjudication is evidence
+for neither reading. The adjudicating pass may instead return a field empty -
+both readings rejected - and that is a result, not a failed pass, distinct
+from the late, oversized, refused, malformed or absent reply above. Every
+failure is a log record in the existing fixed vocabulary; no model output,
+and no caught error text, ever reaches a log.
+
+The system prompt tells the model that the document is untrusted data to be
+read rather than obeyed, but the prompt is not the control. Two things are.
+First, grounding: every value must arrive with a verbatim evidence span, and a
+value is dropped unless that span occurs in the normalised document text and
+itself carries the value. Numeric values must additionally show their digits in
+the span, and a cost is proposed only when its span carries an explicit
+currency symbol or code. The adjudicating prompt carries the heuristic and
+blind readings inside it, but grounding stays against the document data block
+and nothing else: a value present only in those supplied readings does not
+ground on them, so the adjudicated answer is grounded against the document
+exactly as the blind answer is. Second, the surviving values pass
+`safeStoredDocumentProposal` exactly as a heuristic or stored proposal does, so
+normalisation, length caps, markup rejection and the fresh-object rebuild that
+discards unknown keys all apply unchanged.
+
+Closed vocabularies do the rest. The model labels dates with a role from a
+fixed list and never emits a schedule kind; the application derives that.
+Unknown roles are dropped, and a recurrence with no scheduled date to repeat is
+dropped with it.
+
+The blast radius is therefore the same one a hostile document already has over
+the heuristics: it can influence which candidate suggestions a reviewer is
+shown, and it can waste at most two bounded inferences. A hostile document can
+always manufacture a disagreement between the two readings and so force the
+second pass, which is why the two-pass count is capped by a constant in code
+rather than left to the agreement test between the readings - that test is a
+cost optimisation, not a security control. It cannot cause a write, reach
+another household, address a tool, or send anything outward. Review-first
+ingestion ([ADR-0005](adr/0005-reviewed-ingestion-and-mailbox-staging.md)) is
+unchanged - a model suggestion is still only a suggestion a person accepts.
+
+Still to come, and out of this boundary until they land: wiring the model path
+in as the default where the profile is present, and reporting model
+availability to the administrator.
+
+The reviewer surface is being built now. Where the blind and heuristic
+readings disagreed, the reviewer sees the adjudicated value as the
+suggestion, with the reading it rejected available behind a secondary
+affordance beside the field; where the two readings agreed, nothing extra is
+shown at all. The losing validated value is kept only for the life of the
+pending review that offers it, and is discarded with everything else the
+review held once the item is saved or the review is abandoned.

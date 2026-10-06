@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/server/documents/config", () => ({ getDocumentConfig: mocks.config }));
 
-import { extractTextWithTika, getTikaHealth } from "./tika";
+import { extractTextWithTika, getTikaHealth, undoTikaMarkdownEscapes } from "./tika";
 
 const TIKA_URL = "http://tika.internal:9998";
 const DOCUMENT_ID = "11111111-1111-4111-8111-111111111111";
@@ -194,7 +194,16 @@ describe("Tika adapter", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("emits a bounded attempt record before the request and a success record with the document reference, character count and non-negative duration", async () => {
+  /* #1151 A2-Q7: this test's own name used to promise a document reference
+     and a character count the body never checked -- toMatchObject only
+     proved the "ready" record was AT LEAST { event, state, action }, not
+     that it was exactly that plus a duration. Neither field exists: this
+     event never carries one, the same as every other document.* event in
+     this codebase. Retitled to the one thing proven, and the "ready" record
+     is now checked by its exact key set so an undisclosed field added later
+     (a document reference or a character count among them) would fail here
+     rather than pass silently under toMatchObject. */
+  it("emits a bounded attempt record before the request and a success record with only a non-negative duration, no document reference or character count", async () => {
     const infoSpy = vi.spyOn(log, "info");
     vi.mocked(fetch).mockResolvedValue(response({ body: chunksStream([Buffer.from("bounded text")]) }));
 
@@ -203,8 +212,10 @@ describe("Tika adapter", () => {
     const parseCalls = infoSpy.mock.calls.filter(([event]) => event.event === "document.parse");
     expect(parseCalls).toHaveLength(2);
     expect(parseCalls[0][0]).toEqual({ event: "document.parse", state: "starting", action: "check_parser" });
-    expect(parseCalls[1][0]).toMatchObject({ event: "document.parse", state: "ready", action: "none" });
-    const ms = (parseCalls[1][0] as { durationMs: number }).durationMs;
+    const ready = parseCalls[1][0] as Record<string, unknown>;
+    expect(Object.keys(ready).sort()).toEqual(["action", "durationMs", "event", "state"]);
+    expect(ready).toMatchObject({ event: "document.parse", state: "ready", action: "none" });
+    const ms = ready.durationMs as number;
     expect(Number.isInteger(ms)).toBe(true);
     expect(ms).toBeGreaterThanOrEqual(0);
   });
@@ -293,5 +304,37 @@ describe("Tika adapter", () => {
 
     vi.mocked(fetch).mockResolvedValue(response({ ok: false, status: 503 }));
     await expect(getTikaHealth()).resolves.toEqual({ status: "unavailable" });
+  });
+});
+
+describe("Tika's Markdown escapes (#982)", () => {
+  it("removes a backslash the document does not contain", () => {
+    // Observed in real orbit-tika output on a rendered bill: the PDF's
+    // ToUnicode map has a plain `&`, and Tika's writer inserts the escape.
+    expect(undoTikaMarkdownEscapes("Wellmarsh Water \\& Drainage plc")).toBe("Wellmarsh Water & Drainage plc");
+  });
+
+  it("unescapes a numbered field label", () => {
+    expect(undoTikaMarkdownEscapes("1\\. TEST STATION")).toBe("1. TEST STATION");
+  });
+
+  it("unescapes every metacharacter Markdown escapes", () => {
+    const escaped = "\\` \\* \\_ \\{ \\} \\[ \\] \\( \\) \\# \\+ \\- \\. \\! \\| \\& \\< \\> \\~";
+    expect(undoTikaMarkdownEscapes(escaped)).toBe("` * _ { } [ ] ( ) # + - . ! | & < > ~");
+  });
+
+  it("leaves a backslash the document really contains", () => {
+    // A Windows path or a maths expression is the document's own content and
+    // must survive: only a backslash before an escapable character goes.
+    expect(undoTikaMarkdownEscapes("C:\\Users\\anna")).toBe("C:\\Users\\anna");
+    expect(undoTikaMarkdownEscapes("50\\% of nothing")).toBe("50\\% of nothing");
+  });
+
+  it("collapses an escaped backslash to one", () => {
+    expect(undoTikaMarkdownEscapes("a \\\\ b")).toBe("a \\ b");
+  });
+
+  it("leaves ordinary text alone", () => {
+    expect(undoTikaMarkdownEscapes("Renewal date 14 March 2027")).toBe("Renewal date 14 March 2027");
   });
 });

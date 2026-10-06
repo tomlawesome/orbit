@@ -34,6 +34,33 @@ import { packOf, setSwatch, syncSwatches } from "./swatches.js";
 /** @type {(id: string) => string} */
 export const sunHref = (id) => `/household/${encodeURIComponent(id)}`;
 
+/*
+ * THE CONSTELLATION MARKER'S OWN GEOMETRY (#1151 W1-Q12): the ring centre
+ * and the leader-line's "extends away from the dial" veer path (owner,
+ * 2026-08-16), shared between the live sky's renderGalaxy() below and the
+ * newcomer's labelled sky's mountEmptySky() further down — one builds its
+ * marker as an innerHTML SVG string, the other with createElementNS, but
+ * both drew the identical ring/veer numbers from scratch before this. mx()
+ * mirrors any drawn x through the 210-wide viewBox: a constellation left of
+ * centre reads leftward (the original layout, ring at svg x 118), one right
+ * of centre is the horizontal mirror (ring at x 92, text end-anchored).
+ */
+/** @param {number} x @param {boolean} away */
+function markerX(x, away) {
+  return away ? 210 - x : x;
+}
+/** @param {boolean} away */
+function markerRingX(away) {
+  return markerX(118, away);
+}
+/** The arrow extends underneath the text, then veers toward the ring.
+ *  @param {number} width @param {boolean} away */
+function markerVeer(width, away) {
+  return away
+    ? `M 206 21 H ${200 - width} L ${184 - width} 40`
+    : `M 4 21 H ${width + 10} L ${width + 26} 40`;
+}
+
 /**
  * @param {object} options
  * @param {Record<string, any>} options.galaxy
@@ -150,9 +177,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
        * any drawn x through the 210-wide viewBox.
        */
       const away = ox > 0;
-      /** @type {(x: number) => number} */
-      const mx = (x) => (away ? 210 - x : x);
-      const ringX = mx(118);
+      const ringX = markerRingX(away);
       // anchored so the RING CENTRE sits at the bearing point — a flight
       // translating by -delta therefore lands the ring centre EXACTLY on the
       // hero centre, concentric with the dial's sun
@@ -165,14 +190,9 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
       div.style.setProperty("--dim", dim);
       const label = hh.name.toUpperCase();
       const tw = Math.min(150, label.length * 6.6);
-      // the arrow extends underneath the text, then veers toward the ring
-      /** @type {(width: number) => string} */
-      const veerFor = (width) => (away
-        ? `M 206 21 H ${200 - width} L ${184 - width} 40`
-        : `M 4 21 H ${width + 10} L ${width + 26} 40`);
       div.innerHTML = `<svg width="210" height="160" viewBox="0 0 210 160">
-        <text x="${mx(6)}" y="14" font-size="9.5" letter-spacing=".14em"${away ? ' text-anchor="end"' : ""} style="fill:var(--accent-text)" opacity=".85">${label}</text>
-        <path d="${veerFor(tw)}" fill="none" style="stroke:var(--accent)" stroke-width="1" opacity=".55"/>
+        <text x="${markerX(6, away)}" y="14" font-size="9.5" letter-spacing=".14em"${away ? ' text-anchor="end"' : ""} style="fill:var(--accent-text)" opacity=".85">${label}</text>
+        <path d="${markerVeer(tw, away)}" fill="none" style="stroke:var(--accent)" stroke-width="1" opacity=".55"/>
         <circle class="msring" cx="${ringX}" cy="95" r="40" fill="none" style="stroke:var(--chart-line)" stroke-opacity=".5" stroke-width="1"/>
         <!-- #638: the real hit target — fill="none" above doesn't hit-test,
              fill="transparent" does. home.css turns off pointer events on the
@@ -184,7 +204,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
       </svg>`;
       div.addEventListener("click", () => flyTo(key, div));
       hero.appendChild(div);
-      corrections.push({ div, veerFor });
+      corrections.push({ div, away });
     }
     /*
      * The leader rule runs under the label and then veers to the ring, so its
@@ -197,10 +217,10 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
      * Measured in a second pass over the appended nodes, so the run costs one
      * layout for the first measurement instead of one per constellation (#448).
      */
-    for (const { div, veerFor } of corrections) {
+    for (const { div, away } of corrections) {
       const measured = Math.min(150, /** @type {SVGTextElement} */ (div.querySelector("text")).getComputedTextLength());
       if (measured) {
-        /** @type {SVGPathElement} */ (div.querySelector("path")).setAttribute("d", veerFor(measured));
+        /** @type {SVGPathElement} */ (div.querySelector("path")).setAttribute("d", markerVeer(measured, away));
       }
     }
     /* the marks are new nodes, so anything that dresses them — dawn's crossing
@@ -309,11 +329,10 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     homeHeader.addEventListener("mouseenter", () => document.body.classList.add("constellation-lit"));
     homeHeader.addEventListener("mouseleave", () => document.body.classList.remove("constellation-lit"));
   }
-  /* POL-9 */
-  /** @param {boolean} open */
-  function openPalette(open){
-    /** @type {HTMLElement} */ (document.getElementById("palette")).classList.toggle("open", open);
-  }
+  /* #1161: the strip's own open/close and focus/blur are Svelte's
+     (+page.svelte's `stripOpen` state) — only the ⌘K/Ctrl-K shortcut to
+     focus #explore stays imperative, since it is bound with the rest of
+     this screen's window-level keydown wiring. */
   addEventListener("keydown", (/** @type {KeyboardEvent} */ event) => {
     if ((event.metaKey || event.ctrlKey) && event.key === "k") {
       event.preventDefault(); /** @type {HTMLElement} */ (document.getElementById("explore")).focus();
@@ -326,22 +345,25 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     /** @type {HTMLElement} */ (document.getElementById("docview")).classList.add("open");
   }
   callout.addEventListener("mouseleave", () => callout.classList.remove("show"));
-  /* The ratified screen shows the degraded state (the markup's handle already
-     reads "degraded"); real health wiring is deferred functionality (#410). */
-  document.body.classList.add("health-degraded");
-  /** @param {HTMLElement} button */
-  function toggleAccount(button){
-    const card = /** @type {HTMLElement} */ (document.getElementById("account"));
-    const open = card.classList.toggle("open");
-    button.setAttribute("aria-expanded", String(open));
-  }
-  /* packOf, setSwatch and syncSwatches moved to ./swatches.js (#852) so the
-     pocket dialect's own sheet could import the same wiring rather than
-     copy it. The desk's own follow-up — re-measuring the constellation
-     leaders, since the engraved packs size that label differently — is
-     passed in as setSwatch's onChange, which the pocket sheet has no
-     equivalent of and simply omits. */
-  syncSwatches();
+  /* The status-drawer handle's `health-degraded` body class is now owned by
+     +page.svelte's own `$effect`, reactive to the real `systemStatus` read
+     (#863) -- set unconditionally here before, which is what made the
+     handle always say "degraded" regardless of the instance's real state. */
+  /*
+   * The account panel used to be wired from here — the orb's own toggle and
+   * the THEME row's swatches. #1074 moved both to mountAccount() below,
+   * which +page.svelte binds on EVERY branch of its mount: the panel is
+   * chrome, not household data, and a reader with no household has one too.
+   *
+   * What stays is the desk's own follow-up to a theme change: the engraved
+   * packs size the constellation label differently, so the leaders have to
+   * be re-measured whenever the pack changes. It watches the theme itself
+   * rather than the click that wrote it, so it no longer has to be handed to
+   * the swatch row that moved away — and it now also fires for a pack
+   * restored before paint, which the old onChange never saw.
+   */
+  const themeWatch = new MutationObserver(() => { if (!flying) renderGalaxy(false); });
+  themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   /** @param {HTMLElement} button */
   function toggleCreate(button){
     const drawer = /** @type {HTMLElement} */ (document.getElementById("createdrawer"));
@@ -557,27 +579,10 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
      `on` comes from the screen scope at the top of this function. */
   const star = /** @type {HTMLElement} */ (document.getElementById("nstar"));
 
-  on(document.querySelector("button.orb"), "click", (/** @type {MouseEvent} */ event) =>
-    toggleAccount(/** @type {HTMLElement} */ (event.currentTarget)));
+  /* The orb and the THEME row are mountAccount()'s (#1074), bound by
+     +page.svelte on every branch of its mount rather than here. */
   on(star, "click", (/** @type {MouseEvent} */ event) => toggleCreate(/** @type {HTMLElement} */ (event.currentTarget)));
-  on(document.querySelector(".scrim"), "click", () => toggleCreate(star));
-
-  /* title -> theme name: "star-chart" is the starchart pack, "after dark" afterdark */
-  for (const swatch of document.querySelectorAll(".swatches button")) {
-    on(swatch, "click", (/** @type {MouseEvent} */ event) =>
-      setSwatch(
-        packOf(/** @type {HTMLElement} */ (event.currentTarget)),
-        /** @type {HTMLElement} */ (event.currentTarget),
-        /* The constellation leaders are measured from the rendered label,
-           and the engraved packs size that label differently, so re-measure
-           on a theme change. */
-        () => { if (!flying) renderGalaxy(false); },
-      ));
-  }
-
-  const explore = /** @type {HTMLElement} */ (document.getElementById("explore"));
-  on(explore, "focus", () => openPalette(true));
-  on(explore, "blur", () => setTimeout(() => openPalette(false), 150));
+  on(document.querySelector(".desk .scrim"), "click", () => toggleCreate(star));
 
   /* both drawer handles ride their own drawer, which is their parent */
   for (const handle of document.querySelectorAll(".drawer > button.handle")) {
@@ -602,6 +607,7 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
   return () => {
     teardown();
     observer.disconnect();
+    themeWatch.disconnect();
     callout.remove();
     /* the pack sky goes before the document is handed back, so its own teardown
        still has the layers it has to empty (§15, the sky wave) */
@@ -620,6 +626,73 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     for (const prop of ["--descent", "--depth", "--pass", "--below", "--deep", "--mist"])
       doc.style.removeProperty(prop);
   };
+}
+
+/**
+ * THE DESK ACCOUNT PANEL (#1074).
+ *
+ * The avatar, Inbox, Settings, the THEME row and sign-out are chrome: every
+ * reader on /home has them, household or no household. This used to be wired
+ * inside mountHome, which /home only runs for a reader who HAS a household —
+ * so on the empty sky the panel was drawn in full and answered nothing, and
+ * Settings, Inbox, the theme and sign-out were all unreachable from home for
+ * exactly the reader most likely to want them. It is its own mount now, and
+ * +page.svelte binds it on every branch, so no branch can forget it.
+ *
+ * The nav links are plain `<a href>`s and the sign-out button is Svelte's
+ * own `onclick`; what needs binding is the toggle, the light dismiss and the
+ * swatch row. mountHome's OVERLAY_HIT/OVERLAY_OPENER machinery still closes
+ * this panel when one of the desk's other overlays opens — that is about the
+ * drawers, which the empty sky does not have, and it only ever removes a
+ * class, so the two do not fight.
+ */
+export function mountAccount() {
+  const { on, teardown } = screenScope();
+  const orb = /** @type {HTMLElement | null} */ (document.querySelector("button.orb"));
+  const card = document.getElementById("account");
+  if (!orb || !card) return teardown;
+
+  const close = () => {
+    card.classList.remove("open");
+    orb.setAttribute("aria-expanded", "false");
+  };
+  on(orb, "click", () => orb.setAttribute("aria-expanded", String(card.classList.toggle("open"))));
+
+  /* The same light-dismiss rule every overlay in the product carries. The
+     orb's own handler has already run by the time this does, so a press on
+     the orb reads as "inside" and toggles rather than closing twice. */
+  on(window, "click", (/** @type {MouseEvent} */ event) => {
+    if (!card.classList.contains("open")) return;
+    const target = /** @type {Node | null} */ (event.target);
+    if (target && (card.contains(target) || orb.contains(target))) return;
+    close();
+  });
+
+  /* Escape closes, and hands focus back to the orb if it was inside — #853's
+     rule. Once the panel goes visibility:hidden (#847) a focus left in there
+     falls to <body> and a keyboard reader is stranded at the top of the page. */
+  on(window, "keydown", (/** @type {KeyboardEvent} */ event) => {
+    if (event.key !== "Escape" || !card.classList.contains("open")) return;
+    const focusWasInside = card.contains(document.activeElement);
+    close();
+    if (focusWasInside) orb.focus();
+  });
+
+  /* THEME: ./swatches.js, the same wiring the pocket sheet uses (#852). The
+     desk's own follow-up — re-measuring the constellation leaders, which the
+     engraved packs size differently — is mountHome's, which watches the live
+     theme rather than this click, because the chart only exists on the
+     branch mountHome runs on. */
+  for (const swatch of /** @type {NodeListOf<HTMLElement>} */ (card.querySelectorAll(".swatches button"))) {
+    on(swatch, "click", (/** @type {MouseEvent} */ event) =>
+      setSwatch(
+        packOf(/** @type {HTMLElement} */ (event.currentTarget)),
+        /** @type {HTMLElement} */ (event.currentTarget),
+      ));
+  }
+  syncSwatches(card);
+
+  return teardown;
 }
 
 /**
@@ -660,9 +733,7 @@ export function mountEmptySky({ galaxy, onAsk }) {
     for (const { id, household: hh, ox, oy, undrawn } of placed) {
       if (undrawn) continue;
       const away = ox > 0;
-      /** @type {(x: number) => number} */
-      const mx = (x) => (away ? 210 - x : x);
-      const ringX = mx(118);
+      const ringX = markerRingX(away);
       const div = document.createElement("div");
       div.className = "minisys";
       div.setAttribute("role", "button");
@@ -671,7 +742,7 @@ export function mountEmptySky({ galaxy, onAsk }) {
       div.style.top = (h / 2 + oy - 95) + "px";
       const label = hh.name.toUpperCase();
       const tw = Math.min(150, label.length * 6.6);
-      const veer = away ? `M 206 21 H ${200 - tw} L ${184 - tw} 40` : `M 4 21 H ${tw + 10} L ${tw + 26} 40`;
+      const veer = markerVeer(tw, away);
       const svgNS = "http://www.w3.org/2000/svg";
       const svg = document.createElementNS(svgNS, "svg");
       svg.setAttribute("width", "210"); svg.setAttribute("height", "160");
@@ -688,7 +759,7 @@ export function mountEmptySky({ galaxy, onAsk }) {
         svg.appendChild(el);
         return el;
       };
-      const name = put("text", { x: mx(6), y: 14, "font-size": "9.5", "letter-spacing": ".14em", style: "fill:var(--accent-text)", opacity: ".85" }, label);
+      const name = put("text", { x: markerX(6, away), y: 14, "font-size": "9.5", "letter-spacing": ".14em", style: "fill:var(--accent-text)", opacity: ".85" }, label);
       if (away) name.setAttribute("text-anchor", "end");
       put("path", { d: veer, fill: "none", style: "stroke:var(--accent)", "stroke-width": "1", opacity: ".55" });
       put("circle", { class: "msring", cx: ringX, cy: 95, r: 40, fill: "none", style: "stroke:var(--chart-line)", "stroke-opacity": ".5", "stroke-width": "1" });
@@ -696,7 +767,7 @@ export function mountEmptySky({ galaxy, onAsk }) {
       put("circle", { class: "mshit", cx: ringX, cy: 95, r: 40, fill: "transparent" });
       put("circle", { cx: ringX, cy: 95, r: 3, style: "fill:var(--ink)", opacity: ".8" });
       if (hh.requested) {
-        const asked = put("text", { x: mx(6), y: 30, "font-size": "8.5", "letter-spacing": ".14em", style: "fill:var(--ink-faint)" }, "ASKED TO JOIN · WAITING");
+        const asked = put("text", { x: markerX(6, away), y: 30, "font-size": "8.5", "letter-spacing": ".14em", style: "fill:var(--ink-faint)" }, "ASKED TO JOIN · WAITING");
         if (away) asked.setAttribute("text-anchor", "end");
       }
       div.appendChild(svg);

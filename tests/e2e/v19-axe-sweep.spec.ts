@@ -2,6 +2,15 @@ import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
+import { homeIsLive } from "./support/keyboard";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { entrancesSettled } from "./support/motion";
+import { answerPushWithoutAService } from "./support/webkit-push";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #496: a full axe sweep across every SIGNED-IN v19 route, in both dialects.
@@ -25,12 +34,16 @@ import { cleanupHousehold, sessionHeaders } from "./support/households";
  * than filtered or skipped — see the individual `expect` calls below.
  */
 
-const READER = "Orbit Administrator";
+/* #1080: this worker's own administrator, resolved lazily (worker env only). */
+const READER = () => workerAccount("administrator");
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
 async function signIn(page: Page, returnTo: string) {
+  await answerPushWithoutAService(page);
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
-  await page.getByRole("link", { name: READER }).click();
+  await page.getByRole("link", { name: READER() }).click();
+  /* #1080: waits for the session, then holds administrator access. */
+  await ensureWorkerAdministrator(page);
 }
 
 /**
@@ -64,12 +77,22 @@ async function settleHome(page: Page) {
       { timeout: 30_000 },
     )
     .catch(() => {});
-  const card = page.locator(".tourcard");
-  if (await card.count()) {
-    await page.locator("#tour-skip").click();
-    await expect(card).toHaveCount(0);
+  const transport = page.locator("#orbit-tour-transport");
+  if (await transport.count()) {
+    await page.keyboard.press("Escape");
+    /* Esc reaches player.stop() (transport.js), which tears down the veil
+       (#orbit-tour-veil) synchronously -- that is what frees the real
+       screen underneath. The pill itself fades out and is removed a second
+       later (#1190), so it is the veil this waits on, not the pill (see
+       keyboard.ts's `dismissTourIfShown`). */
+    await expect(page.locator("#orbit-tour-veil")).toBeHidden();
   }
   await expect(page.locator(".dialwrap, .mdial").filter({ visible: true })).toHaveCount(1);
+  /* Both dials are server-rendered (#842), so a visible one says the markup
+     is here and nothing about whether home's behaviour is bound yet. #1064:
+     wait for the mount's own marker before any state below arms a control —
+     the account orb's press is dropped outright if it lands first. */
+  await homeIsLive(page);
 }
 
 /**
@@ -201,7 +224,7 @@ test.describe("the signed-in v19 sweep", () => {
 
   // `button.orb`, `#nstar`, `#edge-health` and `#keydrawer` are the DESKTOP
   // chrome (home.css scopes them under `.desk`); the pocket dialect draws its
-  // own account trigger (`.morb`, pocket.svelte) and has no drawers of its
+  // own account trigger (`#morb`, pocket.svelte) and has no drawers of its
   // own at all. Confirmed by running these against mobile-chromium first:
   // every one of the four times out with "element is not visible" rather
   // than finding a pocket equivalent, so there is nothing there for axe to
@@ -219,11 +242,11 @@ test.describe("the signed-in v19 sweep", () => {
   });
 
   // #852: the pocket dialect's own account menu — the mobile mirror of the
-  // desk `button.orb`/`#account` state above. `#morb`/`#maccount` are the
-  // pocket dialect's own trigger and panel (pocket.svelte), so this is
+  // desk `button.orb`/`#account` state above. `#morb` and the kit's hatch
+  // (#1120) are the pocket dialect's own trigger and panel, so this is
   // skipped on desktop the same way the state above skips mobile.
   test("/home pocket account menu open has no automated WCAG A/AA violations", async ({ page, isMobile }) => {
-    test.skip(!isMobile, "#morb/#maccount are pocket-only chrome; the desk dialect's own state is covered above");
+    test.skip(!isMobile, "#morb and the hatch are pocket-only chrome; the desk dialect's own state is covered above");
     const household = await arriveWithHousehold(page);
     try {
       await page.locator("#morb").click();
@@ -287,6 +310,10 @@ test.describe("the signed-in v19 sweep", () => {
   // arrival on this reader, in this file or another, does not meet an
   // unexpected walk.
   test("/home first-run tour overlay has no automated WCAG A/AA violations", async ({ page }) => {
+    /* The film has no pocket cut (§24): a phone mounts no transport at all,
+       so there is nothing for this sweep to visit there (v19-tour.spec.ts
+       skips the same way). */
+    test.skip(test.info().project.name.startsWith("mobile"), "the film is desk-only (owner-decisions.md §24)");
     await signIn(page, "/home");
     await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 });
     const headers = { ...(await sessionHeaders(page)), "content-type": "application/json" };
@@ -294,24 +321,62 @@ test.describe("the signed-in v19 sweep", () => {
     if (!reset.ok()) throw new Error(`#496: could not reset the tour record (${reset.status()})`);
 
     await page.goto("/home");
-    const card = page.locator(".tourcard");
-    await expect(card).toBeVisible({ timeout: 30_000 });
-    await expect(card).toHaveAttribute("data-tour-stop", "1", { timeout: 30_000 });
+    const transport = page.locator("#orbit-tour-transport");
+    await expect(transport).toBeVisible({ timeout: 30_000 });
+    /* Was "reaches stop 1" against the old card's `data-tour-stop`; the film
+       has no stop numbering, so this reads film.js's own review hook for
+       the chapter index instead -- 0 is where a fresh film always opens. */
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as unknown as { __reading?: () => { chapter: number } }).__reading?.().chapter),
+      )
+      .toBe(0);
 
     await axeCheck(page);
 
-    await page.locator("#tour-skip").click();
-    await expect(card).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#orbit-tour-veil")).toBeHidden();
   });
 
   const PLAIN_ROUTES: Array<{ path: string; ready: (page: Page) => Promise<unknown> }> = [
-    { path: "/due-next", ready: (page) => expect(page.getByRole("heading", { name: "Due next" })).toBeVisible() },
-    { path: "/documents", ready: (page) => expect(page.getByRole("heading", { name: "Documents" })).toBeVisible() },
     { path: "/inbox", ready: (page) => expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible() },
-    { path: "/create", ready: (page) => expect(page.locator("#f-name")).toBeVisible() },
-    { path: "/settings", ready: (page) => expect(page.getByRole("heading", { name: "Settings" })).toBeVisible() },
-    { path: "/settings/mail", ready: (page) => expect(page.locator(".relay-card")).toBeVisible() },
-    { path: "/admin", ready: (page) => expect(page.getByRole("heading", { name: "Operational state" })).toBeVisible() },
+    /* #1120: the form's one exposed name field -- the desk card's `#f-name`,
+       or on a phone the pocket's own form (proposal §2.5), whose fields only
+       draw once the households have loaded; the other dialect's is hidden. */
+    { path: "/create", ready: (page) => expect(page.getByRole("textbox", { name: "name", exact: true })).toBeVisible() },
+    /* #1120: on a phone, settings and its relay draw their own pocket
+       screens, whose cards rise in (st-rise, rl-rise); measure them drawn,
+       not through the entrance's fading opacity. On the desk those roots
+       are display:none and hold no animations. */
+    {
+      path: "/settings",
+      ready: async (page) => {
+        await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+        if (!test.info().project.name.startsWith("mobile")) {
+          /* #1195: on desktop Safari, /settings draws only its header, and
+             axe's own `.analyze()` then hangs for the whole test timeout
+             scanning the blanked page (pipeline 2005's trace: this ready
+             function had already resolved -- heading visible, `.st-pocket`
+             present but hidden, same as it always is on the desk dialect --
+             so the 60s was lost inside `AxeBuilder.analyze()` itself, not
+             here). Asserting the desk's own cards exist turns that hang
+             into a bounded, catchable failure instead: true on every
+             desktop engine, not a WebKit special case, and scoped off
+             mobile, whose dialect has no `.cards` to find. */
+          await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
+        }
+        await entrancesSettled(page.locator(".st-pocket"));
+      },
+    },
+    /* The desk's `.relay-card` never shows on a phone; the relay's h1 is
+       drawn by whichever dialect is showing (the other is hidden). */
+    {
+      path: "/settings/mail",
+      ready: async (page) => {
+        await expect(page.getByRole("heading", { name: "Your relay", level: 1 })).toBeVisible();
+        await entrancesSettled(page.locator(".rl-pocket"));
+      },
+    },
     {
       path: "/administration",
       ready: (page) => expect(page.getByRole("heading", { name: "Administration" })).toBeVisible(),
@@ -333,6 +398,9 @@ test.describe("the signed-in v19 sweep", () => {
     try {
       await page.goto(`/household/${household.id}`);
       await expect(page.getByRole("heading", { name: household.name })).toBeVisible();
+      /* #1122: on a phone the household's cards rise in; measure them drawn,
+         not through the entrance's fading opacity. */
+      await entrancesSettled(page.locator(".hh-pocket"));
       await axeCheck(page);
     } finally {
       await cleanup(page, household);

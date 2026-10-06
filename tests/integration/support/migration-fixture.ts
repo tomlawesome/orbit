@@ -35,7 +35,7 @@ export const EXPECTED_ENUMS: Record<string, string[]> = {
   document_job_status: ["pending", "processing", "retry", "completed", "failed", "cancelled"],
   document_lifecycle: ["receiving", "validating", "quarantined", "scanning", "encrypting", "available", "pending_deletion", "deleted", "rejected"],
   document_scan_status: ["pending", "clean", "infected", "error", "skipped"],
-  event_kind: ["renewal", "service"],
+  event_kind: ["renewal", "service", "expiry"],
   imap_attachment_status: ["stored", "rejected", "assigned"],
   imap_recipient_alias_status: ["active", "legacy_inactive"],
   imap_ingestion_status: ["processing", "pending_review", "quarantined", "failed", "completed", "discarded", "approving", "recoverable", "expired", "unattributed", "held"],
@@ -47,6 +47,7 @@ export const EXPECTED_ENUMS: Record<string, string[]> = {
   mail_in_sender_source: ["account", "sso", "manual"],
   mail_in_auth_method: ["password", "xoauth2"],
   membership_role: ["owner", "member"],
+  metadata_key_scope: ["household", "instance"],
   theme_mode: ["system", "light", "dark"],
   reviewed_intake_operation_status: ["processing", "pending_attachment", "completed", "recoverable", "failed"],
   reviewed_intake_operation_source: ["direct_upload", "mailbox_draft"],
@@ -62,36 +63,45 @@ export const EXPECTED_TABLE_COLUMNS: Record<string, string[]> = {
   documents: ["id", "household_id", "item_id", "uploaded_by_user_id", "display_name", "media_type", "size_bytes", "content_sha256", "lifecycle", "scan_status", "failure_code", "delete_after", "deleted_at", "available_at", "version", "created_at", "updated_at"],
   due_events: ["id", "household_id", "item_id", "kind", "due_date", "completed_at", "completed_by_user_id", "completion_key", "next_event_id", "created_at"],
   external_identities: ["id", "user_id", "issuer", "subject", "last_login_at", "created_at", "updated_at"],
-  household_invitations: ["id", "household_id", "email", "role", "invited_by_user_id", "token_digest", "expires_at", "sent_at", "send_error", "redeemed_at", "redeemed_by_user_id", "revoked_at", "revoked_by_user_id", "created_at"],
+  household_invitations: ["id", "household_id", "email", "email_enc", "email_index", "role", "invited_by_user_id", "token_digest", "expires_at", "sent_at", "send_error", "redeemed_at", "redeemed_by_user_id", "revoked_at", "revoked_by_user_id", "created_at"],
   household_join_requests: ["id", "household_id", "user_id", "status", "created_at", "decided_at", "decided_by_user_id"],
   households: ["id", "name", "timezone", "default_currency", "setup_completed", "deletion_requested_at", "delete_after", "deletion_requested_by_user_id", "created_at", "updated_at"],
   imap_ingestion_attachments: ["id", "message_id", "display_name", "media_type", "size_bytes", "content_sha256", "storage_key", "ciphertext_size", "envelope_version", "content_iv", "content_auth_tag", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "status", "assigned_document_id", "transfer_claim_token", "transfer_claimed_at", "transfer_lease_expires_at", "purge_pending", "purge_attempts", "purge_failure_code", "created_at", "updated_at"],
-  imap_ingestion_messages: ["id", "mailbox", "mailbox_uid_validity", "mailbox_uid", "content_sha256", "recipient_alias_sha256", "recipient_alias_generation", "user_id", "household_id", "review_item_id", "draft_version", "proposal", "field_evidence", "expires_at", "approval_operation_id", "approval_result_id", "approval_request_sha256", "approved_item_id", "approval_started_at", "approved_at", "discarded_at", "expired_at", "status", "attempts", "failure_code", "attachment_processing_attempts", "attachment_processing_locked_at", "attachment_processing_lease_token", "attachment_processing_next_attempt_at", "attachment_processing_failure_code", "receipt_status", "receipt_attempts", "receipt_locked_at", "receipt_lease_token", "receipt_sent_at", "receipt_failure_code", "received_at", "created_at", "updated_at", "attributed_by"],
-  items: ["id", "household_id", "section_id", "title", "subtype", "provider", "reference", "cost_minor", "currency", "start_date", "expiry_date", "renewal_date", "service_date", "recurrence_months", "snoozed_until", "notes", "external_document_url", "status", "requires_review", "version", "created_at", "updated_at"],
+  imap_ingestion_messages: ["id", "mailbox", "mailbox_uid_validity", "mailbox_uid", "content_sha256", "recipient_alias_sha256", "recipient_alias_generation", "user_id", "household_id", "review_item_id", "draft_version", "proposal", "proposal_enc", "field_evidence", "field_evidence_enc", "expires_at", "approval_operation_id", "approval_result_id", "approval_request_sha256", "approved_item_id", "approval_started_at", "approved_at", "discarded_at", "expired_at", "status", "attempts", "failure_code", "attachment_processing_attempts", "attachment_processing_locked_at", "attachment_processing_lease_token", "attachment_processing_next_attempt_at", "attachment_processing_failure_code", "receipt_status", "receipt_attempts", "receipt_locked_at", "receipt_lease_token", "receipt_sent_at", "receipt_failure_code", "received_at", "created_at", "updated_at", "attributed_by"],
+  items: ["id", "household_id", "section_id", "title", "subtype", "provider", "reference", "title_enc", "provider_enc", "cost_minor", "cost_minor_enc", "currency", "start_date", "expiry_date", "renewal_date", "service_date", "recurrence_months", "snoozed_until", "notes", "notes_enc", "reference_enc", "reference_index", "external_document_url", "status", "requires_review", "version", "created_at", "updated_at"],
   memberships: ["household_id", "user_id", "role", "created_at"],
   notification_deliveries: ["id", "household_id", "event_id", "user_id", "channel", "scheduled_for", "status", "attempts", "locked_at", "lease_token", "last_error", "sent_at", "created_at", "updated_at"],
   notification_states: ["user_id", "household_id", "notification_id", "read_at", "dismissed_at", "updated_at"],
   portable_archives: ["id", "household_id", "requested_by_user_id", "storage_key", "content_sha256", "size_bytes", "includes_documents", "expires_at", "downloaded_at", "purged_at", "created_at"],
+  portable_archive_imports: ["id", "household_id", "actor_user_id", "started_at", "finished_at", "outcome", "created_section_ids", "created_item_ids"],
   push_subscriptions: ["id", "user_id", "endpoint", "p256dh", "auth", "user_agent", "expires_at", "revoked_at", "created_at"],
   reminder_rules: ["id", "item_id", "days_before", "email_enabled", "push_enabled"],
   sections: ["id", "household_id", "slug", "name", "icon", "accent", "position", "visible", "archived_at", "created_at", "updated_at"],
   sessions: ["id", "user_id", "token_hash", "active_household_id", "expires_at", "rotated_at", "created_at", "user_agent", "last_seen_at"],
   user_preferences: ["user_id", "theme_mode", "theme_id", "text_size", "urgency_palette", "email_notifications", "push_notifications", "first_warning_days", "final_warning_days", "tour_seen_at", "updated_at"],
-  users: ["id", "email", "email_verified", "display_name", "avatar_url", "is_instance_admin", "disabled_at", "created_at", "updated_at"],
+  users: ["id", "email", "email_enc", "email_index", "email_verified", "display_name", "avatar_url", "is_instance_admin", "disabled_at", "created_at", "updated_at"],
   imap_recipient_aliases: ["id", "user_id", "generation", "alias_sha256", "alias_key_secret_id", "status", "active_until", "created_at", "updated_at"],
   instance_authority: ["singleton", "primary_user_id", "updated_at"],
   instance_maintenance: ["singleton", "id", "active", "current_window_id", "expected_end_at", "version", "updated_at"],
   instance_contact: ["singleton", "id", "public_address", "version", "updated_at"],
+  mail_probe_results: ["singleton", "id", "mailbox_result", "mailbox_checked_at", "relay_result", "relay_checked_at", "updated_at"],
   maintenance_windows: ["id", "status", "scheduled_start_at", "started_at", "expected_end_at", "ended_at", "cancelled_at", "absorbed_into_id", "created_at", "updated_at"],
   maintenance_updates: ["id", "window_id", "kind", "body", "published_at", "created_at", "edited_at"],
   reviewed_intake_operations: ["id", "actor_user_id", "source", "household_id", "section_id", "action", "target_item_id", "item_id", "request_sha256", "result_id", "expected_document", "attachment_state", "document_id", "status", "failure_code", "completed_at", "created_at", "updated_at"],
   imap_ingestion_staging_objects: ["id", "message_id", "lease_token", "storage_key", "status", "purge_attempts", "purge_failure_code", "created_at", "updated_at"],
   imap_notification_deliveries: ["id", "message_id", "user_id", "kind", "status", "attempts", "next_attempt_at", "locked_at", "lease_token", "sent_at", "failure_code", "created_at", "updated_at"],
+  metadata_keys: ["id", "scope", "household_id", "envelope_version", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "version", "created_at", "updated_at"],
+  metadata_damage_sightings: ["id", "table_name", "column_name", "row_id", "first_seen_at"],
+  metadata_key_outages: ["id", "status", "started_at", "ended_at", "created_at", "updated_at"],
   mail_in_secrets: ["id", "kind", "ciphertext", "envelope_version", "content_iv", "content_auth_tag", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id", "created_by_user_id", "created_at", "updated_at"],
   mail_in_mailbox: ["singleton", "id", "host", "port", "account_user", "mailbox", "tls_server_name", "provider_profile", "auth_method", "trusted_recipient_header", "poll_seconds", "enabled", "verification_state", "verified_at", "password_secret_id", "alias_key_secret_id", "version", "created_at", "updated_at", "trusted_authserv_id"],
   mail_in_relays: ["user_id", "current_generation", "previous_generation", "previous_expires_at", "ingest_paused_at", "rotated_at", "version", "created_at", "updated_at"],
-  mail_in_sender_addresses: ["id", "user_id", "address", "source", "verified_at", "verification_token_digest", "verification_expires_at", "created_at", "updated_at"],
+  mail_in_sender_addresses: ["id", "user_id", "address", "address_enc", "address_index", "source", "verified_at", "verification_token_digest", "verification_expires_at", "created_at", "updated_at"],
   mail_in_unattributed_replies: ["address_sha256", "last_replied_at", "created_at", "updated_at"],
+  local_credentials: ["user_id", "password_hash", "failed_attempt_count", "locked_until", "last_verified_at", "password_changed_at", "created_at", "updated_at"],
+  credential_setup_tokens: ["id", "user_id", "token_hash", "purpose", "expires_at", "consumed_at", "created_by_user_id", "created_at"],
+  step_up_proofs: ["id", "session_id", "intent", "expires_at", "consumed_at", "created_at"],
+  sign_in_approvals: ["id", "user_id", "token_hash", "claim_hash", "user_agent", "client_address", "expires_at", "consumed_at", "outcome", "decided_at", "send_count", "last_sent_at", "notice_shown_at", "created_at"],
 };
 for (const columns of Object.values(EXPECTED_TABLE_COLUMNS)) columns.sort();
 
@@ -100,7 +110,6 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   audit_household_activity_idx: { table: "audit_log", columns: ["household_id", "entity_type", "created_at"], unique: false },
   audit_household_entity_idx: { table: "audit_log", columns: ["household_id", "entity_type", "entity_id"], unique: false },
   document_crypto_storage_key_unique: { table: "document_crypto", columns: ["storage_key"], unique: true },
-  document_draft_document_unique: { table: "document_drafts", columns: ["document_id"], unique: true },
   document_draft_household_status_idx: { table: "document_drafts", columns: ["household_id", "status"], unique: false },
   document_household_item_created_idx: { table: "documents", columns: ["household_id", "item_id", "created_at"], unique: false },
   document_household_lifecycle_created_idx: { table: "documents", columns: ["household_id", "lifecycle", "created_at"], unique: false },
@@ -108,14 +117,11 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   document_job_lease_idx: { table: "document_jobs", columns: ["status", "lease_expires_at"], unique: false },
   document_job_once: { table: "document_jobs", columns: ["document_id", "kind", "generation"], unique: true },
   document_staging_expiry_idx: { table: "document_staging_objects", columns: ["status", "recovery_expires_at"], unique: false },
-  document_staging_objects_storage_key_unique: { table: "document_staging_objects", columns: ["storage_key"], unique: true },
   due_event_completion_key: { table: "due_events", columns: ["household_id", "completion_key"], unique: true },
   due_event_household_date_idx: { table: "due_events", columns: ["household_id", "due_date"], unique: false },
   external_identity_issuer_subject: { table: "external_identities", columns: ["issuer", "subject"], unique: true },
   household_deletion_due_idx: { table: "households", columns: ["delete_after"], unique: false },
-  imap_attachment_message_hash_unique: { table: "imap_ingestion_attachments", columns: ["message_id", "content_sha256"], unique: true },
   imap_attachment_message_status_idx: { table: "imap_ingestion_attachments", columns: ["message_id", "status"], unique: false },
-  imap_ingestion_attachments_storage_key_unique: { table: "imap_ingestion_attachments", columns: ["storage_key"], unique: true },
   imap_ingestion_review_item_idx: { table: "imap_ingestion_messages", columns: ["review_item_id"], unique: false },
   imap_message_recipient_content_idx: { table: "imap_ingestion_messages", columns: ["user_id", "content_sha256"], unique: false },
   imap_message_approval_operation_unique: { table: "imap_ingestion_messages", columns: ["approval_operation_id"], unique: true },
@@ -125,18 +131,29 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   imap_message_household_status_idx: { table: "imap_ingestion_messages", columns: ["household_id", "status", "received_at"], unique: false },
   imap_message_mailbox_uid_unique: { table: "imap_ingestion_messages", columns: ["mailbox", "mailbox_uid_validity", "mailbox_uid"], unique: true },
   imap_message_user_status_idx: { table: "imap_ingestion_messages", columns: ["user_id", "status", "received_at"], unique: false },
+  item_household_reference_index_idx: { table: "items", columns: ["household_id", "reference_index"], unique: false },
+  metadata_keys_household_unique: { table: "metadata_keys", columns: ["household_id"], unique: true },
+  // Partial (WHERE household_id IS NULL); the contract records its columns and
+  // uniqueness, and migrations.test.ts asserts the singleton behaviour itself.
+  metadata_keys_instance_unique: { table: "metadata_keys", columns: ["scope"], unique: true },
+  metadata_keys_key_id_idx: { table: "metadata_keys", columns: ["key_id"], unique: false },
+  metadata_damage_sighting_value_unique: { table: "metadata_damage_sightings", columns: ["table_name", "column_name", "row_id"], unique: true },
+  metadata_key_outage_open_unique: { table: "metadata_key_outages", columns: ["status"], unique: true },
   imap_attachment_processing_claim_idx: { table: "imap_ingestion_messages", columns: ["status", "attachment_processing_locked_at", "created_at"], unique: false },
   imap_staging_object_message_status_idx: { table: "imap_ingestion_staging_objects", columns: ["message_id", "status"], unique: false },
   imap_staging_object_created_idx: { table: "imap_ingestion_staging_objects", columns: ["status", "created_at"], unique: false },
   imap_notification_message_kind_unique: { table: "imap_notification_deliveries", columns: ["message_id", "kind"], unique: true },
   imap_notification_claim_idx: { table: "imap_notification_deliveries", columns: ["status", "next_attempt_at", "locked_at"], unique: false },
-  imap_ingestion_staging_objects_storage_key_unique: { table: "imap_ingestion_staging_objects", columns: ["storage_key"], unique: true },
   imap_receipt_claim_idx: { table: "imap_ingestion_messages", columns: ["receipt_status", "receipt_locked_at", "created_at"], unique: false },
   imap_receipt_delivery_idx: { table: "imap_ingestion_messages", columns: ["receipt_status", "created_at"], unique: false },
   imap_recipient_alias_active_digest_unique: { table: "imap_recipient_aliases", columns: ["generation", "alias_sha256"], unique: true },
   imap_recipient_alias_user_generation_unique: { table: "imap_recipient_aliases", columns: ["user_id", "generation"], unique: true },
   imap_recipient_alias_user_status_idx: { table: "imap_recipient_aliases", columns: ["user_id", "status"], unique: false },
   mail_in_sender_address_unique: { table: "mail_in_sender_addresses", columns: ["address"], unique: true },
+  // The blind index carrying "one account per sender address" across the
+  // encryption (#969). The plaintext index above stands through the expand
+  // release, for the rows the backfill has not reached.
+  mail_in_sender_address_unique_index: { table: "mail_in_sender_addresses", columns: ["address_index"], unique: true },
   mail_in_sender_address_user_idx: { table: "mail_in_sender_addresses", columns: ["user_id", "verified_at"], unique: false },
   // Partial: at most one open window, enforced by the database (orbit#585).
   maintenance_window_open_unique: { table: "maintenance_windows", columns: ["status"], unique: true },
@@ -149,6 +166,7 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   // Partial: at most one OPEN invitation per household and address (#481), so
   // a resend replaces rather than accumulates.
   household_invitation_open_once: { table: "household_invitations", columns: ["household_id", "email"], unique: true },
+  household_invitation_open_once_index: { table: "household_invitations", columns: ["household_id", "email_index"], unique: true },
   // Deliberately NOT partial: a spent token still has to find its own row, or
   // a second visit to a used link would read as "no such invitation".
   household_invitation_token_digest_unique: { table: "household_invitations", columns: ["token_digest"], unique: true },
@@ -164,13 +182,22 @@ export const EXPECTED_INDEXES: Record<string, ExpectedIndex> = {
   notification_state_household_idx: { table: "notification_states", columns: ["household_id", "user_id"], unique: false },
   portable_archive_expiry_idx: { table: "portable_archives", columns: ["expires_at"], unique: false },
   portable_archive_household_created_idx: { table: "portable_archives", columns: ["household_id", "created_at"], unique: false },
-  portable_archives_storage_key_unique: { table: "portable_archives", columns: ["storage_key"], unique: true },
-  push_subscriptions_endpoint_unique: { table: "push_subscriptions", columns: ["endpoint"], unique: true },
+  portable_archive_import_household_idx: { table: "portable_archive_imports", columns: ["household_id", "finished_at"], unique: false },
   reminder_item_offset: { table: "reminder_rules", columns: ["item_id", "days_before"], unique: true },
   section_household_position: { table: "sections", columns: ["household_id", "position"], unique: false },
   section_household_slug: { table: "sections", columns: ["household_id", "slug"], unique: true },
-  sessions_token_hash_unique: { table: "sessions", columns: ["token_hash"], unique: true },
   user_email_lookup_idx: { table: "users", columns: ["email"], unique: false },
+  // "One account per address", carried across the encryption (#969). Unlike
+  // user_email_unique_ci below this one is over a plain column, so it does
+  // appear in the contract.
+  user_email_unique_index: { table: "users", columns: ["email_index"], unique: true },
+  credential_setup_tokens_user_idx: { table: "credential_setup_tokens", columns: ["user_id"], unique: false },
+  step_up_proofs_session_idx: { table: "step_up_proofs", columns: ["session_id"], unique: false },
+  sign_in_approvals_user_idx: { table: "sign_in_approvals", columns: ["user_id"], unique: false },
+  // user_email_unique_ci is a functional index (lower(email)): PostgreSQL
+  // records its indkey as 0 for the expression column, which readSchemaContract's
+  // introspection join over pg_attribute cannot resolve, so it never appears
+  // in this contract. Its behaviour is asserted directly in migrations.test.ts.
 };
 
 type ExpectedConstraint = {
@@ -223,8 +250,13 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   instance_authority_pkey: primary("instance_authority", ["singleton"]),
   instance_authority_primary_user_id_users_id_fk: foreign("instance_authority", ["primary_user_id"], "users", ["id"], "restrict"),
   instance_maintenance_pkey: primary("instance_maintenance", ["singleton"]),
+  metadata_keys_pkey: primary("metadata_keys", ["id"]),
+  metadata_damage_sightings_pkey: primary("metadata_damage_sightings", ["id"]),
+  metadata_key_outages_pkey: primary("metadata_key_outages", ["id"]),
+  metadata_keys_household_id_households_id_fk: foreign("metadata_keys", ["household_id"], "households", ["id"], "cascade"),
   instance_maintenance_current_window_id_fk: foreign("instance_maintenance", ["current_window_id"], "maintenance_windows", ["id"], "no_action"),
   instance_contact_pkey: primary("instance_contact", ["singleton"]),
+  mail_probe_results_pkey: primary("mail_probe_results", ["singleton"]),
   maintenance_windows_pkey: primary("maintenance_windows", ["id"]),
   maintenance_window_absorbed_into_id_fk: foreign("maintenance_windows", ["absorbed_into_id"], "maintenance_windows", ["id"], "no_action"),
   maintenance_updates_pkey: primary("maintenance_updates", ["id"]),
@@ -274,6 +306,9 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   portable_archives_pkey: primary("portable_archives", ["id"]),
   portable_archives_requested_by_user_id_users_id_fk: foreign("portable_archives", ["requested_by_user_id"], "users", ["id"], "cascade"),
   portable_archives_storage_key_unique: unique("portable_archives", ["storage_key"]),
+  portable_archive_imports_pkey: primary("portable_archive_imports", ["id"]),
+  portable_archive_imports_household_id_households_id_fk: foreign("portable_archive_imports", ["household_id"], "households", ["id"], "cascade"),
+  portable_archive_imports_actor_user_id_users_id_fk: foreign("portable_archive_imports", ["actor_user_id"], "users", ["id"], "no_action"),
   push_subscriptions_endpoint_unique: unique("push_subscriptions", ["endpoint"]),
   push_subscriptions_pkey: primary("push_subscriptions", ["id"]),
   push_subscriptions_user_id_users_id_fk: foreign("push_subscriptions", ["user_id"], "users", ["id"], "cascade"),
@@ -305,6 +340,18 @@ export const EXPECTED_CONSTRAINTS: Record<string, ExpectedConstraint> = {
   /* Truncated to 63 characters by PostgreSQL's identifier limit, exactly as
      the migration writes it. */
   imap_recipient_aliases_alias_key_secret_id_mail_in_secrets_id_f: foreign("imap_recipient_aliases", ["alias_key_secret_id"], "mail_in_secrets", ["id"], "set_null"),
+  local_credentials_pkey: primary("local_credentials", ["user_id"]),
+  local_credentials_user_id_users_id_fk: foreign("local_credentials", ["user_id"], "users", ["id"], "cascade"),
+  credential_setup_tokens_pkey: primary("credential_setup_tokens", ["id"]),
+  credential_setup_tokens_token_hash_unique: unique("credential_setup_tokens", ["token_hash"]),
+  credential_setup_tokens_user_id_users_id_fk: foreign("credential_setup_tokens", ["user_id"], "users", ["id"], "cascade"),
+  credential_setup_tokens_created_by_users_id_fk: foreign("credential_setup_tokens", ["created_by_user_id"], "users", ["id"], "set_null"),
+  step_up_proofs_pkey: primary("step_up_proofs", ["id"]),
+  step_up_proofs_session_id_sessions_id_fk: foreign("step_up_proofs", ["session_id"], "sessions", ["id"], "cascade"),
+  sign_in_approvals_pkey: primary("sign_in_approvals", ["id"]),
+  sign_in_approvals_token_hash_unique: unique("sign_in_approvals", ["token_hash"]),
+  sign_in_approvals_claim_hash_unique: unique("sign_in_approvals", ["claim_hash"]),
+  sign_in_approvals_user_id_users_id_fk: foreign("sign_in_approvals", ["user_id"], "users", ["id"], "cascade"),
 };
 
 type PostgresClient = ReturnType<typeof postgres>;
@@ -690,6 +737,19 @@ export async function readSchemaContract(client: PostgresClient): Promise<Schema
         ON attribute.attrelid = table_class.oid
        AND attribute.attnum = index_key.attnum
       WHERE table_namespace.nspname = 'public'
+        -- T-Q1 (#1151): a primary key or a table-level UNIQUE always backs
+        -- itself with an index of this exact shape, and that index is
+        -- already the "p"/"u" row in the constraints query above -- indexed
+        -- here too it would double-count every table's own primary key as
+        -- an "extra" index EXPECTED_INDEXES never lists. Excluded by
+        -- backing relationship (conindid), not by name, so a drizzle
+        -- uniqueIndex()/index() call -- the only two creators of anything in
+        -- EXPECTED_INDEXES -- is never excluded by this, only a constraint's
+        -- own index is.
+        AND NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE pg_constraint.conindid = index_data.indexrelid
+        )
       GROUP BY table_class.relname, index_class.relname, index_data.indisunique
       ORDER BY index_class.relname
     `),
@@ -723,16 +783,18 @@ export async function readSchemaContract(client: PostgresClient): Promise<Schema
     constraints[String(row.constraint_name)] = constraint;
   }
 
+  // T-Q1 (#1151): report every index the query returns, not only ones already
+  // named in EXPECTED_INDEXES. Pre-filtering by name meant a stray extra
+  // index was dropped before the caller's `toEqual(EXPECTED_INDEXES)` ever
+  // ran, so the schema-contract test could never catch one.
   const indexes: Record<string, ExpectedIndex> = {};
   for (const row of indexRows) {
     const name = String(row.index_name);
-    if (name in EXPECTED_INDEXES) {
-      indexes[name] = {
-        table: String(row.table_name),
-        columns: (row.columns as string[]).map(String),
-        unique: Boolean(row.is_unique),
-      };
-    }
+    indexes[name] = {
+      table: String(row.table_name),
+      columns: (row.columns as string[]).map(String),
+      unique: Boolean(row.is_unique),
+    };
   }
 
   return { enums, tables, constraints, indexes };
@@ -806,7 +868,13 @@ function snapshotColumns(tableName: string): string[] {
   // migration. Snapshot only columns present on both sides so migration data
   // comparisons remain stable while explicit migration assertions cover the
   // transformed legacy rows and newly added columns.
-  if (tableName === "users") return EXPECTED_TABLE_COLUMNS.users;
+  // `email_enc` and `email_index` arrive with 0044 (#969), so they exist on
+  // the current side only and cannot appear in a before-and-after comparison.
+  // What 0044 does to existing rows is asserted directly, below this file's
+  // Tier 1 and Tier 2 cases.
+  if (tableName === "users") {
+    return EXPECTED_TABLE_COLUMNS.users.filter((column) => column !== "email_enc" && column !== "email_index");
+  }
   if (tableName === "imap_ingestion_messages") return fixtureColumns(tableName).filter((column) => column !== "recipient_alias_generation");
   return fixtureColumns(tableName);
 }

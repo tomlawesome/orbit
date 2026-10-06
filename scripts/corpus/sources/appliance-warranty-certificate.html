@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Extended Warranty Certificate — Ashfield Domestic Appliances</title>
+<style>
+@font-face{font-family:"Corpus Ceremony";src:url("../fonts/CormorantGaramond.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Ceremony Sans";src:url("../fonts/Asap.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Corpus Ceremony", serif; font-size: 10.2pt; color: #1a1a1a;
+    background: #fffdf5;
+  }
+  .page {
+    width: 210mm; min-height: 297mm; box-sizing: border-box;
+    position: relative; page-break-after: always;
+    background-color: #fffdf5;
+    background-image:
+      repeating-radial-gradient(circle at 50% 0%, rgba(20,83,45,0.11) 0px, rgba(20,83,45,0.11) 1px, transparent 1px, transparent 5px),
+      repeating-linear-gradient(45deg, rgba(161,98,7,0.09) 0px, rgba(161,98,7,0.09) 1px, transparent 1px, transparent 6px),
+      repeating-linear-gradient(-45deg, rgba(20,83,45,0.09) 0px, rgba(20,83,45,0.09) 1px, transparent 1px, transparent 6px);
+    padding: 10mm;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  .frame-outer {
+    position: relative; height: 100%; box-sizing: border-box;
+    border: 3px double #14532d; padding: 2mm;
+  }
+  .frame-inner {
+    position: relative; height: 100%; box-sizing: border-box;
+    border: 1.1px solid #a16207; padding: 6mm 10mm 5mm 10mm;
+    background: rgba(255,253,245,0.5);
+  }
+
+  /* ---- ornamental corner rules, drawn in CSS ---- */
+  .corner { position: absolute; width: 9mm; height: 9mm; z-index: 2; }
+  .corner::before, .corner::after { content: ""; position: absolute; background: #a16207; }
+  .corner::before { width: 9mm; height: 1.1px; }
+  .corner::after { width: 1.1px; height: 9mm; }
+  .corner.tl { top: -1.6mm; left: -1.6mm; }
+  .corner.tl::before, .corner.tl::after { top: 0; left: 0; }
+  .corner.tr { top: -1.6mm; right: -1.6mm; }
+  .corner.tr::before { top: 0; right: 0; }
+  .corner.tr::after { top: 0; right: 0; }
+  .corner.bl { bottom: -1.6mm; left: -1.6mm; }
+  .corner.bl::before { bottom: 0; left: 0; }
+  .corner.bl::after { bottom: 0; left: 0; }
+  .corner.br { bottom: -1.6mm; right: -1.6mm; }
+  .corner.br::before { bottom: 0; right: 0; }
+  .corner.br::after { bottom: 0; right: 0; }
+  .corner-dot { position: absolute; width: 2.6mm; height: 2.6mm; border: 1.1px solid #a16207; background: #fffdf5; transform: rotate(45deg); }
+  .corner.tl .corner-dot { top: -1.3mm; left: -1.3mm; }
+  .corner.tr .corner-dot { top: -1.3mm; right: -1.3mm; }
+  .corner.bl .corner-dot { bottom: -1.3mm; left: -1.3mm; }
+  .corner.br .corner-dot { bottom: -1.3mm; right: -1.3mm; }
+
+  /* ---- retailer banner: the largest type on the page ---- */
+  .retailer-banner { text-align: center; margin-bottom: 2mm; }
+  .retailer-name {
+    font-size: 24pt; font-weight: 700; color: #14532d; letter-spacing: 0.6px;
+    line-height: 1.05;
+  }
+  .retailer-sub { font-size: 7.4pt; color: #5b6b5b; letter-spacing: 1.4px; text-transform: uppercase; margin-top: 1.2mm; }
+  .goldrule { border: none; border-top: 1.1px solid #a16207; width: 60mm; margin: 2.2mm auto; }
+
+  .cert-title { text-align: center; margin-bottom: 2.4mm; }
+  .cert-title h1 {
+    font-size: 15pt; font-weight: 700; color: #14532d; letter-spacing: 1.2px;
+    text-transform: uppercase; margin: 0;
+  }
+  .cert-title .certno {
+    font-size: 8pt; color: #3a3a3a; margin-top: 1.4mm; letter-spacing: 0.4px;
+  }
+
+  .ceremony { text-align: center; padding: 0 6mm; margin-bottom: 2.6mm; }
+  .ceremony .opening {
+    font-size: 10.4pt; font-style: italic; color: #14532d; margin-bottom: 1.6mm;
+  }
+  .ceremony p { margin: 0 0 1.8mm 0; line-height: 1.38; font-size: 9.6pt; }
+  .ceremony .names { font-weight: 700; }
+
+  .sig-seal-row { display: flex; justify-content: space-between; align-items: flex-end; margin: 2mm 8mm 3mm 8mm; }
+  .sig-block { width: 78mm; }
+  .sig-line { border-top: 1px solid #1a1a1a; margin-top: 7mm; padding-top: 1.2mm; }
+  .sig-line .role { font-size: 8pt; color: #3a3a3a; }
+  .sig-line .org { font-size: 8.6pt; font-weight: 700; color: #14532d; margin-top: 0.6mm; }
+  .sig-date { font-size: 8pt; color: #3a3a3a; margin-top: 2mm; }
+
+  /* ---- seal: a ring of small type ---- */
+  .seal { position: relative; width: 32mm; height: 32mm; flex-shrink: 0; }
+  .seal-outer {
+    position: absolute; inset: 0; border-radius: 50%; border: 1.6px solid #a16207;
+  }
+  .seal-ring {
+    position: absolute; inset: 2.4mm; border-radius: 50%;
+  }
+  .seal-ring span {
+    position: absolute; top: 50%; left: 50%; font-size: 2.6pt; font-weight: 700;
+    font-family: "Corpus Ceremony Sans", sans-serif; color: #14532d; letter-spacing: 0.2px;
+    transform-origin: 0 0;
+  }
+  .seal-inner {
+    position: absolute; inset: 6mm; border-radius: 50%; border: 1.1px solid #14532d;
+    display: flex; align-items: center; justify-content: center; text-align: center;
+  }
+  .seal-inner .txt {
+    font-family: "Corpus Ceremony Sans", sans-serif; font-size: 5.6pt; font-weight: 700;
+    color: #14532d; line-height: 1.5; letter-spacing: 0.4px;
+  }
+  .seal-inner .est { font-size: 5pt; font-weight: 400; color: #a16207; margin-top: 0.8mm; }
+
+  /* ---- appliance details: a plain sans box bolted onto the ornament ---- */
+  .details-box {
+    font-family: "Corpus Ceremony Sans", sans-serif; background: #ffffff;
+    border: 1.3px solid #1a1a1a; margin: 2mm 0 2.6mm 0;
+  }
+  .details-box .db-head {
+    background: #1a1a1a; color: #ffffff; font-size: 7.6pt; font-weight: 700;
+    letter-spacing: 0.8px; text-transform: uppercase; padding: 1.6mm 3mm;
+  }
+  .details-grid { display: grid; grid-template-columns: 1fr 1fr; }
+  .db-field {
+    border-top: 0.8px solid #c9c9c9; border-right: 0.8px solid #c9c9c9;
+    padding: 1.6mm 3mm;
+  }
+  .db-field:nth-child(2n) { border-right: none; }
+  .db-field .lbl { font-size: 6.6pt; text-transform: uppercase; letter-spacing: 0.4px; color: #555; }
+  .db-field .val { font-size: 9pt; color: #101010; margin-top: 0.4mm; }
+  .db-field .val.big { font-size: 11pt; font-weight: 700; }
+
+  .foot { font-family: "Corpus Ceremony Sans", sans-serif; font-size: 6pt; line-height: 1.32; color: #2c2c2c; }
+  .foot h3 { font-size: 6.4pt; text-transform: uppercase; letter-spacing: 0.4px; margin: 1.6mm 0 0.6mm 0; color: #14532d; }
+  .foot p { margin: 0 0 0.8mm 0; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="frame-outer">
+    <div class="corner tl"><span class="corner-dot"></span></div>
+    <div class="corner tr"><span class="corner-dot"></span></div>
+    <div class="corner bl"><span class="corner-dot"></span></div>
+    <div class="corner br"><span class="corner-dot"></span></div>
+    <div class="frame-inner">
+
+      <div class="retailer-banner">
+        <div class="retailer-name">ASHFIELD DOMESTIC APPLIANCES</div>
+        <div class="retailer-sub">Bristol · Cribbs Causeway &nbsp;—&nbsp; sold with confidence since 1994</div>
+      </div>
+
+      <hr class="goldrule">
+
+      <div class="cert-title">
+        <h1>Extended Warranty Certificate</h1>
+        <div class="certno">Certificate No. EWC-2025-118823</div>
+      </div>
+
+      <div class="ceremony">
+        <div class="opening">This is to certify that</div>
+        <p>the appliance described below, purchased from <span class="names">Ashfield Domestic Appliances Ltd</span>
+        on 14 June 2025, is protected against the cost of mechanical and electrical breakdown by an Extended
+        Warranty administered on behalf of the retailer by
+        <span class="names">Bellward Warranty Administration Ltd</span> of Norwich, and underwritten by
+        <span class="names">Corvane Insurance plc</span>, authorised and regulated by the Financial Conduct
+        Authority (FRN 512837).</p>
+        <p>This cover takes effect immediately on expiry of the manufacturer's guarantee and continues,
+        subject to the terms overleaf and below, for a period of five years, commencing on
+        <strong>14 June 2026</strong> and expiring on <strong>13 June 2031</strong>.</p>
+      </div>
+
+      <div class="sig-seal-row">
+        <div class="sig-block">
+          <div class="sig-line">
+            <div class="role">Authorised signatory, for and on behalf of</div>
+            <div class="org">Bellward Warranty Administration Ltd</div>
+          </div>
+          <div class="sig-date">Certificate issued 16 June 2025</div>
+        </div>
+        <div class="seal">
+          <div class="seal-outer"></div>
+          <div class="seal-ring">
+            <span style="transform:rotate(0.00deg) translateY(-12mm) rotate(180deg)">B</span><span style="transform:rotate(5.81deg) translateY(-12mm) rotate(180deg)">E</span><span style="transform:rotate(11.61deg) translateY(-12mm) rotate(180deg)">L</span><span style="transform:rotate(17.42deg) translateY(-12mm) rotate(180deg)">L</span><span style="transform:rotate(23.23deg) translateY(-12mm) rotate(180deg)">W</span><span style="transform:rotate(29.03deg) translateY(-12mm) rotate(180deg)">A</span><span style="transform:rotate(34.84deg) translateY(-12mm) rotate(180deg)">R</span><span style="transform:rotate(40.65deg) translateY(-12mm) rotate(180deg)">D</span><span style="transform:rotate(52.26deg) translateY(-12mm) rotate(180deg)">W</span><span style="transform:rotate(58.06deg) translateY(-12mm) rotate(180deg)">A</span><span style="transform:rotate(63.87deg) translateY(-12mm) rotate(180deg)">R</span><span style="transform:rotate(69.68deg) translateY(-12mm) rotate(180deg)">R</span><span style="transform:rotate(75.48deg) translateY(-12mm) rotate(180deg)">A</span><span style="transform:rotate(81.29deg) translateY(-12mm) rotate(180deg)">N</span><span style="transform:rotate(87.10deg) translateY(-12mm) rotate(180deg)">T</span><span style="transform:rotate(92.90deg) translateY(-12mm) rotate(180deg)">Y</span><span style="transform:rotate(104.52deg) translateY(-12mm) rotate(180deg)">A</span><span style="transform:rotate(110.32deg) translateY(-12mm) rotate(180deg)">D</span><span style="transform:rotate(116.13deg) translateY(-12mm) rotate(180deg)">M</span><span style="transform:rotate(121.94deg) translateY(-12mm) rotate(180deg)">I</span><span style="transform:rotate(127.74deg) translateY(-12mm) rotate(180deg)">N</span><span style="transform:rotate(133.55deg) translateY(-12mm) rotate(180deg)">I</span><span style="transform:rotate(139.35deg) translateY(-12mm) rotate(180deg)">S</span><span style="transform:rotate(145.16deg) translateY(-12mm) rotate(180deg)">T</span><span style="transform:rotate(150.97deg) translateY(-12mm) rotate(180deg)">R</span><span style="transform:rotate(156.77deg) translateY(-12mm) rotate(180deg)">A</span><span style="transform:rotate(162.58deg) translateY(-12mm) rotate(180deg)">T</span><span style="transform:rotate(168.39deg) translateY(-12mm) rotate(180deg)">I</span><span style="transform:rotate(174.19deg) translateY(-12mm) rotate(180deg)">O</span><span style="transform:rotate(180.00deg) translateY(-12mm) rotate(180deg)">N</span><span style="transform:rotate(191.61deg) translateY(-12mm) rotate(180deg)">L</span><span style="transform:rotate(197.42deg) translateY(-12mm) rotate(180deg)">T</span><span style="transform:rotate(203.23deg) translateY(-12mm) rotate(180deg)">D</span><span style="transform:rotate(214.84deg) translateY(-12mm) rotate(180deg)">&#10022;</span><span style="transform:rotate(226.45deg) translateY(-12mm) rotate(180deg)">C</span><span style="transform:rotate(232.26deg) translateY(-12mm) rotate(180deg)">L</span><span style="transform:rotate(238.06deg) translateY(-12mm) rotate(180deg)">A</span><span style="transform:rotate(243.87deg) translateY(-12mm) rotate(180deg)">I</span><span style="transform:rotate(249.68deg) translateY(-12mm) rotate(180deg)">M</span><span style="transform:rotate(255.48deg) translateY(-12mm) rotate(180deg)">S</span><span style="transform:rotate(267.10deg) translateY(-12mm) rotate(180deg)">A</span><span style="transform:rotate(272.90deg) translateY(-12mm) rotate(180deg)">D</span><span style="transform:rotate(278.71deg) translateY(-12mm) rotate(180deg)">M</span><span style="transform:rotate(284.52deg) translateY(-12mm) rotate(180deg)">I</span><span style="transform:rotate(290.32deg) translateY(-12mm) rotate(180deg)">N</span><span style="transform:rotate(296.13deg) translateY(-12mm) rotate(180deg)">I</span><span style="transform:rotate(301.94deg) translateY(-12mm) rotate(180deg)">S</span><span style="transform:rotate(307.74deg) translateY(-12mm) rotate(180deg)">T</span><span style="transform:rotate(313.55deg) translateY(-12mm) rotate(180deg)">R</span><span style="transform:rotate(319.35deg) translateY(-12mm) rotate(180deg)">A</span><span style="transform:rotate(325.16deg) translateY(-12mm) rotate(180deg)">T</span><span style="transform:rotate(330.97deg) translateY(-12mm) rotate(180deg)">O</span><span style="transform:rotate(336.77deg) translateY(-12mm) rotate(180deg)">R</span><span style="transform:rotate(348.39deg) translateY(-12mm) rotate(180deg)">&#10022;</span>
+          </div>
+          <div class="seal-inner">
+            <div class="txt">SEAL OF<br>AUTHENTICITY<div class="est">ESTABLISHED 1998</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="details-box">
+        <div class="db-head">Appliance and cover details — please retain with your proof of purchase</div>
+        <div class="details-grid">
+          <div class="db-field"><div class="lbl">Appliance</div><div class="val">Kestrel Home 9kg 1400 Washing Machine</div></div>
+          <div class="db-field"><div class="lbl">Model / Serial No.</div><div class="val">KHW-9142S / KHW9142S-0038871</div></div>
+          <div class="db-field"><div class="lbl">Retailer branch</div><div class="val">Ashfield Domestic Appliances, Bristol — Cribbs Causeway</div></div>
+          <div class="db-field"><div class="lbl">Date of manufacture</div><div class="val">03/2025</div></div>
+          <div class="db-field"><div class="lbl">Date of purchase</div><div class="val">14 June 2025</div></div>
+          <div class="db-field"><div class="lbl">Price paid for appliance</div><div class="val big">£549.99</div></div>
+          <div class="db-field"><div class="lbl">Manufacturer's guarantee</div><div class="val">12 months parts &amp; labour, ends 13 June 2026</div></div>
+          <div class="db-field"><div class="lbl">Extended warranty price paid</div><div class="val big">£69.99 (inc. IPT)</div></div>
+          <div class="db-field"><div class="lbl">Excess payable per claim</div><div class="val">£60.00</div></div>
+          <div class="db-field"><div class="lbl">Maximum claim value per incident</div><div class="val">£549.99, the price of the appliance when new</div></div>
+          <div class="db-field"><div class="lbl">Maximum lifetime claim value</div><div class="val">£1,099.98 (twice the purchase price)</div></div>
+          <div class="db-field"><div class="lbl">Warranty certificate number</div><div class="val">EWC-2025-118823</div></div>
+        </div>
+      </div>
+
+      <div class="foot">
+        <h3>Terms and conditions</h3>
+        <p>This certificate evidences a contract of insurance between the policyholder named on the retailer's
+        sale record and Corvane Insurance plc (company number 04471822, registered in England and Wales),
+        administered day to day by Bellward Warranty Administration Ltd, Bellward House, 14 Mercer Row,
+        Norwich, NR2 1QJ (company number 03318456). Enquiries and claims: 0345 601 8822, Monday to Friday
+        9am–5.30pm. Ashfield Domestic Appliances Ltd acted only as an introducer at the point of sale and is
+        not a party to the insurance contract and does not handle claims.</p>
+        <p>Cover under this certificate runs from 14 June 2026 to 13 June 2031 and applies only after the
+        appliance's manufacturer's guarantee, which runs for 12 months from the date of purchase (14 June
+        2025 to 13 June 2026), has expired. No claim can be made against this certificate while the
+        manufacturer's guarantee remains in force. This document does not extend, replace or duplicate the
+        manufacturer's guarantee.</p>
+        <p>You have a legal right to cancel this policy within 14 days of the date of purchase (by 28 June
+        2025) for a full refund of the price paid for the warranty, provided no claim has been made. This
+        certificate should be registered online at bellwardwarranty.example within 30 days of purchase, by
+        14 July 2025, or a processing fee may apply to a first claim. Terms correct as at 01/03/2025 and
+        superseding all previous editions.</p>
+        <h3>Making a claim</h3>
+        <p>Notify Bellward Warranty Administration Ltd of any fault as soon as it becomes apparent and, in
+        any event, no later than 13 July 2031. Claims notified after that date, or after the expiry of the
+        period of cover, will not be considered. An excess of £60.00 is payable towards the cost of each
+        repair. This certificate does not cover accidental damage, cosmetic defects, consumables, commercial
+        use, or faults arising from misuse, and repairs may be carried out using non-original parts where the
+        original is no longer available. If the appliance cannot be economically repaired, Bellward Warranty
+        Administration Ltd will, at its discretion, arrange a replacement or a cash settlement not exceeding
+        the maximum claim value shown above.</p>
+        <p>If you are unhappy with how a claim has been handled, write to the Complaints Manager at the
+        address above. If your complaint is not resolved to your satisfaction within eight weeks you may
+        refer it to the Financial Ombudsman Service. This policy is not a savings or investment product and
+        has no cash-in value beyond a claim properly made under it. &copy; 2025 Bellward Warranty
+        Administration Ltd. All rights reserved.</p>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<style>
+  .plain { font-family: "Corpus Ceremony Sans", sans-serif; font-size: 8.1pt; line-height: 1.42; color: #1f1f1f; }
+  .plain h2 { font-family: "Corpus Ceremony", serif; font-size: 13pt; color: #14532d; margin: 0 0 1mm 0; letter-spacing: 0.6px; text-transform: uppercase; }
+  .plain h3 { font-size: 8.4pt; text-transform: uppercase; letter-spacing: 0.7px; color: #14532d; margin: 3.4mm 0 1.2mm 0; border-bottom: 0.8px solid #a16207; padding-bottom: 0.6mm; }
+  .plain p { margin: 0 0 1.6mm 0; text-align: justify; }
+  .plain ul { margin: 0 0 1.8mm 4.5mm; padding: 0; }
+  .plain li { margin-bottom: 0.7mm; }
+  .runhead { display: flex; justify-content: space-between; border-bottom: 1.6px solid #14532d; padding-bottom: 1.4mm; margin-bottom: 2.6mm; font-family: "Corpus Ceremony Sans", sans-serif; font-size: 6.8pt; letter-spacing: 0.6px; text-transform: uppercase; color: #5b6b5b; }
+  .twocol { column-count: 2; column-gap: 7mm; column-rule: 0.6px solid #d8d2be; }
+  table.prod { width: 100%; border-collapse: collapse; font-size: 7.4pt; margin: 0 0 2mm 0; }
+  table.prod th { background: #14532d; color: #fff; text-align: left; padding: 1.1mm 1.8mm; font-size: 6.8pt; letter-spacing: 0.4px; text-transform: uppercase; }
+  table.prod td { border-bottom: 0.6px solid #cfc9b4; padding: 1.1mm 1.8mm; vertical-align: top; }
+  table.prod td.r { text-align: right; white-space: nowrap; }
+  .numstrip { border: 1.1px solid #a16207; background: #fffefa; padding: 2mm 3mm; font-size: 7.2pt; line-height: 1.55; margin: 2mm 0; }
+  .numstrip b { color: #14532d; }
+  .tick { border: 0.9px dashed #14532d; padding: 2mm 3mm; font-size: 7.4pt; line-height: 1.45; margin: 2mm 0; background: rgba(255,255,255,0.6); }
+  .sheetfoot { position: absolute; left: 10mm; right: 10mm; bottom: 5mm; font-family: "Corpus Ceremony Sans", sans-serif; font-size: 6pt; color: #5b6b5b; border-top: 0.6px solid #cfc9b4; padding-top: 1.2mm; display: flex; justify-content: space-between; }
+</style>
+
+<div class="page">
+  <div class="frame-outer">
+    <div class="frame-inner">
+      <div class="plain">
+
+        <div class="runhead">
+          <span>Extended Warranty &mdash; what is covered</span>
+          <span>Certificate EWC-2025-118823 &middot; Sheet 2 of 3</span>
+        </div>
+
+        <h2>Your cover, set out in full</h2>
+        <p>This sheet forms part of your certificate and should be kept with it. It sets out what the cover pays
+        for, what it does not, and the charges that apply to the services sold alongside it. Where this sheet and
+        the certificate disagree, the certificate wins. The wording on this sheet is edition BWA/EW/2025-03,
+        in force from 1 March 2025 and reviewed each year on 1 March.</p>
+
+        <div class="twocol">
+          <h3>What the warranty pays for</h3>
+          <ul>
+            <li>Mechanical breakdown of the appliance named on sheet 1, including drum bearings, the motor, the
+            pump and the door interlock.</li>
+            <li>Electrical failure of the control board, the display and the wiring loom.</li>
+            <li>Labour, call-out and parts for an approved repair, carried out at the address the appliance is
+            installed at.</li>
+            <li>Food spoilage up to &pound;150 in any twelve months, where the appliance is a refrigerator or
+            freezer and the failure is covered.</li>
+            <li>Removal and safe disposal of an appliance that is replaced under the cover.</li>
+            <li>One annual service visit on request, booked at least 21 days ahead.</li>
+          </ul>
+
+          <h3>What it does not pay for</h3>
+          <ul>
+            <li>Accidental damage, impact, flood, fire or theft &mdash; these belong on a household policy.</li>
+            <li>Cosmetic marks, rust, discoloration of panels, and damage to paintwork.</li>
+            <li>Consumables: filters, hoses, seals, light bulbs, belts and detergent drawers.</li>
+            <li>Blockages, descaling and limescale damage where no water softener has been fitted.</li>
+            <li>Installation faults, including a machine that has never been plumbed in correctly.</li>
+            <li>Use in a business, a let property let out by the week, or a shared laundry.</li>
+            <li>Any fault present before 14 June 2026, or reported to the manufacturer before that date.</li>
+          </ul>
+
+          <h3>Claim limits</h3>
+          <p>Each claim carries an excess of &pound;60.00, payable to the engineer before the repair is signed
+          off. The most payable for any single incident is &pound;549.99 and the most payable over the life of
+          the cover is &pound;1,099.98. When the lifetime limit is reached the cover ends and no premium is
+          returned.</p>
+
+          <h3>Cancelling</h3>
+          <p>Cancel within 14 days for a full refund. After that, a pro-rata refund is given less an
+          administration charge of &pound;25.00, provided no claim has been made. A cancellation requested after
+          a claim attracts no refund. Write to the administrator or use the form at
+          <b>bwa-claims.example/cancel</b>.</p>
+        </div>
+
+        <h3>Other protection sold at the counter</h3>
+        <table class="prod">
+          <tr><th>Product</th><th>Code</th><th>Term</th><th class="r">Price</th></tr>
+          <tr><td>Extended Warranty, small appliance (under &pound;200)</td><td>EW-S3</td><td>3 years</td><td class="r">&pound;29.99</td></tr>
+          <tr><td>Extended Warranty, large appliance (this certificate)</td><td>EW-L5</td><td>5 years</td><td class="r">&pound;69.99</td></tr>
+          <tr><td>Extended Warranty, large appliance</td><td>EW-L8</td><td>8 years</td><td class="r">&pound;109.99</td></tr>
+          <tr><td>Accidental Damage add-on</td><td>AD-ADD</td><td>matches warranty</td><td class="r">&pound;24.99</td></tr>
+          <tr><td>Screen protection, television or monitor</td><td>SP-TV</td><td>4 years</td><td class="r">&pound;54.99</td></tr>
+          <tr><td>Kitchen bundle, three appliances on one certificate</td><td>EW-KB3</td><td>5 years</td><td class="r">&pound;159.99</td></tr>
+          <tr><td>Annual service visit, bought singly</td><td>SV-1</td><td>per visit</td><td class="r">&pound;78.00</td></tr>
+          <tr><td>Installation and removal of old machine</td><td>INST-2</td><td>one-off</td><td class="r">&pound;35.00</td></tr>
+          <tr><td>Withdrawn 3-year plan (closed to new sales 30 September 2024)</td><td>EW-L3</td><td>3 years</td><td class="r">&pound;44.99</td></tr>
+        </table>
+        <p style="font-size:7pt;">Prices include Insurance Premium Tax where it applies, were set on 1 March
+        2025 and are held until 28 February 2027.</p>
+
+        <div class="numstrip">
+          <b>Sale record:</b> Till receipt 004821/26 &middot;
+          <b>Customer number:</b> ADA-771426 &middot;
+          <b>Order number:</b> ORD-BR-559043 &middot;
+          <b>Warranty registration:</b> REG-118823-A &middot;
+          <b>Engineer network account:</b> NW-2290 &middot;
+          <b>VAT registration:</b> GB 641 8823 07 &middot;
+          <b>Administrator company number:</b> 03318456 &middot;
+          <b>Underwriter company number:</b> 04471822 &middot;
+          <b>FCA firm reference:</b> 512837 &middot;
+          <b>Delivery note:</b> DN-2025-41198, delivered 18 June 2025
+        </div>
+
+      </div>
+      <div class="sheetfoot"><span>Extended Warranty &mdash; cover summary</span><span>Sheet 2 of 3</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="page">
+  <div class="frame-outer">
+    <div class="frame-inner">
+      <div class="plain">
+
+        <div class="runhead">
+          <span>Claims, help and small print</span>
+          <span>Certificate EWC-2025-118823 &middot; Sheet 3 of 3</span>
+        </div>
+
+        <h2>If something goes wrong</h2>
+
+        <div class="twocol">
+          <h3>Reporting a fault</h3>
+          <p>Telephone 0345 601 8822, Monday to Friday 9am&ndash;5.30pm and Saturday 9am&ndash;1pm. Calls are
+          charged at your provider's standard rate and are included in most inclusive minute allowances. Faults
+          may also be reported at any hour through <b>bwa-claims.example</b>, where the progress of an open
+          repair can be followed with the claim number given to you on the call.</p>
+          <h3>Approved engineers</h3>
+          <p>Repairs are carried out by the manufacturer's own network or by an engineer from the approved
+          national panel. Using an engineer of your own without agreement means the cost is not met and may end
+          the cover. The panel's booking desk is at <b>repairfinder.example</b>, operated by a partner, not by
+          the administrator.</p>
+
+          <h3>Complaints</h3>
+          <p>Write to the Complaints Manager, Bellward House, 14 Mercer Row, Norwich, NR2 1QJ, or e-mail
+          complaints@bwa-claims.example. A complaint is acknowledged within three working days and answered
+          within eight weeks. After eight weeks, or on receipt of a final response, the Financial Ombudsman
+          Service will consider the matter free of charge; its time limit is six months from that response.
+          Making a complaint costs nothing and does not affect your legal rights.</p>
+
+          <h3>Accessibility</h3>
+          <p>This certificate is issued in large print, Braille or audio on request, within ten working days and
+          at no charge. Text relay users dial 18001 before the number above. Households where someone relies on
+          a refrigerated medicine can ask to be flagged for a same-day attendance target; ask at
+          <b>bwa-claims.example/priority</b> or on the telephone.</p>
+
+          <h3>How your details are used</h3>
+          <p>Claim records, call recordings and engineer reports are kept for six years after the cover ends;
+          call recordings for 13 months. The administrator is registered with the Information Commissioner under
+          number ZA338420. The privacy notice, last revised 12 November 2025, is at
+          <b>bwa-claims.example/privacy</b>. To ask for a copy of your record, e-mail
+          dataoffice@bwa-claims.example.</p>
+
+          <h3>From the shop that sold it</h3>
+          <ul>
+            <li>Free delivery on orders over &pound;399, seven days a week</li>
+            <li>Recycling of an old appliance &mdash; &pound;20.00, or free with installation</li>
+            <li>Trade account for landlords and letting agents &mdash; ask in branch</li>
+            <li>Price promise: a matching offer beaten by 10% of the difference for 28 days</li>
+            <li>Clearance and ex-display, updated every Thursday</li>
+          </ul>
+        </div>
+
+        <div class="tick">
+          <b>Register the appliance with its maker as well.</b> Registration is separate from this certificate
+          and is what brings a safety notice to your door. The maker's form takes about four minutes at
+          <b>kestrelhome.example/register</b>, or by the card in the drum. Registering does not change anything
+          set out in this certificate.
+        </div>
+
+        <div class="numstrip">
+          <b>Enquiries:</b> 0345 601 8822 &middot;
+          <b>Claims portal:</b> bwa-claims.example &middot;
+          <b>Retailer:</b> ashfield-appliances.example &middot;
+          <b>Branch:</b> 0117 496 0322 &middot;
+          <b>Parts desk:</b> 0330 100 8823 &middot;
+          <b>Underwriter policy number:</b> CVN/EW/118823 &middot;
+          <b>Scheme reference:</b> SCH-2025-EW-L5 &middot;
+          <b>Payment reference (if a fee is due):</b> EWC118823 &middot;
+          <b>Bank:</b> sort code 60-44-71, account 88230145
+        </div>
+
+        <p style="font-size:6.8pt;">Bellward Warranty Administration Ltd is an appointed representative of
+        Corvane Insurance plc, which is authorised by the Prudential Regulation Authority and regulated by the
+        Financial Conduct Authority and the Prudential Regulation Authority. Details of the permissions held can
+        be checked on the Financial Services Register, updated 1 April 2025. Ashfield Domestic Appliances Ltd,
+        company number 02918440, trades from Cribbs Causeway, Bristol, BS10 7TQ and has sold domestic appliances
+        since 1994. This certificate is printed on paper from certified sources. Certificate printed
+        16 June 2025. Reference EWC-2025-118823 quoted on every letter.</p>
+
+      </div>
+      <div class="sheetfoot"><span>Claims and contact</span><span>Sheet 3 of 3</span></div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,5 +1,13 @@
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
+import { claimInstanceAsAdministrator } from "./support/bootstrap";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #410/§15: THE ARRIVAL. The newcomer's journey and the create-system card,
@@ -18,14 +26,18 @@ import { householdRegister } from "./support/households";
  * owning or joining something during an acceptance run — the administrator
  * creates proving grounds, the member owns a household, the outsider is
  * approved into one by v19-membership — and this journey's whole precondition
- * is a reader who belongs to NOTHING. The database is not reset between specs,
- * so a dedicated identity (`Orbit Newcomer`, tests/oidc/server.mjs) is the only
- * way to have one. It is signed in nowhere else.
+ * is a reader who belongs to NOTHING. The specs inside a file run against one
+ * another's leavings, so a dedicated identity (`Orbit Newcomer`,
+ * tests/oidc/server.mjs) is the only way to have one. It is signed in nowhere
+ * else, and #1077's reset between spec files does not change that: it puts
+ * this FILE back to the seed, not each test within it.
  *
  * THE GAP, stated rather than papered over. The FIRST ADMIN's automatic route
- * to the create card needs an instance with ZERO households, and this harness
- * cannot offer one: the database survives every spec in the run and several of
- * them create households before this file is reached. What is proved here is
+ * to the create card needs an instance with ZERO households. Since #1077 this
+ * file does now begin on one -- the reset is what makes that true -- but the
+ * journeys below run one after another and the first of them makes a
+ * household, so the second still cannot see an empty instance. What is proved
+ * here is
  * the create card's own journey by the road a reader can always reach it on —
  * the newcomer's "or name your own system" — which is the SAME card, the same
  * command, the same hand-over and the same landing; the only unproved step is
@@ -52,6 +64,7 @@ let seeded = false;
 
 /** The way every other spec signs in: straight at the engine's login route. */
 async function signInAs(page: Page, account: string, returnTo = "/") {
+  await answerPushWithoutAService(page);
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
   await page.getByRole("link", { name: account }).click();
 }
@@ -66,25 +79,6 @@ async function signInThroughTheDoor(page: Page, account: string) {
   await page.goto("/");
   await page.locator("#gate").click();
   await page.getByRole("link", { name: account }).click();
-}
-
-/* A fresh instance promotes its first sign-in to instance admin — and an admin
- * never sees the labelled sky, because the server hands them every household as
- * a member would see it (§11). Claim the promotion for the administrator so
- * everyone below is ordinary. */
-async function establishInstanceAdmin(browser: Browser) {
-  const context = await browser.newContext({ ignoreHTTPSErrors: true });
-  const page = await context.newPage();
-  await signInAs(page, "Orbit Administrator", "/home");
-  /* Not a fixed destination: this claims the promotion and nothing else, so
-     it must not assume a household exists anywhere yet. On a genuinely
-     empty database this is the instance's first-ever administrator sign-in
-     -- exactly the reader #840 sends to the arrival at `/` instead of
-     /home, which every other spec in this run relies on this identity
-     already having outgrown by the time IT signs in. */
-  const session = await page.request.get("/api/auth/session");
-  expect(session.ok()).toBe(true);
-  await context.close();
 }
 
 /**
@@ -153,12 +147,16 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
-    /* #665: ask for /home and assert we are ON it. `/\/(home)?$/` matches "/"
-       as well, so it resolves while the app is still navigating -- the race
-       this spec was fixed for. The sweep talks to the API, not the page, but
-       the loose wait is not to be reintroduced anywhere in this file. */
-    await signInAs(page, "Orbit Administrator", "/home");
-    await expect(page).toHaveURL(/\/home$/);
+    /* #665 forbade the loose `/\/(home)?$/` wait that resolved mid-
+       navigation; the strict wait here is now inside
+       ensureWorkerAdministrator (#1080), which polls the session itself
+       until it is authenticated — no URL involved. A URL assertion cannot
+       stand in this hook any more: until the promotion lands, a fresh
+       worker administrator belongs to nothing and is parked on the arrival
+       at `/`, not /home. The sweep talks to the API, and the hard delete it
+       ends with is an instance-admin power. */
+    await signInAs(page, workerAccount("administrator"), "/home");
+    await ensureWorkerAdministrator(page);
     await households.sweep(page);
   } finally {
     await context.close();
@@ -169,14 +167,18 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   test.skip(test.info().project.name.startsWith("mobile"), "the journey is asserted on the desk dialect");
   test.setTimeout(180_000);
 
-  await establishInstanceAdmin(browser);
+  /* An admin never sees the labelled sky, because the server hands them every
+     household as a member would see it (§11), so the administrator takes the
+     instance first and everyone below is ordinary. Since ADR-0022 that is the
+     claim code from the stack's own log rather than a first-sign-in race. */
+  await claimInstanceAsAdministrator(browser);
 
   /* Somebody's system for the newcomer to find, created through the arrival's
      own three-answer contract — so this step is also the proof that the server
      owns the default sections and the owner membership. */
   const ownerContext = await browser.newContext({ ignoreHTTPSErrors: true });
   const ownerPage = await ownerContext.newPage();
-  await signInAs(ownerPage, "Orbit Member", "/home");
+  await signInAs(ownerPage, workerAccount("member"), "/home");
   /* Not a fixed destination: this is "Orbit Member"'s own first sign-in with
      no household yet, exactly the reader #840 sends to the arrival instead
      -- createSystem below talks to the API from whatever page that landed
@@ -189,9 +191,23 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   expect(created.sections.map((section) => section.name))
     .toEqual(["Home", "Vehicles", "Devices", "Services"]);
 
+  /* Captured before the door is even pressed: Arrival.svelte's decide() makes
+     exactly one GET /api/workspace on mount (web/src/lib/arrival/Arrival.svelte),
+     and that single response is what THE COUNT below reads its number from
+     instead of a second, later fetch (#1085/#1080). Workers run in parallel
+     and the household list is instance-wide, budget-bounded rather than
+     isolated per worker (tests/e2e/support/reset-gate.ts's own account of
+     what a reset "still cannot do"), so a fresh fetch made minutes later in
+     the test would legitimately race another worker's fixtures. This is the
+     exact response the sky was drawn from, so it cannot disagree with what is
+     on screen. */
+  const ownWorkspaceRead = page.waitForResponse(
+    (response) => response.request().method() === "GET" && new URL(response.url()).pathname === "/api/workspace",
+  );
+
   /* THE READER. Through the door, by its own button, so the launch is owed and
      the climb plays. */
-  await signInThroughTheDoor(page, "Orbit Newcomer");
+  await signInThroughTheDoor(page, workerAccount("newcomer"));
 
   /* The door KEEPS them: first-run sits on top of the login screen, and a
      reader with no household is not handed on to a home they do not have. */
@@ -215,10 +231,17 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
      It is the real list that is counted, not the sky: the sky draws at most
      twelve (#670), and on a shared instance (#730) more exist than it can
      draw, so the sky is a lower bound and `visibleHouseholds` is the number.
-     Specs run in parallel locally, and a system created by another one between
-     this read and the page's own would make a true count look wrong; CI runs
-     one worker, so there the two reads cannot disagree. */
-  const workspace = await workspaceOf(page);
+     Read from `ownWorkspaceRead` above, not a fresh fetch: a second,
+     independent read taken this many beats after the page's own would race
+     every other worker's fixtures under #1080 rather than only this file's. */
+  const ownResponse = await ownWorkspaceRead;
+  if (!ownResponse.ok()) throw new Error(`workspace read failed: ${ownResponse.status()}`);
+  const { workspace } = (await ownResponse.json()) as {
+    workspace: {
+      households: unknown[];
+      visibleHouseholds: { id: string; name: string; requested: boolean }[];
+    };
+  };
   expect(workspace.households).toEqual([]);
   const discovered = workspace.visibleHouseholds.length;
   expect(discovered).toBeGreaterThan(0);
@@ -244,9 +267,21 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   await expect(row.locator(".act")).toHaveText("waiting", { timeout: 15_000 });
   await expect(target).toContainText("ASKED TO JOIN · WAITING");
 
+  /* #866 (owner-decisions §23): the "waiting" word is a marker, not an
+     explanation. The row now carries a real sentence saying both that the
+     request is waiting and who has to approve it -- not aria-hidden, not
+     colour-only, reachable the same way any other text in the row is. */
+  const note = row.locator(".note");
+  await expect(note).toBeVisible();
+  await expect(note).toHaveAttribute("role", "status");
+  await expect(note).toContainText("waiting");
+  await expect(note).toContainText("owner");
+  await expect(note).toContainText("administrator");
+  await expect(note).toContainText("approve");
+
   const requests = await pendingRequests(ownerPage);
   expect(requests.map((one) => `${one.householdName}/${one.displayName}`))
-    .toContain(`${HOUSEHOLD}/Orbit Newcomer`);
+    .toContain(`${HOUSEHOLD}/${workerAccount("newcomer")}`);
 
   /* Asking twice cannot file twice: the row has nothing left to press. */
   await expect(row.getByRole("button")).toBeDisabled();
@@ -262,7 +297,7 @@ test("naming your own system: the sealed refusal, then the create, then the laun
      membership. Straight at the login route this time — no marker, so no climb;
      the question is served already arrived at, the way /logout serves the
      goodbye already arrived at. */
-  await signInAs(page, "Orbit Newcomer");
+  await signInAs(page, workerAccount("newcomer"));
   await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: "where do you belong?" })).toBeVisible({ timeout: 30_000 });
   expect((await workspaceOf(page)).households).toEqual([]);
@@ -283,15 +318,20 @@ test("naming your own system: the sealed refusal, then the create, then the laun
   await expect(page.locator("#gobtn")).toHaveText("Create");
   await expect(page.locator("#gobtn")).toBeEnabled();
   await page.locator("#gobtn").click();
-  await expect(page.getByRole("alert")).toContainText("already exists here");
-  await expect(page.getByRole("alert").getByRole("link", { name: "ask to join it" })).toBeVisible();
+  /* #1120: the root layout mounts the wake's assertive live region on every
+     screen, present and empty at rest so that a later failure is announced.
+     An empty region says nothing, so the alerts that count are the ones with
+     words in them; that holds across the whole page, not just the card. */
+  const spoken = page.getByRole("alert").filter({ hasText: /\S/ });
+  await expect(spoken).toContainText("already exists here");
+  await expect(spoken.getByRole("link", { name: "ask to join it" })).toBeVisible();
   /* nothing was created and nothing flew */
   await expect(page).toHaveURL(/\/$/);
   expect((await workspaceOf(page)).households).toEqual([]);
 
   /* Typing disarms the rejection, because the rejection was about the NAME. */
   await page.fill("#hhname", OWN_SYSTEM);
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(spoken).toHaveCount(0);
 
   /* AND THE CREATE: the server makes the system, the lockup is reclaimed, and
      the ratified climb plays over the populated home. The two answers the card

@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -51,6 +51,8 @@ function extractFunction(name) {
 
 const healthProbeUrlSource = extractFunction("health_probe_url");
 const waitForHealthSource = extractFunction("wait_for_health");
+const sweepOrphanedCheckpointsSource = extractFunction("sweep_orphaned_checkpoints");
+const refuseIfRotationOpenSource = extractFunction("refuse_if_rotation_open");
 
 // Issue #678: the same two constants and four functions the live script uses,
 // extracted rather than retyped, so this suite cannot pass against a copy that
@@ -493,5 +495,208 @@ describe("scripts/restore.sh correspondence call sites (issue #678)", () => {
     for (const line of callLines) {
       expect(line).toMatch(/"\$\w+_report" [a-z-]+ \|\| return \$\?$/);
     }
+  });
+});
+
+// #1151 O2-R6: a process killed hard (SIGKILL, or an OOM kill) during
+// create_checkpoint -- before its own write_journal call durably records the
+// checkpoint -- left a full-size database dump and document tar behind
+// forever: it predates the journal that --recover and the "an unfinished
+// restore exists" refusal both key off of, so neither ever sees it. Same
+// shape as O2-R10 in the TypeScript engine. sweep_orphaned_checkpoints runs
+// early in every restore.sh invocation, while the backup/restore lock is
+// held, and removes every checkpoint-* directory except the one (if any)
+// the current journal names -- the real function extracted from
+// scripts/restore.sh, never a hand-typed duplicate.
+describe("scripts/restore.sh sweep_orphaned_checkpoints (#1151 O2-R6)", () => {
+  const scratchDirs = [];
+  afterEach(() => {
+    while (scratchDirs.length > 0) rmSync(scratchDirs.pop(), { recursive: true, force: true });
+  });
+
+  function makeRestoreRoot() {
+    const directory = mkdtempSync(join(tmpdir(), "orbit-restore-sweep-"));
+    scratchDirs.push(directory);
+    return directory;
+  }
+
+  function runSweep(restoreRoot, journalContent) {
+    const journalPath = join(restoreRoot, "restore.journal");
+    if (journalContent !== null) writeFileSync(journalPath, journalContent);
+    const harness = [
+      "#!/usr/bin/env bash",
+      "set -Eeuo pipefail",
+      `restore_root=${JSON.stringify(restoreRoot)}`,
+      `journal_path=${JSON.stringify(journalPath)}`,
+      sweepOrphanedCheckpointsSource,
+      "sweep_orphaned_checkpoints",
+      'printf "returned-cleanly\\n"',
+    ].join("\n");
+    return failOnProcessDeadline(spawnSync("bash", ["-c", harness], { encoding: "utf8", ...processGuard() }), { label: "runSweep" });
+  }
+
+  it("removes an abandoned checkpoint directory when no journal exists", () => {
+    const restoreRoot = makeRestoreRoot();
+    const orphan = join(restoreRoot, "checkpoint-abandoned1");
+    writeFileSync(join(restoreRoot, ".keep"), "");
+    mkdirSync(orphan, { recursive: true });
+    writeFileSync(join(orphan, "database.dump"), "stale-dump-bytes");
+
+    const result = runSweep(restoreRoot, null);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("returned-cleanly");
+    expect(existsSync(orphan)).toBe(false);
+  });
+
+  it("preserves the checkpoint directory the current journal names, and removes every other one", () => {
+    const restoreRoot = makeRestoreRoot();
+    const keep = join(restoreRoot, "checkpoint-current1");
+    const orphan = join(restoreRoot, "checkpoint-stale2");
+    mkdirSync(keep, { recursive: true });
+    mkdirSync(orphan, { recursive: true });
+    writeFileSync(join(keep, "database.dump"), "current-dump-bytes");
+    writeFileSync(join(orphan, "database.dump"), "stale-dump-bytes");
+    const journal = "format_version=1\nrestore_id=current1\nstate=checkpointed\n"
+      + `database_sha256=${"a".repeat(64)}\ndocuments_sha256=${"b".repeat(64)}\ndocument_kek_sha256=${"c".repeat(64)}\n`;
+
+    const result = runSweep(restoreRoot, journal);
+
+    expect(result.status).toBe(0);
+    expect(existsSync(keep)).toBe(true);
+    expect(existsSync(orphan)).toBe(false);
+  });
+
+  it("leaves every checkpoint alone when a journal exists but names no readable restore_id", () => {
+    // The unreadable journal is what load_recovery_journal refuses on next;
+    // the checkpoint beside it may be the operator's only rollback.
+    const restoreRoot = makeRestoreRoot();
+    const checkpoint = join(restoreRoot, "checkpoint-current1");
+    mkdirSync(checkpoint, { recursive: true });
+    writeFileSync(join(checkpoint, "database.dump"), "last-good-dump-bytes");
+
+    const result = runSweep(restoreRoot, "format_version=1\nstate=checkpointed\n");
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("returned-cleanly");
+    expect(existsSync(checkpoint)).toBe(true);
+  });
+
+  it("leaves every checkpoint alone when the journal path is a symlink", () => {
+    const restoreRoot = makeRestoreRoot();
+    const checkpoint = join(restoreRoot, "checkpoint-current1");
+    mkdirSync(checkpoint, { recursive: true });
+    writeFileSync(join(checkpoint, "database.dump"), "last-good-dump-bytes");
+    const elsewhere = join(restoreRoot, "elsewhere.journal");
+    writeFileSync(elsewhere, "format_version=1\nrestore_id=current1\n");
+    symlinkSync(elsewhere, join(restoreRoot, "restore.journal"));
+
+    const result = runSweep(restoreRoot, null);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("returned-cleanly");
+    expect(existsSync(checkpoint)).toBe(true);
+  });
+
+  it("does nothing when the restore root does not exist yet", () => {
+    const restoreRoot = join(makeRestoreRoot(), "never-created");
+    const result = runSweep(restoreRoot, null);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("returned-cleanly");
+  });
+});
+
+// #1151 RANGE-S1: a plain `bash scripts/restore.sh <backup.tar>` had no
+// check for an open document-KEK rotation, unlike src/lib/restore-engine.ts
+// (refuseIfDocumentKekRotationOpen, called from both prepare() and
+// recoverRestore()) and scripts/import-recovery-bundle.sh
+// (refuse_if_rotation_open), which this release gave the same guard to.
+// Overwriting the database/document tree while DOCUMENT_KEK_NEXT is staged
+// leaves the rotation's own bookkeeping permanently out of sync with the
+// data it is migrating. This tests the real refuse_if_rotation_open
+// function extracted from the live scripts/restore.sh, never a hand-typed
+// duplicate, and the two places restore.sh now calls it.
+describe("scripts/restore.sh refuse_if_rotation_open (#1151 RANGE-S1)", () => {
+  const scratchDirs = [];
+  afterEach(() => {
+    while (scratchDirs.length > 0) rmSync(scratchDirs.pop(), { recursive: true, force: true });
+  });
+
+  function makeSecretsDirectory() {
+    const directory = mkdtempSync(join(tmpdir(), "orbit-restore-rotation-"));
+    scratchDirs.push(directory);
+    return directory;
+  }
+
+  function runRefuseIfRotationOpen(secretsDirectory) {
+    const harness = [
+      "#!/usr/bin/env bash",
+      "set -Eeuo pipefail",
+      "fail() { printf 'Orbit restore: %s\\n' \"$*\" >&2; exit 1; }",
+      `secrets_directory=${JSON.stringify(secretsDirectory)}`,
+      'document_kek_next_file="$secrets_directory/document-kek-next"',
+      refuseIfRotationOpenSource,
+      "refuse_if_rotation_open",
+      'printf "returned-cleanly\\n"',
+    ].join("\n");
+    return failOnProcessDeadline(spawnSync("bash", ["-c", harness], { encoding: "utf8", ...processGuard() }), { label: "runRefuseIfRotationOpen" });
+  }
+
+  it("returns cleanly when no rotation is open", () => {
+    const secretsDirectory = makeSecretsDirectory();
+
+    const result = runRefuseIfRotationOpen(secretsDirectory);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("returned-cleanly");
+  });
+
+  it("refuses when a document-KEK rotation is open (DOCUMENT_KEK_NEXT exists)", () => {
+    const secretsDirectory = makeSecretsDirectory();
+    const nextKeyPath = join(secretsDirectory, "document-kek-next");
+    writeFileSync(nextKeyPath, `${"a".repeat(64)}\n`);
+
+    const result = runRefuseIfRotationOpen(secretsDirectory);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("preflight/rotation failed; a document-KEK rotation is open");
+    expect(result.stderr).toContain(nextKeyPath);
+  });
+
+  it("does not treat a symlinked document-kek-next as an open rotation", () => {
+    const secretsDirectory = makeSecretsDirectory();
+    const elsewhere = mkdtempSync(join(tmpdir(), "orbit-restore-rotation-elsewhere-"));
+    scratchDirs.push(elsewhere);
+    writeFileSync(join(elsewhere, "document-kek-next"), `${"a".repeat(64)}\n`);
+    symlinkSync(join(elsewhere, "document-kek-next"), join(secretsDirectory, "document-kek-next"));
+
+    const result = runRefuseIfRotationOpen(secretsDirectory);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("returned-cleanly");
+  });
+
+  it("calls refuse_if_rotation_open before read_document_kek in the plain restore path, and inside recover_restore", () => {
+    const calls = [...restoreScriptSource.matchAll(/^refuse_if_rotation_open$/gm)];
+    expect(calls.length).toBe(2);
+    const readKekIndex = restoreScriptSource.indexOf("\nread_document_kek\n");
+    const callIndex = restoreScriptSource.indexOf("\nrefuse_if_rotation_open\n");
+    expect(callIndex).toBeGreaterThan(-1);
+    expect(callIndex).toBeLessThan(readKekIndex);
+    expect(restoreScriptSource).toContain("  refuse_if_rotation_open\n  validate_checkpoint_integrity");
+  });
+
+  // The confirmation prompt can wait indefinitely, and a rotation can open
+  // while it does, so the early check alone is not enough. Source-shape only:
+  // driving restore.sh past prepare_staged_bundle/check_capacity needs docker,
+  // so the race itself is not exercised here.
+  it("re-checks after the RESTORE confirmation and before create_checkpoint", () => {
+    const promptIndex = restoreScriptSource.indexOf("Type RESTORE to continue");
+    const checkpointIndex = restoreScriptSource.indexOf("\ncreate_checkpoint\n");
+    const recheckIndex = restoreScriptSource.indexOf("\nrefuse_if_rotation_open\n", promptIndex);
+    expect(promptIndex).toBeGreaterThan(-1);
+    expect(checkpointIndex).toBeGreaterThan(promptIndex);
+    expect(recheckIndex).toBeGreaterThan(promptIndex);
+    expect(recheckIndex).toBeLessThan(checkpointIndex);
   });
 });

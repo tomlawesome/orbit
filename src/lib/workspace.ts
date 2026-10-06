@@ -24,12 +24,38 @@ const activityKinds = [
   "cancelled",
   "restored",
   "archived",
+  /* #1005: written by the worker's daily sweep, never by a member -- an
+     expiry's fortnight ran out and the item became an ended thing. */
+  "expired",
 ] as const;
+
+/**
+ * Why an encrypted field is not being shown (ADR-0024 decision 5).
+ * `metadata_integrity_failed` is one damaged value; `metadata_locked` is the
+ * instance missing its key-encryption key, which is reversible. Neither is
+ * ever rendered as an empty value: the field is absent and the marker says so.
+ */
+export const metadataFieldStates = ["metadata_integrity_failed", "metadata_locked"] as const;
+export const metadataFieldStateSchema = z.enum(metadataFieldStates);
+export const itemMetadataStatusSchema = z.object({
+  reference: metadataFieldStateSchema.optional(),
+  notes: metadataFieldStateSchema.optional(),
+  /* Tier 2 (#963). `title` is the one required field that can now be missing,
+     which is why the item schema below tolerates an empty title only when this
+     says why it is empty. */
+  title: metadataFieldStateSchema.optional(),
+  provider: metadataFieldStateSchema.optional(),
+  costMinor: metadataFieldStateSchema.optional(),
+});
+export type ItemMetadataStatus = z.infer<typeof itemMetadataStatusSchema>;
 
 export const workspaceItemSchema = z.object({
   id: z.string().min(1).max(100),
   sectionId: z.string().min(1).max(100),
-  title: z.string().trim().min(1).max(100),
+  /* Empty only for a damaged or locked title (ADR-0024 decision 5), which the
+     superRefine below is what allows: a write still has to carry a real one,
+     and the read path is the only producer of the empty case. */
+  title: z.string().trim().max(100),
   subtype: optionalText(80),
   provider: optionalText(100),
   reference: optionalText(80),
@@ -41,15 +67,28 @@ export const workspaceItemSchema = z.object({
   reminderDays: z.array(z.number().int().min(0).max(365)).max(8).optional(),
   snoozedUntil: calendarDate.optional(),
   notes: optionalText(2_000),
+  /** Read-only; the write path ignores whatever a client sends here. */
+  metadataStatus: itemMetadataStatusSchema.optional(),
+  /** Read-only; count of the item's listable documents, added by the read path (#1091). */
+  documentCount: z.number().int().min(0).optional(),
   status: z.enum(itemStatuses),
   version: z.number().int().positive().optional(),
   updatedAt: z.iso.datetime().optional(),
 }).superRefine((item, context) => {
+  if (!item.title && !item.metadataStatus?.title) {
+    context.addIssue({ code: "custom", path: ["title"], message: "Give this a name" });
+  }
   if (item.scheduleKind && !item.dueDate) {
     context.addIssue({ code: "custom", path: ["dueDate"], message: "Choose a date for the scheduled event" });
   }
   if (item.recurrenceMonths && !item.scheduleKind) {
     context.addIssue({ code: "custom", path: ["recurrenceMonths"], message: "Recurrence requires a schedule type" });
+  }
+  /* #1005: an expiry is the one-off kind. It ends on its day and does not come
+     round, so a recurrence on one is a contradiction rather than a default to
+     quietly drop -- the reviewer is told, exactly as an unscheduled one is. */
+  if (item.recurrenceMonths && item.scheduleKind === "expiry") {
+    context.addIssue({ code: "custom", path: ["recurrenceMonths"], message: "An expiry happens once and does not come round" });
   }
 });
 

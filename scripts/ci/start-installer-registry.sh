@@ -20,8 +20,14 @@
 #   ORBIT_RUN_ID       CI run identifier, to keep names unique
 #   ORBIT_RUN_ATTEMPT  CI run attempt, for the same reason
 #
-# Outputs: registry_name, channel and registry_id are appended to
-# $GITHUB_OUTPUT when it is set.
+# Outputs: registry_name, channel, registry_id and release_manifest are
+# appended to $GITHUB_OUTPUT when it is set. release_manifest (ADR-0031 #7)
+# points at a freshly written orbit-release-manifest.json naming this exact
+# push's digest -- scripts/ci/write-test-manifest.sh -- so a caller can hand
+# it to install.sh via ORBIT_RELEASE_MANIFEST instead of install.sh
+# self-fetching a signed manifest that does not exist yet for a locally
+# built, unpublished image (#1107 pipeline 1626: "Could not download the
+# release manifest").
 set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
@@ -53,9 +59,14 @@ source_id="$(docker image inspect --format '{{.Id}}' "${TESTED_IMAGE_TAG}")"
 
 # Bound to loopback only: this registry is disposable evidence, never a
 # publication target.
+#
+# ORBIT_INSTALLER_REGISTRY_IMAGE lets GitLab CI route this pull through the
+# group dependency proxy instead of hitting Docker Hub directly (ai/orbit#1111);
+# the fallback is the same image, pinned by the same digest, straight from
+# Docker Hub, for the GitHub workflow and any local run that has no proxy.
 registry_id="$(
   docker run --detach --name "${registry_name}" --publish 127.0.0.1:5000:5000 \
-    registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+    "${ORBIT_INSTALLER_REGISTRY_IMAGE:-registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373}"
 )"
 [[ "${registry_id}" =~ ^[0-9a-f]{64}$ ]] || {
   printf 'The disposable registry returned an invalid container identity.\n' >&2
@@ -82,4 +93,28 @@ done
 local_tag="127.0.0.1:5000/${IMAGE_NAME}:${channel}"
 docker tag "${TESTED_IMAGE_TAG}" "${local_tag}"
 docker push "${local_tag}" > /dev/null
+
+# The digest this push actually gave the registry -- read from RepoDigests
+# now, before the rmi below drops the only local reference that has it.
+# Immutable, not a lookup of ${channel} again later: the same digest
+# install.sh will pull and then re-check against the registry's own
+# RepoDigests (scripts/install.sh's self_fetch/resolved_reference check).
+# `grep -m1`, not `| head -n1` (#809): grep itself is the one process that
+# stops once it has enough, rather than a separate head risking a SIGPIPE
+# against docker still writing.
+pushed_digest="$(
+  docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${local_tag}" |
+    grep -m1 -F "127.0.0.1:5000/${IMAGE_NAME}@"
+)"
+pushed_digest="${pushed_digest#*@}"
+[[ "${pushed_digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+  printf 'Could not read the digest the disposable registry gave %s.\n' "${local_tag}" >&2
+  exit 1
+}
+
+release_manifest="${repo_root}/.orbit-installer-registry-manifest.json"
+bash "${repo_root}/scripts/ci/write-test-manifest.sh" \
+  "${release_manifest}" "127.0.0.1:5000/${IMAGE_NAME}" "${pushed_digest}"
+emit_output release_manifest "${release_manifest}"
+
 docker rmi "${local_tag}" > /dev/null

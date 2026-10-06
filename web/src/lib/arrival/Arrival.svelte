@@ -11,10 +11,14 @@
   import CreateSystem from "./CreateSystem.svelte";
   import Newcomer from "./Newcomer.svelte";
   import {
-    CREATE, DOOR, INVITED, NEWCOMER, ONWARD,
+    ASKING, CREATE, DOOR, INVITED, NEWCOMER, ONWARD,
     arrivalStageOf, collidingHouseholdOf, createSystemCommand, isInvitedLanding,
     preferredCurrency, preferredTimeZone,
   } from "./stage.js";
+  /* The ring and the card themselves (#914): shared with the sign-in door's
+     four cards since the owner's 2026-09-09 composition ruling. arrival.css
+     keeps only what belongs to the create path's own journey. */
+  import "$lib/ringcard.css";
   import "./arrival.css";
 
   /**
@@ -129,9 +133,18 @@
   const reduced = () =>
     typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+  /** Set by this component's own teardown (#1151 W1-R6), the same pattern
+   *  SignIn.svelte already carries for its own async checks: `decide()`'s
+   *  own fetches can still be in flight once the reader has left, and
+   *  resuming then would yank them on to /home from wherever they actually
+   *  are now, or leave `enterNewcomer`'s launch classes on a body this
+   *  component no longer owns. */
+  let disposed = false;
+
   onMount(() => {
     decide();
     return () => {
+      disposed = true;
       body().classList.remove("showform", "showdawn", "reclaimed", "rejected",
                               "grounded", "shownew", "instrument", "belong",
                               "counting", "bare", "launching", "pinned");
@@ -175,6 +188,11 @@
          on the front door a 401 is not an error, it is the answer — this reader
          is signed out and the door is what they came for. */
       const response = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
+      /* #1151 W1-R6: the reader this screen was deciding for may already be
+         gone — SignIn.svelte's own pattern for the same race. Past this
+         point, carrying on would be deciding for whoever is on screen now,
+         not this component. */
+      if (disposed) return;
       if (!response.ok) return;                /* signed out: the door stands */
       /* A session pointed at a household belongs to a member, and that is the
          whole question answered — no workspace read at all on the journey
@@ -183,6 +201,7 @@
          household its owner has since left is handed on the same way, and lands
          on home's own adrift surface, which is the honest answer there too. */
       const session = await response.json().catch(() => null);
+      if (disposed) return;
       if (isInvitedLanding(session)) {
         visibleHouseholds = session.visibleHouseholds ?? [];
         galaxy = labelledSkyOf(visibleHouseholds);
@@ -196,6 +215,7 @@
       }
       if (session?.activeHouseholdId) { handOn(); return; }
       workspace = await readWorkspace();
+      if (disposed) return;
     } catch {
       /* The server could not be reached. The door is the honest surface: it is
          the one thing on this screen that needs no answer. */
@@ -204,6 +224,12 @@
 
     const next = arrivalStageOf(workspace);
     if (next === ONWARD) { handOn(); return; }
+    if (next === ASKING) {
+      /* #1151 W1-F2: a workspace that came back empty is asked, not
+         answered — the same honest surface as a server that cannot be
+         reached at all (the catch above). */
+      return;
+    }
     visibleHouseholds = workspace.visibleHouseholds ?? [];
     galaxy = labelledSkyOf(visibleHouseholds);
     if (next === CREATE) { enterCreate(); return; }
@@ -295,6 +321,7 @@
       body().classList.add("launching");
       if (!reduced()) body().classList.add("showdawn");
       await tick();
+      if (disposed) return; /* #1151 W1-R6 */
       /* The labelled sky is drawn but not shown: `shownew` arrives with the
          flight's own `land` beat, so the climb is not flying over the surface
          it is about to set down on. */
@@ -437,13 +464,29 @@
          sibling of the dawn and of the card rather than a child of either,
          because it has to outlive the card on the way into the launch (the
          hand-over shrinks it to the login ring's own 302.4px in place,
-         `body.reclaimed` below) — see arrival.css for the ring itself. -->
-    <div class="bigring" aria-hidden="true">
-      <div class="ringglass"></div>
-      <div class="ringorbit"><i></i></div>
+         `body.reclaimed` below) — see arrival.css for the ring itself.
+
+         THE SAME COLUMN AS THE DOOR'S CARDS (#1175). On the desk `.ringcard`
+         changes nothing: every rule that reads it is `:where(.arrival,
+         .ringcard)` and already applied here. On a phone it is the column
+         door-phone.css lays every card on the door in — the ring at its
+         station at the login ring's own size, the card's heading standing
+         inside it, the fields in the column beneath, the ring closing while
+         you type — because a 500px ring cannot hold a 300px card on a 390px
+         screen, and did not: it stood at the left edge with 110px off the
+         right. Same wrapper SignIn.svelte draws. -->
+    <div class="ringcard">
+      <div class="bigring" aria-hidden="true">
+        <div class="ringglass"></div>
+        <!-- the ring's line, on its own unblurred box (#873): the glass
+             closes on the compositor, this closes by width/height so the
+             4.2px stroke never thins. See ringcard.css. -->
+        <div class="ringstroke"></div>
+        <div class="ringorbit"><i></i></div>
+      </div>
+      <CreateSystem bind:name bind:timezone bind:currency {rejected} {busy}
+                    onsubmit={submit} onnaming={naming} onask={askFromCard} />
     </div>
-    <CreateSystem bind:name bind:timezone bind:currency {rejected} {busy}
-                  onsubmit={submit} onnaming={naming} onask={askFromCard} />
   {/if}
 
   {#if stage === NEWCOMER || stage === INVITED}

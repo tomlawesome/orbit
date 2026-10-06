@@ -32,6 +32,7 @@
  * The real fencing predicates are asserted separately, as SQL text, and
  * behaviourally by making an ownership check come back empty.
  */
+import { is, SQL } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const DOCUMENT = "11111111-1111-4111-8111-111111111111";
@@ -72,11 +73,19 @@ const mocks = vi.hoisted(() => ({
   purgeExpiredHouseholds: vi.fn(),
 }));
 
-/** Reconstructs the static text of a drizzle `sql` template; parameters become `?`. */
+/**
+ * Reconstructs the static text of a drizzle `sql` template; parameters
+ * become `?`. A chunk that is itself a nested `SQL` instance -- `claims.ts`'s
+ * shared `JOB_CLAIM_UPDATE` fragment, spliced into its callers' own
+ * templates (#1151 A2-Q3) -- is flattened into its own chunks rather than
+ * rendered as a single opaque placeholder, the same way drizzle's real
+ * `toQuery()` composes it for execution.
+ */
 function sqlText(query: unknown): string {
   const chunks = (query as { queryChunks?: unknown[] }).queryChunks ?? [];
   return chunks
     .map((chunk) => {
+      if (is(chunk, SQL)) return sqlText(chunk);
       const value = (chunk as { value?: unknown }).value;
       return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value.join("") : " ? ";
     })
@@ -222,7 +231,10 @@ vi.mock("@/lib/logger", async () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-vi.mock("@/server/documents/config", () => ({ getDocumentConfig: mocks.config }));
+vi.mock("@/server/documents/config", async (importActual) => ({
+  ...await importActual<typeof import("@/server/documents/config")>(),
+  getDocumentConfig: mocks.config,
+}));
 
 vi.mock("@/server/documents/crypto", () => ({
   decryptDocument: mocks.decryptDocument,
@@ -231,7 +243,11 @@ vi.mock("@/server/documents/crypto", () => ({
 
 vi.mock("@/server/documents/scanner", () => ({ scanFileWithClamAv: mocks.scanFile }));
 
-vi.mock("@/server/documents/storage", () => ({
+vi.mock("@/server/documents/storage", async (importActual) => ({
+  // STORAGE_KEY_PATTERN is real (#1151 A2-Q4): purge-jobs.ts now imports it
+  // from here instead of restating its own copy, so the mock must still
+  // export it or that import throws before a single purge test can run.
+  ...await importActual<typeof import("@/server/documents/storage")>(),
   LocalDocumentStorage: class {
     readStagingCiphertext = mocks.readStagingCiphertext;
     writeQuarantineBytes = mocks.writeQuarantineBytes;
@@ -269,6 +285,8 @@ const documentConfig = {
   tika: { url: null, timeoutMs: 45_000 },
   keyEncryptionKey: Buffer.alloc(32, 1),
   keyId: "test-key-id",
+  nextKeyEncryptionKey: null,
+  nextKeyId: null,
 };
 
 /** The mutable world the default row responders read; each test tweaks a field. */
@@ -1022,6 +1040,28 @@ describe("reconcileDocumentStorage", () => {
       expect.objectContaining({ failureCode: "processing_interrupted" }),
       expect.objectContaining({ lifecycle: "rejected", failureCode: "storage_object_missing" }),
     ]);
+  });
+
+  it("leaves a live document alone on a transient stat() failure, rather than rejecting it (#1151 SS2-S2)", async () => {
+    world.reconcileRecords = [{
+      documentId: DOCUMENT,
+      householdId: HOUSEHOLD,
+      itemId: ITEM,
+      lifecycle: "available",
+      storageKey: FINAL_KEY,
+    }];
+    // Not ENOENT: `ciphertextExists` only resolves `false` for a confirmed-
+    // absent file and rethrows anything else (EACCES, EIO, ...). That must
+    // not be treated the same as "the file is gone".
+    mocks.ciphertextExists.mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }));
+
+    await reconcileDocumentStorage();
+
+    expect(documentWrites()).toEqual([
+      expect.objectContaining({ failureCode: "processing_interrupted" }),
+    ]);
+    expect(mocks.writes.some((write) => write.table === "audit_log")).toBe(false);
+    expect(mocks.steps).not.toContain("execute:advisoryLock");
   });
 
   it("leaves a document alone when the lock shows its lifecycle already moved on", async () => {

@@ -1,0 +1,245 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MetadataCipher } from "@/server/metadata/fields";
+import { sendSetupLink } from "@/server/local-credentials/setup-mail";
+
+/**
+ * Mailing a setup link to an address that is now ciphertext (#969), against
+ * an in-memory stand-in for the database.
+ *
+ * One thing is pinned here that no integration test can state as plainly: an
+ * address this instance cannot read is a refusal, not a send. Nothing is
+ * mailed, and — because issuing kills the previous link — no token is minted
+ * either.
+ */
+
+const ADMIN = "11111111-1111-4111-8111-111111111111";
+const USER = "22222222-2222-4222-8222-222222222222";
+
+const mocks = vi.hoisted(() => ({
+  row: null as null | {
+    id: string;
+    email: string | null;
+    emailEnc: string | null;
+    displayName: string;
+    credential: string | null;
+  },
+  locked: false,
+  auditRows: [] as Array<Record<string, unknown>>,
+  persisted: [] as string[],
+  liveLink: false,
+  persistError: null as Error | null,
+  key: { scope: "instance", householdId: null, keyId: "test-key", dataKey: Buffer.alloc(32, 9) },
+}));
+
+vi.mock("@/server/metadata/fields", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/server/metadata/fields")>();
+  return {
+    ...original,
+    openInstanceMetadataReader: async () => new original.MetadataCipher(
+      mocks.locked ? undefined : mocks.key as never,
+    ),
+  };
+});
+
+vi.mock("@/server/local-credentials", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/server/local-credentials")>();
+  return {
+    ...original,
+    mintSetupToken: () => ({
+      token: "setup-token",
+      tokenHash: "setup-token-hash",
+      purpose: "setup" as const,
+      expiresAt: new Date("2026-09-22T09:00:00.000Z"),
+    }),
+    persistSetupToken: async (userId: string, _minted: unknown, _actor: unknown, options: { onlyIfNoLiveLink?: boolean } = {}) => {
+      if (mocks.persistError) throw mocks.persistError;
+      if (options.onlyIfNoLiveLink && mocks.liveLink) return false;
+      mocks.persisted.push(userId);
+      return true;
+    },
+  };
+});
+
+vi.mock("@/db", async () => {
+  const schema = await import("@/db/schema");
+  function makeSelect() {
+    const builder = {
+      from: () => builder,
+      leftJoin: () => builder,
+      where: () => builder,
+      limit: () => builder,
+      then(onFulfilled: (value: unknown[]) => unknown, onRejected?: (reason: unknown) => unknown) {
+        return Promise.resolve(mocks.row ? [{ ...mocks.row }] : []).then(onFulfilled, onRejected);
+      },
+    };
+    return builder;
+  }
+  return {
+    getDb: () => ({
+      select: () => makeSelect(),
+      insert: (table: unknown) => ({
+        values(value: Record<string, unknown>) {
+          if (table === schema.auditLog) mocks.auditRows.push(value);
+          return Promise.resolve();
+        },
+      }),
+    }),
+  };
+});
+
+const sent: Array<{ to: string; subject: string }> = [];
+const mailer = { sendEmail: async (message: { to: string; subject: string }) => { sent.push(message); } };
+
+beforeEach(() => {
+  process.env.APP_URL = "https://orbit.example.invalid";
+  mocks.row = null;
+  mocks.locked = false;
+  mocks.auditRows = [];
+  mocks.persisted = [];
+  mocks.liveLink = false;
+  mocks.persistError = null;
+  sent.length = 0;
+});
+
+afterEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("sendSetupLink with an encrypted address (#969)", () => {
+  it("decrypts the registered address and sends the link there", async () => {
+    const cipher = new MetadataCipher(mocks.key as never);
+    mocks.row = {
+      id: USER,
+      email: null,
+      emailEnc: cipher.encryptText("users.email", USER, "ada@example.invalid"),
+      displayName: "Ada Lovelace",
+      credential: null,
+    };
+
+    const delivery = await sendSetupLink(ADMIN, USER, { mailer });
+
+    expect(delivery.sendError).toBeNull();
+    expect(delivery.sentTo).toBe("ada@example.invalid");
+    expect(sent.map((message) => message.to)).toEqual(["ada@example.invalid"]);
+    // The audit line names the user and the purpose, and no address.
+    expect(mocks.auditRows).toHaveLength(1);
+    expect(mocks.auditRows[0]).toMatchObject({ action: "setup_link_sent", entityId: USER });
+    expect(JSON.stringify(mocks.auditRows[0])).not.toContain("ada@example.invalid");
+  });
+
+  it("still sends to a row the backfill has not reached", async () => {
+    mocks.row = {
+      id: USER,
+      email: "ada@example.invalid",
+      emailEnc: null,
+      displayName: "Ada Lovelace",
+      credential: USER,
+    };
+
+    const delivery = await sendSetupLink(ADMIN, USER, { mailer });
+    expect(delivery.sentTo).toBe("ada@example.invalid");
+    expect(sent).toHaveLength(1);
+  });
+
+  it("refuses rather than sending to nothing when the instance is locked", async () => {
+    const cipher = new MetadataCipher(mocks.key as never);
+    mocks.row = {
+      id: USER,
+      email: null,
+      emailEnc: cipher.encryptText("users.email", USER, "ada@example.invalid"),
+      displayName: "Ada Lovelace",
+      credential: null,
+    };
+    mocks.locked = true;
+
+    await expect(sendSetupLink(ADMIN, USER, { mailer }))
+      .rejects.toMatchObject({ code: "metadata_locked", status: 503 });
+    expect(sent).toEqual([]);
+    // Nothing written: writing a token would have killed the link this user
+    // may already be holding, in exchange for one that cannot be delivered.
+    expect(mocks.persisted).toEqual([]);
+    expect(mocks.auditRows).toEqual([]);
+  });
+
+  it("refuses when the account has no address at all", async () => {
+    mocks.row = { id: USER, email: null, emailEnc: null, displayName: "Ada Lovelace", credential: null };
+
+    await expect(sendSetupLink(ADMIN, USER, { mailer }))
+      .rejects.toMatchObject({ code: "recipient_address_unreadable", status: 409 });
+    expect(sent).toEqual([]);
+    expect(mocks.persisted).toEqual([]);
+  });
+});
+
+describe("a resend that cannot be delivered (#1151 A1-S1)", () => {
+  it("never writes the new token, so the reader's earlier link stays live", async () => {
+    mocks.liveLink = true;
+    mocks.row = {
+      id: USER,
+      email: "ada@example.invalid",
+      emailEnc: null,
+      displayName: "Ada Lovelace",
+      credential: USER,
+    };
+    const failingMailer = {
+      sendEmail: async () => {
+        throw new Error("connection refused");
+      },
+    };
+
+    const delivery = await sendSetupLink(ADMIN, USER, { mailer: failingMailer });
+
+    expect(delivery.sendError).not.toBeNull();
+    /* The send failed, so the old link -- whatever it was -- must still be
+       the live one: nothing here may have superseded it. */
+    expect(mocks.persisted).toEqual([]);
+    expect(mocks.auditRows).toEqual([]);
+  });
+
+  it("writes the link for a reader who holds none, so a failed send can be sent again", async () => {
+    mocks.liveLink = false;
+    mocks.row = {
+      id: USER,
+      email: "ada@example.invalid",
+      emailEnc: null,
+      displayName: "Ada Lovelace",
+      credential: null,
+    };
+    const failingMailer = {
+      sendEmail: async () => {
+        throw new Error("connection refused");
+      },
+    };
+
+    const delivery = await sendSetupLink(ADMIN, USER, { mailer: failingMailer });
+
+    expect(delivery.sendError).not.toBeNull();
+    /* Nothing to retire, so the minted link is the account's: issued, and
+       never claimed as sent. */
+    expect(mocks.persisted).toEqual([USER]);
+    expect(mocks.auditRows).toEqual([]);
+  });
+});
+
+describe("a mail that goes out but is never persisted (#1151 R1)", () => {
+  it("still leaves an audit record when persistSetupToken fails after a successful send", async () => {
+    mocks.row = {
+      id: USER,
+      email: "ada@example.invalid",
+      emailEnc: null,
+      displayName: "Ada Lovelace",
+      credential: null,
+    };
+    mocks.persistError = new Error("connection dropped");
+
+    await expect(sendSetupLink(ADMIN, USER, { mailer })).rejects.toThrow("connection dropped");
+
+    // The mail genuinely went out, so that must be on the audit trail even
+    // though the token behind it never made it into the table -- otherwise
+    // the account is stuck with a dead link and nothing ever flags it.
+    expect(sent).toHaveLength(1);
+    expect(mocks.persisted).toEqual([]);
+    expect(mocks.auditRows).toHaveLength(1);
+    expect(mocks.auditRows[0]).toMatchObject({ action: "setup_link_sent", entityId: USER });
+  });
+});

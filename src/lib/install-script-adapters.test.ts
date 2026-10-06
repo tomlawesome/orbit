@@ -9,9 +9,10 @@ import { PROCESS_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
 import {
   createInstallConfigurationScriptAdapter,
   createInstallGuidedConfigurationAdapter,
+  runMachinePromptSession,
 } from "./install-script-adapters";
 import { runConfigurationMigration, runConfigurationPreflight } from "./configuration-migration";
-import { prepareConfiguration, stageGuidedInstallConfiguration } from "./guided-configuration";
+import { type MachinePromptAnswerProvider, prepareConfiguration, stageGuidedInstallConfiguration } from "./guided-configuration";
 
 // Whole-script coverage for issue #295 slice 5's shipped subprocess
 // adapters — the production implementations the plan deferred from slice 3
@@ -251,5 +252,60 @@ describe("createInstallGuidedConfigurationAdapter (issue #295 slice 4 deferral)"
   it("confirmApply always resolves 'apply' (unreachable from the shipped CLI path — see this module's header comment)", async () => {
     const adapter = createInstallGuidedConfigurationAdapter();
     await expect(adapter.confirmApply({ selectedProfile: "standard" })).resolves.toBe("apply");
+  });
+});
+
+// O1-R9: a real (but fast, docker-free) child process stands in for
+// configure.sh here — only the race matters: the child must already have
+// exited, with Node not yet having marked its stdin stream destroyed, at
+// the exact moment the write happens. That window is a couple of
+// milliseconds wide at most (confirmed by hand: 1ms after a child exits,
+// child.stdin.writable is still true and a write there emits an 'error'
+// (EPIPE); by 5ms the stream is already destroyed and the same write is a
+// silent no-op) and is inherently racy — `answers.answer()` is async per
+// MachinePromptAnswerProvider, so a real answer provider can land the
+// write at any point in that window. Before the fix, hitting it with no
+// 'error' listener on child.stdin crashed the whole Node process (verified
+// by hand: 3 of 5 bare repro runs with no listener terminated the process
+// with an unhandled EPIPE); this loop repeats the exact shape enough times
+// that the window would be hit at least once if the guard were missing.
+describe("runMachinePromptSession — a child that exits before an answer can be written (#1151 O1-R9)", () => {
+  it("does not crash the process across many attempts at the exact exit/write race; resolves ok:false each time", async () => {
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const answers: MachinePromptAnswerProvider = {
+        answer: () => new Promise((resolve) => setTimeout(() => resolve("https://example.test"), 1)),
+      };
+
+      const result = await runMachinePromptSession(
+        "bash",
+        ["-c", "printf 'prompt field=APP_URL kind=url required=true attempt=1\\n'; exit 7"],
+        undefined,
+        process.env,
+        answers,
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.events).toEqual([{ type: "prompt", field: "APP_URL", kind: "url", required: "true", attempt: 1 }]);
+    }
+  });
+
+  it("still delivers the answer normally when the child outlives the write (no regression to the ordinary path)", async () => {
+    const answers: MachinePromptAnswerProvider = {
+      answer: () => "https://example.test",
+    };
+
+    const result = await runMachinePromptSession(
+      "bash",
+      [
+        "-c",
+        "printf 'prompt field=APP_URL kind=url required=true attempt=1\\n'; read -r answer; " +
+          "if [[ \"$answer\" == \"https://example.test\" ]]; then exit 0; else exit 1; fi",
+      ],
+      undefined,
+      process.env,
+      answers,
+    );
+
+    expect(result.ok).toBe(true);
   });
 });

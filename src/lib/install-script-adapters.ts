@@ -83,6 +83,17 @@ export function runMachinePromptSession(
     const child: ChildProcessWithoutNullStreams = spawn(bashBinary, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
     const events: MachinePromptLine[] = [];
 
+    // O1-R9: the child can exit (crash, refuse, or otherwise close its own
+    // stdin) between this answer being requested and the write below —
+    // `answers.answer()` is async, so there is always a window. Without a
+    // listener, the 'error' Node emits on a write to a stream whose other
+    // end is gone (EPIPE) has no handler and crashes the whole process;
+    // with one, it is just data the close handler below already turns into
+    // the ordinary "configuration step failed" result (ok: false).
+    child.stdin.on("error", () => {
+      /* swallowed: a dead child's close/exit handling below is what answers this. */
+    });
+
     const rl = createInterface({ input: child.stdout, crlfDelay: Infinity });
     rl.on("line", (line) => {
       const parsed = parseMachinePromptLine(line);
@@ -91,7 +102,15 @@ export function runMachinePromptSession(
       if (parsed.type === "prompt") {
         const request: MachinePromptRequest = { field: parsed.field, kind: parsed.kind, attempt: parsed.attempt };
         Promise.resolve(answers.answer(request)).then((answer) => {
-          child.stdin.write(`${answer}\n`);
+          // The same already-exited-child race, caught synchronously too:
+          // `write()` on an ended/destroyed stream throws
+          // ERR_STREAM_WRITE_AFTER_END rather than emitting 'error'.
+          if (!child.stdin.writable || child.stdin.destroyed) return;
+          try {
+            child.stdin.write(`${answer}\n`);
+          } catch {
+            /* swallowed, same reasoning as the 'error' listener above. */
+          }
         });
       }
     });
@@ -147,7 +166,15 @@ export function createInstallGuidedConfigurationAdapter(options: InstallScriptAd
         { ...baseEnv, ORBIT_IMAGE: orbitImage, ORBIT_CONFIGURE_PROMPTS: "machine" },
         answers,
       ),
-    runDefault: (configureScript, orbitImage) => runSync(configureScript, [], { ORBIT_IMAGE: orbitImage }),
+    // O1-S4: configure.sh's bare flow now refuses to persist an ambient
+    // ORBIT_IMAGE onto an already-initialized .env-orbit unless
+    // ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1 is set — install.sh's own two call
+    // sites (prepare_configuration's single bare call, and
+    // stage_guided_install_configuration's second bare call after --init)
+    // both set it, since the installer is the only caller that has already
+    // run this image through the registry/signature checks. runDefault here
+    // backs both of this module's own TS equivalents the same way.
+    runDefault: (configureScript, orbitImage) => runSync(configureScript, [], { ORBIT_IMAGE: orbitImage, ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE: "1" }),
     runSetOidcSecret: (configureScript, answers) =>
       runMachinePromptSession(
         bashBinary,

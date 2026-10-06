@@ -1,6 +1,14 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { cleanupHousehold, householdRegister, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
+import { claimInstanceAsAdministrator } from "./support/bootstrap";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #453: membership and the empty sky (§11). A newcomer with no household
@@ -27,19 +35,10 @@ const households = householdRegister();
 let seeded = false;
 
 async function signInAs(page: Page, account: string) {
+  await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
   await settleArrival(page);
-}
-
-/* A fresh instance promotes its first sign-in to instance admin — and an
- * admin never sees the empty sky (they see everything, §11). Claim the
- * promotion for the administrator so everyone below is ordinary. */
-async function establishInstanceAdmin(browser: Browser) {
-  const context = await browser.newContext({ ignoreHTTPSErrors: true });
-  const page = await context.newPage();
-  await signInAs(page, "Orbit Administrator");
-  await context.close();
 }
 
 async function createHousehold(page: Page, name: string) {
@@ -94,7 +93,9 @@ async function arriveAdrift(page: Page, browser: Browser, account: string) {
   const adminContext = await browser.newContext({ ignoreHTTPSErrors: true });
   const adminPage = await adminContext.newPage();
   try {
-    await signInAs(adminPage, "Orbit Administrator");
+    await signInAs(adminPage, workerAccount("administrator"));
+    /* #1080: the hard delete below is an instance-admin power. */
+    await ensureWorkerAdministrator(adminPage);
     await cleanupHousehold(adminPage, await sessionHeaders(adminPage), household.id, household.name);
   } finally {
     await adminContext.close();
@@ -136,7 +137,9 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
-    await signInAs(page, "Orbit Administrator");
+    await signInAs(page, workerAccount("administrator"));
+    /* #1080: the sweep's hard delete is an instance-admin power. */
+    await ensureWorkerAdministrator(page);
     await households.sweep(page);
   } finally {
     await context.close();
@@ -147,16 +150,20 @@ test("a newcomer sees the labelled sky, asks, is approved, and enters the system
   test.skip(test.info().project.name.startsWith("mobile"), "the journey is asserted on the desk dialect");
   test.setTimeout(120_000);
 
-  await establishInstanceAdmin(browser);
+  /* An admin never sees the empty sky (they see everything, §11), so the
+     administrator claims the instance here and everyone below is ordinary.
+     Since ADR-0022 that is the claim code from the stack's own log, not a
+     race for the first sign-in. */
+  await claimInstanceAsAdministrator(browser);
 
   /* The member owns a household for the newcomer to ask into. */
   const ownerContext = await browser.newContext({ ignoreHTTPSErrors: true });
   const ownerPage = await ownerContext.newPage();
-  await signInAs(ownerPage, "Orbit Member");
+  await signInAs(ownerPage, workerAccount("member"));
   await createHousehold(ownerPage, HOUSEHOLD);
 
   /* The newcomer: no membership, so the sky is labels — no dial, no manifest. */
-  await arriveAdrift(page, browser, "Orbit Outsider");
+  await arriveAdrift(page, browser, workerAccount("outsider"));
   await expect(page.getByRole("heading", { name: "you’re adrift" })).toBeVisible();
   await expect(page.locator(".dialwrap")).toHaveCount(0);
   const target = page.locator(".minisys", { hasText: HOUSEHOLD.toUpperCase() });
@@ -177,7 +184,7 @@ test("a newcomer sees the labelled sky, asks, is approved, and enters the system
      the one place the decision now lives, is not built yet. Until it is, the
      journey exercises the same routes the screen will call, from the owner's
      signed-in session. */
-  const decided = await approveJoinRequest(ownerPage, HOUSEHOLD, "Orbit Outsider");
+  const decided = await approveJoinRequest(ownerPage, HOUSEHOLD, workerAccount("outsider"));
   expect(decided.request.status).toBe("approved");
 
   /* And administration honours the ruling: no join-request UI on it at all. */

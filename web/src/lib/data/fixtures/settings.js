@@ -41,3 +41,35 @@ export const REMINDERS_FIXTURE = {
     outboundMail: settingsFixture.reminders.outboundMail,
   },
 };
+
+/**
+ * "Sent to you lately" (#1003, owner-decisions §20) under the gate ONLY.
+ *
+ * There is no read of `notification_deliveries` for the signed-in user yet:
+ * no route answers it and the seam has no reader, so the live screen says it
+ * cannot show the list rather than showing an empty one. These rows are the
+ * shape #1003's build names (newest first, at most five; the item, which
+ * warning, which channel, when, and a failed or retrying send's plain reason)
+ * so the phone layout can be drawn and photographed before the read exists.
+ * The item ids are the workspace fixture's own, so each row leads somewhere.
+ *
+ * @typedef {{
+ *   id: string, itemId: string, itemName: string,
+ *   warning: "first" | "final", daysBefore: number,
+ *   channel: "email" | "push", status: "sent" | "retry" | "failed",
+ *   reason: ?string, at: string,
+ * }} SentRow
+ */
+/** @type {SentRow[]} */
+export const SENT_LATELY_FIXTURE = [
+  { id: "nd-1", itemId: "i-smoke", itemName: "Smoke alarm batteries", warning: "final", daysBefore: 3,
+    channel: "push", status: "retry", reason: "your phone was offline", at: "2026-08-12T08:00:00.000Z" },
+  { id: "nd-2", itemId: "i-mot", itemName: "Car MOT — Volvo V60", warning: "first", daysBefore: 21,
+    channel: "email", status: "sent", reason: null, at: "2026-08-08T09:00:00.000Z" },
+  { id: "nd-3", itemId: "i-boiler", itemName: "Boiler service", warning: "first", daysBefore: 14,
+    channel: "email", status: "failed", reason: "mail isn’t set up on this Orbit", at: "2026-08-05T09:00:00.000Z" },
+  { id: "nd-4", itemId: "i-boiler", itemName: "Boiler service", warning: "first", daysBefore: 14,
+    channel: "push", status: "sent", reason: null, at: "2026-08-05T09:00:00.000Z" },
+  { id: "nd-5", itemId: "i-gutter", itemName: "Gutter clearing", warning: "final", daysBefore: 0,
+    channel: "email", status: "sent", reason: null, at: "2026-07-30T07:30:00.000Z" },
+];

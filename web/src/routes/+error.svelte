@@ -1,5 +1,6 @@
 <script>
   import Grain from "$lib/Grain.svelte";
+  import Stumble from "./Stumble.svelte";
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
@@ -20,11 +21,14 @@
    * `body{overflow:hidden}` — to the whole app, which is exactly what stopped
    * home scrolling.
    *
-   * Only 404 has a drawn design. Any other status renders the bare fact rather
-   * than borrowing this page's copy, which would tell the user something untrue
-   * ("this page fell into a gravity well" for a failed request). Raised on #410.
+   * 404 and a server fault (status >= 500, "the stumble", #1139) each have a
+   * drawn design. Any other status renders the bare fact rather than
+   * borrowing either page's copy, which would tell the user something untrue
+   * ("this page fell into a gravity well" for a failed request). Raised on
+   * #410.
    */
   const isNotFound = $derived(page.status === 404);
+  const isServerFault = $derived(page.status >= 500);
 
   /**
    * #764 step 2 — the same rasterise-once mechanism as Grain/Dawn/Dusk
@@ -55,8 +59,6 @@
    * the glyph's own transform baked into the SVG string so the <image>
    * needs no transform of its own.
    */
-  const F_B6 =
-    '<filter id="b6" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6"/></filter>';
   const STATIC_BODY =
     '<g transform="translate(1092 460) rotate(8) skewX(-14) scale(1.24,.9)">' +
     '<text x="0" y="52" text-anchor="middle" font-family="\'Space Grotesk\',sans-serif" ' +
@@ -121,26 +123,6 @@
    * Nothing here changes a filter's own inputs — no dash-offset, no morph,
    * no animated blur radius — so nothing had to stay live for THAT reason.
    */
-  const F_B1 =
-    '<filter id="b1" filterUnits="userSpaceOnUse" x="300" y="80" width="1000" height="640">' +
-    "<feGaussianBlur stdDeviation=\"1\"/></filter>";
-  const F_B3 =
-    '<filter id="b3" filterUnits="userSpaceOnUse" x="300" y="80" width="1000" height="640">' +
-    "<feGaussianBlur stdDeviation=\"3\"/></filter>";
-  const G_DOPPLER =
-    '<linearGradient id="doppler" x1="0" y1="0" x2="1" y2="0">' +
-    '<stop offset="0%" stop-color="#fff7e4"/><stop offset="28%" stop-color="#ffd489" stop-opacity=".9"/>' +
-    '<stop offset="62%" stop-color="#e2772b" stop-opacity=".7"/><stop offset="100%" stop-color="#6e2a14" stop-opacity=".45"/>' +
-    "</linearGradient>";
-  const G_DOPPLER_SOFT =
-    '<linearGradient id="doppler-soft" x1="0" y1="0" x2="1" y2="0">' +
-    '<stop offset="0%" stop-color="#ffedc4" stop-opacity=".5"/><stop offset="55%" stop-color="#e2772b" stop-opacity=".22"/>' +
-    '<stop offset="100%" stop-color="#5a2010" stop-opacity=".1"/></linearGradient>';
-  const G_STREAMG =
-    '<linearGradient id="streamg" x1="1" y1="0" x2="0" y2="0">' +
-    '<stop offset="0%" stop-color="#ffd489" stop-opacity=".7"/><stop offset="100%" stop-color="#ffd489" stop-opacity="0"/>' +
-    "</linearGradient>";
-
   /**
    * #798: each raster covers only the part of the frame its filter can
    * touch, not the whole 1600×1000. A filter paints nothing outside its
@@ -249,6 +231,16 @@
   let srcSmearTidal;
   /** @type {SVGImageElement | null} */
   let imgSmearTidal;
+  /** #1151 W1-Q7: the live <defs> block, captured via innerHTML the same
+      way srcLensarcs etc. are captured via outerHTML — one copy of the
+      filters/gradients, read live, rather than the six filter/gradient
+      string constants this used to hand-duplicate them as. Every raster
+      job gets the whole captured block regardless of which ids it
+      actually references: an SVG filter/gradient nobody's url(#id)
+      points at inside one job's cropped document paints nothing and
+      costs nothing. */
+  /** @type {SVGDefsElement | null} */
+  let liveDefs;
 
   /** #790: the falling star bands' host, see the markup. @type {HTMLDivElement | null} */
   let infall;
@@ -341,8 +333,12 @@
       built = false;
       settle();
       const stale = () => cancelled || mine !== generation;
-      if (!world || !srcLensarcs || !srcLensedArch || !srcPhoton || !srcSmearNear || !srcSmearTidal) return;
-      const rect = world.getBoundingClientRect();
+      if (!world || !srcLensarcs || !srcLensedArch || !srcPhoton || !srcSmearNear || !srcSmearTidal || !liveDefs) return;
+      /* The svg's box, not the page's: on a phone the well is drawn smaller
+         than the screen, a 16:10 box inside it (#1120, notfound.css), and
+         the rasters are sampled at the scale it is drawn at. On a desk the
+         two are the same box. */
+      const rect = (world.querySelector("svg") ?? world).getBoundingClientRect();
       if (!rect.width || !rect.height) return;
       /* Unlike Grain/Dawn/Dusk, this raster's body is set text (the two
          "4"s), so its shape depends on Space Grotesk having actually
@@ -377,13 +373,16 @@
          have landed (`lit`): each layer's `.arrive` wrapper stays hidden,
          so no live filter ever paints, and the disc lights up in one
          fade rather than layer by layer. */
+      // #1151 W1-Q7: captured once per build rather than six hand-synced
+      // string constants — see liveDefs's own doc comment above.
+      const defsHTML = liveDefs.innerHTML;
       const jobs = /** @type {const} */ ([
-        [imgStatic, null, `notfound-static${k}`, STATIC_BODY, F_B6, CROP_TEXT],
-        [imgLensarcs, srcLensarcs, `notfound-lensarcs${k}`, srcLensarcs.outerHTML, F_B1, CROP_ARCS],
-        [imgLensedArch, srcLensedArch, `notfound-lensed-arch${k}`, srcLensedArch.outerHTML, F_B1 + F_B3 + G_DOPPLER, CROP_ARCH],
-        [imgPhoton, srcPhoton, `notfound-photon${k}`, srcPhoton.outerHTML, F_B6 + F_B1, CROP_PHOTON],
-        [imgSmearNear, srcSmearNear, `notfound-smear-near${k}`, srcSmearNear.outerHTML, F_B6 + G_DOPPLER_SOFT, CROP_NEAR],
-        [imgSmearTidal, srcSmearTidal, `notfound-smear-tidal${k}`, srcSmearTidal.outerHTML, F_B3 + G_STREAMG, CROP_TIDAL],
+        [imgStatic, null, `notfound-static${k}`, STATIC_BODY, defsHTML, CROP_TEXT],
+        [imgLensarcs, srcLensarcs, `notfound-lensarcs${k}`, srcLensarcs.outerHTML, defsHTML, CROP_ARCS],
+        [imgLensedArch, srcLensedArch, `notfound-lensed-arch${k}`, srcLensedArch.outerHTML, defsHTML, CROP_ARCH],
+        [imgPhoton, srcPhoton, `notfound-photon${k}`, srcPhoton.outerHTML, defsHTML, CROP_PHOTON],
+        [imgSmearNear, srcSmearNear, `notfound-smear-near${k}`, srcSmearNear.outerHTML, defsHTML, CROP_NEAR],
+        [imgSmearTidal, srcSmearTidal, `notfound-smear-tidal${k}`, srcSmearTidal.outerHTML, defsHTML, CROP_TIDAL],
       ]);
       for (const [img, src, key, body, defs, crop] of jobs) {
         const r = await rasteriseCrop(key, body, defs, crop, scale);
@@ -422,8 +421,12 @@
 
 <svelte:head>
   <link rel="stylesheet" href="/screens/family.css" />
+  {#if isServerFault}
+  <link rel="stylesheet" href="/screens/stumble.css" />
+  {:else}
   <link rel="stylesheet" href="/screens/notfound.css" />
-  <title>{isNotFound ? "Orbit — off the chart" : `Orbit — ${page.status}`}</title>
+  {/if}
+  <title>{isNotFound ? "Orbit — off the chart" : isServerFault ? "Orbit — something went wrong" : `Orbit — ${page.status}`}</title>
 </svelte:head>
 
 {#if isNotFound}
@@ -491,8 +494,8 @@
      Without script nothing would ever land, so the noscript rule shows the
      live sources as they were. -->
 <noscript><style>.world .arrive{visibility:visible;opacity:1}</style></noscript>
-<div class="world" class:lit style="position:fixed;inset:0;z-index:1" bind:this={world}><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" style="width:100%;height:100%">
-  <defs>
+<div class="world" class:lit style="position:fixed;inset:0;z-index:1" bind:this={world}><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <defs bind:this={liveDefs}>
     <!-- doppler: the approaching side of the disc burns white, the receding side dims -->
     <linearGradient id="doppler" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0%" stop-color="#fff7e4"/>
@@ -672,16 +675,29 @@
   </g>
 </svg></div>
 
+<!-- The page's one heading. The desk well is told by its art and its two
+     lines, so there it is read, not seen; on a phone it stands over them at
+     28px (proposal §2.19; notfound.css). -->
+<h1 class="offchart">off the chart</h1>
 <div class="line-a">This page fell into a gravity well.</div>
 <div class="line-b"><a href={resolve("/")}>plot a course home &rarr;</a></div>
 
 <Grain slope={0.09} />
 
 <div class="vignette" style="background:radial-gradient(ellipse at 50% 45%,transparent 42%,rgba(0,0,0,.5) 100%)"></div>
+{:else if isServerFault}
+<Stumble status={page.status} />
 {:else}
   <div class="stage">
     <div class="lockup">
-      <div class="name mono">{page.status}</div>
+      <!-- On a phone this is the door's station (proposal §2.19): the ring
+           holds the status and one sentence says what happened. The desk
+           keeps the bare fact; notfound.css draws the ring on phones only. -->
+      <div class="station">
+        <div class="errring" aria-hidden="true"><i></i></div>
+        <div class="name mono">{page.status}</div>
+      </div>
+      <p class="said">Orbit couldn’t answer that · {page.status}</p>
       <p><a href={resolve("/")}>return home</a></p>
     </div>
   </div>

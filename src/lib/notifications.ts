@@ -1,4 +1,4 @@
-import { daysUntil } from "@/lib/domain";
+import { daysUntil, type ScheduleKind } from "@/lib/domain";
 import { effectiveReminderOffsets, type RecipientWarningDays, type ReminderOffset } from "@/lib/preferences";
 import type { HouseholdWorkspace } from "@/lib/workspace";
 
@@ -26,8 +26,13 @@ export interface HouseholdNotification {
  */
 export type NotificationReader = RecipientWarningDays & { id: string };
 
-function scheduleLabel(kind: "renewal" | "service" | undefined): string {
+function scheduleLabel(kind: ScheduleKind | undefined): string {
   return kind === "service" ? "service" : "renewal";
+}
+
+/** "1 day" / "3 days", so the two message builders below agree on it. */
+function dayCount(days: number): string {
+  return `${days} ${days === 1 ? "day" : "days"}`;
 }
 
 /** An item's own explicit reminder rules, shaped for `effectiveReminderOffsets`.
@@ -68,11 +73,20 @@ export function householdNotifications(household: HouseholdWorkspace, today: str
       if (dismissedIds.has(id)) return [];
 
       const event = scheduleLabel(item.scheduleKind);
-      const message = days < 0
-        ? `${event[0].toUpperCase() + event.slice(1)} was due ${Math.abs(days)} ${Math.abs(days) === 1 ? "day" : "days"} ago.`
-        : days === 0
-          ? `${event[0].toUpperCase() + event.slice(1)} is due today.`
-          : `${event[0].toUpperCase() + event.slice(1)} is due in ${days} ${days === 1 ? "day" : "days"}.`;
+      const subject = event[0].toUpperCase() + event.slice(1);
+      /* #1005: an expiry is a thing running out, not a thing owed. Same window
+         and the same rules as a renewal, said as an ending -- never "is due". */
+      const message = item.scheduleKind === "expiry"
+        ? (days < 0
+            ? `Ended ${dayCount(Math.abs(days))} ago.`
+            : days === 0
+              ? "Ends today."
+              : `Ends in ${dayCount(days)}.`)
+        : (days < 0
+            ? `${subject} was due ${dayCount(Math.abs(days))} ago.`
+            : days === 0
+              ? `${subject} is due today.`
+              : `${subject} is due in ${dayCount(days)}.`);
       return [{
         id,
         itemId: item.id,

@@ -2,6 +2,13 @@ import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #496 (epic #411 criterion 5): "`prefers-reduced-motion` and non-JS both
@@ -9,14 +16,13 @@ import { settleArrival } from "./support/arrival";
  *
  * What "degrade" means was read out of the app rather than assumed:
  *
- *   - every route with a live backdrop (home's sky, due-next/documents/
+ *   - every route with a live backdrop (home's sky,
  *     inbox/settings/household/item's own "*-drift" keyframes, the dial's
  *     POL-1/POL-2 flourishes, the login/logout flight) carries its own
  *     `@media (prefers-reduced-motion: reduce)` block that sets the
  *     offending `animation` to `none` or drops the element — see home.css,
- *     due-next.css, documents.css, inbox.css, settings.css, admin.css (see
- *     below), pocket.css, flight.css, arrival.css, logout.css and
- *     maintenance.css.
+ *     inbox.css, settings.css, pocket.css, flight.css, arrival.css,
+ *     logout.css and maintenance.css.
  *   - home's sky DRIFT specifically is not CSS at all: skies.js's
  *     `mountPlane()` reads `matchMedia("(prefers-reduced-motion: reduce)")`
  *     into a `still()` guard and never calls `requestAnimationFrame` when it
@@ -35,15 +41,24 @@ import { settleArrival } from "./support/arrival";
 const NAME_PREFIX = "reduced-motion-";
 
 async function signIn(page: Page) {
+  await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: "Orbit Administrator" }).click();
+  await page.getByRole("link", { name: workerAccount("administrator") }).click();
   await settleArrival(page);
+  /* #1080: the sweep's hard delete is an instance-admin power. */
+  await ensureWorkerAdministrator(page);
 }
 
-/** A household with two items, spread across "this month" and "next month"
- * so the manifest corridor exercises both its `.today`/current group and its
- * `.month` grouping (#469). Named "reduced-motion-" + a uuid: other specs
- * share this stack (#730). */
+/** A household with three items, spread across "overdue", "this month" and
+ * "next month" so the manifest corridor exercises both its `.today`/current
+ * group and its `.month` grouping (#469). Named "reduced-motion-" + a uuid:
+ * other specs share this stack (#730).
+ *
+ * T-Q3 (#1151): the overdue item is the point. +page.svelte's `.ping`
+ * (POL-2's perihelion ping) only renders `{#if firstOverdue}`
+ * (`bodies.find((b) => b.overdue)`), so without one the reduced-motion
+ * check below for it ran against an element that was never in the page at
+ * all and could not have caught a real regression. */
 async function seedHousehold(page: Page) {
   const householdId = randomUUID();
   const sectionId = randomUUID();
@@ -69,11 +84,14 @@ async function seedHousehold(page: Page) {
   });
   if (!created.ok()) throw new Error(`Could not seed the reduced-motion household (${created.status()})`);
 
+  const overdueItem = `${NAME_PREFIX}overdue tv licence`;
   const soonItem = `${NAME_PREFIX}gutter service`;
   const laterItem = `${NAME_PREFIX}boiler certificate`;
+  const overdueDue = new Date(Date.now() - 5 * 86_400_000).toISOString().slice(0, 10);
   const soonDue = new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10);
   const laterDue = new Date(Date.now() + 70 * 86_400_000).toISOString().slice(0, 10);
   for (const [title, dueDate, scheduleKind] of [
+    [overdueItem, overdueDue, "renewal"],
     [soonItem, soonDue, "service"],
     [laterItem, laterDue, "renewal"],
   ] as const) {
@@ -100,7 +118,7 @@ async function seedHousehold(page: Page) {
     if (!upsert.ok()) throw new Error(`Could not seed item "${title}" (${upsert.status()})`);
   }
 
-  return { id: householdId, name, soonItem, laterItem };
+  return { id: householdId, name, overdueItem, soonItem, laterItem };
 }
 
 /** Every CSS animation/transition currently RUNNING on the page (not
@@ -130,6 +148,32 @@ async function settle(page: Page) {
   await page.waitForTimeout(3000);
 }
 
+/**
+ * settle() for the signed-out screens, whose one-shot entrances cannot begin
+ * until their sky has rasterised (#1219). Every one of them -- the door, the
+ * logout, the error page, maintenance -- mounts a `.world` and the grain,
+ * which mark themselves `data-rasterised="ready"` when their filtered layers
+ * are drawn (the fidelity gate waits on the same flag). WebKit does that
+ * drawing on the page's main thread: measured on desktop-webkit in the
+ * pinned Playwright image under reduced motion (2026-10-05), the thread was
+ * held 3.2-3.7 s on / and /login and the error page re-rasterised its world
+ * until 2.5 s, so the same 400-900 ms opacity fades Chromium finishes by
+ * 1.5 s ran from 3.4 s to 4.6 s, and a reading 3 s after `load` caught them
+ * mid-fade (pipeline 2144). Every one of them ended. So the 3 s window opens
+ * once the sky is ready rather than at `load` -- which fires before the
+ * surfaces are even marked, hence a `.world` must be present -- and anything
+ * still running after it is still reported.
+ */
+async function settleSignedOut(page: Page) {
+  await page.waitForLoadState("load");
+  await page.waitForFunction(() => {
+    const surfaces = [...document.querySelectorAll<HTMLElement>(".world[data-rasterised], .grain[data-rasterised]")];
+    return surfaces.some((surface) => surface.classList.contains("world"))
+      && surfaces.every((surface) => surface.dataset.rasterised === "ready");
+  }, undefined, { timeout: 30_000 });
+  await page.waitForTimeout(3000);
+}
+
 test.describe("reduced motion", () => {
   // PlaywrightTestOptions in this repo's pinned @playwright/test does not
   // expose `reducedMotion` for `test.use()` (checked against
@@ -155,13 +199,10 @@ test.describe("reduced motion", () => {
     try {
       const routes = [
         "/home",
-        "/due-next",
-        "/documents",
         "/inbox",
         "/create",
         "/settings",
         "/settings/mail",
-        "/admin",
         "/administration",
       ];
       for (const route of routes) {
@@ -201,34 +242,20 @@ test.describe("reduced motion", () => {
 
       // POL-2's perihelion ping is dropped with `display:none` under reduced
       // motion (home.css `@media (prefers-reduced-motion: reduce){.ping{display:none}}`).
+      // T-Q3 (#1151): `.ping` only renders at all when the household has an
+      // overdue item (+page.svelte's `firstOverdue`) -- seedHousehold now
+      // always gives it one, so this requires the element to actually be
+      // there rather than silently passing when it is not.
       await test.step("/home: POL-2 perihelion ping", async () => {
         const ping = page.locator(".ping").first();
-        if ((await ping.count()) > 0 && (await ping.isVisible())) {
+        if ((await ping.count()) === 0) {
+          problems.push("/home: .ping (POL-2 perihelion ping) did not render for the seeded overdue item");
+        } else if (await ping.isVisible()) {
           problems.push("/home: .ping (POL-2 perihelion ping) is still visible under reduced motion");
         }
       });
 
       expect(problems, problems.join("\n")).toEqual([]);
-    } finally {
-      await cleanupHousehold(page, await sessionHeaders(page), household.id, household.name);
-    }
-  });
-
-  // admin.css has NO `prefers-reduced-motion` rule at all -- unlike every
-  // other screen's stylesheet. `.sky .grid` runs `precess 200s linear
-  // infinite` and `.pulse` runs `tele 4s ease-in-out infinite` regardless of
-  // the reader's motion setting. That gap is what the step above for /admin
-  // is expected to catch; it is asserted here again, isolated, so a single
-  // route failing does not need digging out of the combined list above.
-  test("admin's telemetry backdrop is not exempt from reduced motion", async ({ page, isMobile }) => {
-    test.skip(isMobile, "desktop-chromium only");
-    await signIn(page);
-    const household = await seedHousehold(page);
-    try {
-      await page.goto("/admin");
-      await settle(page);
-      const motion = await runningMotion(page);
-      expect(motion, motion.join(", ")).toEqual([]);
     } finally {
       await cleanupHousehold(page, await sessionHeaders(page), household.id, household.name);
     }
@@ -259,12 +286,16 @@ test.describe("reduced motion", () => {
 
   test("signed-out screens hold still", async ({ page, isMobile }) => {
     test.skip(isMobile, "desktop-chromium only");
+    /* Five screens, each the sky's rasterising plus settle()'s 3 s: 30-33 s
+       on desktop-webkit locally, so the 60 s default is too close for a
+       slower runner (the signed-in sibling above declares 150 s). */
+    test.setTimeout(90_000);
 
     const problems: string[] = [];
     for (const route of ["/", "/login", "/logout"]) {
       await test.step(route, async () => {
         await page.goto(route);
-        await settle(page);
+        await settleSignedOut(page);
         const motion = await runningMotion(page);
         if (motion.length > 0) problems.push(`${route}: still animating -> ${motion.join(", ")}`);
       });
@@ -272,7 +303,7 @@ test.describe("reduced motion", () => {
 
     await test.step("a 404", async () => {
       await page.goto(`/orbit-does-not-exist-${randomUUID()}`);
-      await settle(page);
+      await settleSignedOut(page);
       const motion = await runningMotion(page);
       if (motion.length > 0) problems.push(`404: still animating -> ${motion.join(", ")}`);
     });
@@ -283,7 +314,7 @@ test.describe("reduced motion", () => {
     // without motion coverage does not go unnoticed silently.
     await test.step("/maintenance (if reachable)", async () => {
       await page.goto("/maintenance");
-      await settle(page);
+      await settleSignedOut(page);
       if (new URL(page.url()).pathname === "/maintenance") {
         const motion = await runningMotion(page);
         if (motion.length > 0) problems.push(`/maintenance: still animating -> ${motion.join(", ")}`);

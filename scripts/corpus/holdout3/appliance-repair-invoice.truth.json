@@ -1,0 +1,39 @@
+{
+  "name": "household appliance repair invoice, an unrelated earlier repair to the same machine as a decoy",
+  "filename": "fullpage-appliance-repair-invoice.pdf",
+  "expected": {
+    "dates": [
+      "2026-09-08",
+      "2026-12-07"
+    ],
+    "provider": "Whitlock Domestic Appliance Repairs",
+    "reference": "WDAR-INV-2249",
+    "dateRoles": [
+      {
+        "date": "2026-09-08",
+        "role": "issued"
+      },
+      {
+        "date": "2026-12-07",
+        "role": "expiry"
+      }
+    ],
+    "subtype": {
+      "kinds": [
+        "Repair"
+      ],
+      "qualifiers": [
+        "Appliance"
+      ]
+    },
+    "costMinor": 13500,
+    "currency": "GBP"
+  },
+  "notes": [
+    "dates: job and invoice date 8 September 2026 (printed under two labels, declared once), parts-warranty expiry 7 December 2026. The unrelated earlier repair to the same appliance (14 January 2025) is undeclared.",
+    "provider is Whitlock Domestic Appliance Repairs; C. Whitlock is the sole trader behind the trading name, named only in the small print.",
+    "reference is invoice WDAR-INV-2249.",
+    "costMinor is the total charged, 135.00 (call-out 45.00 + part 58.00 + labour 32.00).",
+    "subtype: Repair/Appliance. No recurrence or scheduleKind is declared: this is a one-off repair with no ongoing service contract, and neither dateRole is 'renewal' or 'service'."
+  ]
+}

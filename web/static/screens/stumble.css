@@ -1,0 +1,72 @@
+
+/* The stumble (#1139): a server fault, drawn — same family grammar as the
+   404 (world, heading, two lines), the same fixed night (#04070f) the 404
+   and the door both paint. Linked from the head, never imported, for the
+   same reason notfound.css is: the error boundary's CSS ships with every
+   route, and a body rule here would leak into the whole app. */
+body{background:#04070f}
+.stumble{--e-ink:#e9edf8;--e-ink-mid:#8791b3;--e-accent:#d8b45a}
+.stumble .world{position:fixed;inset:0;z-index:1}
+.stumble .world>svg{width:100%;height:100%}
+.stumble .stumbled{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.stumble .line-a{position:fixed;left:0;right:0;bottom:17vh;text-align:center;z-index:3;font:500 14px var(--display);letter-spacing:.14em;color:var(--e-ink-mid)}
+.stumble .line-b{position:fixed;left:0;right:0;bottom:12.5vh;text-align:center;z-index:3;font:11px var(--mono);letter-spacing:.14em}
+.stumble .line-b a{color:var(--e-accent);text-decoration:none}
+.stumble .line-b a:hover{text-decoration:underline}
+.stumble .line-b .dot{color:var(--e-ink-mid);margin:0 .9em}
+
+/* The craft never sits still: the world (stars, limb) is steady, the three
+   digits tumble, each on its own period, and three loose parts drift off. */
+.stumble .haze-breathe{animation:stumble-breathe 9s ease-in-out infinite alternate}
+@keyframes stumble-breathe{from{opacity:.75}to{opacity:1}}
+.digit{transform-box:fill-box;transform-origin:center}
+.d0{animation:t0 23s ease-in-out infinite alternate}
+.d1{animation:t1 31s ease-in-out infinite alternate}
+.d2{animation:t2 27s ease-in-out infinite alternate}
+@keyframes t0{from{transform:rotate(-7deg) translate(0,-10px)}to{transform:rotate(5deg) translate(0,8px)}}
+@keyframes t1{from{transform:rotate(4deg) translate(0,14px)}to{transform:rotate(-6deg) translate(0,-12px)}}
+@keyframes t2{from{transform:rotate(-3deg) translate(-6px,0)}to{transform:rotate(8deg) translate(10px,0)}}
+.part-a{animation:drift-a 26s linear -8s infinite}
+.part-b{animation:drift-b 34s linear -20s infinite}
+.part-c{animation:drift-c 30s linear -3s infinite}
+@keyframes drift-a{from{transform:translate(0,0);opacity:.6}to{transform:translate(140px,-90px);opacity:0}}
+@keyframes drift-b{from{transform:translate(0,0);opacity:.6}to{transform:translate(160px,40px);opacity:0}}
+@keyframes drift-c{from{transform:translate(0,0);opacity:.6}to{transform:translate(-120px,70px);opacity:0}}
+
+/* ══ ON A PHONE (proposal §2.19's grammar, two actions) ═══════════════════
+   Same media query as notfound.css. The scene is drawn whole and smaller,
+   fitted by its own box, as the 404 is: the digits span x 470-1130 and
+   y 400-610, so the box is the 404's 760x640 formula with a lower height
+   share and a higher centre, so the taller word stack below never meets it. */
+@media (max-width: 900px), (max-height: 600px){
+  .stumble .world{container-type:size;overflow:hidden}
+  .stumble .world>svg{--kw:min((100cqw - 2 * var(--p-gutter)) / 760, 46cqh / 640);
+      position:absolute;overflow:visible;
+      left:calc(50% - 800 * var(--kw));top:calc(42% - 500 * var(--kw));
+      width:calc(1600 * var(--kw));height:calc(1000 * var(--kw))}
+
+  .stumble .stumbled{position:fixed;left:var(--p-gutter);right:var(--p-gutter);width:auto;height:auto;margin:0;
+      overflow:visible;clip:auto;white-space:normal;z-index:3;text-align:center;
+      bottom:calc(env(safe-area-inset-bottom, 0px) + 188px);
+      font:600 var(--p-type-title)/var(--p-type-title-lh) var(--display);letter-spacing:.01em;color:var(--e-ink)}
+  .stumble .line-a{left:var(--p-gutter);right:var(--p-gutter);
+      bottom:calc(env(safe-area-inset-bottom, 0px) + 150px);
+      font-size:.9375rem;letter-spacing:.04em;line-height:1.4}
+
+  /* .line-b becomes the word stack's own column: try-again -> return-home in
+     DOM order (tab order, screen readers) but reversed visually, so the pill
+     sits lowest, at the thumb. */
+  .stumble .line-b{display:flex;flex-direction:column-reverse;gap:8px;align-items:center;
+      left:var(--p-gutter);right:var(--p-gutter);
+      bottom:calc(env(safe-area-inset-bottom, 0px) + 36px)}
+  .stumble .line-b .dot{display:none}
+  .stumble .line-b a:focus-visible{outline:2px solid var(--e-accent);outline-offset:2px}
+
+  .stumble .home{display:inline-flex;align-items:center;justify-content:center;
+      min-height:var(--p-hit);padding:0 14px;
+      font:var(--p-type-meta) var(--mono);letter-spacing:.1em;color:var(--e-accent)}
+  .stumble .again{display:flex;align-items:center;justify-content:center;
+      width:100%;max-width:376px;min-height:var(--p-hit);border-radius:99px;
+      background:var(--e-accent);color:#04060e;
+      font:600 var(--p-type-button) var(--display);letter-spacing:.04em;text-decoration:none}
+}

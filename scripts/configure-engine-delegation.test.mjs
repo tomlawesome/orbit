@@ -285,6 +285,26 @@ describe("ORBIT_CONFIGURE_ENGINE=container: composes the documented one-off invo
     expect(argv).toContain("--init");
   });
 
+  it("--init: ORBIT_CONFIGURE_PROMPTS=machine with ORBIT_CONFIGURE_AUTH_MODE=local forwards the auth mode too (#1151 O1-F1)", () => {
+    const targetDir = makeFixture();
+    const argvLogPath = join(targetDir, "docker-argv.log");
+    const binDir = makeFakeDockerBin({ argvLogPath });
+
+    runConfigure(targetDir, ["--init"], {
+      pathPrefix: binDir,
+      env: {
+        ORBIT_CONFIGURE_ENGINE: "container",
+        ORBIT_IMAGE: VALID_ORBIT_IMAGE,
+        ORBIT_CONFIGURE_PROMPTS: "machine",
+        ORBIT_CONFIGURE_AUTH_MODE: "local",
+      },
+      input: "",
+    });
+
+    const argv = readArgv(argvLogPath);
+    expect(argv).toContain("ORBIT_CONFIGURE_AUTH_MODE=local");
+  });
+
   it("--init: a real controlling-terminal session (no env triad, no machine mode) never delegates", () => {
     const targetDir = makeFixture();
     const argvLogPath = join(targetDir, "docker-argv.log");

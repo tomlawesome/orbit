@@ -145,4 +145,46 @@ describe("scripts/compose-isolation-preflight.sh", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("could not resolve a Compose project name");
   });
+
+  // #1040: the file is sourced, so the function shares its caller's scope.
+  // `scripts/ci/start-acceptance-stack.sh` makes `project` readonly before
+  // calling in, and a plain `local project="$1"` then failed against it --
+  // leaving the function reading the caller's variable instead of the argument
+  // it was handed, so this refusal never fired. The caller here holds a
+  // perfectly good project name; the guard is asked about an empty one and
+  // must still refuse.
+  it("refuses an empty project even when the caller has made `project` readonly", () => {
+    const env = stubDockerOnPath({ projectName: "orbit-demo" });
+    const result = run(
+      `source "${lib}" &&
+       project="orbit-demo" &&
+       readonly project &&
+       compose_isolation_preflight "" "docker compose -p orbit-unique up"`,
+      env,
+    );
+
+    expect(result.status, `stderr: ${result.stderr}`).toBe(1);
+    expect(result.stderr).toContain("could not resolve a Compose project name");
+    expect(result.stderr).not.toContain("readonly variable");
+  });
+
+  // #1040, other half: the same readonly caller must still get a clean
+  // accept for a valid project name -- proving the guard reads its own
+  // argument rather than silently falling back to the caller's `project` in
+  // either direction, not just the refusal one.
+  it("accepts a valid project even when the caller has made `project` readonly", () => {
+    const env = stubDockerOnPath({ projectName: "orbit-demo", runningContainers: [] });
+    const result = run(
+      `source "${lib}" &&
+       project="orbit-demo" &&
+       readonly project &&
+       compose_isolation_preflight "orbit-demo" "docker compose -p orbit-unique up" &&
+       echo "preflight-passed"`,
+      env,
+    );
+
+    expect(result.status, `stderr: ${result.stderr}`).toBe(0);
+    expect(result.stdout.trim()).toBe("preflight-passed");
+    expect(result.stderr).not.toContain("readonly variable");
+  });
 });

@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Ashcombe Life Assurance plc — Life and Critical Illness Cover: Policy Booklet</title>
+<style>
+@font-face{font-family:"Corpus Booklet";src:url("../fonts/CrimsonPro.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Booklet Sans";src:url("../fonts/IBMPlexSans.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: "Corpus Booklet", serif; font-size: 8.3pt; line-height: 1.42; color: #111; background: #fff; }
+  .page {
+    width: 210mm; min-height: 297mm; box-sizing: border-box;
+    position: relative; page-break-after: always; background: #fff;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  h3 {
+    font-family: "Corpus Booklet Sans", sans-serif; color: #152a4e; font-size: 11pt;
+    text-transform: uppercase; letter-spacing: 0.4px; margin: 0 0 3mm 0;
+    border-bottom: 1pt solid #152a4e; padding-bottom: 1mm; break-after: avoid; column-span: all;
+  }
+  .cn { font-weight: 700; color: #152a4e; margin-right: 1.5mm; }
+  .twocol { column-count: 2; column-gap: 9mm; text-align: justify; }
+  .twocol p { margin: 0 0 2.2mm 0; orphans: 3; widows: 3; }
+  .twocol p.lede { margin: 0 0 3mm 0; }
+
+  .defbox { background: #f2f1ec; padding: 2.4mm 3.4mm; margin: 0 0 2.4mm 0; break-inside: avoid; }
+  .defbox b { color: #152a4e; }
+
+  table.reviewtbl { width: 60%; border-collapse: collapse; font-family: "Corpus Booklet Sans", sans-serif; font-size: 7.6pt; margin: 1mm 0 2.6mm 0; break-inside: avoid; }
+  table.reviewtbl th { background: #152a4e; color: #fff; text-align: left; padding: 1.2mm 2mm; font-weight: 700; }
+  table.reviewtbl td { padding: 1mm 2mm; border-bottom: 0.5pt solid #ccc; }
+
+  /* ---- running header/footer, pages 3-14 ---- */
+  .runhead {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-family: "Corpus Booklet Sans", sans-serif; font-size: 7pt; font-weight: 700;
+    color: #152a4e; text-transform: uppercase; letter-spacing: 0.4px;
+    border-bottom: 1.2pt solid #152a4e; padding: 9mm 15mm 2mm 15mm;
+  }
+  .pagebody { padding: 3mm 15mm 16mm 15mm; }
+  .runfoot {
+    position: absolute; bottom: 8mm; left: 15mm; right: 15mm;
+    display: flex; justify-content: space-between;
+    font-family: "Corpus Booklet Sans", sans-serif; font-size: 6.6pt; color: #152a4e;
+    border-top: 0.8pt solid #152a4e; padding-top: 1.4mm;
+  }
+
+  /* ---- page 1, cover ---- */
+  .coverband { background: #152a4e; color: #fff; padding: 20mm 18mm 14mm 18mm; }
+  .coverband .kicker { font-family: "Corpus Booklet Sans", sans-serif; font-size: 9pt; letter-spacing: 2px; text-transform: uppercase; opacity: 0.85; }
+  .coverband .title { font-family: "Corpus Booklet Sans", sans-serif; font-size: 27pt; font-weight: 700; line-height: 1.12; margin-top: 8mm; }
+  .coverband .subtitle { font-family: "Corpus Booklet Sans", sans-serif; font-size: 11pt; margin-top: 4mm; }
+  .coverwhite { padding: 14mm 18mm; }
+  .insurername { font-family: "Corpus Booklet Sans", sans-serif; font-size: 16pt; font-weight: 700; color: #152a4e; }
+  .coverfacts { font-family: "Corpus Booklet Sans", sans-serif; font-size: 10pt; color: #152a4e; margin-top: 6mm; line-height: 1.9; }
+  .coverfacts b { font-size: 13pt; }
+  .coverblurb { font-family: "Corpus Booklet", serif; font-size: 9.5pt; line-height: 1.6; margin-top: 10mm; max-width: 150mm; color: #222; }
+  .covercode { position: absolute; bottom: 10mm; left: 18mm; font-family: "Corpus Booklet Sans", sans-serif; font-size: 7pt; color: #666; }
+
+  /* ---- page 2, contents ---- */
+  .contentsheading { font-family: "Corpus Booklet Sans", sans-serif; color: #152a4e; font-size: 18pt; font-weight: 700; padding: 16mm 18mm 0 18mm; }
+  .contentspanel { background: #f2f1ec; margin: 8mm 18mm; padding: 8mm 10mm; }
+  .contentsrow { display: flex; align-items: baseline; font-family: "Corpus Booklet Sans", sans-serif; font-size: 10.5pt; margin-bottom: 4mm; color: #111; }
+  .contentsrow .num { color: #152a4e; font-weight: 700; width: 8mm; flex-shrink: 0; }
+  .contentsrow .dots { flex: 1; border-bottom: 1px dotted #152a4e; margin: 0 2mm; position: relative; top: -3px; }
+  .contentsrow .pg { color: #152a4e; font-weight: 700; }
+  .contentsnote { font-family: "Corpus Booklet", serif; font-size: 9pt; color: #333; margin: 4mm 18mm 0 18mm; line-height: 1.6; }
+
+  /* ---- page 13, schedule ---- */
+  .schedulewrap { padding: 3mm 15mm 16mm 15mm; font-family: "Corpus Booklet Sans", sans-serif; }
+  .schedulewrap h3 { column-span: initial; }
+  table.schedule { width: 100%; border-collapse: collapse; font-size: 9pt; margin-top: 2mm; }
+  table.schedule th { background: #152a4e; color: #fff; text-align: left; padding: 2mm 3mm; width: 42%; font-weight: 700; }
+  table.schedule td { padding: 2mm 3mm; border-bottom: 0.6pt solid #ccc; }
+  table.schedule tr:nth-child(even) td, table.schedule tr:nth-child(even) th { background: #f2f1ec; }
+  .scheduleintro { font-family: "Corpus Booklet", serif; font-size: 9pt; margin-bottom: 3mm; }
+
+  /* ---- page 14, contacts ---- */
+  .contacts { columns: 2; column-gap: 9mm; font-size: 8.3pt; line-height: 1.5; }
+  .contacts h4 { font-family: "Corpus Booklet Sans", sans-serif; color: #152a4e; font-size: 9pt; text-transform: uppercase; margin: 0 0 1.5mm 0; break-after: avoid; }
+  .contacts .block { margin-bottom: 4mm; break-inside: avoid; }
+  .regbox { background: #f2f1ec; padding: 3mm 4mm; margin-top: 3mm; font-size: 7.6pt; line-height: 1.55; column-span: all; }
+</style>
+</head>
+<body>
+
+<!-- PAGE 1: COVER -->
+<div class="page">
+  <div class="coverband">
+    <div class="kicker">Policy booklet</div>
+    <div class="title">Life and Critical Illness Cover</div>
+    <div class="subtitle">Your terms and conditions, and how to make a claim</div>
+  </div>
+  <div class="coverwhite">
+    <div class="insurername">Ashcombe Life Assurance plc</div>
+    <div class="coverfacts">
+      Issued: <b>12 June 2026</b><br>
+      This edition: Edition 4, revised <b>14 January 2026</b><br>
+      Policy type: Life cover policy (with optional critical illness cover)
+    </div>
+    <div class="coverblurb">
+      This booklet explains what is and is not covered under your Ashcombe Life Assurance plc
+      life and critical illness policy, how to make a claim, and what to do if you need to
+      complain. Please read it alongside your policy schedule, which is printed at the back of
+      this booklet and which sets out the specific details of your own cover, including your
+      sum assured, your premium, and the dates your cover starts and ends. Keep both documents
+      together in a safe place, and tell the people who may need to make a claim where to find
+      them.
+    </div>
+  </div>
+  <div class="covercode">Form ALA-PB-LCI-07 &middot; Ashcombe Life Assurance plc is authorised by the Prudential Regulation Authority</div>
+</div>
+
+<!-- PAGE 2: CONTENTS -->
+<div class="page">
+  <div class="contentsheading">Contents</div>
+  <div class="contentspanel">
+    <div class="contentsrow"><span class="num">1</span>Welcome and how to use this booklet<span class="dots"></span><span class="pg">3</span></div>
+    <div class="contentsrow"><span class="num">2</span>Your cover<span class="dots"></span><span class="pg">3</span></div>
+    <div class="contentsrow"><span class="num">3</span>Making a claim<span class="dots"></span><span class="pg">5</span></div>
+    <div class="contentsrow"><span class="num">4</span>Exclusions and limitations<span class="dots"></span><span class="pg">6</span></div>
+    <div class="contentsrow"><span class="num">5</span>Cancelling your policy<span class="dots"></span><span class="pg">8</span></div>
+    <div class="contentsrow"><span class="num">6</span>Complaints and how we handle them<span class="dots"></span><span class="pg">9</span></div>
+    <div class="contentsrow"><span class="num">7</span>Definitions<span class="dots"></span><span class="pg">10</span></div>
+    <div class="contentsrow"><span class="num">8</span>How your policy is administered<span class="dots"></span><span class="pg">11</span></div>
+    <div class="contentsrow"><span class="num">9</span>Premiums and reviews<span class="dots"></span><span class="pg">12</span></div>
+    <div class="contentsrow"><span class="num">10</span>Your policy schedule<span class="dots"></span><span class="pg">13</span></div>
+    <div class="contentsrow"><span class="num">11</span>Contacts and regulatory information<span class="dots"></span><span class="pg">14</span></div>
+  </div>
+  <div class="contentsnote">
+    This booklet is issued by Ashcombe Life Assurance plc. It should be read together with your
+    policy schedule (section 10), which records the specific details of your own cover. If you
+    cannot find what you are looking for, section 11 lists how to contact us.
+  </div>
+</div>
+
+<!-- PAGE 3 -->
+<div class="page">
+  <div class="runhead"><span>Ashcombe Life Assurance plc — Policy Booklet</span><span>Your cover — Page 3 of 14</span></div>
+  <div class="pagebody">
+    <div class="twocol">
+      <h3>1. Welcome and how to use this booklet</h3>
+      <p class="lede"><span class="cn">1.1</span> This booklet sets out the terms and conditions that apply to your life and critical illness policy with <b>Ashcombe Life Assurance plc</b> ("we", "us", "our"), referred to in this booklet as the <b>Insurer</b>. It should be read together with your <b>policy schedule</b>, which records the specific details of your cover, including your sum assured, your premium, and the dates your cover starts and ends.</p>
+      <p><span class="cn">1.2</span> Where a word or phrase has a particular meaning under this policy, it appears in bold the first time it is used in this booklet and is explained in full in section 7, Definitions.</p>
+      <p><span class="cn">1.3</span> If anything in your policy schedule conflicts with anything in this booklet, the policy schedule takes precedence, except where this booklet expressly states that a term cannot be varied by the schedule.</p>
+      <p><span class="cn">1.4</span> Nothing in this booklet is, by itself, a contract of insurance. Your contract is made up of this booklet, your policy schedule, the statements made in your application, and any special terms we have confirmed to you in writing.</p>
+      <p><span class="cn">1.5</span> This booklet does not cover every situation. If you are unsure whether something is covered, contact us using the details in section 11 before you rely on cover being in place.</p>
+      <p><span class="cn">1.6</span> We may record and monitor telephone calls for training, quality and security purposes, and to help resolve any dispute about what was said.</p>
+      <h3>2. Your cover</h3>
+      <p class="lede"><span class="cn">2.1</span> What this policy provides</p>
+      <p><span class="cn">2.1.1</span> This policy provides a single lump sum benefit, the <b>sum assured</b>, payable on the death of the <b>life assured</b> during the period of cover, or on the diagnosis of a specified critical illness meeting the definition in section 7, whichever happens first, subject always to the exclusions in section 4.</p>
+      <p><span class="cn">2.1.2</span> The life assured is the person named as the life assured on your policy schedule. Where the policy is written on a joint life basis, both lives are named on the schedule, and cover ends on payment of a claim for either life unless the schedule states that the policy continues on a joint life, second-death basis.</p>
+      <p><span class="cn">2.1.3</span> The amount we pay on a death claim is the sum assured shown on your policy schedule, less any amount already paid under this policy for an earlier critical illness claim under clause 2.1.4.</p>
+      <p><span class="cn">2.1.4</span> Where a critical illness claim is accepted, we pay a proportion of the sum assured, the <b>accelerated benefit</b>, in the amount shown as the critical illness benefit on your policy schedule. This amount is then deducted from the sum assured otherwise payable on death, so the total we will ever pay under this policy does not exceed the sum assured.</p>
+      <p><span class="cn">2.1.5</span> Cover under this policy runs for the period shown on your policy schedule. We call the first day of that period the <b>start date</b> and the last day the <b>expiry date</b>. No benefit is payable for an event happening before the start date or after the expiry date shown on your schedule.</p>
+      <p><span class="cn">2.1.6</span> This policy is not a savings, investment or pension product, and it does not participate in any with-profits fund or investment performance. The only benefit under this policy is the payment described in clause 2.1.1.</p>
+    </div>
+  </div>
+  <div class="runfoot"><span>Form ALA-PB-LCI-07</span><span>Page 3 of 14</span></div>
+</div>
+
+<!-- PAGE 4 -->
+<div class="page">
+  <div class="runhead"><span>Ashcombe Life Assurance plc — Policy Booklet</span><span>Your cover — Page 4 of 14</span></div>
+  <div class="pagebody">
+    <div class="twocol">
+      <h3>2. Your cover (continued)</h3>
+      <p class="lede"><span class="cn">2.2</span> When cover begins and ends</p>
+      <p><span class="cn">2.2.1</span> Cover starts on the start date shown on your policy schedule, provided your first premium has been paid and accepted by us. It ends automatically on the expiry date shown on your schedule, on payment of a valid claim for the full sum assured, on the death of the life assured, or on cancellation under section 5, whichever happens first.</p>
+      <p><span class="cn">2.2.2</span> This policy does not build up a cash value and has no surrender value at any time. If you stop paying premiums, cover simply ends; you do not receive anything back.</p>
+      <p><span class="cn">2.3</span> Waiting period for critical illness cover</p>
+      <p><span class="cn">2.3.1</span> A <b>waiting period</b> of 90 days applies to critical illness cover only, beginning on the start date shown on your schedule. No critical illness benefit is payable for a condition first diagnosed, or for symptoms first investigated, during the waiting period. Life cover is not subject to a waiting period.</p>
+      <p><span class="cn">2.3.2</span> For example, on a policy with a start date of 1 March 2025, a critical illness first diagnosed before 29 May 2025 would not be covered, even if the underlying condition began after the start date. This example is illustrative only and does not describe your own policy; your own dates are shown on your policy schedule.</p>
+      <p><span class="cn">2.4</span> Premium reviews</p>
+      <p><span class="cn">2.4.1</span> Your premium may be reviewed on each <b>premium review date</b> shown in the table in section 9. A review may increase, or in limited circumstances decrease, your premium; it does not change your sum assured.</p>
+      <p><span class="cn">2.5</span> Indexation</p>
+      <p><span class="cn">2.5.1</span> If you have chosen indexation on your policy schedule, your sum assured and premium increase automatically each year in line with the increase shown on your schedule. You may decline an indexation increase by telling us in writing within 30 days of our notice; declining an increase twice in succession removes the indexation option permanently.</p>
+      <p><span class="cn">2.6</span> Continuing cover after a claim</p>
+      <p><span class="cn">2.6.1</span> Where we pay a critical illness benefit that is less than the full sum assured, life cover continues for the balance until the expiry date, at the premium shown in the confirmation we send you following the claim.</p>
+      <p><span class="cn">2.6.2</span> If the life assured dies during the notice period following a critical illness claim decision but before payment has been made, we will pay the higher of the accepted critical illness benefit and the sum assured, less anything already paid under this policy.</p>
+      <p><span class="cn">2.7</span> Other people who can act on this policy</p>
+      <p><span class="cn">2.7.1</span> Only the policyholder, or a person with a valid power of attorney or grant of probate, may give us instructions about this policy. We may ask for evidence of the authority to act before accepting instructions from anyone else.</p>
+    </div>
+  </div>
+  <div class="runfoot"><span>Form ALA-PB-LCI-07</span><span>Page 4 of 14</span></div>
+</div>
+
+<!-- PAGE 5 -->
+<div class="page">
+  <div class="runhead"><span>Ashcombe Life Assurance plc — Policy Booklet</span><span>Making a claim — Page 5 of 14</span></div>
+  <div class="pagebody">
+    <div class="twocol">
+      <h3>3. Making a claim</h3>
+      <p class="lede"><span class="cn">3.1</span> Telling us about a claim</p>
+      <p><span class="cn">3.1.1</span> You, or someone acting on your behalf, must tell us about a claim as soon as reasonably possible, and in any event within 30 days of the event giving rise to the claim, using the claims line in section 11.</p>
+      <p><span class="cn">3.1.2</span> For example, if the event giving rise to a claim happened on 3 March 2026, the claim should be notified to us by 2 April 2026. This example is illustrative only and does not describe your own policy.</p>
+      <p><span class="cn">3.1.3</span> If you tell us about a claim later than 30 days after the event, we may still consider it, but a delay that prevents us from investigating the claim properly may affect whether, and how much, we pay.</p>
+      <p><span class="cn">3.2</span> What we will ask for</p>
+      <p><span class="cn">3.2.1</span> We may ask for a completed claim form, a death certificate or medical evidence of the diagnosis, consent to access medical records, and evidence of the life assured's identity and date of birth.</p>
+      <p><span class="cn">3.2.2</span> We may ask the life assured, or in the case of a death claim the person claiming, to be examined by a doctor of our choosing, at our expense, before we decide the claim.</p>
+      <p><span class="cn">3.2.3</span> All costs of providing evidence in support of a claim, other than an examination we have asked for under clause 3.2.2, are met by the person making the claim.</p>
+      <p><span class="cn">3.3</span> Deciding and paying a claim</p>
+      <p><span class="cn">3.3.1</span> We aim to make a decision on a complete claim within 20 working days of receiving all the evidence we reasonably need. Where a claim is accepted, payment is made within 5 working days of our decision, by direct transfer to the bank account you have given us.</p>
+      <p><span class="cn">3.3.2</span> Interest is not payable on a claim paid within the timescales in clause 3.3.1.</p>
+      <p><span class="cn">3.4</span> If we decline a claim</p>
+      <p><span class="cn">3.4.1</span> If we decline a claim, we will write to you explaining why, and tell you how to ask us to look at the decision again, and how to refer the matter to the Financial Ombudsman Service if you remain unhappy — see section 6.</p>
+      <p><span class="cn">3.5</span> If you disagree with our decision</p>
+      <p><span class="cn">3.5.1</span> If you think we have made a mistake in assessing your claim, ask us to review it, providing any further information you think is relevant. A review is carried out by someone who was not involved in the original decision.</p>
+      <p><span class="cn">3.6</span> Fraudulent claims</p>
+      <p><span class="cn">3.6.1</span> If a claim, or any information given to support it, is fraudulent or intentionally exaggerated, we may refuse the whole claim, recover any amount already paid, and cancel this policy without refunding your premiums.</p>
+    </div>
+  </div>
+  <div class="runfoot"><span>Form ALA-PB-LCI-07</span><span>Page 5 of 14</span></div>
+</div>
+
+<!-- PAGE 6 -->
+<div class="page">
+  <div class="runhead"><span>Ashcombe Life Assurance plc — Policy Booklet</span><span>Exclusions and limitations — Page 6 of 14</span></div>
+  <div class="pagebody">
+    <div class="twocol">
+      <h3>4. Exclusions and limitations</h3>
+      <p class="lede"><span class="cn">4.1</span> General exclusions</p>
+      <p><span class="cn">4.1.1</span> We do not pay a claim arising directly or indirectly from the life assured taking part in war, invasion, act of a foreign enemy, hostilities, civil war, rebellion, revolution, insurrection or military coup, whether declared or not.</p>
+      <p><span class="cn">4.1.2</span> We do not pay a claim where the death or diagnosis results from the life assured's own criminal act.</p>
+      <p><span class="cn">4.1.3</span> Death by suicide is excluded if it occurs within 12 months of the start date. After 12 months from the start date, death by suicide is covered in the same way as any other cause of death.</p>
+      <p><span class="cn">4.1.4</span> We may reduce or refuse a claim, or treat the policy as if it never existed, where the life assured failed to disclose a <b>material fact</b> when applying for cover, and that fact would have affected our decision to offer cover or the terms on which we offered it.</p>
+      <p><span class="cn">4.1.5</span> Cover applies to events occurring anywhere in the world, but a claim arising from travel to, or residence in, a country against which the Foreign, Commonwealth and Development Office has issued advice against all travel at the relevant time may be investigated further before we pay.</p>
+      <p><span class="cn">4.1.6</span> We do not pay a claim arising from a diagnosis made, or treatment given, outside a recognised hospital or clinic, unless we agree in advance that the circumstances made this impossible or inappropriate.</p>
+      <p><span class="cn">4.2</span> Critical illness exclusions</p>
+      <p><span class="cn">4.2.1</span> We do not pay a critical illness benefit for a condition, or the underlying cause of a condition, that a reasonable person would have expected to seek medical advice about before the start date, whether or not a diagnosis had actually been made.</p>
+    </div>
+  </div>
+  <div class="runfoot"><span>Form ALA-PB-LCI-07</span><span>Page 6 of 14</span></div>
+</div>
+
+<!-- PAGE 7 -->
+<div class="page">
+  <div class="runhead"><span>Ashcombe Life Assurance plc — Policy Booklet</span><span>Exclusions and limitations — Page 7 of 14</span></div>
+  <div class="pagebody">
+    <div class="twocol">
+      <h3>4. Exclusions and limitations (continued)</h3>
+      <p class="lede"><span class="cn">4.2.2</span> We do not pay a critical illness benefit for a diagnosis made, or symptoms first investigated, during the 90-day waiting period described in clause 2.3.</p>
+      <p><span class="cn">4.2.3</span> Each specified critical illness covered by this policy must meet the full definition used in the Association of British Insurers' model wording current at the start date, as summarised in section 7. A diagnosis that does not meet that definition, even if described using the same name by a treating clinician, is not covered.</p>
+      <p><span class="cn">4.2.4</span> We do not pay a critical illness benefit for total permanent disability unless you have selected total permanent disability cover on your policy schedule and paid the additional premium shown for it.</p>
+      <p><span class="cn">4.3</span> Territorial and activity limits</p>
+      <p><span class="cn">4.3.1</span> We do not pay a claim arising from the life assured's participation in motor racing, motorcycle racing, aviation other than as a fare-paying passenger on a licensed airline, or professional sport, unless we have agreed in writing to cover the activity and any additional premium has been paid.</p>
+      <p><span class="cn">4.3.2</span> We do not pay a claim arising from the life assured's use of a controlled drug other than as prescribed by a registered medical practitioner, or from alcohol misuse where alcohol misuse is recorded as a contributing cause on the death certificate or medical report.</p>
+      <p><span class="cn">4.4</span> How exclusions interact with your schedule</p>
+      <p><span class="cn">4.4.1</span> Your policy schedule may list further exclusions specific to you, agreed at the time you applied for cover. Those exclusions apply in addition to the exclusions in this section and take priority over anything in this section that conflicts with them.</p>
+      <p><span class="cn">4.5</span> How exclusions are applied</p>
+      <p><span class="cn">4.5.1</span> An exclusion in this section applies only to the specific event it describes. It does not otherwise reduce the cover provided by this policy, and a claim that does not fall within an exclusion is assessed in the normal way described in section 3.</p>
+    </div>
+  </div>
+  <div class="runfoot"><span>Form ALA-PB-LCI-07</span><span>Page 7 of 14</span></div>
+</div>
+
+<!-- PAGE 8 -->
+<div class="page">
+  <div class="runhead"><span>Ashcombe Life Assurance plc — Policy Booklet</span><span>Cancelling your policy — Page 8 of 14</span></div>
+  <div class="pagebody">
+    <div class="twocol">
+      <h3>5. Cancelling your policy</h3>
+      <p class="lede"><span class="cn">5.1</span> Your right to cancel</p>
+      <p><span class="cn">5.1.1</span> You have a <b>cooling-off period</b> of 30 days from the later of the day you receive your policy schedule and this booklet, and the day you receive our first written confirmation that cover has started, during which you may cancel this policy and receive a full refund of any premium paid, provided no claim has been made.</p>
+      <p><span class="cn">5.1.2</span> For example, if you received your policy schedule and this booklet on 3 April 2026, your cooling-off period would end on 3 May 2026. This example is illustrative only and does not describe your own policy.</p>
+      <p><span class="cn">5.1.3</span> To cancel during the cooling-off period, write to us at the address in section 11, or call the number shown there. We will confirm cancellation in writing and refund any premium within 10 working days.</p>
+      <p><span class="cn">5.2</span> Cancelling after the cooling-off period</p>
+      <p><span class="cn">5.2.1</span> After the cooling-off period ends, you may cancel this policy at any time by telling us in writing. Cover ends on the date we receive your instruction, or a later date you specify. No refund of premiums already paid is given for cover already provided.</p>
+      <p><span class="cn">5.2.2</span> If you cancel, or if a claim ends this policy, you may be able to apply for a new policy, but this will be treated as a new application, assessed on the medical and other information current at that time, and any waiting period described in clause 2.3 will begin again from the new start date.</p>
+      <p><span class="cn">5.3</span> Our right to cancel</p>
+      <p><span class="cn">5.3.1</span> We may cancel this policy by giving you 30 days' written notice if we reasonably suspect fraud, or if a premium remains unpaid for more than 30 days after its due date despite the reminder described in clause 9.3.</p>
+      <p><span class="cn">5.3.2</span> We will not cancel this policy simply because you have made a valid claim, or because your health has changed since the start date.</p>
+      <p><span class="cn">5.4</span> If the life assured dies during the cooling-off period</p>
+      <p><span class="cn">5.4.1</span> If the life assured dies during the cooling-off period described in clause 5.1, we will pay the sum assured as if the policy had not been cancelled, provided the premium had been paid and the death is not otherwise excluded under section 4.</p>
+    </div>
+  </div>
+  <div class="runfoot"><span>Form ALA-PB-LCI-07</span><span>Page 8 of 14</span></div>
+</div>
+
+<!-- PAGE 9 -->
+<div class="page">
+  <div class="runhead"><span>Ashcombe Life Assurance plc — Policy Booklet</span><span>Complaints — Page 9 of 14</span></div>
+  <div class="pagebody">
+    <div class="twocol">
+      <h3>6. Complaints and how we handle them</h3>
+      <p class="lede"><span class="cn">6.1</span> How to complain</p>
+      <p><span class="cn">6.1.1</span> If you are unhappy with any decision we have made, or with the service you have received, please tell us. Contact details for our complaints team are in section 11.</p>
+      <p><span class="cn">6.1.2</span> Please give us your policy number, your name, and as much detail as you can about the reason for your complaint, so that we can look into it properly.</p>
+      <p><span class="cn">6.2</span> What happens next</p>
+      <p><span class="cn">6.2.1</span> We will acknowledge your complaint within 5 working days. We aim to send you a final response within 4 weeks, and in any event within 8 weeks, of receiving your complaint.</p>
+      <p><span class="cn">6.2.2</span> For example, a complaint received on 1 June 2026 would normally receive a final response by 27 July 2026 at the latest. This example is illustrative only.</p>
+      <p><span class="cn">6.2.3</span> If we cannot resolve your complaint within 8 weeks, we will write to you explaining why, and tell you about your right to refer the matter to the Financial Ombudsman Service.</p>
+      <p><span class="cn">6.3</span> The Financial Ombudsman Service</p>
+      <p><span class="cn">6.3.1</span> If you remain unhappy with our final response, or if 8 weeks have passed without one, you may refer your complaint to the Financial Ombudsman Service free of charge, normally within 6 months of our final response.</p>
+      <p><span class="cn">6.4</span> The Financial Services Compensation Scheme</p>
+      <p><span class="cn">6.4.1</span> We are covered by the Financial Services Compensation Scheme. If we are unable to meet our obligations under this policy, you may be entitled to compensation, depending on the type of policy and the circumstances of the claim. Further details are in section 11.</p>
+      <p><span class="cn">6.5</span> Vulnerable customers</p>
+      <p><span class="cn">6.5.1</span> If you tell us that you, or the life assured, need extra support because of a disability, bereavement, or another circumstance, we will make reasonable adjustments to how we communicate with you and handle your complaint or claim.</p>
+    </div>
+  </div>
+  <div class="runfoot"><span>Form ALA-PB-LCI-07</span><span>Page 9 of 14</span></div>
+</div>
+
+<!-- PAGE 10 -->
+<div class="page">
+  <div class="runhead"><span>Ashcombe Life Assurance plc — Policy Booklet</span><span>Definitions — Page 10 of 14</span></div>
+  <div class="pagebody">
+    <div class="twocol">
+      <h3>7. Definitions</h3>
+      <p class="lede">The following words and phrases have the meaning given below wherever they appear in bold in this booklet and in your policy schedule.</p>
+      <div class="defbox"><b>Insurer</b> — Ashcombe Life Assurance plc, the company providing this policy.</div>
+      <div class="defbox"><b>Policyholder</b> — the person named as the policyholder on the policy schedule, who owns this policy and is responsible for paying the premium.</div>
+      <div class="defbox"><b>Life Assured</b> — the person on whose life or health a claim under this policy depends, as named on the policy schedule.</div>
+      <div class="defbox"><b>Sum Assured</b> — the maximum amount payable under this policy, as shown on the policy schedule.</div>
+      <div class="defbox"><b>Critical Illness</b> — a condition meeting one of the specified definitions summarised in this section, based on the Association of British Insurers' model wording.</div>
+      <div class="defbox"><b>Waiting Period</b> — the 90-day period described in clause 2.3, during which no critical illness benefit is payable.</div>
+      <div class="defbox"><b>Accelerated Benefit</b> — a critical illness benefit paid as an advance against the sum assured, reducing the amount payable on a later death claim.</div>
+      <div class="defbox"><b>Total Permanent Disability</b> — permanent inability to carry out at least three of the six activities of daily living listed on your policy schedule, as certified by a consultant we approve, where total permanent disability cover has been selected.</div>
+      <div class="defbox"><b>Cooling-Off Period</b> — the 30-day period described in clause 5.1, during which you may cancel this policy and receive a full refund.</div>
+      <div class="defbox"><b>Material Fact</b> — information that would have affected our decision to offer this policy, or the terms on which we offered it, had we known it when you applied.</div>
+      <div class="defbox"><b>Premium Review Date</b> — a date shown in the table in section 9 on which your premium may be reviewed.</div>
+      <div class="defbox"><b>Terminal Illness</b> — an advanced or rapidly progressing illness where, in the opinion of the attending consultant, life expectancy is 12 months or less; a valid terminal illness claim is paid in advance of a death claim.</div>
+      <div class="defbox"><b>Start Date</b> — the date shown as the policy start date on your policy schedule, from which cover begins.</div>
+      <div class="defbox"><b>Expiry Date</b> — the date shown as the policy end date on your policy schedule, after which no benefit is payable.</div>
+    </div>
+  </div>
+  <div class="runfoot"><span>Form ALA-PB-LCI-07</span><span>Page 10 of 14</span></div>
+</div>
+
+<!-- PAGE 11 -->
+<div class="page">
+  <div class="runhead"><span>Ashcombe Life Assurance plc — Policy Booklet</span><span>How your policy is administered — Page 11 of 14</span></div>
+  <div class="pagebody">
+    <div class="twocol">
+      <h3>8. How your policy is administered</h3>
+      <p class="lede"><span class="cn">8.1</span> Who provides this policy</p>
+      <p><span class="cn">8.1.1</span> This policy is provided by Ashcombe Life Assurance plc, registered in England and Wales under company number 04471902, with its registered office at 27 Cathedral Yard, Bristol, BS1 5TX.</p>
+      <p><span class="cn">8.2</span> How we manage the assets backing this policy</p>
+      <p><span class="cn">8.2.1</span> The assets we hold to meet our obligations under policies like yours are managed on our behalf by Meridian Asset Management Ltd (VAT registration number GB 204 5567 12), an investment manager appointed by our board. This does not create any investment element in your policy; this policy has no cash value, as set out in clause 2.2.2.</p>
+      <p><span class="cn">8.3</span> Reinsurance</p>
+      <p><span class="cn">8.3.1</span> We reinsure a proportion of the risk we accept under policies like yours with Continental Re (UK) Ltd, under standard reinsurance treaty arrangements. Reinsurance does not affect your rights under this policy; our obligation to you is unaffected by whether, or how much, of the risk we have reinsured.</p>
+      <p><span class="cn">8.4</span> Our regulatory status</p>
+      <p><span class="cn">8.4.1</span> Ashcombe Life Assurance plc is authorised by the Prudential Regulation Authority and regulated by the Financial Conduct Authority and the Prudential Regulation Authority. We were first authorised to carry out insurance business on 15 September 2004, and our permissions were most recently varied by the regulator on 3 March 2015. Our Firm Reference Number is 447190.</p>
+      <p><span class="cn">8.5</span> Changes to these terms</p>
+      <p><span class="cn">8.5.1</span> We may change the terms in this booklet where the change is required by law or regulation, or to reflect a court or Ombudsman decision, or to correct an error. We will write to you at least 30 days before a change that reduces your cover takes effect. These terms were last updated on 4 February 2026.</p>
+      <p><span class="cn">8.6</span> Law and language</p>
+      <p><span class="cn">8.6.1</span> This policy is governed by the law of England and Wales, and all communications between us will be in English.</p>
+      <p><span class="cn">8.7</span> How we use your information</p>
+      <p><span class="cn">8.7.1</span> We use personal and medical information you give us to assess your application, administer your policy, and handle any claim, and we may share it with the reinsurer named in clause 8.3.1 and with your doctor for that purpose. Our full privacy notice is available on request.</p>
+    </div>
+  </div>
+  <div class="runfoot"><span>Form ALA-PB-LCI-07</span><span>Page 11 of 14</span></div>
+</div>
+
+<!-- PAGE 12 -->
+<div class="page">
+  <div class="runhead"><span>Ashcombe Life Assurance plc — Policy Booklet</span><span>Premiums and reviews — Page 12 of 14</span></div>
+  <div class="pagebody">
+    <div class="twocol">
+      <h3>9. Premiums and reviews</h3>
+      <p class="lede"><span class="cn">9.1</span> How your premium is calculated</p>
+      <p><span class="cn">9.1.1</span> Your premium is calculated when you apply, based on the sum assured you choose, the age, sex, health, occupation and smoker status of the life assured, and any special terms we apply. It is shown on your policy schedule.</p>
+      <p><span class="cn">9.2</span> Premium reviews</p>
+      <p><span class="cn">9.2.1</span> If your policy schedule shows that your premium is reviewable, we will review it on each premium review date shown in the table below, and confirm any change to you in writing at least 30 days beforehand.</p>
+      <table class="reviewtbl">
+        <tr><th>Review</th><th>Premium review date</th></tr>
+        <tr><td>1</td><td>1 January 2027</td></tr>
+        <tr><td>2</td><td>1 January 2028</td></tr>
+        <tr><td>3</td><td>1 January 2029</td></tr>
+        <tr><td>4</td><td>1 January 2030</td></tr>
+        <tr><td>5</td><td>1 January 2031</td></tr>
+        <tr><td>6</td><td>1 January 2032</td></tr>
+        <tr><td>7</td><td>1 January 2033</td></tr>
+        <tr><td>8</td><td>1 January 2034</td></tr>
+      </table>
+      <p><span class="cn">9.3</span> What happens if you miss a payment</p>
+      <p><span class="cn">9.3.1</span> If a premium is not paid on its due date, we will write to remind you. If it remains unpaid 30 days after the due date, cover ends automatically, subject to our right to cancel described in clause 5.3.</p>
+      <p><span class="cn">9.4</span> Illustrative cost of your policy</p>
+      <p><span class="cn">9.4.1</span> If you pay monthly for the whole of your policy term without any premium review changing the amount, the total you would pay over the term is approximately £7,800.00. This figure is illustrative only: your actual premium may change following a review under clause 9.2, and the actual total you pay will depend on how long the policy runs.</p>
+      <p><span class="cn">9.4.2</span> If you choose to pay annually instead of monthly, the annual premium is shown on your policy schedule; paying annually is usually cheaper overall than paying the same monthly premium twelve times over.</p>
+      <p><span class="cn">9.5</span> Amounts shown on your schedule</p>
+      <p><span class="cn">9.5.1</span> Your policy schedule shows your sum assured, your critical illness benefit, and your premium. These are the amounts that apply to you; nothing in this section overrides them.</p>
+      <p><span class="cn">9.6</span> How you pay</p>
+      <p><span class="cn">9.6.1</span> Premiums are collected by direct debit from the bank account shown on your application, on or near the day of the month shown on your policy schedule. We do not accept payment by cash or by post.</p>
+      <p><span class="cn">9.7</span> Optional add-on and rider premiums</p>
+      <p><span class="cn">9.7.1</span> If you add total permanent disability cover, waiver of premium, or indexation after your policy starts, we will confirm the additional premium for each in writing and add it to your monthly premium from your next premium review date shown in the table above. For a policy with your sum assured, illustrative additional premiums are: total permanent disability cover, £4.10 per month; waiver of premium, £1.85 per month; indexation, approximately 3% of premium each year. These are illustrative only; the actual premium for any add-on would be confirmed before it takes effect.</p>
+    </div>
+  </div>
+  <div class="runfoot"><span>Form ALA-PB-LCI-07</span><span>Page 12 of 14</span></div>
+</div>
+
+<!-- PAGE 13: SCHEDULE -->
+<div class="page">
+  <div class="runhead"><span>Ashcombe Life Assurance plc — Policy Booklet</span><span>Your policy schedule — Page 13 of 14</span></div>
+  <div class="schedulewrap">
+    <h3>10. Your policy schedule</h3>
+    <p class="scheduleintro">This schedule forms part of your contract with Ashcombe Life Assurance plc. Please keep it with your policy booklet.</p>
+    <table class="schedule">
+      <tr><th>Policyholder</th><td>Mrs Naomi R. Whitcombe</td></tr>
+      <tr><th>Life assured</th><td>Mrs Naomi R. Whitcombe</td></tr>
+      <tr><th>Address</th><td>14 Sedgemoor Rise, Trentham, Staffordshire, ST9 4LP</td></tr>
+      <tr><th>Policy number</th><td><b>ALA-662048-13</b></td></tr>
+      <tr><th>Type of policy</th><td>Life cover policy, with critical illness cover (accelerated)</td></tr>
+      <tr><th>Policy start date</th><td><b>18 October 2026</b></td></tr>
+      <tr><th>Policy end date</th><td><b>17 October 2046</b></td></tr>
+      <tr><th>Policy term</th><td>20 years</td></tr>
+      <tr><th>Sum assured</th><td>£150,000.00</td></tr>
+      <tr><th>Critical illness benefit</th><td>£75,000.00 (accelerated, deducted from sum assured)</td></tr>
+      <tr><th>Total permanent disability cover</th><td>Not selected</td></tr>
+      <tr><th>Premium frequency</th><td>Monthly (paid every 1 month)</td></tr>
+      <tr><th>Monthly premium</th><td><b>£32.50</b></td></tr>
+      <tr><th>Annual premium (if selected instead)</th><td>£351.00</td></tr>
+      <tr><th>Total premiums payable over full term</th><td>approximately £7,800.00</td></tr>
+      <tr><th>Underwriting basis</th><td>Full medical underwriting</td></tr>
+      <tr><th>Smoker status</th><td>Non-smoker</td></tr>
+      <tr><th>Waiting period</th><td>90 days from the policy start date</td></tr>
+      <tr><th>Premium reviewable</th><td>Yes — see section 9</td></tr>
+      <tr><th>Indexation</th><td>Not selected</td></tr>
+      <tr><th>Client number</th><td>CL-4471-90215</td></tr>
+      <tr><th>Plan code</th><td>LCI-STD-20</td></tr>
+      <tr><th>Quotation reference</th><td>Q-2026-0558-4, issued 2 May 2026</td></tr>
+      <tr><th>Introducing adviser</th><td>Adviser code FA-88213, agency code AG-4471-09</td></tr>
+      <tr><th>Policy held in trust</th><td>Yes — trust deed reference TRUST-ALA-662048-13-01</td></tr>
+      <tr><th>Insurer</th><td>Ashcombe Life Assurance plc, 27 Cathedral Yard, Bristol, BS1 5TX</td></tr>
+    </table>
+  </div>
+  <div class="runfoot"><span>Policy ALA-662048-13 &middot; Form ALA-PB-LCI-07</span><span>Page 13 of 14</span></div>
+</div>
+
+<!-- PAGE 14: CONTACTS -->
+<div class="page">
+  <div class="runhead"><span>Ashcombe Life Assurance plc — Policy Booklet</span><span>Contacts and regulatory information — Page 14 of 14</span></div>
+  <div class="pagebody">
+    <div class="contacts">
+      <h3 style="column-span:all;">11. Contacts and regulatory information</h3>
+      <div class="block">
+        <h4>Customer services</h4>
+        Ashcombe Life Assurance plc<br>
+        27 Cathedral Yard, Bristol, BS1 5TX<br>
+        Telephone: 0345 604 7712 (Monday to Friday, 8am to 6pm)<br>
+        Email: customerservices@ashcombelife.example
+      </div>
+      <div class="block">
+        <h4>Claims line</h4>
+        Telephone: 0345 604 7799<br>
+        Email: claims@ashcombelife.example<br>
+        Please have your policy number ready when you call. Once we register your claim we
+        will give you a claims notification number to quote in further correspondence — for
+        example, a claim registered on 3 March 2026 would be given a number such as
+        CN-2026-004811. This example is illustrative only.
+      </div>
+      <div class="block">
+        <h4>Manage your policy online</h4>
+        View your schedule, update your bank details or nominate a beneficiary at
+        ashcombelife.example/myaccount, or via the Ashcombe Life app, available for iOS and
+        Android. Follow @AshcombeLife for policyholder updates.
+      </div>
+      <div class="block">
+        <h4>Will-writing and probate</h4>
+        Ashcombe Life Assurance plc has partnered with Milbank Wills &amp; Probate to offer
+        policyholders a discounted will-writing and probate service. Details and quotes are
+        available at milbankwills.example/ashcombe. Ashcombe Life Assurance plc may receive a
+        referral fee from Milbank Wills &amp; Probate; use of this partner is optional.
+      </div>
+      <div class="block">
+        <h4>Complaints</h4>
+        Complaints Team, Ashcombe Life Assurance plc<br>
+        27 Cathedral Yard, Bristol, BS1 5TX<br>
+        Email: complaints@ashcombelife.example
+      </div>
+      <div class="block">
+        <h4>Financial Ombudsman Service</h4>
+        Exchange Tower, London, E14 9SR<br>
+        Telephone: 0800 023 4567<br>
+        www.financial-ombudsman.org.uk
+      </div>
+      <div class="block">
+        <h4>Financial Services Compensation Scheme</h4>
+        10th Floor Beaufort House, 15 St Botolph Street, London, EC3A 7QU<br>
+        Telephone: 0800 678 1100<br>
+        www.fscs.org.uk
+      </div>
+      <div class="block">
+        <h4>Data protection</h4>
+        We process your personal data in line with our privacy notice, available on request from
+        the address above or from our website. This booklet was correct at the time of printing
+        on 1 September 2026.
+      </div>
+      <div class="regbox">
+        Ashcombe Life Assurance plc is authorised by the Prudential Regulation Authority and
+        regulated by the Financial Conduct Authority and the Prudential Regulation Authority
+        (Firm Reference Number 447190). Registered in England and Wales, company number
+        04471902. Registered office: 27 Cathedral Yard, Bristol, BS1 5TX. &copy; 2026 Ashcombe
+        Life Assurance plc. All rights reserved.
+      </div>
+    </div>
+  </div>
+  <div class="runfoot"><span>Policy ALA-662048-13 &middot; Form ALA-PB-LCI-07</span><span>Page 14 of 14</span></div>
+</div>
+
+</body>
+</html>

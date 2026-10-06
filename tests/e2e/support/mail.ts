@@ -20,6 +20,38 @@ import { ImapFlow, type MessageStructureObject } from "imapflow";
 
 const IMAPS_PORT = Number(process.env.TEST_IMAPS_PORT ?? 3993);
 
+/** The one intake mailbox every v19-mail-collection pass delivers into and
+ *  Orbit polls (#459). Shared by all workers and all projects on a stack. */
+export const INTAKE_MAILBOX = "orbit-intake@in.orbit.test";
+
+/**
+ * #1183: empties the intake mailbox, as part of putting the stack back to its
+ * seed (support/database.ts). The restore wipes Orbit's own record of what it
+ * has already read from this box but GreenMail keeps the mail, so after a
+ * reset Orbit read every earlier pass's "Boiler cover renewal" again and the
+ * next pass found extra suggestion rows it never sent -- desktop-firefox in
+ * pipeline 1926, and any second pass on one local stack. Only ever called
+ * where the gate has every worker outside a spec file, so no worker's
+ * in-flight mail is in the box.
+ */
+export async function emptyIntakeMailbox(): Promise<void> {
+  const client = new ImapFlow({
+    host: "127.0.0.1",
+    port: IMAPS_PORT,
+    secure: true,
+    tls: { rejectUnauthorized: false },
+    auth: { user: INTAKE_MAILBOX, pass: "orbit-e2e-mail-helper" },
+    logger: false,
+  });
+  await client.connect();
+  try {
+    const box = await client.mailboxOpen("INBOX");
+    if (box.exists > 0) await client.messageDelete("1:*");
+  } finally {
+    await client.logout().catch(() => client.close());
+  }
+}
+
 /** Depth-first search for the first text/plain node in a body structure. */
 function findTextPlainPart(node: MessageStructureObject | undefined): string | undefined {
   if (!node) return undefined;
@@ -46,7 +78,12 @@ async function streamToString(stream: NodeJS.ReadableStream): Promise<string> {
  * attempt is simpler than managing one long-lived client across a poll, and
  * this runs at most a handful of times.
  */
-async function latestMatchingBody(address: string, subjectContains: string): Promise<string | null> {
+async function latestMatchingBody(
+  address: string,
+  subjectContains: string,
+  /** Ignore anything already in the mailbox when the caller took its mark. */
+  afterUid = 0,
+): Promise<string | null> {
   const client = new ImapFlow({
     host: "127.0.0.1",
     port: IMAPS_PORT,
@@ -66,9 +103,10 @@ async function latestMatchingBody(address: string, subjectContains: string): Pro
   await client.connect();
   try {
     await client.mailboxOpen("INBOX", { readOnly: true });
-    const uids = await client.search({ subject: subjectContains }, { uid: true });
-    if (!uids || uids.length === 0) return null;
-    const newestUid = uids[uids.length - 1];
+    const found = await client.search({ subject: subjectContains }, { uid: true });
+    const uids = (found || []).filter((uid) => uid > afterUid);
+    if (uids.length === 0) return null;
+    const newestUid = Math.max(...uids);
 
     const message = await client.fetchOne(newestUid, { uid: true, bodyStructure: true }, { uid: true });
     if (!message) return null;
@@ -146,4 +184,86 @@ export async function waitForSenderVerificationToken(address: string, timeoutMs 
 
   const detail = lastError instanceof Error ? `; last error: ${lastError.message}` : "";
   throw new Error(`#745: no sender-verification mail to ${address} arrived within ${timeoutMs}ms${detail}`);
+}
+
+/** The subject `src/server/sign-in-approvals/mail.ts` sends, pinned by its own test. */
+const APPROVAL_SUBJECT = "Approve your Orbit sign-in";
+
+/**
+ * What the mailbox already holds, before a sign-in is started.
+ *
+ * The number itself means nothing outside IMAP -- it is only ever handed
+ * straight back to `waitForApprovalLink`, which uses it to ignore everything
+ * that was there first. Zero for a mailbox with no approval in it, which is
+ * every mailbox on a fresh stack.
+ */
+export async function newestApprovalUid(address: string): Promise<number> {
+  const client = new ImapFlow({
+    host: "127.0.0.1",
+    port: IMAPS_PORT,
+    secure: true,
+    tls: { rejectUnauthorized: false },
+    auth: { user: address, pass: "orbit-e2e-mail-helper" },
+    logger: false,
+  });
+  await client.connect();
+  try {
+    await client.mailboxOpen("INBOX", { readOnly: true });
+    const uids = await client.search({ subject: APPROVAL_SUBJECT }, { uid: true });
+    return !uids || uids.length === 0 ? 0 : Math.max(...uids);
+  } finally {
+    await client.logout().catch(() => client.close());
+  }
+}
+
+/**
+ * Waits for the sign-in approval mail (#1033, ADR-0027 §5) and returns its
+ * one `/approve/<token>` link.
+ *
+ * The third direction this module reads in, and the only one where the mail
+ * IS the security control rather than a convenience: without this link nobody
+ * gets past a password, so a journey that proves the factor works has to find
+ * it the way its reader would -- in a mailbox, not in a database.
+ *
+ * The subject is fixed rather than a parameter, unlike `waitForInvitationLink`:
+ * there is exactly one approval mail and `src/server/sign-in-approvals/mail.test.ts`
+ * pins its subject, so a caller choosing its own string could only get it
+ * wrong.
+ */
+export async function waitForApprovalLink(
+  address: string,
+  timeoutMs = 60_000,
+  /**
+   * The mark `newestApprovalUid` took before the sign-in was started, so this
+   * waits for the approval THAT sign-in caused.
+   *
+   * Without it the wait answers with whatever approval the mailbox already
+   * holds, because "the newest" is only the new one once the new mail has
+   * actually landed -- and a link that has already been pressed opens the
+   * approval page's finished face, which reads as a broken page rather than
+   * as a wait that answered too early. Every sign-in in a file gets its own
+   * mark; a stack kept between runs (--reuse) holds the previous run's mail
+   * too, so the first sign-in needs one just as much as the second.
+   */
+  afterUid = 0,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  const linkPattern = /https?:\/\/\S+\/approve\/\S+/u;
+  let lastError: unknown;
+
+  while (Date.now() < deadline) {
+    try {
+      const body = await latestMatchingBody(address, APPROVAL_SUBJECT, afterUid);
+      if (body) {
+        const match = body.match(linkPattern);
+        if (match) return match[0].replace(/[).,]+$/u, "");
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
+
+  const detail = lastError instanceof Error ? `; last error: ${lastError.message}` : "";
+  throw new Error(`#1033: no sign-in approval mail to ${address} arrived within ${timeoutMs}ms${detail}`);
 }

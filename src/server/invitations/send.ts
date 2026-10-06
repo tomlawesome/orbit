@@ -31,17 +31,35 @@ export interface InvitationMailer {
   sendEmail(notification: SmtpNotification): Promise<void>;
 }
 
-/** One absolute link, from the instance's public base URL and nothing else. */
-export function invitationLink(token: string, environment: NodeJS.ProcessEnv = process.env): string {
+/**
+ * One absolute link under this instance's own public base URL, from a route
+ * segment and a token -- the one shape an invitation, a setup/recovery and a
+ * sign-in approval link all share (#1151 A1-Q4), differing only in which
+ * route they point at and the words their own error carries. `setupLink`
+ * (`local-credentials/setup-mail.ts`) and `approvalLink`
+ * (`sign-in-approvals.ts`) both import this rather than keeping their own
+ * copy of it.
+ */
+export function absoluteAppLink(
+  routeSegment: string,
+  token: string,
+  errorMessage: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
   const configured = environment.APP_URL;
-  if (!configured) throw new AppError("unsafe_input", "The invitation link cannot be built", 503);
+  if (!configured) throw new AppError("unsafe_input", errorMessage, 503);
   try {
     const url = new URL(configured);
     if (!url.hostname || !["http:", "https:"].includes(url.protocol)) throw new Error("unsafe application origin");
-    return new URL(`/invite/${encodeURIComponent(token)}`, url.origin).href;
+    return new URL(`/${routeSegment}/${encodeURIComponent(token)}`, url.origin).href;
   } catch {
-    throw new AppError("unsafe_input", "The invitation link cannot be built", 503);
+    throw new AppError("unsafe_input", errorMessage, 503);
   }
+}
+
+/** One absolute link, from the instance's public base URL and nothing else. */
+export function invitationLink(token: string, environment: NodeJS.ProcessEnv = process.env): string {
+  return absoluteAppLink("invite", token, "The invitation link cannot be built", environment);
 }
 
 /**
@@ -79,14 +97,18 @@ export interface InvitationSendOutcome {
 }
 
 /**
- * Renders and sends one invitation, and reports which of the two happened.
+ * Puts one already-written message on the wire, now, and reports which of
+ * "sent" and "not sent, and why in one bounded word" happened.
  *
- * Never throws for a provider failure: an owner who has just typed an address
- * gets a row they can resend from, not a 500 that loses the invitation they
- * created a moment ago.
+ * The person-facing sends share this rather than each opening their own
+ * transporter: the invitation (#481) and the account setup link (#911,
+ * ADR-0023 §3, which names this module as the mailer it goes through). Both
+ * are somebody waiting on a link, so both are synchronous and both answer a
+ * failure to the person who asked for the send.
  */
-export async function sendInvitationMail(
-  context: InvitationMailContext,
+export async function sendBoundedMail(
+  to: string,
+  mail: { subject: string; text: string; html?: string },
   mailer?: InvitationMailer | null,
   now: Date = new Date(),
 ): Promise<InvitationSendOutcome> {
@@ -102,14 +124,13 @@ export async function sendInvitationMail(
   }
   if (!provider) return { sentAt: null, sendError: "smtp_unconfigured" };
 
-  const mail = renderInvitationMail(context);
   try {
     await provider.sendEmail({
       from,
-      to: context.email,
+      to,
       subject: mail.subject,
       text: mail.text,
-      html: mail.html,
+      ...(mail.html ? { html: mail.html } : {}),
       tlsMode: getNotificationWorkerConfig().smtpSecurity,
     });
     return { sentAt: now, sendError: null };
@@ -122,4 +143,19 @@ export async function sendInvitationMail(
         : "unknown";
     return { sentAt: null, sendError };
   }
+}
+
+/**
+ * Renders and sends one invitation, and reports which of the two happened.
+ *
+ * Never throws for a provider failure: an owner who has just typed an address
+ * gets a row they can resend from, not a 500 that loses the invitation they
+ * created a moment ago.
+ */
+export async function sendInvitationMail(
+  context: InvitationMailContext,
+  mailer?: InvitationMailer | null,
+  now: Date = new Date(),
+): Promise<InvitationSendOutcome> {
+  return sendBoundedMail(context.email, renderInvitationMail(context), mailer, now);
 }

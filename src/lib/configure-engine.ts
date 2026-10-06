@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -11,8 +11,9 @@ import {
   renameSync,
   rmSync,
   statSync,
-  writeFileSync,
   type Stats,
+  writeFileSync,
+  writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -23,6 +24,7 @@ import {
   containsForbiddenCharacters,
   isForbiddenHost,
   isValidClientId,
+  isValidLocalModel,
   isValidOidcIssuer,
   isValidOrbitImage,
   normalizePublicOrigin,
@@ -92,7 +94,8 @@ export type ConfigureEngineRefusalCode =
   | "oidc-secret-placeholder-invalid"
   | "preflight-failed"
   | "configuration-migration-required"
-  | "write-failed";
+  | "write-failed"
+  | "locked";
 
 /**
  * Thrown for every fail-closed refusal this module makes. Never carries a
@@ -176,6 +179,89 @@ function atomicWriteFile(finalPath: string, content: string | Buffer, mode: numb
   }
 }
 
+// --- cross-process lock (O1-R8/O1-R7) ---------------------------------------
+//
+// Shared (same file name, same algorithm) with install-transaction.ts's own
+// acquireDeployLock: both modules mutate the same managed paths
+// (.env-orbit/.orbit-secrets) under the same deployment directory, and
+// neither had any cross-process exclusion before this (two concurrent
+// `orbit configure` writers could each read-modify-write
+// updateManagedKeys's target and lose the other's keys; a concurrent
+// install/update could do the same to install-transaction.ts's commits).
+// Using one lock file for both closes both gaps with a single mechanism: a
+// second `orbit configure`, `orbit install` or `orbit update` targeting the
+// same directory fails fast with a clear message instead of racing.
+//
+// A plain `open(O_CREAT|O_EXCL)` is the exclusion primitive (atomic across
+// processes on every real filesystem this runs on, unlike a stat-then-create
+// pair); a lock file older than DEPLOY_LOCK_STALE_MS is treated as abandoned
+// by a crashed process (this engine has no PID-liveness check available
+// across a container boundary) and taken over rather than blocking forever.
+const DEPLOY_LOCK_FILE_NAME = ".orbit-engine.lock";
+const DEPLOY_LOCK_STALE_MS = 10 * 60 * 1000;
+
+/** Acquires the deployment-directory lock, or refuses if another run holds it. Returns a release function the caller must call exactly once, success or failure. */
+function acquireDeployLock(deployDir: string, operationLabel: string): () => void {
+  const lockPath = join(deployDir, DEPLOY_LOCK_FILE_NAME);
+
+  const takeLock = (): number => openSync(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
+
+  let fd: number;
+  try {
+    fd = takeLock();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      refuse(`Could not take the ${operationLabel} lock at ${lockPath}.`, "locked");
+    }
+    let staleEnough: boolean;
+    try {
+      staleEnough = Date.now() - statSync(lockPath).mtimeMs > DEPLOY_LOCK_STALE_MS;
+    } catch {
+      staleEnough = true; // Lock vanished between the EEXIST and this stat; retry once below.
+    }
+    if (!staleEnough) {
+      refuse(
+        `Another ${operationLabel} is already running against this deployment (lock held at ${lockPath}). Wait for it to finish, or remove the lock file yourself once you are certain no other run is active.`,
+        "locked",
+      );
+    }
+    // Reclaim by rename, not unlink-then-create (same shape as
+    // install-transaction.ts's copy): two processes that both saw the stale
+    // lock would otherwise each unlink and recreate it, and the slower unlink
+    // removed the faster one's fresh lock, leaving both believing they held
+    // it. Only one rename succeeds; the other tries the plain create once
+    // more and refuses if it is taken.
+    const reclaimed = `${lockPath}.stale-${process.pid}`;
+    try {
+      renameSync(lockPath, reclaimed);
+      rmSync(reclaimed, { force: true });
+    } catch {
+      /* the other process reclaimed it first; the create below decides */
+    }
+    try {
+      fd = takeLock();
+    } catch {
+      refuse(`Another ${operationLabel} is already running against this deployment (lock held at ${lockPath}).`, "locked");
+    }
+  }
+  // The lock names its holder, so a release never removes a lock that was
+  // reclaimed from this process as stale and now belongs to another run.
+  const owner = `${process.pid}:${randomUUID()}\n`;
+  writeSync(fd, owner);
+  closeSync(fd);
+
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    try {
+      if (readFileSync(lockPath, "utf8") === owner) rmSync(lockPath, { force: true });
+    } catch {
+      /* best effort */
+    }
+  };
+}
+
 function generateHexSecret(): string {
   // node:crypto's randomBytes is a CSPRNG (equivalent security posture to
   // configure.sh's own `openssl rand -hex 32` / `/dev/urandom` fallback);
@@ -211,6 +297,7 @@ const MINIMAL_ENVIRONMENT_SECTIONS: MinimalEnvironmentSection[] = [
   {
     heading: "Authentication",
     entries: [
+      { key: "ORBIT_AUTH_OIDC" },
       { key: "OIDC_ISSUER" },
       { key: "OIDC_CLIENT_ID" },
       { key: "OIDC_CLIENT_SECRET" },
@@ -337,6 +424,16 @@ export function ensureEnvironmentFile(deployDir: string): EnsureEnvironmentFileR
  * bash's own `order` array built from positional arguments.
  */
 export function updateManagedKeys(deployDir: string, pairs: ReadonlyArray<readonly [string, string]>): void {
+  const releaseLock = acquireDeployLock(deployDir, "orbit configure");
+  try {
+    updateManagedKeysLocked(deployDir, pairs);
+  } finally {
+    releaseLock();
+  }
+}
+
+/** The actual read-modify-write, now only ever reached with the deployment lock held (O1-R8). */
+function updateManagedKeysLocked(deployDir: string, pairs: ReadonlyArray<readonly [string, string]>): void {
   const envPath = join(deployDir, ENVIRONMENT_FILE_NAME);
   const order = pairs.map(([key]) => key);
   const pending = new Map<string, string>(pairs);
@@ -451,10 +548,60 @@ export interface EnsureSecretFileResult {
   message?: string;
 }
 
-/** ensure_secret_file (configure.sh:747-772, guarantees #15-16), used for session-secret/postgres-password/document-kek. */
-export function ensureSecretFile(deployDir: string, relativePath: string): EnsureSecretFileResult {
+/**
+ * Like pathInfo, but also reports *why* statSync failed to follow the path
+ * when it did: ENOENT ("truly nothing here") versus anything else (EACCES,
+ * EIO, a transient mount problem, ...). ensureSecretFile needs that
+ * distinction (O1-S1/SS1-S2): pathInfo's own blanket catch treats every stat
+ * failure as "doesn't exist," which is exactly how a merely-unstatable
+ * DOCUMENT_KEK/SESSION_SECRET file used to get silently treated as absent
+ * and regenerated.
+ */
+function secretFilePathInfo(path: string): { info: PathInfo; statErrorCode?: string } {
+  let lst: Stats | undefined;
+  try {
+    lst = lstatSync(path);
+  } catch {
+    lst = undefined;
+  }
+  let st: Stats | undefined;
+  let statErrorCode: string | undefined;
+  try {
+    st = statSync(path);
+  } catch (error) {
+    statErrorCode = (error as NodeJS.ErrnoException).code;
+  }
+  return {
+    info: {
+      existsFollowing: st !== undefined,
+      isSymlink: lst?.isSymbolicLink() ?? false,
+      isRegularFollowing: st?.isFile() ?? false,
+      isDirectoryFollowing: st?.isDirectory() ?? false,
+    },
+    statErrorCode,
+  };
+}
+
+/**
+ * ensure_secret_file (configure.sh:747-772, guarantees #15-16), used for
+ * session-secret/postgres-password/document-kek.
+ *
+ * `isFreshInstall` governs the one case that matters most here (O1-S1/
+ * SS1-S2): a missing DOCUMENT_KEK or SESSION_SECRET file. On a genuinely
+ * fresh install (nothing deployed here yet) that is the normal first run and
+ * generating one is correct and expected. On an existing deployment it is
+ * instead the symptom of a lost or corrupted secret, and every encrypted
+ * document becomes permanently unreadable (or every session invalid) the
+ * moment this function "fixes" it by generating a replacement — so on an
+ * existing deployment a missing file is always a hard refusal naming the
+ * file and the recovery path, never a silent regeneration. A stat failure
+ * that is not ENOENT (permissions, I/O, a half-mounted secrets volume) is a
+ * hard refusal unconditionally, fresh install or not: it is never evidence
+ * that the file doesn't exist, only that this process could not find out.
+ */
+export function ensureSecretFile(deployDir: string, relativePath: string, isFreshInstall: boolean): EnsureSecretFileResult {
   const path = join(deployDir, relativePath);
-  const info = pathInfo(path);
+  const { info, statErrorCode } = secretFilePathInfo(path);
   if (info.existsFollowing) {
     if (!info.isRegularFollowing || info.isSymlink) {
       refuse(`Refusing to use ${relativePath} because it is not a regular file.`, "secret-file-invalid");
@@ -469,6 +616,20 @@ export function ensureSecretFile(deployDir: string, relativePath: string): Ensur
       refuse(`Could not restrict permissions on ${relativePath}.`, "secret-file-invalid");
     }
     return { generated: false };
+  }
+
+  if (statErrorCode !== undefined && statErrorCode !== "ENOENT") {
+    refuse(
+      `Could not check ${relativePath} (${statErrorCode}); refusing to guess whether it exists rather than possibly generating a replacement secret.`,
+      "secret-file-invalid",
+    );
+  }
+
+  if (!isFreshInstall) {
+    refuse(
+      `${relativePath} is missing on an existing Orbit deployment. Refusing to generate a replacement, which would make existing encrypted data unreadable or sign out every user. Restore ${relativePath} from backup (or Orbit's recovery bundle) to the exact path ${path}, then run \`orbit configure\` again.`,
+      "secret-file-invalid",
+    );
   }
 
   const secret = generateHexSecret();
@@ -505,11 +666,27 @@ function environmentKeyIsNonEmpty(deployDir: string, key: string): boolean {
   return (rawEnvironmentKeyValue(deployDir, key) ?? "") !== "";
 }
 
-/** ensure_oidc_secret_placeholder (configure.sh:786-814, guarantees #18-19). */
+/**
+ * ensure_oidc_secret_placeholder (configure.sh:786-814, guarantees #18-19).
+ *
+ * The zero-byte placeholder this writes exists for one reason only: Compose's
+ * `file:`-backed secret declaration needs a host source to exist even before
+ * an operator has ever run `--set-oidc-secret`. That bootstrap case is safe
+ * because nothing is lost — there was never a real secret at this path.
+ *
+ * Once OIDC_CLIENT_SECRET_FILE is itself already configured, though, a
+ * missing file here means the real secret this deployment already has was
+ * lost or deleted (O1-S5) — writing a fresh zero-byte placeholder over it
+ * would silently and permanently disable OIDC sign-in while `orbit
+ * configure` reports success. That case is always a hard refusal instead;
+ * never an empty secret.
+ */
 export function ensureOidcSecretPlaceholder(deployDir: string): void {
   if (environmentKeyIsNonEmpty(deployDir, "OIDC_CLIENT_SECRET") && !environmentKeyIsNonEmpty(deployDir, "OIDC_CLIENT_SECRET_FILE")) {
     return;
   }
+
+  const fileModeActive = environmentKeyIsNonEmpty(deployDir, "OIDC_CLIENT_SECRET_FILE");
 
   const secretPath = join(deployDir, OIDC_SECRET_RELATIVE_PATH);
   const info = pathInfo(secretPath);
@@ -523,6 +700,13 @@ export function ensureOidcSecretPlaceholder(deployDir: string): void {
       refuse(`Could not restrict permissions on ${OIDC_SECRET_RELATIVE_PATH}.`, "oidc-secret-placeholder-invalid");
     }
     return;
+  }
+
+  if (fileModeActive) {
+    refuse(
+      `${OIDC_SECRET_RELATIVE_PATH} is missing but OIDC_CLIENT_SECRET_FILE is already configured. Refusing to replace it with an empty placeholder, which would silently disable OIDC sign-in. Restore the OIDC client secret to ${OIDC_SECRET_RELATIVE_PATH}, or run \`orbit configure --set-oidc-secret\` again, then retry.`,
+      "oidc-secret-placeholder-invalid",
+    );
   }
 
   atomicWriteFile(secretPath, Buffer.alloc(0), 0o600, "installing");
@@ -542,12 +726,46 @@ export function applySetOidcSecret(deployDir: string, secret: string): string {
   ensureSecretsDirectory(deployDir);
 
   const secretPath = join(deployDir, OIDC_SECRET_RELATIVE_PATH);
-  atomicWriteFile(secretPath, secret, 0o600, "installing");
+  // O1-R10: captured before the write below, so the failure handling that
+  // follows can tell a brand-new secret (safe to remove again on failure)
+  // from a rotation of one .env-orbit already points at (never removed —
+  // its content is already overwritten either way, but the live pointer
+  // must never end up referencing a file this call just deleted).
+  // Both writes under the one deploy lock: otherwise the losing one of two
+  // overlapping calls rolled back the secret file the winner had just
+  // written and pointed .env-orbit at.
+  const releaseLock = acquireDeployLock(deployDir, "orbit configure");
+  const secretExistedBefore = pathInfo(secretPath).existsFollowing;
+  try {
+    atomicWriteFile(secretPath, secret, 0o600, "installing");
+  } catch (error) {
+    releaseLock();
+    throw error;
+  }
 
-  updateManagedKeys(deployDir, [
-    ["OIDC_CLIENT_SECRET", ""],
-    ["OIDC_CLIENT_SECRET_FILE", CANONICAL_OIDC_SECRET_FILE_PATH],
-  ]);
+  try {
+    updateManagedKeysLocked(deployDir, [
+      ["OIDC_CLIENT_SECRET", ""],
+      ["OIDC_CLIENT_SECRET_FILE", CANONICAL_OIDC_SECRET_FILE_PATH],
+    ]);
+  } catch (error) {
+    // O1-R10: these are two separate atomic writes (the secret file, then
+    // its .env-orbit pointer) — anything short of an uncatchable kill
+    // between them (a lock conflict, a full disk, ...) must not leave a
+    // secret this call just created sitting on disk with nothing pointing
+    // at it, so a first-time write is rolled back on failure rather than
+    // left orphaned.
+    if (!secretExistedBefore) {
+      try {
+        rmSync(secretPath, { force: true });
+      } catch {
+        /* best effort */
+      }
+    }
+    throw error;
+  } finally {
+    releaseLock();
+  }
 
   return `Orbit saved the OIDC client secret to ${OIDC_SECRET_RELATIVE_PATH}.`;
 }
@@ -556,11 +774,25 @@ export function applySetOidcSecret(deployDir: string, secret: string): string {
 
 export interface GuidedInitInput {
   appUrl: string;
-  issuer: string;
-  clientId: string;
+  /** Defaults to "oidc" (unset preserves this function's original always-OIDC behavior). */
+  authMode?: "local" | "oidc";
+  issuer?: string;
+  clientId?: string;
 }
 
-/** guided_init's validate-then-write tail (configure.sh:684-745, guarantees #11-14), given already-collected candidate answers (TTY prompting, the ORBIT_CONFIGURE_* env triad, or #297 machine prompts are all the caller's concern — see the CLI wiring in src/cli/orbit.ts). Writes nothing until all three re-validate. */
+/**
+ * guided_init's validate-then-write tail (configure.sh:684-745, guarantees
+ * #11-14), given already-collected candidate answers (TTY prompting, the
+ * ORBIT_CONFIGURE_* env triad, or #297 machine prompts are all the caller's
+ * concern — see the CLI wiring in src/cli/orbit.ts). Writes nothing until
+ * every required field re-validates.
+ *
+ * O1-F1: `authMode: "local"` is guided_init's local-only branch
+ * (configure.sh:843-850, ADR-0023 §1) — APP_URL and ORBIT_AUTH_OIDC=false
+ * only, never touching OIDC_*, so switching the provider off never forces
+ * deleting its configuration. This engine previously had no such path at
+ * all, so a local-only init always demanded `issuer`/`clientId`.
+ */
 export function applyGuidedInit(deployDir: string, input: GuidedInitInput): string {
   const normalizedAppUrl = normalizePublicOrigin(input.appUrl);
   if (!normalizedAppUrl) {
@@ -569,13 +801,23 @@ export function applyGuidedInit(deployDir: string, input: GuidedInitInput): stri
       "guided-configuration-invalid",
     );
   }
-  if (!isValidOidcIssuer(input.issuer)) {
+
+  if (input.authMode === "local") {
+    ensureEnvironmentFile(deployDir);
+    updateManagedKeys(deployDir, [
+      ["APP_URL", normalizedAppUrl],
+      ["ORBIT_AUTH_OIDC", "false"],
+    ]);
+    return "Orbit guided configuration saved APP_URL and set ORBIT_AUTH_OIDC=false (local accounts only).";
+  }
+
+  if (!isValidOidcIssuer(input.issuer ?? "")) {
     refuse(
       "OIDC_ISSUER must be a complete https:// issuer URL with no credentials, query, fragment, loopback address or example.com placeholder.",
       "guided-configuration-invalid",
     );
   }
-  if (!isValidClientId(input.clientId)) {
+  if (!isValidClientId(input.clientId ?? "")) {
     refuse("OIDC_CLIENT_ID must be a non-empty value with no whitespace or control characters.", "guided-configuration-invalid");
   }
 
@@ -583,20 +825,16 @@ export function applyGuidedInit(deployDir: string, input: GuidedInitInput): stri
   ensureEnvironmentFile(deployDir);
   updateManagedKeys(deployDir, [
     ["APP_URL", normalizedAppUrl],
-    ["OIDC_ISSUER", input.issuer],
-    ["OIDC_CLIENT_ID", input.clientId],
+    ["ORBIT_AUTH_OIDC", "true"],
+    ["OIDC_ISSUER", input.issuer as string],
+    ["OIDC_CLIENT_ID", input.clientId as string],
     ["OIDC_CALLBACK_URL", callbackUrl],
   ]);
 
-  return "Orbit guided configuration saved APP_URL, OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CALLBACK_URL.";
+  return "Orbit guided configuration saved APP_URL, ORBIT_AUTH_OIDC=true, OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CALLBACK_URL.";
 }
 
 // --- deployment profile ---------------------------------------------------
-
-function isValidLocalModel(value: string): boolean {
-  if (value.length < 1 || value.length > 128) return false;
-  return /^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?$/.test(value);
-}
 
 /** set_deployment_profile (configure.sh:327-357, guarantee #10). Argument-shape refusals here map to configure.sh's own `return 2` (usage error, exit 2 from the CLI dispatch) rather than its generic `fail()` (exit 1) — src/cli/orbit.ts distinguishes them by this function's ConfigureEngineRefusal code. */
 export function setDeploymentProfile(deployDir: string, preset: string, model: string | undefined): string {
@@ -707,8 +945,26 @@ export interface ConfigureApplyResult {
  * "Orbit configuration is ready..." message itself, in that order, so
  * combined output stays in the same sequence configure.sh has always used.
  */
-export function runConfigureApply(deployDir: string, orbitImage: string | undefined): ConfigureApplyResult {
+export function runConfigureApply(
+  deployDir: string,
+  orbitImage: string | undefined,
+  options: { trustOrbitImage?: boolean } = {},
+): ConfigureApplyResult {
   const messages: string[] = [];
+
+  // #1151 RANGE-F1 (O1-S1/SS1-S2's "existing deployment" signal for
+  // ensureSecretFile): a deployment is existing when any of the three
+  // generated secrets already exists before this run (a symlink counts).
+  // .env-orbit and the secrets directory are not signals: install.sh runs
+  // `configure.sh --init` (which writes .env-orbit) and then a bare
+  // configure in a second process. Checked once for the whole set, before
+  // the first is generated, so writing one cannot make the next look existing.
+  // hadEnvironmentFile is only for persist_orbit_image's rule below.
+  const hadEnvironmentFile = pathInfo(join(deployDir, ENVIRONMENT_FILE_NAME)).existsFollowing;
+  const isFreshInstall = !GENERATED_SECRET_RELATIVE_PATHS.some((relativePath) => {
+    const info = pathInfo(join(deployDir, relativePath));
+    return info.existsFollowing || info.isSymlink;
+  });
 
   const envResult = ensureEnvironmentFile(deployDir);
   if (envResult.message) messages.push(envResult.message);
@@ -721,12 +977,34 @@ export function runConfigureApply(deployDir: string, orbitImage: string | undefi
     refuse("Configuration preflight failed; restoring the previous deployment.", preflight.code);
   }
 
-  persistOrbitImage(deployDir, orbitImage);
+  // persist_orbit_image's rule (configure.sh): an existing deployment only
+  // changes its pinned image through the installer, which says so with
+  // ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1. Without it, a stale ORBIT_IMAGE
+  // left in the shell re-pinned the deployment through the container
+  // engine while the bash path refused.
+  if (orbitImage && hadEnvironmentFile && !options.trustOrbitImage) {
+    messages.push(`Orbit configure: ignoring the environment's ORBIT_IMAGE value ${orbitImage}; an existing deployment only changes its pinned image through the installer.`);
+  } else {
+    persistOrbitImage(deployDir, orbitImage);
+  }
   ensureSecretsDirectory(deployDir);
 
-  for (const relativePath of GENERATED_SECRET_RELATIVE_PATHS) {
-    const result = ensureSecretFile(deployDir, relativePath);
-    if (result.message) messages.push(result.message);
+  // #1151 RANGE-R5: two concurrent first-time `orbit configure` runs both
+  // see every secret missing and each generate their own; whichever
+  // finishes last previously overwrote the other's file unchallenged,
+  // exactly the read-modify-write race acquireDeployLock exists to close
+  // elsewhere. ensureSecretFile itself never takes this lock (it has no
+  // caller-independent reason to serialize on its own), so the loop takes
+  // it here, same lock, same deployDir, safe to nest after persistOrbitImage's
+  // own acquire/release above has already completed.
+  const releaseSecretsLock = acquireDeployLock(deployDir, "orbit configure");
+  try {
+    for (const relativePath of GENERATED_SECRET_RELATIVE_PATHS) {
+      const result = ensureSecretFile(deployDir, relativePath, isFreshInstall);
+      if (result.message) messages.push(result.message);
+    }
+  } finally {
+    releaseSecretsLock();
   }
 
   ensureOidcSecretPlaceholder(deployDir);
@@ -869,13 +1147,23 @@ function validateOidcSecretAnswer(value: string): string | undefined {
 
 export interface CollectedGuidedInitAnswers {
   appUrl: string;
-  issuer: string;
-  clientId: string;
+  issuer?: string;
+  clientId?: string;
 }
 
-/** The machine-prompt-driven collection guided_init performs when `ORBIT_CONFIGURE_PROMPTS=machine` (configure.sh:698-707): APP_URL, then OIDC_ISSUER, then OIDC_CLIENT_ID, in that order. */
-export function collectMachineGuidedInit(driver: ConfigureMachinePromptDriver): CollectedGuidedInitAnswers {
+/**
+ * The machine-prompt-driven collection guided_init performs when
+ * `ORBIT_CONFIGURE_PROMPTS=machine` (configure.sh:698-707): APP_URL, then —
+ * for `oidc` mode only — OIDC_ISSUER, then OIDC_CLIENT_ID. `authMode`
+ * defaults to "oidc" to match configure.sh's own machine-prompt default
+ * (guided_init: `[[ -n "$auth_mode" ]] || auth_mode="oidc"`, configure.sh
+ * line ~786); "local" asks for APP_URL alone (O1-F1 — this previously had
+ * no local-only path at all, so a local-only machine-prompt init always
+ * demanded OIDC values the operator never intended to supply).
+ */
+export function collectMachineGuidedInit(driver: ConfigureMachinePromptDriver, authMode: "local" | "oidc" = "oidc"): CollectedGuidedInitAnswers {
   const appUrl = collectConfigureMachineField("APP_URL", driver, validateAppUrlAnswer, (value) => classifyUrlRejection(value, false));
+  if (authMode === "local") return { appUrl };
   const issuer = collectConfigureMachineField("OIDC_ISSUER", driver, validateOidcIssuerAnswer, (value) => classifyUrlRejection(value, true));
   const clientId = collectConfigureMachineField("OIDC_CLIENT_ID", driver, validateClientIdAnswer, classifyClientIdRejection);
   return { appUrl, issuer, clientId };

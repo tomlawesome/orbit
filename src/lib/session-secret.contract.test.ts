@@ -95,7 +95,7 @@ function engineAccepts(value: string): boolean {
   writeFileSync(secretPath, `${value}\n`);
   chmodSync(secretPath, 0o600);
   try {
-    ensureSecretFile(dir, ".orbit-secrets/session-secret");
+    ensureSecretFile(dir, ".orbit-secrets/session-secret", false);
     return true;
   } catch {
     return false;
@@ -162,6 +162,11 @@ function runBashConfigure(value: string): { status: number | null; stderr: strin
   const secretPath = join(dir, ".orbit-secrets", "session-secret");
   writeFileSync(secretPath, `${value}\n`);
   chmodSync(secretPath, 0o600);
+  // The engine refuses a lost sibling secret on an existing deployment, so the fixture must look like a real one.
+  for (const sibling of ["postgres-password", "document-kek"]) {
+    writeFileSync(join(dir, ".orbit-secrets", sibling), `${"a".repeat(64)}\n`);
+    chmodSync(join(dir, ".orbit-secrets", sibling), 0o600);
+  }
 
   const binDir = makeFakeBin();
   const result = failOnProcessDeadline(spawnSync("bash", [join(dir, "scripts", "configure.sh")], {

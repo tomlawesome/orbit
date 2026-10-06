@@ -76,4 +76,37 @@ describe("release-train version calculation", () => {
       }),
     ).toThrow(/package version/u);
   });
+
+  describe("retracted tags", () => {
+    const retractedTags = ["v1.0.0", "v1.1.0", "v1.2.0"];
+
+    it("restarts the release line from the package version when only retracted tags exist", () => {
+      const input = { tags: ["v1.1.0", "v1.2.0"], fallbackVersion: "0.2.0", retractedTags };
+
+      expect(calculateReleaseTrainVersion({ ...input, channel: "preview" })).toBe("v0.3.0");
+      expect(calculateReleaseTrainVersion({ ...input, channel: "hotfix" })).toBe("v0.2.1");
+    });
+
+    it("ignores retracted tags beside real ones", () => {
+      expect(
+        calculateReleaseTrainVersion({
+          tags: ["v1.1.0", "v0.3.0", "v1.2.0"],
+          fallbackVersion: "0.2.0",
+          channel: "preview",
+          retractedTags,
+        }),
+      ).toBe("v0.4.0");
+    });
+
+    it("never lets a retracted tag higher than a real tag win", () => {
+      expect(
+        calculateReleaseTrainVersion({
+          tags: ["v0.3.2", "v1.2.0"],
+          fallbackVersion: "0.2.0",
+          channel: "hotfix",
+          retractedTags,
+        }),
+      ).toBe("v0.3.3");
+    });
+  });
 });

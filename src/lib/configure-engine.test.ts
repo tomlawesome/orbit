@@ -1,4 +1,20 @@
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -52,6 +68,7 @@ function statAndReadNoFollow(path: string): { mode: number; content: string } {
 const EXAMPLE_CONTENT = `ORBIT_CONFIG_SCHEMA_VERSION=1
 
 APP_URL=https://orbit.example.com
+ORBIT_AUTH_OIDC=false
 OIDC_ISSUER=https://auth.example.com/application/o/orbit/
 OIDC_CLIENT_ID=
 OIDC_CLIENT_SECRET=
@@ -226,6 +243,37 @@ describe("updateManagedKeys", () => {
     updateManagedKeys(deployDir, [["APP_URL", "https://new"]]);
     expect(statSync(envPath()).mode & 0o777).toBe(0o600);
   });
+
+  // O1-R8: reproduces the race by simulating another writer already
+  // holding the lock, rather than actually racing two threads — the
+  // deterministic way to test a mutual-exclusion guard.
+  it("O1-R8: refuses when another writer already holds the deployment lock", () => {
+    const lockPath = join(deployDir, ".orbit-engine.lock");
+    writeFileSync(lockPath, "");
+    try {
+      expect(() => updateManagedKeys(deployDir, [["APP_URL", "https://blocked"]])).toThrow(ConfigureEngineRefusal);
+      // Refused before ever touching .env-orbit.
+      expect(readEnv()).not.toContain("https://blocked");
+    } finally {
+      rmSync(lockPath, { force: true });
+    }
+  });
+
+  it("O1-R8: releases the lock after a successful call, so a later call succeeds", () => {
+    updateManagedKeys(deployDir, [["APP_URL", "https://first"]]);
+    expect(() => statSync(join(deployDir, ".orbit-engine.lock"))).toThrow();
+    updateManagedKeys(deployDir, [["APP_URL", "https://second"]]);
+    expect(readEnv()).toContain("https://second");
+  });
+
+  it("O1-R8: a stale lock (older than the staleness window) is taken over rather than blocking forever", () => {
+    const lockPath = join(deployDir, ".orbit-engine.lock");
+    writeFileSync(lockPath, "");
+    const old = new Date(Date.now() - 20 * 60 * 1000);
+    utimesSync(lockPath, old, old);
+    updateManagedKeys(deployDir, [["APP_URL", "https://after-stale-lock"]]);
+    expect(readEnv()).toContain("https://after-stale-lock");
+  });
 });
 
 describe("persistOrbitImage", () => {
@@ -288,7 +336,7 @@ describe("ensureSecretFile", () => {
   });
 
   it("guarantee #16: generates a mode-0600 64-hex-character secret when absent", () => {
-    const result = ensureSecretFile(deployDir, `${SECRETS_DIRECTORY_NAME}/session-secret`);
+    const result = ensureSecretFile(deployDir, `${SECRETS_DIRECTORY_NAME}/session-secret`, true);
     expect(result.generated).toBe(true);
     const path = join(deployDir, SECRETS_DIRECTORY_NAME, "session-secret");
     const { mode, content } = statAndReadNoFollow(path);
@@ -300,7 +348,7 @@ describe("ensureSecretFile", () => {
     const path = join(deployDir, SECRETS_DIRECTORY_NAME, "session-secret");
     const value = "b".repeat(64);
     writeFileSync(path, `${value}\n`, { mode: 0o600 });
-    const result = ensureSecretFile(deployDir, `${SECRETS_DIRECTORY_NAME}/session-secret`);
+    const result = ensureSecretFile(deployDir, `${SECRETS_DIRECTORY_NAME}/session-secret`, false);
     expect(result.generated).toBe(false);
     expect(readFileSync(path, "utf8")).toBe(`${value}\n`);
   });
@@ -308,14 +356,49 @@ describe("ensureSecretFile", () => {
   it("guarantee #15: rejects a malformed existing secret", () => {
     const path = join(deployDir, SECRETS_DIRECTORY_NAME, "session-secret");
     writeFileSync(path, "not-hex\n", { mode: 0o600 });
-    expect(() => ensureSecretFile(deployDir, `${SECRETS_DIRECTORY_NAME}/session-secret`)).toThrow(ConfigureEngineRefusal);
+    expect(() => ensureSecretFile(deployDir, `${SECRETS_DIRECTORY_NAME}/session-secret`, false)).toThrow(ConfigureEngineRefusal);
   });
 
   it("guarantee #15: rejects a symlinked existing secret file", () => {
     const real = join(deployDir, "elsewhere-secret");
     writeFileSync(real, "b".repeat(64) + "\n");
     symlinkSync(real, join(deployDir, SECRETS_DIRECTORY_NAME, "session-secret"));
-    expect(() => ensureSecretFile(deployDir, `${SECRETS_DIRECTORY_NAME}/session-secret`)).toThrow(ConfigureEngineRefusal);
+    expect(() => ensureSecretFile(deployDir, `${SECRETS_DIRECTORY_NAME}/session-secret`, false)).toThrow(ConfigureEngineRefusal);
+  });
+
+  // O1-S1/SS1-S2: the finding this reproduces — a missing DOCUMENT_KEK/
+  // SESSION_SECRET file on an existing deployment used to be silently
+  // treated exactly like a fresh install and regenerated, making every
+  // encrypted document unreadable / every session invalid.
+  it("O1-S1: refuses rather than regenerates a missing secret on an existing deployment (isFreshInstall=false)", () => {
+    const path = `${SECRETS_DIRECTORY_NAME}/document-kek`;
+    expect(() => ensureSecretFile(deployDir, path, false)).toThrow(ConfigureEngineRefusal);
+    try {
+      ensureSecretFile(deployDir, path, false);
+    } catch (error) {
+      expect((error as ConfigureEngineRefusal).code).toBe("secret-file-invalid");
+      expect((error as Error).message).toContain(path);
+    }
+    expect(() => statSync(join(deployDir, SECRETS_DIRECTORY_NAME, "document-kek"))).toThrow();
+  });
+
+  it("O1-S1: a genuinely fresh install (isFreshInstall=true) still generates normally", () => {
+    const result = ensureSecretFile(deployDir, `${SECRETS_DIRECTORY_NAME}/document-kek`, true);
+    expect(result.generated).toBe(true);
+  });
+
+  it("O1-S1: a stat error that is not ENOENT is always a hard refusal, even on a fresh install", () => {
+    // Removing the parent directory's execute bit makes statSync on the
+    // child fail with EACCES rather than ENOENT — pathInfo's own blanket
+    // catch used to treat this identically to "doesn't exist" and
+    // generate a replacement secret regardless.
+    const secretsDir = join(deployDir, SECRETS_DIRECTORY_NAME);
+    chmodSync(secretsDir, 0o000);
+    try {
+      expect(() => ensureSecretFile(deployDir, `${SECRETS_DIRECTORY_NAME}/document-kek`, true)).toThrow(ConfigureEngineRefusal);
+    } finally {
+      chmodSync(secretsDir, 0o700);
+    }
   });
 });
 
@@ -344,6 +427,24 @@ describe("ensureOidcSecretPlaceholder", () => {
     symlinkSync(real, join(deployDir, OIDC_SECRET_RELATIVE_PATH));
     expect(() => ensureOidcSecretPlaceholder(deployDir)).toThrow(ConfigureEngineRefusal);
   });
+
+  // O1-S5: the finding this reproduces — once OIDC_CLIENT_SECRET_FILE is
+  // already configured, a missing secret file used to be silently replaced
+  // by a fresh zero-byte placeholder, disabling OIDC sign-in while
+  // `orbit configure` still reported success.
+  it("O1-S5: refuses rather than writing an empty placeholder when OIDC_CLIENT_SECRET_FILE is already configured and the file is missing", () => {
+    updateManagedKeys(deployDir, [["OIDC_CLIENT_SECRET_FILE", CANONICAL_OIDC_SECRET_FILE_PATH]]);
+    expect(() => ensureOidcSecretPlaceholder(deployDir)).toThrow(ConfigureEngineRefusal);
+    expect(() => statSync(join(deployDir, OIDC_SECRET_RELATIVE_PATH))).toThrow();
+  });
+
+  it("O1-S5: still preserves an already-present file when OIDC_CLIENT_SECRET_FILE is configured", () => {
+    updateManagedKeys(deployDir, [["OIDC_CLIENT_SECRET_FILE", CANONICAL_OIDC_SECRET_FILE_PATH]]);
+    const path = join(deployDir, OIDC_SECRET_RELATIVE_PATH);
+    writeFileSync(path, "real-secret", { mode: 0o600 });
+    ensureOidcSecretPlaceholder(deployDir);
+    expect(readFileSync(path, "utf8")).toBe("real-secret");
+  });
 });
 
 describe("applySetOidcSecret", () => {
@@ -363,6 +464,13 @@ describe("applySetOidcSecret", () => {
     expect(() => applySetOidcSecret(deployDir, "")).toThrow(ConfigureEngineRefusal);
   });
 
+  it("refuses while another run holds the deploy lock, before writing any secret file", () => {
+    ensureEnvironmentFile(deployDir);
+    writeFileSync(join(deployDir, ".orbit-engine.lock"), "");
+    expect(() => applySetOidcSecret(deployDir, "super-secret-value")).toThrow(ConfigureEngineRefusal);
+    expect(existsSync(join(deployDir, OIDC_SECRET_RELATIVE_PATH))).toBe(false);
+  });
+
   it("guarantee #22: refuses a secret exceeding the maximum byte size", () => {
     ensureEnvironmentFile(deployDir);
     expect(() => applySetOidcSecret(deployDir, "a".repeat(MAXIMUM_SECRET_BYTES + 1))).toThrow(ConfigureEngineRefusal);
@@ -377,6 +485,45 @@ describe("applySetOidcSecret", () => {
     } catch (error) {
       expect((error as Error).message).not.toContain(secret);
     }
+  });
+
+  // O1-R10: the secret file and its .env-orbit pointer are two separate
+  // atomic writes — anything that stops the second one (here, simulated by
+  // pre-holding the O1-R8 deployment lock) must not leave a first-time
+  // secret orphaned on disk with nothing pointing at it.
+  describe("O1-R10: rolls back a first-time secret write when the .env-orbit pointer update fails", () => {
+    it("removes the just-written secret file", () => {
+      ensureEnvironmentFile(deployDir);
+      const path = join(deployDir, OIDC_SECRET_RELATIVE_PATH);
+      expect(() => statSync(path)).toThrow();
+
+      const lockPath = join(deployDir, ".orbit-engine.lock");
+      writeFileSync(lockPath, "");
+      try {
+        expect(() => applySetOidcSecret(deployDir, "a-brand-new-secret")).toThrow(ConfigureEngineRefusal);
+      } finally {
+        rmSync(lockPath, { force: true });
+      }
+      expect(() => statSync(path)).toThrow();
+    });
+
+    it("never removes a rotation's existing secret: a refused rotation leaves the file exactly as it was", () => {
+      ensureEnvironmentFile(deployDir);
+      ensureSecretsDirectory(deployDir);
+      const path = join(deployDir, OIDC_SECRET_RELATIVE_PATH);
+      writeFileSync(path, "the-previous-secret", { mode: 0o600 });
+
+      const lockPath = join(deployDir, ".orbit-engine.lock");
+      writeFileSync(lockPath, "");
+      try {
+        expect(() => applySetOidcSecret(deployDir, "a-rotated-secret")).toThrow(ConfigureEngineRefusal);
+      } finally {
+        rmSync(lockPath, { force: true });
+      }
+      // Still there, and untouched: the deploy lock is taken before the
+      // secret is written, so a refusal happens before either write.
+      expect(readFileSync(path, "utf8")).toBe("the-previous-secret");
+    });
   });
 });
 
@@ -406,6 +553,45 @@ describe("applyGuidedInit", () => {
     expect(() =>
       applyGuidedInit(deployDir, { appUrl: "https://127.0.0.1", issuer: "https://auth.configure-engine-test.invalid/", clientId: "c" }),
     ).toThrow(ConfigureEngineRefusal);
+  });
+
+  // O1-F3: guided configuration used to accept OIDC_ISSUER/OIDC_CLIENT_ID
+  // values containing `$`, a backtick, or a leading quote — characters
+  // .env-orbit's own reader (env-orbit-file.ts's parseEnvOrbitContent,
+  // mirroring configuration.sh's validate_value) refuses as a syntax error.
+  // That meant `orbit configure --init` could write a value the very next
+  // `orbit configure` (its own preflight) or app start would then refuse.
+  it.each([
+    ["a $VAR-style value", "https://auth.example/$unsafe"],
+    ["a backtick", "https://auth.example/`unsafe`"],
+  ])("O1-F3: rejects an OIDC_ISSUER containing %s, instead of writing a value the reader then refuses", (_label, issuer) => {
+    ensureEnvironmentFile(deployDir);
+    const before = readEnv();
+    expect(() => applyGuidedInit(deployDir, { appUrl: "https://orbit.example.com", issuer, clientId: "client" })).toThrow(
+      ConfigureEngineRefusal,
+    );
+    expect(readEnv()).toBe(before);
+  });
+
+  it("O1-F3: rejects an OIDC_CLIENT_ID containing a leading quote", () => {
+    ensureEnvironmentFile(deployDir);
+    const before = readEnv();
+    expect(() =>
+      applyGuidedInit(deployDir, {
+        appUrl: "https://orbit.example.com",
+        issuer: "https://auth.configure-engine-test.invalid/",
+        clientId: "'quoted",
+      }),
+    ).toThrow(ConfigureEngineRefusal);
+    expect(readEnv()).toBe(before);
+  });
+
+  it("O1-F3: demonstrates the round-trip the fix closes — a value the old validators accepted is exactly what parseEnvOrbitContent refuses", async () => {
+    const { parseEnvOrbitContent } = await import("./env-orbit-file");
+    const content = 'OIDC_CLIENT_ID=has$dollar\nORBIT_CONFIG_SCHEMA_VERSION=1\n';
+    const parsed = parseEnvOrbitContent(content);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.code).toBe("configuration_syntax");
   });
 });
 
@@ -487,6 +673,20 @@ describe("runConfigureApply (bare flow, minus ensure_vapid_keys)", () => {
     expect(readFileSync(sessionSecretPath, "utf8")).toBe(generated);
   });
 
+  it("an existing deployment keeps its pinned image unless the installer's trust marker says otherwise (configure.sh's persist_orbit_image rule)", () => {
+    runConfigureApply(deployDir, "orbit-local:abcdef123456");
+    expect(readEnv()).toMatch(/^ORBIT_IMAGE=orbit-local:abcdef123456$/mu);
+
+    // A stale value left in the shell, through the container engine: ignored, and said so.
+    const ignored = runConfigureApply(deployDir, "orbit-local:0000000aaaaa");
+    expect(readEnv()).toMatch(/^ORBIT_IMAGE=orbit-local:abcdef123456$/mu);
+    expect(ignored.messages.some((m) => m.includes("ignoring the environment's ORBIT_IMAGE value"))).toBe(true);
+
+    // The installer, which checked the image itself, says so and the pin moves.
+    runConfigureApply(deployDir, "orbit-local:111111bbbbbb", { trustOrbitImage: true });
+    expect(readEnv()).toMatch(/^ORBIT_IMAGE=orbit-local:111111bbbbbb$/mu);
+  });
+
   it("leaves .env-orbit and .orbit-secrets in place for the (bash-owned) VAPID step and final message to follow", () => {
     runConfigureApply(deployDir, "orbit-local:abcdef123456");
     expect(statSync(envPath()).isFile()).toBe(true);
@@ -499,6 +699,60 @@ describe("runConfigureApply (bare flow, minus ensure_vapid_keys)", () => {
     ensureEnvironmentFile(deployDir);
     writeFileSync(envPath(), "APP_URL=https://orbit.example.com\n", { mode: 0o600 });
     expect(() => runConfigureApply(deployDir, undefined)).toThrow(ConfigureEngineRefusal);
+  });
+
+  // O1-S1/SS1-S2 end-to-end: on an existing deployment (recognized by a
+  // generated secret already being present from the first run), a lost
+  // DOCUMENT_KEK must never be silently regenerated by the next bare
+  // `orbit configure`.
+  it("O1-S1: refuses rather than regenerating a document KEK lost from an existing deployment", () => {
+    runConfigureApply(deployDir, "orbit-local:abcdef123456");
+    const documentKekPath = join(deployDir, SECRETS_DIRECTORY_NAME, "document-kek");
+    const originalKek = readFileSync(documentKekPath, "utf8");
+    rmSync(documentKekPath);
+
+    expect(() => runConfigureApply(deployDir, "orbit-local:abcdef123456")).toThrow(ConfigureEngineRefusal);
+    expect(() => statSync(documentKekPath)).toThrow();
+    expect(originalKek).toMatch(/^[0-9a-f]{64}\n$/);
+  });
+
+  // #1151 RANGE-F1: install.sh runs `configure.sh --init` (which writes
+  // .env-orbit) and then a bare configure in a second process. .env-orbit
+  // existing is not a sign of an existing deployment; only an already
+  // generated secret is, so this first bare run must generate all three.
+  it("RANGE-F1: generates all three secrets on the install shape (guided init wrote .env-orbit first)", () => {
+    ensureEnvironmentFile(deployDir);
+    applyGuidedInit(deployDir, {
+      appUrl: "https://orbit.configure-engine-test.invalid",
+      issuer: "https://auth.configure-engine-test.invalid/application/o/orbit/",
+      clientId: "install-shape-client",
+    });
+
+    const result = runConfigureApply(deployDir, "orbit-local:abcdef123456");
+
+    for (const name of ["session-secret", "postgres-password", "document-kek"]) {
+      expect(readFileSync(join(deployDir, SECRETS_DIRECTORY_NAME, name), "utf8")).toMatch(/^[0-9a-f]{64}\n$/);
+      expect(result.messages).toContain(`Generated ${SECRETS_DIRECTORY_NAME}/${name}.`);
+    }
+  });
+
+  // #1151 RANGE-R5: two concurrent first-time `orbit configure` runs used to
+  // both see every generated secret missing and each write their own,
+  // whichever finished last silently overwriting the other's file. Taking
+  // the deploy lock around the generation loop makes a second, concurrent
+  // run refuse instead of racing — simulated, as the O1-R8 tests above do,
+  // by pre-holding the lock rather than actually racing two threads.
+  it("RANGE-R5: refuses while another run holds the deploy lock, before generating any secret", () => {
+    const lockPath = join(deployDir, ".orbit-engine.lock");
+    writeFileSync(lockPath, "");
+    try {
+      expect(() => runConfigureApply(deployDir, "orbit-local:abcdef123456")).toThrow(ConfigureEngineRefusal);
+    } finally {
+      rmSync(lockPath, { force: true });
+    }
+    expect(() => statSync(join(deployDir, SECRETS_DIRECTORY_NAME, "session-secret"))).toThrow();
+    expect(() => statSync(join(deployDir, SECRETS_DIRECTORY_NAME, "postgres-password"))).toThrow();
+    expect(() => statSync(join(deployDir, SECRETS_DIRECTORY_NAME, "document-kek"))).toThrow();
   });
 });
 
@@ -589,8 +843,8 @@ describe("internal", () => {
 describe("secret generation determinism seam", () => {
   it("produces different secrets across two calls without mocking", () => {
     ensureSecretsDirectory(deployDir);
-    const a = ensureSecretFile(deployDir, `${SECRETS_DIRECTORY_NAME}/one`);
-    const b = ensureSecretFile(deployDir, `${SECRETS_DIRECTORY_NAME}/two`);
+    const a = ensureSecretFile(deployDir, `${SECRETS_DIRECTORY_NAME}/one`, true);
+    const b = ensureSecretFile(deployDir, `${SECRETS_DIRECTORY_NAME}/two`, true);
     expect(a.generated && b.generated).toBe(true);
     const valueA = readFileSync(join(deployDir, SECRETS_DIRECTORY_NAME, "one"), "utf8");
     const valueB = readFileSync(join(deployDir, SECRETS_DIRECTORY_NAME, "two"), "utf8");

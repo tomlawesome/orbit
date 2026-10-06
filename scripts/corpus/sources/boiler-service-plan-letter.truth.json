@@ -1,0 +1,35 @@
+{
+  "name": "Boiler service plan letter",
+  "filename": "boiler-service-plan-letter.pdf",
+  "expected": {
+    "dates": ["2026-10-14"],
+    "dateRoles": [
+      { "date": "2026-10-14", "role": "service" }
+    ],
+    "provider": "Hearthwell Home Care",
+    "reference": "HHC-4471-2298",
+    "subtype": { "kinds": ["Maintenance contract", "Plan", "Service"], "qualifiers": ["Boiler", "Home"] },
+    "costMinor": 17988,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "service"
+  },
+  "notes": [
+    "Declared date: 'your next service is due on 14 October 2026', repeated on the slip as 'Next service due 14/10/2026' — role service.",
+    "Declared recurrence: 'your boiler and controls are serviced every 12 months' — recurrenceMonths 12, scheduleKind service.",
+    "Declared provider: the letterhead brand 'HEARTHWELL HOME CARE', repeated in the reference box and slip.",
+    "Declared reference: 'Plan reference: HHC-4471-2298', repeated identically on the slip.",
+    "Declared cost: the slip's 'Annual total if paid monthly £179.88' — costMinor 17988, currency GBP (owner rule, 2026-09-13: Orbit tracks the whole commitment, so a fixed-term contract's cost is the total over its term -- printed where it is, duration x monthly price where it is not; only rolling, no-term contracts keep the monthly figure).",
+    "Trap: 'Date of this letter: 2 September 2026' is the letter's own date, not the service date.",
+    "Trap: 'Your last visit was on 16 October 2025' is the previous service, not the one due.",
+    "Trap: 'Thermex Pro 30 boiler (installed 2019)' gives an installation year and model, not a date to extract.",
+    "Trap: 'please telephone us within 28 days of the date of this letter' is a call-by window, not a due date.",
+    "Trap: 'Gas Safe registered engineers (registration number 745213)' is the engineer's registration, not the plan reference.",
+    "Trap: 'non-members pay a callout charge of £90' prices a different audience's callout, not the plan cost.",
+    "Trap: 'this service would otherwise cost £148 if booked separately from the plan' is the non-plan price.",
+    "Trap: the slip's 'This month's instalment £14.99' is one instalment of twelve, not the commitment.",
+    "Trap: 'collected on the 1st of each month' is the Direct Debit collection day, not a service date.",
+    "Trap: 'Hearthwell Home Care is a trading name of Castlemere Assurance Group plc' names the parent company, a rival provider candidate.",
+    "Trap: 'call our 24-hour emergency line on 01632 960455' is a different phone number from the booking line 01632 960112."
+  ]
+}

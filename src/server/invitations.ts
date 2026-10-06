@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
@@ -5,6 +6,11 @@ import { auditLog, householdInvitations, households, memberships, sessions, user
 import { AppError } from "@/lib/app-error";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
 import { acquireActiveHouseholdLock, requireHouseholdAccess, requireUuid } from "@/server/workspace-access";
+import {
+  openMetadataReader,
+  requireMetadataWriter,
+  type MetadataCipher,
+} from "@/server/metadata/fields";
 import { sendInvitationMail, invitationLink, type InvitationMailer, type InvitationSendError } from "@/server/invitations/send";
 import {
   createInvitationToken,
@@ -43,6 +49,18 @@ export type { InvitationSendError } from "@/server/invitations/send";
 /** Past this many open invitations a household is asked to tidy up first. */
 export const MAX_OPEN_INVITATIONS = 20;
 
+/**
+ * Longer than `sendBoundedMail`'s own bounded connect/greeting/socket
+ * timeouts could ever leave a send unresolved (#1151 SR1-R5): a row still
+ * showing neither `sentAt` nor `sendError` past this age was never going to
+ * get an outcome on its own -- the process that owed it one crashed between
+ * committing the row and recording what the send did. Reading the list is
+ * what notices this, and reconciling it to the one bounded word already used
+ * for "we don't know what happened" is what turns a silently stuck
+ * invitation back into one the owner can see failed and resend.
+ */
+const INVITATION_SEND_RECONCILE_MS = 2 * 60 * 1000;
+
 /** What the household screen is told about one invitation. No token, ever. */
 export interface HouseholdInvitation {
   id: string;
@@ -76,19 +94,30 @@ const emailSchema = z.email();
 
 type InvitationRow = {
   id: string;
+  /** Plaintext only for a row the backfill has not reached; `emailEnc` otherwise (#963). */
+  email: string | null;
+  emailEnc: string | null;
   householdId: string;
-  email: string;
   createdAt: Date;
   sentAt: Date | null;
   sendError: string | null;
   expiresAt: Date;
 };
 
-function summarise(row: InvitationRow): HouseholdInvitation {
+/**
+ * The invited address, decrypted (#963). An address that will not decrypt is
+ * reported as the damaged-value marker rather than as an empty address or an
+ * invented one, and a marker never matches anybody at redemption.
+ */
+function invitationEmail(cipher: MetadataCipher, row: { id: string; email: string | null; emailEnc: string | null }): string | null {
+  return cipher.text("household_invitations.email", row.id, { encrypted: row.emailEnc, plaintext: row.email }).value;
+}
+
+function summarise(row: InvitationRow, cipher: MetadataCipher): HouseholdInvitation {
   return {
     id: row.id,
     householdId: row.householdId,
-    email: row.email,
+    email: invitationEmail(cipher, row) ?? "",
     createdAt: row.createdAt.toISOString(),
     sentAt: row.sentAt ? row.sentAt.toISOString() : null,
     sendError: (row.sendError as InvitationSendError | null) ?? null,
@@ -100,6 +129,7 @@ const summaryColumns = {
   id: householdInvitations.id,
   householdId: householdInvitations.householdId,
   email: householdInvitations.email,
+  emailEnc: householdInvitations.emailEnc,
   createdAt: householdInvitations.createdAt,
   sentAt: householdInvitations.sentAt,
   sendError: householdInvitations.sendError,
@@ -110,6 +140,33 @@ const summaryColumns = {
 const stillOpen = and(isNull(householdInvitations.redeemedAt), isNull(householdInvitations.revokedAt));
 
 /**
+ * Marks an invitation stuck with neither outcome as a send Orbit cannot
+ * account for, the same word an unreadable provider failure already uses
+ * (#1151 SR1-R5). The conditional `where` guards against reconciling a row a
+ * real send has since resolved out from under this read.
+ */
+async function reconcileUnresolvedSends(rows: InvitationRow[], now: Date): Promise<InvitationRow[]> {
+  const stale = rows.filter((row) => (
+    row.sentAt === null
+    && row.sendError === null
+    && now.getTime() - row.createdAt.getTime() > INVITATION_SEND_RECONCILE_MS
+  ));
+  if (stale.length === 0) return rows;
+
+  const db = getDb();
+  await Promise.all(stale.map((row) => db.update(householdInvitations)
+    .set({ sendError: "unknown" })
+    .where(and(
+      eq(householdInvitations.id, row.id),
+      isNull(householdInvitations.sentAt),
+      isNull(householdInvitations.sendError),
+    ))));
+
+  const staleIds = new Set(stale.map((row) => row.id));
+  return rows.map((row) => (staleIds.has(row.id) ? { ...row, sendError: "unknown" } : row));
+}
+
+/**
  * The household's open invitations, for anyone who may see that household.
  *
  * Members get the same list an owner does. They typed none of it and can
@@ -117,13 +174,35 @@ const stillOpen = and(isNull(householdInvitations.redeemedAt), isNull(householdI
  * mail and nobody else can see it happening is not the household this product
  * describes (§11's "who sees what").
  */
-export async function listHouseholdInvitations(actorUserId: string, householdId: string): Promise<HouseholdInvitation[]> {
-  await requireHouseholdAccess(actorUserId, householdId);
+/**
+ * `listHouseholdInvitations`'s own body, given a cipher already open for
+ * this household (#1151 A1-Q2). A caller that just wrote under this
+ * household's lock -- `sendHouseholdInvitation` -- already holds both the
+ * access check and the key unwrap this would otherwise repeat; asking
+ * again inside the same request bought nothing a second time.
+ */
+async function householdInvitationsList(
+  householdId: string,
+  cipher: MetadataCipher,
+  now: Date,
+): Promise<HouseholdInvitation[]> {
   const rows = await getDb().select(summaryColumns)
     .from(householdInvitations)
     .where(and(eq(householdInvitations.householdId, householdId), stillOpen))
     .orderBy(asc(householdInvitations.createdAt));
-  return rows.map(summarise);
+  const reconciled = await reconcileUnresolvedSends(rows, now);
+  return reconciled.map((row) => summarise(row, cipher));
+}
+
+export async function listHouseholdInvitations(
+  actorUserId: string,
+  householdId: string,
+  now: Date = new Date(),
+): Promise<HouseholdInvitation[]> {
+  await requireHouseholdAccess(actorUserId, householdId);
+  // One DEK unwrap for the whole list (ADR-0024 decision 1), not one per row.
+  const cipher = await openMetadataReader(householdId);
+  return householdInvitationsList(householdId, cipher, now);
 }
 
 /** The owner check, made again inside the lock the write is taken under. */
@@ -179,15 +258,29 @@ export async function sendHouseholdInvitation(
   const now = options.now ?? new Date();
   const token = createInvitationToken();
   const expiresAt = invitationExpiry(now);
+  /* The row id has to exist before the address is encrypted: the content AAD
+     binds the ciphertext to its row, so a value cannot be replayed into
+     another invitation (ADR-0024 decision 3). A resend reuses the row it
+     replaces, and this id is discarded. */
+  const invitationRowId = randomUUID();
 
   const prepared = await getDb().transaction(async (transaction) => {
     await acquireActiveHouseholdLock(transaction, householdId);
     await assertOwnerUnderLock(transaction, actorUserId, householdId);
 
-    const open = await transaction.select({ id: householdInvitations.id, email: householdInvitations.email })
+    // Tier 2 (#963): the address is ciphertext, so "is there already one for
+    // this address" is answered by the per-household blind index rather than
+    // by comparing stored bytes. The index is what carries the database's
+    // "one open invitation per address" rule across the encryption, and the
+    // resend below still REPLACES the row it finds.
+    const metadata = await requireMetadataWriter(householdId, transaction);
+    const emailIndex = metadata.blindIndex("household_invitations.email", email);
+    const open = await transaction.select({ id: householdInvitations.id, email: householdInvitations.email, emailIndex: householdInvitations.emailIndex })
       .from(householdInvitations)
       .where(and(eq(householdInvitations.householdId, householdId), stillOpen));
-    const existing = open.find((row) => row.email === email);
+    const existing = open.find((row) => (
+      row.emailIndex !== null ? row.emailIndex === emailIndex : row.email === email
+    ));
     if (!existing && open.length >= MAX_OPEN_INVITATIONS) {
       throw new AppError(
         "invitation_limit",
@@ -197,6 +290,9 @@ export async function sendHouseholdInvitation(
     }
 
     const values = {
+      email: null,
+      emailEnc: metadata.encryptText("household_invitations.email", existing?.id ?? invitationRowId, email),
+      emailIndex,
       tokenDigest: invitationTokenDigest(token),
       expiresAt,
       invitedByUserId: actorUserId,
@@ -204,13 +300,18 @@ export async function sendHouseholdInvitation(
          yet, so a stale success or failure must not be read as this one's. */
       sentAt: null,
       sendError: null,
+      /* Reset on a resend, not just on first insert (#1151 F11): this send's
+         own staleness clock (`reconcileUnresolvedSends`, `createdAt` below)
+         has to start now, or a resend of any invitation over two minutes old
+         reads as already stuck before its mail has even been attempted. */
+      createdAt: now,
     };
     const [row] = existing
       ? await transaction.update(householdInvitations).set(values)
         .where(eq(householdInvitations.id, existing.id))
         .returning(summaryColumns)
       : await transaction.insert(householdInvitations)
-        .values({ householdId, email, role: "member", ...values })
+        .values({ id: invitationRowId, householdId, role: "member", ...values })
         .returning(summaryColumns);
     if (!row) throw new AppError("unexpected_failure", "The invitation could not be recorded", 500);
 
@@ -231,6 +332,7 @@ export async function sendHouseholdInvitation(
       row,
       householdName: household?.name ?? "",
       inviterName: inviter?.displayName ?? "",
+      metadata,
     };
   });
 
@@ -247,9 +349,18 @@ export async function sendHouseholdInvitation(
     .where(eq(householdInvitations.id, prepared.row.id))
     .returning(summaryColumns);
 
+  // #1151 A1-Q2: the same writer the transaction above already unwrapped to
+  // encrypt the address decrypts it back here too, a `MetadataCipher` being
+  // both directions on the one key -- a second `openMetadataReader` call
+  // would unwrap the identical household key a second time in one request
+  // for nothing a fresh unwrap could tell this one hadn't already.
   return {
-    invitation: summarise(recorded ?? { ...prepared.row, ...outcome }),
-    invitations: await listHouseholdInvitations(actorUserId, householdId),
+    invitation: summarise(recorded ?? { ...prepared.row, ...outcome }, prepared.metadata),
+    // Access to this household was already proven twice over by the write
+    // above (the early check and, again, under its lock); building the
+    // fresh list reuses that same proof and the same unwrapped key rather
+    // than asking `listHouseholdInvitations` to re-ask both.
+    invitations: await householdInvitationsList(householdId, prepared.metadata, now),
   };
 }
 
@@ -273,15 +384,20 @@ export async function withdrawHouseholdInvitation(
         eq(householdInvitations.householdId, householdId),
         stillOpen,
       ))
-      .returning({ id: householdInvitations.id, email: householdInvitations.email });
+      .returning({ id: householdInvitations.id, email: householdInvitations.email, emailEnc: householdInvitations.emailEnc });
     if (!revoked) throw new AppError("invitation_not_found", "That invitation is no longer open", 404);
+    /* The audit line records a digest of the address, never the address, and
+       that is unchanged (#963). What changed is where the address comes from:
+       an unreadable one is recorded as no address rather than as an invented
+       digest, because a digest of "" would look exactly like a real record. */
+    const withdrawnEmail = invitationEmail(await openMetadataReader(householdId, transaction), revoked);
     await transaction.insert(auditLog).values({
       householdId,
       actorUserId,
       entityType: "household_invitation",
       entityId: revoked.id,
       action: "invitation_withdrawn",
-      changes: { emailSha256: invitationEmailDigest(revoked.email) },
+      changes: withdrawnEmail ? { emailSha256: invitationEmailDigest(withdrawnEmail) } : {},
     });
   });
 
@@ -292,6 +408,7 @@ const lookupColumns = {
   id: householdInvitations.id,
   householdId: householdInvitations.householdId,
   email: householdInvitations.email,
+  emailEnc: householdInvitations.emailEnc,
   expiresAt: householdInvitations.expiresAt,
   redeemedAt: householdInvitations.redeemedAt,
   revokedAt: householdInvitations.revokedAt,
@@ -333,7 +450,13 @@ function stateOf(
 
 export interface RedeemingUser {
   userId: string;
-  email: string;
+  /**
+   * Null when the instance cannot read the signed-in account's own address
+   * (#969). The match below then has nothing to compare, and the redemption
+   * fails as a mismatch — the invitation stays open for whoever it was
+   * addressed to, which is the safe way for this to fail.
+   */
+  email: string | null;
   /** The session whose active household is set on success. */
   sessionId: string;
 }
@@ -384,7 +507,17 @@ export async function redeemInvitation(token: string, user: RedeemingUser): Prom
     /* THE MATCH (Q43). A mismatch changes nothing at all: the invitation stays
        open for the person it was addressed to, and the reader is told to sign
        out rather than quietly handed somebody else's household. */
-    if (normaliseInvitationEmail(user.email) !== row.email) {
+    /* Tier 2 (#963): the stored address decrypts under the household's own key
+       before the comparison, which is otherwise exactly the comparison it was.
+       An address that will not decrypt is null, and null matches nobody — the
+       invitation stays open and the reader is told to sign out, which is the
+       right way for this to fail. */
+    /* Both halves can now be unreadable: the invitation under the household's
+       key (#963), and the reader's own account address under the instance key
+       (#969). Either one missing is a mismatch, never a match — a comparison
+       that cannot be made must not pass. */
+    const invitedAddress = invitationEmail(await openMetadataReader(row.householdId, transaction), row);
+    if (!invitedAddress || user.email === null || normaliseInvitationEmail(user.email) !== invitedAddress) {
       return { state: "mismatch", inviterName, householdId: null, householdName: null };
     }
 
@@ -420,7 +553,9 @@ export async function redeemInvitation(token: string, user: RedeemingUser): Prom
       entityType: "household_invitation",
       entityId: row.id,
       action: "invitation_redeemed",
-      changes: { emailSha256: invitationEmailDigest(row.email) },
+      /* The address that was just matched, which is the decrypted one (#963);
+         a digest is recorded, never the address itself. */
+      changes: { emailSha256: invitationEmailDigest(invitedAddress) },
     });
 
     /* The arrival's household CHOICE never appears because there is nothing

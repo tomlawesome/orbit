@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, notInArray, or, sql } f
 import { getDb } from "@/db";
 import {
   auditLog,
+  documents,
   dueEvents,
   households,
   items,
@@ -14,6 +15,7 @@ import {
   users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
+import type { ScheduleKind } from "@/lib/domain";
 import { listVisibleHouseholds } from "@/server/join-requests";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { log } from "@/lib/logger";
@@ -24,7 +26,10 @@ import {
   type WorkspaceCommand,
   type WorkspaceState,
 } from "@/lib/workspace";
+import { listableDocumentLifecycles } from "@/server/document-repository";
 import { planOwnershipTransfer } from "@/server/household-ownership";
+import { clearMetadataDamageForRow } from "@/server/metadata/damage-sightings";
+import { openMetadataReaders, requireMetadataWriter } from "@/server/metadata/fields";
 import {
   acquireActiveHouseholdLock,
   requireHouseholdAccess,
@@ -44,6 +49,10 @@ import { isInstanceAdministrator } from "@/server/authorization";
 // (#383).
 const MAX_ITEMS_PER_HOUSEHOLD = 500;
 const MAX_NOTIFICATION_IDS_PER_HOUSEHOLD = 2_000;
+/** #1151 A4-R5: an administrator's read otherwise loads every household in
+ *  the instance with nothing bounding the count, unlike every other list
+ *  this read returns. */
+const MAX_INSTANCE_HOUSEHOLDS = 2_000;
 
 /** Truncates to the outbound schema cap instead of letting workspaceSchema.parse fail on stored data (#383). */
 function clampedForRead<T>(values: T[], limit: number): T[] {
@@ -69,13 +78,13 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     deletionRequestedAt: households.deletionRequestedAt,
     deleteAfter: households.deleteAfter,
   };
-  const householdRows = administrator
+  const householdRows = clampedForRead(administrator
     ? await getDb().select(householdSelection).from(households).where(isNull(households.deletionRequestedAt)).orderBy(asc(households.createdAt))
     : await getDb().select(householdSelection)
       .from(memberships)
       .innerJoin(households, eq(households.id, memberships.householdId))
       .where(and(eq(memberships.userId, userId), isNull(households.deletionRequestedAt)))
-      .orderBy(asc(households.createdAt));
+      .orderBy(asc(households.createdAt)), MAX_INSTANCE_HOUSEHOLDS);
 
   const recoverableHouseholds = administrator
     ? await getDb().select({ id: households.id, name: households.name, deleteAfter: households.deleteAfter }).from(households).where(and(isNotNull(households.deletionRequestedAt), sql`${households.deleteAfter} > now()`)).orderBy(asc(households.deleteAfter))
@@ -105,7 +114,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     ? preferredHouseholdId
     : householdIds[0];
 
-  const [sectionRows, itemRows, eventRows, reminderRows, activityRows, memberRows, stateRows] = await Promise.all([
+  const [sectionRows, itemRows, eventRows, reminderRows, activityRows, memberRows, stateRows, documentCountRows] = await Promise.all([
     getDb().select().from(sections)
       .where(and(inArray(sections.householdId, householdIds), isNull(sections.archivedAt)))
       .orderBy(asc(sections.position)),
@@ -113,7 +122,17 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     getDb().select().from(dueEvents)
       .where(and(inArray(dueEvents.householdId, householdIds), isNull(dueEvents.completedAt)))
       .orderBy(asc(dueEvents.dueDate)),
-    getDb().select().from(reminderRules),
+    // #1151 A4-R4: scoped to this read's own households, the same way every
+    // other query here is. `reminder_rules` carries no household column of
+    // its own -- only `itemId` -- so the join runs through `items`, which
+    // already pins the join to the right instance's rows; a plain
+    // `.from(reminderRules)` used to scan and load the entire instance's
+    // reminder rules on every workspace read, for every household, however
+    // many other households and instances the table held.
+    getDb().select({ itemId: reminderRules.itemId, daysBefore: reminderRules.daysBefore })
+      .from(reminderRules)
+      .innerJoin(items, eq(items.id, reminderRules.itemId))
+      .where(inArray(items.householdId, householdIds)),
     // Only recordActivity's inserts (entityType "item", changes: { activity })
     // feed the item history timeline; every other audit_log write (document
     // lifecycle, membership, household lifecycle, ...) is filtered out by the
@@ -131,7 +150,21 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     getDb().select().from(notificationStates)
       .where(and(eq(notificationStates.userId, userId), inArray(notificationStates.householdId, householdIds)))
       .orderBy(desc(notificationStates.updatedAt)),
+    // One grouped count instead of a query per item (#1091): a removed or
+    // refused document must not inflate what the belt shows, so this scopes
+    // to the same lifecycles the item-document list itself shows.
+    getDb().select({ itemId: documents.itemId, count: sql<number>`count(*)::int` })
+      .from(documents)
+      .where(and(
+        inArray(documents.householdId, householdIds),
+        isNotNull(documents.itemId),
+        inArray(documents.lifecycle, [...listableDocumentLifecycles]),
+      ))
+      .groupBy(documents.itemId),
   ]);
+
+  // One DEK unwrap per household, before any row is mapped (ADR-0024).
+  const metadataReaders = await openMetadataReaders(householdIds);
 
   const eventByItem = new Map<string, (typeof eventRows)[number]>();
   for (const event of eventRows) {
@@ -142,6 +175,10 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     const current = remindersByItem.get(reminder.itemId) ?? [];
     current.push(reminder.daysBefore);
     remindersByItem.set(reminder.itemId, current);
+  }
+  const documentCountByItem = new Map<string, number>();
+  for (const row of documentCountRows) {
+    if (row.itemId) documentCountByItem.set(row.itemId, row.count);
   }
 
   const activitiesByHousehold = new Map<string, ItemActivity[]>();
@@ -161,26 +198,46 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     activeHouseholdId,
     recoverableHouseholds: recoverableHouseholds.map((household) => ({ id: household.id, name: household.name, deleteAfter: household.deleteAfter!.toISOString() })),
     households: householdRows.map((household) => {
+      const metadata = metadataReaders.get(household.id)!;
       const householdItems = itemRows.filter((item) => item.householdId === household.id).map((item) => {
         const event = eventByItem.get(item.id);
+        const reference = metadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference });
+        const notes = metadata.text("items.notes", item.id, { encrypted: item.notesEnc, plaintext: item.notes });
+        // Tier 2 (#963): decrypted here rather than in SQL. Cost totals and
+        // search both run on these values in the client, over one household's
+        // rows, which is what the tiering decision traded the query for.
+        const title = metadata.text("items.title", item.id, { encrypted: item.titleEnc, plaintext: item.title });
+        const provider = metadata.text("items.provider", item.id, { encrypted: item.providerEnc, plaintext: item.provider });
+        const costMinor = metadata.number("items.cost_minor", item.id, { encrypted: item.costMinorEnc, plaintext: item.costMinor });
+        const metadataStatus = {
+          reference: reference.state,
+          notes: notes.state,
+          title: title.state,
+          provider: provider.state,
+          costMinor: costMinor.state,
+        };
+        const damaged = Object.values(metadataStatus).some(Boolean);
         const scheduleKind = event?.kind
-          ?? (item.serviceDate ? "service" : item.renewalDate ? "renewal" : undefined);
-        const dueDate = event?.dueDate ?? item.serviceDate ?? item.renewalDate ?? undefined;
+          ?? (item.serviceDate ? "service" : item.renewalDate ? "renewal" : item.expiryDate ? "expiry" : undefined);
+        const dueDate = event?.dueDate ?? item.serviceDate ?? item.renewalDate ?? item.expiryDate ?? undefined;
         return {
           id: item.id,
           sectionId: item.sectionId,
-          title: item.title,
+          // Empty, never fabricated: `metadataStatus.title` is what says why.
+          title: title.value ?? "",
           subtype: item.subtype ?? undefined,
-          provider: item.provider ?? undefined,
-          reference: item.reference ?? undefined,
-          costMinor: item.costMinor ?? undefined,
+          provider: provider.value ?? undefined,
+          reference: reference.value ?? undefined,
+          costMinor: costMinor.value ?? undefined,
           currency: item.currency,
           dueDate,
           scheduleKind,
           recurrenceMonths: item.recurrenceMonths ?? undefined,
           reminderDays: remindersByItem.get(item.id)?.sort((left, right) => right - left),
           snoozedUntil: item.snoozedUntil ?? undefined,
-          notes: item.notes ?? undefined,
+          notes: notes.value ?? undefined,
+          metadataStatus: damaged ? metadataStatus : undefined,
+          documentCount: documentCountByItem.get(item.id) ?? 0,
           status: item.status,
           version: item.version,
           updatedAt: item.updatedAt.toISOString(),
@@ -256,10 +313,12 @@ export async function hasOnwardHousehold(userId: string, isInstanceAdmin: boolea
   return Boolean(row);
 }
 
-function itemDates(scheduleKind: "renewal" | "service" | undefined, dueDate: string | undefined) {
+function itemDates(scheduleKind: ScheduleKind | undefined, dueDate: string | undefined) {
   return {
     renewalDate: scheduleKind === "renewal" ? dueDate ?? null : null,
     serviceDate: scheduleKind === "service" ? dueDate ?? null : null,
+    /* #1005: the one-off's date lives in the column the schema already had. */
+    expiryDate: scheduleKind === "expiry" ? dueDate ?? null : null,
   };
 }
 
@@ -466,23 +525,57 @@ export async function applyWorkspaceCommand(
       if (!ownedSection) throw new AppError("section_not_found", "Choose a section from this household", 422);
       const [existing] = await transaction.select({ version: items.version }).from(items)
         .where(and(eq(items.id, itemId), eq(items.householdId, householdId))).limit(1);
+      // The schema tolerates an empty title only so a damaged one can be read
+      // back (ADR-0024 decision 5); a write still has to carry a real one, and
+      // a client that sends `metadataStatus` to slip past that check is
+      // refused here rather than storing a nameless item.
+      if (!command.item.title.trim()) throw new AppError("invalid_item", "Give this a name", 422);
+      // #1151 A4-S4: `command.item.version` is optional in the wire schema,
+      // but an update with none omitted used to fall back to "whatever the
+      // row's current version already is" -- a check against the value it
+      // had just read a moment earlier, which can never fail. That silently
+      // turned the optimistic-concurrency check off for exactly the caller
+      // who skipped it, overwriting another member's edit with no conflict
+      // ever reported. An existing row now always requires the version it is
+      // meant to replace; only a brand new item, which has no version to
+      // race against, may omit it.
+      if (existing && command.item.version === undefined) {
+        throw new AppError("version_required", "This item changed on another device; refresh and try again", 409);
+      }
+      // Tier 1 and Tier 2 (ADR-0024 decision 3): encrypt and clear the
+      // plaintext in the same statement, so the row is never in both states at
+      // once. Writing a damaged field is also the repair for it: the new value
+      // encrypts cleanly and the old ciphertext is gone.
+      const metadata = await requireMetadataWriter(householdId, transaction);
       const values = {
         sectionId,
-        title: command.item.title,
+        title: null,
+        titleEnc: metadata.encryptText("items.title", itemId, command.item.title),
         subtype: command.item.subtype ?? null,
-        provider: command.item.provider ?? null,
-        reference: command.item.reference ?? null,
-        costMinor: command.item.costMinor ?? null,
+        provider: null,
+        providerEnc: metadata.encryptText("items.provider", itemId, command.item.provider),
+        reference: null,
+        referenceEnc: metadata.encryptText("items.reference", itemId, command.item.reference),
+        referenceIndex: metadata.referenceIndex(command.item.reference),
+        costMinor: null,
+        costMinorEnc: metadata.encryptNumber("items.cost_minor", itemId, command.item.costMinor),
         currency: command.item.currency,
-        recurrenceMonths: command.item.recurrenceMonths ?? null,
+        /* #1005: belt and braces with `workspaceItemSchema`, which refuses the
+           pair outright -- nothing that reaches the row can claim a one-off
+           comes round again. */
+        recurrenceMonths: command.item.scheduleKind === "expiry" ? null : command.item.recurrenceMonths ?? null,
         snoozedUntil: command.item.snoozedUntil ?? null,
-        notes: command.item.notes ?? null,
+        notes: null,
+        notesEnc: metadata.encryptText("items.notes", itemId, command.item.notes),
         status: command.item.status,
         updatedAt: new Date(),
         ...itemDates(command.item.scheduleKind, command.item.dueDate),
       };
       if (existing) {
-        const expectedVersion = Math.max(1, (command.item.version ?? existing.version + 1) - 1);
+        // `command.item.version` is the version the client wants this write
+        // to become, guaranteed present by the guard above; the row it
+        // replaces must be one less than that.
+        const expectedVersion = Math.max(1, command.item.version! - 1);
         const [updated] = await transaction.update(items)
           .set({ ...values, version: sql`${items.version} + 1` })
           .where(and(
@@ -495,6 +588,12 @@ export async function applyWorkspaceCommand(
       } else {
         await transaction.insert(items).values({ id: itemId, householdId, version: 1, ...values });
       }
+      // Every encrypted column on the row was just rewritten - Tier 1 and, since
+      // #963, Tier 2 - so anything this row had been seen damaged in is gone
+      // with the ciphertext that was damaged (#941).
+      // In the same transaction as the write, so a rolled-back save cannot
+      // leave the administrator count claiming a repair that did not happen.
+      await clearMetadataDamageForRow("items", itemId, transaction);
       await transaction.delete(dueEvents).where(and(eq(dueEvents.itemId, itemId), isNull(dueEvents.completedAt)));
       if (command.item.dueDate && command.item.scheduleKind) {
         await transaction.insert(dueEvents).values({
@@ -602,6 +701,11 @@ export async function applyWorkspaceCommand(
       if (!currentEvent) {
         throw new AppError("version_conflict", "This item has no active scheduled event", 409);
       }
+      /* #1005: an expiry is the one-off kind -- completing one records that it
+         ended, and there is no next date to take. */
+      if (currentEvent.kind === "expiry" && command.nextDate) {
+        throw new AppError("invalid_command", "An expiry happens once; it has no next date", 400);
+      }
       let nextEventId: string | undefined;
       if (command.nextDate) {
         nextEventId = randomUUID();
@@ -621,8 +725,19 @@ export async function applyWorkspaceCommand(
           nextEventId,
         }).where(eq(dueEvents.id, currentEvent.id));
       }
+      // Tier 2 (#963): a completion may carry a new cost, and when it does not
+      // the row keeps the one it has. Re-encrypting the value it already holds
+      // would be pointless work and one more chance to lose it, so an absent
+      // cost leaves both columns exactly as they are.
+      const completionCost = command.costMinor === undefined
+        ? {}
+        : {
+          costMinor: null,
+          costMinorEnc: (await requireMetadataWriter(householdId, transaction))
+            .encryptNumber("items.cost_minor", itemId, command.costMinor),
+        };
       await transaction.update(items).set({
-        costMinor: command.costMinor ?? current.costMinor,
+        ...completionCost,
         status: "active",
         snoozedUntil: null,
         recurrenceMonths: command.nextDate ? current.recurrenceMonths : null,
@@ -636,7 +751,7 @@ export async function applyWorkspaceCommand(
     }
 
     if (command.type === "item.reschedule") {
-      const kind = current.serviceDate ? "service" : "renewal";
+      const kind = current.serviceDate ? "service" : current.expiryDate ? "expiry" : "renewal";
       await transaction.update(items).set({
         status: "active",
         snoozedUntil: null,

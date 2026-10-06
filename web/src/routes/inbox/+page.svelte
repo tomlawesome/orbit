@@ -1,12 +1,17 @@
 <script>
   import { onMount } from "svelte";
+  import { goto } from "$app/navigation";
   import { readInboxScreen, approveReceipt, dismissReceipt } from "$lib/data/workspace.js";
-  import { money, ago, agoLong } from "$lib/format.js";
+  import { ago, agoLong } from "$lib/format.js";
+  import { LOCKED, fieldState, receiptWords } from "$lib/data/metadata-status.js";
+  import { papersOf, readingsOf } from "$lib/pocket/review.js";
+  import { reasonWords } from "$lib/pocket/words.js";
   import { daysUntil } from "$lib/data/chart.js";
   import { fillStarTiles } from "$lib/sky.js";
   import Chrome from "$lib/Chrome.svelte";
   import { resolve } from "$app/paths";
   import { SvelteMap } from "svelte/reactivity";
+  import Pocket from "./pocket.svelte";
   import "./inbox.css";
 
   /**
@@ -91,25 +96,16 @@
   /* "Still reading" only ever holds receipts that have already arrived. */
   /** @param {import('$lib/data/workspace.js').Receipt} receipt */
   const readAgo = (receipt) => agoLong(/** @type {string} */ (receipt.receivedAt), need().now);
-  /* READ · SURE / READ · UNSURE — the parser's own confidence, two words. */
-  /**
-   * @param {import('$lib/data/workspace.js').Receipt} receipt
-   * @param {string} field
-   */
-  const mark = (receipt, field) => {
-    const evidence = receipt.fieldEvidence?.[field];
-    if (!evidence) return null;
-    return evidence.confidence === "low" ? "READ · UNSURE" : "READ · SURE";
-  };
-  /* The list API names no files yet (#467): the fixture carries the design's
-     names; live data degrades to the honest count. */
+  /* Why Orbit cannot read a message, in the member's words, or null when it
+     can. Locked: intact, waiting for an administrator -- there is nothing to
+     review and nothing to accept, so those two ways in go, and the receipt
+     stays queued rather than being retired as a failure. Damaged: Orbit's copy
+     is gone, but the member's own mailbox still has the original, so every
+     action stays and the words say to forward it again. */
+  /** @param {import('$lib/data/workspace.js').Receipt | import('$lib/data/workspace.js').MailFailure} receipt */
+  const unreadable = (receipt) => receiptWords(receipt.metadataStatus);
   /** @param {import('$lib/data/workspace.js').Receipt} receipt */
-  const chips = (receipt) =>
-    receipt.attachments?.map(
-      (a) => `◆ ${a.displayName} · ${Math.round(/** @type {number} */ (a.sizeBytes) / 1024)} KB · scanned clean`,
-    ) ?? (receipt.attachmentCount
-      ? [`◆ ${receipt.attachmentCount} document${receipt.attachmentCount === 1 ? "" : "s"} · scanned clean`]
-      : []);
+  const locked = (receipt) => fieldState(receipt.metadataStatus, "proposal") === LOCKED;
   const emptyQueue = $derived.by(() => {
     if (!view) return null;
     const current = need();
@@ -136,6 +132,9 @@
 <Chrome user={view?.user} current="inbox"
         role={view ? `${view.household?.name ?? ""} · ${view.household?.canManage ? "owner" : "member"}` : ""} />
 
+<!-- #1120, proposal §2.6: the pocket's own inbox, chosen by CSS. -->
+<Pocket bind:view />
+
 <div class="page" role="main">
   <header class="screen">
     <h1>Inbox</h1>
@@ -149,7 +148,7 @@
       <div class="group">
         <h2>Filed{view.filed.length ? ` · ${view.filed.length}` : ""}</h2>
         {#each view.filed as entry (entry.itemId)}
-          <a class="item" href={resolve("/item/[id]", { id: entry.itemId })}>
+          <a class="item" href={resolve("/item/[[id]]", { id: entry.itemId })}>
             <span class="dot" style="background:var({TONES[entry.band]})" aria-hidden="true"></span>
             <div class="flex"><b>{entry.title}</b><span>from {entry.sourceDocument} · added {filedDate(/** @type {string} */ (entry.filedAt))}</span></div>
           </a>
@@ -175,28 +174,39 @@
               <small>caught {short(/** @type {string} */ (receipt.receivedAt))} · <span class="exp">burns up in {burnsIn(receipt)}d</span></small>
             </div>
             <div class="fields">
-              {#if receipt.proposal?.provider}
-                <div class="kv"><span>provider</span><b>{receipt.proposal.provider}{#if mark(receipt, "provider")}<span class="conf">{mark(receipt, "provider")}</span>{/if}</b></div>
-              {/if}
-              {#if receipt.proposal?.dueDate}
-                <div class="kv"><span>renews</span><b>{fullDate(receipt.proposal.dueDate)}{#if mark(receipt, "dueDate")}<span class="conf">{mark(receipt, "dueDate")}</span>{/if}</b></div>
-              {/if}
-              {#if receipt.proposal?.costMinor}
-                <div class="kv"><span>cost</span><b>{money(receipt.proposal.costMinor, receipt.proposal.currency ?? "GBP", true)}{#if mark(receipt, "costMinor")}<span class="conf">{mark(receipt, "costMinor")}</span>{/if}</b></div>
-              {/if}
+              {#each readingsOf(receipt) as reading (reading.field)}
+                <div class="kv"><span>{reading.label}</span>
+                  <b>{reading.value}{#if reading.sure !== null}<span class="conf">{reading.sure ? "READ · SURE" : "READ · UNSURE"}</span>{/if}</b></div>
+              {/each}
             </div>
-            {#each chips(receipt) as chip (chip)}
-              <span class="attach">{chip.split(" · scanned clean")[0]} · <span class="clean">scanned clean</span></span>
+            {#each papersOf(receipt) as paper (paper.id ?? paper.name)}
+              {@const itemHref = resolve("/item/[[id]]", { id: receipt.id })}
+              {#if paper.drawable}
+                <a class="attach" href={itemHref}
+                   onclick={(event) => { event.preventDefault(); goto(itemHref, { state: { pocketPaper: paper.id } }); }}>
+                  ◆ <span class="name">{paper.name}</span>{#if paper.meta} · {paper.meta}{/if}{#if paper.clean} · <span class="clean">scanned clean</span>{/if} · <span class="view">view →</span>
+                </a>
+              {:else}
+                <span class="attach">◆ {paper.name}{#if paper.clean} · <span class="clean">scanned clean</span>{/if}</span>
+              {/if}
             {/each}
+            <!-- The card's own quiet mono (.twotap), not an alarm colour: one
+                 of these two states is a wait and the other has a remedy the
+                 member can carry out, and neither is this screen's emergency. -->
+            {#if unreadable(receipt)}
+              <div class="twotap" style="margin-top:10px">{unreadable(receipt)}</div>
+            {/if}
             <div class="actions">
-              <button class="yes" disabled={busy === receipt.id} onclick={() => tap(receipt, "approve")}>
+              <button class="yes" disabled={busy === receipt.id || locked(receipt)} onclick={() => tap(receipt, "approve")}>
                 {armed.id === receipt.id && armed.act === "approve" ? "tap again to approve" : "Add to orbit"}
               </button>
               <button disabled={busy === receipt.id} onclick={() => tap(receipt, "dismiss")}>
                 {armed.id === receipt.id && armed.act === "dismiss" ? "tap again to dismiss" : "Dismiss"}
               </button>
               <span class="twotap">— both ask twice</span>
-              <a href={resolve("/item/[id]", { id: receipt.id })}>review &amp; amend →</a>
+              {#if !locked(receipt)}
+                <a href={resolve("/item/[[id]]", { id: receipt.id })}>review &amp; amend →</a>
+              {/if}
             </div>
             {#if problem && armed.id === receipt.id}
               <div class="mail-problem">{problem}</div>
@@ -231,7 +241,7 @@
             <i aria-hidden="true"></i>
             <div class="body">
               <b>A message from {short(failure.receivedAt)}</b>
-              <span>{failure.message}</span>
+              <span>{unreadable(failure) ?? `${reasonWords(failure.reason)} · ${failure.message}`}</span>
             </div>
             {#if failure.canDiscard}
               <button disabled={busy === failure.id} onclick={() => tap(failure, "dismiss")}>

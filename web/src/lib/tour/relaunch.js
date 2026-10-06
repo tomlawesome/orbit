@@ -21,6 +21,25 @@
 
 let requested = false;
 
+/* #1189: "Watch the tour" sits in the account menus too, which are open on
+   /home itself. Navigating to /home from /home changes nothing Tour.svelte's
+   arrival effect watches, so there the relaunch tells Tour.svelte directly.
+   One listener at a time: there is one Tour.svelte, mounted by the layout. */
+/** @type {(() => void) | null} */
+let inPlace = null;
+
+/**
+ * Tour.svelte's subscription to a relaunch made while already on /home.
+ * @param {() => void} listener
+ * @returns {() => void} unsubscribe
+ */
+export function onRestartInPlace(listener) {
+  inPlace = listener;
+  return () => {
+    if (inPlace === listener) inPlace = null;
+  };
+}
+
 /** Called by the settings control, before it clears the record and navigates. */
 export function requestTourRestart() {
   requested = true;
@@ -50,14 +69,18 @@ export function tourMayBegin(started) {
  * @param {object} deps
  * @param {() => Promise<unknown>} deps.clearTourSeen
  * @param {() => Promise<unknown>} deps.navigateHome
+ * @param {() => boolean} [deps.onHome] true when the reader is already on
+ *   /home, where navigating there again would start nothing (#1189)
  */
-export async function relaunchTour({ clearTourSeen, navigateHome }) {
+export async function relaunchTour({ clearTourSeen, navigateHome, onHome = () => false }) {
   requestTourRestart();
   await clearTourSeen();
-  await navigateHome();
+  if (onHome()) inPlace?.();
+  else await navigateHome();
 }
 
 /** Test-only: the flag is module-level so tests must be able to reset it. */
 export function _resetTourRestartForTests() {
   requested = false;
+  inPlace = null;
 }

@@ -1,56 +1,95 @@
 <script>
   import "./pocket.css";
+  import { tick } from "svelte";
+  import { beforeNavigate, goto, onNavigate } from "$app/navigation";
+  import { page } from "$app/state";
   import { resolve } from "$app/paths";
+  import { WorkspaceError, applyCommand, readItemDocuments } from "$lib/data/workspace.js";
+  import { completeCommand, nextDateAfter } from "$lib/data/commands.js";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf } from "$lib/data/chart.js";
-  import { ago, money } from "$lib/format.js";
+  import { money } from "$lib/format.js";
+  import ArmButton from "$lib/pocket/ArmButton.svelte";
+  import Hatch from "$lib/pocket/Hatch.svelte";
+  import NorthStar from "$lib/pocket/NorthStar.svelte";
+  import ReviewSheet from "$lib/pocket/ReviewSheet.svelte";
+  import Row from "$lib/pocket/Row.svelte";
+  import Sheet from "$lib/pocket/Sheet.svelte";
+  import TopChrome from "$lib/pocket/TopChrome.svelte";
+  import { POCKET_QUERY, isPocket } from "$lib/pocket/media.js";
+  import { formReadingsOf, papersOf as reviewPapersOf } from "$lib/pocket/review.js";
+  import { rowOf } from "$lib/pocket/row.js";
+  import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
+  import { markDoor } from "../household/[id]/door.js";
+  import { HIT_R, spacedBodies } from "./pocket-dial.js";
+  import { readSearchDocuments, searchPocket } from "./pocket-search.js";
+  import { BAND_VAR, tlabel } from "./bands.js";
+  import ItemDrawer from "./ItemDrawer.svelte";
+  import SuggestionDrawer from "./SuggestionDrawer.svelte";
 
   /**
-   * Home in the mobile dialect (CON-10, #430) — the dial owns the width, the
-   * other households collapse from a sky you fly through into a strip you
-   * scroll, and what is a hover callout on a desk becomes a bottom sheet under
-   * a thumb.
+   * HOME ON A PHONE: the pocket sky (CON-10, #430; lifted to the kit in #1120,
+   * proposal §2.1). Wordmark and orb, the dial, the other skies, the search
+   * line, NEEDS ATTENTION, the SIGNALS pen, and the north star.
    *
-   * It shares home's URL. Both dialects are server-rendered and the viewport
-   * chooses between them in CSS, because selecting in JS would flash the wrong
-   * one and would break the non-JS fallback. See pocket.css for the switch.
+   * Both dialects are server-rendered and CSS picks one (pocket.css), so no
+   * flash of the wrong one and no-JS still gets a page. This dialect's own
+   * controls are Svelte's: the kit's sheets and rows bind their own
+   * listeners, and nothing here reaches the desk's markup.
    *
-   * Lifted from design/family/mobile-home.html; live since #451 — the same
-   * view-model the desk dialect renders, through the same laws. A thumb gets
-   * fewer, bigger bodies: the overdue one, the closest approach, and anything
-   * carrying documents on a wide orbit; the rest live in the rows.
+   * THE ROW IS THE ITEM (review round §2.1, the desk's own grammar, #424):
+   * a manifest row opens in place into a drawer holding the item's detail,
+   * `open →` onward to its belt, `complete`, and `copy link`; the relay's
+   * catch opens the same way with its readings and its two decisions. A
+   * search result closes the search and opens its row; one the manifest
+   * does not draw goes straight to the item (review round §6.e). A planet
+   * on the dial does what the desk's does (owner's answer 6a): it opens its
+   * row and wears the lit ring while the row is open, and a second tap on
+   * the lit body goes to the item.
    *
-   * Markup only: +page.svelte mounts whichever dialect the viewport selected,
-   * so the hidden one never binds listeners.
-   */
-  /** @type {{ view?: import('$lib/data/workspace.js').HomeView | null }} */
-  let { view = null } = $props();
-
-  /**
-   * The dial body shape `dialBodiesOf` (chart.js) actually returns —
-   * `closest` is set afterwards on at most one entry, so it stays optional.
+   * Home's sheets are the search sheet (#1057), the hatch, opened from the
+   * orb, and the review sheet (round 3 §4): a suggestion's `review & amend →`
+   * and a second tap on its hollow body raise it in place, rather than
+   * going to the receipt page; the item sheet is gone (§2.1).
    * @typedef {{
-   *   id: string, title: string, days: number, dueDate?: string | null,
-   *   placement: { angle: number, radius: number, x: number, y: number },
-   *   size: number, paint: string, kind: string, suggestion: boolean,
-   *   costMinor: number | null, costIsEstimate: boolean, currency: string,
-   *   documentCount: number, trail: boolean, overdue: boolean, closest?: boolean,
-   * }} DialBody
+   *   view?: import('$lib/data/workspace.js').HomeView | null,
+   *   arrive?: boolean,
+   *   onapprove?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
+   *   ondismiss?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
+   *   onamend?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion,
+   *     item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null) => Promise<string | null>,
+   *   onchanged?: () => Promise<unknown>,
+   * }} Props
    */
+  /** @type {Props} */
+  let {
+    view = null, arrive = false, onapprove = undefined, ondismiss = undefined, onamend = undefined, onchanged = undefined,
+  } = $props();
+  let sheetOpen = $state(false);
+  let hatchOpen = $state(false);
 
+  /* ---- what the page draws ----------------------------------------------
+     `DialBody` is the shape dialBodiesOf (chart.js) returns; `closest` is set
+     afterwards on at most one entry, so it stays optional. */
+  /** @typedef {{ id: string, title: string, days: number, dueDate?: string | null, placement: { angle: number, radius: number, x: number, y: number }, size: number, paint: string, kind: string, suggestion: boolean, costMinor: number | null, costIsEstimate: boolean, currency: string, documentCount: number, trail: boolean, overdue: boolean, closest?: boolean }} DialBody */
   /** @type {DialBody[]} */
   const bodies = $derived(
-    view
+    view?.household
       ? dialBodiesOf(view.household, { suggestions: /** @type {any} */ (view.suggestions), today: view.today })
       : [],
   );
+  // A thumb gets fewer, bigger bodies: the overdue one, the closest approach,
+  // the relay's catch, anything carrying documents on a wide orbit; then the
+  // spacing law (pocket-dial.js) keeps every 44px target clear of the next.
   const pocketBodies = $derived(
-    bodies.filter((b) => b.suggestion || b.overdue || b.closest || (b.documentCount > 0 && b.paint === "jade")),
+    spacedBodies(bodies.filter((b) => b.suggestion || b.overdue || b.closest || (b.documentCount > 0 && b.paint === "jade"))),
   );
   const groups = $derived(
-    view
+    view?.household
       ? manifestGroupsOf(view.household, { suggestions: /** @type {any} */ (view.suggestions), today: view.today })
       : null,
   );
+  const rows = $derived(groups ? [...groups.attention, ...groups.later] : []);
+  const rawItems = $derived(new Map((view?.household?.items ?? []).map((item) => [item.id, item])));
   const others = $derived(
     view
       ? Object.entries(view.galaxy)
@@ -75,61 +114,575 @@
       .slice(0, 2)
       .toUpperCase(),
   );
-  /* #852: the same "household · role" line the desk account panel derives
-     inline (+page.svelte, the `#who-role` span) — copied rather than shared
-     because that one is a plain template expression, not a function. */
+  // #852: the same "household · role" line the desk account panel derives.
   const roleLine = $derived(
-    view
-      ? `${view.household?.name ?? ""} · ${view.galaxy[/** @type {string} */ (view.primary)]?.role ?? "member"}`
+    view?.household
+      ? `${view.household.name ?? ""} · ${view.galaxy[/** @type {string} */ (view.primary)]?.role ?? "member"}`
       : "",
   );
+  // The pocket's inbox orb (§2.1): arrivals from the relay still waiting on
+  // the reader wear a ring and a count bead.
+  const waiting = $derived((view?.suggestions ?? []).filter((s) => s.receiptId).length);
+  const isAdmin = $derived(Boolean(page.data?.isAdmin));
+
   const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-  const QUARTER_POS = [[190, 26], [356, 196], [190, 364], [24, 196]];
+  const QUARTER_POS = [[190, 30], [352, 196], [190, 370], [28, 196]];
   const quarters = $derived(
     QUARTER_POS.map(([x, y], k) => ({
       x, y,
       label: MONTHS[((view ? new Date(view.today + "T00:00:00Z").getUTCMonth() : 7) + k * 3) % 12],
     })),
   );
-  /** @type {Record<string, string>} */
-  const BAND_VAR = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok" };
-  /** @type {(b: { days: number | null }) => string} */
-  const tlabel = (b) => (b.days === null ? "" : b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
+  // BAND_VAR/tlabel: #1151 W1-Q10, shared with CorridorRow.svelte and
+  // +page.svelte's own dial via bands.js, rather than a second, diverging
+  // copy (bands.js's own tlabel is now the null-safe version this file's
+  // old copy had, per #1151 W1-F3's unscheduled band).
   /** @type {(iso: string) => string} */
   const short = (iso) =>
     new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
+  // #1005: a renewal comes round, a one-off ends.
+  /** @type {(s: { scheduleKind?: ?string }) => string} */
+  const dateWord = (s) => (s.scheduleKind === "expiry" ? "ends" : "renews");
   /** @type {(b: DialBody) => string} */
-  const bodyColour = (b) => `var(${BAND_VAR[b.overdue ? "overdue" : b.paint === "amber" ? "due-soon" : b.paint === "sky" ? "upcoming" : "ok"]})`;
+  const bodyColour = (b) => `var(${BAND_VAR[b.overdue ? "overdue" : b.paint === "ended" ? "ended" : b.paint === "amber" ? "due-soon" : b.paint === "sky" ? "upcoming" : "ok"]})`;
   /** @type {(b: DialBody) => number} */
   const bodyR = (b) => (b.overdue ? 8 : b.closest ? 7 : 7.5);
+  // The desk's spheres (review round §2.1): a body wears its paint's
+  // gradient; the ended expiry keeps its quiet flat ink.
+  const SPHERES = new Set(["ruby", "jade", "amber", "sky"]);
   /** @type {(b: DialBody) => string} */
-  const sheetMeta = (b) =>
-    [
-      tlabel(b),
-      b.dueDate ? short(b.dueDate) : null,
-      b.costMinor ? money(b.costMinor, b.currency, b.costIsEstimate) : null,
-      b.documentCount > 0 ? `◆ ${b.documentCount} documents` : null,
-    ].filter(Boolean).join(" · ");
-  /* #466: the relay's signals — days until an unreviewed arrival burns up,
-     elapsed time in the pocket's short register. `now` is pinned by the seam. */
+  const bodyFill = (b) => (SPHERES.has(b.paint) ? `url(#pk-${b.paint})` : bodyColour(b));
+  // The body due soonest (an overdue one is the soonest of all, as the
+  // spacing law has it) pings, home.css's perihelion ping.
+  const pinging = $derived(pocketBodies.find((b) => !b.suggestion) ?? null);
+  // Twelve month ticks on the ring, 6 units long, from the top.
+  /** @type {(a: number, r: number) => number[]} */
+  const tickAt = (a, r) => [190 + Math.cos(a) * r, 190 + Math.sin(a) * r].map((v) => Math.round(v * 10) / 10);
+  const TICKS = Array.from({ length: 12 }, (_, k) => {
+    const a = (k * Math.PI) / 6 - Math.PI / 2;
+    const [x1, y1] = tickAt(a, 150);
+    const [x2, y2] = tickAt(a, 144);
+    return { x1, y1, x2, y2 };
+  });
+  /** @type {(row: { costMinor: number | null, currency: string, costIsEstimate: boolean }) => string | null} */
+  const cost = (row) => (row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null);
   /** @type {(s: import('$lib/data/workspace.js').ReceiptSuggestion) => number | null} */
-  const burnsIn = (s) =>
-    s.expiresAt
-      ? daysUntil(s.expiresAt.slice(0, 10), /** @type {import('$lib/data/workspace.js').HomeView} */ (view).today)
-      : null;
-  /** @type {(iso: string | null | undefined) => string} */
-  const agoShort = (iso) =>
-    iso
-      ? ago(iso, /** @type {import('$lib/data/workspace.js').HomeView} */ (view).now ?? new Date().toISOString())
-      : "";
-  /** @type {(s: import('$lib/data/workspace.js').ReceiptSuggestion) => string} */
-  const suggMeta = (s) =>
-    `caught by your relay ${short(
-      (s.receivedAt ?? /** @type {import('$lib/data/workspace.js').HomeView} */ (view).today).slice(0, 10),
-    )} · burns up in ${burnsIn(s)}d`;
+  const burnsIn = (s) => (s.expiresAt && view ? daysUntil(s.expiresAt.slice(0, 10), view.today) : null);
+
+  /* Reading and failed mail on home: one summary row (round 3 §2, 12a). */
+  const mailSummary = $derived.by(() => {
+    const reading = view?.mailReading?.length ?? 0;
+    const failed = view?.mailFailures?.length ?? 0;
+    const unread = `${failed} message${failed === 1 ? "" : "s"} couldn't be read`;
+    if (reading && failed) return `reading ${reading} · ${failed} couldn't be read`;
+    if (reading) return reading === 1 ? "reading a message" : `reading ${reading} messages`;
+    return failed ? unread : "";
+  });
+
+  // ---- the search sheet's state ------------------------------------------
+
+  /** @type {string | null} */
+  let problem = $state(null);
+  let busy = $state(false);
+
+  function openSearch() {
+    problem = null;
+    query = "";
+    sheetOpen = true;
+    loadSearchDocuments();
+  }
+
+  // The dial's bodies are SVG, so Enter and Space have to be taught (#851).
+  // Escape too (#1149, owner-decisions §28): a row opened from a body leaves
+  // focus on the body, so the body is where Escape is heard. It puts the lit
+  // row away and focus stays where it is, as a sheet's Escape leaves focus on
+  // its opener (sheet.js). The row's own Escape (row.js) still serves a
+  // reader whose focus is inside the row.
+  /** @type {(event: KeyboardEvent, then: () => void) => void} */
+  const onKeyActivate = (event, then) => {
+    if (event.key === "Escape") {
+      if (lit === null) return;
+      event.preventDefault();
+      rowOf(manifestRow(lit))?.close();
+      return;
+    }
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    then();
+  };
+
+  // A sheet that was up when the screen widened past the pocket would float
+  // over the desk; put everything away instead.
+  $effect(() => {
+    const media = matchMedia(POCKET_QUERY);
+    const onchange = () => {
+      if (!media.matches) { sheetOpen = false; hatchOpen = false; }
+    };
+    media.addEventListener("change", onchange);
+    return () => media.removeEventListener("change", onchange);
+  });
+
+  // The approach (§1.2, §1.9): `open →` goes to the item's own screen and the
+  // opened drawer lifts into it. The morph is a view transition; pocket.css
+  // names the open row's panel and says how it lifts. Reduced motion, or a browser without
+  // view transitions, simply navigates.
+  let morphing = false;
+  onNavigate((navigation) => {
+    if (!morphing) return;
+    morphing = false;
+    if (!document.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    return new Promise((ready) => {
+      document.startViewTransition(async () => {
+        ready(undefined);
+        await navigation.complete;
+      });
+    });
+  });
+
+  // A document has no address of its own yet (item/[[id]]/+page.svelte), so a
+  // paper opens its item's belt and says which paper it meant in the
+  // navigation's state, where the belt can pick it up (step 3).
+  /** @param {{ id: string, itemId: string }} doc */
+  function openPaper(doc) {
+    morphing = true;
+    goto(resolve("/item/[[id]]", { id: encodeURIComponent(doc.itemId) }), {
+      replaceState: true,
+      state: { pocketPaper: doc.id },
+    });
+  }
+
+  // ---- the relay's catch (#466) ---------------------------------------------
+
+  /**
+   * The relay's catch, decided from its row in the signals, where a refusal
+   * stays under the row's readings.
+   * @param {"approve" | "dismiss"} act
+   * @param {import('$lib/data/workspace.js').ReceiptSuggestion} target
+   */
+  async function decide(act, target) {
+    const handler = act === "approve" ? onapprove : ondismiss;
+    if (!handler || busy) return;
+    busy = true;
+    delete rowProblem[target.id];
+    try {
+      const failed = await handler(target);
+      if (failed) { rowProblem[target.id] = failed; return; }
+      wake(act === "approve" ? `${target.title} added to your orbit` : `${target.title} dismissed`);
+    } finally {
+      busy = false;
+    }
+  }
+
+  /* ---- review & amend, raised in place (round 3 §4): the sheet the inbox
+     and the receipt page raise too (ReviewSheet.svelte) ---- */
+  let reviewOpen = $state(false);
+  /** @type {import('$lib/data/workspace.js').ReceiptSuggestion | null} */
+  let reviewing = $state(null);
+  /** @type {string | null} */
+  let reviewProblem = $state(null);
+
+  /** @param {import('$lib/data/workspace.js').ReceiptSuggestion} s */
+  function openReview(s) {
+    reviewing = s;
+    reviewProblem = null;
+    reviewOpen = true;
+  }
+
+  /**
+   * @param {import('$lib/data/workspace.js').ItemProposal} item
+   * @param {string | null} sectionId
+   */
+  async function saveReview(item, sectionId) {
+    const target = reviewing;
+    if (!target || !onamend || busy) return false;
+    busy = true;
+    reviewProblem = null;
+    try {
+      const failed = await onamend(target, item, sectionId);
+      if (failed) { reviewProblem = failed; return false; }
+      wake(`${item.title ?? target.title} added to your orbit`);
+      return true;
+    } finally {
+      busy = false;
+    }
+  }
+
+  // ---- the search sheet (#1057, §2.4) -------------------------------------
+
+  let query = $state("");
+  /** @type {import('./pocket-search.js').SearchDocument[]} */
+  let searchDocuments = $state([]);
+  let papersReady = $state(false);
+  /** @type {object | null} */
+  let searchDocumentsFor = null;
+
+  /** #1151 W1-Q8: shared with the desk's own copy (home/+page.svelte) via
+   *  pocket-search.js's readSearchDocuments, which also carries the
+   *  concurrency cap (#1151 W1-R9). */
+  async function loadSearchDocuments() {
+    const household = view?.household;
+    const householdId = view?.primary;
+    if (!household || !householdId || searchDocumentsFor === household) return;
+    searchDocumentsFor = household;
+    const carrying = (household.items ?? []).filter((item) => item.status === "active" && (item.documentCount ?? 0) > 0);
+    // Additive: an item whose papers cannot be read loses its papers from the
+    // results, not the search.
+    const found = await readSearchDocuments(
+      carrying, readItemDocuments, householdId, () => searchDocumentsFor !== household,
+    );
+    if (searchDocumentsFor === household) {
+      searchDocuments = found;
+      papersReady = true;
+    }
+  }
+
+  const results = $derived(
+    searchPocket(query, { items: rows, attention: groups?.attention ?? [], documents: searchDocuments }),
+  );
+
+  /** @param {{ id: string, title: string }} target */
+  async function complete(target) {
+    const raw = rawItems.get(target.id);
+    if (!raw || !view?.primary || busy) return;
+    busy = true;
+    problem = null;
+    const completedDate = view.today;
+    try {
+      await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId: view.primary }), {
+        completedDate,
+        nextDate: nextDateAfter(completedDate, raw.recurrenceMonths) ?? undefined,
+      }));
+      sheetOpen = false;
+      wake(`${target.title} completed`);
+      await onchanged?.();
+    } catch (error) {
+      problem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again";
+    } finally {
+      busy = false;
+    }
+  }
+
+  // ---- the drawers (review round §2.1) ---------------------------------------
+
+  /** What went wrong acting from a row, by the row's id. @type {Record<string, string>} */
+  const rowProblem = $state({});
+
+  /** The manifest's row for an item, if the manifest draws one. @param {string} id */
+  const manifestRow = (id) => document.querySelector(`.pocket .pk-below [data-row-key="${CSS.escape(id)}"]`);
+
+  /**
+   * Opens an item's row where it sits in the manifest and brings it to the
+   * middle of the screen, as the desk's `#id` does. False when the manifest
+   * draws no row for it.
+   * @param {string} id
+   * @param {{ focus?: boolean }} [options]
+   */
+  async function openRow(id, { focus = false } = {}) {
+    await tick();
+    const el = manifestRow(id);
+    const control = rowOf(el);
+    if (!el || !control) return false;
+    control.open();
+    const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView({ block: "center", behavior: still ? "auto" : "smooth" });
+    if (focus) /** @type {HTMLElement | null} */ (el.querySelector("[data-row-face]"))?.focus({ preventScroll: true });
+    return true;
+  }
+
+  /**
+   * A search result closes the search and opens its row (§2.1). An item the
+   * manifest does not draw (it lists what needs attention) has no row to
+   * open, so it goes straight to the item, as it does from the belt
+   * (review round §6.e), taking the search's history entry as a paper does.
+   * @param {string} id
+   */
+  async function openResult(id) {
+    if (!manifestRow(id)) {
+      goto(resolve("/item/[[id]]", { id: encodeURIComponent(id) }), { replaceState: true });
+      return;
+    }
+    sheetOpen = false;
+    await tick();
+    await openRow(id, { focus: true });
+  }
+
+  /* Arriving on an item's address (`copy link`, the desk's own): its row
+     opens, once, as soon as the manifest has drawn it. */
+  let addressed = false;
+  $effect(() => {
+    const id = page.url.searchParams.get("item");
+    if (addressed || !id || !rows.length || !isPocket()) return;
+    openRow(id).then((opened) => { addressed ||= opened; });
+  });
+
+  /* The papers in a drawer ride on the search's own read of them, made the
+     first time any row opens rather than on every arrival. The open row's
+     id is what lights its body on the dial. */
+  /** @type {string | null} */
+  let lit = $state(null);
+  /* The star hides while a sheet is up and while any row is open (round 3
+     §5): it stood over the open suggestion's `Dismiss`. */
+  const starHidden = $derived(sheetOpen || hatchOpen || reviewOpen || lit !== null);
+  /** @param {string} id */
+  const onRowToggle = (id) => /** @type {(open: boolean) => void} */ ((open) => {
+    if (open) { lit = id; loadSearchDocuments(); } else if (lit === id) lit = null;
+  });
+
+  /**
+   * A planet on the dial (owner's answer 6a, the desk's `.body-link`): the
+   * first tap scrolls the manifest to its row and opens it, the body
+   * lighting while the row is open; a tap on the lit body goes to the item,
+   * the open drawer lifting into it, and Escape on the dial puts the row
+   * away (onKeyActivate). A body the manifest draws no row for
+   * goes straight to the item, as a search result does (§6.e). The relay's
+   * catch does what its row's `review & amend →` does: raises the review
+   * sheet in place (round 3 §4).
+   * @param {DialBody} b
+   */
+  async function tapBody(b) {
+    if (lit !== b.id && (await openRow(b.id))) return;
+    if (b.suggestion) {
+      const suggested = view?.suggestions.find((one) => one.id === b.id);
+      if (suggested?.receiptId) openReview(suggested);
+      return;
+    }
+    morphing = lit === b.id;
+    goto(resolve("/item/[[id]]", { id: encodeURIComponent(b.id) }));
+  }
+  /* A press on the lit body must not close its row on the way down (row.js
+     closes an open row on any press outside it), or the drawer would be gone
+     before the tap could lift it into the item. Registered before any row
+     opens, so it hears the press first. */
+  $effect(() => {
+    /** @param {PointerEvent} event */
+    const onpress = (event) => {
+      const body = event.target instanceof Element ? event.target.closest(".pocket .mdial [data-body]") : null;
+      if (body && lit && body.getAttribute("data-body") === lit) event.stopImmediatePropagation();
+    };
+    addEventListener("pointerdown", onpress, true);
+    return () => removeEventListener("pointerdown", onpress, true);
+  });
+  /** @type {(id: string) => typeof searchDocuments} */
+  const papersOf = (id) => searchDocuments.filter((doc) => doc.itemId === id);
+
+  /* `complete` from a drawer, as the belt does it (item/[[id]]/+page.svelte,
+     tapComplete): an item with a cost to confirm goes to its belt with the
+     record sheet up; one with nothing to record completes on the tap, held
+     for the wake's four seconds so `undo` is a real undo, and sent at once
+     if the page is left first. */
+  /** @typedef {{ command: object, timer: ReturnType<typeof setTimeout> | undefined, done: boolean }} HeldCompletion */
+  /** @type {HeldCompletion | null} */
+  let held = null;
+  /** The key a held completion is stashed under (#1151 W1-S3), the same
+      reasoning and the same literal key as item/[[id]]/+page.svelte's own
+      (W1-R5): a flush cut off by the page actually unloading — not merely
+      refused — is picked up on the next load instead of silently failing.
+      One slot: this screen only ever holds one completion at a time. */
+  const HELD_COMPLETION_KEY = "orbit:pending-completion";
+  /* A list, not one slot: completing a second item inside the first's undo
+     window sends the first at once, and its send can still fail or answer
+     late. One slot lost the first (overwritten) or the second (cleared by
+     the first's late success). Each entry leaves on its own send only. */
+  /** @returns {object[]} */
+  function readHeldCompletionStash() {
+    try {
+      const raw = localStorage.getItem(HELD_COMPLETION_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [parsed.command].filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+  /** @param {object[]} commands */
+  function writeHeldCompletionStash(commands) {
+    try {
+      if (commands.length === 0) localStorage.removeItem(HELD_COMPLETION_KEY);
+      else localStorage.setItem(HELD_COMPLETION_KEY, JSON.stringify(commands));
+    } catch { /* best effort */ }
+  }
+  /** @param {object} command */
+  function stashHeldCompletion(command) {
+    writeHeldCompletionStash([...readHeldCompletionStash(), command]);
+  }
+  /** @param {object} command */
+  function clearHeldCompletionStash(command) {
+    const key = JSON.stringify(command);
+    writeHeldCompletionStash(readHeldCompletionStash().filter((one) => JSON.stringify(one) !== key));
+  }
+  /** @param {{ id: string, title: string }} one */
+  function completeRow(one) {
+    const raw = rawItems.get(one.id);
+    const householdId = view?.primary;
+    if (!raw || !householdId || !view) return;
+    if (raw.costMinor !== null && raw.costMinor !== undefined) {
+      morphing = true;
+      goto(resolve("/item/[[id]]", { id: encodeURIComponent(one.id) }), { state: { pocketAct: "complete" } });
+      return;
+    }
+    sendHeld();
+    const completedDate = view.today;
+    const nextDate = nextDateAfter(completedDate, raw.recurrenceMonths) ?? undefined;
+    /* Built once, not per send (#1151 W1-R2/W1-R3's own reasoning): a retry
+       reuses the exact command, version guard included. */
+    const command = completeCommand(/** @type {any} */ ({ ...raw, householdId }), { completedDate, nextDate });
+    stashHeldCompletion(command);
+    /** @type {HeldCompletion} */
+    const job = { command, done: false, timer: undefined };
+    job.timer = setTimeout(() => fireHeld(job), WAKE_HOLD_MS);
+    held = job;
+    wake(`Completed${nextDate ? ` · next due ${short(nextDate)}` : ""} · ${one.title}`, {
+      undo: () => {
+        clearTimeout(job.timer);
+        job.done = true;
+        if (held === job) held = null;
+        clearHeldCompletionStash(job.command);
+      },
+    });
+  }
+  /** @param {HeldCompletion} job */
+  async function fireHeld(job) {
+    if (job.done) return;
+    job.done = true;
+    if (held === job) held = null;
+    try {
+      await applyCommand(job.command);
+      clearHeldCompletionStash(job.command);
+      await onchanged?.();
+    } catch (error) {
+      wake(/** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again", { failure: true });
+    }
+  }
+  /* Leaving before the wake has gone: the completion is sent now, not lost
+     — and stashed before it is sent (above), so even a send this screen
+     never lives to see the answer to is picked up on the next load
+     (#1151 W1-S3). */
+  function sendHeld() {
+    const job = held;
+    if (!job || job.done) return;
+    clearTimeout(job.timer);
+    job.done = true;
+    held = null;
+    applyCommand(job.command).then(() => clearHeldCompletionStash(job.command)).catch(() => {});
+  }
+  beforeNavigate(() => { sendHeld(); });
+  $effect(() => {
+    addEventListener("pagehide", sendHeld);
+    return () => { removeEventListener("pagehide", sendHeld); };
+  });
+  /** A completion stashed by a previous visit that never confirmed it sent
+      (#1151 W1-S3): picked up here instead of staying lost with nothing
+      said. A version conflict means somebody already holds this change —
+      most likely the original send landing after all — so that alone is
+      treated as the stash's own success. Runs once, on mount: nothing it
+      reads is reactive state. */
+  $effect(() => {
+    for (const command of readHeldCompletionStash()) applyCommand(command).then(async () => {
+      clearHeldCompletionStash(command);
+      await onchanged?.();
+    }).catch((error) => {
+      if (error instanceof WorkspaceError && error.code === "version_conflict") {
+        clearHeldCompletionStash(command);
+        onchanged?.();
+        return;
+      }
+      wake(/** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again", { failure: true });
+    });
+  });
+
+  /* `copy link`: the item's address, the desk's (+page.svelte addressOf),
+     the one place the pocket offers it. */
+  /** @type {string | null} */
+  let copied = $state(null);
+  /** @param {string} id */
+  async function copyLink(id) {
+    try {
+      await navigator.clipboard.writeText(new URL(`/home?item=${encodeURIComponent(id)}`, location.origin).href);
+      copied = id;
+    } catch {
+      /* A refused clipboard is no error worth a word: the address still works. */
+      copied = null;
+    }
+  }
+
+  /** The acts in a manifest item's drawer. @param {{ id: string, title: string }} one @returns {import('$lib/pocket/row.js').RowAct[]} */
+  const itemActs = (one) => [
+    { label: "open →", name: `Open ${one.title}`, tone: "accent", onact: () => { morphing = true; },
+      href: resolve("/item/[[id]]", { id: encodeURIComponent(one.id) }) },
+    { label: "complete", name: `Complete ${one.title}`, tone: "ok", onact: () => completeRow(one) },
+  ];
+  /** The relay's catch, decided from its row. @param {import('$lib/data/workspace.js').ReceiptSuggestion} s @returns {import('$lib/pocket/row.js').RowAct[]} */
+  const suggestionActs = (s) => [
+    { label: "Add to orbit", name: `Add ${s.title} to your orbit`, tone: "filled", arms: true, onact: () => decide("approve", s) },
+    { label: "Dismiss", name: `Dismiss ${s.title}`, danger: true, onact: () => decide("dismiss", s) },
+  ];
+
+  // Keyboard (§2.4): ↓ from the field walks into the results, ↑ and ↓ move
+  // through them, ↑ from the first goes back to the field, Enter in the field
+  // takes the first result. Escape is the sheet's own.
+  /** @type {HTMLElement | undefined} */
+  let resultList = $state();
+  /* The results, then the top match's act in the sheet's foot. */
+  const resultStops = () =>
+    /** @type {HTMLElement[]} */ ([
+      ...(resultList?.querySelectorAll("[data-row-face]") ?? []),
+      ...document.querySelectorAll(".p-sheet-layer.open .pk-act"),
+    ]);
+  /** @param {KeyboardEvent} event */
+  function fieldKey(event) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      resultStops()[0]?.focus();
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      resultStops()[0]?.click();
+    }
+  }
+  /** @param {KeyboardEvent} event */
+  function listKey(event) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    const stops = resultStops();
+    const at = stops.indexOf(/** @type {HTMLElement} */ (document.activeElement));
+    if (at < 0) return;
+    event.preventDefault();
+    const next = at + (event.key === "ArrowDown" ? 1 : -1);
+    if (next < 0) /** @type {HTMLElement | null} */ (document.querySelector(".pk-field"))?.focus();
+    else stops[Math.min(next, stops.length - 1)]?.focus();
+  }
+
+  // ---- other skies: a chip flies there (#1118, owner 2026-09-25, 7a) --------
+
+  /** @type {string | null} */
+  let flying = $state(null);
+  let flight = $state({ x: 0, y: 0 });
+  /** @type {HTMLElement | undefined} */
+  let dialEl = $state();
+  /** The dial square the north star rests in (round 3 §5). @type {HTMLElement | null} */
+  let dialBox = $state(null);
+  // As the desk does: the sky streams toward the other household and you
+  // arrive at it, through the sun's door, so its way back reads "← your sky".
+  /**
+   * @param {MouseEvent} event
+   * @param {string} id
+   */
+  function fly(event, id) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    markDoor("sky");
+    if (flying) { event.preventDefault(); return; }
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches || !dialEl) return;
+    event.preventDefault();
+    const chip = /** @type {HTMLElement} */ (event.currentTarget).getBoundingClientRect();
+    const dial = dialEl.getBoundingClientRect();
+    flight = {
+      x: Math.round(chip.left + chip.width / 2 - (dial.left + dial.width / 2)),
+      y: Math.round(chip.top + chip.height / 2 - (dial.top + dial.height / 2)),
+    };
+    flying = id;
+    setTimeout(() => goto(resolve("/household/[id]", { id })).finally(() => { flying = null; }), 620);
+  }
 </script>
 
-<div class="pocket">
+<div class="pocket" class:pk-flying={flying}>
 <div class="sky"><svg viewBox="0 0 400 850" preserveAspectRatio="xMidYMid slice">
 <g fill="var(--star-far, #e9edf8)"><circle cx="152.4" cy="196.1" r="0.52" opacity="0.37"/>
       <circle cx="231.2" cy="586.6" r="0.79" opacity="0.22"/>
@@ -191,50 +744,28 @@
       <circle cx="193.5" cy="214.6" r="0.88" opacity="0.26"/>
       <circle cx="109.0" cy="588.2" r="1.03" opacity="0.17"/>
       <circle cx="325.1" cy="640.6" r="0.77" opacity="0.16"/></g></svg></div>
-<div class="mpage">
-  <div class="mtop">
-    <div class="mark-row" style="font-size:15px"><svg width="22" height="22" viewBox="0 0 200 200"><circle cx="100" cy="100" r="72" fill="none" stroke="var(--ink-mid)" stroke-width="10"/><circle cx="163" cy="63.5" r="22" style="fill:var(--accent)"/></svg> orbit</div>
-    <!-- #852: the avatar opens the same account panel the desk orb does
-         (+page.svelte's `.account`/`#account`), laid out as a bottom sheet
-         here — see `.msheet` below and pocket.behaviour.js for the wiring. -->
-    <button class="morb" id="morb" aria-expanded="false" aria-controls="maccount" title="Menu">{initials}</button>
-    <!-- #852: the account menu as a bottom sheet — same contents as the desk
-         `.account` (+page.svelte lines ~779-810), same wiring (pocket.behaviour.js
-         imports setSwatch/packOf from ./swatches.js, the same functions
-         home.behaviour.js's swatches use, and drives sign-out the way
-         Chrome.svelte's sub-screen orb does: two taps, the second one revoking
-         the session before it navigates). Only one of `#sheet`/`#maccount` is
-         ever open at a time — pocket.behaviour.js enforces that. It sits here,
-         straight after `#morb`, for the same reason the desk `.account` follows
-         its orb: one Tab from the open toggle must land inside the sheet
-         (tests/e2e/support/keyboard.ts auditLightDismiss). It is position:fixed,
-         so its place in the DOM changes nothing visually. -->
-    <div class="msheet" id="maccount" role="region" aria-label="Account and menu">
-      <div class="grab"></div>
-      <div class="mwho"><b>{view?.user?.displayName ?? ""}</b><span>{roleLine}</span></div>
-      <nav>
-        <a href={resolve("/inbox")}>Inbox</a>
-        <a href={resolve("/settings")}>Settings</a>
-        <a href={resolve("/administration")}>Administration</a>
-      </nav>
-      <div class="mswatches" role="group" aria-label="Theme">
-        <span>THEME</span>
-        <button style="background:#070d1f" title="star-chart" aria-pressed="true"></button>
-        <button style="background:#05070d" title="after dark" aria-pressed="false"></button>
-        <button style="background:#eef2f9" title="clouds" aria-pressed="false"></button>
-        <button style="background:#d2d3d4" title="dawn" aria-pressed="false"></button>
-        <button style="background:#080a14;box-shadow:inset 0 0 0 1px #ff4fd8" title="retrograde"
-                aria-pressed="false"></button>
-      </div>
-      <button class="msignout" id="msignout">sign out →</button>
-      <div class="msignout-problem" id="msignout-problem" hidden></div>
-    </div>
-  </div>
+<TopChrome wordmark>
+  {#snippet end()}
+    <!-- #852: the avatar opens the account menu; #1120: that menu is the
+         kit's hatch. It opens rather than toggles, so a press replayed after
+         the screen went live (#1064, +page.svelte) cannot close it again. -->
+    <button class="porb" id="morb" class:waiting={waiting > 0} aria-haspopup="dialog" aria-expanded={hatchOpen}
+            aria-label={waiting > 0 ? `Account and menu, ${waiting} waiting in your inbox` : "Account and menu"}
+            onclick={() => (hatchOpen = true)}>
+      <span class="disc">{initials}</span>
+      {#if waiting > 0}<span class="bead" aria-hidden="true">{waiting}</span>{/if}
+    </button>
+  {/snippet}
+</TopChrome>
+<!-- #1120: the pocket's one main landmark and its one h1, as the desk's
+     `.desk` role=main and sr-only h1 are; the section heads under it are h2. -->
+<main class="mpage">
+  <h1 class="sr-only">Orbit</h1>
   {#if view?.emptySky}
   <!-- §11 (#453): the pocket's labelled sky is a list — each system a ring
        and a name, nothing else. Tapping asks; asking rides data attributes
-       because the hidden dialect must never bind listeners. -->
-  <div class="mgroup adrift"><h3>SYSTEMS AROUND YOU</h3>
+       that +page.svelte binds, the same ask the desk's labelled sky raises. -->
+  <div class="mgroup adrift"><h2 class="p-caps">Systems around you</h2>
     {#each Object.entries(view.galaxy) as [id, hh] (id)}
       <div class="mitem askrow" data-ask={id} data-ask-name={hh.name} data-ask-requested={String(Boolean(hh.requested))}>
         <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" stroke="var(--line)"/><circle cx="13" cy="13" r="2.4" style="fill:var(--ink-mid)"/></svg>
@@ -244,109 +775,256 @@
     <!-- #840: the create card this leads to only ever appears at / (the
          arrival), not on /create's full form -- there is no household yet
          for that form to write into while the sky is empty. -->
-    <div class="burnup">the systems around you are labels until someone lets you in<br><a href={resolve("/")}>— or start your own system →</a></div>
+    <!-- Round 3 §3.1: the rows already say "tap to ask to join". -->
+    <div class="pk-own"><a href={resolve("/")}>— or start your own system →</a></div>
   </div>
   {:else}
-  <div class="mdial">
+  <!-- `arrive` is the desk's own arrival flag (+page.svelte): a forward
+       arrival, never a Back, and never under the launch's own landing. -->
+  <!-- The dial square, and in its bottom-right corner the north star's rest
+       station (round 3 §5). A wrapper, so the dial's own arrival and flight
+       transforms never carry the star. -->
+  <div class="pk-dialbox" bind:this={dialBox}>
+  <div class="mdial" class:arrive bind:this={dialEl} style:--fx="{flight.x}px" style:--fy="{flight.y}px">
     <svg viewBox="0 0 380 380">
+      <!-- The desk's spheres and danger wash (+page.svelte's dial defs),
+           named for the pocket: the desk's own defs share this document. -->
+      <defs aria-hidden="true">
+        <filter id="pk-sun" x="-200%" y="-200%" width="500%" height="500%"><feGaussianBlur stdDeviation="5"/></filter>
+        <radialGradient id="pk-ruby" cx="34%" cy="30%" r="72%">
+          <stop offset="0%" stop-color="var(--p-ruby-1, #ffb3ab)"/><stop offset="42%" stop-color="var(--p-ruby-2, #e0453e)"/>
+          <stop offset="100%" stop-color="var(--p-ruby-3, #7e1a1f)"/>
+        </radialGradient>
+        <radialGradient id="pk-jade" cx="34%" cy="30%" r="72%">
+          <stop offset="0%" stop-color="var(--p-jade-1, #b8f5cf)"/><stop offset="45%" stop-color="var(--p-jade-2, #2fae6a)"/>
+          <stop offset="100%" stop-color="var(--p-jade-3, #12603a)"/>
+        </radialGradient>
+        <radialGradient id="pk-amber" cx="34%" cy="30%" r="72%">
+          <stop offset="0%" stop-color="var(--p-amber-1, #ffe1a0)"/><stop offset="45%" stop-color="var(--p-amber-2, #f0a52b)"/>
+          <stop offset="100%" stop-color="var(--p-amber-3, #8a5a10)"/>
+        </radialGradient>
+        <radialGradient id="pk-sky" cx="34%" cy="30%" r="72%">
+          <stop offset="0%" stop-color="var(--p-sky-1, #cfe4ff)"/><stop offset="45%" stop-color="var(--p-sky-2, #6fa3ef)"/>
+          <stop offset="100%" stop-color="var(--p-sky-3, #2a4f8f)"/>
+        </radialGradient>
+        <radialGradient id="pk-danger4" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#f87171" stop-opacity=".10"/>
+          <stop offset="55%" stop-color="#f87171" stop-opacity=".035"/>
+          <stop offset="85%" stop-color="#f87171" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
       <circle cx="190" cy="190" r="150" fill="none" stroke="var(--line)" stroke-width="1.5"/>
+      <g stroke="var(--line)" stroke-width="1.5" aria-hidden="true">
+        {#each TICKS as t, k (k)}<line x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2}/>{/each}</g>
+      <circle cx="190" cy="190" r="62" fill="url(#pk-danger4)"/>
       <circle cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3"
               stroke-width="1" stroke-dasharray="3 5"/>
-      <g font-size="11" fill="var(--ink-quiet)" text-anchor="middle" font-family="JetBrains Mono,monospace">
+      <!-- Quarter labels at 15 units: 13px at the narrowest dial (§2.1). -->
+      <g font-size="15" fill="var(--ink-quiet)" text-anchor="middle" font-family="JetBrains Mono,monospace">
         {#each quarters as q, k (k)}<text x={q.x} y={q.y}>{q.label}</text>{/each}</g>
-      <path d="M190 34 l6 10 h-12 Z" style="fill:var(--accent)"/>
-      <circle cx="190" cy="190" r="8" style="fill:#fff6e6"/>
+      <path d="M190 38 l6 10 h-12 Z" style="fill:var(--accent)"/>
+      <!-- The sun (the desk's #sun, scaled): a soft glow that breathes under
+           the core, and the household's name beneath it. -->
+      <circle class="pk-glow" cx="190" cy="190" r="16" style="fill:#fff6e6" fill-opacity=".28" filter="url(#pk-sun)"/>
+      <circle class="pk-sun" cx="190" cy="190" r="8" style="fill:#fff6e6"/>
+      <text x="190" y="218" font-size="15" text-anchor="middle" style="fill:var(--ink-mid);font-family:var(--ui)">{view?.household?.name ?? ""}</text>
+      {#if pinging}
+        <circle class="pk-ping" cx={pinging.placement.x} cy={pinging.placement.y} r={bodyR(pinging) + 3} fill="none"
+                stroke="currentColor" stroke-opacity=".7" style:color={bodyColour(pinging)} aria-hidden="true"/>
+      {/if}
       {#each pocketBodies as b (b.id)}
+        <!-- #1129/§1.7: the drawn body keeps its size; an invisible 44px
+             circle round it takes the tap, and the spacing law keeps every
+             such circle clear of its neighbours. -->
         {#if b.suggestion}
           <!-- #466: the relay's catch is ON the dial at its law position —
                the same hollow accent body the desk shows (§12). -->
-          <g data-sheet-sugg={b.id} style="cursor:pointer" tabindex="0" role="button"
-             aria-label={`caught receipt: ${b.title}`}>
+          <g class="pk-body" class:lit={lit === b.id} data-body={b.id} data-body-sugg tabindex="0" role="button"
+             aria-label={`caught receipt: ${b.title}`}
+             onclick={() => tapBody(b)} onkeydown={(event) => onKeyActivate(event, () => tapBody(b))}>
             <circle cx={b.placement.x} cy={b.placement.y} r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/>
             <circle cx={b.placement.x} cy={b.placement.y} r="6" style="fill:var(--accent)" opacity=".12"/>
+            {#if lit === b.id}<circle class="pk-lit" cx={b.placement.x} cy={b.placement.y} r="12.5"/>{/if}
+            <circle class="hit" cx={b.placement.x} cy={b.placement.y} r={HIT_R}/>
           </g>
         {:else}
-          <circle cx={b.placement.x} cy={b.placement.y} r={bodyR(b)} style="fill:{bodyColour(b)}"
-                  data-sheet-title={b.title} data-sheet-meta={sheetMeta(b)}
-                  tabindex="0" role="button" aria-label={b.title}/>
-          {#if b.documentCount > 0 && b.paint === "jade"}
-            <ellipse cx={b.placement.x} cy={b.placement.y} rx="14" ry="5"
-                     transform="rotate(-24 {b.placement.x} {b.placement.y})"
-                     fill="none" style="stroke:var(--accent)" stroke-width="1.2" opacity=".8"/>
-          {/if}
+          <!-- data-papers: how many documents ride with this body, for the
+               first-run film's belt chapter (#1174), which opens a body that
+               carries some; one attribute, no style change (as pk-sun). -->
+          <g class="pk-body" class:lit={lit === b.id} data-body={b.id} data-papers={b.documentCount} tabindex="0" role="button" aria-label={b.title}
+             onclick={() => tapBody(b)} onkeydown={(event) => onKeyActivate(event, () => tapBody(b))}>
+            <circle cx={b.placement.x} cy={b.placement.y} r={bodyR(b)} style="fill:{bodyFill(b)}"/>
+            {#if lit === b.id}<circle class="pk-lit" cx={b.placement.x} cy={b.placement.y} r={bodyR(b) + 4}/>{/if}
+            {#if b.documentCount > 0 && b.paint === "jade"}
+              <ellipse cx={b.placement.x} cy={b.placement.y} rx="14" ry="5"
+                       transform="rotate(-24 {b.placement.x} {b.placement.y})"
+                       fill="none" style="stroke:var(--accent)" stroke-width="1.2" opacity=".8"/>
+            {/if}
+            <circle class="hit" cx={b.placement.x} cy={b.placement.y} r={HIT_R}/>
+          </g>
         {/if}
       {/each}
     </svg>
   </div>
-  <!-- #845: the strip scrolls sideways, so it must be reachable to scroll by keyboard. -->
+  <NorthStar docked anchor={dialBox} hidden={starHidden} />
+  </div>
+  {#if others.length}
+  <!-- #845: the strip scrolls sideways, so it must be reachable to scroll by
+       keyboard (WCAG 2.1.1): a focusable, named region. The rule below cannot
+       see that it scrolls, so it is silenced deliberately. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div class="skies" tabindex="0" role="region" aria-label="Other skies">
     {#each others as hh (hh.id)}
-      <div class="msys"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--line)"/><circle cx={hh.dx} cy={hh.dy} r="2" style="fill:var({hh.tone === "--warm" ? "--warm" : hh.tone === "--upcoming" ? "--upcoming" : "--ok"})" opacity=".6"/></svg>{hh.name}</div>
+      <a class="msys" class:target={flying === hh.id} href={resolve("/household/[id]", { id: hh.id })}
+         onclick={(event) => fly(event, hh.id)}>
+        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="none" stroke="var(--line)"/><circle cx={hh.dx} cy={hh.dy} r="2" style="fill:var({hh.tone === "--warm" ? "--warm" : hh.tone === "--upcoming" ? "--upcoming" : "--ok"})" opacity=".6"/></svg>{hh.name}</a>
     {/each}
   </div>
-  <div class="msearch"><input placeholder="explore your world" readonly></div>
+  {/if}
+  <!-- §2.1: a button drawn as the desk's field, never a field on the page,
+       so iOS never scrolls to an input that is about to move into the sheet. -->
+  <button class="msearch" onclick={openSearch}>explore your world</button>
+  <div class="pk-below" class:pk-busy={busy}>
   {#if groups?.attention.length}
-  <div class="mgroup"><h3>NEEDS ATTENTION</h3>
-    {#each groups.attention as row (row.id)}
-      <div class="mitem"><span class="dot" style="background:var({BAND_VAR[row.band]})"></span>
-        <div class="flex"><b>{row.title}</b><span>{[row.section, row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null].filter(Boolean).join(" · ")}</span></div>
-        <div class="mt" style="color:var({BAND_VAR[row.band]})">{tlabel(row)}<small>{row.dueDate ? short(row.dueDate) : ""}</small></div></div>
-    {/each}
+    <h2 class="p-caps">Needs attention</h2>
+    <div class="pk-list" data-row-group data-row-cards>
+      {#each groups.attention as one (one.id)}
+        <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")} key={one.id}
+             trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
+             acts={itemActs(one)} ontoggle={onRowToggle(one.id)}>
+          {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
+          {#snippet detail()}
+            <ItemDrawer {one} raw={rawItems.get(one.id)} papers={papersOf(one.id)} problem={rowProblem[one.id] ?? null}
+                        reading={!papersReady && (rawItems.get(one.id)?.documentCount ?? 0) > 0} />
+          {/snippet}
+          {#snippet after()}
+            <button class="p-quiet pk-copy" onclick={() => copyLink(one.id)}>{copied === one.id ? "link copied" : "copy link"}</button>
+          {/snippet}
+        </Row>
+      {/each}
+    </div>
+  {:else if groups?.later.length}
+    {@const next = groups.later[0]}
+    <h2 class="p-caps">Needs attention</h2>
+    <!-- Nothing needs you: the one row is the next item up, and opens as it. -->
+    <div class="pk-list" data-row-group data-row-cards>
+      <Row title="nothing needs you" meta={`next up ${next.title}${next.days !== null ? `, ${tlabel(next)}` : ""}`} key={next.id}
+           acts={itemActs(next)} ontoggle={onRowToggle(next.id)}>
+        {#snippet mark()}<span class="pk-dot quiet"></span>{/snippet}
+        {#snippet detail()}
+          <ItemDrawer one={next} raw={rawItems.get(next.id)} papers={papersOf(next.id)} problem={rowProblem[next.id] ?? null}
+                      reading={!papersReady && (rawItems.get(next.id)?.documentCount ?? 0) > 0} />
+        {/snippet}
+        {#snippet after()}
+          <button class="p-quiet pk-copy" onclick={() => copyLink(next.id)}>{copied === next.id ? "link copied" : "copy link"}</button>
+        {/snippet}
+      </Row>
+    </div>
+  {/if}
+  <!-- #466; round 3 §2 and owner-decisions §29 (#1142): 32px of clear sky
+       below the manifest, a caps head, then each signal as its own row-card
+       as the desk seats a suggestion (#1145): dashed at rest, the thin solid
+       accent outline open, no rail. A suggestion row opens in place with
+       its readings and its two decisions. Reading and failed mail are the
+       inbox's matter: at most one summary row, last, goes there (owner's
+       answer 12a). -->
+  {#if view && (view.suggestions.length || mailSummary)}
+    <section class="pk-signals" aria-labelledby="pk-signals-h">
+      <h2 class="p-caps" id="pk-signals-h">Signals{#if view.suggestions.length}<span class="p-count">{view.suggestions.length}</span>{/if}</h2>
+      <div class="pk-pen" data-row-group data-row-cards>
+        {#each view.suggestions as s (s.id)}
+          <Row title={s.title} key={s.id}
+               meta={burnsIn(s) !== null ? `burns up in ${burnsIn(s)}d` : ""}
+               trail={s.costMinor ? money(s.costMinor, s.currency, true) : ""}
+               trailSub={s.renewsOn ? `${dateWord(s)} ${short(s.renewsOn)}` : ""} trailTone="var(--accent-text)"
+               acts={suggestionActs(s)} ontoggle={onRowToggle(s.id)}>
+            {#snippet mark()}<span class="pk-dot hollow"></span>{/snippet}
+            {#snippet detail()}<SuggestionDrawer suggestion={s} problem={rowProblem[s.id] ?? null} />{/snippet}
+            {#snippet after()}
+              {#if s.receiptId}
+                <button class="p-quiet" aria-haspopup="dialog" onclick={() => openReview(s)}>review &amp; amend →</button>
+              {/if}
+            {/snippet}
+          </Row>
+        {/each}
+        {#if mailSummary}
+          <Row title={mailSummary} meta="inbox →" href={resolve("/inbox")} key="mail">
+            {#snippet mark()}<span class="pk-dot {view.mailReading.length ? 'breathing' : 'failed'}"></span>{/snippet}
+          </Row>
+        {/if}
+      </div>
+    </section>
+  {/if}
   </div>
   {/if}
-  <!-- #466: the pocket's signals surface — what the relay caught, in the
-       pocket's own grammar. Suggestion rows raise the suggestion sheet;
-       failures speak the server's words. -->
-  {#if view?.suggestions?.length || view?.mailReading?.length || view?.mailFailures?.length}
-  <div class="mgroup"><h3>SIGNALS — YOUR RELAY CAUGHT</h3>
-    {#each view.suggestions as s (s.id)}
-      <div class="mitem suggest" data-sheet-sugg={s.id}>
-        <span class="dot sug"></span>
-        <div class="flex"><b>{s.title}</b><span>{[
-          `from ${s.sourceDocument}`,
-          burnsIn(s) !== null ? `burns up in ${burnsIn(s)}d` : null,
-        ].filter(Boolean).join(" · ")}</span></div>
-        <div class="mt" style="color:var(--accent-text)">{s.costMinor ? money(s.costMinor, s.currency, true) : ""}<small>{s.renewsOn ? `renews ${short(s.renewsOn)}` : ""}</small></div>
-      </div>
-    {/each}
-    {#each view.mailReading as r (r.id)}
-      <div class="mitem reading">
-        <span class="dot"></span>
-        <div class="flex"><b>A message arrived {agoShort(r.receivedAt)}</b><span>still reading its document</span></div>
-      </div>
-    {/each}
-    {#each view.mailFailures as f (f.id)}
-      <div class="mitem failed">
-        <span class="dot"></span>
-        <div class="flex"><b>A message from {short(f.receivedAt.slice(0, 10))}</b><span>{f.message}</span></div>
-      </div>
-    {/each}
-    <div class="burnup">unreviewed arrivals burn up after 45 days · nothing is added without you</div>
+</main>
+</div>
+
+<Sheet bind:open={sheetOpen} size="list" title="Search your orbit" hideTitle>
+  <!-- The search field rides in the sheet's head (§2.4). Declared in here
+       rather than at the top of the markup: a top-level snippet trips the
+       production bundler (#1130). -->
+  {#snippet head()}
+    <input class="pk-field" type="search" placeholder="explore your world" aria-label="Search your orbit"
+           autocomplete="off" enterkeyhint="go" bind:value={query} onkeydown={fieldKey}>
+  {/snippet}
+  <!-- #1057's phone half (§2.4; phone-search round 1, B). -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="pk-results" class:pk-busy={busy} bind:this={resultList} onkeydown={listKey}>
+    {#if !results.query}
+      {#each results.items as one (one.id)}
+        <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
+             trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
+             onactivate={() => openResult(one.id)}>
+          {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
+        </Row>
+      {/each}
+      <Row title="→ add an item" href={resolve("/create")} />
+    {:else if results.nothing}
+      <p class="p-empty">nothing in your orbit is called “{results.query}”</p>
+      <!-- #1120: the name rides along; /create's pocket reads ?name= (§2.5). -->
+      <Row title={`add “${results.query}” as an item`}
+           href={`${resolve("/create")}?${new URLSearchParams({ name: results.query })}`}>
+        {#snippet mark()}<span class="pk-plus" aria-hidden="true">+</span>{/snippet}
+      </Row>
+    {:else}
+      {#each results.items as one (one.id)}
+        <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
+             trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
+             onactivate={() => openResult(one.id)}>
+          {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
+        </Row>
+      {/each}
+      {#each results.documents as doc (doc.id)}
+        <!-- Round 3 §8: the item alone; the paper's date is its own sheet's. -->
+        <Row title={doc.name} meta={doc.itemTitle} onactivate={() => openPaper(doc)}>
+          {#snippet mark()}<span class="pk-paper" aria-hidden="true">◆</span>{/snippet}
+        </Row>
+      {/each}
+    {/if}
+    {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
   </div>
-  {/if}
-  {/if}
-</div>
-<div class="sheet" id="sheet">
-  <div class="grab"></div><b id="sh-title"></b><div class="meta" id="sh-meta"></div>
-  <div class="fields" id="sh-fields"></div>
-  <div class="acts" id="sh-acts-item"><button class="pri">open</button><button>documents</button><button
-    data-sheet-close>close</button></div>
-  <div class="acts" id="sh-acts-sugg" hidden>
-    <button class="pri" data-sugg-act="approve">Add to orbit</button>
-    <button data-sugg-act="dismiss">Dismiss</button>
-    <button data-sheet-close>close</button>
-  </div>
-  <a class="amend" id="sh-amend" href={resolve("/home")} hidden>review &amp; amend →</a>
-</div>
-{#each view?.suggestions ?? [] as s (s.id)}
-  <!-- The suggestion sheet's copy, rendered by Svelte and cloned into the
-       sheet by the behaviour — no markup is ever built from strings. -->
-  <template data-sugg-template={s.id} data-title={s.title}
-            data-meta={suggMeta(s)}>
-    {#if s.provider}<div class="kv"><span>provider</span><b>{s.provider}</b></div>{/if}
-    {#if s.renewsOn}<div class="kv"><span>renews</span><b>{short(s.renewsOn)} {s.renewsOn.slice(0, 4)}</b></div>{/if}
-    {#if s.costMinor}<div class="kv"><span>cost</span><b>{money(s.costMinor, s.currency, true)}</b></div>{/if}
-    <div class="kv"><span>document</span><b>◆ {s.sourceDocument} · scanned clean</b></div>
-  </template>
-{/each}
-</div>
+  <!-- Every act in the sheet's pinned foot (review round §1.2). -->
+  {#snippet foot()}
+    {#if results.query && !results.nothing && results.complete}
+      {@const top = results.complete}
+      <!-- The one accent action for the top match (§2.4). Wrapped rather
+           than passed a disabled prop ArmButton has no concept of (#1151
+           W1-R8): dims and stops taking taps while any row act (or this
+           one) is already in flight, sharing the same `busy` flag. -->
+      <span class:pk-foot-busy={busy}>
+        <ArmButton label={`→ complete “${top.title}”`} armedLabel="tap again to complete" danger={false} wide
+                   class="pk-act" onfire={() => complete(top)} />
+      </span>
+    {/if}
+  {/snippet}
+</Sheet>
+
+<Hatch bind:open={hatchOpen} name={view?.user?.displayName ?? ""} {roleLine} {isAdmin}
+       inboxCount={waiting || null} />
+
+<ReviewSheet bind:open={reviewOpen} title={reviewing?.title ?? ""} proposal={reviewing?.proposal}
+             householdId={reviewing ? (reviewing.householdId ?? view?.primary ?? null) : null}
+             households={view?.households ?? []} readings={reviewing ? formReadingsOf(reviewing) : []}
+             papers={reviewing ? reviewPapersOf(reviewing) : []} receiptId={reviewing?.receiptId ?? null}
+             {busy} problem={reviewProblem} onsave={saveReview} />

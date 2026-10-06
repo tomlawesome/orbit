@@ -411,6 +411,7 @@
   <title>Orbit — maintenance</title>
 </svelte:head>
 
+<div class="maintenance-page">
 <div class="sky"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
   <defs>
     <radialGradient id="stargl" cx="50%" cy="50%" r="50%">
@@ -574,3 +575,4 @@
 <Grain slope={0.09} />
 
 <div class="vignette" style="background:radial-gradient(ellipse at 50% 44%,transparent 46%,rgba(0,0,0,.42) 100%)"></div>
+</div>

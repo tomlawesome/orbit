@@ -1,6 +1,8 @@
 import { goto } from "$app/navigation";
-import { activeHousehold, applyCommand } from "$lib/data/workspace.js";
+import { WorkspaceError, activeHousehold, applyCommand } from "$lib/data/workspace.js";
+import { saveProblem } from "$lib/data/metadata-status.js";
 import { screenScope } from "$lib/teardown.js";
+import { createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, refusalOf } from "./entry.js";
 
 /**
  * The new-entry form's behaviour, carried across from design/v19/create-v3.html
@@ -11,6 +13,17 @@ import { screenScope } from "$lib/teardown.js";
  * type chips and a drop target, and unfolds the rest the moment you start.
  * `reveal()` is one-way — a form that folded back up while you were filling it
  * in would be worse than one that never folded.
+ *
+ * The owner's five #1058 create decisions, built here under #1069 (the sixth
+ * and seventh — search and the second tap on mobile — are the pocket's own,
+ * under #1057): no assignee; a section must be picked, with no default; kind
+ * maps to a schedule (an inspection recurs, a document's date is optional and
+ * never recurs, a suggestion schedules nothing); recurrence adds a fourth,
+ * custom choice, 1–120 months; a save failure is loud, beside the button, and
+ * nothing typed is lost. The mapping, the recurrence bound and the refusal
+ * wording are not reimplemented here — `entry.js` is the one place they live,
+ * shared with the pocket's own form (`pocket.svelte`, `EntryForm.svelte`),
+ * which built the same five decisions first and is this file's reference.
  *
  * Three deliberate departures from the mockup:
  *
@@ -43,28 +56,166 @@ export function mountCreate() {
   const dropzone = document.getElementById("dropzone");
   const nameInput = /** @type {HTMLInputElement} */ (document.getElementById("f-name"));
   const typeButtons = /** @type {HTMLElement[]} */ ([...document.querySelectorAll("#types button")]);
+  const sections = /** @type {HTMLElement} */ (document.getElementById("sections"));
+  const fieldDate = document.getElementById("field-date");
+  const fieldRecur = /** @type {HTMLElement} */ (card.querySelector(".f-recur"));
+  const recurSelect = /** @type {HTMLSelectElement} */ (document.getElementById("f-recur"));
+  const recurMonths = /** @type {HTMLInputElement} */ (document.getElementById("f-recur-months"));
+  const costInput = document.getElementById("f-cost");
+  const dateInput = document.getElementById("f-date");
   const save = /** @type {HTMLButtonElement} */ (card.querySelector(".btn-primary"));
+  const note = /** @type {HTMLElement} */ (document.getElementById("save-note"));
+
+  const value = (/** @type {string} */ id) =>
+    /** @type {HTMLInputElement} */ (document.getElementById(id)).value.trim();
 
   /** One-way: the form grows as you commit to it, and never shrinks back. */
   const reveal = () => disclose.classList.add("open");
 
-  /** @type {string | null | undefined} */
+  /** @type {import('./entry.js').Kind | null} */
   let chosenType = null;
+  /** @type {string | null} */
+  let chosenSection = null;
+  let saving = false;
+  /** Set the moment a save lands, so leaving for /home is never read as
+      discarding what was typed. */
+  let committed = false;
+  /* Only until the next edit: after a save that kept the form open (the
+     attachment branch of the submit handler) further typing is unsaved
+     work again, and leaving must ask about it (#1151 W1-S1). Bound on the
+     card, so every field's input or change bubbles to it; the type chips,
+     the section buttons and a dropped file change the entry without either
+     event, so their handlers call `edited` themselves. */
+  const edited = () => { committed = false; };
+  on(card, "input", edited);
+  on(card, "change", edited);
+  /** A message from the last save attempt (a loud failure, or "saved, the
+      document was not attached"), held until the NEXT attempt — same as the
+      pocket's own `problem`, which nothing typed clears early. */
+  /** @type {string | null} */
+  let sticky = null;
+  /** Minted once for this draft, not per save attempt (#1151 W1-R2): a retry
+      after a dropped response reuses it, so the server's upsert-by-id
+      idempotency absorbs the retry instead of creating a second item. */
+  const draftId = crypto.randomUUID();
+
+  /** The recurrence select's value, in months — 0 is once (#1058d). */
+  const monthsOf = () => recurrenceOfChoice(recurSelect.value, recurMonths.value);
+
+  /** The form's own entry.js-shaped Entry (#1151 W1-Q9), read fresh each
+   *  time and used for both the refusal check and the save payload below —
+   *  entry.js is the one place the kind→fields mapping, the recurrence
+   *  bound and the cost parsing live, shared with the pocket's own form
+   *  (pocket.svelte's save() already calls createCommandOf this same way);
+   *  this used to re-derive all four by hand instead, with its own,
+   *  differently-gated recurrence condition. */
+  /** @returns {import('./entry.js').Entry} */
+  function entryFromForm() {
+    return {
+      kind: chosenType,
+      name: nameInput.value,
+      householdId: null,
+      sectionId: chosenSection,
+      provider: value("f-provider"),
+      reference: value("f-ref"),
+      dueDate: value("f-date"),
+      recurrence: monthsOf(),
+      cost: value("f-cost"),
+      reminderDays: [Number(value("f-reminder"))],
+      notes: value("f-notes"),
+    };
+  }
+
+  /** Why the entry cannot be saved yet, in entry.js's own refusal vocabulary. */
+  function currentRefusal() {
+    return refusalOf(entryFromForm());
+  }
+
+  /**
+   * #1058b/#1058e: the save button stays disabled while the entry cannot be
+   * saved, the reason sits beside it — quiet while it is only a refusal,
+   * loud (see the `submit` handler's catch) once a save has actually failed.
+   */
+  function updateRefusal() {
+    if (saving) return;
+    const refusal = currentRefusal();
+    save.disabled = Boolean(refusal);
+    /* A sticky message from the last save attempt outranks the live refusal
+       note until the next attempt clears it — typing does not erase it. */
+    if (sticky) return;
+    note.classList.remove("fail");
+    note.removeAttribute("role");
+    note.textContent = refusal ?? "";
+  }
+
+  /* #1058c: what a kind schedules decides what the disclosed fields even
+     ask for — a document's date is optional and never recurs, a suggestion
+     has neither. kindHasDate/kindRecurs are entry.js's own rule, shared with
+     the pocket's form; both read true for no kind chosen yet, so the fields
+     stay in their original, always-visible state until a kind says otherwise. */
+  function applyKindVisibility() {
+    if (fieldDate) fieldDate.hidden = !kindHasDate(chosenType);
+    fieldRecur.hidden = !kindRecurs(chosenType);
+  }
+  applyKindVisibility();
+
   for (const button of typeButtons) {
     on(button, "click", () => {
       for (const other of typeButtons) other.setAttribute("aria-pressed", "false");
       button.setAttribute("aria-pressed", "true");
-      chosenType = button.dataset.type;
+      chosenType = /** @type {import('./entry.js').Kind} */ (button.dataset.type);
+      edited();
+      applyKindVisibility();
       reveal();
+      updateRefusal();
     });
   }
 
   on(nameInput, "input", () => {
     if (nameInput.value.trim().length >= 3) reveal();
+    updateRefusal();
   });
   /* The heading arrives pre-filled ("New Entry", owner 2026-08-15): first
      focus selects it whole, so typing replaces rather than appends. */
   on(nameInput, "focus", () => nameInput.select());
+
+  /* ---- section (#1058b): a row of buttons, none pre-selected; the entry
+     cannot be saved until one is chosen. Populated once the household loads
+     — the same shape #types already is, drawn here rather than built as a
+     second, Svelte-reactive way of doing the same job. Only the visible
+     sections are offered, as the household's own management screen (and the
+     pocket's EntryForm) already draw them. */
+  /** @type {import('./entry.js').FormHousehold | null} */
+  let household = null;
+  activeHousehold()
+    .then((loaded) => {
+      household = loaded;
+      sections.replaceChildren();
+      for (const section of household.sections.filter((one) => one.visible)) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.section = section.id;
+        button.setAttribute("aria-pressed", "false");
+        const dot = document.createElement("span");
+        dot.className = "sec-dot";
+        dot.setAttribute("aria-hidden", "true");
+        dot.style.background = `var(--sec-${section.accent})`;
+        button.append(dot, section.name);
+        on(button, "click", () => {
+          for (const other of [...sections.querySelectorAll("button")]) other.setAttribute("aria-pressed", "false");
+          button.setAttribute("aria-pressed", "true");
+          chosenSection = section.id;
+          edited();
+          reveal();
+          updateRefusal();
+        });
+        sections.appendChild(button);
+      }
+      updateRefusal();
+    })
+    .catch(() => {
+      sections.textContent = "your sections could not load — reload the page and try again";
+    });
 
   /* ---- the drop target ---- */
 
@@ -90,6 +241,7 @@ export function mountCreate() {
   function takeFile(/** @type {File | null | undefined} */ file) {
     if (!file) return;
     attachment = file;
+    edited();
     reveal();
     document.body.classList.add("doc");
     if (heldName) heldName.textContent = file.name;
@@ -121,97 +273,87 @@ export function mountCreate() {
       document.getElementById(/** @type {string} */ (button.dataset.accept))?.classList.remove("sugg"));
   }
 
+  /* ---- recurrence (#1058d): one-off, monthly and yearly stay; a fourth,
+     custom choice takes 1–120 months (entry.js's own RECURRENCE_MAX). */
+  on(recurSelect, "change", () => {
+    recurMonths.hidden = recurSelect.value !== "custom";
+    if (!recurMonths.hidden) recurMonths.focus();
+    updateRefusal();
+  });
+  on(recurMonths, "input", updateRefusal);
+  if (costInput) on(costInput, "input", updateRefusal);
+  if (dateInput) on(dateInput, "input", updateRefusal);
+
   /* ---- saving ---- */
 
-  const value = (/** @type {string} */ id) =>
-    /** @type {HTMLInputElement} */ (document.getElementById(id)).value.trim();
-
-  /**
-   * The design draws no pending or failure state for the save. Rather than
-   * invent one, the button says what is happening and a single line reports a
-   * failure; both are interim and recorded as an open design question.
-   */
-  const note = document.createElement("div");
-  note.className = "save-note";
-  /** @type {HTMLElement} */ (card.querySelector(".save-row")).appendChild(note);
-
-  let saving = false;
   on(card, "submit", async (event) => {
     event.preventDefault();
     if (saving) return;
-
-    const title = nameInput.value.trim();
-    if (!title) {
-      nameInput.focus();
+    if (currentRefusal()) {
+      updateRefusal();
       return;
     }
 
     saving = true;
+    sticky = null;
     save.disabled = true;
+    note.classList.remove("fail");
+    note.removeAttribute("role");
     note.textContent = "";
     const label = save.textContent;
     save.textContent = "Adding…";
 
     try {
-      const household = await activeHousehold();
-      /* No section is drawn on this form, and the data model requires one.
-         The household's first visible section is the least surprising home
-         for a new entry; where it should really go is an open question. */
-      const section =
-        household.sections.find((one) => one.visible) ?? household.sections[0];
-
-      const cost = value("f-cost");
-      const dueDate = value("f-date");
-      const notes = value("f-notes");
-      const recurrence = value("f-recur");
-      /* The domain schedules two kinds of thing, renewals and services. The
-         other three chips describe what an entry *is*, so they are carried as
-         the subtype and schedule nothing. */
-      const scheduleKind =
-        chosenType === "renewal" || chosenType === "service" ? chosenType : undefined;
-
-      await applyCommand({
-        type: "item.upsert",
-        householdId: household.id,
-        item: {
-          id: crypto.randomUUID(),
-          sectionId: section.id,
-          title,
-          subtype: chosenType ?? undefined,
-          provider: value("f-provider") || undefined,
-          reference: value("f-ref") || undefined,
-          costMinor: cost ? Math.round(Number(cost) * 100) : undefined,
-          currency: household.currency,
-          dueDate: dueDate || undefined,
-          scheduleKind: dueDate ? scheduleKind : undefined,
-          recurrenceMonths:
-            dueDate && scheduleKind && recurrence !== "once"
-              ? recurrence === "monthly" ? 1 : 12
-              : undefined,
-          reminderDays: [Number(value("f-reminder"))],
-          notes: notes || undefined,
-          status: "active",
-        },
+      const active = household ?? await activeHousehold();
+      // FormHousehold.currency is optional (entry.js) even though
+      // Household.currency is not — active can be either here, so this is
+      // really possibly undefined; the same fallback pocket.svelte's own
+      // save() already uses for the identical gap (#1151 W1-Q9).
+      await applyCommand(createCommandOf(entryFromForm(), {
+        householdId: active.id, currency: active.currency ?? "GBP", id: draftId,
+      })).catch((error) => {
+        /* This draft id is new to the server, so "this item changed on another
+           device" can only mean the earlier send landed and its answer was
+           lost (same reading as pocket.svelte's save). */
+        if (error instanceof WorkspaceError && error.code === "version_required") return;
+        throw error;
       });
 
+      /* Before either branch: the server holds the entry from here, so
+         leaving must not ask about discarding it (#1151 W1-S1). */
+      committed = true;
       if (attachment) {
         /* Deliberately not silent: the entry is saved, the document is not,
            because that path is unbuilt. Saying so beats losing the file. */
-        note.textContent = `Saved. ${attachment.name} was not attached — documents are not wired up yet.`;
+        sticky = `Saved. ${attachment.name} was not attached — documents are not wired up yet.`;
+        note.textContent = sticky;
         save.textContent = label;
-        save.disabled = false;
         saving = false;
+        updateRefusal();
         return;
       }
 
       await goto("/home");
     } catch (error) {
-      note.textContent = /** @type {any} */ (error)?.message ?? "That could not be saved";
+      /* #1058e: loud, not small print — the button goes back to "Add to
+         orbit", the reason sits beside it, and nothing typed is lost. No
+         toast. saveProblem() is the same wording the pocket's form gives. */
+      sticky = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
+      note.classList.add("fail");
+      note.setAttribute("role", "alert");
+      note.textContent = sticky;
       save.textContent = label;
-      save.disabled = false;
       saving = false;
+      updateRefusal();
     }
   });
+
+  /* #1162: the desk search's "add "<query>" as an item" act carries the typed
+     name the same way the pocket's own create already does (#1120,
+     pocket.svelte's `?name=` read) — the one contract, read by both halves of
+     this route rather than a second one invented for the desk. */
+  const prefillName = new URLSearchParams(location.search).get("name")?.trim();
+  if (prefillName) nameInput.value = prefillName;
 
   /* #856: the panel opens from the `input` listener above, and `input` is
      one-shot — nothing replays it. So anything that writes to the name field
@@ -219,12 +361,17 @@ export function mountCreate() {
      chance: a reader typing fast on a slow device, or a test driving the
      keyboard as soon as the page loads. Two things follow.
 
-     First, catch up on what was typed while nobody was listening. The `value`
-     ATTRIBUTE is the default the markup ships ("New Entry"); `.value` is what
-     is in the field now. They differ only once something has written to it, so
-     this reveals for a real edit and never for the untouched default —
-     progressive disclosure is unchanged. */
+     First, catch up on what was typed while nobody was listening (the name
+     prefill above included). The `value` ATTRIBUTE is the default the markup
+     ships ("New Entry"); `.value` is what is in the field now. They differ
+     only once something has written to it, so this reveals for a real edit
+     and never for the untouched default — progressive disclosure is
+     unchanged. */
   if (nameInput.value.trim().length >= 3 && nameInput.value !== nameInput.getAttribute("value")) reveal();
+
+  /* The section refusal (#1058b) holds the button disabled from the start,
+     same as the pocket's own form does the moment it is ready. */
+  updateRefusal();
 
   /* Second, say so out loud. `#card[data-ready]` is the observable moment the
      listeners exist, so a test can wait for the page to be ABLE to answer
@@ -233,9 +380,17 @@ export function mountCreate() {
      listener above is attached. */
   card.dataset.ready = "true";
 
-  return () => {
-    teardown();
-    delete card.dataset.ready;
-    document.body.classList.remove("doc");
+  return {
+    teardown: () => {
+      teardown();
+      delete card.dataset.ready;
+      document.body.classList.remove("doc");
+    },
+    /** Whether a misclick or a close would discard something typed
+        (#1151 W1-S1). `reveal()`'s own one-way "the form grows as you
+        commit to it" is already exactly this signal — a real name, a
+        chosen type or a dropped document — so it is read rather than
+        tracked twice. */
+    isDirty: () => !committed && disclose.classList.contains("open"),
   };
 }

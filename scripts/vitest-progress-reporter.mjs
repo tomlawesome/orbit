@@ -9,10 +9,9 @@
 // after its last visible output, then died on the 10-minute job timeout).
 //
 // With this reporter, the last "RUNNING" line in a stalled log names the
-// exact file that was executing when everything went quiet, so a future
-// stall is diagnosable from the log alone instead of requiring a blind
-// re-run. It only prints one line per file (not per test) to stay quiet on
-// a normal, healthy run.
+// exact test case that was executing when everything went quiet -- not just
+// the file it lives in -- so a future stall is diagnosable from the log
+// alone instead of requiring a blind re-run (D1-F3, #1151).
 export default class ProgressReporter {
   onTestModuleStart(testModule) {
     process.stdout.write(`[progress] RUNNING  ${testModule.moduleId}\n`);
@@ -21,5 +20,14 @@ export default class ProgressReporter {
   onTestModuleEnd(testModule) {
     const state = testModule.state ? testModule.state() : "unknown";
     process.stdout.write(`[progress] DONE     ${testModule.moduleId} (${state})\n`);
+  }
+
+  onTestCaseReady(testCase) {
+    process.stdout.write(`[progress] RUNNING  ${testCase.module.moduleId} :: ${testCase.fullName}\n`);
+  }
+
+  onTestCaseResult(testCase) {
+    const state = testCase.result ? testCase.result().state : "unknown";
+    process.stdout.write(`[progress] DONE     ${testCase.module.moduleId} :: ${testCase.fullName} (${state})\n`);
   }
 }

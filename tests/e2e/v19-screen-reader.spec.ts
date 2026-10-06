@@ -4,6 +4,13 @@ import { dirname, join } from "node:path";
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { householdRegister, sessionHeaders } from "./support/households";
 import { gotoCreate } from "./support/keyboard";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #496: a screen-reader walkthrough of the core journeys.
@@ -30,7 +37,8 @@ import { gotoCreate } from "./support/keyboard";
  * on a fresh session, exactly as v19-tour.spec.ts's `afterAll` does.
  */
 
-const READER = "Orbit Administrator";
+/* #1080: this worker's own administrator, resolved lazily (worker env only). */
+const READER = () => workerAccount("administrator");
 const NAME_PREFIX = "screen-reader-";
 
 const ROLES_NEEDING_NAMES = [
@@ -46,8 +54,9 @@ const UNBOUNDED_TEXT_PATTERNS: [RegExp, string][] = [
 ];
 
 async function signIn(page: Page, returnTo = "/home") {
+  await answerPushWithoutAService(page);
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
-  await page.getByRole("link", { name: READER }).click();
+  await page.getByRole("link", { name: READER() }).click();
   // The click starts a redirect chain through the identity provider and back
   // through /api/auth/callback, which is what actually sets the session
   // cookie -- proceeding before it lands (as every other spec's idiom does)
@@ -60,6 +69,8 @@ async function signIn(page: Page, returnTo = "/home") {
   // not literally on returnTo.
   const escaped = returnTo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   await page.waitForURL((url) => new RegExp(`${escaped}$`).test(url.pathname) || url.pathname === "/", { timeout: 30_000 });
+  /* #1080: the sweep's hard delete is an instance-admin power. */
+  await ensureWorkerAdministrator(page);
 }
 
 /**
@@ -79,16 +90,25 @@ async function assertEveryControlIsNamed(page: Page, screen: string) {
   }
 }
 
-/** Criterion 2: one main, one h1, and no skipped heading level. */
+/**
+ * Criterion 2: one main, one h1, and no skipped heading level -- as a screen
+ * reader meets them. #1120: a screen with a pocket dialect carries both its
+ * desk and its pocket markup and shows one with display:none on the other,
+ * so what is counted is what the accessibility tree exposes (getByRole
+ * leaves out display:none, visibility:hidden and aria-hidden, but keeps
+ * anything merely moved off-screen). Counting raw elements would pass a
+ * phone whose only main is the hidden desk's, and fail a page whose second
+ * main no reader can reach.
+ */
 async function assertLandmarksAndHeadings(page: Page, screen: string) {
-  const main = page.locator('main, [role="main"]');
+  const main = page.getByRole("main");
   await expect.soft(main, `${screen}: expected exactly one main landmark`).toHaveCount(1);
 
-  const h1 = page.locator("h1");
+  const h1 = page.getByRole("heading", { level: 1 });
   await expect.soft(h1, `${screen}: expected exactly one h1`).toHaveCount(1);
 
-  const levels = await page.locator("h1, h2, h3, h4, h5, h6").evaluateAll((elements) =>
-    elements.map((element) => Number(element.tagName.slice(1))),
+  const levels = await page.getByRole("heading").evaluateAll((elements) =>
+    elements.map((element) => Number(element.getAttribute("aria-level")) || Number(element.tagName.slice(1))),
   );
   let previous = 0;
   for (const level of levels) {
@@ -294,28 +314,6 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     await expect(page.locator(".sky").first()).toHaveAttribute("aria-hidden", "true");
   });
 
-  test("/due-next", async ({ page }, testInfo) => {
-    await signIn(page);
-    await page.goto("/due-next");
-    await walkScreen(page, testInfo, "due-next");
-    await expect(page.locator(".sky").first()).toHaveAttribute("aria-hidden", "true");
-  });
-
-  test("/documents", async ({ page }, testInfo) => {
-    await signIn(page);
-    await page.goto("/documents");
-    await walkScreen(page, testInfo, "documents");
-    await expect(page.locator(".sky").first()).toHaveAttribute("aria-hidden", "true");
-  });
-
-  test("/admin", async ({ page }, testInfo) => {
-    await signIn(page);
-    await page.goto("/admin");
-    await walkScreen(page, testInfo, "admin");
-    // The observatory's own starfield backdrop, unlike every sibling screen's.
-    await expect(page.locator(".sky").first()).toHaveAttribute("aria-hidden", "true");
-  });
-
   test("/administration", async ({ page }, testInfo) => {
     await signIn(page);
     await page.goto("/administration");
@@ -331,6 +329,21 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
    * other spec expects to find it: taken.
    */
   test("first-run tour overlay", async ({ page }, testInfo) => {
+    // T-Q2 (#1151): this used to skip every mobile run outright, citing "the
+    // film is desk-only (owner-decisions.md §24)" -- true when this was
+    // written, but §24's own ending note records #1083 (2026-09-30)
+    // shipping a pocket cut, and v19-tour.spec.ts stopped skipping mobile
+    // the same day; this file never caught up, so a real a11y regression in
+    // the pocket transport could never have failed here. transport.js is
+    // one shared component, so the structural checks below (role,
+    // accessible names, the script and status regions existing) hold on
+    // both viewports. The desk cut's exact heading count and status wording
+    // are still pinned desk-only: owner-decisions.md §32 records the pocket
+    // cut dropping content (chapter 2's recurrence beat), and this could
+    // not be run against the real app to confirm the pocket script's exact
+    // shape -- a follow-up with Playwright access should pin it the same
+    // way.
+    const mobile = test.info().project.name.startsWith("mobile");
     await signIn(page);
     const forgotten = await page.evaluate(async () => {
       const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { csrfToken: string };
@@ -345,22 +358,56 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     expect(forgotten).toBe(true);
 
     await page.goto("/home");
-    const card = page.locator(".tourcard");
-    await expect(card).toBeVisible({ timeout: 30_000 });
+    // #866 retired the dialog-shaped card for the one-take film: no
+    // `role="dialog"` and, per transport.js, no focus management at all --
+    // the pill is a `role="group"` landmark a reader tabs to like any other
+    // toolbar, not something that grabs focus on arrival. That is a real
+    // difference from the old card's behaviour, not an oversight here.
+    const transport = page.locator("#orbit-tour-transport");
+    await expect(transport).toBeVisible({ timeout: 30_000 });
 
-    await expect(card).toHaveAttribute("role", "dialog");
-    await expect(card).toHaveAccessibleName(/\S/);
-    await expect(card, "the tour card takes focus so keys land on it without the reader hunting for it").toBeFocused();
+    await expect(transport).toHaveAttribute("role", "group");
+    await expect(transport).toHaveAccessibleName(/\S/);
 
-    await expect(page.getByRole("button", { name: "Skip" })).toHaveAccessibleName(/\S/);
-    await expect(page.getByRole("button", { name: "Back" })).toHaveAccessibleName(/\S/);
-    await expect(page.getByRole("button", { name: "Next" })).toHaveAccessibleName(/\S/);
+    await expect(page.getByRole("button", { name: /Play|Pause/ })).toHaveAccessibleName(/\S/);
+    await expect(page.getByRole("button", { name: "Skip the tour" })).toHaveAccessibleName(/\S/);
+
+    // #1097 (round 7): the film is not narrated -- a screen reader gets its
+    // script instead, twelve headings deep on the desk cut, plus one
+    // announcement when the film starts. Both live inside the transport,
+    // visually hidden, never `aria-hidden` (design/v19/tour/round-7/README.md).
+    const script = transport.getByRole("region", { name: "Tour script" });
+    await expect(script).toHaveCount(1);
+
+    const status = transport.getByRole("status");
+    await expect(status).toHaveCount(1);
+
+    if (mobile) {
+      // Pocket content is pinned at twelve headings and this exact wording
+      // too once a run against the real app confirms the pocket script's
+      // shape; until then this only proves the script and announcement
+      // exist and are not empty, which is still strictly more than the
+      // blanket skip this replaces ever checked.
+      await expect(script.locator("h3").first()).toBeAttached();
+      await expect(status).not.toHaveText("");
+    } else {
+      await expect(script.locator("h3")).toHaveCount(12);
+      await expect(status).toHaveText(
+        "Orbit's tour is playing on screen: a short film over your own sky, "
+        + "with a transport at the bottom. Press Escape to skip it. The full "
+        + 'script is in the tour transport, under "Tour script".',
+      );
+    }
 
     await writeSnapshot(page, testInfo, "tour-overlay");
 
     // Ends the walk so the record is left taken, as every other spec expects.
-    await page.locator("#tour-skip").click();
-    await expect(card).toHaveCount(0);
+    // Esc reaches transport.js's own listener -> player.stop(), which clears
+    // the veil synchronously; the pill itself then fades out and is removed
+    // a second later (#1190), so the veil -- not the pill -- is what this
+    // waits on.
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#orbit-tour-veil")).toBeHidden();
   });
 
   /**
@@ -373,10 +420,21 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
   test("sign-out screen", async ({ page }, testInfo) => {
     await signIn(page);
     await page.goto("/settings");
-    await page.locator("button.orb").click();
-    const signOutButton = page.locator(".account .signout");
-    await signOutButton.click();
-    await signOutButton.click();
+    if (test.info().project.name.startsWith("mobile")) {
+      /* #1120: on a phone the sub-screen chrome's orb opens the hatch, and
+         its sign-out pill arms on the first tap and fires on the second --
+         the same two-tap control, in the pocket's own sheet. */
+      await page.getByRole("button", { name: "Account and menu" }).click();
+      const signOutPill = page.getByRole("dialog").getByRole("button", { name: /sign out/ });
+      await signOutPill.click();
+      await expect(signOutPill).toHaveAccessibleName("tap again to sign out");
+      await signOutPill.click();
+    } else {
+      await page.locator("button.orb").click();
+      const signOutButton = page.locator(".account .signout");
+      await signOutButton.click();
+      await signOutButton.click();
+    }
     await expect(page).toHaveURL(/\/logout$/, { timeout: 30_000 });
     await expect(page.getByRole("link", { name: "Sign back in" })).toBeVisible();
 

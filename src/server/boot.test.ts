@@ -5,7 +5,10 @@ const mocks = vi.hoisted(() => ({
   config: {
     scanMode: "required",
     clamAv: { host: "private-scanner.internal", port: 3310, timeoutMs: 30_000 },
+    keyId: "live-current-key-id",
+    nextKeyId: null as string | null,
   },
+  recordRotationStarted: vi.fn(),
   getAuthConfig: vi.fn(),
   pingClamAv: vi.fn(),
   log: {
@@ -44,10 +47,13 @@ const mocks = vi.hoisted(() => ({
   getDb: vi.fn(),
   verifyMigrationIntegrity: vi.fn(),
   verifyMigrationJournalComplete: vi.fn(),
+  readAppliedMigrationHashes: vi.fn(),
+  readExpectedMigrationHashes: vi.fn(),
   migrate: vi.fn(),
   ensureMigrationRunsTable: vi.fn(),
   recordMigrationOutcome: vi.fn(),
   workerCalls: [] as string[],
+  rollBackUnfinishedPortableImports: vi.fn(async () => undefined),
   /* Mirrors the real signature (code, detail?). It previously took a message
      and hardcoded code, which silently made every stubbed error look like a
      generic integrity failure - so a test asserting the database_floor path
@@ -66,6 +72,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/server/documents/config", () => ({
   getDocumentConfig: () => mocks.config,
+}));
+
+vi.mock("@/server/documents/rewrap-worker", () => ({
+  recordRotationStarted: mocks.recordRotationStarted,
 }));
 
 vi.mock("@/server/documents/scanner", () => ({
@@ -102,6 +112,8 @@ vi.mock("@/db", () => ({
 vi.mock("@/db/migration-integrity", () => ({
   verifyMigrationIntegrity: mocks.verifyMigrationIntegrity,
   verifyMigrationJournalComplete: mocks.verifyMigrationJournalComplete,
+  readAppliedMigrationHashes: mocks.readAppliedMigrationHashes,
+  readExpectedMigrationHashes: mocks.readExpectedMigrationHashes,
   MigrationIntegrityError: mocks.MigrationIntegrityError,
 }));
 vi.mock("drizzle-orm/postgres-js/migrator", () => ({ migrate: mocks.migrate }));
@@ -113,6 +125,9 @@ vi.mock("@/server/notification-worker", () => ({ startNotificationWorker: () => 
 vi.mock("@/server/document-worker", () => ({ startDocumentWorker: () => mocks.workerCalls.push("document") }));
 vi.mock("@/server/imap-ingestion", () => ({ startImapIngestionWorker: () => mocks.workerCalls.push("imap") }));
 vi.mock("@/server/imap-receipt-worker", () => ({ startImapReceiptWorker: () => mocks.workerCalls.push("receipt") }));
+vi.mock("@/server/portable-archive-repository", () => ({
+  rollBackUnfinishedPortableImports: mocks.rollBackUnfinishedPortableImports,
+}));
 
 import { resetAuthObservabilityForTests } from "@/lib/auth/observability";
 /* The real helper: the mock above keeps every export except `log`. */
@@ -153,9 +168,12 @@ describe("strict startup ordering", () => {
     mocks.workerCalls.length = 0;
     mocks.getDatabaseClient.mockClear();
     mocks.getDb.mockClear();
+    mocks.rollBackUnfinishedPortableImports.mockClear();
     mocks.validateStartupConfiguration.mockReset();
     mocks.verifyMigrationIntegrity.mockReset();
     mocks.verifyMigrationJournalComplete.mockReset();
+    mocks.readAppliedMigrationHashes.mockReset();
+    mocks.readExpectedMigrationHashes.mockReset();
     mocks.migrate.mockReset();
     mocks.ensureMigrationRunsTable.mockReset();
     mocks.recordMigrationOutcome.mockReset();
@@ -362,7 +380,43 @@ describe("strict startup ordering", () => {
       reason: "migration_failed",
       action: "check_migrations",
       impact: "migration_blocked",
+      // #1151 A4-R1: some bounded word for what failed, never the driver's
+      // own message (asserted below) -- `readAppliedMigrationHashes` is not
+      // mocked on this suite's `@/db/migration-integrity`, so this is the
+      // helper's own fallback, exactly as a dead connection would hit too.
+      detail: "migration failed, sqlstate unknown",
     });
+    expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain("private SQL detail");
+  });
+
+  it("names which migration and its sqlstate when the journal can say so (#1151 A4-R1)", async () => {
+    const { registerNode } = await import("./boot");
+    const failure = Object.assign(new Error("duplicate key value violates unique constraint \"users_email_key\""), {
+      code: "23505",
+    });
+    mocks.migrate.mockRejectedValueOnce(failure);
+    // The journal shows two migrations applied; the third -- the one
+    // migrate() was presumably mid-way through -- is what the operator
+    // needs named.
+    mocks.readAppliedMigrationHashes.mockResolvedValueOnce(["hash-a", "hash-b"]);
+    mocks.readExpectedMigrationHashes.mockResolvedValueOnce([
+      { tag: "0001_a", hash: "hash-a" },
+      { tag: "0002_b", hash: "hash-b" },
+      { tag: "0003_c", hash: "hash-c" },
+    ]);
+
+    await expect(registerNode()).rejects.toThrow("migration_failed");
+
+    expect(mocks.log.error).toHaveBeenCalledWith({
+      event: "startup.migration",
+      state: "exhausted",
+      reason: "migration_failed",
+      action: "check_migrations",
+      impact: "migration_blocked",
+      detail: "migration 0003_c failed, sqlstate 23505",
+    });
+    // Never the raw constraint-violation message or the email it names.
+    expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain("users_email_key");
   });
 
   it("still runs and completes migrate() when ensuring the outcome table fails, without masking success", async () => {
@@ -390,9 +444,11 @@ describe("strict startup ordering", () => {
       reason: "migration_failed",
       action: "check_migrations",
       impact: "migration_blocked",
+      detail: "migration failed, sqlstate unknown",
     });
     expect(JSON.stringify(mocks.log.error.mock.calls) + JSON.stringify(mocks.log.warn.mock.calls))
       .not.toContain("connection refused at 10.0.0.5");
+    expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain("private SQL detail");
   });
 
   it("still starts workers when recording a succeeded outcome row fails", async () => {
@@ -573,5 +629,105 @@ describe("scanner readiness diagnostics", () => {
       reason: "scan_mode_disabled",
       action: "none",
     });
+  });
+});
+
+describe("kek rotation visibility at startup (#956)", () => {
+  let reportKekRotationInProgressNode: () => Promise<void>;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mocks.renderedText.length = 0;
+    mocks.renderedJson.length = 0;
+    mocks.config.nextKeyId = null;
+    mocks.recordRotationStarted.mockReset();
+    resetAuthObservabilityForTests();
+    vi.resetModules();
+
+    const nodeModule = await import("./boot");
+    reportKekRotationInProgressNode = nodeModule.reportKekRotationInProgress;
+  });
+
+  afterEach(() => {
+    mocks.config.nextKeyId = null;
+  });
+
+  it("says nothing when no second key is loaded", async () => {
+    await expect(reportKekRotationInProgressNode()).resolves.toBeUndefined();
+
+    expect(mocks.recordRotationStarted).not.toHaveBeenCalled();
+    expect(mocks.log.warn).not.toHaveBeenCalled();
+    expect(mocks.log.info).not.toHaveBeenCalled();
+  });
+
+  it("records the start once and warns with how long the rotation has been open", async () => {
+    mocks.config.nextKeyId = "incoming-next-key-id";
+    const startedAt = new Date(Date.now() - 3 * 60 * 60 * 1_000);
+    mocks.recordRotationStarted.mockResolvedValue({
+      startedAt,
+      previousKeyId: "live-current-key-id",
+      nextKeyId: "incoming-next-key-id",
+    });
+
+    await expect(reportKekRotationInProgressNode()).resolves.toBeUndefined();
+
+    expect(mocks.recordRotationStarted).toHaveBeenCalledWith({
+      previousKeyId: "live-current-key-id",
+      nextKeyId: "incoming-next-key-id",
+    });
+    expect(mocks.log.warn).toHaveBeenCalledWith(expect.objectContaining({
+      event: "document.kek_rotation",
+      state: "starting",
+      action: "inspect_admin_diagnostics",
+      impact: "none",
+      durationMs: expect.any(Number),
+    }));
+    const [event] = mocks.log.warn.mock.calls[0] as [{ durationMs: number }];
+    expect(event.durationMs).toBeGreaterThanOrEqual(3 * 60 * 60 * 1_000);
+    /* What the operator actually sees names both keys and the remedy. */
+    const rendered = mocks.renderedText.join("\n");
+    expect(rendered).toContain("rotation in progress from key live-current-key-id to incoming-next-key-id");
+    expect(rendered).toContain("finish the rewrap and remove DOCUMENT_KEK_NEXT");
+  });
+
+  it("still warns, without a duration, when the started row cannot be written", async () => {
+    mocks.config.nextKeyId = "incoming-next-key-id";
+    mocks.recordRotationStarted.mockRejectedValue(new Error("database unavailable"));
+
+    await expect(reportKekRotationInProgressNode()).resolves.toBeUndefined();
+
+    expect(mocks.log.warn).toHaveBeenCalledWith({
+      event: "document.kek_rotation",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "inspect_admin_diagnostics",
+      impact: "none",
+    });
+    const inProgress = (mocks.log.warn.mock.calls as Array<[{ state: string; durationMs?: number }]>)
+      .map(([event]) => event)
+      .find((event) => event.state === "starting");
+    expect(inProgress).toBeDefined();
+    expect(inProgress?.durationMs).toBeUndefined();
+    expect(mocks.renderedText.join("\n")).toContain("rotation in progress from key live-current-key-id");
+  });
+
+  it("stays silent when document configuration itself is invalid — that path has its own reporting", async () => {
+    /* Scoped to this test's fresh module registry rather than a shared
+       mutable flag, so an earlier test's still-in-flight startup probe can
+       never observe a throwing config and log noise into someone else's
+       assertions. */
+    vi.resetModules();
+    vi.doMock("@/server/documents/config", () => ({
+      getDocumentConfig: () => { throw new Error("document configuration invalid"); },
+    }));
+    try {
+      const { reportKekRotationInProgress } = await import("./boot");
+      await expect(reportKekRotationInProgress()).resolves.toBeUndefined();
+
+      expect(mocks.recordRotationStarted).not.toHaveBeenCalled();
+      expect(mocks.log.warn).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock("@/server/documents/config");
+    }
   });
 });

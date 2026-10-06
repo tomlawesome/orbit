@@ -1,12 +1,17 @@
 <script>
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { invalidateAll } from "$app/navigation";
   import Chrome from "$lib/Chrome.svelte";
+  import Mark from "$lib/Mark.svelte";
   import { fillStarTiles } from "$lib/sky.js";
+  import { PEN_ORDER, inkOf, nextMark } from "$lib/marks.js";
   import { constellationPlanetsOf } from "$lib/data/chart.js";
   import { MAX_SECTIONS, deletionNameMatches, entriesLabel } from "$lib/data/household.js";
   import { FIELD, berthsOf, liftOf, roomOf, skyMap, toField } from "./room.js";
   import { consumeDoor } from "./door.js";
+  import { isPocket } from "$lib/pocket/media.js";
+  import Pocket from "./pocket.svelte";
+  import DeskArchive from "./DeskArchive.svelte";
   import {
     addMember,
     decideJoinRequest,
@@ -54,15 +59,14 @@
    */
 
   /**
-   * The sections editor's own row: a SectionRow while it is being edited, so
-   * an unchosen icon/accent (2b's open question) is null rather than forced
-   * to a pen nothing picked, and `fresh` marks a row this editor added and
-   * the server has never seen.
-   * @typedef {Omit<SectionRow, "icon" | "accent"> & {
-   *   icon: string | null,
-   *   accent: string | null,
-   *   fresh?: boolean,
-   * }} EditorRow
+   * The sections editor's own row: a SectionRow while it is being edited.
+   * 2b's open question is answered (#867) — a row always wears a real mark,
+   * assigned the moment it arrives, never a pen nothing picked. `fresh`
+   * marks a row this editor added and the server has never seen (its tray
+   * opens on arrival); `open` is which row's swap tray is showing, held on
+   * the row rather than a separate id so at most one can ever disagree with
+   * its own button's `aria-expanded`.
+   * @typedef {SectionRow & { fresh?: boolean, open?: boolean }} EditorRow
    */
 
   /** @type {{ data: { household: HouseholdView } }} */
@@ -88,6 +92,7 @@
    * everything that happens ON this screen and nothing that happens off it.
    */
   const door = consumeDoor();
+  const pocket = isPocket();
 
   /* The identity fields (2c): three saves TO THE EYE over one bundled
      command. Local copies so a field can be edited, saved and left alone
@@ -156,15 +161,44 @@
    */
   const editorRowOf = (row) => ({ ...row });
 
-  /* Reset every local edit when the screen's data is replaced — a save
-     reloads through the seam, and stale dirt on a field the server has since
-     answered for would be a lie about what is stored. */
+  /**
+   * A section row stripped of `open` (the tray's own UI state, never sent
+   * and never meaningful to compare) so two row lists can be compared by
+   * content alone.
+   * @param {EditorRow[]} list
+   */
+  const sectionsSnapshot = (list) => JSON.stringify(list.map(({ open, ...rest }) => rest));
+  /** What `rows` looked like the moment it last matched the server — i.e.
+      right after load, or right after a section save round-trips. */
+  let sectionsBaseline = $state("[]");
+  /** True while the section editor holds an edit the server has not seen. */
+  const sectionsDirty = $derived(sectionsSnapshot(rows) !== sectionsBaseline);
+
+  /* Reset local edits when the screen's data is replaced — any save on this
+     page (identity, sections, members, invitations, join requests) reloads
+     through the same `invalidateAll`, and this effect used to resync
+     EVERYTHING unconditionally. That is right for a field the server has
+     since answered for; it is a silent data loss for a field still being
+     typed elsewhere on the page when somebody else's save lands (#1151
+     W2-R2) — saving your own name used to also throw away an unsaved time
+     zone edit, or an in-progress section rename, with no warning.
+     `untrack` keeps this effect watching only `data.household` itself: the
+     dirty checks below read current state without turning that state into
+     a second reason to re-run. */
   $effect(() => {
     const household = data.household;
-    form = { name: household.name, timezone: household.timezone, currency: household.currency };
-    dirty = { name: false, timezone: false, currency: false };
-    rows = household.sections.map(editorRowOf);
-    heir = null;
+    untrack(() => {
+      /* Per field, not the whole object at once — a save elsewhere on this
+         page must not overwrite a field that is still being typed here. */
+      if (!dirty.name) form.name = household.name;
+      if (!dirty.timezone) form.timezone = household.timezone;
+      if (!dirty.currency) form.currency = household.currency;
+      if (!sectionsDirty) {
+        rows = household.sections.map(editorRowOf);
+        sectionsBaseline = sectionsSnapshot(rows);
+      }
+      heir = null;
+    });
   });
 
   /* The mockup's own lists. A household whose stored value is not among them
@@ -209,11 +243,39 @@
     clearTimeout(savedTimers[field]);
   }
 
+  /* #1151 R9: household.update always carries all three fields (see the
+     doc above writeHouseholdIdentity), so a save reads the other two off
+     `v` — the last server-confirmed view — at the moment it actually runs.
+     Two taps close together used to build their payloads from the SAME
+     stale `v` (the first save's invalidateAll had not landed yet), so
+     whichever request's response arrived last could silently carry the
+     other field back to its old value. Chaining every call through one
+     queue makes a later save always build its payload only after the
+     earlier one — and its invalidateAll — has finished, so it reads a
+     fresh `v` instead of a stale one. */
+  let saveQueue = Promise.resolve();
+
   /** @param {IdentityField} field */
-  async function saveField(field) {
+  function saveField(field) {
+    saveQueue = saveQueue.then(() => saveFieldNow(field));
+    return saveQueue;
+  }
+
+  /** @param {IdentityField} field */
+  async function saveFieldNow(field) {
     identityProblem = null;
     try {
-      await writeHouseholdIdentity(v.id, form);
+      /* The command only ever carries all three fields (§2c), but ONLY the
+         one being saved here may be unconfirmed: the other two go over as
+         the server's own last-known values, never as whatever this editor
+         happens to be holding for them. Without this, saving "name" while
+         "time zone" sat dirty-but-unsaved silently committed that typed
+         time zone too, with no notice naming it (#1151 W2-S2). */
+      await writeHouseholdIdentity(v.id, {
+        name: field === "name" ? form.name : v.name,
+        timezone: field === "timezone" ? form.timezone : v.timezone,
+        currency: field === "currency" ? form.currency : v.currency,
+      });
       dirty[field] = false;
       saved[field] = true;
       clearTimeout(savedTimers[field]);
@@ -240,35 +302,99 @@
 
   function addSection() {
     if (shown.length >= MAX_SECTIONS) return;
+    /* #867 — assigned on arrival: the first asterism no OTHER row in this
+       household is wearing yet. Nothing for the owner to fill in, and the
+       tray opens straight away so the assignment is never a surprise. */
+    const icon = nextMark(shown.map((row) => row.icon));
     rows = [...rows, {
       /* A new section needs an id before it can be saved, and the engine's
          schema takes any string: a uuid keeps it unique without pretending to
-         mean anything. Choosing a MARK for a new section is not drawn yet
-         (the mockup's own open question), so it wears the neutral pen. */
+         mean anything. */
       id: crypto.randomUUID(),
       name: "",
-      icon: null,
-      accent: null,
+      icon,
+      accent: inkOf(icon),
+      shipped: false,
       visible: true,
       count: 0,
       removable: true,
       fresh: true,
+      open: true,
     }];
+  }
+
+  /** @param {EditorRow} row */
+  function toggleTray(row) {
+    row.open = !row.open;
+  }
+
+  /**
+   * A row's tray: the figure it wears, then every asterism no OTHER row in
+   * this household currently wears — the same pool `addSection` draws from.
+   * @param {EditorRow} row
+   * @returns {string[]}
+   */
+  function trayOptions(row) {
+    const wornByOthers = new Set(shown.filter((other) => other.id !== row.id).map((other) => other.icon));
+    return [row.icon, ...PEN_ORDER.filter((icon) => icon !== row.icon && !wornByOthers.has(icon))];
+  }
+
+  /**
+   * Picking a mark in the tray updates the row in place. It closes nothing
+   * else (owner, 2026-09-16: "Tap to swap") and reaches the server only when
+   * the whole list is saved.
+   * @param {EditorRow} row
+   * @param {string} icon
+   */
+  function chooseMark(row, icon) {
+    row.icon = icon;
+    row.accent = inkOf(icon);
+  }
+
+  /** @param {string} rowId @param {string} icon */
+  function focusTrayItem(rowId, icon) {
+    queueMicrotask(() => document.getElementById(`swap-${rowId}-${icon}`)?.focus());
+  }
+
+  /**
+   * The tray's own keyboard contract (#867). Enter/Space opening the button
+   * is free on a real `<button>`; arrows moving the selection and Esc
+   * closing it are not, because `role=radio` buttons do not get a native
+   * radio group's arrow-key behaviour for nothing.
+   * @param {KeyboardEvent} event
+   * @param {EditorRow} row
+   */
+  function onTrayKeydown(event, row) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      row.open = false;
+      queueMicrotask(() => document.getElementById(`swap-${row.id}`)?.focus());
+      return;
+    }
+    if (!["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(event.key)) return;
+    event.preventDefault();
+    const options = trayOptions(row);
+    const i = options.indexOf(row.icon);
+    const forward = event.key === "ArrowRight" || event.key === "ArrowDown";
+    const next = options[(i + (forward ? 1 : -1) + options.length) % options.length];
+    chooseMark(row, next);
+    focusTrayItem(row.id, next);
   }
 
   async function saveSections() {
     sectionsProblem = null;
     saidSections = false;
     try {
-      await writeSections(v.id, rows.map((row) => ({
-        ...row,
-        /* The engine's schema requires both; an undrawn choice is not a
-           reason to send nothing, so a fresh row takes the family's first
-           pen until 2b's open question is answered. */
-        icon: row.icon ?? "home",
-        accent: row.accent ?? "sage",
-      })));
+      /* Taken before the send: a section added while the save is in flight
+         was not sent, so it must not be marked saved. */
+      const sent = sectionsSnapshot(rows);
+      await writeSections(v.id, rows);
       saidSections = true;
+      /* This editor's own rows just became the server's truth — mark them
+         as the baseline BEFORE the reload below, so the refresh effect
+         knows it is safe to resync `rows` from the fresh read rather than
+         reading this save as still in progress (#1151 W2-R2). */
+      sectionsBaseline = sent;
       await invalidateAll();
     } catch (error) {
       sectionsProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
@@ -563,6 +689,10 @@
   });
 
   onMount(() => {
+    /* #1122: the pocket hides this backdrop (proposal §1.10) and draws the
+       household's year for its own field, so a phone does not solve the
+       desk's room behind it. */
+    if (isPocket()) return;
     fillStarTiles(document.getElementById("fartile"), document.getElementById("neartile"));
     descend();
     /*
@@ -609,47 +739,13 @@
 
 <svelte:head><title>Orbit — {v.name}</title></svelte:head>
 
-<!-- No JSDoc /** @type */ comment can sit in this snippet's own parameter
-     list or body: rolldown's build mis-parses one there (bisected while
-     reconciling #624). The ternary default gives `icon`/`accent` the
-     `string | null` an annotation would, without a comment. -->
-{#snippet mark({ icon = (true ? null : ""), accent = (true ? null : "") })}
-  <span class="mark" style="--sec:var({accent ? `--sec-${accent}` : "--ink-faint"})" aria-hidden="true">
-    {#if icon === "home"}
-      <svg width="17" height="17" viewBox="0 0 16 16">
-        <path d="M2.6 7.7 8 3.1l5.4 4.6"/><path d="M4.3 7.4v5.6h7.4V7.4"/>
-      </svg>
-    {:else if icon === "vehicle"}
-      <svg width="17" height="17" viewBox="0 0 16 16">
-        <path d="M2.7 10.6V9.1l1.6-2.7h7.4l1.6 2.7v1.5"/>
-        <circle cx="5.2" cy="10.7" r="1.15"/><circle cx="10.8" cy="10.7" r="1.15"/>
-      </svg>
-    {:else if icon === "device"}
-      <svg width="17" height="17" viewBox="0 0 16 16">
-        <rect x="4.2" y="2.7" width="7.6" height="10.6" rx="1.5"/>
-        <path d="M6.7 11.6h2.6"/>
-      </svg>
-    {:else if icon === "service"}
-      <svg width="17" height="17" viewBox="0 0 24 24" style="stroke-width:1.7">
-        <path d="M14.6 6.4a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9l-3.8 3.8z"/>
-      </svg>
-    {:else if icon === "calendar"}
-      <svg width="17" height="17" viewBox="0 0 16 16">
-        <rect x="2.6" y="3.6" width="10.8" height="9.8" rx="1.4"/>
-        <path d="M2.6 6.6h10.8M5.6 2.3v2.2M10.4 2.3v2.2"/>
-      </svg>
-    {:else}
-      <!-- the neutral pen: a new section has no glyph of its own yet, and how
-           one is CHOSEN is an open question, so nothing is invented here -->
-      <svg width="17" height="17" viewBox="0 0 16 16">
-        <circle cx="8" cy="8" r="4.6" stroke-dasharray="2 2"/>
-      </svg>
-    {/if}
-    <i></i>
-  </span>
-{/snippet}
+<!-- #1122, proposal §2.10: the pocket's own household, chosen by CSS. Outside
+     the desk's wrapper so its resets stay the desk's; on a phone the pocket
+     holds the page's one main landmark (this route renders only in the
+     browser, so the dialect is known here). -->
+<Pocket household={v} />
 
-<div class="household-page" class:member={!v.canManage} bind:this={stage} role="main">
+<div class="household-page" class:member={!v.canManage} bind:this={stage} role={pocket ? undefined : "main"}>
 <!-- your own system, drawn from the inside (§15 H2). Behind the dust, not in
      front of it: your system is the structure you are standing in, and the dust
      of the wider sky streams past nearer to the eye. Nothing in here is
@@ -772,8 +868,11 @@
     <!-- ── the system ────────────────────────────────────────────────────
          2c: three fields, three saves TO THE EYE — "it's more human". Each
          field owns its little save; you finish a thought and put it away.
-         UNDERNEATH IT IS STILL ONE COMMAND: the client sends the bundled
-         household.update carrying name + time zone + currency together. -->
+         UNDERNEATH IT IS STILL ONE COMMAND: household.update always carries
+         all three. Saving one field sends the OTHER two as the server's own
+         last-known values, never as whatever this editor is holding for
+         them, so a save here can never carry an unconfirmed sibling field
+         along with it (#1151 W2-S2; saveField builds that payload). -->
     <div class="card c-system">
       <div class="cardhead"><h2>The system</h2></div>
       <div class="field" class:dirty={dirty.name}>
@@ -835,7 +934,16 @@
         <div>
           {#each shown as row (row.id)}
             <div class="sec" class:off={!row.visible} class:empty={row.removable}>
-              {@render mark(row)}
+              {#if row.shipped}
+                <!-- a shipped section's glyph never changes meaning — not a button -->
+                <Mark icon={row.icon} accent={row.accent} aria-hidden="true" />
+              {:else}
+                <!-- #867 tap to swap: a user-named row's mark is a real button -->
+                <Mark icon={row.icon} accent={row.accent} tag="button" class="mark swap"
+                      id="swap-{row.id}" aria-expanded={Boolean(row.open)}
+                      aria-label="Mark for {row.name || 'this section'} — choose another"
+                      onclick={() => toggleTray(row)} />
+              {/if}
               <input maxlength="30" aria-label="Section name" placeholder={row.fresh ? "name it" : null}
                      bind:value={row.name}>
               <span class="used">{entriesLabel(row.count)}</span>
@@ -845,6 +953,20 @@
               <button class="drop" title="remove" aria-label="Remove section"
                       onclick={() => dropSection(row)}>×</button>
             </div>
+            {#if !row.shipped && row.open}
+              <!-- the worn figure plus every asterism this household has not
+                   worn (row.icon is always first). Picking one updates the row
+                   in place, closes nothing else, and saves with the list. -->
+              <div class="tray" role="radiogroup" aria-label="Marks the pen has not used" tabindex="-1"
+                   onkeydown={(event) => onTrayKeydown(event, row)}>
+                {#each trayOptions(row) as icon (icon)}
+                  <Mark {icon} accent={inkOf(icon)} tag="button" role="radio" aria-label={icon}
+                        aria-checked={icon === row.icon} id="swap-{row.id}-{icon}"
+                        tabindex={icon === row.icon ? 0 : -1}
+                        onclick={() => chooseMark(row, icon)} />
+                {/each}
+              </div>
+            {/if}
           {/each}
         </div>
 
@@ -1036,6 +1158,16 @@
         {/if}
       {/if}
     </div>
+
+    <!-- ── the archive (#1002): portable export, import and preview,
+         OWNER-ONLY like sections and the danger line. The phone's own build
+         is #1122's PocketArchive.svelte; DeskArchive.svelte reuses its
+         server calls under the desk's own card grammar. Between the
+         ordinary cards and the danger line, spanning both columns
+         (household.css's .card.c-archive). -->
+    {#if v.canManage}
+      <DeskArchive householdId={v.id} householdName={v.name} entries={v.entries} sections={shown.length} />
+    {/if}
 
     <!-- ── THE DANGER ZONE ─────────────────────────────────────────────────
          Red rule, red wash, hazard ticks, red heading, and the button UP on

@@ -2,6 +2,13 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 
 import { sessionHeaders } from "./support/households";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /*
  * The maintenance page people actually see (#526; ADR-0013 decisions 2, 3, 4
@@ -20,6 +27,7 @@ const HALFWAY = "The copy is about halfway. Still on track for the time below.";
 const VERIFYING = "Verifying the copied documents before we reopen.";
 
 async function signInAs(page: Page, account: string) {
+  await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
   /* Not a fixed destination: #840 sends a session with no household of its
@@ -56,7 +64,9 @@ let adminPage: Page;
 async function openWindow(browser: Browser) {
   admin = await browser.newContext({ ignoreHTTPSErrors: true });
   adminPage = await admin.newPage();
-  await signInAs(adminPage, "Orbit Administrator");
+  await signInAs(adminPage, workerAccount("administrator"));
+  /* #1080: the maintenance commands are an instance-admin power. */
+  await ensureWorkerAdministrator(adminPage);
   if ((await readState(adminPage)).effectivelyActive) {
     await command(adminPage, { action: "end" });
   }
@@ -135,7 +145,7 @@ test("the administrator passes; an ordinary member is shown the screen", async (
   try {
     const page = await context.newPage();
     // The sign-in itself is exempt; what it lands on afterwards is not.
-    await signInAs(page, "Orbit Member");
+    await signInAs(page, workerAccount("member"));
     await expect(page.getByRole("heading", { name: "maintenance — back soon" })).toBeVisible();
     const response = await page.request.get("/home", { maxRedirects: 0 });
     expect(response.status()).toBe(503);

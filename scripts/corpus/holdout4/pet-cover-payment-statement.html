@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Bramblewick Pet Cover - Payment Statement</title>
+<style>
+@font-face{font-family:"Corpus Bramble";src:url("../fonts/Gelasio.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Bramble Mono";src:url("../fonts/Inconsolata.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@page { size: A4; margin: 0; }
+html, body { margin: 0; padding: 0; background: #fff; }
+.page { position: relative; width: 794px; min-height: 1123px; box-sizing: border-box; padding: 44px 52px; }
+body {
+  font-family: "Corpus Bramble", serif;
+  font-size: 9.6pt;
+  line-height: 1.35;
+  color: #1c1c1c;
+}
+.mono { font-family: "Corpus Bramble Mono", monospace; }
+h1, h2, h3 { font-family: "Corpus Bramble", serif; margin: 0 0 6px 0; }
+.masthead { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 3px solid #12463b; padding-bottom: 8px; }
+.brand { font-size: 22pt; font-weight: bold; color: #12463b; letter-spacing: 0.5px; }
+.doctitle { font-size: 12pt; text-align: right; color: #333; }
+.meta-strip { font-size: 8pt; color: #444; margin-top: 4px; display: flex; justify-content: space-between; }
+.legalline { font-size: 7.3pt; color: #555; margin-top: 6px; line-height: 1.3; }
+.summary-panel { border: 1px solid #12463b; background: #f4f8f6; margin-top: 12px; padding: 10px 14px; }
+.summary-title { font-size: 9.5pt; font-weight: bold; color: #12463b; border-bottom: 1px solid #b7cdc6; margin-bottom: 6px; padding-bottom: 3px; }
+.summary-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 18px; row-gap: 3px; font-size: 8.6pt; }
+.summary-grid .k { color: #444; }
+.summary-grid .v { font-weight: bold; }
+.notice { font-size: 8.4pt; margin: 10px 0; font-style: italic; color: #333; }
+table.ledger { width: 100%; border-collapse: collapse; font-family: "Corpus Bramble Mono", monospace; font-size: 7.6pt; margin-top: 6px; }
+table.ledger caption { text-align: left; font-family: "Corpus Bramble", serif; font-weight: bold; font-size: 9.5pt; color: #12463b; margin-bottom: 4px; caption-side: top; }
+table.ledger th, table.ledger td { border-bottom: 1px solid #cdd8d4; padding: 2.5px 4px; text-align: left; white-space: nowrap; }
+table.ledger th { background: #12463b; color: #fff; font-weight: normal; }
+table.ledger td.amt { text-align: right; }
+table.ledger tr.fee td { color: #7a2e18; }
+.ledger-total { display: flex; justify-content: flex-end; margin-top: 4px; font-size: 8.6pt; }
+.ledger-total .box { border: 1px solid #12463b; padding: 4px 10px; font-weight: bold; }
+.footer-strip { position: absolute; bottom: 30px; left: 52px; right: 52px; font-size: 7.4pt; color: #555; border-top: 1px solid #ccc; padding-top: 5px; display: flex; justify-content: space-between; }
+h2.section { font-size: 11pt; color: #12463b; border-bottom: 2px solid #12463b; padding-bottom: 3px; margin-top: 14px; }
+table.claims { width: 100%; border-collapse: collapse; font-size: 8.2pt; margin-top: 6px; }
+table.claims th, table.claims td { border: 1px solid #b7cdc6; padding: 3px 5px; text-align: left; vertical-align: top; }
+table.claims th { background: #e5eeeb; font-weight: bold; }
+table.vets { width: 100%; border-collapse: collapse; font-size: 8.2pt; margin-top: 6px; }
+table.vets th, table.vets td { border: 1px solid #b7cdc6; padding: 3px 5px; text-align: left; }
+table.vets th { background: #e5eeeb; }
+.smallnote { font-size: 7.6pt; color: #555; margin-top: 8px; line-height: 1.3; }
+table.tiers { width: 100%; border-collapse: collapse; font-size: 8.4pt; margin-top: 6px; }
+table.tiers th, table.tiers td { border: 1px solid #cbb98a; padding: 4px 6px; text-align: center; }
+table.tiers th { background: #f4ead0; }
+table.tiers td.name { text-align: left; }
+.marketing-panel { background: #f4ead0; border: 1px solid #cbb98a; padding: 10px 14px; margin-top: 10px; }
+.club-panel { background: #eef3f7; border: 1px solid #a9c3d6; padding: 10px 14px; margin-top: 10px; }
+.dg-box { border: 1px solid #999; padding: 10px 14px; margin-top: 8px; font-size: 8.4pt; }
+p { margin: 5px 0; }
+ul { margin: 4px 0; padding-left: 18px; }
+li { margin-bottom: 2px; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="masthead">
+    <div class="brand">Bramblewick Pet Cover</div>
+    <div class="doctitle">Payment Statement</div>
+  </div>
+  <div class="meta-strip">
+    <span>Statement printed <span class="mono">12 September 2026</span></span>
+    <span>Statement period <span class="mono">4 March 2026</span> to <span class="mono">4 September 2026</span></span>
+    <span>Page <span class="mono">1</span> of <span class="mono">3</span></span>
+  </div>
+  <div class="legalline">
+    Bramblewick Pet Cover is a trading name of BWPC Underwriting Services Limited, a company registered in
+    England and Wales (company number <span class="mono">07734120</span>), VAT registration number
+    <span class="mono">GB 234 5671 09</span>. Registered office: Unit 4 Meridian Court, Hartfield Road,
+    Bramblewick, BW1 6QJ. Policies are administered on Bramblewick's behalf by Halewick Administration
+    Services (company number <span class="mono">06651230</span>).
+  </div>
+
+  <div class="summary-panel">
+    <div class="summary-title">Account summary</div>
+    <div class="summary-grid">
+      <div class="k">Customer number</div><div class="v mono">8802 4471 90</div>
+      <div class="k">Policy number</div><div class="v mono">P-BRM-2291884</div>
+      <div class="k">Policyholder</div><div class="v">Mrs J Alderton</div>
+      <div class="k">Pet</div><div class="v">Baxter, Cocker Spaniel</div>
+      <div class="k">Policy year</div><div class="v mono">4 March 2026</div>
+      <div class="k">Renews on</div><div class="v mono">3 March 2027</div>
+      <div class="k">Monthly premium</div><div class="v mono">£24.99</div>
+      <div class="k">Payment method</div><div class="v">Direct Debit</div>
+      <div class="k">Mandate reference</div><div class="v mono">DDM-660271</div>
+      <div class="k">Collection date</div><div class="v">4th of each month</div>
+      <div class="k">Appears on your bank statement as</div><div class="v mono">BRAMBLEWICK PET COV</div>
+      <div class="k">Payment reference</div><div class="v mono">PYMT-8802447190</div>
+      <div class="k">Collecting account</div><div class="v mono">40-05-17 / ending 8831</div>
+      <div class="k">Cover level</div><div class="v">Standard Cover (tariff <span class="mono">STD-24</span>)</div>
+      <div class="k">Statement number</div><div class="v mono">STM-0007341</div>
+      <div class="k">Previous statement issued</div><div class="v mono">4 March 2026</div>
+    </div>
+  </div>
+  <p class="notice">
+    This is a <span class="mono">12 month policy year</span> running from <span class="mono">4 March 2026</span>
+    to <span class="mono">3 March 2027</span>. You asked us for a record of the payments taken this policy
+    year, so this statement lists every direct debit collection against your policy so far.
+  </p>
+  <p class="smallnote">
+    We normally send a payment statement automatically at renewal, but you can ask for one at any point
+    in the policy year by calling us or requesting it through your online account. If you would prefer
+    to go paperless and receive future statements by email instead of post, you can switch this on from
+    the same account settings screen at any time, and switch back just as easily.
+  </p>
+
+  <table class="ledger">
+    <caption>Transaction ledger</caption>
+    <thead>
+      <tr><th>Date</th><th>Description</th><th>Reference</th><th>Amount in</th><th>Amount out</th><th>Balance</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>4 Mar 2026</td><td>Premium collection</td><td>DDC7734511</td><td class="amt">-</td><td class="amt">24.99</td><td class="amt">24.99</td></tr>
+      <tr><td>4 Apr 2026</td><td>Premium collection</td><td>DDC7738820</td><td class="amt">-</td><td class="amt">24.99</td><td class="amt">49.98</td></tr>
+      <tr><td>6 May 2026</td><td>Payment returned unpaid</td><td>DDR2205563</td><td class="amt">24.99</td><td class="amt">-</td><td class="amt">24.99</td></tr>
+      <tr class="fee"><td>12 May 2026</td><td>Failed payment fee</td><td>FEE0091834</td><td class="amt">-</td><td class="amt">12.00</td><td class="amt">36.99</td></tr>
+      <tr><td>18 May 2026</td><td>Premium collection (re-presented)</td><td>DDC7741190</td><td class="amt">-</td><td class="amt">24.99</td><td class="amt">61.98</td></tr>
+      <tr><td>4 Jun 2026</td><td>Premium collection</td><td>DDC7745502</td><td class="amt">-</td><td class="amt">24.99</td><td class="amt">86.97</td></tr>
+      <tr><td>4 Jul 2026</td><td>Premium collection</td><td>DDC7749814</td><td class="amt">-</td><td class="amt">24.99</td><td class="amt">111.96</td></tr>
+      <tr><td>4 Aug 2026</td><td>Premium collection</td><td>DDC7754126</td><td class="amt">-</td><td class="amt">24.99</td><td class="amt">136.95</td></tr>
+      <tr><td>4 Sep 2026</td><td>Premium collection</td><td>DDC7758438</td><td class="amt">-</td><td class="amt">24.99</td><td class="amt">161.94</td></tr>
+    </tbody>
+  </table>
+  <div class="ledger-total"><div class="box mono">Total collected this policy year to date: £161.94</div></div>
+
+  <p class="smallnote">
+    Your monthly premium was <span class="mono">£21.40</span> until your last renewal on
+    <span class="mono">4 March 2026</span>, when it changed to <span class="mono">£24.99</span>
+    to reflect your pet's age and claims history. A failed collection is normally re-presented within
+    ten working days; a second failure may lead to your policy being cancelled. If a collection fails
+    twice in a policy year we may ask you to pay by an alternative method going forward.
+  </p>
+  <p class="smallnote">
+    Figures on this statement are rounded to the nearest penny and shown in pounds sterling. If you
+    think any line on this ledger is wrong, tell us within thirteen months of the transaction date so
+    we can investigate; after that we may not be able to trace the original collection with our bank.
+    Keep this statement with your policy documents in case you need it for a future claim, a change of
+    address, or a mortgage or letting agreement that asks for proof of ongoing pet cover.
+  </p>
+
+  <div class="footer-strip">
+    <span>Customer number <span class="mono">8802 4471 90</span> &nbsp;|&nbsp; Policy <span class="mono">P-BRM-2291884</span></span>
+    <span>Customer services <span class="mono">0330 111 2044</span> (8am-8pm Mon-Fri, 9am-1pm Sat)</span>
+  </div>
+</div>
+
+<div class="page">
+  <h2 class="section">Claims history</h2>
+  <p>
+    A summary of your pet's cover with us follows. Baxter (Cocker Spaniel, date of birth
+    <span class="mono">2 June 2019</span>) was first insured with Bramblewick on
+    <span class="mono">4 March 2023</span>, and is registered against microchip number
+    <span class="mono">981000009887654</span>.
+  </p>
+  <table class="claims">
+    <thead>
+      <tr><th>Claim number</th><th>Date of claim</th><th>Vet practice</th><th>Condition</th><th>Claimed</th><th>Paid</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      <tr><td class="mono">CLM-2204471</td><td class="mono">14 July 2024</td><td>Riverside Veterinary Group</td><td>Ear infection</td><td class="mono">£186.40</td><td class="mono">£149.12</td><td>Paid</td></tr>
+      <tr><td class="mono">CLM-2298732</td><td class="mono">2 February 2026</td><td>Oakdene Vets</td><td>Skin allergy investigation</td><td class="mono">£412.75</td><td class="mono">£330.20</td><td>Paid</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section">Vet practices used</h2>
+  <table class="vets">
+    <thead><tr><th>Practice</th><th>Practice number</th><th>Address</th><th>Phone</th></tr></thead>
+    <tbody>
+      <tr><td>Riverside Veterinary Group</td><td class="mono">VP-004471</td><td>12 Mill Lane, Hartfield, HF3 2QW</td><td class="mono">01432 556781</td></tr>
+      <tr><td>Oakdene Vets</td><td class="mono">VP-009982</td><td>9 Oak Road, Bramblewick, BW2 4RT</td><td class="mono">01926 774410</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section">How your claims are paid</h2>
+  <p>
+    Each claim is subject to an excess of <span class="mono">£95.00</span> per condition, per
+    policy year. After the excess, we pay 80 per cent of the remaining eligible costs, up to a vet fee
+    limit of <span class="mono">£7,500.00</span> a year. Dental treatment arising from an
+    accident or illness is limited to <span class="mono">£300.00</span> a year. Cosmetic
+    treatment, vaccinations, routine check-ups and pre-existing conditions declared at application are
+    not covered under any Bramblewick cover level.
+  </p>
+  <p>
+    Upload your vet invoices at <span class="mono">portal.bramblewickpetcover.co.uk</span> or through
+    our short link, <span class="mono">brmb.uk/upload</span>, and we will confirm receipt within two
+    working days. Most claims are paid directly to the treating vet practice; where you have already
+    paid the practice yourself, we pay you by bank transfer, usually within five working days of a
+    claim being approved. You can track a claim's progress at any time by signing in to your account
+    online or in the app.
+  </p>
+  <p class="smallnote">
+    If your vet practice is not listed on our approved network, ask them to call our vet line before
+    treatment begins where possible, so we can confirm what is covered. Claims for conditions that
+    began before your policy started, or during a previous break in cover, cannot be paid. Multi-pet
+    households should quote the pet's name as well as the policy number on every claim form, since one
+    policy number can cover more than one animal.
+  </p>
+  <p class="smallnote">
+    We record calls to our claims and customer service lines for training, quality and dispute-resolution
+    purposes. This document, and all Bramblewick correspondence, is available in large print, braille or
+    audio on request, free of charge. If your circumstances make it difficult to deal with us by phone or
+    post, tell us and we will note this on your account so future contact can be adjusted.
+  </p>
+  <h2 class="section">No-claims discount</h2>
+  <p class="smallnote">
+    Since our no-claims discount scheme began on <span class="mono">1 June 2019</span>, policyholders
+    who make no claims in a policy year build up a discount applied at the following renewal, shown
+    separately on your renewal documents rather than on this statement. Any claim made during a policy
+    year, including the two shown above, resets the discount to zero at your next renewal. The discount
+    cannot be transferred between pets or combined with other Bramblewick offers.
+  </p>
+  <div class="footer-strip">
+    <span>Customer number <span class="mono">8802 4471 90</span> &nbsp;|&nbsp; Policy <span class="mono">P-BRM-2291884</span></span>
+    <span>Claims line <span class="mono">0345 604 2210</span> &nbsp;|&nbsp; Page <span class="mono">2</span> of <span class="mono">3</span></span>
+  </div>
+</div>
+
+<div class="page">
+  <div class="dg-box">
+    <h2 class="section" style="margin-top:0;">The Direct Debit Guarantee</h2>
+    <p>
+      This Guarantee is offered by all banks and building societies that accept instructions to pay
+      direct debits, and has been in place since <span class="mono">1 January 2021</span>. If there are
+      any changes to the amount, date or frequency of your direct debit, Halewick Administration Services
+      will notify you in advance, or as otherwise agreed. If an error is made in the payment of your
+      direct debit, you are entitled to a full and immediate refund from your branch of the amount paid.
+      You can cancel a direct debit at any time by contacting your bank or building society.
+    </p>
+  </div>
+
+  <h2 class="section">Changing your payment details</h2>
+  <p>
+    To change your bank account, collection date, or move from monthly to annual payment, sign in at
+    <span class="mono">portal.bramblewickpetcover.co.uk</span>, use the app, or call
+    <span class="mono">0330 111 2044</span>. Mandate changes normally take five working days, so let us
+    know before your next collection date wherever you can.
+  </p>
+
+  <h2 class="section">Complaints</h2>
+  <p>
+    If something has gone wrong, contact Halewick Administration Services first, on
+    <span class="mono">0330 111 2044</span> or in writing. If we cannot resolve things within three
+    working days, we will send a final response within eight weeks. If you remain unhappy, refer your
+    complaint, free of charge, to the Financial Ombudsman Service at
+    <span class="mono">www.financial-ombudsman.org.uk</span> or <span class="mono">0800 023 4567</span>.
+  </p>
+
+  <h2 class="section">Data protection</h2>
+  <p>
+    BWPC Underwriting Services Limited is the data controller for information collected about you and
+    your pet, and is registered with the Information Commissioner's Office. Halewick Administration
+    Services processes this data on our behalf to administer your policy and handle claims, and may
+    share it with vet practices, other insurers and fraud prevention agencies. Our full privacy notice
+    is at <span class="mono">portal.bramblewickpetcover.co.uk</span>. To opt out of marketing by post,
+    email or text, call us or update your preferences online at any time.
+  </p>
+  <p class="smallnote">
+    BWPC Underwriting Services Limited is authorised and regulated by the Financial Conduct Authority,
+    firm reference number <span class="mono">745213</span>. Halewick Administration Services is an
+    appointed representative of BWPC Underwriting Services Limited, firm reference number
+    <span class="mono">812340</span>. You can check these details on the Financial Services Register.
+  </p>
+
+  <div class="marketing-panel">
+    <h3>Other Bramblewick cover levels</h3>
+    <p style="margin-top:0;">Baxter is currently on Standard Cover. Cover can be changed at your next renewal
+    on <span class="mono">3 March 2027</span>, or upgraded mid-term subject to underwriting.</p>
+    <table class="tiers">
+      <thead><tr><th>Cover level</th><th>Tariff code</th><th>Monthly price</th></tr></thead>
+      <tbody>
+        <tr><td class="name">Essential Cover</td><td class="mono">ESS-14</td><td class="mono">£14.60</td></tr>
+        <tr><td class="name">Standard Cover (your current cover)</td><td class="mono">STD-24</td><td class="mono">£24.99</td></tr>
+        <tr><td class="name">Premier Cover</td><td class="mono">PRM-31</td><td class="mono">£31.75</td></tr>
+        <tr><td class="name">Ultimate Cover</td><td class="mono">ULT-42</td><td class="mono">£42.10</td></tr>
+      </tbody>
+    </table>
+    <p class="smallnote">Switch to Premier Cover or above before <span class="mono">30 November 2026</span>
+    and we waive the usual underwriting review. Founded in 1998, Bramblewick has insured British
+    pets for over a quarter of a century.</p>
+  </div>
+
+  <div class="club-panel">
+    <h3>Bramblewick Wellbeing Club</h3>
+    <p style="margin-top:0;">
+      Every Bramblewick policyholder can join the Wellbeing Club free of charge for one free health
+      check a year, discounted flea and worming treatment, and money off pet food from our partner,
+      Hartford Pet Foods, at <span class="mono">www.hartfordpetfoods.co.uk</span>. Members also get
+      our video vet advice line, <span class="mono">0906 470 0091</span> (65p a minute plus your phone
+      provider's access charge).
+    </p>
+    <p class="smallnote">
+      Search "Bramblewick Pet Cover" on the App Store or Google Play to manage your policy and track
+      claims on the move. Follow <span class="mono">@BramblewickPets</span> for pet care tips, offers
+      and Wellbeing Club events near you. We offset the postage and printing of every statement we send.
+    </p>
+  </div>
+
+  <div class="footer-strip">
+    <span>Customer number <span class="mono">8802 4471 90</span> &nbsp;|&nbsp; Policy <span class="mono">P-BRM-2291884</span></span>
+    <span>Page <span class="mono">3</span> of <span class="mono">3</span></span>
+  </div>
+</div>
+
+</body>
+</html>

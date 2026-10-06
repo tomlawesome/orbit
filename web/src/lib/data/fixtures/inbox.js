@@ -7,10 +7,10 @@
  * not from a parallel synthetic suggestion — so the sky and the inbox can
  * never disagree about what the relay caught.
  *
- * `attachments` is NOT an API field yet: the real list names no files (only
- * the detail's ordinals/sizes), which #467 asks the server to change. Until
- * then the design renders as ratified from this, and live data degrades to
- * the count-based wording — the relay.js precedent (#410).
+ * `attachments` names every held file since #467, in the shape
+ * `GET /api/imap-inbox` actually answers (id, ordinal, displayName,
+ * mediaType, sizeBytes, scanState); a receipt with none yet named degrades
+ * to the count-based wording — the relay.js precedent (#410).
  *
  * Times are pinned against the fixture's noon (2026-08-13T12:00:00Z): caught
  * 11 Aug = 2d ago, burns up 25 Sep = in 43d, the waiting arrival = 4m ago.
@@ -45,7 +45,10 @@ export const INBOX_FIXTURE = {
         dueDate: { source: "parser", confidence: "high" },
         costMinor: { source: "parser", confidence: "low" },
       },
-      attachments: [{ displayName: "policy-schedule.pdf", sizeBytes: 831488, scannedClean: true }],
+      attachments: [{
+        id: "a-insurance-1", ordinal: 1, displayName: "policy-schedule.pdf",
+        mediaType: "application/pdf", sizeBytes: 831488, scanState: "clean",
+      }],
     },
     {
       id: "r-reading",
@@ -76,7 +79,8 @@ export const INBOX_FIXTURE = {
       canDiscard: true,
       cleanupOnly: true,
       message:
-        "Its attachment is a picture-only scan, and Orbit couldn’t read any text from it. You can add the item yourself and attach the file from Documents.",
+        "Its attachment was larger than Orbit can store. You can add the item yourself and attach the file from Documents.",
+      reason: "too_large",
       proposal: {},
       fieldEvidence: {},
     },
@@ -93,6 +97,7 @@ export const INBOX_FIXTURE = {
       canDiscard: true,
       cleanupOnly: true,
       message: "It carried no document Orbit can read (PDFs work best). Nothing was kept.",
+      reason: "no_document",
       proposal: {},
       fieldEvidence: {},
     },

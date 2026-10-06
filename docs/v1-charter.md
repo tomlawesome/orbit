@@ -1,5 +1,7 @@
 # Orbit v1 charter
 
+> **Current.** The release contract this project still works to.
+
 ## Purpose
 
 Orbit v1 is a professional, focused, self-hosted home-operations application.

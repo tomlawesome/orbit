@@ -10,6 +10,7 @@ import {
   households,
   imapIngestionMessages,
   imapNotificationDeliveries,
+  mailProbeResults,
   notificationDeliveries,
   users,
 } from "@/db/schema";
@@ -75,6 +76,28 @@ const actionLabels: Record<string, string> = {
   imap_notification_delivery_retried: "Mailbox notification delivery retried",
   document_purged: "Document retention completed",
   document_storage_missing: "Missing document storage detected",
+  // M7 (ADR-0023 §8): the audit record the claim writes, so the
+  // administration screen never renders the raw action string.
+  instance_claimed: "Instance claimed",
+  // M7 slice 8 (#911, ADR-0023 §3, §6-§8): administrator-created local users
+  // and the setup/recovery links and password changes that follow.
+  local_user_created: "Local user created",
+  setup_link_issued: "Setup link issued",
+  // Written only when the mail carrying that link actually went (owner ruling
+  // 2026-09-09: the link is emailed, never shown), so the two records
+  // together say whether anybody could have received it.
+  setup_link_sent: "Setup link emailed",
+  password_set: "Password set",
+  password_changed: "Password changed",
+  // M7 (ADR-0023 §6, §8): the sign-in methods a reader adds and removes for
+  // themselves. The label is what the administration screen renders; the
+  // `changes` payload carries an identity id and nothing else.
+  identity_linked: "Sign-in provider linked",
+  identity_unlinked: "Sign-in provider unlinked",
+  password_removed: "Password removed",
+  // M7 slice 9 (#912, ADR-0022 §5): the primary-administrator recovery CLI's
+  // own audit record, alongside `issueSetupToken`'s `setup_link_issued`.
+  recovery_link_issued: "Recovery link issued",
 };
 
 /** Maps persisted actions to a bounded administrator-facing label. */
@@ -170,6 +193,7 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
     jobs,
     historyRows,
     mailboxNotificationCountRows,
+    [mailProbeRow],
   ] = await Promise.all([
     getDb().select({
       status: notificationDeliveries.status,
@@ -216,6 +240,12 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
       status: imapNotificationDeliveries.status,
       count: sql<number>`count(*)::int`,
     }).from(imapNotificationDeliveries).groupBy(imapNotificationDeliveries.status),
+    getDb().select({
+      mailboxResult: mailProbeResults.mailboxResult,
+      mailboxCheckedAt: mailProbeResults.mailboxCheckedAt,
+      relayResult: mailProbeResults.relayResult,
+      relayCheckedAt: mailProbeResults.relayCheckedAt,
+    }).from(mailProbeResults).limit(1),
   ]);
   const history = historyRows.slice(0, 25);
   const mailboxCounts = boundedCounts(mailboxNotificationCountRows);
@@ -249,7 +279,7 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
         : notificationConfigError ? "unsafe_input" as const
         : imapConfig?.configured ? preflight.status : "not_configured" as const,
       smtp: notificationConfigError ? "unsafe_input" as const : preflight.smtp,
-      imap: imapCredentialLocked ? "unsafe_input" as const : imapConfigError ? "unsafe_input" as const : preflight.imap,
+      imap: imapCredentialLocked ? "credential_locked" as const : imapConfigError ? "unsafe_input" as const : preflight.imap,
       worker: {
         started: imapWorker.started,
         running: imapWorker.running,
@@ -270,6 +300,16 @@ export async function getAdministratorOperations(actorUserId: string, auditCurso
       ...job,
       lastErrorCode: safeDocumentFailure(lastError),
     })),
+    /* The two mail tests' last answer (#1071): kept so the pill survives a
+       reload. Null on either half until that test has ever run. */
+    mailProbes: {
+      mailbox: mailProbeRow?.mailboxResult && mailProbeRow.mailboxCheckedAt
+        ? { result: mailProbeRow.mailboxResult, at: mailProbeRow.mailboxCheckedAt.toISOString() }
+        : null,
+      relay: mailProbeRow?.relayResult && mailProbeRow.relayCheckedAt
+        ? { result: mailProbeRow.relayResult, at: mailProbeRow.relayCheckedAt.toISOString() }
+        : null,
+    },
     audit: history.map((entry) => ({
       id: entry.id,
       actorName: entry.actorName ?? "Orbit system",
@@ -434,6 +474,22 @@ export async function updateDocumentJob(
   });
 }
 
+/**
+ * Persists the last answer of one of the two live mail tests (#1071), so the
+ * pill on the row survives a reload. A store-write failure never hides the
+ * live answer the caller just paid for — it is swallowed, not surfaced.
+ */
+async function recordMailProbeResult(which: "mailbox" | "relay", result: string): Promise<void> {
+  const now = new Date();
+  try {
+    await getDb().update(mailProbeResults)
+      .set(which === "mailbox"
+        ? { mailboxResult: result, mailboxCheckedAt: now, updatedAt: now }
+        : { relayResult: result, relayCheckedAt: now, updatedAt: now })
+      .where(eq(mailProbeResults.singleton, true));
+  } catch { /* the live answer still reaches the caller even if the store write fails */ }
+}
+
 /** Verifies SMTP connectivity/authentication without sending a message. */
 export async function verifySmtpProvider(actorUserId: string): Promise<{ result: string }> {
   await requireInstanceAdministrator(actorUserId);
@@ -449,7 +505,9 @@ export async function verifySmtpProvider(actorUserId: string): Promise<{ result:
   })();
   providerVerificationState.__orbitAdminSmtpVerification = { inFlight, lastStartedAt: now };
   try {
-    return { result: await inFlight };
+    const result = await inFlight;
+    await recordMailProbeResult("relay", result);
+    return { result };
   } finally {
     const state = providerVerificationState.__orbitAdminSmtpVerification;
     if (state?.inFlight === inFlight) providerVerificationState.__orbitAdminSmtpVerification = { lastStartedAt: now };
@@ -500,13 +558,16 @@ export async function verifyImapIngestionProvider(actorUserId: string): Promise<
       if (adminImapVerificationDependenciesForTests?.verify) return await adminImapVerificationDependenciesForTests.verify();
       const state = await verifyImapIngestionProviders(await getImapIngestionConfig(), getNotificationWorkerConfig());
       return state.status;
-    } catch {
+    } catch (error) {
+      if (error instanceof MailInCredentialLockedError) return "credential_locked";
       return "unsafe_input";
     }
   })();
   providerVerificationState.__orbitAdminImapVerification = { inFlight, lastStartedAt: now };
   try {
-    return { result: await inFlight };
+    const result = await inFlight;
+    await recordMailProbeResult("mailbox", result);
+    return { result };
   } catch {
     return { result: "unsafe_input" };
   } finally {

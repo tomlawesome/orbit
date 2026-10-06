@@ -100,7 +100,7 @@ installer_ui_safe_field() {
     reason:initial|reason:target|reason:channel|reason:digest|reason:source-revision|reason:semantic-version|reason:revision|reason:configuration|reason:configuration-required|reason:discovery|reason:compose-config|reason:database-image|reason:service-start|reason:status-verified|reason:installed|reason:host-tools|reason:image-identity|reason:assets-verified|reason:configuration-migration|reason:provider-discovery|reason:compose-validation|reason:service-preparation|reason:database-health|reason:application-health|reason:optional-status|reason:deployment-ready|reason:docker-host|reason:image-registry|reason:configuration-failure|reason:provider-unavailable|reason:database-auth-migration|reason:application-startup|reason:health-timeout|reason:optional-unavailable|reason:failure|reason:rollback|reason:repair-unavailable|reason:unknown)
       printf '%s' "$value"
       ;;
-    action:begin|action:validate|action:pull|action:inspect|action:fetch|action:configure|action:verify|action:check|action:start|action:wait|action:health|action:skip|action:status|action:complete|action:retry|action:rollback|action:repair|action:continue|action:display)
+    action:begin|action:validate|action:pull|action:inspect|action:fetch|action:configure|action:verify|action:check|action:start|action:wait|action:health|action:skip|action:status|action:complete|action:retry|action:rollback|action:repair|action:continue|action:display|action:abort)
       printf '%s' "$value"
       ;;
     *)

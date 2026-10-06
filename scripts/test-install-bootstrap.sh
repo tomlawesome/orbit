@@ -84,9 +84,18 @@ free_port() {
 }
 
 workdir="$(mktemp -d /tmp/orbit-bootstrap.XXXXXX)"
-# The target directory name becomes the Compose project the installer
-# persists, so everything this run creates carries a name no other deployment
-# on this host can own. See AGENTS.md on Compose project collisions.
+# This run names its own Compose project, so everything it creates carries a
+# name no other deployment on this host can own. See AGENTS.md on Compose
+# project collisions.
+#
+# It used to take that name from the target directory, which install.sh fell
+# back to when nothing better was offered. Since #999 nothing better means
+# docker-compose.yml's own `name: orbit`, so the install would land in the
+# `orbit` project while the teardown below still went looking for
+# orbit-bootstrap-*: the stack would survive the trap, and the workdir that
+# points at it is removed straight afterwards. The name is stated on the
+# install now; COMPOSE_PROJECT_NAME still outranks the compose file.
+#
 # Lowercased: this becomes a Docker image tag as well as the Compose
 # project, and a tag must be lowercase.
 project_suffix="${workdir##*.}"
@@ -121,7 +130,12 @@ trap cleanup EXIT INT TERM
 # --- the disposable identity provider --------------------------------------
 
 start_oidc() {
-  docker build --quiet -t "${project_name}-oidc:test" "$repo_root/tests/oidc" >/dev/null ||
+  # OIDC_BASE_IMAGE_PREFIX routes the sidecar's FROM node:24-alpine through
+  # the group dependency proxy in CI (ai/orbit#1111); empty, and so a direct
+  # Docker Hub pull, everywhere else.
+  docker build --quiet -t "${project_name}-oidc:test" \
+    --build-arg "OIDC_BASE_IMAGE_PREFIX=${OIDC_BASE_IMAGE_PREFIX:-}" \
+    "$repo_root/tests/oidc" >/dev/null ||
     fail "could not build the disposable OIDC sidecar"
   docker run --detach --name "$oidc_container" \
     --env TEST_OIDC_ISSUER="$issuer" \
@@ -211,12 +225,45 @@ make_target() {
   chmod 600 "$target/.env-orbit"
 }
 
+# --- the handed-over manifest, preview channel only -------------------------
+#
+# #1151 O1-F2: install.sh's self-fetch refuses ORBIT_CHANNEL=preview outright
+# (ADR-0031 #7 -- "preview is for testing, not for trusting"; preview has no
+# release-assets location a self-fetch could verify against), so this
+# harness's own documented default (--channel preview, see the header) always
+# failed before ever reaching the registry-digest comparison it exists to
+# prove. A real preview install reaches this same refusal unless the caller
+# (get-orbit.sh, or the launcher) already handed over a verified manifest via
+# ORBIT_RELEASE_MANIFEST -- so this harness plays that caller's part itself,
+# using the registry digest it already fetched independently above. Install.sh
+# never signature-checks a manifest handed over this way (the whole point of
+# the caller having already verified it), so none is needed here either.
+make_preview_release_manifest() {
+  release_manifest_path="$workdir/release-manifest.json"
+  cat > "$release_manifest_path" <<JSON
+{
+  "schema": "https://tomlawson.io/schemas/orbit-release-manifest/v1",
+  "version": "0.0.0-bootstrap-test",
+  "channel": "preview",
+  "commit": "$(printf '0%.0s' {1..40})",
+  "image": { "repository": "${repository}", "digest": "${real_digest}" },
+  "launcher": { "tag": "v0.0.0", "commit": "$(printf '0%.0s' {1..40})" },
+  "files": {},
+  "recordedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+JSON
+}
+
 # --- the run ---------------------------------------------------------------
 
 expected_digest="$(registry_digest)"
 [[ "$expected_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
   fail "the registry did not return a digest for ${registry}/${repository}:${channel}"
 note "registry serves ${channel} as ${expected_digest}"
+# Captured before any --red corruption below: #1151 O1-F2's manifest (built
+# further down, only for channel=preview) must always name the real digest,
+# never the deliberately wrong one --red compares against.
+real_digest="$expected_digest"
 if [[ "$red_mode" == 1 ]]; then
   # Flip the final nibble: still a well-formed digest, still not this one.
   case "${expected_digest: -1}" in
@@ -229,6 +276,8 @@ fi
 start_oidc
 make_shim
 make_target
+release_manifest_path=""
+[[ "$channel" != preview ]] || make_preview_release_manifest
 
 bootstrap_url="https://raw.githubusercontent.com/${repository}/${branch}/scripts/install.sh"
 note "fetching the bootstrap from ${bootstrap_url}"
@@ -245,7 +294,9 @@ note "installing into $target as Compose project $project_name (this pulls a rea
 # Piped exactly as documented: bash reads the script from stdin, so the
 # installer has no stdin of its own and no controlling terminal, which is the
 # unattended path an operator following the README actually takes.
-if ! (cd "$target" && env PATH="$workdir/shim:$PATH" ORBIT_CHANNEL="$channel" \
+install_env=(PATH="$workdir/shim:$PATH" ORBIT_CHANNEL="$channel" COMPOSE_PROJECT_NAME="$project_name")
+[[ -z "$release_manifest_path" ]] || install_env+=(ORBIT_RELEASE_MANIFEST="$release_manifest_path")
+if ! (cd "$target" && env "${install_env[@]}" \
   timeout 1800 bash "$workdir/install.sh") > "$workdir/install.log" 2>&1; then
   tail -30 "$workdir/install.log" >&2
   fail "the published bootstrap did not complete"

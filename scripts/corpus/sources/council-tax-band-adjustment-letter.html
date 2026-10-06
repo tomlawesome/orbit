@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Wexmoor District Council — Revised Council Tax Bill</title>
+<style>
+@font-face{font-family:"Corpus Civic";src:url("../fonts/ZillaSlab-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Civic Sans";src:url("../fonts/ArchivoNarrow.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  body { margin: 0; }
+  .page { width: 794px; height: 1123px; box-sizing: border-box; position: relative; overflow: hidden; padding: 40px 48px; font-family: "Corpus Civic", serif; color: #1a1a1a; font-size: 10.4px; line-height: 1.42; }
+
+  .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2.5pt solid #2b4a3a; padding-bottom: 8px; margin-bottom: 10px; }
+  .head .crest { width: 40px; height: 40px; border-radius: 50%; background: #2b4a3a; color: #fff; display: flex; align-items: center; justify-content: center; font-family: "Corpus Civic Sans", sans-serif; font-weight: bold; font-size: 12px; margin-right: 10px; flex-shrink: 0; }
+  .head .namewrap { display: flex; }
+  .head .name { font-size: 20px; font-weight: bold; letter-spacing: 0.3px; line-height: 1.15; }
+  .head .name small { display: block; font-family: "Corpus Civic Sans", sans-serif; font-size: 8.6px; font-weight: normal; letter-spacing: 0.4px; color: #444; margin-top: 2px; }
+  .head .contact { font-family: "Corpus Civic Sans", sans-serif; font-size: 8.4px; text-align: right; line-height: 1.55; color: #333; }
+
+  .addrrow { display: flex; justify-content: space-between; margin-bottom: 14px; }
+  .addrblock { font-size: 10.2px; line-height: 1.5; }
+  .refbox { font-family: "Corpus Civic Sans", sans-serif; font-size: 8.6px; text-align: right; border: 1pt solid #2b4a3a; padding: 6px 10px; height: fit-content; }
+  .refbox .lbl { text-transform: uppercase; letter-spacing: 0.3px; color: #444; }
+  .refbox .val { font-size: 13px; font-weight: bold; letter-spacing: 0.5px; white-space: nowrap; margin: 1px 0 4px 0; }
+
+  h1.doctitle { font-size: 14px; margin: 0 0 8px 0; }
+  p { margin: 0 0 7px 0; text-align: justify; }
+
+  table.chargetbl { width: 100%; border-collapse: collapse; font-family: "Corpus Civic Sans", sans-serif; font-size: 9.2px; margin: 8px 0 6px 0; }
+  table.chargetbl caption { text-align: left; font-weight: bold; font-size: 10px; margin-bottom: 4px; caption-side: top; font-family: "Corpus Civic", serif; }
+  table.chargetbl th { background: #eef1ee; text-align: left; padding: 3px 7px; border-bottom: 1pt solid #2b4a3a; }
+  table.chargetbl td { padding: 3px 7px; border-bottom: 0.5pt solid #ccc; }
+  table.chargetbl td.num, table.chargetbl th.num { text-align: right; white-space: nowrap; }
+  table.chargetbl tr.total td { font-weight: bold; border-top: 1pt solid #000; border-bottom: none; }
+
+  .payslip { border: 1.4pt dashed #2b4a3a; padding: 8px 12px; margin-top: 8px; display: flex; justify-content: space-between; align-items: center; font-family: "Corpus Civic Sans", sans-serif; font-size: 9px; }
+  .payslip .big { font-size: 14px; font-weight: bold; white-space: nowrap; }
+  .payslip .barcode { height: 22px; width: 130px; background-image: repeating-linear-gradient(90deg,#000 0px,#000 1px,#fff 1px,#fff 2px,#000 2px,#000 3px,#fff 3px,#fff 5px,#000 5px,#000 6px,#fff 6px,#fff 8px); background-size: 8px 100%; }
+
+  .pagefoot { position: absolute; bottom: 22px; left: 48px; right: 48px; font-family: "Corpus Civic Sans", sans-serif; font-size: 8px; color: #444; border-top: 0.6pt solid #999; padding-top: 4px; display: flex; justify-content: space-between; }
+
+  h2.zh { font-family: "Corpus Civic Sans", sans-serif; font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; color: #2b4a3a; margin: 10px 0 4px 0; border-bottom: 0.6pt solid #2b4a3a; padding-bottom: 2px; }
+  h3.zh3 { font-family: "Corpus Civic Sans", sans-serif; font-size: 9.4px; text-transform: uppercase; letter-spacing: 0.2px; margin: 8px 0 3px 0; }
+
+  table.instaltbl { border-collapse: collapse; font-family: "Corpus Civic Sans", sans-serif; font-size: 9px; width: 100%; }
+  table.instaltbl th { background: #eef1ee; text-align: left; padding: 3px 8px; border-bottom: 1pt solid #2b4a3a; }
+  table.instaltbl td { padding: 2.6px 8px; border-bottom: 0.4pt solid #ccc; }
+  table.instaltbl td.num, table.instaltbl th.num { text-align: right; white-space: nowrap; }
+  .instalgrid { display: flex; gap: 16px; }
+  .instalgrid > div { flex: 1; }
+
+  .noticebox { font-family: "Corpus Civic Sans", sans-serif; background: #fbf6e3; border: 0.8pt solid #cbb559; padding: 6px 10px; font-size: 9px; margin: 8px 0; }
+
+  .cols2 { display: flex; gap: 18px; margin-top: 4px; }
+  .cols2 .col { flex: 1; font-size: 9px; }
+  .cols2 .col p { margin: 0 0 5px 0; text-align: justify; }
+
+  .smallprint { font-family: "Corpus Civic Sans", sans-serif; font-size: 8px; line-height: 1.32; column-count: 2; column-gap: 16px; text-align: justify; color: #222; }
+  .smallprint h3 { font-size: 8px; font-weight: bold; text-transform: uppercase; margin: 0 0 2px 0; break-after: avoid; }
+  .smallprint p { margin: 0 0 6px 0; }
+
+  .linkline { font-family: "Corpus Civic Sans", sans-serif; font-size: 8.4px; color: #2b4a3a; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="head">
+    <div class="namewrap">
+      <div class="crest">WX</div>
+      <div class="name">Wexmoor District Council
+        <small>COUNCIL OFFICES, PRIORY GATE, WEXMOOR, WX1 3PN</small>
+      </div>
+    </div>
+    <div class="contact">
+      Council Tax section<br>
+      Telephone 01632 960118<br>
+      Textphone 01632 960119<br>
+      counciltax@wexmoor.gov.uk<br>
+      wexmoor.gov.uk/counciltax
+    </div>
+  </div>
+
+  <div class="addrrow">
+    <div class="addrblock">
+      Mrs J. Attwell<br>
+      14 Ferndale Road<br>
+      Ashcombe<br>
+      Wexmoor<br>
+      WX3 9LP
+    </div>
+    <div class="refbox">
+      <div class="lbl">Council Tax account number</div>
+      <div class="val">68104472</div>
+      <div class="lbl">Property reference</div>
+      <div class="val" style="font-size:9.5px;">0091223345X</div>
+    </div>
+  </div>
+
+  <h1 class="doctitle">Your Council Tax bill has changed</h1>
+  <p style="font-family:'Corpus Civic Sans', sans-serif; font-size:8.6px; color:#444;">6 November 2026</p>
+
+  <p>Dear Mrs Attwell,</p>
+  <p>We are writing to tell you that the amount of Council Tax you pay for the property above has
+  changed. This follows a decision by the Valuation Office Agency, under case number
+  <strong>VOA/CT/5510983</strong>, to alter the valuation band recorded for your property. The Valuation
+  Office Agency made its decision on 28 October 2026, and the new band takes effect from 1 April 2026,
+  the start of the current financial year. You do not need to do anything to make this change apply;
+  this letter and the table below replace the bill we sent you on 12 March 2026.</p>
+  <p>Because the change is backdated to the start of the year, the amount you have already paid has
+  been taken into account, and the table below shows what you now owe for the rest of 2026/27. If you
+  disagree with the Valuation Office Agency's decision, the section on the next page explains how to
+  appeal; making an appeal does not let you withhold payment while it is considered.</p>
+
+  <table class="chargetbl">
+    <caption>Revised charge for the year ending 31 March 2027</caption>
+    <thead><tr><th>Charging body</th><th class="num">Amount</th></tr></thead>
+    <tbody>
+      <tr><td>Wexmoor District Council (district services)</td><td class="num">&pound;1,414.68</td></tr>
+      <tr><td>Adult social care precept</td><td class="num">&pound;182.44</td></tr>
+      <tr><td>Wexmoor Police and Crime Commissioner precept</td><td class="num">&pound;246.11</td></tr>
+      <tr><td>Wexmoor Fire and Rescue Authority precept</td><td class="num">&pound;78.90</td></tr>
+      <tr><td>Ashcombe Parish Council precept</td><td class="num">&pound;24.17</td></tr>
+      <tr class="total"><td>Revised Council Tax payable, 2026/27</td><td class="num">&pound;1,946.30</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:9px;">Your original bill for 2026/27, issued 12 March 2026, charged
+  <strong>&pound;2,104.55</strong> for the year based on the previous band. Taking into account payments
+  already made against that figure, <strong>&pound;158.25</strong> has been credited to your account and
+  set against the instalments below. A single person discount of 25% continues to apply to this
+  account; that discount was last reviewed on 19/08/2026.</p>
+  <p style="font-size:9px;">The remaining balance is payable in ten monthly instalments of
+  <strong>&pound;194.63</strong>, the first of which is due on <strong>1 December 2026</strong>. The full
+  instalment schedule is set out overleaf.</p>
+
+  <div class="payslip">
+    <div>
+      <div style="font-family:'Corpus Civic Sans', sans-serif; font-size:8px; text-transform:uppercase; color:#444;">Payment slip &mdash; retain top portion, return this slip</div>
+      Account <strong style="white-space:nowrap;">68104472</strong> &nbsp;|&nbsp; Amount due <span class="big">&pound;194.63</span> &nbsp;|&nbsp; Due date 1 December 2026
+    </div>
+    <div class="barcode"></div>
+  </div>
+
+  <div class="pagefoot">
+    <span>Wexmoor District Council &middot; Council Tax account 68104472</span>
+    <span>Page 1 of 3</span>
+  </div>
+</div>
+
+<div class="page">
+  <h2 class="zh">Your revised instalment schedule</h2>
+  <div class="instalgrid">
+    <div>
+      <table class="instaltbl">
+        <thead><tr><th>No.</th><th>Due date</th><th class="num">Amount</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>1 December 2026</td><td class="num">&pound;194.63</td></tr>
+          <tr><td>2</td><td>1 January 2027</td><td class="num">&pound;194.63</td></tr>
+          <tr><td>3</td><td>1 February 2027</td><td class="num">&pound;194.63</td></tr>
+          <tr><td>4</td><td>1 March 2027</td><td class="num">&pound;194.63</td></tr>
+          <tr><td>5</td><td>1 April 2027</td><td class="num">&pound;194.63</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <table class="instaltbl">
+        <thead><tr><th>No.</th><th>Due date</th><th class="num">Amount</th></tr></thead>
+        <tbody>
+          <tr><td>6</td><td>1 May 2027</td><td class="num">&pound;194.63</td></tr>
+          <tr><td>7</td><td>1 June 2027</td><td class="num">&pound;194.63</td></tr>
+          <tr><td>8</td><td>1 July 2027</td><td class="num">&pound;194.63</td></tr>
+          <tr><td>9</td><td>1 August 2027</td><td class="num">&pound;194.63</td></tr>
+          <tr><td>10</td><td>1 September 2027</td><td class="num">&pound;194.63</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <p style="font-size:9px; margin-top:6px;">Instalments may be paid by direct debit (reference
+  <strong>68104472A</strong>), by debit card at wx.gov.uk/pay, or at a Post Office quoting your account
+  number. This schedule applies for the remainder of the financial year, which ends 31 March 2027.</p>
+
+  <h2 class="zh">Understanding your new band</h2>
+  <p>Every home in England is placed in one of eight valuation bands, A to H, based on an estimate of
+  its capital value at 1 April 1991. Your Council Tax charge is a fixed proportion of the Band D charge
+  set by each charging body, so a change of band changes every part of the bill, not just the Council's
+  own share. The Valuation Office Agency, not Wexmoor District Council, decides which band applies; the
+  Council simply bills and collects the amount that follows from it. You can read a general explanation
+  of how bands work at gov.uk/council-tax-bands.</p>
+
+  <h2 class="zh">If you want to appeal the band</h2>
+  <p>If you think the Valuation Office Agency's decision is wrong, you can make a proposal to have the
+  band reconsidered by contacting the Valuation Office Agency directly, or you can find out how at
+  valuation-office.gov.uk/appeals. Any such proposal relating to this notice should reach the Valuation
+  Office Agency no later than <strong>6 December 2026</strong>. If the Valuation Office Agency does not
+  resolve matters to your satisfaction, you may then be able to take the matter to the independent
+  Valuation Tribunal Service. Making a proposal or an appeal does not entitle you to withhold payment of
+  the instalments shown on this bill while the matter is considered; if your appeal succeeds, any
+  overpayment will be refunded or credited to your account.</p>
+
+  <h2 class="zh">Discounts, exemptions and reductions</h2>
+  <div class="cols2">
+    <div class="col">
+      <p><strong>Single person discount.</strong> A 25% discount applies where only one adult lives in a
+      property as their main home. This discount is already reflected in the figures above and was last
+      reviewed on 19/08/2026; tell us straight away if this is no longer correct.</p>
+      <p><strong>Student and severe mental impairment.</strong> A property occupied only by full-time
+      students, or where a resident has a severe mental impairment, may be exempt or eligible for a
+      further discount.</p>
+    </div>
+    <div class="col">
+      <p><strong>Annexes.</strong> A furnished annexe occupied by a relative of the person living in the
+      main property may qualify for a 50% discount on the annexe's own Council Tax charge.</p>
+      <p><strong>Empty properties.</strong> A property that is unoccupied and substantially unfurnished
+      may be exempt for a short period, after which the full charge, and in some cases a premium of up to
+      100%, applies.</p>
+    </div>
+  </div>
+
+  <div class="pagefoot">
+    <span>Wexmoor District Council &middot; Council Tax account 68104472</span>
+    <span>Page 2 of 3</span>
+  </div>
+</div>
+
+<div class="page">
+  <h2 class="zh">Council Tax Support</h2>
+  <p>If you are on a low income, you may be able to get help towards your Council Tax bill under
+  Wexmoor District Council's local Council Tax Support scheme. If you already receive support, it has
+  been included in the figures shown in this letter; if your circumstances have changed you should tell
+  us, quoting your benefits claim reference <strong>HB-772190</strong> if you have one, so that your
+  award can be recalculated. Applications and further information are at wexmoor.gov.uk/mycouncil.</p>
+
+  <h2 class="zh">If you do not pay</h2>
+  <p>If an instalment is missed, we will send a reminder asking you to bring the account up to date. A
+  second missed instalment in the same year may cancel your right to pay by instalments, and the whole
+  year's revised charge shown on page 1 will then become payable at once. Council Tax accounts that
+  remain unpaid may be referred to the magistrates' court for a liability order, and recovery, including
+  the instruction of enforcement agents, may then pass to the Council's enforcement contractor, Carrick
+  Enforcement, or be administered on the Council's behalf by its revenues partner, Northgate Revenues
+  Services, under department code <strong>REV/CT/09</strong>. Costs are added at each stage; a previous
+  reminder on this account, under summons number <strong>SUM-2026-0417</strong>, had costs of
+  <strong>&pound;70.00</strong> added, which remain payable and are separate from the figures above.</p>
+
+  <h2 class="zh">Ways to pay</h2>
+  <p>You can pay online at wx.gov.uk/pay, by direct debit (reference 68104472A), by debit or credit
+  card by telephone on 01632 960118, by standing order, or at a bank or Post Office using the barcode on
+  the payment slip on page 1. Direct debit is the easiest way to keep instalments up to date
+  automatically. Our records show your most recent card payment on this account was made using card
+  number 6330 4411 8820 1194; if that card has since expired or been replaced, please pay by another
+  method or update your details before the next instalment is due.</p>
+
+  <h2 class="zh">Wexmoor District Council &mdash; other services</h2>
+  <p>Wexmoor District Council also runs household waste and recycling collections, leisure centres and
+  libraries across the district, and administers housing and homelessness services, planning
+  applications and licensing. Details of all of these, along with news of current consultations and
+  seasonal campaigns such as the winter warmth scheme, are at wexmoor.gov.uk/mycouncil and on our social
+  media channel, @wexmoorcouncil. Wexmoor District Council is not responsible for services provided by
+  Wexmoor County Council, Ashcombe Parish Council, or the Wexmoor Police and Crime Commissioner and
+  Wexmoor Fire and Rescue Authority, whose precepts are collected on their behalf as shown on page 1.</p>
+
+  <div class="noticebox">This letter can be provided in large print, audio, Braille or another language
+  on request. Please contact the Council Tax section using the telephone or textphone number on page 1.</div>
+
+  <div class="smallprint">
+    <h3>Data protection</h3>
+    <p>Wexmoor District Council processes the information in this letter to bill and collect Council
+    Tax under its statutory functions, and may share it with other public bodies, including the
+    Department for Work and Pensions, for the prevention and detection of fraud. A copy of the
+    Council's full privacy notice is available at wexmoor.gov.uk/mycouncil or on request from the
+    Council Tax section.</p>
+    <h3>Complaints</h3>
+    <p>If you are unhappy with how your account has been handled, write to the Revenues Manager,
+    Wexmoor District Council, Council Offices, Priory Gate, Wexmoor, WX1 3PN, quoting your Council Tax
+    account number 68104472, or email counciltax@wexmoor.gov.uk. Most complaints are acknowledged
+    within five working days.</p>
+    <h3>Change of circumstances</h3>
+    <p>Tell us within 21 days of any change that might affect your Council Tax, including a change of
+    address, a change in who lives with you, or the end of a discount or exemption. A late report may
+    result in a backdated charge.</p>
+    <h3>How the total is made up</h3>
+    <p>The amount shown for Wexmoor District Council includes the Council's general expenses and its
+    share of the cost of local services. The amounts for the adult social care precept, the Wexmoor
+    Police and Crime Commissioner, the Wexmoor Fire and Rescue Authority and Ashcombe Parish Council are
+    set independently by those bodies; Wexmoor District Council collects them on those bodies' behalf
+    and has no power to alter them.</p>
+    <h3>Freedom of information</h3>
+    <p>Information held by the Council, including the figures used to calculate this letter, may be
+    requested under the Freedom of Information Act 2000, subject to the exemptions set out in that Act.</p>
+    <h3>Confirming this letter is genuine</h3>
+    <p>This letter was generated automatically following the Valuation Office Agency's decision dated
+    28 October 2026. If you are unsure whether contact claiming to be from Wexmoor District Council is
+    genuine, call 01632 960118 using the number printed on page 1, not a number given to you by the
+    caller.</p>
+  </div>
+
+  <div class="pagefoot">
+    <span>Wexmoor District Council &middot; Council Tax account 68104472</span>
+    <span>Page 3 of 3</span>
+  </div>
+</div>
+
+</body>
+</html>

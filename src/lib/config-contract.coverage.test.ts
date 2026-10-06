@@ -53,6 +53,13 @@ const PLATFORM_KEYS = new Set([
   "ORBIT_CONFIGURE_APP_URL",
   "ORBIT_CONFIGURE_OIDC_ISSUER",
   "ORBIT_CONFIGURE_OIDC_CLIENT_ID",
+  // O1-F1: the local/oidc guided-init auth-mode switch, same scope and the
+  // same never-written-to-.env-orbit reasoning as its three siblings above.
+  "ORBIT_CONFIGURE_AUTH_MODE",
+  // The installer's own marker that its ORBIT_IMAGE was checked (configure.sh's
+  // persist_orbit_image, forwarded to the engine by run_engine): set by
+  // install.sh alone, never by a person, never written to .env-orbit.
+  "ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE",
   // ADR-0017 slice 2 (#743): inbound mail (IMAP) credentials moved out of
   // the environment entirely — every IMAP_* key was removed from
   // ALLOWED_KEYS and no longer appears in .env-orbit.example. These five
@@ -67,6 +74,14 @@ const PLATFORM_KEYS = new Set([
   "IMAP_ALIAS_PREVIOUS_GENERATION",
   "IMAP_ALIAS_PREVIOUS_EXPIRES_AT",
   "IMAP_ALIAS_PREVIOUS_EXPIRY",
+  // Release metadata baked into the image at build time (Dockerfile's
+  // runner stage, from the ORBIT_VERSION/ORBIT_REVISION/ORBIT_CHANNEL
+  // ARGs), read back by GET /api/admin/health (#1000,
+  // src/server/admin-health.ts). Never written to .env-orbit and never
+  // operator-set, the same reasoning as NODE_ENV above.
+  "ORBIT_VERSION",
+  "ORBIT_CHANNEL",
+  "ORBIT_REVISION",
 ]);
 
 function sourceFiles(dir: string): string[] {

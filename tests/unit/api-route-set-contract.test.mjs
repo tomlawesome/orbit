@@ -43,6 +43,10 @@ const HANDLER_NAMES = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 const EXPECTED_ROUTES = [
   "/api/admin/contact",
   "/api/admin/documents/health",
+  // Whether a document-KEK rotation is open and since when (#956).
+  "/api/admin/documents/rotation",
+  // The real Operations panel rows and build stamp (#1000).
+  "/api/admin/health",
   "/api/admin/mailbox",
   "/api/admin/maintenance",
   "/api/admin/operations",
@@ -52,13 +56,60 @@ const EXPECTED_ROUTES = [
   "/api/admin/operations/mailbox-notifications",
   "/api/admin/operations/smtp-test",
   "/api/admin/primary",
+  "/api/admin/recovery-bundle",
+  // An administrator creates a system for a named owner (#1052): the flow
+  // behind the Systems card's "new system" button, which was drawn from the
+  // v19 mockup and left inert until the decision of 2026-09-19.
+  "/api/admin/systems",
   "/api/admin/users",
+  // Admin-issued setup and recovery links (M7 slice 8, #911, ADR-0023 §3):
+  // re-issues a `recovery` token for a local user who has forgotten their
+  // password; the initial link comes back from the plain POST above.
+  "/api/admin/users/[userId]/setup-link",
+  // Deciding a pending sign-in (#1033, ADR-0027 §4): signed out by design --
+  // the person reading the approval mail is not signed in, and answering does
+  // not sign them in. The token in the body is its whole authorisation.
+  "/api/auth/approve",
   "/api/auth/availability",
+  // The claim (M7, ADR-0022 §2): signed out by design, and called by the
+  // door and by the e2e claim helper, never by the identity provider.
+  "/api/auth/bootstrap/claim",
+  // The first administrator with a password (M7, ADR-0022 §2): the claim
+  // cookie is its whole authorisation, and it is called by the first-run card.
+  "/api/auth/bootstrap/local",
   "/api/auth/callback",
+  // Linking a provider identity to the signed-in account (M7, ADR-0023 §6):
+  // called by the settings sign-in-methods block, never by the provider.
+  "/api/auth/link/oidc/start",
+  // Local sign-in (M7, ADR-0023 §4): signed out by design, called by the door.
+  "/api/auth/local/login",
+  // The waiting tab's two routes (#1033, ADR-0027 §4, §8). Both are signed out
+  // and both are authorised by the pending-sign-in cookie alone, never by
+  // anything in the body: `pending` is where the session is finally minted,
+  // for that browser and no other, and `resend` posts the link again inside
+  // the send limits.
+  "/api/auth/local/login/pending",
+  "/api/auth/local/login/resend",
+  // Sets or changes the signed-in caller's own password (M7 slice 8, #911,
+  // ADR-0023 §6-§7): a session route, guarded by `write()`.
+  "/api/auth/local/password",
+  // Spends a setup or recovery link and signs its owner in (M7 slice 8,
+  // #911, ADR-0023 §3): signed out by design, called by `/setup/<token>`.
+  "/api/auth/local/setup",
   "/api/auth/login",
+  // The caller's own sign-in methods and their removal (M7, ADR-0023 §6).
+  "/api/auth/methods",
+  "/api/auth/methods/local",
+  "/api/auth/methods/oidc/[identityId]",
+  // The one line a refused sign-in leaves for its owner (#1033): a session
+  // route, and a read that spends the notice as it answers.
+  "/api/auth/sign-in-notice",
   "/api/auth/logout",
   "/api/auth/session",
   "/api/auth/session/refresh",
+  // The OIDC step-up (M7, ADR-0023 §5): the challenge for a reader with no
+  // password, called by every sensitive action's screen, never by the provider.
+  "/api/auth/step-up/start",
   "/api/auth/sessions",
   "/api/auth/sessions/[sessionId]/revoke",
   "/api/auth/sessions/revoke",
@@ -78,6 +129,7 @@ const EXPECTED_ROUTES = [
   "/api/households/[householdId]/portable-archives",
   "/api/imap-inbox",
   "/api/imap-inbox/[receiptId]",
+  "/api/imap-inbox/[receiptId]/attachments/[attachmentId]/preview",
   "/api/join-requests",
   "/api/join-requests/[requestId]",
   "/api/portable-archives/[archiveId]/download",
@@ -91,7 +143,12 @@ const EXPECTED_ROUTES = [
   "/api/settings/mail-relay/senders",
   "/api/settings/mail-relay/verify",
   "/api/settings/reminders",
+  "/api/settings/sent",
   "/api/settings/tour",
+  // The system-status drawer's own data (#863): any signed-in reader, not
+  // only an administrator (#869's ruling put per-subsystem truth "behind
+  // sign-in"), called by /home's #statusdrawer.
+  "/api/system-status",
   "/api/workspace",
   "/api/workspace/commands",
 ].sort();
@@ -117,11 +174,20 @@ function collectServerFiles(dir, routePrefix = "/api") {
 // resolve inside a SvelteKit/vite context, not plain Vitest. A regex over the
 // exported bindings is enough to prove a real handler is exported, without
 // needing to execute the module.
+//
+// T-Q5 (#1151): comments are stripped first. The regex alone matched a
+// commented-out or dead `// export function GET() {}` just as readily as a
+// live one -- a route stubbed out mid-edit still "satisfied" this contract.
+function stripComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+}
+
 function exportedHandlers(source) {
+  const live = stripComments(source);
   return HANDLER_NAMES.filter((name) => {
     const asFunction = new RegExp(`export\\s+(?:async\\s+)?function\\s+${name}\\b`);
     const asConst = new RegExp(`export\\s+const\\s+${name}\\s*=`);
-    return asFunction.test(source) || asConst.test(source);
+    return asFunction.test(live) || asConst.test(live);
   });
 }
 
@@ -132,7 +198,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 52 route families -- no fewer, no more", () => {
+  it("has exactly the expected 77 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });
@@ -149,4 +215,15 @@ describe("SvelteKit API route-set contract (#735)", () => {
       ).toBeGreaterThan(0);
     },
   );
+});
+
+describe("exportedHandlers (#1151 T-Q5)", () => {
+  it("does not count a commented-out export as a live handler", () => {
+    expect(exportedHandlers("// export function GET() {}")).toEqual([]);
+    expect(exportedHandlers("/* export const POST = async () => {}; */")).toEqual([]);
+  });
+
+  it("still finds a real handler sitting next to a dead one", () => {
+    expect(exportedHandlers("// export function GET() {}\nexport function POST() {}")).toEqual(["POST"]);
+  });
 });

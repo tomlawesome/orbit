@@ -115,6 +115,44 @@ export async function currentFocus(p: Page, exclude: string | null = null): Prom
   return p.evaluate((x) => (window as unknown as KbWindow).__kb.focused(x), exclude);
 }
 
+/** A short name for whatever has focus, for failure messages. */
+async function focusLabel(p: Page): Promise<string> {
+  return p.evaluate(() => {
+    const el = document.activeElement;
+    if (!el || el === document.body) return "body";
+    const cls = typeof el.className === "string" && el.className.trim() ? `.${el.className.trim().split(/\s+/)[0]}` : "";
+    return el.tagName.toLowerCase() + (el.id ? `#${el.id}` : "") + cls;
+  });
+}
+
+/*
+ * #1183: headless Firefox does not wrap. Tab on the page's last control
+ * leaves focus right there, press after press, where Chromium passes through
+ * <body> and comes round to the top (a real Firefox hands focus to its
+ * toolbar and back; headless has no toolbar to hand it to). Measured on a
+ * three-button page: Firefox "a b c c c c", Chromium "a b c BODY a b".
+ *
+ * Called once a press has left focus where it was. On Firefox, and only when
+ * that control really is the last focusable thing on the page, it stands in
+ * for the toolbar's hand-off with one blur() -- after which Firefox's next
+ * Tab starts from the top -- and answers true. Anywhere else it answers false
+ * and does nothing, so focus held on a control that is NOT the last one is
+ * still the trap it always was. Never on Chromium: tabTo's header records
+ * that a blur after a wrap breaks headless Chromium, and Chromium wraps.
+ */
+async function wrapPastEndOfPage(p: Page): Promise<boolean> {
+  if (p.context().browser()?.browserType().name() !== "firefox") return false;
+  return p.evaluate((selector) => {
+    const el = document.activeElement;
+    if (!(el instanceof HTMLElement) || el === document.body) return false;
+    const rendered = [...document.querySelectorAll(selector)].filter((node) =>
+      node.getClientRects().length > 0 && !node.closest("[inert]") && getComputedStyle(node).visibility !== "hidden");
+    if (rendered[rendered.length - 1] !== el) return false;
+    el.blur();
+    return true;
+  }, INTERACTIVE_SELECTOR);
+}
+
 type Match = { selector?: string; tag?: string; textIncludes?: string };
 
 /** Blurs whatever has focus, then Tabs to the first element matching `match`,
@@ -134,6 +172,10 @@ export async function tabTo(p: Page, match: Match, { cap = 60, screen = "" }: { 
      breaks, not tabbing onward from wherever focus already, legitimately,
      is. Continuing from the current position is both the fix and the more
      honest keyboard idiom: a real reader never blurs themselves either. */
+  /* #1183: `visited` is where each press landed, so a miss names the path it
+     took; wrapPastEndOfPage (above) is how Firefox gets round the end. */
+  const visited: string[] = [];
+  let previous = await focusLabel(p);
   for (let i = 0; i < cap; i += 1) {
     await p.keyboard.press("Tab");
     const matched = await p.evaluate((m) => {
@@ -145,8 +187,12 @@ export async function tabTo(p: Page, match: Match, { cap = 60, screen = "" }: { 
       return true;
     }, match);
     if (matched) return;
+    const at = await focusLabel(p);
+    const wrapped = at === previous && await wrapPastEndOfPage(p);
+    visited.push(wrapped ? `${at} (end of page, wrapped)` : at);
+    previous = wrapped ? "" : at;
   }
-  throw new Error(`${screen}: Tab never reached the requested control within ${cap} presses`);
+  throw new Error(`${screen}: Tab never reached the requested control within ${cap} presses (focus went: ${visited.join(" → ")})`);
 }
 
 /**
@@ -191,6 +237,15 @@ export async function auditTabOrder(p: Page, screen: string, { root = null, excl
       info = await currentFocus(p, exclude);
       if (!info || info.key !== lastKey) break;
       await p.waitForTimeout(50);
+    }
+    /* #1183: still on the same control after every retry, and it is the
+       page's last: Firefox's end of page, not a trap. Hand focus round to the
+       top and take the press that follows; a control stuck anywhere else
+       falls through to the "stuck" break below exactly as before. */
+    if (info && info.key === lastKey && await wrapPastEndOfPage(p)) {
+      await p.keyboard.press("Tab");
+      await p.waitForTimeout(20);
+      info = await currentFocus(p, exclude);
     }
     if (!info) continue; // focus passed through browser chrome; keep pressing rather than giving up
     lastKey = info.key;
@@ -277,17 +332,38 @@ export async function gotoCreate(p: Page) {
 }
 
 export async function dismissTourIfShown(p: Page) {
-  /* Ask the record, not the screen: the card is drawn only after /home has
-     fetched /api/settings/tour, so an instant "is it visible?" right after
+  /* Ask the record, not the screen: the film is drawn only after /home has
+     fetched /api/settings/tour, so an instant "is it up?" right after
      navigation says no on a fresh account and the walk then runs under the
-     tour. A reader who has never taken it is about to see it — wait for
-     the card; one who has is not — move on. */
+     spec. A reader who has never taken it is about to see it — wait for
+     the film; one who has is not — move on. */
   const record = await p.request.get("/api/settings/tour").then((r) => r.json() as Promise<{ tour?: { tourSeenAt: string | null } }>).catch(() => null);
   if (!record || record.tour?.tourSeenAt) return;
-  const tour = p.locator(".tourcard");
-  await expect(tour).toBeVisible({ timeout: SETTLE_TIMEOUT });
+
+  /* §24 of design/owner-decisions.md: the film has no pocket cut, so
+     trigger.js's own DESK query (matched here) gates it before anything is
+     mounted — a pocket viewport gets nothing at all, and waiting for a
+     transport pill that will never appear would just hang the spec. */
+  const desk = await p.evaluate(() => matchMedia("(min-width: 901px)").matches);
+  if (!desk) return;
+
+  /* transport.js's pill (`#orbit-tour-transport`), the film's one durable
+     handle — unlike the old card it never carries a stop/step number, so
+     presence is all a spec can ask of it. */
+  const transport = p.locator("#orbit-tour-transport");
+  await expect(transport).toBeVisible({ timeout: SETTLE_TIMEOUT });
   await p.keyboard.press("Escape");
-  await expect(tour).toBeHidden();
+  /* Esc reaches transport.js's own listener, which calls player.stop() —
+     the same path the pill's Skip button takes, and it is what turns the
+     write in trigger.js's `beginFilm` (tourSeenAt) into a fact. Stop clears
+     the veil (`ctx.veil(false)` in player.js) synchronously, which is what
+     actually frees the underlying screen for the rest of the spec — the
+     pill itself is not removed by stop in the same tick: it fades out and
+     the film destroys itself a second later (#1190). Waiting for the pill
+     to hide would therefore be racy right after Escape; the veil
+     (`#orbit-tour-veil`, veil.js's `hideVeil`) is the element that is torn
+     down synchronously, and `toBeHidden` is satisfied by "not attached". */
+  await expect(p.locator("#orbit-tour-veil")).toBeHidden();
 }
 
 
@@ -301,12 +377,27 @@ export async function settled(p: Page) {
      it to hand off to the settled dial before anything measures the page
      (Flight.svelte removes "launching" at the end of its own sequence). */
   await p.waitForFunction(() => !document.body.classList.contains("launching"), null, { timeout: SETTLE_TIMEOUT });
-  /* #explore sits in the branch home/+page.svelte renders whenever `view`
-     is not yet an empty-sky household (true from the very first paint,
-     since `view` starts null) — so its presence is really just "home
-     rendered its normal markup at all", independent of whether the async
-     readHome() read has resolved yet. */
+  /* #explore is still the desk dialect's own marker — this helper is
+     desktop-only and asks for it so a pocket run cannot settle here by
+     accident — but it proves nothing about the page being live: it sits in
+     the branch home/+page.svelte renders from the very first paint, which
+     the SERVER already sent (#842). */
   await p.locator("#explore").waitFor({ state: "attached", timeout: SETTLE_TIMEOUT });
+  await homeIsLive(p);
+}
+
+/** #1064: home's behaviour — the account orb included — is bound only after
+ *  the client's own readHome() has resolved, and home/+page.svelte writes
+ *  `data-home-ready` on <body> as the last step of that mount. Waiting for
+ *  it is waiting for the screen to be ABLE to answer a press; waiting for
+ *  markup instead means arming a toggle that has no listener on it yet, and
+ *  the press is dropped with nothing to replay it. That is what made the
+ *  account panel "intermittently not open when armed" in three different
+ *  shapes — `aria-expanded` stuck at false, `#maccount` stuck without
+ *  `open`, and the 60-press Tab cap burnt hunting a link inside a panel that
+ *  never opened. */
+export async function homeIsLive(p: Page) {
+  await p.locator("body[data-home-ready]").waitFor({ state: "attached", timeout: SETTLE_TIMEOUT });
 }
 
 /**
@@ -370,7 +461,21 @@ export async function fillCreateForm(page: Page, name: string) {
   await page.keyboard.press("Tab"); // inspection
   await page.keyboard.press("Tab"); // suggestion
   await page.keyboard.press("Tab"); // document
-  await page.keyboard.press("Tab"); // dropzone — left un-activated; a native file picker isn't keyboard-scriptable here
+
+  /* #1069: the section row, one button per visible section and none chosen
+     by default; the entry cannot be saved until one is, so activate the
+     first as a keyboard user must, then Tab past the rest. */
+  await page.keyboard.press("Tab"); // first section
+  expect(
+    await page.evaluate(() => Boolean(document.activeElement?.closest("#sections"))),
+    "create: expected the section buttons after the type chips",
+  ).toBe(true);
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#sections button").first()).toHaveAttribute("aria-pressed", "true");
+  const sectionCount = await page.locator("#sections button").count();
+  for (let i = 0; i < sectionCount; i += 1) await page.keyboard.press("Tab"); // …the rest, then the dropzone
+  expect(await page.evaluate(() => document.activeElement?.id), "create: expected the dropzone after the sections").toBe("dropzone");
+  // dropzone — left un-activated; a native file picker isn't keyboard-scriptable here
 
   await page.keyboard.press("Tab"); // f-provider — left blank, optional
   await page.keyboard.press("Tab"); // f-ref — left blank, optional
@@ -395,7 +500,7 @@ export async function fillCreateForm(page: Page, name: string) {
   expect(await page.evaluate(() => document.activeElement?.id), "create: expected the recurrence select after the date").toBe("f-recur");
   await page.keyboard.press("Tab"); // f-cost — left blank, optional
   await page.keyboard.press("Tab"); // f-reminder select — left at its default
-  await page.keyboard.press("Tab"); // f-assign select — left at its default (household)
   await page.keyboard.press("Tab"); // f-notes
+  expect(await page.evaluate(() => document.activeElement?.id), "create: expected notes after the reminder").toBe("f-notes");
   await page.keyboard.type("added by the keyboard-only pass");
 }

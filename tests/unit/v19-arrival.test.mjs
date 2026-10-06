@@ -5,7 +5,7 @@ import {
   CURRENCIES, DEFAULT_SECTIONS, NAME_LIMIT, TIME_ZONES,
   arrivalStageOf, belongRowsOf, collidingHouseholdOf,
   createSystemCommand, discoveredCountOf, isInvitedLanding, preferredCurrency, preferredTimeZone,
-  sectionNote, sectionNoteTitle,
+  sectionNote, sectionNoteTitle, WAITING_APPROVAL_NOTE,
 } from "$lib/arrival/stage.js";
 import {
   T, newcomerAscentBeats, newcomerAscentBeatsReduced, runTimeline,
@@ -236,6 +236,24 @@ describe("the card and the sky are one list", () => {
   it("survives an empty sky", () => {
     expect(belongRowsOf({})).toEqual([]);
     expect(belongRowsOf(undefined)).toEqual([]);
+  });
+});
+
+describe("the waiting note (owner-decisions §23): the marker is not the explanation", () => {
+  it("says the request is waiting", () => {
+    expect(WAITING_APPROVAL_NOTE.toLowerCase()).toContain("waiting");
+  });
+
+  it("names who has to approve it, in the owner's own words", () => {
+    expect(WAITING_APPROVAL_NOTE).toContain("owner");
+    expect(WAITING_APPROVAL_NOTE).toContain("administrator");
+    expect(WAITING_APPROVAL_NOTE).toContain("approve");
+  });
+
+  it("promises no mechanism that does not exist: no notification, email or ETA", () => {
+    for (const word of ["email", "notif", "shortly", "soon", "minute", "hour", "day"]) {
+      expect(WAITING_APPROVAL_NOTE.toLowerCase()).not.toContain(word);
+    }
   });
 });
 

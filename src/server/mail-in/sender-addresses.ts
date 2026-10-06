@@ -15,14 +15,26 @@
  * never stored — only its digest — for the same reason a session token is not:
  * a copied database must not hand somebody else the link.
  *
+ * Since #969 the address itself is encrypted metadata under the instance key
+ * (ADR-0024): `address_enc` holds it, `address_index` is the blind index that
+ * attribution and the uniqueness rule both look up, and the plaintext column
+ * stands only until the backfill reaches the row.
+ *
  * This lives outside `core/` because it needs `getDb`/schema access and the
  * SMTP transport, which `core/` is not allowed (see this directory's README).
  */
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { and, eq, isNotNull, isNull, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import { externalIdentities, mailInSenderAddresses, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
+import {
+  openInstanceMetadataReader,
+  requireInstanceMetadataWriter,
+  type MetadataCipher,
+  type MetadataFieldState,
+} from "@/server/metadata/fields";
+import { metadataCryptoAvailable } from "@/server/metadata/keys";
 import {
   createSmtpTransport,
   getNotificationWorkerConfig,
@@ -40,11 +52,18 @@ export type SenderAddressSource = "account" | "sso" | "manual";
 
 export interface SenderAddressView {
   id: string;
-  address: string;
+  /**
+   * Null when the address cannot be read at all (#969): a locked instance, or
+   * a value that will not authenticate. Never an empty string — an address
+   * Orbit cannot read is absent, and `metadataStatus` says why.
+   */
+  address: string | null;
   source: SenderAddressSource;
   verified: boolean;
   /** Set while a link is outstanding, so the screen can say "check your mail". */
   verificationPending: boolean;
+  /** Present only when something is unreadable, as elsewhere (ADR-0024 decision 5). */
+  metadataStatus?: { address?: MetadataFieldState };
 }
 
 /** Explicit seams so tests never open a socket; the defaults are the real ones. */
@@ -59,15 +78,55 @@ function digestToken(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
 }
 
-function viewOf(row: typeof mailInSenderAddresses.$inferSelect, now: Date): SenderAddressView {
+/**
+ * The stored address, decrypted (#969).
+ *
+ * Dual read for the length of the expand release, as everywhere else: a row
+ * whose `address_enc` is set is decrypted under the INSTANCE key, and a row
+ * the backfill has not reached is read from its plaintext column.
+ */
+function readAddress(
+  cipher: MetadataCipher,
+  row: { id: string; address: string | null; addressEnc: string | null },
+) {
+  return cipher.text("mail_in_sender_addresses.address", row.id, { encrypted: row.addressEnc, plaintext: row.address });
+}
+
+/**
+ * Any row already claiming this address — this member's or anybody else's.
+ *
+ * The blind index is what carries "one account per sending address" across the
+ * encryption, and the plaintext arm catches a row the backfill has not reached
+ * yet: without it an encrypted insert would not collide with an existing
+ * plaintext claim, and the address would end up claimed twice.
+ */
+async function existingClaim(
+  address: string,
+  addressIndex: string | null,
+): Promise<typeof mailInSenderAddresses.$inferSelect | undefined> {
+  const [row] = await getDb().select().from(mailInSenderAddresses)
+    .where(addressIndex === null
+      ? eq(mailInSenderAddresses.address, address)
+      : or(eq(mailInSenderAddresses.addressIndex, addressIndex), eq(mailInSenderAddresses.address, address)))
+    .limit(1);
+  return row;
+}
+
+function viewOf(
+  row: typeof mailInSenderAddresses.$inferSelect,
+  now: Date,
+  cipher: MetadataCipher,
+): SenderAddressView {
+  const address = readAddress(cipher, row);
   return {
     id: row.id,
-    address: row.address,
+    address: address.value,
     source: row.source,
     verified: row.verifiedAt !== null,
     verificationPending: row.verifiedAt === null
       && row.verificationExpiresAt !== null
       && row.verificationExpiresAt.getTime() > now.getTime(),
+    metadataStatus: address.state ? { address: address.state } : undefined,
   };
 }
 
@@ -80,7 +139,9 @@ export async function listSenderAddresses(
   const rows = await getDb().select().from(mailInSenderAddresses)
     .where(eq(mailInSenderAddresses.userId, userId))
     .orderBy(mailInSenderAddresses.createdAt);
-  return rows.map((row) => viewOf(row, now));
+  // One key unwrap for the whole list, not one per row (ADR-0024 decision 1).
+  const cipher = await openInstanceMetadataReader();
+  return rows.map((row) => viewOf(row, now, cipher));
 }
 
 /** Whether this member has anything that can attribute mail to them yet. */
@@ -107,15 +168,39 @@ export async function seedSenderAddress(userId: string, dependencies: SenderAddr
     .where(eq(mailInSenderAddresses.userId, userId)).limit(1);
   if (existing) return;
 
-  const [account] = await getDb().select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
+  /* Seeding writes an encrypted claim now (#969), so it needs the instance
+     key. A locked instance simply does not seed: this runs on the member's own
+     read of the relay page, and refusing that whole page for a convenience is
+     the wrong trade — the next read seeds it once the key is back. */
+  if (!metadataCryptoAvailable()) return;
+
+  const [account] = await getDb().select({ email: users.email, emailEnc: users.emailEnc })
+    .from(users).where(eq(users.id, userId)).limit(1);
   const [identity] = await getDb().select({ id: externalIdentities.id }).from(externalIdentities)
     .where(eq(externalIdentities.userId, userId)).limit(1);
-  const address = normalizeSenderAddress(account?.email);
+  const reader = await openInstanceMetadataReader();
+  const accountEmail = account
+    ? reader.text("users.email", userId, { encrypted: account.emailEnc, plaintext: account.email }).value
+    : null;
+  const address = normalizeSenderAddress(accountEmail ?? undefined);
   if (!address) return;
 
+  const cipher = await requireInstanceMetadataWriter();
+  const addressIndex = cipher.senderAddressIndex(address);
+  /* An address somebody already claims is left exactly as it is: seeding must
+     never take an address away from the member who verified it. */
+  if (await existingClaim(address, addressIndex)) return;
+
+  /* The row id exists before the address is encrypted: the content AAD binds
+     the ciphertext to its row, so a value cannot be replayed into another
+     claim (ADR-0024 decision 3). */
+  const id = randomUUID();
   await getDb().insert(mailInSenderAddresses).values({
+    id,
     userId,
-    address,
+    address: null,
+    addressEnc: cipher.encryptText("mail_in_sender_addresses.address", id, address),
+    addressIndex,
     source: identity ? "sso" : "account",
     updatedAt: now,
   }).onConflictDoNothing();
@@ -137,19 +222,41 @@ export async function addSenderAddress(
     throw new AppError("sender_address_limit", "That is as many sending addresses as one member may hold", 409);
   }
 
-  const [inserted] = await getDb().insert(mailInSenderAddresses)
-    .values({ userId, address, source: "manual", updatedAt: now })
-    .onConflictDoNothing()
-    .returning();
-  if (inserted) return viewOf(inserted, now);
+  const cipher = await requireInstanceMetadataWriter();
+  const addressIndex = cipher.senderAddressIndex(address);
 
   /* Taken. It may be this member's own row, which is simply a repeat; if it
      is somebody else's, the refusal says only that the address is unavailable
      — naming the member who holds it would turn this endpoint into a way of
-     asking who owns an address. */
-  const [mine] = await getDb().select().from(mailInSenderAddresses)
-    .where(and(eq(mailInSenderAddresses.userId, userId), eq(mailInSenderAddresses.address, address))).limit(1);
-  if (mine) return viewOf(mine, now);
+     asking who owns an address. Asked BEFORE the insert now (#969), because an
+     encrypted insert does not collide with a claim the backfill has not
+     reached: the unique index the database enforces is on the blind index. */
+  const claimed = await existingClaim(address, addressIndex);
+  if (claimed) {
+    if (claimed.userId === userId) return viewOf(claimed, now, cipher);
+    throw new AppError("sender_address_unavailable", "That address is not available", 409);
+  }
+
+  const id = randomUUID();
+  const [inserted] = await getDb().insert(mailInSenderAddresses)
+    .values({
+      id,
+      userId,
+      address: null,
+      addressEnc: cipher.encryptText("mail_in_sender_addresses.address", id, address),
+      addressIndex,
+      source: "manual",
+      updatedAt: now,
+    })
+    .onConflictDoNothing()
+    .returning();
+  if (inserted) return viewOf(inserted, now, cipher);
+
+  /* Nothing inserted means another request claimed the same address between
+     the check above and this statement. Same answer as before, decided on the
+     row that won. */
+  const raced = await existingClaim(address, addressIndex);
+  if (raced && raced.userId === userId) return viewOf(raced, now, cipher);
   throw new AppError("sender_address_unavailable", "That address is not available", 409);
 }
 
@@ -188,6 +295,14 @@ export async function sendSenderVerification(
   if (!row) throw new AppError("sender_address_unknown", "That address is not on this account", 404);
   if (row.verifiedAt) return;
 
+  /* The link goes to the address itself, so an address Orbit cannot read is an
+     address Orbit cannot check (#969). Refused rather than sent anywhere: a
+     missing value must never become an empty or invented recipient. */
+  const address = readAddress(await openInstanceMetadataReader(), row).value;
+  if (!address) {
+    throw new AppError("metadata_locked", "Orbit cannot read this address until the encryption key is available", 503);
+  }
+
   let smtp: NotificationWorkerConfig;
   try {
     smtp = (dependencies.smtpConfig ?? getNotificationWorkerConfig)();
@@ -209,7 +324,7 @@ export async function sendSenderVerification(
   const send = dependencies.sendMail ?? defaultSender(smtp);
   await send({
     from: smtp.smtpFrom,
-    to: row.address,
+    to: address,
     subject: "Check your Orbit sending address",
     text: [
       "Orbit is checking that you send mail from this address.",
@@ -279,7 +394,7 @@ export async function verifySenderAddress(
     isNull(mailInSenderAddresses.verifiedAt),
   )).returning();
   if (!verified) throw refuse();
-  return viewOf(verified, now);
+  return viewOf(verified, now, await openInstanceMetadataReader());
 }
 
 /**
@@ -288,14 +403,29 @@ export async function verifySenderAddress(
  * This is the whole of attribution's database side, and it is deliberately
  * narrow: one exact normalised address, verified only, and never a prefix, a
  * domain or a pattern. A disabled account attributes nothing.
+ *
+ * The match is on the BLIND INDEX now (#969), which is what carries an exact
+ * address lookup across the encryption, plus the plaintext for a row the
+ * backfill has not reached yet — both arms in the one query, so attribution
+ * behaves the same either side of the backfill. A locked instance cannot
+ * produce an index at all; rather than throw, it matches on plaintext alone,
+ * because mail-in must keep running while the key is away and an address it
+ * cannot read simply attributes to nobody.
  */
 export async function userForVerifiedSender(address: string): Promise<string | undefined> {
   const normalized = normalizeSenderAddress(address);
   if (!normalized) return undefined;
+  const cipher = await openInstanceMetadataReader();
+  const addressIndex = cipher.locked ? null : cipher.senderAddressIndex(normalized);
   const [row] = await getDb().select({ userId: mailInSenderAddresses.userId, disabledAt: users.disabledAt })
     .from(mailInSenderAddresses)
     .innerJoin(users, eq(users.id, mailInSenderAddresses.userId))
-    .where(and(eq(mailInSenderAddresses.address, normalized), isNotNull(mailInSenderAddresses.verifiedAt)))
+    .where(and(
+      addressIndex === null
+        ? eq(mailInSenderAddresses.address, normalized)
+        : or(eq(mailInSenderAddresses.addressIndex, addressIndex), eq(mailInSenderAddresses.address, normalized)),
+      isNotNull(mailInSenderAddresses.verifiedAt),
+    ))
     .limit(1);
   return row && !row.disabledAt ? row.userId : undefined;
 }

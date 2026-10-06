@@ -9,10 +9,10 @@ import { describe, expect, it } from "vitest";
 import {
   BAND_MARGIN, BERTH_NARROW, BERTH_WIDE, DOC_OFF, J_H, J_PHI, J_RHO, MAX_GAP,
   MIN_GAP, RAD, bedOf, berthFor, bloomTargetsOf, bodiesOf, cardWidthOf, docSpread,
-  geometryOf, itemOffsetsOf, lehmer, matchesOf, nearestMatchOf, reachableAt,
+  geometryOf, itemOffsetsOf, lehmer, matchesOf, nearestMatchOf, paperLines, reachableAt,
   rollRangeOf, seatOf, shortName, stepFrom, warpOf, AMBIENT_SEED,
-} from "../../web/src/routes/item/[id]/band.js";
-import { beltManifestOf, sizeLabel } from "../../web/src/lib/data/belt.js";
+} from "../../web/src/routes/item/[[id]]/band.js";
+import { beltManifestOf, documentPreviewStateOf, sizeLabel } from "../../web/src/lib/data/belt.js";
 import { DOCUMENTS_FIXTURE, WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
 
 const TODAY = WORKSPACE_FIXTURE.fixtureToday; // 2026-08-13, the date every mockup was drawn against
@@ -65,17 +65,33 @@ describe("the belt's manifest", () => {
         id: "d-mot-cert", name: "MOT certificate 2025", size: "240 KB",
         added: "12 June 2026", type: "PDF (application/pdf)", plate: "PDF",
         clean: true, scan: "clean", href: "/api/documents/d-mot-cert/download",
+        // #1088: the reading card's own fields, added for the preview.
+        previewHref: "/api/documents/d-mot-cert/preview",
+        lifecycle: "stored", mediaType: "application/pdf", ready: true, deleteAfter: null,
       },
       {
         id: "d-mot-history", name: "Service history", size: "88 KB",
         added: "12 June 2026", type: "PDF (application/pdf)", plate: "PDF",
         clean: true, scan: "clean", href: "/api/documents/d-mot-history/download",
+        previewHref: "/api/documents/d-mot-history/preview",
+        lifecycle: "stored", mediaType: "application/pdf", ready: true, deleteAfter: null,
       },
     ]);
     expect(sizeLabel(2_400_000)).toBe("2.3 MB");
     // A caption is an identifier: the extension survives the elision.
     expect(shortName("service-invoice-2026.pdf")).toBe("service-inv…2026.pdf");
     expect(shortName("Service history")).toBe("Service history");
+  });
+
+  it("wraps the pocket's two-line document caption without ever cutting a word in half (#1174)", () => {
+    // The two real names chapter 8's fault C broke on: the old 17-char hard
+    // cut split "2026" into "2" and "026". The extension now carries whole.
+    expect(paperLines("service-invoice-2026.pdf")).toEqual(["service-invoice-2026", ".pdf"]);
+    expect(paperLines("service-checklist.pdf")).toEqual(["service-checklist", ".pdf"]);
+    // A real name with a space and no extension: breaks at the space, not mid-word.
+    expect(paperLines("MOT certificate 2025")).toEqual(["MOT certificate", "2025"]);
+    // Short enough already: one line, untouched.
+    expect(paperLines("Service history")).toEqual(["Service history"]);
   });
 
   it("keeps a retired item's seat only when it is the one being arrived at", () => {
@@ -90,6 +106,150 @@ describe("the belt's manifest", () => {
     expect(manifestOf({ household: retired }).map((r) => r.id)).not.toContain("i-old");
     expect(manifestOf({ household: retired, keepId: "i-old" }).map((r) => r.id)).toContain("i-old");
   });
+});
+
+/*
+ * #1145: the suggestion in the belt. A mail-in receipt arrived at by its own
+ * address is seated at the date the relay read, among its neighbours in
+ * time, hollow (band.js gives it the accent, not an urgency), with the paper
+ * it came in staged beside it -- and only that arrival seats it.
+ */
+describe("the suggestion's seat", () => {
+  /* The inbox fixture's r-insurance as readItem hands it to the belt
+     (fixtures/inbox.js through receiptSuggestionsOf, plus the receipt's own
+     proposal and count): spelled out here so the seat is pinned to values,
+     not to whatever the fixture says this week. */
+  const PROPOSAL = {
+    title: "Home insurance renewal", provider: "Harbour Mutual", costMinor: 40000, currency: "GBP",
+    dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12,
+  };
+  const SUGGESTION = {
+    id: "r-insurance", receiptId: "r-insurance", householdId: null, draftVersion: 1,
+    title: "Home insurance renewal", renewsOn: "2026-10-03", scheduleKind: "renewal",
+    provider: "Harbour Mutual", expiresAt: "2026-09-25T12:00:00.000Z", receivedAt: "2026-08-11T09:24:00.000Z",
+    costMinor: 40000, currency: "GBP", sourceDocument: "1 forwarded document",
+    attachments: [{
+      id: "a-insurance-1", ordinal: 1, displayName: "policy-schedule.pdf",
+      mediaType: "application/pdf", sizeBytes: 831488, scanState: "clean",
+    }],
+    suggestion: true, proposal: PROPOSAL, attachmentCount: 1, today: TODAY,
+  };
+  const RECEIPT = { proposal: PROPOSAL };
+
+  it("takes its seat at the relay's date, in order, and nowhere else", () => {
+    const rows = manifestOf({ suggestion: SUGGESTION });
+    expect(rows.map((row) => row.id)).toEqual([
+      "i-gutter", "i-mot", "i-boiler", "r-insurance", "i-chimney", "i-smoke", "i-svc",
+    ]);
+    const seat = rows.find((row) => row.id === "r-insurance");
+    expect(seat.suggestion).toBe(SUGGESTION);
+    expect(seat.title).toBe("Home insurance renewal");
+    expect(seat.days).toBe(51);
+    expect(`${seat.t} · ${seat.when}`).toBe("T−51d · 03 Oct");
+    expect(seat.longWhen).toBe("3 October 2026");
+    expect(seat.status).toBe("suggested");
+    expect(seat.section).toBeNull();
+    expect(seat.cost).toBe(40000);
+    expect(seat.costIsEstimate).toBe(true);
+    // No arrival, no visitor: a filed item's belt carries no suggestions.
+    expect(manifestOf().map((row) => row.id)).not.toContain("r-insurance");
+  });
+
+  it("wears the accent in the band, never an urgency, and says so to a reader", () => {
+    const bodies = bodiesOf(manifestOf({ suggestion: SUGGESTION }), DESK.GAP_SCALE);
+    const body = bodies.find((one) => one.kind === "item" && one.id === "r-insurance");
+    expect(body.tone).toBe("var(--accent)");
+    expect(body.item.suggestion).toBeTruthy();
+    // Its neighbours keep their own tones: nothing else on the belt changed.
+    expect(bodies.find((one) => one.id === "i-boiler").tone).toBe("var(--warm)");
+  });
+
+  it("stages the forwarded paper beside it: named, dated by the mail, no download -- but a page for a named PDF (#1155)", () => {
+    const seat = manifestOf({ suggestion: SUGGESTION }).find((row) => row.id === "r-insurance");
+    expect(seat.docs).toHaveLength(1);
+    expect(seat.docs[0]).toMatchObject({
+      id: "r-insurance-paper-1", name: "policy-schedule.pdf", size: "812 KB", added: "11 August 2026",
+      plate: "PDF", clean: true, href: "", ready: false, staged: true, attachmentId: "a-insurance-1",
+      previewHref: "/api/imap-inbox/r-insurance/attachments/a-insurance-1/preview",
+    });
+    expect(documentPreviewStateOf(seat.docs[0])).toBe("available");
+
+    // A named attachment that is not a PDF has no page to ask for: undrawable
+    // -- "staged" is now only the count-only fallback below.
+    const nonPdf = manifestOf({
+      suggestion: {
+        ...SUGGESTION,
+        attachments: [{
+          id: "a-insurance-1", ordinal: 1, displayName: "policy.docx",
+          mediaType: "application/octet-stream", sizeBytes: 1000, scanState: "clean",
+        }],
+      },
+    }).find((row) => row.id === "r-insurance");
+    expect(nonPdf.docs[0].previewHref).toBe("");
+    expect(documentPreviewStateOf(nonPdf.docs[0])).toBe("undrawable");
+
+    // clean follows the API's own scanState, never a guess.
+    const unscanned = manifestOf({
+      suggestion: { ...SUGGESTION, attachments: [{ ...SUGGESTION.attachments[0], scanState: "unknown" }] },
+    }).find((row) => row.id === "r-insurance");
+    expect(unscanned.docs[0].clean).toBe(false);
+
+    // Named or not, an attachments-less receipt (the count-only fallback)
+    // still answers "staged": the one paper Orbit genuinely has no page for.
+    const counted = manifestOf({ suggestion: { ...SUGGESTION, attachments: null, attachmentCount: 2 } })
+      .find((row) => row.id === "r-insurance");
+    expect(counted.docs.map((doc) => doc.name)).toEqual(["forwarded document 1", "forwarded document 2"]);
+    expect(documentPreviewStateOf(counted.docs[0])).toBe("staged");
+  });
+
+  it("falls to the later end when the relay read no date", () => {
+    const undated = { ...SUGGESTION, renewsOn: null, proposal: { ...RECEIPT.proposal, dueDate: undefined } };
+    const rows = manifestOf({ suggestion: undated });
+    expect(rows.at(-1).id).toBe("r-insurance");
+    expect(rows.at(-1).when).toBe("undated");
+  });
+});
+
+/*
+ * #1088: the reading card's own honest state (owner-decisions.md §18) — a
+ * pure read of the document's own lifecycle, never a guess and never
+ * anything the endpoint would have to be asked first. `ready` alone answers
+ * "still scanning"; the two server lifecycles that are neither reachable
+ * from `ready` nor from the media kind — removed and refused — take
+ * priority over everything else.
+ */
+describe("the reading card's honest state", () => {
+  const doc = (overrides) => ({
+    lifecycle: "available", mediaType: "application/pdf", ready: true, ...overrides,
+  });
+
+  it("shows the page when the file is ready and its kind is one Orbit can draw", () => {
+    expect(documentPreviewStateOf(doc())).toBe("available");
+    expect(documentPreviewStateOf(doc({ mediaType: "image/jpeg" }))).toBe("available");
+    expect(documentPreviewStateOf(doc({ mediaType: "image/png" }))).toBe("available");
+  });
+
+  it("is scanning whenever the content is not ready yet, whatever the lifecycle word", () => {
+    expect(documentPreviewStateOf(doc({ ready: false, lifecycle: "receiving" }))).toBe("scanning");
+    expect(documentPreviewStateOf(doc({ ready: false, lifecycle: "scanning" }))).toBe("scanning");
+    expect(documentPreviewStateOf(doc({ ready: false, lifecycle: "encrypting" }))).toBe("scanning");
+  });
+
+  it("is removed once the file is on its retention clock, even mid-scan", () => {
+    expect(documentPreviewStateOf(doc({ lifecycle: "pending_deletion" }))).toBe("removed");
+    expect(documentPreviewStateOf(doc({ lifecycle: "pending_deletion", ready: false }))).toBe("removed");
+  });
+
+  it("is refused for a rejected file, even one whose stored kind looks fine", () => {
+    expect(documentPreviewStateOf(doc({ lifecycle: "rejected" }))).toBe("refused");
+    expect(documentPreviewStateOf(doc({ lifecycle: "rejected", ready: true, mediaType: "application/pdf" }))).toBe("refused");
+  });
+
+  it("is a kind Orbit cannot draw once ready and clean but not one of the three it renders", () => {
+    expect(documentPreviewStateOf(doc({ mediaType: "application/msword" }))).toBe("undrawable");
+    expect(documentPreviewStateOf(doc({ mediaType: null }))).toBe("undrawable");
+  });
+
 });
 
 describe("the spacing law", () => {
@@ -336,14 +496,38 @@ describe("stepping and arriving", () => {
   const sel = at("i-mot");
   const bloom = bloomTargetsOf(BODIES, sel, MANIFEST.length);
 
-  it("steps in date order, over the papers that are out", () => {
-    expect(BODIES[stepFrom(BODIES, sel, bloom, -1)].id).toBe("d-mot-cert");
-    expect(BODIES[stepFrom(BODIES, sel, bloom, 1)].id).toBe("d-mot-history");
-    // The far end's papers are folded away, so the step passes over them.
+  /* #1094, owner 2026-09-23: a step moves ITEM to ITEM and never lands on a
+     paper. It used to step over the papers that were out, which meant `later
+     ->` moved the belt when the next body was an item and opened a reading
+     card when it was a paper (#1088 routes a doc to `openDoc`, because §18
+     says a document is never the centred body) -- one control doing two jobs,
+     with nothing on screen to say which you would get. */
+  it("steps item to item in date order, never onto a paper", () => {
+    // i-mot's own papers ARE out either side of it, and are still skipped.
+    expect(bloom[1]).toBe(1);
+    expect(BODIES[stepFrom(BODIES, sel, bloom, -1)].id).toBe("i-gutter");
+    expect(BODIES[stepFrom(BODIES, sel, bloom, 1)].id).toBe("i-boiler");
+    // Every landing is an item, from every seat, in both directions.
+    for (const from of MANIFEST.map((row) => at(row.id))) {
+      for (const d of [-1, 1]) {
+        const next = stepFrom(BODIES, from, bloom, d);
+        if (next >= 0) expect(BODIES[next].kind).toBe("item");
+      }
+    }
+    // The far end's papers are folded away, and are skipped for that reason
+    // as well as this one.
     expect(BODIES[stepFrom(BODIES, at("i-smoke"), bloom, 1)].id).toBe("i-svc");
     // And the ends of the belt are ends: there is nowhere further to go.
     expect(stepFrom(BODIES, 0, bloom, -1)).toBe(-1);
     expect(stepFrom(BODIES, at("i-svc"), bloom, 1)).toBe(-1);
+  });
+
+  /* A paper is still reached -- by pressing it, or by Tab and Enter, since
+     every seat is a role="button" tabindex="0" with its own accessible name.
+     Skipping them in the step costs a keyboard reader nothing. */
+  it("leaves a bloomed paper reachable, just not by stepping", () => {
+    expect(reachableAt(BODIES, at("d-mot-cert"), bloom)).toBe(true);
+    expect(BODIES[at("d-mot-cert")].kind).toBe("doc");
   });
 
   it("lands a deep arrival on its item, papers out, berth wide", () => {
@@ -374,8 +558,8 @@ describe("stepping and arriving", () => {
 describe("the belt reads no clock and rolls no dice", () => {
   it("has no Math.random, Date.now or bare new Date in anything the gate sees", () => {
     const sources = [
-      "web/src/routes/item/[id]/band.js",
-      "web/src/routes/item/[id]/belt.behaviour.js",
+      "web/src/routes/item/[[id]]/band.js",
+      "web/src/routes/item/[[id]]/belt.behaviour.js",
       "web/src/lib/data/belt.js",
     ];
     for (const path of sources) {

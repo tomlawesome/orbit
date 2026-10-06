@@ -2,52 +2,66 @@ name: Validate Orbit and publish previews
 
 # Since the mirror flip (#801 step 5) this repository is a push mirror of
 # gitlab.tomlawson.io ai/orbit, where every merge is decided and .gitlab-ci.yml
-# runs the whole gate. This workflow is GitHub's second opinion on the same
-# commits: it still runs everything, but a failure here blocks nothing, and it
-# no longer publishes. The image operators pull from GHCR is copied there by
-# publish-from-gitlab.yml, by the digest GitLab tested, so nothing built here
-# can reach a registry. Pull-request triggers are kept for the rare pull request
-# opened here directly; the day-to-day trigger is the mirror's push.
+# runs the whole gate. This workflow was GitHub's second opinion on the same
+# commits, running everything automatically on every mirrored push; a failure
+# here never blocked anything, and it never published (the image operators
+# pull from GHCR is copied there by publish-from-gitlab.yml, by the digest
+# GitLab tested, so nothing built here can reach a registry either way).
+#
+# #948: manual dispatch only now. The automatic run duplicated coverage that
+# GitLab already provides as the primary, blocking gate, at real per-push
+# minutes cost with no corresponding benefit -- and the second opinion is
+# still one `gh workflow run publish-container.yml --ref <branch>` away
+# whenever someone wants it. CodeQL (codeql.yml) and GitHub's native secret
+# scanning are unaffected: they are the reason this mirror exists and neither
+# is a job in this file. Job-for-job, what this workflow's jobs cover and
+# where the same check now runs as the primary gate on GitLab
+# (`.gitlab-ci.yml`):
+#
+#   changes            -> classify
+#   base_image         -> base_image
+#   fast               -> fast
+#   supply_chain_source -> supply_chain_source (+ licence_policy, which covers
+#                          the licence half actions/dependency-review-action
+#                          used to and supply_chain_source never did, #815)
+#   sidecar_images     -> sidecar_images
+#   fidelity           -> fidelity
+#   integration        -> integration
+#   smoke              -> smoke (+ smoke_local_only)
+#   repair_journeys    -> repair_journeys
+#   verify_preview     -> promote_stable's scripts/ci/promote-stable.sh, which
+#                          runs the same scripts/stable-promotion-policy.mjs
+#                          check before a stable promotion
+#   publish_preview    -> record_image / publish_channel (GitLab publishes;
+#                          this job only ever validated, never pushed)
+#
+# verify_preview and publish_preview only ever ran on a pull-request-to-main
+# or push-to-preview/hotfix event; under workflow_dispatch their own `if`
+# stays false, so they no longer run even when this workflow is dispatched by
+# hand. That is not a coverage loss -- see the mapping above -- but it means
+# dispatching this workflow now only ever exercises `changes` through
+# `repair_journeys`. They are kept rather than deleted because
+# scripts/exact-image-workflow.test.mjs asserts their step sequences, and
+# because a future event trigger would want them back unchanged.
+#
+# Everything between `changes` and `repair_journeys` must actually be
+# reachable on a dispatch, or the second opinion quietly covers less than the
+# mapping above claims. Two places did not: `fast`'s production build and
+# document-render steps were gated on `github.event_name == 'push'` alone, and
+# `fidelity` was gated on the classifier's `web` output. A dispatch has no base
+# and head SHA to compare, so `scripts/classify-changed-paths.mjs` falls back
+# to system risk -- build/integration/system all true, but `web` false, because
+# that one is computed from the changed paths rather than from the risk level.
+# Both now name workflow_dispatch explicitly.
 on:
-  pull_request:
-    # Deliberately no `labeled` (#757). It fired one whole run per label, so
-    # `gh pr create --label a --label b` started three; the concurrency group
-    # cancelled two, and because branch protection reads the newest check run
-    # of each name, a cancelled run with a higher id could leave every real
-    # green check reported as CANCELLED and the pull request BLOCKED.
-    #
-    # GitHub cannot filter an event by label name, and there is no
-    # workflow-level `if`, so the alternatives were both worse: gating the
-    # jobs still creates a run whose SKIPPED results replace the real ones,
-    # and a helper workflow cannot dispatch this one because events raised
-    # with GITHUB_TOKEN start no run.
-    #
-    # Asking for the on-demand lanes after opening is therefore a dispatch:
-    # `gh workflow run publish-container.yml --ref <branch>`. The
-    # `ci: acceptance` label still opts a run in whenever one happens for
-    # another reason, so labelling before the first push works as before.
-    types:
-      - opened
-      - synchronize
-      - reopened
-    branches:
-      - main
-      - dev
-      - preview
-  push:
-    branches:
-      - dev
-      - preview
-      - main
-      - "hotfix/**"
   workflow_dispatch: {}
 
 concurrency:
-  group: orbit-container-${{ github.ref }}-${{ github.event.pull_request.number || github.sha }}
-  # Cancel only a superseded pull-request commit. A push must never cancel the
-  # validation of an earlier merge: the delivery model requires trusted evidence
-  # for that exact merge SHA, and a cancelled run leaves it permanently without.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Manual dispatch only (#948): each dispatched run gets its own group, so
+  # queuing a second one never cancels a run already in flight rather than
+  # superseding a stale pull-request commit, which no longer applies.
+  group: orbit-container-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
 
 permissions:
   # Least-privilege default for anything added later: every job below already
@@ -107,7 +121,7 @@ jobs:
       # The classifier uses pnpm's lockfile-only graph reader. It never installs
       # dependencies or executes package lifecycle scripts.
       - name: Set up pnpm graph reader
-        uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
+        uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
         with:
           install: false
 
@@ -155,7 +169,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up pnpm
-        uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
+        uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
         with:
           install: false
 
@@ -174,13 +188,19 @@ jobs:
           ORBIT_TEST_COVERAGE: "true"
         run: bash scripts/test-backend.sh
 
-      - name: Build production application
+      - name: Build the production application, if it is not already built
         if: >-
           ${{
-            github.event_name == 'push' &&
+            (
+              github.event_name == 'push' ||
+              github.event_name == 'workflow_dispatch'
+            ) &&
             needs.changes.outputs.build == 'true'
           }}
-        run: pnpm --filter orbit-web build
+        # The step above has already built it, so this builds only when it
+        # somehow did not (#1061) -- the same guard the GitLab `fast` job uses,
+        # so the two definitions keep saying the same thing.
+        run: node scripts/web-build-stamp.mjs check || pnpm --filter orbit-web build
 
       # The render proof, run here as well as inside the image (#735). The
       # container build is the authoritative gate, but it is minutes away;
@@ -188,7 +208,10 @@ jobs:
       - name: Prove document previews can still be rendered
         if: >-
           ${{
-            github.event_name == 'push' &&
+            (
+              github.event_name == 'push' ||
+              github.event_name == 'workflow_dispatch'
+            ) &&
             needs.changes.outputs.build == 'true'
           }}
         run: pnpm test:web-pdfjs
@@ -290,7 +313,13 @@ jobs:
   #
   # Reporting-only for now: every pinned sidecar currently has fixable HIGH
   # findings and no clean upstream digest exists to re-pin to — the evidence
-  # is on #647. When the pins scan clean, delete `continue-on-error` so a
+  # is on #647. That reporting-only decision lives entirely inside "Enforce
+  # sidecar image policy" below (SQ1-Q2, #1151): a blocked-findings exit is
+  # logged but does not fail the job, the same narrow carve-out GitLab's
+  # `sidecar_images` makes with `allow_failure: exit_codes: [3]` -- never a
+  # blanket `continue-on-error` here, which would also swallow a crash, a
+  # timeout or a missing scan, the exact #810 shape GitLab's job was fixed to
+  # stop hiding. When the pins scan clean, delete that one carve-out so a
   # newly published advisory against a pinned digest fails the job.
   sidecar_images:
     name: Pinned sidecar image scan
@@ -306,7 +335,6 @@ jobs:
         contains(github.event.pull_request.labels.*.name, 'ci: acceptance') ||
         needs.changes.outputs.system == 'true'
       }}
-    continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -333,6 +361,7 @@ jobs:
                   --volume "${GITHUB_WORKSPACE}:/workspace" \
                   --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
                   "${TRIVY_IMAGE}" image \
+                  --timeout 10m \
                   --scanners vuln \
                   --ignore-unfixed \
                   --format json \
@@ -355,7 +384,25 @@ jobs:
           policy_status=$?
           set -e
           rm -rf .orbit-supply-chain/sidecar-scans
-          exit "${policy_status}"
+          if [ "${policy_status}" -eq 0 ]; then
+            exit 0
+          fi
+          # The evaluator writes its evidence file and then exits non-zero for
+          # blocked findings; every other way it exits non-zero -- a missing
+          # or unreadable scan report, a policy file it cannot parse --
+          # throws before that file is written. The file's presence is what
+          # tells "ran, and found things" from "could not run", the same test
+          # GitLab's own `sidecar_images` job makes before it allows exit 3.
+          if [ ! -s .orbit-supply-chain/sidecar-evidence.json ]; then
+            echo "the sidecar scan could not be evaluated: this is not a findings failure" >&2
+            exit 1
+          fi
+          # Reporting-only for now (SQ1-Q2, #1151; see the job's header
+          # comment): a blocked finding is logged, not failed, until every
+          # pinned sidecar scans clean. This is the only non-zero outcome
+          # this step ever turns into a pass -- a crash or a missing scan
+          # exits 1 above and still fails the job.
+          echo "sidecar image policy found blocked findings (reporting-only for now -- see .orbit-supply-chain/sidecar-evidence.json)"
 
       - name: Upload sidecar supply-chain evidence
         if: ${{ !cancelled() }}
@@ -382,7 +429,16 @@ jobs:
     # regression that is only caught on the preview push is caught too late.
     # A pull request that moves web/ pays for this; one that does not never
     # sees it.
-    if: ${{ needs.changes.outputs.web == 'true' }}
+    #
+    # A dispatch has no diff to classify, so `web` comes back false and this
+    # job would be skipped on the one event that can still start this workflow
+    # (#948). Someone asking for the second opinion by hand wants the visual
+    # gate in it, so the dispatch reaches this job unconditionally.
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.web == 'true'
+      }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -461,7 +517,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up pnpm
-        uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
+        uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
         with:
           install: false
 
@@ -527,7 +583,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up pnpm
-        uses: pnpm/setup@703c52620218391530e48b9e8870d5c0082e1b9b # v2.1.0
+        uses: pnpm/setup@fbda4c85fc2e1e08721cd8763afea8f48d60f024 # v3.0.0
         with:
           install: false
 
@@ -657,6 +713,14 @@ jobs:
           TESTED_IMAGE_TAG: ${{ steps.image.outputs.tag }}
         run: bash scripts/ci/verify-tika-processor.sh
 
+      # The processor check leaves orbit-tika running under the Compose project
+      # "orbit", and the #536 isolation preflight refuses to start the smoke
+      # stack beside it (#953). Same position, and the same reason, as the
+      # GitLab job's stop before its installer stack.
+      - name: Stop processor check services
+        if: steps.processor_scope.outputs.required == 'true'
+        run: bash scripts/ci/stop-acceptance-stack.sh
+
       - name: Build disposable OIDC acceptance provider
         run: docker compose --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.acceptance.yml build orbit-oidc
 
@@ -690,6 +754,10 @@ jobs:
           ORBIT_ACCEPTANCE_OIDC: "true"
         run: |
           pnpm exec playwright install --with-deps --only-shell chromium
+          # #1183: desktop-firefox and maintenance-firefox run in the same suite.
+          pnpm exec playwright install --with-deps firefox
+          # #1192: desktop-webkit and mobile-webkit run in the same suite too.
+          pnpm exec playwright install --with-deps webkit
           bash scripts/test-frontend.sh
 
       - name: Upload browser test report
@@ -731,6 +799,7 @@ jobs:
           ORBIT_REGISTRY: 127.0.0.1:5000
           ORBIT_REPOSITORY: ${{ env.IMAGE_NAME }}
           ORBIT_CHANNEL: ${{ steps.installer_registry.outputs.channel }}
+          ORBIT_RELEASE_MANIFEST: ${{ steps.installer_registry.outputs.release_manifest }}
           GIT_GUARD_DIR: ${{ steps.installer_target.outputs.git_guard_dir }}
           GIT_MARKER: ${{ steps.installer_target.outputs.git_marker }}
           ORBIT_RUN_ID: ${{ github.run_id }}
@@ -748,6 +817,7 @@ jobs:
           ORBIT_REGISTRY: 127.0.0.1:5000
           ORBIT_REPOSITORY: ${{ env.IMAGE_NAME }}
           ORBIT_CHANNEL: ${{ steps.installer_registry.outputs.channel }}
+          ORBIT_RELEASE_MANIFEST: ${{ steps.installer_registry.outputs.release_manifest }}
           GIT_GUARD_DIR: ${{ steps.installer_target.outputs.git_guard_dir }}
         run: bash "$GITHUB_WORKSPACE/scripts/ci/run-installer.sh"
 

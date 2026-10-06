@@ -2,6 +2,13 @@ import { randomUUID } from "node:crypto";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #641: the household hit-area fix, proved by a real hit-test.
@@ -63,6 +70,7 @@ type Overlap = {
 };
 
 async function signIn(page: Page, account: string) {
+  await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
   await settleArrival(page);
@@ -104,7 +112,9 @@ async function arriveAdrift(page: Page, browser: Browser, account: string) {
   const adminContext = await browser.newContext({ ignoreHTTPSErrors: true });
   const adminPage = await adminContext.newPage();
   try {
-    await signIn(adminPage, "Orbit Administrator");
+    await signIn(adminPage, workerAccount("administrator"));
+    /* #1080: the hard delete below is an instance-admin power. */
+    await ensureWorkerAdministrator(adminPage);
     await cleanupHousehold(adminPage, await sessionHeaders(adminPage), household.id, household.name);
   } finally {
     await adminContext.close();
@@ -186,10 +196,19 @@ async function packUntilOverlapping(page: Page) {
 
 test.describe.configure({ mode: "serial" });
 
+/* #1219: stubSky is a `page.route`, and Playwright does not route a request
+   the service worker handles (its documentation says to block service
+   workers wherever routing is relied on). On desktop-webkit the stub was
+   applied once, during the arrival, and every `/home` load after Orbit's
+   worker took control went to the real server instead (pipeline 2131: the
+   real one-household sky, "1 drawn" at all four viewports; #1196 measured
+   the same gap). Nothing here is about the worker, so it is kept out. */
+test.use({ serviceWorkers: "block" });
+
 test.beforeEach(async ({ page, browser }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the labelled sky is the desk dialect; the pocket draws no constellations");
   await stubSky(page, FULL_SKY);
-  await arriveAdrift(page, browser, "Orbit Outsider");
+  await arriveAdrift(page, browser, workerAccount("outsider"));
   await expect(page.getByRole("heading", { name: "you’re adrift" })).toBeVisible();
 });
 
@@ -201,8 +220,13 @@ test("a click over one household's ring opens that household, not the neighbour 
   /* #670's separation guarantee, measured on the rendered page rather than on
      a placement fixture: no two drawn hit circles within 80px of each other,
      or a ring — the surface #640 deliberately kept clickable — could steal a
-     click the way a box once did. */
+     click the way a box once did.
+     #1183: measured to within one layout unit. placement.js builds the floor
+     to 80px plus a micron, and Chromium reports that position exactly, but
+     Firefox snaps layout to 1/60px, so the same pair reads 79.996px there.
+     Anything a whole unit or more under the floor still fails. */
   const converging = await page.evaluate(() => {
+    const LAYOUT_UNIT = 1 / 60;
     const rings = [...document.querySelectorAll(".minisys")].map((card) => {
       const box = card.querySelector(".mshit")?.getBoundingClientRect();
       return box ? { name: (card.getAttribute("aria-label") ?? "").replace(/^Request to join /u, ""), x: box.left + box.width / 2, y: box.top + box.height / 2 } : null;
@@ -211,7 +235,7 @@ test("a click over one household's ring opens that household, not the neighbour 
     for (let i = 0; i < rings.length; i += 1) {
       for (let j = i + 1; j < rings.length; j += 1) {
         const gap = Math.hypot(rings[i].x - rings[j].x, rings[i].y - rings[j].y);
-        if (gap < 80) tooClose.push(`${rings[i].name} and ${rings[j].name} are ${gap.toFixed(1)}px apart`);
+        if (gap < 80 - LAYOUT_UNIT) tooClose.push(`${rings[i].name} and ${rings[j].name} are ${gap.toFixed(3)}px apart`);
       }
     }
     return tooClose;
@@ -288,8 +312,15 @@ test("a household the packed sky cannot draw is still reachable by name", async 
   try {
     const newcomer = await newcomerContext.newPage();
     await stubSky(newcomer, OVERFULL_SKY);
-    await signIn(newcomer, "Orbit Outsider");
+    await signIn(newcomer, workerAccount("outsider"));
     await newcomer.goto("/");
+    /* #1219: the arrival decides from its own /api/workspace read, which
+       WebKit holds behind the sky's rasterising: in pipeline 2144 that read
+       left 5.19 s after `GET /`, the stub answered it 4.90 s into the group's
+       5 s wait, and the group never drew in time (local runs: 4.16-4.91 s).
+       The route was applied every time; the decision was late. So wait for
+       the decision itself, as signIn does, before reading the list. */
+    await settleArrival(newcomer);
     const belong = newcomer.getByRole("group", { name: "Where do you belong?" });
     await expect(belong).toBeVisible();
     for (const name of undrawn) {

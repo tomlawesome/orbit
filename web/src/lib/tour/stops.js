@@ -26,7 +26,8 @@
  * @property {string} [phoneTarget] the same thing in the pocket dialect, where it differs
  * @property {boolean} phone        true if this stop survives the four-stop phone cut
  * @property {boolean} example      true if the example body belongs on this stop
- * @property {[string, string]} copy the two lines, in Orbit's voice
+ * @property {[string] | [string, string]} copy the stop's lines, one or two, in Orbit's voice
+ *   (one where the owner cut the second, 2026-10-01, #1174)
  * @property {string} [exampleCopy] second line used INSTEAD when the example body is drawn
  */
 
@@ -51,7 +52,7 @@ export const TOUR_STOPS = [
     phoneTarget: ".mdial, .skies",
     phone: true,
     example: false,
-    copy: ["This is your star chart.", "Every sun is a household you belong to."],
+    copy: ["This is your star chart."],
   },
   {
     id: "sun",
@@ -62,12 +63,12 @@ export const TOUR_STOPS = [
     /* Second line rewritten for EVERYONE (#481, ratified Q45). An invitee
        arrives inside a household without having chosen it, so the tour is
        where they learn more are possible — but the old line only described
-       the sky, and this one says what to do with it. It is how joining works
-       today (home's ask-to-join veil), it is true for every reader, and it
-       needs no separate invitee script. */
+       the sky, and this one says what to do with it. Since #1118 (owner,
+       2026-09-25) a tap on another household flies there, on the desk and
+       on a phone's chips alike, rather than asking to join. */
     copy: [
-      "That's your sun, at centre — your household, always here.",
-      "The rest of the sky holds systems you don't belong to — tap one to ask to join.",
+      "That's your sun, in the centre — your household, always here.",
+      "Explore the sky to find other households — maybe you belong there too?",
     ],
   },
   {
@@ -77,7 +78,7 @@ export const TOUR_STOPS = [
     phoneTarget: ".mdial",
     phone: true,
     example: true,
-    copy: ["Bodies orbit by when they're due.", "The nearer the ring, the sooner."],
+    copy: ["Bodies orbit by when they're due, higher value events are larger."],
   },
   {
     id: "body",
@@ -102,7 +103,6 @@ export const TOUR_STOPS = [
     example: true,
     copy: [
       "The manifest lists what's ahead, nearest first.",
-      "Same law as the dial, read top to bottom instead of round the ring.",
     ],
   },
   {
@@ -113,7 +113,7 @@ export const TOUR_STOPS = [
     example: false,
     copy: [
       "Mail lands here first — filed, waiting for review, or still being read.",
-      "Nothing joins your orbit without your say-so.",
+      "Nothing gets added without your review.",
     ],
   },
   {
@@ -123,8 +123,7 @@ export const TOUR_STOPS = [
     phone: true,
     example: false,
     copy: [
-      "Forward a bill to your relay address and Orbit reads a copy.",
-      "Your mail is never redirected — it keeps arriving exactly where it always has.",
+      "Forward a bill to your relay address and Orbit reads a copy to import it.",
     ],
   },
   {
@@ -141,8 +140,8 @@ export const TOUR_STOPS = [
     phone: false,
     example: false,
     copy: [
-      "Add anything here, by hand or by forwarding a document.",
-      "Settings holds your sky, your relay and this walk — take it again anytime.",
+      "Fill in the details here.",
+      "Watch the tour again anytime from the settings or the menu.",
     ],
   },
 ];
@@ -210,11 +209,11 @@ export function targetOf(stop, { phone = false } = {}) {
 }
 
 /**
- * The stop's two lines, given whether the example body is on screen.
+ * The stop's lines, given whether the example body is on screen.
  *
  * @param {TourStop} stop
  * @param {{ example?: boolean }} [options]
- * @returns {[string, string]}
+ * @returns {[string] | [string, string]}
  */
 export function copyOf(stop, { example = false } = {}) {
   return example && stop.exampleCopy ? [stop.copy[0], stop.exampleCopy] : stop.copy;

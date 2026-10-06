@@ -14,7 +14,7 @@ jwk.kid = "orbit-browser-test-key";
 jwk.use = "sig";
 jwk.alg = "RS256";
 
-const users = new Map([
+const fixedUsers = new Map([
   ["administrator", { sub: "oidc-test-administrator", email: "administrator@example.test", name: "Orbit Administrator" }],
   ["member", { sub: "oidc-test-member", email: "member@example.test", name: "Orbit Member" }],
   ["outsider", { sub: "oidc-test-outsider", email: "outsider@example.test", name: "Orbit Outsider" }],
@@ -38,6 +38,45 @@ const users = new Map([
    * reader who belongs to nothing has to be one nothing else has touched.
    */
   ["doorstep", { sub: "oidc-test-doorstep", email: "doorstep@example.test", name: "Orbit Doorstep" }],
+]);
+
+/*
+ * PER-WORKER IDENTITY SETS (#1080). The suite runs Playwright workers in
+ * parallel, one administrator per worker (owner ruling, 2026-09-21), and the
+ * same reasoning that gave "newcomer" and "doorstep" identities of their own
+ * extends to every role: two workers sharing any identity share its sky, its
+ * mailbox and its sessions. So each worker slot k gets a full set — signed in
+ * by tests/e2e/support/worker-identity.ts, keyed on TEST_PARALLEL_INDEX, and
+ * promoted to administrator through the real administration API (never here;
+ * this provider only says who somebody is).
+ *
+ * WORKER_IDENTITY_SETS in tests/e2e/support/worker-identity.ts must match
+ * the count below: it refuses a parallel index this map has no set for.
+ *
+ * Two constraints shape the names:
+ *  - No name may be a substring of another (legacy names included):
+ *    getByRole's `name` option matches substrings by default, and the
+ *    chooser page below lists everything at once.
+ *  - The administrators are listed FIRST: v19-keyboard.spec.ts reaches its
+ *    identity by pressing Tab under tabTo's 60-press cap, so this worker's
+ *    administrator link must sit within the first few tab stops whatever
+ *    slot it is in.
+ */
+const WORKER_IDENTITY_SETS = 8;
+const workerIdentity = (slot, role, title) => [
+  `w${slot}-${role}`,
+  { sub: `oidc-test-w${slot}-${role}`, email: `w${slot}-${role}@example.test`, name: `Orbit W${slot} ${title}` },
+];
+const slots = Array.from({ length: WORKER_IDENTITY_SETS }, (_, slot) => slot);
+const users = new Map([
+  ...slots.map((slot) => workerIdentity(slot, "administrator", "Administrator")),
+  ...fixedUsers,
+  ...slots.flatMap((slot) => [
+    workerIdentity(slot, "member", "Member"),
+    workerIdentity(slot, "outsider", "Outsider"),
+    workerIdentity(slot, "newcomer", "Newcomer"),
+    workerIdentity(slot, "doorstep", "Doorstep"),
+  ]),
 ]);
 const codes = new Map();
 
@@ -64,7 +103,7 @@ function redirect(response, location) {
   response.end();
 }
 
-function signIdToken({ user, nonce }) {
+function signIdToken({ user, nonce, authTime }) {
   const now = Math.floor(Date.now() / 1000);
   const header = base64url(JSON.stringify({ alg: "RS256", kid: jwk.kid, typ: "JWT" }));
   const payload = base64url(JSON.stringify({
@@ -73,6 +112,11 @@ function signIdToken({ user, nonce }) {
     aud: clientId,
     exp: now + 300,
     iat: now,
+    /* Always emitted, as a provider that supports `max_age` must (ADR-0023 §5).
+       This provider authenticates the person at the moment they pick an
+       identity, so `auth_time` is that moment — which is what makes `max_age=0`
+       honest here rather than merely accepted. */
+    auth_time: authTime ?? now,
     nonce,
     email: user.email,
     email_verified: true,
@@ -114,6 +158,10 @@ const server = createServer({ key: readFileSync(keyPath), cert: readFileSync(cer
   }
   if (request.method === "GET" && url.pathname === "/jwks") return responseJson(response, 200, { keys: [jwk] });
   if (request.method === "GET" && url.pathname === "/authorize") {
+    /* `max_age` needs no branch to be honoured: this provider keeps no session
+       of its own, so every authorize request makes the person pick an identity
+       again, and `auth_time` below is that moment. `max_age=0` therefore means
+       what it says here. */
     const parameters = query(request);
     const redirectUri = parameters.get("redirect_uri");
     if (parameters.get("client_id") !== clientId || parameters.get("response_type") !== "code" || !redirectUri || !parameters.get("state") || !parameters.get("nonce") || !parameters.get("code_challenge")) {
@@ -130,8 +178,22 @@ const server = createServer({ key: readFileSync(keyPath), cert: readFileSync(cer
     }
     const user = users.get(selectedUser);
     if (!user) return responseJson(response, 400, { error: "invalid_user" });
+    /* `stale=1` is the switch a step-up test flips: the identity picker's own
+       links carry every parameter the authorize request arrived with, so a
+       spec that navigates to `.../authorize?...&stale=1` gets an ID token whose
+       `auth_time` is a quarter of an hour old — a provider that answered a
+       `max_age=0` request without actually re-authenticating anybody. Orbit
+       must refuse it with `step_up_failed`. */
+    const now = Math.floor(Date.now() / 1000);
+    const authTime = parameters.get("stale") === "1" ? now - 900 : now;
     const code = randomBytes(32).toString("base64url");
-    codes.set(code, { user, nonce: parameters.get("nonce"), redirectUri, challenge: parameters.get("code_challenge") });
+    codes.set(code, {
+      user,
+      nonce: parameters.get("nonce"),
+      redirectUri,
+      challenge: parameters.get("code_challenge"),
+      authTime,
+    });
     const callback = new URL(redirectUri);
     callback.searchParams.set("code", code);
     callback.searchParams.set("state", parameters.get("state"));

@@ -91,6 +91,13 @@ const test: TestUserConfig = {
           ".claude/worktrees/**",
           "tests/e2e/**",
           "tests/integration/**",
+          // Scratch prototypes (#995), for the same reason tsconfig excludes
+          // and eslint ignores them: AGENTS.md sends agents to tmp/ to
+          // prototype, the directory is gitignored, and a *.test.ts left
+          // there is collected and run like any other — failing the suite
+          // over work that was never meant to ship. Guarded by
+          // scripts/scratch-dir-ignored.test.mjs.
+          "tmp/**",
           // web/ is a separate project with its own runners: its fidelity and
           // behaviour suites are Playwright, so collecting them here calls
           // Playwright's test() outside a Playwright runner and fails to
@@ -101,6 +108,38 @@ const test: TestUserConfig = {
           // it here would import it for its side effect of running the
           // check immediately, without a vitest test to attach the result to.
           "scripts/lockfile-no-pnpm-exe.test.mjs",
+          // Same reason (#921): uses node:test, not vitest globals. Run
+          // standalone with `node --test
+          // scripts/compose-project-name-resolution.test.mjs`.
+          "scripts/compose-project-name-resolution.test.mjs",
+          // Same reason (#995): uses node:test. Run standalone with
+          // `node --test scripts/scratch-dir-ignored.test.mjs`.
+          "scripts/scratch-dir-ignored.test.mjs",
+          // Same reason (#1020): uses node:test. Run by
+          // scripts/test-backend.sh alongside the three above -- it was the
+          // only one of the four that nothing invoked, so it ran nowhere
+          // between #1020 and #1090.
+          "scripts/ci/repin-base-image.test.mjs",
+          // Same reason (ADR-0031 #2): uses node:test, against a local git
+          // repository standing in for the launcher's GitHub mirror. Run
+          // standalone with `node --test scripts/bump-launcher-pin.test.mjs`.
+          "scripts/bump-launcher-pin.test.mjs",
+          // ORBIT_TEST_SKIP_DOCKER (#950): the CI `fast` job runs on the
+          // unprivileged `big` lane, which has no `docker` binary on PATH.
+          // test-e2e-local-reuse.test.mjs joined the list on #947: it drives
+          // the real script, whose preconditions demand docker.
+          // `--exclude` on the CLI does not reach a project defined through
+          // `test.projects` -- verified directly: passing it alongside this
+          // same list left both files collected and red -- so the exclusion
+          // has to live in the project's own array instead, gated on the
+          // variable `fast_docker` sets. `fast_docker` runs all three.
+          ...(process.env.ORBIT_TEST_SKIP_DOCKER === "true"
+            ? [
+                "src/lib/install-script-adapters.test.ts",
+                "src/lib/recovery-bundle.parity.test.ts",
+                "scripts/test-e2e-local-reuse.test.mjs",
+              ]
+            : []),
         ],
       },
     },

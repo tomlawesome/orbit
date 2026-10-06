@@ -91,6 +91,10 @@ class FakeAdapter implements BackupDockerAdapter {
   collectDocumentsArchive(outputPath: string): void {
     writeFileSync(outputPath, this.documentsTarBytes);
   }
+  recordExportedCalls = 0;
+  recordRecoveryBundleExported(): void {
+    this.recordExportedCalls += 1;
+  }
 }
 
 function emptyDocumentsTar(dir: string): Buffer {
@@ -335,6 +339,7 @@ describe("validateBackupBundleContents (in-memory adapter)", () => {
     expect(error).toBeInstanceOf(RecoveryBundleRefusal);
     expect((error as RecoveryBundleRefusal).code).toBe("wrong-key");
   });
+
 });
 
 describe("publishBundleAtomically", () => {
@@ -454,6 +459,23 @@ const fakeDockerScript = [
   '    if [[ "${ORBIT_TEST_TAR_EXIT:-0}" != "0" ]]; then exit "${ORBIT_TEST_TAR_EXIT}"; fi',
   "    tar -cf - -T /dev/null",
   "    exit 0",
+  "    ;;",
+  '  *"--entrypoint sh"*)',
+  '    if [[ "${ORBIT_TEST_TAR_EXIT:-0}" != "0" ]]; then exit "${ORBIT_TEST_TAR_EXIT}"; fi',
+  '    if [[ -n "${DOCUMENTS_ROOT:-}" ]]; then',
+  "      # positionals here (after the run-specific parse_flags above) are",
+  '      # ["orbit-app", "-c", "<script>"]: hand the script to a real sh so a',
+  "      # test can prove DOCUMENTS_ROOT actually expands (#1151 RANGE-F2). A",
+  "      # test that does not set DOCUMENTS_ROOT falls through to the same",
+  '      # empty-tar fake the old `--entrypoint tar` case always produced.',
+  '      sh -c "${positionals[2]}"',
+  "      exit 0",
+  "    fi",
+  "    tar -cf - -T /dev/null",
+  "    exit 0",
+  "    ;;",
+  "  *psql*)",
+  '    exit "${ORBIT_TEST_PSQL_EXIT:-0}"',
   "    ;;",
   "  *)",
   "    # Not a docker refusal: 99 is this fake's own sentinel for a call it does",
@@ -649,15 +671,39 @@ describe("createDockerComposeBackupAdapter (PATH-shim fake docker, no real daemo
       "run",
       "--rm",
       "--no-deps",
+      // `--entrypoint tar` cannot expand ${DOCUMENTS_ROOT} in its own
+      // argument, so this goes through sh -c (#1151 RANGE-F2).
       "--entrypoint",
-      "tar",
+      "sh",
       "orbit-app",
-      "-C",
-      "/var/lib/orbit/documents",
-      "-cf",
-      "-",
-      ".",
+      "-c",
+      // SS2-S1: excludes the household portable-archive export, which is
+      // not a format validateDocumentArchiveEntries's allow-list recognizes.
+      'exec tar -C "${DOCUMENTS_ROOT:-/var/lib/orbit/documents}" --exclude=./portable-archives -cf - .',
     ]);
+  });
+
+  it("collectDocumentsArchive reads the container's own DOCUMENTS_ROOT instead of the hardcoded default (#1151 RANGE-F2)", () => {
+    // Before the fix, this ran `--entrypoint tar ... -C /var/lib/orbit/documents`,
+    // which cannot expand ${DOCUMENTS_ROOT} and silently tarred the wrong
+    // directory for an operator with a non-default documents root.
+    const sandbox = newSandbox("orbit-adapter-collect-custom-root-");
+    const binDir = makeFakeDockerBin();
+    const envFile = join(sandbox, ".env-orbit");
+    writeFileSync(envFile, "FAKE=1\n");
+    const customRoot = join(sandbox, "custom-documents-root");
+    mkdirSync(join(customRoot, "objects"), { recursive: true });
+    writeFileSync(join(customRoot, "marker.txt"), "custom-root-contents");
+    const adapter = createDockerComposeBackupAdapter({ envFile, env: shimEnv(binDir, { DOCUMENTS_ROOT: customRoot }) });
+    const outputPath = join(sandbox, "documents.tar");
+
+    adapter.collectDocumentsArchive(outputPath);
+
+    const listing = failOnProcessDeadline(spawnSync("tar", ["-tf", outputPath], { encoding: "utf8", ...processGuard() }), {
+      label: "tar -tf",
+    });
+    expect(listing.status).toBe(0);
+    expect(listing.stdout).toContain("marker.txt");
   });
 
   it("collectDocumentsArchive refuses as document-archive-collection-failed on a nonzero exit", () => {
@@ -668,6 +714,40 @@ describe("createDockerComposeBackupAdapter (PATH-shim fake docker, no real daemo
     const adapter = createDockerComposeBackupAdapter({ envFile, env: shimEnv(binDir, { ORBIT_TEST_TAR_EXIT: "1" }) });
 
     expect(() => adapter.collectDocumentsArchive(join(sandbox, "documents.tar"))).toThrow(RecoveryBundleRefusal);
+  });
+
+  it("recordRecoveryBundleExported spawns the exact psql-over-exec argv (#968: what the administration card reads back)", () => {
+    const sandbox = newSandbox("orbit-adapter-record-export-");
+    const binDir = makeFakeDockerBin();
+    const logPath = join(sandbox, "argv.log");
+    const envFile = join(sandbox, ".env-orbit");
+    writeFileSync(envFile, "FAKE=1\n");
+    const adapter = createDockerComposeBackupAdapter({ envFile, env: shimEnv(binDir, { ORBIT_DOCKER_ARGV_LOG: logPath }) });
+
+    adapter.recordRecoveryBundleExported();
+
+    const [call] = readArgvLog(logPath);
+    expect(call).toEqual([
+      "compose",
+      "--env-file",
+      envFile,
+      "exec",
+      "-T",
+      "orbit-db",
+      "sh",
+      "-c",
+      `exec psql -v ON_ERROR_STOP=1 --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -c "insert into audit_log (entity_type, entity_id, action, changes) values ('recovery_bundle', gen_random_uuid(), 'recovery_bundle_exported', '{}'::jsonb)"`,
+    ]);
+  });
+
+  it("recordRecoveryBundleExported refuses as recovery-bundle-record-failed on a nonzero exit", () => {
+    const sandbox = newSandbox("orbit-adapter-record-export-fail-");
+    const binDir = makeFakeDockerBin();
+    const envFile = join(sandbox, ".env-orbit");
+    writeFileSync(envFile, "FAKE=1\n");
+    const adapter = createDockerComposeBackupAdapter({ envFile, env: shimEnv(binDir, { ORBIT_TEST_PSQL_EXIT: "1" }) });
+
+    expect(() => adapter.recordRecoveryBundleExported()).toThrow(RecoveryBundleRefusal);
   });
 
   it("end-to-end: createBackupBundle against the real adapter through the PATH shim produces a bundle validateBackupBundleContents accepts", () => {

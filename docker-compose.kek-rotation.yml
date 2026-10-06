@@ -1,0 +1,18 @@
+# Optional overlay for a document-KEK rotation (#954, ADR-0024 decision 4).
+# Apply this alongside docker-compose.yml only for the duration of a
+# rotation, so the running application holds the next key next to the
+# current one and every row stays readable regardless of whether the rewrap
+# worker (`pnpm rewrap-kek`) has reached it yet. See
+# docs/administrator-operations.md, "Rotating the document key-encryption
+# key", for the full procedure. Remove this overlay and restart once the
+# rotation completes and the current secret has been replaced.
+services:
+  orbit-app:
+    environment:
+      DOCUMENT_KEK_NEXT_FILE: /run/orbit-secrets/orbit-document-kek-next
+    secrets:
+      - orbit-document-kek-next
+
+secrets:
+  orbit-document-kek-next:
+    file: ${ORBIT_SECRETS_DIR:-./.orbit-secrets}/document-kek-next

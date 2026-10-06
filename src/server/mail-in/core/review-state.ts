@@ -7,6 +7,7 @@
  * working unchanged.
  */
 import { normalizeImapAttachmentName } from "./imap-attachment-validation";
+import { normalizeComparableMetadata } from "@/server/metadata/crypto";
 import type { SupportedDocumentMediaType } from "@/server/documents/validation";
 
 export type ReviewInboxClassification = "ready" | "waiting" | "retry" | "cleanup" | "unavailable";
@@ -26,11 +27,67 @@ const attachmentTransferFailureCodes = new Set([
   "staging_purge_failed",
 ]);
 
+/**
+ * The nine reasons a member can be given for a failed mail-in receipt,
+ * folded from the ~25 stored `failure_code` values (#1143). The member
+ * needs "what kind of thing went wrong", not the worker's step; the raw
+ * `failure_code` stays on the row for support.
+ */
+export type FailureReason =
+  | "no_document"
+  | "too_large"
+  | "malware"
+  | "scanner_off"
+  | "not_kept"
+  | "wrong_recipient"
+  | "account_disabled"
+  | "older_review"
+  | "unknown";
+
+const failureReasonByCode: Record<string, FailureReason> = {
+  no_supported_pdf: "no_document",
+  document_type_unsupported: "no_document",
+  mime_type_mismatch: "no_document",
+  mime_structure_invalid: "no_document",
+  mime_part_count_exceeded: "no_document",
+  mime_nesting_too_deep: "no_document",
+  message_too_large: "too_large",
+  document_too_large: "too_large",
+  attachment_total_too_large: "too_large",
+  attachment_count_exceeded: "too_large",
+  malware_detected: "malware",
+  scanner_disabled: "scanner_off",
+  scanner_unavailable: "scanner_off",
+  attachment_download_failed: "not_kept",
+  staging_lease_lost: "not_kept",
+  attachment_processing_failed: "not_kept",
+  attachment_processing_exhausted: "not_kept",
+  staging_purge_failed: "not_kept",
+  discard_purge_failed: "not_kept",
+  staging_purge_pending: "not_kept",
+  staging_expiry_pending: "not_kept",
+  recipient_mismatch: "wrong_recipient",
+  account_disabled: "account_disabled",
+  legacy_review_item: "older_review",
+};
+
+/**
+ * Derives the short, fixed reason a member sees for a failed mail-in
+ * receipt from the stored `failure_code`. Pure and derived on read: a
+ * second stored column would drift from the first, and old rows with no
+ * code (or a code not in the table) read as `unknown` for free (#1143).
+ */
+export function failureReasonOf(failureCode: string | null | undefined): FailureReason {
+  if (!failureCode) return "unknown";
+  return failureReasonByCode[failureCode] ?? "unknown";
+}
+
 export function reviewInboxState(status: string, failureCode: string | null | undefined, context: ReviewInboxStateContext = {}): {
   classification: ReviewInboxClassification;
   canApprove: boolean;
   canDiscard: boolean;
   message: string;
+  reason: FailureReason;
 } {
   const now = context.now ?? new Date();
   const hasUnexpiredReceipt = Boolean(context.expiresAt && context.expiresAt > now);
@@ -39,16 +96,17 @@ export function reviewInboxState(status: string, failureCode: string | null | un
     && Boolean(context.hasApprovedItem)
     && hasUnexpiredReceipt
     && attachmentTransferFailureCodes.has(failureCode ?? "");
-  if (status === "pending_review") return { classification: "ready", canApprove: true, canDiscard: true, message: "Ready for your review." };
-  if (status === "processing" || status === "approving") return { classification: "waiting", canApprove: false, canDiscard: false, message: "Orbit is still preparing this private review." };
+  const reason = failureReasonOf(failureCode);
+  if (status === "pending_review") return { classification: "ready", canApprove: true, canDiscard: true, message: "Ready for your review.", reason };
+  if (status === "processing" || status === "approving") return { classification: "waiting", canApprove: false, canDiscard: false, message: "Orbit is still preparing this private review.", reason };
   /* ADR-0017 slice 5 (#746): the reader paused their own collection, so this
      arrived and was deliberately left alone. Saying so is the point — a held
      message that looked "unavailable" would read as something going wrong. */
-  if (status === "held") return { classification: "waiting", canApprove: false, canDiscard: false, message: "Collection is paused. This will be prepared when you turn it back on." };
-  if (canRetryAttachmentTransfer) return { classification: "retry", canApprove: true, canDiscard: true, message: "The item was created; retry to finish attaching the selected documents." };
-  if (status === "recoverable") return { classification: "retry", canApprove: false, canDiscard: true, message: "Private cleanup is waiting to finish. You can retry discard." };
-  if (status === "failed" && failureCode === "legacy_review_item") return { classification: "cleanup", canApprove: false, canDiscard: true, message: "This older review can only finish private cleanup." };
-  return { classification: "unavailable", canApprove: false, canDiscard: false, message: "This incoming document is no longer available for review." };
+  if (status === "held") return { classification: "waiting", canApprove: false, canDiscard: false, message: "Collection is paused. This will be prepared when you turn it back on.", reason };
+  if (canRetryAttachmentTransfer) return { classification: "retry", canApprove: true, canDiscard: true, message: "The item was created; retry to finish attaching the selected documents.", reason };
+  if (status === "recoverable") return { classification: "retry", canApprove: false, canDiscard: true, message: "Private cleanup is waiting to finish. You can retry discard.", reason };
+  if (status === "failed" && failureCode === "legacy_review_item") return { classification: "cleanup", canApprove: false, canDiscard: true, message: "This older review can only finish private cleanup.", reason };
+  return { classification: "unavailable", canApprove: false, canDiscard: false, message: "This incoming document is no longer available for review.", reason };
 }
 
 /**
@@ -93,11 +151,14 @@ export function reviewAttachmentDisplayName(
   return normalizeImapAttachmentName(stored ?? undefined, displayFallbackMediaTypes.get(mediaType ?? "") ?? "application/pdf");
 }
 
-function comparableText(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.normalize("NFKC").replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, " ").replace(/\s+/g, " ").trim().toLocaleLowerCase("en-GB");
-  return normalized || undefined;
-}
+/**
+ * Promoted to `normalizeComparableMetadata` (ADR-0024 decision 2), so the
+ * blind index and every in-application comparison agree on one canonical form.
+ * The implementation moved for a second reason: the range it used to spell out
+ * by hand is exactly the regular-expression trap AGENTS.md warns about, and
+ * the shared version scans for control characters explicitly instead.
+ */
+const comparableText = normalizeComparableMetadata;
 
 export function findReviewedIntakeCandidateReason(
   proposal: Record<string, unknown>,

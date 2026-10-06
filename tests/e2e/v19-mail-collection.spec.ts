@@ -2,7 +2,15 @@ import { createTransport } from "nodemailer";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 import { settleArrival } from "./support/arrival";
-import { waitForSenderVerificationToken } from "./support/mail";
+import { INTAKE_MAILBOX, waitForSenderVerificationToken } from "./support/mail";
+import { claimInstanceAsAdministrator } from "./support/bootstrap";
+import { ensureWorkerAdministrator, workerAccount, workerEmail } from "./support/worker-identity";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #459: the mail proving ground — no interception anywhere. A real message
@@ -30,7 +38,7 @@ import { waitForSenderVerificationToken } from "./support/mail";
  * exactly the reasoning `sendMail` below already applies to the trusted
  * recipient header.
  */
-const MAILBOX_ACCOUNT = "orbit-intake@in.orbit.test";
+const MAILBOX_ACCOUNT = INTAKE_MAILBOX;
 /* GreenMail runs with -Dgreenmail.auth.disabled, so this is accepted as-is
    and is not a credential to anything. */
 const MAILBOX_PASSWORD = "greenmail-proving-ground-only";
@@ -43,7 +51,10 @@ const SMTP_PORT = Number(process.env.TEST_SMTP_PORT ?? 3025);
    works with GreenMail's auth disabled -- see support/mail.ts -- so this one
    only has to be distinct from MAILBOX_ACCOUNT, which is the intake box, not
    a sender's own mailbox. */
-const SENDER_ADDRESS = "member-forwarding@out.orbit.test";
+/* #1080: per worker, because the address is claimed and verified as ONE
+   member's own — two workers claiming the same address would race the
+   claim and cross-read the verification mailbox. Lazy: worker env only. */
+const SENDER_ADDRESS = () => `forwarding-${workerEmail("member").split("@")[0]}@out.orbit.test`;
 /* The authserv-id this spec's mailbox configuration says it trusts, and the
    one it then writes into the `Authentication-Results` header it prepares --
    standing in for the real receiving provider GreenMail does not have. */
@@ -81,27 +92,24 @@ const TINY_PDF = Buffer.from(
 );
 
 async function signInAsMember(page: Page) {
+  await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: "Orbit Member" }).click();
+  await page.getByRole("link", { name: workerAccount("member") }).click();
   await settleArrival(page);
 }
 
-// A fresh instance promotes its first sign-in to instance admin, and admins
-// have an empty relay inbox by design. Claim that promotion for the
-// administrator in a throwaway context so the member below is an ordinary
-// user with a real inbox.
+// Admins have an empty relay inbox by design, so the administrator takes the
+// instance in a throwaway context and the member below is an ordinary user
+// with a real inbox. Since ADR-0022 nobody is promoted by signing in: the
+// instance is claimed with the code from the stack's own log, and the mailbox
+// is configured on the administrator's own signed-in page.
 async function establishInstanceAdmin(browser: Browser) {
-  const context = await browser.newContext({ ignoreHTTPSErrors: true });
-  const page = await context.newPage();
-  await page.goto("/api/auth/login?returnTo=/home");
-  await page.getByRole("link", { name: "Orbit Administrator" }).click();
-  /* Not a fixed destination (#840): this only needs the promotion claimed,
-     not a landing on /home -- see signInAsMember above. */
-  const session = await page.request.get("/api/auth/session");
-  expect(session.ok()).toBe(true);
-  await settleArrival(page);
-  await configureMailbox(page);
-  await context.close();
+  await claimInstanceAsAdministrator(browser, {
+    afterSignIn: async (page) => {
+      await settleArrival(page);
+      await configureMailbox(page);
+    },
+  });
 }
 
 /**
@@ -177,10 +185,10 @@ async function verifySenderAddress(page: Page) {
     if (row.verified) return "already-verified";
     await request({ action: "verify", id: row.id });
     return "verification-sent";
-  }, SENDER_ADDRESS);
+  }, SENDER_ADDRESS());
   if (outcome === "already-verified") return;
 
-  const token = await waitForSenderVerificationToken(SENDER_ADDRESS);
+  const token = await waitForSenderVerificationToken(SENDER_ADDRESS());
   const verified = await page.request.get(`/api/settings/mail-relay/verify?token=${encodeURIComponent(token)}`);
   if (!verified.ok() || !verified.url().includes("sender=verified")) {
     throw new Error(`sender verification link did not confirm: ${verified.status()} ${verified.url()}`);
@@ -221,8 +229,8 @@ async function seedHousehold(page: Page) {
 async function sendMail(alias: string, subject: string, attachment: { filename: string; content: Buffer; contentType: string } | null) {
   const transport = createTransport({ host: "127.0.0.1", port: SMTP_PORT, secure: false, tls: { rejectUnauthorized: false } });
   await transport.sendMail({
-    envelope: { from: SENDER_ADDRESS, to: MAILBOX_ACCOUNT },
-    from: `Forwarding Member <${SENDER_ADDRESS}>`,
+    envelope: { from: SENDER_ADDRESS(), to: MAILBOX_ACCOUNT },
+    from: `Forwarding Member <${SENDER_ADDRESS()}>`,
     to: alias,
     subject,
     text: "A forwarded document for the proving ground.",
@@ -233,7 +241,7 @@ async function sendMail(alias: string, subject: string, attachment: { filename: 
     // test writes them, exactly as it always has for the recipient header.
     headers: {
       "X-Orbit-Delivered-To": { prepared: true, value: alias },
-      "Authentication-Results": { prepared: true, value: `${TRUSTED_AUTHSERV_ID}; dmarc=pass header.from=${SENDER_ADDRESS.slice(SENDER_ADDRESS.indexOf("@") + 1)}` },
+      "Authentication-Results": { prepared: true, value: `${TRUSTED_AUTHSERV_ID}; dmarc=pass header.from=${SENDER_ADDRESS().slice(SENDER_ADDRESS().indexOf("@") + 1)}` },
     },
     attachments: attachment ? [attachment] : [],
   });
@@ -262,9 +270,15 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
+    await answerPushWithoutAService(page);
     await page.goto("/api/auth/login?returnTo=/home");
-    await page.getByRole("link", { name: "Orbit Administrator" }).click();
-    await expect(page).toHaveURL(/\/home$/);
+    await page.getByRole("link", { name: workerAccount("administrator") }).click();
+    /* #1080: no URL wait — until the promotion inside
+       ensureWorkerAdministrator lands, a fresh worker administrator belongs
+       to nothing and is parked on the arrival at `/`, not /home. The
+       helper's session poll is the synchronisation, and the sweep's hard
+       delete is an instance-admin power. */
+    await ensureWorkerAdministrator(page);
     await households.sweep(page);
   } finally {
     await context.close();
@@ -277,8 +291,17 @@ test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item
 
   await establishInstanceAdmin(browser);
   await signInAsMember(page);
-  await verifySenderAddress(page);
+  // #958: seed the household BEFORE verifying the sender address. Success
+  // there follows a real one-use link, whose 303 lands on /settings/mail --
+  // a plain page route, not /api/*, so hooks.server.js's first-run door (#840)
+  // applies to it. A member with zero households fails hasOnwardHousehold and
+  // is bounced to "/" instead, which is indistinguishable here from a failed
+  // verification: `sender=verified` never appears on the URL. Whether this
+  // member already had a household depended on what else had run against the
+  // shared instance first, which is exactly what made it flaky rather than
+  // simply broken.
   await seedHousehold(page);
+  await verifySenderAddress(page);
   const alias = await relayAddress(page);
 
   await sendMail(alias, "Boiler cover renewal", {
@@ -295,13 +318,17 @@ test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item
 
   // The suggestion is on home, from the real pipe.
   await page.goto("/home");
-  /* The member's first landing on a fresh stack gets the first-run tour,
-     and the dimmed page behind it is inert (#844) — a reader has to skip
-     the walk before tapping anything, so this test does too. */
-  const tour = page.locator(".tourcard");
-  if (await tour.waitFor({ state: "visible", timeout: 5_000 }).then(() => true, () => false)) {
-    await page.locator("#tour-skip").click();
-    await expect(tour).toHaveCount(0);
+  /* The member's first landing on a fresh stack gets the first-run film,
+     and the veiled page behind it is inert (#844) — a reader has to stop
+     the film before tapping anything, so this test does too. */
+  const transport = page.locator("#orbit-tour-transport");
+  if (await transport.waitFor({ state: "visible", timeout: 5_000 }).then(() => true, () => false)) {
+    await page.keyboard.press("Escape");
+    /* Esc -> player.stop() clears the veil synchronously; the pill itself
+       lingers as a low-opacity ghost until the film unmounts, so the veil
+       is what actually says the screen underneath is free (see
+       keyboard.ts's `dismissTourIfShown`). */
+    await expect(page.locator("#orbit-tour-veil")).toBeHidden();
   }
   const row = page.locator(".item.suggest").first();
   await expect(row).toBeVisible({ timeout: 30_000 });
@@ -318,9 +345,13 @@ test("a spoofed PDF travels the real pipe: SMTP → IMAP → suggestion → item
   };
   const before = new Set((await itemsOf()).map((item) => item.id));
 
-  // Two taps approve it for real: item created, document transferred.
-  await row.getByRole("button", { name: "Add to orbit" }).click();
-  await row.getByRole("button", { name: "tap again to approve" }).click();
+  // Two taps approve it for real: item created, document transferred. The
+  // decisions live in the drawer the row opens into (#1145).
+  await row.click();
+  const drawer = page.locator(".itemview.suggestview");
+  await expect(drawer).toBeVisible();
+  await drawer.getByRole("button", { name: "Add to orbit" }).click();
+  await drawer.getByRole("button", { name: "tap again to approve" }).click();
   await expect(page.locator(".item.suggest")).toHaveCount(0, { timeout: 30_000 });
 
   // The item is real workspace truth now, with its document attached.
@@ -347,7 +378,14 @@ test("a message with no readable document lands in a bounded state on the relay"
     contentType: "application/pdf",
   });
 
-  await waitForReceipts(page, 1);
+  // A2-Q8 (#1151): "waiting" (src/server/mail-in/core/review-state.ts) is
+  // the one classification still in flight -- "Orbit is still preparing
+  // this private review" -- so stopping at the first poll that merely
+  // *found* the receipt let this test land on that transient state and skip
+  // its only real assertion below without ever proving the hostile payload
+  // actually bounces. Same override as the canApprove wait above: hold for
+  // the classification to settle first.
+  await waitForReceipts(page, 1, 120_000, (receipt) => receipt.classification !== "waiting");
 
   // Whatever bounded state it reached, the user can SEE that mail arrived:
   // either it is reviewable (a suggestion) or its failure is dated on the
@@ -355,7 +393,8 @@ test("a message with no readable document lands in a bounded state on the relay"
   const inbox = (await (await page.request.get("/api/imap-inbox")).json()) as { receipts: Receipt[] };
   const receipt = inbox.receipts[0];
   expect(receipt.message.length).toBeGreaterThan(0);
-  if (!receipt.canApprove && receipt.classification !== "waiting") {
+  expect(receipt.classification).not.toBe("waiting");
+  if (!receipt.canApprove) {
     await page.goto("/settings/mail");
     await expect(page.locator(".failures")).toContainText("arrived, but could not be read");
   }
