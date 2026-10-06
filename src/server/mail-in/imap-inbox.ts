@@ -2,17 +2,22 @@ import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, lt, or, sql } from "drizzle-orm";
 import { AppError } from "@/lib/app-error";
 import { getDb } from "@/db";
-import { documents, households, imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, items, memberships, sections, users } from "@/db/schema";
+import { documents, households, imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, items, memberships, metadataKeyOutages, sections, users } from "@/db/schema";
+import { clearMetadataDamageForColumn } from "@/server/metadata/damage-sightings";
+import { metadataCryptoAvailable } from "@/server/metadata/keys";
 import { purgeHeldImapAttachment } from "./imap-attachment-holding";
-import { requestDocumentDeletion } from "@/server/document-repository";
-import { sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
+import { requestDocumentDeletion, requireDocumentDeletionAccess } from "@/server/document-repository";
+import { clearedReviewDraftMetadata, sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
+import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
 import { validUuid } from "@/server/workspace-access";
 import {
   reviewInboxState,
+  failureReasonOf,
   findReviewedIntakeCandidateReason,
   reviewAttachmentDisplayName,
   reviewAttachmentMediaType,
   reviewAttachmentScanState,
+  type FailureReason,
   type ReviewAttachmentMediaType,
   type ReviewInboxClassification,
   type ReviewInboxStateContext,
@@ -21,8 +26,74 @@ import {
 // Re-exported so `@/server/imap-inbox` (now a deprecated stub pointing here)
 // keeps every existing import path working churn-free. See
 // src/server/mail-in/core/review-state.ts for the implementations.
-export { reviewInboxState, findReviewedIntakeCandidateReason, reviewAttachmentDisplayName, reviewAttachmentMediaType, reviewAttachmentScanState };
-export type { ReviewAttachmentMediaType, ReviewInboxClassification, ReviewInboxStateContext };
+export { reviewInboxState, failureReasonOf, findReviewedIntakeCandidateReason, reviewAttachmentDisplayName, reviewAttachmentMediaType, reviewAttachmentScanState };
+export type { FailureReason, ReviewAttachmentMediaType, ReviewInboxClassification, ReviewInboxStateContext };
+
+/**
+ * Decrypts one receipt's Tier 1 draft (ADR-0024). A value that will not
+ * authenticate yields an empty object and a `metadata_integrity_failed`
+ * marker rather than a fabricated draft, and the receipt's structural fields
+ * — status, dates, attachments — render normally beside it.
+ */
+function readReceiptDraft(metadata: MetadataCipher, receipt: {
+  id: string;
+  proposal: unknown;
+  fieldEvidence: unknown;
+  proposalEnc: string | null;
+  fieldEvidenceEnc: string | null;
+}): {
+  proposal: Record<string, unknown>;
+  fieldEvidence: Record<string, unknown>;
+  metadataStatus?: { proposal?: MetadataFieldState; fieldEvidence?: MetadataFieldState };
+} {
+  const proposal = metadata.json("imap_ingestion_messages.proposal", receipt.id, { encrypted: receipt.proposalEnc, plaintext: receipt.proposal });
+  const fieldEvidence = metadata.json("imap_ingestion_messages.field_evidence", receipt.id, { encrypted: receipt.fieldEvidenceEnc, plaintext: receipt.fieldEvidence });
+  return {
+    proposal: proposal.value,
+    fieldEvidence: fieldEvidence.value,
+    metadataStatus: proposal.state || fieldEvidence.state
+      ? { proposal: proposal.state, fieldEvidence: fieldEvidence.state }
+      : undefined,
+  };
+}
+
+/**
+ * Re-encrypts a receipt's Tier 1 draft under a new scope's DEK. Returns only
+ * the columns that actually change, so a receipt with nothing encrypted yet
+ * (or nothing readable) is left alone.
+ */
+async function rekeyReceiptDraft(
+  current: { id: string; householdId: string | null; proposalEnc: string | null; fieldEvidenceEnc: string | null },
+  nextHouseholdId: string,
+  executor: MetadataExecutor,
+): Promise<Record<string, unknown>> {
+  if (current.householdId === nextHouseholdId) return {};
+  if (current.proposalEnc === null && current.fieldEvidenceEnc === null) return {};
+  const source = await openMetadataReader(current.householdId, executor);
+  const target = await requireReceiptMetadataWriter(nextHouseholdId, executor);
+  const changes: Record<string, unknown> = {};
+
+  if (current.proposalEnc !== null) {
+    const proposal = source.json("imap_ingestion_messages.proposal", current.id, { encrypted: current.proposalEnc, plaintext: {} });
+    if (!proposal.state) {
+      changes.proposal = {};
+      changes.proposalEnc = target.encryptJson("imap_ingestion_messages.proposal", current.id, proposal.value);
+      // The value just re-encrypted cleanly, so whatever sighting this column
+      // carried is resolved (#971) — cleared here rather than left to the
+      // damaged-value repair, which never runs for this table.
+      await clearMetadataDamageForColumn("imap_ingestion_messages.proposal", current.id, executor);
+    }
+  }
+  if (current.fieldEvidenceEnc !== null) {
+    const evidence = source.json("imap_ingestion_messages.field_evidence", current.id, { encrypted: current.fieldEvidenceEnc, plaintext: {} });
+    if (!evidence.state) {
+      changes.fieldEvidence = {};
+      changes.fieldEvidenceEnc = target.encryptJson("imap_ingestion_messages.field_evidence", current.id, evidence.value);
+      await clearMetadataDamageForColumn("imap_ingestion_messages.field_evidence", current.id, executor);
+    }
+  }
+  return changes;
+}
 
 const IMAP_STAGING_PURGE_RETRY_DELAY_MS = 60_000;
 /** Bounds every read on this endpoint: 50 receipts and 50 filed items, each
@@ -65,7 +136,10 @@ function orderedAttachments(rows: Array<{ id: string; displayName: string; media
   }));
 }
 
-async function privateMailboxUser(userId: string): Promise<{ id: string; isInstanceAdmin: boolean }> {
+/** Exported for `imap-attachment-preview.ts` (#1155), which needs the same
+ * signed-in/instance-admin gate `getImapReview` applies before it goes on to
+ * its own receipt-scoped read. */
+export async function privateMailboxUser(userId: string): Promise<{ id: string; isInstanceAdmin: boolean }> {
   const [user] = await getDb().select({ id: users.id, isInstanceAdmin: users.isInstanceAdmin }).from(users)
     .where(and(eq(users.id, userId), isNull(users.disabledAt))).limit(1);
   if (!user) throw new AppError("account_disabled", "This Orbit account cannot read reviewed intake", 403);
@@ -105,6 +179,8 @@ export async function listImapInbox(userId: string) {
       draftVersion: imapIngestionMessages.draftVersion,
       proposal: imapIngestionMessages.proposal,
       fieldEvidence: imapIngestionMessages.fieldEvidence,
+      proposalEnc: imapIngestionMessages.proposalEnc,
+      fieldEvidenceEnc: imapIngestionMessages.fieldEvidenceEnc,
       expiresAt: imapIngestionMessages.expiresAt,
       receivedAt: imapIngestionMessages.receivedAt,
       failureCode: imapIngestionMessages.failureCode,
@@ -146,6 +222,7 @@ export async function listImapInbox(userId: string) {
       itemId: items.id,
       householdId: items.householdId,
       title: items.title,
+      titleEnc: items.titleEnc,
       itemStatus: items.status,
       messageId: imapIngestionMessages.id,
       filedAt,
@@ -169,6 +246,10 @@ export async function listImapInbox(userId: string) {
     if (existing) existing.push(row); else attachmentsByMessage.set(row.messageId, [row]);
   }
   for (const rows of attachmentsByMessage.values()) rows.reverse();
+  // Tier 1 (ADR-0024): a receipt still without a household reads under the
+  // instance key, which is the whole reason that scope exists.
+  const metadataReaders = await openReceiptMetadataReaders(receipts.map((receipt) => receipt.householdId));
+  const filedReaders = await openMetadataReaders(filedRows.map((row) => row.householdId));
   return {
     receipts: receipts.filter((receipt) => !receipt.householdId || visibleHouseholdIds.has(receipt.householdId)).map((receipt) => {
       const state = reviewInboxState(receipt.status, receipt.failureCode, {
@@ -176,9 +257,10 @@ export async function listImapInbox(userId: string) {
         hasApprovedItem: Boolean(receipt.hasApprovedItem),
         expiresAt: receipt.expiresAt,
       });
+      const decrypted = readReceiptDraft(metadataReaders.get(receipt.householdId)!, receipt);
       const metadata = state.classification === "ready" || state.classification === "retry"
-        ? sanitizeReviewDraftMetadata({ proposal: receipt.proposal, fieldEvidence: receipt.fieldEvidence })
-        : { proposal: {}, fieldEvidence: {} };
+        ? { ...sanitizeReviewDraftMetadata(decrypted), metadataStatus: decrypted.metadataStatus }
+        : { proposal: {}, fieldEvidence: {}, metadataStatus: decrypted.metadataStatus };
       return {
         id: receipt.id,
         status: receipt.status,
@@ -199,10 +281,15 @@ export async function listImapInbox(userId: string) {
     // see even though their own mail created it.
     filed: filedRows.filter((row) => visibleHouseholdIds.has(row.householdId)).map((row): MailFiledItem => {
       const filedDocuments = (attachmentsByMessage.get(row.messageId) ?? []).filter((attachment) => attachment.status === "assigned");
+      // Tier 2 (#963): the item's household owns the title, so it decrypts
+      // under that household's key rather than the receipt's, which may be the
+      // instance scope. `filedReaders` holds one per household, not one per row.
+      const filedTitle = filedReaders.get(row.householdId)!
+        .text("items.title", row.itemId, { encrypted: row.titleEnc, plaintext: row.title });
       return {
         itemId: row.itemId,
         householdId: row.householdId,
-        title: row.title,
+        title: filedTitle.value ?? "",
         itemStatus: row.itemStatus,
         documentName: filedDocuments.length ? reviewAttachmentDisplayName(filedDocuments[0].displayName, filedDocuments[0].mediaType) : null,
         documentCount: filedDocuments.length,
@@ -227,6 +314,8 @@ export async function getImapReview(userId: string, receiptId: string, household
     draftVersion: imapIngestionMessages.draftVersion,
     proposal: imapIngestionMessages.proposal,
     fieldEvidence: imapIngestionMessages.fieldEvidence,
+    proposalEnc: imapIngestionMessages.proposalEnc,
+    fieldEvidenceEnc: imapIngestionMessages.fieldEvidenceEnc,
     expiresAt: imapIngestionMessages.expiresAt,
     receivedAt: imapIngestionMessages.receivedAt,
     failureCode: imapIngestionMessages.failureCode,
@@ -243,16 +332,23 @@ export async function getImapReview(userId: string, receiptId: string, household
     hasApprovedItem: Boolean(receipt.hasApprovedItem),
     expiresAt: receipt.expiresAt,
   });
+  const decrypted = readReceiptDraft(await openMetadataReader(receipt.householdId), receipt);
   const metadata = state.classification === "ready" || state.classification === "retry"
-    ? sanitizeReviewDraftMetadata({ proposal: receipt.proposal, fieldEvidence: receipt.fieldEvidence })
-    : { proposal: {}, fieldEvidence: {} };
+    ? { ...sanitizeReviewDraftMetadata(decrypted), metadataStatus: decrypted.metadataStatus }
+    : { proposal: {}, fieldEvidence: {}, metadataStatus: decrypted.metadataStatus };
   if (!state.canApprove) return { receipt: { id: receipt.id, status: receipt.status, householdId, draftVersion: receipt.draftVersion, expiresAt: receipt.expiresAt, receivedAt: receipt.receivedAt, ...state, ...metadata }, sections: [], candidates: [], attachments: [] };
 
   const [householdSections, householdItems, attachments] = await Promise.all([
     getDb().select({ id: sections.id, name: sections.name }).from(sections)
       .where(and(eq(sections.householdId, householdId), eq(sections.visible, true), isNull(sections.archivedAt))).orderBy(asc(sections.position)),
-    getDb().select({ id: items.id, title: items.title, provider: items.provider, reference: items.reference, subtype: items.subtype })
-      .from(items).where(and(eq(items.householdId, householdId), inArray(items.status, ["active", "expired", "cancelled"]))).orderBy(asc(items.title)).limit(200),
+    // Tier 2 (#963) moved the ordering out of SQL: `items.title` is ciphertext,
+    // so ordering by it in the database would order by nothing meaningful. The
+    // rows come back in a stable creation order, are decrypted, and are sorted
+    // by title in the application — the decrypt-and-scan the tiering decision
+    // traded for. The 200 cap stands as the same safety bound it always was;
+    // at household scale it is never the thing that decides what is returned.
+    getDb().select({ id: items.id, title: items.title, titleEnc: items.titleEnc, provider: items.provider, providerEnc: items.providerEnc, reference: items.reference, referenceEnc: items.referenceEnc, subtype: items.subtype })
+      .from(items).where(and(eq(items.householdId, householdId), inArray(items.status, ["active", "expired", "cancelled"]))).orderBy(asc(items.createdAt), asc(items.id)).limit(200),
     getDb().select({
       id: imapIngestionAttachments.id,
       displayName: imapIngestionAttachments.displayName,
@@ -263,7 +359,19 @@ export async function getImapReview(userId: string, receiptId: string, household
       .from(imapIngestionAttachments).where(and(eq(imapIngestionAttachments.messageId, receiptId), inArray(imapIngestionAttachments.status, ["stored", "assigned"])))
       .orderBy(asc(imapIngestionAttachments.createdAt), asc(imapIngestionAttachments.id)),
   ]);
-  const candidates = householdItems.flatMap((item) => {
+  // Candidate matching stays an application-side comparison over decrypted
+  // values at household scale (ADR-0024 decision 2): it already reads every
+  // item in the household, so the blind index would buy it nothing.
+  const householdMetadata = await openMetadataReader(householdId);
+  const decryptedItems = householdItems
+    .map((item) => ({
+      ...item,
+      title: householdMetadata.text("items.title", item.id, { encrypted: item.titleEnc, plaintext: item.title }).value ?? "",
+      provider: householdMetadata.text("items.provider", item.id, { encrypted: item.providerEnc, plaintext: item.provider }).value,
+      reference: householdMetadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference }).value,
+    }))
+    .sort((left, right) => left.title.localeCompare(right.title));
+  const candidates = decryptedItems.flatMap((item) => {
     const reason = findReviewedIntakeCandidateReason(metadata.proposal, item);
     return reason ? [{ itemId: item.id, title: item.title, reason }] : [];
   }).slice(0, 10);
@@ -287,6 +395,16 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
   if (!receipt) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   if (receipt.householdId && !(await hasHouseholdMembership(userId, receipt.householdId))) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);
   if (["discarded", "expired"].includes(receipt.status)) return;
+
+  // A legacy receipt's documents are deleted below through the accepted,
+  // authorised path. Check that authorisation now, before the receipt is
+  // claimed: refused after the claim, the claim stood (locked, then purged
+  // by the staging job) while the document and its item stayed behind, and
+  // the retry reported the discard done.
+  if (receipt.failureCode === "legacy_review_item" && receipt.reviewItemId) {
+    const legacyDocuments = await getDb().select({ id: documents.id }).from(documents).where(and(eq(documents.itemId, receipt.reviewItemId), eq(documents.lifecycle, "available")));
+    for (const document of legacyDocuments) await requireDocumentDeletionAccess(userId, document.id);
+  }
 
   const cleanupToken = randomUUID();
   const now = new Date();
@@ -321,7 +439,14 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
   // bytes and foreign-key targets can be cleaned through the accepted path.
   if (receipt.failureCode === "legacy_review_item" && receipt.reviewItemId) {
     const documentRows = await getDb().select({ id: documents.id }).from(documents).where(and(eq(documents.itemId, receipt.reviewItemId), eq(documents.lifecycle, "available")));
-    for (const document of documentRows) await requestDocumentDeletion(userId, document.id);
+    // A document that left "available" between the read above and its
+    // deletion (another tab, the retention purge) is already gone as far as
+    // this discard is concerned; thrown here, with the claim standing, it
+    // left the receipt locked with its item behind -- the shape A3-S1 closes.
+    for (const document of documentRows) await requestDocumentDeletion(userId, document.id).catch((error: unknown) => {
+      if (error instanceof AppError && error.code === "document_not_found") return;
+      throw error;
+    });
     await getDb().delete(items).where(eq(items.id, receipt.reviewItemId));
   }
 
@@ -375,16 +500,83 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
     const [current] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
       .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "recoverable"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, cleanupToken))).for("update").limit(1);
     if (!current) return false;
-    await transaction.update(imapIngestionMessages).set({ status: "discarded", receiptStatus: "cancelled", failureCode: null, discardedAt: now, attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, updatedAt: now })
+    await transaction.update(imapIngestionMessages).set({ status: "discarded", receiptStatus: "cancelled", failureCode: null, discardedAt: now, attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, updatedAt: now, ...clearedReviewDraftMetadata })
       .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, cleanupToken)));
     return true;
   });
   if (!completed) throw new AppError("staging_cleanup_busy", "The incoming document changed while it was being discarded; retry discard", 409);
 }
 
+/** Every status the retention sweep still considers live, i.e. not yet expired, discarded or approved. */
+const RETENTION_LIVE_STATUSES = ["pending_review", "recoverable", "processing", "held"] as const;
+
+/**
+ * Keeps `metadata_key_outages` in step with `metadataCryptoAvailable()` and
+ * reports whether the key is available right now. Called once at the top of
+ * every purge cycle, before anything is expired (#964, owner ruling
+ * 2026-09-10): a locked receipt was never available to be ignored, so the
+ * 45-day retention clock must not run while the key is away. The caller
+ * (`purgeExpiredImapStaging`) uses the return value to drop the clock arm
+ * from its sweep, not to skip the sweep outright -- purging a disabled
+ * member's mail and giving up on an exhausted attachment pipeline are both
+ * unconditional obligations, not clock-based, and neither reads the
+ * metadata key, so neither needs to wait for it.
+ *
+ * - Key down, no open window: opens one and reports unavailable.
+ * - Key down, window already open: reports unavailable; nothing else to do.
+ * - Key up, window open: closes it, then credits every still-live receipt's
+ *   `expires_at` by the slice of the outage it actually existed for --
+ *   `ended_at - GREATEST(outage started_at, its own received_at)` -- so a
+ *   receipt that arrived mid-outage is credited only from its own arrival,
+ *   never from before it existed. Receipts that arrived after the outage
+ *   closed are excluded outright (`received_at < ended_at`), which also
+ *   keeps the credit from ever going negative. A receipt whose `expires_at`
+ *   had already passed *before* the outage even began is still credited the
+ *   full outage, which can push a deadline that had already run out back
+ *   into the future -- left deliberately: erring toward keeping a receipt
+ *   alive is the right way to err here.
+ * - Key up, no open window: today's behaviour, unchanged.
+ *
+ * `started_at`/`ended_at` are only as precise as this polling cycle -- a few
+ * minutes of slack against the member is accepted (owner ruling, #964).
+ */
+async function syncMetadataKeyOutageWindow(now: Date): Promise<boolean> {
+  const available = metadataCryptoAvailable();
+  const db = getDb();
+  if (!available) {
+    await db.insert(metadataKeyOutages).values({ status: "open", startedAt: now }).onConflictDoNothing();
+    return false;
+  }
+  await db.transaction(async (transaction) => {
+    const [open] = await transaction.select({ id: metadataKeyOutages.id, startedAt: metadataKeyOutages.startedAt })
+      .from(metadataKeyOutages).where(eq(metadataKeyOutages.status, "open")).for("update").limit(1);
+    if (!open) return;
+    const endedAt = now;
+    const [closed] = await transaction.update(metadataKeyOutages).set({ status: "closed", endedAt, updatedAt: now })
+      .where(and(eq(metadataKeyOutages.id, open.id), eq(metadataKeyOutages.status, "open")))
+      .returning({ id: metadataKeyOutages.id, startedAt: metadataKeyOutages.startedAt });
+    if (!closed) return;
+    // Bound as ISO strings, not raw Date objects: the driver's text-format
+    // bind path does not accept a bare Date the way a plain query parameter
+    // does, so every other date-bearing raw `sql` fragment in this module
+    // (materializeNotifications in imap-receipt-worker.ts) does the same.
+    const endedAtIso = endedAt.toISOString();
+    const outageStartedAtIso = closed.startedAt.toISOString();
+    await transaction.update(imapIngestionMessages).set({
+      expiresAt: sql`${imapIngestionMessages.expiresAt} + (${endedAtIso}::timestamptz - GREATEST(${outageStartedAtIso}::timestamptz, ${imapIngestionMessages.receivedAt}))`,
+      updatedAt: now,
+    }).where(and(
+      inArray(imapIngestionMessages.status, RETENTION_LIVE_STATUSES),
+      lt(imapIngestionMessages.receivedAt, endedAt),
+    ));
+  });
+  return true;
+}
+
 /** Expires bounded batches of private drafts only after their ciphertext is purged. */
 export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Promise<void> {
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("IMAP staging purge limit is invalid");
+  const metadataKeyAvailable = await syncMetadataKeyOutageWindow(now);
   for (let processed = 0; processed < limit; processed += 1) {
     const claim = await getDb().transaction(async (transaction) => {
       const [candidate] = await transaction.select({
@@ -397,8 +589,19 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
            arrived (ADR-0017 slice 5): a member who pauses and never comes back
            does not accumulate mail forever, and after it expires the message
            lives only in the provider mailbox. */
-        inArray(imapIngestionMessages.status, ["pending_review", "recoverable", "processing", "held"]),
-        or(lt(imapIngestionMessages.expiresAt, now), isNotNull(users.disabledAt), and(eq(imapIngestionMessages.status, "recoverable"), eq(imapIngestionMessages.failureCode, "attachment_processing_exhausted"))),
+        inArray(imapIngestionMessages.status, RETENTION_LIVE_STATUSES),
+        /* The clock arm (#964) drops out while the metadata key is away: a
+           locked receipt's 45-day countdown does not run, so it must not be
+           part of why a row is picked up here. The other two arms purge
+           ciphertext without ever reading it, so a key outage does not
+           suspend them: a disabled member's staged mail is a standing
+           retention obligation, not a countdown, and an exhausted attachment
+           pipeline has already given up regardless of age. */
+        or(
+          ...(metadataKeyAvailable ? [lt(imapIngestionMessages.expiresAt, now)] : []),
+          isNotNull(users.disabledAt),
+          and(eq(imapIngestionMessages.status, "recoverable"), eq(imapIngestionMessages.failureCode, "attachment_processing_exhausted")),
+        ),
         or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - 10 * 60_000))),
         or(isNull(imapIngestionMessages.attachmentProcessingNextAttemptAt), lte(imapIngestionMessages.attachmentProcessingNextAttemptAt, now)),
       )).orderBy(asc(imapIngestionMessages.expiresAt)).limit(1);
@@ -412,7 +615,7 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
         attachmentProcessingLeaseToken: token,
         attachmentProcessingNextAttemptAt: null,
         updatedAt: now,
-      }).where(and(eq(imapIngestionMessages.id, candidate.id), inArray(imapIngestionMessages.status, ["pending_review", "recoverable", "processing", "held"]), or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - 10 * 60_000))), or(isNull(imapIngestionMessages.attachmentProcessingNextAttemptAt), lte(imapIngestionMessages.attachmentProcessingNextAttemptAt, now)))).returning({ id: imapIngestionMessages.id, token: imapIngestionMessages.attachmentProcessingLeaseToken });
+      }).where(and(eq(imapIngestionMessages.id, candidate.id), inArray(imapIngestionMessages.status, RETENTION_LIVE_STATUSES), or(isNull(imapIngestionMessages.attachmentProcessingLockedAt), lt(imapIngestionMessages.attachmentProcessingLockedAt, new Date(now.getTime() - 10 * 60_000))), or(isNull(imapIngestionMessages.attachmentProcessingNextAttemptAt), lte(imapIngestionMessages.attachmentProcessingNextAttemptAt, now)))).returning({ id: imapIngestionMessages.id, token: imapIngestionMessages.attachmentProcessingLeaseToken });
       if (!claimed?.token) return undefined;
       await transaction.update(imapIngestionAttachments).set({ purgePending: true, purgeFailureCode: null, updatedAt: now }).where(and(
         eq(imapIngestionAttachments.messageId, candidate.id),
@@ -504,6 +707,10 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
       attachmentProcessingLeaseToken: null,
       attachmentProcessingNextAttemptAt: failed ? new Date(now.getTime() + IMAP_STAGING_PURGE_RETRY_DELAY_MS) : null,
       updatedAt: now,
+      // This attempt at purging is itself still retryable when `failed`: the
+      // review has not actually ended yet, so its draft stays put. Reaching
+      // "expired" or the terminal "failed" state is the review ending.
+      ...(failed ? {} : clearedReviewDraftMetadata),
     }).where(and(eq(imapIngestionMessages.id, claim.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, claim.token)));
   }
 }
@@ -518,8 +725,30 @@ export async function assignImapReceiptHousehold(userId: string, receiptId: stri
     const [membership] = await transaction.select({ householdId: memberships.householdId }).from(memberships).innerJoin(households, eq(households.id, memberships.householdId))
       .where(and(eq(memberships.userId, userId), eq(memberships.householdId, householdId), isNull(households.deletionRequestedAt))).limit(1);
     if (!membership) throw new AppError("household_not_found", "That household is not available", 404);
-    const [row] = await transaction.update(imapIngestionMessages).set({ householdId, updatedAt: new Date() })
-      .where(and(eq(imapIngestionMessages.id, receiptId), eq(imapIngestionMessages.userId, userId), eq(imapIngestionMessages.status, "pending_review"))).returning({ id: imapIngestionMessages.id });
+    const owned = and(
+      eq(imapIngestionMessages.id, receiptId),
+      eq(imapIngestionMessages.userId, userId),
+      eq(imapIngestionMessages.status, "pending_review"),
+    );
+    const [current] = await transaction.select({
+      id: imapIngestionMessages.id,
+      householdId: imapIngestionMessages.householdId,
+      proposalEnc: imapIngestionMessages.proposalEnc,
+      fieldEvidenceEnc: imapIngestionMessages.fieldEvidenceEnc,
+    }).from(imapIngestionMessages).where(owned).limit(1);
+    if (!current) return undefined;
+    /* Tier 1 (ADR-0024 decision 1): which DEK encrypted a receipt's draft is
+       decided by its household, and this statement is what changes that
+       household. So the values move keys in the same transaction — from the
+       instance DEK, or from a previous household's — or they would become
+       unreadable the instant the column changed. A field that will not
+       decrypt is left exactly as it is: rewriting it would erase the evidence
+       of damage and put an empty draft in its place. */
+    const [row] = await transaction.update(imapIngestionMessages).set({
+      householdId,
+      ...await rekeyReceiptDraft(current, householdId, transaction),
+      updatedAt: new Date(),
+    }).where(owned).returning({ id: imapIngestionMessages.id });
     return row;
   });
   if (!changed) throw new AppError("inbox_receipt_not_found", "That incoming document is not available", 404);

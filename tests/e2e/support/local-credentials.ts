@@ -1,0 +1,90 @@
+import { expect, type Page } from "@playwright/test";
+import { sessionHeaders } from "./households";
+
+/**
+ * THE ONE PASSWORD an account ever gets from a spec. Once an account holds a
+ * password, `requireRecentAuthentication` (src/lib/auth/recent-auth.ts)
+ * challenges with that password and nothing else -- a step-up proof no longer
+ * answers -- so `ensureLocalPassword` is idempotent only while every caller
+ * sends the same value. Two files giving "Orbit Administrator" different
+ * passwords is a 403 for whichever runs second (pipeline 822, smoke).
+ */
+export const FIXTURE_PASSWORD = {
+  "Orbit Administrator": "e2e-administrator-fixture-915",
+  "Orbit Outsider": "e2e-outsider-fixture-915",
+} as const;
+
+/**
+ * Giving the signed-in reader a password, through the API, because no screen
+ * can yet do it for them (#915, ADR-0023 §5).
+ *
+ * Everything sensitive in M7 re-challenges the person in front of the screen,
+ * and which challenge they get depends on what they already have: a password
+ * answers with itself, and an account with only a provider identity has to go
+ * back to that provider and be authenticated again. So the very first password
+ * on an OIDC account can only be set from the far side of a step-up — which is
+ * why a spec that wants to exercise the ordinary, password-challenged journeys
+ * has to walk one first.
+ *
+ * A browser cannot start that step-up on its own yet: `POST
+ * /api/auth/step-up/start` needs the per-session CSRF header, which only
+ * `fetch` can set, and answers a bare 302 to the provider, which `fetch`
+ * cannot read. Playwright's own request context is under no such rule — it
+ * shares this browser's cookies and will hand back the `Location` — so the
+ * helper below drives the operator's real path with it: start the step-up,
+ * follow it to the provider, authenticate, come back, and set the password.
+ * Nothing here is a test-only hook in the shipped image; every route it
+ * touches is the one a screen will call.
+ *
+ * IDEMPOTENT, because CI retries whole files and the specs share one instance.
+ * `password` is sent as BOTH the new password and the current one, so the
+ * guard is satisfied whichever challenge it chooses: the step-up proof for an
+ * account with no credential yet, that same password for one that already has
+ * it. Calling this twice leaves exactly the state calling it once does.
+ *
+ * The page must already be on an Orbit URL: the CSRF pair is read from the
+ * session this browser is holding, and its Origin from where the page is.
+ *
+ * AND the reader must belong to a household. The step-up comes back to
+ * /settings, which is a gated screen, and #840 sends a reader with no
+ * household anywhere to the arrival instead -- so the wait below times out on
+ * `/` twenty seconds later, naming a navigation rather than the seat that was
+ * missing (pipeline 1268, smoke). Every caller seats one first.
+ */
+export async function ensureLocalPassword(page: Page, account: string, password: string): Promise<void> {
+  const started = await page.request.post("/api/auth/step-up/start", {
+    headers: await sessionHeaders(page),
+    maxRedirects: 0,
+    data: { intent: "password_set", returnTo: "/settings" },
+  });
+  expect(started.status(), "the step-up did not start").toBe(302);
+  const provider = started.headers()["location"];
+  expect(provider, "the step-up named no provider to go to").toBeTruthy();
+
+  await page.goto(provider);
+  await page.getByRole("link", { name: account }).click();
+  /* The callback mints the proof and sends the browser back to `returnTo`. */
+  await page.waitForURL(/\/settings/, { timeout: 20_000 });
+  /* #1192: WebKit only -- this round trip is a cross-origin navigate away to
+     the provider and back, and WebKit swaps the main frame's internal id on
+     that kind of navigation. A caller whose very next step is its own
+     `page.goto` can lose a race with Playwright's own bookkeeping catching
+     up to that swap: the call fails immediately with "Cannot find web frame
+     for the frame id" rather than timing out, so waiting longer here
+     (38ab8ca2's `waitForLoadState("load")`, removed) does not help -- the
+     frame object only becomes valid for Playwright's purposes after that
+     error has already been raised once, and on WebKit retrying the
+     navigation itself is not reliable either (pipeline 2005). The caller
+     must continue on a fresh page on WebKit instead: v19-archive.spec.ts's
+     own `pageAfterStepUp` is the real fix, right where this round trip
+     ends. */
+
+  const set = await page.request.post("/api/auth/local/password", {
+    /* Read again, not reused: setting a password that REPLACES one revokes
+       every session and re-issues this browser's, so the token from before
+       the call is a dead letter by the time the next request needs one. */
+    headers: await sessionHeaders(page),
+    data: { password, currentPassword: password },
+  });
+  expect(set.ok(), `the password was refused (HTTP ${set.status()})`).toBe(true);
+}

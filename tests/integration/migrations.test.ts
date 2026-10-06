@@ -31,6 +31,14 @@ async function insertFixtureHousehold(client: MigrationTestClient, id: string): 
   await client.unsafe(`INSERT INTO "households" (id, name) VALUES ($1, $2)`, [id, "Synthetic readiness household"]);
 }
 
+async function insertFixtureUser(client: MigrationTestClient, email: string): Promise<string> {
+  const [row] = await client.unsafe(
+    `INSERT INTO "users" ("email", "display_name") VALUES ($1, $2) RETURNING "id"`,
+    [email, "Fixture user"],
+  );
+  return String(row.id);
+}
+
 async function insertFixtureDocument(client: MigrationTestClient, params: {
   householdId: string;
   lifecycle: string;
@@ -83,6 +91,14 @@ describe("PostgreSQL migration evidence", () => {
        supported, working state rather than an absent row. */
     const contactRows = await database.client.unsafe(`SELECT "singleton", "public_address", "version" FROM "instance_contact"`);
     expect(contactRows).toEqual([{ singleton: true, public_address: null, version: "1" }]);
+
+    /* 0047 seeds the mail-probe singleton unconditionally too (#1071): every
+       fresh instance starts with neither test ever having run, a supported,
+       working state (a pill that says so, not an absent row). */
+    const mailProbeRows = await database.client.unsafe(
+      `SELECT "singleton", "mailbox_result", "relay_result" FROM "mail_probe_results"`,
+    );
+    expect(mailProbeRows).toEqual([{ singleton: true, mailbox_result: null, relay_result: null }]);
   });
 
   it("converts a live maintenance singleton and its pending notices into windows and updates", async () => {
@@ -428,5 +444,326 @@ describe("PostgreSQL migration evidence", () => {
       display_name: legacyDisplayName,
       content_sha256: legacyHash,
     }]);
+  });
+
+  it("adds the Tier 1 columns without touching a single existing value (0040, ADR-0024)", async () => {
+    const database = await createMigrationTestDatabase("tier1-metadata-expand");
+    databases.push(database);
+    await verifyMigrationPrefix("drizzle");
+    const throughTagDirectory = await createMigrationDirectoryThroughTag("drizzle", "0039_step_up_proofs");
+    temporaryDirectories.push(throughTagDirectory);
+    await runMigrations(database.url, throughTagDirectory.path);
+
+    /* Rows written by the release before this one: plaintext notes, a
+       plaintext reference and a mail-in draft, exactly what an operator
+       upgrading in place already has in their database. */
+    const householdId = randomUUID();
+    await insertFixtureHousehold(database.client, householdId);
+    const [sectionRow] = await database.client.unsafe(
+      `INSERT INTO "sections" ("household_id", "slug", "name", "icon", "accent", "position")
+       VALUES ($1, 'legacy', 'Legacy', 'home', 'blue', 0) RETURNING "id"`,
+      [householdId],
+    );
+    const [itemRow] = await database.client.unsafe(
+      `INSERT INTO "items" ("household_id", "section_id", "title", "currency", "reference", "notes")
+       VALUES ($1, $2, 'Legacy item', 'GBP', 'LEGACY-1', 'Written before encryption') RETURNING "id"`,
+      [householdId, String(sectionRow.id)],
+    );
+    /* The two drafts are written as SQL jsonb literals rather than as bound
+       parameters: a JSON string handed to the driver and cast with `::jsonb`
+       is encoded a second time, so what lands in the column is a jsonb string
+       scalar and the row reads back as text instead of an object. Seeding the
+       literal is what makes this fixture the shape a real pre-encryption row
+       has. */
+    const [receiptRow] = await database.client.unsafe(
+      `INSERT INTO "imap_ingestion_messages"
+         ("mailbox", "mailbox_uid_validity", "mailbox_uid", "content_sha256", "recipient_alias_sha256",
+          "household_id", "status", "expires_at", "proposal", "field_evidence")
+       VALUES ('INBOX', '1', 9001, $1, $2, $3, 'pending_review', now() + interval '1 day',
+               '{"title": "Legacy proposal"}'::jsonb,
+               '{"title": {"source": "subject", "confidence": "high"}}'::jsonb)
+       RETURNING "id"`,
+      ["a".repeat(64), "b".repeat(64), householdId],
+    );
+
+    await runMigrations(database.url, "drizzle");
+
+    /* The expand migration cannot encrypt: the key-encryption key is an
+       application secret and SQL has no access to it. What it must guarantee
+       is that every pre-existing row stays exactly as readable as it was, in
+       the dual-read state the running release reads — plaintext present,
+       ciphertext null — until the backfill job replaces it. */
+    const [item] = await database.client.unsafe(
+      `SELECT "reference", "notes", "reference_enc", "notes_enc", "reference_index" FROM "items" WHERE "id" = $1`,
+      [String(itemRow.id)],
+    );
+    expect(item).toEqual({
+      reference: "LEGACY-1",
+      notes: "Written before encryption",
+      reference_enc: null,
+      notes_enc: null,
+      reference_index: null,
+    });
+    const [receipt] = await database.client.unsafe(
+      `SELECT "proposal", "field_evidence", "proposal_enc", "field_evidence_enc"
+       FROM "imap_ingestion_messages" WHERE "id" = $1`,
+      [String(receiptRow.id)],
+    );
+    /* `toEqual` alone would not distinguish an object from the JSON text of
+       one, and a caller reading this column expects an object. */
+    expect(typeof receipt.proposal).toBe("object");
+    expect(receipt.proposal).toEqual({ title: "Legacy proposal" });
+    expect(typeof receipt.field_evidence).toBe("object");
+    expect(receipt.field_evidence).toEqual({ title: { source: "subject", confidence: "high" } });
+    expect(receipt.proposal_enc).toBeNull();
+    expect(receipt.field_evidence_enc).toBeNull();
+
+    /* No key is seeded either: keys are minted by the application on first
+       use, so an upgraded database starts with none. */
+    expect(await database.client.unsafe(`SELECT count(*)::int AS count FROM "metadata_keys"`))
+      .toEqual([{ count: 0 }]);
+  });
+
+  it("keeps the metadata key scopes honest: one per household, exactly one instance row (0040, ADR-0024)", async () => {
+    const database = await createMigrationTestDatabase("tier1-metadata-key-scopes");
+    databases.push(database);
+    await runMigrations(database.url, "drizzle");
+
+    const householdId = randomUUID();
+    await insertFixtureHousehold(database.client, householdId);
+    const insertKey = (scope: string, household: string | null, keyId: string) => database.client.unsafe(
+      `INSERT INTO "metadata_keys" ("scope", "household_id", "envelope_version", "wrapped_dek", "wrap_iv", "wrap_auth_tag", "key_id")
+       VALUES ($1, $2, 1, 'dek', 'iv', 'tag', $3)`,
+      [scope, household, keyId],
+    );
+
+    await expect(insertKey("household", householdId, "key-one")).resolves.toBeDefined();
+    /* One DEK per household: a second row for the same household would leave
+       half its values on a key nothing reads. */
+    await expect(insertKey("household", householdId, "key-two")).rejects.toThrow(/metadata_keys_household_unique/u);
+    /* The check constraint pairs scope with household_id in both directions. */
+    await expect(insertKey("household", null, "key-three")).rejects.toThrow(/metadata_keys_scope_household_valid/u);
+    await expect(insertKey("instance", householdId, "key-four")).rejects.toThrow(/metadata_keys_scope_household_valid/u);
+
+    await expect(insertKey("instance", null, "key-five")).resolves.toBeDefined();
+    /* PostgreSQL treats every NULL as distinct, so the plain unique index
+       above does not constrain this one; the partial index is what does. */
+    await expect(insertKey("instance", null, "key-six")).rejects.toThrow(/metadata_keys_instance_unique/u);
+
+    /* Dropping a household drops its key, which crypto-shreds any stray copy
+       of that household's ciphertext. */
+    await database.client.unsafe(`DELETE FROM "households" WHERE "id" = $1`, [householdId]);
+    expect(await database.client.unsafe(`SELECT count(*)::int AS count FROM "metadata_keys" WHERE "scope" = 'household'`))
+      .toEqual([{ count: 0 }]);
+    expect(await database.client.unsafe(`SELECT count(*)::int AS count FROM "metadata_keys" WHERE "scope" = 'instance'`))
+      .toEqual([{ count: 1 }]);
+  });
+
+  it("adds the Tier 2 columns without touching a single existing value (0041, ADR-0024)", async () => {
+    const database = await createMigrationTestDatabase("tier2-metadata-expand");
+    databases.push(database);
+    await verifyMigrationPrefix("drizzle");
+    const throughTagDirectory = await createMigrationDirectoryThroughTag("drizzle", "0040_tier1_metadata_encryption");
+    temporaryDirectories.push(throughTagDirectory);
+    await runMigrations(database.url, throughTagDirectory.path);
+
+    /* An item and an open invitation as the release before this one wrote
+       them: title, provider, cost and address all plaintext, and both columns
+       still NOT NULL at this point. */
+    const householdId = randomUUID();
+    await insertFixtureHousehold(database.client, householdId);
+    const [sectionRow] = await database.client.unsafe(
+      `INSERT INTO "sections" ("household_id", "slug", "name", "icon", "accent", "position")
+       VALUES ($1, 'legacy', 'Legacy', 'home', 'blue', 0) RETURNING "id"`,
+      [householdId],
+    );
+    const [itemRow] = await database.client.unsafe(
+      `INSERT INTO "items" ("household_id", "section_id", "title", "provider", "cost_minor", "currency")
+       VALUES ($1, $2, 'Legacy item', 'Legacy provider', 4242, 'GBP') RETURNING "id"`,
+      [householdId, String(sectionRow.id)],
+    );
+    const [invitationRow] = await database.client.unsafe(
+      `INSERT INTO "household_invitations" ("household_id", "email", "token_digest", "expires_at")
+       VALUES ($1, 'legacy@example.invalid', $2, now() + interval '7 days') RETURNING "id"`,
+      [householdId, "c".repeat(64)],
+    );
+
+    await runMigrations(database.url, "drizzle");
+
+    /* Same guarantee 0040 gives: SQL cannot encrypt, so what this migration
+       must do for existing rows is leave them exactly as readable as they
+       were, in the dual-read state the running release reads. */
+    const [item] = await database.client.unsafe(
+      `SELECT "title", "provider", "cost_minor", "title_enc", "provider_enc", "cost_minor_enc"
+       FROM "items" WHERE "id" = $1`,
+      [String(itemRow.id)],
+    );
+    expect(item).toEqual({
+      title: "Legacy item",
+      provider: "Legacy provider",
+      cost_minor: 4242,
+      title_enc: null,
+      provider_enc: null,
+      cost_minor_enc: null,
+    });
+    const [invitation] = await database.client.unsafe(
+      `SELECT "email", "email_enc", "email_index" FROM "household_invitations" WHERE "id" = $1`,
+      [String(invitationRow.id)],
+    );
+    expect(invitation).toEqual({ email: "legacy@example.invalid", email_enc: null, email_index: null });
+
+    /* The backfill needs both columns nullable to clear them; if the NOT NULL
+       survived, every conversion would fail at the last statement. */
+    await expect(database.client.unsafe(
+      `UPDATE "items" SET "title" = NULL, "title_enc" = 'mdv1.a.b.c' WHERE "id" = $1`,
+      [String(itemRow.id)],
+    )).resolves.toBeDefined();
+    await expect(database.client.unsafe(
+      `UPDATE "household_invitations" SET "email" = NULL, "email_enc" = 'mdv1.a.b.c' WHERE "id" = $1`,
+      [String(invitationRow.id)],
+    )).resolves.toBeDefined();
+  });
+
+  it("adds the account address columns without touching a single existing value (0044, ADR-0024)", async () => {
+    const database = await createMigrationTestDatabase("account-address-expand");
+    databases.push(database);
+    await verifyMigrationPrefix("drizzle");
+    const throughTagDirectory = await createMigrationDirectoryThroughTag("drizzle", "0043_metadata_key_outages");
+    temporaryDirectories.push(throughTagDirectory);
+    await runMigrations(database.url, throughTagDirectory.path);
+
+    /* An account and a verified sending address as the release before this one
+       wrote them: both addresses plaintext, both columns still NOT NULL. */
+    const [userRow] = await database.client.unsafe(
+      `INSERT INTO "users" ("email", "display_name") VALUES ('legacy@example.invalid', 'Legacy person') RETURNING "id"`,
+    );
+    const [senderRow] = await database.client.unsafe(
+      `INSERT INTO "mail_in_sender_addresses" ("user_id", "address", "source", "verified_at")
+       VALUES ($1, 'legacy-sender@example.invalid', 'manual', now()) RETURNING "id"`,
+      [String(userRow.id)],
+    );
+
+    await runMigrations(database.url, "drizzle");
+
+    /* The same guarantee 0040 and 0041 give: SQL cannot encrypt, so all this
+       migration may do to an existing row is leave it exactly as readable as
+       it was, in the state the running release dual-reads. */
+    const [user] = await database.client.unsafe(
+      `SELECT "email", "email_enc", "email_index" FROM "users" WHERE "id" = $1`,
+      [String(userRow.id)],
+    );
+    expect(user).toEqual({ email: "legacy@example.invalid", email_enc: null, email_index: null });
+    const [sender] = await database.client.unsafe(
+      `SELECT "address", "address_enc", "address_index" FROM "mail_in_sender_addresses" WHERE "id" = $1`,
+      [String(senderRow.id)],
+    );
+    expect(sender).toEqual({ address: "legacy-sender@example.invalid", address_enc: null, address_index: null });
+
+    /* The backfill clears the plaintext as it encrypts, so a surviving NOT
+       NULL would make every conversion fail on its last statement. */
+    await expect(database.client.unsafe(
+      `UPDATE "users" SET "email" = NULL, "email_enc" = 'mdv1.a.b.c' WHERE "id" = $1`,
+      [String(userRow.id)],
+    )).resolves.toBeDefined();
+    await expect(database.client.unsafe(
+      `UPDATE "mail_in_sender_addresses" SET "address" = NULL, "address_enc" = 'mdv1.a.b.c' WHERE "id" = $1`,
+      [String(senderRow.id)],
+    )).resolves.toBeDefined();
+  });
+
+  it("carries 'one account per address' onto the blind index (0044, ADR-0024 decision 2)", async () => {
+    const database = await createMigrationTestDatabase("account-address-blind-index");
+    databases.push(database);
+    await runMigrations(database.url, "drizzle");
+
+    const [first] = await database.client.unsafe(
+      `INSERT INTO "users" ("email", "email_index", "display_name")
+       VALUES (NULL, 'shared-index-value', 'First') RETURNING "id"`,
+    );
+    expect(first.id).toBeDefined();
+
+    /* The rule the plaintext unique index used to enforce. Without this index
+       it would have gone quietly when the plaintext was cleared, because
+       PostgreSQL counts every NULL as distinct. */
+    await expect(database.client.unsafe(
+      `INSERT INTO "users" ("email", "email_index", "display_name")
+       VALUES (NULL, 'shared-index-value', 'Second')`,
+    )).rejects.toMatchObject({ constraint_name: "user_email_unique_index" });
+
+    /* And two accounts with no index yet — rows the backfill has not reached —
+       still coexist, or the expand release could not run at all. */
+    await expect(database.client.unsafe(
+      `INSERT INTO "users" ("email", "display_name") VALUES ('a@example.invalid', 'A'), ('b@example.invalid', 'B')`,
+    )).resolves.toBeDefined();
+  });
+
+  it("carries 'one open invitation per address' onto the blind index (0041, ADR-0024 decision 2)", async () => {
+    const database = await createMigrationTestDatabase("tier2-invitation-blind-index");
+    databases.push(database);
+    await runMigrations(database.url, "drizzle");
+
+    const householdId = randomUUID();
+    await insertFixtureHousehold(database.client, householdId);
+    let digestSeed = 0;
+    const insertInvitation = (emailIndex: string | null) => database.client.unsafe(
+      `INSERT INTO "household_invitations" ("household_id", "email", "email_enc", "email_index", "token_digest", "expires_at")
+       VALUES ($1, NULL, 'mdv1.a.b.c', $2, $3, now() + interval '7 days')`,
+      [householdId, emailIndex, String(digestSeed += 1).padStart(64, "0")],
+    );
+
+    await expect(insertInvitation("digest-one")).resolves.toBeDefined();
+    /* The rule the plaintext index used to enforce, now enforced on the
+       digest: without this, clearing the plaintext would have retired it
+       silently, because PostgreSQL treats every NULL as distinct. */
+    await expect(insertInvitation("digest-one")).rejects.toThrow(/household_invitation_open_once_index/u);
+    await expect(insertInvitation("digest-two")).resolves.toBeDefined();
+
+    /* A withdrawn invitation is not open, so the address may be invited again. */
+    await database.client.unsafe(
+      `UPDATE "household_invitations" SET "revoked_at" = now() WHERE "email_index" = 'digest-one'`,
+    );
+    await expect(insertInvitation("digest-one")).resolves.toBeDefined();
+  });
+
+  it("treats email as the same identity regardless of case (0038, ADR-0023 §2)", async () => {
+    const database = await createMigrationTestDatabase("email-case-insensitive");
+    databases.push(database);
+    await runMigrations(database.url, "drizzle");
+
+    const insertUser = (email: string) => database.client.unsafe(
+      `INSERT INTO "users" ("email", "display_name") VALUES ($1, $2)`,
+      [email, "Fixture user"],
+    );
+
+    await expect(insertUser("person@example.invalid")).resolves.toBeDefined();
+    /* Same address, different case: the unique index is on lower(email), so
+       this must collide even though no plain-text unique constraint does. */
+    await expect(insertUser("Person@Example.invalid")).rejects.toThrow(/user_email_unique_ci/u);
+    await expect(insertUser("someone-else@example.invalid")).resolves.toBeDefined();
+  });
+
+  it("bounds a credential setup token to its two purposes and cascades with its user (0038, ADR-0023 §2)", async () => {
+    const database = await createMigrationTestDatabase("credential-setup-tokens");
+    databases.push(database);
+    await runMigrations(database.url, "drizzle");
+
+    const userId = await insertFixtureUser(database.client, "setup-token-owner@example.invalid");
+    const insertToken = (purpose: string, tokenHash: string) => database.client.unsafe(
+      `INSERT INTO "credential_setup_tokens" ("user_id", "token_hash", "purpose", "expires_at")
+       VALUES ($1, $2, $3, now() + interval '1 day')`,
+      [userId, tokenHash, purpose],
+    );
+
+    await expect(insertToken("setup", "a".repeat(64))).resolves.toBeDefined();
+    await expect(insertToken("recovery", "b".repeat(64))).resolves.toBeDefined();
+    await expect(insertToken("bogus", "c".repeat(64))).rejects.toThrow(/credential_setup_tokens_purpose/u);
+
+    /* The setup token is a child of the user it was issued for: deleting the
+       user must not leave an orphaned token behind. */
+    await database.client.unsafe(`DELETE FROM "users" WHERE "id" = $1`, [userId]);
+    expect(await database.client.unsafe(
+      `SELECT count(*)::int AS count FROM "credential_setup_tokens" WHERE "user_id" = $1`,
+      [userId],
+    )).toEqual([{ count: 0 }]);
   });
 });

@@ -1,15 +1,25 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
+import { settleArrival } from "./support/arrival";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
+import { ensureLocalPassword } from "./support/local-credentials";
+import { ensureWorkerAdministrator, workerAccount, workerFixturePassword, workerScopedAddress } from "./support/worker-identity";
 import {
   auditLightDismiss,
   auditTabOrder,
   currentFocus,
+  dismissTourIfShown,
   fillCreateForm,
   installKeyboardAudit,
   settled,
   tabTo,
 } from "./support/keyboard";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #496: a keyboard-only pass over the core journeys — sign-in through to
@@ -72,7 +82,8 @@ import {
  * ring).
  */
 
-const READER = "Orbit Administrator";
+/* #1080: this worker's own administrator, resolved lazily (worker env only). */
+const READER = () => workerAccount("administrator");
 
 /* The pocket layouts are different screens with their own chrome; their walk
    is #849. This file covers the desktop screens. */
@@ -81,8 +92,28 @@ test.beforeEach(({ isMobile }) => {
 });
 
 async function signIn(page: Page, returnTo: string) {
+  await answerPushWithoutAService(page);
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
-  await page.getByRole("link", { name: READER }).click();
+  await page.getByRole("link", { name: READER() }).click();
+  /* #1080: waits for the session, then holds administrator access. */
+  await ensureWorkerAdministrator(page);
+    /* #1096: every test in this file signs in when the instance holds no
+     household at all -- the #1077 reset above puts the database back to a
+     seed that has none, and each test cleans its own away -- so
+     hooks.server.js sends the returnTo to `/` instead of to `/home`
+     (web/src/hooks.server.js, the `!session.activeHouseholdId` branch). `/`
+     is the arrival, and Arrival.svelte's `decide()` reads the workspace and
+     hands a reader with somewhere onward to /home with `location.replace`.
+     `seedHousehold` below turns that decision ONWARD while the read is still
+     in flight, so the replace cancels the `page.goto("/home")` the caller
+     makes a beat later: Chromium reports the cancelled one as
+     `net::ERR_ABORTED`, naming the navigation rather than the redirect that
+     killed it. Three CI sightings (pipelines 907, 1275 and 1491) all show the
+     same two /home document requests milliseconds apart, the aborted one
+     Playwright's and the survivor carrying `Referer: /`. `settleArrival`
+     waits for the arrival's decision to land first, which is the fix 72d8efd0
+     made for #840 everywhere else and missed here. */
+  await settleArrival(page);
 }
 
 /**
@@ -231,6 +262,10 @@ async function openSettingsFromHome(page: Page) {
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
+  /* The sign-in methods block (#915) is read after the helm itself, so an
+     audit that starts on `.cards` alone collects its expected set before the
+     block's buttons exist and then meets them by Tab. Wait for the rows. */
+  await expect(page.locator(".method").first()).toBeVisible({ timeout: 30_000 });
 }
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -269,7 +304,7 @@ test("arrive: the sign-in door opens by Tab and Enter alone", async ({ page, con
     /* The provider lists identities as links (tests/e2e/v19-entry.spec.ts);
        Tab to the one this suite signs in as and press Enter rather than
        clicking it. */
-    await tabTo(page, { tag: "A", textIncludes: READER }, { screen: "identity provider" });
+    await tabTo(page, { tag: "A", textIncludes: READER() }, { screen: "identity provider" });
     await page.keyboard.press("Enter");
 
     await expect(page).toHaveURL(/\/home$/, { timeout: 15_000 });
@@ -301,6 +336,50 @@ test("home: the account panel and the three drawers are light-dismiss by keyboar
     await auditLightDismiss(page, "home", "#edge-health", "#statusdrawer");
     await auditLightDismiss(page, "home", "#keydrawer .handle", "#keydrawer");
   } finally {
+    await cleanup(page, household);
+  }
+});
+
+/**
+ * #1064: the press that arrives before home can answer.
+ *
+ * The server renders home whole (#842), so the avatar is on screen, lettered
+ * and tabbable long before the client's own readHome() has resolved and the
+ * behaviour has been bound to it. A press inside that window used to be
+ * dropped outright — no listener, no replay — and the panel stayed shut for
+ * good, which is what the CI flake looked like from the outside:
+ * `aria-expanded` stuck at "false" across a whole 5s poll.
+ *
+ * Driven by delaying `/api/workspace`, the slowest of readHome()'s three
+ * reads, so the window is wide enough to press into on purpose rather than
+ * by luck. The panel must end up open: either the press is held and applied
+ * when the screen goes live, or the wait was never needed.
+ */
+test("home: an Enter on the avatar before home goes live still opens the account panel", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await installKeyboardAudit(page);
+  await signIn(page, "/home");
+  const household = await seedHousehold(page);
+  try {
+    await page.route("**/api/workspace", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 8_000));
+      await route.continue();
+    });
+    await page.goto("/home");
+    await dismissTourIfShown(page);
+    /* Deliberately NOT settled(): this test exists to press while the screen
+       is still the server's own render. The orb is here because the server
+       sent it — assert that, so a future markup change cannot turn this into
+       a test that presses nothing. */
+    await expect(page.locator("button.orb")).toBeVisible();
+    await expect(page.locator("body[data-home-ready]")).toHaveCount(0);
+    await tabTo(page, { selector: "button.orb" }, { screen: "home (not yet live)" });
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#account")).toHaveClass(/open/, { timeout: 20_000 });
+    await expect(page.locator("button.orb")).toHaveAttribute("aria-expanded", "true");
+  } finally {
+    await page.unroute("**/api/workspace").catch(() => {});
     await cleanup(page, household);
   }
 });
@@ -408,7 +487,18 @@ test("household page: reached from home's sun by keyboard, and is fully reachabl
        the stack's lifetime as unrelated specs create accounts — genuinely
        unbounded and not part of what this test is proving. Everything else on
        the screen is still audited in full. */
-    await auditTabOrder(page, "household page", { exclude: ".cand" });
+    /* #1002: the archive's unselected tab is out of the Tab order by
+       design (the WAI-ARIA tabs pattern: the tablist is one Tab stop and
+       ← → move between its tabs), so it is proved by arrow key below rather
+       than by Tab — the same split the pocket file makes (#1122). */
+    await auditTabOrder(page, "household page", {
+      exclude: '.cand, [role="tab"][aria-selected="false"]',
+    });
+    const archive = page.getByRole("tablist", { name: "The archive" });
+    await tabTo(page, { selector: '[role="tab"][aria-selected="true"]' }, { screen: "household page archive" });
+    await page.keyboard.press("ArrowRight");
+    await expect(archive.getByRole("tab", { name: "bring one in" })).toBeFocused();
+    await expect(archive.getByRole("tab", { name: "bring one in" })).toHaveAttribute("aria-selected", "true");
   } finally {
     await cleanup(page, household);
   }
@@ -434,7 +524,15 @@ test("settings: reached via the account panel, and fully reachable", async ({ pa
   const household = await arriveAtHome(page);
   try {
     await openSettingsFromHome(page);
-    await auditTabOrder(page, "settings");
+    /* #1003: the Reminders card's tabs (owner-decisions §22) are one Tab
+       stop with ← → between them, so the unchosen tab is proved by arrow
+       key below, not by Tab — as the pocket file does. */
+    await auditTabOrder(page, "settings", { exclude: '[role="tab"][aria-selected="false"]' });
+    const reminders = page.getByRole("tablist", { name: "Reminders" });
+    await tabTo(page, { selector: '#rem-tab-reminders' }, { screen: "settings reminders" });
+    await page.keyboard.press("ArrowRight");
+    await expect(reminders.getByRole("tab", { name: "sent to you lately" })).toBeFocused();
+    await expect(reminders.getByRole("tab", { name: "sent to you lately" })).toHaveAttribute("aria-selected", "true");
   } finally {
     await cleanup(page, household);
   }
@@ -498,9 +596,143 @@ test("sign out: the two-tap control ends the session by keyboard alone", async (
        the arrival journey proved, so this test's own household can still be
        removed once it revoked the session that was carrying it. */
     await page.goto("/api/auth/login?returnTo=/home");
-    await tabTo(page, { tag: "A", textIncludes: READER }, { screen: "identity provider" });
+    await tabTo(page, { tag: "A", textIncludes: READER() }, { screen: "identity provider" });
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/\/home$/, { timeout: 15_000 });
+  } finally {
+    await cleanup(page, household);
+  }
+});
+
+/* ────────────────────────────────────────────────────────────────────────
+ * SIGN-IN METHODS AND ADMIN-CREATED LOCAL USERS (#915).
+ *
+ * Two blocks arrived with M7, and both are worked entirely by Tab and Enter
+ * here like everything above. What is new about them, and what these two
+ * tests are actually for, is that each control opens ANOTHER control: the
+ * two-tap protocol arms an action and a field appears under it. A field a
+ * pointer reveals and a keyboard cannot reach is exactly the defect this
+ * file exists to catch, so the audit is run with the challenge OPEN, not
+ * only on the resting screen.
+ *
+ * `aria-expanded` is the screen-reader half of the same promise: the armed
+ * state is announced rather than only drawn, so a reader who cannot see the
+ * field appear is still told the control opened something.
+ *
+ * Both need a reader who HAS a password, because that is who is challenged
+ * with a field; an account with only a provider identity is challenged at
+ * the provider instead, which is a navigation and a different journey (it is
+ * walked in sign-in-methods.spec.ts). `ensureLocalPassword` is idempotent
+ * while every file sends the same password (see FIXTURE_PASSWORD), so a
+ * retried file meets the state the first attempt did.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+const KEYBOARD_PASSWORD = () => workerFixturePassword(READER());
+
+test("settings: the sign-in-methods challenge arms by keyboard and is reachable", async ({ page }) => {
+  test.setTimeout(90_000);
+  const household = await arriveAtHome(page);
+  try {
+    await openSettingsFromHome(page);
+    await ensureLocalPassword(page, READER(), KEYBOARD_PASSWORD());
+    await page.goto("/settings");
+    await expect(page.locator(".cards")).toBeVisible({ timeout: 30_000 });
+
+    const change = page.locator(".method button", { hasText: "change" }).first();
+    await expect(change).toHaveAttribute("aria-expanded", "false");
+
+    await tabTo(page, { selector: ".method button", textIncludes: "change" }, { screen: "settings" });
+    const armer = await currentFocus(page);
+    expect(armer?.focusVisible, "settings: the change-password action has no visible focus indicator").toBe(true);
+
+    await page.keyboard.press("Enter");
+    await expect(change).toHaveAttribute("aria-expanded", "true");
+    await expect(page.locator(".challenge")).toBeVisible();
+
+    /* The whole screen again, with the challenge standing open: its two
+       fields and its two buttons have to be in the tab order like anything
+       else the screen is now showing. */
+    /* The Reminders tabs' unchosen tab is off the Tab order by design; the
+       reachable-settings test above proves it by arrow key. */
+    await auditTabOrder(page, "settings with the sign-in challenge open", {
+      exclude: '[role="tab"][aria-selected="false"]',
+    });
+  } finally {
+    await cleanup(page, household);
+  }
+});
+
+test("administration: the local-user controls are reachable and announced", async ({ page }) => {
+  test.setTimeout(90_000);
+  const household = await arriveAtHome(page);
+  try {
+    await openSettingsFromHome(page);
+    await ensureLocalPassword(page, READER(), KEYBOARD_PASSWORD());
+
+    /* #1077: a NEIGHBOUR on the roster, made here rather than inherited. The
+       per-person control asserted at the end of this test needs a row that is
+       somebody other than the reader, and until the database went back to its
+       seed between spec files this test was quietly relying on accounts other
+       specs happened to have created before it ran -- which is the same
+       cross-file coupling that made the tab-order failures move around.
+       Created through the route the screen's own form calls, with the
+       password `ensureLocalPassword` has just set answering the challenge, so
+       the roster it reads is a real one. The address carries the clock
+       because the account outlives this test: the reset takes it away at the
+       next spec file, but a retry of THIS file inside the same one would
+       otherwise collide with the address it used the first time.
+       #1080: and it carries THIS WORKER's slot, because the roster is
+       instance-wide -- every worker's neighbours are on the list this test
+       tabs through, so two workers minting the same address in the same
+       millisecond would be a unique-constraint failure, and a neighbour with
+       no slot in its name could not be told from another worker's. */
+    const neighbour = await page.request.post("/api/admin/users", {
+      headers: await sessionHeaders(page),
+      data: {
+        email: workerScopedAddress(`roster-neighbour-${Date.now()}`),
+        displayName: "Roster Neighbour",
+        currentPassword: KEYBOARD_PASSWORD(),
+      },
+    });
+    expect(neighbour.status(), "administration: the roster neighbour was refused").toBe(201);
+
+    await page.goto("/administration");
+    await expect(page.locator(".card").first()).toBeVisible({ timeout: 30_000 });
+
+    /* Every field in the row is a labelled control, which is what lets a
+       screen reader say what is being asked for rather than "edit text". */
+    const row = page.locator("form.localuser").first();
+    await expect(row.getByLabel("email")).toBeVisible();
+    await expect(row.getByLabel("display name")).toBeVisible();
+    await expect(row.getByLabel("link valid for")).toBeVisible();
+
+    /* The row is a real form: its fields are `required`, so an empty Create
+       is stopped by the browser before the screen sees it. Fill it the way
+       a keyboard user would, then arm. Nothing is created: the challenge
+       opens, and the test never confirms it. */
+    await row.getByLabel("email").fill(`keyboard-${Date.now()}@example.invalid`);
+    await row.getByLabel("display name").fill("Keyboard Newcomer");
+
+    /* Arming Create by keyboard opens the challenge, and the field it opens
+       is the very next thing Tab reaches. */
+    await tabTo(page, { selector: "form.localuser button[type=submit]" }, { screen: "administration" });
+    const create = await currentFocus(page);
+    expect(create?.focusVisible, "administration: the create action has no visible focus indicator").toBe(true);
+    await page.keyboard.press("Enter");
+    await expect(row.getByLabel("your current password")).toBeVisible();
+    await tabTo(page, { selector: "#localuser-current" }, { screen: "administration challenge" });
+    const field = await currentFocus(page);
+    expect(field?.focusVisible, "administration: the challenge field has no visible focus indicator").toBe(true);
+
+    /* And the per-person control says who it is for, and whether it is open,
+       rather than repeating one unlabelled phrase down the roster. */
+    const resend = page
+      .locator(".person")
+      .filter({ hasNotText: "· you" })
+      .first()
+      .getByRole("button", { name: /send a new setup link/ });
+    await expect(resend).toHaveAttribute("aria-expanded", "false");
+    await expect(resend).toHaveAttribute("aria-label", /send a new setup link to .+/);
   } finally {
     await cleanup(page, household);
   }

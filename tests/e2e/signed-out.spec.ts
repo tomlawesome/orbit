@@ -1,5 +1,10 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /*
  * The signed-out boundary, after the cut (#735).
@@ -30,12 +35,13 @@ test("signed-out visitors get 401 from every workspace API route", async ({ requ
     request.delete(`/api/documents/${documentId}`),
     request.post(`/api/documents/${documentId}/restore`),
     request.get("/api/admin/documents/health"),
+    request.get("/api/admin/documents/rotation"),
   ])) {
     expect(response.status()).toBe(401);
   }
 });
 
-test("the arrival shows the ratified door and nothing of the workspace", async ({ page }) => {
+test("the arrival shows the ratified door and nothing of the workspace", async ({ page, request }) => {
   // #410/§15: "/" is the ratified v19 sign-in now — the door every reader
   // meets.
   await page.goto("/");
@@ -49,8 +55,18 @@ test("the arrival shows the ratified door and nothing of the workspace", async (
   await expect(page.locator("#dawn .below")).toHaveCount(0);
   await expect(page.locator("button.topbar-profile")).toHaveCount(0);
   await expect(page.locator(".sidebar, .item-list, .household-control")).toHaveCount(0);
-  // The mark the cut dropped and #780 restored.
-  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", /icon\.svg/);
+  // The mark the cut dropped, #780 restored and #1009 redrew: the SVG for
+  // browsers that take one, a PNG for the rest, and the manifest naming the
+  // same file — a tab and an installed app must never show two marks again.
+  // Anchored on the file, not on the whole value: app.html writes a
+  // root-relative href and the DOM hands back the absolute URL it resolves to,
+  // so an exact "/icon.svg" can never match. Each `type` selector is what
+  // pins the right link to the right file.
+  await expect(page.locator('link[rel="icon"][type="image/svg+xml"]')).toHaveAttribute("href", /\/icon\.svg$/);
+  await expect(page.locator('link[rel="icon"][type="image/png"]')).toHaveAttribute("href", /\/icon-32\.png$/);
+  await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute("href", /\/apple-touch-icon\.png$/);
+  const manifest = await (await request.get("/manifest.webmanifest")).json();
+  expect(manifest.icons.map((icon: { src: string }) => icon.src)).toEqual(["/icon.svg", "/icon-192.png", "/icon-512.png"]);
 });
 
 test("a gated screen redirects on the server, before any of it is sent", async ({ request }) => {
@@ -136,6 +152,120 @@ test("the signed-out boundary fits the mobile viewport", async ({ page, isMobile
     scrollWidth: document.documentElement.scrollWidth,
   }));
   expect(viewport.scrollWidth).toBe(viewport.clientWidth);
+});
+
+/*
+ * ══ WHAT A STRANGER LEARNS BY ASKING (#916, ADR-0023 §1 and §4) ═══════════
+ *
+ * The two facts a signed-out visitor must not be able to extract, whichever
+ * profile this suite is running against: whether a given address has an
+ * account here, and which identity provider this instance trusts. Both are
+ * reconnaissance -- the first names people to phish, the second names the
+ * system to attack instead of this one -- and neither is anything a visitor
+ * is owed.
+ *
+ * These run in both acceptance profiles on purpose. The ordinary stack has a
+ * provider and no local password; the local-only one
+ * (compose/docker-compose.local-only.yml) has a password and no provider. An
+ * assertion that held in only one of them would be an accident of the fixture.
+ */
+
+/** Real in the local-only profile: tests/e2e/local-sign-in.spec.ts creates it. */
+const REAL_ADDRESS = "administrator@example.invalid";
+
+/* Three addresses that must be indistinguishable from it: one that has never
+   existed anywhere, one shaped like an account that plausibly might, and one
+   that is not an address at all. */
+const ABSENT_ADDRESSES = [
+  "nobody-has-this-address@example.invalid",
+  "orbit@example.invalid",
+  "not-an-address",
+];
+
+test("no signed-out route says whether an address has an account", async ({ baseURL, request }) => {
+  /* The sign-in route asserts same-origin rather than a CSRF token, having no
+     session to derive one from. A browser sends `Origin` by itself and
+     Playwright's API context does not, so without this every answer would be
+     an identical `csrf_failed` and the test would prove nothing at all.
+     `baseURL`, never a literal, so no host or port is written down (#741). */
+  expect(baseURL, "the suite has no baseURL to send as the request origin").toBeTruthy();
+
+  /* One attempt each, with a password that is wrong for all of them. The
+     backoff is per credential and allows five (ADR-0023 §4), so this cannot
+     be what turns one answer into a different one.
+     #1183: one at a time, not all four at once. Every attempt costs a
+     password derivation, and the instance runs two at a time and refuses a
+     caller that has queued for five seconds (src/lib/auth/verification-gate.ts)
+     with the same 429 the backoff uses. Four at once, beside the other
+     worker's own password work on a capped stack, was refused once in each of
+     five attempts in pipeline 1926 (the app logged each refusal). Asked in
+     turn, the probes still have to come back identical. */
+  const answers: string[] = [];
+  for (const email of [REAL_ADDRESS, ...ABSENT_ADDRESSES]) {
+    const response = await request.post("/api/auth/local/login", {
+      headers: { origin: baseURL as string },
+      data: { email, password: "orbit-e2e-wrong-password-placeholder" },
+    });
+    answers.push(JSON.stringify({
+      status: response.status(),
+      cacheControl: response.headers()["cache-control"],
+      body: await response.json(),
+    }));
+  }
+
+  /* The whole assertion in one line: every address got the same answer, so
+     the set of distinct answers has exactly one member. An unknown address, a
+     wrong password, a disabled account and an account with no password are
+     one refusal, and this is the only shape of test that can say so. */
+  expect(new Set(answers).size, `distinct answers: ${[...new Set(answers)].join(" | ")}`).toBe(1);
+
+  const [only] = answers;
+  const answer = JSON.parse(only) as { status: number; body: { error: { code: string; message: string } } };
+  expect(answer.status).toBe(401);
+  expect(answer.body.error.code).toBe("credentials_invalid");
+  /* And it is bounded: no count, no remaining time, and not the address it
+     was handed back again. Each of those is the same question asked more
+     politely -- a message that said "no account for X" would undo everything
+     the identical-answers assertion above just proved. */
+  expect(answer.body.error.message).not.toMatch(/\d/u);
+  expect(JSON.stringify(answer.body)).not.toContain(REAL_ADDRESS);
+});
+
+test("nothing signed out says which identity provider this instance trusts", async ({ request }) => {
+  const response = await request.get("/api/auth/availability");
+  expect(response.ok()).toBe(true);
+  const body = (await response.json()) as Record<string, unknown>;
+
+  /* The bounded answer, exactly (ADR-0023 §1). `oidc` is a boolean -- whether
+     there is a provider at all, which the door has to know to draw itself --
+     and there is deliberately no field that could carry an issuer, a client
+     identifier, an endpoint or a raw provider error. A new key here is a new
+     thing a stranger is told, so the key set is asserted rather than sampled.
+
+     `secondFactor` (#1033, ADR-0027 §2) is the one addition since, and it is
+     the same kind of fact as `oidc`: a boolean about the INSTANCE, which the
+     door and the settings screen both have to read from one place so they
+     cannot disagree. It names no account -- the factor is on for everybody or
+     off for everybody -- and no provider, host or endpoint. */
+  expect(Object.keys(body).sort()).toEqual(
+    ["claimed", "configured", "contactAddress", "methods", "phase"],
+  );
+  expect(Object.keys(body["methods"] as Record<string, unknown>).sort())
+    .toEqual(["local", "localAccounts", "oidc", "secondFactor"]);
+  for (const value of Object.values(body)) {
+    expect(typeof value === "string" ? value : "", JSON.stringify(body)).not.toMatch(/:\/\//u);
+  }
+
+  /* Nor does the door itself, which is the only other thing a stranger can
+     fetch. The provider's identity reaches the browser exactly once -- in the
+     redirect a reader gets after pressing Sign in -- and never before. */
+  for (const path of ["/", "/login"]) {
+    const screen = await request.get(path);
+    const markup = await screen.text();
+    for (const leak of ["openid-configuration", ".well-known", "client_id", "OIDC_ISSUER"]) {
+      expect(markup, `${path} names ${leak}`).not.toContain(leak);
+    }
+  }
 });
 
 /*

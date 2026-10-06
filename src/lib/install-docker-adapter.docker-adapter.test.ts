@@ -55,6 +55,11 @@ function readArgvLog(logPath: string): string[][] {
 // shipped `docker exec -T` past 66 green tests against the bash shim.
 const fakeDockerScript = [
   "#!/usr/bin/env bash",
+  // #1151 RANGE-R4: a real wedged daemon/container ignores SIGTERM, unlike
+  // this shim's plain `sleep`, which dies on it by default. Trapping TERM
+  // here reproduces that so a test can prove the adapter's timeout still
+  // bounds the call (via SIGKILL) instead of hanging past it.
+  'if [[ -n "${ORBIT_IGNORE_TERM:-}" ]]; then trap "" TERM; fi',
   'if [[ -n "${ORBIT_ARGV_LOG:-}" ]]; then',
   "  {",
   '    for arg in "$@"; do printf \'%s\\0\' "$arg"; done',
@@ -150,6 +155,10 @@ const fakeDockerScript = [
   "    ;;",
   "esac",
   'if [[ -n "${ORBIT_STDOUT:-}" ]]; then printf \'%s\\n\' "$ORBIT_STDOUT"; fi',
+  // O1-R11: stands in for a hung/unresponsive daemon — sleeps well past any
+  // timeout a test configures, so composeUp/etc's own bound (not this
+  // script's own completion) is what ends the call.
+  'if [[ -n "${ORBIT_SLEEP_SECONDS:-}" ]]; then sleep "$ORBIT_SLEEP_SECONDS"; fi',
   'exit "${ORBIT_EXIT:-0}"',
   "",
 ].join("\n");
@@ -471,6 +480,109 @@ describe("createInstallDockerAdapter — compose lifecycle and health probes", (
     expect(adapterFor(binDirOk).checkDockerAvailable()).toBe(true);
     const binDirFail = makeFakeDockerBin();
     expect(adapterFor(binDirFail, { ORBIT_EXIT: "1" }).checkDockerAvailable()).toBe(false);
+  });
+});
+
+// O1-R11: before this, checkDockerAvailable/composePull/composeUp/
+// composeDown/composeConfigValidate/pullOllamaModel had no timeout at
+// all — unlike the bounded health probes above, an unresponsive daemon
+// could hang the installer forever. composeTimeoutsMs overrides let these
+// tests prove the bound actually kills a hung call and reports it as a
+// failure, using a fake `docker` that sleeps well past a short configured
+// timeout, rather than waiting out the real (deliberately generous,
+// minutes-long) production ceilings.
+describe("createInstallDockerAdapter — compose-lifecycle timeouts (O1-R11)", () => {
+  function hungAdapterFor(binDir: string, overrides: Partial<Record<"quick" | "pull" | "up" | "down" | "ollamaPull", number>>) {
+    return createInstallDockerAdapter({
+      envFile: ".env-orbit",
+      composeProjectName: "orbit",
+      env: shimEnv(binDir, { ORBIT_SLEEP_SECONDS: "5" }),
+      composeTimeoutsMs: overrides,
+    });
+  }
+
+  it("composeUp returns false (never hangs) when the daemon does not respond within the bound", () => {
+    const binDir = makeFakeDockerBin();
+    const adapter = hungAdapterFor(binDir, { up: 200 });
+    expect(adapter.composeUp()).toBe(false);
+  });
+
+  it("composePull returns false when the registry pull hangs past the bound", () => {
+    const binDir = makeFakeDockerBin();
+    const adapter = hungAdapterFor(binDir, { pull: 200 });
+    expect(adapter.composePull("orbit-db")).toBe(false);
+  });
+
+  it("composeDown does not throw or hang when the daemon does not respond within the bound", () => {
+    const binDir = makeFakeDockerBin();
+    const adapter = hungAdapterFor(binDir, { down: 200 });
+    expect(() => adapter.composeDown()).not.toThrow();
+  });
+
+  it("checkDockerAvailable and composeConfigValidate (the 'quick' bound) both return false rather than hang", () => {
+    const binDir = makeFakeDockerBin();
+    const adapter = hungAdapterFor(binDir, { quick: 200 });
+    expect(adapter.checkDockerAvailable()).toBe(false);
+    expect(adapter.composeConfigValidate()).toBe(false);
+  });
+
+  it("pullOllamaModel returns false when a model pull hangs past the bound", () => {
+    const binDir = makeFakeDockerBin();
+    const adapter = hungAdapterFor(binDir, { ollamaPull: 200 });
+    expect(adapter.pullOllamaModel("llama3")).toBe(false);
+  });
+
+  it("a call that finishes well inside its bound still succeeds normally (no regression)", () => {
+    const binDir = makeFakeDockerBin();
+    const adapter = createInstallDockerAdapter({
+      envFile: ".env-orbit",
+      composeProjectName: "orbit",
+      env: shimEnv(binDir),
+      composeTimeoutsMs: { quick: 200 },
+    });
+    expect(adapter.checkDockerAvailable()).toBe(true);
+  });
+});
+
+// #1151 RANGE-R4: the O1-R11 tests above only prove the *timeout* fires —
+// their fake docker's plain `sleep` already dies on the default SIGTERM
+// killSignal, so they pass whether or not SIGKILL escalation exists. These
+// use ORBIT_IGNORE_TERM to model the actual hazard the finding names (a
+// daemon/container that ignores SIGTERM), proving composePull/composeUp/
+// composeDown are still bounded by their timeout rather than hanging past
+// it for the rest of the fake's (deliberately much longer) sleep.
+describe("createInstallDockerAdapter — compose-lifecycle SIGKILL escalation (#1151 RANGE-R4)", () => {
+  function wedgedAdapterFor(binDir: string, overrides: Partial<Record<"quick" | "pull" | "up" | "down" | "ollamaPull", number>>) {
+    return createInstallDockerAdapter({
+      envFile: ".env-orbit",
+      composeProjectName: "orbit",
+      env: shimEnv(binDir, { ORBIT_SLEEP_SECONDS: "30", ORBIT_IGNORE_TERM: "1" }),
+      composeTimeoutsMs: overrides,
+    });
+  }
+
+  it("composeUp returns false within its bound, not after the full 30s hang, when the daemon ignores SIGTERM", () => {
+    const binDir = makeFakeDockerBin();
+    const adapter = wedgedAdapterFor(binDir, { up: 200 });
+    const start = Date.now();
+    expect(adapter.composeUp()).toBe(false);
+    expect(Date.now() - start).toBeLessThan(4000);
+  });
+
+  it("composePull returns false within its bound when the registry pull ignores SIGTERM", () => {
+    const binDir = makeFakeDockerBin();
+    const adapter = wedgedAdapterFor(binDir, { pull: 200 });
+    const start = Date.now();
+    expect(adapter.composePull("orbit-db")).toBe(false);
+    expect(Date.now() - start).toBeLessThan(4000);
+  });
+
+  it("composeDown does not hang past its bound when the daemon ignores SIGTERM", () => {
+    const binDir = makeFakeDockerBin();
+    const adapter = wedgedAdapterFor(binDir, { down: 200 });
+    const start = Date.now();
+    expect(() => adapter.composeDown()).not.toThrow();
+    expect(Date.now() - start).toBeLessThan(4000);
   });
 });
 

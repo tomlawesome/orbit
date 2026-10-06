@@ -31,3 +31,18 @@ describe("parseEnvOrbitContent value validation (#383)", () => {
     }
   });
 });
+
+// SQ1-Q1: configuration.sh's removed_keys list (scripts/configuration.sh)
+// names keys this project used to accept and now refuses with a dedicated
+// "removed" refusal (so an upgrading operator gets a clear message instead
+// of a generic "unknown key") — this TS port must classify the same keys
+// the same way.
+describe("parseEnvOrbitContent removed-key classification (SQ1-Q1)", () => {
+  it("classifies a retired IMAP_* key as configuration_removed_key, not configuration_unknown_key", () => {
+    expect(parseEnvOrbitContent("IMAP_ENABLED=true\n")).toEqual({ ok: false, code: "configuration_removed_key" });
+  });
+
+  it("still classifies a key that was never valid as configuration_unknown_key", () => {
+    expect(parseEnvOrbitContent("TOTALLY_MADE_UP_KEY=1\n")).toEqual({ ok: false, code: "configuration_unknown_key" });
+  });
+});

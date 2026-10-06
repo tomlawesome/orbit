@@ -1,4 +1,5 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -38,6 +39,38 @@ const LIVE_KEK = "a".repeat(64);
 const ORIGINAL_KEY = "c".repeat(64);
 const UPDATED_KEY = "d".repeat(64);
 
+// The other party in the backup/restore lock tests is the real `flock`
+// utility, used the way scripts/backup.sh and scripts/restore.sh use it.
+function sleepMs(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** True when nobody holds the flock: `flock -n <file> true` exits 0. */
+function lockIsFree(lockPath: string): boolean {
+  return spawnSync("flock", ["-n", lockPath, "true"]).status === 0;
+}
+
+function waitForLock(lockPath: string, free: boolean): void {
+  const deadline = Date.now() + 10_000;
+  while (lockIsFree(lockPath) !== free) {
+    if (Date.now() > deadline) throw new Error(`flock at ${lockPath} never became ${free ? "free" : "held"}`);
+    sleepMs(20);
+  }
+}
+
+/** Holds the flock from another process, as a running backup.sh/restore.sh does. */
+function holdLockInAnotherProcess(lockPath: string): ChildProcess {
+  const holder = spawn("flock", [lockPath, "-c", "sleep 30"], { detached: true, stdio: "ignore" });
+  waitForLock(lockPath, false);
+  return holder;
+}
+
+function killLockHolder(holder: ChildProcess, lockPath: string): void {
+  // The process group: flock -c runs `sleep` in a child that shares the fd.
+  if (holder.pid !== undefined) process.kill(-holder.pid, "SIGKILL");
+  waitForLock(lockPath, true);
+}
+
 function reportsFor(storageKey: string, contentLength: number): CorrespondenceReports {
   return {
     crypto: `${DOCUMENT_ID}|${storageKey}|${contentLength}|available\n`,
@@ -72,6 +105,7 @@ function buildDocumentTree(root: string, storageKey: string, contentLength: numb
  */
 class FakeAdapter implements RestoreDockerAdapter {
   appRunning = true;
+  stopOk = true;
   healthOk = true;
   replaceDocumentsOk = true;
   restoreActiveDatabaseOk = true;
@@ -93,6 +127,7 @@ class FakeAdapter implements RestoreDockerAdapter {
   }
 
   stopApp(): boolean {
+    if (!this.stopOk) return false;
     this.appRunning = false;
     return true;
   }
@@ -113,6 +148,12 @@ class FakeAdapter implements RestoreDockerAdapter {
   }
   collectDocumentsArchive(outputPath: string): void {
     createTar(this.liveDocumentsRoot, outputPath, ["."]);
+  }
+  recordExportedCalls = 0;
+  recordExportedOk = true;
+  recordRecoveryBundleExported(): void {
+    this.recordExportedCalls += 1;
+    if (!this.recordExportedOk) throw new RecoveryBundleRefusal("record failed", "recovery-bundle-record-failed");
   }
   createStageDatabase(): void {
     // no-op
@@ -234,6 +275,75 @@ describe("runBackup", () => {
     const result = runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter, now: new Date("2026-03-04T05:06:07Z") });
 
     expect(result.finalTarPath).toBe(join(backupDirectory, "orbit-20260304-050607.tar"));
+    expect(existsSync(result.finalTarPath)).toBe(true);
+  });
+
+  // #1151 RANGE-R6/RANGE-S3: runBackup used to take no lock at all, so it
+  // could race a concurrent orbit restore's stopApp/startApp and document-
+  // tree/database cutover — the exact O2-R3 hazard the Bash scripts' shared
+  // flock closes. RANGE-S4 is the same gap seen from the other direction:
+  // the TS lock was a create-and-close marker file the Bash scripts'
+  // `exec {fd}>file; flock -n $fd` neither saw nor respected, so the TS side
+  // now takes that same flock on .orbit-backup-restore.lock.
+  it("refuses while another process holds the shared flock, and runs once it is released (#1151 RANGE-R6/S3/S4)", () => {
+    const documentsRoot = join(sandbox, "docs-backup-lock");
+    buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
+    const backupDirectory = join(sandbox, "backup-lock-backups");
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+    const lockPath = join(backupDirectory, ".orbit-backup-restore.lock");
+    const holder = holdLockInAnotherProcess(lockPath);
+
+    try {
+      let caught: unknown;
+      try {
+        runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter, now: new Date("2026-03-04T05:06:07Z") });
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(BackupRestoreCliRefusal);
+      expect((caught as BackupRestoreCliRefusal).code).toBe("restore-locked");
+      expect(adapter.appRunning).toBe(true); // stopApp was never reached.
+      expect(readdirSync(backupDirectory)).toEqual([".orbit-backup-restore.lock"]); // Nothing written.
+    } finally {
+      killLockHolder(holder, lockPath);
+    }
+
+    const result = runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter, now: new Date("2026-03-04T05:06:07Z") });
+    expect(existsSync(result.finalTarPath)).toBe(true);
+  });
+
+  it("holds the shared flock for the whole run and releases it afterwards, leaving the file in place", () => {
+    const documentsRoot = join(sandbox, "docs-backup-lock-release");
+    buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
+    const backupDirectory = join(sandbox, "backup-lock-release-backups");
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    const lockPath = join(backupDirectory, ".orbit-backup-restore.lock");
+    let freeDuringRun: boolean | undefined;
+    const stopApp = adapter.stopApp.bind(adapter);
+    adapter.stopApp = () => {
+      freeDuringRun = lockIsFree(lockPath);
+      return stopApp();
+    };
+
+    runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter, now: new Date("2026-03-04T05:06:07Z") });
+
+    expect(freeDuringRun).toBe(false); // A Bash `flock -n` would have refused.
+    expect(lockIsFree(lockPath)).toBe(true);
+    // Never unlinked: a Bash run blocked on the old inode would hold a lock nobody else sees.
+    expect(existsSync(lockPath)).toBe(true);
+  });
+
+  it("takes the lock at once when the file exists but nobody holds it (what every Bash run leaves behind)", () => {
+    const documentsRoot = join(sandbox, "docs-backup-lock-leftover");
+    buildDocumentTree(documentsRoot, ORIGINAL_KEY, 10);
+    const backupDirectory = join(sandbox, "backup-lock-leftover-backups");
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+    writeFileSync(join(backupDirectory, ".orbit-backup-restore.lock"), "");
+
+    const result = runBackup({ backupDirectory, documentKekHex: LIVE_KEK, adapter, now: new Date("2026-03-04T05:06:07Z") });
+
     expect(existsSync(result.finalTarPath)).toBe(true);
   });
 });
@@ -415,6 +525,49 @@ describe("runExportRecoveryBundle (export-recovery-bundle.sh's orchestration)", 
     expect(isValidDocumentKekHex(recoveredHex)).toBe(true);
     // The inner bundle is a byte-identical copy of the source.
     expect(readFileSync(join(extractedDir, "orbit-backup.tar"))).toEqual(readFileSync(sourceBundlePath));
+  });
+
+  it("records the export with the adapter once the bundle is published (#968: what clears the administration card)", () => {
+    const documentsRoot = join(sandbox, "docs-record");
+    const sourceBundlePath = buildBundle(documentsRoot, ORIGINAL_KEY, 10, LIVE_KEK, join(sandbox, "source-backups-record"));
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    const passphrase = "correct horse battery staple";
+
+    runExportRecoveryBundle({
+      sourceBundlePath,
+      documentKekHex: LIVE_KEK,
+      passphrase,
+      passphraseConfirmation: passphrase,
+      backupDirectory: join(sandbox, "recovery-backups-record"),
+      adapter,
+      now: new Date("2026-02-02T00:00:00Z"),
+    });
+
+    expect(adapter.recordExportedCalls).toBe(1);
+  });
+
+  it("still throws when the export cannot be recorded, even though the bundle is already on disk (a false-positive administration card is worse than a resumable error)", () => {
+    const documentsRoot = join(sandbox, "docs-record-fail");
+    const sourceBundlePath = buildBundle(documentsRoot, ORIGINAL_KEY, 10, LIVE_KEK, join(sandbox, "source-backups-record-fail"));
+    const adapter = new FakeAdapter(documentsRoot, ORIGINAL_KEY, 10);
+    adapter.recordExportedOk = false;
+    const passphrase = "correct horse battery staple";
+    const recoveryDirectory = join(sandbox, "recovery-backups-record-fail");
+
+    expect(() =>
+      runExportRecoveryBundle({
+        sourceBundlePath,
+        documentKekHex: LIVE_KEK,
+        passphrase,
+        passphraseConfirmation: passphrase,
+        backupDirectory: recoveryDirectory,
+        adapter,
+        now: new Date("2026-02-02T00:00:00Z"),
+      }),
+    ).toThrow(RecoveryBundleRefusal);
+    expect(adapter.recordExportedCalls).toBe(1);
+    // The bundle itself is not rolled back: it was already safely published.
+    expect(existsSync(join(recoveryDirectory, "orbit-recovery-20260202-000000.tar"))).toBe(true);
   });
 
   it("publishes the recovery bundle at mode 0600 regardless of the ambient umask (issue #383 finding 5: export-recovery-bundle.sh's `umask 077` was never ported)", () => {
@@ -787,5 +940,158 @@ describe("runImportRecoveryBundle (import-recovery-bundle.sh's orchestration, li
       }),
     ).toThrow(RecoveryBundleRefusal);
     expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(LIVE_KEK);
+  });
+
+  // O2-F3: a failed stop must abort before the key swap, never run it anyway.
+  it("O2-F3: aborts before the key swap when the app cannot be stopped", () => {
+    const passphrase = "correct horse battery staple";
+    const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+
+    const liveDocumentsRoot = join(sandbox, "live-docs-import-stopfail");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const liveDocumentKekFile = join(sandbox, "live-document-kek-stopfail");
+    writeFileSync(liveDocumentKekFile, `${LIVE_KEK}\n`, { mode: 0o600 });
+    const backupDirectory = join(sandbox, "import-target-backups-stopfail");
+    const adapter = new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    adapter.stopOk = false;
+
+    expect(() =>
+      runImportRecoveryBundle({
+        recoveryBundlePath,
+        passphrase,
+        liveDocumentKekFile,
+        backupDirectory,
+        adapter,
+        importConfirmed: true,
+        confirmRestore: () => true,
+      }),
+    ).toThrow(BackupRestoreCliRefusal);
+    // The live KEK was never touched, and nothing was ever staged.
+    expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(LIVE_KEK);
+    expect(existsSync(`${liveDocumentKekFile}.import-rollback`)).toBe(false);
+  });
+
+  describe("O2-S3: key-swap staging and revert safety", () => {
+    it("refuses up front when a leftover rollback file already exists, rather than silently reusing or overwriting it", () => {
+      const passphrase = "correct horse battery staple";
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+
+      const liveDocumentsRoot = join(sandbox, "live-docs-import-leftover");
+      buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+      const liveDocumentKekFile = join(sandbox, "live-document-kek-leftover");
+      writeFileSync(liveDocumentKekFile, `${LIVE_KEK}\n`, { mode: 0o600 });
+      const backupDirectory = join(sandbox, "import-target-backups-leftover");
+      const adapter = new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+      const leftoverPath = `${liveDocumentKekFile}.import-rollback`;
+      writeFileSync(leftoverPath, `${"f".repeat(64)}\n`, { mode: 0o600 });
+
+      let caught: unknown;
+      try {
+        runImportRecoveryBundle({
+          recoveryBundlePath,
+          passphrase,
+          liveDocumentKekFile,
+          backupDirectory,
+          adapter,
+          importConfirmed: true,
+          confirmRestore: () => true,
+        });
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(BackupRestoreCliRefusal);
+      expect((caught as Error).message).toContain(leftoverPath);
+      // Untouched — never reused, never overwritten.
+      expect(readFileSync(leftoverPath, "utf8").trim()).toBe("f".repeat(64));
+      expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(LIVE_KEK);
+      expect(adapter.appRunning).toBe(true);
+    });
+
+    it("when the revert itself fails, the previous KEK is preserved (never deleted with the scratch workDir) and the refusal names where it is", () => {
+      const passphrase = "correct horse battery staple";
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, passphrase);
+
+      // Its own directory (not the shared `sandbox`), because the fault
+      // injection below removes write permission on it for the duration of
+      // the call — doing that to the shared sandbox would risk every other
+      // test's cleanup in this file.
+      const liveDir = mkdtempSync(join(sandbox, "live-document-kek-revertfail-dir-"));
+      const liveDocumentsRoot = join(sandbox, "live-docs-import-revertfail");
+      buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+      const liveDocumentKekFile = join(liveDir, "live-document-kek-revertfail");
+      writeFileSync(liveDocumentKekFile, `${LIVE_KEK}\n`, { mode: 0o600 });
+      const backupDirectory = join(sandbox, "import-target-backups-revertfail");
+      const adapter = new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+      const previousKekPath = `${liveDocumentKekFile}.import-rollback`;
+
+      let caught: unknown;
+      try {
+        runImportRecoveryBundle({
+          recoveryBundlePath,
+          passphrase,
+          liveDocumentKekFile,
+          backupDirectory,
+          adapter,
+          importConfirmed: true,
+          // By the time this runs, the outer key swap has already happened
+          // (runRestore's confirm() fires only after preflight/capacity, well
+          // after runImportRecoveryBundle's own swap). Removing write
+          // permission on liveDir here — a real fault, not a mock — means
+          // the revert's own rename (previousKekPath -> liveDocumentKekFile,
+          // both in liveDir) genuinely fails with EACCES, while every other
+          // renameSync call in the run (elsewhere on disk) is unaffected.
+          // No journal evidence is left behind either way, so the code
+          // takes the revert branch rather than the restore-unfinished one.
+          confirmRestore: () => {
+            chmodSync(liveDir, 0o500);
+            return false;
+          },
+        });
+      } catch (error) {
+        caught = error;
+      } finally {
+        chmodSync(liveDir, 0o700);
+      }
+
+      expect(caught).toBeInstanceOf(BackupRestoreCliRefusal);
+      expect((caught as Error).message).toContain(previousKekPath);
+      // The old key still exists, outside the (now-deleted) scratch workDir.
+      expect(readFileSync(previousKekPath, "utf8").trim()).toBe(LIVE_KEK);
+    });
+  });
+});
+
+describe("runRestore cross-process lock (O2-R7, shared file name #1151 RANGE-S4)", () => {
+  it("refuses while another process holds the shared flock against the same backup directory", () => {
+    const liveDocumentsRoot = join(sandbox, "live-docs-restore-lock");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const backupDirectory = join(sandbox, "restore-lock-backups");
+    const documentKekFile = join(sandbox, "restore-lock-document-kek");
+    writeFileSync(documentKekFile, `${ORIGINAL_KEY}\n`, { mode: 0o600 });
+    const backupTarPath = buildBundle(join(sandbox, "restore-lock-source"), ORIGINAL_KEY, 10, ORIGINAL_KEY, join(sandbox, "restore-lock-source-backups"));
+    const adapter = new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const paths = deriveRestorePaths(backupDirectory, documentKekFile);
+    mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+    const lockPath = join(backupDirectory, ".orbit-backup-restore.lock");
+    const holder = holdLockInAnotherProcess(lockPath);
+
+    const workDir = mkdtempSync(join(sandbox, "restore-lock-work-"));
+    try {
+      expect(() =>
+        runRestore({
+          backupTarPath,
+          documentKekHex: ORIGINAL_KEY,
+          paths,
+          adapter,
+          workDir,
+          confirm: () => true,
+        }),
+      ).toThrow(expect.objectContaining({ code: "restore-locked" }));
+      // Refused before the journal-exists check even ran.
+      expect(existsSync(paths.journalPath)).toBe(false);
+      expect(adapter.appRunning).toBe(true);
+    } finally {
+      killLockHolder(holder, lockPath);
+    }
   });
 });

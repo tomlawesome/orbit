@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { householdRegister, sessionHeaders } from "./support/households";
 import { waitForInvitationLink } from "./support/mail";
+import { claimInstanceAsAdministrator } from "./support/bootstrap";
+import { ensureWorkerAdministrator, workerAccount, workerEmail } from "./support/worker-identity";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 /**
  * #481: THE MAILED INVITATION, end to end. An owner sends one to an address
@@ -25,16 +33,20 @@ import { waitForInvitationLink } from "./support/mail";
  * cascades the membership away too and gives the invariant back.
  */
 
-const OWNER_ACCOUNT = "Orbit Member";
-const ADMIN_ACCOUNT = "Orbit Administrator";
-const NEWCOMER_ACCOUNT = "Orbit Newcomer";
-const NEWCOMER_EMAIL = "newcomer@example.test";
+/* #1080: this worker's own identities, resolved lazily (worker env only).
+   The invited address must be the newcomer identity's own, so the invite
+   mail lands in the mailbox that identity signs in from. */
+const OWNER_ACCOUNT = () => workerAccount("member");
+const ADMIN_ACCOUNT = () => workerAccount("administrator");
+const NEWCOMER_ACCOUNT = () => workerAccount("newcomer");
+const NEWCOMER_EMAIL = () => workerEmail("newcomer");
 const HOUSEHOLD = `Invitation Proving Ground ${Date.now()}`;
 
 const households = householdRegister();
 let seeded = false;
 
 async function signInAs(page: Page, account: string) {
+  await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
   await page.getByRole("link", { name: account }).click();
   /* Not a fixed destination: #840 sends a session with no household of its
@@ -46,19 +58,6 @@ async function signInAs(page: Page, account: string) {
      screen is showing. */
   const session = await page.request.get("/api/auth/session");
   expect(session.ok()).toBe(true);
-}
-
-/* A fresh instance promotes its first sign-in to instance admin, and only an
-   administrator can hard-delete a household in the cleanup below. Claiming it
-   here is idempotent: every other spec that needs it does the same. */
-async function establishInstanceAdmin(browser: Browser) {
-  const context = await browser.newContext({ ignoreHTTPSErrors: true });
-  const page = await context.newPage();
-  try {
-    await signInAs(page, ADMIN_ACCOUNT);
-  } finally {
-    await context.close();
-  }
 }
 
 async function createHousehold(page: Page, name: string) {
@@ -93,7 +92,9 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
-    await signInAs(page, ADMIN_ACCOUNT);
+    await signInAs(page, ADMIN_ACCOUNT());
+    /* #1080: the sweep's hard delete is an instance-admin power. */
+    await ensureWorkerAdministrator(page);
     await households.sweep(page);
   } finally {
     await context.close();
@@ -103,9 +104,13 @@ test.afterAll(async ({ browser }) => {
 test("a mailed invitation makes a stranger a member, through the real pipe", async ({ page, browser }) => {
   test.setTimeout(180_000);
 
-  await establishInstanceAdmin(browser);
+  /* Only an administrator can hard-delete a household in the cleanup below,
+     and since ADR-0022 nobody is promoted by signing in: the instance is
+     claimed with the code from its own log. Idempotent, as both callers
+     below need it. */
+  await claimInstanceAsAdministrator(browser);
 
-  await signInAs(page, OWNER_ACCOUNT);
+  await signInAs(page, OWNER_ACCOUNT());
   const created = await createHousehold(page, HOUSEHOLD);
   households.track(created);
   seeded = true;
@@ -114,12 +119,12 @@ test("a mailed invitation makes a stranger a member, through the real pipe", asy
   const headers = await sessionHeaders(page);
   const sendResponse = await page.request.post(`/api/households/${created.id}/invitations`, {
     headers,
-    data: { email: NEWCOMER_EMAIL },
+    data: { email: NEWCOMER_EMAIL() },
   });
   expect(sendResponse.ok(), `invitation send failed: ${sendResponse.status()}`).toBe(true);
 
   // The real pipe: SMTP delivery to GreenMail, read back like a real client.
-  const link = await waitForInvitationLink(NEWCOMER_EMAIL, HOUSEHOLD);
+  const link = await waitForInvitationLink(NEWCOMER_EMAIL(), HOUSEHOLD);
   expect(link).toMatch(/\/invite\//u);
 
   // #871: redemption now lands on the arrival at `/` -- the newcomer's own
@@ -134,7 +139,7 @@ test("a mailed invitation makes a stranger a member, through the real pipe", asy
     // Signed out: the load handler parks the token in its own cookie and
     // sends the browser to the identity provider -- the same door every
     // other spec signs in through.
-    await newcomerPage.getByRole("link", { name: NEWCOMER_ACCOUNT }).click();
+    await newcomerPage.getByRole("link", { name: NEWCOMER_ACCOUNT() }).click();
     // The callback reads the parked token back, redeems it, and lands here.
     await expect(newcomerPage).toHaveURL(/\/home$/, { timeout: 30_000 });
 
@@ -150,9 +155,13 @@ test("a mailed invitation makes a stranger a member, through the real pipe", asy
 test("an invited reader's arrival never draws the chooser: the sky moves to the household instead (#871)", async ({ page, browser }) => {
   test.setTimeout(180_000);
 
-  await establishInstanceAdmin(browser);
+  /* Only an administrator can hard-delete a household in the cleanup below,
+     and since ADR-0022 nobody is promoted by signing in: the instance is
+     claimed with the code from its own log. Idempotent, as both callers
+     below need it. */
+  await claimInstanceAsAdministrator(browser);
 
-  await signInAs(page, OWNER_ACCOUNT);
+  await signInAs(page, OWNER_ACCOUNT());
   const invitedHousehold = `${HOUSEHOLD} (invited landing)`;
   const created = await createHousehold(page, invitedHousehold);
   households.track(created);
@@ -161,11 +170,11 @@ test("an invited reader's arrival never draws the chooser: the sky moves to the 
   const headers = await sessionHeaders(page);
   const sendResponse = await page.request.post(`/api/households/${created.id}/invitations`, {
     headers,
-    data: { email: NEWCOMER_EMAIL },
+    data: { email: NEWCOMER_EMAIL() },
   });
   expect(sendResponse.ok(), `invitation send failed: ${sendResponse.status()}`).toBe(true);
 
-  const link = await waitForInvitationLink(NEWCOMER_EMAIL, invitedHousehold);
+  const link = await waitForInvitationLink(NEWCOMER_EMAIL(), invitedHousehold);
   expect(link).toMatch(/\/invite\//u);
 
   /* Reduced motion, deliberately: `.nf .belong` never renders REGARDLESS of
@@ -176,7 +185,7 @@ test("an invited reader's arrival never draws the chooser: the sky moves to the 
   const newcomerPage = await newcomerContext.newPage();
   try {
     await newcomerPage.goto(link);
-    await newcomerPage.getByRole("link", { name: NEWCOMER_ACCOUNT }).click();
+    await newcomerPage.getByRole("link", { name: NEWCOMER_ACCOUNT() }).click();
 
     // The redemption's own redirect target (#871): the arrival, not /home
     // directly -- this is the newcomer's landing, playing for a reader whose
@@ -219,11 +228,29 @@ test("an invited reader's arrival never draws the chooser: the sky moves to the 
 
     // AND THE TOUR STILL RUNS (#871 criterion 3). The invited landing skips
     // the chooser, not the welcome: this reader has never seen /home before,
-    // so the first-run tour is exactly as due to them as to any newcomer.
+    // so the first-run film is exactly as due to them as to any newcomer.
     // #864 is why this is asserted rather than assumed -- the tour was
     // offered to a reader it could light nothing for, and nothing caught it.
-    await expect(newcomerPage.locator(".tourcard")).toBeVisible({ timeout: 30_000 });
-    await expect(newcomerPage.locator(".tourcard")).toHaveAttribute("data-tour-stop", "1");
+    // The transport pill (transport.js's `#orbit-tour-transport`) is the
+    // film's own handle, and `window.__reading()` (film.js's review hook) is
+    // read for the chapter index rather than clicked through, matching the
+    // headless check the mockup ships: chapter 0 is where a fresh film
+    // always opens.
+    //
+    // On the mobile project the newcomer context is a phone too (the runner
+    // hands `browser.newContext` the project's device), and since #1083 the
+    // pocket dialect takes the same path as the desk one (trigger.js,
+    // owner-decisions.md §24's ending note) -- the film opens there too,
+    // same as v19-tour.spec.ts now asserts for the ordinary first-run case.
+    const transport = newcomerPage.locator("#orbit-tour-transport");
+    await expect(transport).toBeVisible({ timeout: 30_000 });
+    await expect
+      .poll(() =>
+        newcomerPage.evaluate(
+          () => (window as unknown as { __reading?: () => { chapter: number } }).__reading?.().chapter,
+        ),
+      )
+      .toBe(0);
   } finally {
     await newcomerContext.close();
   }

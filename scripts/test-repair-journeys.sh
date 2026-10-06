@@ -14,13 +14,25 @@
 # green tick. The `absent` list below is printed on every run for exactly
 # that reason.
 #
-# Isolation: the target directory name doubles as the Compose project name
-# install.sh persists, so everything this script creates carries the
-# orbit-repair-journeys project label and can be swept even after a SIGKILL.
-# It never touches a project it did not create.
+# Isolation: this script names the Compose project outright, so everything it
+# creates carries the orbit-repair-journeys project label and can be swept
+# even after a SIGKILL. It never touches a project it did not create.
+#
+# It used to get that label for free from the target directory's name, which
+# install.sh took as the project when nothing better was offered. Since #999
+# nothing better means `docker-compose.yml`'s own `name: orbit` — the whole
+# point of that fix — so every install would land in the `orbit` project and
+# this run's sweep would be aimed at somebody else's stack. The check after
+# install.sh proves the label rather than trusting it, and would refuse.
 #
 # Usage: scripts/test-repair-journeys.sh [--keep] [--journey <name>] [--list]
 #   ORBIT_REPAIR_JOURNEYS_IMAGE=<ref>  use this image instead of building one
+#   ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE=<ref>  image for the throwaway local
+#                                        registry (default registry:2). CI
+#                                        sets this to the group dependency
+#                                        proxy path (ai/orbit#1022); a local
+#                                        run has no proxy credential, so it
+#                                        keeps pulling the vendor tag direct.
 set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -213,38 +225,117 @@ install_deployment() {
   else
     image="orbit-repair-journeys-local:$revision"
     note 'building working-tree image (this takes several minutes)'
+    # Stamped at ADR-0016's supported-install floor, not v0.0.0: repair.sh
+    # refuses every version below the floor (#1213 withdrew the major-0
+    # exemption), and these journeys need repair to act on the deployment.
     docker build --quiet -t "$image" \
-      --build-arg ORBIT_VERSION=v0.0.0 \
+      --build-arg ORBIT_VERSION=v0.3.0 \
       --build-arg ORBIT_REVISION="$revision" \
       --build-arg ORBIT_CHANNEL=ci "$repo_root" >/dev/null ||
       fail 'working-tree image build failed'
   fi
 
   docker rm -f "$registry_name" >/dev/null 2>&1 || true
-  docker run -d --name "$registry_name" -p "127.0.0.1:$registry_port:5000" registry:2 >/dev/null ||
+  # Pinned by digest (ai/orbit#1111) so a local run without
+  # ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE set still pulls a known-good image
+  # instead of a moving `:2` tag; CI points the variable at the dependency
+  # proxy copy of the same digest.
+  docker run -d --name "$registry_name" -p "127.0.0.1:$registry_port:5000" \
+      "${ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE:-registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373}" >/dev/null ||
     fail 'local registry did not start'
-  docker tag "$image" "127.0.0.1:$registry_port/$repository:latest"
-  docker push --quiet "127.0.0.1:$registry_port/$repository:latest" >/dev/null ||
+  local local_tag="127.0.0.1:$registry_port/$repository:latest"
+  docker tag "$image" "$local_tag"
+  docker push --quiet "$local_tag" >/dev/null ||
     fail 'push to the local registry failed'
+
+  # install.sh now refuses to run at all without a release manifest it can
+  # verify (ADR-0031 #7): on the default channel ("latest") it self-fetches
+  # one from GitHub, which does not exist for this locally built, unpublished
+  # image (#1107 pipeline 1626: "Could not download the release manifest for
+  # channel latest"). Hand it one directly instead -- the same already-verified
+  # hand-over path get-orbit.sh and the launcher use -- naming the exact
+  # digest this push just gave the registry, read from RepoDigests before
+  # anything else can retag or remove it. `grep -m1`, not `| head -n1` (#809):
+  # grep itself is the one process that stops once it has enough, rather than
+  # a separate head risking a SIGPIPE against docker still writing.
+  local pushed_digest
+  pushed_digest="$(
+    docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$local_tag" |
+      grep -m1 -F "127.0.0.1:$registry_port/$repository@"
+  )"
+  pushed_digest="${pushed_digest#*@}"
+  [[ "$pushed_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+    fail "could not read the digest the local registry gave $local_tag"
+  local release_manifest="$workdir/orbit-release-manifest.json"
+  bash "$repo_root/scripts/ci/write-test-manifest.sh" \
+    "$release_manifest" "127.0.0.1:$registry_port/$repository" "$pushed_digest" >/dev/null ||
+    fail 'could not write the test release manifest'
 
   write_shim
   make_target
 
   note 'installing the deployment under test'
   (cd "$target" && env PATH="$workdir/shim:$PATH" \
+      COMPOSE_PROJECT_NAME="$project" \
       ORBIT_REGISTRY="127.0.0.1:$registry_port" ORBIT_REPOSITORY="$repository" \
+      ORBIT_RELEASE_MANIFEST="$release_manifest" \
       bash "$repo_root/scripts/install.sh" </dev/null) > "$workdir/install.log" 2>&1 ||
     { tail -n 30 "$workdir/install.log" >&2; fail "install.sh failed; log: $workdir/install.log"; }
 
-  # Confirm the isolation claim rather than trusting it: a stray
-  # COMPOSE_PROJECT_NAME would otherwise attach this run to somebody else's
-  # stack, and the teardown below removes volumes (AGENTS.md, compose trap).
+  # Confirm the isolation claim rather than trusting it: the wrong project
+  # label would attach this run to somebody else's stack, and the teardown
+  # below removes volumes (AGENTS.md, compose trap). The name is set on the
+  # install above; this proves install.sh honoured it.
   # The container name is the fixed pin from docker-compose.yml, not a
   # project-prefixed one, which is also why refuse_foreign_stack runs first.
   local owner
   owner="$(docker inspect orbit-postgres --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)"
   [[ "$owner" == "$project" ]] ||
     fail "the stack is not owned by $project (got '${owner:-none}'); refusing to continue"
+
+  apply_ci_healthcheck_override
+}
+
+# Shortens the app's healthcheck interval for this throwaway deployment, so
+# the unhealthy-app journey's wait for Docker's own health flip costs about
+# fifty seconds instead of about two minutes (#923 recommendation 20). The
+# override changes the interval and nothing else -- probe command, probe
+# timeout and retry count are still the image's own, and the production
+# numbers are held honest by scripts/healthcheck-timing-contract.test.mjs
+# rather than by this harness sitting through them.
+#
+# It has to go in AFTER install.sh runs, not before: install.sh accepts a
+# non-empty target only when it is already a deployment or is a
+# pre-provisioned input holding exactly .env-orbit and .orbit-secrets
+# (install.sh's is_preprovisioned_input), so seeding a third file first would
+# make the install refuse. `docker-compose.override.yml` is the name Compose
+# loads automatically beside docker-compose.yml, which is what puts the
+# override in front of every later compose call -- this harness's, repair.sh's
+# and install.sh's alike -- rather than only the one that installed it.
+#
+# Recreating orbit-app is what applies it: a container's healthcheck is fixed
+# when the container is created. That is also why nothing later in the run can
+# lose it -- repair.sh's restart-services uses `docker restart` on the
+# existing container (repair.sh's restart_compose_service), which keeps the
+# configuration it was created with.
+apply_ci_healthcheck_override() {
+  local interval
+  cp -a -- "$repo_root/compose/docker-compose.repair-journeys-ci.yml" \
+    "$target/docker-compose.override.yml" ||
+    fail 'could not place the CI healthcheck override in the target'
+
+  compose up -d --no-deps --force-recreate orbit-app >/dev/null 2>&1 ||
+    fail 'could not recreate the app container with the CI healthcheck override'
+
+  # Prove it landed. Without this a Compose that stopped auto-loading the
+  # override file would leave the journey waiting the full production
+  # interval, and the only symptom would be unhealthy-app timing out on a
+  # deadline that no longer allows for it -- a failure that reads as a
+  # broken repair path rather than as a missing override.
+  interval="$(docker inspect orbit \
+    --format '{{if .Config.Healthcheck}}{{.Config.Healthcheck.Interval}}{{end}}' 2>/dev/null || true)"
+  [[ "$interval" == 2s ]] ||
+    fail "the CI healthcheck override did not take effect (interval '${interval:-none}', wanted 2s)"
 }
 
 # docker-compose.yml pins fixed container names (orbit, orbit-postgres, ...),
@@ -278,7 +369,13 @@ health_check() {
 wait_for_health() {
   local deadline=$((SECONDS + 90))
   until health_check; do
-    ((SECONDS < deadline)) || fail 'the deployment did not become healthy within 90s'
+    if ((SECONDS >= deadline)); then
+      printf '[repair-journeys] wait_for_health: timed out after 90s polling http://127.0.0.1:%s/api/health\n' \
+        "$orbit_port" >&2
+      container_snapshot orbit >&2
+      container_snapshot orbit-postgres >&2
+      fail 'the deployment did not become healthy within 90s'
+    fi
     sleep 2
   done
 }
@@ -286,9 +383,122 @@ wait_for_health() {
 wait_for_unhealthy() {
   local deadline=$((SECONDS + 90))
   while health_check; do
-    ((SECONDS < deadline)) || fail 'the deployment stayed healthy after its credential drifted'
+    if ((SECONDS >= deadline)); then
+      printf '[repair-journeys] wait_for_unhealthy: timed out after 90s, still polling ready at http://127.0.0.1:%s/api/health\n' \
+        "$orbit_port" >&2
+      container_snapshot orbit >&2
+      container_snapshot orbit-postgres >&2
+      fail 'the deployment stayed healthy after its credential drifted'
+    fi
     sleep 2
   done
+}
+
+# --- execution-phase diagnostics (#1089) ------------------------------------
+#
+# #1089: repair_journeys failed in a different journey on each run of the same
+# commit, and passed again on a retry with nothing changed. These snapshots
+# were added to make the next failure say what the world looked like at the
+# moment it mattered, and they did their job: every `repair --execute ...`
+# call below prints, right before invoking repair.sh, what repair.sh's own
+# execution phase is about to see.
+#
+# What they found was two separate faults wearing one signature.
+#
+# 1. The mismatch going missing from the diagnosis (jobs 18392, 18463, 19795,
+#    20612, all before these snapshots existed). All four printed the same
+#    five lines -- `execution result=unactionable`, `dangerous result=empty
+#    reason=none`, and then `finding class=database-credential-mismatch` from
+#    the FINAL re-diagnosis, the one after execution. So the execution-phase
+#    diagnosis had no credential finding to plan from, and a later pass found
+#    it perfectly well. All four reached that state within 6-9s of the journey
+#    starting, far inside the 75s budget, which rules out
+#    `database-credential-unverifiable` (#1026) as the explanation and leaves
+#    the silent one: see the retry loop in `check_database_reachability`
+#    (scripts/repair.sh).
+#
+# 2. This diagnostic eating the answer of the run it was describing (jobs
+#    20104 and 20663, the only two sightings after `execution_snapshot`
+#    landed in 40d0cfc8). Both ended in `prompt-abort` -- `field=safe-batch`
+#    for `printf 'y\n' | repair --execute --safe-only`, `field=action-word`
+#    for credential-drift's three-line `--dangerous` pipe -- which is what
+#    stdin at EOF looks like from inside repair.sh. See `app_secret_probe`.
+#
+# app_secret_probe mirrors an existing repair.sh signal rather than
+# inventing a new one: it is the same read-only check
+# check_database_reachability (scripts/repair.sh:2487) runs at :2579-2580
+# before deciding
+# between `database-credential-mismatch` (safe to plan
+# rotate-database-credential) and `database-credential-unverifiable`
+# (scripts/repair.sh:2608, #1026 -- "the application restarts too fast for
+# repair to read the credential it presents", routed to `manual`, never
+# rotate).
+last_setup_label="" last_setup_at=0
+
+# Call at the point each journey considers its own fixture/fault fully in
+# place, right before it starts asking repair.sh to diagnose or fix it.
+mark_setup_done() {
+  last_setup_label="$1"
+  last_setup_at=$SECONDS
+}
+
+container_snapshot() {
+  local name="$1" out
+  out="$(docker inspect "$name" \
+    --format 'status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restarting={{.State.Restarting}} startedAt={{.State.StartedAt}}' \
+    2>&1)" || out="inspect failed: $out"
+  printf 'container=%s %s\n' "$name" "$out"
+}
+
+# Read-only, mirrors repair.sh's own check_database_reachability probe
+# exactly (scripts/repair.sh:2579-2580): can the app container currently read its
+# own copy of the database credential. Never used to gate, skip or retry
+# anything here -- printed only, so it can never mask a journey's own
+# assertions.
+app_secret_probe() {
+  # </dev/null is load-bearing, not tidiness (#1089). `docker compose exec -T`
+  # keeps stdin attached and streams it to the container: against a running
+  # container it consumes everything the caller's stdin holds (measured on
+  # docker-ce 29.7.2 / compose v5.5.0: 10 runs out of 10), and against a
+  # stopped one it fails before reading anything. Every journey that answers a
+  # machine prompt does it by piping the answer into `repair`, and `repair`
+  # calls execution_snapshot on the way -- so without this the diagnostic
+  # swallowed the very answer the run under test was waiting for, repair.sh
+  # read EOF, and the journey failed on a prompt nobody declined: job 20104
+  # (`prompt-abort field=safe-batch`, unsafe-permissions, exit 1) and job
+  # 20663 (`prompt-abort field=action-word`, credential-drift, exit 6) are
+  # the two sightings of it, and the only two after this file grew an
+  # execution_snapshot in 40d0cfc8. Whether it swallowed the answer depended
+  # on whether orbit-app happened to be up at that moment -- up, it ate the
+  # lot; restarting, it failed before reading anything -- which is why the
+  # journey it broke moved between runs.
+  compose exec -T orbit-app sh -c '
+    f="${POSTGRES_PASSWORD_FILE:-}"
+    if [ -z "$f" ]; then printf "no-POSTGRES_PASSWORD_FILE-set\n"; exit 1; fi
+    if [ -r "$f" ]; then printf "readable:%s\n" "$f"; else printf "unreadable:%s\n" "$f"; fi
+  ' </dev/null 2>&1 || true
+}
+
+# Printed to stderr, which every journey already folds into its own
+# `output="$(... 2>&1)"` capture -- so this shows up on a failing journey's
+# own printed output with no change to what any assertion greps for.
+execution_snapshot() {
+  local label="$1" age='no setup step marked yet'
+  if [[ "$last_setup_at" -gt 0 ]]; then
+    age="${last_setup_label:-unlabelled}, $((SECONDS - last_setup_at))s ago"
+  fi
+  {
+    printf '[repair-journeys] execution-snapshot before: %s\n' "$label"
+    printf '[repair-journeys]   setup completed: %s\n' "$age"
+    printf '[repair-journeys]   deployment health-check ready: %s\n' "$(health_check && echo yes || echo no)"
+    printf '[repair-journeys]   app-secret-probe (mirrors repair.sh check_database_reachability): %s\n' \
+      "$(app_secret_probe)"
+    container_snapshot orbit
+    container_snapshot orbit-postgres
+    # The structural half of the same rule: nothing this diagnostic runs may
+    # read the stdin of the run it is describing, so the whole group is given
+    # /dev/null rather than trusting each probe added here to remember.
+  } >&2 </dev/null
 }
 
 # The copy install.sh placed in the deployment, never the one in this
@@ -298,7 +508,13 @@ wait_for_unhealthy() {
 # that have nothing to do with the target. It is the same code either way --
 # the image under test is built from this working tree and carries these
 # assets (ADR-0019).
-repair() { (cd "$target" && env ORBIT_REPAIR_PROMPTS=machine bash "$target/scripts/repair.sh" "$@"); }
+repair() {
+  local arg
+  for arg in "$@"; do
+    [[ "$arg" != --execute ]] || { execution_snapshot "repair $*"; break; }
+  done
+  (cd "$target" && env ORBIT_REPAIR_PROMPTS=machine bash "$target/scripts/repair.sh" "$@")
+}
 
 # A freshly installed deployment must be healthy by repair's own diagnosis
 # before anything is broken on purpose. Without this, a harness failure two
@@ -368,6 +584,7 @@ drift_the_credential() {
   sha256sum "$target/.orbit-secrets/postgres-password" | awk '{print $1}' > "$workdir/drift.sha256"
   compose restart orbit-app >/dev/null 2>&1 || true
   wait_for_unhealthy
+  mark_setup_done credential-drift-established
 }
 
 # The drift is a fact about the secrets file, and this is how to ask.
@@ -543,6 +760,9 @@ exit "$rc"
 SHIM
   chmod 755 -- "$shimdir/mktemp" "$shimdir/mkdir"
 
+  mark_setup_done signal-cleanup-staging-fixture-ready
+  execution_snapshot 'repair.sh --execute --safe-only (backgrounded, signal-cleanup)'
+
   # Job control on for exactly this fork: without it bash puts a background
   # job in the harness's own process group, and a group signal later would
   # reach everything the harness itself has started, not just this job. With
@@ -557,11 +777,11 @@ SHIM
   pid=$!
   set +m
 
-  local deadline=$((SECONDS + 60))
+  local deadline=$((SECONDS + 60)) stop_reason=timed-out
   while :; do
     if compgen -G "$target/.orbit-repair-recovery.*" >/dev/null 2>&1; then found=1; break; fi
-    kill -0 "$pid" 2>/dev/null || break
-    ((SECONDS < deadline)) || break
+    kill -0 "$pid" 2>/dev/null || { stop_reason=child-exited-first; break; }
+    ((SECONDS < deadline)) || { stop_reason=timed-out; break; }
     sleep 0.005
   done
 
@@ -569,7 +789,11 @@ SHIM
     terminate_process_group "$pid" || true
     rm -rf -- "$staging"
     cat "$out" >&2
-    fail 'signal-cleanup: never observed a private recovery directory to interrupt'
+    # Name which of the two ways this can fail actually happened (rule:
+    # "a step that prints nothing cannot be diagnosed"): a background repair
+    # that exited before ever creating a recovery directory is a different
+    # fault from a poll that genuinely ran out its 60s budget waiting.
+    fail "signal-cleanup: never observed a private recovery directory to interrupt (reason=$stop_reason)"
   fi
 
   status=0
@@ -952,11 +1176,16 @@ journey_hostile_value_privacy_negatives() {
   cp -a -- "$target/.env-orbit" "$workdir/env-orbit.orig"
   printf 'ORBIT_PORT=%s\n' "$canary" >> "$target/.env-orbit"
 
+  # ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE routes this pull through the group
+  # dependency proxy in CI (ai/orbit#1111); a plain Docker Hub pull of the
+  # moving `busybox:stable` tag everywhere else -- this container is a
+  # disposable label vector for the hostile-value journey, not a pin Orbit
+  # ships, so nothing here needs a digest.
   docker run -d --name "orbit-journeys-$canary" \
     --label "com.docker.compose.project=$project" \
     --label "com.docker.compose.service=$canary" \
     --label "com.docker.compose.container-number=1" \
-    busybox:stable sleep 600 >/dev/null 2>&1 ||
+    "${ORBIT_REPAIR_JOURNEYS_CANARY_IMAGE:-busybox:stable}" sleep 600 >/dev/null 2>&1 ||
     fail 'hostile-value: could not start the labelled container vector'
 
   output="$(repair --check 2>&1)" || status=$?
@@ -1012,6 +1241,7 @@ journey_unsafe_permissions() {
 
   chmod 644 -- "$target/.env-orbit"
   chmod 644 -- "$target/.orbit-secrets/postgres-password"
+  mark_setup_done unsafe-permissions-applied
 
   output="$(repair --check 2>&1)" || status=$?
   [[ "$status" == 4 ]] || { printf '%s\n' "$output" >&2; fail "unsafe-permissions: --check exited $status, expected 4"; }
@@ -1126,11 +1356,16 @@ journey_failed_db_migration() {
 
 # A genuinely wedged application: SIGSTOP freezes the app's PID 1, so the
 # health endpoint stops answering while the container keeps running, and
-# Docker's own healthcheck (interval 10s, retries 10) eventually marks it
-# unhealthy — the exact state an operator sees from a hung app. A restart
-# genuinely fixes it, which is what makes restart-services the honest
-# routing to prove here. The docker-status wait is the long pole: the flip
-# needs ten consecutive probe failures, so the deadline is generous.
+# Docker's own healthcheck eventually marks it unhealthy — the exact state an
+# operator sees from a hung app. A restart genuinely fixes it, which is what
+# makes restart-services the honest routing to prove here.
+#
+# The docker-status wait is still the long pole: the flip needs ten
+# consecutive probe failures, each of which sits out the 3s probe timeout
+# before the interval starts again. apply_ci_healthcheck_override cuts the
+# interval to 2s for this deployment only, which puts the flip near fifty
+# seconds instead of the production interval's two minutes; the deadline
+# below leaves more than double that for a contended runner.
 journey_unhealthy_app() {
   local before output status=0 health deadline
   before="$(deployment_manifest)"
@@ -1138,14 +1373,15 @@ journey_unhealthy_app() {
   docker kill --signal=STOP orbit >/dev/null 2>&1 ||
     fail 'unhealthy-app: could not freeze the app container'
 
-  deadline=$((SECONDS + 240))
+  deadline=$((SECONDS + 120))
   while :; do
     health="$(docker inspect orbit --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null || true)"
     [[ "$health" == unhealthy ]] && break
     ((SECONDS < deadline)) || { docker kill --signal=CONT orbit >/dev/null 2>&1 || true
       fail 'unhealthy-app: the frozen app never reached docker health status unhealthy'; }
-    sleep 5
+    sleep 2
   done
+  mark_setup_done application-frozen-unhealthy
 
   # On failure, print the window repair.sh step 12 reads. Which run of the
   # container a sentinel came from is the whole question this journey got
@@ -1232,8 +1468,11 @@ journey_successful_rollback() {
   # evidence and the restore is the only executable action. The running
   # container keeps its published port either way; only the file moves.
   sed -i 's|^ORBIT_PORT=.*|ORBIT_PORT=3212|' "$live"
-  [[ "$(sha256sum "$live" | awk '{print $1}')" != "$expected" ]] ||
+  local drifted
+  drifted="$(sha256sum "$live" | awk '{print $1}')"
+  [[ "$drifted" != "$expected" ]] ||
     fail 'successful-rollback: the drifted live file still matches the backup, so the fixture proves nothing'
+  mark_setup_done successful-rollback-fixture-staged
 
   status=0
   output="$(repair --check 2>&1)" || status=$?
@@ -1266,10 +1505,32 @@ journey_successful_rollback() {
   compgen -G "$target/.orbit-install-staging.*" >/dev/null 2>&1 &&
     fail 'successful-rollback: the staging evidence survived a completed rollback'
 
+  # The restore never deletes a live secret path: it moves the one it
+  # replaces to a dated copy beside it (repair.sh, #1151 O2-S1), so a
+  # rollback that restored the wrong thing still leaves the operator what
+  # was live. Both live secret paths get one: .env-orbit (the drifted file)
+  # and the .orbit-secrets directory (staged too, so restored too, though
+  # nothing in it moved). Prove each copy, then leave them out of the
+  # manifest comparison below — they are the two entries a correct
+  # rollback adds.
+  local kept
+  kept="$(compgen -G "$target/.env-orbit.pre-restore.*" || true)"
+  [[ -n "$kept" && "$(wc -l <<<"$kept")" == 1 ]] ||
+    fail "successful-rollback: expected exactly one .env-orbit.pre-restore.* copy, found: ${kept:-none}"
+  [[ "$(sha256sum "$kept" | awk '{print $1}')" == "$drifted" ]] ||
+    fail 'successful-rollback: the pre-restore copy does not hold the live file the rollback replaced'
+  [[ "$(stat -c '%a' "$kept")" == 600 ]] ||
+    fail 'successful-rollback: the pre-restore copy is not mode 600'
+  kept="$(compgen -G "$target/.orbit-secrets.pre-restore.*" || true)"
+  [[ -n "$kept" && "$(wc -l <<<"$kept")" == 1 && -d "$kept" ]] ||
+    fail "successful-rollback: expected exactly one .orbit-secrets.pre-restore.* directory, found: ${kept:-none}"
+  diff -r -- "$kept" "$target/.orbit-secrets" >/dev/null ||
+    fail 'successful-rollback: the pre-restore secrets directory differs from the restored one, though nothing in it drifted'
+
   status=0
   repair --check >/dev/null 2>&1 || status=$?
   [[ "$status" == 0 ]] || fail "successful-rollback: --check after the rollback exited $status, expected 0"
-  [[ "$(deployment_manifest)" == "$before" ]] ||
+  [[ "$(deployment_manifest | grep -vE '^\./\.(env-orbit|orbit-secrets)\.pre-restore\.')" == "$before" ]] ||
     fail 'successful-rollback: the rolled-back deployment does not match its pre-drift manifest'
   health_check || fail 'successful-rollback: the deployment is unhealthy after the rollback'
   [[ "$(household_name)" == 'repair-journeys-household' ]] ||

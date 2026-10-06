@@ -1,0 +1,223 @@
+/**
+ * CHAPTER 9 — DONE (#866).
+ *
+ * The ratified mockup's ninth `CH` entry (design/v19/tour/round-5/f-one-take.html,
+ * lines 983-1015), with the copy correction dated 2026-09-19 ("Second
+ * correction", design/v19/tour/round-5/README.md): the closing line no
+ * longer claims nothing on a sky is ever finished — the product itself
+ * contradicts that (the item screen prints "one-off — does not come round"
+ * for an expiry, web/src/routes/item/[[id]]/+page.svelte:546) — so it now
+ * reads "A repeat is never finished; it comes round. A one-off simply
+ * ends." verbatim.
+ *
+ * WHERE THE MOCKUP'S SCREENS LAND. `setBg("belt.png", true)` is the item
+ * screen (web/src/routes/item/[[id]]/+page.svelte — by the owner's own
+ * ruling "this surface IS the item screen", the file's own header comment)
+ * reached here as `/item` with no id: the belt seats whichever record rides
+ * at the apex, the same way the product always arrives at one. `setBg("home.png")`
+ * is `/home`, same as every other chapter.
+ *
+ * THE CARD AND THE BUTTON. The mockup lights two things at once — the whole
+ * card at a dim "on" tier, and the complete button at full "goto" strength —
+ * because it is compositing a screenshot and can paste both without one
+ * fighting the other. Translated the way chapter 2 already establishes
+ * (`02-add.js`, its own card/field split): `light(card)` keeps the whole
+ * record's hole cut for the width of the beat, and `goto(done)` is what
+ * actually rises, glows and presses. Both are explicitly `unlight`ed before
+ * `/home` is asked for — the mockup's own `cuts.innerHTML = ""` does the
+ * same cleanup by throwing its whole overlay away; a real lit `Control`
+ * cannot be thrown away like that, because its `els` point at a page about
+ * to be torn down, so unlighting it here is what stands in for that reset.
+ *
+ * THE BUTTON HAS NO NAME OF ITS OWN. The product's five item actions
+ * (complete, reschedule, snooze, edit, retire) are plain `<button>`s with no
+ * class or id — nothing distinguishes "complete" from its siblings by
+ * selector alone. What IS fixed is its position: first child of the item
+ * actions group, in that order, whenever the record is active
+ * (`+page.svelte`'s own markup order). `SELECTORS.done` names that position
+ * rather than inventing a class the product does not render. On a record
+ * that is not active the group's first child is "restore" instead — a real
+ * control, just not the one the mockup means — which is the one honest gap
+ * this translation leaves; noted rather than hidden.
+ *
+ * THE SWING BACK OUT. No real record can be trusted to already be a
+ * just-completed yearly MOT — a chapter must never depend on what is
+ * actually on a household's dial — so, exactly as chapter 5 draws its own
+ * due body rather than moving a real one, this chapter draws its own
+ * `<g class="tourfilm-time-body">` into the real `.dial` svg and places it
+ * every frame with the dial's own law, `dialPlacement(days)`
+ * (web/src/lib/data/chart.js) — the same function chapter 5 uses, walked the
+ * other way: 16 days out (just completed) to 381 (next year), rather than
+ * 381 to 16. The node is drawn, moved, and removed; nothing is sent to the
+ * database.
+ *
+ * THE TRAVELLING HOLE. This is one of the three chapters (5, 9, 12) whose
+ * lit ring follows a moving target rather than sitting still (veil.js's own
+ * comment names this chapter). As in chapter 5, `light(body)` is called
+ * again on every tween frame purely to keep the ring synced to the body's
+ * new box (`syncRings`, vocabulary.js) — the veil's own re-measure loop
+ * keeps pace on its own. Unlike chapter 5, the mockup never raises the veil
+ * for this walk (no `veil(true)` between `setBg("home.png")` and the
+ * chapter's end), so it is never called here either: the swing back out
+ * plays on the reader's own, undimmed sky.
+ */
+import { drawDemoBody, ease, positionDemoBody } from "./demo-body.js";
+
+/** Ratified beat: the demo body walks from 16 days out (just completed) to
+ *  381 (next year), over a fixed 2200ms after a 200ms lead-in — the
+ *  mockup's own numbers, not data. */
+const DAYS_NEAR = 16;
+const DAYS_FAR = 381;
+const WALK_MS = 2200;
+const LEAD_MS = 200;
+
+/**
+ * Every element this chapter names, so
+ * tests/unit/v19-tour-chapter-done.test.mjs can pin the real ones (`.item-card`,
+ * the done button's position, `.dial`) against the item and home screens'
+ * own markup (desk) and pocket's (pocket). `.tourfilm-time-body` is not real
+ * markup — this chapter draws and removes it itself — so it is pinned by
+ * running the chapter instead.
+ */
+export const SELECTORS = Object.freeze({
+  DESK: Object.freeze({
+    /** The item screen's own card, whichever record rides at the apex. */
+    card: ".item-card",
+    /** The record's own complete action: first of the item's actions,
+     *  whenever it is active (see the header note on why this cannot be a
+     *  class or id instead). */
+    done: '.acts[aria-label="Item actions"] button:first-child',
+    /** The star chart, so the demo body has somewhere real to live. */
+    dial: ".dial",
+    dialSvg: ".dial",
+    /** The household's sun — where "MOT passed" is read when no body
+     *  carries a paper (#1174 round 6). */
+    sun: ".sun-link",
+    /** The demo body this chapter draws and removes; never a real item. */
+    body: ".tourfilm-time-body",
+  }),
+  POCKET: Object.freeze({
+    /** Same class as desk. */
+    card: ".item-card",
+    /** The pocket's own complete action, a real class this time. */
+    done: '.ip-acts[aria-label="Item actions"] .ip-complete',
+    /** The round dial. */
+    dial: ".pocket .mdial",
+    /** Its own `<svg>` — the demo body's real append target (§3.6). */
+    dialSvg: ".pocket .mdial svg",
+    /** This household's own sun — the sky line's anchor (§3.3). */
+    sun: ".pocket .mdial .pk-sun",
+    /** The demo body this chapter draws and removes; never a real item. */
+    body: ".tourfilm-time-body",
+  }),
+});
+
+/**
+ * @param {Document} doc
+ * @param {Element} dial
+ * @param {number} days
+ */
+function drawTimeBody(doc, dial, days) {
+  return drawDemoBody(doc, dial, days, "tourfilm-time-body", "tourfilm-time-dot");
+}
+
+/** @param {Element} group @param {number} days */
+function positionTimeBody(group, days) {
+  positionDemoBody(group, days, "tourfilm-time-dot");
+}
+
+/** @type {import("./index.js").Chapter} */
+export default {
+  id: "done",
+  name: "Done",
+
+  /** @param {import("../vocabulary.js").FilmContext} ctx */
+  async play(ctx) {
+    const { pocket, setScreen, veil, ctl, goto, press, light, unlight, callout, dropCallout, tween, w, T, mark, dry, doc } = ctx;
+    const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
+
+    if (ctx.carriesPapers && !ctx.carriesPapers()) {
+      /* #1174 round 6 (Fable's call): no body carries a paper, so chapter 8
+         stayed on the sky and there is no item here to open. The first
+         line is read over the dial, the sun ringed, with no press; the
+         swing back out below plays as it always has. */
+      await setScreen("/home");
+      veil(true);
+      const sun = ctl({ sel: S.sun, round: true });
+      await goto(sun, { willPress: false });
+      await callout(
+        "MOT passed — mark it done and it swings back out to next year.",
+        sun,
+        pocket ? "bottom" : "top",
+        pocket ? { w: 240, dy: 30, mark: "done-complete" } : { w: 240, mark: "done-complete" },
+      );
+      dropCallout();
+      unlight(sun);
+    } else {
+      await setScreen("/item");
+      veil(true);
+
+      /* The whole card stays lit while the complete button is taught within it. */
+      const card = ctl({ sel: S.card, radius: 16, optional: true });
+      light(card);
+
+      const done = ctl({ sel: S.done, radius: pocket ? 22 : 10, optional: true });
+      await goto(done);
+      await callout(
+        "MOT passed — mark it done and it swings back out to next year.",
+        done,
+        "left",
+        { w: 240, mark: "done-complete" },
+      );
+      await press(done);
+      dropCallout();
+      unlight(done);
+      unlight(card);
+    }
+
+    /* Home again, undimmed: the item — drawn, never written — settles back
+       out to next year in front of the reader. */
+    await setScreen("/home");
+    veil(false);
+
+    const dialSvg = ctl({ sel: S.dialSvg });
+    let bodyEl = null;
+    if (!dry() && dialSvg.els[0]) bodyEl = drawTimeBody(doc, dialSvg.els[0], DAYS_NEAR);
+    await w(T.cross);
+    await w(LEAD_MS);
+
+    const body = ctl({ sel: S.body, round: true, optional: true });
+    light(body);
+    await tween(WALK_MS, (t) => {
+      if (dry() || !bodyEl) return;
+      const days = Math.round(DAYS_NEAR + (DAYS_FAR - DAYS_NEAR) * ease(t));
+      positionTimeBody(bodyEl, days);
+      light(body);
+    });
+    await mark("done-swung");
+
+    /* "A repeat is never finished..." — a sky line on the pocket (§3.3):
+       anchored to the sun, not the body. */
+    await goto(body, { willPress: false });
+    if (pocket) {
+      const sun = ctl({ sel: SELECTORS.POCKET.sun, round: true });
+      await callout(
+        "Renewals start their orbit again, fixed length items disappear.",
+        sun,
+        "bottom",
+        { dy: 30, mark: "done-round" },
+      );
+    } else {
+      await callout(
+        "Renewals start their orbit again, fixed length items disappear.",
+        body,
+        "top",
+        { mark: "done-round" },
+      );
+    }
+    unlight(body);
+    dropCallout();
+
+    if (bodyEl) bodyEl.remove();
+  },
+};

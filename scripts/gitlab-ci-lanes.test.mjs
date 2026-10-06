@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { CI_LANE } from "./classify-changed-paths.mjs";
+import { CI_LANE, CI_RISK, pathRisk } from "./classify-changed-paths.mjs";
 
 // #889: `classify` hands the pipeline a lane, and each job decides for itself
 // whether that lane runs it. Nothing else checks the two halves agree -- a
@@ -36,7 +36,7 @@ const jobs = [...allBlocks].filter(([name]) => !name.startsWith("."));
 // before `classify`, so it never sees ORBIT_LANE and always runs.
 const laneMembers = {
   [CI_LANE.IGNORE_POLICY]: ["gitleaks", "licence_policy", "supply_chain_source"],
-  [CI_LANE.CI]: ["fast", "gitleaks", "supply_chain_source"],
+  [CI_LANE.CI]: ["fast", "fast_docker", "gitleaks", "supply_chain_source"],
 };
 
 function guardedJobs() {
@@ -104,6 +104,7 @@ function runClassifyEnv(environment = {}) {
         "integration=false",
         "system=false",
         "web=false",
+        "e2e=false",
         "licence=false",
         "launcher_compat=false",
         "",
@@ -136,6 +137,7 @@ const everythingOn = {
   ORBIT_INTEGRATION: "true",
   ORBIT_SYSTEM: "true",
   ORBIT_WEB: "true",
+  ORBIT_E2E: "true",
   ORBIT_LICENCE: "true",
   ORBIT_LAUNCHER_COMPAT: "true",
   ORBIT_LANE: "full",
@@ -143,17 +145,34 @@ const everythingOn = {
 
 describe("pipeline lanes", () => {
   it("guards every job a narrow lane can skip", () => {
+    // sidecar_images left this list in #944 (owner ruling on #923 rec 16a,
+    // 2026-09-09): it no longer waits for ORBIT_LANE/ORBIT_SYSTEM inside
+    // `script:`, and decides entirely from `rules: changes:` instead, which
+    // needs no dotenv artifact and so needs no wait for one.
     expect(guardedJobs().map(({ name }) => name).sort()).toEqual([
       "acceptance",
       "base_image",
       "build_image",
+      // ADR-0031 #3: builds the pinned launcher, but needs nothing from
+      // build_image -- it is guarded because it shares *launcher_compat_rules
+      // with launcher_install_compat (which does consume build_image), not
+      // because it has the #1076 placeholder problem itself.
+      "build_launcher",
       "fast",
+      "fast_docker",
       "fidelity",
+      "fidelity_webkit",
       "integration",
+      // #1076: it consumes build_image's artifact, so it has to stop on a
+      // lane that skipped the build rather than load the placeholder.
+      "launcher_install_compat",
       "licence_policy",
       "repair_journeys",
-      "sidecar_images",
       "smoke",
+      "smoke_firefox",
+      "smoke_local_only",
+      "smoke_webkit",
+      "smoke_webkit_mobile",
       "supply_chain_image",
       "supply_chain_source",
     ]);
@@ -198,6 +217,25 @@ describe("pipeline lanes", () => {
    * request could only ever be made cheaper; `ci: acceptance` is how one asks
    * for the whole pipeline back.
    */
+  /**
+   * #1092, found while building #1078: `orbit_lane_admits` is consulted before
+   * `orbit_full_gate` is ever reached, so a promotion sitting in a narrow lane
+   * would skip the acceptance stage however emphatically the full gate said
+   * yes. That was survivable while a `dev` push ran everything. #1078 moved
+   * that catch-all onto this promotion, so a promotion that can still skip is
+   * the one thing it cannot afford.
+   *
+   * Asserted against the lane the classifier actually emits, not against a
+   * handed-in `ORBIT_LANE: "full"` -- the gate tests below assume the lane is
+   * already full, which is precisely the assumption that was wrong.
+   */
+  it("collapses the lane to full on both promotions, even on a narrow diff", () => {
+    for (const target of ["preview", "main"]) {
+      const { variables } = runClassifyEnv({ CI_MERGE_REQUEST_TARGET_BRANCH_NAME: target });
+      expect(variables.ORBIT_LANE, `${target}: a promotion must not sit in a narrow lane`).toBe("full");
+    }
+  });
+
   it("leaves the classifier's verdict alone without the label", () => {
     for (const labels of [undefined, "", "bug,area: ci", "ci: acceptance-later", "ci"]) {
       const { variables, stdout } = runClassifyEnv(
@@ -209,6 +247,7 @@ describe("pipeline lanes", () => {
         ORBIT_INTEGRATION: "false",
         ORBIT_SYSTEM: "false",
         ORBIT_WEB: "false",
+        ORBIT_E2E: "false",
         ORBIT_LICENCE: "false",
         // The CI lane does not run launcher_install_compat, and the lane
         // survives because nothing overrode it.
@@ -244,12 +283,268 @@ describe("pipeline lanes", () => {
     expect(runClassifyEnv({ CI_COMMIT_BRANCH: "dev" }).variables.ORBIT_SYSTEM).toBe("false");
   });
 
+  // #1181: the browser suite has its own axis, and every job that runs it
+  // reads that axis rather than the front-end one `fidelity` reads.
+  it("gates every browser-suite job on ORBIT_E2E", () => {
+    for (const name of ["smoke", "smoke_firefox", "smoke_webkit", "smoke_webkit_mobile"]) {
+      const block = allBlocks.get(name);
+      const suite = block.indexOf("bash scripts/test-frontend.sh");
+      const gate = block.lastIndexOf('if [ "${ORBIT_E2E:-true}" != "true" ]; then', suite);
+      expect(gate, `${name}: the browser suite is not behind ORBIT_E2E`).toBeGreaterThan(-1);
+      expect(block, name).not.toMatch(/\$\{ORBIT_WEB/u);
+    }
+    expect(runClassifyEnv().variables.ORBIT_E2E).toBe("false");
+  });
+
+  /*
+   * #1186: the promotion is where the whole suite runs again (#1078), but the
+   * browser checks read their own axes, which came from the diff alone. A
+   * promotion with no web change skipped `fidelity` and both browser suites.
+   * The events `orbit_full_gate` names now switch those axes on; a `dev` push
+   * still tests only what it changed.
+   */
+  it("runs every browser check on the promotions and on delivery pushes (#1186)", () => {
+    for (const environment of [
+      { CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "preview" },
+      { CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main" },
+      { CI_COMMIT_BRANCH: "preview" },
+      { CI_COMMIT_BRANCH: "main" },
+      { CI_COMMIT_BRANCH: "hotfix/x" },
+    ]) {
+      const { variables } = runClassifyEnv(environment);
+      const event = JSON.stringify(environment);
+      expect(variables.ORBIT_WEB, event).toBe("true");
+      expect(variables.ORBIT_E2E, event).toBe("true");
+      // Only the browser axes: the rest still say what the diff carried.
+      expect(variables.ORBIT_SYSTEM, event).toBe("false");
+    }
+    for (const environment of [
+      { CI_COMMIT_BRANCH: "dev" },
+      { CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "dev" },
+      { CI_COMMIT_BRANCH: "feature/x" },
+    ]) {
+      const { variables } = runClassifyEnv(environment);
+      expect(variables.ORBIT_WEB, JSON.stringify(environment)).toBe("false");
+      expect(variables.ORBIT_E2E, JSON.stringify(environment)).toBe("false");
+    }
+  });
+
+  /*
+   * #1187: a run that skipped its browser suite must leave no reuse evidence,
+   * or a later merge-request pipeline with the same key -- the promotion
+   * among them -- stands on it and never runs the suite. Run, not read: the
+   * gate entry and everything after it share one shell, so what matters is
+   * whether the shell gets as far as `*reuse_evidence`.
+   */
+  it("leaves no reuse evidence when a smoke job skips its browser suite (#1187)", () => {
+    for (const name of ["smoke", "smoke_firefox", "smoke_webkit", "smoke_webkit_mobile"]) {
+      const block = allBlocks.get(name);
+      const scriptStart = block.indexOf("\n  script:\n");
+      const scriptEnd = block.indexOf("\n  after_script:\n");
+      const entries = block
+        .slice(scriptStart, scriptEnd)
+        .split(/\n {4}- /u)
+        .slice(1);
+      const gate = entries.findIndex((entry) => entry.includes('"${ORBIT_E2E:-true}" != "true"'));
+      expect(gate, `${name}: no ORBIT_E2E gate`).toBeGreaterThan(-1);
+      const after = entries.slice(gate + 1);
+      expect(after.some((entry) => entry.startsWith("bash scripts/test-frontend.sh")), name).toBe(true);
+      expect(after.at(-1), name).toBe("*reuse_evidence");
+      // The gate entry itself, then a stand-in for every later entry.
+      const shell = `${entries[gate].replace(/^\|\n/u, "").replace(/^ {6}/gmu, "")}\necho REACHED_EVIDENCE\n`;
+      const run = (value) =>
+        execFileSync("sh", ["-c", shell], {
+          encoding: "utf8",
+          env: { PATH: process.env.PATH, ORBIT_E2E: value },
+        });
+      expect(run("false"), `${name}: a skipped suite reached *reuse_evidence`).not.toMatch(/REACHED_EVIDENCE/u);
+      expect(run("true"), name).toMatch(/REACHED_EVIDENCE/u);
+    }
+  });
+
   it("hands the lane on from classify as a dotenv variable", () => {
     const classify = allBlocks.get("classify");
     expect(classify).toMatch(/printf 'ORBIT_LANE=%s\\n' "\$lane" >> classify\.env/u);
-    // A lane is a merge-request economy: every delivery push and the merge
-    // request into `main` collapse it to `full` and run everything.
+    // A lane is a merge-request economy: every delivery push and both
+    // promotions collapse it to `full` and run everything. `preview` joined
+    // `main` on #1092, because #1078 made that promotion the catch-all.
     expect(classify).toMatch(/dev \| preview \| main \| hotfix\/\*\) lane=full ;;/u);
-    expect(classify).toMatch(/CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-\}" = "main" \]/u);
+    expect(classify).toMatch(/CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-\}" in\n\s+preview \| main\) lane=full ;;/u);
+  });
+});
+
+// #1078 (owner ruling 2026-09-21): a push to `dev` now tests what the push
+// changed, and the full gate -- the catch-all sanity check against accidental
+// drift -- moves to the dev -> preview merge request. These run the real
+// `.reach_helpers` and `.system_lane_gate` shell against a synthetic event,
+// the same way `runClassifyEnv` above runs `classify`'s own shell: read, not
+// re-implemented, so a change to the real gate is what these see.
+function hiddenBlockScript(name) {
+  return allBlocks
+    .get(name)
+    .split("\n")
+    .slice(1) // drop the "<name>: &<anchor> |" header line
+    .map((line) => line.replace(/^ {2}/u, ""))
+    .join("\n");
+}
+
+// Ends with a marker so a run that falls through the gate (rather than
+// hitting its own `exit 0`) is distinguishable from one that never reached
+// the marker for some unrelated reason.
+function runSystemLaneGate(environment = {}) {
+  const script = `${hiddenBlockScript(".reach_helpers")}\n${hiddenBlockScript(".system_lane_gate")}\necho REACHED_AFTER_GATE`;
+  return execFileSync("sh", ["-c", script], {
+    encoding: "utf8",
+    env: { PATH: process.env.PATH, ...environment },
+  });
+}
+
+describe("orbit_on_delivery_branch / orbit_full_gate / .system_lane_gate (#1078)", () => {
+  it("no longer treats a push to dev as the full gate", () => {
+    const stdout = runSystemLaneGate({ CI_COMMIT_BRANCH: "dev", ORBIT_LANE: "full", ORBIT_SYSTEM: "false" });
+    expect(stdout).toContain("skipped: no system-risk change");
+    expect(stdout).not.toContain("REACHED_AFTER_GATE");
+  });
+
+  it("still runs the system lane on a dev push that carries system risk", () => {
+    const stdout = runSystemLaneGate({ CI_COMMIT_BRANCH: "dev", ORBIT_LANE: "full", ORBIT_SYSTEM: "true" });
+    expect(stdout).not.toContain("skipped");
+    expect(stdout).toContain("REACHED_AFTER_GATE");
+  });
+
+  it("still runs the system lane unconditionally on preview, main and hotfix pushes", () => {
+    for (const branch of ["preview", "main", "hotfix/x"]) {
+      const stdout = runSystemLaneGate({ CI_COMMIT_BRANCH: branch, ORBIT_LANE: "full", ORBIT_SYSTEM: "false" });
+      expect(stdout, branch).not.toContain("skipped");
+      expect(stdout, branch).toContain("REACHED_AFTER_GATE");
+    }
+  });
+
+  it("runs the full gate on the dev -> preview merge request, whatever the diff holds", () => {
+    const stdout = runSystemLaneGate({
+      CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "preview",
+      ORBIT_LANE: "full",
+      ORBIT_SYSTEM: "false",
+    });
+    expect(stdout).not.toContain("skipped");
+    expect(stdout).toContain("REACHED_AFTER_GATE");
+  });
+
+  it("still runs the full gate on the preview -> main merge request", () => {
+    const stdout = runSystemLaneGate({
+      CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "main",
+      ORBIT_LANE: "full",
+      ORBIT_SYSTEM: "false",
+    });
+    expect(stdout).not.toContain("skipped");
+    expect(stdout).toContain("REACHED_AFTER_GATE");
+  });
+
+  it("skips an ordinary merge request with no system risk, same as before", () => {
+    const stdout = runSystemLaneGate({
+      CI_MERGE_REQUEST_TARGET_BRANCH_NAME: "dev",
+      ORBIT_LANE: "full",
+      ORBIT_SYSTEM: "false",
+    });
+    expect(stdout).toContain("skipped: no system-risk change");
+    expect(stdout).not.toContain("REACHED_AFTER_GATE");
+  });
+});
+
+// A `dir/**/*` pattern or an exact path, which is all sidecar_images' list
+// (below) uses -- enough to check the list against the classifier's own
+// verdict without a real glob library.
+function matchesChangesPattern(pattern, path) {
+  if (!pattern.includes("*")) return pattern === path;
+  if (pattern.endsWith("/**/*")) {
+    const dir = pattern.slice(0, -"/**/*".length);
+    return path === dir || path.startsWith(`${dir}/`);
+  }
+  throw new Error(`unhandled changes: pattern shape: ${pattern}`);
+}
+
+// #944 (owner ruling on #923 rec 16a, 2026-09-09): sidecar_images used to
+// queue for a `big` slot and only then, inside `script:`, read ORBIT_SYSTEM
+// from classify's dotenv artifact and decide there was nothing to do.
+// `rules:` cannot read that artifact -- it is evaluated before any job runs
+// -- so the decision moved to `rules: changes:`, which reads the merge diff
+// directly.
+describe("sidecar_images: the system-lane gate moved into rules: changes: (#944)", () => {
+  const sidecarImages = () => allBlocks.get("sidecar_images");
+
+  function changesList(job) {
+    const start = job.indexOf("      changes:\n");
+    const end = job.indexOf("\n    - when: manual", start);
+    expect(start, "no changes: block on sidecar_images' merge-request rule").toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    return [...job.slice(start, end).matchAll(/^ {10}- (\S+)$/gmu)].map((match) => match[1]);
+  }
+
+  it("no longer waits on ORBIT_LANE or ORBIT_SYSTEM inside script:", () => {
+    const job = sidecarImages();
+    const script = job.slice(job.indexOf("\n  script:\n"));
+    // Comments above the job still explain the move away from these in
+    // prose; only the script's own use of them (now removed) matters here.
+    expect(script).not.toContain("orbit_lane_admits sidecar_images");
+    expect(script).not.toContain("*system_lane_gate");
+    expect(script).not.toContain("*reach_helpers");
+  });
+
+  it("always runs on every delivery branch and on a merge request into main, unconditionally", () => {
+    const job = sidecarImages();
+    // Neither rule carries a `changes:` clause, matching what
+    // `orbit_full_gate` gave every job that still calls `.system_lane_gate`.
+    expect(job).toMatch(
+      /- if: \$CI_COMMIT_BRANCH == "dev" \|\| \$CI_COMMIT_BRANCH == "preview" \|\| \$CI_COMMIT_BRANCH == "main" \|\| \$CI_COMMIT_BRANCH =~ \/\^hotfix\\\/\/\n {4}- if: \$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"\n {4}- if: \$CI_PIPELINE_SOURCE == "merge_request_event"\n/u,
+    );
+  });
+
+  it("covers every path the classifier calls explicit system risk", () => {
+    const listed = changesList(sidecarImages());
+    const explicitSystemPaths = [
+      ".github/workflows/deploy.yml",
+      "Dockerfile",
+      "docker-compose.yml",
+      "compose/docker-compose.test.yml",
+      "config/some-setting.json",
+      "package.json",
+      "drizzle/0001_init.sql",
+      "tests/e2e/some.spec.ts",
+      "web/src/App.svelte",
+      "src/lib/auth/session.ts",
+      "src/server/boot/index.ts",
+      "scripts/backup.sh",
+    ];
+    for (const path of explicitSystemPaths) {
+      expect(pathRisk(path), path).toBe(CI_RISK.SYSTEM);
+      expect(
+        listed.some((pattern) => matchesChangesPattern(pattern, path)),
+        `${path} not covered by sidecar_images' changes: list`,
+      ).toBe(true);
+    }
+  });
+
+  it("also covers the classifier's catch-all default, including .gitleaksignore", () => {
+    const listed = changesList(sidecarImages());
+    // classifyCiRisk defaults an unmatched path to system risk -- the
+    // fail-safe `rules:` cannot read (there is no dotenv to fall back to),
+    // so the list has to be wide enough to catch it too. .gitleaksignore is
+    // the sharpest example: nothing in fastPatterns or systemPatterns names
+    // it, so it is system risk by that same default, even though the now-
+    // removed `ignore_policy` lane used to keep it away from this job by a
+    // different route entirely.
+    const catchAllPaths = ["cosign.pub", "tsconfig.json", "demo-tls/ca.pem", "design/notes.fig", ".gitleaksignore"];
+    for (const path of catchAllPaths) {
+      expect(pathRisk(path), path).toBe(CI_RISK.SYSTEM);
+      expect(listed.some((pattern) => matchesChangesPattern(pattern, path)), path).toBe(true);
+    }
+  });
+
+  it("leaves out only what the classifier calls fast: docs, root markdown, LICENSE, .gitignore", () => {
+    const listed = changesList(sidecarImages());
+    for (const path of ["docs/setup.md", "README.md", "AGENTS.md", "LICENSE", ".gitignore"]) {
+      expect(pathRisk(path), path).not.toBe(CI_RISK.SYSTEM);
+      expect(listed.some((pattern) => matchesChangesPattern(pattern, path)), path).toBe(false);
+    }
   });
 });

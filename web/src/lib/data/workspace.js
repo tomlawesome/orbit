@@ -49,6 +49,13 @@
  * @property {?string} [scheduleKind]   scheduleKinds
  * @property {?number} [recurrenceMonths]
  * @property {?number[]} [reminderDays]
+ * @property {?{reference?: string, notes?: string, title?: string, provider?: string, costMinor?: string}} [metadataStatus]
+ *   Read-only (ADR-0024): why an encrypted field is absent rather than empty --
+ *   `metadata_integrity_failed` for a value that would not decrypt,
+ *   `metadata_locked` while the instance has no key. Never sent back; the
+ *   `ITEM_FIELDS` allowlist in data/commands.js is what keeps it out. `title`
+ *   is the one required field that can be absent (#963): when it is, `title`
+ *   is the empty string and this says why.
  * @property {number} [version]         rides along for #424's writes
  * @property {string} [updatedAt]       ISO-8601, likewise
  * @property {number} [documentCount]   not a schema field; see above
@@ -160,8 +167,8 @@
 
 /**
  * One piece of mail the relay caught, in the shape `GET /api/imap-inbox`
- * answers. `attachments` is not an API field yet (#467) — the fixture carries
- * it so the ratified design renders, and live data degrades to the count.
+ * answers. `attachments` names every held file since #467; a receipt with
+ * none yet named degrades to `attachmentCount` alone.
  *
  * @typedef {object} Receipt
  * @property {string} id
@@ -178,7 +185,14 @@
  * @property {string} [message]
  * @property {ItemProposal} [proposal]
  * @property {Record<string, { source: string, confidence: string }>} [fieldEvidence]
- * @property {{ displayName?: string, sizeBytes?: number, scannedClean?: boolean }[]} [attachments]
+ * @property {?{proposal?: string, fieldEvidence?: string}} [metadataStatus]
+ *   Read-only (ADR-0024, #941): why the extract is absent rather than empty --
+ *   `metadata_integrity_failed` for a draft that would not decrypt,
+ *   `metadata_locked` while the instance holds no usable encryption key.
+ * @property {{ id: string, ordinal: number, displayName: string,
+ *              mediaType: "application/pdf" | "application/octet-stream",
+ *              sizeBytes: number, scanState: "clean" | "unknown" }[]} [attachments]
+ * @property {string} reason
  */
 
 /**
@@ -211,8 +225,12 @@
  * @property {string} title
  * @property {string} currency
  * @property {string} sourceDocument
+ * @property {?{ id: string, ordinal: number, displayName: string,
+ *              mediaType: "application/pdf" | "application/octet-stream",
+ *              sizeBytes: number, scanState: "clean" | "unknown" }[]} [attachments]  named papers (#467)
  * @property {number} [draftVersion]
  * @property {?string} [renewsOn]
+ * @property {?string} [scheduleKind]   renewal / service / expiry (#1005)
  * @property {?string} [provider]
  * @property {?string} [expiresAt]
  * @property {?string} [receivedAt]
@@ -220,6 +238,9 @@
  * @property {string} [classification]
  * @property {string} [message]
  * @property {Record<string, { source: string, confidence: string }>} [fieldEvidence]
+ * @property {?{proposal?: string, fieldEvidence?: string}} [metadataStatus]
+ * @property {ItemProposal} [proposal]    what the review sheet pre-fills (round 3 §4)
+ * @property {number} [attachmentCount]
  */
 
 /**
@@ -323,15 +344,17 @@
  */
 
 /**
- * One row of the sections editor — what sectionRowsOf makes. `count` and
- * `removed` are the interface's own arithmetic and state, not the household's:
- * they never travel to the server, they decide what may be sent.
+ * One row of the sections editor — what sectionRowsOf makes. `count`,
+ * `removed` and `shipped` are the interface's own arithmetic and state, not
+ * the household's: they never travel to the server, they decide what may be
+ * sent (and, for `shipped`, whether the mark is a button — #867).
  *
  * @typedef {object} SectionRow
  * @property {string} id
  * @property {string} name
  * @property {string} icon
  * @property {string} accent
+ * @property {boolean} shipped
  * @property {boolean} visible
  * @property {number} count        entries sitting in this section
  * @property {boolean} [removable] emptiness is the only thing that earns a ×
@@ -385,11 +408,16 @@ export class WorkspaceError extends Error {
  * decode into, so the shape is written down next to the URL that produces it
  * and TypeScript infers T from that annotation.
  *
+ * Exported only so tests/unit/workspace-json.test.js can drive it directly
+ * with a fake response, the way alerts.js's own helpers take fakes rather
+ * than a mocked global — every real caller in this module already reached
+ * it as a plain local function, and still does.
+ *
  * @template T
  * @param {Response} response
  * @returns {Promise<T>}
  */
-async function json(response) {
+export async function json(response) {
   const body = await response.json().catch(() => null);
   if (!response.ok) {
     /* Signed out is not an error state the screens handle — it is a journey:
@@ -409,6 +437,17 @@ async function json(response) {
     throw new WorkspaceError(message, {
       status: response.status,
       code: body?.error?.code,
+    });
+  }
+  if (body === null) {
+    /* A 2xx whose body does not parse as JSON — a proxy restart, a cached
+       offline page a service worker served with status 200, anything that
+       answered but was never the real route — is exactly as unreachable as
+       a non-2xx with no body. Every caller here already expects a decoded
+       object back and dereferences it immediately, so without this they hit
+       their own bare TypeError instead of the message above (#1151 W2-R3). */
+    throw new WorkspaceError(`Orbit could not be reached (${response.status})`, {
+      status: response.status,
     });
   }
   return body;
@@ -535,7 +574,6 @@ export async function activeHousehold() {
  * are fetches, and making callers async NOW means flipping a body from
  * fixture to fetch changes no caller's shape later.
  */
-import { operationsFixture } from "./fixtures/operations.js";
 import { adminFixture } from "./fixtures/admin.js";
 import { ago } from "$lib/format.js";
 import { bandOf, daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
@@ -587,9 +625,11 @@ export async function readInbox(fetchImpl = globalThis.fetch) {
  * @param {?string} fallbackHouseholdId  used when the receipt names no household
  * @param {string} operationId           kept across retries; that is the point
  * @param {?ItemProposal} [amendedItem]  what the reader edited, if they did
+ * @param {?string} [sectionId]  the section the reader chose (the phone's
+ *   review & amend, #1120); the household's first section when none was
  * @returns {Promise<{ outcome: string, itemId?: string }>}
  */
-export async function approveReceipt(suggestion, fallbackHouseholdId, operationId, amendedItem = null) {
+export async function approveReceipt(suggestion, fallbackHouseholdId, operationId, amendedItem = null, sectionId = null) {
   const householdId = suggestion.householdId ?? fallbackHouseholdId;
   if (!householdId) throw new WorkspaceError("This account has no household yet", { code: "no_household" });
   if (!suggestion.householdId) {
@@ -599,7 +639,7 @@ export async function approveReceipt(suggestion, fallbackHouseholdId, operationI
   const review = await json(
     await fetch(`/api/imap-inbox/${suggestion.receiptId}?householdId=${householdId}`, { credentials: "same-origin" }),
   );
-  const section = review.sections?.[0];
+  const section = review.sections?.find((one) => one.id === sectionId) ?? review.sections?.[0];
   if (!section) throw new WorkspaceError("This household has no section to file into", { code: "no_section" });
   /** @type {{ outcome: string, itemId?: string }} */
   const body = await json(await csrfFetch("/api/reviewed-intake/approve", {
@@ -659,6 +699,23 @@ export async function addMember(householdId, userId) {
 }
 
 /**
+ * An administrator creates a system for somebody else —
+ * POST /api/admin/systems (#1052, Fable's decision of 2026-09-19).
+ *
+ * A name and an owner, and nothing else: the household starts empty with the
+ * named person as its owner, and the administrator is not put in it. The
+ * administrator is re-challenged like every other admin action on that screen
+ * (ADR-0023 §5), so `currentPassword` rides along where they have one and is
+ * left out where a step-up proof cookie answers instead.
+ *
+ * @param {{ name: string, ownerId: string, currentPassword?: string }} draft
+ * @returns {Promise<{ household: { id: string, name: string, ownerId: string } }>}
+ */
+export async function createSystem(draft) {
+  return json(await csrfFetch("/api/admin/systems", { body: draft }));
+}
+
+/**
  * "Today" for chart arithmetic. The workspace fixture pins it to the date the
  * designs were drawn against so the fidelity gate is deterministic; the real
  * API carries no such field, so live data uses the real clock.
@@ -684,6 +741,8 @@ function todayOf(workspace) {
  * @property {string} classification
  * @property {string} message
  * @property {boolean} canDiscard
+ * @property {?{proposal?: string, fieldEvidence?: string}} [metadataStatus]
+ * @property {string} reason
  */
 
 /**
@@ -704,6 +763,8 @@ function todayOf(workspace) {
  * @property {Record<string, import('./chart.js').GalaxyEntry>} galaxy
  * @property {string | null} primary           the household in the middle
  * @property {Household | null} household
+ * @property {Household[]} households        every one the reader is in: the
+ *   review sheet offers the sections of the one a suggestion files into
  * @property {ReceiptSuggestion[]} suggestions
  * @property {MailFailure[]} mailFailures
  * @property {Receipt[]} mailReading           arrived, not yet readable
@@ -719,7 +780,15 @@ function todayOf(workspace) {
 export async function readHome(fetchImpl) {
   const [workspace, session, inbox] = await Promise.all([
     readWorkspace(fetchImpl),
-    readSession({}, fetchImpl),
+    /* Additive, the same way every other read in this Promise.all is
+       (#1151 W2-R4): every caller below only ever reads `session?.user`,
+       so a session-endpoint hiccup should cost the reader that one field,
+       not the whole screen it arrives alongside — which had already
+       loaded by the time Promise.all would otherwise have thrown. This
+       was the one unguarded read standing out among guarded neighbours,
+       repeated at every screen below that takes workspace and session
+       together. */
+    readSession({}, fetchImpl).catch(() => null),
     /* Additive: mail-in suggestions enrich home, they must never sink it. */
     readInbox(fetchImpl).catch(() => /** @type {Inbox} */ ({ receipts: [] })),
   ]);
@@ -734,6 +803,7 @@ export async function readHome(fetchImpl) {
       galaxy: labelledSkyOf(workspace.visibleHouseholds),
       primary: null,
       household: null,
+      households: [],
       suggestions: [],
       mailFailures: [],
       mailReading: [],
@@ -746,6 +816,7 @@ export async function readHome(fetchImpl) {
     galaxy: galaxyOf(workspace, today),
     primary,
     household: workspace.households.find((one) => one.id === primary) ?? null,
+    households: workspace.households,
     suggestions: [
       ...(workspace.suggestions ?? []),
       ...receiptSuggestionsOf(inbox.receipts),
@@ -763,23 +834,6 @@ export async function readHome(fetchImpl) {
 }
 
 /**
- * Everything the corridor renders (#461): the whole workspace (the corridor
- * spans every system), the signed-in user for the chrome, and the reckoning
- * date. The transform itself (corridorOf) is pure and lives in chart.js.
- */
-export async function readDueNext() {
-  const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
-  const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
-  return {
-    workspace,
-    primary,
-    household: workspace.households.find((one) => one.id === primary) ?? null,
-    user: session?.user ?? null,
-    today: todayOf(workspace),
-  };
-}
-
-/**
  * Everything the inbox screen renders (#463): the raw receipts in their
  * bounded groups, the approvable ones ALSO in suggestion shape (the approve
  * protocol's input), the relay summary, and a pinned "now" so elapsed-time
@@ -788,7 +842,7 @@ export async function readDueNext() {
 export async function readInboxScreen() {
   const [workspace, session, inbox, relay] = await Promise.all([
     readWorkspace(),
-    readSession(),
+    readSession().catch(() => null),
     readInbox().catch(() => /** @type {Inbox} */ ({ receipts: [] })),
     /* Additive: the relaybar is a summary line, not the screen's subject. */
     readRelay().catch(() => UNAVAILABLE_RELAY),
@@ -796,7 +850,7 @@ export async function readInboxScreen() {
   const receipts = inbox.receipts ?? [];
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   const caught = receipts
-    .filter((receipt) => receipt.classification !== "waiting")
+    .filter((receipt) => receipt.classification !== "waiting" && receipt.receivedAt)
     .map((receipt) => receipt.receivedAt)
     .sort()
     .pop() ?? null;
@@ -817,6 +871,9 @@ export async function readInboxScreen() {
     filed,
     user: session?.user ?? null,
     household: workspace.households.find((one) => one.id === primary) ?? null,
+    /* Every household the reader is in: the phone's review & amend (#1120)
+       offers the sections of the one a receipt will file into. */
+    households: workspace.households,
     primary,
     today,
     now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
@@ -830,52 +887,6 @@ export async function readInboxScreen() {
 }
 
 /**
- * Everything the archive renders (#462): the workspace, every attached
- * document (the API only speaks per-item, so the seam fans out over items
- * that report documents), and the relay's approvable catches. Per-item
- * failures are additive — a household that can't answer loses its rows, not
- * the screen.
- */
-export async function readDocumentsScreen() {
-  const [workspace, session, inbox] = await Promise.all([
-    readWorkspace(),
-    readSession(),
-    readInbox().catch(() => /** @type {Inbox} */ ({ receipts: [] })),
-  ]);
-  const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
-  /** @type {Record<string, DocumentSummary[]>} */
-  const documentsByItem = {};
-  await Promise.all(
-    workspace.households.flatMap((household) =>
-      (household.items ?? [])
-        .filter((item) => (item.documentCount ?? 0) > 0)
-        .map(async (item) => {
-          try {
-            /** @type {{ documents?: DocumentSummary[] }} */
-            const body = await json(
-              await fetch(`/api/households/${household.id}/items/${item.id}/documents`, {
-                credentials: "same-origin",
-              }),
-            );
-            documentsByItem[item.id] = body.documents ?? [];
-          } catch {
-            documentsByItem[item.id] = [];
-          }
-        }),
-    ),
-  );
-  return {
-    workspace,
-    primary,
-    household: workspace.households.find((one) => one.id === primary) ?? null,
-    user: session?.user ?? null,
-    today: todayOf(workspace),
-    receipts: inbox.receipts ?? [],
-    documentsByItem,
-  };
-}
-
-/**
  * Everything the helm renders (#464): who you are, your systems and roles,
  * the relay summary with how many arrivals wait, and the reminder timing —
  * the last live from #468's route.
@@ -883,7 +894,7 @@ export async function readDocumentsScreen() {
 export async function readSettingsScreen() {
   const [workspace, session, inbox, relay, reminders] = await Promise.all([
     readWorkspace(),
-    readSession(),
+    readSession().catch(() => null),
     readInbox().catch(() => /** @type {Inbox} */ ({ receipts: [] })),
     /* Additive: the helm's relay card is a summary, not the screen's subject. */
     readRelay().catch(() => UNAVAILABLE_RELAY),
@@ -1000,6 +1011,29 @@ export async function commandContact(command) {
 }
 
 /**
+ * One row of `GET /api/admin/health`'s `services` array
+ * (src/server/admin-health.ts, AdministratorServiceHealth) — states and
+ * timestamps only, never a hostname, URL or error string.
+ *
+ * @typedef {object} AdminServiceHealth
+ * @property {"database" | "notification-worker" | "mailbox-ingestion" | "virus-scanner" | "document-parser"} id
+ * @property {"ok" | "warn" | "down" | "off"} state
+ * @property {string} checkedAt
+ * @property {?string} [lastSuccessAt]
+ * @property {?string} [lastErrorAt]
+ */
+
+/**
+ * What `GET /api/admin/health` answers (#1000): the real Operations panel
+ * rows and the running build's own version stamp, replacing the five
+ * invented "healthy" rows `adminFixture.services` drew for the mockup.
+ *
+ * @typedef {object} AdminHealth
+ * @property {{ version: ?string, channel: ?string, revision: ?string }} build
+ * @property {AdminServiceHealth[]} services
+ */
+
+/**
  * Everything mission control renders (#465): the instance's people (real
  * route), its systems from the workspace (admins see everything, §11), the
  * live mailbox settings (#743), and the parts no route can answer yet —
@@ -1008,17 +1042,58 @@ export async function commandContact(command) {
  * moved them to household management, so this screen never asks for them.
  */
 export async function readAdminScreen() {
-  const [workspace, session, users, mailbox, contact] = await Promise.all([
+  const [workspace, session, users, mailbox, contact, rotation, metadata, recoveryBundle, health, operations] =
+    await Promise.all([
     readWorkspace(),
-    readSession(),
+    readSession().catch(() => null),
     json(await fetch("/api/admin/users", { credentials: "same-origin" }))
       .then(
-        (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean }[] }} */ body) =>
+        (/** @type {{ users?: { id: string, displayName: string, email?: string, isInstanceAdmin?: boolean, disabledAt?: ?string }[] }} */ body) =>
           body.users ?? [],
       )
       .catch(() => []),
     readMailboxSettings(),
     readContactSettings(),
+    /* An open document-key rotation (#956). Additive: a route that cannot
+       answer (fixture harness, older server) means no card, never a sunk
+       screen — and "no rotation open" renders as nothing at all. */
+    json(await fetch("/api/admin/documents/rotation", { credentials: "same-origin" }))
+      .then(
+        (/** @type {{ rotation?: { inProgress: boolean, startedAt: string | null, secondKeyLoaded: boolean } }} */ body) =>
+          body.rotation ?? null,
+      )
+      .catch(() => null),
+    /* Locked and damaged Tier 1 metadata (#941), from the health route that
+       already answers for the document subsystem rather than a surface of its
+       own. Additive on the same terms as the rotation above: a route that
+       cannot answer means no cards, never a sunk screen, and an instance with
+       nothing wrong renders nothing at all. */
+    json(await fetch("/api/admin/documents/health", { credentials: "same-origin" }))
+      .then(
+        (/** @type {{ health?: { metadata?: MetadataHealth } }} */ body) =>
+          body.health?.metadata ?? null,
+      )
+      .catch(() => null),
+    /* Whether a recovery bundle has been recorded for the current document
+       KEK (#968, slice 1 of #966). Additive on the same terms as the two
+       cards above: a route that cannot answer means no card, never a sunk
+       screen. */
+    json(await fetch("/api/admin/recovery-bundle", { credentials: "same-origin" }))
+      .then(
+        (/** @type {{ recoveryBundle?: { exported: boolean, exportedAt: string | null } }} */ body) =>
+          body.recoveryBundle ?? null,
+      )
+      .catch(() => null),
+    /* The real Operations panel and instance strip (#1000). Additive on the
+       same terms as the rotation and metadata above: a route that cannot
+       answer (fixture harness, older server) keeps the fixture's rows, so
+       the fixture-mode screen the fidelity gate photographs is unchanged. */
+    json(await fetch("/api/admin/health", { credentials: "same-origin" }))
+      .then((/** @type {{ health?: AdminHealth }} */ body) => body.health ?? null)
+      .catch(() => null),
+    /* The document jobs (#1071). Additive on the same terms: a route that
+       cannot answer means no jobs card, never a sunk screen. */
+    readAdminOperations().catch(() => null),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
   /* Real owner names where the members route answers (#453); the fixture's
@@ -1037,6 +1112,9 @@ export async function readAdminScreen() {
       } catch { /* additive: a household that cannot answer keeps its label */ }
     }),
   );
+  /* Pinned under the fidelity gate exactly like the rest of this file's "ago"
+     text (#1000); a real deployment has no fixtureToday and reads the clock. */
+  const now = workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString();
   return {
     user: session?.user ?? null,
     household: workspace.households.find((one) => one.id === primary) ?? null,
@@ -1049,11 +1127,148 @@ export async function readAdminScreen() {
        so the fixture-mode screen the fidelity gate photographs is unchanged
        (#465, §15) while a real deployment shows its real mailbox. */
     relay: mailbox ? relayRowsOf(mailbox) : adminFixture.relay,
+    /* Same contract, for the Operations panel and instance strip (#1000):
+       the five invented "healthy" rows and the hard-coded version string only
+       render where the route genuinely cannot answer. */
+    services: health ? serviceRowsOf(health, now) : adminFixture.services,
+    instance: health ? instanceLineOf(health.build) : adminFixture.instance,
+    /* The answer itself, for the pocket's per-service callout (#1123): when
+       each service was last checked, last succeeded and last failed. Null
+       where the route cannot answer, and the callout then says only the row. */
+    health,
+    now,
+    operations,
+    /* Systems whose deletion is asked for and still inside its window
+       (#1001, §19): an instance administrator's workspace lists every one. */
+    recoverable: workspace.recoverableHouseholds ?? [],
     mailbox,
     contact,
+    rotation,
+    metadata,
+    recoveryBundle,
     owners,
   };
 }
+
+/**
+ * One document job as `GET /api/admin/operations` reports it (#1071): its
+ * kind only, never the document's name (owner, 2026-09-19), and a bounded
+ * failure code rather than the raw error.
+ *
+ * @typedef {object} AdminDocumentJob
+ * @property {string} id
+ * @property {"scan" | "encrypt" | "purge" | "reconcile" | "rewrap"} kind
+ * @property {"pending" | "processing" | "retry" | "completed" | "failed" | "cancelled"} status
+ * @property {number} attempts
+ * @property {?string} lastErrorCode
+ * @property {?string} nextAttemptAt
+ * @property {string} createdAt
+ * @property {string} updatedAt
+ */
+
+/**
+ * One mail test's stored last result (#1071): the server keeps it so the
+ * pill survives a reload. `result` is the same bounded word the live test
+ * answers with (`testVerdict` in ./words.js turns it into a pill).
+ *
+ * @typedef {object} MailProbeResult
+ * @property {string} result
+ * @property {string} at
+ */
+
+/**
+ * The part of the operations snapshot the administration screen reads.
+ *
+ * @typedef {object} AdminOperations
+ * @property {AdminDocumentJob[]} documentJobs      the 25 most recently touched
+ * @property {Record<string, number>} documentJobCounts
+ * @property {{ mailbox: MailProbeResult | null, relay: MailProbeResult | null }} mailProbes
+ */
+
+/**
+ * The operations snapshot (#735 port, #1071).
+ *
+ * @returns {Promise<AdminOperations>}
+ */
+export async function readAdminOperations() {
+  /** @type {{ operations?: AdminOperations }} */
+  const body = await json(await fetch("/api/admin/operations", { credentials: "same-origin" }));
+  if (!body.operations) throw new Error("no operations snapshot");
+  return body.operations;
+}
+
+/**
+ * Retry one failed document job. The server refuses anything that is no
+ * longer in the status the caller last saw (409 `operation_conflict`).
+ *
+ * @param {string} jobId
+ * @param {AdminDocumentJob["status"]} expectedStatus
+ */
+export async function retryDocumentJob(jobId, expectedStatus) {
+  return json(await csrfFetch(`/api/admin/operations/document-jobs/${encodeURIComponent(jobId)}`, {
+    body: { action: "retry", expectedStatus },
+  }));
+}
+
+/**
+ * The two live mail tests (#1071): the incoming mailbox (the IMAP verify and
+ * the relay half together) and the outbound relay. Each answers one bounded
+ * word. The server does not keep the answer.
+ *
+ * @param {"mailbox" | "relay"} which
+ * @returns {Promise<{ result: string }>}
+ */
+export async function testMail(which) {
+  return json(await csrfFetch(`/api/admin/operations/${which === "mailbox" ? "imap-test" : "smtp-test"}`));
+}
+
+/**
+ * Disable or enable a person's account (`PATCH /api/admin/users`).
+ *
+ * @param {string} userId
+ * @param {boolean} disabled
+ */
+export async function setUserDisabled(userId, disabled) {
+  return json(await csrfFetch("/api/admin/users", { method: "PATCH", body: { userId, disabled } }));
+}
+
+/**
+ * Turn a system's deletion back inside its window (#1001, §19). An instance
+ * administrator's act, drawn on administration only ("57 admin only").
+ *
+ * @param {string} householdId
+ */
+export async function restoreHousehold(householdId) {
+  return json(await csrfFetch(`/api/households/${householdId}/lifecycle`, { body: { action: "restore" } }));
+}
+
+/**
+ * Delete a system for good now, skipping the rest of its window (#1001). The
+ * typed name goes over as `confirmation` and the SERVER compares it.
+ *
+ * @param {string} householdId
+ * @param {string} confirmation
+ */
+export async function hardDeleteHousehold(householdId, confirmation) {
+  return json(await csrfFetch(`/api/households/${householdId}/lifecycle`, {
+    body: { action: "hard_delete", confirmation },
+  }));
+}
+
+/**
+ * The Tier 1 metadata section of GET /api/admin/documents/health (#941).
+ * Counts and one boolean: no table, column, row or household crosses this
+ * boundary, because per-occurrence detail belongs in the administrator
+ * diagnostics and this screen is the aggregate.
+ *
+ * @typedef {object} MetadataHealth
+ * @property {boolean} locked
+ * @property {number} lockedItems
+ * @property {number} lockedReceipts
+ * @property {number} damagedValues
+ * @property {number} damagedItems
+ * @property {number} damagedReceipts
+ */
 
 /**
  * The mail-machinery rows, as words rather than fields. Deliberately bounded:
@@ -1079,8 +1294,85 @@ function relayRowsOf(mailbox) {
   ];
 }
 
-/** @param {string} iso */
-const shortDate = (iso) =>
+/** Plain-English names for the Operations panel rows (#1000). */
+const SERVICE_NAMES = /** @type {Record<AdminServiceHealth["id"], string>} */ ({
+  database: "database",
+  "notification-worker": "notification worker",
+  "mailbox-ingestion": "mailbox ingestion",
+  "virus-scanner": "virus scanner",
+  "document-parser": "document parser",
+});
+
+/**
+ * The dot colour for each state, named for the CSS custom properties the
+ * `.svc i` rule reads via `var(--{tone})` (administration.css) — this
+ * palette's tone words, not a generic ok/warn/bad the theme has never
+ * defined. `--ink-quiet` (a muted grey, used elsewhere as inactive text) doubles
+ * as the "off" dot: deliberately disabled or unconfigured is not a fault.
+ */
+const SERVICE_TONES = /** @type {Record<AdminServiceHealth["state"], string>} */ ({
+  ok: "ok",
+  warn: "warm",
+  down: "overdue",
+  off: "ink-quiet",
+});
+
+/** Rows for the workers (notification, mailbox ingestion): last outcome, in words. */
+const WORKER_IDS = /** @type {const} */ (["notification-worker", "mailbox-ingestion"]);
+
+/** @param {AdminServiceHealth} service @param {string} now */
+function serviceDetailOf(service, now) {
+  const isWorker = /** @type {readonly string[]} */ (WORKER_IDS).includes(service.id);
+  if (service.state === "off") return "not enabled";
+  if (service.state === "down") return isWorker ? "stopped" : "unreachable";
+  if (service.state === "warn") {
+    return service.lastErrorAt ? `retrying · last error ${ago(service.lastErrorAt, now)}` : "retrying";
+  }
+  if (isWorker && service.lastSuccessAt) return `running · last success ${ago(service.lastSuccessAt, now)}`;
+  return "healthy";
+}
+
+/**
+ * The Operations panel rows, from `GET /api/admin/health` (#1000). Same tuple
+ * shape the fixture used (`[tone, name, detail]`), so the template that reads
+ * `view.services` is unchanged either way.
+ *
+ * @param {AdminHealth} health
+ * @param {string} now
+ * @returns {[string, string, string][]}
+ */
+function serviceRowsOf(health, now) {
+  return health.services.map((service) => [
+    SERVICE_TONES[service.state] ?? "ink-quiet",
+    SERVICE_NAMES[service.id] ?? service.id,
+    serviceDetailOf(service, now),
+  ]);
+}
+
+/**
+ * The instance strip, from the running build's own version stamp rather than
+ * the fixture's literal "ORBIT v1.3.0 · CHANNEL preview · REVISION fd6a7e6"
+ * (#1000). Any part the build does not know is omitted, never invented.
+ *
+ * @param {{ version: ?string, channel: ?string, revision: ?string }} build
+ * @returns {string}
+ */
+function instanceLineOf(build) {
+  const parts = [];
+  if (build.version) parts.push(`ORBIT ${build.version}`);
+  if (build.channel) parts.push(`CHANNEL ${build.channel}`);
+  if (build.revision) parts.push(`REVISION ${build.revision.slice(0, 7)}`);
+  parts.push("self-hosted — nothing leaves this machine");
+  return parts.join(" · ");
+}
+
+/**
+ * Named apart from format.js's and belt.js's own `shortDate` (#1151 W2-Q5):
+ * those take a bare date and append T00:00:00Z themselves; this one takes a
+ * document's full `availableAt` instant as it already arrives from the API.
+ * @param {string} iso  a full ISO instant, not a bare date
+ */
+const shortAddedDate = (iso) =>
   new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 
 /** @param {number} bytes */
@@ -1097,10 +1389,13 @@ const sizeLabel = (bytes) =>
  * `version`/`updatedAt`/`snoozedUntil` ride along for #424's writes.
  *
  * @param {string} id  an item id, or (#434) a mail-in receipt id
+ * @param {Workspace} [workspace]  a workspace the caller already holds
+ *   (#1151 W2-Q4: readBelt reads one for itself before falling back to
+ *   this for a mail-in suggestion, and must not read a second one)
  * @returns {Promise<?ItemView>}
  */
-export async function readItem(id) {
-  const workspace = await readWorkspace();
+export async function readItem(id, workspace) {
+  workspace ??= await readWorkspace();
   for (const household of workspace.households) {
     const item = (household.items ?? []).find((one) => one.id === id);
     if (!item) continue;
@@ -1118,7 +1413,7 @@ export async function readItem(id) {
       section: sections.get(item.sectionId) ?? null,
       documents: (body.documents ?? []).map((doc) => ({
         name: doc.displayName,
-        meta: `added ${shortDate(doc.availableAt)} · ${sizeLabel(doc.sizeBytes)}`,
+        meta: `added ${shortAddedDate(doc.availableAt)} · ${sizeLabel(doc.sizeBytes)}`,
       })),
     };
   }
@@ -1132,9 +1427,14 @@ export async function readItem(id) {
       return {
         ...suggestion,
         suggestion: true,
+        /* #941: the amend-then-accept card has to know when Orbit cannot read
+           the message it is offering to amend. */
+        metadataStatus: receipt?.metadataStatus ?? null,
         proposal: receipt?.proposal ?? {},
         attachmentCount: receipt?.attachmentCount ?? 0,
-        today: new Date().toISOString().slice(0, 10),
+        /* The workspace's date, pinned under fixtures: the pocket's review
+           card counts the days to burn-up from it (round 3 §4). */
+        today: todayOf(workspace),
       };
     }
   } catch {
@@ -1143,9 +1443,34 @@ export async function readItem(id) {
   return null;
 }
 
-/** Operational state and recent deliveries. Live source: GET /api/admin/operations. */
-export async function readOperations() {
-  return operationsFixture;
+/**
+ * One item's papers, for the pocket home's item sheet and search (#1119,
+ * #1057): the per-item documents route readItem and readBelt already read,
+ * with each paper's id kept so a row can say which one it means. The
+ * household id comes from the home view the caller already holds, which the
+ * route's own membership check still guards.
+ *
+ * @param {string} householdId
+ * @param {string} itemId
+ * @returns {Promise<{ id: string, itemId: string, name: string, meta: string }[]>}
+ */
+export async function readItemDocuments(householdId, itemId) {
+  /** @type {{ documents?: DocumentSummary[] }} */
+  const body = await json(
+    await fetch(`/api/households/${encodeURIComponent(householdId)}/items/${encodeURIComponent(itemId)}/documents`, {
+      credentials: "same-origin",
+    }),
+  );
+  return (body.documents ?? []).map((doc) => ({
+    id: doc.id,
+    itemId,
+    name: doc.displayName,
+    meta: [
+      sizeLabel(doc.sizeBytes),
+      `added ${shortAddedDate(doc.availableAt)}`,
+      doc.lifecycle === "pending_deletion" ? "removed" : null,
+    ].filter(Boolean).join(" · "),
+  }));
 }
 
 /**
@@ -1445,6 +1770,18 @@ export async function readSessions() {
 }
 
 /**
+ * "Sent to you lately" (#1003): the signed-in user's own last five attempted
+ * reminder deliveries, newest first — `GET /api/settings/sent`.
+ *
+ * @returns {Promise<import('$lib/data/fixtures/settings.js').SentRow[]>}
+ */
+export async function readSentLately() {
+  /** @type {{ sent?: import('$lib/data/fixtures/settings.js').SentRow[] }} */
+  const body = await json(await fetch("/api/settings/sent", { credentials: "same-origin" }));
+  return body.sent ?? [];
+}
+
+/**
  * Signs out of exactly one device (#482) — the single-session counterpart to
  * `signOutEverywhere`. If the ended session is this browser's own, the
  * server has already cleared the cookie by the time this resolves, so a
@@ -1509,6 +1846,246 @@ export async function signOut() {
 }
 
 /* ---------------------------------------------------------------------------
+ * SIGN-IN METHODS AND ADMINISTRATOR-CREATED LOCAL USERS (#915, M7).
+ *
+ * ADR-0023 gives one account two optional ways in — a password and a provider
+ * identity — and re-challenges the reader before every change to either. The
+ * routes below are already built (slices 8 and 10); this is the seam the helm's
+ * "Sign-in methods" block and administration's "add a local user" row call.
+ *
+ * THE CHALLENGE TRAVELS IN THE BODY. A reader who has a password answers with
+ * `currentPassword` on the very request making the change; a reader who has
+ * only a provider identity has to come back from a step-up first, and the
+ * proof of that is an HTTP-only cookie the browser carries on its own. So
+ * every function here takes an optional `currentPassword` and nothing else:
+ * there is no second "prove it" round trip to sequence, and no proof value
+ * this module could hold even if it wanted to.
+ */
+
+/**
+ * The caller's own sign-in methods — GET /api/auth/methods (ADR-0023 §6).
+ *
+ * @typedef {object} SignInMethods
+ * @property {{ set: boolean, changedAt: ?string }} local
+ * @property {{ id: string, issuer: string, linkedAt: string, lastLoginAt: ?string }[]} oidc
+ */
+
+/**
+ * @returns {Promise<SignInMethods>}
+ */
+export async function readSignInMethods() {
+  /** @type {Partial<SignInMethods>} */
+  const body = await json(await fetch("/api/auth/methods", { credentials: "same-origin" }));
+  return { local: body.local ?? { set: false, changedAt: null }, oidc: body.oidc ?? [] };
+}
+
+/**
+ * Whether this instance offers a provider at all — GET /api/auth/availability.
+ *
+ * The helm needs it to decide whether "link your identity provider" is an
+ * offer worth making: `ORBIT_AUTH_OIDC=false` is a whole instance with no
+ * provider, and an action pointing at one would be a dead end rather than a
+ * choice. Unauthenticated by design (the sign-in door reads the same answer),
+ * so this asks for no session and treats an unreadable answer as "no offer" —
+ * the direction that shows the reader one fewer control rather than one that
+ * cannot work.
+ *
+ * Since #1033 it carries one more instance-wide fact, for the same reason and
+ * read the same way: whether a password sign-in here is finished by an emailed
+ * approval (ADR-0027 §2).
+ *
+ * @returns {Promise<{ local: boolean, oidc: boolean, secondFactor: boolean }>}
+ */
+export async function readAuthMethodsOffered() {
+  try {
+    /** @type {{ methods?: { local?: boolean, oidc?: boolean, secondFactor?: boolean } }} */
+    const body = await json(await fetch("/api/auth/availability", { credentials: "same-origin" }));
+    return {
+      local: body.methods?.local ?? true,
+      oidc: body.methods?.oidc ?? false,
+      /* #1033: whether a password sign-in here is finished by an emailed
+         approval. False on a failed read, so a hiccup understates what the
+         instance does rather than promising a factor it cannot apply. */
+      secondFactor: body.methods?.secondFactor ?? false,
+    };
+  } catch {
+    return { local: true, oidc: false, secondFactor: false };
+  }
+}
+
+/**
+ * Sets a first password, or replaces the one the caller has —
+ * POST /api/auth/local/password (ADR-0023 §5, §7).
+ *
+ * Replacing one revokes every session including this browser's, and the route
+ * re-issues this browser's own in the same response, so a caller does NOT have
+ * to sign in again. The cached session is dropped all the same: the CSRF token
+ * is derived from the session token, and the one held here belongs to the
+ * session that just died.
+ *
+ * @param {{ password: string, currentPassword?: string }} change
+ * @returns {Promise<{ changed: boolean, sessionsRevoked: number }>}
+ */
+export async function writeLocalPassword({ password, currentPassword }) {
+  /** @type {{ changed?: boolean, sessionsRevoked?: number }} */
+  const body = await json(
+    await csrfFetch("/api/auth/local/password", {
+      body: currentPassword ? { password, currentPassword } : { password },
+    }),
+  );
+  sessionPromise = null;
+  return { changed: body.changed ?? false, sessionsRevoked: body.sessionsRevoked ?? 0 };
+}
+
+/**
+ * Removes the caller's password — DELETE /api/auth/methods/local.
+ *
+ * Refused with `link_last_method` unless a usable provider identity survives
+ * it, which is the rule that keeps a reader from removing their way back in.
+ *
+ * @param {{ currentPassword?: string }} [challenge]
+ */
+export async function removeLocalPassword({ currentPassword } = {}) {
+  await json(
+    await csrfFetch("/api/auth/methods/local", {
+      method: "DELETE",
+      body: currentPassword ? { currentPassword } : {},
+    }),
+  );
+}
+
+/**
+ * Removes one linked provider identity — DELETE /api/auth/methods/oidc/{id}.
+ *
+ * @param {string} identityId
+ * @param {{ currentPassword?: string }} [challenge]
+ */
+export async function unlinkProviderIdentity(identityId, { currentPassword } = {}) {
+  await json(
+    await csrfFetch(`/api/auth/methods/oidc/${encodeURIComponent(identityId)}`, {
+      method: "DELETE",
+      body: currentPassword ? { currentPassword } : {},
+    }),
+  );
+}
+
+/**
+ * Hands the browser to the identity provider for a link or a step-up.
+ *
+ * KNOWN LIMIT, AND THE SHAPE OF ITS FIX (#915). Both routes answer a bare 302
+ * to the provider, and both require the per-session CSRF header — which is a
+ * pair a browser cannot complete. A header can only be set by `fetch`, and a
+ * `fetch` cannot read a cross-origin redirect: `redirect: "manual"` gives an
+ * opaque response with no Location, and `redirect: "follow"` walks into a
+ * provider that answers no CORS headers. A form post could navigate but
+ * cannot carry the header.
+ *
+ * `POST /api/auth/logout` already solves exactly this: asked with
+ * `Accept: application/json` it answers the provider's URL as a string instead
+ * of redirecting, and `signOut` above navigates to it. This function asks
+ * these two routes the same question and follows the same answer, so the day
+ * either grows that branch this seam needs no change. Until then an OIDC-only
+ * reader gets the bounded refusal below rather than a control that silently
+ * does nothing.
+ *
+ * @param {string} path
+ * @param {Record<string, unknown>} body
+ * @returns {Promise<never>}  navigates away, or throws
+ */
+async function handToProvider(path, body) {
+  const { csrfToken } = await readSession();
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    redirect: "manual",
+    headers: { "content-type": "application/json", "x-csrf-token": csrfToken, accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (response.ok) {
+    /** @type {?{ location?: string }} */
+    const answer = await response.json().catch(() => null);
+    if (answer?.location) {
+      window.location.assign(answer.location);
+      /* The navigation is under way; nothing after this runs in this page. */
+      return await new Promise(() => {});
+    }
+  }
+  /* A refusal — a stale CSRF token, a provider that is not configured, a
+     challenge that did not hold — comes back as the shared envelope, so let
+     `json` raise it in the server's own words. */
+  if (!response.ok && response.type !== "opaqueredirect") return json(response);
+  throw new WorkspaceError(
+    "Orbit could not hand you to your identity provider",
+    { code: "provider_handover_unreadable" },
+  );
+}
+
+/**
+ * Starts an OIDC step-up — POST /api/auth/step-up/start (ADR-0023 §5). The
+ * challenge for a reader with no password: the provider authenticates them
+ * again, and the browser comes back to `returnTo` carrying the proof.
+ *
+ * @param {{ intent: string, returnTo: string }} request
+ */
+export function startStepUp({ intent, returnTo }) {
+  return handToProvider("/api/auth/step-up/start", { intent, returnTo });
+}
+
+/**
+ * Starts linking a provider identity — POST /api/auth/link/oidc/start
+ * (ADR-0023 §6). Challenged like every other change to a sign-in method.
+ *
+ * @param {{ returnTo: string, currentPassword?: string }} request
+ */
+export function startProviderLink({ returnTo, currentPassword }) {
+  return handToProvider(
+    "/api/auth/link/oidc/start",
+    currentPassword ? { returnTo, currentPassword } : { returnTo },
+  );
+}
+
+/**
+ * What an administrator is told after Orbit tries to mail a setup link
+ * (ADR-0023 §3). Never the link and never the token: where it went, when it
+ * lapses, and one bounded word if it did not go.
+ *
+ * @typedef {object} SetupLinkDelivery
+ * @property {string} sentTo
+ * @property {string} expiresAt   ISO-8601
+ * @property {?string} sendError  smtp_unconfigured | smtp_unavailable | smtp_rejected | unknown
+ */
+
+/**
+ * Creates a local user and mails them their setup link —
+ * POST /api/admin/users (ADR-0023 §3).
+ *
+ * The account survives a failed send, which is why `sendError` is an answer
+ * rather than a throw: the administrator sends again from the person's row
+ * instead of losing the person they just typed in.
+ *
+ * @param {{ email: string, displayName: string, expiresInDays?: number, currentPassword?: string }} draft
+ * @returns {Promise<SetupLinkDelivery & { user: { id: string, displayName: string, email: string } }>}
+ */
+export async function createLocalUser(draft) {
+  return json(await csrfFetch("/api/admin/users", { body: draft }));
+}
+
+/**
+ * Sends a fresh setup link to one existing user —
+ * POST /api/admin/users/{id}/setup-link (ADR-0023 §3). Issuing it kills the
+ * earlier link, so this is also how a used or lapsed one is replaced.
+ *
+ * @param {string} userId
+ * @param {{ expiresInDays?: number, currentPassword?: string }} [options]
+ * @returns {Promise<SetupLinkDelivery>}
+ */
+export async function sendSetupLink(userId, options = {}) {
+  return json(
+    await csrfFetch(`/api/admin/users/${encodeURIComponent(userId)}/setup-link`, { body: options }),
+  );
+}
+
+/* ---------------------------------------------------------------------------
  * Household management (#410, §15) — ONE system, seen from inside.
  *
  * Every route below already exists in the engine; nothing here is new server
@@ -1539,7 +2116,7 @@ export async function signOut() {
  * @param {string} householdId
  */
 export async function readHouseholdScreen(householdId) {
-  const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
+  const [workspace, session] = await Promise.all([readWorkspace(), readSession().catch(() => null)]);
   const [roster, joinRequests, invitations] = await Promise.all([
     /** @type {Promise<Partial<Roster>>} */ (
       json(await fetch(`/api/households/${householdId}/members`, { credentials: "same-origin" }))
@@ -1745,39 +2322,52 @@ export async function withdrawInvitation(householdId, invitationId) {
  * request out of the URL, so an unknown id is a 404 and not a probe (#451).
  *
  * Documents come from the per-item route, fanned out over the items that
- * report carrying any — readDocumentsScreen's pattern, and additive in the
+ * report carrying any — the pattern the retired archive used, and additive in the
  * same way: an item whose papers cannot be read loses its papers, not the
  * screen. They are read for the whole household rather than for the centred
  * item alone because every item's rock wears CON-1's belt ellipse when it has
  * papers, and because centring a neighbour must not go back to the server.
  *
- * #434 rides along: an id that is a mail-in receipt rather than an item is
- * still the amend-then-accept view, which has no seat in the band — a
- * suggestion is not in the manifest until it is accepted into it.
+ * #434, and since #1145 the owner's merge of the suggestion screen into the
+ * belt: an id that is a mail-in receipt rather than an item is the SAME
+ * belt -- the household the receipt files into (its own, else the primary),
+ * with the suggestion handed alongside so beltManifestOf seats it, hollow, at
+ * the date the relay read. It is a visitor: a suggestion is not in the
+ * manifest until it is accepted into it, so no other arrival ever seats one.
+ * `households` and `primary` ride along for the phone's review sheet, whose
+ * form offers the sections of the household the item files into.
  *
  * @param {string} id  the centred item, or (#434) a mail-in receipt
  */
 export async function readBelt(id) {
-  const [workspace, session] = await Promise.all([readWorkspace(), readSession()]);
+  const [workspace, session] = await Promise.all([readWorkspace(), readSession().catch(() => null)]);
   const today = todayOf(workspace);
-  const household = workspace.households.find((one) =>
+  const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
+  let household = workspace.households.find((one) =>
     (one.items ?? []).some((item) => item.id === id),
   );
+  /** @type {?ItemView} */
+  let suggestion = null;
   if (!household) {
-    const suggestion = await readItem(id);
-    return suggestion?.suggestion ? { kind: "suggestion", item: suggestion } : null;
+    const found = await readItem(id, workspace);
+    if (!found?.suggestion) return null;
+    suggestion = found;
+    household = workspace.households.find((one) => one.id === (found.householdId ?? primary))
+      ?? workspace.households[0];
   }
 
   /** @type {Record<string, DocumentSummary[]>} */
   const documentsByItem = {};
+  const items = household?.items ?? [];
+  const householdId = household?.id ?? "";
   await Promise.all(
-    (household.items ?? [])
+    items
       .filter((item) => (item.documentCount ?? 0) > 0)
       .map(async (item) => {
         try {
           /** @type {{ documents?: DocumentSummary[] }} */
           const body = await json(
-            await fetch(`/api/households/${household.id}/items/${item.id}/documents`, {
+            await fetch(`/api/households/${householdId}/items/${item.id}/documents`, {
               credentials: "same-origin",
             }),
           );
@@ -1793,12 +2383,97 @@ export async function readBelt(id) {
     selectedId: id,
     today,
     user: session?.user ?? null,
-    household: {
-      ...household,
-      /* The command builders write against the raw item plus the household it
-         proved membership of (#455, commands.js base()). */
-      items: (household.items ?? []).map((item) => ({ ...item, householdId: household.id })),
-    },
+    household: household
+      ? {
+          ...household,
+          /* The command builders write against the raw item plus the household it
+             proved membership of (#455, commands.js base()). */
+          items: items.map((item) => ({ ...item, householdId })),
+        }
+      : null,
+    suggestion,
+    households: workspace.households,
+    primary,
     documentsByItem,
   };
+}
+
+/**
+ * Undoes a document's soft delete (#1054/#1088): `POST
+ * /api/documents/{id}/restore`, the belt's own honest-state foot action for a
+ * removed file. The caller re-reads the belt afterwards, same as every other
+ * command here — a restored document's lifecycle has moved, so the card it
+ * rides in has to be drawn again.
+ *
+ * @param {string} documentId
+ * @returns {Promise<{ document: import('./workspace.js').DocumentSummary }>}
+ */
+export async function restoreDocument(documentId) {
+  return json(await csrfFetch(`/api/documents/${encodeURIComponent(documentId)}/restore`));
+}
+
+/**
+ * Removes a document (#1059's reader, owner-decisions.md §18): `DELETE
+ * /api/documents/{id}`, a soft delete the server keeps on the clock, so
+ * restoreDocument above puts it back. The caller re-reads the belt.
+ *
+ * @param {string} documentId
+ * @returns {Promise<{ document: import('./workspace.js').DocumentSummary }>}
+ */
+export async function removeDocument(documentId) {
+  return json(await csrfFetch(`/api/documents/${encodeURIComponent(documentId)}`, { method: "DELETE" }));
+}
+
+/* ── the portable archive (#1002, #1122) ─────────────────────────────────── */
+
+/**
+ * @typedef {{ id: string, expiresAt: string, includesDocuments: boolean, downloadUrl: string }} WrittenArchive
+ * @typedef {{ householdName: string, sections: number, items: number, documents: number, conflicts: { id: string, title: string }[], documentsExcluded: boolean }} ArchivePreview
+ */
+
+/**
+ * Write this household into an encrypted archive, kept on the server for the
+ * owner to download (POST /api/households/{id}/portable-archives). Synchronous:
+ * the answer arrives once the file is written. Documents travel with it, as the
+ * ratified card says (#1002 round 2).
+ *
+ * `currentPassword` is the recent-authentication proof (§17) for a reader who
+ * has a password. The route does not ask for one today; it is sent so the
+ * phone's challenge works the day the route does (#1122).
+ * @param {string} householdId
+ * @param {{ passphrase: string, currentPassword?: string }} request
+ * @returns {Promise<WrittenArchive>}
+ */
+export async function writePortableArchive(householdId, { passphrase, currentPassword }) {
+  const body = await json(await csrfFetch(`/api/households/${householdId}/portable-archives`, {
+    body: { passphrase, includeDocuments: true, ...(currentPassword ? { currentPassword } : {}) },
+  }));
+  return body.archive;
+}
+
+/**
+ * What an archive would bring in, without writing anything
+ * (POST /api/portable-archives/preview). `archive` is the chosen file, parsed.
+ * @param {string} householdId
+ * @param {{ archive: unknown, passphrase: string, currentPassword?: string }} request
+ * @returns {Promise<ArchivePreview>}
+ */
+export async function previewPortableArchive(householdId, { archive, passphrase, currentPassword }) {
+  const body = await json(await csrfFetch("/api/portable-archives/preview", {
+    body: { householdId, archive, passphrase, ...(currentPassword ? { currentPassword } : {}) },
+  }));
+  return body.preview;
+}
+
+/**
+ * Bring an archive in (POST /api/portable-archives/import). Every entry the
+ * preview found already here is named in `skip`, so it stays out.
+ * @param {string} householdId
+ * @param {{ archive: unknown, passphrase: string, skip: string[], currentPassword?: string }} request
+ * @returns {Promise<{ importedItems: number, documentsExcluded: number }>}
+ */
+export async function importPortableArchive(householdId, { archive, passphrase, skip, currentPassword }) {
+  return json(await csrfFetch("/api/portable-archives/import", {
+    body: { householdId, archive, passphrase, conflictItemIds: skip, ...(currentPassword ? { currentPassword } : {}) },
+  }));
 }

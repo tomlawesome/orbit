@@ -50,6 +50,8 @@ docker compose --env-file .env-orbit -f docker-compose.yml -f compose/docker-com
 docker compose --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.acceptance.yml config --quiet
 docker compose --env-file .env-orbit -f docker-compose.yml -f docker-compose.mail.yml config --quiet
 docker compose --env-file .env-orbit --profile processing --profile ai config --quiet
+docker compose --env-file .env-orbit \
+  --profile processing --profile ai --profile ai-model-pull config --quiet
 
 # Optional services must be selectable by configuration alone, so
 # that an operator never needs a different compose command. This
@@ -65,10 +67,17 @@ docker compose --env-file .env-orbit --profile processing --profile ai config --
 selection_env="$(mktemp)"
 cp .env-orbit "${selection_env}"
 COMPOSE_PROFILES= docker compose --env-file "${selection_env}" config --format json \
-  | jq --exit-status '(.services | has("orbit-ollama") or has("orbit-tika")) | not' > /dev/null
+  | jq --exit-status '(.services | has("orbit-ollama") or has("orbit-tika") or has("orbit-ollama-model-pull")) | not' > /dev/null
 printf 'COMPOSE_PROFILES=processing,ai\n' >> "${selection_env}"
 docker compose --env-file "${selection_env}" config --format json \
-  | jq --exit-status '.services | has("orbit-ollama") and has("orbit-tika")' > /dev/null
+  | jq --exit-status '
+      .services
+      | has("orbit-ollama") and has("orbit-tika")
+      # The model pull helper is the one thing in this stack with egress, so
+      # selecting the ai profile must never bring it along: an operator asks
+      # for a model pull by name or it does not happen (ADR-0025).
+      and (has("orbit-ollama-model-pull") | not)
+    ' > /dev/null
 
 processing_config="$(docker compose --env-file .env-orbit \
   --profile processing config --format json)"
@@ -87,3 +96,41 @@ jq --exit-status '
   and (.services["orbit-clamav"].networks | keys == ["orbit-document-processing", "orbit-malware-signature-updates"])
   and ((.services["orbit-clamav"].networks | has("default")) | not)
 ' <<< "${processing_config}" > /dev/null
+
+# ADR-0025 answers "what stops the model server becoming a cloud extraction
+# path" with two structural facts. One is that Orbit's endpoint is a
+# compile-time constant, asserted in the application's own tests. This is the
+# other: the container holding hostile document text has no route out. It fails
+# the moment orbit-ollama gains the default network, a second network or a
+# published port -- which is the point, because a comment saying "no egress"
+# would not.
+ai_config="$(docker compose --env-file .env-orbit --profile ai config --format json)"
+jq --exit-status '
+  .networks["orbit-document-processing"].internal == true
+  and (.services["orbit-ollama"].networks | keys == ["orbit-document-processing"])
+  and ((.services["orbit-ollama"].ports // []) | length == 0)
+  # Defence in depth behind the network, not a substitute for it.
+  and .services["orbit-ollama"].environment.OLLAMA_NO_CLOUD == "1"
+  # Starting the ai profile must not start anything that can reach the internet.
+  and ((.services | has("orbit-ollama-model-pull")) | not)
+' <<< "${ai_config}" > /dev/null
+
+# Egress-free means the server cannot fetch its own model, so the deliberate
+# pull helper is what gets one in: same image and same volume as the server, on
+# the network that does have egress, one-shot, and reachable only by naming it.
+model_pull_config="$(docker compose --env-file .env-orbit \
+  --profile ai --profile ai-model-pull config --format json)"
+jq --exit-status '
+  .services["orbit-ollama-model-pull"].image == .services["orbit-ollama"].image
+  and (.services["orbit-ollama-model-pull"].networks | keys == ["default"])
+  and .services["orbit-ollama-model-pull"].restart == "no"
+  and (.services["orbit-ollama-model-pull"].volumes
+       | any(.type == "volume"
+             and .source == "orbit-ollama-data"
+             and .target == "/root/.ollama"))
+  # It exists to fetch model data and nothing else: no host port, no
+  # application secrets, no document storage.
+  and ((.services["orbit-ollama-model-pull"].ports // []) | length == 0)
+  and ((.services["orbit-ollama-model-pull"].secrets // []) | length == 0)
+  and ((.services["orbit-ollama-model-pull"].volumes | length) == 1)
+' <<< "${model_pull_config}" > /dev/null

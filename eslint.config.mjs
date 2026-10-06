@@ -40,5 +40,19 @@ export default defineConfig([
   // output. Linting it reports another branch's errors as this one's (#769)
   ".claude/worktrees/**",
   // web/ build artefacts: gitignored output, not source (#419)
-  "web/build/**", "web/.svelte-kit/**", "web/.preview/**", "web/test-results/**", "coverage/**", "drizzle/**", "dist/**"]),
+  "web/build/**", "web/.svelte-kit/**", "web/.preview/**", "web/test-results/**", "coverage/**", "drizzle/**", "dist/**",
+  // Scratch prototypes (#995). AGENTS.md and the extraction handoffs send
+  // agents here to prototype, and tmp/ is gitignored, so the files are both
+  // expected to exist and expected to rot — they import modules that have
+  // since been refactored. Checking them meant that following the
+  // instructions broke the fast suite for the next session, which then read
+  // a failure naming a scratch file and had to work out that nothing was
+  // actually wrong. Nothing in tmp/ is built, shipped or imported by
+  // anything that is.
+  "tmp/**",
+  // Design rounds (#1177): the render helpers beside each round's artwork
+  // are one-off scripts that made the PNGs and panes the owner reviewed.
+  // They are records of how the pictures were made, not shipped or imported
+  // code, and they use require() like any throwaway Node script.
+  "design/**/*.cjs"]),
 ]);

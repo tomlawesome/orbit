@@ -19,9 +19,9 @@ boundary, MEDIUM = deployment correctness, LOW = UX).
   the fixed safe/reversible action set only: fix-permissions,
   restore-transaction, restart-services; stage two/dangerous actions remain
   unimplemented) was added 2026-08-13.
-- **Totals:** 369 guarantees — 212 HIGH, 124 MEDIUM, 33 LOW.
-  Install/configuration family: 206 (117 HIGH). Backup/recovery/deploy
-  family: 163 (95 HIGH).
+- **Totals:** 382 guarantees — 219 HIGH, 129 MEDIUM, 34 LOW.
+  Install/configuration family: 218 (123 HIGH). Backup/recovery/deploy
+  family: 164 (96 HIGH).
 - **Maintenance:** a change to an operational script that adds, removes, or
   moves a guarantee must update this catalogue in the same pull request;
   harness scenarios cite entries here. Line numbers drift — treat the
@@ -81,13 +81,14 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 16. If no explicit migration target is supplied, the source file must already carry valid schema + applied-version provenance, else migration refuses with `configuration_provenance_required` — migration never invents provenance data. — configuration.sh:194-196 — category: refusal/fail-closed — criticality: HIGH
 17. If the file already declares a `COMPOSE_PROJECT_NAME` and a different target project name is supplied, migration refuses with `configuration_project_mismatch` rather than silently renaming the deployment's Compose project (which would orphan existing containers/volumes). — configuration.sh:202-205 — category: refusal/fail-closed — criticality: HIGH
 18. Migration is idempotent: if image, version, digest, and project already equal the desired values, `migrate_file` reports "already current" and returns without writing anything. — configuration.sh:212-218 — category: idempotency — criticality: MEDIUM
-19. Before mutating, a rollback backup (`<file>.orbit-config.rollback`) is written; if a backup already exists at that path (file or symlink), migration refuses (`configuration_migration`) rather than overwriting a possibly-still-needed prior rollback point. — configuration.sh:229-231 — category: transactional/rollback — criticality: HIGH
+19. Before mutating, a rollback backup (`<file>.orbit-config.rollback`) is written. If a backup already exists at that path, migration refuses (`configuration_migration`) unless it is byte-identical to the current file — the only way that can be true is a prior `--migrate` run interrupted after writing this backup but before ever changing the file, so there is nothing to protect and the retry proceeds instead of refusing permanently; a backup that differs (a real rollback point from a different migration) or is a symlink still refuses. — configuration.sh:258-275 — category: transactional/rollback — criticality: HIGH
 20. The rollback backup and the in-progress replacement file are created under `umask 077` and explicitly `chmod 600`, so a secret-bearing config file is never briefly world/group-readable during migration. — configuration.sh:232-234,236-237,265 — category: permissions/ownership — criticality: HIGH
 21. The new configuration content is assembled entirely in a `mktemp` temp file and only `mv -f`'d onto the real file after every write and the final `chmod 600` succeed; any write failure deletes the temp file and fails closed without touching the original. — configuration.sh:236-264 — category: transactional/rollback — criticality: HIGH
 22. If the final atomic rename itself fails, the temp file is discarded and (outside of `--transaction` mode) the just-taken backup is copied back over the target — migration never leaves the deployment's `.env-orbit` missing or half-written after a failed rename. — configuration.sh:266-270 — category: transactional/rollback — criticality: HIGH
 23. Migration preserves the source file's original line-ending convention (LF vs CRLF, detected by presence of `\r`) rather than normalising it. — configuration.sh:238-239 — category: idempotency — criticality: LOW
 24. `--transaction` mode (used when an outer caller such as install.sh already owns a rollback point) is only accepted together with `--migrate`; requesting it with any other action fails closed (`configuration_migration`), preventing the flag from being silently ignored. — configuration.sh:293 — category: input-validation — criticality: MEDIUM
 25. `parse_file` distinguishes three outcomes for callers: fully valid current schema (0), valid-but-legacy/unversioned data needing migration (2, reported as `safely_migratable ORBIT_CONFIG_SCHEMA_VERSION`), or hard failure (any other exit) — callers (e.g. configure.sh's preflight) can require an explicit migration step rather than silently treating an old file as current. — configuration.sh:150-157,168-174,296-306 — category: provenance/immutability — criticality: MEDIUM
+26. A direct secret value and its `_FILE` counterpart (`SESSION_SECRET`, `DOCUMENT_KEK`, `DOCUMENT_KEK_NEXT`, `POSTGRES_PASSWORD`, `OIDC_CLIENT_SECRET`, `VAPID_PRIVATE_KEY`, `SMTP_PASSWORD`, `DATABASE_URL`, `SMTP_URL`) set together fail closed as `configuration_secret_conflict`, matching src/lib/config-contract.ts's own mutually-exclusive pairs — `--check`/`--preflight` never certifies a file the app refuses at runtime (#1151 O1-Q1). — configuration.sh:168-174 — category: input-validation — criticality: MEDIUM
 
 ## configure.sh (operator-run `--check`/`--init`/`--set-oidc-secret`/`--set-deployment-profile` entry point; also runs with no args to finish bootstrapping secrets)
 
@@ -167,7 +168,7 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 9. Rollback restores every backed-up path via a same-filesystem `mv` from a `cp -a` backup (preserving content, permissions, and directory-entry structure exactly, not just the files the installer's own logic is aware of) rather than reconstructing state field-by-field. — install.sh:342-344,353-363 — category: transactional/rollback — criticality: HIGH
 10. Rollback only removes directories that this specific invocation created (tracked in `created_directories`); pre-existing directories are left alone even if they end up empty after restoration, so a failed install never deletes an operator's pre-existing (even if now-empty) directory structure. — install.sh:365-383 — category: transactional/rollback — criticality: MEDIUM
 11. The `EXIT` trap (`cleanup`) rolls back an uncommitted file transaction and removes the staging directory on every exit path; if rollback itself fails partway, cleanup deliberately preserves the staging directory and reports its path instead of deleting potential recovery evidence, and exits non-zero to make the incomplete rollback visible rather than silently swallowing it. — install.sh:388-408 — category: recovery — criticality: HIGH
-12. `derive_compose_project_name` requires the Compose project name — whether read from an existing `.env-orbit`, supplied via `COMPOSE_PROJECT_NAME`, or derived from the working-directory name — to match `^[a-z0-9][a-z0-9_-]*$`, and if both a configured file value and an explicitly requested value are present they must match exactly, or the installer refuses to start Compose at all. — install.sh:431-462 — category: input-validation — criticality: HIGH
+12. `derive_compose_project_name` requires the Compose project name — whether read from an existing `.env-orbit`, supplied via `COMPOSE_PROJECT_NAME`, read from `docker-compose.yml`'s own top-level `name:`, or derived from the working-directory name — to match `^[a-z0-9][a-z0-9_-]*$`, and if both a configured file value and an explicitly requested value are present they must match exactly, or the installer refuses to start Compose at all. A compose file declaring an unusable `name:` is skipped rather than fatal, and the working-directory fallback below it still fails closed. — install.sh:479-554 — category: input-validation — criticality: HIGH
 13. `volume_belongs_to_deployment` proves ownership of a pre-existing database volume with multiple independent checks before trusting it: exact Compose project/volume-name label match, exactly one `orbit-db` container attached to the volume in that project, exactly one `orbit-app` container in that project, and that container's image must be digest-pinned and match the expected (previously recorded) image exactly — any ambiguity, extra container, mismatched image, or malformed `docker` output is treated as "not proven" (fails closed) rather than assumed safe. — install.sh:464-520 — category: provenance/immutability — criticality: HIGH
 14. All `docker` command output consumed for volume/container identity checks is bounds-checked (length caps, single-line/no-embedded-newline checks, strict field regexes) before being trusted, guarding against a compromised or unexpected Docker daemon response being parsed as valid identity data. — install.sh:474-519,538-546 — category: input-validation — criticality: MEDIUM
 15. `verify_database_volume_safety` refuses to proceed if an existing Orbit database volume is found but the target was otherwise empty (no recognizable prior deployment) — an empty-looking target directory is never allowed to silently attach to somebody else's pre-existing database volume. — install.sh:552-554 — category: refusal/fail-closed — criticality: HIGH
@@ -179,7 +180,7 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 21. The resolved `install` action requires an empty/safely-pre-provisioned target or fails ("use Update for a recognized deployment"); the resolved `update` action requires a non-empty, recognized existing deployment or fails ("Update requires a recognized existing Orbit deployment") — install can never silently overwrite an existing deployment, and update can never silently bootstrap a fresh one. — install.sh:800-812 — category: refusal/fail-closed — criticality: HIGH
 22. The `repair` action never runs from this installer: it emits a `blocked repair-unavailable` status, signposts `bash scripts/repair.sh --check`, and states "No deployment files or services were changed" before returning — it never attempts a partial/best-effort repair, and never dispatches into repair, because the two scripts' exit-code vocabularies collide (#533, docs/engine-events.md "Repair stream"). — install.sh:830-847 — category: refusal/fail-closed — criticality: MEDIUM
 23. `current_deployment_profile` requires the existing `COMPOSE_PROFILES`/`TIKA_URL`/`OLLAMA_MODEL` triple to exactly match one of exactly four known-good combinations (standard/processing/ai/full); any other combination is treated as unsupported/ambiguous, and `resolve_installer_action` fails closed ("unsupported or ambiguous") rather than guessing which profile is active. — install.sh:632-660,826-829 — category: refusal/fail-closed — criticality: MEDIUM
-24. In a non-interactive context (no controlling terminal) with required configuration fields still missing, `prepare_configuration` refuses to proceed and prints explicit remediation guidance (`print_noninteractive_configuration_guidance`) rather than attempting to guess, auto-fill, or silently skip required secrets/URLs. — install.sh:879-885,993-996 — category: refusal/fail-closed — criticality: HIGH
+24. In a non-interactive context (no controlling terminal) with required configuration fields still missing, `prepare_configuration` refuses to proceed and prints explicit remediation guidance (`print_noninteractive_configuration_guidance`) rather than attempting to guess, auto-fill, or silently skip required secrets/URLs. The guidance is sign-in-mode aware (#922): the client secret file and `--set-oidc-secret` are named as needed only when `ORBIT_AUTH_OIDC=true`, so a local-only operator is never told to supply a secret the deployment does not use. On a controlling terminal, the same path passes the existing deployment's `ORBIT_AUTH_OIDC` to `configure.sh --init` as `ORBIT_CONFIGURE_AUTH_MODE` (#918), so a local-only deployment missing only `APP_URL` is asked for `APP_URL` alone and never for the OIDC issuer, client id or secret. — install.sh:917-923,1017-1053 — category: refusal/fail-closed — criticality: HIGH
 25. The OIDC discovery HTTP request is pinned to `--proto '=https' --proto-redir '=https' --tlsv1.2`, with a 5s connect / 10s total timeout and a `--max-filesize` cap — plaintext HTTP and protocol-downgrade-on-redirect are both structurally impossible, and both time and response size are bounded. — install.sh:899-905 — category: input-validation — criticality: HIGH
 26. The downloaded OIDC discovery document is only trusted after independently confirming (defense in depth beyond curl's own `--max-filesize`) that it landed as a regular, non-symlink file, forcing its permissions to 600, and re-checking its on-disk size against the same byte cap. — install.sh:957-963 — category: input-validation — criticality: MEDIUM
 27. The OIDC discovery JSON itself (issuer match, required `https://` endpoints, no embedded credentials/fragment — enforced by the embedded `oidc_discovery_parser`) is parsed inside a throwaway container run with `--network none --read-only --cap-drop ALL --security-opt no-new-privileges --user 1001:1001 --pids-limit 64 --memory 64m --cpus 0.5` using the pinned Orbit image's own Node — untrusted remote JSON from the OIDC provider is never parsed by the installer's own host bash/Node process. — install.sh:23-47,887-944 — category: input-validation — criticality: HIGH
@@ -197,7 +198,7 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 39. A confirmed Ollama model pull only executes after the Ollama service itself has already been verified healthy — a model download is never attempted against a not-yet-verified service. — install.sh:1203-1218 — category: refusal/fail-closed — criticality: LOW
 40. Host preflight requires `docker`, Docker Compose v2, `curl`, and GNU `timeout` to all be present before any image pull or asset extraction begins — fails closed immediately with a clear tool-specific message rather than failing partway through with a confusing downstream error. — install.sh:1303-1308 — category: refusal/fail-closed — criticality: MEDIUM
 41. The requested channel tag is resolved to an immutable digest via `docker image inspect`'s `RepoDigests`, and only an entry that both matches the expected repository prefix and validates against a strict `@sha256:<64 hex>` pattern is accepted — the moving channel tag itself is never what gets recorded or deployed. — install.sh:1267-1288 — category: provenance/immutability — criticality: HIGH
-42. Deployment assets are extracted from the image the installer just resolved to a digest, never downloaded: `docker create` makes a container from the resolved reference without starting any process in it, `docker cp` copies `/opt/orbit/deploy/` out of it, and the container is removed on every path including failure. The directory is named by the image's own `io.orbit.deployment-assets` label; an image that does not carry that label predates ADR-0019 and is refused as an unsupported install target, as is a label naming any other path. The compose file and the image it configures are therefore the same artifact, and no commit id has to stay resolvable for an install to work (ADR-0019, #890). The `org.opencontainers.image.revision` label is still read and validated as a 40-hex git SHA, as identity evidence. — install.sh:1338-1342,1368-1379,1473-1486 — category: provenance/immutability — criticality: HIGH
+42. Deployment assets are extracted from the image the installer just resolved to a digest, never downloaded: `docker create` makes a container from the resolved reference without starting any process in it, `docker cp` copies `/opt/orbit/deploy/` out of it, and the container is removed on every path including failure. The directory is named by the image's own `io.orbit.deployment-assets` label; an image that does not carry that label predates ADR-0019 and is refused as an unsupported install target, as is a label naming any other path. The compose file and the image it configures are therefore the same artifact, and no commit id has to stay resolvable for an install to work (ADR-0019, #890). The `org.opencontainers.image.revision` label is still read and validated as a 40-hex git SHA, as identity evidence. The label is read before the image is run for its banner, so an image built before ADR-0019 is refused as unsupported rather than reported as a banner failure an operator would retry for ever (#1016). — install.sh:1373-1382,1399-1415,1517-1530 — category: provenance/immutability — criticality: HIGH
 43. The image's semantic version is likewise read from its own `org.opencontainers.image.version` OCI label and validated against strict semver before being trusted or recorded as `ORBIT_CONFIG_APPLIED_VERSION`. — install.sh:1299-1303 — category: provenance/immutability — criticality: HIGH
 44. Before any deployment asset is extracted or written, the installer requires the resolved image's own `container-entrypoint.sh --banner` to actually run successfully in a real container — a digest that pulls but can't execute its own entrypoint is rejected up front. — install.sh:1361-1366 — category: refusal/fail-closed — criticality: MEDIUM
 45. Only a fixed, hardcoded allowlist of deployment assets (`deployment_assets`) is ever staged out of the extracted bundle; anything else the image carries under that directory is left behind with the extraction directory, never installed and never syntax-checked. Each staged file must be a non-empty, regular, non-symlink file in the bundle, is given the mode the umask would have produced rather than the mode the image chose, and every staged *script* additionally must pass `bash -n` before it is later sourced or executed. — install.sh:1380-1392,1488-1512 — category: provenance/immutability — criticality: HIGH
@@ -212,6 +213,7 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 54. The final `ORBIT_IMAGE` rewrite is staged into a `mktemp` file (mode 600) under `staging_dir` and only `mv`'d over `.env-orbit` after the entire rewritten content has been successfully produced — `.env-orbit` is never edited in place with a risk of partial content on a mid-write failure. — install.sh:1505-1535 — category: transactional/rollback — criticality: HIGH
 55. `docker compose config --quiet` must succeed — validating the fully composed configuration — before any service is started or the transaction is committed; invalid Compose configuration is caught and fails closed pre-commit. — install.sh:1539-1541 — category: refusal/fail-closed — criticality: HIGH
 56. The file transaction is marked committed (`file_transaction_committed=1`) only after OIDC discovery, configuration migration, and `compose config --quiet` have all already succeeded; any failure before this point triggers the `EXIT`-trap rollback of every file change made so far, and only once committed do image pulls and service startup (steps outside the file-rollback mechanism's scope) begin. — install.sh:1479-1550 — category: transactional/rollback — criticality: HIGH
+57. The installer never creates the first administrator and never sees the bootstrap claim code (ADR-0022 section 1: the code lives only in the running application process's memory and is printed once, by the application itself, as the last line of the container's own start-up log). Guided configuration's sign-in mode question (`configure.sh --init`) only ever writes `ORBIT_AUTH_OIDC`; when the answer is local-only, `stage_guided_install_configuration` skips the `--set-oidc-secret` step entirely rather than collecting an unused secret, and the main run gates the OIDC-discovery phase itself on the same persisted value — `ORBIT_AUTH_OIDC=true` runs `verify_oidc_discovery` as before, anything else emits a `state=skipped` event and never contacts a provider. `print_completion_screen`'s one new line names only the `docker compose logs orbit-app` command and where on its output to look; it never reads, derives, or interpolates the claim code itself. — install.sh:1089-1096,1274-1293,1600-1613 — category: secret-handling — criticality: HIGH
 
 ## repair.sh (diagnosis, planning and execution entry point — issue #261; `--check`/`--plan`/`--execute --safe-only`/`--execute --dangerous`, plus `--export-diagnostics`)
 
@@ -225,7 +227,7 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 8. `container-foreign-owner` only fires for a container carrying this deployment's own Compose project label without a known Orbit service label (`orbit-app`/`orbit-db`/`orbit-clamav`/`orbit-tika`/`orbit-ollama`); a container labelled as a recognized Orbit service is never reported as foreign. — repair.sh:138,461-484 — category: input-validation — criticality: MEDIUM
 9. `checked`/`skipped` in the final summary line are derived by subtracting from one fixed constant (`total_checks=17`, extended from 13 by the second slice's two database/application checks, from 15 by #528's image-identity check, and from 16 by #530's document-volume-retention check) rather than incrementing two independent counters, so a check that could not run for any reason (docker unavailable, secrets directory invalid, project name unresolved) is guaranteed to be counted exactly once, never double-counted or dropped. — repair.sh:186,263 — category: idempotency — criticality: LOW
 10. `--check` and the accepted-but-inert `--plain` flag (in either order) are the only accepted arguments; any other flag or positional argument exits 2 with a usage message before touching the filesystem or Docker at all. — repair.sh:150-172 — category: input-validation — criticality: LOW
-11. Compose project-name derivation is read-only and never aborts the run: it mirrors install.sh's `derive_compose_project_name` precedence (configured `.env-orbit` value, then `$COMPOSE_PROJECT_NAME`, then a sanitized working-directory basename), but an unresolved name simply skips the docker-backed checks rather than failing diagnosis. — repair.sh:406-425 — category: refusal/fail-closed — criticality: LOW
+11. Compose project-name derivation is read-only and never aborts the run: it mirrors install.sh's `derive_compose_project_name` precedence (configured `.env-orbit` value, then `$COMPOSE_PROJECT_NAME`, then `docker-compose.yml`'s own `name:`, then a sanitized working-directory basename), but an unresolved name simply skips the docker-backed checks rather than failing diagnosis. — repair.sh:406-425 — category: refusal/fail-closed — criticality: LOW
 12. A symlinked managed file, secrets directory, or secret file is classified under its own distinct reason class (`managed-file-symlink` / folded into `secrets-directory-invalid` / folded into `secret-permissions`) checked before existence, so a symlinked managed path is never silently treated as merely "missing." — repair.sh:275-294,315-342 — category: permissions/ownership — criticality: HIGH
 13. The script is source-less by construction: it never sources `install.sh`, `configure.sh`, or `installer-ui.sh` — the only cross-script interaction is invoking `bash scripts/configure.sh --check` as an independent subprocess, so a change to those scripts' internal state can never leak into repair.sh's own execution environment. — repair.sh:11-18 — category: provenance/immutability — criticality: MEDIUM
 14. Database reachability/credential diagnosis execs only read-only client commands (`pg_isready`, `psql -c 'SELECT 1'`, and — only ever after that authenticated probe has already succeeded — #528's single fixed-literal outcome-row `SELECT`, guarantee 38) into this deployment's own orbit-db container, proved by the same Compose project/service label discipline as `container-foreign-owner`; it distinguishes a container that is absent or not yet accepting connections (`database-unreachable`) from a proven password/SQLSTATE-28P01-style authentication failure (`database-credential-mismatch`, the motivating failure of #261) from a clean pass (no finding) — never a fourth, guessed outcome. — repair.sh:513-569 — category: refusal/fail-closed — criticality: HIGH
@@ -291,40 +293,82 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 53. `--export-diagnostics` is a fourth mode, mutually exclusive with `--check`/`--plan`/`--execute` exactly like the existing three (`--safe-only`/`--dangerous` remain accepted only alongside `--execute`), and its exported stream is produced by calling the identical `print_check_lines`/`print_plan_lines` functions `--check`/`--plan` themselves call for their own stdout — never a third reimplementation of either — so the exported check/plan content is guaranteed byte-identical to running both modes separately against the same on-disk/daemon state, not merely similar to it. — repair.sh:1121-1187,1720-1775,3673-3696 — category: idempotency — criticality: MEDIUM
 54. Preview, then confirm, then write, in that order: the full content (the deterministic stream plus the identity line, assembled once) is always printed to stdout before any confirmation is requested, and no `mktemp` call is ever made until confirmation succeeds — so declining, whether by an explicit interactive/machine-prompt "no" or by the fail-closed default when no confirmation channel is available at all (there is no non-interactive automation path for this mode, unlike the safe batch), writes nothing and leaves no temporary file behind. A confirmed write uses the same discipline as the checkpoint bundle above (guarantee 49's family): `mktemp` under the installation directory (mode 600 from creation), content written, mode 600 set again defensively, then an atomic same-directory rename onto a second, equally random final name — and that final path is reported on stderr only, never stdout, exactly like the checkpoint bundle path. — repair.sh:3606-3697 — category: refusal/fail-closed — criticality: HIGH
 55. The bounded identity line (`identity schema_version=<v> applied_version=<v> image=<v>`) carries exactly these three ADR-0008 public values — the only place a configured value ever reaches stdout in this script — read directly from `.env-orbit` (never via `configure.sh`, decision 2's source-less rule) only once the managed-file check has already proven `.env-orbit` trustworthy (`env_status == ok`, mirroring `check_application_container`'s own gate), and only after each value independently passes its own bounded format check (the `image` field reuses `check_application_container`'s exact `ORBIT_IMAGE` pattern). A missing or malformed value renders as the fixed placeholder `unknown` — the same convention docs/engine-events.md already uses for an unrecognised enum value — never the raw value and never a shorter line; allowlisting is inherited entirely from `--check`/`--plan`'s own enum-only contract, with no second redaction layer that could drift from it. — repair.sh:3574-3604 — category: secret-handling — criticality: HIGH
-56. The ADR-0016 supported-version gate (#681) fails closed on absence: a readable `.env-orbit` whose `ORBIT_CONFIG_APPLIED_VERSION` is missing, malformed, or names a published release below the v1.3.0 floor raises `deployment-version-unsupported`, and while that finding is present `--execute` (either form) refuses the ENTIRE batch up front — `execution result=refused done=0 failed=0 reason=deployment-version-unsupported`, exit 6, nothing executed, nothing mutated — never just the finding's own (manual, non-executable) plan entry. The gate yields in exactly two states, both deliberate: major version 0 (development builds, not published releases), and any run where `.env-orbit` is untrustworthy or a configuration finding is present — a half-written file legitimately lacks the key, and the restore that repairs it must not be refused by it; the version re-evaluates on the next run. — repair.sh:2144-2179,3860-3875 — category: refusal/fail-closed — criticality: HIGH
+56. The ADR-0016 supported-version gate (#681) fails closed on absence: a readable `.env-orbit` whose `ORBIT_CONFIG_APPLIED_VERSION` is missing, malformed, or names a release below the v0.3.0 floor (which includes the retracted 1.x line) raises `deployment-version-unsupported`, and while that finding is present `--execute` (either form) refuses the ENTIRE batch up front — `execution result=refused done=0 failed=0 reason=deployment-version-unsupported`, exit 6, nothing executed, nothing mutated — never just the finding's own (manual, non-executable) plan entry. The gate yields in exactly one state, deliberately: any run where `.env-orbit` is untrustworthy or a configuration finding is present — a half-written file legitimately lacks the key, and the restore that repairs it must not be refused by it; the version re-evaluates on the next run. — repair.sh:2144-2179,3860-3875 — category: refusal/fail-closed — criticality: HIGH
+
+## get-orbit.sh (first-run script, ADR-0031 #6 — fetches, verifies and hands off to the signed launcher)
+
+1. Only Linux `amd64`/`arm64` hosts are supported; any other OS or architecture refuses before any network call. — get-orbit.sh:36-44 — category: input-validation — criticality: LOW
+2. `ORBIT_VERSION` must match `^v[0-9]+\.[0-9]+\.[0-9]+$` and `ORBIT_CHANNEL` must be exactly `latest` (the default); `preview` refuses with a plain message pointing at `ORBIT_RELEASE_MANIFEST` for install.sh instead, and anything else refuses too — all before any download begins (#1107). — get-orbit.sh:46-61 — category: input-validation — criticality: MEDIUM
+3. The embedded public key is the committed `cosign.pub`, byte for byte (checked by `scripts/get-orbit.test.mjs`); overriding it requires two independent test-only environment variables together (`ORBIT_GET_TEST_PUBLIC_KEY_FILE` and `ORBIT_GET_TEST_ALLOW_KEY_OVERRIDE=1`), so a user's own environment can never silently swap the trust anchor. — get-orbit.sh:16-20,23-28,67-73 — category: provenance/immutability — criticality: HIGH
+4. The release manifest's signature is verified with `openssl dgst -sha256 -verify` against the embedded key before any field of the manifest is read; an invalid base64 signature or a failed verification refuses immediately and the private working directory is removed. — get-orbit.sh:85-90 — category: refusal/fail-closed — criticality: HIGH
+5. When `cosign` is on `PATH`, the keyless countersignature bundle is required on every channel this script can reach (`latest` and version-pinned; `preview` is refused before this point, #1107): missing or failing verification refuses. — get-orbit.sh:92-107 — category: refusal/fail-closed — criticality: HIGH
+6. A version pin (`ORBIT_VERSION`) is checked against the signed manifest's own `version` field after the signature verifies, refusing a validly signed manifest for any other release — a correctly signed older release can never be substituted for the one asked for. — get-orbit.sh:116-122 — category: provenance/immutability — criticality: HIGH
+7. The launcher archive and `install.sh` are each checked with `sha256sum -c` against the manifest's own recorded checksum before either is used; either mismatch refuses. — get-orbit.sh:123-135 — category: provenance/immutability — criticality: HIGH
+8. Every downloaded file is written under a private `mktemp -d` working directory that is unconditionally removed on exit (`trap ... EXIT`), so a failed or interrupted run never leaves a partially verified download where a later invocation could find and trust it. — get-orbit.sh:63-64 — category: recovery — criticality: MEDIUM
+9. The extracted archive is only trusted after confirming it produced an executable file named exactly `orbit-launcher`; a mismatched or empty archive refuses rather than executing whatever the archive happened to contain. — get-orbit.sh:139-141 — category: refusal/fail-closed — criticality: MEDIUM
+10. The script never runs the launcher directly from the download's temporary location: it copies the verified manifest and `install.sh` into the version-scoped cache directory first, and only then `exec`s the launcher there, with `ORBIT_LAUNCHER_INSTALL_SCRIPT_PATH`/`ORBIT_RELEASE_MANIFEST` pointing at those verified copies — the program that ends up running is always read from the verified, permanent location, never the transient one. — get-orbit.sh:137-151 — category: provenance/immutability — criticality: MEDIUM
+
+**What `get-orbit.sh` does and does not guarantee, in plain terms (ADR-0031):**
+
+- **Checked:** the release manifest's signature (guarantee 4); the version, if
+  pinned (guarantee 6); the launcher archive and `install.sh`, by sha256,
+  against that signed manifest (guarantee 7); the keyless countersignature
+  bundle, when `cosign` is installed and the channel requires it (guarantee
+  5). Nothing downloaded is ever run before all of that passes.
+- **Not checked: the bootstrap itself.** `get-orbit.sh` arrives over plain
+  HTTPS, unsigned. That stops a network attacker from altering it in
+  transit; it does not stop whoever can write to `main` on the GitHub
+  mirror, who could ship a script with a different embedded key that
+  accepts their own manifest. A careful user can read the script first (it
+  is short by design), compare its embedded key against `cosign.pub` and the
+  fingerprint in `docs/releasing.md`, or fetch it from a release tag instead
+  of `main` and check its own sha256 against the one that release's manifest
+  records for it. None of that closes the loop fully: a fully trusted first
+  download needs a key the user already holds.
+- **Not checked: freshness on the `latest` channel.** A signature only
+  proves a release is genuinely signed, not that it is the newest one.
+  Whoever controls what `get-orbit.sh` downloads from could silently serve
+  an older, still-validly-signed release instead of the current `latest`.
+  Pinning to a specific release closes this, though the variable differs by
+  entry point: `get-orbit.sh` reads `ORBIT_VERSION=vX.Y.Z` (guarantee 6);
+  `install.sh` has no `ORBIT_VERSION` and is pinned instead with
+  `ORBIT_CHANNEL=vX.Y.Z`. Either way the script refuses a manifest whose own
+  `version` field does not equal the pin, so an older release can only ever
+  be installed by asking for it by name.
 
 ---
 
 ## Summary
 
-Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `configure.sh`, `configuration.sh`, `installer-ui.sh`, `installer-simulation.sh`, `container-entrypoint.sh`); `repair.sh` was added separately for its issue #261 first slice (`--check` only), extended in the same file for the #261 second slice (read-only database/application diagnosis), extended again for the #261 third slice (`--plan`, still zero mutation), extended again for the #261 slice 4 stage one (`--execute --safe-only` — the fixed safe/reversible action set only), and extended further by the delta slices that followed it in the same file: #528 (migration and identity diagnosis), #529 (configuration-migration-interrupted recovery), #530 (the document-KEK retention guard, then the `regenerate-secret` dangerous-batch executor under `--execute --dangerous` — stage two is now implemented), #531 (`--export-diagnostics`), and the #681 supported-version gate. No `*.test.mjs` or other scripts were read.
+Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `configure.sh`, `configuration.sh`, `installer-ui.sh`, `installer-simulation.sh`, `container-entrypoint.sh`); `repair.sh` was added separately for its issue #261 first slice (`--check` only), extended in the same file for the #261 second slice (read-only database/application diagnosis), extended again for the #261 third slice (`--plan`, still zero mutation), extended again for the #261 slice 4 stage one (`--execute --safe-only` — the fixed safe/reversible action set only), and extended further by the delta slices that followed it in the same file: #528 (migration and identity diagnosis), #529 (configuration-migration-interrupted recovery), #530 (the document-KEK retention guard, then the `regenerate-secret` dangerous-batch executor under `--execute --dangerous` — stage two is now implemented), #531 (`--export-diagnostics`), and the #681 supported-version gate. `get-orbit.sh` (ADR-0031 #6) was added 2026-09-24, the first-run script that verifies the signed release manifest and launcher before handing off to it. No `*.test.mjs` or other scripts were read.
 
 **Guarantee count by script**
 
 | Script | Guarantees |
 |---|---:|
-| install.sh | 56 |
+| install.sh | 57 |
 | configure.sh | 34 |
-| configuration.sh | 25 |
+| configuration.sh | 26 |
 | container-entrypoint.sh | 14 |
 | installer-ui.sh | 13 |
 | repair.sh | 56 |
 | installer-simulation.sh | 8 |
-| **Total** | **206** |
+| get-orbit.sh | 10 |
+| **Total** | **218** |
 
 **Guarantee count by category × criticality**
 
 | Category | HIGH | MEDIUM | LOW | Total |
 |---|---:|---:|---:|---:|
-| refusal/fail-closed | 27 | 25 | 7 | 59 |
-| secret-handling | 30 | 5 | 0 | 35 |
-| input-validation | 6 | 20 | 7 | 33 |
-| provenance/immutability | 17 | 9 | 0 | 26 |
+| refusal/fail-closed | 29 | 26 | 7 | 62 |
+| secret-handling | 31 | 5 | 0 | 36 |
+| input-validation | 6 | 22 | 8 | 36 |
+| provenance/immutability | 20 | 10 | 0 | 30 |
 | transactional/rollback | 18 | 3 | 0 | 21 |
 | permissions/ownership | 18 | 0 | 0 | 18 |
 | idempotency | 0 | 4 | 4 | 8 |
-| recovery | 1 | 4 | 1 | 6 |
-| **Total** | **117** | **70** | **19** | **206** |
+| recovery | 1 | 5 | 1 | 7 |
+| **Total** | **123** | **75** | **20** | **218** |
 
 **Guarantees duplicated across scripts (up to 10, both citations)**
 
@@ -332,7 +376,7 @@ Status: COMPLETE for the six originally-catalogued scripts (`install.sh`, `confi
 2. Refuses a symlinked or non-directory `.orbit-secrets` before trusting it — configure.sh:181-190 (`ensure_secrets_directory`) and install.sh:1352-1355 (`preflight_final_paths`); also install.sh:287 (`is_preprovisioned_input`).
 3. `.env-orbit` must be exactly mode `600` before its contents are trusted for a check — configuration.sh:108-109 (`check_file_safety`) and configure.sh:732-733 (`run_check`).
 4. Digest-pinned immutable image reference pattern `^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$` enforced independently in multiple scripts — configuration.sh:87-89 (`is_valid_immutable_image`) and install.sh:1287 (channel-to-digest resolution); also configure.sh:347-349 and install.sh:516,559,694.
-5. Compose project name must match `^[a-z0-9][a-z0-9_-]*$` — configuration.sh:91-93 (`is_valid_compose_project_name`) and install.sh:435,443,458 (`derive_compose_project_name`).
+5. Compose project name must match `^[a-z0-9][a-z0-9_-]*$` — configuration.sh:91-93 (`is_valid_compose_project_name`) and install.sh:509,517,539,549 (`derive_compose_project_name`).
 6. Applied/image version must match strict semver `^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$` — configuration.sh:79-81 (`is_valid_applied_version`) and install.sh:1302 (image version label check); also container-entrypoint.sh:33-34 (embedded VERSION check).
 7. Digest must match `^sha256:[0-9a-f]{64}$` — configuration.sh:83-85 (`is_valid_applied_digest`) and install.sh:1304 (`applied_digest` derivation from the resolved reference).
 8. `installer-ui.sh` is only ever sourced from a fixed sibling path after confirming it is a regular, non-symlink file — configure.sh:16-19, installer-simulation.sh:24-31, and install.sh:162-176 (`load_installer_ui`, the strictest of the three: also requires the caller's prior `bash -n` check).
@@ -351,6 +395,98 @@ self-contained); `recovery-crypto.mjs` is invoked as a one-off `node` entrypoint
 `orbit-app` container rather than sourced.
 
 All citations are `file.sh:line` against `/home/codex/projects/orbit/scripts/<file>`.
+
+### Before and after an upgrade
+
+This is the operator procedure around an upgrade: running the install line
+again and choosing Update (see [Installing Orbit](installing.md#what-the-installer-asks)).
+Run every command here from the deployment directory. It uses `backup.sh`,
+`restore.sh` and `configuration.sh`, whose guarantees are catalogued in
+their own sections.
+
+Before an upgrade, take a backup, check it, and keep a copy of the current
+`.env-orbit` beside it, readable only by you. The backup deliberately holds
+no configuration or secrets; the saved `.env-orbit` records exactly which
+build was running, so you can go back to it:
+
+```sh
+umask 077
+preupgrade_dir="${ORBIT_BACKUP_DIR:-backups}"
+mkdir -p -- "$preupgrade_dir"
+chmod 700 -- "$preupgrade_dir"
+preupgrade_config="$preupgrade_dir/orbit-pre-upgrade.env"
+cp -- .env-orbit "$preupgrade_config"
+chmod 600 "$preupgrade_config"
+backup_output="$(ORBIT_BACKUP_DIR="$preupgrade_dir" bash scripts/backup.sh)" || exit 1
+case "$backup_output" in
+  "Orbit backup created: "*) backup_path="${backup_output#Orbit backup created: }" ;;
+  *) exit 1 ;;
+esac
+ORBIT_BACKUP_DIR="$preupgrade_dir" bash scripts/backup.sh --verify "$backup_path" >/dev/null
+```
+
+What the installer guarantees during an upgrade:
+
+- It checks the new build's configuration rules before touching an existing
+  `.env-orbit`, and keeps a private rollback copy. Until it reports success, a
+  configuration or pre-start failure automatically restores the original
+  files.
+- Each successful upgrade records the version and build fingerprint it applied
+  in `ORBIT_CONFIG_APPLIED_VERSION` and `ORBIT_CONFIG_APPLIED_DIGEST`. They
+  must match `ORBIT_IMAGE`; never edit them by hand.
+- A fresh install, or a recognised rename of the deployment directory, records
+  the validated `COMPOSE_PROJECT_NAME` (the Compose project name). Keep running
+  `docker compose --env-file .env-orbit`, `scripts/backup.sh` and
+  `scripts/restore.sh` from the deployment directory, and do not pass a
+  remembered `--project-name`, so every command keeps addressing the same
+  containers and volumes after a reboot.
+- If the installer is killed mid-run, `.env-orbit` is either the old file or
+  the complete new one, never half-written. Private
+  `.orbit-install-staging.*` files may be left behind with owner-only
+  permissions; keep them until recovery is complete.
+- Before reusing an existing deployment it proves the deployment is really
+  this one: the Compose project, the database volume's labels, who owns the
+  stopped containers, and the previous build. Moving the directory therefore
+  never quietly creates an empty database. A fresh install is refused if any
+  Orbit database volume already exists, and an update is refused if ownership
+  cannot be proven. Orbit never deletes or resets a database volume by itself.
+  Keep `.orbit-secrets/postgres-password` exactly as it is.
+
+A configuration file from an older Orbit that no installer has migrated can be
+inspected with `scripts/configuration.sh --preflight` and upgraded explicitly,
+giving it the new build's details:
+
+```sh
+bash scripts/configuration.sh --migrate --orbit-image \
+  'registry.example/orbit@sha256:<64 lowercase hexadecimal characters>' \
+  --applied-version v0.3.0 \
+  --applied-digest 'sha256:<64 lowercase hexadecimal characters>' \
+  --compose-project-name orbit
+```
+
+The two digests must be the same. The command keeps one owner-only rollback
+copy beside the file, changes the file all at once or not at all, is safe to
+run again, and never rewrites your own values or secrets.
+
+If Orbit has started but the database migration or sign-in then fails, stop
+it and restore both the checked backup and the saved configuration. Run this
+in the same shell as the backup steps above, so `$preupgrade_config`,
+`$preupgrade_dir` and `$backup_path` are still set:
+
+```sh
+docker compose --env-file .env-orbit stop orbit-app
+cp -- "$preupgrade_config" .env-orbit
+chmod 600 .env-orbit
+docker compose --env-file .env-orbit pull orbit-app
+ORBIT_BACKUP_DIR="$preupgrade_dir" bash scripts/restore.sh "$backup_path"
+```
+
+The restored `.env-orbit` names the previous build exactly; do not swap in a
+version name or edit only `ORBIT_IMAGE`. Type `RESTORE` when the restore
+asks, then check
+`/api/health` and that you can sign in on the previous build, and only then
+delete the saved copy with `rm -f -- "$preupgrade_config"`. Keep it until
+health is confirmed.
 
 ---
 
@@ -418,9 +554,9 @@ All citations are `file.sh:line` against `/home/codex/projects/orbit/scripts/<fi
     `backup.sh:169-170` — category: provenance/immutability — criticality: HIGH
 31. Completed bundle tar is validated (`tar -tf`) before being treated as the deliverable.
     `backup.sh:172` — category: input-validation — criticality: MEDIUM
-32. Final bundle is written via a `.installing` temp name and moved into place with `mv --no-clobber`, giving an atomic publish and refusing to silently overwrite an existing same-named backup.
-    `backup.sh:139-140,173-175` — category: transactional/rollback / idempotency — criticality: HIGH
-33. `temporary_path` is cleared only after a successful move, so the `EXIT` cleanup trap never deletes a successfully published backup, but does clean up any half-built one.
+32. Final bundle is written via a `.installing` temp name and published atomically with a hard link (`ln`, which fails on an existing name), refusing loudly to overwrite an existing same-named backup; `mv --no-clobber` was a separate check-then-rename that on a same-second collision silently exited 0 and reported the old bundle.
+    `backup.sh:28-48,217,257` — category: transactional/rollback / idempotency — criticality: HIGH
+33. `temporary_path` is cleared only after a successful publish, so the `EXIT` cleanup trap never deletes a successfully published backup, but does clean up any half-built one.
     `backup.sh:175,22-24` — category: transactional/rollback — criticality: MEDIUM
 34. `orbit-app` is explicitly restarted at the end of a successful backup (independent of the trap).
     `backup.sh:176-177` — category: transactional/rollback — criticality: HIGH
@@ -432,37 +568,37 @@ All citations are `file.sh:line` against `/home/codex/projects/orbit/scripts/<fi
 ## export-recovery-bundle.sh
 
 1. Source bundle argument is required and must be an existing, regular, non-symlink file, or usage fails.
-   `export-recovery-bundle.sh:28-29` — category: input-validation — criticality: MEDIUM
+   `export-recovery-bundle.sh:50-51` — category: input-validation — criticality: MEDIUM
 2. Requires sha256sum, tar, docker, and the env file to be present before doing anything.
-   `export-recovery-bundle.sh:30-33` — category: input-validation — criticality: MEDIUM
+   `export-recovery-bundle.sh:52-55` — category: input-validation — criticality: MEDIUM
 3. Document KEK file must be a regular, non-symlink file or export refuses to run.
-   `export-recovery-bundle.sh:34` — category: secret-handling / refusal — criticality: HIGH
+   `export-recovery-bundle.sh:56` — category: secret-handling / refusal — criticality: HIGH
 4. The source backup bundle must pass full `backup.sh --verify` (format, HMAC, checksums, KEK-fingerprint match, decryptability, archive-shape checks) before a recovery bundle is produced from it — a corrupt/tampered/wrong-key backup cannot be exported.
-   `export-recovery-bundle.sh:35` — category: provenance/immutability / refusal — criticality: HIGH
+   `export-recovery-bundle.sh:57` — category: provenance/immutability / refusal — criticality: HIGH
 5. Recovery passphrase is read from the controlling TTY (`/dev/tty`) in normal operation, requiring an interactive terminal (test mode allows stdin injection only under `ORBIT_RECOVERY_TEST_MODE`).
-   `export-recovery-bundle.sh:19-26` — category: secret-handling — criticality: MEDIUM
+   `export-recovery-bundle.sh:41-48` — category: secret-handling — criticality: MEDIUM
 6. Recovery passphrase must be at least 12 characters or export refuses to proceed.
-   `export-recovery-bundle.sh:38` — category: input-validation / secret-handling — criticality: MEDIUM
+   `export-recovery-bundle.sh:60` — category: input-validation / secret-handling — criticality: MEDIUM
 7. Recovery passphrase requires a matching confirmation entry before proceeding (typo protection for a passphrase that gates future disaster recovery).
-   `export-recovery-bundle.sh:39-45` — category: input-validation — criticality: MEDIUM
+   `export-recovery-bundle.sh:61-67` — category: input-validation — criticality: MEDIUM
 8. Passphrase confirmation variable is `unset` immediately after comparison rather than lingering in shell memory.
-   `export-recovery-bundle.sh:46` — category: secret-handling — criticality: LOW
+   `export-recovery-bundle.sh:68` — category: secret-handling — criticality: LOW
 9. Recovery bundle work directory is created under the backup directory with mode 700 and `umask 077`, so recovery material (encrypted KEK, backup copy) is not world/group readable.
-   `export-recovery-bundle.sh:48-50` — category: permissions/ownership — criticality: HIGH
+   `export-recovery-bundle.sh:70-72` — category: permissions/ownership — criticality: HIGH
 10. The document KEK-encrypting passphrase is piped to the container over stdin only — never as a CLI argument or environment variable.
-    `export-recovery-bundle.sh:56-59` — category: secret-handling — criticality: HIGH
+    `export-recovery-bundle.sh:78-81` — category: secret-handling — criticality: HIGH
 11. `recovery_passphrase` shell variable is `unset` immediately after use.
-    `export-recovery-bundle.sh:60` — category: secret-handling — criticality: MEDIUM
+    `export-recovery-bundle.sh:82` — category: secret-handling — criticality: MEDIUM
 12. The encrypted document-KEK envelope is checked for the `ORBKEK01` magic header before being trusted as a valid authenticated envelope.
-    `export-recovery-bundle.sh:61-62` — category: input-validation / provenance — criticality: HIGH
+    `export-recovery-bundle.sh:83-84` — category: input-validation / provenance — criticality: HIGH
 13. Checksums (SHA-256) are recorded for both the embedded backup copy and the encrypted KEK envelope.
-    `export-recovery-bundle.sh:63` — category: provenance/immutability — criticality: MEDIUM
+    `export-recovery-bundle.sh:85` — category: provenance/immutability — criticality: MEDIUM
 14. Manifest declares `format_version` and the exact key-encryption algorithm string (`aes-256-gcm-scrypt-n131072-r8-p1`) used to wrap the KEK.
-    `export-recovery-bundle.sh:64` — category: provenance/immutability — criticality: MEDIUM
-15. Final recovery bundle is written via a `.installing` temp name and published atomically with `mv --no-clobber`, never overwriting an existing same-named recovery bundle.
-    `export-recovery-bundle.sh:65-69` — category: transactional/rollback / idempotency — criticality: HIGH
+    `export-recovery-bundle.sh:86` — category: provenance/immutability — criticality: MEDIUM
+15. Final recovery bundle is written via a `.installing` temp name and published atomically with a hard link (`ln`, which fails on an existing name), refusing loudly rather than overwriting or silently skipping an existing same-named recovery bundle; the temp name is cleared only after the publish succeeded, so a refused publish is still cleaned up.
+    `export-recovery-bundle.sh:17-37,87-93` — category: transactional/rollback / idempotency — criticality: HIGH
 16. `EXIT` trap removes the temp working directory and any half-written bundle on any failure path.
-    `export-recovery-bundle.sh:12-17` — category: transactional/rollback — criticality: MEDIUM
+    `export-recovery-bundle.sh:12-15,38-39` — category: transactional/rollback — criticality: MEDIUM
 
 ---
 
@@ -688,6 +824,11 @@ and a separate `--recover` manual-recovery mode for crash safety.
 48. Restore is marked `completed` — and the journal/checkpoint purged — only after documents are replaced, the database is restored, scan leases are reset, active correspondence validates, and the health check passes; any single failure short-circuits into rollback instead.
     `restore.sh:930-933` — category: transactional/rollback — criticality: HIGH
 
+**Authentication data and the revocation boundary (#917, ADR-0022 §6, ADR-0023 §7)**
+
+49. The unconditional whole-database swap (guarantee 25) applies to authentication state with no special-casing: a `local_credentials` password hash and an unconsumed `credential_setup_tokens` row present at backup time are restored byte-for-byte intact, while a `sessions` row created after the backup point is absent from the restored database because it was never part of the dump — restoring an earlier backup cannot resurrect a session an operator believed was already revoked. `scripts/test-backup-restore.sh`'s `assert_credential_fixture_present` exercises all three on every run of the drill.
+    `restore.sh:578-583` — category: provenance/immutability — criticality: HIGH
+
 ---
 
 ## build-container.sh
@@ -754,21 +895,21 @@ and a separate `--recover` manual-recovery mode for crash safety.
 
 ## Summary
 
-**Total guarantees catalogued: 163**
+**Total guarantees catalogued: 164**
 
 ### Counts by criticality
 
 | Criticality | Count |
 |---|---|
-| HIGH | 95 |
+| HIGH | 96 |
 | MEDIUM | 54 |
 | LOW | 14 |
-| **Total** | **163** |
+| **Total** | **164** |
 
 ### Counts by category
 
 An entry may belong to more than one category (e.g. "secret-handling / refusal"), so the
-category tag counts below sum to more than 163. `deployment-correctness` is a category used
+category tag counts below sum to more than 164. `deployment-correctness` is a category used
 only for `build-container.sh`/`deploy-container.sh`/`update-and-start.sh` items that are
 about correct deployment behavior rather than data-loss/security boundaries; it falls outside
 the original 8-category taxonomy and is called out separately.
@@ -778,7 +919,7 @@ the original 8-category taxonomy and is called out separately.
 | input-validation | 55 |
 | secret-handling | 42 |
 | refusal / fail-closed | 29 |
-| provenance/immutability | 30 |
+| provenance/immutability | 31 |
 | transactional/rollback | 26 |
 | recovery | 16 |
 | idempotency | 7 |
@@ -793,7 +934,7 @@ the original 8-category taxonomy and is called out separately.
 | export-recovery-bundle.sh | 16 |
 | import-recovery-bundle.sh | 27 |
 | recovery-crypto.mjs | 16 |
-| restore.sh | 48 |
+| restore.sh | 49 |
 | build-container.sh | 6 |
 | deploy-container.sh | 8 |
 | update-and-start.sh | 4 |
@@ -802,7 +943,7 @@ the original 8-category taxonomy and is called out separately.
 ### Guarantees duplicated across scripts (up to 10, both citations)
 
 1. Document KEK must be a regular, non-symlink file.
-   `backup.sh:44-45` and `restore.sh:53-54` (also `export-recovery-bundle.sh:34`, `import-recovery-bundle.sh:95`)
+   `backup.sh:44-45` and `restore.sh:53-54` (also `export-recovery-bundle.sh:56`, `import-recovery-bundle.sh:95`)
 2. Document KEK content must be exactly 64 hex characters (32 bytes).
    `backup.sh:46-47` and `restore.sh:56-57`
 3. Bundle manifest + checksums are HMAC-recomputed and byte-compared before any bundle content is trusted.
@@ -816,9 +957,9 @@ the original 8-category taxonomy and is called out separately.
 7. A new destructive operation refuses to start while an unfinished-restore journal exists; operator must run `restore.sh --recover` first.
    `restore.sh:898` and `import-recovery-bundle.sh:51-52`
 8. Working/backup directories that will hold key material or backups are created with mode 700 under `umask 077`.
-   `backup.sh:136-138` and `export-recovery-bundle.sh:48-50`
-9. Final published artifact is written via a `.installing`/temp name and atomically published with `mv --no-clobber`, never overwriting an existing file.
-   `backup.sh:139-140,173-175` and `export-recovery-bundle.sh:65-69`
+   `backup.sh:213-215` and `export-recovery-bundle.sh:70-72`
+9. Final published artifact is written via a `.installing`/temp name and atomically published with a hard link that fails on an existing name, never overwriting an existing file and never silently skipping the publish.
+   `backup.sh:28-48,217,257` and `export-recovery-bundle.sh:17-37,87-93`
 10. Document-KEK fingerprint (SHA-256 of the key) is computed and format-validated, then compared against the bundle's recorded fingerprint to refuse bundles encrypted with a different key.
     `backup.sh:61-67,120-121` and `restore.sh:71-79,142-143`
 

@@ -120,9 +120,29 @@ objects also moved into small companion modules (`due-next-view.svelte.js`,
 `bands.js`) for the same reason. #782 stays open to carry the upstream
 constraint and the workaround, but no file needs it worked around today.
 
-The same job compiles `web/` (`pnpm --filter orbit-web build`, about ten
+The same job compiles `web/` (`pnpm --filter orbit-web build`, about twenty
 seconds). Before that, a `.svelte` file that did not compile could merge green
 and first fail at the container build on the `preview` push.
+
+It compiles it **once** (#1061). The build used to happen three times in one
+pipeline — `scripts/test-backend.sh` did it, `fast` did it again on the same
+checkout, and the fidelity gate's Playwright `webServer` did it a third time
+from source. `fast` now publishes `web/build` as an artefact and `fidelity`
+takes it. What stops a stale build being served instead is
+`scripts/web-build-stamp.mjs`: the build records a hash of everything it was
+made from — `web/` less its tests, `src/`, and the manifests that pin the
+dependency versions — and anything wanting to serve that build re-reads those
+files and compares. A mismatch, an absent build or an unstamped one all mean
+"build it here", which is what makes `pnpm --filter orbit-web fidelity` still
+work from a clean checkout with nothing to set up; `ORBIT_FORCE_WEB_BUILD=1`
+forces one anyway. Timestamps cannot do this
+job: a CI job clones the sources after the artefact was built, so the build
+always looks older than what it was built from.
+
+The container image still builds `web/` in its own `web-builder` stage, so the
+published image stays reproducible from the `Dockerfile` alone, and the jobs
+that load the image tarball run the application from the image rather than
+from `web/build`.
 
 ## CI target
 
@@ -156,8 +176,12 @@ dependencies outside the approved SPDX licence policy block integration.
 
 ### Risk-proportional pull-request lanes
 
-Every pull request runs lint, type checking and the complete unit suite. Separate read-only workflows retain dependency-diff review
-and CodeQL. Higher-cost evidence is concentrated on the protected release lane:
+Every pull request runs lint, type checking and the complete unit suite. A
+separate read-only workflow retains CodeQL. Dependency-diff review moved off
+GitHub once the mirror flip (#801) left it no pull requests to diff against
+(#815): GitLab's `licence_policy` job now walks the whole installed
+dependency tree instead (see [supply-chain.md](supply-chain.md)). Higher-cost
+evidence is concentrated on the protected release lane:
 
 | Lane | Additional evidence | Typical eligible change |
 | --- | --- | --- |
@@ -182,18 +206,20 @@ for each.
 | --- | --- | --- |
 | documentation (`risk=fast`) | prose, issue templates, policy files and unit-only tests | `classify`, `fast`, `base_image`, `gitleaks`, `licence_policy` where the file is one it reads |
 | ignore/policy (#889) | `.gitleaksignore`, `supply-chain/licence-policy.yml` | `classify`, `gitleaks`, `licence_policy`, `supply_chain_source` |
-| CI definition (#889) | `.gitlab-ci.yml`, `scripts/ci/`, the classifier and the tests that read the pipeline file | `classify`, `fast`, `gitleaks`, `supply_chain_source` |
+| CI definition (#889) | `.gitlab-ci.yml`, `scripts/ci/`, the classifier and the tests that read the pipeline file | `classify`, `fast`, `fast_docker`, `gitleaks`, `supply_chain_source` |
 
 The documentation lane is the risk classifier's `fast` result and predates the
 other two: it shortens the pipeline by axis, so a job still runs when its own
 axis asks for it. The two lanes below it are lists, and a job the list does not
 name does not run whatever its axis says.
 
-A lane is a merge-request economy and never a relaxation of the delivery gate.
-The `classify` job forces `full` on a push to `dev`, `preview`, `main` or
-`hotfix/*` and on the merge request into `main`, so everything that promotes
-still runs the whole pipeline. Everywhere else — every ordinary merge request
-included — the classifier decides, which is what #883 restored.
+A lane is a merge-request economy, whether or not the diff runs against the
+full gate. The `classify` job forces the *lane* to `full` on a push to `dev`,
+`preview`, `main` or `hotfix/*` and on the merge request into `main`, so a
+delivery push and a promotion always see every axis a job might ask for,
+never the narrow ignore/policy or CI-definition lists. Which jobs actually
+*run* is a separate question, decided per job by its own axis and, for the
+system-risk lane, by `orbit_full_gate` below.
 
 Nothing above can make a merge request run *more* than its diff asks for, and
 sometimes a change deserves the whole gate before it merges. The label
@@ -204,35 +230,222 @@ run on a small diff is never a mystery. Remove the label and the next pipeline
 is classified again.
 
 `scripts/ci/` sits in the CI lane by the owner's decision on #889. Several of
-those scripts are the acceptance stage's own checks, so a change to one is not
-exercised until it merges to `dev`, where every pipeline runs everything again.
+those scripts are the acceptance stage's own checks, so a change confined to
+the CI-definition lane's own merge request does not exercise them: that lane
+runs `fast`, `fast_docker`, `gitleaks` and `supply_chain_source` only, and
+skips the acceptance stage entirely. `scripts/ci/` matches no path in
+`classifyCiRisk`'s `fastPatterns`, `systemPatterns` or `integrationPatterns`,
+so it falls through to the function's catch-all default, `CI_RISK.SYSTEM`
+(`scripts/classify-changed-paths.mjs`) — the same default `.gitleaksignore`
+gets. That means a push to `dev` that changes a `scripts/ci/` file still
+carries `ORBIT_SYSTEM=true` and still reaches the jobs `.system_lane_gate`
+protects (`smoke` among them), even though `dev` no longer forces the full
+gate. A changed CI script is exercised on the push that changes it, not
+deferred to the next promotion.
 
-### Standing on an earlier run (#898)
+### Testing what changed on `dev`, and the full gate at promotion (#1078)
 
-A fix pushed after one red job used to rerun every job that had already passed.
-Now `classify` hashes what each job reads (`scripts/ci/job-inputs.json`) and
-looks through the same merge request's earlier pipelines for a run of that job
-that passed on the same hash. Where it finds one the job says which run it
-stands on and stops; where it does not, it runs. Ten jobs can do this: `fast`,
-`integration`, `fidelity`, `build_image`, `smoke`, `acceptance`,
-`repair_journeys`, `supply_chain_image`, `sidecar_images` and
-`launcher_install_compat`. A reused `build_image` fetches the image and its
-identity file back, so the jobs after it get the bytes a real build would
-have given them.
+Owner ruling, 2026-09-21: a push to `dev` tests what the push changed, the
+same as a merge request; the full suite — the catch-all sanity check against
+accidental drift — runs again in full only at the `dev -> preview` promotion.
 
-Three limits keep it from weakening the gate. Merge requests only — a pipeline
-on `dev`, `preview`, `main` or `hotfix/*` runs everything, every time.
-`.gitlab-ci.yml` is in every input set, so a change to the pipeline reruns the
-lot. And the proof is `ci-evidence/<job>.json`, written as the job's own last
-act and naming both its inputs and any older run it stood on, so a job that
-skipped itself leaves nothing and is never reused. The lookup reads the API
-with `BASE_REPIN_TOKEN`; an unset token, an unreachable API or an expired
-artefact is logged and read as "no reuse", which reruns the job.
+`.gitlab-ci.yml`'s `orbit_full_gate` names the events that run every
+`.system_lane_gate`-gated job (`smoke`, `smoke_local_only`, `acceptance`,
+`integration`, `build_image`, `repair_journeys`, `supply_chain_image`,
+`supply_chain_source`) whatever the diff holds: a push to `preview`, `main`
+or `hotfix/*` (`orbit_on_delivery_branch`), and the merge request into
+`preview` or `main` — the two promotion gates. A push to `dev` is no longer
+one of them, so these jobs now run on `dev` only when the pushed diff itself
+carries the relevant risk, exactly as they already did on an ordinary merge
+request. `fidelity` gates on `ORBIT_WEB` directly and never called
+`orbit_full_gate` even before #1078, so it is unaffected by this section;
+#1078 brought `smoke`'s click-through suite into the same shape by wrapping
+only its `scripts/test-frontend.sh` call in a check of its own. Since #1181
+that check reads `ORBIT_E2E`, not `ORBIT_WEB`: the same front-end paths plus
+`tests/e2e/` and `scripts/test-frontend.sh`, so a merge request that only
+adds or changes a spec runs the suite before merge (`smoke_firefox` reads the
+same axis). When that check says no, the job ends there, before it records
+reuse evidence (#1187): a run that never clicked through must not be one a
+later pipeline can stand on. `fidelity` stays on `ORBIT_WEB`, because a spec
+cannot move what it photographs. `smoke`'s
+runtime-property checks (`verify-health-endpoint.sh`,
+`verify-startup-banner.sh`, `verify-nonroot-runtime.sh`,
+`verify-privacy-boundary.sh`) stay unconditional, because they prove the
+image runs at all and every change can break that.
 
-The acceptance stage now waits for `fast`, `gitleaks`, `licence_policy` and
-`supply_chain_source`, so a red `fast` costs no image build, no browser suite
-and no installer run — about seven minutes added to a green pipeline, and the
-whole acceptance stage saved on a red one.
+The trade-off is accepted knowingly, not a side effect: a change that carries
+no web risk and no system risk by `classifyCiRisk`'s reckoning — for example a
+server route, a schema change, or a dependency bump that moves a rendered
+value without touching `web/` — is not caught on the `dev` push that
+introduces it. It is caught at the `dev -> preview` promotion, where
+`orbit_full_gate` now includes `preview` as a merge-request target, so every
+`.system_lane_gate`-gated job that the diff's own `ORBIT_LANE` reaches runs
+for real. That is later, and against whatever else has landed on `dev`
+since, so unpicking it costs more than it would have on the merge request. A
+reader meeting a red `dev -> preview` promotion should expect this, not
+treat it as a surprise.
+
+`orbit_full_gate` answering yes does not by itself widen `ORBIT_LANE`, nor
+the browser checks' own axes; `classify` does both. It forces the lane to
+`full` for a push to any delivery branch and for a merge request into
+`preview` or `main` (#1092), so a promotion whose whole diff sits in a narrow
+lane still runs the acceptance stage. On the same events, except a push to
+`dev`, it also switches `ORBIT_WEB` and `ORBIT_E2E` on (#1186), so `fidelity`
+and both browser suites run at promotion even when its diff never touched
+`web/`.
+
+### Standing on an earlier run (#898, ADR-0028)
+
+A fix pushed after one red job used to rerun every job that had already
+passed. Now each job's reuse key is one SHA-256 over three axes: the checkout
+minus that job's deny-list (`scripts/ci/job-inputs.json` — what the job
+provably does not read, not what it is guessed to read), the CI definition
+(`.gitlab-ci.yml` and `scripts/ci/**`, so a pipeline change reruns
+everything), and, for the six jobs that test the image (`smoke`,
+`smoke_local_only`, `acceptance`, `repair_journeys`,
+`launcher_install_compat`, `supply_chain_image`), the image's content ID.
+`fidelity` has no artefact axis — it is keyed on the whole checkout, a
+deliberate simplification rather than hashing the built `web/build` site.
+
+`build_image` always builds — it no longer skips — and, once the build
+finishes, always computes the content ID: a SHA-256 over the runner image's
+ordered layer content hashes, excluding the final per-commit stamp layer
+(`scripts/ci/image-content-id.sh`). `classify` computes and looks up the
+evidence for the five source-keyed jobs (`fast`, `fast_docker`, `integration`,
+`fidelity`, `sidecar_images`) before anything is built; `build_image`
+finishes the six image jobs' keys once it has the content ID and looks those
+up too (`scripts/ci/reuse-lookup.mjs`). Where a lookup finds a passing run on
+the same key, the job stands on it and stops; where it does not, it runs.
+`build_image` itself is not a reuse candidate — it is not in
+`job-inputs.json`, and it always builds.
+
+The lookup walks the project's 20 most recent pipelines on any ref, newest
+first, not only this merge request's own — a pass on `dev` or another branch
+against the same content counts. It believes evidence up to seven days old,
+from the job's `finished_at`, matching ADR-0020's publication rule. Delivery
+pipelines (`dev`, `preview`, `main`, `hotfix/*`) never consume evidence, only
+record it, so a flaky pass can carry a merge request no further than the next
+full run (#1078 changed what `dev` admits, not this; `classify` reads
+`CI_PIPELINE_SOURCE` directly, without sourcing `.reach_helpers`). The proof is `ci-evidence/<job>.json`, written as the job's own
+last script line and naming the key and any older run it stood on, so a job
+that skipped itself leaves nothing and is never reused; a missing or
+malformed artefact, or any lookup failure, reads as "no reuse".
+
+Two ways to force a rerun regardless: the merge-request label `ci: rerun`,
+and `ORBIT_REUSE=off` on a pipeline started by hand. The lookup reads the
+API with `ORBIT_REUSE_TOKEN`, a read-only, unprotected credential the owner
+created on 2026-09-23 for exactly this; `BASE_REPIN_TOKEN` is a fallback but
+has been protected since #1084, so it is absent from merge-request
+pipelines. Without a usable token every merge-request verdict is "runs" —
+the safe direction.
+
+`fast` (#950, owner ruling on #923 rec 15a, 2026-09-09) is the docker-free
+part of what used to be one job: type-check, lint, the coverage-bearing
+Vitest run and the web build, on the unprivileged `big` lane. `fast_docker`
+is the other half, on the privileged `orbit-build` lane, and runs the
+suites, of everything that mentions Docker, actually confirmed (by running
+the candidate set with `docker` entirely absent from PATH, matching `big`'s
+real condition) to depend on it: `src/lib/install-script-adapters.test.ts`,
+whose `beforeAll` runs a real `docker build`;
+`src/lib/recovery-bundle.parity.test.ts`, whose "no Docker daemon reachable"
+tests never reach a live daemon but still spawn real scripts that gate on
+`docker` being present before the logic under test runs; and
+`scripts/test-e2e-local-reuse.test.mjs` (#947), which drives
+`test-e2e-local.sh --reuse` far enough to reach its own discovery code, past
+preconditions that demand both the binary and a reachable daemon. That last
+one arrived red on `fast` rather than being predicted: a suite that spawns a
+real script belongs here whether or not the test file itself says "docker".
+The split frees the
+~200-300 s `orbit-build` used to hold for `fast`'s docker-free work every
+pipeline.
+
+The acceptance stage waits for `fast` and `fast_docker`, so a red one of
+either costs no image build, no browser suite and no installer run. It no
+longer also waits for
+`gitleaks`, `licence_policy` and `supply_chain_source` (#945, owner ruling on
+#923 rec 16b, 2026-09-09): those three queued 541–1105 s on the shared
+`light` lane for about 68 s of actual policy work, holding the stage back by
+over five minutes. A red one of the three still fails the pipeline overall —
+none is `allow_failure: true` — it just no longer blocks a job that never
+reads its result; the acceptance stage keeps running rather than being
+cancelled (ADR-0028 §5 removed the project's `auto_cancel` on job failure).
+`fidelity` and `integration` still wait for all
+five: `fast`, `fast_docker`, `gitleaks`, `licence_policy` and
+`supply_chain_source`.
+
+`sidecar_images` and `launcher_install_compat` (#944, owner ruling on #923
+rec 16a, 2026-09-09) used to queue for a slot and only then, inside
+`script:`, read a classifier dotenv variable and decide there was nothing to
+do — 143–300 s of `big` plus a 443–589 s queued tail on nearly every merge
+request, for a job that never ran. `rules:` is evaluated before any job runs
+and cannot read that dotenv artifact, so both jobs now decide with
+`rules: changes:` instead, which reads the merge diff directly. Delivery
+branches and the merge request into `main` still run both unconditionally.
+`launcher_install_compat`'s list is an exact copy of the classifier's own
+`launcherCompatPatterns`. `sidecar_images`' list is deliberately wider than
+the classifier's `ORBIT_SYSTEM` axis: that axis defaults an unmatched path to
+system risk, which `changes:` cannot express as a negation, so the list
+covers everything except what the classifier calls definitely fast (`docs/`,
+root-level markdown, `LICENSE`, `.gitignore`).
+
+### Two more caches: the image build and the vulnerability database (#946)
+
+`build_image` rebuilt its `deps`, `web-deps` and `cli-builder` stages from
+scratch every pipeline (#923 finding 6a: 0 `CACHED` lines, ~26 s, even when
+the lockfile had not changed). It now reads and writes a BuildKit registry
+cache, one tag under this project's own registry
+(`$CI_REGISTRY_IMAGE/build-cache:main`). Every build reads it; only a
+delivery-branch push writes it, the same trust boundary `record_image`'s push
+already draws — an ordinary merge request never writes the shared cache, only
+benefits from what the last delivery push left there. The export is a
+separate, best-effort build of the same already-warm graph rather than folded
+into the main build: a combined build-and-export fails the whole build when
+the push fails, where an export-only invocation cannot touch the image
+already built. A registry outage or a login failure degrades to an uncached
+build, never a red pipeline.
+
+The three Trivy scanner jobs (`supply_chain_source`, `sidecar_images`,
+`supply_chain_image`) each downloaded the ~111 MB vulnerability database
+fresh on every pipeline (#923 finding 6c). They now share one GitLab `cache:`
+key, dated inside by the job rather than by the key — GitLab's own
+`cache:key:` has no way to read today's date, so each job instead looks for a
+subdirectory named for the current UTC date and downloads only when that is
+missing, removing whatever is left from an earlier day first. A calendar-day
+boundary is the whole invalidation story and happens to match Trivy's own
+update cadence, so nothing here can serve a database more than about a day
+old; a cold miss (first run of a new day, or an empty cache) costs exactly
+what every run cost before this.
+
+### The second browser lane: an Orbit with no identity provider (#916)
+
+Since [ADR-0023](adr/0023-registration-linking-and-recent-authentication.md) §1
+an identity provider is optional. An install that never configures one is a
+supported deployment, not a broken one, so the browser evidence has to cover
+it — and `smoke`'s stack cannot, because it has a provider and its specs sign
+in through it.
+
+`smoke_local_only` is that second lane. It runs the same job shape as `smoke`
+against the same tested image, with `compose/docker-compose.local-only.yml`
+in place of the OIDC and mail overlays: `ORBIT_AUTH_OIDC=false`, and no
+provider sidecar at all. It runs the short list in
+`tests/e2e/local-only-specs.txt` rather than the whole suite — the claim from
+the container's own log, the first administrator's password, signing out and
+signing back in, and the signed-out privacy checks, which are the journeys
+that only exist when there is nothing else to sign in with.
+
+`scripts/test-e2e-local.sh --profile local-only` is the same stack locally,
+and reads the same list file, so a spec added to the lane reaches both callers
+or neither.
+
+Two things this lane does not change. It gates a merge on the same rules as
+`smoke` and nothing else moves; and the ordinary suite still runs against the
+provider stack, because most of Orbit has nothing to do with how anyone
+signed in.
+
+The negative half lives in the provider stack instead:
+`tests/e2e/bootstrap-protection.spec.ts` proves that an unclaimed instance
+refuses to start a provider sign-in at all ([ADR-0022](adr/0022-bootstrap-claim-and-lost-administrator-recovery.md)
+§2), which is a refusal that only exists where there is a provider to refuse.
 
 ### Launcher install compatibility
 
@@ -259,6 +472,52 @@ release evidence is never inferred from a cheaper merge-request lane. Until a
 forge-native combined-state queue is available, only one release train is
 admitted to protected CI at a time while
 independent implementation and local validation continue concurrently.
+
+### Launch timing runs at the promotion gate, not on every merge (#1048)
+
+Frame timings through the launch hand-off used to run on every front-end
+merge request, because `web/package.json`'s `fidelity` script was a bare
+`playwright test` and so collected `launch-timing.spec.js` along with the
+screen comparisons. On a shared host the run-to-run noise was larger than the
+effect being measured: the same unchanged build photographed twice differed by
+up to 189 pixels, and a CSS-only phase nobody had touched moved as much as the
+phase under test (measured on #873, 2026-09-17). A correct fix could read as a
+regression and a bad one as a win.
+
+The spec is now its own Playwright project. `fidelity` runs the `fidelity`
+project — appearance, every front-end merge request, unchanged otherwise — and
+the `launch_timing` job runs the `launch-timing` project at the `dev` →
+`preview` promotion: the merge request whose target branch is `preview`, and
+the push to `preview` that lands it. Those two `rules:` conditions are written
+out rather than reusing `orbit_full_gate`, whose first arm matches every push
+to `dev` — the merge frequency this job exists to escape — and whose second
+targets `main`, which is the later gate.
+
+The phone floor measurement (`pocket-measure.spec.js`, #1120) is a third
+project, `pocket-measure`, and rides the `fidelity` job as a second Playwright
+run after the first (#1148). It compares no pixels, so it runs on four
+workers; run beside the one-at-a-time appearance project it shared four CPUs
+with it and failed that project's timing-sensitive tests, so the two never
+overlap. Together they measured 16.7 minutes on a quiet host, and the job's
+limit is 30.
+
+Quiet, as far as the lanes allow: the project's own `orbit-build` runner,
+which no other project's jobs reach, in the last stage with no `needs:`, so
+nothing else of Orbit's is running beside it, and a `resource_group` so two
+promotions cannot measure at once. Both runners share one host, and M11 rules
+out new capacity, so another project's shared-runner work is residual noise
+that cannot be removed here.
+
+The comparison is candidate against candidate.
+`scripts/ci/launch-timing-report.mjs` collects the per-pack numbers, reads the
+report this job left on `preview` at the previous promotion, and prints the
+two side by side with the commit range between them, which is what a
+regression is bisected over. It takes no verdict from the numbers: nobody has
+measured this measurement's noise floor on the quiet lane, and a threshold
+invented before that is how #873 went wrong. Three or four promotions' reports,
+or one run with `--repeat-each`, would earn one. The trade the owner accepted
+(2026-09-18): a signal you can trust, late, instead of one you cannot trust,
+immediately.
 
 ### Required behaviour
 

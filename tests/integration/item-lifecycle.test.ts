@@ -3,6 +3,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, dueEvents, items, notificationStates, reminderRules } from "@/db/schema";
+import { openMetadataReader } from "@/server/metadata/fields";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 
@@ -107,9 +108,17 @@ async function upsertScheduledItem(
 
 async function itemSnapshot(fixture: Awaited<ReturnType<typeof createIntegrationFixture>>) {
   const db = getDb();
-  const [item] = await db.select().from(items).where(eq(items.id, fixture.item.id));
+  const [row] = await db.select().from(items).where(eq(items.id, fixture.item.id));
   const events = await db.select().from(dueEvents).where(eq(dueEvents.itemId, fixture.item.id));
   const reminders = await db.select().from(reminderRules).where(eq(reminderRules.itemId, fixture.item.id));
+  // `items.title` is Tier 2 ciphertext since #963, so the raw row holds a null
+  // title and an envelope. The assertions below are unchanged; what changed is
+  // that the snapshot decrypts through the production reader first.
+  const metadata = await openMetadataReader(fixture.household.id);
+  const item = {
+    ...row,
+    title: metadata.text("items.title", row.id, { encrypted: row.titleEnc, plaintext: row.title }).value,
+  };
   return { item, events, reminders, auditCount: await fixture.auditCount(fixture.item.id) };
 }
 

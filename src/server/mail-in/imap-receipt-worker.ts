@@ -2,6 +2,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { imapIngestionMessages, imapNotificationDeliveries, users } from "@/db/schema";
 import { categorizeProviderError, createSmtpTransport, getNotificationWorkerConfig } from "@/server/notification-worker";
+import { openInstanceMetadataReader } from "@/server/metadata/fields";
 import { purgeExpiredImapStaging } from "./imap-inbox";
 import { AppError } from "@/lib/app-error";
 import { log } from "@/lib/logger";
@@ -188,6 +189,31 @@ export function markImapNotificationFailureForTests(input: {
   return markNotificationFailure(input.id, input.leaseToken, input.attempts, input.maxAttempts, input.category, input.now);
 }
 
+/**
+ * Hands a claimed delivery back unsent, with nothing decided about it (#969).
+ *
+ * Not a failure: the lease is released, the row returns to `retry` on the same
+ * bounded backoff a transient send failure gets, and no failure code is
+ * written — neither here nor on the message, whose receipt status is left
+ * exactly as it was. A later cycle picks the delivery up and sends it, which
+ * is what a locked instance needs: the key coming back is a repair, and
+ * marking the notification failed meanwhile would throw it away over a
+ * reversible condition.
+ */
+async function deferNotification(id: string, leaseToken: string, attempts: number, now: Date): Promise<void> {
+  await getDb().update(imapNotificationDeliveries).set({
+    status: "retry",
+    nextAttemptAt: new Date(now.getTime() + imapNotificationRetryDelayMs(attempts)),
+    lockedAt: null,
+    leaseToken: null,
+    updatedAt: now,
+  }).where(and(
+    eq(imapNotificationDeliveries.id, id),
+    eq(imapNotificationDeliveries.status, "processing"),
+    eq(imapNotificationDeliveries.leaseToken, leaseToken),
+  ));
+}
+
 async function markNotificationSent(
   id: string,
   leaseToken: string,
@@ -253,21 +279,40 @@ export async function runImapReceiptCycle(): Promise<void> {
     kind: imapNotificationDeliveries.kind,
     leaseToken: imapNotificationDeliveries.leaseToken,
     attempts: imapNotificationDeliveries.attempts,
+    userId: users.id,
     email: users.email,
+    emailEnc: users.emailEnc,
     disabledAt: users.disabledAt,
   }).from(imapNotificationDeliveries)
     .innerJoin(users, eq(users.id, imapNotificationDeliveries.userId))
     .where(and(inArray(imapNotificationDeliveries.id, claimed.map((notification) => notification.id)), eq(imapNotificationDeliveries.status, "processing")));
   const transporter = config.smtpUrl ? createSmtpTransport(config) : undefined;
+  // One key unwrap for the cycle: the recipient address is encrypted metadata
+  // under the instance key since #969, and every delivery in the batch reads
+  // through the same cipher.
+  const metadata = await openInstanceMetadataReader();
   try {
     for (const delivery of deliveries) {
       const leaseToken = tokens.get(delivery.id);
       if (!leaseToken || delivery.leaseToken !== leaseToken) continue;
       try {
         if (await cancelDisabledNotification(delivery.id, leaseToken, delivery.disabledAt, now)) continue;
+        /* An address that will not read — a locked instance, or a value that
+           does not authenticate, which the cipher records for the
+           administrator either way — is DEFERRED, not failed (#969). Nothing
+           is sent to an empty or invented recipient, and the notification
+           stays waiting for a cycle that can read it. */
+        const recipient = metadata.text("users.email", delivery.userId, {
+          encrypted: delivery.emailEnc,
+          plaintext: delivery.email,
+        }).value;
+        if (!recipient) {
+          await deferNotification(delivery.id, leaseToken, delivery.attempts, now);
+          continue;
+        }
         if (!transporter) throw Object.assign(new Error("SMTP unavailable"), { code: "smtp_unconfigured" });
         const notification = buildImapNotification(delivery.kind, reviewUrl);
-        await transporter.sendMail({ from: config.smtpFrom, to: delivery.email, ...notification });
+        await transporter.sendMail({ from: config.smtpFrom, to: recipient, ...notification });
         await markNotificationSent(delivery.id, leaseToken, now);
       } catch (error) {
         const category: ImapNotificationFailure = (error as { code?: string }).code === "smtp_unconfigured"

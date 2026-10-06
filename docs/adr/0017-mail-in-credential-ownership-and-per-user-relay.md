@@ -55,7 +55,10 @@ Where the code stands today:
   `src/server/mail-in/imap-attachment-holding.ts:29-69`).
 - No live KEK rewrap exists: `rewrapDocumentKey` (`crypto.ts:167-184`) has no
   production caller; the only KEK replacement path is a wholesale swap by
-  `import-recovery-bundle` (`src/cli/orbit.ts:362`).
+  `import-recovery-bundle` (`src/cli/orbit.ts:362`). **Corrected 2026-09-10
+  (#932):** the rewrap worker now exists
+  (`src/server/documents/rewrap-worker.ts`, run via `pnpm rewrap-kek`) and
+  meets the contract this record sets below.
 - The alias local part is the literal `orbit+<token>` (`core/imap-recipient.ts:27, 47`).
 
 ## Decision
@@ -110,12 +113,18 @@ records nothing secret. Removal clears the reference, deletes the row and
 sets `enabled=false`; cursor, receipts, drafts and staging are preserved, as
 `IMAP_ENABLED=false` preserves them today (`docs/administrator-operations.md:309-310`).
 
-**KEK rotation.** There is no live rewrap today. The contract: any future
-rewrap command must rewrap every `mail_in_secrets` row (selected by `key_id`)
-in the same transaction as `document_crypto`. Until one exists, a KEK swap
-(recovery-bundle import, or repair's `regenerate-secret` for `document-kek`,
-ADR-0014 slice 3) makes the rows unreadable. Startup and each poll cycle
-therefore verify decryptability first; failure puts mail-in in a new
+**KEK rotation.** **Corrected 2026-09-10 (#932):** a live rewrap now exists —
+`src/server/documents/rewrap-worker.ts`, run by an administrator via `pnpm
+rewrap-kek` and documented in `docs/administrator-operations.md`, "Rotating
+the document key-encryption key". It meets the contract this record set:
+every `mail_in_secrets` row (selected by `key_id`) is rewrapped in the same
+batched, resumable pass as `document_crypto` and (ADR-0024) `metadata_keys`,
+and a row is always readable under the current key or the next one, never
+neither. A *wholesale* KEK swap that carries no old key forward — a
+recovery-bundle import, or repair's `regenerate-secret` for `document-kek`
+(ADR-0014 slice 3) — still makes the rows unreadable, because there is
+nothing for a rewrap to unwrap them from. Startup and each poll cycle
+therefore still verify decryptability first; failure puts mail-in in the
 operator state `credential_locked` (added to the table at
 `administrator-operations.md:278-291`), stops polling, and the administrator
 re-enters the credential. This degradation is acceptable because a mailbox

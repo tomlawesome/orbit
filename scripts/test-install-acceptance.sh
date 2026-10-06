@@ -58,6 +58,15 @@ note() { printf '[acceptance] %s\n' "$*"; }
 fail() { printf '[acceptance] FAIL: %s\n' "$*" >&2; exit 1; }
 
 workdir="$(mktemp -d /tmp/orbit-acceptance.XXXXXX)"
+# Set once positive_scenario pushes the image under test and writes a manifest
+# for it (ADR-0031 #7); empty until then. run_installer() hands it to
+# install.sh via ORBIT_RELEASE_MANIFEST whenever it is set, so install.sh does
+# not self-fetch a signed manifest that does not exist for this locally built,
+# unpublished image (#1107). negative_scenarios() calls run_installer() before
+# this is set, but every one of its scenarios is refused by validate_target
+# before install.sh ever reaches manifest resolution, so an empty value there
+# is harmless -- install.sh treats it exactly like an absent one.
+release_manifest=""
 
 free_port() {
   node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{process.stdout.write(String(s.address().port));s.close();});'
@@ -85,21 +94,34 @@ while [[ "$orbit_port" == "$registry_port" ]]; do
 done
 repository="acceptance/orbit"
 issuer="https://oidc.acceptance.invalid/application/o/orbit/"
-# The target directory name doubles as the Compose project name the
-# installer persists (derive_compose_project_name in install.sh falls back
-# to the target directory's basename when COMPOSE_PROJECT_NAME is not set),
-# so every container/volume/network this script creates carries this run's
-# project label and can be swept even after an untrappable SIGKILL left
-# debris behind.
+# The target directory is named after this run's project so debris is
+# recognisable by eye. The project name itself is stated to the installer by
+# run_installer below rather than inferred from that directory: since #999 a
+# fresh install defaults to docker-compose.yml's own `name: orbit`, so every
+# run would otherwise share one project and one set of volumes, and either
+# run's sweep would take the other's. Stating it keeps every
+# container/volume/network this script creates carrying this run's project
+# label, so it can be swept even after an untrappable SIGKILL left debris
+# behind.
 target="$workdir/$project_name"
+# Slice 4 (#907): the local-only run (local_only_scenario) gets its own
+# target directory and its own Compose project name, so the sweep can tell
+# the two deployments' debris apart. It still cannot run while the primary
+# deployment's database volume exists: install.sh #13/#21 refuse a fresh
+# install whenever any `*orbit-db-data` volume is on the host, whatever
+# project owns it (the lifecycle run asserts exactly that), so the primary
+# deployment is taken down, volumes included, before the local-only install.
+local_only_target="$workdir/local-only-deploy"
+local_only_project_name="${project_name}-local"
 
 sweep_debris() {
+  local sweep_project="${1:-$project_name}"
   docker rm -f "$registry_name" >/dev/null 2>&1 || true
-  docker ps -aq --filter label=com.docker.compose.project="$project_name" |
+  docker ps -aq --filter label=com.docker.compose.project="$sweep_project" |
     xargs -r docker rm -f >/dev/null 2>&1 || true
-  docker volume ls -q --filter label=com.docker.compose.project="$project_name" |
+  docker volume ls -q --filter label=com.docker.compose.project="$sweep_project" |
     xargs -r docker volume rm >/dev/null 2>&1 || true
-  docker network ls -q --filter label=com.docker.compose.project="$project_name" |
+  docker network ls -q --filter label=com.docker.compose.project="$sweep_project" |
     xargs -r docker network rm >/dev/null 2>&1 || true
 }
 
@@ -113,7 +135,12 @@ cleanup() {
     chmod 600 "$target/.env-orbit" 2>/dev/null || true
     (cd "$target" && docker compose --env-file .env-orbit down --volumes --remove-orphans >/dev/null 2>&1) || true
   fi
-  sweep_debris
+  if [[ -f "$local_only_target/.env-orbit" && -f "$local_only_target/docker-compose.yml" ]]; then
+    chmod 600 "$local_only_target/.env-orbit" 2>/dev/null || true
+    (cd "$local_only_target" && docker compose --env-file .env-orbit down --volumes --remove-orphans >/dev/null 2>&1) || true
+  fi
+  sweep_debris "$project_name"
+  sweep_debris "$local_only_project_name"
   rm -rf -- "$workdir"
 }
 trap cleanup EXIT
@@ -133,6 +160,12 @@ make_preprovisioned_target() {
     printf 'APP_URL=https://orbit.acceptance.invalid\n'
     printf 'ORBIT_PORT=%s\n' "$orbit_port"
     printf 'ORBIT_BIND_ADDRESS=127.0.0.1\n'
+    # ADR-0023 section 1: OIDC is opt-in; the sign-in mode has to be named
+    # explicitly here too, or a legacy-shaped env file with the OIDC fields
+    # merely present (and no ORBIT_AUTH_OIDC key) is read as local-only by
+    # both configure.sh --check and install.sh's own discovery gate, and this
+    # scenario would stop exercising provider discovery at all.
+    printf 'ORBIT_AUTH_OIDC=true\n'
     printf 'OIDC_ISSUER=%s\n' "$issuer"
     printf 'OIDC_CLIENT_ID=orbit-acceptance\n'
     printf 'OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n'
@@ -141,9 +174,43 @@ make_preprovisioned_target() {
   chmod 600 "$target/.env-orbit"
 }
 
+# Slice 4 (#907): the local-only counterpart of make_preprovisioned_target.
+# ORBIT_AUTH_OIDC=false and no OIDC_* fields at all -- the guided flow's own
+# local-only path (scripts/configure.sh's guided_init) never writes them
+# either. The unattended pre-provisioning contract (installer-guarantees.md,
+# install.sh guarantee 6) still requires a non-empty oidc-client-secret file
+# regardless of sign-in mode, so a harmless unused placeholder goes in it
+# (ADR-0023 section 1: switching the provider off never requires deleting its
+# configuration -- here there simply is none to begin with).
+make_local_only_preprovisioned_target() {
+  rm -rf -- "$target"
+  mkdir -p -- "$target/.orbit-secrets"
+  chmod 700 "$target/.orbit-secrets"
+  printf 'unused-placeholder\n' > "$target/.orbit-secrets/oidc-client-secret"
+  chmod 600 "$target/.orbit-secrets/oidc-client-secret"
+  {
+    printf 'APP_URL=https://orbit.acceptance.invalid\n'
+    printf 'ORBIT_PORT=%s\n' "$orbit_port"
+    printf 'ORBIT_BIND_ADDRESS=127.0.0.1\n'
+    printf 'ORBIT_AUTH_OIDC=false\n'
+    # JSON so the claim notice (ADR-0022 section 1) is one greppable line;
+    # the text form spans three lines with no single unique anchor.
+    printf 'ORBIT_LOG_FORMAT=json\n'
+  } > "$target/.env-orbit"
+  chmod 600 "$target/.env-orbit"
+}
+
 run_installer() {
+  # COMPOSE_PROJECT_NAME is the operator override install.sh has always
+  # honoured ahead of everything else, and this harness needs it: without it
+  # a fresh install now takes docker-compose.yml's own `name: orbit` (#999)
+  # and two concurrent runs would collide exactly as they did before #894.
+  # local_only_scenario exports its own before calling here, so honour that
+  # when it is set.
   (cd "$target" && env PATH="$workdir/shim:$PATH" \
+    COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$project_name}" \
     ORBIT_REGISTRY="127.0.0.1:$registry_port" ORBIT_REPOSITORY="$repository" \
+    ORBIT_RELEASE_MANIFEST="$release_manifest" \
     timeout 900 bash "$repo_root/scripts/install.sh" </dev/null) \
     > "$workdir/install.log" 2>&1
 }
@@ -350,8 +417,12 @@ positive_scenario() {
   fi
 
   docker rm -f "$registry_name" >/dev/null 2>&1 || true
+  # Pinned by digest, the same one scripts/ci/start-installer-registry.sh uses
+  # (ai/orbit#1111): a moving `:2` tag is what let this local-run harness keep
+  # hitting Docker Hub's anonymous pull rate limit.
   docker run -d --name "$registry_name" -p "127.0.0.1:$registry_port:5000" \
-    registry:2 >/dev/null || fail "local registry did not start"
+    registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373 >/dev/null ||
+    fail "local registry did not start"
   docker tag "$image" "127.0.0.1:$registry_port/$repository:latest"
   docker push --quiet "127.0.0.1:$registry_port/$repository:latest" >/dev/null ||
     fail "push to the local registry failed"
@@ -362,6 +433,16 @@ positive_scenario() {
   digest="$(docker inspect --format '{{index .RepoDigests}}' "127.0.0.1:$registry_port/$repository:latest" |
     grep -m1 -oE 'sha256:[0-9a-f]{64}')"
   [[ -n "$digest" ]] || fail "could not capture the pushed digest"
+
+  # ADR-0031 #7: install.sh now refuses to run without a release manifest it
+  # can verify, and this is a locally built, unpublished image, so hand it one
+  # directly (the same already-verified hand-over path get-orbit.sh and the
+  # launcher use) instead of letting it self-fetch one from GitHub that does
+  # not exist for this image (#1107).
+  release_manifest="$workdir/orbit-release-manifest.json"
+  bash "$repo_root/scripts/ci/write-test-manifest.sh" \
+    "$release_manifest" "127.0.0.1:$registry_port/$repository" "$digest" >/dev/null ||
+    fail "could not write the test release manifest"
 
   write_shim
   make_preprovisioned_target
@@ -402,6 +483,7 @@ positive_scenario() {
     set -m
     ( cd "$target" && env PATH="$workdir/shim:$PATH" \
         ORBIT_REGISTRY="127.0.0.1:$registry_port" ORBIT_REPOSITORY="$repository" \
+        ORBIT_RELEASE_MANIFEST="$release_manifest" \
         bash "$repo_root/scripts/install.sh" </dev/null ) \
         > "$workdir/install.log" 2>&1 &
     local install_bg=$! waited=0 install_status=0
@@ -497,6 +579,69 @@ positive_scenario() {
   fi
 }
 
+# Slice 4 (#907): a fresh, local-only, no-OIDC install (docs/plans/
+# m7-local-accounts.md "Slice 4" done-when). Reuses the image
+# positive_scenario already built/pushed to the local registry (a plain
+# `docker run` container, untouched by the Compose teardown below) -- no
+# second build. Runs after, not alongside, the primary OIDC-configured
+# deployment: see the header comment on $local_only_target.
+local_only_scenario() {
+  local first_target="$target" claim_lines=""
+
+  (cd "$first_target" && docker compose --env-file .env-orbit down --volumes --remove-orphans >/dev/null 2>&1) ||
+    fail "could not take the primary deployment down before the local-only install"
+
+  write_shim
+  target="$local_only_target"
+  make_local_only_preprovisioned_target
+
+  note "running unmocked install.sh against a local-only, no-OIDC deployment"
+  export COMPOSE_PROJECT_NAME="$local_only_project_name"
+  run_installer || { tail -20 "$workdir/install.log" >&2; target="$first_target"; unset COMPOSE_PROJECT_NAME; fail "local-only install.sh exited nonzero"; }
+  unset COMPOSE_PROJECT_NAME
+
+  # docs/plans/m7-local-accounts.md Slice 4 done-when: no OIDC trio required,
+  # and install.sh's own oidc-discovery phase is skipped rather than
+  # contacting a provider (installer-guarantees.md install.sh guarantee 57).
+  grep -qE '^phase=oidc component=oidc state=skipped reason=provider-discovery action=skip elapsed=[0-9]+s$' "$workdir/install.log" ||
+    fail "local-only run did not skip the OIDC-discovery phase"
+  grep -q '^phase=complete .*state=completed' "$workdir/install.log" ||
+    fail "local-only run did not reach the terminal phase=complete event"
+
+  grep -q '^ORBIT_AUTH_OIDC=false$' "$target/.env-orbit" ||
+    fail "local-only run did not persist ORBIT_AUTH_OIDC=false"
+  grep -q '^OIDC_ISSUER=' "$target/.env-orbit" &&
+    fail "local-only run wrote an OIDC_ISSUER it was never given"
+
+  # The installer's own output must never carry the claim code (ADR-0022
+  # section 1) -- only a pointer to where the operator reads it.
+  grep -qi 'bootstrap.claim' "$workdir/install.log" &&
+    fail "the installer's own output named the claim event; it must only point at the container log"
+  grep -Fq 'Claim this instance: run "docker compose --env-file .env-orbit logs orbit-app"' "$workdir/install.log" ||
+    fail "completion screen did not name the claim-notice pointer"
+
+  local health_body
+  health_body="$(/usr/bin/curl --fail --silent --max-time 5 "http://127.0.0.1:$orbit_port/api/health")" || true
+  [[ "$health_body" == *'"status":"ready"'* ]] || fail "local-only /api/health did not report ready"
+
+  # ADR-0022 section 1: printClaimNotice writes one JSON object per boot
+  # while unclaimed ({"event":"bootstrap.claim",...}, ORBIT_LOG_FORMAT=json
+  # set above precisely so this is one greppable line). src/lib/auth/
+  # bootstrap.ts and its src/server/boot.ts call site are slice 5's own
+  # touches (#907's sibling issue) and do not exist in this tree yet, so
+  # this assertion is expected to fail until that slice lands -- it is
+  # written now, against the ADR's documented line shape, so slice 5 only
+  # has to make it pass, not invent it.
+  claim_lines="$(cd "$target" && docker compose --env-file .env-orbit logs orbit-app 2>/dev/null |
+    grep -c '"event":"bootstrap.claim"' || true)"
+  [[ "$claim_lines" == 1 ]] ||
+    fail "expected exactly one bootstrap.claim line in the container log, saw ${claim_lines:-0} (awaits slice 5, printClaimNotice)"
+
+  (cd "$target" && docker compose --env-file .env-orbit down --volumes --remove-orphans >/dev/null 2>&1) || true
+  target="$first_target"
+  note "green: local-only install healthy, no OIDC configured, exactly one claim line, no code in installer output"
+}
+
 note "work directory: $workdir"
 note "project: $project_name (registry $registry_name on 127.0.0.1:$registry_port, app on 127.0.0.1:$orbit_port)"
 sweep_debris
@@ -518,4 +663,5 @@ if [[ "$negative_only" == 1 ]]; then
   exit 0
 fi
 positive_scenario
+local_only_scenario
 note "acceptance exemplar complete"

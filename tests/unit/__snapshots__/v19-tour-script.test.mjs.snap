@@ -1,0 +1,51 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`the film's script (round 7, #1097) > #1083 §1: the desk script is byte-identical to a committed snapshot 1`] = `
+[
+  [
+    "This is your star chart.",
+    "That's your sun, in the centre — your household, always here.",
+    "Explore the sky to find other households — maybe you belong there too?",
+  ],
+  [
+    "Fill in the details here.",
+  ],
+  [
+    "Bodies orbit by when they're due, higher value events are larger.",
+  ],
+  [
+    "The manifest lists what's ahead, nearest first.",
+  ],
+  [
+    "As time rolls by, items gravitate toward your sun, the sooner the event, the closer they are.",
+    "Orbit reminds you, visually and through notifications.",
+  ],
+  [
+    "Forward a bill to your relay address and Orbit reads a copy to import it.",
+  ],
+  [
+    "Mail lands here first — filed, waiting for review, or still being read.",
+    "Nothing gets added without your review.",
+  ],
+  [
+    "Every body carries its documents in a belt around it.",
+    "The belt is what you have attached to it.",
+    "Read the full document, right here.",
+  ],
+  [
+    "MOT passed — mark it done and it swings back out to next year.",
+    "Renewals start their orbit again, fixed length items disappear.",
+  ],
+  [
+    "Explore the sky to find other households.",
+    "Tap one to fly there — Gran's flat, the narrowboat.",
+  ],
+  [
+    "Watch the tour again anytime from the settings or the menu.",
+  ],
+  [
+    "That was a year, in one turn of the ring.",
+    "Now it's yours.",
+  ],
+]
+`;

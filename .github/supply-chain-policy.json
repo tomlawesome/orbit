@@ -58,7 +58,7 @@
       "installedVersion": "5.0.7",
       "owner": "Orbit maintainers",
       "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -69,7 +69,7 @@
       "installedVersion": "5.0.7",
       "owner": "Orbit maintainers",
       "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -80,7 +80,7 @@
       "installedVersion": "v1.1.1",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -91,7 +91,7 @@
       "installedVersion": "v0.43.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -102,7 +102,7 @@
       "installedVersion": "v0.43.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -113,7 +113,7 @@
       "installedVersion": "v0.43.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -124,7 +124,7 @@
       "installedVersion": "v0.43.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -135,7 +135,7 @@
       "installedVersion": "v0.43.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -146,7 +146,7 @@
       "installedVersion": "v0.43.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -157,7 +157,7 @@
       "installedVersion": "v0.43.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -168,7 +168,7 @@
       "installedVersion": "v0.43.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -179,7 +179,7 @@
       "installedVersion": "v0.43.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -190,7 +190,7 @@
       "installedVersion": "v0.43.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -201,7 +201,7 @@
       "installedVersion": "v0.22.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -212,7 +212,7 @@
       "installedVersion": "v0.22.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -223,7 +223,7 @@
       "installedVersion": "v0.30.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -234,7 +234,7 @@
       "installedVersion": "v0.30.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -245,7 +245,7 @@
       "installedVersion": "v0.46.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -256,7 +256,7 @@
       "installedVersion": "v0.46.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -267,7 +267,7 @@
       "installedVersion": "v0.46.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -278,7 +278,7 @@
       "installedVersion": "v0.46.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -289,7 +289,7 @@
       "installedVersion": "v0.46.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -300,7 +300,7 @@
       "installedVersion": "v0.30.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -311,106 +311,7 @@
       "installedVersion": "10.2.0",
       "owner": "Orbit maintainers",
       "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved.",
-      "expiresOn": "2026-10-05",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-14456",
-      "package": "libcrypto3",
-      "installedVersion": "3.5.7-r0",
-      "owner": "Orbit maintainers",
-      "rationale": "OpenSSL 3.5.7-r0 in the image; Alpine ships 3.5.8-r0 but the tag has not been rebuilt (node built 2026-08-27, postgres 2026-08-13), so there is nothing newer to pin to.",
-      "expiresOn": "2026-10-05",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-14456",
-      "package": "libssl3",
-      "installedVersion": "3.5.7-r0",
-      "owner": "Orbit maintainers",
-      "rationale": "OpenSSL 3.5.7-r0 in the image; Alpine ships 3.5.8-r0 but the tag has not been rebuilt (node built 2026-08-27, postgres 2026-08-13), so there is nothing newer to pin to.",
-      "expiresOn": "2026-10-05",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-53612",
-      "package": "libuuid",
-      "installedVersion": "2.42.1-r0",
-      "owner": "Orbit maintainers",
-      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
-      "expiresOn": "2026-10-05",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-53613",
-      "package": "libuuid",
-      "installedVersion": "2.42.1-r0",
-      "owner": "Orbit maintainers",
-      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
-      "expiresOn": "2026-10-05",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-53614",
-      "package": "libuuid",
-      "installedVersion": "2.42.1-r0",
-      "owner": "Orbit maintainers",
-      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
-      "expiresOn": "2026-10-05",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-76642",
-      "package": "libuuid",
-      "installedVersion": "2.42.1-r0",
-      "owner": "Orbit maintainers",
-      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
-      "expiresOn": "2026-10-05",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-78408",
-      "package": "libuuid",
-      "installedVersion": "2.42.1-r0",
-      "owner": "Orbit maintainers",
-      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
-      "expiresOn": "2026-10-05",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-78409",
-      "package": "libuuid",
-      "installedVersion": "2.42.1-r0",
-      "owner": "Orbit maintainers",
-      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
-      "expiresOn": "2026-10-05",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-78410",
-      "package": "libuuid",
-      "installedVersion": "2.42.1-r0",
-      "owner": "Orbit maintainers",
-      "rationale": "util-linux 2.42.1-r0 in postgres:18-alpine; Alpine ships 2.42.3-r0 but the tag has not been rebuilt (the newest linux/amd64 digest on 2026-09-05 is the pinned one), so there is nothing newer to pin to. Same situation as the OpenSSL entries above; #824 has the evidence.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -421,7 +322,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -432,7 +333,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -443,7 +344,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -454,7 +355,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -465,7 +366,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -476,7 +377,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -487,7 +388,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -498,7 +399,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -509,7 +410,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -520,7 +421,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -531,7 +432,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -542,7 +443,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -553,7 +454,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -564,7 +465,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -575,7 +476,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -586,7 +487,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -597,7 +498,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -608,7 +509,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -619,7 +520,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -630,7 +531,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -641,7 +542,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -652,7 +553,7 @@
       "installedVersion": "v1.24.6",
       "owner": "Orbit maintainers",
       "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -663,7 +564,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -674,7 +575,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -685,7 +586,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -696,7 +597,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -707,7 +608,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -718,7 +619,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -729,7 +630,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -740,7 +641,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -751,7 +652,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -762,7 +663,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -773,7 +674,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -784,7 +685,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -795,7 +696,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -806,7 +707,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -817,7 +718,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -828,7 +729,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -839,7 +740,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -850,7 +751,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -861,7 +762,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -872,7 +773,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -883,7 +784,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -894,95 +795,7 @@
       "installedVersion": "v1.26.0",
       "owner": "Orbit maintainers",
       "rationale": "Compiled into /usr/bin/ollama; 0.33.3 (2026-09-03) scans identically, so no release yet carries the fix.",
-      "expiresOn": "2026-10-05",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-33818",
-      "package": "stdlib",
-      "installedVersion": "v1.26.5",
-      "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.0.0-full; 4.0.0 is the latest Tika release and its tag has not moved.",
-      "expiresOn": "2026-10-05",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-39821",
-      "package": "stdlib",
-      "installedVersion": "v1.26.5",
-      "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.0.0-full; 4.0.0 is the latest Tika release and its tag has not moved.",
-      "expiresOn": "2026-10-05",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-46600",
-      "package": "stdlib",
-      "installedVersion": "v1.26.5",
-      "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.0.0-full; 4.0.0 is the latest Tika release and its tag has not moved.",
-      "expiresOn": "2026-10-05",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-56853",
-      "package": "stdlib",
-      "installedVersion": "v1.26.5",
-      "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.0.0-full; 4.0.0 is the latest Tika release and its tag has not moved.",
-      "expiresOn": "2026-10-05",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-56858",
-      "package": "stdlib",
-      "installedVersion": "v1.26.5",
-      "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.0.0-full; 4.0.0 is the latest Tika release and its tag has not moved.",
-      "expiresOn": "2026-10-05",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-56859",
-      "package": "stdlib",
-      "installedVersion": "v1.26.5",
-      "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.0.0-full; 4.0.0 is the latest Tika release and its tag has not moved.",
-      "expiresOn": "2026-10-05",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-56860",
-      "package": "stdlib",
-      "installedVersion": "v1.26.5",
-      "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.0.0-full; 4.0.0 is the latest Tika release and its tag has not moved.",
-      "expiresOn": "2026-10-05",
-      "trackingIssue": 794
-    },
-    {
-      "kind": "vulnerability",
-      "scope": "image",
-      "id": "CVE-2026-56862",
-      "package": "stdlib",
-      "installedVersion": "v1.26.5",
-      "owner": "Orbit maintainers",
-      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.0.0-full; 4.0.0 is the latest Tika release and its tag has not moved.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     },
     {
@@ -993,7 +806,117 @@
       "installedVersion": "7.5.19",
       "owner": "Orbit maintainers",
       "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved.",
-      "expiresOn": "2026-10-05",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-102276",
+      "package": "brace-expansion",
+      "installedVersion": "5.0.7",
+      "owner": "Orbit maintainers",
+      "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved (2026-10-01). Owner granted, 2026-10-01.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-102278",
+      "package": "brace-expansion",
+      "installedVersion": "5.0.7",
+      "owner": "Orbit maintainers",
+      "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved (2026-10-01). Owner granted, 2026-10-01.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-19534",
+      "package": "undici",
+      "installedVersion": "6.27.0",
+      "owner": "Orbit maintainers",
+      "rationale": "Bundled with npm inside node:24-alpine; only a rebuilt image replaces it, and the tag has not moved (2026-10-01). Owner granted, 2026-10-01.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-103111",
+      "package": "libpcre2-8-0",
+      "installedVersion": "10.46-1~deb13u2",
+      "owner": "Orbit maintainers",
+      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-75804",
+      "package": "libssl3t64",
+      "installedVersion": "3.5.7-1~deb13u2",
+      "owner": "Orbit maintainers",
+      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-75804",
+      "package": "openssl",
+      "installedVersion": "3.5.7-1~deb13u2",
+      "owner": "Orbit maintainers",
+      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-75804",
+      "package": "openssl-provider-legacy",
+      "installedVersion": "3.5.7-1~deb13u2",
+      "owner": "Orbit maintainers",
+      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-84782",
+      "package": "libssl3t64",
+      "installedVersion": "3.5.7-1~deb13u2",
+      "owner": "Orbit maintainers",
+      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-84782",
+      "package": "openssl",
+      "installedVersion": "3.5.7-1~deb13u2",
+      "owner": "Orbit maintainers",
+      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-84782",
+      "package": "openssl-provider-legacy",
+      "installedVersion": "3.5.7-1~deb13u2",
+      "owner": "Orbit maintainers",
+      "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
+      "expiresOn": "2026-11-04",
       "trackingIssue": 794
     }
   ],
@@ -1001,8 +924,8 @@
     {
       "name": "Orbit base image (Alpine plus Node from official signed source)",
       "tag": "ghcr.io/tomlawesome/orbit-base-image:latest",
-      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:7bc734dba7d353f2a03dba82d82c45aa017e4e215ade61426e95e5c8115066e7",
-      "indexDigest": "sha256:8015d77c0469d0df2b8a258bc375e79976d55bf18b523d6c84bba0f76771cb6e",
+      "reference": "ghcr.io/tomlawesome/orbit-base-image:latest@sha256:8c4f684bf363c1bfd3858bd569d63392780322fb9ec57954b2d04b69b739824f",
+      "indexDigest": "sha256:2b6bb1d1105268683579a6523bf93c5e63cf4c4b9d39cf204c75a3f85a6c5cf7",
       "platform": "linux/amd64",
       "locations": [
         "Dockerfile"
@@ -1012,14 +935,14 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-09-07",
+      "resolvedOn": "2026-10-05",
       "reviewBy": "2026-11-30"
     },
     {
       "name": "Node.js build and runtime",
       "tag": "node:24-alpine",
-      "reference": "node:24-alpine@sha256:4caaaf42195bcd6f6f3559a413b20cb8f8ad089e231ee874cf7701643966689f",
-      "indexDigest": "sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf",
+      "reference": "node:24-alpine@sha256:83f1c388c31fb2e51f7cbd4dea949b96260798c98f206e8e4696bc93bd964e3a",
+      "indexDigest": "sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1",
       "platform": "linux/amd64",
       "locations": [
         "tests/oidc/Dockerfile"
@@ -1029,67 +952,70 @@
       "license": "MIT",
       "licenseSource": "https://github.com/nodejs/docker-node/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-08-30",
+      "resolvedOn": "2026-09-24",
       "reviewBy": "2026-10-30"
     },
     {
       "name": "PostgreSQL database",
       "tag": "postgres:18-alpine",
-      "reference": "postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8",
-      "indexDigest": "sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2",
+      "reference": "postgres:18-alpine@sha256:d8703cd7fba306b9fec9268ecedfa8a966846c053036a60e3635791957eb2f66",
+      "indexDigest": "sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml",
         "scripts/test-integration.mjs",
-        ".gitlab-ci.yml"
+        ".gitlab-ci.yml",
+        "compose/docker-compose.dependency-proxy.yml"
       ],
       "source": "https://github.com/docker-library/postgres",
       "registry": "https://hub.docker.com/_/postgres",
       "license": "MIT",
       "licenseSource": "https://github.com/docker-library/postgres/blob/master/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-08-31",
+      "resolvedOn": "2026-09-24",
       "reviewBy": "2026-10-30"
     },
     {
       "name": "ClamAV malware scanner",
       "tag": "clamav/clamav:1.5.4-debian",
-      "reference": "clamav/clamav:1.5.4-debian@sha256:5037bae34bf7566052d18f30be1e351155bfce845a583f0c08027f9fcaa44b5d",
-      "indexDigest": "sha256:4c975c439fcb7ab9cbdd72162c2802f5efcb4a11dcf5b0b37da1d746474ef20e",
+      "reference": "clamav/clamav:1.5.4-debian@sha256:38482a33c6791529d57ece99e5fda54ab94f85534d43306a0b37f5c5bd0aa498",
+      "indexDigest": "sha256:9bb8712a50f0e75166e936c452cd82dd5e5be0b85586598930b5bbb84a99a578",
       "platform": "linux/amd64",
       "locations": [
-        "docker-compose.yml"
+        "docker-compose.yml",
+        "compose/docker-compose.dependency-proxy.yml"
       ],
       "source": "https://github.com/Cisco-Talos/clamav-docker",
       "registry": "https://hub.docker.com/r/clamav/clamav",
       "license": "GPL-2.0-only",
       "licenseSource": "https://github.com/Cisco-Talos/clamav/blob/main/COPYING.txt",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-09-07",
+      "resolvedOn": "2026-10-01",
       "reviewBy": "2026-10-30"
     },
     {
       "name": "Apache Tika parser",
-      "tag": "apache/tika:4.0.0-full",
-      "reference": "apache/tika:4.0.0-full@sha256:6c244af88e8575ebe8bf0bc5e2da03c49663dd0acc7809cd99c8e9ff8741cbfb",
-      "indexDigest": "sha256:80072bb73dd320a9de9709beb0b16d14dd6d2680376f8d31e498f55b633ba593",
+      "tag": "apache/tika:4.1.0-full",
+      "reference": "apache/tika:4.1.0-full@sha256:d7607239d4e9c2dc1fd396f41a370576a334aef28f767e5bc5511247a1e1adf7",
+      "indexDigest": "sha256:ab9cc988828c594d32d6409e1850d1c8d83152ea793ef5fe0e7862ac0f9e5891",
       "platform": "linux/amd64",
       "locations": [
-        "docker-compose.yml"
+        "docker-compose.yml",
+        "compose/docker-compose.dependency-proxy.yml"
       ],
       "source": "https://github.com/apache/tika-docker",
       "registry": "https://hub.docker.com/r/apache/tika",
       "license": "Apache-2.0",
       "licenseSource": "https://github.com/apache/tika-docker/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-08-31",
+      "resolvedOn": "2026-10-01",
       "reviewBy": "2026-10-30"
     },
     {
       "name": "Ollama optional local AI service",
-      "tag": "ollama/ollama:0.33.3",
-      "reference": "ollama/ollama:0.33.3@sha256:57a73f11f75b32b97b59b003f351445c9c2a8af4b9d586ecdc928dee6150ef26",
-      "indexDigest": "sha256:32931b46719f673c05fdbaa81ccb26da18ea4a1c57590a754874ab28ba269eb2",
+      "tag": "ollama/ollama:0.35.1",
+      "reference": "ollama/ollama:0.35.1@sha256:17e945f1aa6e505707eeb621e3f36847d0a4a063d4778f7007645acccfb8bd4f",
+      "indexDigest": "sha256:292ee7945dfc3d5840a181f3ab86fedb1e66703e02c8af98b50f4da56b7e278c",
       "platform": "linux/amd64",
       "locations": [
         "docker-compose.yml"
@@ -1099,7 +1025,7 @@
       "license": "MIT",
       "licenseSource": "https://github.com/ollama/ollama/blob/main/LICENSE",
       "updateOwner": "Orbit maintainers",
-      "resolvedOn": "2026-09-07",
+      "resolvedOn": "2026-10-02",
       "reviewBy": "2026-10-30"
     }
   ],

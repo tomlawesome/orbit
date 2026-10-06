@@ -18,7 +18,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, mailInMailbox, mailInSecrets } from "@/db/schema";
 import { log } from "@/lib/logger";
-import { getDocumentConfig } from "@/server/documents/config";
+import { getDocumentConfig, keyEncryptionKeyFor, type DocumentConfig } from "@/server/documents/config";
 import {
   decryptMailInSecret,
   type MailInSecretContext,
@@ -28,9 +28,10 @@ import { imapAliasBaseFromAccount } from "./core/imap-recipient";
 import type { ImapIngestionConfig } from "./core/config";
 
 /**
- * Thrown when a `mail_in_secrets` row cannot be decrypted under the current
- * document KEK — a KEK swap with no rewrap, a tampered row, or corruption.
- * The message and every field on this error are fixed and non-secret: no
+ * Thrown when a `mail_in_secrets` row cannot be decrypted under any document
+ * KEK this instance holds (current, and the next one during a rotation,
+ * #954) — a KEK swap with no rewrap, a tampered row, or corruption. The
+ * message and every field on this error are fixed and non-secret: no
  * plaintext, provider error, or stack detail from the underlying crypto
  * failure is ever attached (ADR-0017 decision 1, decision 5).
  */
@@ -89,8 +90,16 @@ export function resolveTrustedAuthservId(providerProfile: string | undefined, co
 
 type MailInSecretRow = typeof mailInSecrets.$inferSelect;
 
-/** Authenticates and decrypts one secret row, bound to the mailbox's own host/account. */
-function decryptSecretRow(row: MailInSecretRow, account: { host: string; user: string }, keyEncryptionKey: Buffer): Buffer {
+/**
+ * Authenticates and decrypts one secret row, bound to the mailbox's own
+ * host/account. Picks by the row's own `key_id` (#954, ADR-0024 decision 4):
+ * during a rotation `config` holds both the current and next key, so a row
+ * is readable whether or not the rewrap worker (#932) has reached it yet.
+ * Throws when the row's key_id matches neither held key.
+ */
+function decryptSecretRow(row: MailInSecretRow, account: { host: string; user: string }, config: DocumentConfig): Buffer {
+  const keyEncryptionKey = keyEncryptionKeyFor(config, row.keyId);
+  if (!keyEncryptionKey) throw new Error("mail-in secret is wrapped under a key this instance does not hold");
   const context: MailInSecretContext = {
     secretId: row.id,
     kind: row.kind,
@@ -204,7 +213,7 @@ export async function getImapIngestionConfig(): Promise<ImapIngestionConfig> {
       .where(eq(mailInSecrets.id, mailboxRow.passwordSecretId)).limit(1);
     if (secretRow) {
       try {
-        password = decryptSecretRow(secretRow, account, documentConfig.keyEncryptionKey).toString("utf8");
+        password = decryptSecretRow(secretRow, account, documentConfig).toString("utf8");
       } catch {
         await reportCredentialLocked(mailboxRow.id, secretRow.keyId);
         throw new MailInCredentialLockedError(secretRow.keyId);
@@ -222,7 +231,7 @@ export async function getImapIngestionConfig(): Promise<ImapIngestionConfig> {
     const secretRows = await getDb().select().from(mailInSecrets).where(eq(mailInSecrets.kind, "alias_key"));
     for (const secretRow of secretRows) {
       try {
-        aliasKeysById[secretRow.id] = decryptSecretRow(secretRow, account, documentConfig.keyEncryptionKey).toString("utf8");
+        aliasKeysById[secretRow.id] = decryptSecretRow(secretRow, account, documentConfig).toString("utf8");
       } catch {
         // A superseded key that no longer decrypts only costs its own grace
         // period; the CURRENT key failing is what locks mail-in, because

@@ -80,6 +80,17 @@ centre `r7` filled `--sun`; planet `cx163 cy63.5 r16` filled `--accent`; drift
 **Strapline:** none on the sign-in — *"the hero is the name."* CON-11 records
 *"your year, in orbit"* for surfaces that want words (README, launcher splash).
 
+**Addendum, 2026-10-01 (owner, on #1177, the README art):** outside the app's
+own themed screens the mark is drawn at its **standard proportion** — ring,
+planet, centre dot, the word plain beside or under — never the sign-in's thin
+cut; and the planet is **always gold `#d8b45a`**, whatever ground it sits on
+(it stays gold on After Dark's river). Owner verbatim: *"The simple ring and
+planet is orbit's brand identity, and for something like this, it's always
+the gold colour. Changing the colour would only be appropriate in certain
+places and situations."* Theme tokens recolour the mark only inside the app's
+themed screens. The README tagline is CON-11's *"your year, in orbit"* (owner,
+same day).
+
 ## 3. The home screen
 
 ### The hero
@@ -950,3 +961,610 @@ the day's rounds on Windows/Firefox; the phone's Safari is not required
   start to fall — it was the one thing still arriving late.
 - **Accepted** on the build at `1dd44bc` ("good"); the 404 baseline was
   re-captured on that acceptance.
+
+## 17. The door is mode-aware; every card is the first-household card (owner, 2026-09-09)
+
+The composition for M7's local accounts (#259), ruled directly rather than
+through a design round: #906 (mockups) was closed as superseded the same day.
+The full text stands in `docs/plans/m7-local-accounts.md` §2.7 and is the
+specification; this records that it is the owner's, and when.
+
+- **One card, repurposed, everywhere.** The styling source for every new
+  card is the first-household card — `web/src/lib/arrival/CreateSystem.svelte`'s
+  `form.card` inside the ring (`design/v19/first-run-card/round-3/ring.html`)
+  — with sign-in fields in it instead of a system's name. Not a lookalike:
+  the drawing itself is shared (`web/src/lib/ringcard.css`), so the five
+  places it appears cannot drift apart one padding at a time.
+- **Unclaimed.** The ring shows that card with one field, "claim code" —
+  pre-filled and submitted from the `#claim=` fragment when the operator
+  arrived by the link in the container's log, typed by hand otherwise — and
+  one sentence saying where the code is (`docker compose logs orbit-app`,
+  last line). **No Sign in gate**: there is nobody to sign in as yet.
+- **Local-only, claimed.** The ring shows the same card with email (or
+  username — the field accepts the account's email) and password.
+- **Mixed mode** (an identity provider is on and local accounts exist). The
+  ratified door is **unchanged** — the Sign in gate exactly as today — plus
+  one subtle line under the gate, "local login", which opens that same card
+  in the ring. `GET /api/auth/availability` reports `methods.localAccounts`
+  so the line appears only when a local credential exists.
+- **Create mode**, after a successful claim. The same card asks email,
+  display name and password: the identity of the first administrator. When
+  an identity provider is enabled, a single "continue with your identity
+  provider" line sits under the fields **instead of a gate**. The
+  create-system card that follows is untouched (three things only, §15).
+- **The setup screen** `/setup/<token>`: the same card in a fourth mode —
+  password, password again — taking the shape of
+  `web/src/routes/invite/[token]/`.
+
+Two further composition calls were made in the same ruling and belong to the
+slices that build them, not to this screen: settings' **Sign-in methods**
+block with its inline recent-authentication challenge, and administration's
+**Add a local user** row with its shown-once setup link (§2.7, second half).
+
+## 18. The document preview and the reader over the belt (owner, 2026-09-20)
+
+**"Very good, all approved."** — #1059 (document previews and a reader) and
+#1054 (download and restore), ratified against
+`design/v19/document-card/round-6/h-preview-and-reader.html` after six
+rounds (the owner counts five). The round READMEs hold every verdict
+verbatim; this is the shape that stands.
+
+- **A document is never the centred body.** The item card stays at the apex;
+  a document is a paper riding the belt beside its item, and the item card
+  says only `N documents.` (round 1, then round 6).
+- **Pressing a paper opens the preview** in create-v3's reading card on the
+  paper's own side — the one grid widening so the item card slides over and
+  the reading card grows beside it, the pair centred together, exactly
+  `design/v19/create-v3.html`'s `doc`/`snap` states (rounds 2–3: "That's the
+  exact mockup I meant").
+- **The preview is extremely basic.** The page nearly edge to edge, top, left
+  and right, always whole and in its own proportions, on the cream sheet
+  with the tilted second sheet under it for every file; beneath, `1 of 3`
+  with an arrow either side only where there is a page that way. Nothing
+  else: no head, no file row, no zoom, no close control of its own. Esc or
+  dead space on the belt closes it; on a phone it is the bottom sheet.
+- **The honest states** are the focus block held still: the line says what
+  is happening; the foot holds only what can be done — `restore` for a
+  removed file, `download` for one Orbit could not draw, nothing while
+  scanning. While scanning, a line in the plate's outline colour sweeps the
+  plate up and down with a glow.
+- **The page is a button. Pressing it opens the reader** — round 1's reading
+  room as a window over the belt, never a separate page. The belt dims and
+  blurs beneath. Head: name · item · page N of M left, `fit − % +` centred,
+  `close · esc` right. The page as large as the window allows; a round
+  glass arrow either side of it, the left absent on page 1 and the right on
+  the last. Foot: the page number centred; `download` and `remove` at the
+  right as the item card's own action pills (download in the accent, remove
+  in the overdue tone, filled when armed for the two-press remove). Zoom by
+  keys, ctrl+wheel and pinch; past fit the page scrolls inside the window.
+  No thumbnail rail.
+
+Left open by the rounds and not decided here: pages after the first (a page
+parameter on the preview endpoint or PDF.js in the browser — round 1's
+question 2), which is a build call for #1059.
+
+## 19. Household recovery lives on the household's row in Systems (owner, 2026-09-20)
+
+Asked A (a danger banner per household on the clock, above the
+administration grid) or B (the household's own row in the Systems card
+carries the state and both acts), the owner ruled: **"56 b the row."**
+
+- A household on its 30-day clock shows in Systems with a dashed red ring,
+  a red sun and the line "on the clock · N days left · gone for good <date>"
+  in place of members/owner/items; beneath the name sit `restore` (the
+  accent, one tap) and `delete now →`.
+- `delete now` is the household danger line's own protocol: the opener
+  prints the cost, the system's name is typed exactly, then the button asks
+  twice. Admin-only, as §15 already ruled.
+- **Restore is admin-only in the interface too** (owner: "57 admin only").
+  The server lets a household owner call it; the household page still never
+  draws it — its danger line keeps saying "an instance admin can turn this
+  back until then".
+- Nothing is drawn when nothing is scheduled; a second household on the
+  clock costs one more row, not one more card.
+- **Ratified as drawn** (owner: "58. As drawn."). Record:
+  `design/v19/household-recovery/round-1/b-the-row-on-the-clock.html` and
+  its README.
+
+
+## 20. Sent to you lately — notification history in the Reminders card (owner, 2026-09-20)
+
+Asked whether a member should see the reminders Orbit has sent them, and
+where, the owner ruled **"60. a."**: yes, in the settings Reminders card
+under the two switches. Round 1 was then approved as drawn (**"61
+approved"**).
+
+- The last five sends for the signed-in user, newest first, read from
+  `notification_deliveries`: the item's name (a link to the item), the
+  small line "first warning · email" / "final warning · browser alert", and
+  when it went.
+- A send that did not go says so in its row — "couldn't send · <plain
+  reason>" in `--overdue`, "still trying · <reason>" in `--warm`. Nothing
+  is hidden.
+- Nothing sent yet: one line saying when the first warning goes out.
+  Both switches off: a warm line above the list; past sends stay.
+- Nothing in the list is a control; the switches are the controls.
+- Record: `design/v19/notification-history/round-1/a-sent-to-you-lately.html`
+  and its README.
+
+## 21. The archive — one owner-only card on the household page (owner, 2026-09-20)
+
+Seven rounds, 2026-09-20. Round 1's card stood from the start ("The UI
+itself is fine otherwise"); the rest was what it holds and how it reads.
+Rulings, verbatim: **"63. What's the point in exporting if there's no
+documents?"** and **"64a yeah documents always in because there's zero
+point in an export without them, as there's nothing to then import."**;
+**"I'd rather it read more as a list."**; **"I don't hate it but this could
+be two tabs on the same card"**; then **"Round 7 approved."**
+
+- One card, **The archive**, on the household's own page above the danger
+  line, owner-only (`own-only`; members never see it). Two tabs on it:
+  **take it with you** (export) · **bring one in** (import). Everything on
+  each tab is a sentence, a list and one quiet button at rest; it opens
+  only when stepped toward.
+- Documents are always in the file, both ways. There is no "without
+  documents" option on the surface or the route. Over the 128 MiB cap the
+  card says so under the list and offers no button.
+- What a file holds is a **list** (`.man`): a figure, a name, a small note
+  — entries, dates (and the reminders on them), sections, documents with
+  their size, and `0 people · never in the file`. The same list says what
+  an import holds, what was written, and what was brought in.
+- Export asks for the account password again at the point of export
+  ("nothing leaves without it"), then a passphrase twice, 12+ characters,
+  and says in warm on the surface that Orbit never keeps it. The written
+  file is offered for 24 hours and leaves one line on the household's
+  record.
+- Import: choose a file, its passphrase, `look inside`; the preview lists
+  what is in it and names each entry already here — those stay out, said
+  in warm, never merged over. `bring in N entries` is the household page's
+  own two-tap. People never come in from a file; the card says so.
+- Refusals in the preview's place, in `--overdue`: wrong passphrase; file
+  too big (said before upload, from the file's size); not an Orbit
+  archive.
+- Record: `design/v19/portable-archive/round-7/g-a-switch-not-a-hint.html`
+  and the seven READMEs.
+
+## 22. Tabs on a card — the grammar, and where it applies (owner, 2026-09-20)
+
+v19 had no tabs before #1002. Three tries at making the two tabs read as
+tabs and the heading as a heading ("This makes it look like it's three
+tabs but the archive is just a heading." / "68 still unclear." / "69. Try
+one more time, they're still too subtle.") settled it:
+
+- The card heading stays left in its own grammar. The tabs are one joined
+  pill pair at the **far end of the card head**, in the page's ghost-button
+  voice (11px mono, 1px `--line`); the chosen tab is **filled with
+  `--accent`** in `--bg` text, as the page's primary button is. No
+  underlines, nothing between heading and tabs.
+- `role=tablist` labelled by the heading; `role=tab` with `aria-selected`
+  and `aria-controls`; the panel `role=tabpanel`; one tab in the Tab
+  order, ← → between them; the unchosen panel `hidden`. An act that opens
+  on a panel selects its tab first.
+- Under 560px the pair follows the heading on its line if it fits, else
+  wraps under it.
+- Where tabs go, asked and answered (**"67. a reminders only."**): the
+  settings **Reminders** card becomes *reminders · sent to you lately*
+  (§20's list on the second tab). The household **Members** card is not
+  tabbed; nothing else is. "We don't need to tab everything."
+
+## 23. There is one tour, and it is the one-take film (owner, 2026-09-20)
+
+Said when a build turned out to have followed the superseded ten-beat
+design: **"The only tour is the one with the play and pause buttons.
+Anything else is old and superseded."** The approved tour is rounds 4 and
+5's **one take** — `design/v19/tour/round-5/f-one-take.html` and its
+README — where the beats are gone and the film runs as one continuous
+take.
+
+- **One tour, for everybody.** No second cut for a reader with no
+  household. The nine-beat adrift film and everything serving it is
+  superseded: **"No one should see the tour without a household anyway"**,
+  because the first screen a reader lands on already invites them to ask
+  to join one or start their own.
+- **When it plays.** On the first login after the reader has a household,
+  joined or created.
+- **Waiting to be let in.** A reader whose join request has not been
+  answered is told, when they log in again, that the owner or an
+  administrator has to approve it first. The households list already puts
+  a "waiting" word on the row they asked for, and that is not the same as
+  telling them what is happening.
+- **Once approved**, their next login plays the full film.
+
+## 24. A phone waits for the film rather than seeing an old one (owner, 2026-09-23)
+
+The one-take film is drawn for the desk only. Its pocket cut was never
+drawn and is #1083, deferred to M14. So #866 lands a film a phone cannot
+play, and the question was what a phone reader gets on their first login
+in the meantime. Asked as three options; answered **"3c"**.
+
+- **Nothing plays on a phone.** The superseded eight-stop card walk is not
+  kept alive as a stand-in; §23 already retired it, and running it on
+  phones would put the old design back in front of readers on the one
+  surface where it is hardest to correct later.
+- **`tourSeenAt` is not spent by a phone login.** The flag is written only
+  when the film itself is skipped or finished. A reader who signs in on
+  their phone first still gets the whole film the first time they sit at a
+  desk — otherwise their one chance at it would be consumed by a screen
+  that showed them nothing.
+- **What this costs.** A phone-only reader sees no first-run welcome at all
+  until #1083 ships. That is the accepted price of not shipping a design
+  that has been superseded.
+
+The cut is the desk dialect's own, `(min-width: 901px)` — the same one home
+uses to choose between its two dialects (CON-10) — so "desk" means exactly
+what it already means everywhere else in v19.
+
+**Shipped by #1083 on 2026-09-30:** the pocket cut plays on a pocket
+viewport and spends `tourSeenAt` the same way the desk cut does.
+
+## 25. Accessibility means real access, not conformance wording (owner, 2026-09-25)
+
+WCAG is the default check. A departure from a criterion is fine if keyboard,
+screen-reader, voice and switch users can all still reach everything, tested
+on a real iPhone, a real Android phone and the desk, and recorded on the
+issue. Departures are the owner's decision. Agents raise gaps; they don't
+decide them. First case: #1122 (swipe-only row actions; departs from WCAG
+2.5.1).
+
+That first case is withdrawn (owner, 2026-09-25, after using it on a real
+phone): row actions open on a tap, on every phone row that has them, so it
+no longer departs from 2.5.1. The principle above stands.
+
+## 26. The belt's end-caps stand at the screen's middle (owner, 2026-09-26)
+
+Asked whether "sooner" and "later" should be centred on the band where it
+leaves the frame or on the screen, the owner chose **the screen's vertical
+middle** ("Centred in the screen"), on the desk, whatever height the band
+is at on that side. This overturns #1010's placement (held above the band's
+upper edge) for the desk only. The pocket keeps #1035's rule, because its
+band is a plate at the top of a page that scrolls, not the whole screen.
+
+## 27. A suggestion opens as a drawer, and rides the belt (owner, 2026-09-27)
+
+**"Let the suggested items open as a drawer like the manifest items, and
+then I think we should merge the suggested item screen into the item belt"**
+— then: **"the same familiar item belt just with a similar card to the
+suggested item screen, but on the belt instead."** And, on being offered a
+design first: **"Don't build a mock up - just build it."** #1145.
+
+- **On the desk home** a suggestion row opens in place, exactly as a filed
+  row does (#424): the row at rest keeps the hollow mark, the title and the
+  `Found in … · renews … · ~£…` line, and loses its inline `Add to orbit` /
+  `Dismiss`; the drawer holds the relay's readings with how sure it was,
+  when it burns up, the paper it came in (`attached on acceptance`), the two
+  decisions (two taps, as before), `copy link` and `review in the belt →`
+  (`manage this item →`'s twin). The phone's drawer (round 3) is unchanged.
+- **`/item/<receiptId>` is the belt.** The suggestion is seated at the date
+  the relay read, among its neighbours in time, as a hollow rock in the
+  accent (CON-3's hollow body, in stone); its forwarded paper rides beside
+  it, staged, and pressing it opens the reading card's fifth honest state,
+  `Not yet in orbit.` (§18's grammar). The card is the amend-then-accept
+  card in the belt's card position: on the desk the fields are editable in
+  the card with `accept into orbit` / `dismiss`; on a phone the readings and
+  the two decisions, with `review & amend →` raising the shared review
+  sheet. Accepted, it becomes the new item's seat in place; dismissed, the
+  apex moves to the neighbour it sat beside. Only the arrival seats it: a
+  filed item's belt carries no suggestions, because the belt is the manifest
+  and a suggestion is not in it until accepted.
+- **The promise line is cut on the desk too**, extending 10b: the sub line
+  says when the suggestion burns up, and `accept into orbit` is the promise.
+  `← back to your orbit` goes with the page; the chrome carries the way back.
+- The separate suggestion page (`Suggestion.svelte`, `item.css`) and the
+  phone's receipt page (`ReceiptPocket.svelte`, round 3 §4) retire.
+
+Calls made by the build without a fresh ruling, for the owner to overturn:
+the dismissal's landing (the later neighbour, else the sooner, else home);
+the desk drawer's foot wording (`review in the belt →`); the hollow rock's
+draw (outline in the accent, 12% wash, no pip); the fifth honest state's
+words; the find note's `· 1 suggested`.
+
+## 28. Escape on the dial puts the open row away (build's call, 2026-09-27)
+
+Not the owner's ruling: a call made by the build for #1149, for the owner
+to overturn. A planet pressed with Enter opens its manifest row in place
+and, by answer 6a, leaves focus on the planet so a second Enter goes to
+the item. The row's own Escape (row.js) listens on the row, so a keyboard
+user standing on the dial had no way to close what they had just opened.
+
+- **Escape on a dial body closes the lit row, and focus stays on the body.**
+  The rule is the kit's own: a sheet hears Escape wherever focus is and
+  hands focus back to its opener (sheet.js); here the opener never lost
+  focus, so it keeps it. The planet's ring goes out with the row.
+- The second-Enter rule stands unchanged. Focus is not moved into the row
+  on Enter (that would spend the second Enter on the row's face), and
+  Escape is not made page-wide (a sheet's Escape is its own; a page-wide
+  listener would race it).
+- A reader whose focus is inside the row still closes it with Escape and
+  lands on the row's face, as before.
+
+## 29. A signal is its own dashed card, and opens as the desk's does (Fable's call, 2026-09-27)
+
+Not the owner's ruling: a call made by Fable for #1142, for the owner to
+overturn. Three looks on the live phone build the same day:
+
+- First: the Home insurance signal opened inside home's signals pen (round
+  3 §2) with the kit's opened-row plate — fill, accent rail, 12px corners
+  — edge to edge inside the dashed card: **"a card inside the drawer"**.
+- Second, with the plate gone but the rail kept: the rail ran down the
+  pen's left edge on the dashed border: **"Then you haven't fixed
+  anything."**
+- Third, the owner set the target from the desk, where the suggestion is
+  its own dashed card seated in the manifest (#1145, §27): **"On the
+  desktop it's a dashed line that expands to a solid blue line. On
+  mobile, it's a dashed line with a random solid blue line with too much
+  line weight."**
+
+The ruling follows the desk:
+
+- **Each signal is its own row-card, as the manifest's rows are.** Under
+  32px of clear sky and the `SIGNALS` caps head, drawn on the sky as
+  `NEEDS ATTENTION` is, a suggestion wears the dashed accent pen at rest.
+  Opened, that same outline turns a thin solid accent line — the same 1px,
+  nothing heavier — round the face and the drawer together, with no line
+  between them, as the desk's row and `.itemview` join. **No rail**: a line
+  along an outline is a card edge, and nothing on a phone signal may look
+  like one. The plate under the face and drawer is the manifest rows' own.
+  The mail summary row (`reading 1 · 2 couldn't be read`, `inbox →`,
+  answer 12a) wears the manifest's plain hairline: it is not a proposal.
+- **The whole outline goes solid, which is one step past the desk's
+  code.** On the desk the opened row's own face keeps its dashes, turned
+  accent (`home.css`, `.desk .item.suggest.open`, #1145), and the drawer
+  that opens under it (`.itemview`) wears a solid accent outline: that is
+  the "dashed line that expands to a solid blue line" the owner saw. On
+  the phone the face and the drawer share one outline, so the whole of it
+  turns solid, as the owner asked. If the desk's face should go solid
+  too, that is a one-line desk change for its own issue, not made here.
+- **Nothing else moves.** The row's panel, `Add to orbit`, `Dismiss` and
+  `review & amend →` (raising the shared review sheet), the count bead,
+  the north star's stations and the foot pad are as round 3 §2 has them.
+- **Overturns, for the pen only:** round 3 §2's "the break is a pen" —
+  one `.p-card.proposed` holding every signal with its caps head inside,
+  rows as transparent card rows with hairlines between, the per-row
+  dashed border (`.pk-sugg .p-row`) gone, and "the open row keeps its
+  accent rail". The break survives as the 32px gap and the dashed
+  outlines against the manifest's plain ones; the per-row dashed border
+  returns because it is what the desk draws, on the owner's own
+  direction.
+- **The rail goes from every opened row on the phone, at the kit level
+  (owner, 2026-09-27).** Asked whether the blue side line should also go
+  from opened manifest items such as Boiler service, to match the desk:
+  **"yeah why not."** So `Row.svelte` and `kit.css` draw no inset accent
+  rail on the opened face or its panel anywhere — home's manifest,
+  household members, the inbox, settings, administration, create, the
+  item page — and a row with an outline of its own (the manifest's
+  hairline, a signal's dashed pen) turns it the desk's thin solid accent
+  line; a row on a card's glass keeps the plate and nothing else marks
+  it, as review round §1.1's plate did on the household card. This
+  overturns review round §1.1's "the same accent rail" for the phone.
+- **Not chosen:** the first cut, `4a933b3e`'s "no plate in the pen" (the
+  rail on the pen's edge was the second look above); a dashed accent
+  outline when open, the desk's literal code (the owner asked for solid);
+  a thinner or shorter rail (any rail along an outline is the fault); and
+  raising the review sheet from the face instead of opening in place
+  (overturns round 3 §2 and §27, and puts a decision behind a second tap).
+- **Left as it is:** the desk suggestion card and the desk's open item.
+
+## 30. The desk search field's focus ring has rounded ends (owner, 2026-09-27)
+
+On the live build of #1057 the owner asked: *"I would like the search box to
+have rounded ends please."* The box they saw is the focus ring #847 gave the
+field. It is now a pill: the outline takes a full radius, and the hairline
+under the text is hidden while the ring shows, since a bottom border under a
+full radius bends into a curve. At rest the field is unchanged: a hairline
+under centred type, no box.
+
+## 31. Searching unrolls the year (owner, 2026-09-27)
+
+Round 1 of #1161 drew three desk searches (`design/v19/search/round-1/`):
+A lifts the built palette above the field as bare rows; B lights the
+matching planets on the dial and hangs the chart's callout on the top
+match; C dissolves the ring on focus and draws the year as a line above
+the field, with the matches standing on it as their own planets at their
+due dates. The owner chose C: *"Great job Fable! Three really cool
+options, but I think the one that's going to give us the most going
+forward, has to be C - unrolled!"*
+
+What is fixed by that choice: the field stays where §3 put it, with no box
+and no icon; results never go below it; the ring gives way to the line on
+focus and comes back on blur (POL-8's own dissolve); a match is drawn by
+the same code and tokens as its planet on the dial; matching stays
+`pocket-search.js`'s, shared with the phone. Round 1's B survives as a
+feature idea (search that lights the dial); A is the fallback that was not
+needed. The build brief is `design/v19/search/round-1/BUILD.md`.
+
+## 32. The pocket cut of the one-take film (Fable's call, 2026-09-30)
+
+#1083's build notes (`design/v19/tour/round-8/build-notes.md`) translate the
+desk's one-take film (§23) to the pocket dialect. No verdicted design round
+first (owner, 2026-09-30): the desk film is precedent and this is a
+translation, not a new design; the owner reviews the built pocket film.
+Round 8 (`design/1083-tour-pocket`, 2026-09-24) drew the cut and the owner
+answered its three questions on 2026-09-25 (1a, 2c, 3b — see the issue).
+Calls below are Fable's own, made while writing the build notes, each with
+its reason:
+
+- **The transport is 64px tall with 12px type**, not round 8's 60px/9.5px,
+  because the kit's own type floor is 12px and the pill is drawn on the kit.
+- **The twelve chapter ticks are painted marks, not buttons**, on the
+  pocket: twelve 44px hit boxes cannot fit a 250px rail without lying about
+  their hit box, so the rail itself is the one slider target and the
+  keyboard route the desk's tick buttons were.
+- **The transport moves between its three places by a fade, never a
+  slide.** A pill sliding across a rising sheet clashes with it by
+  definition; the clash sampler is what decides, and a fade cannot clash.
+- **Chapter 2's recurrence beat is dropped on the pocket.** The pocket form
+  only renders "comes round" once a kind is really chosen, and really
+  choosing one dirties the form, so `/create`'s "Leave without adding?"
+  sheet would block chapter 3's `setScreen("/home")`. The one place the
+  pocket plays fewer beats than the desk; a product change could let it
+  come back (#1083 §11).
+- **A sky line** (a callout whose subject is the dial or a body on it)
+  anchors to the household's own sun, side `bottom`, `dy: 30`: it sits in
+  the dial's lower half beneath the household's name rather than over the
+  bodies, since the pocket dial has no empty quarter to put a line in.
+
+**Corrections on the owner's iPhone (Fable's calls, #1174 and #1175,
+2026-09-30).** The built cut passed every Chromium check and broke on the
+phone. What changed, and why:
+
+- **The film's marks follow the page.** Rings, typed lines and the callout
+  re-measure on scroll and resize (as the veil's holes always did), so a
+  screen scrolling under the film — a `goto` into the band, chapter 4's
+  manifest, a row opening, a browser bar collapsing — never leaves a
+  spotlight where a control was. A jump or a stop puts the page back at the
+  top, where every chapter opens.
+- **The film's own scrolls are instant or on its clock**, never the page's
+  smooth scroll: chapter 4 glides on a tween over `T.scroll`, and a `goto`
+  scrolls its control in at once, so the next beat measures a page that has
+  arrived.
+- **`unread()` is marked as the film's own Escape**, as `close()` always
+  was. Unmarked, the transport stopped the film at chapter 8 on both
+  dialects (a regression in #1083, which moved the dispatch to the
+  document).
+- **Only what a reader can see is lit** (`visible`): chips scrolled off
+  the strip and captions of papers rolled off the sky are scenery, not
+  spotlights. On the pocket a paper's whole caption seat is ringed once,
+  not each of its two lines; the read prefers a paper that is out and falls
+  back to the first paper the belt holds, as the desk always has.
+- **Chapter 5's reminder line is pinned to the dial's top** under the
+  chrome (round 8's toast position) rather than flipped under the dial.
+- **Chapter 6 rings the pocket relay's own address card**; the desk
+  `.relay-card` is a 0x0 box on the phone since the relay got its pocket
+  dialect.
+- **Chapter 7 waits for the pocket inbox to draw its lanes**, and drops the
+  orb's line before the hatch rises so the docking pill has nothing to land
+  on.
+- **The pill and the callouts blur with `-webkit-backdrop-filter` too**:
+  iOS Safari before 18 knows only the prefixed name, and without it both
+  were see-through boxes with the page's words showing through their own.
+- **The first-run create card takes the door's own phone column** (#1175,
+  door-phone.css's `.ringcard`): the login ring at its station holding the
+  question "Name your first system", the fields beneath, the act a
+  full-width pill, the ring closing while you type — because a 500px ring
+  cannot hold a 300px card on a 390px screen. The desk is untouched.
+- **The phone in WebKit is now a check** (`pocket-webkit`,
+  `web/tests/fidelity/tour-pocket-webkit.spec.js` and
+  `pocket-create-ring.spec.js`): the film played through and every mark
+  held at two widths, and the create card's ring, in Safari's engine, run
+  by CI's `fidelity` job.
+
+Both new phone strings (owner's 3b, and the belt's label) are recorded
+where they are said, `chapters/08-the-belt.js`; no other copy changed.
+
+**Round 3 on the owner's iPhone (2026-10-01; owner's 7a and 11, calls by
+Opus 5.5 finishing Fable's round, #1174).**
+
+- **The play bar is always in front (owner's 7a).** On the phone it stays
+  at full strength while the film plays and after it ends (no 38%/16%
+  recede). Its ground is the pack's `--panel-raised` laid over the pack's
+  `--bg`, so it is opaque over the veil, a sheet or a light page, with the
+  kit's lifted-row shadow (`0 10px 28px rgb(0 0 0 / .35)`). Chapter name
+  and clock step up from `--ink-quiet` to `--ink-mid` and the rail from
+  `--line-soft` to `--line`: over 5:1 on every pack. No blur, because
+  nothing shows through. Its places, docking and round 8's fade between
+  places are unchanged. The desk pill is unchanged.
+- **Veil depth stays at the ratified 0.62.** The veil now really cuts its
+  holes: the CSS `mask-image` data URI never did in any engine (an image
+  mask works on alpha, and the black hole shapes were opaque), so every
+  lit control sat dimmed under the veil. The veil is an inline SVG
+  `<mask>`, with no image to decode. Holes open and close on a 180ms fade,
+  and rings fade out over the same 180ms instead of snapping.
+- **The page under the pocket film takes no touches while the film runs.**
+  A clear pane under the pill catches them, whether the film is playing or
+  paused, and goes when the film ends or is stopped. A tap on /create's
+  "suggestion" chip had removed the field the film named next, and the
+  film stopped itself. The desk is unchanged.
+- **Every screen the film walks to opens at its top**, as a jump already
+  does.
+- **The check** (`tour-pocket-webkit.spec.js`) plays under normal motion at
+  430x932 end to end, and at 390x844 and 360x780 through chapter 3. It
+  includes a reader's tap. It asks that the clock keeps moving, that the
+  pill is in front, never faint and its readout at 4.5:1, that no hole or
+  ring snaps, and that at every held mark the lit control is not dimmed.
+
+**Round 5 on the owner's iPhone (2026-10-01; owner's decision on the danger
+ring, calls by Opus 5.5, #1174).**
+
+- **Chapter 4 stages example rows on a new household.** No first-run data
+  is seeded, so a new household's pocket manifest is empty and chapter 4's
+  two lines pointed at blank sky. Round 8's pocket one-take holds three rows
+  at this mark. Where the pocket manifest has no "Needs attention" row, the
+  film draws its own: a "Needs attention" header and the mockup's three rows,
+  nearest first (Gutter clearing T+16d, Car MOT — Volvo V60 T−16d, Boiler
+  service T−22d), with dates counted from today. Each row's meta line opens
+  with "example" in the accent. The rows wear the real row's solid hairline,
+  not the dashed pen, because a dashed row means a suggestion on the
+  pocket. They fade in before the scroll and fade out once the page is back
+  at the top. They are gone at the chapter's end, and on a jump or a stop,
+  and are never written to the account. A household with rows of its own
+  sees those instead. The desk is unchanged. On a new household it already
+  shows its "TODAY" header and "nothing scheduled", but its row line points
+  at nothing (follow-up).
+- **The danger ring pulses red in chapter 5 (owner's decision).** "Time
+  runs" is where the film shows the danger zone: a body walks in toward the
+  sun. From the moment the body lands until the chapter ends, the film lays
+  its own ring over the dial's r=62 circle, on the desk and the phone. The
+  ring is a solid `--overdue` line, 2.5 units wide, and the zone is washed
+  in the same red at 14%. Every 1.4s the line dips to 55% and back, and a
+  second red ring swells to 1.22x and fades. The pulse runs on the film's
+  clock, so it pauses and stops with the film. Under reduced motion the
+  ring is steady and fully red, with no pulse. Each pack's own red is at
+  least 3:1 against its ground: about 3.7:1 on dawn and clouds, 7:1 on the
+  dark packs. The ring is drawn under the bodies and the sun.
+
+**Round 6 on the owner's iPhone (2026-10-01; calls by Opus 5.5, #1174).**
+
+- **Chapter 8 plays on through a household with no belt or no papers.**
+  The film stood still at 1:56. On a household with nothing in it the
+  phone has no body to open, so the film walks to /item, which shows the
+  empty household's card, and waited 12 seconds for a belt that is never
+  drawn. Then it stopped itself at 2:09, at a preview sheet that no paper
+  could open. A household whose items carry no papers stopped there too.
+  Now the empty household's card counts as /item having arrived. The
+  preview sheet is required only when a paper was opened, and is then
+  waited for, in case a phone raises it after its 300ms. The desk is
+  unchanged.
+- **What chapter 8 shows a new household** was left open here, and is
+  settled in the addendum below.
+- **The check** fails on any wait for the page that runs out (the film
+  records each one), and plays chapters 7 to 9 on an empty household at
+  all three phone sizes, and on a household without papers at 390x844.
+
+**Round 6 addendum, 2026-10-01: chapters 8 and 9 without papers (Fable's
+call, built by Opus 5.5, #1174).**
+
+- **Where no body carries a paper, chapters 8 and 9 open no item and
+  point at nothing.** That covers a household with nothing in it, and one
+  whose items carry no documents. Desk and phone alike.
+- **Chapter 8 stays on the sky.** With the sun ringed, it reads "Every
+  body carries its documents in a belt around it." and then "The belt is
+  what you have attached to it." over the dial. The third line, about
+  reading the page, is dropped, because there is no page to read.
+- **Chapter 9 reads "MOT passed — mark it done and it swings back out to
+  next year." over the dial,** with the sun ringed and no press. Its
+  second line, and the drawn body swinging back out, play as before.
+- **A household with a body carrying a paper plays both chapters exactly
+  as before.**
+- **How the film knows.** It asks the sky once, after home's own read has
+  landed and before the film is measured: is there a body with documents?
+  (`data-docs` on the desk, `data-papers` on the phone.) The answer holds
+  for the whole run, so the chapter markers match what plays.
+- **The film is shorter on this path.** Phone: 3:02 with normal motion,
+  1:56 reduced (3:20 and 2:05 with papers). Desk: 3:00 and 1:56 (3:17 and
+  2:07).
+- **The check** plays chapters 8 and 9 on an empty household at 390x844.
+  Every line must point at something on the screen, and no item may be
+  opened.
+
+## 33. The play bar's Stop becomes Skip, and the bar leaves (Fable 5.1, 2026-10-02)
+
+The owner asked: *"The tour play bar needs a way to close it, and cancel/skip
+the tour."* (#1190.) The bar's square Stop is now a cross, labelled "Skip the
+tour" — the same control, same slot, same hit target, pressed or Escape ends
+the film exactly as Stop always did. The bar then fades out and the film is
+destroyed shortly after; a natural finish holds the bar at full strength for
+3s first, then leaves the same way. This supersedes round 5's "the stopped
+and ended state keeps the 16% ghost" (§32's round-5 text above): the ghost is
+retired, because "Watch the tour" (#1189) now does its one job. Round 5's and
+round 8's own READMEs (`design/v19/tour/round-5/`, `design/1083-tour-pocket/`)
+are left as written; this entry is the record of what changed since.

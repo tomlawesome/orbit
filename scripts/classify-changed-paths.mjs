@@ -43,6 +43,14 @@ const dependencySnapshotPaths = new Set(["pnpm-lock.yaml", "pnpm-workspace.yaml"
 // layer moves without charging every system-risk change for it.
 const webPatterns = [/^web\//u, /^pnpm-lock\.yaml$/u, /^pnpm-workspace\.yaml$/u];
 
+// What `smoke`, `smoke_firefox`, `smoke_webkit` and `smoke_webkit_mobile`'s
+// browser suite answers for (#1181): the front end, as above, plus the suite
+// itself and the script that runs it. A merge request that only added a spec
+// used to skip the suite, so the new spec first ran after merge. Kept apart
+// from `webPatterns` because a spec change cannot move what `fidelity`
+// photographs.
+const browserSuitePatterns = [...webPatterns, /^tests\/e2e\//u, /^scripts\/test-frontend\.sh$/u];
+
 // What the `licence_policy` job (#815) reaches for: a change to any of these
 // can add or move a dependency, so the installed-tree licence walk needs to
 // run. Narrower than a full dependency-snapshot change on purpose -- unlike
@@ -72,6 +80,10 @@ const licencePolicyPaths = new Set([
 // that copy them, what .dockerignore lets into that build context, the two
 // compose files, the example environment file, the Tika configuration and the
 // seven helper scripts under ./deploy/scripts/.
+// ADR-0031 #2/#3: the job also builds and installs the pinned launcher
+// itself now, rather than always checking out orbit-launcher's `dev`, so a
+// pin bump or a change to how it is built is part of what this job proves
+// too.
 const launcherCompatPatterns = [
   /^scripts\/install\.sh$/u,
   /^\.gitlab-ci\.yml$/u,
@@ -82,6 +94,9 @@ const launcherCompatPatterns = [
   /^\.env-orbit\.example$/u,
   /^config\/tika-config\.json$/u,
   /^scripts\/(?:configure|installer-ui|configuration|backup|restore|repair|engine-check)\.sh$/u,
+  /^launcher\/pin\.json$/u,
+  /^scripts\/ci\/build-launcher\.sh$/u,
+  /^scripts\/ci\/checkout-launcher-source\.sh$/u,
 ];
 
 // The ignore/policy lane (#889). Both files record what a scanner is allowed
@@ -117,17 +132,23 @@ const fastPatterns = [
   /^docs\//u,
   /^\.github\/ISSUE_TEMPLATE\//u,
   /^\.github\/pull_request_template\.md$/u,
-  /^\.github\/supply-chain-policy\.json$/u,
   /^supply-chain\/licence-policy\.yml$/u,
   /^[^/]+\.md$/u,
   /^\.gitignore$/u,
   /^LICENSE$/u,
-  /^scripts\/(?:supply-chain-policy|stable-promotion-policy)(?:\.test)?\.mjs$/u,
+  /^scripts\/stable-promotion-policy(?:\.test)?\.mjs$/u,
   /^scripts\/[^/]*(?:policy|workflow)\.test\.mjs$/u,
   /^src\/.*\.test\.[cm]?[jt]sx?$/u,
 ];
 
 const systemPatterns = [
+  // The vulnerability policy itself and its evaluator (D1-F2, #1151): a
+  // change confined to these can loosen what `supply_chain_image` accepts, so
+  // it must force the lane that builds and scans an image, not the cheapest
+  // one. (scripts/supply-chain-policy.test.mjs stays fast -- it only exercises
+  // the evaluator, it is not what the pipeline runs against the real image.)
+  /^\.github\/supply-chain-policy\.json$/u,
+  /^scripts\/supply-chain-policy\.mjs$/u,
   /^\.github\/workflows\//u,
   /^Dockerfile$/u,
   // The two deployment compose files stay at the root (installer contract,
@@ -207,6 +228,15 @@ export function touchesWeb(changedPaths) {
 }
 
 /**
+ * True when a change can move what the browser suite clicks through, or the
+ * suite itself. Fails safe the same way `touchesWeb` does.
+ */
+export function touchesBrowserSuite(changedPaths) {
+  if (!Array.isArray(changedPaths) || changedPaths.length === 0) return true;
+  return changedPaths.some((path) => matchesAny(normalizePath(path), browserSuitePatterns));
+}
+
+/**
  * True when a change can move what the `licence_policy` gate checks. Fails
  * safe the same way `touchesWeb` does: no usable list of changed paths means
  * run it.
@@ -253,6 +283,7 @@ export function ciRequirements(changedPaths, options = {}) {
     integration: risk === CI_RISK.INTEGRATION || risk === CI_RISK.SYSTEM,
     system: risk === CI_RISK.SYSTEM,
     web: touchesWeb(changedPaths),
+    e2e: touchesBrowserSuite(changedPaths),
     licence: touchesLicencePolicy(changedPaths),
     launcherCompat: touchesLauncherInstallCompat(changedPaths),
   };
@@ -380,13 +411,14 @@ function main() {
   const integration = risk === CI_RISK.SYSTEM || requirements.integration;
   const system = risk === CI_RISK.SYSTEM || requirements.system;
   const web = requirements.web;
+  const e2e = requirements.e2e;
   const licence = requirements.licence;
   const launcherCompat = requirements.launcherCompat;
   // A lane is a claim about the whole diff, so a diff that could not be proven
   // has no lane at all -- the same fail-safe the three axes above apply.
   const lane = comparisonProven ? requirements.lane : CI_LANE.FULL;
   console.log(
-    `CI risk classification: risk=${risk} lane=${lane} build=${build} integration=${integration} system=${system} web=${web} licence=${licence} launcher_compat=${launcherCompat} (${reason}).`,
+    `CI risk classification: risk=${risk} lane=${lane} build=${build} integration=${integration} system=${system} web=${web} e2e=${e2e} licence=${licence} launcher_compat=${launcherCompat} (${reason}).`,
   );
   if (graphChanged !== undefined) {
     console.log(`Production dependency graph changed: ${graphChanged}.`);
@@ -399,6 +431,7 @@ function main() {
     appendFileSync(process.env.GITHUB_OUTPUT, `integration=${integration}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `system=${system}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `web=${web}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `e2e=${e2e}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `licence=${licence}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `launcher_compat=${launcherCompat}\n`);
   }

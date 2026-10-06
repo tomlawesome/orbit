@@ -67,7 +67,7 @@ try {
     `POSTGRES_USER=${databaseUser}`,
     "--env",
     `POSTGRES_PASSWORD=${databasePassword}`,
-    "postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8",
+    "postgres:18-alpine@sha256:d8703cd7fba306b9fec9268ecedfa8a966846c053036a60e3635791957eb2f66",
   ], "Could not start the disposable PostgreSQL container");
   containerStarted = true;
 
@@ -116,7 +116,14 @@ try {
   delete integrationEnvironment.OIDC_CLIENT_SECRET_FILE;
 
   run(packageManager, ["exec", "tsx", "src/db/migrate.ts"], integrationEnvironment, "Database migrations");
-  run(packageManager, ["exec", "vitest", "run", "--project", "integration"], integrationEnvironment, "Integration tests");
+  /* Extra arguments are handed to vitest, so one file can be run on its own
+     against the same disposable database the whole suite uses. `--project
+     <name>` may be given first, which is how the database-backed tests that
+     live outside tests/integration — the CLI's own, guarded on DATABASE_URL —
+     get a real database to run against. */
+  const selected = process.argv.slice(2);
+  const project = selected[0] === "--project" ? selected.splice(0, 2)[1] : "integration";
+  run(packageManager, ["exec", "vitest", "run", "--project", project, ...selected], integrationEnvironment, "Integration tests");
 } catch (error) {
   console.error(error instanceof Error ? error.message : "Integration tests failed");
   process.exitCode = 1;

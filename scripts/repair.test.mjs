@@ -92,10 +92,24 @@ const recoveryCryptoScriptPath = join(scriptsDir, "recovery-crypto.mjs");
 function dockerShimScript({
   unavailable = false,
   volumes = [],
+  // SS1-S4: makes `docker volume ls --filter name=<this value> ...` fail
+  // (exit 1) rather than listing anything, simulating a transient
+  // docker/daemon hiccup on THIS specific probe even though the initial
+  // `docker ps -a` connectivity probe (docker_available) already
+  // succeeded. Unset (the default) leaves every `volume ls` call
+  // succeeding, exactly as before this option existed.
+  volumeLsFailFilter = "",
   containers = [],
   composeFails = false,
   db = { present: true, ready: true, authResult: "ok" },
-  app = { present: true, image: "ghcr.io/tomlawesome/orbit@sha256:" + "0".repeat(64), health: "healthy" },
+  // SF2-F9: matches makeFixture()'s own default ORBIT_IMAGE
+  // ("orbit-local:abcdef123456") so an ordinary test sees pinned_image ==
+  // actual_image and never trips stale-container by accident now that
+  // repair.sh recognizes the installer-local tag form as well as a
+  // digest. A test that wants a mismatch already overrides this (and/or
+  // calls writeDigestPinnedEnv) explicitly — see e.g. the restart-services
+  // and image-identity-mismatch tests below.
+  app = { present: true, image: "orbit-local:abcdef123456", health: "healthy" },
   argvLogPath = "",
   // --execute's restart-services support: `restartFails` makes every
   // `docker restart` invocation fail (exit 1); `healthMarkerPath`, when
@@ -202,6 +216,20 @@ function dockerShimScript({
   // `appSecretReadable` behaviour untouched.
   appSecretDelayAttempts = 0,
   appSecretDelayCounterPath = "",
+  // #1089: the same crash-loop, one step later. The readability check above
+  // and the `exec cat` READ of the secret are two separate `docker exec`
+  // calls, so a container that holds still for the first can be back in
+  // `restarting` for the second — and `docker exec` into a restarting
+  // container prints "Container ... is restarting, wait until the container
+  // is running" on stderr and exits 1 with nothing on stdout (measured
+  // against docker-ce 29.7.2). `appReaderFailAttempts` makes the reader
+  // branch answer that way for the first `appReaderFailAttempts - 1` calls
+  // and succeed on that call — set it beyond what the budget can reach to
+  // model a container that never lets the read land at all. Requires
+  // `appReaderFailCounterPath` (scratch file, same reason as
+  // `appSecretDelayCounterPath`: each exec is its own process).
+  appReaderFailAttempts = 0,
+  appReaderFailCounterPath = "",
 } = {}) {
   if (unavailable) {
     return "#!/usr/bin/env bash\nexit 1\n";
@@ -388,14 +416,23 @@ function dockerShimScript({
     // rationale as `ps)` above.
     "      volume_args=(\"${@:3}\")",
     "      volume_idx=0",
+    "      volume_filter=''",
     '      while (( volume_idx < ${#volume_args[@]} )); do',
     '        volume_arg="${volume_args[volume_idx]}"',
     '        case "$volume_arg" in',
     "          -q|--quiet) volume_idx=$((volume_idx + 1)) ;;",
-    "          -f|--filter|--format) volume_idx=$((volume_idx + 2)) ;;",
+    "          -f|--filter)",
+    "            volume_idx=$((volume_idx + 1))",
+    '            volume_filter="${volume_args[volume_idx]:-}"',
+    "            volume_idx=$((volume_idx + 1))",
+    "            ;;",
+    "          --format) volume_idx=$((volume_idx + 2)) ;;",
     '          *) printf "unknown flag: %s\\n" "$volume_arg" >&2; exit 125 ;;',
     "        esac",
     "      done",
+    volumeLsFailFilter
+      ? `      if [[ "$volume_filter" == 'name=${volumeLsFailFilter}' ]]; then exit 1; fi`
+      : "      true",
     volumeLines || "      true",
     "      exit 0",
     "    fi",
@@ -436,6 +473,18 @@ function dockerShimScript({
     // secret file, then reads it. Two calls, distinguished by the `exec cat`
     // the reader carries and the precondition does not.
     '    if [[ "$joined" == *"POSTGRES_PASSWORD_FILE"* && "$joined" == *"exec cat"* ]]; then',
+    appReaderFailAttempts > 0
+      ? [
+          `      reader_attempt=0`,
+          `      [[ -f '${appReaderFailCounterPath}' ]] && reader_attempt="$(cat '${appReaderFailCounterPath}')"`,
+          `      reader_attempt=$((reader_attempt + 1))`,
+          `      printf '%s' "$reader_attempt" > '${appReaderFailCounterPath}'`,
+          `      if (( reader_attempt < ${appReaderFailAttempts} )); then`,
+          `        printf 'Error response from daemon: Container %s is restarting, wait until the container is running\\n' '${appId}' >&2`,
+          `        exit 1`,
+          `      fi`,
+        ].join("\n")
+      : "      true",
     appSecretReadable ? `      printf '%s\\n' '${appSecret}'` : "      exit 97",
     appSecretReadable ? "      exit 0" : "",
     "    fi",
@@ -489,6 +538,12 @@ function dockerShimScript({
     "    fi",
     '    if [[ "$joined" == *"psql"* ]]; then',
     '      probe_password="$(cat)"',
+    // repair.sh's own $authenticated_probe runs `PGPASSWORD="$(cat)"` and
+    // exits $PROBE_NO_SECRET_STATUS when nothing arrived, so the shim must
+    // too: a reader whose `docker exec` failed sends no bytes, and a shim
+    // that answered "mismatch" to an empty password would hide exactly the
+    // path #1089 turned out to run down.
+    '      if [[ -z "$probe_password" ]]; then exit 97; fi',
     dbAuthMarkerPath
       ? `      effective_auth_result="${authResult}"; [[ -e '${dbAuthMarkerPath}' ]] && effective_auth_result=ok`
       : `      effective_auth_result="${authResult}"`,
@@ -700,7 +755,7 @@ function makeFixture({ withConfigure = true, withComposeAndEnv = true, withSecre
       "ORBIT_IMAGE=orbit-local:abcdef123456",
       // Every supported install writes this key (ADR-0016 gate, #681); the
       // floor itself is the representative supported value.
-      "ORBIT_CONFIG_APPLIED_VERSION=v1.3.0",
+      "ORBIT_CONFIG_APPLIED_VERSION=v0.3.0",
       "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
       "OIDC_CLIENT_ID=repair-test-client",
       "OIDC_CLIENT_SECRET=repair-test-secret",
@@ -721,17 +776,18 @@ function makeFixture({ withConfigure = true, withComposeAndEnv = true, withSecre
   return targetDir;
 }
 
-// Overwrites .env-orbit with a digest-pinned ORBIT_IMAGE (the shape
-// stale-container comparisons require — see the regex in
-// check_application_container in repair.sh). makeFixture()'s default
-// ORBIT_IMAGE ("orbit-local:abcdef123456") is deliberately not
-// digest-pinned so ordinary tests never accidentally exercise this
-// comparison.
+// Overwrites .env-orbit with a digest-pinned ORBIT_IMAGE — one of the two
+// forms check_application_container's regex in repair.sh accepts (SF2-F9:
+// the other is makeFixture()'s own default installer-local tag,
+// "orbit-local:abcdef123456", which is equally comparable). Tests that want
+// a stale-container/image-identity comparison use this helper (and/or an
+// explicit `app: { image: ... }` override) to get a specific, deliberately
+// matched or mismatched value rather than relying on either default.
 function writeDigestPinnedEnv(targetDir, orbitImage) {
   const envLines = [
     "APP_URL=https://orbit.repair-test.internal",
     `ORBIT_IMAGE=${orbitImage}`,
-    "ORBIT_CONFIG_APPLIED_VERSION=v1.3.0",
+    "ORBIT_CONFIG_APPLIED_VERSION=v0.3.0",
     "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
     "OIDC_CLIENT_ID=repair-test-client",
     "OIDC_CLIENT_SECRET=repair-test-secret",
@@ -758,7 +814,7 @@ function writeFileBackedOidcSecretEnv(targetDir) {
   const envLines = [
     "APP_URL=https://orbit.repair-test.internal",
     "ORBIT_IMAGE=orbit-local:abcdef123456",
-    "ORBIT_CONFIG_APPLIED_VERSION=v1.3.0",
+    "ORBIT_CONFIG_APPLIED_VERSION=v0.3.0",
     "OIDC_ISSUER=https://auth.repair-test.internal/application/o/orbit/",
     "OIDC_CLIENT_ID=repair-test-client",
     "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret",
@@ -770,13 +826,31 @@ function writeFileBackedOidcSecretEnv(targetDir) {
   chmodSync(join(targetDir, ".env-orbit"), 0o600);
 }
 
+// O2-S4 (#1151): builds the env for a repair.sh child, with the fake
+// `docker` shim directory ALWAYS first on PATH — even when the caller's
+// own `env` supplies its own PATH override (e.g. to add a second shim,
+// for `mv`/`mkdir`/etc., ahead of the real one). A plain object spread
+// (`{ PATH: ..., ...env }`) lets a later `env.PATH` silently replace the
+// whole key, dropping the docker shim and letting that one test probe
+// whatever real `docker` happens to be on this host's PATH — exactly the
+// invariant dockerShimScript's own header comment promises never happens.
+// Prepending binDir here, after the spread, is what makes it win
+// regardless of what the caller passed; a caller's own shim directory
+// (first in its PATH value) still runs ahead of the real system PATH,
+// just behind the one directory that must never be skipped.
+function repairChildEnv(binDir, env) {
+  const merged = { HOME: process.env.HOME ?? tmpdir(), ...env };
+  merged.PATH = `${binDir}:${merged.PATH ?? process.env.PATH}`;
+  return merged;
+}
+
 function runRepair(targetDir, args, dockerOptions = {}, { input, env } = {}) {
   const binDir = makeFakeBin(dockerOptions);
   return failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "repair.sh"), ...args], {
     cwd: targetDir,
     encoding: "utf8",
     input,
-    env: { PATH: `${binDir}:${process.env.PATH}`, HOME: process.env.HOME ?? tmpdir(), ...env },
+    env: repairChildEnv(binDir, env),
     ...processGuard(),
   }), { label: "runRepair" });
 }
@@ -789,7 +863,7 @@ function spawnRepair(targetDir, args, dockerOptions = {}, { env } = {}) {
   const binDir = makeFakeBin(dockerOptions);
   const child = spawn("bash", [join(targetDir, "scripts", "repair.sh"), ...args], {
     cwd: targetDir,
-    env: { PATH: `${binDir}:${process.env.PATH}`, HOME: process.env.HOME ?? tmpdir(), ...env },
+    env: repairChildEnv(binDir, env),
   });
   let stdout = "";
   let stderr = "";
@@ -930,6 +1004,30 @@ describe("scripts/repair.sh --check", () => {
 
     expect(result.status).toBe(0);
     expect(lines(result.stdout)).toEqual(["diagnosis result=healthy checked=18 skipped=0"]);
+  });
+
+  // O2-S4 (#1151): a test's own PATH override (e.g. to add a second shim
+  // for mv/mkdir ahead of the real one, as the EXIT-trap signal tests
+  // below do) must never drop the fake docker shim — the one thing this
+  // whole suite depends on to never reach a real daemon. Proven here with
+  // a decoy directory that ALSO defines `docker`, distinguishably wrong
+  // (exit 99): if the merge ever let a caller's PATH win outright, this
+  // decoy would run instead of the real fake shim and the deployment would
+  // report docker-unavailable instead of healthy.
+  it("a caller-supplied PATH override never shadows the fake docker shim (runRepair and spawnRepair alike)", async () => {
+    const targetDir = makeFixture();
+    const decoyDir = mkdtempSync(join(tmpdir(), "orbit-repair-path-decoy-"));
+    scratchDirs.push(decoyDir);
+    writeFileSync(join(decoyDir, "docker"), "#!/usr/bin/env bash\nexit 99\n", { mode: 0o755 });
+
+    const syncResult = runRepair(targetDir, ["--check"], {}, { env: { PATH: `${decoyDir}:${process.env.PATH}` } });
+    expect(syncResult.status).toBe(0);
+    expect(syncResult.stdout).not.toContain("docker-unavailable");
+
+    const spawned = spawnRepair(targetDir, ["--check"], {}, { env: { PATH: `${decoyDir}:${process.env.PATH}` } });
+    const { status } = await failOnProcessDeadline(spawned.exited, { label: "spawnRepair PATH override" });
+    expect(status).toBe(0);
+    expect(spawned.stdoutSoFar()).not.toContain("docker-unavailable");
   });
 
   it("never emits ANSI or cursor-control bytes", () => {
@@ -1320,6 +1418,43 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).not.toContain("document-volume-retained-without-key");
   });
 
+  // SS1-S4 (#1151): a transient failure of THIS probe — docker briefly
+  // unreachable, a timeout — must never be read as "no volume found". Before
+  // the fix, the `|| true` on `docker volume ls` swallowed the failure and
+  // left found_ours=0, so a retained document volume could go completely
+  // unreported and document-kek would be planned for a silent
+  // regenerate-secret that destroys it. The fix treats a failed probe exactly
+  // like a found, retained volume: document-volume-retained-without-key
+  // fires and secret-missing/document-kek resolves to manual, never
+  // regenerate-secret.
+  it("SS1-S4: treats a failed document-volume probe as retained (manual), never as safe to regenerate, even though the initial docker_available probe succeeded", () => {
+    const targetDir = makeFixture();
+    rmSync(join(targetDir, ".orbit-secrets", "document-kek"));
+
+    const result = runRepair(targetDir, ["--check"], { volumeLsFailFilter: "orbit-documents-data" });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=secret-missing target=document-kek severity=warn");
+    expect(result.stdout).toContain(
+      "finding class=document-volume-retained-without-key target=document-volume severity=fail",
+    );
+
+    const plan = runRepair(targetDir, ["--plan"], { volumeLsFailFilter: "orbit-documents-data" });
+    expect(plan.stdout).toContain(
+      "plan action=manual resolves=secret-missing mutation=none backup=not-required target=document-kek rollback=not-required expect=operator-action",
+    );
+    expect(plan.stdout).not.toContain("action=regenerate-secret resolves=secret-missing");
+  });
+
+  it("SS1-S4: a failed document-volume probe does not affect the unrelated database-volume guard", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(targetDir, ["--check"], { volumeLsFailFilter: "orbit-documents-data" });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain("document-volume-retained-without-key");
+  });
+
   it("reports unrelated-resource-present for a document volume belonging to a different Compose project", () => {
     const targetDir = makeFixture();
 
@@ -1445,6 +1580,111 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).not.toContain("diagnosis result=healthy");
   });
 
+  // #1026: the #822 retry loop above rides out a container passing through
+  // "exited", but its budget is still finite. A container that never once
+  // holds still long enough for the readability check to succeed exhausts
+  // that budget every time — exactly what a credential-mismatched app does
+  // once Docker's own restart-policy backoff for it grows past the budget.
+  // Before this fix, hitting that budget silently fell back to reading the
+  // database's own copy of the credential (which always "authenticates"
+  // against itself), so the dangerous pass saw no finding at all — "no fault
+  // found" and "could not determine" were indistinguishable on the wire.
+  // ORBIT_REPAIR_APP_SECRET_BUDGET lets this test exhaust the real budget in
+  // well under a second rather than waiting out the full 75s.
+  it("reports database-credential-unverifiable (fail), never a guessed mismatch, when the app container never holds still long enough to prove its credential either way — #1026", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--check"],
+      {
+        db: { present: true, ready: true, authResult: "mismatch" },
+        app: { present: true, health: "healthy" },
+        appState: "running",
+        appSecretReadable: false,
+      },
+      { env: { ORBIT_REPAIR_APP_SECRET_BUDGET: "1" } },
+    );
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=database-credential-unverifiable target=database severity=fail");
+    expect(result.stdout).not.toContain("database-credential-mismatch");
+    expect(result.stdout).not.toContain("diagnosis result=healthy");
+  });
+
+  it("plans database-credential-unverifiable as manual, never as an automatic rotate-database-credential guess — #1026", () => {
+    const targetDir = makeFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      {
+        db: { present: true, ready: true, authResult: "mismatch" },
+        app: { present: true, health: "healthy" },
+        appState: "running",
+        appSecretReadable: false,
+      },
+      { input: "rotate\n", env: { ORBIT_REPAIR_PROMPTS: "machine", ORBIT_REPAIR_APP_SECRET_BUDGET: "1" } },
+    );
+
+    expect(result.stdout).toContain("execute action=manual resolves=database-credential-unverifiable result=skipped");
+    expect(result.stdout).toContain("dangerous result=empty done=0 failed=0 reason=none");
+    expect(result.stdout).not.toContain("rotate-database-credential");
+  });
+
+  // #1089: the readability loop of #822/#1026 guards the question "can this
+  // container read its secret file"; the `exec cat` that reads it was a
+  // single attempt against the one container that is crash-looping by
+  // definition whenever its credential is wrong. When that attempt lands
+  // between restarts `docker exec` writes its error to stderr and exits 1
+  // with nothing on stdout, the probe downstream receives an empty password
+  // and exits 97, and 97 used to mean "this container names no secret file":
+  // no finding at all. The mismatch disappeared from the diagnosis, nothing
+  // planned rotate-database-credential, and the repair journeys failed in a
+  // different journey on each run of the same commit.
+  it("still reports the credential mismatch when the app container's secret read is lost to a restart and the retry lands — #1089", () => {
+    const targetDir = makeFixture();
+    const readerCounterPath = join(scratchDir(), "app-reader-attempts");
+
+    const result = runRepair(targetDir, ["--check"], {
+      db: { present: true, ready: true, authResult: "mismatch" },
+      app: { present: true, health: "healthy" },
+      appState: "running",
+      appReaderFailAttempts: 2,
+      appReaderFailCounterPath: readerCounterPath,
+    });
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=database-credential-mismatch target=database severity=fail");
+    expect(result.stdout).not.toContain("diagnosis result=healthy");
+  });
+
+  // #1089, the other end of the same budget: a read that never lands must
+  // report the uncertainty it has, in the same terms #1026 chose for the
+  // readability check — never silence, which reads as a healthy deployment.
+  it("reports database-credential-unverifiable, never silence, when the secret read never lands inside the budget — #1089", () => {
+    const targetDir = makeFixture();
+    const readerCounterPath = join(scratchDir(), "app-reader-attempts-exhausted");
+
+    const result = runRepair(
+      targetDir,
+      ["--check"],
+      {
+        db: { present: true, ready: true, authResult: "mismatch" },
+        app: { present: true, health: "healthy" },
+        appState: "running",
+        // Far beyond what a 1s budget of 0.25s retries can reach.
+        appReaderFailAttempts: 1000,
+        appReaderFailCounterPath: readerCounterPath,
+      },
+      { env: { ORBIT_REPAIR_APP_SECRET_BUDGET: "1" } },
+    );
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("finding class=database-credential-unverifiable target=database severity=fail");
+    expect(result.stdout).not.toContain("diagnosis result=healthy");
+  });
+
   it("reports database-unreachable (fail) when the orbit-db container is absent", () => {
     const targetDir = makeFixture();
 
@@ -1547,18 +1787,30 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).not.toContain("stale-container");
   });
 
-  it("does not report stale-container when ORBIT_IMAGE is not digest-pinned (nothing safe to compare)", () => {
-    // makeFixture()'s default ORBIT_IMAGE ("orbit-local:abcdef123456") is a
-    // local build tag, not a digest-pinned reference; the comparison must
-    // stay silent rather than guess.
-    const targetDir = makeFixture();
+  it("does not report stale-container when ORBIT_IMAGE matches neither accepted form (nothing safe to compare)", () => {
+    // SF2-F9: repair.sh accepts BOTH a digest-pinned reference and
+    // makeFixture()'s own default installer-local tag
+    // ("orbit-local:abcdef123456") — neither is silently dropped any more.
+    // Only a value matching neither form leaves nothing safe to compare.
+    const targetDir = makeFixture({ withConfigure: false });
+    writeDigestPinnedEnv(targetDir, "ghcr.io/tomlawesome/orbit:latest");
 
     const result = runRepair(targetDir, ["--check"], {
       app: { present: true, image: "something-else:latest", health: "healthy" },
     });
-
     expect(result.status).toBe(0);
     expect(result.stdout).not.toContain("stale-container");
+  });
+
+  it("reports stale-container when the installer-local ORBIT_IMAGE tag no longer matches the running container (SF2-F9)", () => {
+    const targetDir = makeFixture(); // default ORBIT_IMAGE=orbit-local:abcdef123456
+
+    const result = runRepair(targetDir, ["--check"], {
+      app: { present: true, image: "orbit-local:fedcba987654", health: "healthy" },
+    });
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain("finding class=stale-container target=container severity=warn");
   });
 
   // --- image-identity-mismatch (issue #528 slice C) -------------------------
@@ -1615,11 +1867,12 @@ describe("scripts/repair.sh --check", () => {
     expect(result.stdout).not.toContain("image-identity-mismatch");
   });
 
-  it("skips image-identity-mismatch when ORBIT_IMAGE is not digest-pinned", () => {
-    // makeFixture()'s default ORBIT_IMAGE is not digest-pinned; even if a
-    // mismatched local image happened to be configured, there is nothing
+  it("skips image-identity-mismatch when ORBIT_IMAGE matches neither accepted form", () => {
+    // SF2-F9: unlike makeFixture()'s own default installer-local tag (now
+    // recognized), a value matching neither accepted form leaves nothing
     // safe to compare against.
-    const targetDir = makeFixture();
+    const targetDir = makeFixture({ withConfigure: false });
+    writeDigestPinnedEnv(targetDir, "ghcr.io/tomlawesome/orbit:latest");
 
     const result = runRepair(targetDir, ["--check"], {
       app: { present: true, image: "something-else:latest", health: "healthy" },
@@ -1956,9 +2209,11 @@ describe("scripts/repair.sh --check", () => {
 // ORBIT_CONFIG_APPLIED_VERSION is written by configuration.sh on every
 // supported install, so a readable .env-orbit without it is the signature
 // of a pre-floor (v1.0.0-era) or hand-assembled deployment — both fail
-// closed. Major version 0 is the development era and exempt. While the
-// finding is present, --execute refuses the whole batch: even the safe
-// executors must not mutate a layout repair was never proven against.
+// closed. The floor is v0.3.0 (ADR-0016 amendment, #1213): releases are
+// numbered 0.x, so there is no longer a major-0 exemption, and the 1.x tags
+// are retracted alphas below the floor. While the finding is present,
+// --execute refuses the whole batch: even the safe executors must not mutate
+// a layout repair was never proven against.
 
 // Rewrites makeFixture()'s .env-orbit with the given
 // ORBIT_CONFIG_APPLIED_VERSION line (or no such line when null), keeping
@@ -1981,8 +2236,12 @@ function writeVersionedEnv(targetDir, versionLine) {
 
 describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion 9)", () => {
   it.each([
-    ["v1.2.0", "a published release below the floor"],
+    ["v1.2.0", "a retracted 1.x alpha"],
     ["v1.0.0", "the pre-configuration.sh era"],
+    ["v1.3.0", "the retracted 1.x line"],
+    ["v2.0.0", "a major version above the retracted 1.x line"],
+    ["v0.2.9", "a 0.x release below the floor"],
+    ["v0.0.0", "a development build, no longer exempt"],
     ["v0.9", "a malformed (two-component) version"],
     ["v1.3.0-rc1", "a malformed (pre-release-suffixed) version"],
     ["1.3.0", "a malformed (unprefixed) version"],
@@ -2006,7 +2265,7 @@ describe("scripts/repair.sh: the ADR-0016 supported-version gate (#681 criterion
     expect(result.stdout).toContain("finding class=deployment-version-unsupported target=deployment severity=fail");
   });
 
-  it.each([["v0.0.0"], ["v1.3.0"], ["v1.3.1"], ["v1.4.0"], ["v2.0.0"]])(
+  it.each([["v0.3.0"], ["v0.3.1"], ["v0.4.0"], ["v0.10.0"]])(
     "accepts %s with no version finding",
     (version) => {
       const targetDir = makeFixture();
@@ -2897,7 +3156,15 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       ],
     });
 
-    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+    // O2-S1: restoring .env-orbit from a staging snapshot is never
+    // automatic (see the "live secrets are never restored automatically"
+    // tests below) — explicitly
+    // confirm via the machine-prompt channel, exactly like the dangerous
+    // batch's own never-automatable approval.
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {}, {
+      env: { ORBIT_REPAIR_PROMPTS: "machine" },
+      input: "y\n",
+    });
 
     expect(result.stdout).toContain(
       "execute action=restore-transaction resolves=staging-evidence-present result=done",
@@ -2921,12 +3188,57 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     // not exist before the interrupted transaction and must be removed.
     writeFileSync(join(targetDir, "docker-compose.mail.yml"), "services: {}\n");
 
-    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+    // O2-S1: this staging snapshot also carries a backup of .env-orbit
+    // (envBackupLines above), so this restore needs explicit confirmation
+    // too — see this test's sibling above.
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {}, {
+      env: { ORBIT_REPAIR_PROMPTS: "machine" },
+      input: "y\n",
+    });
 
     expect(result.stdout).toContain(
       "execute action=restore-transaction resolves=staging-evidence-present result=done",
     );
     expect(statSync(join(targetDir, "docker-compose.mail.yml"), { throwIfNoEntry: false })).toBeFalsy();
+  });
+
+  // --- restore-transaction: live secrets are never restored automatically ---
+  // The guard do_restore_transaction runs when the staging snapshot carries a
+  // backup of .env-orbit or .orbit-secrets (the "dedicated" tests the three
+  // comments above point at).
+
+  it("restore-transaction: refuses to restore a live .env-orbit unattended, leaving the live file and the staging directory untouched", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    const stagingDir = makeStagingTransaction(targetDir, {
+      envBackupLines: ["APP_URL=https://orbit.old-good-state.internal", "COMPOSE_PROJECT_NAME=repairtest"],
+    });
+    const liveBefore = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+
+    // No terminal, no ORBIT_REPAIR_PROMPTS=machine: the --safe-only automation path.
+    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+
+    expect(result.stderr).toContain("this is never automatic");
+    expect(result.stdout).not.toContain("execute action=restore-transaction resolves=staging-evidence-present result=done");
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(liveBefore);
+    expect(statSync(stagingDir).isDirectory()).toBe(true);
+  });
+
+  it("restore-transaction: a confirmed restore keeps the live .env-orbit as a dated .pre-restore copy rather than deleting it", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    makeStagingTransaction(targetDir, {
+      envBackupLines: ["APP_URL=https://orbit.old-good-state.internal", "COMPOSE_PROJECT_NAME=repairtest"],
+    });
+    const liveBefore = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {}, {
+      env: { ORBIT_REPAIR_PROMPTS: "machine" },
+      input: "y\n",
+    });
+
+    expect(result.stdout).toContain("execute action=restore-transaction resolves=staging-evidence-present result=done");
+    const kept = readdirSync(targetDir).filter((name) => name.startsWith(".env-orbit.pre-restore."));
+    expect(kept).toHaveLength(1);
+    expect(readFileSync(join(targetDir, kept[0]), "utf8")).toBe(liveBefore);
   });
 
   it("restore-transaction: self-restores every path it already touched and leaves the staging directory intact when a later path fails", () => {
@@ -3035,7 +3347,12 @@ describe("scripts/repair.sh --execute --safe-only", () => {
       committed: false,
     });
 
-    const result = runRepair(targetDir, ["--execute", "--safe-only"]);
+    // O2-S1: explicit confirmation required — see the "live secrets are
+    // never restored automatically" tests above.
+    const result = runRepair(targetDir, ["--execute", "--safe-only"], {}, {
+      env: { ORBIT_REPAIR_PROMPTS: "machine" },
+      input: "y\n",
+    });
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain(
@@ -3248,6 +3565,51 @@ describe("scripts/repair.sh --execute --safe-only", () => {
     expect(result.stdout).toContain("prompt-accept field=safe-batch");
     expect(result.stdout).toContain("execute action=fix-permissions resolves=managed-file-permissions result=done");
     expect(mode(join(targetDir, ".env-orbit"))).toBe("600");
+  });
+
+  // O2-F1 (#1151): confirm_safe_batch's own prompt says "N safe action(s)
+  // proposed above", so the preview it shows must be only those N — never
+  // the manual/dangerous lines of the rest of the plan, which this batch is
+  // not about to run and the operator is not being asked about here.
+  it("O2-F1: the safe-batch preview shows only the safe action, never a manual finding that happens to be in the same plan", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644); // safe: fix-permissions
+    rmSync(join(targetDir, "docker-compose.yml")); // manual: managed-file-missing
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "y\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    const preview = result.stdout.slice(0, result.stdout.indexOf("prompt field=safe-batch"));
+    expect(preview).toContain("plan action=fix-permissions resolves=managed-file-permissions");
+    expect(preview).not.toContain("action=manual");
+    expect(result.stdout).toContain("execute action=fix-permissions resolves=managed-file-permissions result=done");
+    expect(result.stdout).toContain("execute action=manual resolves=managed-file-missing result=skipped");
+  });
+
+  it("O2-F1: the interactive safe-batch preview shows only the safe action too", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    chmodSync(join(targetDir, ".env-orbit"), 0o644); // safe: fix-permissions
+    rmSync(join(targetDir, "docker-compose.yml")); // manual: managed-file-missing
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only"],
+      {},
+      { input: "y\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    const preview = result.stdout.slice(0, result.stdout.indexOf("plan action=fix-permissions"));
+    // Nothing printed to stdout before the one safe plan line — in
+    // particular, no manual plan line precedes it.
+    expect(preview).toBe("");
+    const previewSection = result.stdout.slice(0, result.stdout.indexOf("execute action="));
+    expect(previewSection).not.toContain("action=manual");
+    expect(result.stdout).toContain("execute action=fix-permissions resolves=managed-file-permissions result=done");
+    expect(result.stdout).toContain("execute action=manual resolves=managed-file-missing result=skipped");
   });
 
   it("machine prompts: a non-'y' answer aborts with zero mutation", () => {
@@ -3622,6 +3984,35 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
     expect(findCheckpointDir(targetDir)).toBeNull();
   });
 
+  // O2-F2 (#1151): the EXIT CODES (--execute --dangerous) table says exit 1
+  // (safe batch declined) is reachable whenever the dangerous batch's own
+  // result is not itself FAILED — refused is not failed, so an explicit
+  // safe-batch decline must still be reported as 1 even when the
+  // independent dangerous batch was also refused, never silently replaced
+  // by exit 6.
+  it("an explicit safe-batch decline is reported (exit 1), never masked by the independent dangerous batch also being refused", () => {
+    const targetDir = makeCredentialMismatchFixture();
+    chmodSync(join(targetDir, ".env-orbit"), 0o644); // adds a fixable managed-file-permissions finding
+    const before = treeSnapshot(targetDir);
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--safe-only", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" } },
+      // "n" declines the safe-batch confirm; stdin then runs out, so the
+      // dangerous batch's own typed-word prompt hits EOF on its first
+      // attempt and is refused too (reason=refused-by-operator) — both
+      // batches decline/refuse, and the explicit decline must win.
+      { input: "n\n", env: { ORBIT_REPAIR_PROMPTS: "machine" } },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("prompt-abort field=safe-batch");
+    expect(result.stdout).toContain("execution result=declined done=0 failed=0");
+    expect(result.stdout).toContain("dangerous result=refused done=0 failed=0 reason=refused-by-operator");
+    expect(treeSnapshot(targetDir)).toBe(before);
+  });
+
   // --- typed-word approval gate (owner: "operator must TYPE THE ACTION
   // WORD... a non-standard input, so muscle-memory Enter can never fire it")
 
@@ -3956,6 +4347,44 @@ describe("scripts/repair.sh --execute --dangerous (issue #261 slice 5, stage two
 
     expect(result.stdout).not.toContain(ROTATE_PASSPHRASE);
     expect(result.stdout).not.toContain(checkpointDir);
+  });
+
+  // O2-R2 (#1151): by the time restart-services (step 4) is the one that
+  // fails, the rotation has already fully landed — rotate-credential and
+  // update-config both succeeded. The checkpoint holds the OLD credential,
+  // which the database no longer accepts at this point, so repeating the
+  // "recoverable from the checkpoint" guidance here would send the operator
+  // to reintroduce the exact mismatch the rotation just fixed. Contrast the
+  // test immediately above: same reason=step-failed, different step,
+  // different and non-overlapping guidance.
+  it("restart-services failure (the only step to fail, after rotate-credential and update-config both succeeded): guidance says restart yourself, never to restore the checkpoint", () => {
+    const targetDir = makeCredentialMismatchFixture();
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { db: { present: true, ready: true, authResult: "mismatch" }, restartFails: true },
+      { input: `rotate\n${ROTATE_PASSPHRASE}\n${ROTATE_PASSPHRASE}\n`, env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("dangerous result=failed done=0 failed=1 reason=step-failed");
+    expect(result.stdout).toContain("execute action=rotate-database-credential resolves=database-credential-mismatch result=failed");
+    expect(result.stderr).toContain("stage two step 'restart-services' failed");
+
+    // The new, state-accurate guidance: already rotated, restart yourself.
+    expect(result.stderr).toContain("already rotated");
+    expect(result.stderr).toContain("bash scripts/deploy-container.sh --pull");
+    // Never the old, now-wrong "recoverable from the checkpoint" guidance,
+    // which would send the operator to reintroduce the mismatch.
+    expect(result.stderr).not.toContain("remains recoverable from the checkpoint");
+    expect(result.stderr).not.toContain("decrypt it with your checkpoint passphrase");
+
+    // The new credential IS already in the live secret file (update-config
+    // succeeded) — only the container restart failed.
+    expect(readFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), "utf8").trim()).toMatch(
+      HEX_SECRET_PATTERN,
+    );
   });
 
   // --- passphrase rule enforcement (owner: "existing ≥12-char rule,
@@ -4429,14 +4858,22 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
     expect(leftoverStaging).toHaveLength(0);
   });
 
-  it("regenerates a real zero-byte placeholder secret (install.sh's own OIDC_CLIENT_SECRET_FILE shape) — the old empty placeholder is gone, replaced by real content", () => {
+  // SF2-F10 (#1151): oidc-client-secret is issued by the identity provider,
+  // not minted by Orbit, so unlike every other generated secret it is NEVER
+  // regenerated — even in the exact zero-byte-placeholder shape
+  // (ensure_oidc_client_secret_placeholder in configure.sh) a real
+  // install.sh deployment produces before an operator ever runs
+  // --set-oidc-secret.
+  it("never regenerates oidc-client-secret, even from a real zero-byte placeholder (install.sh's own OIDC_CLIENT_SECRET_FILE shape) — plans manual instead, pointing at configure.sh", () => {
     const targetDir = makeFixture({ withConfigure: false });
-    // Mirrors ensure_oidc_client_secret_placeholder in configure.sh: a real,
-    // zero-byte, mode-0600 file — not simply removed — is exactly what a
-    // real install.sh deployment produces before an operator ever runs
-    // --set-oidc-secret.
     writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "");
     chmodSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), 0o600);
+
+    const plan = runRepair(targetDir, ["--plan"]);
+    expect(plan.stdout).toContain(
+      "plan action=manual resolves=secret-missing mutation=none backup=not-required target=oidc-client-secret rollback=not-required expect=operator-action",
+    );
+    expect(plan.stderr).toContain("bash scripts/configure.sh --set-oidc-secret");
 
     const result = runRepair(
       targetDir,
@@ -4446,16 +4883,14 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
     );
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain("execute action=regenerate-secret resolves=secret-missing result=done");
+    expect(result.stdout).toContain("dangerous result=empty done=0 failed=0 reason=none");
+    expect(result.stdout).not.toContain("action=regenerate-secret resolves=secret-missing target=oidc-client-secret");
 
     const secretPath = join(targetDir, ".orbit-secrets", "oidc-client-secret");
-    const content = readFileSync(secretPath, "utf8").trim();
-    expect(content).toMatch(HEX_SECRET_PATTERN);
-    expect(content.length).toBeGreaterThan(0);
-    expect(statSync(secretPath).mode & 0o777).toBe(0o600);
+    expect(readFileSync(secretPath, "utf8")).toBe("");
   });
 
-  it("regenerates every distinct missing-secret target deferred in the same run", () => {
+  it("regenerates every distinct missing-secret target deferred in the same run, except oidc-client-secret (SF2-F10)", () => {
     const targetDir = makeFixture({ withConfigure: false });
     rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
     rmSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"));
@@ -4471,14 +4906,56 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
     const doneLines = lines(result.stdout).filter(
       (line) => line === "execute action=regenerate-secret resolves=secret-missing result=done",
     );
-    expect(doneLines).toHaveLength(2);
-    expect(result.stdout).toContain("dangerous result=complete done=2 failed=0 reason=none");
+    expect(doneLines).toHaveLength(1);
+    expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
+    expect(result.stdout).toContain("execute action=manual resolves=secret-missing result=skipped");
 
     const sessionSecret = readFileSync(join(targetDir, ".orbit-secrets", "session-secret"), "utf8").trim();
-    const oidcSecret = readFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "utf8").trim();
     expect(sessionSecret).toMatch(HEX_SECRET_PATTERN);
-    expect(oidcSecret).toMatch(HEX_SECRET_PATTERN);
-    expect(sessionSecret).not.toBe(oidcSecret);
+    expect(statSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), { throwIfNoEntry: false })).toBeFalsy();
+  });
+
+  // SS1-S5 (#1151): a freshly minted secret is useless to the running
+  // application until orbit-app restarts and re-resolves the bind-mounted
+  // secret file (the same #629 lesson regenerate-secret was missing).
+  it("restarts orbit-app after regenerating a secret, so the new value actually reaches the running container", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+    const restartLogPath = join(scratchDir(), "restart.log");
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { restartLogPath },
+      { input: "regenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("dangerous result=complete done=1 failed=0 reason=none");
+    const restarted = readFileSync(restartLogPath, "utf8").trim().split("\n").filter(Boolean);
+    expect(restarted).toEqual(["3333bbbb4444"]); // the app container id, exactly once
+  });
+
+  it("reports failure (never a silent success) when the new secret was written but restarting orbit-app itself failed", () => {
+    const targetDir = makeFixture({ withConfigure: false });
+    rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+
+    const result = runRepair(
+      targetDir,
+      ["--execute", "--dangerous"],
+      { restartFails: true },
+      { input: "regenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
+    );
+
+    expect(result.status).toBe(4);
+    expect(result.stdout).toContain("dangerous result=failed done=0 failed=1 reason=step-failed");
+    expect(result.stderr).toContain("restarting orbit-app failed");
+    expect(result.stderr).toContain("still using the OLD value");
+
+    // The new secret material WAS written — only the restart failed — so
+    // this is never reported as if nothing happened.
+    const sessionSecret = readFileSync(join(targetDir, ".orbit-secrets", "session-secret"), "utf8").trim();
+    expect(sessionSecret).toMatch(HEX_SECRET_PATTERN);
   });
 
   // --- step failure: TOCTOU re-proof catches a change during the approval
@@ -4539,11 +5016,12 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
     const targetDir = makeFixture({ withConfigure: false });
     rmSync(join(targetDir, ".orbit-secrets", "postgres-password"));
     rmSync(join(targetDir, ".orbit-secrets", "session-secret"));
+    const restartLogPath = join(scratchDir(), "restart.log");
 
     const result = runRepair(
       targetDir,
       ["--execute", "--dangerous"],
-      { volumes: ["repairtest_orbit-db-data"] },
+      { volumes: ["repairtest_orbit-db-data"], restartLogPath },
       { input: "rotate\nregenerate\n", env: { ORBIT_REPAIR_TTY_INPUT: "1" } },
     );
 
@@ -4563,6 +5041,19 @@ describe("scripts/repair.sh --execute --dangerous: regenerate-secret (#530 slice
     expect(
       readFileSync(join(targetDir, ".orbit-secrets", "session-secret"), "utf8").trim(),
     ).toMatch(HEX_SECRET_PATTERN);
+
+    // #1151 RANGE-F7: rotate runs first (its own restart-services step
+    // restarts orbit-db then orbit-app, memoizing
+    // service_restart_result[orbit-app]=done), then regenerate-secret
+    // writes a fresh session-secret and must restart orbit-app itself
+    // rather than silently skipping on that same memo -- otherwise the
+    // running container keeps the OLD session-secret despite the batch
+    // reporting done. Three restarts, not two: orbit-db, orbit-app
+    // (rotation), orbit-app again (regenerate) -- container ids
+    // 1111aaaa2222 (orbit-db) and 3333bbbb4444 (orbit-app), same fixture
+    // the #629 rotation-restart test above uses.
+    const restarted = readFileSync(restartLogPath, "utf8").trim().split("\n").filter(Boolean);
+    expect(restarted).toEqual(["1111aaaa2222", "3333bbbb4444", "3333bbbb4444"]);
   });
 
   it("in a mixed batch, refusing the SECOND word (regenerate) refuses the WHOLE batch — the credential is never rotated either, even though 'rotate' was typed correctly", () => {

@@ -1,29 +1,27 @@
 import { randomUUID } from "node:crypto";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AuthConfig } from "../env";
+import type { OidcAuthConfig } from "../env";
 import type { TokenExchangeReason } from "./errors";
 import {
   createAuthorizationUrl,
   completeAuthorization,
   discoverProvider,
   profileFromClaims,
+  StaleAuthenticationError,
+  STEP_UP_MAX_AUTH_AGE_SECONDS,
   validateIdTokenClaims,
   verifyIdToken,
   type OidcMetadata,
 } from "./oidc";
 
-const config: AuthConfig = {
-  appUrl: new URL("https://orbit.example"),
-  sessionSecret: "test-secret-that-is-at-least-thirty-two-characters",
-  sessionTtlSeconds: 3600,
+const config: OidcAuthConfig = {
   issuer: "https://auth.example/application/o/orbit/",
   clientId: "orbit",
   clientSecret: "secret",
   callbackUrl: "https://orbit.example/api/auth/callback",
   scopes: "openid profile email",
   claims: { email: "email", emailVerified: "email_verified", name: "name", avatar: "picture" },
-  secureCookies: true,
 };
 
 const metadata: OidcMetadata = {
@@ -106,6 +104,85 @@ describe("OIDC validation", () => {
     }
   });
 
+  it("asks for max_age only when the transaction does, and a step-up asks for zero", () => {
+    const transaction = {
+      state: "state-value",
+      nonce: "nonce-value",
+      codeVerifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+      returnTo: "/",
+    };
+    expect(createAuthorizationUrl(config, metadata, transaction).searchParams.has("max_age")).toBe(false);
+    const stepUp = createAuthorizationUrl(config, metadata, {
+      ...transaction,
+      stepUpSessionId: "11111111-1111-4111-8111-111111111111",
+      intent: "primary_transfer",
+      maxAge: 0,
+    });
+    expect(stepUp.searchParams.get("max_age")).toBe("0");
+  });
+
+  it("holds a step-up to a fresh auth_time, and an ordinary login to none", () => {
+    const now = Math.floor(Date.now() / 1000);
+    const claims = (authTime?: number) => ({
+      sub: "subject",
+      aud: "orbit",
+      nonce: "expected",
+      ...(authTime === undefined ? {} : { auth_time: authTime }),
+    });
+
+    // No step-up asked for: auth_time is nobody's business.
+    expect(() => validateIdTokenClaims(claims(), "expected", "orbit")).not.toThrow();
+    expect(() => validateIdTokenClaims(claims(now - 86_400), "expected", "orbit")).not.toThrow();
+
+    const stepUp = { maxAuthAgeSeconds: STEP_UP_MAX_AUTH_AGE_SECONDS };
+    expect(() => validateIdTokenClaims(claims(now), "expected", "orbit", stepUp)).not.toThrow();
+    // 90 seconds old: the plan's case, and past the 60 s window plus tolerance.
+    expect(() => validateIdTokenClaims(claims(now - 90), "expected", "orbit", stepUp))
+      .toThrow(StaleAuthenticationError);
+    // A provider that answers max_age with no auth_time has re-authenticated
+    // nobody, so it fails the same way rather than being trusted.
+    expect(() => validateIdTokenClaims(claims(), "expected", "orbit", stepUp))
+      .toThrow(StaleAuthenticationError);
+    expect(() => validateIdTokenClaims({ ...claims(), auth_time: "now" }, "expected", "orbit", stepUp))
+      .toThrow(StaleAuthenticationError);
+    // Far in the future is a wrong clock or a forged claim, not evidence.
+    expect(() => validateIdTokenClaims(claims(now + 600), "expected", "orbit", stepUp))
+      .toThrow(StaleAuthenticationError);
+  });
+
+  it("answers a stale step-up with step_up_failed rather than invalid_id_token", async () => {
+    const trusted = await generateKeyPair("RS256");
+    const publicJwk = { ...await exportJWK(trusted.publicKey), alg: "RS256", kid: "primary", use: "sig" };
+    const trustedKeys = createLocalJWKSet({ keys: [publicJwk] });
+    const now = Math.floor(Date.now() / 1000);
+
+    const sign = (authTime: number | undefined) => {
+      const token = new SignJWT({
+        nonce: "expected-nonce",
+        ...(authTime === undefined ? {} : { auth_time: authTime }),
+      })
+        .setProtectedHeader({ alg: "RS256", kid: "primary" })
+        .setIssuer(config.issuer)
+        .setAudience(config.clientId)
+        .setSubject("immutable-subject")
+        .setIssuedAt(now)
+        .setExpirationTime(now + 300);
+      return token.sign(trusted.privateKey);
+    };
+
+    const stepUp = { maxAuthAgeSeconds: STEP_UP_MAX_AUTH_AGE_SECONDS };
+    await expect(verifyIdToken(config, metadata, await sign(now), undefined, "expected-nonce", trustedKeys, stepUp))
+      .resolves.toMatchObject({ sub: "immutable-subject" });
+    for (const authTime of [now - 90, undefined]) {
+      await expect(verifyIdToken(config, metadata, await sign(authTime), undefined, "expected-nonce", trustedKeys, stepUp))
+        .rejects.toMatchObject({ code: "step_up_failed", status: 401 });
+    }
+    // The same token is fine for an ordinary sign-in: the rule is the
+    // transaction's, not the provider's.
+    await expect(verifyIdToken(config, metadata, await sign(now - 90), undefined, "expected-nonce", trustedKeys))
+      .resolves.toMatchObject({ sub: "immutable-subject" });
+  });
+
   it("maps mutable profile claims without changing issuer/subject identity", () => {
     expect(profileFromClaims(config, {
       sub: "immutable-subject",
@@ -156,6 +233,14 @@ describe("OIDC discovery and provider failure contracts", () => {
     await expectDiscoveryFailure(discoveryDocument(issuer, { authorization_endpoint: "http://insecure.example.invalid/authorize" }), issuer);
     await expectDiscoveryFailure(discoveryDocument(issuer, { code_challenge_methods_supported: undefined }), issuer);
     await expectDiscoveryFailure(discoveryDocument(issuer, { code_challenge_methods_supported: ["plain"] }), issuer);
+  });
+
+  // SR2-R5: an otherwise-valid document larger than the response-size cap
+  // must be refused rather than fully parsed and trusted — matching the
+  // install-time discovery path's own OIDC_DISCOVERY_MAX_BYTES ceiling.
+  it("rejects an otherwise-valid discovery document larger than the response-size cap", async () => {
+    const issuer = uniqueIssuer();
+    await expectDiscoveryFailure(discoveryDocument(issuer, { padding: "x".repeat(2_000_000) }), issuer);
   });
 
   it.each([
@@ -224,10 +309,44 @@ describe("OIDC discovery and provider failure contracts", () => {
     return { providerMetadata, idToken, jwks: { keys: [publicJwk] } };
   }
 
+  // SR2-R5: the token endpoint's response also has no size cap today — an
+  // otherwise-valid, fully-parseable token payload padded past the cap must
+  // be refused rather than accepted whole.
+  it("rejects an otherwise-valid token response larger than the response-size cap", async () => {
+    const { providerMetadata, idToken, jwks } = await signedProviderFixture();
+    const fetchMock = vi.fn().mockImplementation((input: string | URL) => {
+      const url = String(input);
+      if (url === providerMetadata.token_endpoint) {
+        return Promise.resolve(new Response(JSON.stringify({
+          id_token: idToken,
+          padding: "x".repeat(2_000_000),
+        }), { headers: { "content-type": "application/json" } }));
+      }
+      if (url === providerMetadata.jwks_uri) {
+        return Promise.resolve(new Response(JSON.stringify(jwks), { headers: { "content-type": "application/json" } }));
+      }
+      return Promise.reject(new Error("unexpected endpoint"));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(completeAuthorization({ ...config, issuer: providerMetadata.issuer }, providerMetadata, "authorization-code-sentinel", {
+      state: "state",
+      nonce: "nonce",
+      codeVerifier: "verifier",
+      returnTo: "/",
+    })).rejects.toMatchObject({
+      code: "token_exchange_failed",
+      status: 502,
+      tokenExchangeReason: "invalid_response",
+    });
+  });
+
   it.each([
     ["HTTP failure", () => new Response(JSON.stringify({ error: "invalid_token" }), { status: 401 })],
     ["invalid body", () => new Response("{", { status: 200 })],
     ["subject mismatch", () => new Response(JSON.stringify({ sub: "different-subject" }), { status: 200 })],
+    // SR2-R5: an otherwise-valid UserInfo response larger than the cap.
+    ["oversized body", () => new Response(JSON.stringify({ sub: "immutable-subject", padding: "x".repeat(2_000_000) }), { status: 200 })],
   ])("maps UserInfo %s to a bounded error without provider values", async (_label, userInfoResponse) => {
     const { providerMetadata, idToken, jwks } = await signedProviderFixture();
     const fetchMock = vi.fn().mockImplementation((input: string | URL) => {

@@ -60,7 +60,11 @@ export function reportAuthCallbackFailure(code: AuthErrorCode, tokenReason?: Tok
     ? code
     : code === "provider_error"
       ? "provider_error"
-      : "unexpected_failure";
+      /* A step-up the provider did not honour has an operator remedy, so it
+         gets its own reason rather than the generic one (ADR-0023 §8). */
+      : code === "step_up_failed"
+        ? "step_up_rejected"
+        : "unexpected_failure";
   log.error({
     event: "auth.provider",
     state: "degraded",

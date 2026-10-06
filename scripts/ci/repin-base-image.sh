@@ -100,12 +100,29 @@
 #                             the packages axis be exercised without a real
 #                             stale image, which is not something that can be
 #                             fabricated to order.
+#   BASE_IMAGE_MANIFEST_SIMULATION
+#                             Testing seam: canned `docker buildx imagetools
+#                             inspect --format '{{json .Manifest}}'` output,
+#                             used instead of running docker. Lets the axis-1
+#                             corroboration step (#708) be exercised without a
+#                             real registry.
 #   BASE_REPIN_BRANCH         The branch this script pushes and opens a
 #                             merge request from. Defaults to
 #                             chore/base-image-repin -- fixed, not per-run,
 #                             so a second finding updates the same merge
 #                             request instead of opening a duplicate.
 #   BASE_REPIN_TARGET_BRANCH  The merge request's target. Defaults to `dev`.
+#   BASE_REPIN_PUSH_URL       Testing seam: overrides the URL this script
+#                             pushes the re-pin branch to, which is otherwise
+#                             always built from CI_SERVER_HOST and
+#                             CI_PROJECT_PATH. Lets the commit-and-push half
+#                             (#1020's Debt) be exercised against a local bare
+#                             repository instead of a real GitLab remote.
+#   BASE_REPIN_STOP_AFTER_PUSH
+#                             Testing seam: once the push above succeeds, exit
+#                             0 immediately rather than checking for or
+#                             opening a merge request. Lets the commit-and-push
+#                             half be proven without a GitLab API to call.
 set -Eeuo pipefail
 # Belt and braces on top of never putting a token in argv below: forced off
 # regardless of how this script is invoked (a stray `bash -x`, an inherited
@@ -147,7 +164,11 @@ fail() { printf 'repin-base-image: %s\n' "$1" >&2; exit 2; }
 # covers every exit this script can take -- success, `fail`'s exit 2, an
 # unhandled error under `set -e`, or a signal -- not just the tidy one.
 _secret_files=()
-_cleanup_secret_files() { [[ ${#_secret_files[@]} -eq 0 ]] || rm -f "${_secret_files[@]}"; }
+_scratch_dirs=()
+_cleanup_secret_files() {
+  [[ ${#_secret_files[@]} -eq 0 ]] || rm -f "${_secret_files[@]}"
+  [[ ${#_scratch_dirs[@]} -eq 0 ]] || rm -rf "${_scratch_dirs[@]}"
+}
 trap _cleanup_secret_files EXIT INT TERM
 
 # A mode-600 temp file, tracked for cleanup. Never the token itself: callers
@@ -434,7 +455,9 @@ fi
 
 log "corroborating the artifact against the live tag before trusting it..."
 manifest_json=""
-if ! manifest_json="$(docker buildx imagetools inspect "$pinned_tag" --format '{{json .Manifest}}' 2>/dev/null)"; then
+if [[ -n "${BASE_IMAGE_MANIFEST_SIMULATION:-}" ]]; then
+  manifest_json="$BASE_IMAGE_MANIFEST_SIMULATION"
+elif ! manifest_json="$(docker buildx imagetools inspect "$pinned_tag" --format '{{json .Manifest}}' 2>/dev/null)"; then
   fail "could not resolve ${pinned_tag} to corroborate the artifact's digest"
 fi
 
@@ -546,7 +569,7 @@ this image's index digest, ${trusted_digest}, the moment its push succeeded;
 ${pinned_tag} currently resolves that index to ${live_platform_digest} for
 linux/amd64, which is what the Dockerfile pins. scripts/check-base-image-current.sh
 passes against it.
-$($packages_stale && printf '\nPackages inside the new image were still reported behind at build time; see #706.\n')
+$(if $packages_stale; then printf '\nPackages inside the new image were still reported behind at build time; see #706.\n'; fi)
 Opened automatically by the base_image_repin schedule (#708). Nothing here
 merges itself.
 "
@@ -566,13 +589,108 @@ git -C "$repo_dir" commit -m "$commit_message"
 # command it execs never contains it. `-c credential.helper=` first clears
 # any helper already configured (same defensive shape as AGENTS.md's
 # documented push pattern) so only the one named here is consulted.
+# Defensive, and NOT the cause of #1081 -- recording that plainly because the
+# commit that added this said it was, and was wrong.
+#
+# The theory was that GitLab Runner leaves its own CI_JOB_TOKEN in this
+# checkout's git config as an `http.<url>.extraheader` AUTHORIZATION line,
+# which git would send in place of the credential below. It would have
+# explained the 403 exactly. It is not what happens here: on the first run
+# after this landed (pipeline 1470) the loop found no such key, logged
+# nothing, and the push was refused identically.
+#
+# Kept because clearing an inherited credential before an authenticated push
+# is right whether or not one is present, and because its absence is now
+# itself evidence: if this line ever does appear in a log, the config did
+# carry one. The key names are logged; the values never are.
+while IFS= read -r extraheader_key; do
+  [[ -n "$extraheader_key" ]] || continue
+  log "clearing an inherited git auth header before the push: ${extraheader_key}"
+  git -C "$repo_dir" config --unset-all "$extraheader_key"
+done < <(git -C "$repo_dir" config --name-only --get-regexp '^http\..*\.extraheader$' || true)
+
+# Which identity is this token, actually? (#1081)
+#
+# Two owner rotations and two wrong diagnoses have gone into a 403 that says
+# only "you are not allowed", without saying who "you" is. The push cannot be
+# made to name its identity, but the API can: this asks the token who it is
+# and logs the answer before the push that will be refused.
+#
+# A username is not a secret; the token stays in a mode-600 header file and
+# never reaches argv. If this prints an identity that is not the base-repin
+# bot, the stored value is wrong. If it prints the right one, the value is
+# right and the refusal is about what that identity may do, not who it is --
+# and the next question is the token's scopes, since `api` alone does not
+# necessarily carry git push.
+# Skipped when CI_API_V4_URL is unset, which is the case in this script's own
+# tests: they drive the commit-and-push half against a local bare repo with no
+# GitLab behind it. A diagnostic must never be able to fail the thing it is
+# diagnosing, so every step here is non-fatal.
+if [[ -n "${CI_API_V4_URL:-}" ]]; then
+  identity_header="$(new_secret_file)"
+  printf 'PRIVATE-TOKEN: %s\n' "$BASE_REPIN_TOKEN" > "$identity_header"
+  identity="$(
+    curl --silent --location --max-time 30 --header @"$identity_header" \
+      "${CI_API_V4_URL%/}/user" 2>/dev/null |
+      node -e 'let i="";process.stdin.on("data",c=>i+=c).on("end",()=>{try{const u=JSON.parse(i);process.stdout.write(`${u.username ?? "?"} (id ${u.id ?? "?"})`)}catch{process.stdout.write("unreadable -- the API refused this token")}})' 2>/dev/null || true
+  )"
+  log "the push credential authenticates as: ${identity:-unreadable}"
+fi
+
 credential_file="$(new_secret_file)"
 printf 'https://oauth2:%s@%s\n' "$BASE_REPIN_TOKEN" "$CI_SERVER_HOST" > "$credential_file"
-push_url="https://${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
-git -C "$repo_dir" \
+push_url="${BASE_REPIN_PUSH_URL:-https://${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git}"
+
+# The push, from a scratch repository rather than the runner's checkout
+# (#1081, 2026-09-23). Pipeline 1527 showed the stored token is the right
+# identity (the probe above named the base-repin bot, a Developer) and the
+# push was still refused with the wording GitLab uses for a *job token*,
+# which may read this project but never write it. Nothing in the checkout's
+# config explained it (no extraheader key, no helper), so the checkout is
+# not trusted for the push at all: the commit is fetched into a fresh
+# `git init` with no config of its own, no global or system gitconfig, and a
+# HOME nothing else has written to. The only credential that can reach this
+# push is the store file above.
+#
+# `push_trace` records the HTTP exchange so a refusal can finally say what
+# was sent. Git redacts every Authorization value in that trace by default
+# (GIT_TRACE_REDACT) and the printout below keeps only status lines and
+# header names, never values; each line is scrubbed again before printing.
+push_repo="$(mktemp -d)"
+push_home="$(mktemp -d)"
+_scratch_dirs+=("$push_repo" "$push_home")
+git init -q "$push_repo"
+# The checkout is a shallow clone (GIT_DEPTH), and a push out of one is a
+# "shallow update" the receiving side refuses by default -- pipeline 1553.
+# Allowing it makes the scratch repository shallow at the same boundary,
+# which the onward push does not mind: GitLab already holds that history.
+git -C "$push_repo" config receive.shallowUpdate true
+# Pushed from the checkout into the scratch repository, not fetched out of
+# it: a fetch runs upload-pack inside "$repo_dir/.git", and git's ownership
+# check matches that path against the `safe.directory` the pipeline sets
+# for "$repo_dir" alone, so it refused with "dubious ownership" on
+# pipeline 1547. A push runs receive-pack in the scratch repository, which
+# this job created and owns.
+git -C "$repo_dir" push -q "$push_repo" "refs/heads/${branch_name}:refs/heads/${branch_name}"
+push_trace="$(new_secret_file)"
+push_status=0
+GIT_TRACE_CURL="$push_trace" GIT_TRACE_CURL_NO_DATA=1 GIT_TRACE_REDACT=1 \
+GIT_TERMINAL_PROMPT=0 HOME="$push_home" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+git -C "$push_repo" \
   -c credential.helper= \
   -c "credential.helper=store --file=${credential_file}" \
-  push --force "$push_url" "HEAD:refs/heads/${branch_name}"
+  push --force "$push_url" "refs/heads/${branch_name}:refs/heads/${branch_name}" || push_status=$?
+if [[ "$push_status" -ne 0 ]]; then
+  log "push refused (exit ${push_status}); the HTTP exchange, status lines and header names only:"
+  grep -E 'Send header: (POST|GET|Authorization)|Recv header: HTTP/' "$push_trace" |
+    sed -E 's/^[^=<]*//; s/(Authorization:).*/\1 [value withheld]/; s/[?].*//; s/^/repin-base-image:   /'
+  exit "$push_status"
+fi
+
+if [[ -n "${BASE_REPIN_STOP_AFTER_PUSH:-}" ]]; then
+  log "BASE_REPIN_STOP_AFTER_PUSH set: stopping after the push (testing seam); not checking for or opening a merge request."
+  exit 0
+fi
 
 header_file="$(new_secret_file)"
 body_file="$(new_secret_file)"

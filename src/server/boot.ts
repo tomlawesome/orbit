@@ -10,6 +10,53 @@ const SCANNER_STARTUP_WINDOW_MS = 180_000;
 const SCANNER_READINESS_RETRY_INTERVAL_MS = 5_000;
 
 /**
+ * Where migrations are read from -- the one resolver both the running boot
+ * and the documented manual `pnpm db:migrate` (`src/db/migrate.ts`) call, so
+ * the two can never validate or apply a different set from each other
+ * (#1151 A4-Q2). Boot honoured `DRIZZLE_MIGRATIONS_PATH` already; the manual
+ * command used to hard-code `"drizzle"` regardless.
+ */
+export function resolveMigrationsFolder(environment: NodeJS.ProcessEnv = process.env): string {
+  return environment.DRIZZLE_MIGRATIONS_PATH ?? "drizzle";
+}
+
+/**
+ * What the operator needs when `migrate()` throws (#1151 A4-R1): never the
+ * raw driver message, which can embed table or column text and, depending on
+ * the failure, a connection string -- but the two safe facts that actually
+ * say which migration and what kind of failure. `nextTag` is the first
+ * migration this database's own journal has not recorded yet (so, almost
+ * always, the one `migrate()` was mid-way through); `sqlstate` is the five
+ * character code Postgres itself assigns the error, which identifies the
+ * KIND of failure (a constraint violation reads differently from a syntax
+ * error) without naming a single value, table or credential.
+ *
+ * Reading the journal to say which migration is itself best-effort: a
+ * connection already gone must not turn one failure into a more confusing
+ * second one, so this never throws -- it falls back to the sqlstate alone.
+ */
+export async function describeMigrationFailureDetail(
+  client: import("@/db/migration-integrity").SqlClient,
+  migrationsFolder: string,
+  error: unknown,
+): Promise<import("@/lib/logger").OperationalDetail> {
+  const { operationalDetail } = await import("@/lib/logger");
+  const rawCode = (error as { code?: unknown } | null)?.code;
+  const sqlstate = typeof rawCode === "string" && /^[0-9A-Za-z_-]{1,10}$/u.test(rawCode) ? rawCode : "unknown";
+  try {
+    const { readAppliedMigrationHashes, readExpectedMigrationHashes } = await import("@/db/migration-integrity");
+    const [applied, expected] = await Promise.all([
+      readAppliedMigrationHashes(client),
+      readExpectedMigrationHashes(migrationsFolder),
+    ]);
+    const nextTag = expected[applied.length]?.tag ?? "unknown_migration";
+    return operationalDetail`migration ${nextTag} failed, sqlstate ${sqlstate}`;
+  } catch {
+    return operationalDetail`migration failed, sqlstate ${sqlstate}`;
+  }
+}
+
+/**
  * The two words `GET /api/auth/availability` exposes as `phase` (#869): a
  * strict, terminating fact the process itself holds, so the sign-in door can
  * stop inferring boot from a content-free `degraded` readiness answer.
@@ -150,6 +197,64 @@ export async function reportScannerReadiness(): Promise<void> {
   );
 }
 
+/**
+ * Says, on every startup that finds `DOCUMENT_KEK_NEXT` loaded, that a
+ * document-KEK rotation is in progress (#956) — and makes sure the rotation
+ * has its one instance-level `document_kek_rotation_started` audit row, so
+ * "how long has this been open?" is answerable from the instance.
+ *
+ * A rotation in progress is not a configuration problem — the operator put
+ * the second key there on purpose, mid-procedure — so this is its own
+ * `document.kek_rotation` event on the same boot-time surface as
+ * `configuration.problem`, never filed as one. And it never blocks startup:
+ * a hard cut-off would turn a slow rotation into an outage, which is worse
+ * than the two-key window it would be guarding (#956, owner 2026-09-10).
+ */
+export async function reportKekRotationInProgress(): Promise<void> {
+  const [{ getDocumentConfig }, { log, operationalDetail }] = await Promise.all([
+    import("@/server/documents/config"),
+    import("@/lib/logger"),
+  ]);
+
+  let config: ReturnType<typeof getDocumentConfig>;
+  try {
+    config = getDocumentConfig();
+  } catch {
+    // Broken document configuration is reported by its own path.
+    return;
+  }
+  if (!config.nextKeyId) return;
+
+  let startedAt: Date | null = null;
+  try {
+    const { recordRotationStarted } = await import("@/server/documents/rewrap-worker");
+    startedAt = (await recordRotationStarted({
+      previousKeyId: config.keyId,
+      nextKeyId: config.nextKeyId,
+    })).startedAt;
+  } catch {
+    // The reminder below still goes out; only the durable row and the
+    // duration are missing, and refusing to start over bookkeeping is
+    // exactly what this path must never do.
+    log.warn({
+      event: "document.kek_rotation",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "inspect_admin_diagnostics",
+      impact: "none",
+    });
+  }
+
+  log.warn({
+    event: "document.kek_rotation",
+    state: "starting",
+    action: "inspect_admin_diagnostics",
+    impact: "none",
+    detail: operationalDetail`rotation in progress from key ${config.keyId} to ${config.nextKeyId} - deliberate and safe, but meant to be short: finish the rewrap and remove DOCUMENT_KEK_NEXT`,
+    ...(startedAt ? { durationMs: Date.now() - startedAt.getTime() } : {}),
+  });
+}
+
 export async function registerNode(): Promise<void> {
   const [{ validateStartupConfiguration, StartupConfigurationError }, { getDatabaseClient }, { verifyMigrationIntegrity, verifyMigrationJournalComplete, MigrationIntegrityError }, { log }, { getConfigurationProblems }] = await Promise.all([
     import("@/lib/startup-config"),
@@ -218,8 +323,12 @@ export async function registerNode(): Promise<void> {
       action: "inspect_admin_diagnostics",
       impact: "none",
     });
+    // Resolved once and reused below (#1151 A4-Q2): the integrity check, the
+    // migrate() call and the post-migration journal check must all read the
+    // one folder this boot decided on, not three independent re-reads of the
+    // environment that could in principle disagree.
+    const migrationsFolder = resolveMigrationsFolder();
     try {
-      const migrationsFolder = process.env.DRIZZLE_MIGRATIONS_PATH ?? "drizzle";
       log.info({ event: "startup.migration", state: "starting", action: "check_migrations" });
       await verifyMigrationIntegrity(getDatabaseClient(), migrationsFolder);
     } catch (error) {
@@ -267,14 +376,22 @@ export async function registerNode(): Promise<void> {
     }
     const migrationStartedAt = new Date();
     try {
-      await migrate(getDb(), { migrationsFolder: process.env.DRIZZLE_MIGRATIONS_PATH ?? "drizzle" });
-    } catch {
+      await migrate(getDb(), { migrationsFolder });
+    } catch (error) {
+      // #1151 A4-R1: this used to be a bare `catch {}`, so the one person who
+      // could act on a failed migration -- an operator reading the log --
+      // was never told which migration or what kind of failure. The detail
+      // is built from the journal and the error's own SQLSTATE, never the
+      // raw driver message, which can carry table definitions or a
+      // connection string.
+      const detail = await describeMigrationFailureDetail(getDatabaseClient(), migrationsFolder, error);
       log.error({
         event: "startup.migration",
         state: "exhausted",
         reason: "migration_failed",
         action: "check_migrations",
         impact: "migration_blocked",
+        detail,
       });
       try {
         await recordMigrationOutcome(getDatabaseClient(), {
@@ -299,7 +416,7 @@ export async function registerNode(): Promise<void> {
       logMigrationOutcomeUnavailable();
     }
     try {
-      await verifyMigrationJournalComplete(getDatabaseClient(), process.env.DRIZZLE_MIGRATIONS_PATH ?? "drizzle");
+      await verifyMigrationJournalComplete(getDatabaseClient(), migrationsFolder);
     } catch {
       log.error({
         event: "startup.migration",
@@ -312,6 +429,21 @@ export async function registerNode(): Promise<void> {
     }
     log.info({ event: "startup.migration", state: "ready", action: "none" });
   }
+
+  // Portable-archive crash recovery (#1151 RANGE-R2): a row left open by a
+  // crash or restart mid-document-restore is rolled back before anything
+  // else runs -- awaited, not fire-and-forget, so the document worker never
+  // starts beside an import that is still half-done.
+  const { rollBackUnfinishedPortableImports } = await import("@/server/portable-archive-repository");
+  await rollBackUnfinishedPortableImports().catch(() => {
+    log.error({
+      event: "portable_archive.import",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "inspect_admin_diagnostics",
+      impact: "application_degraded",
+    });
+  });
 
   if (process.env.WORKER_ENABLED === "true") {
     const [{ startNotificationWorker }, { startDocumentWorker }, { startImapIngestionWorker }, { startImapReceiptWorker }, { startMaintenanceWorker }] = await Promise.all([
@@ -344,6 +476,13 @@ export async function registerNode(): Promise<void> {
     if (!optionalSettings.has("mail") && !optionalSettings.has("imap")) startImapReceiptWorker();
     // Unconditional: scheduled maintenance depends on no optional setting.
     startMaintenanceWorker();
+
+    /* The Tier 1 metadata backfill (ADR-0024 decision 3). It runs once, drains
+       the rows migration 0040 could not encrypt, and stops; an instance with
+       no key-encryption key logs and stops without converting anything, rather
+       than holding up start-up. */
+    const { startMetadataBackfill } = await import("@/server/metadata/backfill");
+    startMetadataBackfill();
   }
 
   // The strict sequence (#869) is done: configuration, readiness reports,
@@ -351,6 +490,22 @@ export async function registerNode(): Promise<void> {
   // post-boot reporting, not a boot step, so it flips before the scanner
   // probe kicks off rather than after.
   bootPhase = "running";
+
+  // Best-effort: the reminder that a KEK rotation is open must appear in
+  // every boot's log, but a failed audit write may not stop the boot (#956)
+  // — every failure inside is caught, and this catch is the last net.
+  // Awaited, unlike the scanner probe below, so the reminder lands in the
+  // startup log deterministically rather than racing the claim notice; it
+  // is one config read on the common no-rotation path.
+  await reportKekRotationInProgress().catch(() => {
+    log.warn({
+      event: "document.kek_rotation",
+      state: "degraded",
+      reason: "unexpected_failure",
+      action: "inspect_admin_diagnostics",
+      impact: "none",
+    });
+  });
 
   // Probed after workers start so a slow or absent scanner never delays them.
   // Failure is reported, never thrown: readiness is the health surface's job.
@@ -364,4 +519,13 @@ export async function registerNode(): Promise<void> {
     });
   });
 
+  /* The last act of start-up (ADR-0022 §1). On an unclaimed instance this
+     prints the claim notice, so it is the last line of `docker logs
+     orbit-app` until the first request arrives and the operator can open it
+     straight from there. On a claimed instance it generates nothing and
+     prints nothing. It throws only when no code can be produced at all, which
+     is a start-up fault like any other: an instance that is up and unclaimed
+     always has a live code (ADR-0022 §3). */
+  const { printClaimNotice } = await import("@/lib/auth/bootstrap");
+  await printClaimNotice();
 }

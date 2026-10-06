@@ -75,6 +75,7 @@ export const operationalReasons = [
   "key_unavailable",
   "purge_failed",
   "stage_purge_failed",
+  "rewrap_failed",
   "scan_recovery_expired",
   "staging_object_invalid",
   "smtp_unconfigured",
@@ -101,6 +102,30 @@ export const operationalReasons = [
      than we support", which have different remedies. */
   "database_mismatch",
   "database_below_floor",
+  /* The claim (ADR-0022, ADR-0023 §8). `bootstrap_unclaimed` is the state an
+     instance boots into before anyone has claimed it; `bootstrap_rejected` is
+     a claim attempt that did not match. Neither record ever carries the code
+     itself — the notice is printed outside this protocol on purpose, and is
+     the only place in Orbit that prints a secret. */
+  "bootstrap_unclaimed",
+  "bootstrap_rejected",
+  /* Local sign-in (ADR-0023 §8). `credentials_rejected` is a password that did
+     not match — or an address that has no account, which is deliberately the
+     same record; `attempts_exhausted` is the verification gate turning a
+     caller away. Neither ever carries the address, the password or a count. */
+  "credentials_rejected",
+  "attempts_exhausted",
+  /* Recent authentication (ADR-0023 §5, §8): a step-up came back without a
+     usable re-authentication — no `auth_time`, a stale one, or an identity
+     that is not the one holding the session. The operator needs to know,
+     because a provider that ignores `max_age` blocks every sensitive action;
+     the record names no person and no provider text. */
+  "step_up_rejected",
+  /* Tier 1 metadata (ADR-0024 decision 5): one stored value would not
+     authenticate. The record names the table, column and row so an
+     administrator can find it; it never carries the value, the ciphertext or
+     any key material, and the rest of the row keeps working. */
+  "metadata_integrity_failed",
 ] as const;
 export type OperationalReason = typeof operationalReasons[number];
 
@@ -112,6 +137,10 @@ export const operationalActions = [
   "check_migrations",
   "check_scanner",
   "check_parser",
+  /* The optional local model of ADR-0025: reachable, loaded and answering
+     inside its deadline. Distinct from check_parser because the parser being
+     down blocks processing, while the model being down only costs suggestions. */
+  "check_model",
   "check_provider",
   "retry",
   "retry_job",
@@ -136,12 +165,17 @@ export const operationalImpacts = [
   "migration_blocked",
   "document_upload_blocked",
   "document_processing_blocked",
+  /* ADR-0025 section 5: the model path failed, so an upload gets the heuristic
+     proposal alone. Nothing is blocked and no user sees an error. */
+  "heuristic_suggestions_only",
   "notification_delivery_delayed",
   "mail_receipt_delayed",
   "mail_delivery_delayed",
   "backup_unavailable",
   "recovery_blocked",
   "worker_degraded",
+  /* One field is unreadable, not the row and not the application. */
+  "metadata_field_unreadable",
 ] as const;
 export type OperationalImpact = typeof operationalImpacts[number];
 
@@ -178,6 +212,11 @@ export const operationalEvents = {
   "database.migration": "migrations",
   "auth.configuration": "authentication",
   "auth.provider": "authentication",
+  /* Local sign-in (M7). Neither of the two authentication events above fits a
+     password attempt — nothing about the configuration changed and no provider
+     was involved — and an operator reading the log should be able to tell the
+     three apart at a glance. */
+  "auth.local": "authentication",
   "notification.worker": "notification",
   "document.worker": "document",
   "document.job": "document",
@@ -187,6 +226,10 @@ export const operationalEvents = {
   "document.inspection": "document",
   "document.preview": "document",
   "document.parse": "parser",
+  /* The optional local-model proposer (ADR-0025). It reports beside the
+     document events rather than the parser's, because a failure here degrades
+     suggestions instead of stopping processing. */
+  "document.model_extraction": "document",
   "imap.ingestion": "ingestion",
   "imap.receipt": "mail",
   "delivery.smtp": "delivery",
@@ -195,6 +238,19 @@ export const operationalEvents = {
   "recovery.operation": "recovery",
   "maintenance.worker": "maintenance",
   "configuration.problem": "configuration",
+  /* Tier 1 metadata encryption (ADR-0024): a value that failed its integrity
+     check, and the resumable backfill that converts pre-encryption rows. */
+  "metadata.integrity": "metadata",
+  "metadata.backfill": "metadata",
+  /* The document KEK rewrap worker (#932, ADR-0017): reports beside
+     "document.job" rather than reusing it, because this is a whole rotation's
+     outcome across all three key populations, not one job's. */
+  "document.kek_rotation": "document",
+  /* Portable-archive import rollback (#1151 RANGE-R2): a crash-recovery sweep
+     or an aborted document restore that could not fully clean up. Reports
+     beside the document events because what it names is document ciphertext
+     left behind, not a portable-archive export file. */
+  "portable_archive.import": "document",
 } as const;
 export type OperationalEventName = keyof typeof operationalEvents;
 export type OperationalComponent = typeof operationalEvents[OperationalEventName];

@@ -1,12 +1,15 @@
 <script>
   import { onMount } from "svelte";
-  import { goto } from "$app/navigation";
+  import { beforeNavigate, goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import "./create.css";
   import { mountCreate } from "./create.behaviour.js";
   import { mountConstellations } from "$lib/backdrops/constellations.js";
+  import Chrome from "$lib/Chrome.svelte";
   import { readHome } from "$lib/data/workspace.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
+  import { isPocket } from "$lib/pocket/media.js";
+  import Pocket from "./pocket.svelte";
 
   /**
    * New entry — the full form (CON-9: "create = genesis"). Reached from the
@@ -31,8 +34,37 @@
   /** @type {?HTMLDivElement} */
   let backdropRoot = null;
 
+  /* The shared chrome's who-and-where (#1010), off the same readHome the
+     backdrop already makes: null until it lands, and Chrome draws without. */
+  /** @type {Awaited<ReturnType<typeof readHome>> | null} */
+  let chrome = $state(null);
+
+  /** The mounted form's own dirty check (#1151 W1-S1), null until onMount —
+      which is also the whole of the window a misclick has no guard, since
+      nothing can be typed before the form exists either. */
+  /** @type {ReturnType<typeof mountCreate> | null} */
+  let form = null;
+
+  /* A misclick on the light-dismiss stage below, a chrome link away, or any
+     other in-app navigation while the form holds something typed (#1151
+     W1-S1): no confirm sheet exists on the desk the way the pocket's own
+     form has one, so this is the browser's own confirm() — no new layout,
+     same "discard changes" question the pocket's sheet asks. */
+  beforeNavigate(({ cancel }) => {
+    if (form?.isDirty() && !confirm("Discard this entry? What you've typed will be lost.")) cancel();
+  });
+
+  /** Closing the tab or reloading: beforeNavigate never sees this, so the
+      browser's own beforeunload prompt is the only honest warning left.
+      @param {BeforeUnloadEvent} event */
+  function onBeforeUnload(event) {
+    if (!form?.isDirty()) return;
+    event.preventDefault();
+    event.returnValue = "";
+  }
+
   onMount(() => {
-    const formTeardown = mountCreate();
+    form = mountCreate();
     let disposed = false;
     let backdropTeardown = () => {};
     /* The backdrop's households come through the same seam home's sky does
@@ -41,6 +73,10 @@
        deterministic sky against the mockup's; rolled fresh otherwise. */
     readHome().then((view) => {
       if (disposed) return;
+      chrome = view;
+      /* #1120: the pocket hides the constellations (proposal §1.10), so a
+         phone does not run them behind its own sky. */
+      if (isPocket()) return;
       const seed = data?.fixtures ? seedFromWorkspace(view.primary ?? "") : rollSeed();
       backdropTeardown = mountConstellations(
         /** @type {HTMLDivElement} */ (backdropRoot),
@@ -49,7 +85,8 @@
     });
     return () => {
       disposed = true;
-      formTeardown();
+      form?.teardown();
+      form = null;
       backdropTeardown();
     };
   });
@@ -60,7 +97,19 @@
   <title>Orbit — new entry</title>
 </svelte:head>
 
+<svelte:window onbeforeunload={onBeforeUnload} />
+
+<div class="create-page">
 <div class="backdrop" bind:this={backdropRoot} aria-hidden="true"></div>
+
+<!-- The shared chrome (#1010, owner 2026-09-16): the way back to the sky and
+     the account menu, as on every sub-screen. The stage's own light-dismiss
+     below is the other way out and stays. -->
+<Chrome user={chrome?.user} current=""
+        role={chrome?.household ? `${chrome.household.name ?? ""} · ${chrome.household.canManage ? "owner" : "member"}` : ""} />
+
+<!-- #1120, proposal §2.5: the pocket's own create, chosen by CSS. -->
+<Pocket />
 
 <!-- §14 (#471): clicking off the form returns to the landing page — the same
      light-dismiss the item view has. -->
@@ -82,6 +131,17 @@
         <button type="button" data-type="suggestion" aria-pressed="false">&#9675; suggestion</button>
         <button type="button" data-type="document" aria-pressed="false">&#9670; document</button>
       </div>
+    </div>
+
+    <!-- #1058(b)/#1069: a section must be picked, with no default; the save
+         button stays disabled until one is chosen, and the reason sits beside
+         it (create.behaviour.js's refusal note), in entry.js's own vocabulary
+         (refusalOf). Populated from the household's sections once they load —
+         mountCreate() draws the buttons, the same pattern #types already
+         is, rather than a second, Svelte-reactive way of doing the same job. -->
+    <div class="field">
+      <label id="sections-label">section</label>
+      <div class="sections" id="sections" role="group" aria-labelledby="sections-label"></div>
     </div>
 
     <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="drop a document, or press enter to choose one">
@@ -120,7 +180,10 @@
               <option value="once">one-off</option>
               <option value="monthly">monthly</option>
               <option value="yearly" selected>yearly</option>
+              <option value="custom">every &hellip; months</option>
             </select>
+            <input id="f-recur-months" class="recur-months" type="number" min="1" max="120"
+                   inputmode="numeric" placeholder="months" aria-label="months" hidden>
           </div>
         </div>
 
@@ -142,23 +205,20 @@
         </div>
 
         <div class="field">
-          <label for="f-assign">assign to</label>
-          <select id="f-assign">
-            <option value="">household &middot; shared</option>
-            <option>Tom</option>
-            <option>Sarah</option>
-            <option>Isla</option>
-          </select>
-        </div>
-
-        <div class="field">
           <label>notes</label>
           <textarea id="f-notes" rows="2" placeholder="anything else worth keeping"></textarea>
         </div>
 
+        <!-- #1058(e)/#1069: a failure is loud, not small print — the reason
+             sits here, the button goes back to "Add to orbit", nothing typed
+             is lost. No toast. create.behaviour.js also parks the refusal
+             reason here while the entry cannot yet be saved. -->
         <div class="save-row">
-          <button type="submit" class="btn-primary">Add to orbit</button>
-          <a href={resolve("/home")} class="cancel-link">cancel</a>
+          <div class="save-note" id="save-note" aria-live="polite"></div>
+          <div class="save-buttons">
+            <button type="submit" class="btn-primary">Add to orbit</button>
+            <a href={resolve("/home")} class="cancel-link">cancel</a>
+          </div>
         </div>
 
       </div></div>
@@ -278,3 +338,4 @@
 </div>
 
 <div class="vignette"></div>
+</div>

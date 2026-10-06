@@ -1,6 +1,6 @@
 # ADR-0016: The supported-install floor is v1.3.0
 
-**Status:** Accepted
+**Status:** Accepted; amended 2026-10-04 (see Amendment 2026-10-04)
 **Date:** 2026-08-30
 **Relates to:**
 [ADR-0003](0003-gitflow-preview-and-stable-channels.md) (channels and
@@ -30,14 +30,15 @@ remained supported.
 
 ## Decision
 
-1. **The supported-install floor is v1.3.0.** `install.sh`, `repair.sh` and
-   the rest of the operator tooling need only work against v1.3.0 and later.
+1. **The supported-install floor is v1.3.0** (amended below to v0.3.0).
+   `install.sh`, `repair.sh` and the rest of the operator tooling need only
+   work against v1.3.0 and later.
    Releases published before it — `v1.0.0`, and the `v1.2.0` build carried by
    `latest` — are not supported install targets, and no compatibility branch
    is carried for them (owner decision, 2026-08-30).
-2. **Backward compatibility is required from v1.3.0 onward.** Once a later
-   release exists, installing, repairing and restoring a still-supported
-   earlier release must work. Every revision from v1.3.0 carries the full
+2. **Backward compatibility is required from v1.3.0 onward** (amended below
+   to v0.3.0). Once a later release exists, installing, repairing and
+   restoring a still-supported earlier release must work. Every revision from v1.3.0 carries the full
    helper-script set, so the installer's existing rule — every deployment
    asset comes from the revision stamped into the image it pulled — satisfies
    this without special cases, and keeps a compose file from drifting from
@@ -65,7 +66,7 @@ remained supported.
   relabelled or republished; those artifacts simply are not supported install
   targets.
 - Prior-version evidence cannot be gathered until a release after v1.3.0
-  exists. The repair-journey harness reports
+  (amended below to v0.3.0) exists. The repair-journey harness reports
   `exact-image-prior-version` as `absent` rather than approximating it.
 
 ## Superseded
@@ -97,3 +98,20 @@ that serves every ref from one tree cannot tell the two apart.
   removes the guarantee rather than honouring it (#676's security note).
 - **Relabel or republish `v1.0.0`:** rejected — historic tags are immutable
   audit evidence (ADR-0003, `docs/releasing.md`).
+
+## Amendment 2026-10-04
+
+Orbit was rebuilt from the ground up, and the rebuild's releases were
+numbered as if they continued the old line. They did not: v1.0.0, v1.1.0
+and v1.2.0 were alphas of the rebuild, so the release line restarts at
+v0.3.0 (owner decision, 2026-10-04, #1213). Those three tags are retracted
+mislabelled alphas. They cannot be removed from the GitHub mirror or the
+registries, so they stay visible as audit evidence (ADR-0003), but nothing
+is ever built on them: the version calculation ignores them and the
+operator tooling refuses them. The supported-install floor is v0.3.0, and
+backward compatibility is required from v0.3.0 onward. The major-0
+development exemption in `repair.sh` is withdrawn, because releases are
+now numbered 0.x and a major-0 version is no longer a sign of a
+development build. The retracted list lives in one place,
+`scripts/retracted-tags.json`; this follows the standard "retract a
+published version" pattern, as Go modules do it.

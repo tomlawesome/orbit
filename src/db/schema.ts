@@ -10,7 +10,8 @@ const bytea = customType<{ data: Buffer }>({
 
 export const membershipRole = pgEnum("membership_role", ["owner", "member"]);
 export const itemStatus = pgEnum("item_status", ["active", "expired", "cancelled", "archived"]);
-export const eventKind = pgEnum("event_kind", ["renewal", "service"]);
+/** #1005: `expiry` is the one-off -- an end date that never comes round. */
+export const eventKind = pgEnum("event_kind", ["renewal", "service", "expiry"]);
 export const deliveryChannel = pgEnum("delivery_channel", ["email", "web_push"]);
 export const deliveryStatus = pgEnum("delivery_status", ["pending", "processing", "sent", "retry", "failed", "cancelled"]);
 export const themeMode = pgEnum("theme_mode", ["system", "light", "dark"]);
@@ -36,6 +37,8 @@ export const documentJobStatus = pgEnum("document_job_status", [
   "cancelled",
 ]);
 export const documentDraftStatus = pgEnum("document_draft_status", ["pending_review", "approved", "discarded"]);
+/** Which Tier 1 metadata key a row holds (ADR-0024 decision 1). */
+export const metadataKeyScope = pgEnum("metadata_key_scope", ["household", "instance"]);
 export const imapIngestionStatus = pgEnum("imap_ingestion_status", [
   "processing",
   "pending_review",
@@ -74,14 +77,37 @@ const auditColumns = {
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
-  email: text("email").notNull(),
+  /**
+   * Tier 2 metadata (ADR-0024, #969). `email_enc` holds the `mdv1.` envelope
+   * and `email_index` the blind index; the plaintext column stands only until
+   * the backfill reaches the row, and an encrypted row clears it.
+   *
+   * Under the INSTANCE key, not a household one: a user belongs to several
+   * households, so no household owns their address.
+   */
+  email: text("email"),
+  emailEnc: text("email_enc"),
+  emailIndex: text("email_index"),
   emailVerified: boolean("email_verified").notNull().default(false),
   displayName: text("display_name").notNull(),
   avatarUrl: text("avatar_url"),
   isInstanceAdmin: boolean("is_instance_admin").notNull().default(false),
   disabledAt: timestamp("disabled_at", { withTimezone: true }),
   ...auditColumns,
-}, (table) => [index("user_email_lookup_idx").on(table.email)]);
+}, (table) => [
+  index("user_email_lookup_idx").on(table.email),
+  // Case-insensitive: sign-in and provisioning treat email as the same
+  // identity regardless of case (ADR-0023 §2). There are no existing rows,
+  // so this ships as a plain index rather than a migration risk.
+  uniqueIndex("user_email_unique_ci").on(sql`lower(${table.email})`),
+  // The blind index carries "one account per address" across the encryption
+  // (#969). Without it, clearing the plaintext would quietly retire that rule:
+  // PostgreSQL treats every NULL as distinct, so the case-insensitive index
+  // above stops constraining a row the moment its plaintext goes. Both stand
+  // through the expand release — that one still holds the rows the backfill
+  // has not reached.
+  uniqueIndex("user_email_unique_index").on(table.emailIndex),
+]);
 
 export const userPreferences = pgTable("user_preferences", {
   userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
@@ -243,6 +269,26 @@ export const instanceContact = pgTable("instance_contact", {
   check("instance_contact_singleton", sql`${table.singleton}`),
 ]);
 
+/**
+ * The last answer of each of the two live mail tests (#1071): "test this
+ * mailbox" (the IMAP verify and the relay half together) and "test the
+ * relay". Follows `instance_contact`'s singleton shape (0033) — the 0047
+ * migration seeds the one row unconditionally, no version column, since a
+ * test result is only ever overwritten by the next run of the same test,
+ * never edited by two people at once.
+ */
+export const mailProbeResults = pgTable("mail_probe_results", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  id: uuid("id").notNull().defaultRandom(),
+  mailboxResult: text("mailbox_result"),
+  mailboxCheckedAt: timestamp("mailbox_checked_at", { withTimezone: true }),
+  relayResult: text("relay_result"),
+  relayCheckedAt: timestamp("relay_checked_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("mail_probe_results_singleton", sql`${table.singleton}`),
+]);
+
 export const externalIdentities = pgTable("external_identities", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
@@ -267,6 +313,131 @@ export const sessions = pgTable("sessions", {
   userAgent: text("user_agent"),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
 });
+
+/**
+ * A user's local password credential (ADR-0021, ADR-0023 §2): at most one
+ * per user, an optional 1:1 child of `users`. `failedAttemptCount` and
+ * `lockedUntil` are the persisted sign-in backoff (5 free attempts, then
+ * doubling up to a 15 minute ceiling); `lastVerifiedAt` is the last
+ * successful verification; `passwordChangedAt` is distinct from the row's
+ * own audit `updatedAt` because a rehash on login touches the hash without
+ * the password changing.
+ */
+export const localCredentials = pgTable("local_credentials", {
+  userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  passwordHash: text("password_hash").notNull(),
+  failedAttemptCount: integer("failed_attempt_count").notNull().default(0),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
+  lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+  passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }).notNull().defaultNow(),
+  ...auditColumns,
+});
+
+/**
+ * A one-use token for setting or resetting a local password (ADR-0023 §2):
+ * `purpose` is `setup` (an administrator-created user's first password) or
+ * `recovery` (a forgotten one, including the primary administrator's CLI
+ * path, ADR-0022 §5). `tokenHash` is the sha256 digest of a 32-byte token;
+ * the token itself is never stored. `createdByUserId` is null when the CLI
+ * issued it.
+ */
+export const credentialSetupTokens = pgTable("credential_setup_tokens", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  purpose: text("purpose").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("credential_setup_tokens_user_idx").on(table.userId),
+  check("credential_setup_tokens_purpose", sql`${table.purpose} IN ('setup','recovery')`),
+]);
+
+/**
+ * One pending password sign-in, waiting on its emailed approval (ADR-0027).
+ *
+ * Every password sign-in makes one of these instead of a session: the browser
+ * that typed the password waits, and the link mailed to the account's own
+ * address is what lets it through. Two secrets, never one, and each column
+ * here holds only the digest of its own:
+ *
+ *  - `tokenHash` is the approval link — 32 random bytes, sha256 at rest, the
+ *    same shape as `credential_setup_tokens` — and it travels by email. It
+ *    says *whether* this sign-in is allowed.
+ *  - `claimHash` is the waiting tab's own cookie, minted in the same breath
+ *    and never leaving that browser. It says *which browser* may collect the
+ *    session. Without it, anyone who watched the approval happen could poll
+ *    for the session the approval unlocked, and a forwarded link would hand
+ *    the reader the account rather than the choice ADR-0027 §4 gives them.
+ *
+ * `outcome` is null while nobody has pressed anything: opening the link
+ * changes nothing at all, because mail scanners follow links (build ruling,
+ * 2026-09-18). `consumedAt` is stamped when the waiting tab collects its
+ * session, so an approval spends exactly once.
+ *
+ * `userAgent` and `clientAddress` are what the approval page and the mail
+ * show about the request being approved. The address is stored as the server
+ * read it; the wording a reader sees ("from your home network" for a private
+ * address) is decided at render time, never here.
+ *
+ * `noticeShownAt` belongs to the other half of a refusal: a recorded "this
+ * wasn't me" is worth telling the account holder about, once, on their next
+ * successful sign-in. Stamping it is what keeps "once" true.
+ */
+export const signInApprovals = pgTable("sign_in_approvals", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  claimHash: text("claim_hash").notNull().unique(),
+  userAgent: text("user_agent"),
+  clientAddress: text("client_address"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  outcome: text("outcome"),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  /* The send limits of ADR-0027 §8, counted where they cannot be forgotten by
+     a restart: how many links this pending sign-in has put in the post, and
+     when the last one went. "Five per account per hour" is these counts summed
+     across the account's rows, and "resend after 60 s" is this timestamp. */
+  sendCount: integer("send_count").notNull().default(0),
+  lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
+  noticeShownAt: timestamp("notice_shown_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("sign_in_approvals_user_idx").on(table.userId),
+  check("sign_in_approvals_outcome", sql`${table.outcome} IS NULL OR ${table.outcome} IN ('approved','denied')`),
+]);
+
+/**
+ * One row per OIDC step-up proof, so a proof can be spent once and only once
+ * (ADR-0023 §5, owner ruling 2026-09-09).
+ *
+ * The sealed cookie already binds a proof to a session, an action and a two
+ * minute expiry, but clearing the cookie only stops the browser that holds it:
+ * anyone who copied the cookie value could present it again inside those two
+ * minutes. `id` is the `jti` sealed inside the proof, and the guard spends it
+ * with a single conditional UPDATE, so the second attempt finds nothing to
+ * update and is refused.
+ *
+ * The cascade on `sessionId` is what makes revocation reach these rows:
+ * signing a session out deletes the `sessions` row, and any proof earned by
+ * that session has to die with it rather than outlive the session it proves.
+ *
+ * Rows are swept on insert, so the table holds only live proofs and never
+ * needs a background job.
+ */
+export const stepUpProofs = pgTable("step_up_proofs", {
+  id: uuid("id").primaryKey(),
+  sessionId: uuid("session_id").notNull().references(() => sessions.id, { onDelete: "cascade" }),
+  intent: text("intent").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("step_up_proofs_session_idx").on(table.sessionId),
+]);
 
 export const households = pgTable("households", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -326,11 +497,38 @@ export const items = pgTable("items", {
   id: uuid("id").primaryKey().defaultRandom(),
   householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
   sectionId: uuid("section_id").notNull().references(() => sections.id, { onDelete: "restrict" }),
-  title: text("title").notNull(),
+  /**
+   * Tier 2 metadata (ADR-0024, #963). Nullable since 0041: an encrypted row
+   * clears the plaintext, exactly as Tier 1 does, and `title_enc` carries the
+   * value. The column survives only until the contract release drops it.
+   */
+  title: text("title"),
   subtype: text("subtype"),
   provider: text("provider"),
   reference: text("reference"),
+  /**
+   * Tier 1 metadata (ADR-0024). `reference_enc` holds the `mdv1.` envelope and
+   * `reference_index` the blind index; the plaintext `reference` column above
+   * survives only until the contract release drops it, and is read solely for
+   * rows the backfill has not reached yet.
+   */
+  referenceEnc: text("reference_enc"),
+  referenceIndex: text("reference_index"),
+  /**
+   * Tier 2 metadata (ADR-0024, #963): the item's own name and the provider's
+   * name. No blind index sits beside either — nothing looks them up by exact
+   * match, so there is nothing for an index to serve and no equality to leak.
+   */
+  titleEnc: text("title_enc"),
+  providerEnc: text("provider_enc"),
   costMinor: integer("cost_minor"),
+  /**
+   * Tier 2 metadata (ADR-0024, #963): the cost, held as the decimal minor-unit
+   * integer rendered into the same `mdv1.` envelope every other value uses.
+   * Totals are summed application-side over decrypted values; nothing sums
+   * this column in SQL, and after 0041 nothing can.
+   */
+  costMinorEnc: text("cost_minor_enc"),
   currency: text("currency").notNull(),
   startDate: date("start_date"),
   expiryDate: date("expiry_date"),
@@ -339,6 +537,8 @@ export const items = pgTable("items", {
   recurrenceMonths: integer("recurrence_months"),
   snoozedUntil: date("snoozed_until"),
   notes: text("notes"),
+  /** Tier 1 metadata (ADR-0024); see `referenceEnc`. */
+  notesEnc: text("notes_enc"),
   externalDocumentUrl: text("external_document_url"),
   status: itemStatus("status").notNull().default("active"),
   /** Inbound documents are deliberately invisible until a member reviews them. */
@@ -348,6 +548,8 @@ export const items = pgTable("items", {
 }, (table) => [
   index("item_household_status_idx").on(table.householdId, table.status),
   index("item_household_section_idx").on(table.householdId, table.sectionId),
+  /** Serves blind-index duplicate detection (ADR-0024 decision 2). */
+  index("item_household_reference_index_idx").on(table.householdId, table.referenceIndex),
 ]);
 
 /** Metadata for an encrypted document; ciphertext and key material live in documentCrypto. */
@@ -388,6 +590,98 @@ export const documentCrypto = pgTable("document_crypto", {
   keyId: text("key_id").notNull(),
   ...auditColumns,
 }, (table) => [uniqueIndex("document_crypto_storage_key_unique").on(table.storageKey)]);
+
+/**
+ * One wrapped 32-byte Tier 1 metadata DEK per household (ADR-0024 decision 1),
+ * plus exactly one `instance`-scope row covering mail-in receipts that have no
+ * household yet. The envelope columns are deliberately identical to
+ * `document_crypto`'s so the rewrap worker (#932) can treat both the same way,
+ * and the wrapping KEK is the same `DOCUMENT_KEK` for the reasons ADR-0017
+ * recorded. Dropping a household drops its key, which crypto-shreds any stray
+ * copy of that household's ciphertext.
+ */
+export const metadataKeys = pgTable("metadata_keys", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  scope: metadataKeyScope("scope").notNull(),
+  householdId: uuid("household_id").references(() => households.id, { onDelete: "cascade" }),
+  envelopeVersion: integer("envelope_version").notNull(),
+  wrappedDek: text("wrapped_dek").notNull(),
+  wrapIv: text("wrap_iv").notNull(),
+  wrapAuthTag: text("wrap_auth_tag").notNull(),
+  keyId: text("key_id").notNull(),
+  version: integer("version").notNull().default(1),
+  ...auditColumns,
+}, (table) => [
+  uniqueIndex("metadata_keys_household_unique").on(table.householdId),
+  /**
+   * A plain unique index would not constrain the instance row: PostgreSQL
+   * treats every NULL `household_id` as distinct, so nothing above stops a
+   * second instance key existing. This partial index is what makes it a
+   * singleton.
+   */
+  uniqueIndex("metadata_keys_instance_unique").on(table.scope).where(sql`${table.householdId} IS NULL`),
+  index("metadata_keys_key_id_idx").on(table.keyId),
+  check(
+    "metadata_keys_scope_household_valid",
+    sql`(${table.scope} = 'household' AND ${table.householdId} IS NOT NULL) OR (${table.scope} = 'instance' AND ${table.householdId} IS NULL)`,
+  ),
+]);
+
+/**
+ * One Tier 1 value that failed its integrity check, the first time anything
+ * saw it fail (#941, ADR-0024 decision 5). Damage is only discoverable by
+ * decrypting, so without this record there is nothing for an administrator to
+ * count: a damaged note is found when somebody opens the item, and is then
+ * forgotten again as soon as the response is sent.
+ *
+ * Keyed exactly like the value's own content AAD — table, column, row — so a
+ * sighting names one value and never the row's other encrypted column. The row
+ * is deleted when that value is written over, which is the repair.
+ *
+ * Deliberately no foreign key: `row_id` addresses two different tables, so no
+ * single reference could cover it. The counts join the owning table instead,
+ * which is also what stops a receipt that has since burned up inflating them.
+ */
+export const metadataDamageSightings = pgTable("metadata_damage_sightings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tableName: text("table_name").notNull(),
+  columnName: text("column_name").notNull(),
+  rowId: uuid("row_id").notNull(),
+  firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex("metadata_damage_sighting_value_unique").on(table.tableName, table.columnName, table.rowId),
+]);
+
+/**
+ * One row per interval in which `metadataCryptoAvailable()`
+ * (src/server/metadata/keys.ts) was false — the instance KEK absent, so
+ * every Tier 1 field reads locked rather than blank. Modelled on
+ * `maintenanceWindows` above: same shape, and the same partial-unique-index
+ * trick for "at most one open at a time" (`status` filtered to `'open'`,
+ * since a plain unique index cannot constrain a nullable `ended_at` — every
+ * NULL is distinct to PostgreSQL).
+ *
+ * This is what lets the mail-in retention reaper (#964,
+ * src/server/mail-in/imap-inbox.ts) credit a still-pending receipt's
+ * `expires_at` for the part of an outage it existed for, per the owner's
+ * 2026-09-10 ruling: the 45-day clock counts elapsed time the receipt was
+ * *available and ignored*, not wall-clock time, so a locked receipt's clock
+ * does not run for the outage and resumes when the key returns.
+ *
+ * `started_at` is only as precise as the reaper's own poll cycle — it can
+ * lag the real outage by a few minutes either way, which errs in the
+ * member's favour and is accepted (owner ruling, #964).
+ */
+export const metadataKeyOutages = pgTable("metadata_key_outages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  status: text("status").notNull().default("open"),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  endedAt: timestamp("ended_at", { withTimezone: true }),
+  ...auditColumns,
+}, (table) => [
+  check("metadata_key_outage_status_valid", sql`${table.status} IN ('open', 'closed')`),
+  uniqueIndex("metadata_key_outage_open_unique").on(table.status).where(sql`${table.status} = 'open'`),
+]);
 
 /** Durable, idempotent worker jobs for document lifecycle operations. */
 export const documentJobs = pgTable("document_jobs", {
@@ -551,6 +845,28 @@ export const portableArchives = pgTable("portable_archives", {
   index("portable_archive_household_created_idx").on(table.householdId, table.createdAt),
 ]);
 
+/**
+ * One row per portable-archive import attempt, open from the moment its
+ * metadata transaction commits until the document-restore phase finishes or
+ * is rolled back (#1151 RANGE-R2). The import is all-or-nothing: a row left
+ * with `finished_at` null past a boot or an hour is a crash mid-restore, and
+ * `rollBackUnfinishedPortableImports`/the next import for the same household
+ * undoes exactly what it recorded here rather than leaving it stranded.
+ */
+export const portableArchiveImports = pgTable("portable_archive_imports", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
+  actorUserId: uuid("actor_user_id").references(() => users.id),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  outcome: text("outcome"),
+  createdSectionIds: uuid("created_section_ids").array().notNull().default([]),
+  createdItemIds: uuid("created_item_ids").array().notNull().default([]),
+}, (table) => [
+  index("portable_archive_import_household_idx").on(table.householdId, table.finishedAt),
+  check("portable_archive_imports_outcome", sql`${table.outcome} IS NULL OR ${table.outcome} IN ('completed','rolled_back')`),
+]);
+
 /** Durable, content-free receipts for messages observed in the dedicated IMAP mailbox. */
 export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -567,6 +883,14 @@ export const imapIngestionMessages = pgTable("imap_ingestion_messages", {
   draftVersion: integer("draft_version").notNull().default(1),
   proposal: jsonb("proposal").notNull().default({}),
   fieldEvidence: jsonb("field_evidence").notNull().default({}),
+  /**
+   * Tier 1 metadata (ADR-0024): the serialised JSON of the two columns above,
+   * encrypted under the receipt's household DEK, or under the instance DEK
+   * while the receipt is still unattributed. The plaintext columns are reset
+   * to `{}` — they are NOT NULL — as each row is encrypted.
+   */
+  proposalEnc: text("proposal_enc"),
+  fieldEvidenceEnc: text("field_evidence_enc"),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   approvalOperationId: uuid("approval_operation_id"),
   approvalResultId: uuid("approval_result_id"),
@@ -696,8 +1020,17 @@ export const mailInRelays = pgTable("mail_in_relays", {
 export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  /** Normalised on the way in: trimmed, unwrapped, case-folded. */
-  address: text("address").notNull(),
+  /**
+   * Normalised on the way in: trimmed, unwrapped, case-folded.
+   *
+   * Tier 2 metadata (ADR-0024, #969), under the INSTANCE key: attribution
+   * matches a sender before any household is known. `address_enc` holds the
+   * envelope, `address_index` the blind index that exact-match attribution
+   * looks up, and the plaintext stands only until the backfill reaches it.
+   */
+  address: text("address"),
+  addressEnc: text("address_enc"),
+  addressIndex: text("address_index"),
   source: mailInSenderSource("source").notNull().default("manual"),
   verifiedAt: timestamp("verified_at", { withTimezone: true }),
   /** The one-use link's token, digested. The token itself is never stored. */
@@ -706,6 +1039,9 @@ export const mailInSenderAddresses = pgTable("mail_in_sender_addresses", {
   ...auditColumns,
 }, (table) => [
   uniqueIndex("mail_in_sender_address_unique").on(table.address),
+  // Carries "one account per sender address" across the encryption, for the
+  // same reason as `user_email_unique_index` above (#969).
+  uniqueIndex("mail_in_sender_address_unique_index").on(table.addressIndex),
   index("mail_in_sender_address_user_idx").on(table.userId, table.verifiedAt),
   check("mail_in_sender_address_verification_pair", sql`(${table.verificationTokenDigest} IS NULL) = (${table.verificationExpiresAt} IS NULL)`),
 ]);
@@ -892,7 +1228,13 @@ export const householdInvitations = pgTable("household_invitations", {
   householdId: uuid("household_id").notNull().references(() => households.id, { onDelete: "cascade" }),
   /* Normalised at the seam (trimmed, lower-cased): the address the signed-in
      identity must match, so the comparison is made on stored bytes. */
-  email: text("email").notNull(),
+  /* Tier 2 metadata (ADR-0024, #963): nullable since 0041, because an
+     encrypted row clears it. `email_enc` carries the address and `email_index`
+     the per-household blind index that keeps "one open invitation per address"
+     a database rule rather than an application hope. */
+  email: text("email"),
+  emailEnc: text("email_enc"),
+  emailIndex: text("email_index"),
   role: membershipRole("role").notNull().default("member"),
   invitedByUserId: uuid("invited_by_user_id").references(() => users.id, { onDelete: "set null" }),
   tokenDigest: text("token_digest").notNull(),
@@ -908,6 +1250,11 @@ export const householdInvitations = pgTable("household_invitations", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   uniqueIndex("household_invitation_open_once").on(table.householdId, table.email)
+    .where(sql`${table.redeemedAt} IS NULL AND ${table.revokedAt} IS NULL`),
+  /* The encrypted successor to the index above (ADR-0024 decision 2). Both
+     stand through the expand release: the plaintext one still constrains rows
+     the backfill has not reached, and this one constrains every row it has. */
+  uniqueIndex("household_invitation_open_once_index").on(table.householdId, table.emailIndex)
     .where(sql`${table.redeemedAt} IS NULL AND ${table.revokedAt} IS NULL`),
   /* Not partial: a spent token must still find its row, or a second visit to
      a used link would read as "no such invitation" instead of "already used". */

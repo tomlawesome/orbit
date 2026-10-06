@@ -21,8 +21,20 @@ services:
   orbit-app:
     environment:
       APP_URL: https://${DEMO_HOST:?set DEMO_HOST to this machine's LAN address}:3443
+      ORBIT_AUTH_OIDC: "true"
       OIDC_ISSUER: https://${DEMO_HOST:?set DEMO_HOST to this machine's LAN address}:4443/
       OIDC_CALLBACK_URL: https://${DEMO_HOST:?set DEMO_HOST to this machine's LAN address}:3443/api/auth/callback
+    # A4-Q1 (#1151): docker-compose.yml publishes this on
+    # ${ORBIT_BIND_ADDRESS:-0.0.0.0}:${ORBIT_PORT:-3000}, and demo-tls below
+    # needs host port 3000 on $DEMO_HOST for its own plain-HTTP listener. A
+    # 0.0.0.0 bind reserves every address for that port, $DEMO_HOST included,
+    # so the two collide with "address already in use" however ORBIT_PORT is
+    # set. LAN access to the app goes through demo-tls's :3443 either way
+    # (APP_URL's own law requires HTTPS off loopback), so this is rebound to
+    # loopback only -- still reachable from the host itself, never from the
+    # port demo-tls needs.
+    ports: !override
+      - "127.0.0.1:${ORBIT_PORT:-3000}:3000"
   orbit-oidc:
     environment:
       TEST_OIDC_ISSUER: https://${DEMO_HOST:?set DEMO_HOST to this machine's LAN address}:4443/

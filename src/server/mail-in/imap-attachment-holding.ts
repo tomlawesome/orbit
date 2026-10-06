@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { getDocumentConfig } from "@/server/documents/config";
+import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
@@ -61,7 +61,9 @@ async function holdBytes(
 ): Promise<HeldImapAttachment> {
   const config = getDocumentConfig();
   const contentSha256 = createHash("sha256").update(input.bytes).digest("hex");
-  const encrypted = encryptDocument(input.bytes, stagingContext(id, recipientUserId, receiptId, input.mediaType, input.bytes.length), config.keyEncryptionKey, config.keyId);
+  // The next key while a rotation is in progress, the current key otherwise (#955).
+  const wrap = wrappingKey(config);
+  const encrypted = encryptDocument(input.bytes, stagingContext(id, recipientUserId, receiptId, input.mediaType, input.bytes.length), wrap.keyEncryptionKey, wrap.keyId);
   const storageKey = storage().createStorageKey();
   try {
     await onCiphertextAllocated?.({ id, storageKey });
@@ -109,15 +111,23 @@ export async function scanAndHoldImapAttachment(input: {
   }
 }
 
-/** Opens holding bytes only for re-encryption into an explicitly selected household. */
+/** Opens holding bytes for re-encryption into an explicitly selected household,
+ * and (#1155) for a page-one render that never leaves memory: both callers
+ * decrypt the same ciphertext under the same recipient/receipt-bound context
+ * and the plaintext never reaches disk either way. */
 export async function readHeldImapAttachment(
   attachment: Pick<HeldImapAttachment, "id" | "mediaType" | "sizeBytes" | "storageKey" | "envelope">,
   owner: { recipientUserId: string; receiptId: string },
 ): Promise<Buffer> {
   const config = getDocumentConfig();
+  // Picks by the envelope's own key_id (#954): held attachments are
+  // short-lived, but not so short-lived that a rotation in progress can be
+  // assumed never to span one.
+  const holdingKek = keyEncryptionKeyFor(config, attachment.envelope.keyId);
+  if (!holdingKek) throw new Error("held attachment is wrapped under a key this instance does not hold");
   const ciphertext = await storage().readCiphertext(attachment.storageKey, attachment.sizeBytes + 64);
   try {
-    return decryptDocument(ciphertext, stagingContext(attachment.id, owner.recipientUserId, owner.receiptId, attachment.mediaType, attachment.sizeBytes), attachment.envelope, config.keyEncryptionKey);
+    return decryptDocument(ciphertext, stagingContext(attachment.id, owner.recipientUserId, owner.receiptId, attachment.mediaType, attachment.sizeBytes), attachment.envelope, holdingKek);
   } finally {
     ciphertext.fill(0);
   }

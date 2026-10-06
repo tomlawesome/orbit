@@ -38,9 +38,25 @@ The engine never prompts without a controlling terminal. In a
 non-interactive run with incomplete configuration it refuses before
 starting Compose, prints guidance naming only the missing field names, and
 emits a terminal `state=failed` event (`reason=configuration-failure` for
-the configuration phase). A consumer that receives this outcome should
+the configuration phase). That reason is never emitted once the deployment
+files are committed: a failure after that point is the generic `failure`
+(#1227). A consumer that receives this outcome should
 re-run configuration interactively (for `orbit-launcher`: the terminal
 handoff stretch), then retry.
+
+A consumer that wants to run that configuration itself sets
+`ORBIT_LAUNCHER_CONFIG_TREE` to an empty directory it created (mode 0700,
+owned by the running user) (#1225). On any exit whose event reason is
+`configuration-failure`, before the event and before rolling back,
+`install.sh` copies the configure tree it verified from the digest-pinned
+image into it at the same relative paths: `scripts/configure.sh`,
+`scripts/configuration.sh`, `scripts/installer-ui.sh` and
+`.env-orbit.example`, as owner-only (0600/0700) regular files, all or
+nothing: a failed copy removes what it wrote. If the directory is missing,
+not a directory, a symlink, not mode 0700, not empty or not owned by the
+current user, it writes nothing and prints one stderr line; the event,
+guidance and exit status are unchanged either way. Unset or empty, nothing
+is written.
 
 ## Vocabulary
 
@@ -166,7 +182,13 @@ rollback
 repair
 continue
 display
+abort
 ```
+
+`abort` marks a failure that no retry can clear (#1038): the installer
+emits it in place of the phase's usual `retry`, and a consumer should stop
+the run rather than loop. It first appears on the ADR-0019 refusal of an
+image published without bundled deployment assets.
 
 ## Consumer guidance
 
@@ -313,7 +335,7 @@ breaking change requiring a version bump and coordination with consumers.
 `scripts/configure.sh --check` (and `--check-rollback`, identical in every
 respect but the file it checks) emits a fixed-vocabulary readiness summary on
 stdout: one line per required field or optional group, from `run_check`
-(`scripts/configure.sh:972`). This is orbit-launcher's own machine interface
+(`scripts/configure.sh`). This is orbit-launcher's own machine interface
 onto configuration state — separate from the `phase=...` event stream and
 from the "Machine prompts (v0)" prompt grammar above, sharing neither their
 line shape nor `installer_ui_emit`. orbit-launcher's `RunConfigCheck`
@@ -328,6 +350,7 @@ ready <FIELD>
 missing <FIELD>
 optional <FIELD>
 app-managed <FIELD>
+not in use <FIELD>
 ```
 
 - One line per readiness item, in the fixed order below.
@@ -335,12 +358,21 @@ app-managed <FIELD>
   line; orbit-launcher's own parser discards any line that does not split
   into exactly two fields, and treats a run that produces no `ready`,
   `missing`, `optional` or `app-managed` line at all as a structural failure
-  rather than "everything is ready".
+  rather than "everything is ready". `not in use <FIELD>` is four tokens, so
+  that same parser discards it today rather than misreading it — the safe
+  outcome, since a "not in use" field must never appear in `Missing` or
+  `Unfixable` either.
 - `app-managed <FIELD>` means the field's credential is administration-
   screen configuration stored encrypted in the database, not .env-orbit
   (ADR-0017): it is reported unconditionally, regardless of any environment
   content, is never counted toward `Missing`/`Unfixable`, and never turns
   the exit status non-zero.
+- `not in use <FIELD>` (ADR-0023 §1) means the field belongs to a sign-in
+  method that is currently switched off (`ORBIT_AUTH_OIDC=false`, the
+  default): a value left in .env-orbit is neither validated nor required
+  while the method is off, so operators can disable a provider without
+  deleting its configuration. It is never counted toward `Missing`/
+  `Unfixable` and never turns the exit status non-zero.
 - `<FIELD>` is always a fixed name, never a configured value: `--check` never
   discloses secrets, URLs or other configured content, by field name alone.
 - Exit status is non-zero whenever any line reports `missing`, zero
@@ -348,7 +380,9 @@ app-managed <FIELD>
 
 ### field
 
-Required fields — reported only as `ready` or `missing`, never `optional`:
+Required fields — reported as `ready` or `missing`, and additionally, for the
+four OIDC fields below, as `not in use` whenever `ORBIT_AUTH_OIDC` is not
+`true`:
 
 ```
 APP_URL
@@ -469,7 +503,7 @@ read-then-confirm entry); `orbit import-recovery-bundle`'s own passphrase
 entry has no confirmation step (matching `import-recovery-bundle.sh`, which
 reads the recovery passphrase once). `IMPORT_CONFIRMATION` is
 `orbit import-recovery-bundle`'s literal `IMPORT RECOVERY` phrase
-(`import-recovery-bundle.sh` guarantee #19). `RESTORE_CONFIRMATION` is
+(`import-recovery-bundle.sh` guarantee #17). `RESTORE_CONFIRMATION` is
 `orbit restore`'s literal `RESTORE` phrase (`restore.sh` guarantee #46) —
 also collected a second time, independently, inside
 `orbit import-recovery-bundle` itself, because `import-recovery-bundle.sh`
@@ -736,11 +770,12 @@ configuration-migration-interrupted     migration-failed
 container-foreign-owner                 not-orbit-directory
 database-below-floor                    secret-missing
 database-credential-mismatch            secret-permissions
-database-schema-mismatch                secrets-directory-invalid
-database-unreachable                    staging-evidence-present
-deployment-version-unsupported          stale-container
-docker-unavailable                      unrelated-resource-present
-document-volume-retained-without-key    volume-retained-without-credentials
+database-credential-unverifiable        secrets-directory-invalid
+database-schema-mismatch                staging-evidence-present
+database-unreachable                    stale-container
+deployment-version-unsupported          unrelated-resource-present
+docker-unavailable                      volume-retained-without-credentials
+document-volume-retained-without-key
 ```
 
 ### action, mutation and backup

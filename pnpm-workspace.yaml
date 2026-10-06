@@ -1,9 +1,3 @@
-# web/ is a workspace member (#419). Before this it sat outside, which meant
-# pnpm silently ignored web/pnpm-lock.yaml unless --ignore-workspace was
-# passed: a `pnpm add` there wrote the ROOT lockfile and left web's stale, so
-# local installs passed while a clean --frozen-lockfile failed. It also kept
-# web's dependency graph outside the overrides below, outside the SBOM, and
-# outside scripts/classify-changed-paths.mjs.
 packages:
   - "."
   - "web"
@@ -30,8 +24,8 @@ allowBuilds:
   unrs-resolver: true
 overrides:
   # Security floor: esbuild >=0.25.0 avoids GHSA-67mh-4wv8-2f99.
-  # Compatibility ceiling: <0.26.0 is the narrow bound for deprecated core-utils.
-  '@esbuild-kit/core-utils>esbuild': '>=0.25.0 <0.26.0'
+  # Compatibility ceiling: <0.29.0 is the widened bound for deprecated core-utils (#1112).
+  '@esbuild-kit/core-utils>esbuild': '>=0.25.0 <0.29.0'
   postcss: 8.5.28
   # Security floor: nanoid 3.3.18 avoids GHSA-2v37-7h3g-55p8 and CVE-2026-67213.
   # Unscoped on purpose (#881). This was keyed 'postcss@8.5.23>nanoid', which
@@ -42,4 +36,4 @@ overrides:
   # this tree, so the unscoped key selects the same package and goes on
   # selecting it after a postcss bump. scripts/check-override-pins.mjs fails
   # the build if any override key here stops matching the lockfile.
-  nanoid: 3.3.18
+  nanoid: 6.0.1

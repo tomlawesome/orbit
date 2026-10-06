@@ -1,6 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Browser, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
+import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
+import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { answerPushWithoutAService } from "./support/webkit-push";
+
+/* #1077: back to the stack's own seed before this file's setup runs, so the
+   lists these specs walk carry nothing an earlier spec left behind. */
+resetDatabaseBetweenSpecFiles();
 
 // #450, re-solved by #735: there is no longer anything to compose. The v19
 // front end and the API are one SvelteKit server on one origin, so the path
@@ -40,8 +47,11 @@ test.describe("the application entry", () => {
   async function signedInPage(browser: Browser) {
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
+    await answerPushWithoutAService(page);
     await page.goto("/api/auth/login?returnTo=/home");
-    await page.getByRole("link", { name: "Orbit Administrator" }).click();
+    await page.getByRole("link", { name: workerAccount("administrator") }).click();
+    /* The hard delete in cleanupHousehold is an instance-admin power (#1080). */
+    await ensureWorkerAdministrator(page);
     return { context, page };
   }
 
@@ -57,9 +67,11 @@ test.describe("the application entry", () => {
     await context.close();
   });
   test("signing in with returnTo=/home lands on the v19 home", async ({ page }) => {
+    await answerPushWithoutAService(page);
     await page.goto("/api/auth/login?returnTo=/home");
-    await page.getByRole("link", { name: "Orbit Administrator" }).click();
+    await page.getByRole("link", { name: workerAccount("administrator") }).click();
     await expect(page).toHaveURL(/\/home$/);
+    await ensureWorkerAdministrator(page);
     const household = await seedHousehold(page);
     try {
     await page.goto("/home");
@@ -96,8 +108,9 @@ test.describe("the application entry", () => {
     await page.goto("/home");
     await expect(page).toHaveURL(/\/login\?returnTo=%2Fhome$/);
     await page.getByRole("button", { name: "Sign in" }).click();
-    await page.getByRole("link", { name: "Orbit Administrator" }).click();
+    await page.getByRole("link", { name: workerAccount("administrator") }).click();
     await expect(page).toHaveURL(/\/home$/);
+    await ensureWorkerAdministrator(page);
     const household = await seedHousehold(page);
     try {
       await page.goto("/home");

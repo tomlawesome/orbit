@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { imapIngestionMessages, items } from "@/db/schema";
 import { approveReviewedIntake } from "@/server/reviewed-intake";
+import { openMetadataReader } from "@/server/metadata/fields";
 import { assignImapReceiptHousehold, listImapInbox } from "@/server/imap-inbox";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 
@@ -53,13 +54,39 @@ describe("private reviewed intake approval boundary", () => {
       attachmentIds: [],
     };
 
+    // T-Q6 (#1151): this used to check outsider's inbox before anything had
+    // ever been written for anyone, so it was empty regardless of whether
+    // listImapInbox actually scopes by user -- it could never have caught a
+    // leak. Give member a real receipt first, so an outsider seeing it would
+    // be a genuine privacy failure, not a trivial pass.
+    const [memberReceipt] = await getDb().insert(imapIngestionMessages).values({
+      mailbox: "reviewed-intake-privacy-check",
+      mailboxUidValidity: "reviewed-intake-privacy-check",
+      mailboxUid: 1,
+      contentSha256: operation("eeeeeeee"),
+      recipientAliasSha256: operation("ffffffff"),
+      userId: member.userId,
+      status: "pending_review",
+      householdId: null,
+      receiptStatus: "cancelled",
+      expiresAt: new Date(Date.now() + 86_400_000),
+    }).returning({ id: imapIngestionMessages.id });
+    expect((await listImapInbox(member.userId)).receipts.map((r) => r.id)).toContain(memberReceipt.id);
     expect((await listImapInbox(outsider.userId)).receipts).toHaveLength(0);
     const first = await approveReviewedIntake(member.userId, input);
     const second = await approveReviewedIntake(member.userId, input);
     expect(second.itemId).toBe(first.itemId);
     expect(await getDb().select({ id: items.id }).from(items).where(eq(items.householdId, fixture.household.id))).toHaveLength(before.length + 1);
-    const [created] = await getDb().select({ title: items.title, provider: items.provider }).from(items).where(eq(items.id, first.itemId));
-    expect(created).toEqual({ title: "Exact reviewed value", provider: "Reviewed provider" });
+    // Title and provider are Tier 2 ciphertext since #963, so the row holds
+    // envelopes; the assertion is the same one, made on the decrypted values.
+    const [created] = await getDb().select({ id: items.id, title: items.title, titleEnc: items.titleEnc, provider: items.provider, providerEnc: items.providerEnc })
+      .from(items).where(eq(items.id, first.itemId));
+    expect({ title: created.title, provider: created.provider }).toEqual({ title: null, provider: null });
+    const metadata = await openMetadataReader(fixture.household.id);
+    expect({
+      title: metadata.text("items.title", created.id, { encrypted: created.titleEnc, plaintext: created.title }).value,
+      provider: metadata.text("items.provider", created.id, { encrypted: created.providerEnc, plaintext: created.provider }).value,
+    }).toEqual({ title: "Exact reviewed value", provider: "Reviewed provider" });
   });
 
   it("does not apply submitted fields when attaching to an existing item", async () => {

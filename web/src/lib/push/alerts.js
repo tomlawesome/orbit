@@ -62,6 +62,47 @@ export async function currentSubscription(scope = globalThis) {
 }
 
 /**
+ * What the settings screens read at mount instead of currentSubscription:
+ * the browser's live subscription, re-sent to the server when there is one.
+ * The browser remembering a subscription says nothing about whether the
+ * server still has it (a failed write, a purge after a failed push), and a
+ * switch that reads "on" is only ever tapped to turn alerts OFF -- so the
+ * re-send in enableAlerts never ran for exactly the device that needed it.
+ * A server that cannot be reached leaves the switch reading what the
+ * browser says; the next visit tries again. A server that answers and
+ * REFUSES the subscription -- it belongs to another account, on a shared
+ * device the last person never signed out of -- is a different thing: the
+ * browser is subscribed, this account is not, and a switch reading "on"
+ * would promise alerts that never come. That reads as off, so the reader
+ * can turn it on for themselves.
+ *
+ * @param {object} [deps] see resolvedDeps
+ * @returns {Promise<PushSubscription | null>}
+ */
+export async function syncAlerts(deps = {}) {
+  const d = resolvedDeps(deps);
+  const existing = await currentSubscription(d.scope);
+  if (!existing) return null;
+  try {
+    await d.writePushSubscription(/** @type {any} */ (existing.toJSON()));
+  } catch (error) {
+    if (serverRefused(error)) return null;
+    /* unreachable: re-sent on the next visit */
+  }
+  return existing;
+}
+
+/**
+ * True for an answer the server gave on purpose (a 4xx), as opposed to no
+ * answer at all. The fetch layer records the status on its error.
+ * @param {unknown} error
+ */
+function serverRefused(error) {
+  const status = /** @type {{ status?: number }} */ (error)?.status;
+  return typeof status === "number" && status >= 400 && status < 500;
+}
+
+/**
  * The VAPID public key, base64url as the server hands it out, decoded into
  * the raw bytes `PushManager#subscribe` wants as `applicationServerKey`.
  * Copied from the retiring src/components/push-notification-control.tsx —
@@ -101,10 +142,13 @@ function resolvedDeps(deps = {}) {
 }
 
 /**
- * Turns browser alerts on for this device. Idempotent by design — a device
- * already subscribed returns its live subscription straight away, before
- * anything that would prompt for permission or write anything, so calling
- * this on a device that is already on is silent and safe.
+ * Turns browser alerts on for this device. A device already subscribed
+ * skips the browser permission prompt and `pushManager.subscribe` — that
+ * part really is idempotent — but still (re)sends the subscription to the
+ * server every time. An existing browser subscription says the BROWSER
+ * remembers being on; it says nothing about whether the server's last
+ * write actually landed, so skipping the POST here left a device that
+ * looked "on" forever even if the one write it ever tried had failed.
  *
  * The sequence, in order: register the worker if the browser has not
  * already (this browser's own registration may still be in flight);
@@ -123,7 +167,10 @@ export async function enableAlerts(deps = {}) {
   const registration = (await d.getRegistration()) ?? (await d.register());
 
   const existing = await registration.pushManager.getSubscription();
-  if (existing) return existing;
+  if (existing) {
+    await d.writePushSubscription(existing.toJSON());
+    return existing;
+  }
 
   const permission = await d.requestPermission();
   if (permission !== "granted") {

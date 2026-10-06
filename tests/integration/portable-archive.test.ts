@@ -1,10 +1,11 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { getDb } from "@/db";
-import { items } from "@/db/schema";
-import { encryptPortableArchive } from "@/server/portable-archive";
-import { importPortableArchive } from "@/server/portable-archive-repository";
+import { documents, items } from "@/db/schema";
+import { decryptPortableArchive, encryptPortableArchive } from "@/server/portable-archive";
+import { createPortableArchive, importPortableArchive, readPortableArchive } from "@/server/portable-archive-repository";
+import { openMetadataReader } from "@/server/metadata/fields";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 
 const passphrase = "correct-horse-battery-staple";
@@ -80,9 +81,16 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
       conflictItemIds: [],
     });
     expect(result.importedItems).toBe(1);
-    const [stored] = await getDb().select({ notes: items.notes }).from(items)
-      .where(and(eq(items.householdId, fixture.household.id), eq(items.title, "Imported item")));
-    expect(stored?.notes).toHaveLength(2_000);
+    // Notes are Tier 1 now (ADR-0024): the import writes the envelope and
+    // clears the plaintext, so the cap is asserted on the decrypted value.
+    // Found by its own encrypted notes rather than by title: `items.title` is
+    // Tier 2 ciphertext since #963, so a SQL equality on it matches nothing.
+    const [stored] = await getDb().select({ id: items.id, notes: items.notes, notesEnc: items.notesEnc }).from(items)
+      .where(and(eq(items.householdId, fixture.household.id), isNotNull(items.notesEnc)));
+    expect(stored?.notes).toBeNull();
+    const metadata = await openMetadataReader(fixture.household.id);
+    expect(metadata.text("items.notes", stored.id, { encrypted: stored.notesEnc, plaintext: stored.notes }).value)
+      .toHaveLength(2_000);
   });
 
   it("rejects out-of-range costMinor and recurrenceMonths the same way", async () => {
@@ -110,5 +118,56 @@ describe("portable archive import field bounds (#383 finding 2)", () => {
       passphrase,
       conflictItemIds: [],
     })).rejects.toMatchObject({ code: "archive_invalid", status: 422 });
+  });
+});
+
+describe("portable archive export access and document selection (#1049)", () => {
+  it("refuses a non-owner member with owner_required, but still lets the owner export", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-export-owner-only");
+
+    await expect(createPortableArchive({
+      userId: fixture.users.member.id,
+      householdId: fixture.household.id,
+      passphrase,
+      includeDocuments: false,
+    })).rejects.toMatchObject({ code: "owner_required", status: 403 });
+
+    const archive = await createPortableArchive({
+      userId: fixture.users.owner.id,
+      householdId: fixture.household.id,
+      passphrase,
+      includeDocuments: false,
+    });
+    expect(archive.id).toBeTruthy();
+  });
+
+  it("excludes a pending_deletion document from the export, keeping an available one", async () => {
+    const fixture = await createIntegrationFixture("portable-archive-export-lifecycle");
+    const [pendingDeletion] = await getDb().insert(documents).values({
+      householdId: fixture.household.id,
+      itemId: fixture.item.id,
+      uploadedByUserId: fixture.users.owner.id,
+      displayName: "pending-deletion-document.pdf",
+      mediaType: "application/pdf",
+      sizeBytes: 128,
+      contentSha256: createHash("sha256").update(`${fixture.household.id}-pending-deletion`).digest("hex"),
+      lifecycle: "pending_deletion",
+      scanStatus: "skipped",
+      availableAt: new Date(),
+      deleteAfter: new Date(Date.now() + 86_400_000),
+    }).returning({ id: documents.id, displayName: documents.displayName });
+
+    const archive = await createPortableArchive({
+      userId: fixture.users.owner.id,
+      householdId: fixture.household.id,
+      passphrase,
+      includeDocuments: false,
+    });
+    const { bytes } = await readPortableArchive(fixture.users.owner.id, archive.id);
+    const encrypted = JSON.parse(bytes.toString("utf8"));
+    const payload = JSON.parse(decryptPortableArchive(encrypted, passphrase).toString("utf8"));
+    const exportedIds = (payload.documents as Array<{ id: string }>).map((document) => document.id);
+    expect(exportedIds).toContain(fixture.document.id);
+    expect(exportedIds).not.toContain(pendingDeletion.id);
   });
 });

@@ -28,10 +28,10 @@
  * mockup's own — real star patterns, borrowed by name, unrelated to Orbit's
  * data — and stay a fixed list exactly as the sheet drew them.
  */
+import { drawFigureMark, drawHouseholdMark, FIGURES } from "$lib/backdrops/station.js";
 import { streamFactory } from "$lib/sky.js";
 
 const NS = "http://www.w3.org/2000/svg";
-const MONO = "ui-monospace,SFMono-Regular,Menlo,monospace";
 
 /**
  * @param {string} name
@@ -51,22 +51,18 @@ const BEHIND = 340; /* held this far past the left edge, then discarded */
 
 /**
  * @typedef {{ id: string, name: string, pos: [number, number], planets: Array<[number, number, number, string]>, items: number }} HouseholdSys
- * @typedef {{ name: string, pts: number[][], links: number[][] }} FigureDef
  */
 
 /* The named constellations sharing the sky with your households — real star
  * patterns, borrowed by name, drawn quieter than any household mark so the
- * households stay the only things up there that mean anything. Fixed sky,
- * not data: identical to design/v19/create-v3.html's own FIGURES. */
-/** @type {FigureDef[]} */
-const FIGURES = [
-  { name: "CASSIOPEIA", pts: [[-48, 6], [-24, -14], [0, 4], [24, -16], [48, 2]], links: [[0, 1], [1, 2], [2, 3], [3, 4]] },
-  { name: "CYGNUS", pts: [[0, -32], [0, -6], [0, 20], [0, 40], [-32, -2], [30, -12]], links: [[0, 1], [1, 2], [2, 3], [4, 1], [5, 1]] },
-  { name: "LYRA", pts: [[-18, -30], [0, -12], [16, 6], [4, 26], [-14, 10]], links: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 1]] },
-  { name: "VELA", pts: [[-38, 14], [-10, -24], [26, -12], [34, 20]], links: [[0, 1], [1, 2], [2, 3], [3, 0]] },
-  { name: "ANDROMEDA", pts: [[-46, 18], [-18, 6], [10, -6], [38, -22], [24, 10]], links: [[0, 1], [1, 2], [2, 3], [2, 4]] },
-  { name: "PERSEUS", pts: [[-32, -24], [-10, -6], [6, 18], [30, 28], [18, -18]], links: [[0, 1], [1, 2], [2, 3], [1, 4]] },
-];
+ * households stay the only things up there that mean anything.
+ *
+ * Used to be this module's own copy, ported from design/v19/create-v3.html
+ * and independently tuned from administration's (#1151 W1-Q2: the same six
+ * asterisms, drawn with different points and different line/dot/label
+ * constants in each module). FIGURES is station.js's now, and
+ * drawHouseholdMark/drawFigureMark below are its drawing, not a second copy
+ * of it. */
 
 /* The static protractor over the chart with the card: fixed sky furniture,
  * not drawn from data, so it is one literal block rather than a generator. */
@@ -182,9 +178,14 @@ export function mountConstellations(root, { seed, galaxy, primary }) {
     }
   }
 
-  /* --- one real household, riding at the height its own bearing gives it --- */
+  /* --- one real household, riding at the height its own bearing gives it ---
+     The drawing itself is station.js's drawHouseholdMark now (#1151 W1-Q2);
+     this is only the placement, which stays this screen's own -- a real
+     household's height here comes from its bearing, never a chunk roll. The
+     ".csys" class and its animation-delay are this screen's own entrance,
+     administration never drew one. */
   /** @param {SVGGElement} g @param {HouseholdSys} hh @param {number} x @param {() => number} r */
-  function household(g, hh, x, r) {
+  function genHouseholdAt(g, hh, x, r) {
     const bearing = Math.atan2(hh.pos[1], hh.pos[0]); /* sacred — never rolled */
     const spread = 300 + r() * 145;
     const y = 500 + Math.sin(bearing) * spread;
@@ -192,79 +193,35 @@ export function mountConstellations(root, { seed, galaxy, primary }) {
     const far = 0.58 + r() * 0.42; /* only the distance is rolled */
     const scale = 0.6 + (1 - far) * 0.4;
     const dim = (0.5 + (1 - far) * 0.3).toFixed(2);
-
-    const node = /** @type {SVGGElement} */ (svgEl("g", {
-      class: "csys", transform: `translate(${x.toFixed(1)},${y.toFixed(1)})`,
-      opacity: dim, style: `animation-delay:${(r() * 0.5).toFixed(2)}s`,
-    }));
-    const s = svgEl("g", { transform: `scale(${scale.toFixed(3)})` });
-    s.appendChild(svgEl("circle", { r: "50", fill: "none", stroke: "var(--chart-ink)", "stroke-width": "1.5", "stroke-dasharray": "3 7" }));
-    s.appendChild(svgEl("circle", { r: "3", fill: "var(--chart-ink)" }));
-    for (const [px, py, pr, tok] of hh.planets)
-      s.appendChild(svgEl("circle", { cx: String(px), cy: String(py), r: String(pr), fill: `var(${tok})`, opacity: "1" }));
-    node.appendChild(s);
-
-    const lead = 50 * scale + 16, dir = away ? 1 : -1;
-    node.appendChild(svgEl("path", {
-      d: `M ${dir * (50 * scale + 4)} -${(34 * scale).toFixed(1)} ` +
-        `L ${dir * lead} -${(52 * scale + 12).toFixed(1)} ` +
-        `h ${dir * 16}`,
-      fill: "none", stroke: "var(--chart-ink)", "stroke-width": "1.15", opacity: ".9",
-    }));
-    const t = /** @type {SVGTextElement} */ (svgEl("text", {
-      x: String(dir * (lead + 22)), y: String(-(52 * scale + 15)), "font-size": "10.5",
-      "letter-spacing": ".16em", fill: "var(--chart-ink)", "font-family": MONO,
-      "text-anchor": away ? "start" : "end",
-    }));
-    t.textContent = hh.name.toUpperCase();
-    node.appendChild(t);
-    const c = /** @type {SVGTextElement} */ (svgEl("text", {
-      x: String(dir * (lead + 22)), y: String(-(52 * scale + 2)), "font-size": "8.5",
-      "letter-spacing": ".12em", fill: "var(--chart-ink)", "font-family": MONO,
-      "text-anchor": away ? "start" : "end", opacity: ".85",
-    }));
-    c.textContent = hh.items + (hh.items === 1 ? " ITEM" : " ITEMS");
-    node.appendChild(c);
-    g.appendChild(node);
+    drawHouseholdMark(g, hh, { x, y, scale, dim, away }, {
+      class: "csys", style: `animation-delay:${(r() * 0.5).toFixed(2)}s`,
+    });
   }
 
-  /* --- one named constellation, quieter than any household ------------- */
-  /** @param {FigureDef} fig @param {number} x @param {number} y @param {() => number} r */
-  function figure(fig, x, y, r) {
+  /* --- one named constellation, quieter than any household --------------
+     Likewise station.js's drawFigureMark now; the tilt stays this screen's
+     own choreography. */
+  /** @param {SVGGElement} g @param {{ name: string, pts: number[][], edges: number[][] }} fig @param {number} x @param {number} y @param {() => number} r */
+  function genFigureAt(g, fig, x, y, r) {
     const scale = 0.72 + r() * 0.55;
-    const tilt = (r() * 24 - 12).toFixed(1);
+    const rotateDeg = r() * 24 - 12;
     const dim = (0.5 + r() * 0.2).toFixed(2);
-    const node = /** @type {SVGGElement} */ (svgEl("g", {
-      class: "csys", opacity: dim,
-      transform: `translate(${x.toFixed(1)},${y.toFixed(1)}) rotate(${tilt}) scale(${scale.toFixed(3)})`,
-      style: `animation-delay:${(r() * 0.6).toFixed(2)}s`,
-    }));
-    let d = "";
-    for (const [a, b] of fig.links)
-      d += `M ${fig.pts[a][0]} ${fig.pts[a][1]} L ${fig.pts[b][0]} ${fig.pts[b][1]} `;
-    node.appendChild(svgEl("path", { d, fill: "none", stroke: "var(--chart-ink)", "stroke-width": "1.2", opacity: ".78" }));
-    for (const [px, py] of fig.pts)
-      node.appendChild(svgEl("circle", { cx: String(px), cy: String(py), r: (1.4 + r() * 1).toFixed(2), fill: "var(--star-far)", opacity: ".9" }));
-    const t = /** @type {SVGTextElement} */ (svgEl("text", {
-      x: "0", y: "58", "font-size": "9.5", "letter-spacing": ".22em",
-      fill: "var(--chart-ink)", "font-family": MONO, "text-anchor": "middle", opacity: ".85",
-    }));
-    t.textContent = fig.name;
-    node.appendChild(t);
-    return node;
+    drawFigureMark(g, r, fig, { x, y, scale, dim, rotateDeg }, {
+      class: "csys", style: `animation-delay:${(r() * 0.6).toFixed(2)}s`,
+    });
   }
 
   /* every real household comes past in turn */
   /** @param {SVGGElement} g @param {() => number} r @param {number} idx */
   function genHousehold(g, r, idx) {
     if (SYSTEMS.length === 0) return;
-    household(g, SYSTEMS[cyc(SYSTEMS.length, idx, seed % SYSTEMS.length)], 170 + r() * 220, r);
+    genHouseholdAt(g, SYSTEMS[cyc(SYSTEMS.length, idx, seed % SYSTEMS.length)], 170 + r() * 220, r);
   }
   /** @param {SVGGElement} g @param {() => number} r @param {number} idx */
   function genFigure(g, r, idx) {
     if (r() > 0.86) return; /* the deep sky is allowed a gap */
     const f = FIGURES[cyc(FIGURES.length, idx, seed % FIGURES.length)];
-    g.appendChild(figure(f, 180 + r() * 340, 140 + r() * 720, r));
+    genFigureAt(g, f, 180 + r() * 340, 140 + r() * 720, r);
   }
 
   /**

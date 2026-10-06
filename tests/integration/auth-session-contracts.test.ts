@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { eq } from "drizzle-orm";
 import { readSetCookie } from "./support/set-cookie";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -20,6 +22,15 @@ const { POST: logout } = await loadRoute("auth/logout");
 const { GET: sessionStatus } = await loadRoute("auth/session");
 const { POST: refresh } = await loadRoute("auth/session/refresh");
 const { GET: listSessions } = await loadRoute("auth/sessions");
+// #1151 A1-R7: the route's own cap, read back from its own module rather
+// than duplicated as a literal here, so this test fails the moment the two
+// drift apart. Not a route export -- SvelteKit refuses a `+server.js` export
+// that isn't an HTTP method, one of its own options, or `_`-prefixed -- so
+// this crosses the same tsc/web boundary loadRoute does, once more, for the
+// one constant rather than the whole route.
+const SESSION_LIST_LIMIT = (await import(
+  /* @vite-ignore */ new URL("../../web/src/lib/server/session-limits.js", import.meta.url).href
+) as { SESSION_LIST_LIMIT: number }).SESSION_LIST_LIMIT;
 const { POST: revokeSessions } = await loadRoute("auth/sessions/revoke");
 const { POST: revokeOneSession } = await loadRoute("auth/sessions/[sessionId]/revoke");
 
@@ -307,6 +318,45 @@ describe("PostgreSQL authentication session contracts", () => {
     expect(current.device).toBe("unknown device");
     expect(Object.keys(current).sort()).toEqual(["createdAt", "current", "device", "id", "lastSeenAt"]);
     expect(body.sessions[0].id).toBe(laptop.sessionId); // current sorts first
+  });
+
+  it("caps the list at SESSION_LIST_LIMIT, keeping the current session and the most recently seen (#1151 A1-R7)", async () => {
+    const fixture = await createIntegrationFixture("auth-sessions-cap");
+    const laptop = await fixture.session("member");
+
+    // SESSION_LIST_LIMIT + 5 more sessions for the same user, inserted
+    // directly rather than through createSession (one unit per row is all
+    // this needs) -- each with its own lastSeenAt a second apart, so which
+    // ones the cap keeps is unambiguous. Row `j` is the j-th oldest; only the
+    // newest SESSION_LIST_LIMIT - 1 of them (the current session takes the
+    // other slot) should survive the cap.
+    const extraCount = SESSION_LIST_LIMIT + 5;
+    const base = Date.now() - extraCount * 1000;
+    const extraRows = Array.from({ length: extraCount }, (_, j) => ({
+      userId: laptop.userId,
+      tokenHash: hashSessionToken(randomUUID()),
+      expiresAt: new Date(Date.now() + 86_400_000),
+      createdAt: new Date(base + j * 1000),
+      lastSeenAt: new Date(base + j * 1000),
+    }));
+    await getDb().insert(sessions).values(extraRows).returning({ id: sessions.id });
+    const keptExtraIds = new Set(
+      extraRows.slice(extraCount - (SESSION_LIST_LIMIT - 1)).map((row) => row.tokenHash),
+    );
+
+    const response = await callRouteForSession(listSessions, laptop, { url: LIST_URL });
+    const body = await response.json();
+
+    expect(body.sessions).toHaveLength(SESSION_LIST_LIMIT);
+    expect(body.sessions.map((row: { id: string }) => row.id)).toContain(laptop.sessionId);
+
+    const kept = await getDb().select({ id: sessions.id, tokenHash: sessions.tokenHash })
+      .from(sessions).where(eq(sessions.userId, laptop.userId));
+    const idToTokenHash = new Map(kept.map((row) => [row.id, row.tokenHash]));
+    const keptExtraCountInBody = body.sessions
+      .filter((row: { id: string }) => row.id !== laptop.sessionId)
+      .filter((row: { id: string }) => keptExtraIds.has(idToTokenHash.get(row.id) ?? "")).length;
+    expect(keptExtraCountInBody).toBe(SESSION_LIST_LIMIT - 1);
   });
 
   it("revokes exactly one session, leaving the caller's other sessions and other accounts untouched", async () => {

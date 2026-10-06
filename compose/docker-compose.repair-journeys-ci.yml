@@ -1,0 +1,33 @@
+# The app healthcheck, sped up for scripts/test-repair-journeys.sh only
+# (#923 recommendation 20).
+#
+# The `unhealthy-app` journey freezes the app container with SIGSTOP and then
+# waits for Docker's own health status to flip to `unhealthy`. That flip costs
+# `retries` consecutive failed probes, so at the Dockerfile's production
+# interval of 10s it is roughly two minutes of pure waiting in a journey that
+# otherwise takes about two and a half. At 2s it is roughly fifty seconds.
+#
+# Only the interval moves. `test`, `timeout`, `start_period` and `retries` are
+# deliberately absent: Docker fills each of them in from the image's own
+# HEALTHCHECK when Compose leaves it unset, so the journey still proves the
+# real probe command, the real 3s probe timeout and the real ten consecutive
+# failures. Restating any of them here would be a second copy free to drift.
+#
+# Where this is picked up: scripts/test-repair-journeys.sh copies this file
+# into its throwaway deployment directory as `docker-compose.override.yml`,
+# which is the name Compose loads automatically beside `docker-compose.yml`.
+# That is the only route in. A real operator install never sees it — the file
+# is not one of install.sh's deployment assets and the Dockerfile does not
+# copy compose/ into the image's /opt/orbit/deploy tree, so it cannot reach a
+# deployment that was not built by that harness.
+#
+# The production numbers stay covered by an assertion rather than by a test
+# waiting for them: scripts/healthcheck-timing-contract.test.mjs pins the
+# Dockerfile's --interval, --timeout, --start-period and --retries, and pins
+# this file to the interval alone. Change either side and that test fails, so
+# this override can never quietly become the only definition of the app's
+# healthcheck.
+services:
+  orbit-app:
+    healthcheck:
+      interval: 2s

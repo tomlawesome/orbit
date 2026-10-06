@@ -112,6 +112,17 @@ describe("exact-image publication workflow", () => {
     },
   );
 
+  it("hands both installer runs the manifest for the image under test (#1107)", () => {
+    // install.sh otherwise self-fetches a signed release manifest, which does
+    // not exist for this workflow's local, unpublished image.
+    for (const step of ["installer_refusal", "Run installer against the pre-provisioned disposable registry"]) {
+      const start = workflow.indexOf(step);
+      expect(start).toBeGreaterThan(-1);
+      const block = workflow.slice(start, workflow.indexOf("run:", start));
+      expect(block).toContain("ORBIT_RELEASE_MANIFEST: ${{ steps.installer_registry.outputs.release_manifest }}");
+    }
+  });
+
   it("can be dispatched on demand, and never runs on a label (#572, #757)", () => {
     const trigger = workflow.slice(workflow.indexOf("\non:\n"), workflow.indexOf("\nconcurrency:\n"));
 
@@ -146,13 +157,13 @@ describe("exact-image publication workflow", () => {
     // publish_preview already runs this exact step sequence once on push;
     // smoke itself must never also fire on a push event.
     expect(smoke).not.toContain("'push'");
-    // Since the mirror flip (#801 step 5) GitHub sees pushes, not pull
-    // requests: the mirror delivers dev, preview and main.
+    // #948: this workflow no longer triggers on a mirrored push or a pull
+    // request. GitLab's own pipeline is the push-triggered gate now; this one
+    // is a manual second opinion, reached only by dispatching it.
     const trigger = workflow.slice(workflow.indexOf("\non:\n"), workflow.indexOf("\nconcurrency:\n"));
-    const pushBranches = trigger.slice(trigger.indexOf("  push:\n"), trigger.indexOf("  workflow_dispatch:"));
-    for (const branch of ["dev", "preview", "main", '"hotfix/**"']) {
-      expect(pushBranches).toContain(`      - ${branch}\n`);
-    }
+    expect(trigger).not.toContain("  push:\n");
+    expect(trigger).not.toContain("  pull_request:\n");
+    expect(trigger.trim()).toBe("on:\n  workflow_dispatch: {}".trim());
   });
 
   it("selects fail-safe risk lanes while keeping required checks reportable", () => {
@@ -172,8 +183,11 @@ describe("exact-image publication workflow", () => {
     expect(fast).toContain("github.event_name == 'push'");
     /* The production build is the front end's since the cut (#735): there is
        no root `build` script any more, because the SvelteKit output IS the
-       application server. */
-    expect(fast).toContain("run: pnpm --filter orbit-web build");
+       application server. Behind the stamp check since #1061: the static and
+       unit step before it has already built the application, so this step is
+       the one that catches a build that somehow did not happen rather than a
+       second run of the same work. */
+    expect(fast).toContain("run: node scripts/web-build-stamp.mjs check || pnpm --filter orbit-web build");
     expect(integration).toContain("needs.changes.outputs.integration == 'true'");
     expect(integration).toContain("github.event_name == 'push'");
     // The changed-paths filter is a cost filter, not a publication gate, so
@@ -565,7 +579,8 @@ describe("exact-image publication workflow", () => {
     expect(refusalStep).toContain("installer_status=$?");
     expect(refusalStep).toContain('[[ "${installer_status}" -ne 0 ]]');
     expect(refusalStep).toContain(
-      "Orbit installer: configuration fields requiring attention: APP_URL OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CALLBACK_URL.",
+      // M7 (#909): OIDC is off by default, so an empty target owes only APP_URL.
+      "Orbit installer: configuration fields requiring attention: APP_URL.",
     );
     expect(refusalStep).toContain(
       "Orbit installer: Required configuration fields require attention; refusing to start Compose.",
@@ -683,6 +698,50 @@ describe("exact-image publication workflow", () => {
     expect(cleanupSection).toContain("${current_registry_id}\" == \"${REGISTRY_ID}\"");
   });
 
+  it("routes every GitLab CI pull of the disposable registry through the dependency proxy (#1111)", () => {
+    // pipeline 1597 (jobs 22132/22133/22198/22199) and 1598 (job 22174): three
+    // jobs start scripts/ci/start-installer-registry.sh's disposable registry
+    // -- acceptance, repair_journeys (its own copy of the variable) and
+    // launcher_install_compat -- and all three used to pull it straight from
+    // Docker Hub and trip its anonymous rate limit. The fix is the CI
+    // variable, not the script: the script's fallback stays a direct pull (it
+    // is also what the GitHub workflow above uses), so what has to hold is
+    // that the GitLab pipeline always overrides it with a proxied,
+    // digest-pinned reference.
+    const gitlabCi = readFileSync(new URL("../.gitlab-ci.yml", import.meta.url), "utf8");
+    const proxyPrefix = "${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/";
+    const registryDigest =
+      "registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373";
+
+    const installerRegistryLine = gitlabCi
+      .split(/\r?\n/u)
+      .find((line) => /^\s*ORBIT_INSTALLER_REGISTRY_IMAGE:/u.test(line));
+    expect(installerRegistryLine, "ORBIT_INSTALLER_REGISTRY_IMAGE must be set").toBeDefined();
+    expect(installerRegistryLine).toContain(proxyPrefix);
+    expect(installerRegistryLine).toContain(registryDigest);
+
+    // repair_journeys keeps its own job-level variable (it predates this
+    // fix); it must still resolve to the same proxied, digest-pinned image,
+    // never a bare Docker Hub tag.
+    const repairRegistryLine = gitlabCi
+      .split(/\r?\n/u)
+      .find((line) => /^\s*ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE:/u.test(line));
+    expect(repairRegistryLine, "ORBIT_REPAIR_JOURNEYS_REGISTRY_IMAGE must be set").toBeDefined();
+    expect(repairRegistryLine).toMatch(
+      /\$\{(?:CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX\}\/library\/registry|ORBIT_INSTALLER_REGISTRY_IMAGE\})/u,
+    );
+    expect(repairRegistryLine).not.toMatch(/registry:2\s*$/u);
+
+    // The disposable OIDC sidecar `smoke` builds (FROM node:24-alpine) is the
+    // same shape of defect: a CI job pulling a Docker Hub base image with no
+    // proxy route.
+    const oidcPrefixLine = gitlabCi
+      .split(/\r?\n/u)
+      .find((line) => /^\s*OIDC_BASE_IMAGE_PREFIX:/u.test(line));
+    expect(oidcPrefixLine, "OIDC_BASE_IMAGE_PREFIX must be set").toBeDefined();
+    expect(oidcPrefixLine).toContain(proxyPrefix);
+  });
+
   it("gates acceptance jobs on system-risk paths, not only dispatch or the label (#617)", () => {
     const supplyChain = jobBlock("supply_chain_source", "fidelity");
     const integration = jobBlock("integration", "smoke");
@@ -693,6 +752,29 @@ describe("exact-image publication workflow", () => {
       expect(block).toContain("needs.changes.outputs.system == 'true'");
       expect(block).toContain("ci: acceptance");
     }
+  });
+
+  // SQ1-Q2/SQ1-Q3 (#1151): GitLab's own sidecar_images job was fixed twice
+  // on real failures -- a blanket allow-failure that hid a real one (#810),
+  // and trivy's 5-minute default timeout that a cold-cache pull of a large
+  // image on a busy runner already reached (pipeline 1534) -- and this job
+  // runs the identical scan, so both fixes have to carry over rather than
+  // reopen either failure here.
+  it("sidecar image scan: never swallows a crash or a timeout behind a blanket allow-failure", () => {
+    const sidecarImages = jobBlock("sidecar_images", "fidelity");
+    expect(sidecarImages).not.toContain("continue-on-error");
+    // The one soft outcome this job accepts: blocked findings, proven by a
+    // non-empty evidence file, exit the policy step at 0. Anything that
+    // never got that far -- the evidence file missing or empty -- still
+    // exits 1 and fails the job, same as GitLab's own exit-code-3 carve-out.
+    expect(sidecarImages).toContain('if [ "${policy_status}" -eq 0 ]; then\n            exit 0\n          fi');
+    expect(sidecarImages).toContain("if [ ! -s .orbit-supply-chain/sidecar-evidence.json ]; then");
+    expect(sidecarImages).toContain("exit 1");
+  });
+
+  it("sidecar image scan: gives trivy an explicit timeout longer than its 5-minute default", () => {
+    const sidecarImages = jobBlock("sidecar_images", "fidelity");
+    expect(sidecarImages).toMatch(/"\$\{TRIVY_IMAGE\}" image \\\n\s+--timeout 10m \\/);
   });
 });
 

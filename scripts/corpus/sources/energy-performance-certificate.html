@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Energy Performance Certificate</title>
+<style>
+@font-face{font-family:"Corpus EPC";src:url("../fonts/SourceSans3.ttf") format("truetype");font-weight:100 900;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus EPC Mono";src:url("../fonts/SpaceMono-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus EPC Mono";src:url("../fonts/SpaceMono-Bold.ttf") format("truetype");font-weight:700;font-style:normal;font-display:block}
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  @page { size: A4; margin: 0; }
+  .page {
+    width: 794px;
+    min-height: 1123px;
+    box-sizing: border-box;
+    position: relative;
+    padding: 34px 46px 30px 46px;
+    background: #ffffff;
+    color: #16202a;
+    font-family: "Corpus EPC", sans-serif;
+    font-size: 11.8px;
+    line-height: 1.42;
+    page-break-after: always;
+  }
+  .page:last-child { page-break-after: auto; }
+  .cols2e { display: flex; gap: 20px; }
+  .cols2e > div { flex: 1; }
+  h3.hhe { font-size: 11px; color: #1c5b3a; border-bottom: 1px solid #cfe0d5; padding-bottom: 3px; margin: 10px 0 6px 0; text-transform: uppercase; letter-spacing: 0.3px; }
+  table.tariffe { width: 100%; border-collapse: collapse; font-size: 10.3px; margin-bottom: 8px; }
+  table.tariffe th { background: #eef4f0; text-align: left; border: 1px solid #ccc; padding: 4px 6px; }
+  table.tariffe td { border: 1px solid #ccc; padding: 4px 6px; }
+  table.tariffe td.re { text-align: right; }
+  ul.tighte { margin: 3px 0 8px 14px; padding: 0; font-size: 10.3px; line-height: 1.5; }
+  .refgride { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 9.8px; margin: 6px 0 8px; }
+  .refgride span { border-left: 2px solid #9ab; padding-left: 5px; }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 3px solid #1c5b3a;
+    padding-bottom: 8px;
+    margin-bottom: 14px;
+  }
+  .header h1 {
+    font-size: 18px;
+    margin: 0;
+    color: #1c5b3a;
+  }
+  .header .addr { font-size: 11.5px; margin-top: 3px; }
+  .header .rrn-box {
+    text-align: right;
+    font-size: 11px;
+  }
+  .header .rrn-box .rrn {
+    font-family: "Corpus EPC Mono", monospace;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.5px;
+  }
+  .datesbar {
+    display: flex;
+    justify-content: space-between;
+    background: #eef4f0;
+    border: 1px solid #cfe0d5;
+    border-radius: 4px;
+    padding: 7px 14px;
+    margin-bottom: 14px;
+    font-size: 11px;
+  }
+  .datesbar b { font-family: "Corpus EPC Mono", monospace; }
+  h2.section {
+    font-size: 12.5px;
+    color: #1c5b3a;
+    border-bottom: 1px solid #b9cdc1;
+    padding-bottom: 3px;
+    margin: 0 0 8px 0;
+  }
+  .block { margin-bottom: 14px; }
+
+  /* rating chart */
+  .rating-chart { margin-bottom: 4px; }
+  .band-row {
+    display: flex;
+    align-items: center;
+    height: 22px;
+    margin-bottom: 2px;
+  }
+  .band-letter {
+    width: 26px;
+    height: 100%;
+    color: #fff;
+    font-weight: 700;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .band-bar {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    padding-left: 8px;
+    color: #fff;
+    font-family: "Corpus EPC Mono", monospace;
+    font-size: 10.5px;
+    font-weight: 700;
+  }
+  .band-flag {
+    font-family: "Corpus EPC", sans-serif;
+    font-weight: 700;
+    font-size: 10.5px;
+    margin-left: 10px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .flag-current { background: #16406b; color: #fff; }
+  .flag-potential { background: #555; color: #fff; }
+  .a { background: #0a7d3c; } .b { background: #4ba82e; } .c { background: #a0c02a; }
+  .d { background: #f4d02a; color: #333 !important; } .e { background: #f0a02a; }
+  .f { background: #e5641f; } .g { background: #cc1f1f; }
+
+  table.summary {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+  }
+  table.summary td {
+    border: 1px solid #ccc;
+    padding: 4px 8px;
+  }
+  table.summary td.k { color: #444; width: 32%; background: #f7f7f7; }
+  table.summary td.v { font-family: "Corpus EPC Mono", monospace; }
+
+  .cost-panel {
+    display: flex;
+    justify-content: space-between;
+    background: #f7f5ee;
+    border: 1px solid #ddd6c0;
+    border-radius: 4px;
+    padding: 10px 16px;
+  }
+  .cost-cell { text-align: center; }
+  .cost-cell .clabel { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.5px; color: #666; }
+  .cost-cell .cval { font-family: "Corpus EPC Mono", monospace; font-weight: 700; font-size: 15px; margin-top: 2px; }
+
+  .footer-page {
+    position: absolute;
+    bottom: 14px;
+    left: 46px;
+    right: 46px;
+    font-size: 9.5px;
+    color: #777;
+    display: flex;
+    justify-content: space-between;
+    border-top: 1px solid #ddd;
+    padding-top: 4px;
+  }
+
+  table.improve {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10.8px;
+  }
+  table.improve th, table.improve td {
+    border: 1px solid #ccc;
+    padding: 5px 7px;
+    text-align: left;
+  }
+  table.improve th {
+    background: #eef4f0;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  table.improve td.cost { font-family: "Corpus EPC Mono", monospace; }
+
+  .assessor-box {
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 10px 14px;
+    font-size: 10.8px;
+    background: #fafafa;
+  }
+  .assessor-box .aline { margin-bottom: 4px; }
+  .assessor-box b { font-family: "Corpus EPC Mono", monospace; }
+
+  .small-print {
+    font-size: 9.6px;
+    color: #555;
+    margin-top: 10px;
+  }
+  .small-print p { margin: 0 0 6px 0; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="header">
+    <div>
+      <h1>Energy Performance Certificate</h1>
+      <div class="addr">24 Larkspur Avenue, Hallowfield, HF3 4RT</div>
+    </div>
+    <div class="rrn-box">
+      Report Reference Number<br>
+      <span class="rrn">8823-4471-9902-1156-3390</span>
+    </div>
+  </div>
+
+  <div class="datesbar">
+    <div>Assessment date / certificate issued: <b>12 May 2026</b></div>
+    <div>Valid until: <b>11 May 2036</b></div>
+    <div>This certificate is valid for 10 years.</div>
+  </div>
+
+  <div class="block">
+    <h2 class="section">Energy efficiency rating</h2>
+    <div class="rating-chart">
+      <div class="band-row"><div class="band-letter a">A</div><div class="band-bar a" style="width:38%">92–100</div></div>
+      <div class="band-row"><div class="band-letter b">B</div><div class="band-bar b" style="width:48%">81–91<span class="band-flag flag-potential">POTENTIAL 84 · B</span></div></div>
+      <div class="band-row"><div class="band-letter c">C</div><div class="band-bar c" style="width:58%">69–80</div></div>
+      <div class="band-row"><div class="band-letter d">D</div><div class="band-bar d" style="width:68%">55–68<span class="band-flag flag-current">CURRENT 63 · D</span></div></div>
+      <div class="band-row"><div class="band-letter e">E</div><div class="band-bar e" style="width:78%">39–54</div></div>
+      <div class="band-row"><div class="band-letter f">F</div><div class="band-bar f" style="width:88%">21–38</div></div>
+      <div class="band-row"><div class="band-letter g">G</div><div class="band-bar g" style="width:98%">1–20</div></div>
+    </div>
+  </div>
+
+  <div class="block">
+    <h2 class="section">Estimated energy costs for this property</h2>
+    <div class="cost-panel">
+      <div class="cost-cell"><div class="clabel">Per year</div><div class="cval">£871</div></div>
+      <div class="cost-cell"><div class="clabel">Over 3 years</div><div class="cval">£2,614</div></div>
+      <div class="cost-cell"><div class="clabel">Potential saving</div><div class="cval">£456 / year</div></div>
+    </div>
+  </div>
+
+  <div class="block">
+    <h2 class="section">Property summary</h2>
+    <table class="summary">
+      <tr><td class="k">Dwelling type</td><td class="v">Mid-terrace house</td><td class="k">Total floor area</td><td class="v">94 m²</td></tr>
+      <tr><td class="k">Walls</td><td class="v">Cavity, filled</td><td class="k">Year built</td><td class="v">1938</td></tr>
+      <tr><td class="k">Roof</td><td class="v">Pitched, 150mm loft insulation</td><td class="k">Main heating</td><td class="v">Gas boiler, radiators</td></tr>
+      <tr><td class="k">Floor</td><td class="v">Suspended, no insulation</td><td class="k">Hot water</td><td class="v">From main system</td></tr>
+      <tr><td class="k">Windows</td><td class="v">Fully double glazed</td><td class="k">Lighting</td><td class="v">62% low energy bulbs</td></tr>
+    </table>
+  </div>
+
+  <div class="small-print" style="margin-top:6px;">
+    <p>This certificate is one of a series of EPC-related documents issued for this property: the certificate
+    itself (this page and page 2), the recommendations report (page 2), and the guidance sheets on pages 3 and 4
+    explaining how to read them. Keep all four pages together with any home information pack for the property.</p>
+  </div>
+
+  <div class="footer-page">
+    <div>24 Larkspur Avenue, Hallowfield, HF3 4RT — RRN 8823-4471-9902-1156-3390</div>
+    <div>Page 1 of 4</div>
+  </div>
+</div>
+
+<div class="page">
+  <div class="header">
+    <div>
+      <h1>Energy Performance Certificate</h1>
+      <div class="addr">24 Larkspur Avenue, Hallowfield, HF3 4RT</div>
+    </div>
+    <div class="rrn-box">
+      Report Reference Number<br>
+      <span class="rrn">8823-4471-9902-1156-3390</span>
+    </div>
+  </div>
+
+  <div class="block">
+    <h2 class="section">Recommended improvements</h2>
+    <table class="improve">
+      <tr><th>Improvement</th><th>Typical saving</th><th>Indicative cost</th></tr>
+      <tr><td>Top up loft insulation to 270mm</td><td>£26 / year</td><td class="cost">£100–£350</td></tr>
+      <tr><td>Cavity wall insulation top-up</td><td>£115 / year</td><td class="cost">£500–£1,500</td></tr>
+      <tr><td>Suspended floor insulation</td><td>£62 / year</td><td class="cost">£800–£1,200</td></tr>
+      <tr><td>Solar water heating</td><td>£48 / year</td><td class="cost">£4,000–£6,000</td></tr>
+      <tr><td>Solar photovoltaic panels, 2.5 kWp</td><td>£270 / year</td><td class="cost">£3,500–£5,500</td></tr>
+    </table>
+  </div>
+
+  <div class="block">
+    <h2 class="section">Assessor and accreditation</h2>
+    <div class="assessor-box">
+      <div class="aline">This certificate was produced by <b>Greenline Energy Assessments Ltd</b>, 12 Riverside Court, Hallowfield, HF4 7QP. Telephone 01632 960777.</div>
+      <div class="aline">Assessor: Priya Nandakumar, membership number <b>HEAS/2018/004471</b>.</div>
+      <div class="aline">Accredited by the Home Energy Assessors Scheme (HEAS). This certificate has been lodged on the National Energy Performance Register (NEPR).</div>
+      <div class="aline">This property's previous certificate was issued on 4 April 2016.</div>
+      <div class="aline">For general information about Energy Performance Certificates, call the national helpline on 01632 960900.</div>
+      <div class="aline">Job reference for this assessment: JOB-2026-05512. Quote reference, if one was issued before booking: QT-2026-01184.</div>
+      <div class="aline">Greenline Energy Assessments Ltd holds professional indemnity insurance, policy reference PII-774120, renewed annually on 1 March.</div>
+    </div>
+  </div>
+
+  <div class="block small-print">
+    <h2 class="section">About this certificate</h2>
+    <p>This certificate records how energy efficient a property is as a building, rather than how it is used and run by the people living in it. It gives a rating from A (most efficient) to G (least efficient). The estimated energy costs shown are calculated using standard assumptions about occupancy and heating patterns, and actual costs will depend on how the property is used.</p>
+    <p>The recommendations above are generic measures for a property of this type and construction. Indicative costs are approximate and will vary according to the installer chosen, the specification of materials and local conditions.</p>
+  </div>
+
+  <div class="footer-page">
+    <div>24 Larkspur Avenue, Hallowfield, HF3 4RT — RRN 8823-4471-9902-1156-3390</div>
+    <div>Page 2 of 4</div>
+  </div>
+</div>
+
+<div class="page">
+  <div class="header">
+    <div>
+      <h1>Understanding your certificate</h1>
+      <div class="addr">24 Larkspur Avenue, Hallowfield, HF3 4RT</div>
+    </div>
+    <div class="rrn-box">
+      Report Reference Number<br>
+      <span class="rrn">8823-4471-9902-1156-3390</span>
+    </div>
+  </div>
+
+  <div class="cols2e">
+    <div>
+      <h3 class="hhe">How the rating is calculated</h3>
+      <p>The energy efficiency rating is based on the standard assessment procedure used across the United
+      Kingdom for existing homes. It considers the fabric of the building, the heating and hot water systems, and
+      the fixed lighting, using standard occupancy assumptions rather than how this particular household actually
+      lives in the property. Two identical houses used differently can have the same certificate but very
+      different real bills.</p>
+      <h3 class="hhe">Checking a certificate is genuine</h3>
+      <p>Every certificate lodged on the National Energy Performance Register carries a unique Report Reference
+      Number, printed at the top of every page of this document. The register can be searched using this number
+      or the property's postcode at register.nepr.example, or by calling the national helpline on 01632 960900.</p>
+      <h3 class="hhe">Why the rating can look out of date</h3>
+      <p>A certificate remains valid for the ten years shown on the first page even if the property is later
+      altered, for example by adding an extension or replacing a boiler. Property owners are not required to
+      obtain a new certificate after such work unless the property is being marketed for sale or rent, at which
+      point a current certificate must be made available to a prospective buyer or tenant.</p>
+      <h3 class="hhe">Previous assessments of this property</h3>
+      <table class="tariffe">
+        <tr><th>Date issued</th><th>Rating</th><th>Assessor</th></tr>
+        <tr><td>4 April 2016</td><td>E (48)</td><td>Assessed by a different firm</td></tr>
+        <tr><td>19 June 2009</td><td>F (32)</td><td>First certificate lodged for this property</td></tr>
+      </table>
+    </div>
+    <div>
+      <h3 class="hhe">Other assessments we offer</h3>
+      <table class="tariffe">
+        <tr><th>Assessment</th><th class="re">Typical fee</th></tr>
+        <tr><td>Standard domestic EPC (this certificate)</td><td class="re">£75.00</td></tr>
+        <tr><td>Commercial EPC, small unit</td><td class="re">from £180.00</td></tr>
+        <tr><td>Retrofit assessment (PAS 2035)</td><td class="re">£240.00</td></tr>
+        <tr><td>On-site consultation, per hour</td><td class="re">£60.00</td></tr>
+        <tr><td>Duplicate certificate, posted copy</td><td class="re">£15.00</td></tr>
+      </table>
+      <p>Fees above were last revised on 1 February 2026 and exclude travel outside a 20-mile radius of
+      Hallowfield, which is charged at 45p per mile. A commercial EPC quotation is valid for 60 days from the
+      date given.</p>
+      <h3 class="hhe">Glossary</h3>
+      <ul class="tighte">
+        <li><b>RRN</b> &mdash; Report Reference Number, this certificate's unique identifier</li>
+        <li><b>SAP</b> &mdash; the standard assessment procedure used to produce the rating</li>
+        <li><b>HEAS</b> &mdash; Home Energy Assessors Scheme, the accreditation body for the assessor</li>
+        <li><b>NEPR</b> &mdash; National Energy Performance Register, where this certificate is lodged</li>
+        <li><b>kWp</b> &mdash; kilowatt peak, the rated output of a solar photovoltaic array</li>
+        <li><b>Dwelling type</b> &mdash; the general form of the property used for standard assumptions</li>
+      </ul>
+      <h3 class="hhe">Regional variation</h3>
+      <p>Energy costs used in this certificate are calculated using national average fuel prices rather than a
+      regional or supplier-specific tariff, so your actual bill may differ from the figures shown on page 1
+      depending on the tariff you are on and where you live.</p>
+    </div>
+  </div>
+
+  <div class="footer-page">
+    <div>24 Larkspur Avenue, Hallowfield, HF3 4RT — RRN 8823-4471-9902-1156-3390</div>
+    <div>Page 3 of 4</div>
+  </div>
+</div>
+
+<div class="page">
+  <div class="header">
+    <div>
+      <h1>Contact, complaints and our other services</h1>
+      <div class="addr">24 Larkspur Avenue, Hallowfield, HF3 4RT</div>
+    </div>
+    <div class="rrn-box">
+      Report Reference Number<br>
+      <span class="rrn">8823-4471-9902-1156-3390</span>
+    </div>
+  </div>
+
+  <div class="cols2e">
+    <div>
+      <h3 class="hhe">How to reach us</h3>
+      <ul class="tighte">
+        <li>Office, Mon&ndash;Fri 09:00&ndash;17:00: 01632 960777</li>
+        <li>Booking a new assessment: bookings@greenlineenergy.example</li>
+        <li>Self-service quote request: greenlineenergy.example/quote</li>
+        <li>Post: 12 Riverside Court, Hallowfield, HF4 7QP</li>
+      </ul>
+      <h3 class="hhe">Complaints</h3>
+      <p>If you are unhappy with this assessment, write to our office manager at the address above within three
+      months of the assessment date, quoting the Report Reference Number on this certificate. We aim to
+      acknowledge within five working days and resolve within 20 working days. If we cannot resolve your
+      complaint, you may refer it free of charge to the Home Energy Assessors Scheme's independent complaints
+      panel; details at heas.example/complaints.</p>
+      <h3 class="hhe">Accessibility</h3>
+      <p>Large-print and audio versions of this certificate can be issued free of charge within ten working days
+      of a request. Ask by telephone or e-mail using the details above.</p>
+      <h3 class="hhe">Other services from this firm</h3>
+      <ul class="tighte">
+        <li>Condensation and damp survey &mdash; from £120.00</li>
+        <li>Air-tightness testing for new builds &mdash; from £260.00</li>
+        <li>Ventilation (sound insulation) testing &mdash; from £180.00</li>
+      </ul>
+    </div>
+    <div>
+      <h3 class="hhe">Your data</h3>
+      <p>We keep assessment records, including the floor plan sketch and photographs taken on site, for six
+      years after the assessment date. We are registered with the Information Commissioner's Office under
+      registration number ZA774120. Our full privacy notice is at greenlineenergy.example/privacy, last updated
+      02/02/2026.</p>
+      <h3 class="hhe">Reference numbers</h3>
+      <div class="refgride">
+        <span>Company number: <b>05512847</b></span>
+        <span>VAT registration: <b>GB 447 7719 22</b></span>
+        <span>HEAS firm number: <b>HEAS/F/2011</b></span>
+        <span>Job reference: <b>JOB-2026-05512</b></span>
+        <span>Quote reference: <b>QT-2026-01184</b></span>
+      </div>
+      <h3 class="hhe">Small print</h3>
+      <p>Greenline Energy Assessments Ltd is registered in England and Wales, company number 05512847, registered
+      office 12 Riverside Court, Hallowfield, HF4 7QP. Founded 2011. Accredited by the Home Energy Assessors
+      Scheme since 2012; accreditation is renewed annually and was last renewed on 1 March 2026, next due
+      1 March 2027. This certificate template, version EPC/T/2025-11, was last updated 14 November 2025.</p>
+    </div>
+  </div>
+
+  <div class="footer-page">
+    <div>24 Larkspur Avenue, Hallowfield, HF3 4RT — RRN 8823-4471-9902-1156-3390</div>
+    <div>Page 4 of 4</div>
+  </div>
+</div>
+
+</body>
+</html>

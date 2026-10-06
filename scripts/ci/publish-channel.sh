@@ -41,6 +41,14 @@
 #   ORBIT_VERIFY_SCRIPT   Optional; the verifier to run, overridable only so
 #                         tests can stub it. Real use always takes
 #                         scripts/ci/verify-validation-evidence.sh.
+#   ORBIT_RELEASE_MANIFEST_FILE  Optional; the signed manifest record_image
+#                         wrote (ADR-0031 #1), default
+#                         .orbit-supply-chain/orbit-release-manifest.json.
+#                         Its signature is expected alongside it as
+#                         "<file>.sig" (sign_evidence's artifact).
+#   ORBIT_VERIFY_MANIFEST_SCRIPT  Optional; the manifest verifier to run,
+#                         overridable only so tests can stub it. Real use
+#                         always takes scripts/ci/verify-release-manifest.sh.
 #
 # The caller must already be logged in to the registry; this script only ever
 # reads image content and creates tags, never pushes bytes.
@@ -57,12 +65,12 @@ fail() { printf 'publish-channel: %s\n' "$1" >&2; exit 1; }
 
 [[ "$CI_COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]] || fail "CI_COMMIT_SHA is not an exact commit SHA: ${CI_COMMIT_SHA}"
 
-channel_tag=preview
-case "$CI_COMMIT_BRANCH" in
-  preview) ;;
-  hotfix/*) channel_tag="hotfix-$(printf '%s' "${CI_COMMIT_BRANCH#hotfix/}" | tr -c 'A-Za-z0-9._-' '-')" ;;
-  *) fail "branch ${CI_COMMIT_BRANCH} is not a publishing branch; only preview and hotfix/* take a channel tag" ;;
-esac
+# The mapping itself lives in scripts/ci/channel-name.sh, shared with
+# write-release-manifest.sh's "channel" field (ADR-0031 #1) so it cannot fork
+# into two copies; this script only supplies its own wording for a branch the
+# mapping refuses.
+channel_tag="$(bash "${repo_root}/scripts/ci/channel-name.sh" "$CI_COMMIT_BRANCH" 2> /dev/null)" ||
+  fail "branch ${CI_COMMIT_BRANCH} is not a publishing branch; only preview and hotfix/* take a channel tag"
 
 evidence_file="${ORBIT_EVIDENCE_FILE:-.orbit-supply-chain/gitlab-tested-image.json}"
 [[ -f "$evidence_file" ]] ||
@@ -110,6 +118,16 @@ reported_version="$(docker run --rm "$pinned" --version)"
   fail 'embedded channel does not match the image release-stage label'
 
 node scripts/supply-chain-policy.mjs validate
+
+# ADR-0031 #4/#5: the release manifest's signature, verified both with cosign
+# and with openssl (scripts/ci/verify-release-manifest.sh) before this job
+# gives the digest its consumer-visible name -- the same "before it creates
+# the channel tag" placement the ADR specifies. Both checks must pass; either
+# one failing refuses publication the same way a failing cheap check above
+# does.
+manifest_file="${ORBIT_RELEASE_MANIFEST_FILE:-.orbit-supply-chain/orbit-release-manifest.json}"
+bash "${ORBIT_VERIFY_MANIFEST_SCRIPT:-${repo_root}/scripts/ci/verify-release-manifest.sh}" \
+  "$manifest_file"
 
 # --- Publication: the tag is the only thing this script creates ------------
 

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { parseMachineOutput, summarize } from "./check-v19-types.mjs";
+import { mkdtempSync, mkdirSync, symlinkSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { foreignWorkspaceRoot, parseMachineOutput, summarize } from "./check-v19-types.mjs";
 
 const MACHINE_OUTPUT = [
   '1787607088256 START "/home/codex/projects/orbit/web"',
@@ -42,5 +46,54 @@ describe("v19 type check", () => {
       total: 5,
       lines: ["a.js: 2 errors", "b.svelte: 3 errors"],
     });
+  });
+});
+
+/*
+ * #1029: in a worktree, `web/node_modules` is usually a link to the main
+ * checkout, so `orbit/server/*` resolves to whatever branch THAT directory has
+ * out. The check then reads this tree's .svelte and .js files against another
+ * branch's server source and answers for neither — a false error at best, and
+ * at worst a false pass on an import that is genuinely broken.
+ */
+describe("foreignWorkspaceRoot (#1029)", () => {
+  /** A checkout whose workspace link points wherever `target` says. */
+  function checkout(target) {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "orbit-v19-types-")));
+    mkdirSync(join(root, "web", "node_modules"), { recursive: true });
+    if (target) symlinkSync(target, join(root, "web", "node_modules", "orbit"));
+    return `${root}/`;
+  }
+
+  it("is silent when the link points at this checkout, which is the main one", () => {
+    const root = checkout(null);
+    symlinkSync(realpathSync(root), join(root, "web", "node_modules", "orbit"));
+    try {
+      expect(foreignWorkspaceRoot(root)).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("names the other checkout when the link leaves this tree, as it does in a worktree", () => {
+    const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), "orbit-main-checkout-")));
+    const root = checkout(elsewhere);
+    try {
+      // The value is the path, so the message can say where the answer would
+      // have come from rather than only that something is wrong.
+      expect(foreignWorkspaceRoot(root)).toBe(elsewhere);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
+  it("is silent when there is no link at all: a missing dependency is svelte-check's to report", () => {
+    const root = checkout(null);
+    try {
+      expect(foreignWorkspaceRoot(root)).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

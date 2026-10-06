@@ -1,5 +1,6 @@
 import { readDocumentDownload } from "orbit/server/document-repository";
 
+import { placeholderDownloadBytes, requireFixtureDocument } from "$lib/server/document-content-fixture.js";
 import { read } from "$lib/server/api.js";
 
 /** @param {string} filename */
@@ -16,20 +17,41 @@ function contentDisposition(filename) {
  * `no-store`: this is the one route serving a caller-controlled filename and
  * fixed content type as a direct download.
  */
-export const GET = read(async (event, session) => {
-  const documentId = /** @type {string} */ (event.params.documentId);
-  const document = await readDocumentDownload(session.user.id, documentId);
-  const responseBody = Uint8Array.from(document.bytes);
-  document.bytes.fill(0);
-  return new Response(responseBody, {
-    status: 200,
-    headers: {
-      "Cache-Control": "private, no-store",
-      "Content-Disposition": contentDisposition(document.displayName),
-      "Content-Length": String(document.bytes.length),
-      "Content-Security-Policy": "default-src 'none'; sandbox",
-      "Content-Type": "application/octet-stream",
-      "X-Content-Type-Options": "nosniff",
+export const GET = read(
+  async (event, session) => {
+    const documentId = /** @type {string} */ (event.params.documentId);
+    const document = await readDocumentDownload(session.user.id, documentId);
+    const responseBody = Uint8Array.from(document.bytes);
+    document.bytes.fill(0);
+    return new Response(responseBody, {
+      status: 200,
+      headers: {
+        "Cache-Control": "private, no-store",
+        "Content-Disposition": contentDisposition(document.displayName),
+        "Content-Length": String(document.bytes.length),
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+        "Content-Type": "application/octet-stream",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  },
+  {
+    /* #1141: same fixture gap as the preview route beside it — a small
+       generated sample file rather than a reach into the (absent) engine. */
+    fixture: (event) => {
+      const doc = requireFixtureDocument(/** @type {string} */ (event.params.documentId));
+      const body = Uint8Array.from(placeholderDownloadBytes(doc));
+      return new Response(body, {
+        status: 200,
+        headers: {
+          "Cache-Control": "private, no-store",
+          "Content-Disposition": contentDisposition(doc.displayName),
+          "Content-Length": String(body.length),
+          "Content-Security-Policy": "default-src 'none'; sandbox",
+          "Content-Type": "application/octet-stream",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
     },
-  });
-});
+  },
+);

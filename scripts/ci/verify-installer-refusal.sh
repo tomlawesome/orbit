@@ -91,7 +91,9 @@ trap 'show_output_on_failure $?' EXIT
 # fixed prefix on its own first, and show whatever it actually said when it
 # is present but wrong (#770).
 required_fields_prefix='Orbit installer: configuration fields requiring attention:'
-required_fields_line='Orbit installer: configuration fields requiring attention: APP_URL OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CALLBACK_URL.'
+# M7 (#909, ADR-0021): ORBIT_AUTH_OIDC defaults to false, so an empty target
+# owes only APP_URL; the provider fields become required once it is true.
+required_fields_line='Orbit installer: configuration fields requiring attention: APP_URL.'
 if ! grep --fixed-strings --line-regexp --quiet "${required_fields_line}" "${refusal_output}"; then
   if actual_fields_line="$(grep --fixed-strings -m1 -- "${required_fields_prefix}" "${refusal_output}")"; then
     printf 'The empty-target refusal reported the wrong required fields.\n' >&2

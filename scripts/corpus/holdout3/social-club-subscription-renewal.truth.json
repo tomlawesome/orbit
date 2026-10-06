@@ -1,0 +1,39 @@
+{
+  "name": "social club subscription renewal, a lower social-only tier and a joining fee as decoy prices",
+  "filename": "fullpage-social-club-subscription-renewal.pdf",
+  "expected": {
+    "dates": [
+      "2026-10-31",
+      "2026-11-01"
+    ],
+    "provider": "Thornbury Bowls & Social Club",
+    "reference": "TBSC-0447",
+    "dateRoles": [
+      {
+        "date": "2026-10-31",
+        "role": "renewal"
+      },
+      {
+        "date": "2026-11-01",
+        "role": "start"
+      }
+    ],
+    "subtype": {
+      "kinds": [
+        "Membership"
+      ]
+    },
+    "costMinor": 6500,
+    "currency": "GBP",
+    "recurrenceMonths": 12,
+    "scheduleKind": "renewal"
+  },
+  "notes": [
+    "dates: renewal due 31 October 2026, membership year starts 1 November 2026. The lapse date (30 November 2026), the AGM date (14 November 2026) and the club's public-liability renewal (30 April 2027) are undeclared.",
+    "provider is Thornbury Bowls & Social Club.",
+    "reference is membership number TBSC-0447.",
+    "costMinor is the annual subscription, 65.00; the green fee (3.00 per session), the social-only tier (25.00, a different membership category) and the joining fee (10.00, waived for on-time renewal) are traps.",
+    "recurrenceMonths is 12, printed in digits as 'a 12-month membership'.",
+    "subtype: Membership. scheduleKind is 'renewal', taken from the renewal dateRole (which is declared first, ahead of 'start', in print order)."
+  ]
+}

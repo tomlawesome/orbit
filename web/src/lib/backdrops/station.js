@@ -75,8 +75,14 @@ const FAR_V = 1.9, NEAR_V = 4.0, STATION_V = NEAR_V;
    fixed sky the platform flies against, so they are drawn thinner, fainter
    and unlabelled-but-for-a-whisper: a household is yours, a constellation is
    only where you are. Fixed sky, not data: identical to
-   design/v19/administration-iss.html's own FIGURES. */
-const FIGURES = [
+   design/v19/administration-iss.html's own FIGURES.
+
+   Exported (#1151 W1-Q2): constellations.js (the create screen) drew its own
+   named constellations too, by name but not by the same points, and its own
+   household mark too, tuned apart from this one. Importing this module's
+   FIGURES and its drawHouseholdMark/drawFigureMark below, rather than keeping
+   a second hand-tuned copy, is what this fix is. */
+export const FIGURES = [
   { name: "CASSIOPEIA", pts: [[0, 22], [24, 4], [48, 18], [72, 2], [96, 20]], edges: [[0, 1], [1, 2], [2, 3], [3, 4]] },
   { name: "CYGNUS", pts: [[46, 0], [46, 40], [46, 74], [46, 100], [8, 36], [86, 30]], edges: [[0, 1], [1, 2], [2, 3], [4, 1], [1, 5]] },
   { name: "LYRA", pts: [[0, 0], [12, 30], [38, 24], [46, 52], [20, 58]], edges: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 1]] },
@@ -245,6 +251,102 @@ function elevationOf(hh) {
 }
 
 /**
+ * One household mark's drawing (#1151 W1-Q2) — the dashed ring, its planets,
+ * the lead line and the two labels. Independent of how its placement was
+ * chosen: this module rolls a chunk-tied household and an elevation, while
+ * constellations.js (the create screen) places by the household's real
+ * bearing instead. Those stay each caller's own; everything below this line
+ * used to be a second, separately-tuned copy of this one.
+ *
+ * `extraAttrs` is the one thing this keeps as a caller's choice rather than a
+ * shared constant: create's entrance animation (its own ".csys" class and
+ * animation-delay), which administration never drew and so never had a
+ * constant to diverge in the first place.
+ *
+ * @param {SVGGElement} g
+ * @param {{ name: string, items: number, planets: Array<[number, number, number, string]> }} hh
+ * @param {{ x: number, y: number, scale: number, dim: string, away: boolean }} place
+ * @param {Record<string, string>} [extraAttrs]
+ */
+export function drawHouseholdMark(g, hh, { x, y, scale, dim, away }, extraAttrs = {}) {
+  const dir = away ? 1 : -1;
+  const root2 = /** @type {SVGGElement} */ (svgEl("g", {
+    ...extraAttrs,
+    transform: `translate(${x.toFixed(1)},${y.toFixed(1)})`,
+    opacity: dim,
+  }));
+  const s = svgEl("g", { transform: `scale(${scale.toFixed(3)})` });
+  /* dashed chart ink, not accent: on home an accent ring means "fly here",
+     and from administration you may only look */
+  s.appendChild(svgEl("circle", { r: "50", fill: "none", stroke: "var(--chart-ink)", "stroke-width": "1.2", "stroke-dasharray": "3 8" }));
+  s.appendChild(svgEl("circle", { r: "2.6", fill: "var(--chart-ink)" }));
+  for (const [px, py, pr, tok] of hh.planets)
+    s.appendChild(svgEl("circle", { cx: String(px), cy: String(py), r: String(pr), fill: `var(${tok})`, opacity: ".85" }));
+  root2.appendChild(s);
+
+  const lead = 50 * scale + 16;
+  root2.appendChild(svgEl("path", {
+    d: `M ${dir * (50 * scale + 4)} -${(34 * scale).toFixed(1)} ` +
+      `L ${dir * lead} -${(52 * scale + 12).toFixed(1)} h ${dir * 16}`,
+    fill: "none", stroke: "var(--chart-ink)", "stroke-width": "1", opacity: ".75",
+  }));
+  const t = /** @type {SVGTextElement} */ (svgEl("text", {
+    x: String(dir * (lead + 22)), y: String(-(52 * scale + 15)), "font-size": "9.5",
+    "letter-spacing": ".16em", fill: "var(--chart-ink)", "font-family": MONO,
+    "text-anchor": away ? "start" : "end",
+  }));
+  t.textContent = hh.name.toUpperCase();
+  root2.appendChild(t);
+  const c = /** @type {SVGTextElement} */ (svgEl("text", {
+    x: String(dir * (lead + 22)), y: String(-(52 * scale + 3)), "font-size": "8",
+    "letter-spacing": ".12em", fill: "var(--chart-ink)", "font-family": MONO,
+    "text-anchor": away ? "start" : "end", opacity: ".8",
+  }));
+  c.textContent = hh.items + (hh.items === 1 ? " ITEM" : " ITEMS");
+  root2.appendChild(c);
+  g.appendChild(root2);
+}
+
+/**
+ * One named constellation's drawing (#1151 W1-Q2), same split as
+ * drawHouseholdMark above: the path, its stars and the label were a second
+ * copy in constellations.js, tuned apart from this one.
+ *
+ * `rng` draws each star's own radius, same as the original did inline, so a
+ * caller's own stream still decides it rather than this function rolling a
+ * second, uncoordinated one. `rotateDeg`, like `extraAttrs`, is the one
+ * placement detail administration never had and so never had a constant to
+ * diverge: create tilts its figures for its own choreography, so that stays
+ * a caller's choice.
+ *
+ * @param {SVGGElement} g
+ * @param {() => number} rng
+ * @param {{ name: string, pts: number[][], edges: number[][] }} fig
+ * @param {{ x: number, y: number, scale: number, dim: string, rotateDeg?: number }} place
+ * @param {Record<string, string>} [extraAttrs]
+ */
+export function drawFigureMark(g, rng, fig, { x, y, scale, dim, rotateDeg = 0 }, extraAttrs = {}) {
+  const rotate = rotateDeg ? ` rotate(${rotateDeg.toFixed(1)})` : "";
+  const root2 = /** @type {SVGGElement} */ (svgEl("g", {
+    ...extraAttrs,
+    transform: `translate(${x.toFixed(1)},${y.toFixed(1)})${rotate} scale(${scale.toFixed(3)})`,
+    opacity: dim,
+  }));
+  let d = "";
+  for (const [a, b] of fig.edges) d += `M ${fig.pts[a][0]} ${fig.pts[a][1]} L ${fig.pts[b][0]} ${fig.pts[b][1]} `;
+  root2.appendChild(svgEl("path", { d, fill: "none", stroke: "var(--chart-ink)", "stroke-width": "1.2", opacity: ".78" }));
+  for (const [px, py] of fig.pts)
+    root2.appendChild(svgEl("circle", { cx: String(px), cy: String(py), r: (1.5 + rng() * 1.1).toFixed(2), fill: "var(--star-far)", opacity: ".9" }));
+  const t = /** @type {SVGTextElement} */ (svgEl("text", {
+    x: String(fig.pts[0][0] - 4), y: String(fig.pts[0][1] - 13), "font-size": "9",
+    "letter-spacing": ".2em", fill: "var(--chart-ink)", "font-family": MONO, opacity: ".82",
+  }));
+  t.textContent = fig.name;
+  root2.appendChild(t);
+  g.appendChild(root2);
+}
+
+/**
  * Mounts the streaming sky, the households, the constellations and the
  * station into `root`, and returns a teardown that removes everything this
  * call added.
@@ -354,66 +456,17 @@ export function mountStation(root, { seed, galaxy, primary, facts }) {
     const y = elevationOf(hh) + (rng() - 0.5) * 44; /* a breath, never a move */
     const scale = 0.86 - far * 0.34;
     const dim = (0.52 - far * 0.20).toFixed(2);
-    const away = rng() < 0.5, dir = away ? 1 : -1; /* which side the label reads */
+    const away = rng() < 0.5; /* which side the label reads */
 
-    const root2 = /** @type {SVGGElement} */ (svgEl("g", { transform: `translate(${x.toFixed(1)},${y.toFixed(1)})`, opacity: dim }));
-    const s = svgEl("g", { transform: `scale(${scale.toFixed(3)})` });
-    /* dashed chart ink, not accent: on home an accent ring means "fly here",
-       and from administration you may only look */
-    s.appendChild(svgEl("circle", { r: "50", fill: "none", stroke: "var(--chart-ink)", "stroke-width": "1.2", "stroke-dasharray": "3 8" }));
-    s.appendChild(svgEl("circle", { r: "2.6", fill: "var(--chart-ink)" }));
-    for (const [px, py, pr, tok] of hh.planets)
-      s.appendChild(svgEl("circle", { cx: String(px), cy: String(py), r: String(pr), fill: `var(${tok})`, opacity: ".85" }));
-    root2.appendChild(s);
-
-    const lead = 50 * scale + 16;
-    root2.appendChild(svgEl("path", {
-      d: `M ${dir * (50 * scale + 4)} -${(34 * scale).toFixed(1)} ` +
-        `L ${dir * lead} -${(52 * scale + 12).toFixed(1)} h ${dir * 16}`,
-      fill: "none", stroke: "var(--chart-ink)", "stroke-width": "1", opacity: ".75",
-    }));
-    const t = /** @type {SVGTextElement} */ (svgEl("text", {
-      x: String(dir * (lead + 22)), y: String(-(52 * scale + 15)), "font-size": "9.5",
-      "letter-spacing": ".16em", fill: "var(--chart-ink)", "font-family": MONO,
-      "text-anchor": away ? "start" : "end",
-    }));
-    t.textContent = hh.name.toUpperCase();
-    root2.appendChild(t);
-    const c = /** @type {SVGTextElement} */ (svgEl("text", {
-      x: String(dir * (lead + 22)), y: String(-(52 * scale + 3)), "font-size": "8",
-      "letter-spacing": ".12em", fill: "var(--chart-ink)", "font-family": MONO,
-      "text-anchor": away ? "start" : "end", opacity: ".8",
-    }));
-    c.textContent = hh.items + (hh.items === 1 ? " ITEM" : " ITEMS");
-    root2.appendChild(c);
-    g.appendChild(root2);
+    drawHouseholdMark(g, hh, { x, y, scale, dim, away });
   }
 
-  /* §14 amendment: the real sky was too faint to read at arm's length. The
-     figure steps up a notch — dim floor 0.26 → 0.38, line 1/.62 → 1.2/.78 and
-     in chart INK rather than chart LINE, name 8/.75 → 9/.82. It stays under
-     the household mark on every axis. */
   function figure(/** @type {SVGGElement} */ g, /** @type {() => number} */ rng) {
     const f = FIGURES[Math.floor(rng() * FIGURES.length)];
     const x = 40 + rng() * 400, y = 120 + rng() * 740;
     const scale = 0.85 + rng() * 0.85;
     const dim = (0.38 + rng() * 0.14).toFixed(2); /* quieter than a household */
-    const root2 = /** @type {SVGGElement} */ (svgEl("g", {
-      transform: `translate(${x.toFixed(1)},${y.toFixed(1)}) scale(${scale.toFixed(3)})`,
-      opacity: dim,
-    }));
-    let d = "";
-    for (const [a, b] of f.edges) d += `M ${f.pts[a][0]} ${f.pts[a][1]} L ${f.pts[b][0]} ${f.pts[b][1]} `;
-    root2.appendChild(svgEl("path", { d, fill: "none", stroke: "var(--chart-ink)", "stroke-width": "1.2", opacity: ".78" }));
-    for (const [px, py] of f.pts)
-      root2.appendChild(svgEl("circle", { cx: String(px), cy: String(py), r: (1.5 + rng() * 1.1).toFixed(2), fill: "var(--star-far)", opacity: ".9" }));
-    const t = /** @type {SVGTextElement} */ (svgEl("text", {
-      x: String(f.pts[0][0] - 4), y: String(f.pts[0][1] - 13), "font-size": "9",
-      "letter-spacing": ".2em", fill: "var(--chart-ink)", "font-family": MONO, opacity: ".82",
-    }));
-    t.textContent = f.name;
-    root2.appendChild(t);
-    g.appendChild(root2);
+    drawFigureMark(g, rng, f, { x, y, scale, dim });
   }
 
   /* ---- the station: one pass per slot, always exactly one in the window ---

@@ -173,6 +173,8 @@ export interface DatabaseVolumeSafetyState {
   composeProjectNameExplicit: boolean;
   /** install.sh `compose_project_name` */
   composeProjectName: string;
+  /** install.sh `compose_project_name_provisional` (#999) */
+  composeProjectNameProvisional: boolean;
 }
 
 export interface PostgresPasswordFacts {
@@ -230,6 +232,7 @@ export function verifyDatabaseVolumeSafety(
     ...state,
     composeProjectName: derived.composeProjectName,
     composeProjectNameExplicit: derived.explicit,
+    composeProjectNameProvisional: derived.provisional,
   };
 
   const volumeList = adapter.listVolumesByKeySubstring(DATABASE_VOLUME_KEY);
@@ -260,8 +263,15 @@ export function verifyDatabaseVolumeSafety(
     return { ...nextState, databaseVolumeChecked: true };
   }
   if (nextState.targetWasEmpty) {
+    // O1-S3: names the volume and the exact removal command, mirroring
+    // install.sh's own fail() text exactly (candidates joined with a single
+    // space, matching bash's "${candidates[*]}" under the default IFS) —
+    // the normal case this now reaches is a volume a prior interruption's
+    // own failure path could not remove, since on a fresh install nothing
+    // else could have created it.
+    const candidateList = candidates.join(" ");
     throw new DatabaseVolumeSafetyRefusal(
-      "An existing Orbit database volume requires a recognized deployment with its preserved database credentials; refusing to start Compose.",
+      `An existing Orbit database volume (${candidateList}) requires a recognized deployment with its preserved database credentials; refusing to start Compose. If this is leftover from a previous failed install rather than a deployment you want to keep, remove it first: docker volume rm -- ${candidateList}`,
     );
   }
   if (candidates.length !== 1) {
@@ -310,7 +320,12 @@ export function verifyDatabaseVolumeSafety(
   // used). Setting it here was an early mistake in this port, caught by
   // database-volume-safety.parity.test.ts's byte-for-byte comparison
   // against the real script's globals after a successful attach.
-  nextState = { ...nextState, composeProjectName: discoveredProject };
+  // The project that owns the recognised volume is the deployment's real
+  // identity, so it is never provisional: install.sh:659 clears the flag on
+  // exactly this path, so that the later re-derivation (#999) cannot replace
+  // a proven owner with the compose file's declared name and address a
+  // project this host has not got.
+  nextState = { ...nextState, composeProjectName: discoveredProject, composeProjectNameProvisional: false };
 
   if (!(postgresPasswordFacts.isRegularNonSymlinkFile && postgresPasswordFacts.mode === 0o600)) {
     throw new DatabaseVolumeSafetyRefusal(

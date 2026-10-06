@@ -15,6 +15,7 @@ import { z } from "zod";
 // scripts/configuration.sh.
 export const ALLOWED_KEYS = [
   "APP_URL",
+  "ORBIT_AUTH_OIDC",
   "OIDC_ISSUER",
   "OIDC_CLIENT_ID",
   "OIDC_CLIENT_SECRET",
@@ -28,6 +29,8 @@ export const ALLOWED_KEYS = [
   "SESSION_SECRET_FILE",
   "DOCUMENT_KEK",
   "DOCUMENT_KEK_FILE",
+  "DOCUMENT_KEK_NEXT",
+  "DOCUMENT_KEK_NEXT_FILE",
   "POSTGRES_PASSWORD",
   "POSTGRES_PASSWORD_FILE",
   "VAPID_PUBLIC_KEY",
@@ -120,6 +123,32 @@ export function isValidSessionSecret(value: string): boolean {
   return SECRET_HEX256_PATTERN.test(value);
 }
 
+// SF2-F6: SESSION_TTL_SECONDS had no shape validation anywhere in the
+// readiness contract (evaluateReadiness below), only in env.ts's runtime
+// auth-config loader (`z.coerce.number().int().min(900).max(2_592_000)`) --
+// so `orbit check` could report an invalid value "ready" and the app would
+// then crash on the very next start. The bounds live here once, the same
+// discipline SECRET_HEX256_PATTERN above already uses, and env.ts imports
+// them rather than restating the numbers.
+export const SESSION_TTL_SECONDS_MIN = 900;
+export const SESSION_TTL_SECONDS_MAX = 2_592_000;
+
+/**
+ * The readiness-contract shape check for SESSION_TTL_SECONDS: a plain
+ * decimal integer in range. Deliberately narrower than env.ts's
+ * `z.coerce.number()` (which also accepts "900.0", "1e3", leading/trailing
+ * whitespace, or a hex literal via plain JS `Number()` coercion) — those
+ * never appear in a value env-orbit-file.ts's own parser has already
+ * accepted (it forbids leading/trailing whitespace) or that configure.sh/the
+ * administration UI would ever write, and "ready" should mean unambiguously
+ * valid, not merely coercible.
+ */
+export function isValidSessionTtlSeconds(value: string): boolean {
+  if (!/^[0-9]+$/.test(value)) return false;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= SESSION_TTL_SECONDS_MIN && parsed <= SESSION_TTL_SECONDS_MAX;
+}
+
 /** Operator-facing wording, kept identical across bash and TypeScript. */
 export const SECRET_HEX256_REQUIREMENT =
   "must be 64 hexadecimal characters (a 256-bit secret), as produced by: openssl rand -hex 32";
@@ -157,6 +186,25 @@ export function containsForbiddenCharacters(value: string): boolean {
   return /[\s\u0000-\u001f\u007f]/.test(value);
 }
 
+// The subset of env-orbit-file.ts's isValidValue (configuration.sh's
+// validate_value) not already implied by containsForbiddenCharacters, which
+// every write-time validator below already calls first and which already
+// forbids *all* whitespace — so validate_value's own "no whitespace before a
+// bare #" rule can never fire once that has passed, and is not restated
+// here. What's left: length, and `$`/backtick/a leading quote, which are
+// ambiguous or dangerous to Compose's env-file parser in ways no amount of
+// escaping fixes. Applied at WRITE time (guided configuration, machine
+// prompts) so this module can never accept — and configure-engine.ts can
+// never persist — a value that .env-orbit's own reader
+// (env-orbit-file.ts's parseEnvOrbitContent) then refuses to read back as a
+// syntax error (O1-F3): what configure writes must always read back.
+function isWriteSafeEnvValue(value: string): boolean {
+  if (value.length > 4096) return false;
+  if (/[$`]/.test(value)) return false;
+  if (/^['"]/.test(value)) return false;
+  return true;
+}
+
 export function isForbiddenHost(host: string): boolean {
   const bare = host.replace(/:.*$/, "");
   if (["127.0.0.1", "localhost", "0.0.0.0", "::1"].includes(bare)) return true;
@@ -183,6 +231,7 @@ function validateAuthority(authority: string): boolean {
 // Returns the lowercase-normalised origin, or null when invalid.
 export function normalizePublicOrigin(value: string): string | null {
   if (containsForbiddenCharacters(value)) return null;
+  if (!isWriteSafeEnvValue(value)) return null;
   if (!value.startsWith("https://")) return null;
   if (value.includes("@") || value.includes("?") || value.includes("#")) return null;
   const trimmed = value.replace(/\/$/, "");
@@ -197,6 +246,7 @@ export function normalizePublicOrigin(value: string): string | null {
 // fragment; a provider-specific path is allowed; same forbidden-host rules.
 export function isValidOidcIssuer(value: string): boolean {
   if (containsForbiddenCharacters(value)) return false;
+  if (!isWriteSafeEnvValue(value)) return false;
   if (!value.startsWith("https://")) return false;
   if (value.includes("@") || value.includes("?") || value.includes("#")) return false;
   const rest = value.slice("https://".length);
@@ -212,8 +262,23 @@ export function isValidOrbitImage(value: string): boolean {
   );
 }
 
+// O1-Q6: is_valid_local_model (install.sh:617-621 / configure.sh's own
+// identical restatement for `--set-deployment-profile`) used to be
+// duplicated verbatim in deployment-profile.ts (the install side) and
+// configure-engine.ts (the configure side), with no shared source to keep
+// them from drifting. One rule, here, same discipline as
+// SECRET_HEX256_PATTERN/isValidOrbitImage above.
+// Accepts name, name:tag and the digest-pinned name@sha256:<64 hex> that
+// docs/administrator-operations.md tells an operator to set; configure.sh
+// and install.sh restate this regex by hand.
+const LOCAL_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?(@sha256:[0-9a-f]{64})?$/;
+
+export function isValidLocalModel(value: string): boolean {
+  return value.length >= 1 && value.length <= 128 && LOCAL_MODEL_PATTERN.test(value);
+}
+
 export function isValidClientId(value: string): boolean {
-  return value.length > 0 && !containsForbiddenCharacters(value);
+  return value.length > 0 && !containsForbiddenCharacters(value) && isWriteSafeEnvValue(value);
 }
 
 // Field-format schema: shape validation for every allowed key when present.
@@ -221,6 +286,11 @@ export function isValidClientId(value: string): boolean {
 export const envOrbitSchema = z
   .object({
     APP_URL: z.string().optional(),
+    // Explicit mode key (ADR-0023 §1): local sign-in is always available;
+    // OIDC is enabled only when this is exactly "true" (default "false").
+    // When not "true" the OIDC fields below stay in the allowlist but are
+    // ignored by evaluateReadiness rather than required or validated.
+    ORBIT_AUTH_OIDC: z.enum(["", "true", "false"]).optional(),
     OIDC_ISSUER: z.string().optional(),
     OIDC_CLIENT_ID: z.string().optional(),
     OIDC_CLIENT_SECRET: z.string().optional(),
@@ -253,6 +323,16 @@ export const envOrbitSchema = z
         message: `DOCUMENT_KEK ${SECRET_HEX256_REQUIREMENT}`,
       })
       .optional(),
+    // Set only for the duration of an online KEK rotation (#954, ADR-0024
+    // decision 4), normally via the docker-compose.kek-rotation.yml overlay
+    // rather than this file; accepted here too so a direct assignment is
+    // validated identically rather than rejected as unknown.
+    DOCUMENT_KEK_NEXT: z
+      .string()
+      .refine((v) => v === "" || SECRET_HEX256_PATTERN.test(v), {
+        message: `DOCUMENT_KEK_NEXT ${SECRET_HEX256_REQUIREMENT}`,
+      })
+      .optional(),
     ORBIT_PORT: z.string().regex(/^$|^[0-9]{1,5}$/).optional(),
     POSTGRES_PORT: z.string().regex(/^$|^[0-9]{1,5}$/).optional(),
     ORBIT_LOG_LEVEL: z.enum(["", "error", "warn", "info", "debug"]).optional(),
@@ -276,6 +356,7 @@ export const envOrbitSchema = z
     const exclusivePairs: Array<[AllowedKey, AllowedKey]> = [
       ["SESSION_SECRET", "SESSION_SECRET_FILE"],
       ["DOCUMENT_KEK", "DOCUMENT_KEK_FILE"],
+      ["DOCUMENT_KEK_NEXT", "DOCUMENT_KEK_NEXT_FILE"],
       ["POSTGRES_PASSWORD", "POSTGRES_PASSWORD_FILE"],
       ["OIDC_CLIENT_SECRET", "OIDC_CLIENT_SECRET_FILE"],
       ["VAPID_PRIVATE_KEY", "VAPID_PRIVATE_KEY_FILE"],
@@ -361,6 +442,15 @@ export function evaluateReadiness(
   const appManaged = (label: string) => {
     lines.push(`app-managed ${label}`);
   };
+  // ORBIT_AUTH_OIDC=false (the default): the provider fields may stay set —
+  // switching the provider off must not force deleting its configuration
+  // (owner, 2026-09-09, ADR-0023 §1) — so they are reported inert rather
+  // than missing, and never affect `ok`.
+  const notInUse = (label: string) => {
+    lines.push(`not in use ${label}`);
+  };
+
+  const oidcEnabled = record.ORBIT_AUTH_OIDC === "true";
 
   const normalizedAppUrl = isSet(record, "APP_URL")
     ? normalizePublicOrigin(record.APP_URL as string)
@@ -396,10 +486,17 @@ export function evaluateReadiness(
 
   required("APP_URL", appUrlReady);
   required("ORBIT_IMAGE", imageReady);
-  required("OIDC_ISSUER", issuerReady);
-  required("OIDC_CLIENT_ID", clientIdReady);
-  required("OIDC_CLIENT_SECRET", oidcSecretReady);
-  required("OIDC_CALLBACK_URL", callbackReady);
+  if (oidcEnabled) {
+    required("OIDC_ISSUER", issuerReady);
+    required("OIDC_CLIENT_ID", clientIdReady);
+    required("OIDC_CLIENT_SECRET", oidcSecretReady);
+    required("OIDC_CALLBACK_URL", callbackReady);
+  } else {
+    notInUse("OIDC_ISSUER");
+    notInUse("OIDC_CLIENT_ID");
+    notInUse("OIDC_CLIENT_SECRET");
+    notInUse("OIDC_CALLBACK_URL");
+  }
 
   const processingPresent =
     profileEnabled(record, "processing") || isSet(record, "TIKA_URL");
@@ -443,6 +540,20 @@ export function evaluateReadiness(
     isSet(record, "VAPID_PUBLIC_KEY") &&
     exactlyOneSet(record, "VAPID_PRIVATE_KEY", "VAPID_PRIVATE_KEY_FILE");
   optional("push", pushReady, pushPresent);
+
+  // SF2-F6: configuration.sh --check never tracked SESSION_TTL_SECONDS at
+  // all (it is in allowed_keys but no check function ever looks at it), so
+  // this is a deliberate improvement over bash, not a parity restatement —
+  // unlike every optional() group above, nothing is printed for the
+  // absent-or-valid cases (bash's own silence there is preserved exactly,
+  // so every existing fixture's line-for-line parity is untouched); only a
+  // present-but-invalid value — the one case that otherwise sails through
+  // `orbit check` as "ready" and then crashes the auth config loader at
+  // startup — adds a line and clears ok.
+  if (isSet(record, "SESSION_TTL_SECONDS") && !isValidSessionTtlSeconds(record.SESSION_TTL_SECONDS as string)) {
+    lines.push("missing session-ttl");
+    ok = false;
+  }
 
   return { lines, ok };
 }

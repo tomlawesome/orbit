@@ -1,8 +1,15 @@
 <script>
+  import { onDestroy } from "svelte";
+  import { ringFocusIn, ringFocusOut, ringOpens } from "$lib/flight/ring-closes.js";
   import {
     CURRENCIES, TIME_ZONES, NAME_LIMIT,
     sectionNote, sectionNoteTitle,
   } from "./stage.js";
+
+  /* #1175: on a phone the ring closes while a field has focus, the way it
+     does for every card on the door (ring-closes.js); the class it raises
+     goes with this card. */
+  onDestroy(ringOpens);
 
   /**
    * THE CREATE-SYSTEM CARD (#410, §15 — design/v19/first-run.html, block 2;
@@ -24,6 +31,16 @@
    *
    * This component is the form and only the form: the host owns the stage, the
    * ring, the submit, the reclaim and the launch.
+   *
+   * THE DRAWING IS SHARED NOW, not copied (#914): the ring, this card, its
+   * fields, its note, its refusal line and its act live in
+   * `$lib/ringcard.css`, because the owner's 2026-09-09 composition ruling
+   * makes this same card the sign-in door's claim, sign-in, first-administrator
+   * and setup cards. Nothing about this one moved a pixel — arrival.css keeps
+   * `#hhname` and the create path's own `body.rejected` and `body.reclaimed`
+   * beats, and every one of those outranks its shared base on specificity, so
+   * the cascade cannot turn on which file a bundler emits first. The markup
+   * below is untouched by that lift.
    */
   /**
    * @type {{
@@ -58,8 +75,16 @@
   <!-- THIRD PASS: three fields, a button, air. Everything that was prose is
        either gone or moved to a title attribute — the household screen and
        settings say all of it again, later, where it is actually needed. -->
-  <form class="card" aria-label="Name your first system"
+  <form class="card" aria-labelledby="createask"
+        onfocusin={ringFocusIn} onfocusout={ringFocusOut}
         onsubmit={(event) => { event.preventDefault(); onsubmit(); }}>
+    <!-- THE RING HOLDS THE QUESTION (#1175, as door-phone.css puts it for
+         every card on the door): on a phone this heading stands at the
+         ring's centre, 22px in the display face; on the desk it is read and
+         not seen (`.asklabel`), exactly as Identity.svelte's is, since the
+         ratified card carries no visible heading. The same words the form's
+         label already said. -->
+    <h2 class="ask asklabel" id="createask">Name your first system</h2>
     <div class="field">
       <label for="hhname">name</label>
       <input id="hhname" placeholder="Your world" maxlength={NAME_LIMIT} autocomplete="off"
@@ -105,6 +130,6 @@
          control; the owner's round-3 word closes the last difference). No
          whitespace inside the button: the label is centred, and a collapsed
          newline either side of it moves the word off the mockup's own pixels. -->
-    <button class="btn" id="gobtn" type="submit" disabled={!trimmed || busy}>Create</button>
+    <button class="btn act" id="gobtn" type="submit" disabled={!trimmed || busy}>Create</button>
   </form>
 </div>

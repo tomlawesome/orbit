@@ -15,7 +15,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documents, reviewedIntakeOperations } from "@/db/schema";
 import { log } from "@/lib/logger";
-import { getDocumentConfig } from "@/server/documents/config";
+import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
@@ -26,6 +26,7 @@ import {
   SCANNER_RECOVERY_MAX_ATTEMPTS,
 } from "@/server/documents/staging";
 import {
+  JOB_CLAIM_UPDATE,
   operationalDocumentReason,
   type ClaimedScanJob,
   type ScanRecoveryRecord,
@@ -58,16 +59,7 @@ export async function claimScannerRecoveryJobs(limit = 25): Promise<ClaimedScanJ
       for update of job skip locked
       limit ${limit}
     ), claimed as (
-      update document_jobs as job
-      set status = 'processing',
-          attempts = job.attempts + 1,
-          locked_at = now(),
-          lease_expires_at = now() + interval '10 minutes',
-          lease_token = gen_random_uuid(),
-          updated_at = now()
-      from claimable
-      where job.id = claimable.id
-      returning job.id, job.document_id, job.generation, job.lease_token
+      ${JOB_CLAIM_UPDATE}
     )
     select claimed.id, claimed.document_id as "documentId", claimed.generation,
       claimed.lease_token as "leaseToken", claimable.previous_status as "previousStatus"
@@ -188,6 +180,11 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
   let availabilityFinalized = false;
   try {
     ciphertext = await storage.readStagingCiphertext(record.stagingStorageKey, config.maxBytes);
+    // Picks by the staged object's own key_id (#954): held staging objects
+    // outlive a poll cycle (up to `scanRecoveryRetentionHours`), long enough
+    // to span a rotation window.
+    const stagingKek = keyEncryptionKeyFor(config, record.keyId);
+    if (!stagingKek) throw new Error("staging object's key is not held by this instance");
     plaintext = decryptDocument(ciphertext!, {
       documentId: job.documentId,
       householdId: record.householdId,
@@ -204,7 +201,7 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
       wrappedDek: record.wrappedDek,
       wrapIv: record.wrapIv,
       wrapAuthTag: record.wrapAuthTag,
-    } as DocumentCryptoEnvelope, config.keyEncryptionKey);
+    } as DocumentCryptoEnvelope, stagingKek);
     quarantinePath = await storage.writeQuarantineBytes(job.documentId, plaintext);
     const scan = await scanFileWithClamAv(quarantinePath, config.clamAv);
     await storage.discardQuarantine(quarantinePath);
@@ -219,13 +216,16 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
       return;
     }
     finalStorageKey = storage.createStorageKey();
+    // The next key while a rotation is in progress (#955): the staged object
+    // this republishes may have been wrapped under either key.
+    const wrap = wrappingKey(config);
     const encrypted = encryptDocument(plaintext, {
       documentId: job.documentId,
       householdId: record.householdId,
       itemId: record.itemId,
       mediaType: record.mediaType,
       plaintextSize: record.sizeBytes,
-    }, config.keyEncryptionKey, config.keyId);
+    }, wrap.keyEncryptionKey, wrap.keyId);
     await storage.writeCiphertext(finalStorageKey, encrypted.ciphertext);
     const now = new Date();
     const finalized = await getDb().transaction(async (transaction) => {

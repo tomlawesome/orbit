@@ -15,7 +15,7 @@ import {
 import { AppError } from "@/lib/app-error";
 import { log, operationalReasons, type OperationalReason } from "@/lib/logger";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
-import { getDocumentConfig } from "@/server/documents/config";
+import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import {
@@ -23,7 +23,7 @@ import {
   normalizedDocumentFilename,
   validateSupportedDocumentStructure,
 } from "@/server/documents/validation";
-import { canAccessHouseholdDocuments } from "@/server/documents/authorization";
+import { canAccessHouseholdDocuments, canManageDocumentDeletion } from "@/server/documents/authorization";
 import { retryableScannerFailureCode, scannerRecoveryDelayMs } from "@/server/documents/staging";
 import { validUuid } from "@/server/workspace-access";
 
@@ -161,8 +161,10 @@ async function requireDocumentAccess(userId: string, documentId: string) {
       contentSha256: documents.contentSha256,
       deleteAfter: documents.deleteAfter,
       availableAt: documents.availableAt,
+      uploadedByUserId: documents.uploadedByUserId,
       administrator: users.isInstanceAdmin,
       membershipUserId: memberships.userId,
+      membershipRole: memberships.role,
     })
     .from(users)
     .innerJoin(documents, eq(documents.id, documentId))
@@ -182,6 +184,26 @@ async function requireDocumentAccess(userId: string, documentId: string) {
     || unavailableDocumentConditions.includes(record.lifecycle as typeof unavailableDocumentConditions[number])
   ) {
     throw new AppError("document_not_found", "That document is not available", 404);
+  }
+  return record;
+}
+
+/**
+ * Queueing a deletion or undoing one is narrower than the household-wide read
+ * access `requireDocumentAccess` grants: only the household owner or the
+ * member who uploaded the document may do it (#1151 A3-S1). Any other
+ * member can see the document but must not be able to purge or restore
+ * someone else's upload.
+ */
+export async function requireDocumentDeletionAccess(userId: string, documentId: string) {
+  const record = await requireDocumentAccess(userId, documentId);
+  const isUploader = record.uploadedByUserId !== null && record.uploadedByUserId === userId;
+  if (!canManageDocumentDeletion(record.administrator, record.membershipRole, isUploader)) {
+    throw new AppError(
+      "document_deletion_forbidden",
+      "Only the household owner or the member who uploaded this document can do that",
+      403,
+    );
   }
   return record;
 }
@@ -436,7 +458,20 @@ export async function uploadItemDocument(input: {
       }
     }
 
+    // A `required` scan reads the quarantine file again below only once the
+    // ClamAV scan (which can run for as long as CLAMAV_TIMEOUT_MS) has
+    // finished, so the validation buffer is zeroed immediately rather than
+    // held in memory for that whole wait (A2-Q1). With scanning `disabled`
+    // there is no such gap -- the second read bought nothing but duplicate
+    // I/O -- so that path reuses this buffer instead of reading again.
+    const reuseValidationBytesForEncrypt = config.scanMode === "disabled";
     const validationBytes = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
+    // Reuse only covers a validated buffer handed on to the encrypt stage
+    // below, which is the only place that zeroes it on that path. A buffer
+    // this block is about to discard instead -- structure validation failed,
+    // or threw -- has nowhere else left to be wiped, so it must be zeroed
+    // here regardless of `reuseValidationBytesForEncrypt` (#1151 F13).
+    let structureValid = false;
     try {
       if (!await validateSupportedDocumentStructure(validationBytes, mediaType)) {
         throw new AppError(
@@ -445,8 +480,9 @@ export async function uploadItemDocument(input: {
           422,
         );
       }
+      structureValid = true;
     } finally {
-      validationBytes.fill(0);
+      if (!reuseValidationBytesForEncrypt || !structureValid) validationBytes.fill(0);
     }
     await reserveDocumentMetadata({
       documentId,
@@ -492,6 +528,8 @@ export async function uploadItemDocument(input: {
         if (retryableFailureCode) {
           const plaintext = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
           try {
+            // The next key while a rotation is in progress (#955).
+            const stagingWrap = wrappingKey(config);
             const staged = encryptDocument(plaintext, {
               documentId,
               householdId: input.householdId,
@@ -499,7 +537,7 @@ export async function uploadItemDocument(input: {
               mediaType,
               plaintextSize: received.sizeBytes,
               purpose: "scanner_recovery",
-            }, config.keyEncryptionKey, config.keyId);
+            }, stagingWrap.keyEncryptionKey, stagingWrap.keyId);
             stagingKey = storage.createStorageKey();
             await storage.writeStagingCiphertext(stagingKey, staged.ciphertext);
             const now = new Date();
@@ -618,8 +656,12 @@ export async function uploadItemDocument(input: {
     }
     log.info({ event: "document.lifecycle", state: "starting", action: "none" });
 
-    const plaintext = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
+    const plaintext = reuseValidationBytesForEncrypt
+      ? validationBytes
+      : await storage.readQuarantine(received.quarantinePath, config.maxBytes);
     let encrypted: ReturnType<typeof encryptDocument>;
+    // The next key while a rotation is in progress (#955).
+    const publishWrap = wrappingKey(config);
     try {
       encrypted = encryptDocument(plaintext, {
         documentId,
@@ -627,7 +669,7 @@ export async function uploadItemDocument(input: {
         itemId: input.itemId,
         mediaType,
         plaintextSize: received.sizeBytes,
-      }, config.keyEncryptionKey, config.keyId);
+      }, publishWrap.keyEncryptionKey, publishWrap.keyId);
     } finally {
       plaintext.fill(0);
     }
@@ -642,13 +684,27 @@ export async function uploadItemDocument(input: {
         ciphertextSize: encrypted.ciphertext.length,
         ...encrypted.envelope,
       });
-      await transaction.update(documents).set({
+      // Asserted, not assumed: a slow encrypt can run past the maintenance
+      // sweep's interrupted-upload boundary (rejectInterruptedDocuments),
+      // which moves the row out of `encrypting` while this is in flight. An
+      // unconditional update would report success regardless, leaving a
+      // document the caller is told is "available" but whose ciphertext the
+      // next reconciliation sweep deletes as unreferenced (A2-R1).
+      const [published] = await transaction.update(documents).set({
         lifecycle: "available",
         availableAt: now,
         failureCode: null,
         version: sql`${documents.version} + 1`,
         updatedAt: now,
-      }).where(and(eq(documents.id, documentId), eq(documents.lifecycle, "encrypting")));
+      }).where(and(eq(documents.id, documentId), eq(documents.lifecycle, "encrypting")))
+        .returning({ id: documents.id });
+      if (!published) {
+        throw new AppError(
+          "document_publish_conflict",
+          "That document's upload state changed while it was being published",
+          409,
+        );
+      }
       await transaction.insert(auditLog).values({
         householdId: input.householdId,
         actorUserId: input.userId,
@@ -732,7 +788,11 @@ export async function readDocumentDownload(
   const [crypto] = await getDb().select().from(documentCrypto).where(eq(documentCrypto.documentId, documentId)).limit(1);
   if (!crypto) throw new AppError("document_unavailable", "That document cannot currently be opened", 503);
 
-  if (crypto.keyId !== config.keyId) {
+  // Picks by the row's own key_id (#954, ADR-0024 decision 4): during a
+  // rotation the config holds both the current and next key, so a row is
+  // readable whether or not the rewrap worker (#932) has reached it yet.
+  const documentKek = keyEncryptionKeyFor(config, crypto.keyId);
+  if (!documentKek) {
     throw new AppError("document_key_unavailable", "Document encryption keys require administrator attention", 503);
   }
   let ciphertext: Buffer;
@@ -759,7 +819,7 @@ export async function readDocumentDownload(
       itemId: record.itemId,
       mediaType: record.mediaType,
       plaintextSize: record.sizeBytes,
-    }, envelope, config.keyEncryptionKey);
+    }, envelope, documentKek);
   } catch {
     throw new AppError("document_integrity_failed", "That document failed its integrity check", 503);
   }
@@ -768,7 +828,7 @@ export async function readDocumentDownload(
 }
 
 export async function requestDocumentDeletion(userId: string, documentId: string): Promise<DocumentSummary> {
-  const record = await requireDocumentAccess(userId, documentId);
+  const record = await requireDocumentDeletionAccess(userId, documentId);
   if (record.lifecycle !== "available") throw new AppError("document_not_found", "That document is not available", 404);
   const config = getDocumentConfig();
   const deleteAfter = new Date(Date.now() + config.retentionDays * 86_400_000);
@@ -800,7 +860,7 @@ export async function requestDocumentDeletion(userId: string, documentId: string
 }
 
 export async function restoreDocument(userId: string, documentId: string): Promise<DocumentSummary> {
-  const record = await requireDocumentAccess(userId, documentId);
+  const record = await requireDocumentDeletionAccess(userId, documentId);
   const config = getDocumentConfig();
   if (!isDocumentContentReady(record, config.scanMode, "restore") || !record.deleteAfter || record.deleteAfter <= new Date()) {
     throw new AppError("document_not_found", "That document is not available", 404);

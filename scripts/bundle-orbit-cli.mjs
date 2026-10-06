@@ -50,6 +50,18 @@ mkdirSync(dirname(outfile), { recursive: true });
 // — it makes it *visible*, surviving as a literal `require("next/...")` in
 // the output, which scripts/bundle-orbit-cli.test.mjs fails on. The test,
 // not vigilance, is the enforcement.
+//
+// `--external:@node-rs/argon2` is the same boundary for a different reason
+// (#912): `auth recovery-link` reaches `issueSetupToken` in
+// `local-credentials.ts`, which imports `password.ts` for its other
+// exports, and that package is a compiled `.node` native binding esbuild
+// cannot inline at all — the build fails outright, not just carries a stray
+// require. `password.ts` now loads it lazily (`loadArgon2`) only from the
+// functions that actually hash or verify, none of which the recovery link
+// calls, so marking it external costs nothing at runtime on that path: the
+// require it leaves behind is simply never reached. It would fail if reached
+// — the shipped CLI has no node_modules for it to resolve, same as `next` —
+// which is why every other command here still keeps its hands off both.
 const args = [
   entryPoint,
   "--bundle",
@@ -59,6 +71,7 @@ const args = [
   "--legal-comments=none",
   "--external:next",
   "--external:next/*",
+  "--external:@node-rs/argon2",
   `--outfile=${outfile}`,
 ];
 

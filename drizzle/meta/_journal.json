@@ -267,6 +267,83 @@
       "when": 1788220800000,
       "tag": "0037_mail_in_held_receipts",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1788307200000,
+      "tag": "0038_local_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1788393600000,
+      "tag": "0039_step_up_proofs",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1788480000000,
+      "tag": "0040_tier1_metadata_encryption",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1788566400000,
+      "tag": "0041_tier2_metadata_encryption",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1788652800000,
+      "tag": "0042_metadata_damage_sightings",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1788739200000,
+      "tag": "0043_metadata_key_outages",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1788825600000,
+      "tag": "0044_account_address_encryption",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1788912000000,
+      "tag": "0045_expiry_event_kind",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1788998400000,
+      "tag": "0046_sign_in_approvals",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1789084800000,
+      "tag": "0047_mail_probe_results",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1789171200000,
+      "tag": "0048_portable_archive_imports",
+      "breakpoints": true
     }
   ]
 }

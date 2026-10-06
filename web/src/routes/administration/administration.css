@@ -28,15 +28,15 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
     rgba(0,0,0,.8) 0%, rgba(0,0,0,1) 90%);
   mask-image:radial-gradient(ellipse 32% 30% at 50% 50%,
     rgba(0,0,0,.8) 0%, rgba(0,0,0,1) 90%)}
-/* atlas/dawn's chart-alpha damper (owner-ratified, 01fb4cd: "dark ink on pale
+/* clouds/dawn's chart-alpha damper (owner-ratified, 01fb4cd: "dark ink on pale
    paper already carries; the ISS lands softer here"). Neither family.css nor
    packs.css carries --chart-alpha yet (create.css reads it with fallback 1
    and no pack sets it), so it is added here, scoped to this screen, rather
    than widened to every --chart-alpha reader at once. */
-[data-theme=atlas] .mission-page,[data-theme=dawn] .mission-page{--chart-alpha:.82}
+[data-theme=clouds] .mission-page,[data-theme=dawn] .mission-page{--chart-alpha:.82}
 .mission-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
           background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
-[data-theme=atlas] .mission-page .vignette,[data-theme=dawn] .mission-page .vignette{background:none}
+[data-theme=clouds] .mission-page .vignette,[data-theme=dawn] .mission-page .vignette{background:none}
 
 .mission-page .page{position:relative;z-index:2;max-width:980px;margin:0 auto;padding:96px 24px 120px}
 .mission-page header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
@@ -77,6 +77,96 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .mission-page .system .who{flex:1;min-width:0}
 .mission-page .system .who b{display:block;font-size:13.5px;font-weight:530}
 .mission-page .system .who span{font:10.5px var(--mono);color:var(--ink-quiet)}
+
+/* HOUSEHOLD RECOVERY ON THE CLOCK (#1001, design/v19/household-recovery/
+ * round-1/b-the-row-on-the-clock.html): the danger grammar, household-manage's
+ * own — a red-outlined button that fills red once armed, and restore as the
+ * card family's ordinary button in the accent. --on-danger is the danger
+ * button's own text colour once armed, per pack, from household.css. */
+[data-theme=starchart] .mission-page{--on-danger:#060b1c}
+[data-theme=afterdark] .mission-page{--on-danger:#05070d}
+[data-theme=clouds] .mission-page{--on-danger:#f6f1e4}
+[data-theme=dawn] .mission-page{--on-danger:#ffffff}
+[data-theme=retrograde] .mission-page{--on-danger:#0a0410}
+
+.mission-page .system.doomed{flex-wrap:wrap;position:relative;border-bottom-color:var(--overdue)}
+.mission-page .system.doomed svg .ring{stroke:var(--overdue);stroke-dasharray:3 3}
+.mission-page .system.doomed svg .sun{fill:var(--overdue)}
+.mission-page .system.doomed .who span{color:var(--overdue-text)}
+.mission-page .system.doomed .acts{display:flex;gap:8px;align-items:center;flex-basis:100%;
+    padding-left:48px;margin-top:2px}
+.mission-page .system.doomed .confirm{flex-basis:100%;padding:12px 0 6px 48px}
+.mission-page .system.doomed .adminproblem.said,.mission-page .system.settled .adminproblem.said{
+    flex-basis:100%;padding-left:48px;margin-top:0}
+.mission-page .system.settled{flex-wrap:wrap}
+.mission-page .system.settled .adminproblem.gone{padding-left:0}
+
+.mission-page .dangerbtn{font:600 11px var(--mono);letter-spacing:.15em;text-transform:uppercase;
+    color:var(--overdue-text);background:none;border:1.5px solid var(--overdue);border-radius:9px;
+    padding:7px 12px;font-size:10.5px;cursor:pointer;white-space:nowrap;
+    transition:background .15s,color .15s,border-color .15s}
+.mission-page .dangerbtn:hover{background:color-mix(in srgb,var(--overdue) 15%,transparent)}
+.mission-page .dangerbtn.armed{background:var(--overdue);color:var(--on-danger);border-color:var(--overdue)}
+.mission-page .dangerbtn:disabled{opacity:.42;cursor:not-allowed;background:none}
+.mission-page .rebtn{font:11px var(--mono);color:var(--accent-text);background:none;
+    border:1px solid var(--accent);border-radius:9px;padding:8px 14px;cursor:pointer;white-space:nowrap}
+.mission-page .rebtn:hover{background:color-mix(in srgb,var(--accent) 14%,transparent)}
+
+.mission-page .confirm .field{margin-top:10px}
+.mission-page .confirm label{display:block;font:10.5px var(--mono);color:var(--ink-faint);
+    letter-spacing:.04em;margin-bottom:6px}
+.mission-page .confirm input{font:13px var(--mono);color:var(--ink);background:var(--panel-raised);
+    border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%;max-width:320px;
+    box-sizing:border-box}
+.mission-page .confirm input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.mission-page .confirm .stake{font-size:13px;color:var(--ink-mid);line-height:1.62;margin:0}
+.mission-page .adminproblem.gone{color:var(--overdue-text)}
+
+@media (prefers-reduced-motion:reduce){.mission-page .dangerbtn{transition:none}}
+@media (max-width:560px){
+  .mission-page .dangerbtn{white-space:normal}
+  .mission-page .system.doomed .acts{flex-wrap:wrap}
+  .mission-page .system.doomed .acts,.mission-page .system.doomed .confirm,
+  .mission-page .system.doomed .adminproblem.said,.mission-page .system.settled .adminproblem.said{padding-left:0}
+}
+
+/* DOCUMENT JOBS AND THE TWO MAIL TESTS (#1071, design/v19/administration-ops/
+ * round-2/f-the-screens-grammar.html). Job and test rows reuse the People
+ * card's own `.person`/`.who`/`.place` furniture (already styled above);
+ * this is only the state pill's colour family and the two cards' own
+ * furniture (the head count, the foot line, the page-head tells). */
+.mission-page .role.bad{color:var(--overdue-text);border-color:var(--overdue)}
+.mission-page .role.warn{color:var(--warm-text);border-color:var(--warm)}
+.mission-page .role.run{color:var(--upcoming-text);border-color:var(--upcoming)}
+.mission-page .role.ok{color:var(--ok-text);border-color:var(--ok)}
+.mission-page .role.quiet{color:var(--ink-quiet);animation:mission-breathe 1.6s ease-in-out infinite}
+@keyframes mission-breathe{50%{opacity:.45}}
+
+.mission-page .tells{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.mission-page .tells .role{text-decoration:none}
+.mission-page .tells .role:hover{border-color:var(--accent);color:var(--accent-text)}
+
+.mission-page .card .count{margin-left:auto;font:10.5px var(--mono);color:var(--ink-quiet)}
+.mission-page .jobfoot{font:10.5px var(--mono);color:var(--ink-faint);padding:12px 2px 0}
+/* the reason is the point of the subtext: it wraps rather than being cut */
+.mission-page #jobs-card .who span,.mission-page .machinery .who span{white-space:normal}
+.mission-page #jobs-card .place{flex-basis:100%;text-align:right}
+
+.mission-page .card .cardhead button+button{margin-left:6px}
+.mission-page .card .cardhead button[disabled]{cursor:default;color:var(--ink-quiet);border-color:var(--line-soft)}
+.mission-page .card .cardhead button.busy{animation:mission-breathe 1.6s ease-in-out infinite}
+
+@media (prefers-reduced-motion:reduce){
+  .mission-page .role.quiet,.mission-page .card .cardhead button.busy{animation:none}
+}
+@media (max-width:560px){
+  .mission-page .machinery .cardhead{flex-wrap:wrap;row-gap:8px}
+  .mission-page .machinery .cardhead h2{flex-basis:100%}
+  .mission-page .machinery .cardhead button{margin-left:0;min-height:44px}
+  .mission-page #jobs-card .cardhead{flex-wrap:wrap}
+  .mission-page #jobs-card .count{margin-left:0;flex-basis:100%}
+}
+
 /* §15-2g removed the joinbadge and the dashed join-request row from this
    panel. Nothing replaces them and no spacing is patched in: the roster closes
    on its last system (which loses its rule to :last-child), so the card ends on
@@ -139,3 +229,57 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .mission-page .mailboxform .mailboxrow{grid-column:1 / -1}
 .mission-page .mailboxform .mailboxnote{font:10.5px var(--mono);line-height:1.5;color:var(--ink-quiet);margin-top:2px}
 .mission-page .adminproblem.ok{color:var(--ok-text)}
+
+/* THE ROSTER ROW HAS TWO ACTIONS NOW (#915), and two of them plus a name, an
+   address and a role pill do not fit across the People card's half of the
+   ratified two-column grid. Nothing is shrunk to make them: the type stays the
+   card's own and the address keeps the one ellipsis the ratified row already
+   gave it. The row simply wraps, and the actions take the line under the
+   person they belong to — the same accommodation the helm makes for its
+   session rows on a narrow viewport. Widening the card, or shortening the
+   control's ruled name, would both be composition calls and are not made here. */
+.mission-page .person{flex-wrap:wrap}
+.mission-page .person .who{flex:1 1 60%}
+.mission-page .person .place:first-of-type{margin-left:auto}
+
+/* Add a local user, and send a new setup link (#915, ADR-0023 §3; composition
+   §2.7). Built from the panel's existing furniture — .placerow buttons and
+   .adminproblem for both outcomes — with a label-and-field grid of its own,
+   because the People card had no form to borrow from. Labels sit beside their
+   fields rather than above, so the row stays one band above the roster instead
+   of a second panel; the type is the card's own, and nothing is shrunk. */
+.mission-page .localuser{display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;
+      padding:4px 2px 12px;border-bottom:1px solid var(--line-soft)}
+.mission-page .localuser label{font:10.5px var(--mono);letter-spacing:.06em;color:var(--ink-quiet)}
+.mission-page .localuser input{font:12px var(--mono);color:var(--ink);background:none;
+      border:1px solid var(--line-soft);border-radius:6px;padding:5px 7px;width:100%}
+/* As the helm's challenge fields do: the accent border marks the focused
+   field and the browser's own ring stays, so a keyboard reader has an
+   indicator that does not depend on noticing a colour change. */
+.mission-page .localuser input:focus-visible{border-color:var(--accent)}
+.mission-page .localuser .days{display:flex;align-items:center;gap:8px;
+      font:10.5px var(--mono);color:var(--ink-quiet)}
+.mission-page .localuser .days input{width:5em}
+.mission-page .localuser .localuserrow{grid-column:1 / -1;padding:6px 2px 0;border-bottom:0}
+/* The per-row form is indented to the roster's own text column, the way the
+   placement picker is, so it reads as belonging to the person above it. */
+.mission-page .localuser.resend{padding-left:44px}
+.mission-page .adminproblem .retry{font:10.5px var(--mono);color:var(--ink-mid);background:none;
+      border:1px solid var(--line);border-radius:99px;padding:3px 10px;margin-left:8px;cursor:pointer}
+.mission-page .adminproblem .retry:hover{border-color:var(--accent);color:var(--accent-text)}
+@media (max-width:560px){.mission-page .localuser{grid-template-columns:1fr}}
+
+/* AN OPEN DOCUMENT-KEY ROTATION (#956). First in the grid only while one is
+   open; absent otherwise, so the everyday screen (and the fidelity baseline)
+   carries no trace of it. A notice in the card's ordinary voice — the accent
+   edge marks it out without borrowing .adminproblem's warning colour, because
+   a rotation mid-flight is deliberate, not wrong.
+
+   #941 reuses this composition unchanged for the locked and damaged Tier 1
+   metadata cards, which is what #956 reserved the slot for: three conditional
+   notices with one voice between them, rather than three sets of rules. The
+   class keeps its name because renaming it would be churn in a stylesheet the
+   fidelity baseline is photographed against; read it as "the notice card". */
+.mission-page .card.rotation{border-left:3px solid var(--accent)}
+.mission-page .card.rotation .since{margin-left:auto;font:10.5px var(--mono);color:var(--accent-text)}
+.mission-page .card.rotation .rotationwords{font:12px/1.6 var(--mono);color:var(--ink-mid);max-width:74ch}

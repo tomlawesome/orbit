@@ -3,6 +3,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import pixelmatch from "pixelmatch";
+// Kept by owner decision on #1063 (#1115 evidence, 2026-09-24): a trial swap
+// to @napi-rs/canvas (already a runtime dependency, decode via loadImage +
+// getImageData, encode via toBuffer("image/png")) moved the "item" screen's
+// baseline diff from 1379 to 1510 pixels on an unchanged tree -- canvas's
+// colour handling shifts pixel values, so it fails the zero-move bar this
+// swap needed. Every other screen was unaffected. Reconsider on a pngjs CVE
+// or a Node version pngjs stops supporting.
 // @ts-expect-error -- pngjs ships no declaration file and none is vendored for this project;
 // there is no `@type`/`@typedef` spelling that fixes a missing module declaration.
 import { PNG } from "pngjs";
@@ -49,34 +56,113 @@ const PIXEL_THRESHOLD = 0.1;
 const MAX_DIFF_RATIO = 0.001;
 
 /**
- * Walks the tour to stop 3 and settles there (#752).
+ * Holds the one-take film at one of its own marks and settles there (#1098).
  *
  * Runs in the page, polled by waitForFunction, so it has to be safe to
- * evaluate over and over: it presses *Next* at most once per stop — the card
- * publishes which stop it is on, and the marker below only lets a given
- * number be pressed once — so the walk cannot be run past the stop being
- * photographed. Settled means the galaxy has been placed, the card says stop
- * 3, the emphasis has actually been applied to something — `.lit` is the
- * mark the whole screen exists to guard, in both modes — and the fade that
- * carries it (tour.css, .45s on opacity and filter) has finished everywhere:
- * photographed mid-fade, the same stop measures differently on every run.
+ * evaluate over and over. The film is not a walk that stops and waits: it is
+ * twelve chapters on a clock (web/src/lib/tour/film.js). What makes a frame
+ * of it photographable is the film's own review hook, `window.__hold`: the
+ * next time the film reaches the mark of that name it parks its clock and
+ * holds the coroutine there (vocabulary.js, `mark`), with the veil, the
+ * ring, the callout and the pill all left standing. `__held` says the hold
+ * has happened.
+ *
+ * The chapter is asked for by id, never by index, and asked for exactly once
+ * (the marker below): `__jump` restarts a chapter from its first line, so
+ * pressing it on every poll would never let the film reach the mark.
+ *
+ * Settled means the galaxy has been placed, the film is held at the mark,
+ * the veil is up over the sky with something actually lit through it — the
+ * ring is the mark the whole screen exists to guard — the callout is on the
+ * screen, and nothing on the film's own chrome is still in a transition
+ * (the callout's .24s slide-in, the veil's fade): photographed mid-fade, the
+ * same mark measures differently on every run.
  */
-function tourAtStopThree() {
+function tourHeldAtOthers() {
+  const w = /** @type {any} */ (window);
+  w.__hold = "others-gran";
   if (document.querySelectorAll(".minisys").length === 0) return false;
-  const card = document.querySelector(".tourcard");
-  if (!card) return false;
-  const at = Number(card.getAttribute("data-tour-stop") ?? 0);
-  if (at === 0) return false;
-  if (at < 3) {
-    if (card.getAttribute("data-pressed") !== String(at)) {
-      card.setAttribute("data-pressed", String(at));
-      document.getElementById("tour-next")?.click();
-    }
+  if (typeof w.__jump !== "function" || !Array.isArray(w.__chapters)) return false;
+  if (!w.__fidelityJumped) {
+    const k = w.__chapters.findIndex((/** @type {{ id: string }} */ c) => c.id === "others");
+    if (k < 0) return false;
+    w.__fidelityJumped = true;
+    w.__jump(k);
     return false;
   }
-  if (at !== 3 || document.querySelectorAll("[data-tour-dim].lit").length === 0) return false;
-  return [...document.querySelectorAll("[data-tour-dim]")].every(
-    (el) => !el.getAnimations().some((a) => a instanceof CSSTransition),
+  if (w.__held !== "others-gran") return false;
+  const veil = document.getElementById("orbit-tour-veil");
+  const chrome = document.getElementById("orbit-tour-film");
+  const pill = document.getElementById("orbit-tour-transport");
+  if (!veil || !chrome || !pill) return false;
+  if (getComputedStyle(veil).opacity === "0") return false;
+  if (!chrome.querySelector(".tourfilm-ring")) return false;
+  if (!chrome.querySelector(".tourfilm-callout")) return false;
+  return [veil, chrome, pill].every(
+    (el) => !el.getAnimations({ subtree: true }).some((a) => a instanceof CSSTransition),
+  );
+}
+
+/**
+ * #1083: the same hold as `tourHeldAtOthers`, above, but for the pocket
+ * dialect — keyed on `.msys` (the pocket's own pill chips) rather than the
+ * desk's `.minisys`, and reading the pocket's own chapter id (`others`,
+ * unchanged — the registry is one list for both dialects).
+ */
+function tourHeldAtOthersPocket() {
+  const w = /** @type {any} */ (window);
+  w.__hold = "others-gran";
+  if (document.querySelectorAll(".msys").length === 0) return false;
+  if (typeof w.__jump !== "function" || !Array.isArray(w.__chapters)) return false;
+  if (!w.__fidelityJumped) {
+    const k = w.__chapters.findIndex((/** @type {{ id: string }} */ c) => c.id === "others");
+    if (k < 0) return false;
+    w.__fidelityJumped = true;
+    w.__jump(k);
+    return false;
+  }
+  if (w.__held !== "others-gran") return false;
+  const veil = document.getElementById("orbit-tour-veil");
+  const chrome = document.getElementById("orbit-tour-film");
+  const pill = document.getElementById("orbit-tour-transport");
+  if (!veil || !chrome || !pill) return false;
+  if (getComputedStyle(veil).opacity === "0") return false;
+  if (!chrome.querySelector(".tourfilm-ring")) return false;
+  if (!chrome.querySelector(".tourfilm-callout")) return false;
+  return [veil, chrome, pill].every(
+    (el) => !el.getAnimations({ subtree: true }).some((a) => a instanceof CSSTransition),
+  );
+}
+
+/**
+ * #1083: the pocket's own chapter 11 ("Your sky"), held at `sky-settings` —
+ * the account hatch up, the settings row ringed, the pill docked to the top
+ * (owner's 1a). Settle also requires the sheet to be open and the pill's own
+ * `.top` class, so the frame is never photographed mid-dock.
+ */
+function tourHeldAtSkySettingsPocket() {
+  const w = /** @type {any} */ (window);
+  w.__hold = "sky-settings";
+  if (typeof w.__jump !== "function" || !Array.isArray(w.__chapters)) return false;
+  if (!w.__fidelityJumped) {
+    const k = w.__chapters.findIndex((/** @type {{ id: string }} */ c) => c.id === "sky");
+    if (k < 0) return false;
+    w.__fidelityJumped = true;
+    w.__jump(k);
+    return false;
+  }
+  if (w.__held !== "sky-settings") return false;
+  const veil = document.getElementById("orbit-tour-veil");
+  const chrome = document.getElementById("orbit-tour-film");
+  const pill = document.getElementById("orbit-tour-transport");
+  if (!veil || !chrome || !pill) return false;
+  if (getComputedStyle(veil).opacity === "0") return false;
+  if (!chrome.querySelector(".tourfilm-ring")) return false;
+  if (!chrome.querySelector(".tourfilm-callout")) return false;
+  if (!document.querySelector(".p-sheet-layer.open")) return false;
+  if (!pill.classList.contains("top")) return false;
+  return [veil, chrome, pill].every(
+    (el) => !el.getAnimations({ subtree: true }).some((a) => a instanceof CSSTransition),
   );
 }
 
@@ -94,6 +180,8 @@ function tourAtStopThree() {
  *   viewport?: { width: number, height: number },
  *   pack?: string,
  *   tourDue?: boolean,
+ *   availability?: Record<string, unknown> | null,
+ *   claimAccepted?: boolean,
  * }} Screen
  */
 
@@ -254,6 +342,104 @@ const SCREENS = [
     },
     mockupOnly: [".demos", ".sheet"],
   },
+  /*
+   * ══ THE DOOR'S FOUR CARDS AND THE SETUP SCREEN (#914) ═══════════════════
+   *
+   * Composition ruled by the owner on 2026-09-09 (design/owner-decisions.md
+   * §17; docs/plans/m7-local-accounts.md §2.7), with no design round: #906
+   * was closed as superseded. There is therefore no mockup to port against —
+   * these five earn a baseline directly, which is what "owned" means here,
+   * and the drawing they are judged against is the first-household card's,
+   * shared rather than copied (web/src/lib/ringcard.css). If one of them
+   * drifts a padding from `first-run`, that entry's own 0-pixel port against
+   * design/v19/first-run.html is what catches it.
+   *
+   * Each names the availability body that puts its card on the screen, the
+   * same way the goodbye names its reader: the state is stated in the gate,
+   * beside the budget, rather than clicked into being.
+   */
+  {
+    /* UNCLAIMED: one field, one sentence, and no Sign in gate at all. */
+    name: "door-claim",
+    path: "/login",
+    availability: {
+      configured: true, phase: "running", contactAddress: null,
+      claimed: false, methods: { local: true, oidc: true },
+    },
+    settle: () => document.body.classList.contains("lit")
+      && document.body.classList.contains("showform")
+      && Boolean(document.querySelector("#claimcode"))
+      && document.querySelectorAll("#gate").length === 0,
+  },
+  {
+    /*
+     * CREATE MODE, reached the way an operator reaches it: by the link in the
+     * container's own start-up notice. The fragment carries an obviously
+     * fake code, the claim POST is answered as accepted (capture()'s
+     * `claimAccepted`), and the card that appears is the first
+     * administrator's identity — with the one identity-provider line under
+     * the fields, because this body says a provider is configured.
+     *
+     * It also photographs ADR-0022 §1's other half: by the time the shutter
+     * opens the fragment is gone from the address bar, cleared by
+     * `history.replaceState` before the first request went out.
+     */
+    name: "door-identity",
+    path: "/login#claim=ABCD-EFGH-2345",
+    availability: {
+      configured: true, phase: "running", contactAddress: null,
+      claimed: false, methods: { local: true, oidc: true },
+    },
+    claimAccepted: true,
+    settle: () => document.body.classList.contains("lit")
+      && document.body.classList.contains("showform")
+      && Boolean(document.querySelector("#idname"))
+      && location.hash === "",
+  },
+  {
+    /* LOCAL-ONLY, CLAIMED: the ring holds the sign-in card outright. */
+    name: "door-local",
+    path: "/login",
+    availability: {
+      configured: true, phase: "running", contactAddress: null,
+      claimed: true, methods: { local: true, oidc: false, localAccounts: true },
+    },
+    settle: () => document.body.classList.contains("lit")
+      && document.body.classList.contains("showform")
+      && Boolean(document.querySelector("#idemail"))
+      && document.querySelectorAll("#idname").length === 0,
+  },
+  {
+    /*
+     * MIXED MODE: the ratified door, unchanged, plus the one quiet line. The
+     * `login` entry above photographs the same screen WITHOUT the line — its
+     * body carries no methods at all — so the pair is what proves the ruling
+     * was kept: everything but the line is the same pixels.
+     */
+    name: "door-mixed",
+    path: "/login",
+    availability: {
+      configured: true, phase: "running", contactAddress: null,
+      claimed: true, methods: { local: true, oidc: true, localAccounts: true },
+    },
+    settle: () => document.body.classList.contains("lit")
+      && !document.body.classList.contains("showform")
+      && Boolean(document.querySelector("#gate"))
+      && Boolean(document.querySelector("#localopen")),
+  },
+  {
+    /*
+     * THE SETUP SCREEN: the same card in its fourth mode. The token in the
+     * path is an obvious placeholder and is never presented — the screen
+     * draws before anything is asked of the server, and the gate never
+     * presses the button.
+     */
+    name: "setup",
+    path: "/setup/fidelity-gate-placeholder-token",
+    settle: () => document.body.classList.contains("lit")
+      && document.body.classList.contains("showform")
+      && Boolean(document.querySelector("#idagain")),
+  },
   {
     /*
      * THE NEWCOMER'S QUESTION (§15 second pass, ruling 4), arrived at: the
@@ -292,6 +478,13 @@ const SCREENS = [
     mockupOnly: [".foot"],
   },
   {
+    name: "stumble",
+    /* The 500 (#1139): a fixtures-only route that genuinely fails in load. */
+    path: "/kit/stumble",
+    stage: "owned",
+    settle: () => document.querySelectorAll(".stumble .digit").length === 3,
+  },
+  {
     name: "maintenance",
     /* The fixture window has three entries, so this is the state WITH the
        arrow — the drawer closed, as it first renders. The one-entry state,
@@ -322,8 +515,13 @@ const SCREENS = [
        (#430). What selects between them is the viewport below, which is why
        the gate having per-screen frames is what makes one URL possible. */
     path: "/home",
-    stage: "porting",
-    mockup: "/design/family/mobile-home.html",
+    /* Accepted by the owner after the #1120 review round, 2026-09-26: the
+       phone home is done, not still being ported, so `/design/family/
+       mobile-home.html` is now a historical record rather than a live
+       comparison target. Re-cut 2026-09-28 with the owner's approval: each
+       signal its own dashed card (#1142) and no doubled top edge on a
+       group's second card (#1157). */
+    stage: "owned",
     /* The dialect's own frame: `.mpage` is drawn at max-width 400 and the sky
        behind it at a 400×850 viewBox, so that is the sheet of glass to
        compare, not a desk viewport with a narrow column down the middle. */
@@ -335,15 +533,6 @@ const SCREENS = [
        "the galaxy has been placed" condition home settles on. */
     settle: () => Boolean(document.querySelector(".mdial svg"))
       && document.querySelectorAll(".msys").length > 0,
-  },
-  {
-    name: "admin",
-    path: "/admin",
-    stage: "porting",
-    mockup: "/design/family/admin.html",
-    settle: () => Boolean(document.querySelector(".pane .row")),
-    /* The mockup names its own motif for the reviewer; the product does not. */
-    mockupOnly: [".foot"],
   },
   {
     name: "relay",
@@ -401,16 +590,18 @@ const SCREENS = [
      * sides, and both are photographed in it.
      */
     reducedMotion: "reduce",
-    /* Settled once the card is up and the households have been sown. */
+    /* Settled once the card is up, the households have been sown, and the
+       section row (#1058b/#1069, drawn once the household loads) has its
+       buttons — none pressed, as the mockup's own row never is. */
     settle: () =>
       Boolean(document.getElementById("card"))
-      && document.querySelectorAll(".chartback .csys").length > 0,
-    /* The sheet's own scaffolding: the demos rail (re-roll, state switcher),
-       the footer naming the proposal, and the account chrome (back link,
-       menu orb) that every standalone mockup carries to stand on its own but
-       that this route does not render — leaving the form is cancel or
-       submit, not a back link, and the account menu lives elsewhere. */
-    mockupOnly: [".demos", "footer", ".back", ".orb"],
+      && document.querySelectorAll(".chartback .csys").length > 0
+      && document.querySelectorAll("#sections button").length > 0,
+    /* The sheet's own scaffolding: the demos rail (re-roll, state switcher)
+       and the footer naming the proposal. The account chrome the sheet
+       draws was scaffolding too until #1010 -- the route renders it now, so
+       it is compared like everything else. */
+    mockupOnly: [".demos", "footer"],
   },
   {
     /*
@@ -422,6 +613,9 @@ const SCREENS = [
      * that sheet like every other ported screen. Back to PORTING.
      */
     name: "item",
+    /* Baseline re-cut 2026-09-28 with the owner's approval (#1169): the
+       belt's end-caps stand at the screen's middle since f5026445 (§26),
+       and the old baseline still drew them at the top. */
     path: "/item/i-mot",
     stage: "porting",
     mockup: "/design/v19/item-belt.html",
@@ -554,48 +748,97 @@ const SCREENS = [
     mockupOnly: [".demos", "footer"],
   },
   /*
-   * THE FIRST-RUN WALK, ONE SCREEN PER EMPHASIS MODE (#752, acceptance
-   * criterion 4). Both photograph the SAME stop — stop 3, the dial, which is
-   * the one every pack has to carry — and differ only in the pack in force:
+   * THE ONE-TAKE FILM, ONE FRAME PER GROUND (#1098; the walk these replaced
+   * was #752's). Both photograph the SAME held mark — chapter 10's
+   * `others-gran`, on /home: the veil up over the whole sky with one hole
+   * cut round a real neighbouring sun, that sun lifted and ringed, its
+   * callout beside it, and the transport pill parked — and differ only in
+   * the pack in force:
    *
-   *   tour-dim      star-chart, where everything but the dial drops to the
-   *                 pack's faint tier;
-   *   tour-forward  dawn, where nothing dims and the dial is pushed forward
-   *                 by colour instead (owner, 2026-09-03).
+   *   tour-dark     star-chart, the veil graded against a dark ground;
+   *   tour-light    dawn, against a light one, and the tight case: the ring
+   *                 measures 3.03:1 against dawn's --bg where the floor is 3
+   *                 (#866). A pack that moves the ring under that floor
+   *                 moves this frame.
    *
-   * OWNED, not porting, and the reason is not a shortcut: design/v19/tour.html
-   * is a reduced stage — a dial, a one-row manifest and three lane cards drawn
-   * to show the TREATMENT — not a second drawing of home. Photographing the
-   * real /home under the tour against that sheet would measure the difference
-   * between two screens, not drift in the walk. What these two guard is the
-   * emphasis itself, on the real screen, in both modes.
+   * Why this mark and not the dial's. The film has no dim and no forward
+   * mode any more: one veil, the pack's own --bg at veil.js's OPACITY, with
+   * holes, is the whole emphasis in every pack (veil.js). So the
+   * frame worth guarding is the one where that veil is UP over the reader's
+   * real sky with a real hole in it. Chapter 1 rings the dial on an unveiled
+   * sky and chapters 3 and 5 are the same; the only unscrolled /home moment
+   * with the veil up is chapter 10 — chapter 4 has it up too, but over a
+   * page it has scrolled, which is a frame about scroll position, not the
+   * veil. The pill is in every frame; held, it shows its paused face.
+   *
+   * OWNED, not porting, for the reason the walk's pair gave: the ratified
+   * sheets (design/v19/tour/round-5/) are drawn over a synthetic sky to show
+   * the TREATMENT, not a second drawing of home. Photographing the real
+   * /home under the film against them would measure the difference between
+   * two skies, not drift in the film.
    *
    * Both are photographed in the design's reduced-motion state, for the
    * belt's reason (above): home's sky drifts and its rotor turns on clocks
-   * the walk cannot pin, and the walk itself takes seconds to reach stop 3,
-   * so two captures of the same stop otherwise land on different frames of
-   * the drift — measured at 0.8%, eight times the budget. In that state the
-   * sky holds still, the rotor stands, and the emphasis is applied without
-   * its fade, which is exactly the design's own reduced-motion rule
-   * (tour.css: `transition: none`).
+   * the film cannot pin, and the film takes seconds to reach a mark, so two
+   * captures of the same mark otherwise land on different frames of the
+   * drift — measured at 0.8%, eight times the budget. In that state the sky
+   * holds still, the rotor stands, and the film's own motion (the dot's
+   * travel, the lift, the veil's fade) arrives instead of playing, which is
+   * the film's own reduced-motion rule (clock.js: `w()` waits nothing).
    */
   {
-    name: "tour-dim",
+    name: "tour-dark",
     path: "/home",
     stage: "owned",
     pack: "starchart",
     tourDue: true,
     reducedMotion: "reduce",
-    settle: tourAtStopThree,
+    settle: tourHeldAtOthers,
   },
   {
-    name: "tour-forward",
+    name: "tour-light",
     path: "/home",
     stage: "owned",
     pack: "dawn",
     tourDue: true,
     reducedMotion: "reduce",
-    settle: tourAtStopThree,
+    settle: tourHeldAtOthers,
+  },
+  /*
+   * #1083: the pocket cut's own three owned frames, at 390x844 — the same
+   * `others-gran` mark as the desk pair (dark and light, the ring's 3.03:1
+   * case on dawn), plus one frame the desk has no equivalent for: the
+   * transport docked to the top edge while a kit sheet is up (owner's 1a).
+   */
+  {
+    name: "tour-pocket-dark",
+    path: "/home",
+    stage: "owned",
+    pack: "starchart",
+    tourDue: true,
+    reducedMotion: "reduce",
+    viewport: { width: 390, height: 844 },
+    settle: tourHeldAtOthersPocket,
+  },
+  {
+    name: "tour-pocket-light",
+    path: "/home",
+    stage: "owned",
+    pack: "dawn",
+    tourDue: true,
+    reducedMotion: "reduce",
+    viewport: { width: 390, height: 844 },
+    settle: tourHeldAtOthersPocket,
+  },
+  {
+    name: "tour-pocket-docked",
+    path: "/home",
+    stage: "owned",
+    pack: "starchart",
+    tourDue: true,
+    reducedMotion: "reduce",
+    viewport: { width: 390, height: 844 },
+    settle: tourHeldAtSkySettingsPocket,
   },
 ];
 
@@ -658,11 +901,14 @@ function maskRegions(png, rects) {
  *   trim?: ((html: string) => string) | null,
  *   pack?: string,
  *   tourDue?: boolean,
+ *   availability?: Record<string, unknown> | null,
+ *   claimAccepted?: boolean,
  * }} [options]
  */
 async function capture(
   page, url, settle, mockupOnly = [], viewport = null, signedOut = false,
-  { reducedMotion = null, trim = null, pack = "starchart", tourDue = false } = {},
+  { reducedMotion = null, trim = null, pack = "starchart", tourDue = false,
+    availability = null, claimAccepted = false } = {},
 ) {
   /*
    * WHICH SKY. Star chart unless a screen names another, because that is the
@@ -770,13 +1016,46 @@ async function capture(
   await page.route("**/api/health", (/** @type {import("@playwright/test").Route} */ route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: '{"status":"ready"}' }),
   );
+  /*
+   * WHICH FACE THE OPEN DOOR WEARS (#914). The default body deliberately
+   * carries no `claimed` and no `methods`, exactly as it did before M7 — and
+   * `doorModeOf` reads that as the ratified door, which is what keeps the
+   * login, first-run and logout baselines standing across this change rather
+   * than needing a re-cut for a screen that did not move.
+   *
+   * A screen that IS one of the new cards says so instead, as a whole
+   * availability body: the three fields above plus whatever claim and method
+   * facts put the card it is photographing on the screen. Stated per screen
+   * rather than reached by clicking, for the reason the login's own entry
+   * gives — the selection stays in the gate, next to the budget.
+   */
   await page.route("**/api/auth/availability", (/** @type {import("@playwright/test").Route} */ route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: '{"configured":true,"phase":"running","contactAddress":null}',
+      body: JSON.stringify(
+        availability ?? { configured: true, phase: "running", contactAddress: null },
+      ),
     }),
   );
+
+  /*
+   * THE CLAIM THE CREATE CARD STANDS BEHIND. The create card is only ever
+   * reached by presenting a valid code, and the gate's harness has no
+   * unclaimed instance and no code to present. So the one screen that
+   * photographs it says the claim was accepted; every other screen leaves
+   * this route alone and the real one answers. Nothing is claimed and no
+   * cookie is minted — the fulfilment is the whole of it.
+   */
+  if (claimAccepted) {
+    await page.route("**/api/auth/bootstrap/claim", (/** @type {import("@playwright/test").Route} */ route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: '{"claimed":false,"methods":{"local":true,"oidc":true}}',
+      }),
+    );
+  }
 
   /* Most of the family is drawn for a desk. The mobile dialect is drawn for a
      phone, and comparing it at 1600 wide would measure the wrong thing. */
@@ -917,7 +1196,8 @@ async function captureAppOnce(page, screen) {
   if (!appShots.has(screen.name)) {
     const { png } = await capture(
       page, APP + screen.path, screen.settle, [], screen.viewport ?? null, screen.signedOut,
-      { reducedMotion: screen.reducedMotion, pack: screen.pack, tourDue: screen.tourDue });
+      { reducedMotion: screen.reducedMotion, pack: screen.pack, tourDue: screen.tourDue,
+        availability: screen.availability, claimAccepted: screen.claimAccepted });
     appShots.set(screen.name, { width: png.width, height: png.height, data: png.data });
   }
   const shot = appShots.get(screen.name);

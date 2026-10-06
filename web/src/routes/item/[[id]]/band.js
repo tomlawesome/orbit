@@ -1,0 +1,980 @@
+/**
+ * THE BELT'S GEOMETRY AND ORDER (#458) — the pure half of the item screen.
+ *
+ * Every number, law and comment below is the sealed mockup's own
+ * (design/v19/item-belt.html, ratified 2026-08-16). This module is that
+ * engine's arithmetic with the drawing taken out: a ring seen at an angle, the
+ * date law that seats the manifest along it, the jumble, the berth, the
+ * ambient bed's seeded population, and the search. Nothing here touches the
+ * DOM, reads a clock or calls Math.random, so the whole of it is unit-tested
+ * (tests/unit/v19-belt.test.mjs) rather than discovered in a browser — the
+ * placement.js precedent, which is why home's sky can be proved at all.
+ *
+ * The painter that consumes it is belt.behaviour.js; the screen is
+ * +page.svelte. The data it eats comes from $lib/data/belt.js. The one thing
+ * it reaches outside itself for is the seeded RNG (#445), which is still pure.
+ */
+import { seededRng } from "$lib/sky.js";
+
+/**
+ * ==================================================================== *
+ * THE GEOMETRY — a ring seen at an angle, not a rainbow.
+ *
+ * The belt is a circle of radius A lying in its own plane. Two rotations
+ * put it on screen:
+ *   INC   40°  inclination — how far the ring plane is tipped away from us.
+ *              This is what turns the circle into a shallow ellipse
+ *              (minor/major = cos 40° = .766) and what makes the arc across
+ *              the sky a sweep rather than a bow.
+ *   NODE −12°  the node roll — the ring's line of nodes is not level with
+ *              the horizon. This is the asymmetry: it drops the left flank
+ *              and lifts the right, so the two halves of the visible band
+ *              fall by different amounts (~300px left, ~240px right at
+ *              1600×1000) and foreshorten differently.
+ *
+ * The apex — the highest point of the projected ellipse, found analytically,
+ * not assumed — is then translated to the horizontal centre of the viewport
+ * at 35% of its height. Everything else follows from that one pin.
+ *
+ * Ring angle phi runs anticlockwise; on screen INCREASING PHI MOVES LEFT.
+ * Since the manifest runs sooner-left to later-right, a body's angular
+ * offset along the belt DECREASES phi: offset 0 is the first item due.
+ * ==================================================================== */
+
+/* ==================================================================== *
+ * THE VOCABULARY (#624). The shapes this module eats and hands on, said
+ * once here so the painter and the screen can say them too. `BeltRow` and
+ * `BeltDoc` are $lib/data/belt.js's own output, written down rather than
+ * re-derived; `Body` is this module's seat list, and it is a discriminated
+ * union on `kind` because a rock and a paper genuinely carry different
+ * things and the two must never be confused for one another.
+ * ==================================================================== */
+
+/** @typedef {"over" | "soon" | "up" | "ok" | "ended"} Urgency the manifest's words; `ended` is the expiry past its date (#1005) */
+
+/**
+ * The raw workspace item the manifest carries through untouched, so the
+ * command builders (#455) have the record they write against.
+ *
+ * @typedef  {object}  ItemRecord
+ * @property {string}  id
+ * @property {string}  householdId
+ * @property {number}  [version]
+ * @property {string}  title
+ * @property {string}  status
+ * @property {?string} [sectionId]
+ * @property {?string} [subtype]
+ * @property {?string} [scheduleKind]
+ * @property {?string} [dueDate]
+ * @property {?string} [snoozedUntil]
+ * @property {?string} [provider]
+ * @property {?string} [reference]
+ * @property {?string} [notes]
+ * @property {?number} [costMinor]
+ * @property {?boolean} [costIsEstimate]
+ * @property {?string} [currency]
+ * @property {?number} [recurrenceMonths]
+ * @property {?number[]} [reminderDays]
+ */
+
+/**
+ * One paper, as documentRowOf() makes it.
+ *
+ * @typedef  {object}  BeltDoc
+ * @property {string}  id
+ * @property {string}  name      the display name, whole
+ * @property {string}  size      "240 KB"
+ * @property {string}  added     "12 June 2026", or "unknown"
+ * @property {string}  type      "PDF (application/pdf)"
+ * @property {string}  plate     "PDF"
+ * @property {boolean} clean     scanned clean
+ * @property {?string} scan      the scan's own word, when there is one
+ * @property {string}  href      the download the card hands over
+ * @property {string}  previewHref  GET /api/documents/{id}/preview — page one
+ * @property {?string} lifecycle  the server's own state (#1088's reading card)
+ * @property {?string} mediaType  the raw stored kind, e.g. "application/pdf"
+ * @property {boolean} ready      whether the content can be read at all yet
+ * @property {?string} deleteAfter  "9 September 2026", when the file is on the clock
+ * @property {boolean} [staged]   a suggestion's paper (#1145): staged with the mail,
+ *                                no `documents` row and no download, but its page
+ *                                one draws wherever `previewHref` names one (#1155)
+ * @property {?string} [attachmentId]  the staged attachment's own id (null for the
+ *                                     count-only fallback)
+ */
+
+/**
+ * One item, as beltManifestOf() makes it: every string the band and the card
+ * need, already reckoned against the same today the chart uses.
+ *
+ * @typedef  {object}     BeltRow
+ * @property {string}     id
+ * @property {string}     title
+ * @property {?string}    section
+ * @property {string}     kind         inspection / renewal / service / expiry
+ * @property {?string}    provider
+ * @property {?string}    reference
+ * @property {?string}    notes
+ * @property {?{reference?: string, notes?: string}} metadataStatus  why a Tier 1 field is absent (#941)
+ * @property {string}     status
+ * @property {?string}    snoozedUntil
+ * @property {?string}    due
+ * @property {number}     days         days until due; undated rows sort last
+ * @property {Urgency}    urg
+ * @property {string}     t            "T−16d"
+ * @property {string}     when         "29 Aug", or "ends 29 Aug" / "ended 29 Aug" for an expiry (#1005)
+ * @property {string}     longWhen     "29 August 2026"
+ * @property {?number}    cost         minor units
+ * @property {boolean}    costIsEstimate
+ * @property {string}     currency
+ * @property {?number}    months       the orbital period
+ * @property {number[]}   remind
+ * @property {BeltDoc[]}  docs
+ * @property {ItemRecord} item         the raw record the commands write against
+ * @property {?object}    [suggestion] set on a mail-in suggestion's seat (#1145): the
+ *                                     receipt's own view, which the card's form reads
+ */
+
+/**
+ * What every body in the seat list carries, rock or paper alike.
+ *
+ * @typedef  {object}     BodyCommon
+ * @property {string}     id
+ * @property {BeltRow}    item     the row this body belongs to
+ * @property {number}     itemIdx  its index in the manifest
+ * @property {number}     off      its angular seat along the band
+ * @property {string}     label    the caption's first line
+ * @property {string}     sub      the caption's second line
+ * @property {string}     tone     the CSS variable this body wears
+ * @property {number}     r        its radius in px
+ * @property {number}     sweep    the neighbourhood it clears of rubble
+ * @property {number}     seed     its silhouette's own seed
+ * @property {BeltDoc[]}  docs     an item's papers; a paper carries none
+ * @property {number}     jp       the seeded jumble: along the band...
+ * @property {number}     jr       ...off the ring radius...
+ * @property {number}     jh       ...and out of the ring plane
+ * @property {SVGElement} [mark]  the painter's own handle on this seat's
+ *                                mark; nothing pure ever reads it
+ */
+
+/**
+ * @typedef {BodyCommon & { kind: "item", urg: Urgency, days: number,
+ *                          t: string, when: string, longWhen: string }} ItemBody
+ * @typedef {BodyCommon & { kind: "doc", doc: BeltDoc }} DocBody
+ * @typedef {ItemBody | DocBody} Body
+ */
+
+/**
+ * A point on the screen, with how far toward the viewer it leans.
+ *
+ * @typedef  {object} Projected
+ * @property {number} x
+ * @property {number} y
+ * @property {number} d  toward the viewer; the band's depth cue
+ */
+
+/**
+ * Everything the sky's size decides — geometryOf()'s whole answer.
+ *
+ * @typedef  {object} Geometry
+ * @property {number} W          the viewport's width
+ * @property {number} H          ...and its height
+ * @property {number} A          the ring's radius
+ * @property {number} APEX_Y     where the apex hangs
+ * @property {number} CX         the ring's projected centre
+ * @property {number} CY
+ * @property {number} PHI_APEX   the ring angle that lands on the apex
+ * @property {number} PHI_L      the arc the screen can see, left...
+ * @property {number} PHI_R      ...and right
+ * @property {number} DIP_L      how far the band falls 300px either side
+ * @property {number} DIP_R
+ * @property {number} GAP_SCALE  the squeeze a narrow sky takes
+ * @property {boolean} [pocket]  the phone's belt (#1072): see THE POCKET'S BELT
+ * @property {(phi: number, rho: number, hh: number) => Projected} project
+ */
+
+/**
+ * Where a body actually is at this instant of the roll.
+ *
+ * @typedef  {object} Seat
+ * @property {number} phi
+ * @property {number} rho
+ * @property {number} h
+ */
+
+/**
+ * One inert body of the ambient bed. Held in BAND coordinates: `phi` is the
+ * ring angle it was born at, so the drift and the roll both apply to it at
+ * its own `rate` for the rest of its life.
+ *
+ * @typedef  {object} Rubble
+ * @property {number} rho
+ * @property {number} h
+ * @property {number} size
+ * @property {number} tone   an index into the painter's three tones
+ * @property {number} alpha
+ * @property {number} rate   its share of the drift — Keplerian shear
+ * @property {?[number, number][]} poly  its silhouette, if it is big enough
+ * @property {number} phi
+ */
+
+export const RAD = Math.PI / 180;
+export const INC = 40 * RAD;
+export const NODE = -12 * RAD;
+export const COS_I = Math.cos(INC), SIN_I = Math.sin(INC);
+const COS_N = Math.cos(NODE), SIN_N = Math.sin(NODE);
+export const A_FRAC = 0.74, A_MIN = 1150;   /* ring radius against the viewport */
+export const APEX_FRAC = 0.35;              /* where the apex hangs in the sky   */
+export const R_ITEM = 25;                   /* an item's radius                  */
+export const R_DOC = 17;                    /* a document's — smaller, on purpose */
+export const RADIAL = 0.19;                 /* the band's radial half-spread     */
+export const HFRAC = 0.066;                 /* its out-of-plane half-thickness   */
+export const SWEEP = 74;                    /* the neighbourhood an item clears  */
+export const SWEEP_DOC = 52;                /* a document's smaller clearing     */
+export const DRIFT = 0.0125;                /* rad/s along the ring, leftward    */
+export const GLIDE = 420;                   /* the roll, unchanged from v1/v2    */
+
+/* ---- the spacing law -------------------------------------------------
+   Position along the band is the item's DATE. Consecutive items are set
+   apart by an angle that grows with the gap between their due dates, from a
+   floor (below which two labels would touch) to a ceiling (beyond which a
+   five-month wait would push the next item off the world). The growth is
+   e-folded at 45 days: a fortnight apart reads noticeably tighter than a
+   season apart, but the whole manifest still fits on one ring. */
+export const MIN_GAP = 11.5 * RAD;
+export const MAX_GAP = 17.5 * RAD;
+export const GAP_EFOLD = 45;                /* days, the gap law's scale         */
+/* A document's seat is cut out of the space BETWEEN its item and the next
+   one along — 6° of ring, well inside the floor — so putting documents in
+   the band can never reorder the manifest or change what "next" means. */
+export const DOC_OFF = 6.0 * RAD;
+
+/* ---- the card's berth ------------------------------------------------
+   The centred body is not a rock, it is a ~400px card, so it has swept a
+   wider clearing than its neighbours: angles are pushed away from the apex
+   by a smooth ODD function, which stretches the seats flanking the card and
+   leaves everything further out merely shifted. warp(0) === 0 exactly, so
+   the centred body still lands on the apex pin to the pixel, and because
+   warp is smooth and monotonic the roll never jumps and the date order can
+   never be disturbed.
+
+   The berth WIDENS when the centred item has papers, because the papers have
+   to sit in it: the neighbours stand off from ~295px to ~480px, and the
+   documents take the ground they leave, at ~285px — clear of the card's edge
+   on one side and of the neighbour's label on the other. It widens across
+   the roll itself, so opening an item is a visible act: the belt makes room
+   and the papers come out. */
+export const BERTH_NARROW = 0.075, BERTH_WIDE = 0.28, BERTH_K = 0.16;
+/** @type {(berth: number) => (u: number) => number} */
+export const warpOf = (berth) => (u) => u + berth * Math.tanh(u / BERTH_K);
+
+/* ---- the jumble ------------------------------------------------------
+   "They don't form an orderly, linear line, they're jumbled around a
+   little" (owner). Each body carries a seeded throw: off the ring radius,
+   out of the ring plane, and a little along the band. The along-band throw
+   is a tenth of the minimum gap, which cannot reorder anything and cannot
+   close two labels to touching; the other two scatter the bodies through the
+   band's thickness. All three ease to zero at the apex. */
+export const J_PHI = 0.10;                  /* × the minimum gap                 */
+export const J_RHO = 0.100;                 /* × A, off the ring radius          */
+export const J_H = 0.038;                   /* × A, out of the ring plane        */
+export const J_FADE = 0.62;                 /* × the min gap: the settling zone  */
+
+/* The screen window's own overhang, either side, in radians of ring: a body
+   is alive a little past the edge so nothing is seen to pop. */
+export const BAND_MARGIN = 0.16;
+
+/** The ambient bed's seed, and the members' two silhouette/jumble seeds. */
+export const AMBIENT_SEED = 19170812;
+export const ROCK_SEED = 7717, ROCK_STEP = 913;
+export const DOC_SEED = 4231, DOC_ITEM_STEP = 617, DOC_STEP = 149;
+export const JUMBLE_SEED = 1013, JUMBLE_STEP = 7919;
+
+/* A Lehmer stream. Two of them in the screen: one fixed seed for the members'
+   silhouettes and their jumble (so a rock is the same rock, in the same
+   place, every load — fixture truth), and one that runs for the ambient band,
+   never rewound between respawns, which is exactly why the band can never
+   repeat itself.
+
+   It IS $lib/sky.js's seededRng — same Park–Miller constants, and every seed
+   in this screen is a small positive integer, so the shared one's guard on a
+   zero or out-of-range seed never fires and the streams are identical (#445).
+   Aliased to the belt's own name because the whole screen reads `lehmer`,
+   and renaming every call site is not what this issue is. */
+export const lehmer = seededRng;
+/** @type {(x: number) => number} */
+export const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+
+/* ==================================================================== *
+ * The projection and the one pin.
+ * ==================================================================== */
+
+/**
+ * The ring's own projection, given a centre offset.
+ *
+ * @param   {number} cx
+ * @param   {number} cy
+ * @param   {number} phi  the ring angle, anticlockwise
+ * @param   {number} rho  the radius this body rides at
+ * @param   {number} hh   its height out of the ring plane
+ * @returns {Projected}
+ */
+function projectAt(cx, cy, phi, rho, hh) {
+  const s = Math.sin(phi), c = Math.cos(phi);
+  const u = rho * c;                          /* along the node line       */
+  const v = rho * s * COS_I + hh * SIN_I;     /* screen-up, foreshortened  */
+  const d = -rho * s * SIN_I + hh * COS_I;    /* toward the viewer         */
+  return { x: cx + u * COS_N - v * SIN_N, y: cy - (u * SIN_N + v * COS_N), d };
+}
+
+/* x(phi) falls monotonically across the visible arc, so a walk-and-refine
+   is exact enough and cannot be tripped by the ellipse's turning points. */
+/**
+ * @param   {Geometry} geom
+ * @param   {number}   targetX  the screen x to solve for
+ * @param   {number}   dir      which way round the ring to walk
+ * @returns {number}            the ring angle that lands on it
+ */
+export function phiAtX(geom, targetX, dir) {
+  let phi = geom.PHI_APEX, step = 0.02 * dir, last = geom.project(phi, geom.A, 0).x;
+  for (let i = 0; i < 400; i++) {
+    const next = phi + step, x = geom.project(next, geom.A, 0).x;
+    if ((dir < 0 && x >= targetX) || (dir > 0 && x <= targetX)) {
+      const t = (targetX - last) / (x - last);
+      return phi + step * Math.max(0, Math.min(1, t));
+    }
+    if ((dir < 0 && x < last) || (dir > 0 && x > last)) return phi; /* turned */
+    phi = next; last = x;
+  }
+  return phi;
+}
+
+/**
+ * Everything the sky's size decides: the ring radius, the apex pin, the arc
+ * the screen can see, how far the band falls either side of the apex, and the
+ * squeeze the date law takes on a narrow viewport.
+ *
+ * @param   {number} width
+ * @param   {number} height
+ * @param   {{ pocket?: boolean }} [options]  the phone's belt instead (#1072)
+ * @returns {Geometry}
+ */
+export function geometryOf(width, height, { pocket = false } = {}) {
+  if (pocket) return pocketGeometryOf(width, height);
+  const W = width, H = height;
+  const A = Math.max(A_MIN, W * A_FRAC);
+  const APEX_Y = Math.round(H * APEX_FRAC);
+  /* d/dphi of the projected height, solved: the true apex of the tilted
+     ellipse, which is NOT the top of the untilted one. */
+  let PHI_APEX = Math.atan2(COS_I * COS_N, SIN_N);
+  if (PHI_APEX < 0) PHI_APEX += Math.PI * 2;
+  const p = projectAt(0, 0, PHI_APEX, A, 0);
+  const CX = W / 2 - p.x, CY = APEX_Y - p.y;
+
+  /** @type {Geometry} */
+  const geom = {
+    W, H, A, APEX_Y, CX, CY, PHI_APEX,
+    PHI_L: 0, PHI_R: 0, DIP_L: 0, DIP_R: 0, GAP_SCALE: 1,
+    project: (phi, rho, hh) => projectAt(CX, CY, phi, rho, hh),
+  };
+  geom.PHI_R = phiAtX(geom, W + 200, -1);
+  geom.PHI_L = phiAtX(geom, -200, +1);
+  /* The gaps are real angles of ring, but a narrow sky cannot hold two of
+     them either side of the apex once the card's widest berth is added: on
+     one, the belt sits its items closer together rather than rolling them
+     off the world. The date law survives the squeeze — every gap scales
+     together, so clusters stay clusters. */
+  const wide = warpOf(BERTH_WIDE);
+  for (let k = 0; k < 24; k++) {
+    const one = wide(MIN_GAP * geom.GAP_SCALE);
+    if (geom.project(PHI_APEX - one, A, 0).x <= W - 86 &&
+        geom.project(PHI_APEX + one, A, 0).x >= 86) break;
+    geom.GAP_SCALE -= 0.04;
+    if (geom.GAP_SCALE < 0.55) { geom.GAP_SCALE = 0.55; break; }
+  }
+  /* How far the band falls 300px either side of the apex: the card slides
+     ALONG the band when it leaves, so it has to know the dip. */
+  geom.DIP_L = geom.project(phiAtX(geom, W / 2 - 300, +1), A, 0).y - APEX_Y;
+  geom.DIP_R = geom.project(phiAtX(geom, W / 2 + 300, -1), A, 0).y - APEX_Y;
+  return geom;
+}
+
+/* ==================================================================== *
+ * THE POCKET'S BELT (#1072, design/v19/phone-vision/proposal.md §2.3, drawn
+ * in design/v19/item-phone/round-1 and accepted "stands with changes").
+ *
+ * On a phone the desk's ring cannot be shown whole: its radius floors at
+ * A_MIN, so a 390px sky sees a hugely magnified band with the neighbours and
+ * papers far off the screen. The pocket brings the viewer CLOSER instead —
+ * the same band, the same rocks and papers, the same order — as a low arc
+ * across the top of the page with the card hanging beneath it:
+ *
+ *   · the arc falls POCKET_FALL px from the crest to the screen's edges;
+ *   · seats are placed by RANK, as fractions of the width, so 360 and 390
+ *     are one drawing: the centred item's papers at ±0.20, the neighbours
+ *     at ±0.39, the next-but-ones at ±0.58 (half off the edge, decorative);
+ *   · at most POCKET_RIDE papers ride; the rest pack into one "+N" clump at
+ *     the crest, which the painter draws and the screen lists in a sheet.
+ *
+ * The date law's spacing is the desk's: on a phone the belt shows three
+ * items at a time and the gap between them is the step, not the calendar.
+ * The ORDER is untouched, and so is everything the order drives — stepping,
+ * the search, the end-caps.
+ *
+ * It is the same ring arithmetic underneath: a seat is still a ring angle
+ * with a radius and a height, so the painter, the ambient bed and its drift
+ * run unchanged; only the projection from ring to screen is the pocket's.
+ * ==================================================================== */
+export const POCKET_CREST = 165;            /* the apex's y on the band plate    */
+export const POCKET_FALL = 95;              /* the arc's fall, crest to edge     */
+export const POCKET_A = 320;                /* thickness scale: ~120px of rubble */
+export const POCKET_PLATE = 360;            /* the band plate's height           */
+export const POCKET_NEAR = 0.39;            /* the neighbours, × the width       */
+export const POCKET_FAR = 0.19;             /* each step past them, × the width  */
+export const POCKET_PAPER = 0.20;           /* the centred item's papers         */
+export const POCKET_RIDE = 2;               /* papers that ride; the rest clump  */
+export const POCKET_R_ITEM = 17, POCKET_R_DOC = 12;
+export const POCKET_SWEEP = 44, POCKET_SWEEP_DOC = 34;
+/* The jumble, softened: three bodies share a 390px arc, so a full throw would
+   put a neighbour's label into its end-cap. */
+export const POCKET_JUMBLE = 0.35;
+/* The ambient bed's density on the pocket's plate (the desk's 2100 is for a
+   1600px sky and a band four times as thick). */
+export const POCKET_RUBBLE = 900;
+/* The pocket's drift (owner, 2026-09-26: "way too fast" on a phone). The
+   desk's DRIFT is an angle, and on the pocket one MIN_GAP of angle spans
+   0.39 of the width, so the same rate crossed a phone about 2.4 times faster,
+   as a share of the screen, than the desk. A quarter of it. */
+export const POCKET_DRIFT = DRIFT / 4;
+
+/**
+ * Where a seat `u` steps from the apex lands across the width: linear out to
+ * the neighbours, then POCKET_FAR per step, so the next-but-ones sit half off
+ * the edge rather than a whole screen away.
+ *
+ * @param   {number} u  steps from the apex; negative is sooner (left)
+ * @param   {number} W  the width
+ * @returns {number}    the screen x
+ */
+export function pocketXOf(u, W) {
+  const a = Math.abs(u);
+  const f = a <= 1 ? POCKET_NEAR * a : POCKET_NEAR + POCKET_FAR * (a - 1);
+  return W / 2 + Math.sign(u) * f * W;
+}
+/** The step a paper sits at, so it lands at ±POCKET_PAPER of the width. */
+export const POCKET_PAPER_STEP = POCKET_PAPER / POCKET_NEAR;
+
+/**
+ * The pocket's geometry: a ring angle maps to a screen x by rank (one item
+ * step is MIN_GAP of ring), the arc through the crest falls as a parabola to
+ * the edges, and a body's radius and height lift it off the arc along the
+ * arc's own normal, so the band keeps its thickness as it bends.
+ *
+ * @param   {number} W
+ * @param   {number} H
+ * @returns {Geometry}
+ */
+function pocketGeometryOf(W, H) {
+  const A = POCKET_A, APEX_Y = POCKET_CREST, half = W / 2;
+  let PHI_APEX = Math.atan2(COS_I * COS_N, SIN_N);
+  if (PHI_APEX < 0) PHI_APEX += Math.PI * 2;
+  /** @type {(phi: number, rho: number, hh: number) => Projected} */
+  const project = (phi, rho, hh) => {
+    const x0 = pocketXOf((PHI_APEX - phi) / MIN_GAP, W);
+    const t = (x0 - half) / half;
+    const slope = (2 * POCKET_FALL * t) / half;       /* dy/dx along the arc */
+    const n = Math.hypot(1, slope);
+    const r = rho - A;
+    const v = r * COS_I + hh * SIN_I;                 /* off the arc, outward */
+    /* depth: as on the desk, the arc's ends lean toward you */
+    const d = -r * SIN_I + hh * COS_I + A * 0.25 * (Math.min(Math.abs(t), 1.4) - 0.5);
+    return { x: x0 + (v * slope) / n, y: APEX_Y + POCKET_FALL * t * t - v / n, d };
+  };
+  /** @type {Geometry} */
+  const geom = {
+    W, H, A, APEX_Y, CX: half, CY: APEX_Y, PHI_APEX,
+    PHI_L: 0, PHI_R: 0, DIP_L: 0, DIP_R: 0, GAP_SCALE: 1, pocket: true, project,
+  };
+  geom.PHI_R = phiAtX(geom, W + 200, -1);
+  geom.PHI_L = phiAtX(geom, -200, +1);
+  return geom;
+}
+
+/**
+ * The papers that ride beside an item on the pocket, and how many clump.
+ *
+ * @param   {number} n  how many papers the item carries
+ * @returns {{ ride: number, clump: number }}
+ */
+export const pocketPapersOf = (n) =>
+  ({ ride: Math.min(n, POCKET_RIDE), clump: n > POCKET_RIDE ? n - POCKET_RIDE : 0 });
+
+/**
+ * The card's own width: it is a body in the belt, so it has to fit BETWEEN
+ * its neighbours — the berth its own bulk has cleared, less a clear margin
+ * for the next body along. Measured at the NARROW berth and the tightest
+ * possible gap, so the card is the same card whatever is centred; it must not
+ * breathe every time an item happens to carry paper.
+ *
+ * @param   {Geometry} geom
+ * @returns {number}   the card's width in px
+ */
+export function cardWidthOf(geom) {
+  const narrow = warpOf(BERTH_NARROW);
+  const gap = Math.abs(
+    geom.project(geom.PHI_APEX - narrow(MIN_GAP * geom.GAP_SCALE), geom.A, 0).x - geom.W / 2,
+  );
+  return Math.max(340, Math.min(480, 2 * (gap - 104), geom.W - 56));
+}
+
+/* ==================================================================== *
+ * THE ORDER OF THE BELT — the whole point of v4.
+ *
+ * `bodies` is the flat seat list, sorted by `off` — the angular distance
+ * along the band from the first item due. Item offsets are a running sum of
+ * gaps, each gap a function of the days between two consecutive due dates:
+ *
+ *   · the sequence is the manifest's own linear order, exactly;
+ *   · a cluster in the calendar is a cluster in the band;
+ *   · nothing ever falls below MIN_GAP, so no two labels can touch.
+ *
+ * Document seats hang off their item at ±DOC_OFF, inside that gap. They
+ * exist always but are only SHOWN when their item is the centred one:
+ * `bloom` per item, 0 to 1. So the manifest's spacing is never disturbed by a
+ * document, and no rebuild ever happens mid-roll — opening an item is an
+ * opacity and a widening berth, not a relayout.
+ *
+ * The belt rolls by `roll`; seat i sits at PHI_APEX − warp(off[i] − roll).
+ * ==================================================================== */
+
+/**
+ * The date law: one running sum of gaps, in the manifest's own order.
+ *
+ * @param   {BeltRow[]} manifest
+ * @param   {number}    gapScale
+ * @returns {number[]}  one angular seat per item
+ */
+export function itemOffsetsOf(manifest, gapScale) {
+  /** @type {number[]} */
+  const offsets = [];
+  let acc = 0;
+  manifest.forEach((row, i) => {
+    if (i) {
+      const gapDays = row.days - manifest[i - 1].days;
+      const t = 1 - Math.exp(-Math.max(0, gapDays) / GAP_EFOLD);
+      acc += (MIN_GAP + (MAX_GAP - MIN_GAP) * t) * gapScale;
+    }
+    offsets.push(acc);
+  });
+  return offsets;
+}
+
+/** v2's split: half the papers sit before the item, half after. Never wider
+ *  than two-thirds of the tightest item gap, so they stay in the berth.
+ *
+ * @param   {number}   n  how many papers this item carries
+ * @param   {number}   gapScale
+ * @returns {number[]} each paper's offset from its item, in radians of ring */
+export function docSpread(n, gapScale) {
+  const cut = Math.ceil(n / 2), out = [];
+  for (let j = 0; j < n; j++) {
+    const side = j < cut ? -1 : 1;
+    const rank = j < cut ? cut - j : j - cut + 1;
+    out.push(side * Math.min(rank * DOC_OFF, MIN_GAP * gapScale * 0.66));
+  }
+  return out;
+}
+
+/* A caption in the band is an identifier, not the record: a long filename is
+   elided in the middle so its extension survives, because ".pdf" is half of
+   what tells you what the thing is. The card carries the whole name. */
+/**
+ * @param   {string} s
+ * @returns {string}
+ */
+export function shortName(s) {
+  return s.length <= 21 ? s : s.slice(0, 11) + "…" + s.slice(-8);
+}
+
+/** @param {string} text @param {number} n */
+export function clip(text, n) {
+  return text.length <= n ? text : text.slice(0, n - 1).trimEnd() + "…";
+}
+
+/* The pocket's two-line caption for a document (#1174, chapter 8's fault C):
+   a filename must never break mid-word. The first line reaches for the
+   extension — "service-invoice-2026" / ".pdf" — carrying the whole stem
+   across if the extension itself is short enough to ride the second line;
+   failing that, it breaks after the latest hyphen, underscore or space the
+   first line can reach; only a single unbroken run longer than the line is
+   ever hard-cut. */
+/** @param {string} name @returns {string[]} at most two lines */
+export function paperLines(name) {
+  if (name.length <= 17) return [name];
+  const dot = name.lastIndexOf(".");
+  if (dot > 0 && dot < name.length - 1 && name.length - dot <= 17) {
+    return [name.slice(0, dot), name.slice(dot)];
+  }
+  const breakAt = Math.max(
+    name.lastIndexOf(" ", 17), name.lastIndexOf("-", 17), name.lastIndexOf("_", 17),
+  );
+  if (breakAt > 6) {
+    const atSpace = name[breakAt] === " ";
+    const head = name.slice(0, atSpace ? breakAt : breakAt + 1).trimEnd();
+    return [head, clip(name.slice(breakAt + 1).trimStart(), 17)];
+  }
+  return [name.slice(0, 17), clip(name.slice(17), 17)];
+}
+
+const BAND_VAR = {
+  over: "var(--overdue)", soon: "var(--warm)",
+  up: "var(--upcoming)", ok: "var(--ok)",
+  /* #1005: an ended one-off wears the quiet ink tone, never the alarm. */
+  ended: "var(--ink-mid)",
+};
+
+/**
+ * The flat seat list: every item in date order, each item's documents seated
+ * in the space between it and its neighbour, all of them thrown their seeded
+ * jumble. `manifest` is $lib/data/belt.js's shape.
+ *
+ * The three jumble throws are seated at zero in the literals below and given
+ * their real values in the pass underneath, which is where they have always
+ * been reckoned: the throw depends on a body's place in the SORTED list, so
+ * it cannot be known while the list is still being built.
+ *
+ * @param   {BeltRow[]} manifest
+ * @param   {number}    gapScale
+ * @param   {{ pocket?: boolean }} [options]  seat for the phone (#1072)
+ * @returns {Body[]}    the flat seat list, sorted by `off`
+ */
+export function bodiesOf(manifest, gapScale, { pocket = false } = {}) {
+  /** @type {Body[]} */
+  const bodies = [];
+  /* #1072: the pocket seats by rank, one MIN_GAP a step, and only the papers
+     that ride take a seat — the rest are the clump, which is not a body. */
+  const itemOff = pocket ? manifest.map((_, i) => i * MIN_GAP) : itemOffsetsOf(manifest, gapScale);
+
+  manifest.forEach((row, i) => {
+    const docs = row.docs ?? [];
+    bodies.push({
+      kind: "item", id: row.id, item: row, itemIdx: i, off: itemOff[i],
+      label: row.title, sub: `${row.t} · ${row.when}`,
+      /* #1145: a suggestion's seat wears the accent, the tone of "not yet
+         accepted" on the dial and the manifest (CON-3's hollow body), never
+         an urgency -- nothing is owed on a thing that is not in orbit. */
+      tone: row.suggestion ? "var(--accent)" : (BAND_VAR[row.urg] ?? BAND_VAR.ok), urg: row.urg, days: row.days,
+      r: pocket ? POCKET_R_ITEM : R_ITEM, sweep: pocket ? POCKET_SWEEP : SWEEP,
+      seed: ROCK_SEED + i * ROCK_STEP,
+      t: row.t, when: row.when, longWhen: row.longWhen,
+      docs,
+      jp: 0, jr: 0, jh: 0,
+    });
+    const spread = pocket
+      ? [-1, 1].slice(0, pocketPapersOf(docs.length).ride).map((side) => side * POCKET_PAPER_STEP * MIN_GAP)
+      : docSpread(docs.length, gapScale);
+    spread.forEach((d, j) => {
+      bodies.push({
+        kind: "doc", id: docs[j].id, doc: docs[j], item: row, itemIdx: i,
+        off: itemOff[i] + d,
+        label: pocket ? docs[j].name : shortName(docs[j].name), sub: docs[j].size,
+        tone: "var(--paper)", r: pocket ? POCKET_R_DOC : R_DOC,
+        sweep: pocket ? POCKET_SWEEP_DOC : SWEEP_DOC,
+        seed: DOC_SEED + i * DOC_ITEM_STEP + j * DOC_STEP,
+        docs: [],
+        jp: 0, jr: 0, jh: 0,
+      });
+    });
+  });
+  bodies.sort((a, b) => a.off - b.off);
+
+  bodies.forEach((b, i) => {
+    const j = lehmer(JUMBLE_SEED + i * JUMBLE_STEP);   /* this body's own jumble */
+    const soft = b.kind === "doc" ? 0.55 : 1;          /* papers ride tighter in */
+    /* The throw, in units: along-band, radial, out-of-plane. Flat, not
+       peaked — a peaked throw leaves most of the bodies sitting on the very
+       line it was supposed to break them off, which is the whole complaint. */
+    b.jp = (j() * 2 - 1) * J_PHI * soft;
+    b.jr = (j() * 2 - 1) * J_RHO * soft;
+    b.jh = (j() * 2 - 1) * J_H * soft;
+  });
+  return bodies;
+}
+
+/**
+ * Where a body actually is at this instant: its seat, plus its jumble, with
+ * the jumble eased to nothing as it comes into the apex so the card seats on
+ * the pin exactly.
+ *
+ * @param   {Body[]}   bodies
+ * @param   {number}   i        which seat
+ * @param   {object}   at
+ * @param   {number}   at.roll  where the belt is turned to
+ * @param   {number}   at.berth how wide the card's clearing is
+ * @param   {Geometry} at.geom
+ * @returns {Seat}
+ */
+export function seatOf(bodies, i, { roll, berth, geom }) {
+  const b = bodies[i];
+  const u = b.off - roll;
+  /* #1072: the pocket seats by rank, so there is no berth to widen. */
+  const phi0 = geom.PHI_APEX - (geom.pocket ? u : warpOf(berth)(u));
+  const f = clamp01(Math.abs(phi0 - geom.PHI_APEX) / (MIN_GAP * geom.GAP_SCALE * J_FADE));
+  const s = f * f * (3 - 2 * f);               /* smoothstep; 0 at the apex */
+  if (geom.pocket) {
+    const k = s * POCKET_JUMBLE;
+    return { phi: phi0 + b.jp * MIN_GAP * k, rho: geom.A * (1 + b.jr * k), h: geom.A * b.jh * k };
+  }
+  return {
+    phi: phi0 + b.jp * MIN_GAP * geom.GAP_SCALE * s,
+    rho: geom.A * (1 + b.jr * s),
+    h: geom.A * b.jh * s,
+  };
+}
+
+/** An item's papers are out when that item is centred, or when one of its own
+ *  papers is. Nothing else opens them.
+ *
+ * @param   {Body[]}   bodies
+ * @param   {number}   sel        which seat is at the apex
+ * @param   {number}   itemCount  how long the manifest is
+ * @returns {number[]} 0 or 1 per item */
+export function bloomTargetsOf(bodies, sel, itemCount) {
+  /** @type {number[]} */
+  const t = new Array(itemCount).fill(0);
+  const s = bodies[sel];
+  if (s && (s.item?.docs ?? []).length) t[s.itemIdx] = 1;
+  return t;
+}
+/** @type {(bodies: Body[], sel: number, itemCount: number) => number} */
+export const berthFor = (bodies, sel, itemCount) =>
+  bloomTargetsOf(bodies, sel, itemCount).some((v) => v) ? BERTH_WIDE : BERTH_NARROW;
+
+/* ==================================================================== *
+ * The ambient band's population — v2's, unchanged.
+ *
+ * Bodies are scattered in three dimensions of the ring, not along a line:
+ *   phi   where round the belt
+ *   rho   A · (1 ± .19), triangular — dense at the ring radius, frayed out
+ *   h     ±.066·A out of the ring plane, triangular
+ * and each carries its own size, tone and silhouette. Sizes are cubed so
+ * the population is overwhelmingly dust with a scattering of real rubble:
+ * that ratio, not the count, is what makes a belt look like a belt.
+ *
+ * Drift: leftward along the ring for ever. Inner bodies run faster than
+ * outer ones (Keplerian shear, softened to a ±15% spread so the band shears
+ * rather than smears), and near bodies faster than far ones. A body that
+ * leaves the left edge does not come back: it is REBUILT from the running
+ * stream at the far end with fresh radius, height, size and shape. The
+ * band you are shown one minute is not the band you were shown before.
+ *
+ * WHERE IT IS SOWN. The bed is sown across THE WHOLE ARC THE CAMERA CAN EVER
+ * REACH: the screen window, plus the roll span the seats themselves produce
+ * (sooner-most seat to later-most seat, measured off the built manifest, not
+ * guessed at), so every roll looks out on ground that was already sown.
+ *
+ * A body is held in BAND COORDINATES — where it sits when the belt is rolled
+ * to its sooner end — because that is the one frame the roll cannot move.
+ * Its own arc is [PHI_R − M − REACH·rate, PHI_L + M]: a fast body has to
+ * start further out to still be in the sky at the later end, and because
+ * every rate class is sown uniformly across its own arc, the density the
+ * screen sees is the same at every roll.
+ *
+ * These are inert decor and nothing else. They are also the reason a
+ * household with three items still has a belt (owner, confirmed): the real
+ * members stand proud of an ambient bed that is always there.
+ * ==================================================================== */
+
+/** The roll's reach, off the seats: base is the sooner-most seat, reach the
+ *  angle from there to the later-most, documents included, since a paper can
+ *  be centred too.
+ *
+ * @param   {Body[]} bodies
+ * @returns {{ base: number, reach: number }} */
+export function rollRangeOf(bodies) {
+  if (!bodies.length) return { base: 0, reach: 0 };
+  let lo = bodies[0].off, hi = bodies[0].off;
+  for (const b of bodies) { if (b.off < lo) lo = b.off; if (b.off > hi) hi = b.off; }
+  return { base: lo, reach: hi - lo };
+}
+
+/**
+ * u is where along this body's OWN sown arc it lands, 0 at the far end the
+ * band feeds from and 1 at the edge it retires over. Respawn passes 0.
+ *
+ * `rk` is taken as a Partial so a virgin `{}` and a body being rebuilt are
+ * the same call. Every field of a Rubble is written below before the object
+ * leaves, which is what the returned type says.
+ *
+ * @param   {Partial<Rubble>} rk
+ * @param   {number}   u
+ * @param   {object}   sky
+ * @param   {() => number} sky.rng    the running stream; never rewound
+ * @param   {Geometry} sky.geom
+ * @param   {number}   sky.base       the sooner-most seat
+ * @param   {number}   sky.reach      the angle from there to the later-most
+ * @param   {number}   sky.drift      how far the band has drifted
+ * @returns {Rubble}
+ */
+export function spawnInto(rk, u, { rng, geom, base, reach, drift }) {
+  const r = rng;
+  /* A belt has a core and a fray, not an even slab: radius and height come
+     off a peaked distribution, and one body in seven is a stray thrown well
+     outside it. That is what stops the population reading as a rectangle of
+     confetti and lets the sweep of the ring still be seen through it. */
+  const stray = r() < 0.14 ? 1.75 : 1;
+  rk.rho = geom.A * (1 + ((r() + r() + r() - 1.5) / 1.5) * RADIAL * stray);
+  rk.h = geom.A * ((r() + r() + r() - 1.5) / 1.5) * HFRAC * stray;
+  const g = r();
+  rk.size = 0.42 + g * g * g * 7.6;
+  rk.tone = r() < 0.17 ? 1 : 0;               /* 1 = accent-lit, 0 = ink   */
+  rk.alpha = (0.2 + r() * 0.55) / (stray > 1 ? 1.5 : 1);
+  rk.rate = Math.pow(geom.A / rk.rho, 0.9) * (0.94 + (rk.h / (geom.A * HFRAC)) * 0.12);
+  rk.poly = null;
+  if (rk.size > 2.3) {                        /* big enough to have a shape */
+    const n = 7;
+    /** @type {[number, number][]} */
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + r() * 0.5;
+      const rr = 0.72 + r() * 0.5;
+      pts.push([Math.cos(a) * rr, Math.sin(a) * rr * 0.9]);
+    }
+    rk.poly = pts;
+  }
+  /* Sown across the arc THIS body can ever be seen on, then stored as the
+     ring angle it was BORN at, so the running drift and the belt's roll both
+     apply to it at its own rate for the rest of its life. */
+  const lo = geom.PHI_R - BAND_MARGIN - reach * rk.rate;
+  const hi = geom.PHI_L + BAND_MARGIN;
+  rk.phi = lo + u * (hi - lo) - (drift + base) * rk.rate;
+  /* Every field is written above, which a Partial cannot say for itself. */
+  return /** @type {Rubble} */ (rk);
+}
+
+/**
+ * The whole bed. Density per arc-length is the constant, not the count: the
+ * sky's own window keeps exactly the population it had, and the ground the
+ * roll adds is sown at the same rate.
+ *
+ * @param   {object}   sky
+ * @param   {() => number} sky.rng
+ * @param   {Geometry} sky.geom
+ * @param   {Body[]}   sky.bodies   the seats, for the density they earn
+ * @param   {number}   sky.base
+ * @param   {number}   sky.reach
+ * @param   {number}   [sky.drift]
+ * @returns {Rubble[]}
+ */
+export function bedOf({ rng, geom, bodies, base, reach, drift = 0 }) {
+  const win = geom.PHI_L - geom.PHI_R + BAND_MARGIN * 2;
+  const full = geom.pocket ? POCKET_RUBBLE : 2100;
+  const n = Math.round(((bodies.length ? full : full * 880 / 2100) / win) * (win + reach));
+  const bed = [];
+  for (let i = 0; i < n; i++) bed.push(spawnInto({}, rng(), { rng, geom, base, reach, drift }));
+  return bed;
+}
+
+/* ==================================================================== *
+ * THE SEARCH BOX.
+ *
+ * It matches title, section, kind, provider and document name, because all
+ * five are things a person types when they are looking for one thing in a
+ * household. A document's name lights ITS ITEM, because the item is how you
+ * get to the paper — and lights the paper too, if it is already out.
+ *
+ * What it does NOT do is remove anything: the band keeps its shape and its
+ * order, matches stay lit and everything else falls back to a quarter of its
+ * weight, so you can see where in time your hit lives before you go to it.
+ * ==================================================================== */
+/**
+ * @param   {Body}   b
+ * @returns {string} everything about this body a person might type
+ */
+export function haystackOf(b) {
+  return (b.kind === "doc"
+    ? [b.doc.name, b.item.title, "document"]
+    : [b.label, b.item.section, b.item.kind, b.item.provider ?? "",
+       ...b.docs.map((d) => d.name)]).join(" ").toLowerCase();
+}
+
+/**
+ * @param   {Body[]} bodies
+ * @param   {string} query
+ * @returns {Set<number>} the seats that are lit
+ */
+export function matchesOf(bodies, query) {
+  const q = query.trim().toLowerCase();
+  /** @type {Set<number>} */
+  const found = new Set();
+  if (q) bodies.forEach((b, i) => { if (haystackOf(b).includes(q)) found.add(i); });
+  return found;
+}
+
+/* A paper still folded inside its item is not somewhere you can be sent —
+   its item is. */
+/** @type {(bodies: Body[], i: number, bloom: number[]) => boolean} */
+export const reachableAt = (bodies, i, bloom) => {
+  const b = bodies[i];
+  return b.kind !== "doc" || (bloom[b.itemIdx] ?? 0) > 0.5;
+};
+
+/** The nearest hit is the nearest ALONG THE BELT, not the first in the list:
+ *  you are standing somewhere in time and the belt should turn the shortest
+ *  way it can to the thing you asked for.
+ *
+ * @param   {Body[]}           bodies
+ * @param   {Iterable<number>} matches
+ * @param   {number}           selected
+ * @param   {number[]}         bloom
+ * @returns {number}           the seat to centre, or -1 */
+export function nearestMatchOf(bodies, matches, selected, bloom) {
+  let best = -1, bestD = Infinity;
+  for (const i of matches) {
+    if (i === selected || !reachableAt(bodies, i, bloom)) continue;
+    const d = Math.abs(bodies[i].off - bodies[selected].off);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+
+/** ← and → step through the belt in date order, which is its whole grammar —
+ *  **over items only, never onto a paper** (#1094, owner 2026-09-23).
+ *
+ * A step has to land on something that can be centred, and a document never
+ * is (`design/owner-decisions.md` §18). Stepping over the papers as well, as
+ * this used to, left one control doing two unrelated jobs: `later →` moved
+ * the belt when the next body was an item and opened a reading card when it
+ * was a paper, with nothing on screen to say which you would get. #1062's
+ * whole point is that the end-caps say what they do, so a button labelled
+ * "later" always moves you later.
+ *
+ * A paper is still reached by pressing it — by pointer, or by Tab and Enter,
+ * since every seat is a `role="button" tabindex="0"` with its own accessible
+ * name. Skipping them here costs a keyboard reader nothing.
+ *
+ * `bloom` is no longer read: it only ever gated papers, and papers are now
+ * excluded outright. It stays in the signature because the end-cap's
+ * disabled state calls this with `bloomTo` mid-roll (belt.behaviour.js), and
+ * a caller that must pass one is a caller that cannot silently drift.
+ *
+ * @param   {Body[]}   bodies
+ * @param   {number}   selected
+ * @param   {number[]} _bloom  unused; see above
+ * @param   {number}   d       -1 for ←, +1 for →
+ * @returns {number}   the seat to centre, or -1 at the end of the belt */
+export function stepFrom(bodies, selected, _bloom, d) {
+  const order = bodies.map((_, i) => i).filter((i) => bodies[i].kind !== "doc");
+  const at = order.indexOf(selected);
+  return order[at + d] ?? -1;
+}
+
+/* The roll's easing, solved rather than approximated: v2's curve exactly. */
+/** @type {(p1x: number, p1y: number, p2x: number, p2y: number) => (t: number) => number} */
+export const bez = (p1x, p1y, p2x, p2y) => (t) => {
+  let lo = 0, hi = 1, u = t;
+  /** @type {(v: number) => number} */
+  const bx = (v) => 3 * (1 - v) * (1 - v) * v * p1x + 3 * (1 - v) * v * v * p2x + v * v * v;
+  for (let i = 0; i < 22; i++) { const x = bx(u); if (x < t) lo = u; else hi = u; u = (lo + hi) / 2; }
+  return 3 * (1 - u) * (1 - u) * u * p1y + 3 * (1 - u) * u * u * p2y + u * u * u;
+};
+export const ease = bez(0.32, 0.72, 0.26, 1);

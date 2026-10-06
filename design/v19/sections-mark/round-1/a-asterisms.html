@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en" data-theme="starchart">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>#867 · round 1 · A — asterisms</title>
+<style>
+  /* Tokens carried verbatim from design/v19/household-manage.html. */
+  :root{
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--ui);
+  }
+  [data-theme=starchart]{--bg:#060b1c;--panel:rgba(13,20,44,.55);--panel-raised:rgba(19,28,58,.75);
+    --line:#243259;--line-soft:#17203f;--ink:#e9edf8;--ink-mid:#8791b3;--ink-faint:#737e9e;
+    --accent:#d8b45a;--ok:#4ade80;--overdue:#f87171;--accent-text:var(--accent);
+    --sec-sage:#8fbf9f;--sec-blue:#8fb8ff;--sec-sand:#d8b45a;--sec-plum:#b79ae0;--sec-coral:#f0907a}
+  [data-theme=afterdark]{--bg:#05070d;--panel:rgba(11,15,26,.6);--panel-raised:rgba(15,21,36,.8);
+    --line:#1c2434;--line-soft:#151b28;--ink:#e7e9ee;--ink-mid:#7c8699;--ink-faint:#4a5468;
+    --accent:#7dd3fc;--ok:#4ade80;--overdue:#f87171;--accent-text:var(--accent);
+    --sec-sage:#7fb79a;--sec-blue:#7dd3fc;--sec-sand:#d9bd83;--sec-plum:#a99ae0;--sec-coral:#ef9b86}
+  [data-theme=atlas]{--bg:#c9bfa6;--panel:rgba(214,206,186,.78);--panel-raised:#dcd5c3;
+    --line:#a89c80;--line-soft:#b8ae95;--ink:#1c2b4a;--ink-mid:#4a5570;--ink-faint:#7b8296;
+    --accent:#b4842c;--ok:#1e7a45;--overdue:#b02458;--accent-text:#684808;
+    --sec-sage:#3f6f4d;--sec-blue:#2b6cb0;--sec-sand:#a9761f;--sec-plum:#6f4788;--sec-coral:#ab4a34}
+  [data-theme=dawn]{--bg:#c3ccdb;--panel:rgba(226,232,241,.82);--panel-raised:#e4eaf3;
+    --line:#9daabf;--line-soft:#b2bccd;--ink:#1a2233;--ink-mid:#48546e;--ink-faint:#78849b;
+    --accent:#1f7ac2;--ok:#178a4c;--overdue:#c22a63;--accent-text:#134a72;
+    --sec-sage:#2f7d55;--sec-blue:#1f7ac2;--sec-sand:#8f6c00;--sec-plum:#71499a;--sec-coral:#bd4f36}
+  [data-theme=retrograde]{--bg:#080a14;--panel:rgba(12,20,30,.62);--panel-raised:rgba(16,26,38,.86);
+    --line:#1d4a5a;--line-soft:#12303c;--ink:#eef6ff;--ink-mid:#7fb6c6;--ink-faint:#4c7788;
+    --accent:#ff4fd8;--ok:#3ef2a0;--overdue:#ff3864;--accent-text:var(--accent);
+    --sec-sage:#3ef2a0;--sec-blue:#2de2e6;--sec-sand:#ffd23f;--sec-plum:#ff4fd8;--sec-coral:#ff9f1c}
+
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--ui);line-height:1.55;
+       min-height:100vh;padding:28px 24px 60px;transition:background .4s,color .4s}
+  .wrap{max-width:1040px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:22px}
+  @media (max-width:880px){.wrap{grid-template-columns:1fr}}
+  .bar{grid-column:1/-1;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+       font:10.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint)}
+  .bar .tag{margin-right:auto}
+  .bar button{font:10.5px var(--mono);letter-spacing:.1em;color:var(--ink-mid);background:none;
+       border:1px solid var(--line);border-radius:9px;padding:5px 10px;cursor:pointer}
+  .bar button[aria-pressed=true]{border-color:var(--accent);color:var(--accent-text)}
+
+  .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
+        border-radius:16px;padding:20px 22px}
+  .cardhead{display:flex;align-items:baseline;gap:10px;margin-bottom:15px}
+  .card h3{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-faint)}
+  .cardhead .count{font:10.5px var(--mono);color:var(--ink-faint);letter-spacing:.06em}
+
+  /* the Sections card, verbatim */
+  .sec{display:flex;align-items:center;gap:12px;padding:7px 2px;border-bottom:1px solid var(--line-soft)}
+  .mark{position:relative;width:20px;height:20px;flex:none;display:grid;place-items:center}
+  .mark svg{display:block;fill:none;stroke:var(--ink-mid);stroke-width:1.15;
+            stroke-linecap:round;stroke-linejoin:round;opacity:.9}
+  .mark i{position:absolute;right:-1px;bottom:0;width:5px;height:5px;border-radius:50%;
+          background:var(--sec);opacity:.92}
+  .sec input{flex:1;min-width:0;background:none;border:0;border-bottom:1px solid transparent;
+             color:var(--ink);font-size:13.5px;font-family:var(--ui);padding:4px 0}
+  .sec input:focus{outline:none;border-bottom-color:var(--accent)}
+  .sec input:disabled{color:var(--ink-mid)}
+  .sec .used{font:10.5px var(--mono);color:var(--ink-faint);flex:none}
+  .sec .state{font:10px var(--mono);letter-spacing:.1em;color:var(--ink-mid);width:46px;text-align:right;flex:none}
+  .sec .drop{font:12px var(--mono);color:var(--ink-faint);background:none;border:0;cursor:pointer;
+             padding:0 2px;flex:none;visibility:hidden}
+  .sec.empty .drop{visibility:visible}
+  .toggle{width:34px;height:19px;border-radius:99px;border:1px solid var(--line);background:none;
+          cursor:pointer;position:relative;flex:none}
+  .toggle i{position:absolute;top:2.5px;left:3px;width:12px;height:12px;border-radius:50%;background:var(--ink-faint)}
+  .toggle[aria-pressed=true]{border-color:var(--ok)}
+  .toggle[aria-pressed=true] i{left:17px;background:var(--ok)}
+  .addsec{margin-top:12px;font:11px var(--mono);color:var(--ink-mid);background:none;
+          border:1px dashed var(--line);border-radius:9px;padding:7px 13px;cursor:pointer;width:100%}
+  .savebar{display:flex;align-items:center;gap:14px;margin-top:17px}
+  .btn{font:600 13px var(--display);color:var(--bg);background:var(--accent);border:0;
+       border-radius:10px;padding:9px 19px;cursor:pointer}
+
+  /* ── the answer ───────────────────────────────────────────────────────
+     A new section's mark is a small asterism — a few pen-drawn stars joined
+     by the same line the dial is drawn with. It is ASSIGNED, not chosen:
+     the row arrives wearing the first figure the pen has not used. On a
+     new row the mark is a button; press it and the pen's unused figures
+     line up under the row, the worn one ringed. Pick one or leave it. */
+  .mark.pick{cursor:pointer;background:none;border:0;padding:0;border-radius:6px}
+  .mark.pick:hover,.mark.pick[aria-expanded=true]{box-shadow:0 0 0 1px var(--line)}
+  .mark.pick:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .tray{display:none;gap:6px;padding:6px 0 8px 32px;border-bottom:1px solid var(--line-soft)}
+  .tray.open{display:flex}
+  .tray .mark{width:24px;height:24px;border-radius:6px;cursor:pointer;background:none;border:0;padding:0}
+  .tray .mark:hover{box-shadow:0 0 0 1px var(--line)}
+  .tray .mark[aria-checked=true]{box-shadow:0 0 0 1px var(--accent)}
+  .tray .mark:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+  /* manifest, the other place a mark is printed: 14px, beside the entry */
+  .ent{display:flex;align-items:center;gap:10px;padding:6px 2px;border-bottom:1px solid var(--line-soft);
+       font-size:13px}
+  .ent .mark{width:14px;height:14px}
+  .ent .mark svg{width:12px;height:12px}
+  .ent .mark i{width:4px;height:4px;right:-2px}
+  .ent .when{margin-left:auto;font:10.5px var(--mono);color:var(--ink-faint)}
+  .ent em{font-style:normal;color:var(--ink-faint);font-size:11px}
+
+  /* the pen's set: what twelve looks like */
+  .set{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-top:6px}
+  .set figure{display:grid;justify-items:center;gap:6px}
+  .set figcaption{font:9.5px var(--mono);letter-spacing:.08em;color:var(--ink-faint);text-transform:uppercase}
+  .small{display:flex;gap:12px;margin-top:14px}
+  .small .mark{width:14px;height:14px}
+  .small .mark svg{width:12px;height:12px}
+  .small .mark i{width:4px;height:4px;right:-2px}
+  .note{font:10.5px var(--mono);color:var(--ink-faint);line-height:1.85;margin-top:12px}
+  .note b{color:var(--ink-mid);font-weight:400}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="bar">
+    <span class="tag">round 1 · A · asterisms · #867</span>
+    <button aria-pressed="true" onclick="pack(this,'starchart')">starchart</button>
+    <button onclick="pack(this,'afterdark')">afterdark</button>
+    <button onclick="pack(this,'atlas')">atlas</button>
+    <button onclick="pack(this,'dawn')">dawn</button>
+    <button onclick="pack(this,'retrograde')">retrograde</button>
+  </div>
+
+  <div class="card">
+    <div class="cardhead"><h3>Sections</h3><span class="count">7 of 12</span></div>
+    <div id="secs"></div>
+    <button class="addsec">+ add a section</button>
+    <div class="savebar"><button class="btn">save</button></div>
+  </div>
+
+  <div>
+    <div class="card">
+      <div class="cardhead"><h3>Manifest</h3><span class="count">the mark beside the entry</span></div>
+      <div id="manifest"></div>
+    </div>
+    <div class="card" style="margin-top:22px">
+      <div class="cardhead"><h3>The pen's set</h3><span class="count">five drawn, seven figures — twelve, the cap</span></div>
+      <div class="set" id="set"></div>
+      <div class="small" id="small"></div>
+      <p class="note">Five inks, twelve marks: the line tells them apart, the dot is only the colour.
+        Inks go round again after five — <b>Boat</b> is sage like Home, but Home is a roof and Boat is a hook.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  // The five shipped glyphs (household-manage.html, verbatim) and seven
+  // asterisms drawn in the same hand: nodes r=.9, one line, nothing filled.
+  const N = (x, y) => `<circle cx="${x}" cy="${y}" r=".9"/>`;
+  const GL = {
+    home:     { ink: "sage",  svg: '<path d="M2.6 7.7 8 3.1l5.4 4.6"/><path d="M4.3 7.4v5.6h7.4V7.4"/>' },
+    vehicles: { ink: "blue",  svg: '<path d="M2.7 10.6V9.1l1.6-2.7h7.4l1.6 2.7v1.5"/><circle cx="5.2" cy="10.7" r="1.15"/><circle cx="10.8" cy="10.7" r="1.15"/>' },
+    devices:  { ink: "sand",  svg: '<rect x="4.2" y="2.7" width="7.6" height="10.6" rx="1.5"/><path d="M6.7 11.6h2.6"/>' },
+    services: { ink: "plum",  svg: '<path transform="scale(.667)" style="stroke-width:1.7" d="M14.6 6.4a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9l-3.8 3.8z"/>' },
+    dates:    { ink: "coral", svg: '<rect x="2.6" y="3.6" width="10.8" height="9.8" rx="1.4"/><path d="M2.6 6.6h10.8M5.6 2.3v2.2M10.4 2.3v2.2"/>' },
+    hook:     { ink: "sage",  svg: '<path d="M2.6 9.4 6 5.6l4.4 1.6 3-3.6"/>' + N(2.6,9.4)+N(6,5.6)+N(10.4,7.2)+N(13.4,3.6) },
+    kite:     { ink: "blue",  svg: '<path d="M7 2.8 13 6.5 9 13.2 3 8.5z"/>' + N(7,2.8)+N(13,6.5)+N(9,13.2)+N(3,8.5) },
+    ladle:    { ink: "sand",  svg: '<path d="M2.5 3.5 5.5 5.5 8.5 6l4-1 1 4.5-4 1z"/>' + N(2.5,3.5)+N(5.5,5.5)+N(8.5,6)+N(12.5,5)+N(13.5,9.5)+N(9.5,10.5) },
+    cross:    { ink: "plum",  svg: '<path d="M3 3.5 13 12.5M11 3 5.5 13"/>' + N(3,3.5)+N(13,12.5)+N(11,3)+N(5.5,13) },
+    bow:      { ink: "coral", svg: '<path d="M2.5 11.5Q8 1.5 13.5 11.5"/>' + N(2.5,11.5)+N(8,6.5)+N(13.5,11.5) },
+    wedge:    { ink: "sage",  svg: '<path d="M4 13 8 3l5 8z"/>' + N(4,13)+N(8,3)+N(13,11) },
+    belt:     { ink: "blue",  svg: '<path d="M3 12.5 8 8l5-4.5"/>' + N(3,12.5)+N(8,8)+N(13,3.5) },
+  };
+  const mark = (g, cls = "mark", extra = "") =>
+    `<span class="${cls}" style="--sec:var(--sec-${GL[g].ink})" ${extra}><svg width="17" height="17" viewBox="0 0 16 16">${GL[g].svg}</svg><i></i></span>`;
+
+  // the data story: Lawson Home, five shipped sections and two the owner named
+  const SECS = [
+    ["home", "Home", "3 entries"], ["vehicles", "Vehicles", "2 entries"], ["devices", "Devices", "1 entry"],
+    ["services", "Services", "0 entries"], ["dates", "Dates & renewals", "0 entries"],
+    ["hook", "Boat", "1 entry"], ["kite", "Allotment", "0 entries", true],
+  ];
+  const shipped = new Set(["home", "vehicles", "devices", "services", "dates"]);
+  const worn = () => new Set(SECS.map((s) => s[0]));
+
+  function render() {
+    const free = Object.keys(GL).filter((g) => !shipped.has(g) && !worn().has(g));
+    document.getElementById("secs").innerHTML = SECS.map(([g, name, used, fresh], i) => {
+      const m = shipped.has(g)
+        ? mark(g, "mark", 'aria-hidden="true"')
+        : `<button class="mark pick" data-i="${i}" aria-expanded="${fresh ? "true" : "false"}" aria-label="Mark for ${name} — choose another" style="--sec:var(--sec-${GL[g].ink})"><svg width="17" height="17" viewBox="0 0 16 16">${GL[g].svg}</svg><i></i></button>`;
+      const tray = shipped.has(g) ? "" :
+        `<div class="tray${fresh ? " open" : ""}" role="radiogroup" aria-label="Marks the pen has not used">` +
+          [g, ...free].map((f) => `<button class="mark" role="radio" aria-checked="${f === g}" data-i="${i}" data-g="${f}" aria-label="${f}" style="--sec:var(--sec-${GL[f].ink})"><svg width="17" height="17" viewBox="0 0 16 16">${GL[f].svg}</svg><i></i></button>`).join("") +
+        `</div>`;
+      return `<div class="sec${used.startsWith("0") ? " empty" : ""}">${m}
+        <input value="${name}" maxlength="30" aria-label="Section name"><span class="used">${used}</span>
+        <button class="toggle" aria-pressed="true" aria-label="${name} on the chart"><i></i></button>
+        <span class="state">shown</span><button class="drop" aria-label="Remove section">×</button></div>${tray}`;
+    }).join("");
+    document.getElementById("manifest").innerHTML = [
+      ["vehicles", "Car MOT — Volvo V60", "inspection", "29 Aug"],
+      ["home", "Home insurance renewal", "renewal", "03 Oct"],
+      ["hook", "Boat safety certificate", "inspection", "14 Nov"],
+      ["home", "Gutter clearing", "service", "28 Jul"],
+      ["devices", "Laptop warranty", "renewal", "02 Mar"],
+    ].map(([g, t, k, d]) => `<div class="ent">${mark(g, "mark", 'aria-hidden="true"')}<span>${t} <em>· ${k}</em></span><span class="when">${d}</span></div>`).join("");
+    document.getElementById("set").innerHTML = Object.keys(GL).map((g) =>
+      `<figure>${mark(g, "mark", 'aria-hidden="true"')}<figcaption>${g}</figcaption></figure>`).join("");
+    document.getElementById("small").innerHTML = Object.keys(GL).map((g) => mark(g, "mark", 'aria-hidden="true"')).join("");
+  }
+  document.addEventListener("click", (e) => {
+    const p = e.target.closest(".pick");
+    if (p) { const t = p.parentElement.nextElementSibling; const o = t.classList.toggle("open"); p.setAttribute("aria-expanded", o); return; }
+    const r = e.target.closest(".tray .mark");
+    if (r) { SECS[+r.dataset.i][0] = r.dataset.g; SECS[+r.dataset.i][3] = true; render(); }
+  });
+  function pack(b, t) {
+    document.documentElement.dataset.theme = t;
+    document.querySelectorAll(".bar button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+  }
+  render();
+</script>
+</body>
+</html>

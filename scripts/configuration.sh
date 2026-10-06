@@ -18,6 +18,22 @@ orbit_image_value=""
 applied_version_value=""
 applied_digest_value=""
 compose_project_value=""
+# migrate_file's own scratch file (#1151 O1-R4): Ctrl-C or a SIGTERM mid-
+# migration previously left "${file}.migrating.XXXXXX" behind forever --
+# migrate_file's own error paths each removed it on a normal failure, but
+# nothing ran if the process was simply killed between them. A trap fires
+# this cleanup on any exit, signalled or not; rm -f is a no-op once the
+# file is already gone (removed on an ordinary failure, or renamed away on
+# success).
+migration_temp_file=""
+# Set by acquire_deploy_lock, read by release_deploy_lock (#1151 RANGE-F6).
+deploy_lock_path_value=""
+deploy_lock_owner_value=""
+cleanup_migration_temp() {
+  [[ -z "$migration_temp_file" ]] || rm -f -- "$migration_temp_file" 2>/dev/null || true
+  release_deploy_lock
+}
+trap cleanup_migration_temp EXIT
 
 fail_code() {
   printf '%s\n' "$1" >&2
@@ -33,7 +49,7 @@ usage() {
 # Inbound mail (IMAP) credentials are no longer environment configuration at
 # all: they are set from the administration screen and stored encrypted in
 # the database (ADR-0017), so no IMAP_* key appears here.
-readonly allowed_keys='APP_URL OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CLIENT_SECRET_FILE OIDC_CALLBACK_URL ORBIT_IMAGE ORBIT_CONFIG_APPLIED_VERSION ORBIT_CONFIG_APPLIED_DIGEST COMPOSE_PROJECT_NAME SESSION_SECRET SESSION_SECRET_FILE DOCUMENT_KEK DOCUMENT_KEK_FILE POSTGRES_PASSWORD POSTGRES_PASSWORD_FILE VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_PRIVATE_KEY_FILE ORBIT_BIND_ADDRESS ORBIT_PORT ORBIT_LOG_LEVEL ORBIT_LOG_FORMAT COMPOSE_PROFILES POSTGRES_DB POSTGRES_USER POSTGRES_HOST POSTGRES_PORT DATABASE_URL DATABASE_URL_FILE DOCUMENTS_ROOT DOCUMENTS_QUARANTINE_ROOT DOCUMENT_MAX_BYTES DOCUMENT_HOUSEHOLD_QUOTA_BYTES DOCUMENT_INSTANCE_QUOTA_BYTES DOCUMENT_RETENTION_DAYS DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS DOCUMENT_SCAN_MODE CLAMAV_HOST CLAMAV_PORT CLAMAV_TIMEOUT_MS CLAMAV_MEMORY_LIMIT TIKA_URL TIKA_TIMEOUT_MS TIKA_MEMORY_LIMIT OLLAMA_MODEL OLLAMA_MEMORY_LIMIT OLLAMA_CPUS OLLAMA_MAX_QUEUE OLLAMA_KEEP_ALIVE SMTP_HOST SMTP_PORT SMTP_SECURITY SMTP_USER SMTP_PASSWORD SMTP_PASSWORD_FILE SMTP_FROM SMTP_URL SMTP_URL_FILE VAPID_SUBJECT SESSION_TTL_SECONDS OIDC_SCOPES OIDC_EMAIL_CLAIM OIDC_EMAIL_VERIFIED_CLAIM OIDC_NAME_CLAIM OIDC_AVATAR_CLAIM WORKER_POLL_SECONDS MAINTENANCE_TICK_SECONDS NOTIFICATION_MAX_ATTEMPTS MIGRATE_ON_START WORKER_ENABLED DRIZZLE_MIGRATIONS_PATH ORBIT_SECRETS_DIR ORBIT_CONFIG_SCHEMA_VERSION'
+readonly allowed_keys='APP_URL ORBIT_AUTH_OIDC OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CLIENT_SECRET_FILE OIDC_CALLBACK_URL ORBIT_IMAGE ORBIT_CONFIG_APPLIED_VERSION ORBIT_CONFIG_APPLIED_DIGEST COMPOSE_PROJECT_NAME SESSION_SECRET SESSION_SECRET_FILE DOCUMENT_KEK DOCUMENT_KEK_FILE DOCUMENT_KEK_NEXT DOCUMENT_KEK_NEXT_FILE POSTGRES_PASSWORD POSTGRES_PASSWORD_FILE VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_PRIVATE_KEY_FILE ORBIT_BIND_ADDRESS ORBIT_PORT ORBIT_LOG_LEVEL ORBIT_LOG_FORMAT COMPOSE_PROFILES POSTGRES_DB POSTGRES_USER POSTGRES_HOST POSTGRES_PORT DATABASE_URL DATABASE_URL_FILE DOCUMENTS_ROOT DOCUMENTS_QUARANTINE_ROOT DOCUMENT_MAX_BYTES DOCUMENT_HOUSEHOLD_QUOTA_BYTES DOCUMENT_INSTANCE_QUOTA_BYTES DOCUMENT_RETENTION_DAYS DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS DOCUMENT_SCAN_MODE CLAMAV_HOST CLAMAV_PORT CLAMAV_TIMEOUT_MS CLAMAV_MEMORY_LIMIT TIKA_URL TIKA_TIMEOUT_MS TIKA_MEMORY_LIMIT OLLAMA_MODEL OLLAMA_MEMORY_LIMIT OLLAMA_CPUS OLLAMA_MAX_QUEUE OLLAMA_KEEP_ALIVE SMTP_HOST SMTP_PORT SMTP_SECURITY SMTP_USER SMTP_PASSWORD SMTP_PASSWORD_FILE SMTP_FROM SMTP_URL SMTP_URL_FILE VAPID_SUBJECT SESSION_TTL_SECONDS OIDC_SCOPES OIDC_EMAIL_CLAIM OIDC_EMAIL_VERIFIED_CLAIM OIDC_NAME_CLAIM OIDC_AVATAR_CLAIM WORKER_POLL_SECONDS MAINTENANCE_TICK_SECONDS NOTIFICATION_MAX_ATTEMPTS MIGRATE_ON_START WORKER_ENABLED DRIZZLE_MIGRATIONS_PATH ORBIT_SECRETS_DIR ORBIT_CONFIG_SCHEMA_VERSION'
 
 is_allowed() {
   local candidate
@@ -55,6 +71,12 @@ is_deprecated_secret() {
   esac
   return 1
 }
+
+# Direct-value/_FILE pairs the app's own contract (src/lib/config-contract.ts's
+# exclusivePairs) rejects as mutually exclusive: setting both certifies a file
+# the app refuses at runtime. Same nine pairs, same order, kept side by side
+# with that list.
+readonly secret_file_pairs='SESSION_SECRET:SESSION_SECRET_FILE DOCUMENT_KEK:DOCUMENT_KEK_FILE DOCUMENT_KEK_NEXT:DOCUMENT_KEK_NEXT_FILE POSTGRES_PASSWORD:POSTGRES_PASSWORD_FILE OIDC_CLIENT_SECRET:OIDC_CLIENT_SECRET_FILE VAPID_PRIVATE_KEY:VAPID_PRIVATE_KEY_FILE SMTP_PASSWORD:SMTP_PASSWORD_FILE DATABASE_URL:DATABASE_URL_FILE SMTP_URL:SMTP_URL_FILE'
 
 is_control_free() {
   local value="$1" char i
@@ -126,7 +148,7 @@ check_file_safety() {
 
 parse_file() {
   local file="$1" line key value line_number=0 assignment_count=0
-  local -A seen=()
+  local -A seen=() values=()
   parsed_keys=(); schema_present=0; applied_version_present=0; applied_digest_present=0; compose_project_present=0
   schema_value=""; orbit_image_value=""; applied_version_value=""; applied_digest_value=""; compose_project_value=""
   check_file_safety "$file"
@@ -141,6 +163,7 @@ parse_file() {
     key="${BASH_REMATCH[1]}"; value="${BASH_REMATCH[2]}"
     [[ -z "${seen[$key]:-}" ]] || fail_code configuration_syntax
     seen["$key"]=1
+    values["$key"]="$value"
     assignment_count=$((assignment_count + 1)); parsed_keys+=("$key")
     if ! is_allowed "$key"; then
       if is_removed "$key"; then
@@ -162,6 +185,19 @@ parse_file() {
     esac
   done < "$file"
   [[ "$assignment_count" -gt 0 ]] || fail_code configuration_syntax
+  local secret_file_pair direct_key file_key
+  for secret_file_pair in $secret_file_pairs; do
+    direct_key="${secret_file_pair%%:*}"; file_key="${secret_file_pair#*:}"
+    # Mirrors src/lib/config-contract.ts's own `record[direct] &&
+    # record[file]` check: a key present with an empty value is JS-falsy
+    # there, so an empty direct placeholder sitting alongside a populated
+    # _FILE value (the shape configure.sh itself writes, e.g.
+    # "OIDC_CLIENT_SECRET=" beside "OIDC_CLIENT_SECRET_FILE=...") is not a
+    # conflict — only two actually-populated values are.
+    if [[ -n "${values[$direct_key]:-}" && -n "${values[$file_key]:-}" ]]; then
+      fail_code configuration_secret_conflict
+    fi
+  done
   if [[ -n "$schema_value" && "$schema_value" != "$schema_version" ]]; then
     [[ "$schema_value" =~ ^[0-9]+$ && "$schema_value" -gt "$schema_version" ]] && fail_code configuration_version
     fail_code configuration_version
@@ -188,9 +224,79 @@ report_classification() {
   [[ "$compose_project_present" == 1 ]] || printf 'safely_migratable COMPOSE_PROJECT_NAME\n'
 }
 
+# Shares the Orbit engine's cross-process deploy lock (#1151 RANGE-F6) with
+# scripts/configure.sh's update_managed_keys and
+# src/lib/configure-engine.ts's/install-transaction.ts's acquireDeployLock:
+# all three read-modify-write the same deployment's $file (.env-orbit)
+# under the same deployment directory, so all three must exclude each
+# other. install.sh's --migrate run and a concurrent `orbit configure` were
+# otherwise free to race the same read-modify-write .env-orbit update and
+# lose one writer's keys, exactly like O1-R8 before it was closed for
+# update_managed_keys.
+#
+# Copied here rather than sourced from configure.sh: this script is
+# deliberately standalone and source-less (the same convention
+# read_compose_project_name's five verbatim copies follow, proven identical
+# by scripts/compose-project-name-resolution.test.mjs) and is always
+# invoked as its own subprocess (`bash scripts/configuration.sh ...`),
+# never sourced into a caller's shell. Unlike configure.sh -- which cd's to
+# the deployment directory first and uses a lock path relative to its own
+# cwd -- this script never cd's anywhere and takes $file as a path handed
+# in by its caller (absolute in this suite's own tests), so the lock lives
+# next to $file's own directory rather than assuming cwd is the deployment
+# directory.
+readonly deploy_lock_stale_seconds=600
+
+acquire_deploy_lock() {
+  local file_for_lock="$1" lock_path lock_dir owner lock_age reclaimed
+  lock_dir="$(dirname -- "$file_for_lock")"
+  lock_path="$lock_dir/.orbit-engine.lock"
+
+  if ! ( set -o noclobber; : > "$lock_path" ) 2>/dev/null; then
+    lock_age="$deploy_lock_stale_seconds"
+    if [[ -e "$lock_path" ]]; then
+      lock_age=$(( $(date +%s) - $(stat -c %Y -- "$lock_path" 2>/dev/null || printf '0') ))
+    fi
+    if (( lock_age <= deploy_lock_stale_seconds )); then
+      fail_code configuration_migration
+    fi
+    # Reclaim by rename, not unlink-then-create: two processes that both saw
+    # the stale lock would otherwise each unlink and recreate it, and the
+    # slower unlink removes the faster one's fresh lock. Only one rename
+    # succeeds; the other tries the plain create once more and refuses if
+    # that is taken too.
+    reclaimed="${lock_path}.stale-$$"
+    if mv -- "$lock_path" "$reclaimed" 2>/dev/null; then
+      rm -f -- "$reclaimed"
+    fi
+    if ! ( set -o noclobber; : > "$lock_path" ) 2>/dev/null; then
+      fail_code configuration_migration
+    fi
+  fi
+
+  owner="$$:$RANDOM:$RANDOM"
+  printf '%s\n' "$owner" > "$lock_path"
+  deploy_lock_path_value="$lock_path"
+  deploy_lock_owner_value="$owner"
+}
+
+# Never removes a lock that was reclaimed from this process as stale and now
+# belongs to another run: only a lock file that still names this process's
+# own owner token is removed. Safe to call more than once (the EXIT trap
+# calls it again as a backstop after any fail_code exit mid-migration).
+release_deploy_lock() {
+  [[ -n "$deploy_lock_path_value" ]] || return 0
+  if [[ "$(cat -- "$deploy_lock_path_value" 2>/dev/null)" == "$deploy_lock_owner_value" ]]; then
+    rm -f -- "$deploy_lock_path_value"
+  fi
+  deploy_lock_path_value=""
+  deploy_lock_owner_value=""
+}
+
 migrate_file() {
   local file="$1" state temp newline backup transaction="$2"
   local target_image="$3" target_version="$4" target_digest="$5" target_project="$6"
+  acquire_deploy_lock "$file"
   local desired_image desired_version desired_digest desired_project prior_schema prior_version prior_digest
   local line_without_cr key replaced
   local -a managed_order=(ORBIT_IMAGE ORBIT_CONFIG_SCHEMA_VERSION ORBIT_CONFIG_APPLIED_VERSION ORBIT_CONFIG_APPLIED_DIGEST COMPOSE_PROJECT_NAME)
@@ -229,6 +335,7 @@ migrate_file() {
     "$applied_digest_value" == "$desired_digest" && "$compose_project_present" == 1 &&
     "$compose_project_value" == "$desired_project" ]]; then
     printf 'Orbit configuration: already current schema v1 version %s digest %s\n' "$desired_version" "$desired_digest"
+    release_deploy_lock
     return 0
   fi
 
@@ -243,12 +350,29 @@ migrate_file() {
 
   if [[ "$transaction" != 1 ]]; then
     backup="${file}${rollback_suffix}"
-    if [[ -e "$backup" || -L "$backup" ]]; then fail_code configuration_migration; fi
+    if [[ -e "$backup" || -L "$backup" ]]; then
+      # A leftover rollback backup only blocks a legitimate retry when it
+      # cannot be told apart from a fresh one: if it is byte-identical to
+      # $file right now, the only way that can be true is that an earlier
+      # --migrate run was interrupted after writing this same backup from
+      # this same pre-migration content but before its own final `mv`
+      # applied anything — $file was never actually changed, so the
+      # "already current" short-circuit above never got a chance to fire
+      # on retry either, and there is nothing here worth protecting. A
+      # backup that differs (or is a symlink) is a real rollback point from
+      # a genuinely different migration and must not be silently replaced.
+      if [[ ! -L "$backup" ]] && cmp -s -- "$file" "$backup" 2>/dev/null; then
+        rm -f -- "$backup" 2>/dev/null || fail_code configuration_migration
+      else
+        fail_code configuration_migration
+      fi
+    fi
     umask 077
     cp -- "$file" "$backup" 2>/dev/null || fail_code configuration_migration
     chmod 600 "$backup" 2>/dev/null || fail_code configuration_migration
   fi
   temp="$(mktemp "${file}.migrating.XXXXXX" 2>/dev/null)" || fail_code configuration_migration
+  migration_temp_file="$temp"
   chmod 600 "$temp" 2>/dev/null || { rm -f -- "$temp" 2>/dev/null; fail_code configuration_migration; }
   newline=$'\n'
   LC_ALL=C grep -q $'\r' "$file" && newline=$'\r\n'
@@ -283,8 +407,10 @@ migrate_file() {
     if [[ "$transaction" != 1 ]]; then cp -- "$backup" "$file" 2>/dev/null || true; fi
     fail_code configuration_migration
   fi
+  migration_temp_file=""
   printf 'Orbit configuration: migrated from schema %s version %s digest %s to schema v1 version %s digest %s\n' \
     "$prior_schema" "$prior_version" "$prior_digest" "$desired_version" "$desired_digest"
+  release_deploy_lock
 }
 
 file="$environment_file_default"; action=check; transaction=0

@@ -23,6 +23,11 @@
 #     reopens it afterwards
 #   recovery-bundle export/import path          export/import-recovery-bundle.sh
 #     entries (Part 2)
+#   assert_credential_fixture_present            restore.sh #49 (authentication
+#     data and the revocation boundary, #917, ADR-0022 §6, ADR-0023 §7): a
+#     local credential and an unconsumed setup token seeded before the backup
+#     restore intact, and a session created after the backup point does not
+#     survive restoring to before it existed.
 set -Eeuo pipefail
 
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -42,6 +47,22 @@ readonly staging_storage_key="dddddddddddddddddddddddddddddddddddddddddddddddddd
 readonly storage_path="/var/lib/orbit/documents/objects/aa/aa/${storage_key}.bin"
 readonly attachment_storage_path="/var/lib/orbit/documents/objects/cc/cc/${attachment_storage_key}.bin"
 readonly staging_path="/var/lib/orbit/documents/staging/${staging_storage_key}.bin"
+# M7 slice 15 (#917): a local credential, an unconsumed setup token and a
+# linked OIDC identity, seeded before the backup so the whole-database dump
+# carries them (ADR-0022 section 6, ADR-0023 section 7 -- the revocation
+# boundary). credential_session_id is deliberately inserted only *after* the
+# backup is taken (see insert_post_backup_session_fixture below), so it
+# proves the opposite: a session that exists only after the backup point
+# does not survive a restore to before it existed.
+readonly credential_user_id="66666666-6666-4666-8666-666666666666"
+readonly credential_setup_token_id="77777777-7777-4777-8777-777777777777"
+readonly credential_identity_id="88888888-8888-4888-8888-888888888888"
+readonly credential_session_id="99999999-9999-4999-8999-999999999999"
+readonly credential_password_hash='$argon2id$v=19$m=19456,t=2,p=1$backuptestsalt$backuptesthashbackuptesthash'
+readonly credential_setup_token_hash="6060606060606060606060606060606060606060606060606060606060606060"
+readonly credential_identity_issuer="https://idp.backup-test.invalid/"
+readonly credential_identity_subject="backup-drill-subject"
+readonly credential_session_token_hash="7070707070707070707070707070707070707070707070707070707070707070"
 backup_path=""
 recovery_bundle_path=""
 test_directory=""
@@ -252,6 +273,81 @@ remove_document_fixture() {
   compose exec -T orbit-app rm -f "$staging_path" >/dev/null
 }
 
+# M7 slice 15 (#917): a local credential, an unconsumed setup token and a
+# linked OIDC identity for one user, inserted before the backup so the
+# whole-database dump captures them exactly as any other row (ADR-0022
+# section 6, ADR-0023 section 7). Idempotent like insert_document_fixture:
+# deleting the user first cascades away any earlier run's rows.
+insert_credential_fixture() {
+  compose exec -T orbit-db sh -c \
+    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 --command="
+      delete from users where id = '\''$1'\'';
+      insert into users (id, email, email_verified, display_name, is_instance_admin)
+        values ('\''$1'\'', '\''backup-drill@example.invalid'\'', false, '\''Backup Drill User'\'', false);
+      insert into local_credentials (user_id, password_hash)
+        values ('\''$1'\'', '\''$2'\'');
+      insert into credential_setup_tokens (id, user_id, token_hash, purpose, expires_at)
+        values ('\''$3'\'', '\''$1'\'', '\''$4'\'', '\''setup'\'', now() + interval '\''7 days'\'');
+      insert into external_identities (id, user_id, issuer, subject)
+        values ('\''$5'\'', '\''$1'\'', '\''$6'\'', '\''$7'\'');"' \
+    sh "$credential_user_id" "$credential_password_hash" "$credential_setup_token_id" \
+    "$credential_setup_token_hash" "$credential_identity_id" "$credential_identity_issuer" \
+    "$credential_identity_subject" >/dev/null
+}
+
+# The opposite fixture: a session for that same user, inserted only *after*
+# the backup this drill restores from is already captured, so it proves the
+# revocation boundary rather than mere persistence -- a session that exists
+# only after the backup point must not come back when restoring to before it
+# existed.
+insert_post_backup_session_fixture() {
+  compose exec -T orbit-db sh -c \
+    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 --command="
+      delete from sessions where id = '\''$1'\'';
+      insert into sessions (id, user_id, token_hash, expires_at)
+        values ('\''$1'\'', '\''$2'\'', '\''$3'\'', now() + interval '\''1 day'\'');"' \
+    sh "$credential_session_id" "$credential_user_id" "$credential_session_token_hash" >/dev/null
+}
+
+# Runs the SQL-only checks the drill runs, not the app (per docs/plans/
+# m7-local-accounts.md section 2.9): the credential row verifies by exact
+# stored-hash comparison, the setup token is still unconsumed and its stored
+# hash is unchanged, the linked identity survived, and no session created
+# after the backup point exists in the restored database.
+assert_credential_fixture_present() {
+  local stored_hash stored_token_hash stored_subject session_count
+
+  stored_hash="$(compose exec -T orbit-db sh -c \
+    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="select password_hash from local_credentials where user_id = '\''$1'\'';"' \
+    sh "$credential_user_id")"
+  [[ "$stored_hash" == "$credential_password_hash" ]] ||
+    fail 'The local credential password hash did not survive restore intact.'
+
+  stored_token_hash="$(compose exec -T orbit-db sh -c \
+    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="select token_hash from credential_setup_tokens where id = '\''$1'\'' and consumed_at is null;"' \
+    sh "$credential_setup_token_id")"
+  [[ "$stored_token_hash" == "$credential_setup_token_hash" ]] ||
+    fail 'The unconsumed setup token did not survive restore, or was marked consumed.'
+
+  stored_subject="$(compose exec -T orbit-db sh -c \
+    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="select subject from external_identities where id = '\''$1'\'';"' \
+    sh "$credential_identity_id")"
+  [[ "$stored_subject" == "$credential_identity_subject" ]] ||
+    fail 'The linked identity did not survive restore.'
+
+  session_count="$(compose exec -T orbit-db sh -c \
+    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="select count(*) from sessions where id = '\''$1'\'';"' \
+    sh "$credential_session_id")"
+  [[ "$session_count" == '0' ]] ||
+    fail 'A session created after the backup point survived restore -- the revocation boundary broke.'
+}
+
+remove_credential_fixture() {
+  compose exec -T orbit-db sh -c \
+    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 --command="delete from users where id = '\''$1'\'';"' \
+    sh "$credential_user_id" >/dev/null
+}
+
 prepare_variant() {
   local name="$1"
   variant_directory="$test_directory/$name"
@@ -387,6 +483,7 @@ run_valid_restore() {
   wait_for_health
   assert_fixture_present
   assert_recovery_jobs_restored
+  assert_credential_fixture_present
 }
 
 maintenance_sql() {
@@ -710,11 +807,15 @@ compose exec -T --user orbit:orbit orbit-app sh -c \
 expected_hash="$(compose exec -T orbit-app sha256sum "$storage_path" | awk '{print $1}')"
 attachment_expected_hash="$(compose exec -T orbit-app sha256sum "$attachment_storage_path" | awk '{print $1}')"
 insert_document_fixture "$expected_hash"
+insert_credential_fixture
 
 backup_output="$(bash scripts/backup.sh)"
 backup_path="${backup_output#Orbit backup created: }"
 [[ -f "$backup_path" ]] || fail 'Backup script did not return a bundle path.'
 bash scripts/backup.sh --verify "$backup_path" >/dev/null
+# Deliberately after the backup: see insert_post_backup_session_fixture's own
+# comment for why this session must NOT be part of the archive under test.
+insert_post_backup_session_fixture
 create_recovery_bundle
 test_recovery_bundle_diagnostics
 
@@ -751,5 +852,6 @@ test_restore_during_maintenance
 
 remove_document_fixture
 assert_fixture_absent
+remove_credential_fixture
 
-printf 'Orbit backup test: staged correspondence, rollback, interruption recovery, key handling, restore during maintenance, and document/crypto round trip passed.\n'
+printf 'Orbit backup test: staged correspondence, rollback, interruption recovery, key handling, restore during maintenance, document/crypto round trip, and the authentication-data revocation boundary passed.\n'

@@ -220,9 +220,9 @@ export function missingConfigurationFields(readiness: string): string[] {
 export function noninteractiveConfigurationGuidance(missing: readonly string[]): string[] {
   return [
     `Orbit installer: configuration fields requiring attention: ${missing.join(" ")}.`,
-    "Orbit installer: non-interactive use requires a complete .env-orbit and an existing owner-only .orbit-secrets/oidc-client-secret file.",
-    "Orbit installer: safe next command in a controlling terminal: curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/install.sh | bash",
-    "Orbit installer: configure with --init, provide the secret with --set-oidc-secret, then verify with --check before rerunning automation.",
+    "Orbit installer: non-interactive use requires a complete .env-orbit and, when ORBIT_AUTH_OIDC=true, an existing owner-only .orbit-secrets/oidc-client-secret file.",
+    "Orbit installer: safe next command in a controlling terminal: curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/get-orbit.sh | bash",
+    "Orbit installer: configure with --init, provide the secret with --set-oidc-secret if OIDC is on, then verify with --check before rerunning automation.",
   ];
 }
 
@@ -435,6 +435,16 @@ export async function prepareConfiguration(
     }
   }
 
+  // O1-Q3: `check` always reflects the most recent known state, re-fetched
+  // only immediately after something that could actually have changed it
+  // (runInit, runSetOidcSecret) — never unconditionally "just in case".
+  // install.sh's own prepare_configuration has the identical unconditional
+  // re-check after one that already passed (it runs `configure.sh --check`
+  // again at its very end regardless), so this is a deliberate improvement
+  // over bash, not a parity restatement; nothing between either check in
+  // that path ever mutates .env-orbit, so the first result is always still
+  // current, and O1-R7/O1-R8's deployment lock now rules out even an
+  // external concurrent writer doing so.
   let check = adapter.runCheck(context.configureScript);
   if (check.status !== 0) {
     const missing = missingRequiredFields(check.stdout);
@@ -445,15 +455,16 @@ export async function prepareConfiguration(
         if (!init.ok) {
           return failed("Guided configuration was cancelled or invalid; restoring the previous deployment.");
         }
+        // install.sh:988 ignores a non-zero status from this re-check
+        // (`|| true`) and only inspects its stdout.
+        check = adapter.runCheck(context.configureScript);
       }
-      // install.sh:988 ignores a non-zero status from this re-check
-      // (`|| true`) and only inspects its stdout.
-      const recheck = adapter.runCheck(context.configureScript);
-      if (isFieldMissing(recheck.stdout, "OIDC_CLIENT_SECRET")) {
+      if (isFieldMissing(check.stdout, "OIDC_CLIENT_SECRET")) {
         const oidcSecret = await adapter.runSetOidcSecret(context.configureScript, answers);
         if (!oidcSecret.ok) {
           return failed("OIDC client secret collection was cancelled or invalid; restoring the previous deployment.");
         }
+        check = adapter.runCheck(context.configureScript);
       }
     } else if (missing.length > 0) {
       return {
@@ -464,7 +475,6 @@ export async function prepareConfiguration(
     }
   }
 
-  check = adapter.runCheck(context.configureScript);
   if (check.status !== 0) {
     let missing = missingConfigurationFields(check.stdout);
     if (missing.length === 0) missing = REQUIRED_FIELDS;

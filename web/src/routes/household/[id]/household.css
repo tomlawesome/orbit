@@ -6,11 +6,12 @@
  * the family's standard drifting star tiles until §15 picks its successor, at
  * which point this screen adopts it unchanged in every other respect.
  *
- * Palette tokens come from packs.css. Two families of token the mockup
- * declared for itself are NOT in packs.css because nothing else uses them —
- * the section accents and the ink that reads on a solid danger button — so
- * they are declared here, per pack, scoped to this screen rather than pushed
- * into a shared file no other screen would read.
+ * Palette tokens come from packs.css, including the section accents (#867:
+ * moved there from here, since the manifest on /home now draws marks too --
+ * a value scoped to this screen alone was not shareable with a second).
+ * One family of token the mockup declared for itself is still NOT in
+ * packs.css because nothing else uses it -- the ink that reads on a solid
+ * danger button -- so it stays here, per pack, scoped to this screen.
  *
  * Everything is scoped under .household-page: this route is a sibling of no
  * one, but the family's law is that a screen's stylesheet cannot reach past
@@ -22,31 +23,11 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page *{box-sizing:border-box;margin:0}
 .household-page{min-height:100vh}
 
-[data-theme=starchart] .household-page{
-  --on-danger:#060b1c;
-  --sec-sage:#8fbf9f; --sec-blue:#8fb8ff; --sec-sand:#d8b45a;
-  --sec-plum:#b79ae0; --sec-coral:#f0907a;
-}
-[data-theme=afterdark] .household-page{
-  --on-danger:#05070d;
-  --sec-sage:#7fb79a; --sec-blue:#7dd3fc; --sec-sand:#d9bd83;
-  --sec-plum:#a99ae0; --sec-coral:#ef9b86;
-}
-[data-theme=atlas] .household-page{
-  --on-danger:#f6f1e4;
-  --sec-sage:#3f6f4d; --sec-blue:#2b6cb0; --sec-sand:#a9761f;
-  --sec-plum:#6f4788; --sec-coral:#ab4a34;
-}
-[data-theme=dawn] .household-page{
-  --on-danger:#ffffff;
-  --sec-sage:#2f7d55; --sec-blue:#1f7ac2; --sec-sand:#8f6c00;
-  --sec-plum:#71499a; --sec-coral:#bd4f36;
-}
-[data-theme=retrograde] .household-page{
-  --on-danger:#0a0410;
-  --sec-sage:#3ef2a0; --sec-blue:#2de2e6; --sec-sand:#ffd23f;
-  --sec-plum:#ff4fd8; --sec-coral:#ff9f1c;
-}
+[data-theme=starchart] .household-page{ --on-danger:#060b1c; }
+[data-theme=afterdark] .household-page{ --on-danger:#05070d; }
+[data-theme=clouds] .household-page{ --on-danger:#f6f1e4; }
+[data-theme=dawn] .household-page{ --on-danger:#ffffff; }
+[data-theme=retrograde] .household-page{ --on-danger:#0a0410; }
 
 /* ══ H2 — THE HOUSEHOLD'S OWN CHART, AT ROOM SCALE (§15) ═══════════════════
    From design/v19/household-inside.html, whose cards are this screen's cards
@@ -90,7 +71,6 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
    lines on dark, at the same alpha */
 [data-theme=afterdark]  .household-page .consty{--con-op:.92}
 [data-theme=retrograde] .household-page .consty{--con-op:.82}
-[data-theme=atlas]      .household-page .consty{--con-op:.46}
 [data-theme=dawn]       .household-page .consty{--con-op:.46}
 /* clouds arrived after the mockup was drawn (#486/§15) and carries the lighter
    end of the roster with dawn, so it takes dawn's restraint. */
@@ -120,7 +100,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .sky .near{animation:driftn 195s linear infinite}
 .household-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
           background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
-[data-theme=atlas] .household-page .vignette,
+[data-theme=clouds] .household-page .vignette,
 [data-theme=dawn] .household-page .vignette{background:none}
 
 /* §14: the desk. Same scale as the helm and administration. */
@@ -150,7 +130,10 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .card.c-sections{grid-column:1;grid-row:2}
 .household-page .card.c-members {grid-column:2;grid-row:1 / span 2;align-self:stretch;
                  display:flex;flex-direction:column}
-.household-page .card.c-danger  {grid-column:1 / -1;grid-row:3}
+/* #1002: the archive, owner-only like sections and the danger line, spans
+   both columns between the ordinary cards and the red rule. */
+.household-page .card.c-archive {grid-column:1 / -1;grid-row:3}
+.household-page .card.c-danger  {grid-column:1 / -1;grid-row:4}
 /* the panel is taller than its content in a family this size, so the slack
    is SHARED between the blocks instead of collecting in one hole at the
    bottom: three auto margins, three even breaths, rules evenly spaced. */
@@ -161,7 +144,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 @media (max-width:880px){
   .household-page .cards{grid-template-columns:1fr}
   .household-page .card.c-system,.household-page .card.c-sections,
-  .household-page .card.c-members,
+  .household-page .card.c-members,.household-page .card.c-archive,
   .household-page .card.c-danger{grid-column:1;grid-row:auto;align-self:auto}
   .household-page .c-members .block{margin-top:16px}
 }
@@ -206,6 +189,9 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .savebar{display:flex;align-items:center;gap:14px;margin-top:17px}
 .household-page .btn{font:600 13px var(--display);color:var(--bg);background:var(--accent);border:0;
      border-radius:10px;padding:9px 19px;cursor:pointer}
+/* #1131: --bg on --accent is 3.03:1 on dawn/clouds, same pair the pocket kit
+   measured on its own filled pill (74e7a491) — white clears 4.5:1 there too. */
+:is([data-theme=dawn],[data-theme=clouds]) .household-page .btn{color:#fff}
 .household-page .btn:hover{filter:brightness(1.06)}
 .household-page .btn:disabled{opacity:.36;cursor:not-allowed;filter:none}
 .household-page .ghost{font:11px var(--mono);color:var(--ink-mid);background:none;border:1px solid var(--line);
@@ -243,6 +229,22 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .mark i{position:absolute;right:-1px;bottom:0;width:5px;height:5px;border-radius:50%;
         background:var(--sec);opacity:.92}
 .household-page .sec.off .mark{opacity:.6}
+
+/* #867 tap to swap. A user-named row's mark is a real button; a shipped
+   row's is the plain span above and never wears these rules. */
+.household-page .mark.swap{cursor:pointer;background:none;border:0;padding:0;border-radius:6px}
+.household-page .mark.swap:hover,.household-page .mark.swap[aria-expanded=true]{box-shadow:0 0 0 1px var(--line)}
+.household-page .mark.swap:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* the tray: the worn figure plus every asterism this household has not
+   worn, role=radiogroup, the worn one ringed in --accent. Picking one
+   updates the row in place — it saves with the rest of the list. */
+.household-page .tray{display:flex;gap:6px;padding:6px 0 8px 32px;border-bottom:1px solid var(--line-soft)}
+.household-page .sec:last-of-type + .tray{border-bottom:0}
+.household-page .tray button.mark{width:24px;height:24px;border-radius:6px;cursor:pointer;
+      background:none;border:0;padding:0}
+.household-page .tray button.mark:hover{box-shadow:0 0 0 1px var(--line)}
+.household-page .tray button.mark[aria-checked=true]{box-shadow:0 0 0 1px var(--accent)}
+.household-page .tray button.mark:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .household-page .sec:last-of-type{border-bottom:0}
 .household-page .sec input{flex:1;min-width:0;background:none;border:0;border-bottom:1px solid transparent;
            color:var(--ink);font-size:13.5px;font-family:var(--ui);padding:4px 0}
@@ -363,7 +365,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .dangercard::after{content:"";position:absolute;inset:0;border-radius:inherit;
                    background:var(--overdue);opacity:.085;pointer-events:none}
 /* the light packs need more of it before the red is felt rather than seen */
-[data-theme=atlas] .household-page .dangercard::after,
+[data-theme=clouds] .household-page .dangercard::after,
 [data-theme=dawn] .household-page .dangercard::after{opacity:.12}
 /* the hazard rule — chart-pen ticks, hard edges only, along the top */
 .household-page .dangercard::before{content:"";position:absolute;left:0;right:0;top:0;height:6px;
@@ -411,6 +413,76 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 /* 2f — the scheduled-for-deletion banner and its restore button are NOT here:
    the recovery window is an instance-admin affair, drawn on the admin panel.
    What lives on this screen is the request itself. */
+
+/* ── THE ARCHIVE (#1002) — portable export, import and preview ───────────
+   Owner-only, spanning both columns (placed above, .card.c-archive). Round
+   7's own tab grammar (ratified 2026-09-20): a joined pill pair at the far
+   end of the card head, in the page's ghost-button voice, the chosen one
+   filled with --accent. role=tablist/tab/tabpanel, ← → between them. */
+.household-page .c-archive .cardhead{gap:22px;align-items:center}
+.household-page .tabs{display:inline-flex;margin-left:auto;border:1px solid var(--line);
+      border-radius:999px;overflow:hidden}
+.household-page .tabs [role=tab]{font:11px var(--mono);letter-spacing:.04em;color:var(--ink-mid);
+      background:none;border:0;padding:6px 14px;cursor:pointer;line-height:1.2}
+.household-page .tabs [role=tab]+[role=tab]{border-left:1px solid var(--line)}
+.household-page .tabs [role=tab]:hover{color:var(--ink)}
+.household-page .tabs [role=tab][aria-selected=true]{background:var(--accent);color:var(--bg);font-weight:600}
+/* #1166: --bg on --accent is 3.03:1 on dawn/clouds, same pair the pocket kit
+   measured on its own filled pill (74e7a491) — white clears 4.5:1 there too. */
+:is([data-theme=dawn],[data-theme=clouds]) .household-page .tabs [role=tab][aria-selected=true]{color:#fff}
+.household-page .tabs [role=tab]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.household-page .arch{max-width:600px}
+.household-page .arch p{margin:0 0 12px;font-size:13px;color:var(--ink-mid);line-height:1.62;max-width:52ch}
+.household-page .arch p b{color:var(--ink);font-weight:560}
+/* what a file holds is a manifest — a figure and a name per row (round 3:
+   "I'd rather it read more as a list"), never a sentence */
+.household-page .arch .man{margin:0 0 12px;padding:0;list-style:none;max-width:430px}
+.household-page .arch .man li{display:flex;align-items:baseline;gap:12px;padding:5px 2px;
+      border-top:1px solid var(--line-soft);font-size:13px;color:var(--ink-mid);line-height:1.4}
+.household-page .arch .man li:first-child{border-top:0}
+.household-page .arch .man li:last-child{border-bottom:1px solid var(--line-soft)}
+.household-page .arch .man b{flex:none;width:34px;text-align:right;font:600 13px var(--mono);color:var(--ink)}
+.household-page .arch .man .lab{color:var(--ink-mid)}
+.household-page .arch .man small{margin-left:auto;font:10.5px var(--mono);color:var(--ink-faint);
+      letter-spacing:.04em;text-align:right}
+.household-page .arch .man small.zero,.household-page .arch .man small.warm{color:var(--warm)}
+.household-page .arch .man li.head{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.06em;
+      padding-bottom:7px}
+.household-page .arch .act{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:0}
+/* the open step borrows the danger line's own confirm: a dashed rule, then
+   fields — the same shape administration.svelte's inline challenge uses */
+.household-page .arch .step{display:none;margin-top:13px;padding-top:13px;border-top:1px dashed var(--line)}
+.household-page .arch .step.open{display:block}
+.household-page .arch .step .field{max-width:430px}
+.household-page .arch .field input.pw{font-family:var(--mono);font-size:12.5px;letter-spacing:.14em}
+.household-page .arch .never{margin:0 0 13px;font:11px var(--mono);color:var(--warm);line-height:1.75;
+      max-width:60ch}
+.household-page .arch .never b{color:var(--warm);font-weight:600}
+.household-page .arch .fname{margin:0 0 12px;font-size:13px;color:var(--ink)}
+.household-page .arch .fname b{font-weight:530}
+.household-page .arch .fname small{margin-left:8px;font:10.5px var(--mono);color:var(--ink-quiet)}
+.household-page .arch .inside{margin-top:13px;padding-top:13px;border-top:1px dashed var(--line)}
+.household-page .arch .dup{margin:0 0 12px;padding:0;list-style:none}
+.household-page .arch .dup li{display:flex;align-items:center;gap:10px;padding:4px 2px;
+      font-size:13px;color:var(--ink)}
+.household-page .arch .dup li span{margin-left:auto;font:10.5px var(--mono);color:var(--warm);
+      letter-spacing:.06em;white-space:nowrap}
+.household-page .arch .refuse{margin:12px 0 0;font:11.5px var(--mono);color:var(--overdue-text);line-height:1.7}
+/* the reactive step-up challenge (#1132): the same "type your password,
+   confirm" shape administration.svelte and settings/+page.svelte already
+   use, held inline under the act it belongs to rather than in a dialog —
+   this route has no modal component. */
+.household-page .arch .challenge{margin-top:13px;padding-top:13px;border-top:1px dashed var(--accent)}
+.household-page .arch .challenge p{max-width:60ch}
+.household-page .arch .challenge .field{max-width:430px}
+@media (max-width:880px){
+  .household-page .arch{max-width:none}
+}
+@media (max-width:560px){
+  .household-page .c-archive .cardhead{flex-wrap:wrap;gap:10px 14px}
+  .household-page .tabs{margin-left:0}
+  .household-page .arch p,.household-page .arch .step .field{max-width:none}
+}
 
 @media (prefers-reduced-motion: reduce){
   .household-page .sky .far,.household-page .sky .near,

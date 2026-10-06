@@ -1,0 +1,830 @@
+/* The item belt (#458), ported from design/v19/item-belt.html into the app.
+ * Tokens come from packs.css; everything below is scoped under .belt-page.
+ * The mockup's own explanatory comments are preserved verbatim as design law. */
+
+  /*
+   * THE ITEM BELT — v4, issue #458.
+   * design/owner-decisions.md §15, and the owner's corrections of 2026-08-16.
+   *
+   * WHAT WAS MISREAD. v2 and v3 both built a belt of ONE ITEM'S DOCUMENTS.
+   * That was wrong, and the owner has said so plainly:
+   *
+   *   "It was supposed to be an ITEM belt, with a search box. An alternative
+   *    way to view the manifest, essentially."
+   *
+   *   "It should just have had all the items in there together, either old on
+   *    the left, newer on the right, or visa versa, I don't mind, but all the
+   *    asteroids are surrounded by the other items that are chronologically
+   *    (by renewal/required date) near to them in the linear list."
+   *
+   *   "v2 was better overall" — so v3's paper is gone. Every sheet, every
+   *    turned corner, every ruled line: deleted. The band is rock and dust
+   *    again, which is what v2 had and what the owner wants back.
+   *
+   *   "Asteroid belt — yes, but they don't form an orderly, linear line,
+   *    they're jumbled around a little." — so the items keep strict date
+   *    ORDER along the band while being scattered within its thickness. See
+   *    THE JUMBLE below.
+   *
+   * AND: THE BELT IS THE ITEM SCREEN (owner, same review). This surface
+   * replaces /item. Arriving at an item from anywhere else — a manifest row
+   * on home, a filed lane in the inbox, a link in a reminder — lands you HERE
+   * with that item already seated at the apex and its neighbours in time
+   * already around it. There is no separate item page to go to afterwards;
+   * this page opening with a card at the apex IS that arrival, which is what
+   * the default view below demonstrates. (documents.html retires into this
+   * too, §14: "the coming asteroid belt (#458) with a well-placed search box
+   * is the document surface.")
+   *
+   * AND: THE DOCUMENTS RIDE IN THE BAND (owner, ruling the open question).
+   * When an item is at the apex, its documents are bodies in the belt beside
+   * it — not a list on the card — and they must be unmistakable against
+   * everything else. He asked for a different-coloured perimeter line, or a
+   * glow or gentle pulse, and floated "Both?" — then, shown the two variants
+   * side by side, RULED for all of it: a document body wears a distinct
+   * accent PERIMETER RING, a soft GLOW, and a slow 2.6s PULSE, one treatment,
+   * no toggle. Under reduced motion the breath stops and the ring and glow
+   * stay: the mark is obvious with no motion at all.
+   * Clicking a document body rolls it to the apex and it becomes the document
+   * card — what it is, when it arrived, that it scanned clean, and the
+   * original in your hands (the page render itself still waits on #476).
+   * When a document is centred the same mark — ring, glow and breath —
+   * appears on ITS ITEM, one short step away, so the way back is never in
+   * doubt.
+   *
+   * WHAT THE BELT IS, THEN. Every item in the household is a body in one
+   * band, and the band is TIME:
+   *
+   *   SOONER  ←──────────────── the apex ────────────────→  LATER
+   *
+   * Left is the past and the near future — overdue first — and it runs
+   * rightward into the wide orbits. Neighbours in the band are neighbours in
+   * the manifest's linear date list, always: the belt is that list, bent
+   * round a ring. Spacing breathes with the date gaps (a cluster of four
+   * renewals in three weeks sits close; a five-month gap opens up) but never
+   * closes below a floor, so labels cannot collide. Documents take no room in
+   * that sequence: their seats are cut out of the space BETWEEN an item and
+   * its neighbour, so opening an item can never reorder the manifest or
+   * change what "next" means.
+   *
+   * THE JUMBLE. Order is strict; position is not. Each body is thrown a
+   * seeded distance off the ring radius, out of the ring plane, and a little
+   * along the band, so the population scatters through the band's ~430px
+   * thickness rather than threading a wire. The throw eases to exactly zero
+   * at the apex, so the centred body still seats on the pin to the pixel and
+   * the card sits precisely where the band's highest point is; the roll
+   * glides a clicked body from wherever it was jumbled to that seat.
+   *
+   * THE BERTH. The centred body is not a 25px rock, it is a 400px card, so it
+   * has swept a wider clearing than its neighbours — and when the centred
+   * item has papers, wider still, because the papers have to sit in the gap
+   * it has cleared. That widening is animated across the same 420ms as the
+   * roll: the neighbours stand off, and the documents come out of the item.
+   *
+   * WHAT v2 KEEPS, UNCHANGED — its geometry and choreography are ratified:
+   *
+   * 1. THE CARD RIDES IN THE BELT. No crown asteroid stands in for the
+   *    centred thing. The centred body's CARD is the body at the apex: it
+   *    sits IN the band, rubble streaming behind it (through it — the glass
+   *    blurs what passes) and a few motes drifting in front.
+   * 2. THE APEX IS AT SCREEN CENTRE, pinned at every viewport size.
+   * 3. NOT A SEMICIRCLE. A real ring seen at an angle: radius A, inclined 40°
+   *    to the line of sight, node line rolled 12°, projected to screen. The
+   *    left flank falls ~300px and turns toward you, the right falls ~240px
+   *    and runs away foreshortened. Nothing is symmetric.
+   * 4. DENSER AND DISORDERLY, AND SOWN THE WHOLE WAY ROUND. Seeded ambient
+   *    bodies at scattered radii (peaked ±19% of A, one in seven thrown 1.75×
+   *    further out) and heights (±6.6% of A), dust to rubble, drawn at depth
+   *    — nearer bodies larger, brighter, faster, the highest passing in FRONT
+   *    of the card. ~2100 of them fill one skyful, and the bed is sown across
+   *    every skyful the roll can reach: the screen window (2.01 rad at
+   *    1280×800, 2.45 at 1600×1000) plus the manifest's own roll span
+   *    (3.10 rad, Window cleaning to Gas safety), so 5341 bodies at 1280×800
+   *    and 4756 at 1600×1000 — the same density per radian, over 2.5× the
+   *    ground. Centring an end item now looks out on rock, not on the bare
+   *    ring the fixed-window sowing used to leave behind it.
+   *    They drift for ever and NEVER loop: a body that leaves the arc for
+   *    good is rebuilt at its far end out of the same running seeded stream
+   *    (§14, "the sky never loops"), and inner bodies drift faster than
+   *    outer — Keplerian shear.
+   *    That ambient bed is scenery. It is also the answer to a thin
+   *    household: when there are not enough real items to fill the band, the
+   *    band is still a belt (owner, confirmed).
+   *
+   * THE MEMBERS must read instantly as the things that mean something. Four
+   * separations, as v2: they are 25px bodies against rubble that tops out
+   * near 9px; they are drawn (a faceted rock) where rubble is a flat tone;
+   * they carry a label and a focus ring; and each has SWEPT ITS
+   * NEIGHBOURHOOD — the rubble thins to nothing in a disc around every one of
+   * them, the way a body big enough to be a body clears its own orbit. One
+   * thing is added for items: each rock wears its urgency as home wears it —
+   * the tone of the manifest's T-minus column on its rim and a single pip
+   * (overdue / due soon / upcoming / wide orbit), so the left end of the band
+   * burns and the right end cools. Items carrying documents also wear the
+   * dial's belt ellipse (CON-1, "documents attached"), which is the promise
+   * that centring them will bring the papers out.
+   *
+   * THE SEARCH BOX (§14's "well-placed search box"). Quiet, mono, on home's
+   * explore-field idiom — underline only — floated over the top of the sky.
+   * Typing LIGHTS the matches and DIMS the rest; nothing vanishes, because
+   * the belt keeps its shape and you are meant to see where in time your hit
+   * sits. It matches title, section, kind, provider and document name — so
+   * searching "service history" lights the car the paper is filed against.
+   * Enter centres the nearest match; so does clicking a lit rock, or a row of
+   * the hit list beside the field.
+   *
+   * Data: the six Lawson Home items are fixture-true, from
+   * web/src/lib/data/fixtures/workspace.js and DOCUMENTS_FIXTURE, rendered
+   * through web/src/lib/format.js against DESIGN_TODAY 2026-08-13. Eight more
+   * are drawn in the same household's flavour (marked `fill:1` below) purely
+   * so the band reads as a real manifest rather than a six-item sketch — they
+   * are mockup furniture, not fixture, and the build takes the real manifest.
+   *
+   * Backdrop: the shared tiled starfield (#445, seed 17170812, 95 far + 46
+   * near) drifting per POL-11, fixed, with the family vignette.
+   */
+  /* The belt's own tokens, not in packs.css: --rubble and --rubble-gain paint
+     the ambient bed of dust and rock, --paper marks the documents. The rest
+     of each pack — --bg, --panel, --ink, --accent, --overdue, --upcoming, and
+     everything else the belt borrows — is already declared by
+     web/src/lib/packs.css and is deliberately not re-declared here. */
+  [data-theme=starchart]{--rubble:#7d88ab; --rubble-gain:1; --paper:#8fb8ff} /* the documents' own line — see THE DOCUMENTS */
+  [data-theme=afterdark]{--rubble:#78849b; --rubble-gain:1; --paper:#c4b5fd}
+  [data-theme=clouds]{--rubble:#3d4a70; --rubble-gain:1.55; --paper:#2b6cb0}
+  [data-theme=dawn]{--rubble:#3a4966; --rubble-gain:1.5; --paper:#6d28d9}
+  [data-theme=retrograde]{--rubble:#6ea6b8; --rubble-gain:1; --paper:#2de2e6}
+
+  .belt-page *{box-sizing:border-box;margin:0}
+  html,body{height:100%}
+  /* The belt is a stage, not a document: the band is pinned to the viewport
+     so its apex can BE the screen centre, and the card is hung on that
+     point. The card scrolls inside itself if a viewport is too short for it
+     rather than sliding the belt off the top of the sky. */
+  html body{background:var(--bg);color:var(--ink);font-family:var(--ui);line-height:1.55;
+       transition:background .4s,color .4s;overflow:hidden;margin:0}
+  /* THE SCROLL LAW, said loudly enough to be heard. §15's universal descent
+     is a law for screens that scroll, and this one does not: the sheet pins
+     the band to the viewport and rules "the item screen has no descent of its
+     own and none is invented here". But this route has a second occupant —
+     #434's amend-then-accept card, which shares the address and DOES need the
+     page to scroll, and whose sheet (item.css) says so in a bare `html body`
+     rule of equal specificity. Source order between two imported stylesheets
+     is not a thing to leave a law resting on, so the belt states its own with
+     the page it belongs to named in the selector. */
+  html:has(.belt-page) body{overflow:hidden}
+
+  /* family.css / item.css: the sky is fixed and drifts (POL-11); the item
+     screen has no descent of its own and none is invented here. */
+  .belt-page .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+       transition:opacity .4s;z-index:0}
+  .belt-page .sky svg{position:absolute;inset:0;width:100%;height:100%}
+  .belt-page .sky .far{animation:driftf 400s linear infinite}
+  .belt-page .sky .near{animation:driftn 195s linear infinite}
+  .belt-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+            background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+  [data-theme=clouds] .belt-page .vignette,[data-theme=dawn] .belt-page .vignette{background:none}
+
+  /* ---- the band ------------------------------------------------------
+     Two canvases sandwich the card, because the card is IN the band:
+     everything at or behind the ring plane paints under it (and blurs
+     through its glass), the nearest few per cent of the population paints
+     over it. The members ride an SVG between them so they keep real hit
+     targets, labels and focus rings. */
+  .belt-page #band,.belt-page #fore{position:fixed;inset:0;pointer-events:none}
+  .belt-page #band{z-index:2}
+  .belt-page #fore{z-index:5}
+  .belt-page #members{position:fixed;inset:0;z-index:3;overflow:visible}
+  /* #1151 W1-Q18: the one place the seat ring and the end-cap ring's shared
+     width/offset live, so #1065's "the seats above now do it the same way
+     as the end-caps" stays true automatically rather than by two hand-kept
+     copies of the same two values. */
+  .belt-page{--belt-seat-ring:2px dashed var(--accent);--belt-seat-ring-offset:3px}
+  .belt-page .hit{pointer-events:auto;cursor:pointer}
+  .belt-page .hit .fring{opacity:0}
+  .belt-page .hit:focus-visible{outline:none}
+  .belt-page .hit:focus-visible .fring{opacity:1}
+  /* #1065: a seat's ring is an OUTLINE on the seat's own <g>, the same fix
+     #1062 gave the end-caps and for the same reason -- see the comment on
+     .endcap-hit below. `.seat .hit` rather than `.hit` alone, so this leaves
+     the pocket's document clump (buildClump, not wrapped in `.seat`) painting
+     its ring on a child exactly as before: #1065 is scoped to seats. */
+  .belt-page .seat .hit:focus-visible{outline:var(--belt-seat-ring);outline-offset:var(--belt-seat-ring-offset)}
+  .belt-page .hit:hover .rim{opacity:.9}
+  .belt-page .rim{transition:opacity .25s ease}
+  .belt-page .cap-name{font:11.5px var(--mono);fill:var(--ink-mid);text-anchor:middle}
+  .belt-page .cap-t{font:10px var(--mono);letter-spacing:.06em;text-anchor:middle;
+         font-variant-numeric:tabular-nums}
+  /* The two end-caps: the band's compass. Which way is time? They ride the
+     band where it leaves the frame, held above its upper edge (#1010): the
+     far corners they used to keep went to the shared chrome, and above the
+     band is the one side of it a jumbled body never reaches -- rocks sit in
+     the band, their labels hang below it. */
+  .belt-page .endcap{font:9.5px var(--mono);letter-spacing:.2em;fill:var(--ink-quiet);
+          text-transform:uppercase}
+  /* #1062: and each end-cap is a control -- a transparent target with the
+     screen's dashed accent ring on focus and nothing at rest. The ink stays
+     9.5px; belt.behaviour.js squares the target up around it at the product's
+     44px floor. At an exhausted end the control dims and stops taking the
+     press; it keeps its place in the Tab order so a reader can still find it
+     and be told it is spent.
+
+     The ring is an OUTLINE on the control itself, not a dashed shape drawn
+     inside it, because Chromium paints outline on an SVG element around its
+     bounding box, so this is one ring, on the thing the focus is actually
+     on -- a keyboard audit reading the focused element's own computed style
+     finds it, where a ring painted by a child leaves that element carrying
+     nothing (pipeline 1281). The seats above now do it the same way (#1065);
+     paintMembers still drops a seat nobody can see to tabindex="-1", and the
+     e2e keyboard audit's household still holds one item -- the card -- so it
+     still never focuses a seat itself, which is why that fix is proved by a
+     fidelity check on the fixture household instead. Only the pocket's
+     document clump below still paints its ring on a child, because #1065 was
+     scoped to seats. 2px and offset, not a hairline: it has to read against
+     the band on a phone as well as on a desk. */
+  .belt-page .endcap-hit{pointer-events:auto;cursor:pointer}
+  .belt-page .endcap-hit:focus-visible{outline:var(--belt-seat-ring);outline-offset:var(--belt-seat-ring-offset)}
+  .belt-page .endcap-hit:hover .endcap{fill:var(--ink-mid)}
+  .belt-page .endcap-hit.off{cursor:default}
+  .belt-page .endcap-hit.off .endcap,
+  .belt-page .endcap-hit.off:hover .endcap{fill:var(--ink-quiet);opacity:.4}
+
+  /* ---- THE DOCUMENTS' MARK -------------------------------------------
+     The owner: "a different coloured perimeter line around them, and/or
+     some kind of glow, or gentle pulse... Both?" — and, shown the two
+     variants side by side, he took all three. RULED: ring + glow + pulse is
+     the one and only treatment; there is no variant left to switch, so the
+     demo rail's DOCS chip is gone with it.
+     A document body is a small rock inside a hard PERIMETER RING in --paper
+     (a line no item ever wears: items wear their urgency tone, dust wears
+     none) with a soft GLOW behind it, over a faint disc so the ring reads
+     even where the band is thick with rubble — and the whole mark BREATHES,
+     a 2.6s cycle on the ring's own opacity and the halo's radius. Nothing
+     travels; it is a light coming up and going down.
+     Reduced motion kills the breath with every other animation, and the
+     ring and the glow stay exactly where they are — the mark still has to
+     be the loudest thing in the band without a single moving pixel. */
+  .belt-page .doclabel{fill:var(--paper);font-size:10.5px}
+  .belt-page .halo{fill:var(--paper);opacity:.10;
+        animation:belt-halobreath 2.6s ease-in-out infinite alternate;
+        transform-box:fill-box;transform-origin:center}
+  .belt-page .ring{fill:none;stroke:var(--paper);stroke-width:1.7;opacity:.95;
+        animation:belt-ringbreath 2.6s ease-in-out infinite alternate}
+  .belt-page .ringsoft{fill:none;stroke:var(--paper);stroke-width:3.2;opacity:.5;
+            filter:url(#docglow)}
+  @keyframes belt-ringbreath{from{opacity:.42}to{opacity:1}}
+  @keyframes belt-halobreath{from{opacity:.05;transform:scale(.9)}
+                        to{opacity:.17;transform:scale(1.14)}}
+
+  /* ---- the card, seated at the apex ----------------------------------
+     item.css's glass card, unchanged in its parts, hung so that the band's
+     highest point crosses it a third of the way down: the band's thickness
+     (~430px at the apex) and the card's height are of an order, which is
+     what makes it read as riding IN the belt rather than floating above it.
+     The 16px backdrop blur is doing real work here — the rubble streaming
+     behind the card is visible through it, smeared. */
+  .belt-page .cardwrap{position:fixed;left:50%;z-index:4;width:min(480px,calc(100vw - 56px));
+    max-height:calc(100vh - 150px);overflow:auto;
+    --cdx:0px; --cdy:0px; --csc:1;
+    transform:translate(calc(-50% + var(--cdx)),calc(-34% + var(--cdy))) scale(var(--csc));
+    transform-origin:50% 34%;}
+  .belt-page .cardwrap.rollout{opacity:0;
+    transition:transform 190ms cubic-bezier(.55,0,.85,.4),opacity 165ms linear}
+  .belt-page .cardwrap.rollpre{transition:none;opacity:0}
+  .belt-page .cardwrap.rollin{transition:transform 230ms cubic-bezier(.16,.72,.3,1),opacity 205ms linear}
+  .belt-page .glass{background:var(--panel-raised);backdrop-filter:blur(16px);
+         border:1px solid var(--line);border-radius:18px}
+  .belt-page .item-card{padding:22px 26px 20px}
+  .belt-page .item-card h2{font:600 21px var(--display);line-height:1.25}
+  .belt-page .item-card .sub{font:11px var(--mono);color:var(--ink-mid);letter-spacing:.04em;
+                  margin:5px 0 16px}
+  .belt-page .kv{display:flex;justify-content:space-between;gap:18px;font:11.5px var(--mono);
+      color:var(--ink-mid);padding:6.5px 2px;border-bottom:1px solid var(--line-soft)}
+  .belt-page .kv:last-of-type{border:0}
+  .belt-page .kv b{color:var(--ink);font-weight:500;text-align:right}
+  .belt-page .kv b.clean{color:var(--ok-text)}
+  .belt-page .kv b.over{color:var(--overdue-text)} .belt-page .kv b.soon{color:var(--warm)}
+  /* #1005: an expiry past its date reads quietly, never as an alarm. */
+  .belt-page .kv b.ended{color:var(--ink-mid)}
+  .belt-page .kv b.up{color:var(--upcoming)} .belt-page .kv b.ok{color:var(--ok-text)}
+  /* #941, and no new vocabulary: the same b.<state> family as .clean and .over
+     above, in the two tones the ruling names. Damaged carries inbox.css's
+     .failed dot -- 8px, --degraded, the mark "arrived but could not be read"
+     already wears; locked is --ink-quiet and no degraded colour at all,
+     because waiting for an administrator is not a failure. */
+  .belt-page .kv b.failed{color:var(--degraded);font-weight:450}
+  .belt-page .kv b.failed i{display:inline-block;width:8px;height:8px;border-radius:50%;
+    background:var(--degraded);margin-right:7px;vertical-align:baseline}
+  .belt-page .kv b.locked{color:var(--ink-quiet);font-weight:450}
+  .belt-page .item-card p.failed{color:var(--degraded)}
+  .belt-page .item-card p.locked{color:var(--ink-quiet)}
+  /* #843: h3, not h4 -- these follow the card's own h2 and must not skip a
+     level. The look is unchanged. */
+  .belt-page .item-card h3{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+                color:var(--ink-quiet);margin:16px 0 8px}
+  .belt-page .note{font:10.5px var(--mono);color:var(--ink-quiet);margin-top:13px;line-height:1.75}
+  .belt-page .note b{color:var(--paper);font-weight:500}
+  /* #1155: the note's own paper name is the way into the belt with that
+     paper open, styled as the note's own `b` (colour and weight). */
+  .belt-page .note .ip-paperlink{appearance:none;background:none;border:0;padding:0;margin:0;
+    font:inherit;color:var(--paper);font-weight:500;cursor:pointer}
+  .belt-page .note .ip-paperlink:hover{text-decoration:underline dotted}
+  .belt-page .note .ip-paperlink:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+  .belt-page .acts{display:flex;flex-wrap:wrap;gap:7px}
+  /* #854: see item.css's .acts button — --act-text is the letterform's own
+     colour, set beside --act; --act itself still rings and fills unchanged. */
+  .belt-page .acts button{font:11px var(--mono);color:var(--act-text,var(--act,var(--ink-mid)));background:var(--panel);
+    border:1px solid color-mix(in srgb, var(--act,var(--ink-mid)) 40%, transparent);
+    border-radius:999px;padding:6px 13px;cursor:pointer}
+  .belt-page .acts button:hover{border-color:var(--act,var(--ink))}
+  .belt-page .btn-primary{padding:9px 20px;border-radius:11px;border:0;cursor:pointer;
+    font:600 12.5px var(--display);color:var(--bg);background:var(--act,var(--accent))}
+  /* #1131: --bg on --accent is 3.03:1 on dawn/clouds, same pair the pocket
+     kit measured on its own filled pill (74e7a491) — white clears 4.5:1
+     there too. --btn-primary never sets --act, so this is always the
+     --accent case. */
+  :is([data-theme=dawn],[data-theme=clouds]) .belt-page .btn-primary{color:#fff}
+  .belt-page .btn-primary:hover{filter:brightness(1.05)}
+  .belt-page .back{display:inline-block;margin-top:14px;font:11.5px var(--mono);
+        color:var(--ink-mid);text-decoration:none;background:none;border:0;
+        cursor:pointer;padding:0}
+  .belt-page .back:hover{color:var(--accent-text)}
+
+  /* The honest stand-in for a page that has none to show (scanning, removed,
+     refused) or isn't drawing one yet: a plain card face, no fabricated page
+     image. #1088's readcard/topsheet/sheet/rcfoot draw the actual page
+     alongside it now; .docview/.docbody/.getrow, the pre-#1088 flex layout
+     this plate used to sit in, are gone from the markup and were deleted
+     from here with them (#1151 W1-Q16) rather than left to describe a
+     layout that no longer exists. */
+  .belt-page .plate{flex:none;width:104px;height:134px;border-radius:8px;position:relative;
+         border:1px solid var(--paper);background:var(--panel);
+         display:grid;place-items:end center;padding-bottom:8px;
+         font:9.5px var(--mono);letter-spacing:.1em;color:var(--paper)}
+  .belt-page .plate::before{content:"";position:absolute;left:14px;right:14px;top:20px;height:1px;
+     background:var(--line);
+     box-shadow:0 10px 0 var(--line),0 20px 0 var(--line-soft),0 30px 0 var(--line-soft),
+                0 40px 0 var(--line-soft),0 50px 0 var(--line-soft)}
+
+  /* ---- the search box -------------------------------------------------
+     home.html's explore field, verbatim in its idiom: no box, one underline,
+     mono, centred. It floats over the top of the sky so it never fights the
+     card. */
+  .belt-page .find{position:fixed;left:50%;top:20px;transform:translateX(-50%);z-index:6;
+        text-align:center;width:min(360px,calc(100vw - 48px))}
+
+  /* ---- THE TOP STRIP ON A NARROW SKY (#1035) ---------------------------
+     Three things are fixed into the same strip across the top: the shared
+     chrome (#1010), which takes the way back on the left and the account orb
+     on the right; the search field, centred; and the band's two end-caps,
+     which ride above the band where it leaves the frame and so also land in
+     that strip once the sky is short.
+
+     They share one row only while the field's own edges clear the chrome.
+     The way back ("← YOUR SKY") ends at x=115 and the orb starts 66px in from
+     the right, so a 360px-wide field needs about 614px of sky before its left
+     edge passes the way back. Below that the field is drawn straight through
+     the way back, the orb and both end-caps — which is what a phone shows.
+
+     So under 680px (that threshold, rounded up) the strip stacks: the chrome
+     keeps row one, the field takes a row of its own beneath it, and the
+     end-caps are inset past the chrome on their own side. The insets are read
+     by belt.behaviour.js's buildEnds — the end-caps are SVG text placed on
+     the band, so CSS can say where the chrome is but cannot move them.
+     28px is the end-caps' own margin, so each inset is what the chrome needs
+     on top of it: 99 puts "← sooner" at x=127, twelve clear of the way back;
+     50 ends "later →" at 78 in from the right, twelve clear of the orb. */
+  .belt-page{--endcap-inset-start:0px;--endcap-inset-end:0px}
+  @media (max-width:680px){
+    .belt-page{--endcap-inset-start:99px;--endcap-inset-end:50px}
+    /* clear of the chrome's row: the orb is 40px tall from y=22. */
+    .belt-page .find{top:72px}
+  }
+  .belt-page .find>input,.belt-page .find>.findnote{position:relative}
+  .belt-page .find input{background:none;border:0;outline:0;border-bottom:1px solid var(--line);
+    width:100%;text-align:center;font:12.5px var(--mono);color:var(--ink);
+    padding:6px 4px;transition:border-color .25s;-webkit-appearance:none;appearance:none}
+  .belt-page .find input::placeholder{color:var(--ink-quiet)}
+  .belt-page .find input:focus{border-color:var(--accent)}
+  .belt-page .find input::-webkit-search-cancel-button{display:none}
+  /* One line always (#1147): with a suggestion counted, the line runs a
+     little past the field's 360px, so it spills evenly both sides rather
+     than wrapping its last word. Flex centres an overflowing line; plain
+     text-align would push it all off to the right. The desk only: a narrow
+     sky hides .find for the pocket's own search. */
+  .belt-page .findnote{font:9.5px var(--mono);letter-spacing:.14em;color:var(--ink-quiet);
+            margin-top:7px;text-transform:uppercase;
+            white-space:nowrap;display:flex;justify-content:center}
+  /* The hit list drops BESIDE the field, not beneath it: beneath it is where
+     the card is, and the search must never cover the thing you are looking
+     at. It hangs in the empty quarter of the sky to the field's right, and
+     it is only a reach for the matches that are round the far side of the
+     ring — the ones on this sky you simply click. */
+  .belt-page .hits{position:absolute;left:calc(100% + 22px);top:0;width:296px;
+        background:var(--panel-raised);backdrop-filter:blur(14px);
+        border:1px solid var(--line);border-radius:12px;padding:6px;display:none;
+        text-align:left;max-height:252px;overflow:auto}
+  .belt-page .hits.open{display:block}
+  .belt-page .hits button{display:flex;width:100%;gap:10px;align-items:baseline;background:none;
+    border:0;cursor:pointer;font:11.5px var(--mono);color:var(--ink-mid);
+    padding:6px 9px;border-radius:7px;text-align:left}
+  .belt-page .hits button b{color:var(--ink);font-weight:500;flex:1;min-width:0;
+                 overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .belt-page .hits button small{font-size:10px;font-variant-numeric:tabular-nums}
+  .belt-page .hits button:hover,.belt-page .hits button.pick{background:var(--panel);color:var(--ink)}
+  .belt-page .hits .none{padding:8px 9px;font:11.5px var(--mono);color:var(--ink-quiet)}
+  @media (max-width:1140px){ .belt-page .hits{position:static;width:auto;margin-top:9px} }
+
+  /* ---- chrome ----------------------------------------------------------
+     The mockup's own scaffolding stops here. Its .demos rail (centre / belt /
+     theme) and its <footer> describing the proposal are drawn for a reviewer
+     reading a sheet, not for anyone using Orbit, so — like every other v19
+     port, none of which carries them — their rules do not come across. The
+     fidelity gate masks the same two selectors on the mockup's side, which is
+     what keeps the budget measuring real drift rather than a known,
+     deliberate absence. */
+
+  @media (prefers-reduced-motion: reduce){
+    /* The swap is instant rather than animated — the belt still puts the
+       clicked body at the apex, it simply arrives there, the documents are
+       simply already out, the mark's breath never runs (its ring and glow
+       stay put, at rest), and the band's drift holds still. */
+    .belt-page *{animation:none!important}
+    .belt-page .cardwrap{transition:none!important}
+  }
+
+/* ---- the command panels — item.css's vocabulary, scoped -----------------
+   The mockup draws the action pills but leaves them inert: it has no forms
+   behind the "Renew", "Snooze" etc. buttons. So the panel grammar below is
+   not lifted from item-belt.html at all — it is copied from the retired
+   item view's own sheet, web/src/routes/item/[[id]]/item.css, where it was
+   already composed from create.html's ratified field vocabulary (.field,
+   .row2, .save-row, .btn-primary, .cancel-link). Only the rules the belt
+   actually needs for its panels are copied, each prefixed with .belt-page;
+   the belt's own .btn-primary (and .btn-primary:hover) above, from the
+   mockup itself, is kept and NOT overridden, so it is not repeated here —
+   nor are item.css's .acts, .acts button, .kv, .note, .back, .item-card or
+   html body rules, which the belt already declares its own versions of. */
+.belt-page .panel{margin-top:16px;padding-top:4px}
+.belt-page .panel .field{margin-bottom:13px}
+.belt-page .panel .field label{display:block;font:10.5px var(--mono);letter-spacing:.12em;
+  color:var(--ink-quiet);text-transform:uppercase;margin:0 0 6px}
+.belt-page .panel .field input,.belt-page .panel .field textarea{width:100%;background:var(--panel);
+  border:1px solid var(--line);border-radius:9px;color:var(--ink);font-size:13.5px;
+  padding:9px 12px;font-family:var(--ui)}
+.belt-page .panel .field input:focus,.belt-page .panel .field textarea:focus{border-color:var(--accent)}
+.belt-page .panel .field textarea{resize:vertical;line-height:1.5}
+.belt-page .panel .field.mono input{font-family:var(--mono)}
+.belt-page .panel .row2{display:flex;gap:14px}
+.belt-page .panel .row2>.field{flex:1;min-width:0}
+.belt-page .save-row{display:flex;align-items:center;gap:18px;margin-top:6px}
+.belt-page .cancel-link{font:12px var(--mono);color:var(--ink-quiet);background:none;border:0;
+  cursor:pointer;padding:0}
+.belt-page .cancel-link:hover{color:var(--ink-mid)}
+.belt-page .btn-quiet{font:11px var(--mono);color:var(--act-text,var(--act,var(--ink-mid)));background:var(--panel);
+  border:1px solid color-mix(in srgb, var(--act,var(--ink-mid)) 40%, transparent);
+  border-radius:999px;padding:8px 16px;cursor:pointer}
+.belt-page .btn-quiet:hover{border-color:var(--act,var(--ink))}
+.belt-page .problem{font:10.5px var(--mono);color:var(--overdue-text);margin-top:14px;line-height:1.6}
+.belt-page .acts button[aria-pressed=true]{border-color:var(--act,var(--accent));
+  background:color-mix(in srgb, var(--act,var(--accent)) 14%, transparent)}
+.belt-page .acts button:disabled{opacity:.5;cursor:default}
+.belt-page .btn-primary:disabled{opacity:.5;cursor:default}
+
+/* ==========================================================================
+ * #1088: THE DOCUMENT PREVIEW (owner-decisions.md §18)
+ *
+ * design/v19/create-v3.html's reading card — .readcard, .topsheet, .focus,
+ * .sheet, landed, breathe — reused in the idiom that document-card/round-6
+ * grew it into: pressing a paper widens the belt's own grid on THE PAPER'S
+ * OWN SIDE, sliding the item card off centre and growing the reading card
+ * beside it, the pair centred together. A document is never the centred
+ * body — this rides beside `.cardwrap` entirely, opened and closed by
+ * belt.behaviour.js's own openDoc/closeDoc rather than by centring anything.
+ *
+ * ROUND 6's OWN CUT (owner: "extremely basic"): the page nearly edge to
+ * edge, whole, in its own proportions, on the cream sheet with the tilted
+ * second sheet under it. No head, no file row, no zoom, no close control —
+ * Esc or dead space on the belt closes it.
+ *
+ * #1088 CUTS THE PAGE COUNTER AND ITS ARROWS the mockup drew beneath the
+ * page: Orbit records no page count and the preview endpoint always serves
+ * page one, and "an arrow only where there is a page that way" (the round's
+ * own rule) means no arrows at all with a single page — an owner decision of
+ * 2026-09-22, not a variation on the mockup. The foot below holds only the
+ * honest states' one word instead: restore, or download.
+ *
+ * The reader over the belt — the page as a button, dimmed belt beneath,
+ * `fit − % +`, round arrows, download/remove pills, zoom — is #1059 and is
+ * NOT built here; the page below is inert. */
+
+.belt-page .lanes{position:fixed;left:0;right:0;top:0;bottom:0;z-index:4;pointer-events:none;
+       display:grid;justify-content:center;align-items:start;grid-template-rows:100%;
+       --cardw:480px;--readw:min(480px,calc(100vw - var(--cardw) - 28px - 48px));
+       --rc-top:84px;--rc-bottom:16px;
+       grid-template-columns:minmax(0,var(--cardw)) minmax(0,0px);
+       transition:grid-template-columns .75s cubic-bezier(.4,.5,.15,1),gap .75s cubic-bezier(.4,.5,.15,1)}
+.belt-page .lanes.left{grid-template-columns:minmax(0,0px) minmax(0,var(--cardw))}
+.belt-page .lanes.left.open{grid-template-columns:minmax(0,var(--readw)) minmax(0,var(--cardw));gap:28px}
+.belt-page .lanes.right.open{grid-template-columns:minmax(0,var(--cardw)) minmax(0,var(--readw));gap:28px}
+.belt-page .lanes>*{pointer-events:auto}
+/* the card keeps its own top (the apex, set inline by belt.behaviour.js's
+   layout()) and its roll transform (--cdx/--cdy/--csc) — only the belt's
+   OWN -50% centring is handed to the grid, which centres the track itself
+   now that the track's own width is the card's width (--cardw). */
+.belt-page .lanes .cardwrap{position:relative;left:auto;grid-row:1;grid-column:1;
+      transform:translate(var(--cdx),calc(-34% + var(--cdy))) scale(var(--csc))}
+.belt-page .lanes.left .cardwrap{grid-column:2}
+
+/* the open paper keeps its rim lit while its reading card is out */
+.belt-page .hit.open .rim{opacity:.9}
+
+.belt-page .readcard{width:var(--readw);min-width:0;overflow:hidden;padding:22px 22px 18px;
+          opacity:0;transform:translateX(-16px);pointer-events:none;
+          transition:opacity .55s ease .18s,transform .65s cubic-bezier(.4,.5,.15,1) .18s;
+          grid-row:1;grid-column:2;justify-self:start;align-self:start;
+          margin-top:var(--rc-y,var(--rc-top));max-height:calc(100% - var(--rc-top) - var(--rc-bottom));
+          display:grid;grid-template-rows:minmax(0,1fr) auto;grid-template-columns:minmax(0,1fr);gap:6px}
+.belt-page .lanes.left .readcard{grid-column:1;justify-self:end;transform:translateX(16px)}
+.belt-page .readcard.open,.belt-page .lanes.left .readcard.open{opacity:1;transform:none;pointer-events:auto}
+.belt-page .readcard:focus{outline:none}
+
+.belt-page .pagebox{position:relative;min-height:0;min-width:0;overflow:visible;
+         display:grid;place-items:center}
+.belt-page .readcard.snap .pagebox{display:block;overflow:auto}
+
+/* create-v3, verbatim: the focus — the reticle, the owner's line breathing */
+.belt-page .focus{display:flex;flex-direction:column;align-items:center;text-align:center;
+       padding:16px 0 6px;max-width:360px;margin:0 auto}
+.belt-page .reticle{width:96px;height:96px;margin-bottom:20px}
+.belt-page .reticle .sweep{transform-origin:48px 48px;animation:belt-sweep 9s linear infinite}
+.belt-page .reticle .pull{transform-origin:48px 48px;animation:belt-pull 3.6s ease-in-out infinite}
+@keyframes belt-sweep{to{transform:rotate(360deg)}}
+@keyframes belt-pull{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(.88);opacity:.5}}
+.belt-page .focusline{font:600 15.5px var(--display);letter-spacing:.01em;color:var(--ink);
+           animation:belt-breathe 4.2s ease-in-out infinite}
+@keyframes belt-breathe{0%,100%{opacity:.96}50%{opacity:.42}}
+.belt-page .focus .why{font:10.5px var(--mono);color:var(--ink-quiet);line-height:1.9;margin-top:12px}
+/* the honest states wear the focus block still, not breathing: the line is
+   said once and the reticle is never drawn at all — only the plate below. */
+.belt-page .readcard.still .focusline{animation:none}
+.belt-page .readcard.rc-refused .focusline{color:var(--degraded)}
+
+/* the still states' own plate — v2's honest display, borrowed: no
+   fabricated page, only what Orbit knows the file to be doing right now */
+.belt-page .readcard .focus .plate{margin:0 auto 18px;cursor:default}
+.belt-page .plate.scanning{position:relative;overflow:hidden;letter-spacing:.06em;
+                 animation:belt-platebreath 2.6s ease-in-out infinite alternate}
+.belt-page .plate.scanning::before{opacity:.45}
+@keyframes belt-platebreath{from{border-color:color-mix(in srgb,var(--paper) 30%,transparent)}
+                       to{border-color:var(--paper)}}
+/* STILL SCANNING: a line in the plate's own outline colour sweeps it top to
+   bottom and back with a glow — the scanner at work (owner-decisions.md §18) */
+.belt-page .plate.scanning::after{content:"";position:absolute;left:5px;right:5px;top:6px;
+   height:2px;border-radius:1px;background:var(--paper);opacity:.95;
+   box-shadow:0 0 5px 1px var(--paper),0 0 16px 2px color-mix(in srgb,var(--paper) 45%,transparent);
+   animation:belt-scanline 2.2s ease-in-out infinite alternate}
+@keyframes belt-scanline{from{top:6px}to{top:calc(100% - 8px)}}
+.belt-page .plate.removed{border-style:dashed;opacity:.55;letter-spacing:.06em}
+.belt-page .plate.removed::before{opacity:.5}
+
+/* create-v3's topsheet, verbatim: page one, whole, on the cream sheet with
+   the tilted second sheet under it, always drawn for every showable file. */
+.belt-page .readcard .topsheet{display:none}
+.belt-page .readcard.snap .topsheet{display:flex;justify-content:center;
+                animation:belt-landed .6s cubic-bezier(.3,.7,.2,1) backwards}
+@keyframes belt-landed{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+.belt-page .sheet{position:relative;background:#f6f4ee;border-radius:5px;padding:9px;
+       width:max-content;max-width:100%;
+       box-shadow:0 18px 44px rgba(0,0,0,.45),0 1px 0 rgba(255,255,255,.4) inset}
+/* the sheet under it — ALWAYS there, whatever the file (round 5): it is
+   what makes the page read as a document rather than a loose picture. */
+.belt-page .sheet::before{content:"";position:absolute;inset:0;background:#e7e3d8;border-radius:5px;
+               transform:rotate(-1.1deg) translate(-4px,3px);z-index:-1}
+.belt-page .sheet img{display:block;border-radius:2px;background:#fff;width:auto;
+             max-width:100%;height:auto;max-height:min(60vh,520px)}
+
+/* THE FOOT. Nothing else lives here — no page counter, no arrows (#1088):
+   the honest states' one word instead, restore or download, nothing while
+   scanning or refused. */
+.belt-page .rcfoot{display:flex;justify-content:center;align-items:center;min-height:38px;
+        font:11px var(--mono);color:var(--ink-mid)}
+.belt-page .rcfoot .quiet{display:inline-flex;align-items:center;font:11px var(--mono);
+      color:var(--ink-quiet);background:none;border:0;cursor:pointer;padding:0 8px;
+      height:34px;text-decoration:none;letter-spacing:.02em}
+.belt-page .rcfoot .quiet:hover{color:var(--ink)}
+.belt-page .rcfoot .quiet:disabled{opacity:.4;cursor:default;color:var(--ink-quiet)}
+/* #1155: the staged paper's one foot line -- nothing here can be done, so
+   the foot says why rather than staying empty (the .why line's own type). */
+.belt-page .rcnote{font:10.5px var(--mono);color:var(--ink-quiet);letter-spacing:.02em}
+
+/* ---- ON A PHONE, CON-10's bottom sheet (round 6) ------------------------
+   No second lane: the grid stays one column and the card stays put. The
+   reading card is fixed to the foot, 18px shoulders, the grab, panel-raised
+   glass, up from 105% below. The page fills it; --rc-y (desk-only levelling)
+   is simply never read here. */
+@media (max-width:680px){
+  .belt-page .lanes,.belt-page .lanes.left,.belt-page .lanes.left.open,.belt-page .lanes.right.open{
+     grid-template-columns:minmax(0,var(--cardw));gap:0}
+  .belt-page .lanes .cardwrap,.belt-page .lanes.left .cardwrap{grid-column:1}
+  .belt-page .readcard,.belt-page .lanes.left .readcard{position:fixed;left:0;right:0;bottom:0;top:auto;
+     width:auto;min-width:0;z-index:10;border-radius:18px 18px 0 0;height:auto;max-height:80vh;margin:0;
+     grid-column:auto;grid-row:auto;justify-self:auto;align-self:auto;
+     background:var(--panel-raised);backdrop-filter:blur(18px);border-top:1px solid var(--line);
+     border-left:0;border-right:0;border-bottom:0;padding:14px 16px 10px;gap:6px;
+     opacity:1;transform:translateY(105%);visibility:hidden;
+     transition:transform .3s cubic-bezier(.3,.7,.3,1),visibility 0s .3s}
+  .belt-page .readcard.open,.belt-page .lanes.left .readcard.open{
+     transform:none;visibility:visible;transition-delay:0s}
+  .belt-page .readcard::before{content:"";display:block;width:36px;height:4px;border-radius:2px;
+                    background:var(--line);margin:0 auto 8px}
+  .belt-page .sheet img{max-height:60vh}
+}
+
+/* ==========================================================================
+ * THE POCKET (#1072, design/v19/phone-vision/proposal.md §2.3; drawn in
+ * design/v19/item-phone/round-1, "stands with changes"). Below the CON-10
+ * switch — the same query $lib/pocket/media.js holds — the belt is a low arc
+ * across the top of a page that scrolls, with the card hanging beneath it
+ * at the §1.6 scale (16/13): the band plate is 360px tall from the top safe
+ * area, the find line and the count line sit over its crest, the end-caps
+ * are pills at its shoulders, and the card starts at 340px. Band geometry
+ * is band.js's THE POCKET'S BELT; the painter's pocket parts are in
+ * belt.behaviour.js. Everything the desk unfolds in or beside the card is
+ * a kit Sheet on a phone, styled by the .bp-* rules after this block.
+ * ========================================================================== */
+.belt-page .ip-find,.belt-page .ip-count{display:none}
+@media (max-width:900px), (max-height:600px){
+  /* A page that scrolls, not a stage: the chrome retracts over it (§1.3). */
+  html:has(.belt-page) body{overflow:visible}
+  .belt-page{--ip-card-top:340px;position:relative;min-height:100dvh;overflow-x:clip;
+    padding:calc(var(--ip-card-top) + env(safe-area-inset-top)) 0 calc(48px + env(safe-area-inset-bottom))}
+  .belt-page .find{display:none}
+
+  .belt-page .ip-find{appearance:none;display:block;position:absolute;z-index:6;
+    top:calc(env(safe-area-inset-top) + 60px);left:50%;transform:translateX(-50%);
+    width:min(88%, var(--p-column));min-height:var(--p-hit);padding:0 8px;
+    background:none;border:0;border-bottom:1px solid var(--line);border-radius:0;
+    font:var(--p-type-body)/1 var(--mono);letter-spacing:.04em;color:var(--ink-quiet);text-align:center;
+    cursor:text;-webkit-tap-highlight-color:transparent}
+  .belt-page .ip-find:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
+  .belt-page .ip-count{display:block;position:absolute;z-index:6;left:0;right:0;margin:0;
+    top:calc(env(safe-area-inset-top) + 114px);padding:0 var(--p-gutter);text-align:center;
+    font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);text-transform:uppercase;
+    color:var(--ink-quiet);text-shadow:0 0 2px var(--bg),0 0 5px var(--bg),0 0 11px var(--bg);pointer-events:none}
+
+  /* the band plate: the two canvases and the members, riding the page */
+  .belt-page #band,.belt-page #fore,.belt-page #members{position:absolute;inset:auto;
+    top:env(safe-area-inset-top);left:0;width:100%;height:360px}
+  .belt-page #members{overflow:hidden;touch-action:pan-y}
+  /* captions at the pocket's scale, haloed so the band never eats them */
+  .belt-page .cap-name{font:var(--p-type-meta) var(--ui);fill:var(--ink);
+    paint-order:stroke;stroke:var(--bg);stroke-width:3px;stroke-linejoin:round}
+  .belt-page .cap-t{font:var(--p-type-meta) var(--mono);letter-spacing:.02em;
+    paint-order:stroke;stroke:var(--bg);stroke-width:3px;stroke-linejoin:round}
+  .belt-page .doclabel{font:var(--p-type-meta) var(--ui);fill:var(--paper)}
+  /* the end-caps: ghost pills at the shoulders (§2.3), the button type */
+  .belt-page .endcap-hit.pocket .endcap{font:var(--p-type-button) var(--mono);letter-spacing:.02em;
+    text-transform:none;fill:var(--ink-mid)}
+  .belt-page .endpill{fill:color-mix(in srgb, var(--panel) 85%, transparent);stroke:var(--line);stroke-width:1}
+  .belt-page .endcap-hit.pocket:active .endpill{stroke:var(--accent);
+    fill:color-mix(in srgb, var(--accent) 14%, var(--panel))}
+  .belt-page .endcap-hit.pocket:focus-visible{outline-offset:1px}
+  .belt-page .endcap-hit.pocket.off .endpill{opacity:.4}
+  .belt-page .clump .fring{opacity:0}
+  .belt-page .clump:focus-visible .fring{opacity:1}
+
+  /* the card, in the page's flow beneath the band */
+  .belt-page .lanes,.belt-page .lanes.left,.belt-page .lanes.left.open,.belt-page .lanes.right.open{
+    position:relative;inset:auto;display:block;z-index:4;pointer-events:auto;
+    padding:0 var(--p-gutter);transition:none}
+  .belt-page .lanes .cardwrap,.belt-page .lanes.left .cardwrap{position:relative;left:auto;top:auto;
+    width:auto;max-width:var(--p-column);margin:0 auto;max-height:none;overflow:visible;touch-action:pan-y;
+    transform:translate(calc(var(--cdx) + var(--sdx, 0px)),var(--cdy)) scale(var(--csc));transform-origin:50% 0}
+
+  .belt-page .item-card.ip{padding:20px var(--p-card-pad) 12px;border-radius:var(--p-card-radius);
+    background:var(--panel-raised);border-color:var(--line);
+    box-shadow:0 18px 44px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.05);
+    /* the approach from home morphs the item sheet into this card (§2.1) */
+    view-transition-name:pocket-item}
+  .belt-page .item-card.ip h2{font:600 var(--p-type-card)/1.2 var(--display);overflow-wrap:anywhere}
+  .belt-page .item-card.ip .sub{font:var(--p-type-meta)/1.4 var(--mono);letter-spacing:.02em;margin:6px 0 10px}
+  .belt-page .item-card.ip .kv{align-items:baseline;gap:16px;min-height:var(--p-hit);padding:11px 0;
+    font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
+  .belt-page .item-card.ip .kv span{flex:none}
+  .belt-page .item-card.ip .kv b{font:500 var(--p-type-button)/1.35 var(--mono);min-width:0;overflow-wrap:anywhere}
+  .belt-page .item-card.ip h3{font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:.18em;margin:20px 0 10px}
+  .belt-page .item-card.ip p{font:var(--p-type-body)/1.5 var(--ui);color:var(--ink-mid)}
+  .belt-page .item-card.ip .problem{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal}
+  .belt-page .ip-acts{display:flex;flex-direction:column;gap:var(--p-pill-gap)}
+  .belt-page .ip-pair{display:grid;grid-template-columns:1fr 1fr;gap:var(--p-pill-gap)}
+  .belt-page .ip-pair>*{width:100%}
+  /* act colour on the pills, the desk's item.css way (§5.2) */
+  .belt-page .ip-acts .p-pill{background:var(--panel);
+    border-color:color-mix(in srgb, var(--act, var(--line)) 45%, transparent);color:var(--act-text, var(--ink-mid))}
+  .belt-page .ip-acts .p-pill:active{border-color:var(--act, var(--accent));
+    background:color-mix(in srgb, var(--act, var(--accent)) 14%, var(--panel))}
+  .belt-page .ip-acts .arm{--act:var(--overdue);--act-text:var(--overdue-text)}
+  .belt-page .ip-acts .arm.armed{border-color:var(--overdue);background:color-mix(in srgb, var(--overdue) 12%, var(--panel))}
+  .belt-page .ip-acts .ip-lead{--act:var(--accent);--act-text:var(--accent-text)}
+  .belt-page .ip-acts .ip-complete{--act:var(--ok);--act-text:var(--ok-text);
+    background:color-mix(in srgb, var(--ok) 16%, var(--panel));border-color:color-mix(in srgb, var(--ok) 60%, transparent);
+    font:600 var(--p-type-button)/1.2 var(--display);letter-spacing:.01em}
+  .belt-page .ip-acts .p-pill:disabled{opacity:.5}
+  .belt-page .ip-docs{appearance:none;display:flex;align-items:center;gap:12px;width:100%;min-height:56px;
+    margin:16px 0 0;padding:0;border:0;border-top:1px solid var(--line-soft);background:none;text-align:left;
+    font:var(--p-type-body)/1.35 var(--ui);color:var(--ink);cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .belt-page .ip-docs:active{background:var(--panel-raised)}
+  .belt-page .ip-docs:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:8px}
+  .belt-page .ip-paper{flex:none;width:24px;text-align:center;color:var(--paper)}
+  .belt-page .ip-docs-title{min-width:0}
+  .belt-page .ip-chev{flex:none;margin-left:auto;padding-right:4px;font:var(--p-type-meta)/1.3 var(--mono);color:var(--accent-text)}
+  .belt-page .item-card.ip .ip-sentence{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal;color:var(--ink-quiet);margin:16px 0 4px}
+  .belt-page .ip-emptycard .ip-acts{margin-top:16px}
+}
+@media (max-width:389px){
+  .belt-page .ip-find{width:calc(100% - 2 * var(--p-gutter))}
+  /* one line at 360: the count's tracking tightens, the size holds the floor */
+  .belt-page .ip-count{letter-spacing:.08em}
+}
+
+/* ---- the pocket's sheets (#1072): portalled to <body>, so not under
+   .belt-page. The kit's field and pill grammar at 44px, 16px inputs. ---- */
+.bp-sheet{padding-bottom:4px}
+.bp-spacer{flex:1}
+.bp-lede{font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-mid);margin:0 0 14px}
+/* A lede that is a sentence, not the item's name and date (#1120). */
+.bp-lede.prose{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal}
+.bp-field{margin:0 0 12px;min-width:0}
+.bp-field label{display:block;font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);
+  text-transform:uppercase;color:var(--ink-quiet);margin:0 0 6px}
+.bp-field input,.bp-field textarea{box-sizing:border-box;display:block;width:100%;min-height:var(--p-hit);
+  padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);
+  font:var(--p-type-body)/1.4 var(--ui)}
+.bp-field .mono{font-family:var(--mono)}
+.bp-field textarea{resize:vertical}
+.bp-field input:focus-visible,.bp-field textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.bp-field input:disabled,.bp-field textarea:disabled{opacity:.55}
+/* 170px, not the pill rule's 150 (review round §6.c): a pair of fields sits
+   side by side at 390 and stacks at 360. */
+.bp-row2{display:grid;grid-template-columns:repeat(auto-fit, minmax(170px, 1fr));gap:12px}
+.bp-quick{margin:0 0 14px}
+.bp-quick .p-pill[aria-pressed=true]{border-color:var(--accent);color:var(--accent-text);
+  background:color-mix(in srgb, var(--accent) 14%, transparent)}
+.bp-note{font:var(--p-type-meta)/1.5 var(--ui);letter-spacing:normal;color:var(--ink-quiet);margin:0 0 12px}
+.bp-go.filled{background:var(--act, var(--accent));border-color:var(--act, var(--accent));
+  font:600 var(--p-type-button)/1.2 var(--display)}
+.bp-go:disabled{opacity:.5}
+.bp-danger{border-color:var(--overdue);color:var(--overdue-text);
+  background:color-mix(in srgb, var(--overdue) 14%, transparent);font-weight:600}
+.bp-paper{color:var(--paper, var(--accent-text));font-size:1rem}
+.bp-dot{display:block;width:10px;height:10px;border-radius:50%;box-shadow:0 0 0 2.5px var(--bg)}
+.bp-plus{color:var(--accent-text);font:var(--p-type-body) var(--mono)}
+.bp-field-find{flex:1;min-width:0;box-sizing:border-box;min-height:var(--p-hit);padding:0 4px;margin:0;
+  border:0;border-bottom:1px solid var(--line);border-radius:0;background:none;color:var(--ink);outline:0;
+  font:var(--p-type-body)/1 var(--mono);-webkit-appearance:none;appearance:none}
+.bp-field-find::placeholder{color:var(--ink-quiet)}
+.bp-field-find:focus{border-bottom-color:var(--accent)}
+.bp-field-find::-webkit-search-cancel-button{display:none}
+/* The staged-page grammar (.bp-page/.bp-honest/.bp-plate/.bp-line/.bp-why)
+   moved to kit.css (#1155): StagedPage.svelte and the item page's own
+   reading card now share one copy rather than two that could drift. */
+
+/* ==========================================================================
+   THE SUGGESTION IN THE BELT (#1145). The amend-then-accept card as it stood
+   on its own page (the retired item.css, which composed it from create.html's
+   ratified field grammar), now the belt's own card: everything the belt
+   already declares (.panel, .field, .row2, .save-row, .btn-primary,
+   .btn-quiet, .problem, .note) is reused, and only what the suggestion card
+   alone needs is here -- the heading that IS the name, and the from-document
+   mark on a field the relay read. A suggestion's seat is CON-3's hollow
+   body drawn as stone (belt.behaviour.js drawRock's hollow branch); its
+   card wears the same dashed pen the manifest's suggestion row wears, so
+   "not yet in orbit" reads the same on every screen.
+   ======================================================================== */
+.belt-page .item-card.sug-card{border-style:dashed;border-color:color-mix(in srgb, var(--accent) 55%, var(--line))}
+/* #434: the heading IS the name (create.css .name-title, mirrored here because
+   this screen does not load that sheet). */
+.belt-page .name-title{display:block;width:100%;background:none;border:0;padding:0;
+  font:600 21px var(--display);line-height:1.25;color:var(--ink)}
+.belt-page .name-title:focus{outline:none;border-bottom:1px solid var(--accent)}
+.belt-page .name-title:disabled{color:var(--ink-mid)}
+.belt-page .name-title.sugg{border-left:3px solid var(--accent);padding-left:10px}
+.belt-page .panel .field.sugg input{border-left:3px solid var(--accent)}
+.belt-page .sug-card .save-row{margin-top:10px}
+/* How sure the relay was, on a phone's reading (the pocket's ReviewCard
+   grammar): 12px caps after the value, ok for sure, warm for unsure. */
+.belt-page .kv b i.sure{font:normal var(--p-type-caps, 11px)/1 var(--mono);letter-spacing:var(--p-type-caps-track, .1em);
+  text-transform:uppercase;color:var(--ok-text);margin-left:8px}
+.belt-page .kv b i.sure.unsure{color:var(--warm-text)}
+/* The seat: a hollow rock breathes no glow of its own; the mark the papers
+   wear is unchanged. Its caption's second line already reads the accent. */
+.belt-page .hit.sug .hollow{transition:fill .25s ease}
+.belt-page .hit.sug:hover .hollow{fill:color-mix(in srgb, var(--accent) 22%, transparent)}
+@media (max-width: 900px){
+  /* review & amend → on the phone's card: the pocket's quiet line, 44px. */
+  .belt-page .ip-amend{display:flex;align-items:center;justify-content:center;width:100%;min-height:var(--p-hit);
+    margin-top:4px;appearance:none;border:0;background:none;padding:0;cursor:pointer;
+    font:var(--p-type-meta)/1.2 var(--mono);color:var(--accent-text);letter-spacing:.02em}
+  .belt-page .ip-amend:disabled{opacity:.5}
+  .belt-page .ip-amend:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:8px}
+}

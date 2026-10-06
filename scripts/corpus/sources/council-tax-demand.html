@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Council Tax Demand Notice 2026/27</title>
+<style>
+@font-face{font-family:"Corpus Civic";src:url("../fonts/FiraSans-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Civic";src:url("../fonts/FiraSans-Bold.ttf") format("truetype");font-weight:700;font-style:normal;font-display:block}
+@font-face{font-family:"Corpus Civic Mono";src:url("../fonts/FiraMono-Regular.ttf") format("truetype");font-weight:400;font-style:normal;font-display:block}
+  @page { size: A4; margin: 0; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Corpus Civic", sans-serif; font-size: 8pt; line-height: 1.28; color: #000000;
+  }
+  .page {
+    width: 210mm; min-height: 297mm; box-sizing: border-box;
+    padding: 5mm 7mm; background: #ffffff; page-break-after: always;
+  }
+  .page:last-child { page-break-after: auto; }
+
+  .mono { font-family: "Corpus Civic Mono", monospace; }
+
+  /* ---- Zone 1: header band ---- */
+  .headband {
+    background: #1f5c3a; color: #ffffff; display: flex; justify-content: space-between;
+    align-items: stretch; padding: 2.4mm 3mm; margin-bottom: 1.6mm;
+  }
+  .crestwrap { display: flex; align-items: center; }
+  .crestshape {
+    width: 12mm; height: 13mm; background: #ffffff;
+    clip-path: polygon(50% 0%, 100% 15%, 100% 65%, 50% 100%, 0% 65%, 0% 15%);
+    display: flex; align-items: center; justify-content: center;
+    color: #1f5c3a; font-weight: 700; font-size: 7pt; letter-spacing: 0.3px; text-align: center;
+    margin-right: 3mm; flex-shrink: 0;
+  }
+  .wordmark { line-height: 1.15; }
+  .wordmark .big { font-size: 15pt; font-weight: 700; letter-spacing: 2px; }
+  .wordmark .sub { font-size: 6.6pt; letter-spacing: 0.6px; margin-top: 0.5mm; }
+  .headright { text-align: right; font-size: 7pt; line-height: 1.5; }
+  .headright .doctitle { font-size: 10pt; font-weight: 700; letter-spacing: 0.5px; }
+
+  .subheadstrip {
+    display: flex; justify-content: space-between; border-bottom: 2.4pt solid #1f5c3a;
+    padding-bottom: 1.6mm; margin-bottom: 2mm; font-size: 7pt;
+  }
+  .acctblock { text-align: right; }
+  .acctblock .lbl { font-size: 6.2pt; text-transform: uppercase; letter-spacing: 0.5px; color: #333; }
+  .acctblock .val { font-size: 10.5pt; font-weight: 700; letter-spacing: 1px; }
+  .barcode {
+    height: 8mm; width: 46mm; margin-top: 1mm; margin-left: auto;
+    background-image: repeating-linear-gradient(90deg,
+      #000 0px, #000 1px, #fff 1px, #fff 2px,
+      #000 2px, #000 3px, #fff 3px, #fff 5px,
+      #000 5px, #000 6px, #fff 6px, #fff 7px,
+      #000 7px, #000 9px, #fff 9px, #fff 10px,
+      #000 10px, #000 11px, #fff 11px, #fff 13px);
+    background-size: 13px 100%;
+  }
+
+  h2.zt {
+    font-size: 8.4pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+    color: #1f5c3a; margin: 0 0 1.2mm 0;
+  }
+
+  /* ---- Zone 2: property + band box ---- */
+  .propbox {
+    border: 0.9pt solid #000000; padding: 2mm 3mm; margin-bottom: 2mm; display: flex; gap: 4mm;
+  }
+  .propcol1 { flex: 1.1; }
+  .propcol2 { flex: 1.4; }
+  .addr { font-size: 8.4pt; line-height: 1.4; margin-bottom: 1.4mm; }
+  .kv { font-size: 7.4pt; margin-bottom: 0.6mm; }
+  .kv b { display: inline-block; min-width: 30mm; }
+
+  table.bandtbl { width: 100%; border-collapse: collapse; font-size: 6.8pt; }
+  table.bandtbl th {
+    background: #e8e8e8; text-align: left; padding: 0.7mm 1.4mm; border-bottom: 0.8pt solid #000;
+    font-weight: 700;
+  }
+  table.bandtbl td { padding: 0.5mm 1.4mm; border-bottom: 0.3pt solid #999; }
+  table.bandtbl td.num, table.bandtbl th.num { text-align: right; white-space: nowrap; }
+  table.bandtbl tr.here td { font-weight: 700; color: #1f5c3a; }
+
+  /* ---- Zone 3: charge breakdown box ---- */
+  .chargebox {
+    border-top: 2.6pt double #1f5c3a; border-bottom: 2.6pt double #1f5c3a;
+    padding: 2mm 0 2mm 0; margin-bottom: 2mm;
+  }
+  table.chargetbl { width: 100%; border-collapse: collapse; font-size: 7.6pt; margin-bottom: 1.4mm; }
+  table.chargetbl th {
+    background: #e8e8e8; text-align: left; padding: 0.9mm 1.6mm; font-weight: 700;
+    border-bottom: 0.8pt solid #000;
+  }
+  table.chargetbl td { padding: 0.9mm 1.6mm; border-bottom: 0.3pt solid #999; }
+  table.chargetbl td.num, table.chargetbl th.num { text-align: right; white-space: nowrap; }
+  table.chargetbl tr.total td { font-weight: 700; border-top: 1.2pt solid #000; border-bottom: none; }
+  .paylines { font-size: 7.2pt; line-height: 1.55; padding: 0 1.6mm; }
+  .paylines b { color: #1f5c3a; }
+
+  /* ---- Zone 4: instalment schedule box ---- */
+  .instalbox {
+    border: 1.3pt dashed #1f5c3a; padding: 2mm 3mm; margin-bottom: 2mm;
+  }
+  .instalgrid { display: flex; gap: 6mm; }
+  table.instaltbl { border-collapse: collapse; font-size: 7.4pt; flex: 1; }
+  table.instaltbl th {
+    background: #e8e8e8; text-align: left; padding: 0.7mm 2mm; font-weight: 700;
+    border-bottom: 0.8pt solid #000;
+  }
+  table.instaltbl td { padding: 0.55mm 2mm; border-bottom: 0.3pt solid #ccc; }
+  table.instaltbl td.num, table.instaltbl th.num { text-align: right; }
+
+  /* ---- Small print ---- */
+  .smallprint {
+    font-size: 6pt; line-height: 1.26; column-count: 2; column-gap: 5mm; text-align: justify;
+    color: #000000; border-top: 0.8pt solid #000; padding-top: 1.4mm;
+  }
+  .smallprint h3 {
+    font-size: 6pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;
+    margin: 0 0 0.6mm 0; break-after: avoid;
+  }
+  .smallprint p { margin: 0 0 1.6mm 0; }
+  .pagefoot {
+    font-size: 6pt; color: #333; margin-top: 1.4mm; display: flex; justify-content: space-between;
+  }
+
+  /* ---- continuation sheets ---- */
+  .subhead {
+    background: #1f5c3a; color: #fff; padding: 1.8mm 3mm; margin-bottom: 2.4mm;
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .subhead .t { font-size: 9.5pt; font-weight: 700; letter-spacing: 0.4px; }
+  .subhead .s { font-size: 6.6pt; }
+  table.feetbl { width: 100%; border-collapse: collapse; font-size: 7.4pt; margin-bottom: 2.2mm; }
+  table.feetbl th { background: #e8e8e8; text-align: left; padding: 0.9mm 1.6mm; font-weight: 700; border-bottom: 0.8pt solid #000; }
+  table.feetbl td { padding: 0.8mm 1.6mm; border-bottom: 0.3pt solid #999; }
+  table.feetbl td.num, table.feetbl th.num { text-align: right; white-space: nowrap; }
+  .contactgrid { display: flex; gap: 5mm; margin-bottom: 2mm; }
+  .contactgrid > div { flex: 1; font-size: 7.2pt; line-height: 1.55; }
+  .contactgrid h3 { font-size: 7.4pt; color: #1f5c3a; text-transform: uppercase; letter-spacing: 0.4px; margin: 0 0 1mm 0; }
+  .refstrip { display: flex; flex-wrap: wrap; gap: 1.6mm 6mm; font-size: 6.8pt; margin: 1.6mm 0 2.2mm 0; }
+  .refstrip span { border-left: 1.2pt solid #1f5c3a; padding-left: 1.6mm; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="headband">
+    <div class="crestwrap">
+      <div class="crestshape">CH<br>1894</div>
+      <div class="wordmark">
+        <div class="big">CALDERHYTHE</div>
+        <div class="sub">COUNCIL TAX &mdash; BILLING AUTHORITY</div>
+      </div>
+    </div>
+    <div class="headright">
+      <div class="doctitle">COUNCIL TAX DEMAND NOTICE</div>
+      Charge for the year 1 April 2026 to 31 March 2027<br>
+      Notice issued 10 March 2026
+    </div>
+  </div>
+
+  <div class="subheadstrip">
+    <div>
+      <div class="kv"><b>Property reference</b> CH-14-SC-2261</div>
+      <div class="kv"><b>Liable person(s)</b> Mr D. Pemberton</div>
+    </div>
+    <div class="acctblock">
+      <div class="lbl">Council tax account number</div>
+      <div class="val mono">8845612033</div>
+      <div class="barcode"></div>
+    </div>
+  </div>
+
+  <div class="propbox">
+    <div class="propcol1">
+      <h2 class="zt">Property charged</h2>
+      <div class="addr">
+        14 Sedge Close<br>Marlpool<br>Calderhythe<br>CH3 7QD
+      </div>
+      <div class="kv"><b>Valuation band</b> D</div>
+      <div class="kv"><b>Capital value basis</b> 1 April 1991</div>
+      <div class="kv"><b>Days charged this year</b> 365</div>
+      <div class="kv"><b>Discount applied</b> None</div>
+    </div>
+    <div class="propcol2">
+      <h2 class="zt">Valuation bands and proportion of Band D charge</h2>
+      <table class="bandtbl">
+        <thead><tr><th>Band</th><th>1991 capital value</th><th class="num">Proportion</th></tr></thead>
+        <tbody>
+          <tr><td>A</td><td>Up to &pound;40,000</td><td class="num">6/9</td></tr>
+          <tr><td>B</td><td>&pound;40,001 &ndash; &pound;52,000</td><td class="num">7/9</td></tr>
+          <tr><td>C</td><td>&pound;52,001 &ndash; &pound;68,000</td><td class="num">8/9</td></tr>
+          <tr class="here"><td>D</td><td>&pound;68,001 &ndash; &pound;88,000</td><td class="num">9/9</td></tr>
+          <tr><td>E</td><td>&pound;88,001 &ndash; &pound;120,000</td><td class="num">11/9</td></tr>
+          <tr><td>F</td><td>&pound;120,001 &ndash; &pound;160,000</td><td class="num">13/9</td></tr>
+          <tr><td>G</td><td>&pound;160,001 &ndash; &pound;320,000</td><td class="num">15/9</td></tr>
+          <tr><td>H</td><td>Over &pound;320,000</td><td class="num">18/9</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="chargebox">
+    <h2 class="zt" style="padding-left:1.6mm;">Charge breakdown for the year ending 31 March 2027</h2>
+    <table class="chargetbl">
+      <thead>
+        <tr><th>Precepting authority</th><th class="num">2025/26</th><th class="num">2026/27</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Calderhythe District Council (district services)</td><td class="num">&pound;298.61</td><td class="num">&pound;312.44</td></tr>
+        <tr><td>Wealdshire County Council</td><td class="num">&pound;1,412.87</td><td class="num">&pound;1,486.05</td></tr>
+        <tr><td>Wealdshire Police and Crime Commissioner</td><td class="num">&pound;226.98</td><td class="num">&pound;237.15</td></tr>
+        <tr><td>Wealdshire Fire and Rescue Authority</td><td class="num">&pound;78.04</td><td class="num">&pound;81.33</td></tr>
+        <tr><td>Marlpool Parish Council</td><td class="num">&pound;39.80</td><td class="num">&pound;42.10</td></tr>
+        <tr class="total"><td>Total council tax charge for the year</td><td class="num">&pound;2,056.30</td><td class="num">&pound;2,159.07</td></tr>
+      </tbody>
+    </table>
+    <div class="paylines">
+      Pay by ten monthly instalments of <b>&pound;215.91</b> (final instalment <b>&pound;215.88</b>), as scheduled below,
+      or pay the whole year in a single instalment on or before 15 April 2026 and deduct a prompt
+      payment allowance of &pound;21.59, making one payment of <b>&pound;2,137.48</b>.
+    </div>
+  </div>
+
+  <div class="instalbox">
+    <h2 class="zt">Instalment schedule &mdash; ten payments, year 2026/27</h2>
+    <div class="instalgrid">
+      <table class="instaltbl">
+        <thead><tr><th>No.</th><th>Due date</th><th class="num">Amount</th></tr></thead>
+        <tbody class="mono">
+          <tr><td>1</td><td>15/04/2026</td><td class="num">&pound;215.91</td></tr>
+          <tr><td>2</td><td>15/05/2026</td><td class="num">&pound;215.91</td></tr>
+          <tr><td>3</td><td>15/06/2026</td><td class="num">&pound;215.91</td></tr>
+          <tr><td>4</td><td>15/07/2026</td><td class="num">&pound;215.91</td></tr>
+          <tr><td>5</td><td>15/08/2026</td><td class="num">&pound;215.91</td></tr>
+        </tbody>
+      </table>
+      <table class="instaltbl">
+        <thead><tr><th>No.</th><th>Due date</th><th class="num">Amount</th></tr></thead>
+        <tbody class="mono">
+          <tr><td>6</td><td>15/09/2026</td><td class="num">&pound;215.91</td></tr>
+          <tr><td>7</td><td>15/10/2026</td><td class="num">&pound;215.91</td></tr>
+          <tr><td>8</td><td>15/11/2026</td><td class="num">&pound;215.91</td></tr>
+          <tr><td>9</td><td>15/12/2026</td><td class="num">&pound;215.91</td></tr>
+          <tr><td>10</td><td>15/01/2027</td><td class="num">&pound;215.88</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="smallprint">
+    <h3>Billing authority</h3>
+    <p>This demand notice is issued by Calderhythe District Council, which is the billing authority
+    for this charge under section 1 of the Local Government Finance Act 1992, and collects the sums
+    shown above on behalf of itself and the precepting authorities listed in the charge breakdown.
+    Calderhythe District Council set its budget requirement for the year 2026/27, and the amount of
+    council tax at each band that follows from it, at its budget meeting on 25 February 2026.</p>
+
+    <h3>Valuation and appeals</h3>
+    <p>The valuation band shown for this property is taken from the valuation list compiled by the
+    Valuation Office Agency, which took effect on 1 April 1993, and reflects the property&rsquo;s
+    estimated capital value at 1 April 1991. If you consider the band to be wrong you may propose a
+    change to the Valuation Office Agency; a proposal relating to this notice must reach the Valuation
+    Office Agency no later than 10 September 2026. Making a proposal does not allow you to withhold
+    payment while it is considered.</p>
+
+    <h3>How to pay</h3>
+    <p>Instalments may be paid by direct debit, standing order, online or at a Post Office, quoting
+    the council tax account number shown above. If you pay by direct debit, your bank will collect
+    each instalment on the dates shown in the schedule above, with the first collection on
+    15 April 2026. You may ask in writing to pay by twelve monthly instalments instead of ten;
+    a request must be received before 15 April 2026 to apply to this year&rsquo;s charge.</p>
+
+    <h3>Discounts, exemptions and reductions</h3>
+    <p>A 25% discount applies where only one adult lives in a property as their main home. Certain
+    unoccupied properties, and properties occupied only by full-time students, may be exempt. A
+    reduction may be available where a disabled occupant needs extra space. Support with paying may
+    be available under Calderhythe District Council&rsquo;s local council tax reduction scheme. None
+    of these applies to this account, as shown by the discount field above. An empty homes premium of
+    up to 100% may be charged on properties empty for more than twelve months.</p>
+
+    <h3>If you do not pay</h3>
+    <p>If an instalment is missed, a reminder will be sent; a second missed instalment in the same
+    year may cancel the right to pay by instalments and the whole year&rsquo;s charge shown above will
+    become payable at once. Unpaid council tax may be recovered through a liability order made by the
+    magistrates&rsquo; court under the Council Tax (Administration and Enforcement) Regulations 1992,
+    after which recovery action, including the instruction of enforcement agents, may be referred to
+    the Council&rsquo;s recovery contractor, Halsworth Compliance Services Ltd, operating under
+    contract reference HCS/CT/2244. Costs incurred at this stage are added to the amount you owe.</p>
+
+    <h3>Data protection and complaints</h3>
+    <p>Calderhythe District Council processes the information on this notice to bill and collect
+    council tax under its statutory functions, and may share it with other public bodies for the
+    prevention of fraud. A copy of the Council&rsquo;s privacy notice is available on request. If you
+    are unhappy with how your account has been handled, write to the Revenues Manager at the address
+    on the reverse of this notice quoting your council tax account number.</p>
+
+    <h3>Change of circumstances</h3>
+    <p>Tell Calderhythe District Council within 21 days of any change that may affect your council
+    tax, including a change of address or the end of an exemption or discount. Late reporting may
+    result in a backdated charge and a penalty of &pound;70 added to your account.</p>
+
+    <h3>Second homes and empty properties</h3>
+    <p>A property that is no one&rsquo;s main home is normally charged the full amount shown above;
+    the 10% discount previously available for second homes in this area was withdrawn with effect
+    from 1 April 2024. A premium of up to 100% may apply to a furnished second home; none applies
+    here.</p>
+
+    <h3>How the total is made up</h3>
+    <p>The amount shown for Calderhythe District Council includes the Council&rsquo;s general
+    expenses and its share of the cost of local services such as waste collection, recycling,
+    planning and environmental health. The amounts shown for Wealdshire County Council, the
+    Police and Crime Commissioner, the Fire and Rescue Authority and Marlpool Parish Council are set
+    independently by those bodies and collected by Calderhythe District Council on their behalf; the
+    Council has no power to alter them.</p>
+
+    <h3>Freedom of information</h3>
+    <p>Information held by the Council, including the figures used to calculate this notice, may be
+    requested under the Freedom of Information Act 2000, subject to the exemptions in that Act.</p>
+  </div>
+
+  <div class="pagefoot">
+    <span>Calderhythe District Council &middot; Council Tax Section &middot; Account 8845612033</span>
+    <span>Page 1 of 3</span>
+  </div>
+
+</div>
+
+<div class="page">
+
+  <div class="subhead">
+    <div class="t">Charges by band across Calderhythe &mdash; 2026/27</div>
+    <div class="s">Sheet 2 of 3 &middot; Account 8845612033</div>
+  </div>
+
+  <h2 class="zt">Total annual charge by valuation band, whole district</h2>
+  <table class="feetbl">
+    <thead><tr><th>Band</th><th class="num">2025/26 total</th><th class="num">2026/27 total</th></tr></thead>
+    <tbody>
+      <tr><td>A</td><td class="num">&pound;1,370.87</td><td class="num">&pound;1,439.38</td></tr>
+      <tr><td>B</td><td class="num">&pound;1,599.35</td><td class="num">&pound;1,679.61</td></tr>
+      <tr><td>C</td><td class="num">&pound;1,827.83</td><td class="num">&pound;1,919.43</td></tr>
+      <tr><td>D</td><td class="num">&pound;2,056.30</td><td class="num">&pound;2,159.07</td></tr>
+      <tr><td>E</td><td class="num">&pound;2,513.26</td><td class="num">&pound;2,638.42</td></tr>
+      <tr><td>F</td><td class="num">&pound;2,970.21</td><td class="num">&pound;3,118.78</td></tr>
+      <tr><td>G</td><td class="num">&pound;3,427.17</td><td class="num">&pound;3,598.45</td></tr>
+      <tr><td>H</td><td class="num">&pound;4,112.60</td><td class="num">&pound;4,318.14</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:7.2pt; margin: 0 0 2.4mm 0;">
+    These are the total charges for the whole district at each band, made up of the district
+    charge and all four precepting authorities together. Only the Band D row applies to the
+    account on sheet 1; the other rows are shown so you can check the charge for a different
+    property in Calderhythe.
+  </p>
+
+  <h2 class="zt">Recovery and enforcement costs, if you fall behind</h2>
+  <table class="feetbl">
+    <thead><tr><th>Stage</th><th class="num">Cost added to your account</th></tr></thead>
+    <tbody>
+      <tr><td>Reminder notice</td><td class="num">No cost at this stage</td></tr>
+      <tr><td>Final notice (after a second missed instalment)</td><td class="num">No cost at this stage</td></tr>
+      <tr><td>Summons to the magistrates&rsquo; court</td><td class="num">&pound;90.00</td></tr>
+      <tr><td>Liability order granted</td><td class="num">&pound;35.00</td></tr>
+      <tr><td>Enforcement agent, compliance stage</td><td class="num">&pound;75.00</td></tr>
+      <tr><td>Enforcement agent, enforcement stage</td><td class="num">&pound;235.00</td></tr>
+      <tr><td>Enforcement agent, sale or disposal stage</td><td class="num">&pound;110.00</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:7.2pt; margin: 0 0 2.4mm 0;">
+    Enforcement agent fees above &pound;1,500 owed also carry a further 7.5% of the amount above
+    that figure, set by the Taking Control of Goods (Fees) Regulations 2014 and not by the Council.
+    These figures are for this account&rsquo;s recovery path only if payment is not brought up to
+    date; they are not charged where instalments are kept up as scheduled on sheet 1.
+  </p>
+
+  <h2 class="zt">Discounts and exemptions in full</h2>
+  <table class="feetbl">
+    <thead><tr><th>Class</th><th>Who it covers</th></tr></thead>
+    <tbody>
+      <tr><td>Single person discount</td><td>One adult resident, 25% off the full charge</td></tr>
+      <tr><td>Class B</td><td>Unoccupied property owned by a charity, up to six months</td></tr>
+      <tr><td>Class D</td><td>Unoccupied because the liable person is detained</td></tr>
+      <tr><td>Class E</td><td>Unoccupied because the liable person is in a care home</td></tr>
+      <tr><td>Class N</td><td>Occupied only by full-time students</td></tr>
+      <tr><td>Class U</td><td>Occupied only by a person who is severely mentally impaired</td></tr>
+      <tr><td>Disabled band reduction</td><td>Property with a room or feature needed for a disability</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:7.2pt; margin: 0;">
+    None of these applies to this account, as shown by the discount field on sheet 1. Full
+    conditions for each class are set out in the Council Tax (Exempt Dwellings) Order 1992 and
+    related regulations.
+  </p>
+
+  <div class="pagefoot">
+    <span>Calderhythe District Council &middot; Council Tax Section &middot; Account 8845612033</span>
+    <span>Page 2 of 3</span>
+  </div>
+
+</div>
+
+<div class="page">
+
+  <div class="subhead">
+    <div class="t">Support, ways to pay and how to reach us</div>
+    <div class="s">Sheet 3 of 3 &middot; Account 8845612033</div>
+  </div>
+
+  <h2 class="zt">Support with paying your council tax</h2>
+  <p style="font-size:7.2pt; margin: 0 0 2mm 0;">
+    If you are struggling to pay, contact the Revenues team before an instalment is missed. Support
+    that may be available includes the local council tax reduction scheme, a short-term payment
+    arrangement, a referral to the Household Support Fund, and a discretionary reduction under
+    section 13A of the Local Government Finance Act 1992 in exceptional cases. Independent advice
+    is available free of charge from Calderhythe Citizens Advice.
+  </p>
+
+  <h2 class="zt">Ways to pay</h2>
+  <table class="feetbl">
+    <thead><tr><th>Method</th><th>Details</th></tr></thead>
+    <tbody>
+      <tr><td>Direct debit</td><td>Choose the 1st, 8th, 15th or 28th of the month online or by phone</td></tr>
+      <tr><td>Online</td><td>calderhythe-tax.example/pay, card payment, available at any time</td></tr>
+      <tr><td>Automated telephone</td><td>0300 456 0198, available 24 hours, card payment</td></tr>
+      <tr><td>Standing order</td><td>Sort code 20-55-84, account 74108845, quote your account number</td></tr>
+      <tr><td>Post Office or PayPoint</td><td>Cash or cheque, using the barcode on sheet 1</td></tr>
+    </tbody>
+  </table>
+
+  <div class="contactgrid">
+    <div>
+      <h3>Revenues team</h3>
+      Telephone: 0300 456 0177<br>
+      Textphone: 0300 456 0178<br>
+      E-mail: counciltax@calderhythe-tax.example<br>
+      Opening hours: Monday to Friday, 9am to 5pm<br>
+      Address: Revenues Service, Calderhythe District Council, Guildhall Square, Calderhythe CH1 1AA
+    </div>
+    <div>
+      <h3>Other contacts</h3>
+      Benefits and support: 0300 456 0182<br>
+      Valuation Office Agency (band appeals): 03000 501 501<br>
+      Halsworth Compliance Services Ltd (recovery queries only): 0345 604 2210<br>
+      Calderhythe Citizens Advice: 0800 144 8848<br>
+      Social media: @calderhythecouncil
+    </div>
+  </div>
+
+  <h2 class="zt">Reference numbers on this notice</h2>
+  <div class="refstrip">
+    <span>Account: <b>8845612033</b></span>
+    <span>Property ref: <b>CH-14-SC-2261</b></span>
+    <span>Recovery contract: <b>HCS/CT/2244</b></span>
+    <span>Direct debit SUN: <b>681204</b></span>
+    <span>Sort code: <b>20-55-84</b></span>
+    <span>BACS account: <b>74108845</b></span>
+    <span>ICO registration: <b>Z5811023</b></span>
+    <span>Notice print run: <b>NR-2026-03-091</b></span>
+  </div>
+
+  <h2 class="zt">Accessibility and priority contact</h2>
+  <p style="font-size:7.2pt; margin: 0 0 2mm 0;">
+    This notice is available in large print, Braille or audio on request, and in other languages
+    through the Council&rsquo;s interpreting service. If you or someone in your household has
+    additional communication needs, ask the Revenues team to add a note to your account.
+  </p>
+
+  <h2 class="zt">Complaints</h2>
+  <p style="font-size:7.2pt; margin: 0;">
+    If you are unhappy with how your account has been handled, write to the Revenues Manager at
+    the address above. If you remain dissatisfied after the Council&rsquo;s own complaints process,
+    you may refer the matter to the Local Government and Social Care Ombudsman, who considers
+    complaints about council tax administration free of charge.
+  </p>
+
+  <div class="pagefoot">
+    <span>Calderhythe District Council &middot; Council Tax Section &middot; Account 8845612033</span>
+    <span>Page 3 of 3</span>
+  </div>
+
+</div>
+</body>
+</html>

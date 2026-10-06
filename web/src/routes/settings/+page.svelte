@@ -1,21 +1,32 @@
 <script>
   import { onMount } from "svelte";
-  import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import {
-    clearTourSeen,
+    readAuthMethodsOffered,
+    readSentLately,
     readSessions,
     readSettingsScreen,
+    readSignInMethods,
+    removeLocalPassword,
     revokeSession,
     signOutEverywhere,
+    startProviderLink,
+    startStepUp,
+    unlinkProviderIdentity,
+    writeLocalPassword,
     writeReminders,
   } from "$lib/data/workspace.js";
+  import { SIGN_IN_METHODS_FIXTURES } from "$lib/data/fixtures/admin.js";
+  import { SENT_LATELY_FIXTURE } from "$lib/data/fixtures/settings.js";
   import { agoLong } from "$lib/format.js";
-  import { alertsSupported, currentSubscription, disableAlerts, enableAlerts } from "$lib/push/alerts.js";
-  import { relaunchTour } from "$lib/tour/relaunch.js";
+  import { alertsSupported, disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
+  import { watchTour } from "$lib/tour/watch.js";
   import { fillStarTiles } from "$lib/sky.js";
-  import { DEFAULT_THEME, THEME_PACKS } from "$lib/theme.js";
+  import { DEFAULT_THEME } from "$lib/theme.js";
   import Chrome from "$lib/Chrome.svelte";
+  import SignInChallenge from "./SignInChallenge.svelte";
+  import { PACKS, intentOf, issuerHost, methodWords, on } from "./helm.js";
+  import Pocket from "./pocket.svelte";
   import "./settings.css";
 
   /**
@@ -29,45 +40,14 @@
    * it manages households, which this screen deliberately does not. The flip
    * is a cutover line once those journeys exist v19-side (#453).
    */
+  /** @type {{ data: { fixtures: boolean } }} */
+  let { data } = $props();
   /** @type {Awaited<ReturnType<typeof readSettingsScreen>> | null} */
   let view = $state(null);
+  /** @type {string | null} */
+  let screenProblem = $state(null);
 
-  /*
-   * THE v1.3.0 ROSTER, FINAL (§15, owner): star-chart, after dark, CLOUDS,
-   * dawn (which now means the terminator) and retrograde — theme.js's own
-   * THEME_PACKS, in the order and membership named there (#865). Atlas,
-   * hanami, porcelain, miami and solarium are on the records shelf: their
-   * code is gone (#865 removed atlas's own, the last one still present), and
-   * what goes here is the OFFER — this card is the only place in the product
-   * that makes one in words as well as colour.
-   *
-   * Two rows changed with the roster, and both of them because the sheet
-   * ruled the picture rather than because a preference was tidied:
-   *   · CLOUDS joined, carrying the lighter end of the range (owner: "one of
-   *     Orbit's MAIN LIGHTER THEMES"). Its strip shows the cool white of a
-   *     cloud crest and its own hazy pastel bodies.
-   *   · DAWN's ground moved to the temperature story's own #d2d3d4 and its
-   *     line stopped saying "first light" — that is the pair's shared light,
-   *     and what this pack IS now is the crossing. The words are the sheet's:
-   *     design/v19/dawn-terminator.html, "night hands the sky to day".
-   * Both strips' bodies are the pastels the refresh gave the light packs, so
-   * the swatch is made of the same paint as the screen it promises.
-   */
-  /** @type {Record<string, [string, string, string, string[]]>} */
-  const META = {
-    starchart: ["star-chart", "the ratified night", "#060b1c",
-      ["radial-gradient(circle at 35% 30%,#fff6e6,#ffe9c4 45%,transparent 72%)", "#f0b429", "#4ade80", "#8fb8ff"]],
-    afterdark: ["after dark", "lights out, ink up", "#05070d",
-      ["radial-gradient(circle at 35% 30%,#ffffff,#dbe9ff 45%,transparent 72%)", "#f0b429", "#4ade80", "#7dd3fc"]],
-    clouds: ["clouds", "first light, from altitude", "#eef2f9",
-      ["radial-gradient(circle at 35% 30%,#9c4a10,#eda253 45%,transparent 72%)", "#f0c076", "#95cfab", "#9dbce6"]],
-    dawn: ["dawn", "night hands the sky to day", "#d2d3d4",
-      ["radial-gradient(circle at 35% 30%,#9c4a10,#eda253 45%,transparent 72%)", "#f0c076", "#95cfab", "#9dbce6"]],
-    retrograde: ["retrograde", "the eighties, classy", "#080a14",
-      ["radial-gradient(circle at 35% 30%,#fff0fb,#ff4fd8 45%,transparent 72%)", "#ffd23f", "#3ef2a0", "#2de2e6"]],
-  };
-  /** @type {[string, string, string, string, string[]][]} */
-  const PACKS = THEME_PACKS.map((id) => [id, ...META[id]]);
+  /* The roster and its offer live in helm.js, shared with the phone layout. */
   let active = $state(DEFAULT_THEME);
   /** @param {string} name */
   function pickPack(name) {
@@ -76,19 +56,9 @@
     try { localStorage.setItem("orbit-theme", name); } catch {}
   }
 
-  /**
-   * "Take the walk again" (#753, slice 3 of #477, mockup stop 8 of
-   * design/v19/tour.html): clears `tourSeenAt` then goes to /home, where the
-   * existing first-run trigger starts the walk at stop 1 because the record
-   * now reads null. relaunchTour (relaunch.js) also arms the one-shot flag
-   * that gets this SAME-session arrival past Tour.svelte's `started` guard.
-   */
-  function walkAgain() {
-    return relaunchTour({
-      clearTourSeen,
-      navigateHome: () => goto(resolve("/home")),
-    });
-  }
+  /* "Watch the tour" (#753 built it here as "take the walk again"; #1189
+     renamed it and put it in both account menus and on phone settings):
+     $lib/tour/watch.js. */
 
   /**
    * Reminders (#468). The ratified card shows the two warning offsets as
@@ -155,7 +125,7 @@
        compares against one ratified mockup — and would give the reader a
        missing control rather than a held one. */
     if (!alertsAvailable) alertsProblem = "this browser can't show alerts";
-    else browserAlerts = Boolean(await currentSubscription());
+    else browserAlerts = Boolean(await syncAlerts());
   });
 
   async function toggleBrowserAlerts() {
@@ -174,7 +144,13 @@
         browserAlerts = true;
       }
     } catch (error) {
-      browserAlerts = Boolean(await currentSubscription());
+      /* #1151 F9: reconcile against the server the same way the onMount
+         read above does. currentSubscription() only reports whether the
+         browser still holds a subscription object, which stays true even
+         after the server has refused it (e.g. it belongs to another
+         account on a shared device) — exactly the case syncAlerts() exists
+         to catch, so falling back to the raw browser read here undid it. */
+      browserAlerts = Boolean(await syncAlerts());
       /* alerts.js throws AlertsError, which carries the reason as a code so
          this screen never has to match on a message. */
       const reason = /** @type {{ code?: string }} */ (error)?.code;
@@ -185,6 +161,163 @@
           : "not switched on — Orbit could not reach your alert settings";
     } finally {
       alertsBusy = false;
+    }
+  }
+
+  /* SENT TO YOU LATELY (#1003, §20; the desk equivalent of pocket.svelte's
+     own tab, #1125). The Reminders card's second tab: the signed-in user's
+     own last five attempted deliveries. `null` is "couldn't load", never a
+     loading placeholder — the panel says so plainly rather than sitting
+     empty. */
+  let tab = $state(/** @type {"reminders" | "sent"} */ ("reminders"));
+  /** @type {import('$lib/data/fixtures/settings.js').SentRow[] | null} */
+  let sent = $state(null);
+  const bothOff = $derived(view !== null && !emailReminders && !browserAlerts);
+
+  /** @param {string} iso */
+  function whenSent(iso) {
+    const date = new Date(iso);
+    const zone = data?.fixtures ? "UTC" : undefined;
+    const day = date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: zone });
+    const time = date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: zone });
+    return `${day} · ${time}`;
+  }
+
+  /** @param {import('$lib/data/fixtures/settings.js').SentRow} row */
+  const warningWord = (row) => (row.warning === "first" ? "first warning" : "final warning");
+  /** @param {import('$lib/data/fixtures/settings.js').SentRow} row */
+  const channelWordDesk = (row) => (row.channel === "email" ? "email" : "browser alert");
+  /** @param {import('$lib/data/fixtures/settings.js').SentRow} row */
+  const sentLabel = (row) =>
+    `${row.itemName}, ${warningWord(row)} · ${channelWordDesk(row)}, ${whenSent(row.at)}`
+    + (row.status === "failed" ? `, couldn’t send · ${row.reason ?? "no reason given"}`
+      : row.status === "retry" ? `, still trying · ${row.reason ?? "no reason given"}` : "");
+
+  /* §22's keyboard: one tab in the Tab order, ← → between them. */
+  /** @param {KeyboardEvent} event */
+  function remTabKey(event) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    tab = tab === "reminders" ? "sent" : "reminders";
+    queueMicrotask(() => document.getElementById(`rem-tab-${tab}`)?.focus());
+  }
+
+  /**
+   * SIGN-IN METHODS (#915, ADR-0023 §5, §6; composition ruled in
+   * docs/plans/m7-local-accounts.md §2.7).
+   *
+   * The line that used to say "signed in via your identity provider" was a
+   * guess this build can no longer make: an account may have a password, a
+   * provider identity, or both, and the reader is the one who decides which.
+   * So the "You" card now lists what actually exists — the password with the
+   * date it last changed, each provider with its issuer and the date it was
+   * linked — and offers the change beside each.
+   *
+   * THE CHALLENGE IS INLINE, and it is the two-tap protocol "sign out of every
+   * device" already uses below: the first tap ARMS the action and opens the
+   * field under it, the confirm inside that field is the second tap. What the
+   * field asks for depends on how the reader can prove themselves (ADR-0023
+   * §5): somebody with a password answers with it, and somebody with only a
+   * provider is sent back to that provider to authenticate again and returns
+   * here carrying a short-lived proof — `?stepup=` names the action they left
+   * to do, so the block re-arms itself on the way back in.
+   */
+  /* The cast is on the initial value rather than the declaration: a `@type`
+     comment above a `$state(null)` is not picked up here (the same reason
+     `view` above is cast at each of its uses), and this way the type is
+     stated once, where the null is. */
+  let methods = $state(/** @type {Awaited<ReturnType<typeof readSignInMethods>> | null} */ (null));
+  /** Whether this instance has a provider at all — no provider, no offer to link. */
+  let providerOffered = $state(false);
+  /** #1033: whether a password sign-in here is finished by an emailed approval. */
+  let emailApproval = $state(false);
+  /** @type {string | null} */
+  let methodsProblem = $state(null);
+  /**
+   * Which action is armed, if any: `password_set`, `password_change`,
+   * `password_remove`, `link_oidc`, or `unlink:<identity id>`.
+   * @type {string | null}
+   */
+  let armedMethod = $state(null);
+  let currentPassword = $state("");
+  let newPassword = $state("");
+  let methodBusy = $state(false);
+  /** @type {string | null} */
+  let methodOutcome = $state(null);
+  /** @type {string | null} */
+  let methodProblem = $state(null);
+  /* There is deliberately no "am I standing on a step-up proof" flag. A reader
+     with no password can only reach an armed action by coming back from one —
+     `tapMethod` sends them there rather than opening a field — so `hasPassword`
+     already answers which challenge is in play, and a second piece of state
+     saying the same thing is a second thing that can disagree. */
+  const hasPassword = $derived(methods?.local.set ?? false);
+  const identities = $derived(methods?.oidc ?? []);
+
+  /**
+   * The first tap. Somebody with a password gets the field; somebody without
+   * one is handed to the provider, and comes back to this block re-armed.
+   *
+   * @param {string} action
+   */
+  async function tapMethod(action) {
+    methodProblem = null;
+    methodOutcome = null;
+    currentPassword = "";
+    newPassword = "";
+    if (armedMethod === action) { armedMethod = null; return; }
+    if (hasPassword) { armedMethod = action; return; }
+    /* No password: the challenge is a fresh authentication at the provider.
+       `returnTo` carries the action so this block can pick it up again. */
+    const identity = action.startsWith("unlink:") ? `&identity=${encodeURIComponent(action.slice(7))}` : "";
+    try {
+      await startStepUp({ intent: intentOf(action), returnTo: `/settings?stepup=${encodeURIComponent(action)}${identity}` });
+    } catch (error) {
+      methodProblem = methodWords(error);
+    }
+  }
+
+  /** Disarms whatever is armed, leaving the block as this reader found it. */
+  function cancelMethod() {
+    armedMethod = null;
+    currentPassword = "";
+    newPassword = "";
+  }
+
+  /** The second tap: the change itself, carrying whichever proof applies. */
+  async function confirmMethod() {
+    if (!armedMethod || methodBusy) return;
+    methodBusy = true;
+    methodProblem = null;
+    /* A step-up proof is a cookie the browser carries; a password travels in
+       the body. Exactly one of them is in play, never both. */
+    const challenge = hasPassword ? { currentPassword } : {};
+    const action = armedMethod;
+    try {
+      if (action === "link_oidc") {
+        await startProviderLink({ returnTo: "/settings", ...challenge });
+        return;
+      }
+      if (action === "password_set" || action === "password_change") {
+        const outcome = await writeLocalPassword({ password: newPassword, ...challenge });
+        methodOutcome = outcome.changed
+          ? "password changed — every other device was signed out"
+          : "password set";
+      } else if (action === "password_remove") {
+        await removeLocalPassword(challenge);
+        methodOutcome = "password removed";
+      } else if (action.startsWith("unlink:")) {
+        await unlinkProviderIdentity(action.slice(7), challenge);
+        methodOutcome = "identity provider unlinked";
+      }
+      armedMethod = null;
+      currentPassword = "";
+      newPassword = "";
+      methods = await readSignInMethods();
+    } catch (error) {
+      methodProblem = methodWords(error);
+    } finally {
+      methodBusy = false;
     }
   }
 
@@ -259,9 +392,28 @@
     }
   }
 
+  /** The armed action a step-up came back for; the phone layout reopens its sheet (#1125). */
+  let resumedMethod = $state(/** @type {string | null} */ (null));
+
+  /**
+   * The screen's own read, broken out so a failed fetch can be retried
+   * (#1195): additive like every other read below it, rather than the one
+   * fetch that used to take the whole page down with it.
+   */
+  async function loadScreen() {
+    screenProblem = null;
+    try {
+      const screen = await readSettingsScreen();
+      view = screen;
+      emailReminders = screen.reminders.emailEnabled;
+    } catch {
+      screenProblem = "not shown — Orbit could not reach your settings";
+    }
+  }
+
   const initials = $derived(
     (/** @type {Awaited<ReturnType<typeof readSettingsScreen>> | null} */ (view)?.user?.displayName ?? "")
-      .split(/\s+/).map((/** @type {string} */ part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
+      .split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
   );
 
   onMount(async () => {
@@ -270,17 +422,68 @@
       /** @type {SVGGElement} */ (/** @type {unknown} */ (document.getElementById("neartile"))),
     );
     active = document.documentElement.dataset.theme || DEFAULT_THEME;
-    view = await readSettingsScreen();
-    emailReminders = /** @type {Awaited<ReturnType<typeof readSettingsScreen>>} */ (view).reminders.emailEnabled;
+    await loadScreen();
     try {
       sessions = await readSessions();
     } catch {
       sessionsProblem = "not shown — Orbit could not reach your session list";
     }
+
+    /* Sign-in methods (#915). Additive like the cards above: a block that
+       cannot be read costs the reader that block, not the helm.
+
+       Under fixtures there is no session to read them off — `GET
+       /api/auth/methods` answers the CALLER's own rows and the harness has no
+       caller — so the gate's screen is drawn from the fixture instead, the way
+       administration's relay rows already are. `?signin=` names which state,
+       so both can be photographed and walked. */
+    const parameters = new URLSearchParams(window.location.search);
+    if (data?.fixtures) {
+      const wanted = parameters.get("signin") ?? "both";
+      methods = /** @type {any} */ (SIGN_IN_METHODS_FIXTURES)[wanted] ?? SIGN_IN_METHODS_FIXTURES.both;
+      providerOffered = true;
+      emailApproval = true;
+    } else {
+      try {
+        [methods, { oidc: providerOffered, secondFactor: emailApproval }] = await Promise.all([
+          readSignInMethods(),
+          readAuthMethodsOffered(),
+        ]);
+      } catch {
+        methodsProblem = "not shown — Orbit could not reach your sign-in methods";
+      }
+    }
+
+    /* Back from the provider (ADR-0023 §5): the proof is in a cookie the
+       browser carries, and this is the action it was earned for. Re-arm it so
+       the reader finishes where they left off rather than starting again. */
+    const back = parameters.get("stepup");
+    if (back && methods && !methods.local.set) armedMethod = resumedMethod = back;
+
+    /* "Sent to you lately" (#1003). `?sent=none|off` and `?tab=sent` pick the
+       gate's other scenes, the same query pocket.svelte's own tab answers to. */
+    if (data?.fixtures) {
+      const sentScene = parameters.get("sent") ?? "some";
+      sent = sentScene === "none" ? [] : SENT_LATELY_FIXTURE;
+      if (parameters.get("tab") === "sent") tab = "sent";
+    } else {
+      try {
+        sent = await readSentLately();
+      } catch {
+        sent = null;
+      }
+    }
   });
 </script>
 
 <svelte:head><title>Orbit — settings</title></svelte:head>
+
+<!-- #1125, proposal §2.7: the phone's own settings, chosen by CSS, as the
+     household's is. It shares what this page loads rather than reading it
+     twice, and hides this page's sky and cards below the switch; the chrome
+     stays, because on a phone Chrome.svelte draws the kit's top chrome. -->
+<Pocket bind:view bind:methods bind:sessions bind:active {initials} {providerOffered} {emailApproval} {screenProblem} onretry={loadScreen}
+        {methodsProblem} {sessionsProblem} resumed={resumedMethod} fixtures={Boolean(data?.fixtures)} />
 
 <div class="helm-page">
 <div class="sky" aria-hidden="true">
@@ -300,15 +503,122 @@
     <div class="sub">your controls, and only yours · the instance’s levers live on administration</div>
   </header>
 
+  {#if screenProblem && !view}
+    <div class="cards">
+      <div class="card wide">
+        <p class="note">{screenProblem}</p>
+        <button onclick={loadScreen}>try again</button>
+      </div>
+    </div>
+  {/if}
+
   {#if view}
     <div class="cards">
     <div class="card wide">
       <h2>You</h2>
       <div class="idrow">
         <span class="avatar" aria-hidden="true">{initials}</span>
-        <div class="who"><b>{view.user?.displayName ?? ""}</b><span>{view.user?.email ?? ""} · signed in via your identity provider</span></div>
-        <button>edit name</button>
+        <div class="who"><b>{view.user?.displayName ?? ""}</b><span>{view.user?.email ?? ""}</span></div>
       </div>
+
+      <!-- Sign-in methods (#915, ADR-0023 §6; composition §2.7). This replaces
+           the single "signed in via your identity provider" line: an account
+           can have a password, providers, or both, so the block says which,
+           and each row carries its own way to change it. The rows are the
+           card family's own .kv furniture — same type, same rhythm, nothing
+           shrunk to make room. -->
+      <h3 class="methods-head">Sign-in methods</h3>
+      {#if methods}
+        <div class="kv">
+          <span>password</span>
+          <span class="method">
+            {#if hasPassword}
+              <b>set{methods.local.changedAt ? ` · changed ${on(methods.local.changedAt)}` : ""}</b>
+              <button onclick={() => tapMethod("password_change")}
+                      aria-expanded={armedMethod === "password_change"}>change</button>
+              <button onclick={() => tapMethod("password_remove")}
+                      aria-expanded={armedMethod === "password_remove"}>remove</button>
+            {:else}
+              <b>not set</b>
+              <button onclick={() => tapMethod("password_set")}
+                      aria-expanded={armedMethod === "password_set"}>set a password</button>
+            {/if}
+          </span>
+        </div>
+        {#if armedMethod === "password_set" || armedMethod === "password_change" || armedMethod === "password_remove"}
+          <SignInChallenge wantsNewPassword={armedMethod !== "password_remove"}
+                           confirmLabel={armedMethod === "password_remove" ? "remove it" : "save it"}
+                           hasPassword={hasPassword} busy={methodBusy} problem={methodProblem}
+                           bind:currentPassword bind:newPassword
+                           onconfirm={confirmMethod} oncancel={cancelMethod} />
+        {/if}
+
+        {#each identities as identity (identity.id)}
+          <div class="kv">
+            <span>identity provider</span>
+            <span class="method">
+              <b>{issuerHost(identity.issuer)} · linked {on(identity.linkedAt)}</b>
+              <button onclick={() => tapMethod(`unlink:${identity.id}`)}
+                      aria-expanded={armedMethod === `unlink:${identity.id}`}
+                      aria-label={`unlink ${issuerHost(identity.issuer)}`}>unlink</button>
+            </span>
+          </div>
+          {#if armedMethod === `unlink:${identity.id}`}
+            <SignInChallenge confirmLabel="unlink it"
+                             hasPassword={hasPassword} busy={methodBusy} problem={methodProblem}
+                             bind:currentPassword bind:newPassword
+                             onconfirm={confirmMethod} oncancel={cancelMethod} />
+          {/if}
+        {/each}
+
+        <!-- One offer, and only where it can be taken: an instance with no
+             provider configured has nothing to link to. -->
+        {#if providerOffered && identities.length === 0}
+          <div class="kv">
+            <span>identity provider</span>
+            <span class="method">
+              <b>not linked</b>
+              <button onclick={() => tapMethod("link_oidc")}
+                      aria-expanded={armedMethod === "link_oidc"}>link your identity provider</button>
+            </span>
+          </div>
+          {#if armedMethod === "link_oidc"}
+            <SignInChallenge confirmLabel="continue to your provider"
+                             hasPassword={hasPassword} busy={methodBusy} problem={methodProblem}
+                             bind:currentPassword bind:newPassword
+                             onconfirm={confirmMethod} oncancel={cancelMethod} />
+          {/if}
+        {/if}
+
+        <!-- THE SECOND FACTOR, WHICH NOBODY CHOOSES (#1033, ADR-0027 §1-§2).
+             It sits among the methods because that is where a reader looks to
+             find out how they get in, and it carries no control at all: there
+             is no per-user switch and no remembered browser. The one thing
+             that moves it is the instance having a mail relay, and the screen
+             says which of the two it is plainly -- an instance with no relay
+             has a password and nothing else, and a reader is owed that fact
+             rather than a promise of a factor that is not running.
+
+             THE ROW IS THE WHOLE OF IT, and no paragraph under it (Fable's
+             composition call, 2026-09-19). `.note` on this screen is the
+             problem-notice slot -- methodsProblem, reminderProblem,
+             revokeProblem all land in one -- so prose in a `.note` here would
+             read as something having gone wrong. The row states the fact; why
+             it works the way it does is in docs/authentication.md and
+             ADR-0027, where somebody asking that question is already looking. -->
+        <div class="kv">
+          <span>email approval</span>
+          <span class="method">
+            {#if emailApproval}
+              <b>on · every password sign-in</b>
+            {:else}
+              <b>off · this instance has no mail relay configured</b>
+            {/if}
+          </span>
+        </div>
+        {#if methodOutcome}<div class="note ok">{methodOutcome}</div>{/if}
+      {/if}
+      {#if methodsProblem}<div class="note">{methodsProblem}</div>{/if}
     </div>
 
     <div class="card wide">
@@ -326,18 +636,61 @@
           </button>
         {/each}
       </div>
-      <button class="relaunch" onclick={walkAgain}>↻ take the walk again</button>
+      <button class="relaunch" onclick={watchTour}>↻ watch the tour</button>
     </div>
 
     <div class="card">
-      <h2>Reminders</h2>
-      <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed={emailReminders} aria-label="Email reminders" onclick={toggleEmailReminders}><i></i></button></div>
-      <div class="kv"><span>browser alerts · this device</span><button class="toggle" aria-pressed={browserAlerts} aria-label="Browser alerts on this device" disabled={alertsBusy || !alertsAvailable} onclick={toggleBrowserAlerts}><i></i></button></div>
-      <div class="kv"><span>first warning</span><b>{view.reminders.firstWarning}</b></div>
-      <div class="kv"><span>final warning</span><b>{view.reminders.finalWarning}</b></div>
-      <div class="kv"><span>outbound mail</span><span><b class="on">{view.reminders.outboundMail}</b> · by your administrator</span></div>
-      {#if reminderProblem}<div class="note">{reminderProblem}</div>{/if}
-      {#if alertsProblem}<div class="note">{alertsProblem}</div>{/if}
+      <!-- Two tabs (#1003 §20, §22; the grammar #1002 round 7 settles: heading
+           left, the pair at the far end of the card head, filled accent for
+           the chosen one, no underline). "reminders" is everything this card
+           already drew; "sent" is new. -->
+      <div class="cardhead">
+        <h2 id="rem-h">Reminders</h2>
+        <div class="tabs" role="tablist" aria-labelledby="rem-h">
+          <button role="tab" id="rem-tab-reminders" aria-selected={tab === "reminders"} aria-controls="rem-panel-reminders"
+                  tabindex={tab === "reminders" ? 0 : -1} onclick={() => (tab = "reminders")} onkeydown={remTabKey}>reminders</button>
+          <button role="tab" id="rem-tab-sent" aria-selected={tab === "sent"} aria-controls="rem-panel-sent"
+                  tabindex={tab === "sent" ? 0 : -1} onclick={() => (tab = "sent")} onkeydown={remTabKey}>sent to you lately</button>
+        </div>
+      </div>
+
+      <div role="tabpanel" id="rem-panel-reminders" aria-labelledby="rem-tab-reminders" hidden={tab !== "reminders"}>
+        <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed={emailReminders} aria-label="Email reminders" onclick={toggleEmailReminders}><i></i></button></div>
+        <div class="kv"><span>browser alerts · this device</span><button class="toggle" aria-pressed={browserAlerts} aria-label="Browser alerts on this device" disabled={alertsBusy || !alertsAvailable} onclick={toggleBrowserAlerts}><i></i></button></div>
+        <!-- #1151 W2-S4: this used to show only on the "sent" tab, downstream
+             of the switches that actually cause it rather than beside them. -->
+        {#if bothOff}<p class="sent-off">both switches are off · nothing more will be sent until one is on</p>{/if}
+        <div class="kv"><span>first warning</span><b>{view.reminders.firstWarning}</b></div>
+        <div class="kv"><span>final warning</span><b>{view.reminders.finalWarning}</b></div>
+        <div class="kv"><span>outbound mail</span><span><b class="on">{view.reminders.outboundMail}</b> · by your administrator</span></div>
+        {#if reminderProblem}<div class="note">{reminderProblem}</div>{/if}
+        {#if alertsProblem}<div class="note">{alertsProblem}</div>{/if}
+      </div>
+
+      <!-- ROUND 1 (#1003): what Orbit has actually sent this person, read
+           from notification_deliveries. The last five, newest first; a
+           failed or still-trying send says so in the row rather than
+           hiding. Nothing here is a control — the two switches above are. -->
+      <div role="tabpanel" id="rem-panel-sent" aria-labelledby="rem-tab-sent" hidden={tab !== "sent"}>
+        {#if bothOff}<p class="sent-off">both switches are off · nothing more will be sent until one is on</p>{/if}
+        {#if sent === null}
+          <div class="note">not shown — Orbit could not reach what’s been sent</div>
+        {:else if sent.length === 0}
+          <p class="sent-none">nothing sent yet · the first warning goes out <b>{view.reminders.firstWarning}</b>, by email and by browser alert if they are on</p>
+        {:else}
+          {#each sent as row (row.id)}
+            <a class="sent" href={resolve("/item/[[id]]", { id: row.itemId })} aria-label={sentLabel(row)}>
+              {#if row.channel === "email"}
+                <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><rect x="2" y="4" width="14" height="10" rx="2"/><path d="m2.5 5 6.5 5 6.5-5"/></svg>
+              {:else}
+                <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M4.5 12.5V8.5a4.5 4.5 0 0 1 9 0v4l1 1.5h-11z"/><path d="M7.5 15a1.5 1.5 0 0 0 3 0"/></svg>
+              {/if}
+              <span class="what"><b>{row.itemName}</b><small>{warningWord(row)} · {channelWordDesk(row)}</small></span>
+              <span class="when">{whenSent(row.at)}{#if row.status === "failed"}<i class="bad">couldn’t send · {row.reason ?? "no reason given"}</i>{:else if row.status === "retry"}<i class="wait">still trying · {row.reason ?? "no reason given"}</i>{/if}</span>
+            </a>
+          {/each}
+        {/if}
+      </div>
     </div>
 
     <div class="card">

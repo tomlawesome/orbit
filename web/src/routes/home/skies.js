@@ -88,6 +88,43 @@ const mkRng = seededRng;
    · reduced motion — no rAF, no drift, the opening window held.
    ══════════════════════════════════════════════════════════════════════════ */
 /**
+ * THE WINDOWED CHUNK-STREAMING LOOP (#1151 W1-Q13): build what is needed,
+ * drop what scrolled past. Every sky engine below drifts an endless row of
+ * fixed-width chunks and needs exactly this — which chunk indices the
+ * viewport (plus a margin behind and ahead of it) currently reaches, build
+ * any of those not already live, then remove any live chunk outside that
+ * range — four times independently before this. `build`/`append`/`remove`
+ * are the one thing that actually differs between engines (a single `<g>`
+ * vs mountPlane's three-group `{gg,gs,gd}` chunk, appended to one host vs
+ * three); the windowing arithmetic itself does not, so it lives here once.
+ * @template T
+ * @param {Map<number, T>} live
+ * @param {number} offset
+ * @param {number} w chunk width
+ * @param {number} behind margin kept alive behind the viewport
+ * @param {number} ahead margin built ahead of the viewport
+ * @param {(i: number) => T} build
+ * @param {(chunk: T) => void} append
+ * @param {(chunk: T) => void} remove
+ */
+export function streamChunks(live, offset, w, behind, ahead, build, append, remove) {
+  const first = Math.floor((offset - behind) / w);
+  const last = Math.floor((offset + 1600 + ahead) / w);
+  for (let i = first; i <= last; i++) {
+    if (live.has(i)) continue;
+    const chunk = build(i);
+    live.set(i, chunk);
+    append(chunk);
+  }
+  for (const [i, chunk] of live) {
+    if (i < first || i > last) {
+      remove(chunk);
+      live.delete(i);
+    }
+  }
+}
+
+/**
  * @param {SkyOptions} options
  */
 function mountPlane({ seed, still, onCamera }) {
@@ -285,22 +322,11 @@ function mountPlane({ seed, still, onCamera }) {
      every 400 units. */
   /** @param {number} offset */
   function fill(offset) {
-    const first = Math.floor((offset - BEHIND) / CW);
-    const last = Math.floor((offset + 1600 + AHEAD) / CW);
-    for (let i = first; i <= last; i++) {
-      if (live.has(i)) continue;
-      const c = build(i);
-      live.set(i, c);
+    streamChunks(live, offset, CW, BEHIND, AHEAD, build, (c) => {
       /** @type {HTMLElement} */ (gGlow).appendChild(c.gg);
       /** @type {HTMLElement} */ (gStar).appendChild(c.gs);
       /** @type {HTMLElement} */ (gDust).appendChild(c.gd);
-    }
-    for (const [i, c] of live) {
-      if (i < first || i > last) {
-        c.gg.remove(); c.gs.remove(); c.gd.remove();
-        live.delete(i); /* gone for good */
-      }
-    }
+    }, (c) => { c.gg.remove(); c.gs.remove(); c.gd.remove(); });
   }
 
   /* ---- the camera: the plane is the furthest thing in the sky -------------
@@ -628,10 +654,7 @@ function mountTerminator({ seed, still, onCamera, onGalaxy }) {
 
   /** @param {Layer} L @param {number} offset */
   function fill(L, offset) {
-    const first = Math.floor((offset - BEHIND) / L.w);
-    const last = Math.floor((offset + 1600 + AHEAD) / L.w);
-    for (let i = first; i <= last; i++) {
-      if (L.live.has(i)) continue;
+    streamChunks(L.live, offset, L.w, BEHIND, AHEAD, (i) => {
       const r = streamFor(L.key, i);
       const g = svgel("g", { transform: `translate(${i * L.w},0)` });
       for (let k = 0; k < L.n; k++) {
@@ -641,10 +664,8 @@ function mountTerminator({ seed, still, onCamera, onGalaxy }) {
           opacity: (L.o0 + r() * (L.o1 - L.o0)).toFixed(2),
         }));
       }
-      L.live.set(i, g); L.node.appendChild(g);
-    }
-    for (const [i, g] of L.live)
-      if (i < first || i > last) { g.remove(); L.live.delete(i); } /* gone for good */
+      return g;
+    }, (g) => L.node.appendChild(g), (g) => g.remove());
   }
 
   /* ---- the descent: scroll is altitude -----------------------------------
@@ -777,15 +798,11 @@ function mountCloudSea({ seed, still }) {
   }
   /** @param {Stratum} L @param {number} off */
   function fillStratum(L, off) {
-    const first = Math.floor((off - BEHIND) / L.w), last = Math.floor((off + 1600 + AHEAD) / L.w);
-    for (let i = first; i <= last; i++) {
-      if (L.live.has(i)) continue;
+    streamChunks(L.live, off, L.w, BEHIND, AHEAD, (i) => {
       const g = svgel("g", { transform: `translate(${i * L.w},0)` });
       buildStratum(L, g, streamFor(L.key, i));
-      L.live.set(i, g); /** @type {HTMLElement} */ (L.node).appendChild(g);
-    }
-    for (const [i, g] of L.live)
-      if (i < first || i > last) { g.remove(); L.live.delete(i); } /* gone for good */
+      return g;
+    }, (g) => /** @type {HTMLElement} */ (L.node).appendChild(g), (g) => g.remove());
   }
 
   /* ---- the peaks ---------------------------------------------------------
@@ -842,15 +859,14 @@ function mountCloudSea({ seed, still }) {
   /** @param {number} off */
   function fillPeaks(off) {
     const P = PEAKS;
-    const first = Math.floor((off - 400) / P.w), last = Math.floor((off + 2000) / P.w);
-    for (let i = first; i <= last; i++) {
-      if (P.live.has(i)) continue;
+    // 400/2000 are this engine's own behind/ahead margins in the shared
+    // offset+1600+ahead form streamChunks takes (#1151 W1-Q13): 2000 is
+    // 1600+400, the same 400 as the behind margin.
+    streamChunks(P.live, off, P.w, 400, 400, (i) => {
       const g = svgel("g", { transform: `translate(${i * P.w},0)` });
       buildPeak(g, streamFor(P.key, i));
-      P.live.set(i, g); /** @type {HTMLElement} */ (peakHost).appendChild(g);
-    }
-    for (const [i, g] of P.live)
-      if (i < first || i > last) { g.remove(); P.live.delete(i); } /* gone for good */
+      return g;
+    }, (g) => /** @type {HTMLElement} */ (peakHost).appendChild(g), (g) => g.remove());
   }
 
   /* ---- the drift -------------------------------------------------------- */

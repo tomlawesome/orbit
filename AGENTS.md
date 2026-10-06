@@ -12,6 +12,21 @@ governance decision is
 `ai/orbit-base-image` (GitLab) is part of this project, not a sibling: standing
 authorisation to raise issues and make changes there (owner, 2026-08-30).
 
+`ai/orbit-launcher` (GitLab, project 50) is part of this project too, not a
+sibling (owner, 2026-10-03). When one needs something from the other, or
+something there is not working as intended, act on it -- file the issue,
+tell the launcher session -- without asking first. Asking costs the owner a
+round trip on a question with only one answer.
+
+`orbit-site` (GitHub `tomlawesome/orbit-site`) is Orbit's public-facing
+website, built by another agent and largely complete (owner, 2026-10-03). It
+lives on GitHub only for now, to use cloud credit that works nowhere else,
+and will move to GitLab later. It is a sibling project, read-only from here:
+report what one needs from the other rather than changing it (owner,
+2026-09-30). Anything that describes Orbit to the public -- a feature claim,
+an install step, a screenshot -- belongs there, so check it when Orbit's
+behaviour changes.
+
 ## Where the work lives
 
 Orbit moved to the owner's own GitLab on 2026-09-04 (#801). **`ai/orbit` on
@@ -78,6 +93,13 @@ pipeline and playing a manual job are refused by the safety hook here, on top
 of the refusals the gitlab-first-migration skill lists.
 `dev`, `preview` and `main` all take push "No one", merge "Maintainers".
 
+A job whose composite key already passed elsewhere stands on that run
+instead of repeating it (ADR-0028; `docs/quality-strategy.md`'s "Standing on
+an earlier run" has the mechanism, `scripts/ci/job-inputs.json` and
+`scripts/ci/reuse-lookup.mjs` the detail). Label the merge request
+`ci: rerun`, or start the pipeline with `ORBIT_REUSE=off`, to force
+everything to run regardless.
+
 Two runners serve this project, both on the host `gitlab-runners` (32 cores,
 48 GB): the shared group runner, and runner 8, a privileged project runner
 owned by `ai/orbit` and tagged `orbit-build`, that everything needing a
@@ -90,7 +112,7 @@ Three facts about that host live in its `config.toml` and root cron, not here.
 note. `pull_policy = ["if-not-present"]` covers a job's own image but not a
 service's, which needs its own line in `.gitlab-ci.yml`. And
 `/usr/local/sbin/runner-docker-tidy.sh` prunes containers, volumes, untagged
-images and the builder cache (3 GB reserve) at 03:15 nightly, logging to
+images and the builder cache (3 GB reserve) at 02:15 nightly, logging to
 `/var/log/runner-docker-tidy.log`; pinned job images survive it (owner, 2026-09-08).
 
 A push starts a pipeline only on `dev`, `preview`, `main` and `hotfix/*`; a
@@ -134,11 +156,14 @@ group token or a second project token were not adopted.
 - Run fast checks before container and browser checks: this project's
   container and browser suites cost minutes each, and the fast suite catches
   most of what they would.
-- Nothing promotes to `main` before v1.3.0; #547 holds that promotion. So
-  `main` stays at v1.2.0 and is expected to be far behind. A Renovate-flagged
-  stale pin on `main` is not work: check `dev` first, and if `dev` is already
-  fixed it clears when v1.3.0 ships. Do not propose a promotion as available
-  work.
+- v0.3.0 is the current release, and it comes before everything else (owner,
+  2026-09-27). What is left: M14's open issues, then the release steps --
+  #1151 (audit, a Fable session), #1152 (`dev` to `preview`), #1153
+  (acceptance), #1154 (signed-release trial) -- then #885 (promote to
+  `main`). Each promotion merge still needs the owner's go-ahead.
+- `main` stays at the retracted v1.2.0 until v0.3.0 ships, and is expected
+  to be far behind. A Renovate-flagged stale pin on `main` is not work: check
+  `dev` first; if `dev` is already fixed it clears when v0.3.0 ships.
 
 ## Harnesses that already exist
 
@@ -154,11 +179,22 @@ Check the list before building a test rig or handing a check to the owner.
   disagrees
 - `scripts/test-integration.mjs` — integration suite against a real database
 - `scripts/test-e2e-local.sh` — local stack with disposable OIDC and GreenMail
-  sidecars, then Playwright
+  sidecars, then Playwright. `--profile local-only` swaps them for an Orbit
+  with no identity provider at all and runs the short list in
+  `tests/e2e/local-only-specs.txt`, which is what CI's `smoke_local_only`
+  runs too (#916). `--reuse PROJECT` skips the build and `compose up` and
+  runs Playwright straight against a stack a prior `--keep` run left up,
+  identified by Compose's project/service labels and health-checked before
+  anything runs; it never tears that stack down (#947). `--ci-cap` adds the
+  cpu/memory overlay CI's acceptance stack always runs under, so a local
+  timing measurement transfers; off by default because an uncapped stack is
+  the faster iteration loop (#1080)
 - `scripts/test-install-acceptance.sh` — real fresh install to a healthy
   `/api/health`, asserting `docs/installer-guarantees.md`; OIDC discovery is a
   fixture, so no provider credentials are needed
-- `scripts/test-install-bootstrap.sh` — the documented operator path: fetches
+- `scripts/test-install-bootstrap.sh` — the direct bootstrap path (not a
+  supported install entry since ADR-0031's 2026-10-04 amendment;
+  `get-orbit.sh` is): fetches
   `install.sh` over the network from a branch, pipes it to bash, and proves the
   channel tag resolved to the digest the registry serves right now. Real
   network and registry; only OIDC discovery is redirected, to the `tests/oidc`
@@ -197,6 +233,10 @@ Check the list before building a test rig or handing a check to the owner.
   crash on the production build (#782); `pnpm --filter orbit-web
   repro:782` drives the real crash against throwaway fixtures in
   `web/tests/rolldown-repro/` (slow, not wired into the fast suite)
+- `scripts/ci/prove-content-id.sh` — ADR-0028 section 6's proof (#1060 slice
+  2): three image builds showing that the same tree on two commits gives one
+  image content ID and that a changed `src/` file gives another. By hand or as
+  a manual job, never in an ordinary pipeline — it builds the image three times
 - `scripts/ci/repin-base-image.sh` — base image freshness (#708): compares
   the Dockerfile pin to ai/orbit-base-image's published-digest.txt artifact
   and, on a mismatch, re-pins every location and opens a merge request;
@@ -205,7 +245,7 @@ Check the list before building a test rig or handing a check to the owner.
 
 ## Traps when running things locally
 
-Ten known ways to lose an afternoon, or worse.
+Eleven known ways to lose an afternoon, or worse.
 
 **`pnpm db:generate` refuses to run, on purpose.** `drizzle/meta/` holds
 snapshots only up to 0004, so `drizzle-kit generate` would diff against a
@@ -265,6 +305,12 @@ must be empty in the main checkout; repair with `CI=true pnpm install` from
 the main checkout root (breaks other sessions' builds while it runs — agree a
 window first).
 
+**The web type check says SKIPPED in most worktrees, and that is correct
+(#1029).** `web/node_modules/orbit` usually links to the main checkout, so
+`orbit/server/*` would be read from whatever branch *that* has out — a wrong
+answer either way, and a passing one is the dangerous half. Run it in the main
+checkout or let CI answer; it is not a fault to fix.
+
 **A red compose smoke job can be hiding the next failure.** Its steps run in
 one job and it stops at the first, so fixing that step reveals what was behind
 it rather than turning the job green — the favicon 404 hid nine e2e failures
@@ -279,6 +325,15 @@ explicitly instead, as `isApplicationRelative` in
 `web/src/routes/login/+page.svelte` does, and give it cases for the empty
 string, a protocol-relative `//` and a backslash.
 
+**`scripts/test-install-acceptance.sh` refuses while any Orbit database
+volume exists on the host — the demo stack's `orbit-demo_orbit-db-data`
+included.** `install.sh`'s fresh-install guard (#13, #21) matches every
+volume ending `orbit-db-data`, whatever Compose project owns it, so with a
+demo or review stack up the harness fails one second into the positive
+scenario with "An existing Orbit database volume requires a recognized
+deployment". CI does not run this harness (deferred, see the top of
+`.gitlab-ci.yml`), so take the demo stack down first or run it elsewhere.
+
 **A lockfile diff adding an `@pnpm/exe` block is pnpm 11 talking, not your
 change.** The host's PATH `pnpm` is 11.9.0 and writes that block while
 handing over to the pinned 12.3.4, which no longer pins it (the `pnpm`
@@ -286,6 +341,25 @@ package is the native executable from v12): a correct 12.3.4 lockfile has no
 such block. Run `node --test scripts/lockfile-no-pnpm-exe.test.mjs` before
 committing a lockfile change — discard the diff if it fails, never commit it.
 CI activates 12.3.4 through corepack, so it never sees this (#884, #901).
+
+## Only ten fonts exist on this host, and the rest fail silently
+
+Rendering anything to PDF or an image — a mockup, a test document, a
+screenshot — uses the host's fonts. Only these are installed:
+
+    Bitstream Charter   Courier 10 Pitch   Liberation Serif
+    Liberation Sans     Liberation Mono    FreeSerif
+    FreeSans            FreeMono           Loma
+    WenQuanYi Zen Hei
+
+Anything else falls back with no warning. Ask for Helvetica, Arial, Georgia
+or Times New Roman and you get a substitute, and nothing tells you.
+
+This is not cosmetic. Six extraction-corpus documents were built in parallel
+to look deliberately unlike each other, every one specified a font from that
+uninstalled list, and all six rendered in the same face — the variety was
+requested but never existed (#981, 2026-09-11). Check with `fc-list : family`
+rather than assuming a common font is present.
 
 ## The demo stack is disposable
 
@@ -331,6 +405,106 @@ than fix a surface that will not ship (#566, #300, 2026-09-01).
   Risk fields have no GitLab equivalent and nothing replaces them (owner,
   2026-09-04, #814): the milestone says what is scheduled and open/closed
   says what is done.
+- Document extraction: read #992 (extraction lessons, running record) before
+  touching `src/server/documents/extraction-*`; add an entry there when a
+  session learns something the next would otherwise relearn. Every scored
+  run (`eval:stages`, `eval:holdout`, `eval:extraction`) is an experiment
+  and goes in `docs/experiments/extraction.json` the same session, with a
+  plain-English "what we did" (owner, 2026-09-12: "we can only improve if
+  we keep track"): `node scripts/experiment-log.mjs record …` parses the
+  score line and renders the page. Runs that ask the model must be run
+  inside a container on `orbit_orbit-document-processing` (the
+  `stages-rerun` pattern: `docker run --network … -v $PWD:/app -w /app
+  --entrypoint sh node:22 -c '…'`); from the host `orbit-ollama` does not
+  resolve, every answer is blank and the run scores 0% in seconds. The
+  owner reads the log at port 8090 on the design host (container
+  `orbit-experiments`, nginx over `tmp/experiment-log/`); re-render after
+  recording.
+- How extraction work is tested (owner, 2026-09-12), which is not a ruling on
+  what the pipeline ends up doing: heuristics only, no model, one field at a
+  time. What the full pipeline does is decided later, once the fields have
+  been measured this way. The page's front table is the blind whole-page model
+  against the heuristics on the twelve unseen pages; a run joins it with
+  `"headline": true` in the register.
+- **Every field gets its own copy of every stage** (owner, 2026-09-12): its
+  own sieve, its own tagging, its own chooser, in its own files. Not one
+  shared stage 1 with per-field choosers on top — provider's sieve is
+  provider's, and making it greedier must not change a single candidate
+  subtype sees. Copy rather than import: a shared helper cannot be tuned for
+  one field without moving the other, which is the whole point of separating
+  them. Duplication is expected and is not a defect to clean up.
+
+  Whether anything can be merged back is decided at the end, from the
+  numbers, once every field has been tuned on its own. Until then, a change
+  that helps one field and is not measured on the others does not go into
+  anything the others read. #996 is the first of these.
+- **An internal test harness is not product UX** (owner, 2026-09-15:
+  *"This is a basic functional ui so it goes to you. We don't need fable
+  for test harnesses."*). The global rule routing UI and architecture calls
+  to the top model covers what a household sees, not tooling the owner and
+  the agents use -- a labelling harness, an evaluation page, a debug view.
+  Build those in the ordinary way; #1025 was filed to Fable in error.
+- **Collected documents stay out of the repository** (owner, 2026-09-15:
+  *"None of our treatments from any source need to be committed, any that
+  carry license terms saying they do shouldn't be used."*). Specimen and
+  real documents gathered for measuring the extractor live outside git --
+  `~/projects/.scratch/uk-specimens/` for the collected British specimens,
+  the owner's own machine for their paperwork -- and are used locally
+  only. A source whose licence would oblige us to publish or redistribute
+  anything is not used at all, whatever else it offers. Counts, score
+  lines and licence records are what travel.
+- **Non-commercial data and dependencies are acceptable** (owner,
+  2026-09-15: *"Non commercial is usable here. I am happy to ditch the
+  possibility of an orbit commercial license."*). Orbit will not be offered
+  commercially, so a CC BY-NC or CC BY-NC-SA dataset or model may be used.
+  The rest of the dependencies-and-data skill still applies: record the
+  exact licence, and share-alike still binds anything the project
+  redistributes, which AGPL-3.0-or-later makes likelier than it sounds.
+- **Document-scanning rules are kept for what they say about paper, not
+  for the pages they fix** (owner, 2026-09-13: *"what I wanted were generic
+  rule improvements, not tunes"*). This is about the extraction rules in
+  `src/server/documents/extraction-*` — the sieves, tagging and choosers
+  that read a scanned household document — not about project rules in
+  general. A scanning rule states a fact about household paper in general
+  ("a total the page dates is history"; "the number carried on every sheet
+  is the item's own") and the commit and experiment note say that fact. A
+  scanning rule that names a heading word, a phrase or a layout seen on one
+  page is a tune: it needs a class of paper it is true of, or it stays out.
+  Hold-outs
+  are a check, not the judge — keeping a rule by its hold-out score alone
+  is selecting on the hold-out, and twelve pages make one page eight points
+  of a field. The judge is the owner's own documents through
+  `scripts/extract-bundle/`: rebuild after a batch of rules and compare
+  right / in top three / wrong counts with the previous run (#1007).
+- **The unseen documents are locked, not just off limits** (owner,
+  2026-09-12: *"You need to be locked out from the unseen documents."*).
+  `~/agent-hooks/holdout-gate.py` refuses to read a hold-out document, its
+  ground truth or its generated module, and refuses to RUN an eval carrying
+  `--misses` or `--answers` — the flags that print each page's expected value beside
+  what was extracted. Staging, counting, moving, building and writing about
+  those files is all still allowed; reading them out is not. Score them and
+  read the score line.
+
+  Asking permission cannot help: the hook screens the command, not the
+  intent. Authoring a hold-out is the one exempt role, and it is declared
+  rather than inferred — write `ORBIT_HOLDOUT_AUTHOR=1` into the command
+  itself, which says "I am writing these and will never tune against them".
+  A session that writes it has spent its right to tune on that set.
+
+  It must be in the command text. The hook runs as its own process, so a
+  variable exported around the command is not set when the hook reads its
+  environment — the first version checked only the environment and so locked
+  the author out along with everyone else. Declaring it in the command is
+  better anyway: the exemption shows up in the transcript on the line that
+  used it. Only Bash can carry it, so a hold-out author reads with `cat` and
+  writes with a heredoc; Read, Write and Edit stay shut on those paths.
+
+  The first hold-out was lost on 2026-09-12 without a single file being
+  opened: an eval printed the answers, they were read, and the next change
+  was designed knowing them (#996, #997). That is why the flags are gated and
+  not only the files. `~/agent-hooks/holdout-gate_test.py` proves both halves
+  fire, and that neither blocks ordinary work.
+
 - `docs/engineering-baseline.md`: evidence-backed capability and gap audit.
 - `docs/quality-strategy.md`: test, CI, and definition-of-done policy.
 - `docs/feature-register.md`: detailed product direction and constraints, not

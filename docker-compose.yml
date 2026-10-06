@@ -3,7 +3,7 @@ name: orbit
 services:
   orbit-db:
     container_name: orbit-postgres
-    image: postgres:18-alpine@sha256:63bdc97d67b5133bf0e5ebd500bec6d046fa851dc81340d838f0347e616107e8
+    image: postgres:18-alpine@sha256:d8703cd7fba306b9fec9268ecedfa8a966846c053036a60e3635791957eb2f66
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-orbit}
@@ -38,7 +38,12 @@ services:
       MIGRATE_ON_START: "true"
       WORKER_ENABLED: "true"
     volumes:
-      - orbit-documents-data:/var/lib/orbit/documents
+      # Must track wherever the app actually writes documents (src/server/
+      # documents/config.ts's DOCUMENTS_ROOT, same default) -- mounting the
+      # volume at a fixed path while an operator-set DOCUMENTS_ROOT points
+      # elsewhere means the app writes outside the volume and backups never
+      # see those files (#1151 SF2-F1).
+      - orbit-documents-data:${DOCUMENTS_ROOT:-/var/lib/orbit/documents}
     tmpfs:
       - /tmp/orbit-document-quarantine:rw,noexec,nosuid,nodev,uid=1001,gid=1001,mode=0700,size=64m
       - /run/orbit-secrets:rw,noexec,nosuid,nodev,uid=0,gid=1001,mode=0750,size=1m
@@ -61,7 +66,7 @@ services:
   # closed when it is unavailable, while the rest of the application stays up.
   orbit-clamav:
     container_name: orbit-clamav
-    image: clamav/clamav:1.5.4-debian@sha256:5037bae34bf7566052d18f30be1e351155bfce845a583f0c08027f9fcaa44b5d
+    image: clamav/clamav:1.5.4-debian@sha256:38482a33c6791529d57ece99e5fda54ab94f85534d43306a0b37f5c5bd0aa498
     restart: unless-stopped
     networks:
       # clamd shares only the hostile-document channel with Orbit. A separate
@@ -86,7 +91,7 @@ services:
   # docker compose --profile processing up -d
   orbit-tika:
     container_name: orbit-tika
-    image: apache/tika:4.0.0-full@sha256:6c244af88e8575ebe8bf0bc5e2da03c49663dd0acc7809cd99c8e9ff8741cbfb
+    image: apache/tika:4.1.0-full@sha256:d7607239d4e9c2dc1fd396f41a370576a334aef28f767e5bc5511247a1e1adf7
     profiles: ["processing"]
     restart: unless-stopped
     user: "35002:35002"
@@ -95,6 +100,12 @@ services:
     # the only thing holding the Tesseract OCR parser out of the parser set,
     # and it only binds in the array form under a registered component name:
     # the object form parses, loads nothing and reports no error (#687).
+    # Tika 4.1 added a second switch, "text-recognizers", for the engine that
+    # reads text out of images and rendered pages. The config file sets it to
+    # [] as well, so OCR stays off by two independent settings (#687, the
+    # threat model). Checked on 4.1.0 with a PNG and a scanned PDF (#794):
+    # no config reads the text; the exclusion alone or with the empty list
+    # reads none.
     # This argument is the only thing that selects the config file: the server
     # reads no environment variable for it, so change the path here (#692).
     command: ["-c", "/etc/orbit/tika-config.json"]
@@ -118,9 +129,15 @@ services:
   # Optional private model server for a future reviewed semantic-extraction
   # workflow. Orbit does not call it yet, so selecting and pulling a model is an
   # explicit operator action rather than a deployment requirement.
+  #
+  # ADR-0025 makes this container egress-free: document text handed to a model
+  # must not sit somewhere that can reach the internet, and the model server is
+  # then structurally incapable of becoming a cloud extraction path, whatever a
+  # future image or configuration tries. Getting a model in is therefore a
+  # separate, deliberate step -- see the one-shot model pull helper below.
   orbit-ollama:
     container_name: orbit-ollama
-    image: ollama/ollama:0.33.3@sha256:57a73f11f75b32b97b59b003f351445c9c2a8af4b9d586ecdc928dee6150ef26
+    image: ollama/ollama:0.35.1@sha256:17e945f1aa6e505707eeb621e3f36847d0a4a063d4778f7007645acccfb8bd4f
     profiles: ["ai"]
     restart: unless-stopped
     environment:
@@ -145,6 +162,13 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # The model reads hostile document text, so it gets exactly what Tika gets:
+    # reachable from Orbit over the internal network, and no route out. This is
+    # the structural half of ADR-0025's "the endpoint cannot become a cloud
+    # path" -- OLLAMA_NO_CLOUD above is defence in depth behind it. Adding
+    # `default`, a published port, or any second network here reopens egress.
+    networks:
+      - orbit-document-processing
     cpus: "${OLLAMA_CPUS:-2.0}"
     mem_limit: ${OLLAMA_MEMORY_LIMIT:-6g}
     pids_limit: 512
@@ -154,6 +178,76 @@ services:
       timeout: 10s
       start_period: 30s
       retries: 8
+
+  # One-shot model pull, and the only part of this stack allowed to fetch model
+  # data. Never started with the stack; the notes inside it say how it runs.
+  orbit-ollama-model-pull:
+    # The model server above has no route off the internal processing network,
+    # so it cannot fetch a model itself. This runs the same pinned image against
+    # the same model volume on the default network, which does have egress, and
+    # then exits. Its own profile keeps it out of `--profile ai` and out of
+    # every `up`, so it runs only when an operator names it, having first set
+    # OLLAMA_MODEL in .env-orbit to the model reference to fetch:
+    #
+    #   docker compose --env-file .env-orbit --profile ai-model-pull \
+    #     run --rm orbit-ollama-model-pull
+    #
+    # It never sees document text: it starts a private loopback server for the
+    # length of the download only, writes to the volume, and stops. Deliberately
+    # no container_name, and restart "no": a one-shot `run` container must not
+    # claim a name a long-lived service could want, nor come back by itself.
+    image: ollama/ollama:0.35.1@sha256:17e945f1aa6e505707eeb621e3f36847d0a4a063d4778f7007645acccfb8bd4f
+    profiles: ["ai-model-pull"]
+    restart: "no"
+    environment:
+      # Loopback only. The temporary server exists to accept this container's
+      # own pull; nothing on the default network should be able to reach it.
+      OLLAMA_HOST: 127.0.0.1:11434
+      # A pull of an explicitly named local model, never a cloud model or a
+      # cloud relay -- the same promise the serving container makes.
+      OLLAMA_NO_CLOUD: "1"
+      ORBIT_OLLAMA_MODEL: "${OLLAMA_MODEL:-}"
+    volumes:
+      - orbit-ollama-data:/root/.ollama
+    networks:
+      - default
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    entrypoint: ["/bin/sh", "-eu", "-c"]
+    command:
+      - |
+        if [ -z "$${ORBIT_OLLAMA_MODEL:-}" ]; then
+          echo "Set OLLAMA_MODEL in .env-orbit to the model reference to pull." >&2
+          exit 2
+        fi
+        /bin/ollama serve > /tmp/orbit-model-pull.log 2>&1 &
+        server_pid=$$!
+        waited=0
+        while ! /bin/ollama list > /dev/null 2>&1; do
+          waited=$$((waited + 1))
+          if [ "$$waited" -ge 60 ]; then
+            echo "The temporary model server did not start; nothing was pulled." >&2
+            cat /tmp/orbit-model-pull.log >&2
+            kill "$$server_pid" 2>/dev/null || true
+            exit 1
+          fi
+          sleep 1
+        done
+        echo "Pulling $${ORBIT_OLLAMA_MODEL} into the orbit-ollama-data volume."
+        status=0
+        /bin/ollama pull "$${ORBIT_OLLAMA_MODEL}" || status=$$?
+        kill "$$server_pid" 2>/dev/null || true
+        wait "$$server_pid" 2>/dev/null || true
+        if [ "$$status" -ne 0 ]; then
+          echo "Model pull failed. Orbit is unaffected: the serving profile keeps whatever model the volume already held." >&2
+          exit "$$status"
+        fi
+        /bin/ollama list
+    cpus: "${OLLAMA_CPUS:-2.0}"
+    mem_limit: ${OLLAMA_MEMORY_LIMIT:-6g}
+    pids_limit: 512
 
 networks:
   orbit-document-processing:

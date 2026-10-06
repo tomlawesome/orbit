@@ -89,6 +89,16 @@ describe("the validation/publication split (#661)", () => {
     expect(section).not.toContain("ORBIT_SIGNING_DIR");
   });
 
+  it("waits on fidelity_webkit, not only fidelity (#1151 RANGE-F3)", () => {
+    // fidelity_webkit shares fidelity's exact `rules:`/`needs:` (gitlab-ci-lanes.test.mjs
+    // asserts both are guarded jobs), so it runs just as non-optionally on a
+    // preview/hotfix push. Missing it here reopens D1-S1 for that one job:
+    // record_image could publish while the phone-WebKit acceptance job is
+    // still running or has failed.
+    const section = job("record_image");
+    expect(section).toContain("job: fidelity_webkit");
+  });
+
   it("lets sign_evidence only sign: never build, push bytes, or tag", () => {
     const section = job("sign_evidence");
     expect(section).toContain("job: record_image");

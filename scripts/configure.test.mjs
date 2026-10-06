@@ -9,6 +9,7 @@ import {
   statSync,
   symlinkSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -113,6 +114,10 @@ function runConfigure(targetDir, args = [], envOverrides = {}, input = undefined
       PATH: `${binDir}:${process.env.PATH}`,
       HOME: process.env.HOME ?? tmpdir(),
       ORBIT_IMAGE: "orbit-local:abcdef123456",
+      // These helpers simulate the installer driving configure.sh (the realistic
+      // caller), so they carry its trust marker too -- see the dedicated
+      // negative test below for the one case that must NOT carry it.
+      ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE: "1",
       ...envOverrides,
     },
     ...processGuard(),
@@ -132,6 +137,10 @@ function runConfigureWithControllingTerminal(targetDir, args = [], envOverrides 
       PATH: `${binDir}:${process.env.PATH}`,
       HOME: process.env.HOME ?? tmpdir(),
       ORBIT_IMAGE: "orbit-local:abcdef123456",
+      // These helpers simulate the installer driving configure.sh (the realistic
+      // caller), so they carry its trust marker too -- see the dedicated
+      // negative test below for the one case that must NOT carry it.
+      ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE: "1",
       ...envOverrides,
     },
   });
@@ -159,6 +168,7 @@ function runConfigureWithPipeEOF(targetDir, args = [], envOverrides = {}, input 
         PATH: `${binDir}:${process.env.PATH}`,
         HOME: process.env.HOME ?? tmpdir(),
         ORBIT_IMAGE: "orbit-local:abcdef123456",
+        ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE: "1",
         ...envOverrides,
       },
       ...processGuard(),
@@ -203,6 +213,7 @@ describe(".env-orbit.example", () => {
     expect(activeKeys).toEqual([
       "ORBIT_CONFIG_SCHEMA_VERSION",
       "APP_URL",
+      "ORBIT_AUTH_OIDC",
       "OIDC_ISSUER",
       "OIDC_CLIENT_ID",
       "OIDC_CLIENT_SECRET",
@@ -252,6 +263,64 @@ describe(".env-orbit.example", () => {
 });
 
 describe("configure.sh", () => {
+  it("honours ORBIT_SECRETS_DIR, writing generated secrets there instead of the default .orbit-secrets (#1151 SF2-F8)", () => {
+    const targetDir = makeFixture(undefined);
+    const customSecretsDir = join(targetDir, "custom-secrets-location");
+
+    const result = runConfigure(targetDir, [], { ORBIT_SECRETS_DIR: customSecretsDir });
+
+    expect(result.status).toBe(0);
+    expect(existsSync(join(targetDir, ".orbit-secrets"))).toBe(false);
+    expect(statSync(customSecretsDir).mode & 0o777).toBe(0o700);
+    for (const name of ["session-secret", "postgres-password", "document-kek", "vapid-private-key"]) {
+      expect(existsSync(join(customSecretsDir, name))).toBe(true);
+    }
+  });
+
+  it("ignores a stale ambient ORBIT_IMAGE on an existing deployment without the installer's trust marker, printing what it ignored (#1151 O1-S4)", () => {
+    const pinnedImage = `old-registry.example/orbit@sha256:${"a".repeat(64)}`;
+    const targetDir = makeFixture(`APP_URL=https://orbit.example.invalid\nORBIT_IMAGE=${pinnedImage}\n`);
+    const binDir = makeFakeBin();
+
+    // Deliberately bypasses the runConfigure helper (which now always
+    // carries ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE, simulating the installer):
+    // this is exactly the bare, human-run invocation the finding is about,
+    // with a stale ORBIT_IMAGE left over in the shell and no trust marker.
+    const result = failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "configure.sh")], {
+      cwd: targetDir,
+      encoding: "utf8",
+      env: {
+        PATH: `${binDir}:${process.env.PATH}`,
+        HOME: process.env.HOME ?? tmpdir(),
+        ORBIT_IMAGE: "orbit-local:bbbbbbbbbbbb",
+      },
+      ...processGuard(),
+    }), { label: "bareConfigureStaleImage" });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("ignoring the environment's ORBIT_IMAGE value orbit-local:bbbbbbbbbbbb");
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain(`ORBIT_IMAGE=${pinnedImage}`);
+  });
+
+  it("still seeds ORBIT_IMAGE from the environment on a brand-new deployment, even without the trust marker", () => {
+    const targetDir = makeFixture(undefined);
+    const binDir = makeFakeBin();
+
+    const result = failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "configure.sh")], {
+      cwd: targetDir,
+      encoding: "utf8",
+      env: {
+        PATH: `${binDir}:${process.env.PATH}`,
+        HOME: process.env.HOME ?? tmpdir(),
+        ORBIT_IMAGE: "orbit-local:cccccccccccc",
+      },
+      ...processGuard(),
+    }), { label: "bareConfigureFreshImage" });
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain("ORBIT_IMAGE=orbit-local:cccccccccccc");
+  });
+
   it("creates a concise operator environment while leaving reference-only defaults in the example", () => {
     const targetDir = makeFixture(undefined);
 
@@ -498,6 +567,7 @@ describe("configure.sh", () => {
     const initial = [
       "APP_URL=https://orbit.configure-test.internal",
       "ORBIT_IMAGE=orbit-local:abcdef123456",
+      "ORBIT_AUTH_OIDC=true",
       "OIDC_ISSUER=https://auth.configure-test.internal/application/o/orbit/",
       "OIDC_CLIENT_ID=super-secret-client-id",
       "OIDC_CLIENT_SECRET=super-secret-client-secret-value",
@@ -519,7 +589,7 @@ describe("configure.sh", () => {
 
     const lines = result.stdout.split("\n").filter(Boolean);
     for (const line of lines) {
-      expect(line).toMatch(/^(ready|missing|optional|app-managed) [A-Za-z_]+$/);
+      expect(line).toMatch(/^(ready|missing|optional|app-managed|not in use) [A-Za-z_]+$/);
     }
     expect(lines).toContain("ready APP_URL");
     expect(lines).toContain("ready ORBIT_IMAGE");
@@ -543,10 +613,12 @@ describe("configure.sh", () => {
     const lines = result.stdout.split("\n").filter(Boolean);
     expect(lines).toContain("missing APP_URL");
     expect(lines).toContain("missing ORBIT_IMAGE");
-    expect(lines).toContain("missing OIDC_ISSUER");
-    expect(lines).toContain("missing OIDC_CLIENT_ID");
-    expect(lines).toContain("missing OIDC_CLIENT_SECRET");
-    expect(lines).toContain("missing OIDC_CALLBACK_URL");
+    // ORBIT_AUTH_OIDC is unset, so it defaults to false (ADR-0023 §1): the
+    // OIDC fields are inert rather than missing, even though nothing is set.
+    expect(lines).toContain("not in use OIDC_ISSUER");
+    expect(lines).toContain("not in use OIDC_CLIENT_ID");
+    expect(lines).toContain("not in use OIDC_CLIENT_SECRET");
+    expect(lines).toContain("not in use OIDC_CALLBACK_URL");
     expect(lines).toContain("optional processing");
     expect(lines).toContain("optional ai");
     expect(lines).toContain("optional mail");
@@ -557,6 +629,7 @@ describe("configure.sh", () => {
   it("treats the historical loopback default and documented example.com placeholders as missing", () => {
     const initial = [
       "APP_URL=http://127.0.0.1:3000",
+      "ORBIT_AUTH_OIDC=true",
       "OIDC_ISSUER=https://auth.example.com/application/o/orbit/",
       "OIDC_CALLBACK_URL=http://127.0.0.1:3000/api/auth/callback",
       "",
@@ -576,6 +649,7 @@ describe("configure.sh", () => {
     const initial = [
       "APP_URL=https://orbit.configure-test.internal",
       "ORBIT_IMAGE=orbit-local:abcdef123456",
+      "ORBIT_AUTH_OIDC=true",
       "OIDC_ISSUER=https://auth.configure-test.internal/application/o/orbit/",
       "OIDC_CLIENT_ID=test-client-id",
       "OIDC_CLIENT_SECRET=test-client-secret",
@@ -597,6 +671,7 @@ describe("configure.sh", () => {
     const initial = [
       "APP_URL=https://orbit.configure-test.internal",
       "ORBIT_IMAGE=ghcr.io/tomlawesome/orbit:latest",
+      "ORBIT_AUTH_OIDC=true",
       "OIDC_ISSUER=https://auth.configure-test.internal/application/o/orbit/",
       "OIDC_CLIENT_ID=   ",
       "OIDC_CLIENT_SECRET=test-client-secret",
@@ -622,6 +697,7 @@ describe("configure.sh", () => {
       "OIDC_CLIENT_ID=test-client-id",
       "OIDC_CLIENT_SECRET=test-client-secret",
       "OIDC_CALLBACK_URL=https://orbit.configure-test.internal/api/auth/callback",
+      "ORBIT_AUTH_OIDC=true",
       "",
     ].join("\n");
     const targetDir = makeFixture(initial);
@@ -645,6 +721,7 @@ describe("configure.sh", () => {
       "OIDC_CLIENT_ID=test-client-id",
       "OIDC_CLIENT_SECRET=test-client-secret",
       "OIDC_CALLBACK_URL=https://orbit.configure-test.internal/api/auth/callback",
+      "ORBIT_AUTH_OIDC=true",
       "SMTP_HOST=smtp.example.com",
       "",
     ].join("\n");
@@ -665,6 +742,7 @@ describe("configure.sh", () => {
       "OIDC_CLIENT_ID=test-client-id",
       "OIDC_CLIENT_SECRET=test-client-secret",
       "OIDC_CALLBACK_URL=https://orbit.configure-test.internal/api/auth/callback",
+      "ORBIT_AUTH_OIDC=true",
       "SMTP_HOST=smtp.example.com",
       "SMTP_USER=orbit@example.com",
       "SMTP_PASSWORD=private-smtp-value",
@@ -682,6 +760,7 @@ describe("configure.sh", () => {
 
   it("reports direct and file secret conflicts as incomplete without disclosing values", () => {
     const initial = [
+      "ORBIT_AUTH_OIDC=true",
       "OIDC_CLIENT_SECRET=private-direct-oidc",
       "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/private-oidc",
       "SMTP_HOST=smtp.example.com",
@@ -701,7 +780,7 @@ describe("configure.sh", () => {
   });
 
   it("reports OIDC_CLIENT_SECRET_FILE ready only for the canonical path backed by a non-empty, regular, non-symlink host file", () => {
-    const initial = "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n";
+    const initial = "ORBIT_AUTH_OIDC=true\nOIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n";
     const targetDir = makeFixture(initial);
     mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
     writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "configured-secret-value");
@@ -715,7 +794,7 @@ describe("configure.sh", () => {
   });
 
   it("reports a file-backed OIDC secret as missing when its permissions are too broad", () => {
-    const initial = "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n";
+    const initial = "ORBIT_AUTH_OIDC=true\nOIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n";
     const targetDir = makeFixture(initial);
     mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
     writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "configured-secret-value");
@@ -729,7 +808,7 @@ describe("configure.sh", () => {
   });
 
   it("reports OIDC_CLIENT_SECRET_FILE as missing when the configured path is not the canonical runtime path", () => {
-    const initial = "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/some-other-path\n";
+    const initial = "ORBIT_AUTH_OIDC=true\nOIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/some-other-path\n";
     const targetDir = makeFixture(initial);
     mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
     writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "configured-secret-value");
@@ -741,7 +820,7 @@ describe("configure.sh", () => {
   });
 
   it("reports OIDC_CLIENT_SECRET_FILE as missing when the canonical host file is absent", () => {
-    const initial = "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n";
+    const initial = "ORBIT_AUTH_OIDC=true\nOIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n";
     const targetDir = makeFixture(initial);
 
     const result = runConfigure(targetDir, ["--check"]);
@@ -751,7 +830,7 @@ describe("configure.sh", () => {
   });
 
   it("reports OIDC_CLIENT_SECRET_FILE as missing when the canonical host file is empty", () => {
-    const initial = "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n";
+    const initial = "ORBIT_AUTH_OIDC=true\nOIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n";
     const targetDir = makeFixture(initial);
     mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
     writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "");
@@ -763,7 +842,7 @@ describe("configure.sh", () => {
   });
 
   it("reports OIDC_CLIENT_SECRET_FILE as missing when the canonical host file is a symlink", () => {
-    const initial = "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n";
+    const initial = "ORBIT_AUTH_OIDC=true\nOIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n";
     const targetDir = makeFixture(initial);
     mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
     const elsewhere = mkdtempSync(join(tmpdir(), "orbit-configure-elsewhere-"));
@@ -847,6 +926,7 @@ describe("configure.sh", () => {
     const goodFileBackedEnv = [
       "APP_URL=https://orbit.configure-test.internal",
       "ORBIT_IMAGE=orbit-local:abcdef123456",
+      "ORBIT_AUTH_OIDC=true",
       "OIDC_ISSUER=https://auth.configure-test.internal/application/o/orbit/",
       "OIDC_CLIENT_ID=test-client-id",
       "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret",
@@ -883,7 +963,10 @@ describe("configure.sh", () => {
       expect(result.status).not.toBe(0);
       const lines = result.stdout.split("\n").filter(Boolean);
       expect(lines).toContain("missing APP_URL");
-      expect(lines).toContain("missing OIDC_CLIENT_SECRET");
+      // ORBIT_AUTH_OIDC is unset with no rollback copy at all, so it
+      // defaults to false (ADR-0023 §1): the OIDC fields are inert rather
+      // than missing.
+      expect(lines).toContain("not in use OIDC_CLIENT_SECRET");
     });
 
     it("fails when the rollback copy is a symlink", () => {
@@ -913,6 +996,7 @@ describe("configure.sh", () => {
       const targetDir = makeFixture(
         "APP_URL=https://orbit.configure-test.internal\n" +
           "ORBIT_IMAGE=orbit-local:abcdef123456\n" +
+          "ORBIT_AUTH_OIDC=true\n" +
           "OIDC_ISSUER=https://auth.configure-test.internal/application/o/orbit/\n" +
           "OIDC_CLIENT_ID=test-client-id\n" +
           "OIDC_CLIENT_SECRET=live-direct-secret\n" +
@@ -920,7 +1004,7 @@ describe("configure.sh", () => {
       );
       // A minimal, incomplete rollback: --check-rollback must fail even
       // though the live file above is fully ready.
-      writeRollback(targetDir, "APP_URL=https://orbit.configure-test.internal\n");
+      writeRollback(targetDir, "APP_URL=https://orbit.configure-test.internal\nORBIT_AUTH_OIDC=true\n");
 
       expect(runConfigure(targetDir, ["--check"]).status).toBe(0);
 
@@ -1108,6 +1192,108 @@ describe("configure.sh", () => {
       expect(stagingLeftovers(targetDir)).toEqual([]);
     });
 
+    it("derives and atomically writes ORBIT_AUTH_OIDC=true alongside a complete environment set (ADR-0023 section 1)", () => {
+      const targetDir = makeFixture("UNRELATED_KEY=keep-me\n");
+
+      const result = runConfigure(targetDir, ["--init"], {
+        ORBIT_CONFIGURE_APP_URL: validAppUrl,
+        ORBIT_CONFIGURE_OIDC_ISSUER: validIssuer,
+        ORBIT_CONFIGURE_OIDC_CLIENT_ID: validClientId,
+      });
+
+      expect(result.status).toBe(0);
+      const updated = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+      expect(updated).toContain("ORBIT_AUTH_OIDC=true");
+    });
+
+    it("ORBIT_CONFIGURE_AUTH_MODE=local writes only APP_URL and ORBIT_AUTH_OIDC=false, never the OIDC trio", () => {
+      const targetDir = makeFixture("UNRELATED_KEY=keep-me\n");
+
+      const result = runConfigure(targetDir, ["--init"], {
+        ORBIT_CONFIGURE_AUTH_MODE: "local",
+        ORBIT_CONFIGURE_APP_URL: validAppUrl,
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("ORBIT_AUTH_OIDC=false");
+      const updated = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+      expect(updated).toContain("UNRELATED_KEY=keep-me");
+      expect(updated).toContain(`APP_URL=${validAppUrl}`);
+      expect(updated).toContain("ORBIT_AUTH_OIDC=false");
+      expect(updated).not.toContain("OIDC_ISSUER=");
+      expect(updated).not.toContain("OIDC_CLIENT_ID=");
+      expect(updated).not.toContain("OIDC_CALLBACK_URL=");
+    });
+
+    it("switching to local-only preserves an existing OIDC configuration instead of deleting it (ADR-0023 section 1)", () => {
+      const initial = [
+        "APP_URL=https://old.guided-test.internal",
+        "OIDC_ISSUER=https://old-auth.guided-test.internal/o/orbit/",
+        "OIDC_CLIENT_ID=old-client-id",
+        "OIDC_CALLBACK_URL=https://old.guided-test.internal/api/auth/callback",
+        "",
+      ].join("\n");
+      const targetDir = makeFixture(initial);
+
+      const result = runConfigure(targetDir, ["--init"], {
+        ORBIT_CONFIGURE_AUTH_MODE: "local",
+        ORBIT_CONFIGURE_APP_URL: validAppUrl,
+      });
+
+      expect(result.status).toBe(0);
+      const updated = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+      expect(updated).toContain(`APP_URL=${validAppUrl}`);
+      expect(updated).toContain("ORBIT_AUTH_OIDC=false");
+      expect(updated).toContain("OIDC_ISSUER=https://old-auth.guided-test.internal/o/orbit/");
+      expect(updated).toContain("OIDC_CLIENT_ID=old-client-id");
+    });
+
+    it("rejects ORBIT_CONFIGURE_AUTH_MODE=local combined with a complete OIDC environment set", () => {
+      const initial = "UNRELATED_KEY=keep-me\n";
+      const targetDir = makeFixture(initial);
+
+      const result = runConfigure(targetDir, ["--init"], {
+        ORBIT_CONFIGURE_AUTH_MODE: "local",
+        ORBIT_CONFIGURE_APP_URL: validAppUrl,
+        ORBIT_CONFIGURE_OIDC_ISSUER: validIssuer,
+        ORBIT_CONFIGURE_OIDC_CLIENT_ID: validClientId,
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(initial);
+      expect(stagingLeftovers(targetDir)).toEqual([]);
+    });
+
+    it("rejects an invalid ORBIT_CONFIGURE_AUTH_MODE value without mutation", () => {
+      const initial = "UNRELATED_KEY=keep-me\n";
+      const targetDir = makeFixture(initial);
+
+      const result = runConfigure(targetDir, ["--init"], {
+        ORBIT_CONFIGURE_AUTH_MODE: "sso",
+        ORBIT_CONFIGURE_APP_URL: validAppUrl,
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(initial);
+    });
+
+    it("the interactive mode question defaults to local-only and asks nothing further", () => {
+      const targetDir = makeFixture("UNRELATED_KEY=keep-me\n");
+
+      const result = runConfigureWithControllingTerminal(
+        targetDir,
+        ["--init"],
+        { TERM: "xterm" },
+        `\r${validAppUrl}\r`,
+      );
+
+      expect(result.status).toBe(0);
+      const updated = readFileSync(join(targetDir, ".env-orbit"), "utf8");
+      expect(updated).toContain(`APP_URL=${validAppUrl}`);
+      expect(updated).toContain("ORBIT_AUTH_OIDC=false");
+      expect(updated).not.toContain("OIDC_ISSUER=");
+    });
+
     it("normalizes one harmless trailing slash from the public Orbit origin", () => {
       const targetDir = makeFixture("UNRELATED_KEY=keep-me\n");
 
@@ -1156,7 +1342,7 @@ describe("configure.sh", () => {
         targetDir,
         ["--init"],
         { TERM: "xterm" },
-        `${validAppUrl}\n${validIssuer}\n${validClientId}X\x1b[D\x1b[3~\r`,
+        `oidc\n${validAppUrl}\n${validIssuer}\n${validClientId}X\x1b[D\x1b[3~\r`,
       );
 
       expect(result.status).toBe(0);
@@ -1292,5 +1478,176 @@ describe("configure.sh", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Could not secure the temporary Orbit environment file");
     expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+});
+
+// #1151 RANGE-F1: a missing DOCUMENT_KEK or SESSION_SECRET file on an
+// existing deployment is a lost or corrupted secret, not a first run.
+// scripts/configure.sh is the default engine (ORBIT_CONFIGURE_ENGINE=container
+// is opt-in; install.sh never sets it), and before this fix its
+// ensure_secret_file unconditionally generated a brand-new secret whenever
+// the file was missing, silently making every existing encrypted document
+// unreadable (document-kek) or signing out every session (session-secret).
+// Mirrors src/lib/configure-engine.ts's ensureSecretFile isFreshInstall
+// refusal. A deployment is existing when any of the three generated secrets
+// already exists before the run -- not when .env-orbit does, because
+// install.sh runs `configure.sh --init` and then a bare `configure.sh`.
+describe("scripts/configure.sh ensure_secret_file existing-deployment refusal (#1151 RANGE-F1)", () => {
+  it("refuses to regenerate a missing document-kek on an existing deployment instead of silently replacing it", () => {
+    const targetDir = makeFixture("ORBIT_IMAGE=old\n");
+    const validSecret = `${"a".repeat(64)}\n`;
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+    writeFileSync(join(targetDir, ".orbit-secrets", "session-secret"), validSecret);
+    chmodSync(join(targetDir, ".orbit-secrets", "session-secret"), 0o600);
+    writeFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), validSecret);
+    chmodSync(join(targetDir, ".orbit-secrets", "postgres-password"), 0o600);
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(".orbit-secrets/document-kek is missing on an existing Orbit deployment");
+    expect(result.stderr).toContain("Refusing to generate a replacement");
+    expect(existsSync(join(targetDir, ".orbit-secrets", "document-kek"))).toBe(false);
+  });
+
+  it("generates all three secrets on the install shape: --init writes .env-orbit, then a bare run in a second process", () => {
+    const targetDir = makeFixture(undefined);
+
+    const initResult = runConfigure(targetDir, ["--init"], {
+      ORBIT_CONFIGURE_APP_URL: "https://orbit.install-shape.internal",
+      ORBIT_CONFIGURE_OIDC_ISSUER: "https://auth.install-shape.internal/application/o/orbit/",
+      ORBIT_CONFIGURE_OIDC_CLIENT_ID: "install-shape-client-id",
+    });
+    expect(initResult.status).toBe(0);
+    expect(existsSync(join(targetDir, ".env-orbit"))).toBe(true);
+
+    const result = runConfigure(targetDir);
+
+    expect(result.stderr).not.toContain("is missing on an existing Orbit deployment");
+    expect(result.status).toBe(0);
+    for (const name of ["session-secret", "postgres-password", "document-kek"]) {
+      expect(existsSync(join(targetDir, ".orbit-secrets", name))).toBe(true);
+    }
+  });
+
+  it("still generates secrets normally on a genuinely fresh install (neither .env-orbit nor .orbit-secrets existed before this run)", () => {
+    const targetDir = makeFixture(undefined);
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).toBe(0);
+    for (const name of ["session-secret", "postgres-password", "document-kek"]) {
+      expect(existsSync(join(targetDir, ".orbit-secrets", name))).toBe(true);
+    }
+  });
+
+  it("refuses for postgres-password and generates nothing when only session-secret already exists", () => {
+    const targetDir = makeFixture("ORBIT_IMAGE=old\n");
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+    writeFileSync(join(targetDir, ".orbit-secrets", "session-secret"), `${"a".repeat(64)}\n`);
+    chmodSync(join(targetDir, ".orbit-secrets", "session-secret"), 0o600);
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(".orbit-secrets/postgres-password is missing on an existing Orbit deployment");
+    expect(existsSync(join(targetDir, ".orbit-secrets", "postgres-password"))).toBe(false);
+    expect(existsSync(join(targetDir, ".orbit-secrets", "document-kek"))).toBe(false);
+  });
+});
+
+// #1151 RANGE-F5: once OIDC_CLIENT_SECRET_FILE is already configured, a
+// missing oidc-client-secret file means the real secret was lost, not a
+// first bootstrap. Before this fix, ensure_oidc_secret_placeholder silently
+// wrote a fresh zero-byte placeholder over it and reported success, leaving
+// OIDC sign-in broken for everyone with no warning. Mirrors
+// src/lib/configure-engine.ts's ensureOidcSecretPlaceholder fileModeActive
+// refusal.
+describe("scripts/configure.sh ensure_oidc_secret_placeholder fileModeActive refusal (#1151 RANGE-F5)", () => {
+  it("refuses to replace a missing OIDC client secret file with an empty placeholder when OIDC_CLIENT_SECRET_FILE is already configured", () => {
+    const initial = "ORBIT_AUTH_OIDC=true\nOIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n";
+    const targetDir = makeFixture(initial);
+    const validSecret = `${"a".repeat(64)}\n`;
+    mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
+    for (const name of ["session-secret", "postgres-password", "document-kek"]) {
+      writeFileSync(join(targetDir, ".orbit-secrets", name), validSecret);
+      chmodSync(join(targetDir, ".orbit-secrets", name), 0o600);
+    }
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      ".orbit-secrets/oidc-client-secret is missing but OIDC_CLIENT_SECRET_FILE is already configured",
+    );
+    expect(existsSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"))).toBe(false);
+  });
+});
+
+// #1151 RANGE-F6: the new cross-process deploy lock (O1-R7/O1-R8,
+// .orbit-engine.lock) only ever guarded the opt-in container/TS engine.
+// scripts/configure.sh's own update_managed_keys took no lock at all, so two
+// concurrent default (bash-engine) `orbit configure` runs against the same
+// deployment directory could each read-modify-write .env-orbit and lose one
+// writer's keys. Mirrors src/lib/configure-engine.ts's acquireDeployLock:
+// same lock file, same "already running" refusal, same stale-after-10-minute
+// takeover.
+describe("scripts/configure.sh update_managed_keys deploy lock (#1151 RANGE-F6)", () => {
+  it("refuses a write while another run's deploy lock is held", () => {
+    const targetDir = makeFixture(undefined);
+    writeFileSync(join(targetDir, ".orbit-engine.lock"), "12345:1:2\n");
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Another orbit configure is already running against this deployment");
+    expect(result.stderr).toContain(".orbit-engine.lock");
+    // The other run's lock is left untouched, not stolen or deleted.
+    expect(readFileSync(join(targetDir, ".orbit-engine.lock"), "utf8")).toBe("12345:1:2\n");
+  });
+
+  it("reclaims a stale deploy lock left by a crashed run instead of blocking forever", () => {
+    const targetDir = makeFixture(undefined);
+    const lockPath = join(targetDir, ".orbit-engine.lock");
+    writeFileSync(lockPath, "99999:1:1\n");
+    const staleTime = (Date.now() - 11 * 60 * 1000) / 1000;
+    utimesSync(lockPath, staleTime, staleTime);
+
+    const result = runConfigure(targetDir);
+
+    expect(result.status).toBe(0);
+    // Released again after the (successful) run that reclaimed it.
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it("releases the lock after each successful update, so later steps in the same run do not see it as held", () => {
+    const targetDir = makeFixture(undefined);
+
+    // The bare flow calls update_managed_keys more than once in a single
+    // process (persist_orbit_image, then ensure_vapid_keys); every existing
+    // passing test exercises this already, but assert it directly too.
+    const result = runConfigure(targetDir);
+
+    expect(result.status).toBe(0);
+    expect(existsSync(join(targetDir, ".orbit-engine.lock"))).toBe(false);
+  });
+
+  // #1151 RANGE-R5: the lock must cover the generated-secret loop itself, not
+  // only update_managed_keys. An existing .env-orbit with a pinned image and
+  // no trust marker makes persist_orbit_image skip its own update, so the
+  // secret loop is the first thing that can take the lock.
+  it("refuses to generate secrets while another run's deploy lock is held", () => {
+    const pinnedImage = `registry.example.invalid/orbit@sha256:${"a".repeat(64)}`;
+    const targetDir = makeFixture(`APP_URL=https://orbit.example.invalid\nORBIT_IMAGE=${pinnedImage}\n`);
+    writeFileSync(join(targetDir, ".orbit-engine.lock"), "12345:1:2\n");
+
+    const result = runConfigure(targetDir, [], { ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE: "" });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Another orbit configure is already running against this deployment");
+    for (const name of ["session-secret", "postgres-password", "document-kek"]) {
+      expect(existsSync(join(targetDir, ".orbit-secrets", name))).toBe(false);
+    }
+    expect(readFileSync(join(targetDir, ".orbit-engine.lock"), "utf8")).toBe("12345:1:2\n");
   });
 });

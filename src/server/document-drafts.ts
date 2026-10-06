@@ -13,6 +13,7 @@ import { extractTextWithTika } from "@/server/documents/tika";
 import { detectDocumentMediaType, validateSupportedDocumentStructure } from "@/server/documents/validation";
 import { isDocumentContentReady, readDocumentDownload } from "@/server/document-repository";
 import { getDocumentConfig } from "@/server/documents/config";
+import { openMetadataReader, requireMetadataWriter } from "@/server/metadata/fields";
 import { acquireActiveHouseholdLock, validUuid } from "@/server/workspace-access";
 
 export { proposalFromText } from "@/server/documents/suggestions";
@@ -51,10 +52,24 @@ function optionalReviewedField(value: string | null, maximum: number): string | 
 async function findDuplicates(householdId: string, documentId: string, proposal: { title: string; provider?: string; reference?: string; dates?: string[] }): Promise<DuplicateCandidate[]> {
   const [document] = await getDb().select({ hash: documents.contentSha256 }).from(documents).where(eq(documents.id, documentId)).limit(1);
   const householdItems = await getDb().select().from(items).where(eq(items.householdId, householdId));
+  // ADR-0024 decision 2: a reader already scanning every item in the household
+  // keeps comparing decrypted values in the application, exactly as it did on
+  // plaintext. The blind index exists for lookups that would otherwise have to
+  // read every row, which this one does anyway.
+  const metadata = await openMetadataReader(householdId);
+  // Tier 2 (#963) joins Tier 1 in the same pass: title and provider decrypt
+  // here too, so the comparisons below read exactly as they did on plaintext.
+  // A damaged or locked value reads as null and simply never matches.
+  const decrypted = householdItems.map((item) => ({
+    ...item,
+    title: metadata.text("items.title", item.id, { encrypted: item.titleEnc, plaintext: item.title }).value ?? "",
+    provider: metadata.text("items.provider", item.id, { encrypted: item.providerEnc, plaintext: item.provider }).value,
+    reference: metadata.text("items.reference", item.id, { encrypted: item.referenceEnc, plaintext: item.reference }).value,
+  }));
   const seen = new Map<string, DuplicateCandidate>();
   const sameHash = await getDb().select({ itemId: documents.itemId }).from(documents).where(and(eq(documents.householdId, householdId), eq(documents.contentSha256, document?.hash ?? "")));
-  for (const match of sameHash) if (match.itemId) seen.set(match.itemId, { itemId: match.itemId, title: householdItems.find((item) => item.id === match.itemId)?.title ?? "Existing item", reason: "document_hash" });
-  for (const item of householdItems) {
+  for (const match of sameHash) if (match.itemId) seen.set(match.itemId, { itemId: match.itemId, title: decrypted.find((item) => item.id === match.itemId)?.title || "Existing item", reason: "document_hash" });
+  for (const item of decrypted) {
     if (proposal.reference && item.reference?.toLowerCase() === proposal.reference.toLowerCase()) seen.set(item.id, { itemId: item.id, title: item.title, reason: "reference" });
     else if (proposal.provider && item.provider?.toLowerCase() === proposal.provider.toLowerCase() && item.title.toLowerCase() === proposal.title.toLowerCase()) seen.set(item.id, { itemId: item.id, title: item.title, reason: "provider_title" });
     else if (proposal.dates?.some((date) => [item.startDate, item.expiryDate, item.renewalDate, item.serviceDate].includes(date))) seen.set(item.id, { itemId: item.id, title: item.title, reason: "date_overlap" });
@@ -173,6 +188,15 @@ export async function approveDocumentDraft(
       ))
       .limit(1);
     if (!activeDraft) throw new AppError("draft_not_found", "That draft is not available", 404);
+    // Tier 1 (ADR-0024): `reference` is encrypted and indexed here exactly as
+    // the workspace write path does it; `provider` is a provider name, which
+    // is Tier 2 and stays in plaintext for now.
+    const metadata = await requireMetadataWriter(record.householdId, transaction);
+    const referenceColumns = {
+      reference: null,
+      referenceEnc: metadata.encryptText("items.reference", itemId, reviewed.reference),
+      referenceIndex: metadata.referenceIndex(reviewed.reference),
+    };
     if (mode === "create") {
       await transaction.insert(items).values({
         id: itemId,
@@ -180,18 +204,27 @@ export async function approveDocumentDraft(
         sectionId,
         title: reviewed.title,
         provider: reviewed.provider,
-        reference: reviewed.reference,
+        ...referenceColumns,
         currency: household.currency,
       });
     }
     if (mode === "merge") {
       await transaction.update(items).set({
+        title: reviewed.title,
         provider: reviewed.provider,
-        reference: reviewed.reference,
+        ...referenceColumns,
         updatedAt: new Date(),
       }).where(eq(items.id, itemId));
     }
-    await transaction.update(documents).set({ itemId, updatedAt: new Date() }).where(eq(documents.id, draft.documentId));
+    // Conditional on the document still being `available`: a concurrent
+    // deletion (requestDocumentDeletion) could have moved it to
+    // `pending_deletion` or beyond between requireDocumentMember's read and
+    // here, and this approval must not resurrect a link to a document on its
+    // way out (SR1-R1).
+    const [linked] = await transaction.update(documents).set({ itemId, updatedAt: new Date() })
+      .where(and(eq(documents.id, draft.documentId), eq(documents.lifecycle, "available")))
+      .returning({ id: documents.id });
+    if (!linked) throw new AppError("document_not_found", "That document is not available", 404);
     const [approved] = await transaction.update(documentDrafts)
       .set({ status: "approved", approvedItemId: itemId, updatedAt: new Date() })
       .where(and(eq(documentDrafts.id, draftId), eq(documentDrafts.status, "pending_review")))

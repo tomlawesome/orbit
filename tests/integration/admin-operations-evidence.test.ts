@@ -18,6 +18,7 @@ import { callRoute, callRouteForSession, loadRoute } from "./support/request-eve
 
 const { GET: getOperations } = await loadRoute("admin/operations");
 const { GET: getDocumentHealth } = await loadRoute("admin/documents/health");
+const { GET: getDocumentRotation } = await loadRoute("admin/documents/rotation");
 const { POST: retryDelivery } = await loadRoute("admin/operations/deliveries/[deliveryId]");
 const { POST: retryDocumentJob } = await loadRoute("admin/operations/document-jobs/[jobId]");
 const { POST: verifySmtp } = await loadRoute("admin/operations/smtp-test");
@@ -46,8 +47,10 @@ describe("administrator operations evidence", () => {
 
     await expectError(await callRoute(getOperations, { url: "http://127.0.0.1:3000/api/admin/operations" }), 401, "session_required");
     await expectError(await callRoute(getDocumentHealth, { url: "http://127.0.0.1:3000/api/admin/documents/health" }), 401, "session_required");
+    await expectError(await callRoute(getDocumentRotation, { url: "http://127.0.0.1:3000/api/admin/documents/rotation" }), 401, "session_required");
     await expectError(await callRouteForSession(getOperations, owner, { url: "http://127.0.0.1:3000/api/admin/operations" }), 403, "administrator_required");
     await expectError(await callRouteForSession(getDocumentHealth, owner, { url: "http://127.0.0.1:3000/api/admin/documents/health" }), 403, "administrator_required");
+    await expectError(await callRouteForSession(getDocumentRotation, owner, { url: "http://127.0.0.1:3000/api/admin/documents/rotation" }), 403, "administrator_required");
 
     const operations = await callRouteForSession(getOperations, admin, { url: "http://127.0.0.1:3000/api/admin/operations" });
     const health = await callRouteForSession(getDocumentHealth, admin, { url: "http://127.0.0.1:3000/api/admin/documents/health" });
@@ -62,6 +65,18 @@ describe("administrator operations evidence", () => {
     const healthText = JSON.stringify(await json(health));
     expect(healthText).not.toContain("keyId");
     expect(healthText).not.toContain("synthetic-key-id");
+
+    // The rotation surface (#956): same administrator gate, same no-store,
+    // same key-id boundary as documents/health above.
+    const rotation = await callRouteForSession(getDocumentRotation, admin, { url: "http://127.0.0.1:3000/api/admin/documents/rotation" });
+    expect(rotation.status).toBe(200);
+    expect(rotation.headers.get("cache-control")).toBe("no-store");
+    const rotationPayload = await json(rotation);
+    expect(rotationPayload.rotation).toEqual(expect.objectContaining({
+      inProgress: expect.any(Boolean),
+      secondKeyLoaded: expect.any(Boolean),
+    }));
+    expect(JSON.stringify(rotationPayload)).not.toContain("keyId");
 
     const deliveryId = randomUUID();
     const documentJobId = randomUUID();

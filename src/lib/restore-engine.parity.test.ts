@@ -231,8 +231,14 @@ describe("check_capacity parity (extracted and executed as a real Bash subproces
         "compose() {",
         '  case "$*" in',
         "    *pg_database_size*) printf '%s' " + JSON.stringify(String(scenario.databaseBytes)) + " ;;",
-        `    *"du -sk /var/lib/orbit/documents"*) printf '%s' ${JSON.stringify(String(scenario.documentKib))} ;;`,
-        `    *"df -Pk /var/lib/orbit/documents"*) printf '%s' ${JSON.stringify(String(scenario.volumeAvailableKib))} ;;`,
+        // SF2-F1 wrapped the literal path in "${DOCUMENTS_ROOT:-...}" (restore.sh
+        // now reads the container's own DOCUMENTS_ROOT, defaulting to the same
+        // path), so the du/df invocations no longer contain "du -sk
+        // /var/lib/orbit/documents"/"df -Pk /var/lib/orbit/documents" as a
+        // contiguous substring — two anchors bridge the "${DOCUMENTS_ROOT:-"
+        // text in between instead of matching the whole command literally.
+        `    *"du -sk"*"/var/lib/orbit/documents"*) printf '%s' ${JSON.stringify(String(scenario.documentKib))} ;;`,
+        `    *"df -Pk"*"/var/lib/orbit/documents"*) printf '%s' ${JSON.stringify(String(scenario.volumeAvailableKib))} ;;`,
         "    *) return 1 ;;",
         "  esac",
         "}",

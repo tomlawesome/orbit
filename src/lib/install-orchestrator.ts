@@ -47,7 +47,9 @@ import {
   stageGuidedInstallConfiguration,
 } from "./guided-configuration";
 import {
+  COMPOSE_FILE,
   ComposeProjectNameRefusal,
+  type DeriveComposeProjectNameResult,
   TargetValidationRefusal,
   deriveComposeProjectName,
   readEnvironmentValue,
@@ -77,6 +79,7 @@ export interface InstallOrchestratorAdapters {
     composePull(service: string): boolean;
     composeUp(): boolean;
     composeDown(): void;
+    removeLeftoverDatabaseVolume(): void;
     composeConfigValidate(): boolean;
     probeDatabaseHealth(): boolean;
     probeApplicationHealth(): boolean;
@@ -343,6 +346,7 @@ export async function runInstall(
     targetWasEmpty,
     composeProjectNameExplicit: false,
     composeProjectName: "",
+    composeProjectNameProvisional: false,
   };
   try {
     volumeState = verifyDatabaseVolumeSafety(
@@ -546,6 +550,50 @@ export async function runInstall(
 
     let committed = false;
     try {
+      // install.sh's second derive_compose_project_name call (#999, ported
+      // by #1043). The bundled docker-compose.yml has been staged and
+      // syntax-checked but is not in the target yet, and this is the last
+      // moment before anything writes a project name down, so its own
+      // `name: orbit` is read from the staged copy: a fresh install had
+      // nothing but the working directory's name to go on until now, which
+      // is how installing into ~/apps/household produced the Compose project
+      // "household". It has to happen before the migration below and not
+      // after the assets are installed — an unattended pre-provisioned
+      // bootstrap arrives with its own .env-orbit, that migration writes the
+      // name it is given into it, and a derivation running afterwards would
+      // read that value straight back as an explicit one and keep the
+      // directory name for good. An operator's requested name, a value
+      // already persisted in .env-orbit and the project that owns a
+      // recognised database volume all outrank the declaration and leave
+      // `composeProjectNameProvisional` false, so none of them is touched
+      // here. No `compose`-wrapped call has run yet either (the first is the
+      // config validation below), so telling the docker adapter again here
+      // is enough to make every later call use it.
+      if (volumeState.composeProjectNameProvisional) {
+        let rederived: DeriveComposeProjectNameResult;
+        try {
+          rederived = deriveComposeProjectName(
+            context.targetDir,
+            context.requestedComposeProjectName,
+            context.fallbackBasename,
+            join(scratchDir, COMPOSE_FILE),
+          );
+        } catch (error) {
+          // Unreachable in practice — the same basename already derived
+          // once, above — but a refusal is still a refusal, never an escaped
+          // throw (issue #383's contract).
+          if (!(error instanceof ComposeProjectNameRefusal)) throw error;
+          return fail("compose", "compose", error.message);
+        }
+        volumeState = {
+          ...volumeState,
+          composeProjectName: rederived.composeProjectName,
+          composeProjectNameExplicit: rederived.explicit,
+          composeProjectNameProvisional: rederived.provisional,
+        };
+        adapters.docker.setComposeProjectName(volumeState.composeProjectName);
+      }
+
       // Configuration preflight + migrate for an *existing* .env-orbit,
       // before any fetched asset is installed (install.sh:1441-1448,
       // guarantee #50, first of the two configuration_migration_completed
@@ -588,10 +636,18 @@ export async function runInstall(
         }
 
         if (guidedStaged) {
-          transaction.writeStagedFile(ENVIRONMENT_FILE, readFileSync(join(scratchDir, ENVIRONMENT_FILE)));
-          transaction.commitMove(ENVIRONMENT_FILE, "file");
+          // SR1-R6: secrets committed *before* the environment file that
+          // references them, not after — a crash between the two commits
+          // must never leave a committed .env-orbit whose DOCUMENT_KEK_FILE/
+          // SESSION_SECRET_FILE/etc. point at a .orbit-secrets tree that
+          // does not exist yet. The other order was exactly backwards:
+          // without .orbit-secrets, Orbit cannot start at all either way,
+          // but with .orbit-secrets and no .env-orbit yet, a retry simply
+          // redoes guided staging — a strictly safer crash state.
           stageSecretsDirectoryTree(transaction, join(scratchDir, SECRETS_DIRECTORY), SECRETS_DIRECTORY);
           transaction.commitMove(SECRETS_DIRECTORY, "directory");
+          transaction.writeStagedFile(ENVIRONMENT_FILE, readFileSync(join(scratchDir, ENVIRONMENT_FILE)));
+          transaction.commitMove(ENVIRONMENT_FILE, "file");
         }
 
         // Assets are not secret-bearing (unlike the environment file/secrets
@@ -806,7 +862,12 @@ export async function runInstall(
     // wait_for_deployment_readiness (install.sh:1164-1219).
     onEvent({ phase: "database", component: "database", state: "starting", reason: "database-health", action: "start" });
     if (!adapters.docker.composeUp()) {
-      if (targetWasEmpty) adapters.docker.composeDown();
+      // install.sh:1471-1483: on a fresh install the database volume this
+      // attempt created is removed too, or every retry refuses on it.
+      if (targetWasEmpty) {
+        adapters.docker.composeDown();
+        adapters.docker.removeLeftoverDatabaseVolume();
+      }
       // install.sh:1172's `fail_with docker-host repair` — defaultFailureReason("host")
       // already matches ("docker-host"), but defaultFailureAction("host") is
       // "retry", not the "repair" bash actually routes this to (issue #383).

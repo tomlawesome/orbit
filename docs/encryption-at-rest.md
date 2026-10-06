@@ -16,13 +16,14 @@ follows from that absence is spelled out below rather than hidden.
 Every document Orbit stores is encrypted before it reaches the filesystem,
 starting with the first document ever uploaded — there is no unencrypted
 period to migrate out of. `src/server/documents/crypto.ts` generates a fresh
-random 256-bit data-encryption key (DEK) per document, encrypts the document
-bytes with it under AES-256-GCM, and then wraps that DEK — separately, also
-under AES-256-GCM — with the instance's key-encryption key (`DOCUMENT_KEK`).
-Both the content ciphertext and the wrapped key are bound with authenticated
-additional data (document ID, household ID, item ID, media type, and
-plaintext size), so ciphertext cannot be replayed against a different
-document or a different household.
+random 256-bit key per document (the document key, or DEK for
+data-encryption key) and encrypts the document bytes with it under
+AES-256-GCM. It then encrypts that document key separately, also under
+AES-256-GCM, with the instance's master key (`DOCUMENT_KEK`, the
+key-encryption key); "wrapping" below means this second step. Both the
+encrypted content and the wrapped document key are locked to the document
+ID, household ID, item ID, media type and plaintext size, so encrypted bytes
+cannot be swapped onto a different document or a different household.
 
 The document volume (`/var/lib/orbit/documents`, UID/GID 1001 only) therefore
 contains ciphertext only. PostgreSQL holds the wrapped per-document keys and
@@ -40,22 +41,82 @@ protection. On a host without disk encryption, anyone who can read the
 filesystem gets the key and the ciphertext in the same reach — the envelope
 buys nothing in that scenario. This is exactly why layer 4 (below) exists.
 
-### 2. Database contents: none, by default — this is a real gap, not an oversight
+### 2. Database contents: none by default, apart from the Tier 1 and Tier 2 metadata columns — a real gap, not an oversight
 
-Stock PostgreSQL has no transparent data encryption (TDE). Orbit does not add
-any: the PostgreSQL data directory (the named `orbit-postgres` volume) is
+Stock PostgreSQL has no whole-database encryption of its own. Orbit does not
+add any: the PostgreSQL data directory (the named `orbit-postgres` volume) is
 **cleartext on disk**. That includes household and item names, filenames and
 media types (which the threat model already treats as potentially sensitive
-on their own), audit events, session data, and every other row Orbit writes.
-Percona's `pg_tde` extension is a possible future option — its WAL encryption
-is still marked experimental upstream, so Orbit does not depend on it today.
-It is being watched, not adopted, until that changes.
+on their own), audit events, session data, and every other row Orbit writes,
+apart from the columns layer 2a covers. Percona's `pg_tde` extension, a
+Postgres add-on for whole-database encryption, is a possible future option.
+Its encryption of the database's write-ahead journal is still marked
+experimental upstream, so Orbit does not depend on it today. It is being
+watched, not adopted, until that changes.
 
-Practically, the only thing standing between "database file on disk" and
-"readable data" for an instance's PostgreSQL volume is host disk encryption —
-layer 4. There is no application-layer substitute for this today, and
-claiming otherwise would be the marketing framing this document exists to
-avoid.
+Practically, host disk encryption (layer 4) is what stands between "database
+file on disk" and "readable data" for almost every row. The one exception is
+layer 2a below. There is no general application-level substitute for
+whole-database encryption, and claiming otherwise would be the marketing
+framing this document exists to avoid.
+
+### 2a. The Tier 1 and Tier 2 metadata columns: application-layer envelope encryption
+
+ADR-0024 encrypts the household metadata #365 calls Tier 1 and Tier 2 the same
+way documents are encrypted, under the same `DOCUMENT_KEK`. One random 256-bit
+key per household (plus one for mail-in receipts nobody has attributed yet)
+is wrapped under that master key; each value is a compact AES-256-GCM
+envelope locked to its own table, column and row.
+
+**Tier 1** is an item's notes and reference, and a mail-in receipt's extracted
+proposal and field evidence. **Tier 2** is an item's name, its provider's name
+and its cost, the address on an open household invitation, and — since #969 —
+every account address: `users.email` and the mail-forwarding addresses members
+send from. Those two sit under an instance-wide key rather than a household
+one, because a person belongs to several households and a forwarded message is
+matched to its sender before any household is known. Tier 2 costs
+queries the database used to be able to do: searching item names, matching a
+provider and adding up costs all happen in Orbit now, over one household's
+decrypted rows. Measured on a seeded database, that costs about 4.5 ms for a
+100-item household and about 28 ms at the 500-item ceiling one household's item
+list can reach.
+
+**Tier 3 is deliberately left in plaintext**: due dates, statuses, recurrence,
+and household and member relationships. Those are what the reminder workers and
+due-window queries run on in SQL, and disk encryption (layer 4) is the answer
+for them.
+
+**What happens to signing in when the key is missing** was the open question
+here, and #966 settled it. Orbit finds an account by its address, so with no
+key it can match none. Password sign-in is refused in those words, "this
+instance cannot sign anybody in until its encryption key is available", and
+never as a wrong password, which would send an operator looking for a fault in
+themselves. People who sign in through an identity provider are unaffected,
+because that match is on the provider's own issuer and subject and never
+touches the address. If the key **and** the recovery bundle are both gone, the
+addresses cannot be recovered at all, and a host-shell command clears them so
+that people can be let back in and their addresses re-entered by hand — see
+[administrator-operations.md](administrator-operations.md#when-the-encryption-key-and-the-recovery-bundle-are-both-lost).
+
+`items.reference`, the invitation address and both account addresses carry a
+blind index, so an exact-match lookup still works without decrypting every row.
+For the invitation address that index is what keeps "one open invitation per
+address" a rule the database enforces; for the account addresses it is what
+keeps "one account per address", and it is how every sign-in finds its account.
+Nothing else is indexed: an item's name, provider
+and cost are only ever compared by readers that already read the whole
+household, so an index would serve no query. Within one household an index
+reveals which rows share a value and how many distinct values there are, and
+nothing about the values themselves; across households it reveals nothing at
+all, because the key is per-household.
+
+**The boundary is the same one layer 1 has, and no larger.** It protects the
+database *file* — an exfiltrated volume, a SQL dump, a stolen disk — and not a
+live host, because a running Orbit holds the key. It is also being rolled out
+over two releases: the expand release adds the encrypted columns beside the
+plaintext ones and converts existing rows in the background, and only the
+contract release afterwards drops the plaintext columns. Until that lands, a
+database dump can still contain those four columns in the clear.
 
 ### 3. Backups and recovery bundles
 
@@ -78,9 +139,10 @@ encrypted":
   produces a much smaller, separate bundle whose only job is to let an
   operator recover the `DOCUMENT_KEK` itself using a memorised passphrase
   (12 characters minimum, confirmed twice) instead of the raw key file. The
-  key is wrapped in the **ORBKEK01 envelope**: an scrypt-derived
-  (`N=131072, r=8, p=1`) AES-256-GCM key, fresh salt and IV per export, AAD-
-  bound to the format magic. This bundle does not contain documents or
+  key is wrapped in the **ORBKEK01 envelope**: a key derived from your
+  passphrase encrypts the master key under AES-256-GCM, with a fresh salt
+  and IV per export, and the result is locked to the format's own
+  marker.[^scrypt] This bundle does not contain documents or
   database rows — it exists purely so a lost `document-kek` secret file does
   not mean a permanently unreadable document archive. See
   `docs/adr-notes/296-backup-port-plan.md` for the implementation slice this
@@ -104,12 +166,12 @@ host operator's responsibility.
 
 ## The trade-off this creates
 
-An encrypted host disk needs a passphrase (or an unlock key from something
-like a TPM/Clevis setup, which Orbit does not configure) before it will
-mount. That means an operator who wants disk encryption is also choosing that
-**an unattended reboot — a power cut, a host restart, a scheduled kernel
-update — will not bring Orbit back up on its own.** Someone has to be present
-to unlock the disk, or Orbit stays down until they are.
+**If you encrypt the host disk, Orbit will not come back up by itself after
+a reboot** (a power cut, a host restart, a scheduled kernel update). Someone
+has to be present to unlock the disk, or Orbit stays down until they are.
+That is because an encrypted disk needs a passphrase (or an unlock key from
+something like a TPM/Clevis setup, which Orbit does not configure) before it
+will mount.
 
 This is a genuine trade-off, not a solved problem: "survives an unattended
 reboot" and "protected at rest while powered off" pull in opposite
@@ -124,8 +186,10 @@ exists so the operator picks it knowingly, rather than by accident.
 | Document bytes (live volume) | Application envelope (DOCUMENT_KEK) + disk encryption | — |
 | Document bytes (inside an `orbit backup` tar) | Application envelope (same DOCUMENT_KEK) + disk encryption | — |
 | `DOCUMENT_KEK` secret file itself | Filesystem mode `0600`/`0400` + disk encryption | Application envelope (it *is* the key) |
-| PostgreSQL data directory | Disk encryption only | No database-level or Orbit-level encryption |
-| Database dump inside an `orbit backup` tar | Disk encryption only | No application-layer encryption |
+| Tier 1 metadata columns (item notes/reference, mail-in draft) | Application envelope (same DOCUMENT_KEK) + disk encryption | — (but see the two-release rollout in 2a) |
+| Tier 2 metadata columns (item name/provider/cost, invited address, account and mail-forwarding addresses) | Application envelope (same DOCUMENT_KEK) + disk encryption | — (but see the two-release rollout in 2a) |
+| PostgreSQL data directory, every other column | Disk encryption only | No database-level or Orbit-level encryption |
+| Database dump inside an `orbit backup` tar | Disk encryption only, plus the envelope for the Tier 1 and Tier 2 columns | No application-layer encryption for anything else |
 | Restore/repair checkpoints | Filesystem mode `0600`/`0700` + disk encryption | Application-layer encryption |
 | `DOCUMENT_KEK` inside a recovery bundle | ORBKEK01 passphrase envelope | — |
 
@@ -165,3 +229,6 @@ effect regardless of what the installer says about the disk underneath them.
   is about.
 - `docs/adr-notes/296-backup-port-plan.md` — where the ORBKEK01 envelope and
   backup-bundle crypto were ported and characterised.
+
+[^scrypt]: The passphrase is stretched with scrypt, parameters
+    `N=131072, r=8, p=1`, into the AES-256-GCM key.

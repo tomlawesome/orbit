@@ -1,18 +1,31 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const webPushMock = vi.hoisted(() => ({
+  setVapidDetails: vi.fn(),
+  sendNotification: vi.fn(async () => ({ statusCode: 201, body: "", headers: {} })),
+}));
+vi.mock("web-push", () => ({ default: webPushMock }));
+
 import {
   categorizeProviderError,
+  createDefaultNotificationProviders,
+  deliveryIsStale,
   deliveryFailureState,
   effectiveReminderOffsets,
   enabledDeliveryChannels,
+  failDelivery,
   getNotificationWorkerConfig,
   getNotificationWorkerHealth,
   householdReminderTime,
   isAllowedPushEndpoint,
+  materializeDeliveriesForCandidate,
+  NOTIFICATION_PROVIDER_TIMEOUT_MS,
   notificationRetryDelayMs,
   reminderIsSnoozed,
+  type MaterializationCandidate,
 } from "./notification-worker";
 
 const temporaryDirectories: string[] = [];
@@ -143,6 +156,21 @@ describe("notification worker scheduling", () => {
     expect(config.maxAttempts).toBe(5);
   });
 
+  it("treats SMTP_SECURITY=\"\" as not set, the same as every other unset field (#1151 SF2-F2)", () => {
+    const config = getNotificationWorkerConfig({
+      NODE_ENV: "test",
+      SMTP_SECURITY: "",
+    } as NodeJS.ProcessEnv);
+    expect(config.smtpSecurity).toBe("starttls");
+  });
+
+  it("still rejects a genuinely invalid SMTP_SECURITY rather than silently defaulting it", () => {
+    expect(() => getNotificationWorkerConfig({
+      NODE_ENV: "test",
+      SMTP_SECURITY: "tls1.2",
+    } as NodeJS.ProcessEnv)).toThrow();
+  });
+
   it("keeps SMTP providers independent and prefers a file-backed password", () => {
     const config = getNotificationWorkerConfig({
       NODE_ENV: "test",
@@ -191,8 +219,57 @@ describe("notification worker scheduling", () => {
     expect(deliveryFailureState("smtp_rejected", 1, 5)).toBe("cancelled");
     expect(deliveryFailureState("recipient_preferences_disabled", 1, 5)).toBe("cancelled");
     expect(deliveryFailureState("smtp_unavailable", 1, 5)).toBe("retry");
+    /* #963/#969: a name or an address this run could not decrypt is deferred,
+       not cancelled — a locked key and a damaged value are both repairable,
+       and neither is a reason to throw somebody's reminder away. */
+    expect(deliveryFailureState("item_title_unreadable", 1, 5)).toBe("retry");
+    expect(deliveryFailureState("recipient_address_unreadable", 1, 5)).toBe("retry");
+    expect(deliveryFailureState("recipient_address_unreadable", 5, 5)).toBe("failed");
     expect(deliveryFailureState("push_unavailable", 5, 5)).toBe("failed");
     expect(deliveryFailureState("unknown", 5, 5)).toBe("failed");
+  });
+
+  it("failDelivery's own real outcome is what decides exhausted, not a second copy of the threshold (#1151 A4-Q4)", async () => {
+    const updates: Array<{ status: unknown }> = [];
+    const fakeDb = {
+      update: () => ({
+        set: (values: { status: unknown }) => ({
+          where: () => {
+            updates.push({ status: values.status });
+            return Promise.resolve();
+          },
+        }),
+      }),
+    } as unknown as Parameters<typeof failDelivery>[0];
+
+    // maxAttempts is 5. One attempt BEFORE the real threshold (attempts=4)
+    // is where the old log code's `attempts + 1 >= maxAttempts` -- double
+    // counting the post-claim increment `claimDeliveries` already applied --
+    // disagreed with the real status and called it "exhausted" a cycle
+    // early.
+    const oneBeforeThreshold = await failDelivery(
+      fakeDb, "delivery-1", "lease-1", 4, 5, "unknown", new Date(), () => 1_000,
+    );
+    expect(oneBeforeThreshold).toBe("retry");
+    const oldBuggyExhausted = 4 + 1 >= 5;
+    expect(oldBuggyExhausted).toBe(true); // the bug: it said "exhausted" here
+    expect(oneBeforeThreshold !== "retry").toBe(false); // the fix: it does not
+
+    const atThreshold = await failDelivery(
+      fakeDb, "delivery-1", "lease-1", 5, 5, "unknown", new Date(), () => 1_000,
+    );
+    expect(atThreshold).toBe("failed");
+
+    // A category that cancels outright (never retries, whatever `attempts`
+    // says) is "exhausted" too under the real-status fix -- the old formula
+    // would have called a cancelled delivery "retrying" at a low attempt
+    // count.
+    const cancelledEarly = await failDelivery(
+      fakeDb, "delivery-1", "lease-1", 1, 5, "smtp_rejected", new Date(), () => 1_000,
+    );
+    expect(cancelledEarly).toBe("cancelled");
+    expect(cancelledEarly !== "retry").toBe(true);
+    expect(updates.map((update) => update.status)).toEqual(["retry", "failed", "cancelled"]);
   });
 
   it("#383 finding 2: only allows push endpoints that are https on the default port and not a private or reserved address", () => {
@@ -218,6 +295,124 @@ describe("notification worker scheduling", () => {
     expect(isAllowedPushEndpoint("not a url")).toBe(false);
   });
 
+  describe("deliveryIsStale", () => {
+    const NOW = new Date("2026-09-20T09:00:00.000Z");
+    const twoDaysAgo = new Date(NOW.getTime() - 48 * 60 * 60_000);
+
+    it("the catch-up row written just now for an old reminder time is not stale, so it is actually sent", () => {
+      expect(deliveryIsStale({ scheduledFor: twoDaysAgo, createdAt: NOW }, NOW)).toBe(false);
+    });
+
+    it("a row that has sat unclaimed past the window is stale as before", () => {
+      expect(deliveryIsStale({ scheduledFor: twoDaysAgo, createdAt: twoDaysAgo }, NOW)).toBe(true);
+    });
+  });
+
+  describe("materializeDeliveriesForCandidate (#1151 A4-S3)", () => {
+    const NOW = new Date("2026-09-20T09:00:00.000Z");
+    const CATCH_UP_BOUNDARY = new Date(NOW.getTime() - 24 * 60 * 60_000);
+
+    function candidate(overrides: Partial<MaterializationCandidate> = {}): MaterializationCandidate {
+      return {
+        householdId: "household-1",
+        eventId: "event-1",
+        createdAt: new Date("2026-09-01T00:00:00.000Z"),
+        dueDate: "2026-09-20",
+        timezone: "UTC",
+        userId: "user-1",
+        daysBefore: null,
+        emailEnabled: null,
+        pushEnabled: null,
+        userEmailEnabled: true,
+        userPushEnabled: true,
+        firstWarningDays: 14,
+        finalWarningDays: 3,
+        snoozedUntil: null,
+        ...overrides,
+      };
+    }
+
+    it("still sends a reminder due inside the catch-up window, exactly as before", () => {
+      // 09:00 UTC on the due date itself (daysBefore 0 via a single rule) is
+      // the due instant -- in the window, due right now.
+      const deliveries = materializeDeliveriesForCandidate(
+        candidate({ daysBefore: 0, emailEnabled: true, pushEnabled: true }),
+        NOW,
+        CATCH_UP_BOUNDARY,
+      );
+      expect(deliveries.map((d) => d.scheduledFor.toISOString())).toEqual([NOW.toISOString(), NOW.toISOString()]);
+    });
+
+    it("never sends a reminder not yet due", () => {
+      const deliveries = materializeDeliveriesForCandidate(
+        candidate({ dueDate: "2026-09-25", daysBefore: 3 }),
+        NOW,
+        CATCH_UP_BOUNDARY,
+      );
+      expect(deliveries).toEqual([]);
+    });
+
+    it("sends a single reminder more than a day overdue, rather than dropping it (the finding itself)", () => {
+      // 3 days before the due date is 2026-09-17T09:00Z -- two days before
+      // the catch-up boundary of 2026-09-19T09:00Z.
+      const deliveries = materializeDeliveriesForCandidate(
+        candidate({ dueDate: "2026-09-20", daysBefore: 3, emailEnabled: true, pushEnabled: false }),
+        NOW,
+        CATCH_UP_BOUNDARY,
+      );
+      expect(deliveries).toHaveLength(1);
+      expect(deliveries[0].channel).toBe("email");
+      expect(deliveries[0].scheduledFor.toISOString()).toBe("2026-09-17T09:00:00.000Z");
+    });
+
+    it("collapses two missed offsets (the default first/final pair) into one, per channel", () => {
+      // No item rule of its own (daysBefore: null), so the recipient's
+      // first/final pair applies -- 14 and 3 days before the due date. An
+      // outage spanning both leaves both overdue; the recipient gets one
+      // delivery, timestamped at the more recent (final) of the two.
+      const deliveries = materializeDeliveriesForCandidate(
+        candidate({ dueDate: "2026-09-20", firstWarningDays: 14, finalWarningDays: 3 }),
+        NOW,
+        CATCH_UP_BOUNDARY,
+      );
+      const emailDeliveries = deliveries.filter((d) => d.channel === "email");
+      expect(emailDeliveries).toHaveLength(1);
+      expect(emailDeliveries[0].scheduledFor.toISOString()).toBe("2026-09-17T09:00:00.000Z");
+      const pushDeliveries = deliveries.filter((d) => d.channel === "web_push");
+      expect(pushDeliveries).toHaveLength(1);
+      expect(pushDeliveries[0].scheduledFor.toISOString()).toBe("2026-09-17T09:00:00.000Z");
+    });
+
+    it("never back-fires an offset whose moment passed before the event existed (#479's reach)", () => {
+      // Entered on the 18th, due on the 20th, with the default pair: the
+      // 14-day warning's moment (the 6th) was never pending for anyone, so
+      // catching up does not invent it. The 3-day one (the 17th) was not
+      // pending either; only an offset the event was waiting on counts.
+      const entered = new Date("2026-09-18T12:00:00.000Z");
+      expect(materializeDeliveriesForCandidate(candidate({ createdAt: entered }), NOW, CATCH_UP_BOUNDARY)).toEqual([]);
+      // Entered on the 10th, the 3-day warning was pending through an outage
+      // and is caught up; the 14-day one still predates the event.
+      const deliveries = materializeDeliveriesForCandidate(
+        candidate({ createdAt: new Date("2026-09-10T12:00:00.000Z") }),
+        NOW,
+        CATCH_UP_BOUNDARY,
+      );
+      expect(deliveries.map((d) => d.scheduledFor.toISOString())).toEqual([
+        "2026-09-17T09:00:00.000Z",
+        "2026-09-17T09:00:00.000Z",
+      ]);
+    });
+
+    it("never sends a reminder the household snoozed, overdue or not", () => {
+      const deliveries = materializeDeliveriesForCandidate(
+        candidate({ dueDate: "2026-09-20", daysBefore: 3, snoozedUntil: "2026-09-30" }),
+        NOW,
+        CATCH_UP_BOUNDARY,
+      );
+      expect(deliveries).toEqual([]);
+    });
+  });
+
   it("exposes only bounded initial worker health", () => {
     expect(getNotificationWorkerHealth()).toEqual({
       started: false,
@@ -226,5 +421,31 @@ describe("notification worker scheduling", () => {
       lastErrorAt: null,
       lastErrorCategory: null,
     });
+  });
+
+  it("bounds a push send to the same outbound timeout the email transport uses (#1151 SR2-R4, A4-R3)", async () => {
+    webPushMock.sendNotification.mockClear();
+    const providers = createDefaultNotificationProviders(getNotificationWorkerConfig({
+      NODE_ENV: "test",
+      VAPID_SUBJECT: "mailto:ops@example.test",
+      VAPID_PUBLIC_KEY: "public-key",
+      VAPID_PRIVATE_KEY: "private-key",
+    } as NodeJS.ProcessEnv));
+
+    await providers.sendPush({
+      target: { endpoint: "https://push.services.example.test/sub/abc123", keys: { p256dh: "p", auth: "a" } },
+      payload: { title: "Due today", body: "An item", url: "/" },
+    });
+
+    expect(webPushMock.sendNotification).toHaveBeenCalledTimes(1);
+    const [, , options] = webPushMock.sendNotification.mock.calls[0] as unknown as [unknown, unknown, { timeout?: number }];
+    // Before the fix, no third argument was passed at all: a blackholed
+    // endpoint held the household's DB advisory lock for as long as the
+    // provider never answered, one subscription at a time.
+    expect(options?.timeout).toBe(NOTIFICATION_PROVIDER_TIMEOUT_MS);
+  });
+
+  it("gives a push send's timeout the same bound the email transport's connect/greeting/socket timeouts use", () => {
+    expect(NOTIFICATION_PROVIDER_TIMEOUT_MS).toBe(5_000);
   });
 });

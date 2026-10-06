@@ -19,8 +19,11 @@ import {
 import { AppError } from "@/lib/app-error";
 import { type HomeItem } from "@/lib/domain";
 import { workspaceItemSchema } from "@/lib/workspace";
+import type { AdjudicatedField } from "@/server/documents/adjudication";
+import { safeDocumentPlainText, scheduleKinds, type DocumentProposal } from "@/server/documents/suggestions";
 import { readHeldImapAttachment, purgeHeldImapAttachment } from "@/server/imap-attachment-holding";
 import { isDocumentAvailable, uploadItemDocument } from "@/server/document-repository";
+import { openMetadataReader } from "@/server/metadata/fields";
 import { applyWorkspaceCommand } from "@/server/workspace-repository";
 
 const proposalFields = [
@@ -88,19 +91,19 @@ function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
-function boundedText(value: unknown, maximum: number): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.normalize("NFKC").replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, " ").replace(/\s+/g, " ").trim();
-  return normalized && normalized.length <= maximum && !/[<>]/u.test(normalized) ? normalized : undefined;
-}
-
 function boundedProposalField(field: ProposalField, value: unknown): unknown {
   if (["title", "subtype", "provider", "reference", "currency", "dueDate", "scheduleKind"].includes(field)) {
-    const text = boundedText(value, proposalTextMaximum[field]);
+    // A3-Q2: delegates to suggestions.ts's own sanitiser rather than a
+    // local copy, which had drifted and no longer stripped Unicode bidi
+    // and zero-width characters.
+    const text = safeDocumentPlainText(value, proposalTextMaximum[field]);
     if (!text) return undefined;
     if (field === "currency" && !/^[A-Z]{3}$/u.test(text)) return undefined;
     if (field === "dueDate" && !/^\d{4}-\d{2}-\d{2}$/u.test(text)) return undefined;
-    if (field === "scheduleKind" && !["renewal", "service"].includes(text)) return undefined;
+    // A3-Q1: the shared list (suggestions.ts, from src/lib/domain.ts)
+    // includes "expiry"; a local copy missing it let an expiry document
+    // reach review with its date but no schedule type.
+    if (field === "scheduleKind" && !(scheduleKinds as readonly string[]).includes(text)) return undefined;
     return text;
   }
   if (field === "costMinor" && typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 100_000_000) return value;
@@ -108,10 +111,23 @@ function boundedProposalField(field: ProposalField, value: unknown): unknown {
   return undefined;
 }
 
+export interface ReviewDraftFieldEvidence {
+  source: string;
+  confidence: string;
+  /**
+   * The validated value adjudication rejected in favour of the proposed one
+   * (ADR-0025 section 4, owner ruling 2026-09-10): only for a field that was
+   * actually disputed, and only for the life of this pending review — it
+   * rides inside this same blob and is discarded with it when the review is
+   * approved or abandoned (`clearedReviewDraftMetadata`).
+   */
+  alternative?: string;
+}
+
 /** Keeps only bounded fields and coarse provenance; raw extraction never enters durable metadata. */
 export function sanitizeReviewDraftMetadata(input: unknown): {
   proposal: Record<string, unknown>;
-  fieldEvidence: Record<string, { source: string; confidence: string }>;
+  fieldEvidence: Record<string, ReviewDraftFieldEvidence>;
 } {
   const source = record(input);
   const proposalInput = record(source?.proposal);
@@ -122,14 +138,76 @@ export function sanitizeReviewDraftMetadata(input: unknown): {
   }
 
   const evidenceInput = record(source?.fieldEvidence);
-  const fieldEvidence: Record<string, { source: string; confidence: string }> = {};
+  const fieldEvidence: Record<string, ReviewDraftFieldEvidence> = {};
   for (const field of proposalFields) {
     const candidate = record(evidenceInput?.[field]);
     const parsed = z.object({ source: evidenceSource, confidence: evidenceConfidence }).safeParse(candidate);
-    if (parsed.success) fieldEvidence[field] = parsed.data;
+    if (!parsed.success) continue;
+    const alternative = safeDocumentPlainText(candidate?.alternative, proposalTextMaximum[field] ?? 100);
+    fieldEvidence[field] = alternative ? { ...parsed.data, alternative } : parsed.data;
   }
   return { proposal, fieldEvidence };
 }
+
+/**
+ * The mail-in review flow's side of ADR-0025 section 7: the same slots the
+ * Add-item surface offers (`buildDocumentSuggestions`,
+ * `src/server/item-document-inspection.ts`), in the shape a mailbox review
+ * draft stores. A field the proposal does not carry is offered to nobody,
+ * so where the model path is absent the four model-owned slots are simply
+ * absent here too.
+ *
+ * It goes back out through `sanitizeReviewDraftMetadata`, so nothing
+ * reaches durable metadata by a route that skips that boundary.
+ */
+export function reviewDraftMetadataFromProposal(
+  proposal: DocumentProposal,
+  alternatives: Partial<Record<AdjudicatedField, string>> = {},
+): {
+  proposal: Record<string, unknown>;
+  fieldEvidence: Record<string, ReviewDraftFieldEvidence>;
+} {
+  const offered: Record<ProposalField, unknown> = {
+    title: proposal.title,
+    subtype: proposal.subtype,
+    provider: proposal.provider,
+    reference: proposal.reference,
+    costMinor: proposal.costMinor,
+    currency: proposal.currency,
+    // The scheduled date when the roles named one, otherwise the first date.
+    dueDate: proposal.scheduleDate ?? proposal.dates[0],
+    scheduleKind: proposal.scheduleKind,
+    recurrenceMonths: proposal.recurrenceMonths,
+  };
+  const fieldEvidence: Record<string, ReviewDraftFieldEvidence> = {};
+  for (const field of proposalFields) {
+    if (offered[field] === undefined) continue;
+    // Title still comes from the file name; every other field is read out of
+    // the document text, which is what the reviewer is being asked to check.
+    const base: ReviewDraftFieldEvidence = field === "title"
+      ? { source: "filename", confidence: "high" }
+      : { source: "document_text", confidence: "medium" };
+    const alternative = (field === "title" || field === "provider" || field === "reference")
+      ? alternatives[field as AdjudicatedField]
+      : undefined;
+    fieldEvidence[field] = alternative ? { ...base, alternative } : base;
+  }
+  return sanitizeReviewDraftMetadata({ proposal: offered, fieldEvidence });
+}
+
+/**
+ * The four columns cleared wherever a receipt's pending review ends —
+ * approved, discarded or expired. The rejected reading is only ever kept
+ * for the life of the pending review (ADR-0025 section 4), and it rides
+ * inside this same blob, so nothing extra is needed to make it go with
+ * everything else the review held.
+ */
+export const clearedReviewDraftMetadata = {
+  proposal: {},
+  proposalEnc: null,
+  fieldEvidence: {},
+  fieldEvidenceEnc: null,
+} as const;
 
 function canonicalItem(input: ReviewedIntakeApproval, itemId: string): HomeItem {
   return workspaceItemSchema.parse({
@@ -228,21 +306,30 @@ async function reviewedItemMatches(input: ReviewedIntakeApproval, itemId: string
       .where(and(eq(dueEvents.itemId, itemId), isNull(dueEvents.completedAt))).limit(1);
     const reminders = await getDb().select({ daysBefore: reminderRules.daysBefore }).from(reminderRules)
       .where(eq(reminderRules.itemId, itemId));
+    // Tier 1 (ADR-0024): the persisted row's own household decides the key.
+    // A damaged value reads as null here, so it can never compare equal to an
+    // expected value and the approval is treated as a conflict, not a match.
+    const metadata = await openMetadataReader(existing.householdId);
+    const persistedReference = metadata.text("items.reference", existing.id, { encrypted: existing.referenceEnc, plaintext: existing.reference });
+    const persistedNotes = metadata.text("items.notes", existing.id, { encrypted: existing.notesEnc, plaintext: existing.notes });
+    const persistedTitle = metadata.text("items.title", existing.id, { encrypted: existing.titleEnc, plaintext: existing.title });
+    const persistedProvider = metadata.text("items.provider", existing.id, { encrypted: existing.providerEnc, plaintext: existing.provider });
+    const persistedCost = metadata.number("items.cost_minor", existing.id, { encrypted: existing.costMinorEnc, plaintext: existing.costMinor });
     const persisted = {
       id: existing.id,
       sectionId: existing.sectionId,
-      title: existing.title,
+      title: persistedTitle.value ?? "",
       subtype: existing.subtype ?? undefined,
-      provider: existing.provider ?? undefined,
-      reference: existing.reference ?? undefined,
-      costMinor: existing.costMinor ?? undefined,
+      provider: persistedProvider.value ?? undefined,
+      reference: persistedReference.value ?? undefined,
+      costMinor: persistedCost.value ?? undefined,
       currency: existing.currency,
       dueDate: event?.dueDate ?? existing.serviceDate ?? existing.renewalDate ?? undefined,
       scheduleKind: event?.kind ?? (existing.serviceDate ? "service" : existing.renewalDate ? "renewal" : undefined),
       recurrenceMonths: existing.recurrenceMonths ?? undefined,
       reminderDays: reminders.map((row) => row.daysBefore).sort((left, right) => left - right),
       snoozedUntil: existing.snoozedUntil ?? undefined,
-      notes: existing.notes ?? undefined,
+      notes: persistedNotes.value ?? undefined,
       status: existing.status,
     };
     const comparableExpected = {
@@ -548,15 +635,38 @@ async function assignedReceiptAttachmentIds(receiptId: string): Promise<string[]
   return rows.map((row) => row.id);
 }
 
+// A dropped request (crash, timeout, lost connection) between claiming a
+// receipt for approval and finishing it leaves `approving` with no further
+// progress and no owner left to retry it: every later approve attempt, with
+// any operation id, would otherwise see a mismatched `approvalOperationId`
+// and refuse permanently as "already used". Past this bound the claim is
+// treated as abandoned rather than active (SR1-R3).
+const APPROVAL_RECLAIM_TIMEOUT_MS = 10 * 60_000;
+
 async function finishMailboxApproval(
   userId: string,
   input: MailboxApproval,
   requestHash: string,
 ): Promise<ApprovalOutcome> {
   const result = await getDb().transaction(async (transaction) => {
-    const [receipt] = await transaction.select().from(imapIngestionMessages)
+    let [receipt] = await transaction.select().from(imapIngestionMessages)
       .where(and(eq(imapIngestionMessages.id, input.source.receiptId), eq(imapIngestionMessages.userId, userId))).for("update").limit(1);
     if (!receipt) throw notFound();
+    if (
+      receipt.status === "approving"
+      && receipt.approvalStartedAt
+      && receipt.approvalStartedAt.getTime() < Date.now() - APPROVAL_RECLAIM_TIMEOUT_MS
+    ) {
+      const [reclaimed] = await transaction.update(imapIngestionMessages).set({
+        status: "pending_review",
+        approvalOperationId: null,
+        approvalResultId: null,
+        approvalRequestSha256: null,
+        approvalStartedAt: null,
+        updatedAt: new Date(),
+      }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "approving"))).returning();
+      if (reclaimed) receipt = reclaimed;
+    }
     if (receipt.approvalOperationId) {
       if (receipt.approvalOperationId !== input.operationId || receipt.approvalRequestSha256 !== requestHash) {
         throw new AppError("reviewed_intake_conflict", "That approval identity was already used", 409);
@@ -626,6 +736,9 @@ async function finishMailboxApproval(
       approvedItemId: itemId,
       approvedAt: partial ? null : new Date(),
       updatedAt: new Date(),
+      // The review is only actually over once this reaches "completed"; a
+      // partial success is still retryable and keeps its draft meanwhile.
+      ...(partial ? {} : clearedReviewDraftMetadata),
     }).where(and(
       eq(imapIngestionMessages.id, input.source.receiptId),
       eq(imapIngestionMessages.approvalOperationId, input.operationId),
