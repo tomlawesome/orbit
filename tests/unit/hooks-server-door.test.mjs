@@ -53,8 +53,12 @@ function eventFor(cookies = {}, id = "/") {
   };
 }
 
+/* SvelteKit's resolve() tags a rendered 200 page with a weak ETag; the door
+   must lose it, or a browser holding a cached copy could revalidate it. */
+const DOOR_ETAG = 'W/"door-1"';
+
 function doorResolver() {
-  return vi.fn(async () => new Response(DOOR_HTML, { status: 200, headers: { "content-type": "text/html" } }));
+  return vi.fn(async () => new Response(DOOR_HTML, { status: 200, headers: { "content-type": "text/html", etag: DOOR_ETAG } }));
 }
 
 async function handleRoot(event) {
@@ -67,6 +71,7 @@ async function handleRoot(event) {
 async function expectTheDoor(response, resolve, event) {
   expect(response.status).toBe(200);
   expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(response.headers.get("etag")).toBeNull();
   expect(await response.text()).toBe(DOOR_HTML);
   expect(resolve).toHaveBeenCalledTimes(1);
   /* The door's load returns only `fixtures`; nothing about the reader may

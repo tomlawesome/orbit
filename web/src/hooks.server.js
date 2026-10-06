@@ -284,6 +284,9 @@ async function frontDoor(event, resolve, session) {
   }
   const door = await resolve(event);
   door.headers.set("cache-control", "no-store");
+  /* and no validator either, so a copy cached before this cannot be
+     revalidated into a 304 and shown again */
+  door.headers.delete("etag");
   return door;
 }
 
