@@ -1,0 +1,17 @@
+{
+  "name": "derive compose name outranks fallback",
+  "mode": "derive",
+  "setup": [
+    {
+      "path": "docker-compose.yml",
+      "file": "name: orbit\n\nservices: {}\n"
+    }
+  ],
+  "requested": null,
+  "targetBasename": "_Parity.Target",
+  "bash": {
+    "status": 0,
+    "stdout": "compose_project_name=orbit explicit=0 provisional=0",
+    "stderr": ""
+  }
+}
