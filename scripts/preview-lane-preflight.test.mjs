@@ -29,12 +29,16 @@ describe("preview-lane local preflight", () => {
   it("isolates generated configuration from the developer checkout", () => {
     expect(preflight).toContain("mktemp -d");
     expect(preflight).toContain("git ls-files --cached --others --exclude-standard");
-    expect(preflight).toContain("GIT_WORK_TREE");
-    expect(preflight).toContain("bash scripts/configure.sh");
+    expect(preflight).toContain(".env-orbit.example");
     expect(preflight).toContain("bash scripts/validate-compose-config.sh");
     expect(preflight).toContain("trap cleanup EXIT");
     expect(preflight).not.toContain("docker compose up");
     expect(preflight).not.toMatch(/claude|mistral|ollama pull/iu);
+  });
+
+  it("never builds or pulls an image, and does not run the configuration engine", () => {
+    expect(preflight).not.toMatch(/docker (?:build|buildx|pull)/iu);
+    expect(preflight).not.toContain("scripts/configure.sh");
   });
 
   it("calculates and validates the same release identity used by CI", () => {
@@ -50,7 +54,6 @@ describe("preview-lane local preflight", () => {
 
   it("validates every supported Compose combination and processing boundary", () => {
     const expectedOverlays = [
-      "compose/docker-compose.build.yml",
       "compose/docker-compose.acceptance.yml",
       "docker-compose.mail.yml",
     ];

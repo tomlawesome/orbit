@@ -185,10 +185,16 @@ evidence.
 
 ```sh
 pnpm install
-bash scripts/configure.sh
+bash scripts/build-container.sh
+ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)" bash scripts/configure.sh
 pnpm db:migrate
 pnpm --filter orbit-web dev
 ```
+
+`configure.sh` runs inside the Orbit image, so the image has to exist first:
+`build-container.sh` builds it as `orbit-local:<12-character commit>`, and
+`configure.sh` records that tag in `.env-orbit`. To use a published image
+instead, skip the build and set `ORBIT_IMAGE` to its digest.
 
 The last command starts the development server for the app under `web/`;
 the repository root has no `dev` script of its own.

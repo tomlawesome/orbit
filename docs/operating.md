@@ -222,13 +222,11 @@ refreshes the settings, takes a backup if the database is already running,
 starts everything and waits until it is healthy. Your existing `.env-orbit`,
 secrets and data are left as they are. `bash scripts/deploy-container.sh
 --pull` does the same with the published build named in `ORBIT_IMAGE`
-instead of building one: it pulls that digest first. Both still need an
-existing `.env-orbit`, and `build-container.sh` does too; how a source build
-should start on a checkout with no `.env-orbit` yet is an open question on
-issue #1210. To build
-only, run `bash scripts/build-container.sh`; the base Compose file has no
-build instructions, so it builds through the `compose/docker-compose.build.yml`
-overlay.
+instead of building one: it pulls that digest first. Neither needs an
+existing `.env-orbit`: `configure.sh` creates it once the image exists. To
+build only, run `bash scripts/build-container.sh`; it builds the image
+straight from the Dockerfile (the base Compose file has no build
+instructions) and needs no `.env-orbit`.
 
 To update a checkout and start it in one go:
 
