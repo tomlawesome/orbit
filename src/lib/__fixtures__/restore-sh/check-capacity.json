@@ -1,0 +1,100 @@
+[
+  {
+    "name": "comfortable",
+    "scenario": {
+      "stagedKib": 100,
+      "backupBytes": 102400,
+      "databaseBytes": 51200,
+      "documentKib": 40,
+      "hostAvailableKib": 10000000,
+      "tempAvailableKib": 10000000,
+      "volumeAvailableKib": 10000000
+    },
+    "status": 0,
+    "stderr": ""
+  },
+  {
+    "name": "backup directory at threshold",
+    "scenario": {
+      "stagedKib": 100,
+      "backupBytes": 102400,
+      "databaseBytes": 51200,
+      "documentKib": 40,
+      "hostAvailableKib": 131462,
+      "tempAvailableKib": 10000000,
+      "volumeAvailableKib": 10000000
+    },
+    "status": 0,
+    "stderr": ""
+  },
+  {
+    "name": "backup directory below threshold",
+    "scenario": {
+      "stagedKib": 100,
+      "backupBytes": 102400,
+      "databaseBytes": 51200,
+      "documentKib": 40,
+      "hostAvailableKib": 131461,
+      "tempAvailableKib": 10000000,
+      "volumeAvailableKib": 10000000
+    },
+    "status": 1,
+    "stderr": "preflight/capacity failed; reserve working, checkpoint, database, document, and rollback space in the private backup location.\n"
+  },
+  {
+    "name": "temp filesystem at threshold",
+    "scenario": {
+      "stagedKib": 100,
+      "backupBytes": 102400,
+      "databaseBytes": 51200,
+      "documentKib": 40,
+      "hostAvailableKib": 10000000,
+      "tempAvailableKib": 65676,
+      "volumeAvailableKib": 10000000
+    },
+    "status": 0,
+    "stderr": ""
+  },
+  {
+    "name": "temp filesystem below threshold",
+    "scenario": {
+      "stagedKib": 100,
+      "backupBytes": 102400,
+      "databaseBytes": 51200,
+      "documentKib": 40,
+      "hostAvailableKib": 10000000,
+      "tempAvailableKib": 65675,
+      "volumeAvailableKib": 10000000
+    },
+    "status": 1,
+    "stderr": "preflight/capacity failed; reserve temporary filesystem space for checkpoint extraction.\n"
+  },
+  {
+    "name": "document volume at threshold",
+    "scenario": {
+      "stagedKib": 100,
+      "backupBytes": 102400,
+      "databaseBytes": 51200,
+      "documentKib": 40,
+      "hostAvailableKib": 10000000,
+      "tempAvailableKib": 10000000,
+      "volumeAvailableKib": 60
+    },
+    "status": 0,
+    "stderr": ""
+  },
+  {
+    "name": "document volume below threshold",
+    "scenario": {
+      "stagedKib": 100,
+      "backupBytes": 102400,
+      "databaseBytes": 51200,
+      "documentKib": 40,
+      "hostAvailableKib": 10000000,
+      "tempAvailableKib": 10000000,
+      "volumeAvailableKib": 59
+    },
+    "status": 1,
+    "stderr": "preflight/capacity failed; reserve document-volume space for the staged tree after current contents are removed.\n"
+  }
+]
