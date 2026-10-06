@@ -964,8 +964,10 @@ function commandRestore(deployDir: string, args: string[], directories: BackupRe
   const adapter = createInContainerAdapter();
   const { hooks, testHooks } = restoreTestHooksFromEnvironment();
 
+  const usage = "orbit: usage: orbit restore [--yes] <backup.tar> | orbit restore --preflight <backup.tar> | orbit restore --recover";
   let yesFlag = false;
   let recoverMode = false;
+  let preflightOnly = false;
   let backupFile: string | undefined;
   for (const arg of args) {
     if (arg === "--yes") {
@@ -976,12 +978,19 @@ function commandRestore(deployDir: string, args: string[], directories: BackupRe
       recoverMode = true;
       continue;
     }
+    if (arg === "--preflight") {
+      preflightOnly = true;
+      continue;
+    }
     if (backupFile === undefined) {
       backupFile = arg;
       continue;
     }
-    fail("orbit: usage: orbit restore [--yes] <backup.tar> | orbit restore --recover");
+    fail(usage);
   }
+  // --preflight only validates (amendment E3a): it never asks, so --yes has
+  // nothing to answer, and it never recovers.
+  if (preflightOnly && (yesFlag || recoverMode)) fail("orbit: usage: --preflight accepts neither --yes nor --recover");
 
   if (recoverMode) {
     if (backupFile !== undefined || yesFlag) fail("orbit: usage: --recover accepts no other arguments");
@@ -993,7 +1002,7 @@ function commandRestore(deployDir: string, args: string[], directories: BackupRe
     process.exit(0);
   }
 
-  if (backupFile === undefined) fail("orbit: usage: orbit restore [--yes] <backup.tar> | orbit restore --recover");
+  if (backupFile === undefined) fail(usage);
   const documentKekHex = readDocumentKekHex(paths.documentKekFile);
   preflightPostgresClient();
   const workDir = mkdtempSync(join(tmpdir(), "orbit-restore-"));
@@ -1007,8 +1016,10 @@ function commandRestore(deployDir: string, args: string[], directories: BackupRe
       confirm: makeRestoreConfirmer(yesFlag),
       hooks,
       testHooks,
+      preflightOnly,
     });
-    writeResult("Orbit restore completed successfully.");
+    // A passed preflight prints nothing: restore.sh goes on to stop Orbit.
+    if (!preflightOnly) writeResult("Orbit restore completed successfully.");
   });
   process.exit(0);
 }
@@ -1034,8 +1045,11 @@ function commandExportRecoveryBundle(deployDir: string, args: string[], director
 
 function commandImportRecoveryBundle(deployDir: string, args: string[], directories: BackupRestoreDirectories): never {
   requireDeploymentContext("import-recovery-bundle");
-  if (args.length !== 1 || !args[0]) fail("orbit: usage: orbit import-recovery-bundle <recovery.tar>");
-  const recoveryBundlePath = resolve(args[0]);
+  // --preflight (amendment E3a): check the bundle while Orbit still runs, asking nothing.
+  const preflightOnly = args[0] === "--preflight";
+  const bundleArgs = preflightOnly ? args.slice(1) : args;
+  if (bundleArgs.length !== 1 || !bundleArgs[0]) fail("orbit: usage: orbit import-recovery-bundle [--preflight] <recovery.tar>");
+  const recoveryBundlePath = resolve(bundleArgs[0]);
   const paths = resolveBackupRestorePaths(deployDir, directories);
   const adapter = createInContainerAdapter();
   const { hooks, testHooks } = restoreTestHooksFromEnvironment();
@@ -1052,8 +1066,9 @@ function commandImportRecoveryBundle(deployDir: string, args: string[], director
     beforeRestore: preflightPostgresClient,
     hooks,
     testHooks,
+    preflightOnly,
   });
-  writeResult("Orbit recovery import completed successfully.");
+  if (!preflightOnly) writeResult("Orbit recovery import completed successfully.");
   process.exit(0);
 }
 

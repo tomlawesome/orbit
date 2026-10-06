@@ -5,9 +5,11 @@ set -Eeuo pipefail
 # (#1211), which checks the bundle, asks for the passphrase and IMPORT
 # RECOVERY, swaps the document key and restores the inner backup -- all in
 # the engine inside the Orbit image (src/lib/backup-restore-cli.ts) as a
-# compose one-off on orbit-app. This stops orbit-app, runs the engine, then
-# starts orbit-app and waits for health -- unless the inner restore left a
-# journal, which keeps Orbit stopped for restore.sh --recover (build E3).
+# compose one-off on orbit-app. The bundle is checked first (--preflight,
+# asking nothing) while Orbit still runs (amendment E3a); only then does
+# this stop orbit-app, run the engine, start orbit-app and wait for health
+# -- unless the inner restore left a journal, which keeps Orbit stopped for
+# restore.sh --recover (build E3). The passphrase is asked once, in the full run.
 
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_dir"
@@ -94,6 +96,7 @@ recovery_bundle="$1"
   fail "Usage: bash scripts/import-recovery-bundle.sh <recovery.tar>"
 require_deployment
 engine_host_identity
+run_engine "$recovery_bundle" import-recovery-bundle --preflight /orbit-input/bundle.tar </dev/null || exit $?
 compose stop orbit-app >/dev/null || fail "Orbit could not be stopped; the document KEK was not changed."
 status=0
 run_engine "$recovery_bundle" import-recovery-bundle /orbit-input/bundle.tar || status=$?

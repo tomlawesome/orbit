@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Orbit restore: the shell around `orbit restore` (#1211), which restores inside the Orbit image
-# (src/lib/restore-engine.ts) as a compose one-off. This stops orbit-app, runs it, then starts
-# orbit-app and waits for health -- unless a restore journal was left: Orbit stays stopped (E3).
+# Orbit restore: the shell around `orbit restore` (#1211, src/lib/restore-engine.ts), a compose one-off
+# in the Orbit image. A bundle is checked (--preflight) while Orbit still runs (E3a); then this stops
+# orbit-app, restores, starts it and waits for health -- unless a journal was left: it stays stopped (E3).
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_dir"
 
@@ -105,6 +105,7 @@ fi
 
 require_deployment
 engine_host_identity
+[[ "$recover" == true ]] || run_engine "$backup_file" restore --preflight /orbit-input/bundle.tar </dev/null || exit $?
 compose stop orbit-app >/dev/null 2>&1 || fail 'checkpoint/stop failed; Orbit was not stopped for a consistent recovery point.'
 status=0
 if [[ "$recover" == true ]]; then run_engine "" restore --recover || status=$?

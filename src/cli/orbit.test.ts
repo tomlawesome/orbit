@@ -112,6 +112,27 @@ describe("orbit restore: refuses without its required backup-bundle argument", (
     const result = runCli(["restore", join(sandbox, "does-not-exist.tar"), "--dir", sandbox]);
     expect(result.status).not.toBe(0);
   });
+
+  // Amendment E3a: --preflight only validates, so it never asks and never
+  // recovers; combining it with either is a mistake, not a choice.
+  it.each([
+    ["--preflight", "--yes"],
+    ["--yes", "--preflight"],
+    ["--preflight", "--recover"],
+  ])("restore %s %s is a usage error", (first, second) => {
+    writeValidDocumentKek(sandbox);
+    const result = runCli(["restore", first, second, join(sandbox, "bundle.tar"), "--dir", sandbox]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("usage");
+    expect(result.stderr).toContain("--preflight");
+    expect(existsSync(join(sandbox, "backups"))).toBe(false);
+  });
+
+  it("import-recovery-bundle --preflight accepts exactly one bundle", () => {
+    const result = runCli(["import-recovery-bundle", "--preflight", "--dir", sandbox]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("usage");
+  });
 });
 
 describe("orbit export-recovery-bundle: refuses without its required backup-bundle argument", () => {

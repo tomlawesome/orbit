@@ -407,9 +407,20 @@ export interface RunRestoreOptions {
   testHooks?: RestoreOrchestrationTestHooks;
   /** The caller already holds the backup/restore lock (runImportRecoveryBundle takes it before swapping the key, as import-recovery-bundle.sh did). */
   lockHeld?: boolean;
+  /**
+   * `orbit restore --preflight` (#1211 amendment E3a): stage, validate and
+   * capacity-check the bundle, then return before confirm(). restore.sh runs
+   * this while Orbit is still up, so it stops nothing and leaves no journal
+   * or checkpoint; its stage database is dropped and its scratch lives in
+   * the caller's workDir. The full run repeats every check: this is a gate,
+   * never an input.
+   */
+  preflightOnly?: boolean;
 }
 
-export function runRestore(options: RunRestoreOptions): RestoreDisposeResult | { outcome: "completed" } {
+export type RunRestoreResult = RestoreDisposeResult | { outcome: "completed" } | { outcome: "preflight-passed" };
+
+export function runRestore(options: RunRestoreOptions): RunRestoreResult {
   // O2-R7: taken before anything else, including the journal-exists check
   // below — the journal written at the end of checkpointing was the only
   // thing stopping two concurrent restores, and both could pass that check
@@ -422,7 +433,7 @@ export function runRestore(options: RunRestoreOptions): RestoreDisposeResult | {
   }
 }
 
-function runRestoreLocked(options: RunRestoreOptions): RestoreDisposeResult | { outcome: "completed" } {
+function runRestoreLocked(options: RunRestoreOptions): RunRestoreResult {
   ensureBackupDirectorySafe(options.paths);
   // A link at the journal's path counts as an unfinished restore too, as it
   // did for restore.sh: only nothing at all means no restore is open.
@@ -452,6 +463,7 @@ function runRestoreLocked(options: RunRestoreOptions): RestoreDisposeResult | { 
     tempAvailableKib: filesystemAvailableKib(stagingWorkDir),
     volumeAvailableKib: options.adapter.measureDocumentVolumeAvailableKib(),
   });
+  if (options.preflightOnly) return { outcome: "preflight-passed" };
 
   if (!options.confirm()) {
     refuse("restore-not-confirmed", "confirmation failed; restore cancelled.");
@@ -591,6 +603,14 @@ export interface RunImportRecoveryBundleOptions {
   confirmRestore: () => boolean;
   hooks?: RestoreDurabilityHooks;
   testHooks?: RestoreOrchestrationTestHooks;
+  /**
+   * `orbit import-recovery-bundle --preflight` (#1211 amendment E3a): the
+   * journal, rotation and rollback-file checks and the archive preflight,
+   * under the backup/restore lock, then return before the passphrase is
+   * asked for. import-recovery-bundle.sh runs this while Orbit is still up;
+   * it asks nothing and changes nothing.
+   */
+  preflightOnly?: boolean;
 }
 
 /**
@@ -639,7 +659,21 @@ function renameSecretFileAcrossDevices(sourcePath: string, destinationPath: stri
  * vs. manual-recovery-required are RestoreRun.dispose()'s internal
  * distinctions, already fully handled inside runRestore()).
  */
-export function runImportRecoveryBundle(options: RunImportRecoveryBundleOptions): { outcome: "completed" } {
+export function runImportRecoveryBundle(options: RunImportRecoveryBundleOptions): { outcome: "completed" } | { outcome: "preflight-passed" } {
+  if (options.preflightOnly) {
+    // The same lock as the full run, so a preflight that meets a running
+    // backup or restore exits 75 and the shell touches nothing (E3a).
+    const releaseLock = acquireBackupRestoreLock(options.backupDirectory);
+    try {
+      return importRecoveryBundleUnlocked(options);
+    } finally {
+      releaseLock();
+    }
+  }
+  return importRecoveryBundleUnlocked(options);
+}
+
+function importRecoveryBundleUnlocked(options: RunImportRecoveryBundleOptions): { outcome: "completed" } | { outcome: "preflight-passed" } {
   requireRegularNonSymlinkFile(options.recoveryBundlePath, "Usage: bash scripts/import-recovery-bundle.sh <recovery.tar>");
   const paths = deriveRestorePaths(options.backupDirectory, options.liveDocumentKekFile);
   if (existsSync(paths.journalPath)) {
@@ -674,6 +708,7 @@ export function runImportRecoveryBundle(options: RunImportRecoveryBundleOptions)
     return withScratchCleanupOnSignal(workDir, () => {
       const extractedDir = join(workDir, "extracted");
       preflightRecoveryBundle(options.recoveryBundlePath, extractedDir);
+      if (options.preflightOnly) return { outcome: "preflight-passed" as const };
 
       const passphrase = typeof options.passphrase === "function" ? options.passphrase() : options.passphrase;
       const envelope = readFileSync(join(extractedDir, "document-kek.enc"));
