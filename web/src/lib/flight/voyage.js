@@ -33,6 +33,7 @@
  */
 
 import { chore, fetchOnce, note } from "./chores.js";
+import { fitsFrame } from "./fitness.js";
 
 const TEX = {
   lights: "/flight/world/earth-lights.webp",
@@ -707,14 +708,9 @@ function createVoyage() {
     /** @type {VoyageFrame} */
     const st = { t: 1900, v: 1, K: 7.4, vp: [W / 2, -0.55 * H], rmax: Math.hypot(W, H) * 1.55, tint: [1, 0.8, 0.4],
       progress: 0.4, world: null, bloom: 0, tu: 1900, star: true, dt: 0 };
-    let ms = Infinity;
-    try {
-      const t0 = performance.now();
-      draw(st); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
-      ms = performance.now() - t0;
-    } catch { /* unfit */ }
+    const fits = fitsFrame(gl, () => draw(st));
     part = was; CW = 0; resize(W, H); lastDraw = 0;
-    return ms <= 30;
+    return fits;
   }
   /* the measure: a few whole frames at the heaviest point of the flight (the
      nebula, the streaks at full speed), timed, and the drawing's size chosen
