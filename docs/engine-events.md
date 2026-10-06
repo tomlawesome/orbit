@@ -656,33 +656,79 @@ docker run --rm --network none [-i [-t]] \
   `--user` maps to a subordinate id the operator cannot access. If it cannot
   hand a file over it refuses rather than leave one behind (#1258).
 
-**Commands that need the deployment's own Compose project (`backup`,
-`restore`): the compose-attached one-off.** They need the deployment's
-network, secrets and volumes, so they keep the original shape (#1211):
+**Commands that need the deployment itself (`backup`, `restore`,
+`export-recovery-bundle`, `import-recovery-bundle`): the compose-attached
+one-off.** They read and write the database, the document volume and the
+mounted secrets, so they run on the `orbit-app` service, inside the
+deployment (#1211). `scripts/backup.sh`, `restore.sh`,
+`export-recovery-bundle.sh` and `import-recovery-bundle.sh` run:
 
 ```
-docker compose --project-name "$project" --env-file "$environment_file" \
-  run --rm --no-deps -T --entrypoint node \
-  --volume "<host-deployment-dir>:/orbit-deploy:<ro|rw>" \
-  orbit-app /opt/orbit/cli/orbit.js <command> --dir /orbit-deploy
+docker compose --env-file "$environment_file" \
+  run --rm --no-deps -i <-t|-T> \
+  -e ORBIT_HOST_UID=<uid> -e ORBIT_HOST_GID=<gid> -e ORBIT_HOST_DEPLOY_DIR=<host-deployment-dir> \
+  [-e <switch>=<value> ...] \
+  -v "<host-deployment-dir>:/orbit-deploy:rw" \
+  [-v "<backup-dir>:/orbit-backups:rw" -e ORBIT_HOST_BACKUP_DIR=<backup-dir>] \
+  [-v "<secrets-dir>:/orbit-secrets:rw" -e ORBIT_HOST_SECRETS_DIR=<secrets-dir>] \
+  [-v "<bundle>:/orbit-input/bundle.tar:ro" -e ORBIT_HOST_INPUT_FILE=<bundle>] \
+  --entrypoint node orbit-app /opt/orbit/cli/orbit.js <command> ... \
+  --dir /orbit-deploy [--backup-dir /orbit-backups] [--secrets-dir /orbit-secrets]
 ```
 
-- `--rm --no-deps` — a throwaway container, and only the named service's own
-  image is used; no dependent service (`orbit-db`, etc.) is started for a
-  one-off that does not need one, mirroring `recovery-crypto.mjs`'s own call
-  sites in `scripts/repair.sh`.
-- `-T` — disables pseudo-TTY allocation, the same choice `repair.sh`'s own
-  `recovery-crypto.mjs` invocations make, so stdio behaves predictably for a
-  scripted caller (machine prompts, if any, flow over stdio exactly as the
-  "Machine prompts (v0)" grammar above already defines — no new protocol).
-- `--entrypoint node` — as above.
-- `$project`/`$environment_file` resolve exactly as `repair.sh`'s own
-  "Compose project name derivation" step does, so the one-off targets the
-  same Compose project and `.env-orbit` the rest of the deployment's Docker
-  operations already use. This shape needs `.env-orbit` to exist already.
-- Every command that would otherwise need to mutate a live deployment is
-  Docker-backed and therefore refuses inside the container before touching the
-  mount (see "Fail-closed guard" below).
+- `--rm --no-deps` — a throwaway container on the `orbit-app` service; no
+  other service is started. The one-off is on the project network, so the
+  engine reaches `orbit-db` over TCP, has the compose secrets under
+  `/run/secrets`, and has the document volume at `DOCUMENTS_ROOT`. It runs
+  `pg_dump`, `pg_restore` and `psql` from the image (PostgreSQL 18 client,
+  pinned to the server's major by `src/lib/postgres-client-major.test.ts`;
+  the engine refuses with `preflight/tools failed` before a dump if the
+  server is a different major) and `tar` on the volume, all locally
+  (`src/lib/in-container-adapter.ts`). The database password reaches each
+  tool as `PGPASSWORD` in its own environment, never on a command line.
+- `-i` always; `-t` when both standard input and standard output are a
+  terminal, otherwise `-T`. On a terminal the engine prompts for the
+  recovery passphrase and the `RESTORE`/`IMPORT RECOVERY` confirmations
+  itself. `ORBIT_RECOVERY_TEST_MODE=true` reads each answer as a plain line
+  on standard input with no prompt text, as the scripts' test mode always
+  did; the "Machine prompts: backup/restore/recovery (v0)" grammar above is
+  unchanged.
+- Switches travel as `-e NAME=value`, only when set: `ORBIT_NONINTERACTIVE_RESTORE`,
+  `ORBIT_RECOVERY_TEST_MODE`, and restore.sh's test switches
+  (`ORBIT_RESTORE_TEST_*`, which `scripts/test-backup-restore.sh` sets). None
+  is a secret; passphrases only ever travel on standard input.
+- `ORBIT_ENV_FILE` is the `--env-file`. `ORBIT_BACKUP_DIR` and
+  `ORBIT_SECRETS_DIR`, when they name somewhere other than the deployment's
+  own `backups/` and `.orbit-secrets/`, get mounts of their own and are
+  passed as `--backup-dir`/`--secrets-dir`; the script creates an outside
+  backup directory (mode 700) itself, so Docker never creates it as root.
+  The bundle being read is mounted read-only at `/orbit-input/bundle.tar`.
+  The `ORBIT_HOST_*` variables let the engine print host paths
+  (`src/lib/host-paths.ts`): `Orbit backup created: /srv/orbit/backups/...`,
+  never the mount point.
+- Ownership: the one-off runs as the image's `root` (it must read the
+  `orbit`-owned document objects). Every file and directory it creates under
+  `/orbit-deploy`, `/orbit-backups` or `/orbit-secrets` — the backups
+  directory, the lock file, bundles, the restore journal and checkpoints, a
+  swapped document key — is handed to `ORBIT_HOST_UID:ORBIT_HOST_GID`, as for
+  `configure` above. The document tree on the volume keeps the owners in its
+  archive, as `tar` running as root always gave it.
+- The backup/restore lock is the engine's: a `flock` on
+  `backups/.orbit-backup-restore.lock`, on the bind mount, so it excludes a
+  second run on the same host kernel (a backups directory on NFS is not
+  supported). A run that finds the lock held refuses at once and exits `75`;
+  the shell then leaves `orbit-app` to the run that holds it.
+- The shell stops and starts `orbit-app`; the engine never does. `backup.sh`
+  stops it, runs `backup`, and starts it again. `restore.sh` (with a bundle
+  or `--recover`) and `import-recovery-bundle.sh` stop it for the whole run,
+  preflight included, then start it and wait up to 45 seconds for
+  `/api/health` — unless `backups/.orbit-restore/restore.journal` exists
+  afterwards, which keeps Orbit stopped for `bash scripts/restore.sh
+  --recover`. `backup.sh --verify` and `export-recovery-bundle.sh` leave it
+  running. The engine reports, once, on standard error, that it left the
+  app's lifecycle to the shell:
+  `phase=application component=application state=skipped reason=application-startup action=skip elapsed=0s`.
+- Exit statuses pass through unchanged.
 
 ### Fail-closed guard: no Docker access from inside the engine container
 
@@ -701,13 +747,10 @@ any such attempt.
    container started any other way (a host checkout run directly via
    `pnpm run orbit`/`tsx`, with no image involved) never has it set.
 2. Every command whose adapters would ever spawn `docker`
-   (`install`/`update` via `src/lib/install-docker-adapter.ts`;
-   `backup`/`restore`/`export-recovery-bundle`/`import-recovery-bundle` via
-   `src/lib/recovery-bundle.ts`'s/`src/lib/restore-engine.ts`'s
-   `createDockerCompose*Adapter`) calls `refuseDockerInContainer` as the
-   FIRST statement in its command function — before any adapter is
-   constructed, so the code path that would spawn `docker` is never
-   reached, not merely made to fail once reached. When
+   (`install`/`update` via `src/lib/install-docker-adapter.ts`) calls
+   `refuseDockerInContainer` as the FIRST statement in its command function
+   — before any adapter is constructed, so the code path that would spawn
+   `docker` is never reached, not merely made to fail once reached. When
    `ORBIT_ENGINE_CONTEXT=container` is set, that call prints
    `orbit: refused command=<command> reason=docker-command-forbidden-in-container`
    to stderr and exits `9`, before touching the target directory or any
@@ -718,6 +761,11 @@ any such attempt.
    never spawn `docker` under any invocation — `src/cli/orbit.test.ts`,
    `src/cli/orbit.configure.test.ts`, and the bundle's own smoke test assert
    this with a booby-trapped `docker` on `PATH`.
+3. `backup`, `restore`, `export-recovery-bundle` and `import-recovery-bundle`
+   spawn no `docker` at all since #1211: they run only inside the
+   deployment, and anywhere else refuse with `orbit: <command> runs inside
+   the deployment; use bash scripts/<script>.sh.` (exit 1).
+   `src/cli/orbit.test.ts` asserts a booby-trapped `docker` is never called.
 
 This is a permanent architectural boundary, not a placeholder pending a
 future slice: any command that genuinely needs to touch Docker stays a
@@ -755,7 +803,8 @@ no opt-in variable and no bash fallback. With no image to run,
   secret line.
 - `install.sh` and `repair.sh` call `scripts/configure.sh`; `deploy-container.sh`
   builds or pulls the image first, then runs `configure.sh`.
-- `backup` and `restore` still use the compose-attached shape (#1211).
+- `backup`, `restore` and the recovery-bundle commands use the compose-attached
+  shape above (#1211).
 
 `docs/adr-notes/294-configure-write-port-plan.md` records the design of the
 opt-in era this replaced.
