@@ -228,3 +228,24 @@ export function letterOf(/** @type {string} */ name) {
   const first = sortKey(name).charAt(0).toUpperCase();
   return first >= "A" && first <= "Z" ? first : "";
 }
+
+/** The compose service each About sidecar id runs as. */
+const SERVICE_OF = { postgres: "orbit-db", tika: "orbit-tika", clamav: "orbit-clamav", ollama: "orbit-ollama" };
+
+/**
+ * What card 1 shows for one sidecar's version (#1256): the version the
+ * sidecar itself gave; failing that, the tag docker-compose.yml pins (marked
+ * `pinned`, so the reader can tell it is not a live answer); "not known" only
+ * when neither exists. `kind` is "off" for a sidecar that is not running.
+ *
+ * @param {{ id: string, state: "running" | "off", version: string | null }} row
+ * @param {{ service: string, image: string }[]} sidecars the pinned images, from ./credits.js
+ * @returns {{ kind: "off" | "live" | "pinned" | "unknown", text: string }}
+ */
+export function sidecarVersionOf(row, sidecars) {
+  if (row.state === "off") return { kind: "off", text: "not running" };
+  if (row.version) return { kind: "live", text: row.version };
+  const image = sidecars.find((one) => one.service === SERVICE_OF[/** @type {keyof typeof SERVICE_OF} */ (row.id)])?.image;
+  const tag = image ? image.slice(image.lastIndexOf(":") + 1) : "";
+  return tag && !tag.includes("/") ? { kind: "pinned", text: tag } : { kind: "unknown", text: "not known" };
+}

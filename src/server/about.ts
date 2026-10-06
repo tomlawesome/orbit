@@ -15,7 +15,8 @@ import { readTikaVersion } from "@/server/documents/tika";
  * never a hostname, URL, port, error string or path. Each sidecar is asked
  * its own version; a sidecar that is switched off says so, and one whose
  * answer cannot be read is `version: null`, which the page draws as
- * "not known". Nothing is guessed.
+ * "not known" unless the compose file pins a tag for it (the page falls back
+ * to that, marked pinned; web/src/lib/about/group.js). Nothing is guessed.
  */
 
 export type AboutSidecarId = "postgres" | "tika" | "clamav" | "ollama";

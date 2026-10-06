@@ -38,6 +38,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .about-page .kv a{color:var(--ink-mid);text-decoration:none}
 .about-page .kv a:hover{color:var(--accent-text)}
 .about-page .kv .unknown{font-style:normal;color:var(--ink-quiet)}
+.about-page .kv .pinned{color:var(--ink-quiet);font-weight:400}
 /* The full digest, never cut short: it wraps instead. */
 .about-page .kv.image{align-items:flex-start}
 .about-page .kv.image b{overflow-wrap:anywhere;word-break:break-all}

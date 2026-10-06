@@ -1,7 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { CREDITS, FONTS, SIDECARS } from "$lib/about/credits.js";
-  import { creditsView, letterOf } from "$lib/about/group.js";
+  import { creditsView, letterOf, sidecarVersionOf } from "$lib/about/group.js";
   import { buildLineOf, readAbout, readSession, readWorkspace } from "$lib/data/workspace.js";
   import { fillStarTiles } from "$lib/sky.js";
   import Chrome from "$lib/Chrome.svelte";
@@ -101,10 +101,12 @@
         <div class="kv image"><span>Image</span>{#if about.build.image}<b>{about.build.image}</b>{:else}<i class="unknown">not known</i>{/if}</div>
         <div class="kv"><span>Node</span>{#if about.node}<b>{about.node}</b>{:else}<i class="unknown">not known</i>{/if}</div>
         {#each about.sidecars as sidecar (sidecar.id)}
+          {@const shown = sidecarVersionOf(sidecar, SIDECARS)}
           <div class="kv"><span>{SIDECAR_NAMES[sidecar.id] ?? sidecar.id}</span>
-            {#if sidecar.state === "off"}<span class="off">not running</span>
-            {:else if sidecar.version}<b>{sidecar.version}</b>
-            {:else}<i class="unknown">not known</i>{/if}</div>
+            {#if shown.kind === "off"}<span class="off">{shown.text}</span>
+            {:else if shown.kind === "live"}<b>{shown.text}</b>
+            {:else if shown.kind === "pinned"}<b>{shown.text}<span class="pinned"> (pinned)</span></b>
+            {:else}<i class="unknown">{shown.text}</i>{/if}</div>
         {/each}
       {:else if aboutProblem}
         <p class="note">{aboutProblem}</p>
