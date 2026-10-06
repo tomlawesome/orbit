@@ -88,8 +88,13 @@ get_orbit_script="${ORBIT_GET_ORBIT_SCRIPT:-scripts/get-orbit.sh}"
 commit="${CI_COMMIT_SHA:-}"
 
 [[ -n "$version" ]] || fail 'ORBIT_VERSION is not set'
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] ||
-  fail "ORBIT_VERSION is not a plain semantic version: ${version}"
+# The same vX.Y.Z pattern the image label, /opt/orbit/VERSION and
+# `orbit --version` are stamped and checked with, not a copy of it: this
+# script's own bare-X.Y.Z regex refused the real label on the first preview
+# run of v0.3.0 (#1228). The label is recorded verbatim.
+. "${repo_root}/scripts/release-metadata-patterns.sh"
+[[ "$version" =~ $ORBIT_VERSION_PATTERN ]] ||
+  fail "ORBIT_VERSION is not an Orbit release version (vX.Y.Z): ${version}"
 [[ -n "$branch" ]] || fail 'CI_COMMIT_BRANCH is not set'
 # The mapping itself lives in scripts/ci/channel-name.sh, shared with
 # publish-channel.sh's channel tag, so this script carries no copy of it.
