@@ -321,7 +321,7 @@ page's URL at failure, which this one has to infer.
 
 - 2026-09-27 · 6420d955 (+ #1069's uncommitted desk-create work, nowhere near backup/restore) · local `scripts/test-backend.sh`, seven worktrees running it at once · `Error: Test timed out in 5000ms`, alongside the sighting above in the same file. Same rerun, same result: green alone. First sighting.
 
-## v19-archive.spec.ts:143 "write an archive, then bring it into a second household — a clash stays out" — desktop-chromium
+## v19-archive.spec.ts:143 "write an archive, then bring it into a second household — a clash stays out" — desktop-chromium (#1232)
 
 - 2026-09-30 · 0135f516 (!1006, M14 pocket-film batch plus `dev`'s base-image re-pin; nothing near archives) · pipeline 1855 / smoke (job 27172) · a `toHaveCount` assertion failed on the first attempt and on Playwright's in-job retry, so the job failed outright. Job retried as 27269 on the same commit: green, 221 passed. First sighting; an issue on the third.
 
@@ -330,7 +330,7 @@ page's URL at failure, which this one has to infer.
 - 2026-10-04 · 91a3ada2 (!1021; the batch's only veil change, W3-S1, adds no timer, and the fade timer itself dates from 2026-09-22) · local `scripts/test-backend.sh` (full 393-file run, two integration suites sharing the host) · every test passed, but Vitest caught one unhandled `ReferenceError: window is not defined` at `removeListeners web/src/lib/tour/veil.js:280`, from `hideVeil`'s `setTimeout` teardown firing after the file's jsdom window was gone, and exited 1. The same file alone passed three times in a row straight after on the same code, and CI's `fast` job was green on `bc9ba29e`. First sighting; an issue on the third.
 - 2026-10-04 · 440eb552 (!1024 rebased onto 6329566d; no `web/` change in the branch) · pipeline 2101 / fast (job 31506) · the same unhandled error, this time attributed to `tests/unit/v19-tour-vocabulary.test.mjs`, same stack (`removeListeners` ← `teardownOverlay` ← the `hideTimer` timeout at veil.js:388); 393 files, 5469 tests passed, and the one unhandled error failed the job. The same `dev` code passed `fast` on pipelines 2100 (31486) and 2102 (31526) within the hour. Second sighting; the attributed file differs because the timer outlives whichever file ran last, hence this heading names the mechanism rather than one file. Retried as a job retry on 2101.
 
-## v19-archive.spec.ts:172 and :241, `answerArchiveChallenge`'s `expect(challenge).toHaveCount(0)` at :114 — desktop-firefox
+## v19-archive.spec.ts:172 and :241, `answerArchiveChallenge`'s `expect(challenge).toHaveCount(0)` at :114 — desktop-firefox (#1232)
 
 - 2026-10-03 · 594b745a (!1017) · pipeline 1999 / smoke_firefox (job 30199) · two in one run, both passing on the file's own Playwright retry: `:172` "write an archive, then bring it into a second household — a clash stays out" — after filling the password and clicking "confirm and carry on", `expect(challenge).toHaveCount(0)` found the challenge locator still resolving to 1 element on all 13 polls across the 5000ms timeout (27.6s total for the attempt); and `:241` "a wrong passphrase is refused, and nothing is read" — the same assertion, 14 polls, same 5000ms timeout (22.3s total). No trace was captured for either failing attempt (`trace: on-first-retry`), so there is no network or DOM detail beyond the error-context: only that the password-step-up dialog had not closed by the time the assertion gave up. Each passed on its own retry in the same run (33.6s and 19.4s). Not established whether this is the same cause as the desktop-chromium sighting above (different engine; that one's own failing assertion was not recorded, and this pipeline's own `smoke_webkit` job failed these two tests for an unrelated, already-diagnosed reason — a WebKit navigation race, not this challenge-closing wait). First sighting on desktop-firefox; an issue on the third sighting of either.
 
@@ -395,9 +395,13 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 
 - 2026-10-06 · 3eb5c4dc (!1032, dev -> preview; `web/` and `tests/` identical to 0ef8f497, on which pipeline 2193 ran this job green) · pipeline 2199 / smoke_webkit (job 32442) · `toContainText("Setup link sent to")` on `.adminproblem.ok` found no element within 5 s, on the attempt and the in-job retry. `:243` "an administrator adds a local user and is told where the link went" failed once in the same run and passed on retry (flaky), with a strict-mode violation: `.person` filtered on "Newcomer Lawson" resolved to 2 elements, so the earlier attempt's newcomer was still listed. Job retried as 32450. First sighting; an issue on the third.
 
-## v19-archive.spec.ts:248 "a wrong passphrase is refused, and nothing is read" — desktop-webkit
+## v19-archive.spec.ts:248 "a wrong passphrase is refused, and nothing is read" — desktop-webkit (#1232)
 
 - 2026-10-06 · 3eb5c4dc (same run and unchanged web tree as the heading above) · pipeline 2199 / smoke_webkit (job 32442) · `toHaveCount(0)` on `.c-archive .challenge` kept resolving to 1 for the whole 5 s, on the attempt (25.7 s) and the in-job retry (27.8 s): the passphrase challenge stayed on screen after the refusal. Both failing attempts were traced. First sighting; an issue on the third.
+
+## v19-archive.spec.ts:178 "write an archive, then bring it into a second household — a clash stays out" — desktop-webkit (#1232)
+
+- 2026-10-06 · 58baf3cf (!1034, third `dev` -> `preview` run; the diff since 2200 is docs/flakes.md and `scripts/ci/` only) · pipeline 2203 / smoke_webkit (job 32537) · `answerArchiveChallenge`'s `toHaveCount(0)` on `.c-archive .challenge` resolved to 1 on all 14 polls across the 5 s, on the attempt (30.5 s) and the in-job retry (36.8 s): the step-up dialog stayed on screen after "confirm and carry on". 180 passed, 1 flaky (sign-in-methods `:243`, #1229). Job retried as 32545. Third sighting of this assertion (1999 firefox, 2199 webkit, here): #1232.
 
 ## v19-feedback-recovery.spec.ts:344 "a mail suggestion whose approval fails, on /inbox is announced, and the act can be repeated by keyboard" — mobile-webkit
 
