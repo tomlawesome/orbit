@@ -107,6 +107,9 @@
       signOutProblem = /** @type {{ message?: string }} */ (error)?.message ?? "still signed in — try again";
       return;
     }
+    /* #1262: the menu closes as the sign-out goes ahead, not left standing
+       while the next page loads */
+    open = false;
     location.href = "/logout";
   }
 
