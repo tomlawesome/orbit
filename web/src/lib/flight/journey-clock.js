@@ -8,9 +8,11 @@
  * journey where it is rather than skipping it ahead to the landing.
  *
  * App change: a stall is capped only while `stalls(true)` is set -- the
- * flight sets it while its WebGL2 world is drawing. Otherwise the clock is
+ * climb sets it while its WebGL2 world is drawing. Otherwise the clock is
  * real time, as the flight always kept, so a machine that simply draws
- * slowly finishes the journey on time rather than stretching it.
+ * slowly finishes the journey on time rather than stretching it. The
+ * descent always keeps real time (#1262): the reader is already signed out
+ * and the dusk is owed on time.
  *
  * A HOLD stops the clock at a point in the journey until something it needs
  * has come (Flight.svelte gives it the flight's world), so a journey can
@@ -36,9 +38,18 @@ export function journeyClock(env = {}) {
     if (hold && !hold.done && t > hold.at) t = hold.at;
     return t;
   };
+  /* #1262: each beat is its own, as each was its own timer before this
+     clock: one that throws is reported and the rest still run */
+  /** @param {() => void} fn */
+  const run = (fn) => {
+    try { fn(); } catch (e) {
+      if (typeof reportError === "function") reportError(e);
+      else setTimeout(() => { throw e; });
+    }
+  };
   const poll = () => {
     raf = 0; const at = now();
-    for (const [id, b] of pending) if (b.at <= at) { pending.delete(id); b.fn(); }
+    for (const [id, b] of pending) if (b.at <= at) { pending.delete(id); run(b.fn); }
     if (pending.size) raf = frame(poll);
   };
   return {
