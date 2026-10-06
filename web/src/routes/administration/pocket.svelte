@@ -937,7 +937,7 @@
     {:else if reading?.id === "bundle"}
       <p class="p-prose ad-sheet-say">If the encryption key is ever lost with no recovery bundle to recover it, every
         document, all encrypted metadata, and — once account addresses are encrypted — every stored address are gone for
-        good. Run <code>orbit backup</code> then <code>orbit export-recovery-bundle &lt;backup.tar&gt;</code> to make one.</p>
+        good. Run <code>bash scripts/backup.sh</code> then <code>bash scripts/export-recovery-bundle.sh &lt;backup.tar&gt;</code> to make one.</p>
       <p class="p-prose ad-sheet-say">Keep its two parts apart: the bundle file on storage separate from this instance, and
         its passphrase in a password manager or on paper — never both together, because that separation is what keeps
         anyone who gets hold of the file alone from being able to use it. This reappears after every encryption-key
