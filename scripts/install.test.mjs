@@ -2728,20 +2728,63 @@ describe("install.sh", () => {
     expect(result.calls).not.toContain("docker volume rm");
   });
 
-  it("refuses a fresh target when a renamed-directory Orbit volume is orphaned", () => {
+  // #1239: the preflight used to match every volume on the host ending in
+  // orbit-db-data, so any other Orbit stack (a demo, an e2e run) made a fresh
+  // install refuse and told the operator to delete that stack's database.
+  it("is not blocked by another Compose project's database volume, and never names it (#1239)", () => {
+    const targetDir = makeTarget();
+    const foreign = ["orbit-demo_orbit-db-data", "orbit-e2e-local-abc_orbit-db-data", "old-directory_orbit-db-data"];
+
+    const result = runInstall(targetDir, {
+      FAKE_DOCKER_VOLUME_NAMES: foreign.join("\n"),
+      FAKE_USE_REAL_CONFIGURATION: "1",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.calls).toContain("up -d");
+    for (const name of foreign) {
+      expect(result.stdout).not.toContain(name);
+      expect(result.stderr).not.toContain(name);
+      expect(result.calls).not.toContain(`volume rm -- ${name}`);
+    }
+    expect(result.stderr).not.toContain("existing Orbit database volume");
+    expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("still refuses on its own project's volume when others are present, naming only its own (#1239)", () => {
     const targetDir = makeTarget();
 
     const result = runInstall(targetDir, {
-      FAKE_DOCKER_VOLUME_NAMES: "old-directory_orbit-db-data",
+      FAKE_DOCKER_VOLUME_NAMES: "orbit-demo_orbit-db-data\norbit_orbit-db-data",
     });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("existing Orbit database volume");
+    expect(result.stderr).toContain("existing Orbit database volume (orbit_orbit-db-data)");
+    expect(result.stderr).toContain("docker volume rm -- orbit_orbit-db-data");
+    expect(result.stderr).not.toContain("orbit-demo");
     expect(result.calls).not.toContain("docker pull");
-    expect(result.calls).not.toContain("curl");
     expect(result.calls).not.toContain("up -d");
     expect(targetEntries(targetDir)).toEqual([]);
     expect(stagingLeftovers(targetDir)).toEqual([]);
+  });
+
+  it("scopes an explicit COMPOSE_PROJECT_NAME to that project's volume only (#1239)", () => {
+    const own = makeTarget();
+    const blocked = runInstall(own, {
+      COMPOSE_PROJECT_NAME: "fresh-orbit",
+      FAKE_DOCKER_VOLUME_NAMES: "fresh-orbit_orbit-db-data",
+    });
+    expect(blocked.status).not.toBe(0);
+    expect(blocked.stderr).toContain("existing Orbit database volume (fresh-orbit_orbit-db-data)");
+
+    const other = makeTarget();
+    const allowed = runInstall(other, {
+      COMPOSE_PROJECT_NAME: "fresh-orbit",
+      FAKE_DOCKER_VOLUME_NAMES: "orbit_orbit-db-data",
+      FAKE_USE_REAL_CONFIGURATION: "1",
+    });
+    expect(allowed.status).toBe(0);
+    expect(allowed.stderr).not.toContain("orbit_orbit-db-data");
   });
 
   it("accepts a recognized deployment when stored and recomputed config hashes diverge", () => {
