@@ -10,10 +10,14 @@ import { bodyLimitFor, limitRequestBody } from "$lib/server/body-limit.js";
  * Route ids, not pathnames: the router's own truth, so a trailing slash or a
  * percent-encoded path cannot dress a gated screen up as an open one.
  *
- * `/` is the arrival and decides signed-in from signed-out in the browser;
- * `/login` and `/logout` are the ratified dawn and dusk (§15); `/maintenance`
- * has to be reachable precisely when the instance cannot serve anything else.
- * None of them reads a session.
+ * `/` is the arrival. It is open because a signed-out reader is served the
+ * door there, never bounced to /login, but since #1252 it reads the session
+ * once, in `frontDoor` below: a reader who already belongs to a household is
+ * answered 303 to /home before the door's HTML is sent. Everyone else gets the
+ * door, and Arrival.svelte decides the rest in the browser. `/login` and
+ * `/logout` are the ratified dawn and dusk (§15), still prerendered;
+ * `/maintenance` has to be reachable precisely when the instance cannot serve
+ * anything else. None of those three reads a session.
  *
  * `/invite/[token]` is open because a signed-out stranger is exactly who the
  * address is written for (#481). It is the one open route that DOES read a
@@ -209,6 +213,81 @@ function neverStored(page) {
 }
 
 /**
+ * Whether the reader at `/` is the invited reader's first landing (#481): the
+ * one signed-in member the door must still be served to, so the arrival
+ * plays once. Presence only -- GET /api/auth/session reads and clears it, and
+ * clearing it here would take that landing away. Any failure, auth
+ * unconfigured included, answers "not that", which serves nothing new: the
+ * session read that follows fails the same way and the door is served anyway.
+ *
+ * @param {import("@sveltejs/kit").Cookies} cookies
+ */
+async function invitedLandingPresent(cookies) {
+  try {
+    const { invitedLandingCookieName } = await import("orbit/server/invitations/cookie");
+    const { getAuthConfig } = await import("orbit/lib/env");
+    return Boolean(cookies.get(invitedLandingCookieName(getAuthConfig())));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether this session already belongs to a household, by the same two tests
+ * the gate below uses for every other screen (#840): `activeHouseholdId`, or
+ * failing that `hasOnwardHousehold`. A failed membership read answers "no",
+ * which serves the door -- the arrival's own decide() then asks again.
+ *
+ * @param {import("orbit/lib/auth/session").AuthenticatedSession | null} session
+ */
+async function belongsSomewhere(session) {
+  if (!session) return false;
+  if (session.activeHouseholdId) return true;
+  try {
+    const { hasOnwardHousehold } = await import("orbit/server/workspace-repository");
+    return await hasOnwardHousehold(session.user.id, session.user.isInstanceAdmin);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * THE FRONT DOOR DECIDES ON THE SERVER (#1252; ADR-0012, amended 2026-10-06).
+ *
+ * A member who refreshed `/` used to be served the sign-in door and handed on
+ * to /home only once the browser had asked GET /api/auth/session -- long
+ * enough to see the door. Now a session that already belongs somewhere is
+ * answered 303 to /home before any HTML is sent. Every other reader -- no
+ * cookie, a stale one, no household yet, the invited landing, a backend that
+ * cannot answer -- is served the door exactly as before, and Arrival.svelte's
+ * decide() stays as the fallback.
+ *
+ * Nothing about the reader goes on `locals` here, so the door's HTML is the
+ * same with or without a cookie. Both answers are `no-store`: the same
+ * address now means two things depending on who asks.
+ *
+ * A Response rather than `redirect()`, because a thrown redirect carries no
+ * headers of ours. SvelteKit turns it into its JSON redirect for a
+ * `__data.json` request, the same as a thrown one.
+ *
+ * @param {import("@sveltejs/kit").RequestEvent} event
+ * @param {Parameters<import("@sveltejs/kit").Handle>[0]["resolve"]} resolve
+ * @param {import("orbit/lib/auth/session").AuthenticatedSession | null | undefined} session
+ *   already read by the maintenance gate, when it needed one
+ */
+async function frontDoor(event, resolve, session) {
+  if (!(await invitedLandingPresent(event.cookies))) {
+    session ??= await readSessionQuietly(event.cookies);
+    if (await belongsSomewhere(session)) {
+      return new Response(null, { status: 303, headers: { location: "/home", "cache-control": "no-store" } });
+    }
+  }
+  const door = await resolve(event);
+  door.headers.set("cache-control", "no-store");
+  return door;
+}
+
+/**
  * The gates for every screen: maintenance (#526), then authentication (#789).
  *
  * The cut deleted Next's AuthenticationGate along with the rest of `src/app/`
@@ -269,7 +348,8 @@ export async function handle({ event, resolve }) {
   if (DOORS.has(id)) return resolve(event);
 
   /* The session is read at most once, and only when a gate needs it: the open
-     routes never read one unless the instance is closed. */
+     routes never read one unless the instance is closed, `/` excepted
+     (#1252), which reuses this one when maintenance already read it. */
   let session;
 
   const maintenance = await readMaintenance();
@@ -284,6 +364,8 @@ export async function handle({ event, resolve }) {
       return closedForMaintenance(screen, maintenance);
     }
   }
+
+  if (id === "/") return frontDoor(event, resolve, session);
 
   if (OPEN_ROUTES.has(id)) return resolve(event);
 
