@@ -253,12 +253,13 @@
     if (!instant) flip(from, g.left, g.top, g.width, g.height, MARK_RIDE_DOWN);
   }
 
+  /** @typedef {{ name: string, bodies: Array<[number, number, string, number]> }} PassingHome */
   /** The other households with their tones read as colours, now. */
   function paintedHomes() {
     const style = getComputedStyle(document.body);
     /** @param {string} tone */
     const colour = (tone) => (tone.startsWith("--") ? style.getPropertyValue(tone).trim() : tone) || "#8fb8ff";
-    return homes.map((h) => ({ name: h.name, bodies: h.bodies.map((b) => /** @type {[number, number, string, number]} */ ([b[0], b[1], colour(b[2]), b[3]])) }));
+    return /** @type {PassingHome[]} */ (homes).map((h) => ({ name: h.name, bodies: h.bodies.map((b) => /** @type {[number, number, string, number]} */ ([b[0], b[1], colour(b[2]), b[3]])) }));
   }
   /** The climb, carrying the other households past. */
   function upProfile() {
