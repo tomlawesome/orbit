@@ -30,7 +30,7 @@ resetDatabaseBetweenSpecFiles();
  * stand up a real reader with no household, wait for home to say it is live
  * (`body[data-home-ready]`, #1064 — so a failure here is "nothing is
  * listening", never "the test was early"), and then work the panel: open it,
- * change the theme, arm sign-out, and walk out of it onto /settings.
+ * change the theme, find sign-out, and walk out of it onto /settings.
  */
 
 const READER = "Orbit Outsider";
@@ -128,12 +128,11 @@ test("home (desk, empty sky): the account panel opens and its controls answer", 
   await panel.locator(".swatches button[title='after dark']").click();
   await expect.poll(() => liveTheme(page)).toBe("afterdark");
 
-  /* Sign-out arms on the first tap (the second one revokes the session, so
-     this stops at one). */
+  /* Sign-out is there and is one press (owner, 2026-10-06), so this does not
+     press it: that would end the session the rest of the walk needs. */
   const signout = panel.locator("button.signout");
   await expect(signout).toBeVisible();
-  await signout.click();
-  await expect(signout).toHaveText(/tap again to sign out/);
+  await expect(signout).toHaveText(/sign out/);
 
   /* And the panel is a way out of home, not an ornament. */
   await panel.getByRole("link", { name: "Settings" }).click();
@@ -161,11 +160,10 @@ test("home (pocket, empty sky): the account menu opens and its controls answer",
   await menu.locator("button.swatch[title='after dark']").click();
   await expect.poll(() => liveTheme(page)).toBe("afterdark");
 
-  /* Sign-out arms on its first tap and does nothing else (§1.8). */
+  /* Sign-out is there and is one tap (owner, 2026-10-06), so this does not
+     tap it: that would end the session the rest of the walk needs. */
   const signout = menu.getByRole("button", { name: /sign out/ });
   await expect(signout).toBeVisible();
-  await signout.click();
-  await expect(signout).toHaveClass(/armed/);
 
   await menu.getByRole("link", { name: "Settings" }).click();
   await expect(page).toHaveURL(/\/settings/);

@@ -169,10 +169,8 @@ for (const size of WIDTHS) {
         await menu.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
 
         const clicked = Date.now();
+        /* one click (owner, 2026-10-06): the plain sign-out no longer arms */
         await signOut.click();
-        if (/tap again/.test((await signOut.textContent()) ?? "") || (await signOut.getAttribute("class"))?.includes("armed")) {
-          await signOut.click();
-        }
 
         /* the menu closes by itself as the sign-out starts */
         if (desk) await expect.soft(menu, "#1262: the menu is still open after sign-out started").not.toHaveClass(/open/, { timeout: 2_000 });
