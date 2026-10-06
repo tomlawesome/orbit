@@ -6,6 +6,8 @@
     newcomerAscentBeats, newcomerAscentBeatsReduced,
     runTimeline, MARK_ARRIVE, MARK_RIDE_UP, MARK_RIDE_DOWN, D,
   } from "./timeline.js";
+  import { journeyClock } from "./journey-clock.js";
+  import { readyFlight } from "./warm.js";
   import "./flight.css";
 
   /**
@@ -86,14 +88,20 @@
   const reduced = () =>
     typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+  /* #1253: the journey keeps its own time (journey-clock.js), so a stall
+     while the flight's world is readied pauses the journey rather than
+     skipping it ahead; the engine and the live beats both read it */
+  const clock = journeyClock();
+
   onMount(() => {
-    const flightEngine = createFlight(canvas);
+    const flightEngine = createFlight(canvas, { now: clock.now });
     engine = flightEngine;
     const onResize = () => flightEngine.resize();
     addEventListener("resize", onResize);
     return () => {
       removeEventListener("resize", onResize);
       cancelTimeline();
+      clock.dispose();
       flightEngine.clear();
       reset();
     };
@@ -287,6 +295,7 @@
     body().classList.remove("arming", "showdawn", "showwarp", "launching", "bare",
                             "instrument", "withdrawing", "dispersing", "showdusk",
                             "farewell", "pinned", "counting", "belong");
+    body().classList.remove("holding");
     markEl?.classList.remove("on", "collapse");
     nameEl?.classList.remove("on");
     restoreGlyphVisibility();
@@ -311,9 +320,25 @@
         ascentStep(pinned ? at : undefined), pinned ? { at } : {});
       return;
     }
-    cancelTimeline = runTimeline(
-      newcomer ? newcomerAscentBeats() : ascentBeats(),
-      ascentStep(pinned ? at : undefined), pinned ? { at } : {});
+    if (pinned) {
+      cancelTimeline = runTimeline(newcomer ? newcomerAscentBeats() : ascentBeats(), ascentStep(at), { at });
+      return;
+    }
+    /* #1253: the flight's world (voyage.js), readied now and hurried. If it
+       is not ready yet the journey still starts at once, but its opening is
+       the mark lifting to the centre (which needs nothing drawn), and the
+       clock holds just before the warp until the world is ready -- eight
+       seconds at most, and then the flight goes on its own canvas, as ever */
+    let beats = newcomer ? newcomerAscentBeats() : ascentBeats();
+    const engine = activeEngine();
+    const ready = readyFlight({ hurry: true }).then(() => engine.warm());
+    if (!engine.world) {
+      const warp = beats.find((b) => b.act === "warp")?.at ?? 0;
+      beats = beats.map((b) => (b.act === "mark" ? { ...b, at: Math.min(b.at, Math.max(0, warp - 80)) } : b));
+      body().classList.add("holding");
+      clock.holdAt(Math.max(0, warp - 10), ready.finally(() => body().classList.remove("holding")));
+    }
+    cancelTimeline = runTimeline(beats, ascentStep(undefined), clock);
   }
 
   /**
@@ -330,8 +355,15 @@
                                    pinned ? { at } : {});
       return;
     }
+    /* the descent never waits: home readied its world when the sign-out was
+       armed, and if it is not ready by the warp the descent flies on its own
+       canvas, as ever (engine.js decides at the warp) */
+    if (!pinned) {
+      const engine = activeEngine();
+      readyFlight({ hurry: true, gentle: true }).then(() => engine.warm({ make: false }));
+    }
     cancelTimeline = runTimeline(descentBeats(), descentStep(pinned ? at : undefined),
-                                 pinned ? { at } : {});
+                                 pinned ? { at } : clock);
   }
 </script>
 
