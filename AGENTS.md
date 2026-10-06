@@ -250,10 +250,20 @@ Check the list before building a test rig or handing a check to the owner.
   and, on a mismatch, re-pins every location and opens a merge request;
   `--red` proves the comparison fires, `--dry-run` stops before any commit,
   push or merge-request call
+- `scripts/cleanup-stacks.sh` — lists every `orbit*` Compose project on the
+  host (containers, volumes, networks, stopped and profile ones included, and
+  networks left with no container); `--remove` tears them down, `--project
+  NAME` limits it to one. Keeps `orbit-ollama` and its model volume unless
+  `--include-ollama`. Containers Compose did not create are listed, never
+  removed (#1241)
 
 ## Traps when running things locally
 
-Eleven known ways to lose an afternoon, or worse.
+Twelve known ways to lose an afternoon, or worse.
+
+**A stack a script started is torn down by the same script; stale containers
+are a defect, not housekeeping.** Run `bash scripts/cleanup-stacks.sh` at
+session end and before an acceptance run, and `--remove` what it lists (#1241).
 
 **`pnpm db:generate` refuses to run, on purpose.** `drizzle/meta/` holds
 snapshots only up to 0004, so `drizzle-kit generate` would diff against a
