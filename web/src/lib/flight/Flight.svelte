@@ -69,7 +69,7 @@
      * engine.js `othersOf` reads them from the galaxy. Body tones may be CSS
      * custom property names; they are read as colours when the flight starts.
      * Empty for a reader with one household: nothing made up passes instead.
-     * @type {Array<{ name: string, bodies: Array<[number, number, string, number]> }>}
+     * Each is { name, bodies: [[x, y, tone, r]] }.
      */
     homes = [],
   } = $props();
