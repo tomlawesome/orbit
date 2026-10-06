@@ -220,6 +220,7 @@
         case "warp":
           b.classList.add("showwarp");
           activeEngine().start(UP, pinned === undefined ? {} : { at: Math.min(pinned, UP.dur) });
+          clock.stalls(activeEngine().drawingWorld);
           break;
         case "mark":
           b.classList.remove("arming");
@@ -265,6 +266,7 @@
           b.classList.add("showwarp");
           activeEngine().start(DOWN, pinned === undefined
             ? {} : { at: Math.min(Math.max(0, pinned - D.warp), DOWN.dur) });
+          clock.stalls(activeEngine().drawingWorld);
           break;
         /* The mockup drops `descending` here because its home frame has a
            hidden base state to fall back to; a real screen does not, so the
@@ -297,6 +299,7 @@
                             "instrument", "withdrawing", "dispersing", "showdusk",
                             "farewell", "pinned", "counting", "belong");
     body().classList.remove("holding");
+    clock.stalls(false);
     markEl?.classList.remove("on", "collapse");
     nameEl?.classList.remove("on");
     restoreGlyphVisibility();

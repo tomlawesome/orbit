@@ -7,6 +7,11 @@
  * runTimeline's schedule/cancel) both keep this time, so a stall pauses the
  * journey where it is rather than skipping it ahead to the landing.
  *
+ * App change: a stall is capped only while `stalls(true)` is set -- the
+ * flight sets it while its WebGL2 world is drawing. Otherwise the clock is
+ * real time, as the flight always kept, so a machine that simply draws
+ * slowly finishes the journey on time rather than stretching it.
+ *
  * A HOLD stops the clock at a point in the journey until something it needs
  * has come (Flight.svelte gives it the flight's world), so a journey can
  * start the moment it is asked for and still never draw before it is ready.
@@ -20,14 +25,14 @@ export function journeyClock(env = {}) {
   const real = env.now ?? (() => performance.now());
   const frame = env.frame ?? ((fn) => requestAnimationFrame(fn));
   const cancelFrame = env.cancelFrame ?? ((id) => cancelAnimationFrame(id));
-  let t = 0, last = real(), raf = 0;
+  let t = 0, last = real(), raf = 0, cap = Infinity;
   /** @type {{ at: number, done: boolean } | null} */
   let hold = null;
   /** @type {Map<number, { at: number, fn: () => void }>} */
   const pending = new Map();
   let ids = 0;
   const now = () => {
-    const p = real(); t += Math.min(64, Math.max(0, p - last)); last = p;
+    const p = real(); t += Math.min(cap, Math.max(0, p - last)); last = p;
     if (hold && !hold.done && t > hold.at) t = hold.at;
     return t;
   };
@@ -38,6 +43,8 @@ export function journeyClock(env = {}) {
   };
   return {
     now,
+    /** count a stall as a frame or so (true), or keep real time (false) @param {boolean} on */
+    stalls(on) { now(); cap = on ? 64 : Infinity; },
     /** @param {() => void} fn @param {number} ms */
     schedule(fn, ms) {
       const id = ++ids; pending.set(id, { at: now() + ms, fn });

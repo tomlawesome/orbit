@@ -675,7 +675,13 @@ function createVoyage() {
            on the first draw) before a flight, at no cost to see */
         .then(() => chore(() => touch(ST()), 60, "flight"))
         .then(() => chore(() => touch({ ...ST(), world: { cx: W / 2, cy: H * 3, R: H * 2.4, alpha: 1, c: 0.1 }, tu: 900 }), 60, "flight"))
-        .then(() => { ready = ok && !dead; if (ready) note("flight: ready", since); });
+        /* and whether this machine can draw it at all (#1253): a GPU that
+           cannot (software rendering, a remote desktop) would make every
+           frame a long stall, and the journey's clock would stretch the climb
+           to many times its length. Such a world is never ready, and the
+           flight draws on its own canvas, as it always could */
+        .then(() => chore(() => { fit = fitness(); }, 60, "flight"))
+        .then(() => { ready = ok && !dead && fit; note(`flight: ${ready ? "ready" : fit ? "not made" : "too slow here, drawn without it"}`, since); });
       /* the measure is never hurried, and nothing waits on it */
       warming.then(() => chore(calibrate, 200, "measure"));
     }
@@ -689,11 +695,32 @@ function createVoyage() {
     try { draw(st); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4)); } catch { /* fine */ }
     gl.disable(gl.SCISSOR_TEST); lastDraw = 0;
   }
+  /* the fitness test: one whole frame at the heaviest point of the flight,
+     timed at the smallest drawing the measure would ever choose; fit if
+     that leaves room for about 30 frames a second */
+  let fit = false;
+  function fitness() {
+    if (!ok) return false;
+    if (W < 2) resize(innerWidth, innerHeight);
+    const was = part;
+    part = 0.4; CW = 0; resize(W, H);
+    /** @type {VoyageFrame} */
+    const st = { t: 1900, v: 1, K: 7.4, vp: [W / 2, -0.55 * H], rmax: Math.hypot(W, H) * 1.55, tint: [1, 0.8, 0.4],
+      progress: 0.4, world: null, bloom: 0, tu: 1900, star: true, dt: 0 };
+    let ms = Infinity;
+    try {
+      const t0 = performance.now();
+      draw(st); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+      ms = performance.now() - t0;
+    } catch { /* unfit */ }
+    part = was; CW = 0; resize(W, H); lastDraw = 0;
+    return ms <= 30;
+  }
   /* the measure: a few whole frames at the heaviest point of the flight (the
      nebula, the streaks at full speed), timed, and the drawing's size chosen
      so a frame takes about 11 ms here */
   function calibrate() {
-    if (!ok || document.hidden || (lastDraw && performance.now() - lastDraw < 5000)) return;
+    if (!ok || !fit || document.hidden || (lastDraw && performance.now() - lastDraw < 5000)) return;
     if (W < 2) resize(innerWidth, innerHeight);
     /** @type {VoyageFrame} */
     const st = { t: 1900, v: 1, K: 7.4, vp: [W / 2, -0.55 * H], rmax: Math.hypot(W, H) * 1.55, tint: [1, 0.8, 0.4],
