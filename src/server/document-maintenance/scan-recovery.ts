@@ -37,6 +37,19 @@ import {
   purgeScannerStage,
 } from "@/server/document-maintenance/staging-purge";
 
+/**
+ * A staged object wrapped under a key id this instance does not hold (#1260),
+ * for instance after a restore onto an instance with different keys. The
+ * failure is permanent, so it ends the recovery terminally with the stage
+ * purged, like a stage that fails authentication, and is never retried.
+ */
+export class StagingKeyNotHeldError extends Error {
+  constructor() {
+    super("staging object's key is not held by this instance");
+    this.name = "StagingKeyNotHeldError";
+  }
+}
+
 export async function claimScannerRecoveryJobs(limit = 25): Promise<ClaimedScanJob[]> {
   const rows = await getDb().execute(sql<ClaimedScanJob>`
     with claimable as materialized (
@@ -184,7 +197,7 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
     // outlive a poll cycle (up to `scanRecoveryRetentionHours`), long enough
     // to span a rotation window.
     const stagingKek = keyEncryptionKeyFor(config, record.keyId);
-    if (!stagingKek) throw new Error("staging object's key is not held by this instance");
+    if (!stagingKek) throw new StagingKeyNotHeldError();
     plaintext = decryptDocument(ciphertext!, {
       documentId: job.documentId,
       householdId: record.householdId,
@@ -293,7 +306,8 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
       return;
     }
     if (finalStorageKey) await storage.deleteCiphertext(finalStorageKey).catch(() => undefined);
-    if (error instanceof Error && /authentication|invalid|unsupported|size|enoent|no such file/i.test(error.message)) {
+    if (error instanceof StagingKeyNotHeldError
+      || (error instanceof Error && /authentication|invalid|unsupported|size|enoent|no such file/i.test(error.message))) {
       await purgeScannerStage(job, record, "staging_object_invalid");
       return;
     }
