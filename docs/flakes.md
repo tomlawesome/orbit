@@ -390,6 +390,14 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 
 - 2026-10-05 · dac67650 (!1017) · pipeline 2131 / smoke_webkit (job 31782) · `page.goto: Navigation to "/inbox" is interrupted by another navigation to "/home"` at line 243, 6.3s in, right after `signIn(page, "/home")`; the in-job retry passed (4.1s). Only the passing retry was traced. Same suspected shape as the heading above: the arrival's own hand-on to `/home` landing after the spec's next `goto`. First sighting; an issue on the third.
 
+## v19-feedback-recovery.spec.ts:344 "a mail suggestion whose approval fails, on /inbox is announced, and the act can be repeated by keyboard" — mobile-webkit
+
+- 2026-10-05 · c352cf77 (!1029: install.sh, its tests and docs; `web/` and `tests/` identical to c2d17eda, on which pipelines 2152 and 2184 ran this job green) · pipeline 2188 / smoke_webkit_mobile (job 32287) · `expect(locator).toBeVisible()` on `button[aria-label="Add Mailed renewal … to your orbit"]` gave up after 30 s at line 256, on both the attempt (33.3 s) and the in-job retry (37.7 s): the mail suggestion never appeared on /inbox. The two sibling journeys at the same line (/create, item view) passed in the same run. The job failed on this one. First sighting; an issue on the third.
+
+## v19-feedback-recovery.spec.ts:362 "a save on /create that cannot reach Orbit leaves focus where the reader was" — mobile-webkit
+
+- 2026-10-05 · c352cf77 (same run and same unchanged web tree as the heading above) · pipeline 2188 / smoke_webkit_mobile (job 32287) · `focus is not dropped to the page` at line 373: `focusedElement` was `body` after the staged failure was shown, 5.9 s in; the in-job retry passed (6.5 s), so Playwright counted it flaky. First sighting; an issue on the third.
+
 ## v19-feedback-recovery.spec.ts journeys, `page.goto: net::ERR_ABORTED` straight after sign-in — desktop-chromium (local) (#1221)
 
 - 2026-10-05 · 6b57ac93 + the #1219 test changes (none reach these journeys) · local kept stack, uncapped, two workers · `:362` "a household deletion request that fails leaves focus where the reader was": `page.goto: net::ERR_ABORTED` at `/household/<id>` (line 297). First sighting.

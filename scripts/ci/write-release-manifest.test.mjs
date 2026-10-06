@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it } from "vitest";
  */
 const realScript = new URL("./write-release-manifest.sh", import.meta.url).pathname;
 const realChannelNameScript = new URL("./channel-name.sh", import.meta.url).pathname;
+const realPatternsScript = new URL("../release-metadata-patterns.sh", import.meta.url).pathname;
 
 const DIGEST = `sha256:${"1".repeat(64)}`;
 const COMMIT = "a".repeat(40);
@@ -70,6 +71,7 @@ function workspace({
   const script = join(scriptDir, "write-release-manifest.sh");
   copyFileSync(realScript, script);
   copyFileSync(realChannelNameScript, join(scriptDir, "channel-name.sh"));
+  copyFileSync(realPatternsScript, join(dir, "scripts", "release-metadata-patterns.sh"));
 
   return { dir, files, script, manifestPath: join(dir, ".orbit-supply-chain", "orbit-release-manifest.json") };
 }
@@ -79,7 +81,7 @@ function run({ script, files, args = ["registry.example/ai/orbit", DIGEST], env 
     PATH: process.env.PATH,
     CI_COMMIT_SHA: COMMIT,
     CI_COMMIT_BRANCH: "preview",
-    ORBIT_VERSION: "1.4.0",
+    ORBIT_VERSION: "v1.4.0",
     ORBIT_LAUNCHER_TAG: "v1.2.3",
     ORBIT_LAUNCHER_COMMIT: LAUNCHER_COMMIT,
     ORBIT_LAUNCHER_AMD64_ARCHIVE: files.amd64Archive,
@@ -101,7 +103,7 @@ describe("write-release-manifest.sh", () => {
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
     expect(manifest).toMatchObject({
       schema: "https://tomlawson.io/schemas/orbit-release-manifest/v1",
-      version: "1.4.0",
+      version: "v1.4.0",
       channel: "preview",
       commit: COMMIT,
       image: { repository: "registry.example/ai/orbit", digest: DIGEST },
@@ -149,9 +151,13 @@ describe("write-release-manifest.sh", () => {
   it("refuses a missing or malformed ORBIT_VERSION", () => {
     const { files, script } = workspace();
     expect(() => run({ script, files, dropEnv: ["ORBIT_VERSION"] })).toThrow(/ORBIT_VERSION is not set/);
-    expect(() => run({ script, files, env: { ORBIT_VERSION: "v1" } })).toThrow(
-      /not a plain semantic version/,
-    );
+    // Orbit's version is vX.Y.Z on every surface (release-metadata-patterns.sh,
+    // the image label, `orbit --version`); the bare form and a short one are
+    // both refused. The first preview run of v0.3.0 failed here on "v0.3.0"
+    // when this script alone demanded the bare form (#1228).
+    for (const malformed of ["v1", "1.4.0", "v1.4.0-rc1"]) {
+      expect(() => run({ script, files, env: { ORBIT_VERSION: malformed } })).toThrow(/not an Orbit release version/);
+    }
   });
 
   it("derives the channel from CI_COMMIT_BRANCH via the shared channel-name.sh", () => {
