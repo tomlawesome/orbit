@@ -7,6 +7,8 @@
  *   · `changes` is filled only where the licence requires adaptations to be
  *     marked (Creative Commons: the Milky Way). NASA's pictures are not
  *     copyrighted, so they carry the credit NASA asks for and nothing else.
+ *   · A CC-licensed work's own title is in the `name` the page shows (CC 3.0
+ *     §4(c) asks for the title where one is supplied); `source` is not drawn.
  *   · `licenceUrl` is given for every entry under a licence; for NASA it is
  *     NASA's own guidelines for using its imagery.
  *
@@ -80,7 +82,7 @@ export const CREDITS = [
     files: ["flight/world/moon.webp"],
   },
   {
-    name: "The Milky Way behind the flight",
+    name: "The Milky Way behind the flight, from \"Deep Star Maps 2020\"",
     source: "NASA's Deep Star Maps 2020, from Gaia DR2 data",
     author: "NASA/Goddard Space Flight Center Scientific Visualization Studio; Gaia DR2: ESA/Gaia/DPAC",
     licence: "CC BY-NC 3.0 IGO (commercial use of this picture needs ESA's permission)",
