@@ -143,7 +143,9 @@ has no maintenance pass of its own yet. Locally, `scripts/test-e2e-local.sh`
 runs all five unless told otherwise; `ORBIT_E2E_ENGINES=chromium`, `=firefox`
 or `=webkit` picks one engine the way the jobs do, and
 `ORBIT_E2E_WEBKIT_DEVICES=desktop` or `=mobile` narrows WebKit further the
-way `smoke_webkit` and `smoke_webkit_mobile` do. The automated checks are
+way `smoke_webkit` and `smoke_webkit_mobile` do. On the development host the
+WebKit projects run inside the CI Playwright image rather than on the host,
+which lacks WebKit's system packages (#1235). The automated checks are
 deliberately representative, not device certification:
 
 | Contract | Automated evidence |
