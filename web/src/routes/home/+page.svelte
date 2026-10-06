@@ -252,9 +252,19 @@
       return;
     }
     providerLogout = redirectTo;
+    /* #1262: the menu goes as the descent begins, never left open over it
+       (it stands above the flight's canvas). Closed the way "watch the
+       tour" closes it; kept open on a refusal above, so its line is read. */
+    closeAccount();
     leaving = true;
     await tick();
     flight?.descend();
+  }
+  /* The account card closes the way home.behaviour.js's closeOverlays
+     closes it. */
+  function closeAccount() {
+    document.getElementById("account")?.classList.remove("open");
+    document.querySelector("button.orb")?.setAttribute("aria-expanded", "false");
   }
   /* The provider's own end-session URL, kept for the way back: following it
      now would yank the reader off the ratified goodbye, so "sign back in"
@@ -1331,11 +1341,7 @@
   <!-- "Watch the tour" (#1189), beside the theme as in every account menu.
        The card closes the way home.behaviour.js's closeOverlays closes it,
        so the film opens over the sky rather than under the card. -->
-  <button class="watch" onclick={() => {
-    document.getElementById("account")?.classList.remove("open");
-    document.querySelector("button.orb")?.setAttribute("aria-expanded", "false");
-    void watchTour();
-  }}>↻ watch the tour</button>
+  <button class="watch" onclick={() => { closeAccount(); void watchTour(); }}>↻ watch the tour</button>
   <!-- Two taps to leave, and the second one revokes the session before a
        single frame of the descent is drawn (§15: logout is the login played
        backwards, and it is a real sign-out, not an animation about one). -->
