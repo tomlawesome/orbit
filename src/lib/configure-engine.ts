@@ -30,6 +30,8 @@ import {
   normalizePublicOrigin,
   secretFileFormatMessage,
 } from "./config-contract";
+import { acquireDeployLock as acquireSharedDeployLock } from "./deploy-lock";
+import { HostOwnershipError, applyHostOwnership } from "./host-ownership";
 import { parseEnvOrbitContent } from "./env-orbit-file";
 
 // The write side of scripts/configure.sh, ported to the TypeScript engine
@@ -159,13 +161,15 @@ function atomicWriteFile(finalPath: string, content: string | Buffer, mode: numb
   try {
     writeFileSync(tmpPath, content, { mode });
     chmodSync(tmpPath, mode);
-  } catch {
+    // #1258: handed to the host operator before it takes its final name.
+    applyHostOwnership(tmpPath);
+  } catch (error) {
     try {
       rmSync(tmpPath, { force: true });
     } catch {
       /* best effort cleanup */
     }
-    refuse(`Could not write ${finalPath}.`, "write-failed");
+    refuse(error instanceof HostOwnershipError ? error.message : `Could not write ${finalPath}.`, "write-failed");
   }
   try {
     renameSync(tmpPath, finalPath);
@@ -181,85 +185,10 @@ function atomicWriteFile(finalPath: string, content: string | Buffer, mode: numb
 
 // --- cross-process lock (O1-R8/O1-R7) ---------------------------------------
 //
-// Shared (same file name, same algorithm) with install-transaction.ts's own
-// acquireDeployLock: both modules mutate the same managed paths
-// (.env-orbit/.orbit-secrets) under the same deployment directory, and
-// neither had any cross-process exclusion before this (two concurrent
-// `orbit configure` writers could each read-modify-write
-// updateManagedKeys's target and lose the other's keys; a concurrent
-// install/update could do the same to install-transaction.ts's commits).
-// Using one lock file for both closes both gaps with a single mechanism: a
-// second `orbit configure`, `orbit install` or `orbit update` targeting the
-// same directory fails fast with a clear message instead of racing.
-//
-// A plain `open(O_CREAT|O_EXCL)` is the exclusion primitive (atomic across
-// processes on every real filesystem this runs on, unlike a stat-then-create
-// pair); a lock file older than DEPLOY_LOCK_STALE_MS is treated as abandoned
-// by a crashed process (this engine has no PID-liveness check available
-// across a container boundary) and taken over rather than blocking forever.
-const DEPLOY_LOCK_FILE_NAME = ".orbit-engine.lock";
-const DEPLOY_LOCK_STALE_MS = 10 * 60 * 1000;
-
-/** Acquires the deployment-directory lock, or refuses if another run holds it. Returns a release function the caller must call exactly once, success or failure. */
+// The one deploy lock (src/lib/deploy-lock.ts, #1210 D9), shared with the
+// configuration migration and install/update's file transaction.
 function acquireDeployLock(deployDir: string, operationLabel: string): () => void {
-  const lockPath = join(deployDir, DEPLOY_LOCK_FILE_NAME);
-
-  const takeLock = (): number => openSync(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
-
-  let fd: number;
-  try {
-    fd = takeLock();
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-      refuse(`Could not take the ${operationLabel} lock at ${lockPath}.`, "locked");
-    }
-    let staleEnough: boolean;
-    try {
-      staleEnough = Date.now() - statSync(lockPath).mtimeMs > DEPLOY_LOCK_STALE_MS;
-    } catch {
-      staleEnough = true; // Lock vanished between the EEXIST and this stat; retry once below.
-    }
-    if (!staleEnough) {
-      refuse(
-        `Another ${operationLabel} is already running against this deployment (lock held at ${lockPath}). Wait for it to finish, or remove the lock file yourself once you are certain no other run is active.`,
-        "locked",
-      );
-    }
-    // Reclaim by rename, not unlink-then-create (same shape as
-    // install-transaction.ts's copy): two processes that both saw the stale
-    // lock would otherwise each unlink and recreate it, and the slower unlink
-    // removed the faster one's fresh lock, leaving both believing they held
-    // it. Only one rename succeeds; the other tries the plain create once
-    // more and refuses if it is taken.
-    const reclaimed = `${lockPath}.stale-${process.pid}`;
-    try {
-      renameSync(lockPath, reclaimed);
-      rmSync(reclaimed, { force: true });
-    } catch {
-      /* the other process reclaimed it first; the create below decides */
-    }
-    try {
-      fd = takeLock();
-    } catch {
-      refuse(`Another ${operationLabel} is already running against this deployment (lock held at ${lockPath}).`, "locked");
-    }
-  }
-  // The lock names its holder, so a release never removes a lock that was
-  // reclaimed from this process as stale and now belongs to another run.
-  const owner = `${process.pid}:${randomUUID()}\n`;
-  writeSync(fd, owner);
-  closeSync(fd);
-
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    try {
-      if (readFileSync(lockPath, "utf8") === owner) rmSync(lockPath, { force: true });
-    } catch {
-      /* best effort */
-    }
-  };
+  return acquireSharedDeployLock(deployDir, operationLabel, (message) => new ConfigureEngineRefusal(message, "locked"));
 }
 
 function generateHexSecret(): string {
@@ -534,6 +463,11 @@ export function ensureSecretsDirectory(deployDir: string): void {
       mkdirSync(dirPath);
     } catch {
       refuse(`Could not create ${SECRETS_DIRECTORY_NAME}.`, "secrets-directory-invalid");
+    }
+    try {
+      applyHostOwnership(dirPath);
+    } catch (error) {
+      refuse((error as Error).message, "write-failed");
     }
   }
   try {
