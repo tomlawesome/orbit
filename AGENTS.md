@@ -255,8 +255,10 @@ Check the list before building a test rig or handing a check to the owner.
   profile ones included, and networks left with no container). `--remove`
   tears down only stale projects and skips any with a running container, since
   other sessions share the host; `--project NAME --remove` removes that one
-  even if running, `--remove --all` removes running ones too. Keeps
-  `orbit-ollama` and its model volume unless `--include-ollama`. Containers
+  even if running, `--remove --all` removes running ones too. Also removes unused
+  `orbit-local`, `orbit-vapid-bootstrap` and `orbit-acceptance-local` images
+  (not with `--project`). Keeps `orbit-ollama` and its model volume unless
+  `--include-ollama`. Containers
   Compose did not create are listed, never removed (#1241)
 
 ## Traps when running things locally

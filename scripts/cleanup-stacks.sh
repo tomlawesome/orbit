@@ -24,14 +24,20 @@
 # no container at all (fourteen such networks once used up Docker's address
 # pools and put a new stack on the owner's LAN range). Containers Compose did
 # not create (a `docker run` review container) are listed and never removed.
+# Also lists the locally built images (orbit-local, orbit-vapid-bootstrap,
+# orbit-acceptance-local) that no container uses; plain --remove or --all
+# removes those by name, never with -f and never by pruning. They belong to no
+# project, so --project leaves them alone.
 # Output is plain text, never coloured.
 set -uo pipefail
 
 PROJECT_LABEL='com.docker.compose.project'
 OLLAMA_SERVICE='orbit-ollama'
+# Repositories of images the scripts build locally. Exact names only.
+IMAGE_REPOS='orbit-local orbit-vapid-bootstrap orbit-acceptance-local'
 
 usage() {
-  sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 remove=false
@@ -133,6 +139,36 @@ selected_for_removal() {
   [ "$all_projects" = true ] || [ -n "$only_project" ] || [ -z "$(running_containers "$1")" ]
 }
 
+# Sets $images to one row per locally built image:
+#   repository|tag|id|age|size|used     (used is "yes" when any container, in any
+# state and any project, was created from it). Returns non-zero when Docker
+# cannot say, so nothing is ever removed on a guess.
+images=""
+fetch_images() {
+  local listed ids used_ids="" repo tag id age size row keep r
+  listed="$(docker image ls --no-trunc --format '{{.Repository}}|{{.Tag}}|{{.ID}}|{{.CreatedSince}}|{{.Size}}')" || return 1
+  ids="$(docker ps -a -q)" || return 1
+  if [ -n "$ids" ]; then
+    local -a id_array
+    mapfile -t id_array <<<"$ids"
+    used_ids="$(docker inspect --format '{{.Image}}' "${id_array[@]}")" || return 1
+  fi
+  images=""
+  while IFS='|' read -r repo tag id age size; do
+    [ -n "$repo" ] || continue
+    keep=false
+    for r in $IMAGE_REPOS; do
+      [ "$repo" = "$r" ] && keep=true
+    done
+    [ "$keep" = true ] || continue
+    row="$repo|$tag|$id|$age|$size|no"
+    if [ -n "$used_ids" ] && printf '%s\n' "$used_ids" | grep -qxF -- "$id"; then
+      row="$repo|$tag|$id|$age|$size|yes"
+    fi
+    images="${images:+$images$'\n'}$row"
+  done <<<"$listed"
+}
+
 failures=0
 skipped=0
 ollama_listed=false
@@ -219,6 +255,29 @@ if [ -n "$foreign" ]; then
   echo
 fi
 
+images_ok=true
+unused_images=0
+fetch_images || {
+  images_ok=false
+  echo "Could not tell which locally built images are in use, so images are left alone." >&2
+  failures=$((failures + 1))
+}
+if [ "$images_ok" = true ] && [ -n "$images" ]; then
+  echo "Locally built images (not part of any project):"
+  while IFS='|' read -r repo tag _ age size used; do
+    if [ "$used" = yes ]; then
+      echo "    $repo:$tag ($age, $size) in use, kept"
+    else
+      echo "    $repo:$tag ($age, $size) unused"
+      unused_images=$((unused_images + 1))
+    fi
+  done <<<"$images"
+  if [ -n "$only_project" ]; then
+    echo "  Images are not removed when --project is used."
+  fi
+  echo
+fi
+
 try() {
   # try DESCRIPTION CMD...: run a removal, print what it did, count failures.
   local description="$1"
@@ -237,16 +296,15 @@ ollama_note() {
 }
 
 if [ "$remove" != true ]; then
-  if [ -n "$projects" ]; then
-    if [ "$ollama_listed" = true ]; then
-      ollama_note
-    fi
-    echo "Nothing was changed. --remove tears down the stale projects; a running one needs --project NAME --remove, or --all."
+  if [ "$ollama_listed" = true ]; then
+    ollama_note
   fi
+  if [ -n "$projects" ] || [ "$unused_images" -gt 0 ]; then
+    echo "Nothing was changed. --remove tears down the stale projects and removes unused images; a running project needs --project NAME --remove, or --all."
+  fi
+  [ "$failures" -eq 0 ] || exit 1
   exit 0
 fi
-
-[ -n "$projects" ] || exit 0
 
 echo "Removing:"
 for project in $projects; do
@@ -287,6 +345,21 @@ while IFS='|' read -r proj name; do
   esac
   try "network $name" docker network rm "$name"
 done <<<"$networks"
+
+# Images last: a container removed above frees its image, so ask Docker again
+# rather than trusting the listing made before the removals.
+if [ -z "$only_project" ] && [ "$images_ok" = true ]; then
+  if fetch_images; then
+    while IFS='|' read -r repo tag _ _ _ used; do
+      [ -n "$repo" ] || continue
+      [ "$used" = no ] || continue
+      try "image $repo:$tag" docker image rm "$repo:$tag"
+    done <<<"$images"
+  else
+    echo "Could not tell which locally built images are in use, so images were left alone." >&2
+    failures=$((failures + 1))
+  fi
+fi
 
 if [ "$kept_ollama" = true ]; then
   echo
