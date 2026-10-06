@@ -118,6 +118,8 @@
         {#snippet mark()}<svg width="22" height="14" viewBox="0 0 22 14" fill="none" stroke="currentColor" stroke-width="1"><path d="M1 7h20"/><rect x="2" y="2" width="5" height="10"/><rect x="15" y="2" width="5" height="10"/><path d="M2 4.5h5M2 9.5h5M15 4.5h5M15 9.5h5"/><rect x="9" y="5" width="4" height="4" fill="currentColor"/></svg>{/snippet}
       </Row>
     {/if}
+    <!-- #1256: last, for every member, in the plain mark Items and Inbox use. -->
+    <Row title="About" href={resolve("/about")} current={current === "about"}>{#snippet mark()}<span></span>{/snippet}</Row>
   </nav>
   <h3 class="p-caps" id="{uid}-theme">Theme</h3>
   <div class="swatches" role="group" aria-labelledby="{uid}-theme">

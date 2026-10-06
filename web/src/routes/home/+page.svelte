@@ -1316,6 +1316,7 @@
     <a href={resolve("/inbox")}>Inbox</a>
     <a href={resolve("/settings")}>Settings</a>
     <a href={resolve("/administration")}>Administration</a>
+    <a href={resolve("/about")}>About</a>
   </nav>
   <div class="swatches" role="group" aria-label="Theme">
     <span>THEME</span>
