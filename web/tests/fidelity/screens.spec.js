@@ -535,6 +535,25 @@ const SCREENS = [
       && document.querySelectorAll(".msys").length > 0,
   },
   {
+    name: "about",
+    /* #1256: built from the design record on the issue, which has no mockup
+       sheet to port against, so the screen is judged against its own
+       baseline from the first one. Settled once card 1's fixture rows are in
+       (they arrive client-side); cards 2 and 3 are in the server render. */
+    path: "/about",
+    stage: "owned",
+    settle: () => document.querySelectorAll(".about-page .orbit .kv").length > 0,
+  },
+  {
+    name: "about-pocket",
+    /* The same one layout at a phone's width (#1256, owner answer 8): the
+       pocket chrome above it and the kit's floor in the type. */
+    path: "/about",
+    stage: "owned",
+    viewport: { width: 390, height: 844 },
+    settle: () => document.querySelectorAll(".about-page .orbit .kv").length > 0,
+  },
+  {
     name: "relay",
     path: "/settings/mail",
     stage: "porting",
