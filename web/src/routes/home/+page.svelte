@@ -210,27 +210,22 @@
   /** @type {import('$lib/flight/Flight.svelte').default | null} */
   let flight = $state(null);
   let leaving = $state(fixtureFlight === "down");
-  let armedOut = $state(false);
-  /** Set for the span of the actual signOut() request (#1151 W1-R7):
-      armedOut alone stays true for that whole span too, so a third rapid
-      tap — while the second tap's request is still in flight — fell
-      through the `if (!armedOut)` guard and fired a second, concurrent
-      signOut() call. */
+  /** Set for the span of the actual signOut() request (#1151 W1-R7), so a
+      second press while it is still in flight never fires a second,
+      concurrent signOut() call. */
   let signingOut = $state(false);
   /** @type {string | null} */
   let signOutProblem = $state(null);
 
-  /* #1253: armed, the descent is likely, so its world is readied now (never
-     a compile that would stop the page: warm.js), and it is there by the
-     time the second tap has revoked the session */
-  function armSignOut() {
-    armedOut = true;
+  /* #1253, #1262: the menu holds the sign-out, so when it opens the descent's
+     world is readied (never a compile that would stop the page: warm.js),
+     and it is there by the time the one press has revoked the session */
+  function readyDescent() {
     readyFlight({ hurry: true, gentle: true });
   }
 
   async function tapSignOut() {
-    /* Two taps, as every destructive control in this app arms and fires. */
-    if (!armedOut) { armSignOut(); return; }
+    /* One press (owner, 2026-10-06): the plain sign-out does not arm first. */
     if (signingOut) return;
     signingOut = true;
     signOutProblem = null;
@@ -246,7 +241,6 @@
     try {
       redirectTo = await signOut();
     } catch (error) {
-      armedOut = false;
       signingOut = false;
       signOutProblem = /** @type {any} */ (error)?.message ?? "still signed in — try again";
       return;
@@ -1314,7 +1308,7 @@
   </svg>
   {#if mailWaiting > 0}<i class="count">{mailWaiting}</i>{/if}
 </a>
-<button class="orb" aria-expanded="false" aria-controls="account" title="Menu">{initials}</button>
+<button class="orb" aria-expanded="false" aria-controls="account" title="Menu" onclick={readyDescent}>{initials}</button>
 <div class="account" id="account" role="region" aria-label="Account and menu">
   <div class="who"><b>{view?.user?.displayName ?? ""}</b><span id="who-role"
     >{view ? `${view.household?.name ?? ""} · ${view.galaxy[/** @type {string} */ (view.primary)]?.role ?? "member"}` : ""}</span></div>
@@ -1342,11 +1336,11 @@
        The card closes the way home.behaviour.js's closeOverlays closes it,
        so the film opens over the sky rather than under the card. -->
   <button class="watch" onclick={() => { closeAccount(); void watchTour(); }}>↻ watch the tour</button>
-  <!-- Two taps to leave, and the second one revokes the session before a
+  <!-- One press to leave, and it revokes the session before a
        single frame of the descent is drawn (§15: logout is the login played
        backwards, and it is a real sign-out, not an animation about one). -->
   <button class="signout" onclick={tapSignOut} disabled={signingOut}>
-    {armedOut ? "tap again to sign out" : "sign out →"}
+    sign out →
   </button>
   {#if signOutProblem}<div class="signout-problem">{signOutProblem}</div>{/if}
 </div>

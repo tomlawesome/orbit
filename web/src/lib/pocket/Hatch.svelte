@@ -4,7 +4,6 @@
   import { DEFAULT_THEME } from "$lib/theme.js";
   import { SWATCHES, applyTheme } from "$lib/theme-swatches.js";
   import { watchTour } from "$lib/tour/watch.js";
-  import ArmButton from "./ArmButton.svelte";
   import Row from "./Row.svelte";
   import Sheet from "./Sheet.svelte";
   /* First, with no comment of its own: Svelte hoists $props.id() and would
@@ -18,7 +17,7 @@
    * behind the foot on an iPhone (#1188).
    * Who you are; the journeys as 56px rows, the current page's in the accent
    * text grade; the five theme swatches as 44px rings; sign-out as a ghost
-   * pill that arms. Leaves by any of the sheet's dismisses.
+   * pill, one tap (owner, 2026-10-06). Leaves by any of the sheet's dismisses.
    *
    * Differs from §2.2's list in one row, on purpose: "Items" stays, because
    * it is the belt's only way in (#1014). Administration shows to instance
@@ -56,6 +55,10 @@
      reader reaches the goodbye screen. */
   /** @type {string | null} */
   let problem = $state(null);
+  /* One tap (owner, 2026-10-06): the plain sign-out does not arm first. Set
+     while the request is in flight, so a second tap never fires a second,
+     concurrent signOut() (#1151 W1-R7, as home has it). */
+  let signingOut = $state(false);
   /* "Watch the tour" (#1189). The sheet closes first and its history entry
      comes off before the film navigates, or the back that pops it would
      land after the film's own navigation and undo it. */
@@ -70,10 +73,13 @@
   }
 
   async function leave() {
+    if (signingOut) return;
+    signingOut = true;
     problem = null;
     try {
       await signOut();
     } catch (error) {
+      signingOut = false;
       problem = /** @type {{ message?: string }} */ (error)?.message ?? "still signed in — try again";
       return;
     }
@@ -128,7 +134,7 @@
   {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
   <!-- The sheet's one act, in its pinned foot (review round §1.2). -->
   {#snippet foot()}
-    <ArmButton label="sign out →" armedLabel="tap again to sign out" onfire={leave} />
+    <button class="p-pill danger" onclick={leave} disabled={signingOut}>sign out →</button>
   {/snippet}
 </Sheet>
 
