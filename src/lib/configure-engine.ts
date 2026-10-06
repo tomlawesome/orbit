@@ -1,19 +1,14 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import {
   chmodSync,
-  closeSync,
-  constants,
-  fstatSync,
   lstatSync,
   mkdirSync,
-  openSync,
   readFileSync,
   renameSync,
   rmSync,
   statSync,
   type Stats,
   writeFileSync,
-  writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -32,7 +27,7 @@ import {
 } from "./config-contract";
 import { acquireDeployLock as acquireSharedDeployLock } from "./deploy-lock";
 import { HostOwnershipError, applyHostOwnership } from "./host-ownership";
-import { parseEnvOrbitContent } from "./env-orbit-file";
+import { preflightEnvironmentFile } from "./configuration-migration";
 import { ensureVapidKeys } from "./vapid-keys";
 
 // The write side of scripts/configure.sh, ported to the TypeScript engine
@@ -798,48 +793,20 @@ export type ConfigurePreflightOutcome =
   | { ok: false; code: "preflight-failed" | "configuration-migration-required" };
 
 /**
- * run_configuration_preflight (configure.sh:42-51, guarantee #2). bash
- * drives `configuration.sh --preflight` as a subprocess; that script is not
- * shipped inside the app image, so this reuses env-orbit-file.ts's
- * parseEnvOrbitContent — the existing parity-proven mirror of
- * configuration.sh's own `parse_file` — instead (see this module's header
- * comment). File-safety (regular, non-symlink, mode 600) is re-checked here
- * the same way src/cli/orbit.ts's commandCheck does: a single O_NOFOLLOW
- * descriptor so the safety check and the content read cannot be split by a
- * file swap. Deliberately not a separate existsSync-then-open pair (CodeQL
- * js/file-system-race): "does the file exist" is answered by the same
- * openSync call that reads it, dispatching on its own failure code —
- * mirroring recovery-bundle.ts's readRegularFileNoFollow, whose own comment
- * notes "a dangling/symlink path surfaces as ELOOP/ENOENT from the single
- * open call itself." Only a true ENOENT (nothing at this path at all) skips
- * preflight, matching bash's `[[ ! -e ]]`; a symlinked `.env-orbit` (ELOOP)
- * fails closed here rather than bash's own dangling-symlink-only skip —
- * strictly more conservative, not a behavioral regression.
+ * run_configuration_preflight (configure.sh guarantee #2): an existing
+ * .env-orbit must pass the configuration contract's preflight
+ * (src/lib/configuration-migration.ts, the port of configuration.sh); a file
+ * with no schema marker needs the installer's migration first. Nothing at
+ * the path at all (bash's `[[ ! -e ]]`) skips the check.
  */
 export function runConfigurePreflight(deployDir: string): ConfigurePreflightOutcome {
   const envPath = join(deployDir, ENVIRONMENT_FILE_NAME);
-
-  let descriptor: number;
-  try {
-    descriptor = openSync(envPath, constants.O_RDONLY | constants.O_NOFOLLOW);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { ok: true };
-    return { ok: false, code: "preflight-failed" };
+  if (!pathInfo(envPath).existsFollowing && !pathInfo(envPath).isSymlink) return { ok: true };
+  const result = preflightEnvironmentFile(envPath);
+  if (result.status !== 0) return { ok: false, code: "preflight-failed" };
+  if (/^safely_migratable ORBIT_CONFIG_SCHEMA_VERSION$/m.test(result.stdout)) {
+    return { ok: false, code: "configuration-migration-required" };
   }
-  let content: string;
-  try {
-    const stat = fstatSync(descriptor);
-    if (!stat.isFile() || (stat.mode & 0o777) !== 0o600) {
-      return { ok: false, code: "preflight-failed" };
-    }
-    content = readFileSync(descriptor, "utf8");
-  } finally {
-    closeSync(descriptor);
-  }
-
-  const parsed = parseEnvOrbitContent(content);
-  if (!parsed.ok) return { ok: false, code: "preflight-failed" };
-  if (!parsed.schemaPresent) return { ok: false, code: "configuration-migration-required" };
   return { ok: true };
 }
 

@@ -1,81 +1,120 @@
-import { spawnSync } from "node:child_process";
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
-import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
+import { readGolden } from "./__fixtures__/golden";
 import {
-  buildMigrateArgv,
-  buildPreflightArgv,
+  CONFIGURATION_ROLLBACK_SUFFIX,
+  runConfigurationCommand,
   runConfigurationMigration,
   runConfigurationPreflight,
   type ConfigurationMigrationTarget,
-  type ConfigurationScriptAdapter,
 } from "./configuration-migration";
+import { createInstallConfigurationScriptAdapter } from "./install-script-adapters";
 
-// Whole-script parity between this module's decision logic and the real,
-// unmodified scripts/configuration.sh --preflight / --migrate --transaction
-// entry points (issue #295 slice 3). Unlike install-transaction.parity.test.ts
-// and target-identity.parity.test.ts (which awk-extract function bodies
-// because install.sh's transaction phase has no standalone entry point),
-// configuration.sh already has real, independently-invocable --preflight
-// and --migrate flags — the same situation src/lib/config-contract.
-// parity.test.ts is in for `configure.sh --check`, so this test spawns the
-// real script directly (stronger than function extraction: it proves the
-// exact argv this module builds actually drives the live script to the
-// message this module expects), through a reference adapter local to this
-// file (not shipped — see configuration-migration.ts's module comment for
-// why a real subprocess adapter isn't shipped in this slice).
+// The configuration contract port (#1210 D8) against what the retired
+// scripts/configuration.sh produced for the same inputs, captured from
+// b0ee5929 (src/lib/__fixtures__/README.md). Every case compares exit
+// status, stdout, the stderr code, and the file, rollback copy and deploy
+// lock left behind. Golden-file characterization: the fixtures are bash's,
+// never regenerated from this port.
 
-// This file spawns the real scripts/configuration.sh under bash; a spawn
-// that takes 0.7s quiet took 4.3s on a starved core (#698). Budget and
-// reasoning: scripts/process-budget.mjs.
-vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
-
-const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const sandboxes: string[] = [];
-
 afterAll(() => {
   for (const sandbox of sandboxes) rmSync(sandbox, { recursive: true, force: true });
 });
-
-function makeSandbox(envOrbitContent: string): string {
-  const sandbox = mkdtempSync(join(tmpdir(), "orbit-configuration-migration-parity-"));
-  sandboxes.push(sandbox);
-  mkdirSync(join(sandbox, "scripts"));
-  cpSync(join(repoRoot, "scripts", "configuration.sh"), join(sandbox, "scripts", "configuration.sh"));
-  writeFileSync(join(sandbox, ".env-orbit"), envOrbitContent, { mode: 0o600 });
-  chmodSync(join(sandbox, ".env-orbit"), 0o600);
-  return sandbox;
+function sandbox(): string {
+  const dir = mkdtempSync(join(tmpdir(), "orbit-configuration-parity-"));
+  sandboxes.push(dir);
+  return dir;
 }
 
-// Reference adapter: shells the real script exactly as install.sh does
-// (bash <script> <args...>), through this module's own argv builders — not
-// shipped from configuration-migration.ts itself (see that module's header
-// comment for why: a "handoff", not a port, and slice 5 owns the real
-// production subprocess call).
-function realAdapter(sandbox: string): ConfigurationScriptAdapter {
-  return {
-    runPreflight: (configurationScript, environmentFile) => {
-      const result = failOnProcessDeadline(spawnSync("bash", [configurationScript, ...buildPreflightArgv(environmentFile)], {
-        cwd: sandbox,
-        encoding: "utf8",
-        ...processGuard(),
-      }), { label: "runPreflight" });
-      return { status: result.status ?? -1, stdout: result.stdout };
-    },
-    runMigrate: (configurationScript, target) => {
-      const result = failOnProcessDeadline(spawnSync("bash", [configurationScript, ...buildMigrateArgv(target)], {
-        cwd: sandbox,
-        encoding: "utf8",
-        ...processGuard(),
-      }), { label: "runMigrate" });
-      return { status: result.status ?? -1, stdout: result.stdout };
-    },
+interface MatrixCase {
+  name: string;
+  input: {
+    content: string;
+    args: string[];
+    mode?: number;
+    rollback?: string;
+    lock?: string;
+    lockAgeMinutes?: number;
+    symlink?: boolean;
+    directory?: boolean;
+    missing?: boolean;
+    noFile?: boolean;
+  };
+  bash: {
+    status: number;
+    stdout: string;
+    stderr: string;
+    file: string | null;
+    fileMode: number | null;
+    rollback: { content: string; mode: number } | null;
+    lock: string | null;
+    migratingLeftovers: number;
   };
 }
+
+const matrix = readGolden<{ cases: MatrixCase[] }>("configuration-migration", "matrix");
+
+describe("configuration contract port: every captured configuration.sh case", () => {
+  it("has the full captured matrix", () => {
+    expect(matrix.cases.length).toBe(94);
+  });
+
+  for (const testCase of matrix.cases) {
+    it(testCase.name, () => {
+      const { input, bash } = testCase;
+      const dir = sandbox();
+      const file = join(dir, ".env-orbit");
+      writeFileSync(file, input.content);
+      chmodSync(file, input.mode ?? 0o600);
+      const rollbackPath = `${file}${CONFIGURATION_ROLLBACK_SUFFIX}`;
+      if (input.rollback !== undefined) {
+        writeFileSync(rollbackPath, input.rollback);
+        chmodSync(rollbackPath, 0o600);
+      }
+      const lockPath = join(dir, ".orbit-engine.lock");
+      if (input.lock !== undefined) {
+        writeFileSync(lockPath, input.lock);
+        if (input.lockAgeMinutes) {
+          const stale = new Date(Date.now() - input.lockAgeMinutes * 60_000);
+          utimesSync(lockPath, stale, stale);
+        }
+      }
+      let argFile = file;
+      if (input.symlink) {
+        argFile = join(dir, "link");
+        symlinkSync(file, argFile);
+      }
+      if (input.directory) argFile = dir;
+      if (input.missing) argFile = join(dir, "absent");
+      const args = input.noFile ? input.args : [...input.args, "--file", argFile];
+
+      const result = runConfigurationCommand(args, join(dir, ".env-orbit"));
+
+      expect({ status: result.status, stdout: result.stdout, stderr: result.stderr }).toEqual({
+        status: bash.status,
+        stdout: bash.stdout,
+        stderr: bash.stderr,
+      });
+      expect(existsSync(file) ? readFileSync(file, "utf8") : null).toBe(bash.file);
+      expect(existsSync(file) ? lstatSync(file).mode & 0o777 : null).toBe(bash.fileMode);
+      expect(
+        existsSync(rollbackPath)
+          ? { content: readFileSync(rollbackPath, "utf8"), mode: lstatSync(rollbackPath).mode & 0o777 }
+          : null,
+      ).toEqual(bash.rollback);
+      expect(existsSync(lockPath) ? readFileSync(lockPath, "utf8") : null).toBe(bash.lock);
+      expect(readdirSync(dir).filter((name) => name.includes("migrating")).length).toBe(bash.migratingLeftovers);
+    });
+  }
+});
+
+// install's hand-off (runConfigurationPreflight / runConfigurationMigration,
+// install.sh:1405-1424 and 2040) through the shipped adapter, against the
+// bash results the old reference adapter recorded.
 
 const IMAGE = "ghcr.io/tomlawesome/orbit@sha256:" + "b".repeat(64);
 const DIGEST = "sha256:" + "b".repeat(64);
@@ -91,66 +130,89 @@ function targetFor(overrides: Partial<ConfigurationMigrationTarget> = {}): Confi
   };
 }
 
-describe("configuration.sh --preflight / --migrate --transaction parity", () => {
-  it("agrees: an already-current file reports 'already current' and preflight passes", () => {
-    const sandbox = makeSandbox(
-      [
-        `ORBIT_IMAGE=${IMAGE}`,
-        "ORBIT_CONFIG_SCHEMA_VERSION=1",
-        "ORBIT_CONFIG_APPLIED_VERSION=v1.0.0",
-        `ORBIT_CONFIG_APPLIED_DIGEST=${DIGEST}`,
-        "COMPOSE_PROJECT_NAME=orbit",
-        "",
-      ].join("\n"),
+interface HandOffStep {
+  kind: "preflight" | "migrate";
+  status: number;
+  stdout: string;
+  file: string;
+}
+
+function handOffSandbox(content: string): string {
+  const dir = sandbox();
+  writeFileSync(join(dir, ".env-orbit"), content, { mode: 0o600 });
+  chmodSync(join(dir, ".env-orbit"), 0o600);
+  return dir;
+}
+
+function expectSteps(dir: string, golden: HandOffStep[], steps: Array<() => { status: number; stdout: string }>): void {
+  expect(steps.length).toBe(golden.length);
+  steps.forEach((step, index) => {
+    const result = step();
+    expect({ kind: golden[index].kind, status: result.status, stdout: result.stdout }).toEqual({
+      kind: golden[index].kind,
+      status: golden[index].status,
+      stdout: golden[index].stdout,
+    });
+    expect(readFileSync(join(dir, ".env-orbit"), "utf8")).toBe(golden[index].file);
+  });
+}
+
+describe("install's preflight / migrate --transaction hand-off", () => {
+  it("agrees: an already-current file reports already current and preflight passes", () => {
+    const golden = readGolden<HandOffStep[]>(
+      "configuration-migration-parity",
+      "agrees: an already-current file reports already current and preflight passes",
     );
-    const adapter = realAdapter(sandbox);
-    const scriptPath = join(sandbox, "scripts", "configuration.sh");
-
-    const preflight = runConfigurationPreflight(scriptPath, ".env-orbit", adapter);
-    expect(preflight).toEqual({ ok: true });
-
-    const migration = runConfigurationMigration(scriptPath, targetFor(), adapter);
+    const dir = handOffSandbox(
+      [`ORBIT_IMAGE=${IMAGE}`, "ORBIT_CONFIG_SCHEMA_VERSION=1", "ORBIT_CONFIG_APPLIED_VERSION=v1.0.0", `ORBIT_CONFIG_APPLIED_DIGEST=${DIGEST}`, "COMPOSE_PROJECT_NAME=orbit", ""].join("\n"),
+    );
+    const adapter = createInstallConfigurationScriptAdapter({ cwd: dir });
+    expectSteps(dir, golden, [
+      () => adapter.runPreflight("unused", ".env-orbit"),
+      () => adapter.runMigrate("unused", targetFor()),
+    ]);
+    expect(runConfigurationPreflight("unused", ".env-orbit", adapter)).toEqual({ ok: true });
+    const migration = runConfigurationMigration("unused", targetFor(), adapter);
     expect(migration.ok).toBe(true);
     expect(migration.message).toContain("already current schema v1 version v1.0.0");
   });
 
-  it("agrees: a legacy unversioned file migrates and preflight still passes (#configuration.sh #25 — schema-2 outcome)", () => {
-    const sandbox = makeSandbox([`ORBIT_IMAGE=${IMAGE}`, ""].join("\n"));
-    const adapter = realAdapter(sandbox);
-    const scriptPath = join(sandbox, "scripts", "configuration.sh");
-
-    const preflight = runConfigurationPreflight(scriptPath, ".env-orbit", adapter);
-    expect(preflight).toEqual({ ok: true });
-
-    const migration = runConfigurationMigration(scriptPath, targetFor(), adapter);
-    expect(migration.ok).toBe(true);
-    expect(migration.message).toContain("migrated from schema v0 version legacy/unknown digest legacy/unknown");
-    expect(migration.message).toContain("to schema v1 version v1.0.0");
+  it("agrees: a legacy unversioned file migrates and preflight still passes (configuration.sh #25)", () => {
+    const golden = readGolden<HandOffStep[]>(
+      "configuration-migration-parity",
+      "agrees: a legacy unversioned file migrates and preflight still passes (#configuration.sh #25 — schema-2 outcome)",
+    );
+    const dir = handOffSandbox(`ORBIT_IMAGE=${IMAGE}\n`);
+    const adapter = createInstallConfigurationScriptAdapter({ cwd: dir });
+    expectSteps(dir, golden, [
+      () => adapter.runPreflight("unused", ".env-orbit"),
+      () => adapter.runMigrate("unused", targetFor()),
+    ]);
   });
 
   it("agrees: a structurally invalid file fails preflight closed (install.sh:1444-1445)", () => {
-    const sandbox = makeSandbox(["this is not a valid assignment line", ""].join("\n"));
-    const adapter = realAdapter(sandbox);
-    const scriptPath = join(sandbox, "scripts", "configuration.sh");
-
-    const preflight = runConfigurationPreflight(scriptPath, ".env-orbit", adapter);
-    expect(preflight).toEqual({
+    const golden = readGolden<HandOffStep[]>(
+      "configuration-migration-parity",
+      "agrees: a structurally invalid file fails preflight closed (install.sh:1444-1445)",
+    );
+    const dir = handOffSandbox("this is not a valid assignment line\n");
+    const adapter = createInstallConfigurationScriptAdapter({ cwd: dir });
+    expectSteps(dir, golden, [() => adapter.runPreflight("unused", ".env-orbit")]);
+    expect(runConfigurationPreflight("unused", ".env-orbit", adapter)).toEqual({
       ok: false,
       message: "Configuration preflight failed; restoring the previous deployment.",
     });
   });
 
   it("agrees: a compose project mismatch fails the migration closed (configuration.sh #17)", () => {
-    const sandbox = makeSandbox(
-      [`ORBIT_IMAGE=${IMAGE}`, "ORBIT_CONFIG_SCHEMA_VERSION=1", "COMPOSE_PROJECT_NAME=some-other-project", ""].join(
-        "\n",
-      ),
+    const golden = readGolden<HandOffStep[]>(
+      "configuration-migration-parity",
+      "agrees: a compose project mismatch fails the migration closed (configuration.sh #17)",
     );
-    const adapter = realAdapter(sandbox);
-    const scriptPath = join(sandbox, "scripts", "configuration.sh");
-
-    const migration = runConfigurationMigration(scriptPath, targetFor({ composeProjectName: "orbit" }), adapter);
-    expect(migration).toEqual({
+    const dir = handOffSandbox([`ORBIT_IMAGE=${IMAGE}`, "ORBIT_CONFIG_SCHEMA_VERSION=1", "COMPOSE_PROJECT_NAME=some-other-project", ""].join("\n"));
+    const adapter = createInstallConfigurationScriptAdapter({ cwd: dir });
+    expectSteps(dir, golden, [() => adapter.runMigrate("unused", targetFor({ composeProjectName: "orbit" }))]);
+    expect(runConfigurationMigration("unused", targetFor({ composeProjectName: "orbit" }), adapter)).toEqual({
       ok: false,
       message: "Configuration migration failed; restoring the previous deployment.",
     });
