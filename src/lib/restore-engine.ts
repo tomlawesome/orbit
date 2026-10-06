@@ -93,7 +93,10 @@ export type RestoreEngineRefusalCode =
   | "capacity-measurement-invalid"
   | "capacity-insufficient"
   | "kek-rotation-open"
-  | "checkpoint-orphan-mismatch";
+  | "checkpoint-orphan-mismatch"
+  | "correspondence-incomplete"
+  | "postgres-client-mismatch"
+  | "database-connection-failed";
 
 /**
  * Thrown for every fail-closed refusal this module makes. Never carries
@@ -245,7 +248,7 @@ function documentKekNextFilePath(documentKekFile: string): string {
  * open rotation would leave the rotation's own audit trail and bookkeeping
  * permanently out of sync with the data it is supposed to be migrating.
  */
-function refuseIfDocumentKekRotationOpen(documentKekFile: string): void {
+export function refuseIfDocumentKekRotationOpen(documentKekFile: string): void {
   const nextKeyPath = documentKekNextFilePath(documentKekFile);
   if (isRegularNonSymlinkFile(nextKeyPath)) {
     refuse(
@@ -277,6 +280,14 @@ export interface RestoreDurabilityHooks {
   beforeJournalDirectorySync?: (state: RestoreJournalState) => void;
   beforeCheckpointArtifactSync?: () => void;
   beforeCheckpointDirectorySync?: () => void;
+  /**
+   * Called before a verified checkpoint is reapplied onto live state (a
+   * rollback, or `--recover`); throwing makes that reapplication fail. The
+   * analogue of restore.sh's `ORBIT_RESTORE_TEST_FAILURE_STAGE=checkpoint-restore`
+   * / `ORBIT_RESTORE_TEST_CHECKPOINT_FAILURE=true`, which the real-stack drill
+   * still drives through `orbit restore` (#1211).
+   */
+  beforeCheckpointRestore?: () => void;
 }
 
 /**
@@ -509,6 +520,10 @@ export const CORRESPONDENCE_QUERIES = {
     "SELECT count(*)::text FROM documents d WHERE d.lifecycle IN ('receiving', 'validating', 'quarantined', 'encrypting') OR (d.lifecycle = 'scanning' AND NOT EXISTS (SELECT 1 FROM document_staging_objects s WHERE s.document_id = d.id));",
 } as const;
 
+/** reset_scan_recovery_leases's literal SQL (restore.sh:587), unmodified: the statement psql runs, without the `sh -c` wrapper bash needed to reach orbit-db. */
+export const SCAN_RECOVERY_LEASES_STATEMENT =
+  "BEGIN; UPDATE document_jobs AS job SET status = 'failed', completed_at = NULL, locked_at = NULL, lease_expires_at = NULL, lease_token = NULL, last_error = COALESCE(job.last_error, 'scanner_failed'), updated_at = now() FROM documents document WHERE job.document_id = document.id AND job.kind = 'scan' AND job.status IN ('pending', 'retry', 'processing') AND job.attempts >= 5 AND document.lifecycle = 'scanning' AND EXISTS (SELECT 1 FROM document_staging_objects stage WHERE stage.document_id = document.id AND stage.status = 'pending'); UPDATE document_jobs AS job SET status = 'pending', next_attempt_at = now(), locked_at = NULL, lease_expires_at = NULL, lease_token = NULL, completed_at = NULL, updated_at = now() FROM documents document WHERE job.document_id = document.id AND job.kind = 'scan' AND job.status IN ('pending', 'retry', 'processing') AND job.attempts < 5 AND document.lifecycle = 'scanning' AND EXISTS (SELECT 1 FROM document_staging_objects stage WHERE stage.document_id = document.id AND stage.status = 'pending'); COMMIT;";
+
 /** reset_scan_recovery_leases's literal SQL (restore.sh:587), unmodified. */
 export const SCAN_RECOVERY_LEASES_SQL =
   'exec psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 --command="BEGIN; UPDATE document_jobs AS job SET status = \'failed\', completed_at = NULL, locked_at = NULL, lease_expires_at = NULL, lease_token = NULL, last_error = COALESCE(job.last_error, \'scanner_failed\'), updated_at = now() FROM documents document WHERE job.document_id = document.id AND job.kind = \'scan\' AND job.status IN (\'pending\', \'retry\', \'processing\') AND job.attempts >= 5 AND document.lifecycle = \'scanning\' AND EXISTS (SELECT 1 FROM document_staging_objects stage WHERE stage.document_id = document.id AND stage.status = \'pending\'); UPDATE document_jobs AS job SET status = \'pending\', next_attempt_at = now(), locked_at = NULL, lease_expires_at = NULL, lease_token = NULL, completed_at = NULL, updated_at = now() FROM documents document WHERE job.document_id = document.id AND job.kind = \'scan\' AND job.status IN (\'pending\', \'retry\', \'processing\') AND job.attempts < 5 AND document.lifecycle = \'scanning\' AND EXISTS (SELECT 1 FROM document_staging_objects stage WHERE stage.document_id = document.id AND stage.status = \'pending\'); COMMIT;"';
@@ -704,26 +719,54 @@ export interface RestoreDockerAdapter extends Pick<BackupDockerAdapter, "dumpDat
   measureDocumentVolumeAvailableKib(): number;
 }
 
-function fetchCorrespondenceReports(adapter: Pick<RestoreDockerAdapter, "queryReport">, databaseName: string): CorrespondenceReports {
-  return {
-    crypto: adapter.queryReport(databaseName, CORRESPONDENCE_QUERIES.crypto),
-    visible: adapter.queryReport(databaseName, CORRESPONDENCE_QUERIES.visible),
-    attachments: adapter.queryReport(databaseName, CORRESPONDENCE_QUERIES.attachments),
-    staging: adapter.queryReport(databaseName, CORRESPONDENCE_QUERIES.staging),
-    documentStaging: adapter.queryReport(databaseName, CORRESPONDENCE_QUERIES.documentStaging),
-    transientCount: adapter.queryReport(databaseName, CORRESPONDENCE_QUERIES.transientCount),
-  };
+/** The name each report goes by in an operator message, as restore.sh's query_report call sites named them (#678). */
+const CORRESPONDENCE_CHECK_NAMES: Record<keyof CorrespondenceReports, string> = {
+  crypto: "crypto",
+  visible: "visible",
+  attachments: "attachments",
+  staging: "staging",
+  documentStaging: "document-stage",
+  transientCount: "transient",
+};
+
+/** Where in a restore a correspondence check runs; the prefix of its refusal. */
+export type CorrespondenceStage = "preflight" | "checkpoint" | "recovery" | "cutover";
+
+/**
+ * fail_correspondence's status 2 (restore.sh, #678): a report that could not
+ * be run to completion says nothing about the operator's bundle, so it is
+ * refused as an incomplete check naming itself, never as a correspondence
+ * violation ("use a complete backup and retry").
+ */
+function refuseIncompleteCorrespondence(stage: CorrespondenceStage, report: keyof CorrespondenceReports): never {
+  refuse(
+    "correspondence-incomplete",
+    `${stage}/correspondence-incomplete failed; the ${CORRESPONDENCE_CHECK_NAMES[report]} check did not run to completion, so correspondence could not be verified. This is not a verdict on the backup; retry, and capture the restore output if it recurs.`,
+  );
 }
 
-function fetchActiveCorrespondenceReports(adapter: Pick<RestoreDockerAdapter, "queryActiveReport">): CorrespondenceReports {
-  return {
-    crypto: adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto),
-    visible: adapter.queryActiveReport(CORRESPONDENCE_QUERIES.visible),
-    attachments: adapter.queryActiveReport(CORRESPONDENCE_QUERIES.attachments),
-    staging: adapter.queryActiveReport(CORRESPONDENCE_QUERIES.staging),
-    documentStaging: adapter.queryActiveReport(CORRESPONDENCE_QUERIES.documentStaging),
-    transientCount: adapter.queryActiveReport(CORRESPONDENCE_QUERIES.transientCount),
-  };
+function isIncompleteCorrespondence(error: unknown): boolean {
+  return error instanceof RestoreEngineRefusal && error.code === "correspondence-incomplete";
+}
+
+function fetchReports(stage: CorrespondenceStage, query: (sql: string) => string): CorrespondenceReports {
+  const reports = {} as CorrespondenceReports;
+  for (const report of Object.keys(CORRESPONDENCE_QUERIES) as (keyof CorrespondenceReports)[]) {
+    try {
+      reports[report] = query(CORRESPONDENCE_QUERIES[report]);
+    } catch {
+      refuseIncompleteCorrespondence(stage, report);
+    }
+  }
+  return reports;
+}
+
+function fetchCorrespondenceReports(adapter: Pick<RestoreDockerAdapter, "queryReport">, databaseName: string, stage: CorrespondenceStage): CorrespondenceReports {
+  return fetchReports(stage, (query) => adapter.queryReport(databaseName, query));
+}
+
+function fetchActiveCorrespondenceReports(adapter: Pick<RestoreDockerAdapter, "queryActiveReport">, stage: CorrespondenceStage): CorrespondenceReports {
+  return fetchReports(stage, (query) => adapter.queryActiveReport(query));
 }
 
 function installCheckpointKey(checkpointDirectory: string, documentKekFile: string): boolean {
@@ -741,17 +784,22 @@ function installCheckpointKey(checkpointDirectory: string, documentKekFile: stri
   }
 }
 
+/** Throws on a capture failure or an incomplete report; returns the correspondence verdict otherwise. */
+function checkActiveCorrespondence(adapter: RestoreDockerAdapter, workDir: string, stage: CorrespondenceStage): boolean {
+  const archivePath = join(workDir, "active-documents.tar");
+  adapter.collectDocumentsArchive(archivePath);
+  validateDocumentArchiveEntries(listTarEntriesVerbose(archivePath));
+  const extractedDir = join(workDir, "active-documents");
+  rmSync(extractedDir, { recursive: true, force: true });
+  mkdirSync(extractedDir, { recursive: true });
+  extractTar(archivePath, extractedDir);
+  const reports = fetchActiveCorrespondenceReports(adapter, stage);
+  return checkCorrespondence(reports, extractedDir);
+}
+
 function captureAndCheckActiveCorrespondence(adapter: RestoreDockerAdapter, workDir: string): boolean {
   try {
-    const archivePath = join(workDir, "active-documents.tar");
-    adapter.collectDocumentsArchive(archivePath);
-    validateDocumentArchiveEntries(listTarEntriesVerbose(archivePath));
-    const extractedDir = join(workDir, "active-documents");
-    rmSync(extractedDir, { recursive: true, force: true });
-    mkdirSync(extractedDir, { recursive: true });
-    extractTar(archivePath, extractedDir);
-    const reports = fetchActiveCorrespondenceReports(adapter);
-    return checkCorrespondence(reports, extractedDir);
+    return checkActiveCorrespondence(adapter, workDir, "cutover");
   } catch {
     return false;
   }
@@ -763,7 +811,18 @@ function captureAndCheckActiveCorrespondence(adapter: RestoreDockerAdapter, work
  * re-validates correspondence — used identically by both rollback_checkpoint
  * (automatic, mid-run) and recover_restore (`--recover`, a fresh process).
  */
-function applyCheckpointState(adapter: RestoreDockerAdapter, checkpointDirectory: string, documentKekFile: string, workDir: string): boolean {
+function applyCheckpointState(
+  adapter: RestoreDockerAdapter,
+  checkpointDirectory: string,
+  documentKekFile: string,
+  workDir: string,
+  hooks: RestoreDurabilityHooks = {},
+): boolean {
+  try {
+    hooks.beforeCheckpointRestore?.();
+  } catch {
+    return false;
+  }
   if (!adapter.restoreActiveDatabase(join(checkpointDirectory, "database.dump"))) return false;
   if (!adapter.replaceDocumentsFromArchive(join(checkpointDirectory, "documents.tar"))) return false;
   if (!installCheckpointKey(checkpointDirectory, documentKekFile)) return false;
@@ -932,7 +991,7 @@ export function preflightValidateBundle(options: PreflightValidateBundleOptions)
     if (!options.adapter.restoreDumpToDatabase(stage, options.databaseDumpPath)) {
       refuse("checkpoint-verification-failed", "preflight/database-stage failed; the PostgreSQL archive could not be restored transactionally.");
     }
-    const reports = fetchCorrespondenceReports(options.adapter, stage);
+    const reports = fetchCorrespondenceReports(options.adapter, stage, "preflight");
     if (!checkCorrespondence(reports, options.stagedDocumentsRoot)) {
       refuse("preflight-correspondence-failed", "preflight/correspondence failed; the staged database and document tree do not correspond; use a complete backup and retry.");
     }
@@ -1147,7 +1206,7 @@ export class RestoreRun {
     // pass here would read the whole archive twice for nothing.
 
     this.copyCheckpointKey();
-    this.verifyCheckpointArtifactsCorrespond("orbit_restore_checkpoint_stage_");
+    this.verifyCheckpointArtifactsCorrespond("orbit_restore_checkpoint_stage_", "checkpoint");
 
     this.checkpointDigests = computeCheckpointDigests(this.checkpointDirectory);
     syncCheckpointArtifacts(this.checkpointDirectory, this.hooks);
@@ -1186,8 +1245,8 @@ export class RestoreRun {
    * differ only in the stage-database name prefix Bash uses for operator log
    * clarity.
    */
-  private verifyCheckpointArtifactsCorrespond(stageNamePrefix: string): void {
-    const stage = `${stageNamePrefix}${this.restoreId}`;
+  private verifyCheckpointArtifactsCorrespond(stageNamePrefix: string, stage: CorrespondenceStage): void {
+    const stageDatabase = `${stageNamePrefix}${this.restoreId}`;
     const databaseDumpPath = join(this.checkpointDirectory, "database.dump");
     const documentsTarPath = join(this.checkpointDirectory, "documents.tar");
     try {
@@ -1198,9 +1257,9 @@ export class RestoreRun {
       // still leaves this.stageDatabase set, and the finally below (and
       // dispose()'s cleanup) always attempts the (idempotent, DROP-IF-
       // EXISTS) drop instead of leaking the stage database forever.
-      this.stageDatabase = stage;
-      this.adapter.createStageDatabase(stage);
-      if (!this.adapter.restoreDumpToDatabase(stage, databaseDumpPath)) {
+      this.stageDatabase = stageDatabase;
+      this.adapter.createStageDatabase(stageDatabase);
+      if (!this.adapter.restoreDumpToDatabase(stageDatabase, databaseDumpPath)) {
         refuse("checkpoint-verification-failed", "checkpoint/verification failed; the durable database checkpoint is invalid.");
       }
       const extractedDocuments = join(this.workDir, "checkpoint-documents");
@@ -1208,7 +1267,7 @@ export class RestoreRun {
       mkdirSync(extractedDocuments, { recursive: true });
       validateDocumentArchiveEntries(listTarEntriesVerbose(documentsTarPath));
       extractTar(documentsTarPath, extractedDocuments);
-      const reports = fetchCorrespondenceReports(this.adapter, stage);
+      const reports = fetchCorrespondenceReports(this.adapter, stageDatabase, stage);
       if (!checkCorrespondence(reports, extractedDocuments)) {
         refuse("checkpoint-verification-failed", "checkpoint/verification failed; the durable rollback database and document tree do not correspond.");
       }
@@ -1241,7 +1300,14 @@ export class RestoreRun {
 
   /** restore.sh:927-932: re-validates active correspondence, waits for health, and only then marks the restore complete and purges the journal/checkpoint. */
   finalize(): void {
-    if (!captureAndCheckActiveCorrespondence(this.adapter, this.workDir)) {
+    let corresponds: boolean;
+    try {
+      corresponds = checkActiveCorrespondence(this.adapter, this.workDir, "cutover");
+    } catch (error) {
+      if (isIncompleteCorrespondence(error)) throw error;
+      corresponds = false;
+    }
+    if (!corresponds) {
       refuse("active-correspondence-failed", "cutover/correspondence failed; active database and documents do not correspond.");
     }
     if (!this.adapter.startApp() || !this.adapter.waitForHealth()) {
@@ -1265,7 +1331,7 @@ export class RestoreRun {
       return false;
     }
     this.appStopped = true;
-    if (!applyCheckpointState(this.adapter, this.checkpointDirectory, this.paths.documentKekFile, this.workDir)) {
+    if (!applyCheckpointState(this.adapter, this.checkpointDirectory, this.paths.documentKekFile, this.workDir, this.hooks)) {
       return false;
     }
     if (!this.adapter.startApp() || !this.adapter.waitForHealth()) {
@@ -1277,7 +1343,7 @@ export class RestoreRun {
 
   /** recover_restore's own re-verification of the checkpoint before trusting it (restore.sh:802-820). */
   reverifyCheckpointForRecovery(): void {
-    this.verifyCheckpointArtifactsCorrespond("orbit_recover_checkpoint_stage_");
+    this.verifyCheckpointArtifactsCorrespond("orbit_recover_checkpoint_stage_", "recovery");
   }
 
   /** recover_restore's application step (restore.sh:822-826), once re-verification has already passed. */
@@ -1286,7 +1352,7 @@ export class RestoreRun {
       refuse("app-stop-failed", "recovery/stop failed; keep Orbit stopped and retry recovery.");
     }
     this.appStopped = true;
-    if (!applyCheckpointState(this.adapter, this.checkpointDirectory, this.paths.documentKekFile, this.workDir)) {
+    if (!applyCheckpointState(this.adapter, this.checkpointDirectory, this.paths.documentKekFile, this.workDir, this.hooks)) {
       refuse("recovery-restore-failed", "recovery/restore failed; Orbit remains stopped and the checkpoint is preserved for another explicit recovery attempt.");
     }
     if (!this.adapter.startApp() || !this.adapter.waitForHealth()) {
