@@ -26,6 +26,17 @@ if [[ "$security_options" == *rootless* ]]; then
   exit 0
 fi
 
+# The engine accepts only a digest or an orbit-local:<12 hex> tag, as
+# create-test-configuration.sh notes; a CI tag (orbit-ci:<commit>) is given
+# the second shape, naming the same image by its own ID.
+if [[ ! "$ORBIT_IMAGE" =~ ^orbit-local:[0-9a-f]{12}$ && ! "$ORBIT_IMAGE" =~ @sha256:[0-9a-f]{64}$ ]]; then
+  image_id="$(docker image inspect --format '{{.Id}}' "$ORBIT_IMAGE")"
+  image_id="${image_id#sha256:}"
+  docker tag "$ORBIT_IMAGE" "orbit-local:${image_id:0:12}"
+  ORBIT_IMAGE="orbit-local:${image_id:0:12}"
+fi
+export ORBIT_IMAGE
+
 scratch="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/orbit-ownership.XXXXXX")"
 cleanup() {
   # Whatever the engine left may not be ours to delete without root's help.
