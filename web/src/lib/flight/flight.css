@@ -9,6 +9,9 @@
  * descending / farewell), because the staging is class-driven, which is
  * exactly what lets reduced motion keep the whole story and drop only the
  * movement.
+ *
+ * The dawn's first-light timings rebalanced 2026-10-06 (owner: button ready
+ * by 2 s, sunrise by 3.5 s).
  */
 
 /* ══ THE DAWN AND THE DUSK ═══════════════════════════════════════════════ */
@@ -53,20 +56,20 @@ body.showdusk #dusk{opacity:1}
 /* the shared twinkle curve's default range IS this pair (atmosphere.css) */
 #dawn .sky .tw,#dusk .sky .tw{animation:twinkle 4.5s ease-in-out infinite alternate}
 /* first light: dawn breaks once on load, exactly as the login does it */
-.dawnlayer{opacity:0;transition:opacity 3s ease}
+.dawnlayer{opacity:0;transition:opacity 1.4s ease}
 body.lit .dawnlayer{opacity:1}
-.rim{opacity:0;transition:opacity 2.2s ease .3s}
+.rim{opacity:0;transition:opacity 1s ease .1s}
 body.lit .rim{opacity:1}
 .shimmer{stroke-dasharray:3 97;animation:sweep 22s linear infinite;opacity:0;
-         transition:opacity 1.8s ease 1.2s}
+         transition:opacity 1.2s ease .5s}
 body.lit .shimmer{opacity:.9}
 @keyframes sweep{to{stroke-dashoffset:-100}}
-.sunpt{opacity:0;transition:opacity 3.2s ease .5s}
+.sunpt{opacity:0;transition:opacity 2s ease .3s}
 body.lit .sunpt{opacity:1}
 .sunpt-breathe{animation:breathe-sun 7s ease-in-out infinite alternate}
 @keyframes breathe-sun{from{opacity:.8}to{opacity:1}}
 .rays{transform-origin:800px 920px;opacity:0;transform:scale(1,.55);
-      transition:opacity 3.6s ease .9s,transform 4.2s cubic-bezier(.22,.6,.25,1) .9s;
+      transition:opacity 2.2s ease .4s,transform 2.6s cubic-bezier(.22,.6,.25,1) .4s;
       mix-blend-mode:screen}
 body.lit .rays{opacity:1;transform:scale(1,1)}
 .rays .sway1{transform-origin:800px 920px;will-change:transform;
@@ -80,7 +83,7 @@ body.lit .rays{opacity:1;transform:scale(1,1)}
    it, and the crisp rim gives way once the picture carries the limb */
 #dawn .earth image{opacity:0;transition:opacity 1.2s ease}
 #dawn .earth image.in{opacity:1}
-#dawn .earth .up.in{opacity:0;transition:opacity 4.5s cubic-bezier(.4,0,.3,1) .3s}
+#dawn .earth .up.in{opacity:0;transition:opacity 2.6s cubic-bezier(.4,0,.3,1) .2s}
 body.lit #dawn .earth .up.in{opacity:1}
 #dawn .world.earthy .rim{opacity:0}
 .zodiacal{animation:zbreathe 13s ease-in-out infinite alternate;mix-blend-mode:screen}
@@ -152,7 +155,7 @@ body.lit #dawn .earth .up.in{opacity:1}
       letter-spacing:.04em;text-decoration:none;display:inline-block;line-height:normal;
       box-shadow:0 0 28px rgba(216,180,90,.22);
       opacity:0;transform:translateY(10px);
-      transition:opacity 1.6s ease 3.6s,transform 1.6s ease 3.6s,
+      transition:opacity .9s ease .35s,transform .9s ease .35s,
                  filter .35s ease,box-shadow .3s ease}
 body.lit .gate{opacity:1;transform:none}
 .gate:hover,#dusk .gate-wrap a:hover{filter:brightness(1.08)}
@@ -174,7 +177,7 @@ body.lit .gate{opacity:1;transform:none}
    `local login`. */
 .localopen{position:absolute;top:100%;left:50%;transform:translateX(-50%);
       margin-top:18px;white-space:nowrap;text-align:center;
-      opacity:0;transition:opacity 1.6s ease 4.1s}
+      opacity:0;transition:opacity .8s ease .5s}
 body.lit .localopen{opacity:1}
 
 /* ══ THE THREE STATES WHERE THE DOOR CANNOT OPEN (#788), AND THE CALLBACK'S
@@ -212,11 +215,11 @@ body[data-state]:not([data-state="door"]):not([data-state="incomplete"]) #dawn .
 #dawn .state-primary{position:absolute;left:50%;top:calc(50% + 64px);transform:translateX(-50%);
       width:max-content;max-width:250px;text-align:center;
       font:600 14px var(--display);letter-spacing:.01em;color:#cfd3e4;
-      opacity:0;transition:opacity 1.4s ease 3.6s}
+      opacity:0;transition:opacity .9s ease .35s}
 #dawn .state-sub{position:absolute;left:50%;top:calc(50% + 174px);transform:translateX(-50%);
       width:340px;max-width:78vw;text-align:center;
       font:10.5px var(--mono);color:#8791b3;line-height:1.75;letter-spacing:.04em;
-      opacity:0;transition:opacity 1.4s ease 3.9s}
+      opacity:0;transition:opacity .8s ease .5s}
 body.lit #dawn .state-primary,body.lit #dawn .state-sub{opacity:1}
 /* A state reached after the door already loaded (the ordinary path: default
    optimistic, corrected once a check answers) fades its words in on its own
@@ -259,7 +262,7 @@ body.lit[data-state="starting"] #dawn .dawnlayer{opacity:.45;
 body.lit[data-state="starting"] #dawn .sunpt{opacity:.6}
 @keyframes dawnswell{from{opacity:.32}to{opacity:.62}}
 /* the Earth's sunrise is lit by `body.lit` too, so it is held with the sky
-   (#1253 ruling 2); release rides its own 4.5s transition, so recovery is
+   (#1253 ruling 2); release rides its own 2.6s transition, so recovery is
    still a sunrise. The night side (`.pre`) stays fully in. */
 body.lit[data-state="unconfigured"] #dawn .earth .up.in,
 body.lit[data-state="failed"] #dawn .earth .up.in,
@@ -281,7 +284,7 @@ body.lit[data-state="starting"] #dawn .earth .up.in{opacity:.45;
    exactly as round-1 ratifies. */
 body[data-state="incomplete"] #dawn .gate-wrap{display:block}
 /* the pill's own entrance (opacity/transform on `.lit`, the delayed
-   1.6s-ease-3.6s transition) is the shared `.gate` rule above, unscoped by
+   .9s-ease-.35s transition) is the shared `.gate` rule above, unscoped by
    state — this needs nothing of its own once the wrapper is visible. */
 
 /* the words, `incomplete` only: a 14px display line does not fit between

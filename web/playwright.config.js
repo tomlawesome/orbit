@@ -36,8 +36,14 @@ export default defineConfig({
    */
   projects: [
     { name: "fidelity", workers: 1,
-      testIgnore: ["**/launch-timing.spec.js", "**/pocket-measure.spec.js", "**/tour-pocket-webkit.spec.js"] },
+      testIgnore: ["**/launch-timing.spec.js", "**/door-reveal-timing.spec.js", "**/pocket-measure.spec.js", "**/tour-pocket-webkit.spec.js"] },
     { name: "launch-timing", workers: 1, testMatch: "**/launch-timing.spec.js" },
+    /* the door's first light, timed (2026-10-06 ruling: button by 2s,
+       sunrise by 3.5s): a measurement like launch-timing, so outside the
+       per-merge-request gate, in both engines the door is judged in */
+    { name: "door-timing", workers: 1, testMatch: "**/door-reveal-timing.spec.js" },
+    { name: "door-timing-firefox", workers: 1, testMatch: "**/door-reveal-timing.spec.js",
+      use: { browserName: "firefox" } },
     /* `pocket-measure` guards the phone floors (#1120): 508 read-only layout
        measurements, each on its own page against the fixture app with its
        API answered per page, so no test can see another's state. It compares
