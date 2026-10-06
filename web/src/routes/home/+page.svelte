@@ -6,6 +6,7 @@
   import { resolve } from "$app/paths";
   import { mountAccount, mountEmptySky, mountHome } from "./home.behaviour.js";
   import Flight from "$lib/flight/Flight.svelte";
+  import { othersOf } from "$lib/flight/engine.js";
   import Dawn from "$lib/flight/Dawn.svelte";
   import Dusk from "$lib/flight/Dusk.svelte";
   import { consumeLaunch } from "$lib/flight/arrival.js";
@@ -1128,7 +1129,8 @@
   </Dusk>
 {/if}
 {#if launching || leaving}
-  <Flight bind:this={flight} name={view?.household?.name ?? ""} onfarewell={onFarewell} />
+  <Flight bind:this={flight} name={view?.household?.name ?? ""} onfarewell={onFarewell}
+          homes={view && !view.emptySky ? othersOf(view.galaxy, view.primary) : []} />
 {/if}
 
 <div class="desk" class:arrive role="main">

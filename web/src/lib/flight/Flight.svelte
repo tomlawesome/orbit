@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { createFlight, UP, DOWN } from "./engine.js";
+  import { createFlight, UP, DOWN, PROPS_UP, PROPS_DOWN, homeProps, mirrored } from "./engine.js";
   import {
     ascentBeats, ascentBeatsReduced, descentBeats, descentBeatsReduced,
     newcomerAscentBeats, newcomerAscentBeatsReduced,
@@ -63,6 +63,15 @@
     onbelong = () => {},
     /* the descent has finished: the reader is on the dusk */
     onfarewell = () => {},
+    /*
+     * THE OTHER HOUSEHOLDS (#1253 ruling 3): the reader's real other
+     * households, passed on the climb and met again on the descent, as
+     * engine.js `othersOf` reads them from the galaxy. Body tones may be CSS
+     * custom property names; they are read as colours when the flight starts.
+     * Empty for a reader with one household: nothing made up passes instead.
+     * @type {Array<{ name: string, bodies: Array<[number, number, string, number]> }>}
+     */
+    homes = [],
   } = $props();
 
   /** @type {HTMLCanvasElement} */
@@ -210,6 +219,22 @@
     if (!instant) flip(from, g.left, g.top, g.width, g.height, MARK_RIDE_DOWN);
   }
 
+  /** The other households with their tones read as colours, now. */
+  function paintedHomes() {
+    const style = getComputedStyle(document.body);
+    /** @param {string} tone */
+    const colour = (tone) => (tone.startsWith("--") ? style.getPropertyValue(tone).trim() : tone) || "#8fb8ff";
+    return homes.map((h) => ({ name: h.name, bodies: h.bodies.map((b) => /** @type {[number, number, string, number]} */ ([b[0], b[1], colour(b[2]), b[3]])) }));
+  }
+  /** The climb, carrying the other households past. */
+  function upProfile() {
+    return { ...UP, props: [...PROPS_UP, ...homeProps(paintedHomes())] };
+  }
+  /** The descent, meeting them the other way. */
+  function downProfile() {
+    return { ...DOWN, props: [...PROPS_DOWN, ...mirrored(homeProps(paintedHomes()))] };
+  }
+
   /** @param {number | undefined} pinned */
   function ascentStep(pinned) {
     /** @param {string} act */
@@ -219,7 +244,7 @@
         case "arming": b.classList.add("arming"); break;
         case "warp":
           b.classList.add("showwarp");
-          activeEngine().start(UP, pinned === undefined ? {} : { at: Math.min(pinned, UP.dur) });
+          activeEngine().start(upProfile(), pinned === undefined ? {} : { at: Math.min(pinned, UP.dur) });
           clock.stalls(activeEngine().drawingWorld);
           break;
         case "mark":
@@ -264,7 +289,7 @@
         case "disperse": b.classList.add("dispersing"); break;
         case "warp":
           b.classList.add("showwarp");
-          activeEngine().start(DOWN, pinned === undefined
+          activeEngine().start(downProfile(), pinned === undefined
             ? {} : { at: Math.min(Math.max(0, pinned - D.warp), DOWN.dur) });
           clock.stalls(activeEngine().drawingWorld);
           break;

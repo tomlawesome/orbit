@@ -45,7 +45,7 @@ import { chore } from "./chores.js";
  * "con" kind's shape (`pts`) is a fixed, cached Path2D keyed by `shape`
  * instead (#873) — it never varied per run, only per constellation shape.
  * @typedef {object} Prop
- * @property {"grat" | "con" | "sys" | "craft" | "comet"} kind
+ * @property {"grat" | "con" | "sys" | "craft" | "comet" | "home"} kind
  * @property {number} t0
  * @property {number} dur
  * @property {number} ang
@@ -57,6 +57,7 @@ import { chore } from "./chores.js";
  * @property {number} [rad]
  * @property {number} [rot0]
  * @property {Array<[number, number, string, number]>} [bodies]
+ * @property {string} [name]                    the "home" kind's household name
  * @property {number} [al]
  * @property {number} [hair]
  */
@@ -196,6 +197,36 @@ export const PROPS_UP = [
   { kind: "sys", t0: 2120, dur: 1350, ang: 108, z: 0.62, k: 5, spin: -0.16 },
 ];
 
+/* THE OTHER HOUSEHOLDS (#1253 ruling 3, orbit-site flight.js demoFlight): the
+   reader's real other households pass on the climb, each with its items as
+   bodies where its dial has them. A reader with one household passes
+   nothing. `homes` is [{ name, bodies:[[x,y,colour,r]] }]. */
+/**
+ * @param {Array<{ name: string, bodies: Array<[number, number, string, number]> }>} homes
+ * @returns {Prop[]}
+ */
+export function homeProps(homes) {
+  const BEAR = [44, 136, 74, 106, 58, 122], ZED = [0.5, 0.42, 0.62, 0.46, 0.56, 0.4];
+  return homes.map((h, i) => ({ kind: "home", name: h.name, bodies: h.bodies, t0: 760 + i * 380, dur: 2000 + (i % 3) * 350, ang: BEAR[i % BEAR.length], z: ZED[i % ZED.length], spin: 0 }));
+}
+/**
+ * The other households as the galaxy holds them (chart.js galaxyOf): each
+ * planet at its own bearing, at the radius the dial would put it. Tones are
+ * left as the galaxy names them; the caller resolves them to colours.
+ * @param {Record<string, { name: string, planets: Array<[number, number, number, string]> }> | null | undefined} galaxy
+ * @param {string | null | undefined} primary
+ * @returns {Array<{ name: string, bodies: Array<[number, number, string, number]> }>}
+ */
+export function othersOf(galaxy, primary) {
+  return Object.entries(galaxy ?? {}).filter(([id]) => id !== primary).map(([, h]) => ({
+    name: h.name,
+    bodies: (h.planets ?? []).map(([dx, dy, , tone]) => {
+      const a = Math.atan2(dy, dx), r = 22 + ((Math.hypot(dx, dy) - 18) / 12) * 58;
+      return /** @type {[number, number, string, number]} */ ([Math.cos(a) * r, Math.sin(a) * r, tone, 3.2]);
+    }),
+  }));
+}
+
 /* ── the two profiles ─────────────────────────────────────────────────────
    UP · 4800ms.  0–300 ignition (the ship is barely moving; the mark flares
    and the card dissolves) · 300–1350 hard acceleration out of the dawn ·
@@ -238,6 +269,10 @@ export const PROPS_DOWN = PROPS_UP.map((g) => ({
   dur: g.dur * REV * SWEEP,
   t0: Math.max(0, (UPDUR - (g.t0 + g.dur)) * REV),
 }));
+/* the descent meets the other households the same way (orbit-site's
+   `mirrored`, flight.js) */
+/** @param {Prop[]} props @returns {Prop[]} */
+export const mirrored = (props) => props.map((g) => ({ ...g, spin: -(g.spin || 0), dur: g.dur * REV * SWEEP, t0: Math.max(0, (UPDUR - (g.t0 + g.dur)) * REV) }));
 
 /** @type {Profile} */
 export const DOWN = {
@@ -558,9 +593,26 @@ export function createFlight(canvas, options = {}) {
     ctx.fillStyle = "#fff6e6";
     ctx.beginPath(); ctx.arc(0, 0, 5, 0, 6.284); ctx.fill();
   }
+  /* another household in the galaxy, passing (orbit-site engine.js penHome):
+     its sun, its year as the rings the app draws, its items as bodies where
+     its dial has them, and its name beneath */
+  /** @param {HydratedProp} g @param {number} [_t] */
+  function penHome(g, _t) {
+    ctx.lineWidth = g.hair; ctx.globalAlpha = g.al * 0.9;
+    ctx.strokeStyle = PACK.pen; ctx.stroke(systemRing78);
+    ctx.strokeStyle = PACK.penLo; ctx.stroke(systemRing52);
+    ctx.globalAlpha = g.al;
+    ctx.fillStyle = PACK.sun; ctx.fill(systemSunDot);
+    for (const b of g.bodies ?? []) { ctx.fillStyle = b[2]; ctx.beginPath(); ctx.arc(b[0], b[1], b[3], 0, 6.284); ctx.fill(); }
+    ctx.font = "500 13px 'JetBrains Mono Variable', 'JetBrains Mono', monospace"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    try { ctx.letterSpacing = "2.5px"; } catch { /* fine */ }
+    ctx.fillStyle = PACK.penHi; ctx.globalAlpha = g.al * 0.85;
+    ctx.fillText((g.name ?? "").toUpperCase(), 0, 96);
+    try { ctx.letterSpacing = "0px"; } catch { /* fine */ }
+  }
   const PEN = {
     con: penConstellation, sys: penSystem, grat: penGraticule,
-    craft: penCraft, comet: penComet,
+    craft: penCraft, comet: penComet, home: penHome,
   };
 
   /** @param {number} b */
@@ -787,10 +839,12 @@ export function createFlight(canvas, options = {}) {
        is still on screen when you brake keeps sailing out of frame. Reversed,
        the same traffic arrives from the frame edge and recedes to the
        vanishing point: p runs 1 → 0 instead of 0 → 1. */
-    /* over the voyage's sky the made-up traffic (craft, systems, comets,
-       rulings) is left out, as the site's own flight leaves it out */
-    if (!voyage) for (const g of active.props) {
+    for (const g of active.props) {
       if (t < g.t0) continue;
+      /* over the voyage's sky only the traffic that is real passes: the
+         other households. The made-up craft, systems, comets and rulings are
+         left out, as the site's own flight leaves them out (#1253 ruling 3) */
+      if (voyage && g.kind !== "home") continue;
       const advance = Math.max(av, 0.50) * (dt * 1000) / g.dur;
       /* prime() has already set every prop's `p` before step() ever runs. */
       g.p = /** @type {number} */ (g.p) + (active.rev ? -advance : advance);
