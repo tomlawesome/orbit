@@ -168,6 +168,10 @@
     query.addEventListener("change", follow);
     return () => query.removeEventListener("change", follow);
   });
+  /* #1248: editing on the desk widens the card to 720px and drops the detail
+     rows the form repeats. The phone also sets `panel` while its full-height
+     edit sheet is up, so the card there is left alone. */
+  const editingInCard = $derived(panel === "edit" && !pocket);
 
   /* ---- THE SUGGESTION IN THE BELT (#1145, owner 2026-09-27: "the same
      familiar item belt just with a similar card to the suggested item screen,
@@ -1253,7 +1257,7 @@
        pair together (owner-decisions.md §18, design/v19/create-v3.html). -->
   <div class="lanes" id="lanes"
        class:left={previewSide === "left"} class:right={previewSide === "right"}
-       class:open={previewOpen}>
+       class:open={previewOpen} class:editing={editingInCard}>
   <!-- the card, riding at the apex -->
   <div class="cardwrap" id="cardwrap">
     {#if !bodies.length && pocket}
@@ -1396,6 +1400,7 @@
       <article class="glass item-card" class:ip={pocket}>
         <h2>{row.title}</h2>
         <div class="sub">{[row.section, row.kind].filter(Boolean).join(" · ")}</div>
+        {#if !editingInCard}
         <!-- #1005: a one-off ends on its day; nothing is due on it. -->
         <div class="kv"><span>{row.kind === "expiry" ? "ends" : "due"}</span><b class={row.urg}>{row.t} · {row.longWhen}</b></div>
         {#if row.snoozedUntil}
@@ -1426,6 +1431,7 @@
         {/if}
         {#if row.remind.length}
           <div class="kv"><span>reminders</span><b>{remindOf(row.remind)}</b></div>
+        {/if}
         {/if}
 
         <h3>actions</h3>
@@ -1606,6 +1612,7 @@
           <div class="problem" role="alert">{problem}</div>
         {/if}
 
+        {#if !editingInCard}
         {#if row.notes}
           <h3>notes</h3>
           <p>{row.notes}</p>
@@ -1633,6 +1640,7 @@
         {:else}
           <div class="note">no documents yet — anything you attach, or mail in to your
             relay, takes a seat in the belt beside this item.</div>
+        {/if}
         {/if}
       </article>
     {/if}
