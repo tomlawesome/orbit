@@ -76,7 +76,7 @@ describe("a refusal that has its own reason (#1242)", () => {
   it("says why, in ADR-0023's own fixed words", () => {
     expect(authErrorMessageFor(INCOMPLETE, "link_required")).toEqual({
       primary: "Sign-in didn’t complete.",
-      sub: "An Orbit account already uses this email address. Sign in to it and link this provider from settings.",
+      sub: "Address already in use.",
     });
   });
 

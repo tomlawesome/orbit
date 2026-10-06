@@ -56,7 +56,7 @@ const MESSAGES = {
 const MESSAGES_BY_CODE = {
   link_required: {
     primary: "Sign-in didn’t complete.",
-    sub: "An Orbit account already uses this email address. Sign in to it and link this provider from settings.",
+    sub: "Address already in use.",
   },
 };
 
