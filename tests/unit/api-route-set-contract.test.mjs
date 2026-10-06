@@ -41,6 +41,8 @@ const routesRoot = new URL("../../web/src/routes/api/", import.meta.url).pathnam
 const HANDLER_NAMES = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 
 const EXPECTED_ROUTES = [
+  // What this Orbit runs on, for the About page (#1256): any signed-in member.
+  "/api/about",
   "/api/admin/contact",
   "/api/admin/documents/health",
   // Whether a document-KEK rotation is open and since when (#956).
@@ -201,7 +203,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 79 route families -- no fewer, no more", () => {
+  it("has exactly the expected 80 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });
