@@ -291,6 +291,11 @@ export interface EnsureEnvironmentFileResult {
   message?: string;
 }
 
+/** ensure_environment_file's own "Created ..." line, as a prefix for a flow's closing message (bash printed both). */
+function withCreatedLine(created: EnsureEnvironmentFileResult, message: string): string {
+  return created.message ? `${created.message}\n${message}` : message;
+}
+
 /** ensure_environment_file (configure.sh:171-198, guarantees #4-6). */
 export function ensureEnvironmentFile(deployDir: string): EnsureEnvironmentFileResult {
   const examplePath = join(deployDir, ENVIRONMENT_EXAMPLE_NAME);
@@ -636,7 +641,7 @@ export function applySetOidcSecret(deployDir: string, secret: string): string {
     refuse(`The OIDC client secret exceeds the ${MAXIMUM_SECRET_BYTES}-byte maximum.`, "oidc-secret-invalid");
   }
 
-  ensureEnvironmentFile(deployDir);
+  const created = ensureEnvironmentFile(deployDir);
   ensureSecretsDirectory(deployDir);
 
   const secretPath = join(deployDir, OIDC_SECRET_RELATIVE_PATH);
@@ -681,7 +686,7 @@ export function applySetOidcSecret(deployDir: string, secret: string): string {
     releaseLock();
   }
 
-  return `Orbit saved the OIDC client secret to ${OIDC_SECRET_RELATIVE_PATH}.`;
+  return withCreatedLine(created, `Orbit saved the OIDC client secret to ${OIDC_SECRET_RELATIVE_PATH}.`);
 }
 
 // --- guided configuration (--init) --------------------------------------
@@ -717,12 +722,12 @@ export function applyGuidedInit(deployDir: string, input: GuidedInitInput): stri
   }
 
   if (input.authMode === "local") {
-    ensureEnvironmentFile(deployDir);
+    const created = ensureEnvironmentFile(deployDir);
     updateManagedKeys(deployDir, [
       ["APP_URL", normalizedAppUrl],
       ["ORBIT_AUTH_OIDC", "false"],
     ]);
-    return "Orbit guided configuration saved APP_URL and set ORBIT_AUTH_OIDC=false (local accounts only).";
+    return withCreatedLine(created, "Orbit guided configuration saved APP_URL and set ORBIT_AUTH_OIDC=false (local accounts only).");
   }
 
   if (!isValidOidcIssuer(input.issuer ?? "")) {
@@ -736,7 +741,7 @@ export function applyGuidedInit(deployDir: string, input: GuidedInitInput): stri
   }
 
   const callbackUrl = `${normalizedAppUrl}${OIDC_CALLBACK_PATH}`;
-  ensureEnvironmentFile(deployDir);
+  const created = ensureEnvironmentFile(deployDir);
   updateManagedKeys(deployDir, [
     ["APP_URL", normalizedAppUrl],
     ["ORBIT_AUTH_OIDC", "true"],
@@ -745,7 +750,7 @@ export function applyGuidedInit(deployDir: string, input: GuidedInitInput): stri
     ["OIDC_CALLBACK_URL", callbackUrl],
   ]);
 
-  return "Orbit guided configuration saved APP_URL, ORBIT_AUTH_OIDC=true, OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CALLBACK_URL.";
+  return withCreatedLine(created, "Orbit guided configuration saved APP_URL, ORBIT_AUTH_OIDC=true, OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CALLBACK_URL.");
 }
 
 // --- deployment profile ---------------------------------------------------
@@ -776,14 +781,14 @@ export function setDeploymentProfile(deployDir: string, preset: string, model: s
       refuse(`Unknown deployment profile preset: ${preset}.`, "deployment-profile-invalid");
   }
 
-  ensureEnvironmentFile(deployDir);
+  const created = ensureEnvironmentFile(deployDir);
   updateManagedKeys(deployDir, [
     ["COMPOSE_PROFILES", profiles],
     ["TIKA_URL", tikaUrl],
     ["OLLAMA_MODEL", model ?? ""],
   ]);
 
-  return `Orbit deployment profile saved: ${preset}.`;
+  return withCreatedLine(created, `Orbit deployment profile saved: ${preset}.`);
 }
 
 // --- configuration preflight (configuration.sh --preflight handoff) --------

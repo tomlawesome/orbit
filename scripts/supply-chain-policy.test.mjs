@@ -206,7 +206,11 @@ describe("supply-chain policy", () => {
     // script must actually enforce the digest format.
     expect(deploy.includes(digestGuard)).toBe(true);
 
-    expect(configure).toContain('[[ -n "$orbit_image" ]] || return 0');
+    // configure.sh never falls back to an implied image: with no explicit
+    // ORBIT_IMAGE (environment or .env-orbit) it refuses, and any image it
+    // runs must pass the digest-or-local-tag check (#1210 D2).
+    expect(configure).toContain('No Orbit image to run configuration with.');
+    expect(configure).toContain('is_valid_orbit_image "$image" ||');
   });
 
   it("records the cosign pin the installer actually downloads (#661)", () => {

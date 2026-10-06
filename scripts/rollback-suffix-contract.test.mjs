@@ -2,33 +2,25 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// #1151 O1-Q5: configure.sh and configuration.sh each hand-duplicate the
-// ".orbit-config.rollback" suffix as their own readonly constant (never
-// sourced -- both scripts are deliberately source-less, so this is not
-// fixed by having one import the other). Both test files also hard-code the
-// literal suffix rather than reading either constant, so a one-sided edit
-// to just one script's constant passed every existing test while silently
-// breaking --check-rollback and every real rollback-file interaction.
-//
-// This extracts both real constants from the live scripts (never a
-// hand-typed duplicate of its own) and fails if they ever diverge, the same
-// role src/lib/session-secret.contract.test.ts already plays for
-// secret_hex256_pattern between configure.sh and config-contract.ts.
+// #1151 O1-Q5: the ".orbit-config.rollback" suffix is written in more than
+// one place, and a one-sided edit silently broke --check-rollback and every
+// real rollback-file interaction while every other test passed. Since #1210
+// the migration that creates the copy is the engine's
+// (src/lib/configuration-migration.ts's CONFIGURATION_ROLLBACK_SUFFIX);
+// repair.sh keeps its own readonly constant (it is deliberately
+// source-less), and configure.sh names the copy once, to find the engine
+// image for --check-rollback. This reads all three from the live files.
 
+const migrationSource = readFileSync(join(import.meta.dirname, "..", "src", "lib", "configuration-migration.ts"), "utf8");
+const repairSource = readFileSync(join(import.meta.dirname, "repair.sh"), "utf8");
 const configureSource = readFileSync(join(import.meta.dirname, "configure.sh"), "utf8");
-const configurationSource = readFileSync(join(import.meta.dirname, "configuration.sh"), "utf8");
 
-function extractConstant(source, name) {
-  const match = source.match(new RegExp(`^readonly ${name}="([^"]*)"$`, "mu"));
-  if (!match) throw new Error(`Could not find readonly ${name}="..." in the given source`);
-  return match[1];
-}
-
-describe("configure.sh and configuration.sh agree on the rollback-file suffix (#1151 O1-Q5)", () => {
-  it("configuration_rollback_suffix and rollback_suffix are the same literal", () => {
-    const configureSuffix = extractConstant(configureSource, "configuration_rollback_suffix");
-    const configurationSuffix = extractConstant(configurationSource, "rollback_suffix");
-    expect(configureSuffix).toBe(configurationSuffix);
-    expect(configureSuffix).toBe(".orbit-config.rollback");
+describe("the engine, repair.sh and configure.sh agree on the rollback-file suffix (#1151 O1-Q5)", () => {
+  it("CONFIGURATION_ROLLBACK_SUFFIX, repair.sh's constant and configure.sh's lookup are the same literal", () => {
+    const engineSuffix = migrationSource.match(/^export const CONFIGURATION_ROLLBACK_SUFFIX = "([^"]*)";$/mu)?.[1];
+    const repairSuffix = repairSource.match(/^readonly configuration_rollback_suffix="([^"]*)"$/mu)?.[1];
+    expect(engineSuffix).toBe(".orbit-config.rollback");
+    expect(repairSuffix).toBe(engineSuffix);
+    expect(configureSource).toContain(`"\${environment_file}${engineSuffix}"`);
   });
 });

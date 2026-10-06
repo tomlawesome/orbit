@@ -29,20 +29,25 @@ else
   export ORBIT_IMAGE="$configured_image"
 fi
 
-bash scripts/configure.sh
-
 compose() {
   docker compose --env-file "$environment_file" "$@"
 }
 
-# Prepare the selected application image before touching a running deployment.
-compose pull orbit-db
-compose pull orbit-clamav
+# The image has to exist before configuration, because configuration runs
+# inside it (#1210 D4): build or pull it first. Nothing here touches the
+# existing .env-orbit, secrets or volumes, so an existing deployment keeps
+# its data.
 if [[ "$mode" == "--build" ]]; then
   bash scripts/build-container.sh
 else
-  compose pull orbit-app
+  docker pull "$ORBIT_IMAGE"
 fi
+
+bash scripts/configure.sh
+
+# Prepare the remaining images before touching a running deployment.
+compose pull orbit-db
+compose pull orbit-clamav
 
 # Database migrations happen on application startup. Preserve a validated
 # recovery point whenever this is an update rather than a first deployment.
