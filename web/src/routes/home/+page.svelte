@@ -6,6 +6,8 @@
   import { resolve } from "$app/paths";
   import { mountAccount, mountEmptySky, mountHome } from "./home.behaviour.js";
   import Flight from "$lib/flight/Flight.svelte";
+  import Sun from "$lib/sun/Sun.svelte";
+  import { SUN_R } from "$lib/sun/furnace.js";
   import { othersOf } from "$lib/flight/engine.js";
   import Dawn from "$lib/flight/Dawn.svelte";
   import Dusk from "$lib/flight/Dusk.svelte";
@@ -1421,9 +1423,6 @@
         <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
           <feGaussianBlur stdDeviation="4"/>
         </filter>
-        <filter id="sun" x="-200%" y="-200%" width="500%" height="500%">
-          <feGaussianBlur stdDeviation="9"/>
-        </filter>
         <radialGradient id="p-ruby" cx="34%" cy="30%" r="72%">
           <stop offset="0%" stop-color="var(--p-ruby-1, #ffb3ab)"/><stop offset="42%" stop-color="var(--p-ruby-2, #e0453e)"/>
           <stop offset="100%" stop-color="var(--p-ruby-3, #7e1a1f)"/>
@@ -1524,8 +1523,9 @@
       <a class="sun-link" href={view?.primary ? resolve("/household/[id]", { id: encodeURIComponent(view.primary) }) : undefined}
          onclick={() => markDoor("sky")}
          aria-label={view?.household?.name ? `Open ${view.household.name}` : undefined}>
-        <circle cx="190" cy="190" r="13" style="fill:var(--sun)" filter="url(#sun)" opacity=".8"/>
-        <circle cx="190" cy="190" r="7" style="fill:var(--sun-core)"/>
+        <!-- #1250: the sun itself is drawn by the layer over the dial (Sun.svelte,
+             Furnace); this is its disc, kept in the link as what a pointer lands on -->
+        <circle class="sun-disc" cx="190" cy="190" r={SUN_R} fill="transparent"/>
         <text id="dial-name" x="190" y="212" font-size="10" fill="var(--ink-mid)" text-anchor="middle" style="font-family:var(--ui)">{view?.household?.name ?? ""}</text>
       </a>
 
@@ -1561,6 +1561,7 @@
         </g>
       {/each}
     </svg>
+    <Sun r={SUN_R} />
     </div>
     <div class="hero-foot">
       <div class="splash-search" style="position:relative">
