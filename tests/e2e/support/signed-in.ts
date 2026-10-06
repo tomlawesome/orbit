@@ -4,6 +4,7 @@ import { expect, type Page } from "@playwright/test";
 import { cleanupHousehold, sessionHeaders } from "./households";
 import { homeIsLive } from "./keyboard";
 import { ensureWorkerAdministrator, workerAccount } from "./worker-identity";
+import { settleArrival } from "./arrival";
 import { answerPushWithoutAService } from "./webkit-push";
 
 /**
@@ -30,6 +31,15 @@ export async function signIn(page: Page, returnTo: string) {
   await answerPushWithoutAService(page);
   await page.goto(`/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`);
   await page.getByRole("link", { name: READER() }).click();
+  /* #1233 (#1221, #840): the session probe below answers as soon as the
+     cookie is set, while the browser is still following the sign-in's own
+     redirects (the callback, then /home or the arrival, which may itself
+     leave for /home). A spec's first `goto` after that raced the redirect
+     still in flight -- `net::ERR_ABORTED` on Chromium, "interrupted by
+     another navigation to /home" on WebKit (pipeline 2131), and a 7 s stall
+     before /inbox loaded on desktop-webkit (pipeline 2203, job 32545). So:
+     land first, then ask. */
+  await settleArrival(page, 20_000, returnTo);
   /* #1080: waits for the session, then holds administrator access. */
   await ensureWorkerAdministrator(page);
 }

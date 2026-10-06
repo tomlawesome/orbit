@@ -70,21 +70,26 @@ type Journey = {
   fire: (page: Page, household: Household) => Promise<() => Promise<void>>;
   /** The failure itself is never shown, so neither check below can run:
    *  both tests expect-fail on it ahead of their own defect. */
-  shownDefect?: () => string | undefined;
   announceDefect?: () => string | undefined;
   focusDefect?: () => string | undefined;
+  /** A reason the focus check cannot report either way on this project (#1233). */
+  focusFixme?: () => string | undefined;
 };
 
-/* #1196: WebKit's driver stops applying a `page.route` mock once the service
-   worker controls the page -- the request reaches Orbit for real -- so a
-   journey whose failure is staged by a mock shows one or not by timing. A
-   timing-dependent expected failure cannot be marked `fail`, so on the
-   desktop-webkit project these journeys are `fixme` until the driver gap
-   closes (owner, 2026-10-05). Detail on #1196. */
-const ROUTE_MOCK_SKIPPED_ON_DESKTOP_WEBKIT = (what: string) =>
-  test.info().project.name === "desktop-webkit"
-    ? `#1196: desktop Safari applies the route mock only until the service worker controls the page, so by timing ${what}`
-    : undefined;
+/* #1233 (#1196, #1219): every journey here stages its failure with a
+   `page.route` mock, and Playwright does not route a request the service
+   worker handles (its documentation says to block service workers wherever
+   routing is relied on). On WebKit the mock applied only until Orbit's
+   worker took the page, so the /inbox journey drew the real, empty inbox
+   instead of the synthetic suggestion (desktop: pipeline 2203, job 32545,
+   `/api/imap-inbox` answered by the server; phone: pipeline 2188). The
+   same cure as v19-mail-review.spec.ts and v19-hit-routing.spec.ts: nothing
+   here is about the worker, so on WebKit it is kept out. */
+test.use({
+  serviceWorkers: async ({}, use, testInfo) => {
+    await use(testInfo.project.use.defaultBrowserType === "webkit" ? "block" : "allow");
+  },
+});
 
 /* The defect common to three journeys: the button that was pressed disables
    itself (or is swapped for a disabled copy) while the request is out, and a
@@ -124,9 +129,10 @@ const createOffline: Journey = {
   name: "a save on /create that cannot reach Orbit",
   /* The desk shows the browser's own error words (create.behaviour.js
      saveProblem), which differ by engine: Chromium's "Failed to fetch",
-     Firefox's "NetworkError when attempting to fetch resource." (#1183);
-     the pocket prefixes "not saved". */
-  words: /^not saved|Failed to fetch|NetworkError when attempting to fetch resource/,
+     Firefox's "NetworkError when attempting to fetch resource." (#1183),
+     WebKit's "Load failed" (#1233: unseen until the #1196 fixme came off,
+     pipeline 2205); the pocket prefixes "not saved". */
+  words: /^not saved|Failed to fetch|NetworkError when attempting to fetch resource|Load failed/,
   fire: async (page) => {
     const name = `Offline proving ${randomUUID().slice(0, 8)}`;
     await gotoCreate(page);
@@ -155,8 +161,6 @@ const createOffline: Journey = {
      (pipeline 1989, mobile-webkit) -- the opposite of Chromium's #1178
      defect, not a timing race like Firefox's. Nothing to expect-fail here. */
   focusDefect: () => isWebkit() ? undefined : FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket create bar (.pk-save)" : "the desk create card (#card .btn-primary)"),
-  /* The mock on /api/workspace/commands above (pipeline 2011: both checks). */
-  shownDefect: () => ROUTE_MOCK_SKIPPED_ON_DESKTOP_WEBKIT("the save succeeds and no failure is shown"),
 };
 
 /* ── IMAP review ───────────────────────────────────────────────────────── */
@@ -238,11 +242,15 @@ const itemViewApproval: Journey = {
       await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 });
     };
   },
+  /* #1233: desktop WebKit kept focus on the amend card's button (pipeline
+     2205, "Expected to fail, but passed", the first run with the #1196 fixme
+     off), as it keeps it on the create card (#1192) -- and the create card's
+     check on desktop-webkit then raced (#1219). One observation is not a
+     certainty either way, so on desktop-webkit this check is fixme, as the
+     create card's document check is below; the phone and the other engines
+     keep their marks. */
   focusDefect: () => FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket suggestion card's Add to orbit" : "the desk amend card's accept into orbit"),
-  /* The GET mock on /api/imap-inbox/<id> (interceptFailingMail): without it
-     the item view has no synthetic receipt to draw, so the amend card's act
-     never appears (pipeline 2011, :207 toBeEnabled). */
-  shownDefect: () => ROUTE_MOCK_SKIPPED_ON_DESKTOP_WEBKIT("the item view never draws the synthetic suggestion"),
+  focusFixme: () => test.info().project.name === "desktop-webkit" ? FOCUS_DEFECT_RACES_ON_DESKTOP_WEBKIT : undefined,
 };
 
 const inboxApproval: Journey = {
@@ -342,8 +350,7 @@ const JOURNEYS = [createOffline, itemViewApproval, inboxApproval, householdDelet
 
 for (const journey of JOURNEYS) {
   test(`${journey.name} is announced, and the act can be repeated by keyboard`, async ({ page }) => {
-    const defect = journey.shownDefect?.() ?? journey.announceDefect?.();
-    test.fixme(Boolean(journey.shownDefect?.()), journey.shownDefect?.());
+    const defect = journey.announceDefect?.();
     test.fail(Boolean(defect), defect);
     test.setTimeout(90_000);
     await signIn(page, "/home");
@@ -360,8 +367,8 @@ for (const journey of JOURNEYS) {
   });
 
   test(`${journey.name} leaves focus where the reader was`, async ({ page }) => {
-    const defect = journey.shownDefect?.() ?? journey.focusDefect?.();
-    test.fixme(Boolean(journey.shownDefect?.()), journey.shownDefect?.());
+    const defect = journey.focusDefect?.();
+    test.fixme(Boolean(journey.focusFixme?.()), journey.focusFixme?.());
     test.fixme(Boolean(defect) && isFirefox(), FOCUS_DEFECT_RACES_ON_FIREFOX);
     test.fail(Boolean(defect), defect);
     test.setTimeout(90_000);

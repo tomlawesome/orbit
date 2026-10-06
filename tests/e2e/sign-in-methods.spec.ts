@@ -264,7 +264,17 @@ test("an administrator adds a local user and is told where the link went", async
   await row.getByRole("button", { name: "create", exact: true }).click();
   await expect(row.getByLabel("your current password")).toBeVisible();
   await row.getByLabel("your current password").fill(ADMINISTRATOR_PASSWORD());
+  /* #1233 (#1229): the create verifies the administrator's password
+     (argon2id, 64 MiB x 3), mints and persists the link's token and hands the
+     mail to the sender before it answers -- 4001 ms on an idle runner
+     (pipeline 2203, job 32545), against the 5 s the notice assertion below
+     gives it. The notice is drawn from that answer, so wait for the answer. */
+  const created = page.waitForResponse(
+    (response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/admin/users",
+    { timeout: 30_000 },
+  );
   await row.getByRole("button", { name: "create and send the link" }).click();
+  await created;
 
   /* WHERE IT WENT AND WHEN IT LAPSES — never the link itself (owner ruling,
      2026-09-09). The absence is asserted as hard as the presence: a Copy
@@ -274,8 +284,11 @@ test("an administrator adds a local user and is told where the link went", async
   await expect(page.locator(".mission-page")).not.toContainText("/setup/");
   await expect(page.getByRole("button", { name: /copy/i })).toHaveCount(0);
 
-  /* And the person is in the roster the moment they exist. */
-  await expect(page.locator(".person", { hasText: "Newcomer Lawson" })).toBeVisible();
+  /* And the person is in the roster the moment they exist. By the address,
+     which is this attempt's own: the file is serial, so a retry re-runs it
+     against the roster the first pass already added a "Newcomer Lawson" to
+     (two rows, strict-mode violation; pipeline 2203, job 32545). */
+  await expect(page.locator(".person", { hasText: NEWCOMER })).toBeVisible();
 });
 
 test("an administrator sends a new setup link from somebody's row", async ({ page }) => {
@@ -296,7 +309,13 @@ test("an administrator sends a new setup link from somebody's row", async ({ pag
   await expect(resend).toBeVisible();
   await resend.getByLabel("link valid for").fill("14");
   await resend.getByLabel("your current password").fill(ADMINISTRATOR_PASSWORD());
+  /* #1233 (#1229): the same wait as the create above, for the same reason. */
+  const resent = page.waitForResponse(
+    (response) => response.request().method() === "POST" && /\/api\/admin\/users\/[^/]+\/setup-link$/.test(new URL(response.url()).pathname),
+    { timeout: 30_000 },
+  );
   await resend.getByRole("button", { name: "send it" }).click();
+  await resent;
 
   await expect(page.locator(".adminproblem.ok")).toContainText("Setup link sent to");
   await expect(page.locator(".adminproblem.ok")).toContainText("valid until");
