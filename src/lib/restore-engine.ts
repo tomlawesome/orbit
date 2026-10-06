@@ -20,6 +20,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { applyHostOwnership } from "./host-ownership";
 import {
   type BackupDockerAdapter,
   type DockerComposeAdapterOptions,
@@ -336,6 +337,7 @@ export function writeRestoreJournal(
     try {
       copyFileSync(paths.journalPath, previousJournal);
       chmodSync(previousJournal, SECURE_FILE_MODE);
+      applyHostOwnership(previousJournal);
     } catch {
       rmSafely(journalTemp);
       refuse("journal-durability-failed", "checkpoint/journal failed; the recovery journal could not be durably published.");
@@ -359,6 +361,7 @@ export function writeRestoreJournal(
       } catch {
         try {
           copyFileSync(previousJournal, paths.journalPath);
+          applyHostOwnership(paths.journalPath);
         } catch {
           // Best-effort restoration, matches restore.sh:497-498's own `|| true` fallback chain.
         }
@@ -1107,8 +1110,12 @@ export class RestoreRun {
 
     mkdirSync(options.paths.restoreRoot, { recursive: true });
     chmodSync(options.paths.restoreRoot, SECURE_DIRECTORY_MODE);
+    // #1211 E6: the restore evidence belongs to the operator on the host, so
+    // they can read the journal and act on it without root.
+    applyHostOwnership(options.paths.restoreRoot);
     const checkpointDirectory = mkdtempSync(join(options.paths.restoreRoot, "checkpoint-"));
     chmodSync(checkpointDirectory, SECURE_DIRECTORY_MODE);
+    applyHostOwnership(checkpointDirectory);
     // O2-R10: this directory (and the dump/tar/key-copy createCheckpoint is
     // about to put in it) exists before any journal references it. Without
     // this marker, a crash before writeRestoreJournal's first call leaves it
@@ -1117,6 +1124,7 @@ export class RestoreRun {
     // mkdtempSync ever finds or removes it. createCheckpoint() removes the
     // marker the moment the checkpoint is durably journaled.
     writeFileSync(join(checkpointDirectory, CHECKPOINT_PREPARING_MARKER), "");
+    applyHostOwnership(join(checkpointDirectory, CHECKPOINT_PREPARING_MARKER));
     const marker = "checkpoint-";
     const restoreId = checkpointDirectory.slice(checkpointDirectory.lastIndexOf(marker) + marker.length);
     return new RestoreRun(

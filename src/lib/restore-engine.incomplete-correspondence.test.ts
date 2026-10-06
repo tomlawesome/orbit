@@ -39,7 +39,7 @@ const healthyReports: CorrespondenceReports = {
 };
 
 function adapterAnswering(reports: CorrespondenceReports, failing?: keyof CorrespondenceReports) {
-  const byQuery = new Map(Object.entries(CORRESPONDENCE_QUERIES).map(([name, query]) => [query, name as keyof CorrespondenceReports]));
+  const byQuery = new Map<string, keyof CorrespondenceReports>(Object.entries(CORRESPONDENCE_QUERIES).map(([name, query]) => [query, name as keyof CorrespondenceReports]));
   return {
     createStageDatabase: () => undefined,
     dropStageDatabase: () => undefined,
