@@ -6,6 +6,7 @@
   import Identity from "./Identity.svelte";
   import Waiting from "./Waiting.svelte";
   import { clearLaunch, markLaunch } from "./arrival.js";
+  import { readyFlight, hurryFlight } from "./warm.js";
   import {
     APPROVAL_BACKSTOP_MS, CLAIM, DOOR, LOCAL, STARTING, STARTING_BACKSTOP_MS,
     applyStartingBackstop, availabilityOf, cardMessageFor, claimFromHash, doorMessageFor,
@@ -260,6 +261,7 @@
    *  entered exactly as an identity provider's callback enters it. */
   async function submitCreate() {
     if (busy) return;
+    hurryFlight();
     if (await present("/api/auth/bootstrap/local", { email, displayName, password })) {
       password = "";
       markLaunch();
@@ -279,6 +281,7 @@
    */
   async function submitSignIn() {
     if (busy) return;
+    hurryFlight();
     const answer = await present("/api/auth/local/login", { email, password });
     if (!answer) return;
     password = "";
@@ -347,6 +350,7 @@
         /* The session is already in this browser's cookie jar: the poll route
            minted it for THIS tab and nobody else. The ratified launch plays
            from here exactly as it does after any other way in. */
+        hurryFlight();
         markLaunch();
         location.href = returnTo;
         return;
@@ -459,6 +463,47 @@
     /** @type {ReturnType<typeof setTimeout> | undefined} */
     let pollTimer;
 
+    /*
+     * THE FLIGHT, READIED IN THE DOOR'S QUIET MOMENTS (#1253, warm.js). Only
+     * once the door can open and its face is showing, and only once first
+     * light has finished drawing in: the GPU work is queued as chores, done
+     * in idle moments, and paused while someone types. Waited for by each
+     * painted animation's own end, not a guess: what only moves or fades is
+     * carried by the compositor and nothing here can stutter it, but what is
+     * painted is drawn on this thread (orbit-site's main.js, `drawn`).
+     */
+    let readying = false;
+    const COMPOSITED = new Set(["transform", "opacity", "offset", "easing", "composite", "computedOffset"]);
+    /** @param {Animation} a */
+    const painted = (a) => {
+      try {
+        const t = /** @type {KeyframeEffect} */ (a.effect).target;
+        if (t instanceof SVGElement && !(t instanceof SVGSVGElement)) return true;
+        const tp = /** @type {any} */ (a).transitionProperty;
+        const props = tp ? [tp] : /** @type {KeyframeEffect} */ (a.effect).getKeyframes().flatMap(Object.keys);
+        return props.some((k) => !COMPOSITED.has(k));
+      } catch { return true; }
+    };
+    const drawnIn = () => {
+      try {
+        const ends = document.getAnimations().filter((a) => Number.isFinite(a.effect?.getComputedTiming().endTime) && painted(a));
+        return Promise.all(ends.map((a) => a.finished.catch(() => {})));
+      } catch { return Promise.resolve([]); }
+    };
+    function readyWhenDrawn() {
+      if (readying) return;
+      readying = true;
+      const whenLit = () => {
+        if (disposed) return;
+        if (!document.body.classList.contains("lit")) { after(120, whenLit); return; }
+        /* two frames, so the lit sequence's transitions exist to be waited on */
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          drawnIn().then(() => { if (!disposed) readyFlight({ gentle: true }); });
+        }));
+      };
+      whenLit();
+    }
+
     /**
      * Shows a state other than the door: fixed words, styled to match it.
      * @param {Parameters<typeof doorMessageFor>[0]} state
@@ -526,6 +571,7 @@
       if (disposed) return;
       if (first.state === DOOR) {
         wearFace(first.face);
+        readyWhenDrawn();
         return;
       }
       const wasStarting = first.state === STARTING;
@@ -552,6 +598,7 @@
              is the one the released dawn hands over to. */
           wearFace(next.face);
           recoverToDoor();
+          readyWhenDrawn();
         } else showState(resolved, next.contactAddress);
       };
       pollTimer = setTimeout(poll, 4000);
@@ -577,6 +624,7 @@
     const gate = /** @type {HTMLElement} */ (event.currentTarget);
     if (leaving) return;
     leaving = true;
+    hurryFlight();
     markLaunch();
     const rm = reduced();
     setTimeout(() => gate.classList.add("flash"), rm ? 0 : 420);
