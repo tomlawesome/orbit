@@ -37,7 +37,14 @@ FROM base AS web-builder
 COPY --from=deps /opt/orbit/node_modules ./node_modules
 COPY --from=deps /opt/orbit/web/node_modules ./web/node_modules
 COPY . .
-RUN pnpm --filter orbit-web build
+# The About page's bill of materials (#1256): every shipped package, as SPDX,
+# written into web/static before the build so it ships as a static file. It
+# has to be made here, from the tree being built: CI's image SBOM only exists
+# once this image does. Same walk and scope as the licence gate
+# (scripts/ci/licence-policy.mjs), and deterministic, so ADR-0028's content
+# ID still sees one tree as one image.
+RUN node scripts/about-sbom.mjs web/static/about/sbom.spdx.json \
+  && pnpm --filter orbit-web build
 
 # The front end's production node_modules, pruned by pnpm to what actually
 # runs (#735). The engine's own code is bundled by the stage above, but its
