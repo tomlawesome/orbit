@@ -68,9 +68,9 @@ export default defineConfig({
       testMatch: "**/pocket-measure.spec.js" },
     /* `pocket-webkit` (#1174, #1175) is the phone in Safari's engine: the
        first-run film played through and every mark held at two phone widths
-       (tour-pocket-webkit.spec.js), and the create card's ring
-       (pocket-create-ring.spec.js, which the Chromium `fidelity` run above
-       also takes). Everything else here runs in Chromium, and the pocket
+       (tour-pocket-webkit.spec.js), and the belong card's create drawer
+       (pocket-belong-drawer.spec.js, #1263, which the Chromium `fidelity`
+       run above also takes). Everything else here runs in Chromium, and the pocket
        film shipped green through all of it and broke on the owner's iPhone.
        Its own script, `pnpm --filter orbit-web fidelity:webkit`, run by CI's
        `fidelity` job after `fidelity`: WebKit's system libraries are in
@@ -79,7 +79,7 @@ export default defineConfig({
        phone at a time, as `fidelity` itself; the played film is ~1:42 under
        reduced motion, so the per-test limit is set by the spec. */
     { name: "pocket-webkit", workers: 1,
-      testMatch: ["**/tour-pocket-webkit.spec.js", "**/pocket-create-ring.spec.js"],
+      testMatch: ["**/tour-pocket-webkit.spec.js", "**/pocket-belong-drawer.spec.js"],
       use: { browserName: "webkit", isMobile: true, hasTouch: true, deviceScaleFactor: 2,
         viewport: { width: 390, height: 844 } } },
   ],
