@@ -99,6 +99,12 @@ fail() {
 # before install.sh ever reaches manifest resolution, so an empty value there
 # is harmless -- install.sh treats it exactly like an absent one.
 release_manifest=""
+# The image under test is pushed to this run's own throwaway registry, so it
+# can never carry the GitHub countersignature a stable channel demands when
+# cosign is installed (install.sh's release_manifest_stable, ADR-0031 #7).
+# What is being accepted is a preview digest, so install it as one (#1257);
+# stable_channel_refusal proves the stable rule still bites.
+readonly install_channel=preview
 
 free_port() {
   node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{process.stdout.write(String(s.address().port));s.close();});'
@@ -379,9 +385,29 @@ run_installer() {
   (cd "$target" && env PATH="$workdir/shim:$PATH" \
     COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$project_name}" \
     ORBIT_REGISTRY="127.0.0.1:$registry_port" ORBIT_REPOSITORY="$repository" \
-    ORBIT_RELEASE_MANIFEST="$release_manifest" \
+    ORBIT_RELEASE_MANIFEST="$release_manifest" ORBIT_CHANNEL="${ORBIT_CHANNEL_UNDER_TEST:-$install_channel}" \
     timeout 900 bash "$repo_root/scripts/install.sh" </dev/null) \
     > "$workdir/install.log" 2>&1
+}
+
+# With cosign installed, the same unsigned image on channel latest must be
+# refused at the identity phase, before anything in the target changes
+# (#1257). Without cosign install.sh cannot check signatures at all, so there
+# is nothing to prove and it says so.
+stable_channel_refusal() {
+  if ! command -v cosign >/dev/null 2>&1; then
+    note "stable-channel refusal: skipped, cosign is not installed"
+    return 0
+  fi
+  cp -- "$target/.env-orbit" "$workdir/env-before-stable"
+  if ORBIT_CHANNEL_UNDER_TEST=latest run_installer; then
+    fail "stable-channel refusal: install.sh accepted an unsigned image on channel latest"
+  fi
+  grep -q 'could not verify the countersignature' "$workdir/install.log" ||
+    fail "stable-channel refusal: install.sh failed for another reason (see install.log)"
+  cmp -s "$target/.env-orbit" "$workdir/env-before-stable" ||
+    fail "stable-channel refusal: the refused install changed .env-orbit"
+  note "negative: unsigned image refused on channel latest (ADR-0031 #7)"
 }
 
 negative_scenarios() {
@@ -621,6 +647,7 @@ positive_scenario() {
 
   write_shim
   make_preprovisioned_target
+  stable_channel_refusal
 
   if [[ "$lifecycle_mode" == 1 ]]; then
     # catalogue Part 1 / install.sh #31: a hard interruption before the
@@ -658,7 +685,7 @@ positive_scenario() {
     set -m
     ( cd "$target" && env PATH="$workdir/shim:$PATH" \
         ORBIT_REGISTRY="127.0.0.1:$registry_port" ORBIT_REPOSITORY="$repository" \
-        ORBIT_RELEASE_MANIFEST="$release_manifest" \
+        ORBIT_RELEASE_MANIFEST="$release_manifest" ORBIT_CHANNEL="$install_channel" \
         bash "$repo_root/scripts/install.sh" </dev/null ) \
         > "$workdir/install.log" 2>&1 &
     local install_bg=$! waited=0 install_status=0
