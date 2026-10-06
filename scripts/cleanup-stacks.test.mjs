@@ -48,6 +48,24 @@ const networks = [
   "other|other_default",
 ];
 
+// images: repository|tag|id|created since|size. containerImages: the image id
+// each container (by id) was created from, as `docker inspect` reports it.
+const images = [
+  "orbit-local|aaa111|sha256:1|2 days ago|419MB",
+  "orbit-local|bbb222|sha256:2|1 day ago|419MB",
+  "orbit-local|ccc333|sha256:8|3 hours ago|419MB",
+  "orbit-vapid-bootstrap|v1|sha256:3|5 days ago|100MB",
+  "orbit-acceptance-local|x1|sha256:4|4 days ago|200MB",
+  "orbit-local-extra|t1|sha256:5|1 day ago|50MB",
+  "orbit|latest|sha256:6|1 day ago|300MB",
+  "postgres|18-alpine|sha256:7|1 week ago|270MB",
+];
+const containerImages = [
+  "c5|sha256:2", // orbit-b's running container uses orbit-local:bbb222
+  "c10|sha256:8", // the stale project's stopped container uses orbit-local:ccc333
+  "c6|sha256:7",
+];
+
 const scratchDirs = [];
 afterEach(() => {
   while (scratchDirs.length > 0) rmSync(scratchDirs.pop(), { recursive: true, force: true });
@@ -59,6 +77,8 @@ function fakeDocker({ failOn = [], psRows = containers } = {}) {
   writeFileSync(join(dir, "ps.txt"), `${psRows.join("\n")}\n`);
   writeFileSync(join(dir, "volumes.txt"), `${volumes.join("\n")}\n`);
   writeFileSync(join(dir, "networks.txt"), `${networks.join("\n")}\n`);
+  writeFileSync(join(dir, "images.txt"), `${images.join("\n")}\n`);
+  writeFileSync(join(dir, "imageids.txt"), `${containerImages.join("\n")}\n`);
   writeFileSync(join(dir, "fail.txt"), `${failOn.join("\n")}\n`);
   writeFileSync(join(dir, "calls.log"), "");
   const stub = join(dir, "docker");
@@ -67,10 +87,16 @@ function fakeDocker({ failOn = [], psRows = containers } = {}) {
     `#!/usr/bin/env bash
 echo "$*" >> "${dir}/calls.log"
 case "$1 $2" in
-  "ps -a") cat "${dir}/ps.txt" ;;
+  "ps -a") if [ "$3" = "-q" ]; then cut -d'|' -f2 "${dir}/ps.txt"; else cat "${dir}/ps.txt"; fi ;;
+  "image ls") cat "${dir}/images.txt" ;;
+  "image rm") grep -qx -- "$3" "${dir}/fail.txt" && exit 1; exit 0 ;;
+  "inspect --format")
+    grep -qx inspect "${dir}/fail.txt" && exit 1
+    shift 3
+    for id in "$@"; do grep "^$id|" "${dir}/imageids.txt" | cut -d'|' -f2; done ;;
   "volume ls") cat "${dir}/volumes.txt" ;;
   "network ls") cat "${dir}/networks.txt" ;;
-  "rm -f") grep -qx -- "\${@: -1}" "${dir}/fail.txt" && exit 1; exit 0 ;;
+  "rm -f") grep -qx -- "\${@: -1}" "${dir}/fail.txt" && exit 1; sed -i "/^\${@: -1}|/d" "${dir}/imageids.txt"; exit 0 ;;
   "volume rm"|"network rm") grep -qx -- "$3" "${dir}/fail.txt" && exit 1; exit 0 ;;
   *) echo "unexpected docker invocation: $*" >&2; exit 99 ;;
 esac
@@ -95,11 +121,13 @@ function run(args, options = {}) {
     containers: calls.filter((c) => c.startsWith("rm -f")).map((c) => c.split(" ").pop()),
     volumes: calls.filter((c) => c.startsWith("volume rm")).map((c) => c.split(" ").pop()),
     networks: calls.filter((c) => c.startsWith("network rm")).map((c) => c.split(" ").pop()),
+    images: calls.filter((c) => c.startsWith("image rm")).map((c) => c.split(" ").pop()),
   };
   return { ...result, calls, removed };
 }
 
-const mutating = (call) => /^(rm|volume rm|network rm|stop|kill|compose|system|container|prune)\b/.test(call);
+const mutating = (call) =>
+  /^(rm|volume rm|network rm|image rm|image prune|stop|kill|compose|system|container|prune)\b/.test(call);
 
 describe("cleanup-stacks.sh", () => {
   it("lists every orbit* project, stopped containers and empty-project leftovers included, and changes nothing", () => {
@@ -257,6 +285,64 @@ describe("cleanup-stacks.sh", () => {
     expect(r.stderr).toContain("COULD NOT REMOVE network orbit-b_default");
     expect(r.removed.containers).toContain("c5");
     expect(r.removed.volumes).toContain("orbit-gone_orbit-db-data");
+  });
+
+  describe("images", () => {
+    it("lists unused locally built images with tag, age and size, and in-use ones as kept, changing nothing", () => {
+      const r = run([]);
+      expect(r.status).toBe(0);
+      expect(r.calls.some(mutating)).toBe(false);
+      expect(r.stdout).toContain("orbit-local:aaa111 (2 days ago, 419MB) unused");
+      expect(r.stdout).toContain("orbit-vapid-bootstrap:v1 (5 days ago, 100MB) unused");
+      expect(r.stdout).toContain("orbit-acceptance-local:x1 (4 days ago, 200MB) unused");
+      expect(r.stdout).toContain("orbit-local:bbb222 (1 day ago, 419MB) in use, kept");
+      expect(r.stdout).toContain("orbit-local:ccc333 (3 hours ago, 419MB) in use, kept");
+    });
+
+    it("plain --remove removes the unused images by name and keeps the used ones", () => {
+      const r = run(["--remove"]);
+      expect(r.status).toBe(0);
+      expect(r.removed.images.sort()).toEqual([
+        "orbit-acceptance-local:x1",
+        "orbit-local:aaa111",
+        // freed by removing the stale project's stopped container in this same run
+        "orbit-local:ccc333",
+        "orbit-vapid-bootstrap:v1",
+      ]);
+      expect(r.removed.images).not.toContain("orbit-local:bbb222");
+      expect(r.stdout).toContain("Removed image orbit-local:aaa111");
+    });
+
+    it("--remove --all removes unused images too", () => {
+      const r = run(["--remove", "--all"]);
+      expect(r.removed.images).toContain("orbit-local:aaa111");
+      // the running project's container went first, so its image is free now
+      expect(r.removed.images).toContain("orbit-local:bbb222");
+    });
+
+    it("never removes an image of any other repository, never forces, never prunes", () => {
+      const r = run(["--remove", "--all", "--include-ollama"]);
+      for (const other of ["orbit-local-extra:t1", "orbit:latest", "postgres:18-alpine"]) {
+        expect(r.removed.images).not.toContain(other);
+      }
+      expect(r.calls.filter((c) => c.startsWith("image rm")).every((c) => !c.includes("-f"))).toBe(true);
+      expect(r.calls.some((c) => c.includes("prune"))).toBe(false);
+    });
+
+    it("--project leaves images alone and says so", () => {
+      const r = run(["--remove", "--project", "orbit-stale"]);
+      expect(r.removed.images).toEqual([]);
+      expect(r.stdout).toContain("Images are not removed when --project is used.");
+    });
+
+    it("leaves images alone, and fails, when Docker cannot say what is in use", () => {
+      const r = run(["--remove"], { failOn: ["inspect"] });
+      expect(r.status).toBe(1);
+      expect(r.removed.images).toEqual([]);
+      expect(r.stderr).toContain("Could not tell which locally built images are in use");
+      // the project teardown still happened
+      expect(r.removed.containers).toEqual(["c10"]);
+    });
   });
 
   it("rejects an unknown option without calling docker", () => {
