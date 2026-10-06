@@ -15,8 +15,9 @@ set -Eeuo pipefail
 #     created, mode 0700 and owned by the running user. On any exit whose
 #     event reason is configuration-failure the installer copies
 #     scripts/configure.sh, scripts/installer-ui.sh and .env-orbit.example,
-#     as verified from the image, into it before
-#     rolling back, owner-only (0600/0700), all or nothing. It writes nothing,
+#     as verified from the image, and .orbit-image, the resolved digest
+#     reference on one line, into it before rolling back, owner-only
+#     (0600/0700), all or nothing. It writes nothing,
 #     and says so in one stderr line, if the directory is missing, not a
 #     directory, a symlink, not mode 0700, not empty or not owned by the
 #     current user (#1225, docs/engine-events.md).
@@ -371,11 +372,11 @@ launcher_tree_write() {
     launcher_tree_notice "its scripts directory could not be created"
     return 1
   fi
-  for asset in "${launcher_config_tree_assets[@]}"; do
+  for asset in "${launcher_config_tree_files[@]}"; do
     if ! is_real_non_symlink_directory scripts || [[ -e "$asset" || -L "$asset" ]] ||
       ! (set -o noclobber; cat -- "$snapshot/$asset" > "$asset") 2>/dev/null ||
       ! cmp -s -- "$snapshot/$asset" "$asset"; then
-      rm -rf -- scripts .env-orbit.example
+      rm -rf -- scripts .env-orbit.example .orbit-image
       launcher_tree_notice "${asset} could not be written"
       return 1
     fi
@@ -1884,6 +1885,10 @@ readonly launcher_config_tree_assets=(
   "scripts/installer-ui.sh"
   ".env-orbit.example"
 )
+# Everything the launcher tree receives: those assets plus the image pin,
+# which is written only into the launcher tree's snapshot, never into a
+# deployment.
+readonly launcher_config_tree_files=("${launcher_config_tree_assets[@]}" ".orbit-image")
 declare -a asset_directories=()
 declare -A asset_directory_seen=()
 for asset in "${deployment_assets[@]}"; do
@@ -1998,7 +2003,9 @@ done
 
 # The staged files move into the target below and leave with the rollback on
 # a refusal, so the launcher's copy is taken now, while they are exactly what
-# was extracted and checked, into the private staging directory (#1225).
+# was extracted and checked, into the private staging directory (#1225). The
+# image pin, .orbit-image, is written here and nowhere else, so a deployment
+# never has one.
 if [[ -n "$launcher_config_tree" ]]; then
   launcher_tree_snapshot="$staging_dir/launcher-config-tree"
   if mkdir -- "$launcher_tree_snapshot" 2>/dev/null && chmod 700 "$launcher_tree_snapshot" &&
@@ -2009,6 +2016,11 @@ if [[ -n "$launcher_config_tree" ]]; then
         break
       }
     done
+    if [[ -n "$launcher_tree_snapshot" ]] &&
+      ! { (umask 077; printf '%s\n' "$resolved_reference" > "$launcher_tree_snapshot/.orbit-image") &&
+        chmod 600 "$launcher_tree_snapshot/.orbit-image"; } 2>/dev/null; then
+      launcher_tree_snapshot=""
+    fi
   else
     launcher_tree_snapshot=""
   fi

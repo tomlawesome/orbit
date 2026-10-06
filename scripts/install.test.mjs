@@ -856,10 +856,17 @@ const fakeStatScript = [
 ].join("\n");
 
 // Shadows cat to fail one read (#1225): any argument ending in
-// FAKE_CAT_FAIL_PATH makes it exit 1. Every other call is the real cat.
+// FAKE_CAT_FAIL_PATH makes it exit 1. Reading an argument ending in
+// FAKE_CAT_PLANT_AFTER first creates the file FAKE_CAT_PLANT_FILE, standing
+// in for an entry that appears mid-copy. Every other call is the real cat.
 const fakeCatScript = [
   "#!/usr/bin/env bash",
   "set -Eeuo pipefail",
+  'if [[ -n "${FAKE_CAT_PLANT_AFTER:-}" && -n "${FAKE_CAT_PLANT_FILE:-}" ]]; then',
+  '  for argument in "$@"; do',
+  '    [[ "$argument" != *"${FAKE_CAT_PLANT_AFTER}" ]] || printf \'PLANTED\\n\' > "${FAKE_CAT_PLANT_FILE}"',
+  "  done",
+  "fi",
   'if [[ -n "${FAKE_CAT_FAIL_PATH:-}" ]]; then',
   '  for argument in "$@"; do',
   '    [[ "$argument" != *"${FAKE_CAT_FAIL_PATH}" ]] || exit 1',
@@ -1787,12 +1794,14 @@ describe("install.sh", () => {
       expect(stagingLeftovers(targetDir)).toEqual([]);
     }
 
-    // The three files, byte-identical to what the image bundles, owner-only.
+    // The three files, byte-identical to what the image bundles, owner-only,
+    // and the image pin: the resolved digest reference on one line.
     function expectTreeHandedOver(tree) {
       const bundle = makeImageDeployFixture({});
       try {
         expect(readdirSync(tree, { recursive: true }).sort()).toEqual([
           ".env-orbit.example",
+          ".orbit-image",
           "scripts",
           "scripts/configure.sh",
           "scripts/installer-ui.sh",
@@ -1805,6 +1814,11 @@ describe("install.sh", () => {
           expect(lstatSync(path).mode & 0o7777).toBe(0o600);
           expect(readFileSync(path)).toEqual(readFileSync(join(bundle, asset)));
         }
+        const pin = join(tree, ".orbit-image");
+        expect(lstatSync(pin).isSymbolicLink()).toBe(false);
+        expect(lstatSync(pin).isFile()).toBe(true);
+        expect(lstatSync(pin).mode & 0o7777).toBe(0o600);
+        expect(readFileSync(pin, "utf8")).toBe(`${resolvedReference}\n`);
       } finally {
         rmSync(bundle, { recursive: true, force: true });
       }
@@ -1969,6 +1983,27 @@ describe("install.sh", () => {
         expectRefusalUnchanged(result, targetDir);
         expect(noticeLines(result.stderr)).toEqual([
           "Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because scripts/installer-ui.sh could not be written.",
+        ]);
+        expect(readdirSync(tree)).toEqual([]);
+      } finally {
+        cleanUp(targetDir, tree);
+      }
+    });
+
+    it("refuses the whole hand-over when .orbit-image appears mid-copy, and says so once", () => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      try {
+        const result = runInstall(targetDir, {
+          FAKE_CONFIGURE_READY: "0",
+          ORBIT_LAUNCHER_CONFIG_TREE: tree,
+          FAKE_CAT_PLANT_AFTER: "/launcher-config-tree/.env-orbit.example",
+          FAKE_CAT_PLANT_FILE: join(tree, ".orbit-image"),
+        });
+
+        expectRefusalUnchanged(result, targetDir);
+        expect(noticeLines(result.stderr)).toEqual([
+          "Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because .orbit-image could not be written.",
         ]);
         expect(readdirSync(tree)).toEqual([]);
       } finally {

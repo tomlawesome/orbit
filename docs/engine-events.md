@@ -50,9 +50,12 @@ owned by the running user) (#1225). On any exit whose event reason is
 `configuration-failure`, before the event and before rolling back,
 `install.sh` copies the configure tree it verified from the digest-pinned
 image into it at the same relative paths: `scripts/configure.sh`,
-`scripts/installer-ui.sh` and
-`.env-orbit.example`, as owner-only (0600/0700) regular files, all or
-nothing: a failed copy removes what it wrote. If the directory is missing,
+`scripts/installer-ui.sh` and `.env-orbit.example`, plus the image pin
+`.orbit-image`, which holds the resolved digest reference
+(`ghcr.io/<repo>@sha256:<64 hex>`) on one newline-terminated line. All are
+owner-only (0600/0700) regular files, written all or nothing: a failed copy
+removes what it wrote. The pin is written only into this launcher tree; a
+deployment never has an `.orbit-image`. If the directory is missing,
 not a directory, a symlink, not mode 0700, not empty or not owned by the
 current user, it writes nothing and prints one stderr line; the event,
 guidance and exit status are unchanged either way. Unset or empty, nothing
