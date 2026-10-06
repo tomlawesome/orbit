@@ -155,12 +155,17 @@
   [data-theme=retrograde]{--rubble:#6ea6b8; --rubble-gain:1; --paper:#2de2e6}
 
   .belt-page *{box-sizing:border-box;margin:0}
-  html,body{height:100%}
+  /* #1249: every rule here that reaches past .belt-page names the page in
+     its selector. SvelteKit keeps a route's stylesheet loaded after a
+     client-side navigation away, so a bare `html body{overflow:hidden}`
+     followed the reader back to /home through "← YOUR SKY" and outranked
+     home's own `body`: the sky would no longer scroll down to the manifest. */
+  html:has(.belt-page),html:has(.belt-page) body{height:100%}
   /* The belt is a stage, not a document: the band is pinned to the viewport
      so its apex can BE the screen centre, and the card is hung on that
      point. The card scrolls inside itself if a viewport is too short for it
      rather than sliding the belt off the top of the sky. */
-  html body{background:var(--bg);color:var(--ink);font-family:var(--ui);line-height:1.55;
+  html:has(.belt-page) body{background:var(--bg);color:var(--ink);font-family:var(--ui);line-height:1.55;
        transition:background .4s,color .4s;overflow:hidden;margin:0}
   /* THE SCROLL LAW, said loudly enough to be heard. §15's universal descent
      is a law for screens that scroll, and this one does not: the sheet pins
