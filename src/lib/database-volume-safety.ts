@@ -29,6 +29,9 @@ const CONTAINER_ID_PATTERN = /^[0-9a-f]{12,64}$/;
 const IMMUTABLE_IMAGE_PATTERN = /^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$/;
 const CANDIDATE_VOLUME_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 const CANDIDATE_VOLUME_SUFFIX_PATTERN = /(^|_)orbit-db-data$/;
+// install.sh `bundled_compose_project_name`: the `name:` the bundled
+// docker-compose.yml declares (#999, #1239).
+const BUNDLED_COMPOSE_PROJECT_NAME = "orbit";
 
 /**
  * The `docker` calls `volume_belongs_to_deployment` makes, each returning
@@ -235,6 +238,14 @@ export function verifyDatabaseVolumeSafety(
     composeProjectNameProvisional: derived.provisional,
   };
 
+  // #1239: the projects this install may end up using. Before the bundled
+  // compose file is staged the name is only the directory-based guess; once
+  // staged it is replaced by that file's own `name:` (#999). Both are checked
+  // now so the later re-derivation cannot reach a volume this preflight never
+  // looked at.
+  const scopeProjects = [nextState.composeProjectName];
+  if (nextState.composeProjectNameProvisional) scopeProjects.push(BUNDLED_COMPOSE_PROJECT_NAME);
+
   const volumeList = adapter.listVolumesByKeySubstring(DATABASE_VOLUME_KEY);
   if (volumeList === null) {
     throw new DatabaseVolumeSafetyRefusal(
@@ -251,6 +262,14 @@ export function verifyDatabaseVolumeSafety(
   for (const volume of volumeList.split("\n")) {
     if (volume === "") continue;
     if (!volume.endsWith(DATABASE_VOLUME_KEY)) continue;
+    // #1239: a fresh install is only blocked by the volume it would itself
+    // attach to, <this install's Compose project>_orbit-db-data. Other
+    // stacks' volumes are skipped silently. An existing deployment keeps the
+    // broad search: its project may be a renamed one that only the volume's
+    // labels can prove.
+    if (nextState.targetWasEmpty && !scopeProjects.some((project) => volume === `${project}_${DATABASE_VOLUME_KEY}`)) {
+      continue;
+    }
     if (!(CANDIDATE_VOLUME_NAME_PATTERN.test(volume) && CANDIDATE_VOLUME_SUFFIX_PATTERN.test(volume))) {
       throw new DatabaseVolumeSafetyRefusal(
         "Could not verify the existing Orbit database volume; refusing to start Compose.",
