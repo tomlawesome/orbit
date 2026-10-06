@@ -6,6 +6,7 @@ import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { ensureWorkerAdministrator, workerAccount, workerEmail } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { bodyClassAdds, bodyClassSeen, witnessBodyClasses } from "./support/arrival";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -177,12 +178,14 @@ test("an invited reader's arrival never draws the chooser: the sky moves to the 
   const link = await waitForInvitationLink(NEWCOMER_EMAIL(), invitedHousehold);
   expect(link).toMatch(/\/invite\//u);
 
-  /* Reduced motion, deliberately: `.nf .belong` never renders REGARDLESS of
-     motion (Newcomer.svelte leaves it out of the DOM entirely for INVITED --
-     see its own note), so this is for speed and determinism, not to dodge a
-     race the product itself does not have. */
-  const newcomerContext = await browser.newContext({ ignoreHTTPSErrors: true, reducedMotion: "reduce" });
+  /* FULL MOTION (#1263): the one climb is the point here. `.nf .belong`
+     never renders regardless of motion (Newcomer.svelte leaves it out of the
+     DOM entirely for INVITED -- see its own note), and the witness records
+     every class <body> wears in each document, so the climb on `/` and its
+     absence on /home are both facts rather than polls. */
+  const newcomerContext = await browser.newContext({ ignoreHTTPSErrors: true, reducedMotion: "no-preference" });
   const newcomerPage = await newcomerContext.newPage();
+  await witnessBodyClasses(newcomerPage);
   try {
     await newcomerPage.goto(link);
     await newcomerPage.getByRole("link", { name: NEWCOMER_ACCOUNT() }).click();
@@ -216,9 +219,15 @@ test("an invited reader's arrival never draws the chooser: the sky moves to the 
     const countText = await newcomerPage.locator(".nf .disc .big").textContent();
     expect(Number(countText)).toBeGreaterThan(0);
 
+    // THE ONE CLIMB, on `/` (#1263).
+    await expect.poll(() => bodyClassSeen(newcomerPage, "showwarp"), { timeout: 20_000 }).toBe(true);
     // THE MOVE: the sky lands the reader on their own household, by the same
     // road any arriving member already takes -- no second landing invented.
-    await expect(newcomerPage).toHaveURL(/\/home$/, { timeout: 15_000 });
+    // The belong beat is 13.8s into the climb, and the climb may hold up to
+    // 8s for its world (Flight.svelte, #1253).
+    const climbs = await bodyClassAdds(newcomerPage, "showwarp");
+    expect(climbs, "one climb on /").toBe(1);
+    await expect(newcomerPage).toHaveURL(/\/home$/, { timeout: 40_000 });
     // and the chooser stays gone for good measure: this surface draws none.
     await expect(newcomerPage.locator(".nf .belong")).toHaveCount(0);
 
@@ -251,6 +260,12 @@ test("an invited reader's arrival never draws the chooser: the sky moves to the 
         ),
       )
       .toBe(0);
+
+    // ...and no second climb on /home (#1263): toHousehold() writes no launch
+    // marker. Asked once the tour is up, which is well past the 200ms a
+    // climb's warp would have started at.
+    expect(await bodyClassSeen(newcomerPage, "showwarp"), "showwarp seen on /home").toBe(false);
+    expect(await bodyClassSeen(newcomerPage, "showdawn"), "showdawn seen on /home").toBe(false);
   } finally {
     await newcomerContext.close();
   }
