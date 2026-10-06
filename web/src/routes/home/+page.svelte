@@ -9,6 +9,7 @@
   import Dawn from "$lib/flight/Dawn.svelte";
   import Dusk from "$lib/flight/Dusk.svelte";
   import { consumeLaunch } from "$lib/flight/arrival.js";
+  import { readyFlight } from "$lib/flight/warm.js";
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
@@ -218,7 +219,14 @@
 
   async function tapSignOut() {
     /* Two taps, as every destructive control in this app arms and fires. */
-    if (!armedOut) { armedOut = true; return; }
+    if (!armedOut) {
+      armedOut = true;
+      /* #1253: armed, the descent is likely, so its world is readied now
+         (never a compile that would stop the page: warm.js) and is there
+         by the time the second tap has revoked the session */
+      readyFlight({ hurry: true, gentle: true });
+      return;
+    }
     if (signingOut) return;
     signingOut = true;
     signOutProblem = null;
