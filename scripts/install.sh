@@ -29,6 +29,8 @@ readonly compose_file="docker-compose.yml"
 readonly secrets_directory="${ORBIT_SECRETS_DIR:-.orbit-secrets}"
 readonly launcher_config_tree="${ORBIT_LAUNCHER_CONFIG_TREE:-}"
 readonly database_volume_key="orbit-db-data"
+# The `name:` the bundled docker-compose.yml declares (#999, #1239).
+readonly bundled_compose_project_name="orbit"
 readonly image_repository="${registry}/${repository}"
 readonly oidc_discovery_max_bytes=1048576
 # ADR-0031 #7: byte-identical to cosign.pub (scripts/get-orbit.test.mjs also
@@ -760,8 +762,8 @@ volume_belongs_to_deployment() {
 }
 
 verify_database_volume_safety() {
-  local volume_list="" volume="" old_image="" status=0
-  local -a candidates=()
+  local volume_list="" volume="" old_image="" status=0 scoped=0 scope_project=""
+  local -a candidates=() scope_projects=()
 
   if [[ "$database_volume_checked" == 1 ]]; then
     [[ "$database_volume_seen" == 1 ]] || return 0
@@ -773,6 +775,15 @@ verify_database_volume_safety() {
   fi
 
   derive_compose_project_name
+  # The projects this install may end up using. Before the bundled compose
+  # file is staged the name is only the directory-based guess; once staged it
+  # is replaced by that file's own `name:` (#999), which is `orbit`. Both are
+  # checked now so the later re-derivation cannot reach a volume this
+  # preflight never looked at.
+  scope_projects=("$compose_project_name")
+  if [[ "$compose_project_name_provisional" == 1 ]]; then
+    scope_projects+=("$bundled_compose_project_name")
+  fi
   volume_list="$(docker volume ls --filter "name=$database_volume_key" --format '{{.Name}}' 2>/dev/null)" ||
     fail "Could not verify the existing Orbit database volume; refusing to start Compose."
   [[ ${#volume_list} -le 1048576 ]] ||
@@ -780,6 +791,18 @@ verify_database_volume_safety() {
   while IFS= read -r volume || [[ -n "$volume" ]]; do
     [[ -z "$volume" ]] && continue
     [[ "$volume" == *"$database_volume_key" ]] || continue
+    # #1239: a fresh install is only blocked by the volume it would itself
+    # attach to, i.e. one named <this install's Compose project>_orbit-db-data.
+    # Another stack's volume on the same host is none of its business and is
+    # skipped without a word. An existing deployment keeps the broad search:
+    # its project may be a renamed one that only the volume's labels can prove.
+    if [[ "$target_was_empty" == 1 ]]; then
+      scoped=0
+      for scope_project in "${scope_projects[@]}"; do
+        [[ "$volume" == "${scope_project}_${database_volume_key}" ]] && scoped=1
+      done
+      [[ "$scoped" == 1 ]] || continue
+    fi
     [[ "$volume" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ && "$volume" =~ (^|_)orbit-db-data$ ]] ||
       fail "Could not verify the existing Orbit database volume; refusing to start Compose."
     candidates+=("$volume")
