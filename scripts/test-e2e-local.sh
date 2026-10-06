@@ -78,21 +78,40 @@
 #                    launch on this host (#1235); see the comment above the
 #                    `docker run` below. Chromium and Firefox runs stay on
 #                    the host.
-#   --keep          Leave the stack up on exit instead of tearing it down, so a
+#   --keep          The only way to leave anything up. Skips teardown on exit so a
 #                    failed run can be inspected: query the database, read the
 #                    container logs, open the app. The run logs its own
 #                    profile, project name and app port at startup ("starting
 #                    the acceptance stack (profile ..., project ..., app on
-#                    ...)"); tear that project down afterwards with the file
-#                    set its profile used -- the oidc profile's is:
-#                      COMPOSE_PROFILES=processing \
-#                        docker compose -p <project> --env-file .env-orbit \
-#                        -f docker-compose.yml -f docker-compose.mail.yml \
-#                        -f compose/docker-compose.acceptance.yml \
-#                        -f compose/docker-compose.local-e2e.yml down --volumes
-#                    COMPOSE_PROFILES is not optional there: without it
-#                    Compose does not consider the `processing` profile's
-#                    orbit-tika part of the project and leaves it running.
+#                    ...)") and, on exit, prints the exact command that tears
+#                    that project down completely -- its containers (profile
+#                    services such as orbit-tika included), volumes, networks
+#                    and the image this run built.
+#
+# #1241: every stack this script brings up tears itself down completely, and
+# never leaves a stale container behind, whatever ends the run. The EXIT trap
+# (and INT/TERM, which exit through it) runs one teardown, exactly once, on
+# success, on failure and on interruption:
+#   - `docker compose -p <project> --profile '*' down --volumes
+#     --remove-orphans --rmi local`: every container of this run's project,
+#     profile services included (orbit-tika used to be left running, on the
+#     reasoning that Compose ignores a profile it was not told about; the
+#     wildcard profile is the fix, not a COMPOSE_PROFILES the caller must
+#     remember), its volumes, its networks (orbit-document-processing and
+#     the rest are project-scoped) and the sidecar images Compose built for it;
+#   - the application image this run built, tagged orbit-local:<sha>-<pid> so
+#     the tag is this run's alone and removing it can never pull the rug from a
+#     concurrent run at the same commit;
+#   - the Playwright container of a WebKit run, found by the label this run
+#     gave it;
+#   - a final sweep of anything still carrying this project's Compose label.
+# Nothing outside this run's own project is ever touched, and a stack it did
+# not start (--reuse) is never torn down, whatever --keep says.
+#
+# A failed run keeps its evidence: before anything is removed, `compose logs`,
+# `compose ps` and Playwright's test-results/ (the traces) are copied to
+# ~/projects/.backups/orbit/e2e-<project>-<timestamp>/ (ORBIT_E2E_ARTIFACT_ROOT
+# overrides the root), and the path is printed on exit.
 #
 # #875: the Compose project name and app port used to be fixed
 # ("orbit-e2e-local" on 13777), so two concurrent runs -- two worktrees, two
@@ -308,7 +327,10 @@ readonly compose_files
 # it. compose/docker-compose.local-e2e.yml carries the other half -- the
 # TIKA_URL the application reads, and the parser's per-run container name.
 compose() {
-  env ORBIT_IMAGE="$orbit_image" COMPOSE_PROJECT_NAME="$project_name" \
+  # ORBIT_IMAGE is empty until the build step names it; docker-compose.yml's
+  # `${ORBIT_IMAGE:?...}` guard would then fail a teardown that has nothing to
+  # remove yet, so give the guard a placeholder rather than an empty value.
+  env ORBIT_IMAGE="${orbit_image:-not-built-yet:none}" COMPOSE_PROJECT_NAME="$project_name" \
     COMPOSE_PROFILES=processing \
     docker compose -p "$project_name" --env-file .env-orbit "${compose_files[@]}" "$@"
 }
@@ -340,13 +362,53 @@ assert_document_parser_ready() {
 # Registered before anything is built or started, so any failure from here
 # on -- including one added later by an edit to this script -- attempts
 # teardown of project "$project_name" rather than silently leaking
-# containers, volumes or networks. Before ".env-orbit" exists or the image is
-# built this is a harmless no-op (nothing to tear down; `compose down` itself
-# fails cleanly and is swallowed below).
+# containers, volumes or networks. INT and TERM exit (130, 143) so the EXIT
+# trap is the one place teardown happens: a handler that merely ran cleanup
+# and returned would let the script carry on running the suite after Ctrl-C.
+# created_anything is set immediately before the first build, so a run that
+# stopped at a precondition has nothing to tear down and does not try.
 cleaned_up=0
+created_anything=0
+orbit_image_built=0
+artifact_root="${ORBIT_E2E_ARTIFACT_ROOT:-${HOME}/projects/.backups/orbit}"
+
+# The exact command that removes everything this run created, printed on a
+# --keep exit and after a teardown that did not finish. ORBIT_IMAGE has to be
+# there because docker-compose.yml refuses to render without it.
+teardown_command() {
+  local arg
+  printf 'cd %q && ORBIT_IMAGE=%q docker compose -p %q --env-file .env-orbit' \
+    "$repo_dir" "${orbit_image:-not-built-yet:none}" "$project_name"
+  for arg in "${compose_files[@]}"; do printf ' %q' "$arg"; done
+  printf ' --profile %q down --volumes --remove-orphans --rmi local' '*'
+  [[ -z "$orbit_image" ]] || printf ' && docker image rm %q' "$orbit_image"
+  printf '\n'
+}
+
+# A failed run's evidence, copied out before the containers that hold it go.
+save_failure_artifacts() {
+  local dir
+  dir="${artifact_root}/e2e-${project_name}-$(date +%Y%m%d-%H%M%S)"
+  if ! mkdir -p "$dir" 2>/dev/null; then
+    log "could not create ${dir}; the failed run's logs are lost with the stack"
+    return 0
+  fi
+  compose --profile '*' ps --all > "${dir}/compose-ps.txt" 2>&1 || true
+  compose --profile '*' logs --no-color > "${dir}/compose-logs.txt" 2>&1 || true
+  # Playwright's outputDir (tests/e2e/playwright.config.ts) is test-results/
+  # at the repository root: traces, screenshots, page snapshots.
+  if [[ -d test-results ]]; then
+    cp -a test-results "${dir}/test-results" 2>/dev/null || log "could not copy test-results/ to ${dir}"
+  fi
+  log "failed run: logs and Playwright traces saved to ${dir}"
+}
+
 cleanup() {
+  local status=$?
   [[ "$cleaned_up" == 0 ]] || return 0
   cleaned_up=1
+  # A second Ctrl-C while teardown runs must not abandon it half done.
+  trap '' INT TERM
   # --reuse (#947) means this run never created project "$project_name" --
   # it is reusing a stack an earlier --keep run left up, or it failed before
   # ever confirming one exists -- so, unlike --keep, this is not a choice
@@ -357,7 +419,12 @@ cleanup() {
     return 0
   fi
   if [[ "$keep" == 1 ]]; then
-    log "leaving project ${project_name} up (--keep); tear it down with the command in this script's usage"
+    log "leaving project ${project_name} up (--keep). Tear it down completely with:"
+    printf '  %s' "$(teardown_command)" >&2
+    printf '\n' >&2
+    return 0
+  fi
+  if [[ "$created_anything" == 0 ]]; then
     return 0
   fi
   # AGENTS.md's standing Compose trap ("Compose commands attach to whatever
@@ -375,10 +442,42 @@ cleanup() {
     log "refusing to tear down: ${db_container} belongs to project '${actual_label}', not '${project_name}'. Leaving it alone -- investigate manually."
     return 0
   fi
+  [[ "$status" == 0 ]] || save_failure_artifacts
   log "tearing down project ${project_name}"
-  compose down --volumes --remove-orphans > /dev/null 2>&1 || true
+  # The WebKit run's Playwright container is not a Compose service, so `down`
+  # cannot see it; it carries this run's label instead. Docker's own `--rm`
+  # covers a normal exit, not a killed client.
+  local leftover
+  leftover="$(docker ps --all --quiet --filter "label=orbit-e2e-run=${project_name}" 2>/dev/null || true)"
+  # shellcheck disable=SC2086 # ids, split on purpose
+  [[ -z "$leftover" ]] || docker rm --force $leftover > /dev/null 2>&1 || true
+  # `--profile '*'` is every profile, so the processing parser (orbit-tika) is
+  # part of the project whatever COMPOSE_PROFILES says.
+  local down_ok=1
+  compose --profile '*' down --volumes --remove-orphans --rmi local > /dev/null 2>&1 || down_ok=0
+  if [[ "$orbit_image_built" == 1 ]]; then
+    docker image rm "$orbit_image" > /dev/null 2>&1 || true
+  fi
+  # Final sweep by this project's own label: whatever `down` could not see.
+  leftover="$(docker ps --all --quiet --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null || true)"
+  # shellcheck disable=SC2086
+  [[ -z "$leftover" ]] || { down_ok=0; docker rm --force --volumes $leftover > /dev/null 2>&1 || true; }
+  leftover="$(docker volume ls --quiet --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null || true)"
+  # shellcheck disable=SC2086
+  [[ -z "$leftover" ]] || { down_ok=0; docker volume rm $leftover > /dev/null 2>&1 || true; }
+  leftover="$(docker network ls --quiet --filter "label=com.docker.compose.project=${project_name}" 2>/dev/null || true)"
+  # shellcheck disable=SC2086
+  [[ -z "$leftover" ]] || { down_ok=0; docker network rm $leftover > /dev/null 2>&1 || true; }
+  if [[ "$down_ok" == 0 ]]; then
+    log "teardown of project ${project_name} needed more than \`compose down\`; if anything is still listed by \`docker ps --all --filter label=com.docker.compose.project=${project_name}\`, run:"
+    printf '  %s' "$(teardown_command)" >&2
+    printf '\n' >&2
+  fi
+  return 0
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # --- Preconditions -----------------------------------------------------------
 
@@ -653,11 +752,18 @@ else
   orbit_short_sha="$(git rev-parse --short=12 HEAD)"
   orbit_revision="$(git rev-parse HEAD)"
   orbit_version="$(node scripts/calculate-version.mjs --channel preview)"
-  readonly orbit_image="orbit-local:${orbit_short_sha}"
+  # Per-run tag (#1241): the image is this run's to remove at teardown, which
+  # is only safe if no other run at the same commit shares the tag. Layers
+  # stay cached by the builder, so a rebuild costs nothing extra.
+  readonly orbit_image="orbit-local:${orbit_short_sha}-$$"
   readonly orbit_revision
   readonly orbit_version
   readonly orbit_channel="dev"
 
+  # From here on there is something to tear down, even if the build fails
+  # half way (a built image, a created network).
+  created_anything=1
+  orbit_image_built=1
   log "building ${orbit_image} (version ${orbit_version})"
   env ORBIT_IMAGE="$orbit_image" ORBIT_VERSION="$orbit_version" ORBIT_REVISION="$orbit_revision" ORBIT_CHANNEL="$orbit_channel" \
     docker compose -p "$project_name" --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.build.yml \
@@ -803,7 +909,7 @@ if [[ "$in_image" == 1 ]]; then
     oidc_forward="node -e 'const n=require(\"net\");n.createServer(s=>{const c=n.connect(${TEST_OIDC_PORT},\"127.0.0.1\");s.pipe(c).pipe(s);s.on(\"error\",()=>c.destroy());c.on(\"error\",()=>s.destroy())}).listen(4443,\"127.0.0.1\")' & sleep 1;"
   fi
   log "running Playwright inside ${playwright_image} (WebKit needs it; #1235)"
-  docker run --rm --network host --ipc=host --add-host orbit-oidc:127.0.0.1 \
+  docker run --rm --label "orbit-e2e-run=${project_name}" --network host --ipc=host --add-host orbit-oidc:127.0.0.1 \
     -v "${repo_dir}:${repo_dir}" -w "$repo_dir" \
     -v "${docker_cli}:/usr/local/bin/docker:ro" \
     -v "$(dirname -- "$compose_plugin"):/usr/local/lib/docker/cli-plugins:ro" \

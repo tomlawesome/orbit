@@ -250,10 +250,26 @@ Check the list before building a test rig or handing a check to the owner.
   and, on a mismatch, re-pins every location and opens a merge request;
   `--red` proves the comparison fires, `--dry-run` stops before any commit,
   push or merge-request call
+- `scripts/cleanup-stacks.sh` — lists every `orbit*` Compose project on the
+  host, marked running or stale (containers, volumes, networks, stopped and
+  profile ones included, and networks left with no container). `--remove`
+  tears down only stale projects and skips any with a running container, since
+  other sessions share the host; `--project NAME --remove` removes that one
+  even if running, `--remove --all` removes running ones too. Also removes unused
+  `orbit-local`, `orbit-vapid-bootstrap` and `orbit-acceptance-local` images
+  over a day old (not with `--project`). Keeps `orbit-ollama` and its model volume unless
+  `--include-ollama`. Containers
+  Compose did not create are listed, never removed (#1241)
 
 ## Traps when running things locally
 
-Eleven known ways to lose an afternoon, or worse.
+Twelve known ways to lose an afternoon, or worse.
+
+**A stack a script started is torn down by the same script; stale containers
+are a defect, not housekeeping.** Run `bash scripts/cleanup-stacks.sh` at
+session end and before an acceptance run. Plain `--remove` clears stale stacks
+and skips running ones (another session may own them); a running stack you
+started yourself goes with `--project NAME --remove` (#1241).
 
 **`pnpm db:generate` refuses to run, on purpose.** `drizzle/meta/` holds
 snapshots only up to 0004, so `drizzle-kit generate` would diff against a
@@ -382,11 +398,14 @@ it.
 The owner cannot open files on this VM. A mockup is served from an
 `nginx:alpine` container with a published port (the standing pattern —
 `docker run -d --name orbit-<issue>-review -p <port>:80 -v <dir>:/usr/share/nginx/html:ro nginx:alpine`),
-and a built screen is the demo stack (`bash scripts/build-container.sh`, then
-`docker compose -p orbit-demo --env-file .env-orbit -f docker-compose.yml
--f docker-compose.mail.yml -f compose/docker-compose.acceptance.yml
--f compose/docker-compose.demo.yml up -d` with `DEMO_HOST`, `ORBIT_IMAGE`,
-`ORBIT_BIND_ADDRESS=127.0.0.1`, `ORBIT_PORT=3001` set). Hand over clickable
+and a built screen is the demo bed:
+`bash scripts/dev/test-bed.sh up --image <digest> --host <lan address>` (or
+`up --build` for this checkout), then `down` when finished -- it removes
+everything the bed made, test data included, and keeps `orbit-ollama` and its
+model volume unless `down --include-ollama`. `scripts/deploy-container.sh` is
+the real-install path and is not used for the bed. Run `backup.sh` and the
+other operator scripts against it as `test-bed.sh run -- bash scripts/backup.sh`
+(it supplies the image and host the scripts lack). Hand over clickable
 `https://<DEMO_HOST>:3443/<route>` links plus the one-time self-signed cert
 warning on `:3443` and `:4443`. A screenshot or fidelity baseline is
 supporting evidence, not the review: sign-off is on the running code

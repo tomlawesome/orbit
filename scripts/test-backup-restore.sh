@@ -28,6 +28,35 @@
 #     local credential and an unconsumed setup token seeded before the backup
 #     restore intact, and a session created after the backup point does not
 #     survive restoring to before it existed.
+#
+# Ownership (#1241). Unlike the acceptance harnesses this drill does NOT bring
+# up a stack of its own: it runs against the deployment that ORBIT_ENV_FILE
+# (default .env-orbit) names, in CI the disposable container-validation one.
+#
+#   Borrowed, never removed: the Compose project and its orbit-app and orbit-db
+#   containers, every volume and network, the images, the live document KEK and
+#   the backup directory itself. Nothing here runs `compose down`, removes a
+#   volume, network or image, or deletes the deployment's data. The restore
+#   steps rewind the database and documents to the backup the drill took at its
+#   own start, which is the point of the drill.
+#
+#   Owned, removed on every exit: the fixture rows (household, documents,
+#   IMAP message, credential user and the post-backup session) and the three
+#   fixture files in orbit-app; the backup bundle, the recovery bundle and the
+#   maintenance-window bundle; the temp directory of corrupted-bundle variants;
+#   the one-off container `compose run` starts for the HMAC refresh (named, so
+#   it can be found).
+#
+#   Borrowed state it changes, and puts back: the live document KEK (swapped to
+#   a wrong and then a missing key), the maintenance flag, a restore journal
+#   left by a drill step that did not finish (`restore.sh --recover`), and a
+#   stopped or unhealthy orbit-app (restarted).
+#
+# The teardown is one trap on EXIT, INT and TERM and runs exactly once. A failed
+# or interrupted run first copies compose state and logs, the restore journal
+# and the failure reason to $ORBIT_EVIDENCE_ROOT/test-backup-restore-<timestamp>/
+# (default ~/projects/.backups/orbit) and prints the path. A fixture-free
+# deployment before the run is a fixture-free deployment after it.
 set -Eeuo pipefail
 
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -65,25 +94,147 @@ readonly credential_identity_subject="backup-drill-subject"
 readonly credential_session_token_hash="7070707070707070707070707070707070707070707070707070707070707070"
 backup_path=""
 recovery_bundle_path=""
+maintenance_backup_path=""
 test_directory=""
 key_backup=""
 variant_directory=""
+# Teardown state (#1241). `touched` is set before the drill first changes the
+# deployment, so a run that fails a precondition never reaches for docker.
+# `journal_at_start` records whether an unfinished restore journal already
+# existed, so teardown only recovers one this run left behind.
+restore_state_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}/.orbit-restore"
+drill_run_container="orbit-backup-drill-$$"
+touched=0
+fixtures_seeded=0
+fixtures_removed=0
+maintenance_touched=0
+maintenance_initial=""
+journal_at_start=0
+torn_down=0
+failure_reason=""
+last_error=""
+evidence_dir=""
+if [[ -f "$restore_state_directory/restore.journal" ]]; then journal_at_start=1; fi
 
 fail() {
+  failure_reason="$*"
   printf 'Orbit backup test: %s\n' "$*" >&2
   exit 1
 }
 
+# What a failed run needs to be diagnosed, copied before teardown changes the
+# deployment (#1241). Compose state and logs only for a run that touched it.
+collect_evidence() {
+  local status="$1" root dir
+  root="${ORBIT_EVIDENCE_ROOT:-${HOME:-/nonexistent}/projects/.backups/orbit}"
+  dir="$root/test-backup-restore-$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p -- "$root" && mkdir -m 700 -- "$dir" 2>/dev/null || return 1
+  {
+    printf 'exit_status=%s\nfailure_reason=%s\nlast_failed_command=%s\n' "$status" "$failure_reason" "$last_error"
+    printf 'environment_file=%s\nbackup_directory=%s\n' "$environment_file" "${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
+  } > "$dir/run-info.txt"
+  if [[ "$touched" == 1 ]]; then
+    compose ps -a > "$dir/compose-ps.txt" 2>&1 || true
+    compose logs --no-color --timestamps --tail 500 orbit-app orbit-db > "$dir/compose.log" 2>&1 || true
+    maintenance_active > "$dir/maintenance-active.txt" 2>&1 || true
+  fi
+  if [[ -f "$restore_state_directory/restore.journal" ]]; then
+    cp -- "$restore_state_directory/restore.journal" "$dir/restore.journal" 2>/dev/null || true
+  fi
+  ls -laR -- "$restore_state_directory" > "$dir/restore-state-listing.txt" 2>&1 || true
+  if [[ -n "$test_directory" ]]; then
+    ls -la -- "$test_directory" > "$dir/test-directory-listing.txt" 2>&1 || true
+  fi
+  evidence_dir="$dir"
+}
+
+# Put back what the drill changed in the deployment it borrows (#1241). Never
+# removes the deployment or any of its data: only the drill's own fixtures, and
+# state the drill moved (an unfinished restore, a stopped app, the maintenance
+# flag).
+restore_deployment() {
+  local health_deadline
+
+  if [[ "$journal_at_start" == 0 && -f "$restore_state_directory/restore.journal" ]]; then
+    printf 'Orbit backup test: teardown: recovering the unfinished restore this run left.\n' >&2
+    timeout 600 bash scripts/restore.sh --recover >/dev/null 2>&1 ||
+      printf 'Orbit backup test: teardown: restore recovery failed; run: bash scripts/restore.sh --recover\n' >&2
+  fi
+
+  if ! health_check; then
+    compose start orbit-app >/dev/null 2>&1 || true
+    health_deadline=$((SECONDS + teardown_health_seconds))
+    until health_check || (( SECONDS >= health_deadline )); do sleep 1; done
+  fi
+
+  if [[ "$maintenance_touched" == 1 && "$maintenance_initial" == f && "$(maintenance_active 2>/dev/null)" == t ]]; then
+    timeout 300 bash scripts/end-maintenance.sh >/dev/null 2>&1 ||
+      printf 'Orbit backup test: teardown: could not reopen the instance; run: bash scripts/end-maintenance.sh\n' >&2
+  fi
+
+  if [[ "$fixtures_seeded" == 1 && "$fixtures_removed" == 0 ]]; then
+    remove_document_fixture >/dev/null 2>&1 || true
+    remove_credential_fixture >/dev/null 2>&1 || true
+  fi
+  # The one-off container `compose run` starts is named, so it is found by name
+  # and nothing else of the deployment's is touched.
+  timeout 60 docker rm -f -v "$drill_run_container" >/dev/null 2>&1 || true
+}
+
+# Teardown is the one exit path: EXIT runs it, and INT/TERM turn into an exit
+# so the same trap runs it. `torn_down` makes it fire exactly once however the
+# run ends, and signals are ignored while it runs so a second Ctrl-C cannot
+# abandon it half way.
+readonly teardown_health_seconds="${ORBIT_BACKUP_TEST_TEARDOWN_HEALTH_SECONDS:-60}"
 cleanup() {
+  local status=$?
+  [[ "$torn_down" == 0 ]] || return 0
+  torn_down=1
+  trap '' INT TERM
+  trap - ERR
+  set +e +E +u
+  printf 'Orbit backup test: teardown: starting (exit status %s)\n' "$status" >&2
+
+  # Bounded: a hung docker must not hang the teardown.
+  compose() { timeout 120 docker compose --env-file "$environment_file" "$@"; }
+
+  if [[ "$status" -ne 0 ]]; then collect_evidence "$status"; fi
+
   if [[ -n "$key_backup" && -f "$key_backup" ]]; then
     mv -f -- "$key_backup" "$live_kek" || true
   fi
+  if [[ "$touched" == 1 ]]; then restore_deployment; fi
   [[ -z "$backup_path" ]] || rm -f -- "$backup_path"
   [[ -z "$recovery_bundle_path" ]] || rm -f -- "$recovery_bundle_path"
+  [[ -z "$maintenance_backup_path" ]] || rm -f -- "$maintenance_backup_path"
   [[ -z "$test_directory" ]] || rm -rf -- "$test_directory"
+  printf 'Orbit backup test: teardown: complete.\n' >&2
+  if [[ -n "$evidence_dir" ]]; then
+    printf 'Orbit backup test: evidence kept in: %s\n' "$evidence_dir" >&2
+  fi
+}
+# bash runs a trap only after its foreground command ends. A terminal's Ctrl-C,
+# a runner's cancel and `timeout` signal the whole process group, so that
+# command dies with the script and the trap runs at once; on_signal also stops
+# anything still running underneath. A signal sent to this one process alone
+# is acted on when the command it is waiting for returns.
+kill_descendants() {
+  local child
+  for child in $(pgrep -P "$1" 2>/dev/null || true); do
+    kill_descendants "$child"
+    kill -TERM "$child" 2>/dev/null || true
+  done
+}
+on_signal() {
+  trap '' INT TERM
+  kill_descendants "$$"
+  exit "$1"
 }
 
 trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+trap 'last_error="line $LINENO: $BASH_COMMAND"' ERR
 command -v docker >/dev/null 2>&1 || fail 'Docker is required.'
 command -v openssl >/dev/null 2>&1 || fail 'OpenSSL is required.'
 command -v sha256sum >/dev/null 2>&1 || fail 'sha256sum is required.'
@@ -112,8 +263,10 @@ health_probe_url() {
 
   bind_address="$(awk -F= '$1 == "ORBIT_BIND_ADDRESS" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
   port="$(awk -F= '$1 == "ORBIT_PORT" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
-  bind_address="${bind_address:-0.0.0.0}"
-  port="${port:-3000}"
+  # An exported value wins over the file, exactly as it does for Compose's
+  # own interpolation, so the probe reaches the port Compose published (#1241).
+  bind_address="${ORBIT_BIND_ADDRESS:-${bind_address:-0.0.0.0}}"
+  port="${ORBIT_PORT:-${port:-3000}}"
 
   # 0.0.0.0 means "listen on every interface"; it is not itself a
   # connectable address, so probe via loopback there, same as any other
@@ -344,8 +497,8 @@ assert_credential_fixture_present() {
 
 remove_credential_fixture() {
   compose exec -T orbit-db sh -c \
-    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 --command="delete from users where id = '\''$1'\'';"' \
-    sh "$credential_user_id" >/dev/null
+    'psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 --command="delete from sessions where id = '\''$2'\''; delete from users where id = '\''$1'\'';"' \
+    sh "$credential_user_id" "$credential_session_id" >/dev/null
 }
 
 prepare_variant() {
@@ -374,7 +527,7 @@ package_variant() {
   fi
   if [[ "$refresh_auth" == true ]]; then
     cat "$variant_directory/manifest" "$variant_directory/checksums.sha256" > "$variant_directory/manifest-and-checksums"
-    compose run --rm --no-deps -T --entrypoint node orbit-app \
+    compose run --rm --no-deps -T --name "$drill_run_container" --entrypoint node orbit-app \
       /opt/orbit/scripts/recovery-crypto.mjs hmac /run/secrets/orbit-document-kek \
       < "$variant_directory/manifest-and-checksums" > "$variant_directory/manifest.hmac"
   fi
@@ -518,13 +671,15 @@ close_instance_for_maintenance() {
 # checked, which is a poor place to discover a mistake: the one moment it
 # runs is the moment nobody can sign in.
 test_restore_during_maintenance() {
+  maintenance_initial="$(maintenance_active)"
+  maintenance_touched=1
   close_instance_for_maintenance
   [[ "$(maintenance_active)" == 't' ]] || fail 'Maintenance did not become active for the restore drill.'
   # Maintenance is a healthy category, not an outage, so the readiness probe
   # restore.sh waits on must keep answering while the instance is closed.
   health_check || fail 'Health stopped answering while maintenance was active.'
 
-  local maintenance_backup_output maintenance_backup_path
+  local maintenance_backup_output
   maintenance_backup_output="$(bash scripts/backup.sh)"
   maintenance_backup_path="${maintenance_backup_output#Orbit backup created: }"
   [[ -f "$maintenance_backup_path" ]] || fail 'Backup during maintenance did not return a bundle path.'
@@ -541,6 +696,7 @@ test_restore_during_maintenance() {
   [[ "$(maintenance_active)" == 'f' ]] || fail 'Re-running the recovery path did not leave Orbit open.'
 
   rm -f -- "$maintenance_backup_path"
+  maintenance_backup_path=""
   # Leave the canonical bundle applied for the assertions that follow.
   run_valid_restore
 }
@@ -801,6 +957,9 @@ test_wrong_recovery_material() {
 }
 
 test_directory="$(mktemp -d "${TMPDIR:-/tmp}/orbit-backup-test.XXXXXX")"
+# From here the deployment is changed, so teardown puts it back (#1241).
+touched=1
+fixtures_seeded=1
 compose exec -T --user orbit:orbit orbit-app sh -c \
   'mkdir -p /var/lib/orbit/documents/objects/aa/aa /var/lib/orbit/documents/objects/cc/cc /var/lib/orbit/documents/staging && printf "%s" "orbit-backup-ciphertext-00001" > "$1" && printf "%s" "orbit-imap-attachment-00001" > "$2" && printf "%s" "orbit-encrypted-recovery-00001" > "$3"' \
   sh "$storage_path" "$attachment_storage_path" "$staging_path"
@@ -853,5 +1012,6 @@ test_restore_during_maintenance
 remove_document_fixture
 assert_fixture_absent
 remove_credential_fixture
+fixtures_removed=1
 
 printf 'Orbit backup test: staged correspondence, rollback, interruption recovery, key handling, restore during maintenance, document/crypto round trip, and the authentication-data revocation boundary passed.\n'
