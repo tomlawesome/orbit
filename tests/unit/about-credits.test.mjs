@@ -86,6 +86,17 @@ describe("creditsView (#1256)", () => {
     expect(view().groups[0].entries?.filter((entry) => entry.changes)).toHaveLength(1);
   });
 
+  it("names each Creative Commons work by its title in the name the page shows (CC 3.0 section 4(c))", () => {
+    const cc = CREDITS.filter((credit) => /^CC /.test(credit.licence));
+    expect(cc.length).toBeGreaterThan(0);
+    const galaxy = view().groups[0].entries?.find((entry) => entry.name.startsWith("The Milky Way"));
+    expect(galaxy?.name).toContain("Deep Star Maps 2020");
+    for (const credit of cc) {
+      const entry = view().groups[0].entries?.find((one) => one.id === `credit-${slug(credit.name)}`);
+      expect(entry?.name, credit.name).toMatch(/"[^"]+"/);
+    }
+  });
+
   it("draws the strip A to Z, linking only the letters that have entries", () => {
     const { letters } = view();
     expect(letters.map((one) => one.letter).join("")).toBe("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
