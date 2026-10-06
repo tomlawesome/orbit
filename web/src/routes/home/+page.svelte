@@ -217,16 +217,17 @@
   /** @type {string | null} */
   let signOutProblem = $state(null);
 
+  /* #1253: armed, the descent is likely, so its world is readied now (never
+     a compile that would stop the page: warm.js), and it is there by the
+     time the second tap has revoked the session */
+  function armSignOut() {
+    armedOut = true;
+    readyFlight({ hurry: true, gentle: true });
+  }
+
   async function tapSignOut() {
     /* Two taps, as every destructive control in this app arms and fires. */
-    if (!armedOut) {
-      armedOut = true;
-      /* #1253: armed, the descent is likely, so its world is readied now
-         (never a compile that would stop the page: warm.js) and is there
-         by the time the second tap has revoked the session */
-      readyFlight({ hurry: true, gentle: true });
-      return;
-    }
+    if (!armedOut) { armSignOut(); return; }
     if (signingOut) return;
     signingOut = true;
     signOutProblem = null;
