@@ -43,6 +43,9 @@ const PLATFORM_KEYS = new Set([
   // alongside `orbit restore --yes` for unattended restore (guarantee #46).
   "ORBIT_RECOVERY_PROMPTS",
   "ORBIT_NONINTERACTIVE_RESTORE",
+  // The recovery-bundle scripts' test mode (answers as plain lines on
+  // standard input), which the shells forward to the engine since #1211.
+  "ORBIT_RECOVERY_TEST_MODE",
   // orbit configure's own machine-prompt/scripted-guided-init toggles
   // (issue #294, src/cli/orbit.ts / src/lib/configure-engine.ts), mirroring
   // configure.sh's own identically-named, identically-scoped environment

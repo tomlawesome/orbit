@@ -278,6 +278,16 @@ describe("createInContainerAdapter: exact argv, password only in the environment
     expect(listing).not.toContain("portable-archives");
   });
 
+  // #1151 SF2-F1: the tree is wherever the app itself resolves DOCUMENTS_ROOT.
+  it("reads the container's own DOCUMENTS_ROOT, and falls back to the documented default", () => {
+    const fixture = newFixture({ DOCUMENTS_ROOT: "/srv/orbit-documents" });
+    const fromEnvironment = createInContainerAdapter({ env: fixture.env, emitEvent: () => undefined });
+    expect(() => fromEnvironment.collectDocumentsArchive(join(fixture.root, "a.tar"))).toThrow(RecoveryBundleRefusal);
+    const fallback = createInContainerAdapter({ env: { ...fixture.env, DOCUMENTS_ROOT: undefined }, emitEvent: () => undefined });
+    expect(() => fallback.collectDocumentsArchive(join(fixture.root, "b.tar"))).toThrow(RecoveryBundleRefusal);
+    expect(fixture.calls().map((call) => call.argv[1])).toEqual(["/srv/orbit-documents", "/var/lib/orbit/documents"]);
+  });
+
   it("replaces the document tree: removes what is there, then extracts the archive with tar -xf -", () => {
     const fixture = newFixture();
     const source = join(fixture.root, "source");
