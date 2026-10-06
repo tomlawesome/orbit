@@ -263,8 +263,10 @@ health_probe_url() {
 
   bind_address="$(awk -F= '$1 == "ORBIT_BIND_ADDRESS" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
   port="$(awk -F= '$1 == "ORBIT_PORT" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
-  bind_address="${bind_address:-0.0.0.0}"
-  port="${port:-3000}"
+  # An exported value wins over the file, exactly as it does for Compose's
+  # own interpolation, so the probe reaches the port Compose published (#1241).
+  bind_address="${ORBIT_BIND_ADDRESS:-${bind_address:-0.0.0.0}}"
+  port="${ORBIT_PORT:-${port:-3000}}"
 
   # 0.0.0.0 means "listen on every interface"; it is not itself a
   # connectable address, so probe via loopback there, same as any other

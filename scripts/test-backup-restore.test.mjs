@@ -103,9 +103,12 @@ function harnessPrelude(environmentFile) {
   ];
 }
 
-function runHealthProbeUrl(environmentFile) {
+function runHealthProbeUrl(environmentFile, exported = {}) {
   const harness = [...harnessPrelude(environmentFile), healthProbeUrlSource, "health_probe_url"].join("\n");
-  return failOnProcessDeadline(spawnSync("bash", ["-c", harness], { encoding: "utf8", ...processGuard() }), { label: "runHealthProbeUrl" });
+  const env = { ...process.env, ...exported };
+  if (!("ORBIT_PORT" in exported)) delete env.ORBIT_PORT;
+  if (!("ORBIT_BIND_ADDRESS" in exported)) delete env.ORBIT_BIND_ADDRESS;
+  return failOnProcessDeadline(spawnSync("bash", ["-c", harness], { encoding: "utf8", env, ...processGuard() }), { label: "runHealthProbeUrl" });
 }
 
 // Async, non-blocking bash runner — required (not spawnSync) whenever the bash
@@ -205,6 +208,14 @@ describe("scripts/test-backup-restore.sh health_probe_url (issue #684)", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).not.toBe(preFixHardcodedProbeUrl);
     expect(result.stdout).toBe("http://127.0.0.1:9443/api/health");
+  });
+
+  it("an exported ORBIT_PORT/ORBIT_BIND_ADDRESS wins over .env-orbit, as it does for Compose itself (#1241)", () => {
+    const dir = makeFixture();
+    const environmentFile = writeEnvironmentFile(dir, ["APP_URL=https://orbit.internal", "ORBIT_PORT=3000"]);
+    const result = runHealthProbeUrl(environmentFile, { ORBIT_PORT: "3001", ORBIT_BIND_ADDRESS: "127.0.0.1" });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("http://127.0.0.1:3001/api/health");
   });
 
   it("derives the probe the same way scripts/restore.sh does, so the two cannot drift apart", () => {
