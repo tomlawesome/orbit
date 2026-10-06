@@ -93,11 +93,19 @@ rm -f "$signature_path"
 # reason: no Rekor here, key-based trust only, and --use-signing-config
 # defaults to true so --tlog-upload=false must be paired with it or cosign
 # refuses. --yes answers the interactive prompt a job cannot.
+# --new-bundle-format=false: cosign v3 defaults sign-blob to a Sigstore
+# bundle and refuses --output-signature without it ("must specify --bundle
+# with --new-bundle-format"), which is how the first preview run of v0.3.0
+# failed here (#1230). The bare base64 DER signature is the contract on
+# every consumer -- verify-release-manifest.sh's cosign and openssl checks,
+# get-orbit.sh, the GitHub countersign and the launcher's live job -- so the
+# legacy output stays until they all move together.
 "$cosign_cmd" sign-blob \
   --key "$COSIGN_PRIVATE_KEY" \
   --tlog-upload=false \
   --use-signing-config=false \
   --yes \
+  --new-bundle-format=false \
   --output-signature "$signature_path" \
   "$manifest_path" ||
   fail "cosign could not sign ${manifest_path}"
