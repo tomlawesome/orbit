@@ -90,15 +90,12 @@ describe("immutable container version identity", () => {
     expect(configureScript).not.toMatch(/docker build/u);
   });
 
-  it("removes the VAPID bootstrap image once the keys are made, so no per-commit tag is left behind (#1241)", () => {
-    const build = configureScript.indexOf('docker build --target vapid-generator --tag "$bootstrap_image"');
-    const run = configureScript.indexOf('docker run --rm "$bootstrap_image"', build);
-    const remove = configureScript.indexOf('docker image rm "$bootstrap_image"', run);
-
-    expect(build).toBeGreaterThanOrEqual(0);
-    expect(run).toBeGreaterThan(build);
-    expect(remove).toBeGreaterThan(run);
-    expect(configureScript.slice(run, remove)).not.toContain("fail ");
+  it("builds no VAPID bootstrap image at all, so no per-commit tag can be left behind (#1241, #1210)", () => {
+    // #1241 removed the bootstrap image after its one run; #1210 moved key
+    // generation into the engine (src/lib/vapid-keys.ts), so configure.sh
+    // no longer builds one.
+    expect(configureScript).not.toContain("vapid-generator");
+    expect(configureScript).not.toContain("bootstrap_image");
   });
 
   it("handles --version before root and secret bootstrap checks", () => {
