@@ -753,11 +753,16 @@ below). Making a bundle is a deliberate step, and one every deployment should
 take before it holds real data:
 
 ```sh
-orbit backup
-orbit export-recovery-bundle <backup.tar>
+bash scripts/backup.sh
+bash scripts/export-recovery-bundle.sh backups/orbit-<timestamp>.tar
 ```
 
-`orbit export-recovery-bundle` locks the live `DOCUMENT_KEK` under a
+Run them from the deployment directory. Each runs the Orbit engine inside the
+deployment, as a one-off container on the app service, so the host needs
+Docker and nothing else.
+
+`export-recovery-bundle.sh` asks for the passphrase twice, then locks the live
+`DOCUMENT_KEK` under it
 passphrase you choose (the passphrase is stretched with scrypt and the key
 encrypted with AES-256-GCM) and packages it with the backup you just made into
 one file, `orbit-recovery-<timestamp>.tar`.
@@ -771,11 +776,13 @@ The administration screen shows a "No recovery bundle exported" card until a
 bundle has been recorded, and again after every `DOCUMENT_KEK` rotation,
 because a bundle wrapped under the previous key can no longer recover the
 current one. The card is a reminder, not a gate: it never blocks use of the
-instance, and it clears the moment `orbit export-recovery-bundle` completes.
+instance, and it clears the moment `export-recovery-bundle.sh` completes.
 
 ![The "No recovery bundle exported" card, persistent until a bundle is recorded](images/admin-no-recovery-bundle.png)
 
-To use a recovery bundle, see `orbit import-recovery-bundle` and "Restoring
+To use a recovery bundle, run `bash scripts/import-recovery-bundle.sh
+<recovery.tar>` (it asks for the passphrase, then for `IMPORT RECOVERY`, then
+for `RESTORE`) and see "Restoring
 the document key-encryption key" below.
 
 ## Restoring the document key-encryption key

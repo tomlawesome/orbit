@@ -124,18 +124,18 @@ Two different artifacts exist, and they are protected differently — worth
 being precise about rather than lumping them together as "backups are
 encrypted":
 
-- **`orbit backup` / `scripts/backup.sh`** produces one tar
+- **`scripts/backup.sh`** (which runs `orbit backup` inside the deployment) produces one tar
   (`orbit-<timestamp>.tar`) containing a manifest, checksums, a `pg_dump`
   database dump, and the document tree. Inside that tar, the **document
   archive is encrypted** with AES-256-CBC (PBKDF2-SHA256, 600,000 iterations)
   using the same `DOCUMENT_KEK` that protects live documents — so a backup is
   exactly as recoverable, and exactly as exposed, as the live document store
   is. The **database dump inside the same tar is plaintext** `pg_dump`
-  output. Nothing in `backup.sh` encrypts it; a backup tar sitting on an
+  output. Nothing in the backup encrypts it; a backup tar sitting on an
   unencrypted disk (or an unencrypted off-host copy) discloses the database
   in full to whoever can read the file. This is the second half of the
   database gap above, not a separate issue.
-- **`orbit export-recovery-bundle` / `scripts/export-recovery-bundle.sh`**
+- **`scripts/export-recovery-bundle.sh`** (`orbit export-recovery-bundle`)
   produces a much smaller, separate bundle whose only job is to let an
   operator recover the `DOCUMENT_KEK` itself using a memorised passphrase
   (12 characters minimum, confirmed twice) instead of the raw key file. The
@@ -147,7 +147,7 @@ encrypted":
   not mean a permanently unreadable document archive. See
   `docs/adr-notes/296-backup-port-plan.md` for the implementation slice this
   landed in.
-- **Repair/restore checkpoints** (`scripts/restore.sh`'s `create_checkpoint`,
+- **Repair/restore checkpoints** (the restore engine's checkpoint, `src/lib/restore-engine.ts`,
   and the equivalent path in `scripts/repair.sh`) are plain, unencrypted
   files under a `0700` directory with `0600` file modes — the same posture as
   the database dump above, not the ORBKEK01 envelope. They are private,
