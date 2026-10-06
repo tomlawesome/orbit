@@ -33,6 +33,7 @@ import {
 import { acquireDeployLock as acquireSharedDeployLock } from "./deploy-lock";
 import { HostOwnershipError, applyHostOwnership } from "./host-ownership";
 import { parseEnvOrbitContent } from "./env-orbit-file";
+import { ensureVapidKeys } from "./vapid-keys";
 
 // The write side of scripts/configure.sh, ported to the TypeScript engine
 // (issue #294, completing the port begun for `--check` in src/lib/
@@ -41,30 +42,14 @@ import { parseEnvOrbitContent } from "./env-orbit-file";
 // and are re-asserted by name in src/lib/configure-engine.test.ts and
 // src/lib/configure-engine.parity.test.ts.
 //
-// Scope: every configure.sh write flow EXCEPT `ensure_vapid_keys`
-// (configure.sh:684-716, guarantees #24-26), which is the one sub-step that
-// genuinely needs `docker` (to either run an already-resolved ORBIT_IMAGE or
-// build+run a throwaway bootstrap image). Per the settled #295 engine-
-// delivery architecture ("the engine can never manage the Docker socket.
-// Ever." / "host scripts remain the only Docker-touching layer"), that step
-// cannot move into this module or into the containerized `orbit configure`
-// CLI command it backs — it stays bash-only, always, run by
-// scripts/configure.sh itself immediately after delegating (or running
-// locally) everything else this module implements. This is a permanent
-// scope boundary, not a placeholder: see docs/adr-notes/294-configure-write-
-// port-plan.md, "Docker-dependency audit".
+// Scope: every configure.sh write flow, VAPID key generation included since
+// #1210 (build note D7, src/lib/vapid-keys.ts). scripts/configure.sh is now
+// only the shell that runs this engine as a one-off container; it writes no
+// configuration itself.
 //
-// Schema-migration handoff: configure.sh's own `run_configuration_preflight`
-// delegates to `configuration.sh --preflight` as a subprocess. That script
-// is not shipped inside the app image (only the bundled `orbit` CLI itself
-// is — see the Dockerfile's `cli-builder`/`runner` stages), so a real
-// in-container subprocess hand-off is not possible here. Instead
-// runConfigurePreflight below reuses src/lib/env-orbit-file.ts's
-// parseEnvOrbitContent — itself already the parity-proven TypeScript mirror
-// of configuration.sh's own `parse_file` (established for #292/the `check`
-// port) — rather than re-deriving new parsing/validation logic. This is
-// "mirror it, don't reimplement it" applied to the one mirror that already
-// exists and is already proven, not a fresh reimplementation.
+// Schema-migration preflight: runConfigurePreflight below applies
+// src/lib/configuration-migration.ts's preflight (the TypeScript port of the
+// retired scripts/configuration.sh, #1210 D8) to .env-orbit.
 //
 // Every mutating function here operates on real files under an explicit
 // `deployDir` (mirroring src/cli/orbit.ts's existing `--dir` convention),
@@ -858,7 +843,7 @@ export function runConfigurePreflight(deployDir: string): ConfigurePreflightOutc
   return { ok: true };
 }
 
-// --- the bare (no-argument) flow, minus ensure_vapid_keys ------------------
+// --- the bare (no-argument) flow ----------------------------------------------
 
 const GENERATED_SECRET_RELATIVE_PATHS = [
   `${SECRETS_DIRECTORY_NAME}/session-secret`,
@@ -871,13 +856,10 @@ export interface ConfigureApplyResult {
 }
 
 /**
- * configure.sh's bare/default invocation (configure.sh:1156-1167), minus
- * `ensure_vapid_keys` (guarantees #24-26) — see this module's header
- * comment for why that step is permanently out of scope here. The caller
- * (scripts/configure.sh, when delegating, or src/cli/orbit.ts's `configure`
- * command) is responsible for running the VAPID step and printing the final
- * "Orbit configuration is ready..." message itself, in that order, so
- * combined output stays in the same sequence configure.sh has always used.
+ * configure.sh's bare/default invocation (guarantees #1-9, #15-19, #24-26,
+ * #33): the environment file, preflight, the pinned image, the generated
+ * secrets, the OIDC placeholder and, last, the VAPID key pair. The CLI
+ * prints the returned messages, then "Orbit configuration is ready...".
  */
 export function runConfigureApply(
   deployDir: string,
@@ -942,6 +924,10 @@ export function runConfigureApply(
   }
 
   ensureOidcSecretPlaceholder(deployDir);
+
+  // #1210 D7: VAPID keys are generated here now, not by a Docker-backed bash step.
+  const vapid = ensureVapidKeys(deployDir);
+  if (vapid.message) messages.push(vapid.message);
 
   return { messages };
 }
@@ -1112,6 +1098,7 @@ export function collectMachineOidcSecret(driver: ConfigureMachinePromptDriver): 
 // the predicate logic above — mirrors guided-configuration.ts's/install-
 // transaction.ts's own `internal` export.
 export const internal = {
+  atomicWriteFile,
   pathInfo,
   exampleActiveValue,
   buildMinimalEnvironmentContent,

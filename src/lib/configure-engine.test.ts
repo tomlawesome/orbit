@@ -687,12 +687,17 @@ describe("runConfigureApply (bare flow, minus ensure_vapid_keys)", () => {
     expect(readEnv()).toMatch(/^ORBIT_IMAGE=orbit-local:111111bbbbbb$/mu);
   });
 
-  it("leaves .env-orbit and .orbit-secrets in place for the (bash-owned) VAPID step and final message to follow", () => {
-    runConfigureApply(deployDir, "orbit-local:abcdef123456");
-    expect(statSync(envPath()).isFile()).toBe(true);
-    expect(statSync(join(deployDir, SECRETS_DIRECTORY_NAME)).isDirectory()).toBe(true);
-    // VAPID keys are never touched by this module (see header comment).
-    expect(() => statSync(join(deployDir, SECRETS_DIRECTORY_NAME, "vapid-private-key"))).toThrow();
+  it("ends with the VAPID step (#1210 D7, guarantees #24-26): a key pair on the first run, kept on the next", () => {
+    const first = runConfigureApply(deployDir, "orbit-local:abcdef123456");
+    expect(first.messages.at(-1)).toBe("Generated VAPID push keys.");
+    const keyPath = join(deployDir, SECRETS_DIRECTORY_NAME, "vapid-private-key");
+    const key = readFileSync(keyPath, "utf8");
+    expect(statSync(keyPath).mode & 0o777).toBe(0o600);
+    expect(readEnv()).toMatch(/^VAPID_PUBLIC_KEY=[A-Za-z0-9_-]{87}$/m);
+    expect(readEnv()).toContain("VAPID_PRIVATE_KEY_FILE=/run/orbit-secrets/orbit-vapid-private-key\n");
+    const second = runConfigureApply(deployDir, undefined);
+    expect(second.messages).not.toContain("Generated VAPID push keys.");
+    expect(readFileSync(keyPath, "utf8")).toBe(key);
   });
 
   it("fails closed with configuration-migration-required when preflight finds a schema-less file", () => {
