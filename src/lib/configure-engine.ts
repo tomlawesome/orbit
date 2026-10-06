@@ -369,14 +369,22 @@ function updateManagedKeysLocked(deployDir: string, pairs: ReadonlyArray<readonl
     inputLines = inputLines.slice(0, -1);
   }
 
+  // Windows files keep their own ending: lines this function writes get CRLF;
+  // copied lines are untouched and already carry their own "\r".
+  const crlf = raw.includes("\r\n");
   const outputLines: string[] = [];
+  const generated = new Set<number>();
+  const emit = (line: string): void => {
+    generated.add(outputLines.length);
+    outputLines.push(line);
+  };
   const written = new Set<string>();
   const hasOidcSecretFilePending = pending.has("OIDC_CLIENT_SECRET_FILE");
 
   for (const line of inputLines) {
     if (hasOidcSecretFilePending && line.startsWith("# OIDC_CLIENT_SECRET_FILE=")) {
       if (!written.has("OIDC_CLIENT_SECRET_FILE")) {
-        outputLines.push(`OIDC_CLIENT_SECRET_FILE=${pending.get("OIDC_CLIENT_SECRET_FILE")}`);
+        emit(`OIDC_CLIENT_SECRET_FILE=${pending.get("OIDC_CLIENT_SECRET_FILE")}`);
         written.add("OIDC_CLIENT_SECRET_FILE");
       }
       continue;
@@ -390,7 +398,7 @@ function updateManagedKeysLocked(deployDir: string, pairs: ReadonlyArray<readonl
           // Relocated elsewhere (the commented selector above, or right
           // after OIDC_CLIENT_SECRET below) — this stale copy is dropped.
         } else if (!written.has(key)) {
-          outputLines.push(`${key}=${pending.get(key)}`);
+          emit(`${key}=${pending.get(key)}`);
           written.add(key);
         }
         break;
@@ -402,20 +410,22 @@ function updateManagedKeysLocked(deployDir: string, pairs: ReadonlyArray<readonl
     }
 
     if (hasOidcSecretFilePending && !written.has("OIDC_CLIENT_SECRET_FILE") && line.startsWith("OIDC_CLIENT_SECRET=")) {
-      outputLines.push(`OIDC_CLIENT_SECRET_FILE=${pending.get("OIDC_CLIENT_SECRET_FILE")}`);
+      emit(`OIDC_CLIENT_SECRET_FILE=${pending.get("OIDC_CLIENT_SECRET_FILE")}`);
       written.add("OIDC_CLIENT_SECRET_FILE");
     }
   }
 
   for (const key of order) {
     if (!written.has(key)) {
-      outputLines.push(`${key}=${pending.get(key)}`);
+      emit(`${key}=${pending.get(key)}`);
       finalNewline = true;
     }
   }
 
   const content = outputLines
-    .map((line, index) => (index === outputLines.length - 1 && !finalNewline ? line : `${line}\n`))
+    .map((line, index) =>
+      index === outputLines.length - 1 && !finalNewline ? line : `${line}${crlf && generated.has(index) ? "\r\n" : "\n"}`,
+    )
     .join("");
 
   atomicWriteFile(envPath, content, 0o600, "env-orbit.updating");
