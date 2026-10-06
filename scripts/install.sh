@@ -1710,7 +1710,7 @@ print_completion_screen() {
   # it would fail an offline install -- so this is an instruction, not a
   # gate. The administration screen carries its own persistent reminder
   # until a bundle is actually recorded.
-  printf 'Export a recovery bundle now: run "orbit backup" then "orbit export-recovery-bundle <backup.tar>" -- see "Exporting a recovery bundle" in the administrator guide. It is the only way back in if the encryption key is ever lost.\n'
+  printf 'Export a recovery bundle now: run "bash scripts/backup.sh" then "bash scripts/export-recovery-bundle.sh <backup.tar>" in the deployment directory -- see "Exporting a recovery bundle" in the administrator guide. It is the only way back in if the encryption key is ever lost.\n'
 }
 
 installer_ui_event host host starting host-tools check
