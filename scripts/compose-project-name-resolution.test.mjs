@@ -41,7 +41,10 @@ import { failOnProcessDeadline, processGuard } from "./process-budget.mjs";
 // without the compose-file step once install.sh gained it — so a deployment
 // with no stored COMPOSE_PROJECT_NAME had its one-off `configure` addressing
 // a different project from every other script.
-const SCRIPTS = ["end-maintenance.sh", "engine-check.sh", "repair.sh", "install.sh", "configure.sh"];
+// #1210 removed two: engine-check.sh was deleted, and configure.sh no longer
+// addresses a Compose project at all (its engine one-off is a plain
+// `docker run`).
+const SCRIPTS = ["end-maintenance.sh", "repair.sh", "install.sh"];
 
 function extractFunction(source, name) {
   const match = source.match(new RegExp(`^${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`, "mu"));
@@ -69,7 +72,7 @@ function scratchDir(prefix) {
 describe("read_compose_project_name is the same function in all five scripts", () => {
   const bodies = SCRIPTS.map((name) => extractFunction(readFileSync(join(import.meta.dirname, name), "utf8"), "read_compose_project_name"));
 
-  it("is present, identical, in end-maintenance.sh, engine-check.sh, repair.sh, install.sh and configure.sh", () => {
+  it("is present, identical, in end-maintenance.sh, repair.sh and install.sh", () => {
     for (const [index, body] of bodies.entries()) {
       assert.equal(body, bodies[0], `${SCRIPTS[index]} carries a different read_compose_project_name`);
     }
@@ -105,8 +108,7 @@ describe("read_compose_project_name is the same function in all five scripts", (
 // A fake `docker` that logs its exact argv (one argument per line) to
 // argvLogPath and exits 0 -- never touching a real daemon. Bash, not Node:
 // `docker compose --env-file <path>` collides with Node 20.6+'s own
-// `--env-file` CLI-flag interception (scripts/engine-check.test.mjs's
-// makeFakeDockerBin notes the same thing).
+// `--env-file` CLI-flag interception.
 function makeFakeDockerBin(argvLogPath) {
   const binDir = scratchDir("orbit-compose-name-fakebin-");
   const script = ["#!/usr/bin/env bash", `printf '%s\\n' "$@" > '${argvLogPath}'`, "exit 0", ""].join("\n");
@@ -160,18 +162,3 @@ describe("end-maintenance.sh resolves the project from docker-compose.yml's name
   });
 });
 
-describe("engine-check.sh (ORBIT_ENGINE_CHECK=container) resolves the project from docker-compose.yml's name:, not the directory basename", () => {
-  it("composes --project-name orbit from a scratch directory named after this test, not \"orbit\"", () => {
-    const dir = makeMinimalDeployment("engine-check.sh");
-    const argvLogPath = join(dir, "docker-argv.log");
-    const binDir = makeFakeDockerBin(argvLogPath);
-
-    const result = runScript("engine-check.sh", dir, { binDir, env: { ORBIT_ENGINE_CHECK: "container" } });
-
-    assert.equal(result.status, 0, result.stderr);
-    const argv = readFileSync(argvLogPath, "utf8").split("\n").filter((line) => line.length > 0);
-    const projectNameIndex = argv.indexOf("--project-name");
-    assert.ok(projectNameIndex >= 0, argv.join(" "));
-    assert.equal(argv[projectNameIndex + 1], "orbit");
-  });
-});

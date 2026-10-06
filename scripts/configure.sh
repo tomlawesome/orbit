@@ -1,88 +1,26 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+# Orbit configuration: the host shell around the configure engine (#1210).
+#
+# Every flow -- creating and updating .env-orbit, generating secrets and
+# VAPID keys, guided configuration, the OIDC client secret, deployment
+# profiles, readiness checks and the configuration migration -- runs once,
+# in the TypeScript engine shipped inside the Orbit image
+# (src/cli/orbit.ts, src/lib/configure-engine.ts,
+# src/lib/configuration-migration.ts). This script only resolves which image
+# to run, makes sure it is present, and runs it as a disposable one-off with
+# the deployment directory mounted at /orbit-deploy (docs/engine-events.md,
+# "In-container engine invocation"). It never writes configuration itself
+# and Node is never needed on the host.
+
+caller_dir="$(pwd -P)"
+repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_dir"
 
 readonly environment_file=".env-orbit"
-readonly environment_example=".env-orbit.example"
-readonly secrets_directory="${ORBIT_SECRETS_DIR:-.orbit-secrets}"
-readonly oidc_secret_file="$secrets_directory/oidc-client-secret"
-readonly oidc_secret_file_path="/run/orbit-secrets/orbit-oidc-client-secret"
-readonly maximum_secret_bytes=65536
-# The one definition of a 256-bit hexadecimal secret, restating
-# src/lib/config-contract.ts's SECRET_HEX256_PATTERN and its wording. Bash
-# cannot import the TypeScript module, so src/lib/session-secret.contract.test.ts
-# runs this script and the TypeScript layers over the same candidate values and
-# fails if they ever disagree (issue #578).
-readonly secret_hex256_pattern='^[0-9a-fA-F]{64}$'
-readonly secret_hex256_requirement='must be 64 hexadecimal characters (a 256-bit secret), as produced by: openssl rand -hex 32'
-readonly session_secret_rotation_warning='Rotating the session secret invalidates CSRF tokens issued before it, which recover on the next session read; active sessions stay signed in.'
-# configuration.sh's own rollback_suffix constant (scripts/configuration.sh
-# line 9), duplicated here rather than sourced (this script's own source-less
-# convention). Only configuration.sh ever creates a file at this suffix.
-readonly configuration_rollback_suffix=".orbit-config.rollback"
-# --check-rollback (issue #529, ADR-0014 decision 7) runs the identical
-# --check logic below against configuration.sh's own rollback copy at its
-# conventional location instead of the live file — no path argument, no
-# override, so this script never accepts untrusted path input; a caller
-# wanting a nonstandard layout checked simply gets the same "does not fire"
-# fallback repair.sh already has for every other undetectable case. Set once
-# here, at startup, from the selected mode, so run_check's own body reads a
-# single variable rather than branching on which mode is active.
-checked_environment_file="$environment_file"
-if [[ "${1:-}" == --check-rollback ]]; then
-  checked_environment_file="${environment_file}${configuration_rollback_suffix}"
-fi
-temporary_file=""
-terminal_fd=""
-terminal_echo_disabled=0
-# Set by ensure_environment_file when .env-orbit did not exist yet -- read
-# by persist_orbit_image below (#1151 O1-S4).
-environment_file_was_created=0
-# Set once in the bare flow, before the first secret is generated -- read by
-# ensure_secret_file below (#1151 RANGE-F1), mirroring
-# src/lib/configure-engine.ts's runConfigureApply isFreshInstall.
-generated_secret_existed_before_run=0
-# Set by acquire_deploy_lock, read by release_deploy_lock (#1151 RANGE-F6).
-deploy_lock_path_value=""
-deploy_lock_owner_value=""
-installer_ui_input_loaded=0
-installer_ui_path="$repo_dir/scripts/installer-ui.sh"
-if [[ -f "$installer_ui_path" && ! -L "$installer_ui_path" ]]; then
-  # shellcheck source=/dev/null
-  source "$installer_ui_path"
-  if declare -F installer_ui_read_text >/dev/null &&
-    declare -F installer_ui_read_secret >/dev/null; then
-    installer_ui_input_loaded=1
-  fi
-fi
-
-# docs/engine-events.md "Machine prompts (v0)". Opt-in only: byte-identical
-# to today's TTY prompting unless the caller sets this exact value. The
-# duplicated descriptor is opened here, before any command substitution, so
-# that machine_prompt_collect (invoked as `var="$(machine_prompt_collect ...)"`
-# below) can still write protocol lines to the real stdout from inside a
-# subshell whose own stdout is being captured by that substitution.
-machine_prompts=0
-if [[ "${ORBIT_CONFIGURE_PROMPTS:-}" == machine ]]; then
-  machine_prompts=1
-fi
-machine_prompt_fd=""
-if [[ "$machine_prompts" == 1 ]]; then
-  exec {machine_prompt_fd}>&1
-fi
-
-run_configuration_preflight() {
-  [[ -f scripts/configuration.sh ]] || return 0
-  [[ ! -e "$environment_file" ]] && return 0
-  local preflight_status=0 preflight_output=""
-  preflight_output="$(bash scripts/configuration.sh --preflight --file "$environment_file" 2>/dev/null)" || preflight_status=$?
-  [[ "$preflight_status" == 0 ]] || fail "Configuration preflight failed; restoring the previous deployment."
-  if grep -q '^safely_migratable ORBIT_CONFIG_SCHEMA_VERSION$' <<< "$preflight_output"; then
-    fail "configuration_migration_required"
-  fi
-}
+readonly engine_mount="/orbit-deploy"
+readonly engine_cli="/opt/orbit/cli/orbit.js"
 
 fail() {
   printf 'Orbit configuration: %s\n' "$*" >&2
@@ -90,1554 +28,181 @@ fail() {
 }
 
 usage() {
-  printf 'Usage: %s [--check|--check-rollback|--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]]\n' "$0" >&2
+  printf 'Usage: %s [--check|--check-rollback|--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--preflight [--file F]|--migrate [--transaction] [--file F] ...]\n' "$0" >&2
 }
-
-cleanup() {
-  if [[ "$terminal_echo_disabled" == 1 && -n "$terminal_fd" ]]; then
-    stty echo <&"$terminal_fd" 2>/dev/null || true
-    terminal_echo_disabled=0
-  fi
-  if [[ -n "$terminal_fd" ]]; then
-    exec {terminal_fd}>&-
-    terminal_fd=""
-  fi
-  if [[ -n "$machine_prompt_fd" ]]; then
-    exec {machine_prompt_fd}>&-
-    machine_prompt_fd=""
-  fi
-  [[ -z "$temporary_file" ]] || rm -f -- "$temporary_file"
-  release_deploy_lock
-}
-
-trap cleanup EXIT
-
-open_controlling_terminal() {
-  [[ -n "$terminal_fd" ]] && return 0
-  if ! { exec {terminal_fd}<>/dev/tty; } 2>/dev/null; then
-    terminal_fd=""
-    return 1
-  fi
-}
-
-read_guided_line() {
-  local prompt="$1" input
-
-  if [[ -n "$terminal_fd" ]]; then
-    if [[ "$installer_ui_input_loaded" == 1 ]]; then
-      input="$(installer_ui_read_text "$terminal_fd" "$prompt" 2048)" || return $?
-    else
-      printf '%s' "$prompt" >&"$terminal_fd"
-      IFS= read -r -u "$terminal_fd" input || return 1
-    fi
-  else
-    IFS= read -r -p "$prompt" input || return 1
-  fi
-  printf '%s' "$input"
-}
-
-disable_terminal_echo() {
-  stty -echo <&"$terminal_fd" 2>/dev/null ||
-    fail "Could not secure hidden terminal input."
-  terminal_echo_disabled=1
-}
-
-restore_terminal_echo() {
-  if [[ "$terminal_echo_disabled" == 1 ]]; then
-    stty echo <&"$terminal_fd" 2>/dev/null ||
-      fail "Could not restore terminal input."
-    terminal_echo_disabled=0
-  fi
-}
-
-generate_hex_secret() {
-  local secret
-
-  if command -v openssl >/dev/null 2>&1; then
-    secret="$(openssl rand -hex 32)"
-  elif [[ -r /dev/urandom ]] && command -v od >/dev/null 2>&1; then
-    secret="$(od -An -N32 -tx1 /dev/urandom | tr -d '[:space:]')"
-  else
-    fail "OpenSSL or a readable /dev/urandom with od is required to generate secrets."
-  fi
-
-  [[ "$secret" =~ $secret_hex256_pattern ]] || fail "Secure secret generation failed."
-  printf '%s\n' "${secret,,}"
-}
-
-# The refusal wording for a secret file of the wrong shape, kept identical to
-# src/lib/config-contract.ts's secretFileFormatMessage (issue #578); the
-# session secret earns the extra sentence because rotating it ends every
-# signed-in session, which the other two secrets do not.
-secret_file_format_message() {
-  local path="$1" message
-  message="${path} does not contain a valid 256-bit hexadecimal secret: it ${secret_hex256_requirement}."
-  if [[ "${path##*/}" == "session-secret" ]]; then
-    message+=" ${session_secret_rotation_warning}"
-  fi
-  printf '%s' "$message"
-}
-
-example_active_value() {
-  local requested_key="$1" line value="" found=0
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" == "${requested_key}="* ]]; then
-      value="${line#*=}"
-      found=$((found + 1))
-    fi
-  done < "$environment_example"
-  [[ "$found" == 1 ]] || return 1
-  printf '%s' "$value"
-}
-
-write_minimal_environment() {
-  local heading key value
-  while [[ $# -gt 0 ]]; do
-    heading="$1"
-    shift
-    printf '# --- %s ---\n' "$heading"
-    while [[ $# -gt 0 && "$1" != --section ]]; do
-      key="$1"
-      shift
-      if [[ "$key" == managed:* ]]; then
-        key="${key#managed:}"
-        if [[ "$key" == OIDC_CLIENT_SECRET_FILE ]]; then
-          printf '# %s=%s\n' "$key" "$oidc_secret_file_path"
-        else
-          printf '# %s=\n' "$key"
-        fi
-      else
-        value="$(example_active_value "$key")" || return 1
-        printf '%s=%s\n' "$key" "$value"
-      fi
-    done
-    [[ $# -eq 0 ]] || shift
-    printf '\n'
-  done
-}
-
-ensure_environment_file() {
-  [[ -f "$environment_example" ]] ||
-    fail "${environment_example} is missing."
-
-  if [[ -e "$environment_file" ]]; then
-    [[ -f "$environment_file" && ! -L "$environment_file" ]] ||
-      fail "Refusing to use ${environment_file} because it is not a regular file."
-    chmod 600 "$environment_file" ||
-      fail "Could not restrict ${environment_file} permissions."
-    return
-  fi
-
-  environment_file_was_created=1
-  temporary_file="$(mktemp "$PWD/.env-orbit.installing.XXXXXX")" ||
-    fail "Could not create a temporary Orbit environment file."
-  chmod 600 "$temporary_file" ||
-    fail "Could not secure the temporary Orbit environment file."
-  write_minimal_environment \
-    'Core' ORBIT_CONFIG_SCHEMA_VERSION APP_URL ORBIT_IMAGE managed:ORBIT_CONFIG_APPLIED_VERSION managed:ORBIT_CONFIG_APPLIED_DIGEST --section \
-    'Authentication' ORBIT_AUTH_OIDC OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET managed:OIDC_CLIENT_SECRET_FILE OIDC_CALLBACK_URL --section \
-    'Generated secrets and keys' SESSION_SECRET_FILE DOCUMENT_KEK_FILE POSTGRES_PASSWORD_FILE VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY_FILE --section \
-    'Deployment' managed:COMPOSE_PROJECT_NAME ORBIT_BIND_ADDRESS ORBIT_PORT COMPOSE_PROFILES POSTGRES_DB POSTGRES_USER --section \
-    'Optional services' TIKA_URL OLLAMA_MODEL --section \
-    'Observability' ORBIT_LOG_LEVEL ORBIT_LOG_FORMAT > "$temporary_file" ||
-    fail "Could not create a concise Orbit environment file from the supported defaults."
-  mv -- "$temporary_file" "$environment_file"
-  temporary_file=""
-  printf 'Created %s from %s.\n' "$environment_file" "$environment_example"
-}
-
-ensure_secrets_directory() {
-  if [[ -e "$secrets_directory" ]]; then
-    [[ -d "$secrets_directory" && ! -L "$secrets_directory" ]] ||
-      fail "Refusing to use ${secrets_directory} because it is not a regular directory."
-  else
-    mkdir -- "$secrets_directory"
-  fi
-  chmod 700 "$secrets_directory" ||
-    fail "Could not restrict ${secrets_directory} permissions."
-}
-
-# #1151 RANGE-F1: a deployment is EXISTING when any of the three generated
-# secrets (session-secret, postgres-password, document-kek) already exists
-# before this run; .env-orbit and the secrets directory are not signals,
-# because install.sh runs `configure.sh --init` (which writes .env-orbit) and
-# then a bare `configure.sh` in a second process. Checked once for the whole
-# set, before the first is generated, so writing one cannot make the next
-# look existing. Mirrors src/lib/configure-engine.ts's runConfigureApply.
-record_generated_secret_presence() {
-  local name path
-  generated_secret_existed_before_run=0
-  for name in session-secret postgres-password document-kek; do
-    path="$secrets_directory/$name"
-    if [[ -e "$path" || -L "$path" ]]; then
-      generated_secret_existed_before_run=1
-      return
-    fi
-  done
-}
-
-# Shares the Orbit engine's cross-process deploy lock (#1151 RANGE-F6):
-# src/lib/configure-engine.ts's acquireDeployLock and
-# install-transaction.ts's own copy both take ".orbit-engine.lock" in the
-# deployment directory before a read-modify-write of $environment_file, but
-# bash's own update_managed_keys took no lock at all, so two concurrent
-# default (bash-engine) `orbit configure` runs against the same deployment
-# directory could each read-modify-write it and lose one writer's keys --
-# exactly the race O1-R8 closed only for the opt-in container engine. Same
-# lock file (so the two engines exclude each other), same
-# stale-after-10-minutes takeover (a crashed process leaves no PID to check
-# across a container boundary), same rename-based reclaim so two processes
-# racing a stale lock cannot both believe they hold it.
-readonly deploy_lock_file=".orbit-engine.lock"
-readonly deploy_lock_stale_seconds=600
-
-acquire_deploy_lock() {
-  local operation_label="$1" lock_path="$deploy_lock_file" owner lock_age reclaimed
-
-  if ! ( set -o noclobber; : > "$lock_path" ) 2>/dev/null; then
-    lock_age="$deploy_lock_stale_seconds"
-    if [[ -e "$lock_path" ]]; then
-      lock_age=$(( $(date +%s) - $(stat -c %Y -- "$lock_path" 2>/dev/null || printf '0') ))
-    fi
-    if (( lock_age <= deploy_lock_stale_seconds )); then
-      fail "Another ${operation_label} is already running against this deployment (lock held at ${lock_path}). Wait for it to finish, or remove the lock file yourself once you are certain no other run is active."
-    fi
-    # Reclaim by rename, not unlink-then-create: two processes that both saw
-    # the stale lock would otherwise each unlink and recreate it, and the
-    # slower unlink removes the faster one's fresh lock. Only one rename
-    # succeeds; the other tries the plain create once more and refuses if
-    # that is taken too.
-    reclaimed="${lock_path}.stale-$$"
-    if mv -- "$lock_path" "$reclaimed" 2>/dev/null; then
-      rm -f -- "$reclaimed"
-    fi
-    if ! ( set -o noclobber; : > "$lock_path" ) 2>/dev/null; then
-      fail "Another ${operation_label} is already running against this deployment (lock held at ${lock_path})."
-    fi
-  fi
-
-  owner="$$:$RANDOM:$RANDOM"
-  printf '%s\n' "$owner" > "$lock_path"
-  deploy_lock_path_value="$lock_path"
-  deploy_lock_owner_value="$owner"
-}
-
-# Never removes a lock that was reclaimed from this process as stale and now
-# belongs to another run: only a lock file that still names this process's
-# own owner token is removed. Safe to call more than once (cleanup's EXIT
-# trap calls it again as a backstop after any fail() exit mid-update).
-release_deploy_lock() {
-  [[ -n "$deploy_lock_path_value" ]] || return 0
-  if [[ "$(cat -- "$deploy_lock_path_value" 2>/dev/null)" == "$deploy_lock_owner_value" ]]; then
-    rm -f -- "$deploy_lock_path_value"
-  fi
-  deploy_lock_path_value=""
-  deploy_lock_owner_value=""
-}
-
-# Reusable atomic updater for installer-managed keys in $environment_file. It
-# accepts one or more KEY VALUE pairs, rewrites the first active "KEY=..."
-# assignment for each in place, drops any further duplicate active
-# assignments for the same key, and appends each assignment at the end of
-# the file when none was present, in the order given. Every other line,
-# including comments, is copied through byte-for-byte. All pairs are applied
-# in a single atomic rewrite.
-update_managed_keys() {
-  acquire_deploy_lock "orbit configure"
-  local temp line key found final_newline=1 output_line index last_byte=""
-  # mapfile -t strips the newline but not a preceding carriage return, so a
-  # CRLF file arrives with one still attached to every line. Unmanaged lines
-  # therefore keep theirs automatically, while a rewritten managed line is
-  # rebuilt from scratch and would lose it - leaving mixed endings in a file
-  # that started out consistent. `cr` carries the ending of the line being
-  # replaced; `file_cr` carries the file's own convention, for keys appended
-  # at the end that have no original line to copy from.
-  local cr="" file_cr=""
-  local -a input_lines=() output_lines=()
-  local -A pending=() written=()
-  local -a order=()
-
-  while [[ $# -gt 0 ]]; do
-    key="$1"
-    pending["$key"]="$2"
-    order+=("$key")
-    shift 2
-  done
-
-  temp="$(mktemp "$PWD/.env-orbit.updating.XXXXXX")" ||
-    fail "Could not create a temporary Orbit environment file."
-  temporary_file="$temp"
-  chmod 600 "$temp" ||
-    fail "Could not secure the temporary Orbit environment file."
-
-  mapfile -t input_lines < "$environment_file" ||
-    fail "Could not read ${environment_file} for an atomic update."
-  if [[ -s "$environment_file" ]]; then
-    # Command substitution strips trailing newlines, so inspect the final byte
-    # as hex when preserving the source file's exact newline convention.
-    last_byte="$(tail -c 1 -- "$environment_file" | od -An -t x1 | tr -d '[:space:]')"
-    [[ "$last_byte" == 0a ]] || final_newline=0
-  fi
-
-  for line in "${input_lines[@]}"; do
-    [[ "$line" == *$'\r' ]] && file_cr=$'\r'
-  done
-
-  for line in "${input_lines[@]}"; do
-    found=0
-    cr=""
-    [[ "$line" == *$'\r' ]] && cr=$'\r'
-
-    # Keep the file-backed OIDC selector beside its authentication
-    # documentation. Active managed lines are the only lines eligible for
-    # relocation. The obsolete commented selector itself is replaced so a
-    # valid file-backed secret does not still look disabled. Other comments
-    # and unmanaged operator lines pass through unchanged.
-    if [[ -n "${pending[OIDC_CLIENT_SECRET_FILE]+present}" &&
-      "$line" == "# OIDC_CLIENT_SECRET_FILE="* ]]; then
-      if [[ -z "${written[OIDC_CLIENT_SECRET_FILE]:-}" ]]; then
-        output_lines+=("OIDC_CLIENT_SECRET_FILE=${pending[OIDC_CLIENT_SECRET_FILE]}$cr")
-        written[OIDC_CLIENT_SECRET_FILE]=1
-      fi
-      continue
-    fi
-
-    for key in "${order[@]}"; do
-      if [[ "$line" == "${key}="* ]]; then
-        found=1
-        if [[ "$key" == OIDC_CLIENT_SECRET_FILE ]]; then
-          # The canonical location is emitted at the documented selector or
-          # immediately after OIDC_CLIENT_SECRET below. Do not retain an
-          # older active copy in an arbitrary location.
-          break
-        elif [[ -z "${written[$key]:-}" ]]; then
-          output_lines+=("$key=${pending[$key]}$cr")
-          written["$key"]=1
-        fi
-        break
-      fi
-    done
-
-    if [[ "$found" == 0 ]]; then
-      output_lines+=("$line")
-    fi
-    if [[ -n "${pending[OIDC_CLIENT_SECRET_FILE]+present}" &&
-      -z "${written[OIDC_CLIENT_SECRET_FILE]:-}" &&
-      "$line" == OIDC_CLIENT_SECRET=* ]]; then
-      output_lines+=("OIDC_CLIENT_SECRET_FILE=${pending[OIDC_CLIENT_SECRET_FILE]}$cr")
-      written[OIDC_CLIENT_SECRET_FILE]=1
-    fi
-  done
-  for key in "${order[@]}"; do
-    if [[ -z "${written[$key]:-}" ]]; then
-      output_lines+=("$key=${pending[$key]}$file_cr")
-      # Adding a new assignment requires a line boundary after the value,
-      # even when the source file ended without one.
-      final_newline=1
-    fi
-  done
-
-  for index in "${!output_lines[@]}"; do
-    output_line="${output_lines[index]}"
-    if ((index == ${#output_lines[@]} - 1 && final_newline == 0)); then
-      printf '%s' "$output_line"
-    else
-      printf '%s\n' "$output_line"
-    fi
-  done > "$temp"
-
-  mv -- "$temp" "$environment_file" ||
-    fail "Could not persist configuration in ${environment_file}."
-  temporary_file=""
-  release_deploy_lock
-}
-
-persist_orbit_image() {
-  local orbit_image="${ORBIT_IMAGE:-}"
-  [[ -n "$orbit_image" ]] || return 0
-  # A bare `bash scripts/configure.sh` picks up whatever ORBIT_IMAGE is
-  # exported in the invoking shell -- including a stale value left over
-  # from an earlier session -- and previously persisted it unconditionally,
-  # silently rewriting an existing deployment's pinned image without going
-  # through install.sh's own registry/signature checks (#1151 O1-S4). A
-  # brand-new .env-orbit has no prior pin to protect and needs this value to
-  # seed itself (install.sh's own fresh-install call relies on exactly
-  # that), so only an EXISTING deployment requires the installer's explicit
-  # trust marker, ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1 (set by install.sh
-  # itself alongside ORBIT_IMAGE; never set by a human invocation).
-  if [[ "$environment_file_was_created" != 1 && "${ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE:-}" != 1 ]]; then
-    # Worded without a literal "ORBIT_IMAGE=" (#1151 O1-S4 follow-up):
-    # scripts/supply-chain-policy.test.mjs scans this file for exactly that
-    # assignment shape to prove every deployment reference is pinned, and a
-    # message built the same way as a real assignment tripped it.
-    printf 'Orbit configure: ignoring the environment'"'"'s ORBIT_IMAGE value %s; an existing deployment only changes its pinned image through the installer.\n' "$orbit_image" >&2
-    return 0
-  fi
-  if ! is_valid_orbit_image "$orbit_image"; then
-    fail "ORBIT_IMAGE must be an immutable registry digest or the installer-generated local build tag."
-  fi
-  update_managed_keys ORBIT_IMAGE "$orbit_image"
-}
-
-is_valid_local_model() {
-  local value="$1"
-  [[ ${#value} -ge 1 && ${#value} -le 128 ]] || return 1
-  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?(@sha256:[0-9a-f]{64})?$ ]]
-}
-
-set_deployment_profile() {
-  local preset="$1" model="${2:-}" profiles="" tika_url=""
-
-  case "$preset" in
-    standard)
-      [[ -z "$model" ]] || return 2
-      ;;
-    processing)
-      [[ -z "$model" ]] || return 2
-      profiles="processing"
-      tika_url="http://orbit-tika:9998"
-      ;;
-    ai)
-      is_valid_local_model "$model" || return 2
-      profiles="ai"
-      ;;
-    full)
-      is_valid_local_model "$model" || return 2
-      profiles="processing,ai"
-      tika_url="http://orbit-tika:9998"
-      ;;
-    *) return 2 ;;
-  esac
-
-  ensure_environment_file
-  update_managed_keys \
-    COMPOSE_PROFILES "$profiles" \
-    TIKA_URL "$tika_url" \
-    OLLAMA_MODEL "$model"
-  printf 'Orbit deployment profile saved: %s.\n' "$preset"
-}
-
-# --- Guided configuration (--init) validation -------------------------------
-#
-# Shared by the guided prompts below and by --check readiness, so both agree
-# on what counts as a deployment-ready public origin or issuer URL.
-
-readonly hostname_pattern='^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$'
 
 is_valid_orbit_image() {
   [[ "$1" =~ ^orbit-local:[0-9a-f]{12}$ || "$1" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]]
 }
 
-contains_forbidden_characters() {
-  [[ "$1" =~ [[:cntrl:][:space:]] ]]
-}
-
-is_forbidden_host() {
-  local host="$1"
-  case "$host" in
-    127.0.0.1 | 127.0.0.1:* | localhost | localhost:* | 0.0.0.0 | 0.0.0.0:* | ::1 | ::1:*)
-      return 0
-      ;;
-    127.*)
-      return 0
-      ;;
-    example.com | example.com:* | *.example.com | *.example.com:*)
-      return 0
-      ;;
-  esac
-  return 1
-}
-
-validate_authority() {
-  local authority="$1" host="$1" port=""
-  if [[ "$authority" == *:* ]]; then
-    host="${authority%:*}"
-    port="${authority##*:}"
-    [[ "$port" =~ ^[0-9]{1,5}$ ]] || return 1
-    (( 10#$port >= 1 && 10#$port <= 65535 )) || return 1
+# The image the engine runs from (#1210 D2): ORBIT_IMAGE from the
+# environment, else the ORBIT_IMAGE line already in .env-orbit (a plain read,
+# never sourced), else refuse. A digest that is not present locally is
+# pulled; a local build tag that is not present cannot be, so it refuses.
+resolve_engine_image() {
+  local image="${ORBIT_IMAGE:-}" candidate
+  # --check-rollback may run while .env-orbit itself is damaged, so the
+  # rollback copy beside it is the second place to look.
+  for candidate in "$environment_file" "${environment_file}.orbit-config.rollback"; do
+    [[ -z "$image" ]] || break
+    [[ "$candidate" == "$environment_file" || "$flow" == --check-rollback ]] || continue
+    if [[ -f "$candidate" && ! -L "$candidate" ]]; then
+      image="$(sed -n 's/^ORBIT_IMAGE=//p' "$candidate" | tail -n 1)"
+    fi
+  done
+  [[ -n "$image" ]] ||
+    fail "No Orbit image to run configuration with. Set ORBIT_IMAGE to an immutable registry digest (or the local tag scripts/build-container.sh builds), or install with get-orbit.sh, which records it in ${environment_file}."
+  is_valid_orbit_image "$image" ||
+    fail "ORBIT_IMAGE must be an immutable registry digest or the installer-generated local build tag."
+  command -v docker >/dev/null 2>&1 || fail "Docker is required to run Orbit configuration."
+  if ! docker image inspect "$image" >/dev/null 2>&1; then
+    [[ "$image" == *@sha256:* ]] ||
+      fail "The Orbit image ${image} is not present locally. Build it with bash scripts/build-container.sh, or set ORBIT_IMAGE to a published digest."
+    docker pull --quiet "$image" >/dev/null || fail "Could not pull ${image}."
   fi
-  [[ "$host" =~ $hostname_pattern ]] || return 1
-  ! is_forbidden_host "$host"
+  engine_image="$image"
 }
 
-is_valid_client_id() {
-  [[ -n "$1" ]] && ! contains_forbidden_characters "$1"
-}
-
-# Validates a complete public origin (scheme + host, no credentials, path,
-# query or fragment) and prints its lowercase-normalised form on success.
-normalize_public_origin() {
-  local value="$1" host lower
-
-  if contains_forbidden_characters "$value"; then
-    return 1
+# Who owns what the engine writes (#1210 D5, #1258). The one-off runs as the
+# image's root. Under rootless Docker that root is the operator already, so
+# 0:0; under rootful Docker the engine hands each file it creates to the
+# operator's own uid/gid. Never `--user`: under rootless Docker a numeric
+# --user maps to a subordinate uid the operator cannot access.
+engine_host_identity() {
+  if docker info --format '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless; then
+    host_uid=0
+    host_gid=0
+  else
+    host_uid="$(id -u)"
+    host_gid="$(id -g)"
   fi
-  case "$value" in
-    https://*) ;;
-    *) return 1 ;;
-  esac
-  case "$value" in
-    *@*) return 1 ;;
-  esac
-  case "$value" in
-    *'?'*) return 1 ;;
-  esac
-  case "$value" in
-    *'#'*) return 1 ;;
-  esac
-
-  value="${value%/}"
-  host="${value#https://}"
-  case "$host" in
-    */*) return 1 ;;
-  esac
-  [[ -n "$host" ]] || return 1
-
-  lower="${host,,}"
-  validate_authority "$lower" || return 1
-
-  printf 'https://%s' "$lower"
 }
 
-# Validates an OIDC issuer URL. A path is allowed because the issuer is
-# provider-specific; credentials, query and fragment are still rejected.
-validate_oidc_issuer() {
-  local value="$1" authority lower
-
-  if contains_forbidden_characters "$value"; then
-    return 1
-  fi
-  case "$value" in
-    https://*) ;;
-    *) return 1 ;;
-  esac
-  case "$value" in
-    *@*) return 1 ;;
-  esac
-  case "$value" in
-    *'?'*) return 1 ;;
-  esac
-  case "$value" in
-    *'#'*) return 1 ;;
-  esac
-
-  authority="${value#https://}"
-  authority="${authority%%/*}"
-  [[ -n "$authority" ]] || return 1
-
-  lower="${authority,,}"
-  validate_authority "$lower" || return 1
-  return 0
-}
-
-prompt_app_url() {
-  local input normalized
-  while true; do
-    if ! input="$(read_guided_line 'Public Orbit origin (e.g. https://orbit.your-domain.tld): ')"; then
-      return 1
-    fi
-    if normalized="$(normalize_public_origin "$input")"; then
-      printf '%s' "$normalized"
-      return 0
-    fi
-    printf 'Enter a complete https:// public origin with no credentials, path, query, fragment, loopback address or example.com placeholder.\n' >&2
-  done
-}
-
-prompt_oidc_issuer() {
-  local input
-  while true; do
-    if ! input="$(read_guided_line 'OIDC issuer URL (e.g. https://sso.your-domain.tld/application/o/orbit/): ')"; then
-      return 1
-    fi
-    if validate_oidc_issuer "$input"; then
-      printf '%s' "$input"
-      return 0
-    fi
-    printf 'Enter a complete https:// issuer URL with no credentials, query, fragment, loopback address or example.com placeholder.\n' >&2
-  done
-}
-
-prompt_oidc_client_id() {
-  local input
-  while true; do
-    if ! input="$(read_guided_line 'OIDC client ID: ')"; then
-      return 1
-    fi
-    if is_valid_client_id "$input"; then
-      printf '%s' "$input"
-      return 0
-    fi
-    printf 'Enter a non-empty OIDC client ID with no whitespace or control characters.\n' >&2
-  done
-}
-
-# ADR-0023 section 1: local accounts (email and password) are always
-# available; an identity provider is opt-in. Guided configuration asks once,
-# up front, which mode this deployment starts in -- OIDC can always be turned
-# on later with a plain `configure.sh --init` rerun.
-prompt_auth_mode() {
-  local input
-  while true; do
-    if ! input="$(read_guided_line 'Sign in with local accounts only, or also with an identity provider? OIDC can be added later with configure.sh. [local/oidc] (default: local): ')"; then
-      return 1
-    fi
-    case "${input,,}" in
-      '' | local)
-        printf 'local'
-        return 0
-        ;;
-      oidc)
-        printf 'oidc'
-        return 0
-        ;;
-    esac
-    printf 'Enter "local" for local accounts only, or "oidc" to also enable an identity provider.\n' >&2
-  done
-}
-
-# --- Machine prompt mode (ORBIT_CONFIGURE_PROMPTS=machine) -------------------
+# run_engine <mount-dir> <ro|rw> <stdin:none|pipe|terminal> <orbit args...>
 #
-# docs/engine-events.md "Machine prompts (v0)" documents the exact line
-# grammar and field/kind/reason vocabulary emitted here. Acceptance is
-# decided solely by the same validators the TTY prompts above call
-# (normalize_public_origin, validate_oidc_issuer, is_valid_client_id, and the
-# OIDC client secret's existing non-empty/size checks below); the
-# classify_*_rejection helpers only pick a reason label for an answer already
-# known to be rejected and never themselves gate acceptance.
-
-machine_prompt_field_kind() {
-  case "$1" in
-    APP_URL) printf 'url' ;;
-    OIDC_ISSUER) printf 'url' ;;
-    OIDC_CALLBACK_URL) printf 'url' ;;
-    OIDC_CLIENT_ID) printf 'text' ;;
-    OIDC_CLIENT_SECRET) printf 'secret' ;;
-    *) return 1 ;;
-  esac
-}
-
-# --- reason vocabulary (docs/engine-events.md "Machine prompts (v0)") -------
-
-# Classifies a rejected URL-kind answer exactly the way normalize_public_origin
-# (allow_path=0, APP_URL) and validate_oidc_issuer (allow_path=1, OIDC_ISSUER)
-# parse one, using the same primitives those validators use.
-classify_url_rejection() {
-  local value="$1" allow_path="$2" host
-  if [[ -z "$value" ]]; then
-    printf 'empty'
-    return
-  fi
-  if contains_forbidden_characters "$value"; then
-    printf 'invalid-characters'
-    return
-  fi
-  case "$value" in
-    https://*) ;;
-    *)
-      printf 'not-https'
-      return
-      ;;
-  esac
-  case "$value" in
-    *@*)
-      printf 'not-absolute-url'
-      return
-      ;;
-  esac
-  case "$value" in
-    *'?'*)
-      printf 'not-absolute-url'
-      return
-      ;;
-  esac
-  case "$value" in
-    *'#'*)
-      printf 'not-absolute-url'
-      return
-      ;;
-  esac
-  host="${value#https://}"
-  if [[ "$allow_path" == 1 ]]; then
-    host="${host%%/*}"
-  else
-    host="${host%/}"
-    case "$host" in
-      */*)
-        printf 'not-absolute-url'
-        return
-        ;;
-    esac
-  fi
-  if [[ -z "$host" ]]; then
-    printf 'not-absolute-url'
-    return
-  fi
-  if is_forbidden_host "${host,,}"; then
-    printf 'forbidden-host'
-    return
-  fi
-  printf 'not-absolute-url'
-}
-
-classify_app_url_rejection() {
-  classify_url_rejection "$1" 0
-}
-
-classify_oidc_issuer_rejection() {
-  classify_url_rejection "$1" 1
-}
-
-classify_oidc_client_id_rejection() {
-  if [[ -z "$1" ]]; then
-    printf 'empty'
-  else
-    printf 'invalid-characters'
-  fi
-}
-
-# Mirrors, and never replaces, the non-empty/size checks set_oidc_secret
-# applies below after reading its answer; kept separate rather than shared so
-# machine mode can never change that function's existing default-path
-# behaviour.
-classify_oidc_secret_rejection() {
-  if [[ -z "$1" ]]; then
-    printf 'empty'
-  else
-    printf 'too-large'
-  fi
-}
-
-# --- end reason vocabulary ---------------------------------------------
-
-# validate_oidc_issuer and is_valid_client_id are plain predicates; wrap them
-# so machine_prompt_collect's validator callback can use the same "print the
-# accepted value, or print nothing and fail" contract normalize_public_origin
-# already implements directly.
-machine_validate_oidc_issuer() {
-  validate_oidc_issuer "$1" && printf '%s' "$1"
-}
-
-machine_validate_oidc_client_id() {
-  is_valid_client_id "$1" && printf '%s' "$1"
-}
-
-machine_validate_oidc_secret() {
-  local value="$1" bytes
-  [[ -n "$value" ]] || return 1
-  bytes="$(printf '%s' "$value" | wc -c | tr -d '[:space:]')"
-  [[ "$bytes" =~ ^[0-9]+$ ]] || return 1
-  [[ "$bytes" -le "$maximum_secret_bytes" ]] || return 1
-  printf '%s' "$value"
-}
-
-# Drives one machine-mode field to completion: emits a `prompt` line, reads
-# exactly one answer line from standard input, and emits `prompt-accept` or
-# `prompt-reject` per docs/engine-events.md. Never prints the answer itself.
-# Aborts (emits `prompt-abort` and returns failure, for the caller's existing
-# refusal path) after a third rejected attempt or on end-of-input.
-machine_prompt_collect() {
-  local field="$1" validator="$2" classifier="$3"
-  local kind attempt=1 input value reason
-  kind="$(machine_prompt_field_kind "$field")" || return 2
-  while ((attempt <= 3)); do
-    printf 'prompt field=%s kind=%s required=true attempt=%d\n' \
-      "$field" "$kind" "$attempt" >&"$machine_prompt_fd"
-    if ! IFS= read -r input; then
-      printf 'prompt-abort field=%s\n' "$field" >&"$machine_prompt_fd"
-      return 1
-    fi
-    if value="$("$validator" "$input")"; then
-      printf 'prompt-accept field=%s\n' "$field" >&"$machine_prompt_fd"
-      printf '%s' "$value"
-      return 0
-    fi
-    reason="$("$classifier" "$input")"
-    printf 'prompt-reject field=%s reason=%s\n' "$field" "$reason" >&"$machine_prompt_fd"
-    attempt=$((attempt + 1))
-  done
-  printf 'prompt-abort field=%s\n' "$field" >&"$machine_prompt_fd"
-  return 1
-}
-
-# Guided (--init) collection of the non-secret public URL and, when the
-# operator also wants an identity provider, the OIDC values (ADR-0023
-# section 1: local accounts are always available, OIDC is opt-in).
-#
-# The sign-in mode comes from, in order: an explicit ORBIT_CONFIGURE_AUTH_MODE
-# (local|oidc); otherwise the complete ORBIT_CONFIGURE_APP_URL /
-# ORBIT_CONFIGURE_OIDC_ISSUER / ORBIT_CONFIGURE_OIDC_CLIENT_ID environment set
-# implies "oidc" (a partial set is still refused); otherwise machine-prompt
-# mode asks for APP_URL only (the mode question is a TTY-only prompt -- v0's
-# machine-prompt grammar is unchanged by this slice) and keeps today's
-# OIDC-required behaviour; otherwise an interactive terminal asks the mode
-# question first, via prompt_auth_mode, defaulting to local-only. Values are
-# never echoed. Nothing is written until every input validates.
-guided_init() {
-  local auth_mode=""
-  case "${ORBIT_CONFIGURE_AUTH_MODE:-}" in
-    local | oidc) auth_mode="$ORBIT_CONFIGURE_AUTH_MODE" ;;
-    '') ;;
-    *) fail "ORBIT_CONFIGURE_AUTH_MODE must be 'local' or 'oidc'." ;;
-  esac
-
-  local env_count=0
-  if [[ -n "${ORBIT_CONFIGURE_APP_URL:-}" ]]; then env_count=$((env_count + 1)); fi
-  if [[ -n "${ORBIT_CONFIGURE_OIDC_ISSUER:-}" ]]; then env_count=$((env_count + 1)); fi
-  if [[ -n "${ORBIT_CONFIGURE_OIDC_CLIENT_ID:-}" ]]; then env_count=$((env_count + 1)); fi
-
-  local app_url issuer client_id
-
-  if [[ "$auth_mode" == local && -n "${ORBIT_CONFIGURE_APP_URL:-}" ]]; then
-    [[ -z "${ORBIT_CONFIGURE_OIDC_ISSUER:-}" && -z "${ORBIT_CONFIGURE_OIDC_CLIENT_ID:-}" ]] ||
-      fail "ORBIT_CONFIGURE_AUTH_MODE=local conflicts with a supplied OIDC issuer/client ID environment set."
-    app_url="$ORBIT_CONFIGURE_APP_URL"
-  elif [[ "$env_count" -eq 3 ]]; then
-    [[ -z "$auth_mode" || "$auth_mode" == oidc ]] ||
-      fail "ORBIT_CONFIGURE_AUTH_MODE=local conflicts with a supplied OIDC issuer/client ID environment set."
-    auth_mode="oidc"
-    app_url="$ORBIT_CONFIGURE_APP_URL"
-    issuer="$ORBIT_CONFIGURE_OIDC_ISSUER"
-    client_id="$ORBIT_CONFIGURE_OIDC_CLIENT_ID"
-  elif [[ "$env_count" -gt 0 ]]; then
-    fail "Guided configuration requires all of ORBIT_CONFIGURE_APP_URL, ORBIT_CONFIGURE_OIDC_ISSUER and ORBIT_CONFIGURE_OIDC_CLIENT_ID together, not a partial set."
-  elif [[ "$machine_prompts" == 1 ]]; then
-    [[ -n "$auth_mode" ]] || auth_mode="oidc"
-    if ! app_url="$(machine_prompt_collect APP_URL normalize_public_origin classify_app_url_rejection)"; then
-      fail "Guided configuration was cancelled."
-    fi
-    if [[ "$auth_mode" == oidc ]]; then
-      if ! issuer="$(machine_prompt_collect OIDC_ISSUER machine_validate_oidc_issuer classify_oidc_issuer_rejection)"; then
-        fail "Guided configuration was cancelled."
-      fi
-      if ! client_id="$(machine_prompt_collect OIDC_CLIENT_ID machine_validate_oidc_client_id classify_oidc_client_id_rejection)"; then
-        fail "Guided configuration was cancelled."
-      fi
-    fi
-  elif open_controlling_terminal; then
-    if [[ -z "$auth_mode" ]]; then
-      if ! auth_mode="$(prompt_auth_mode)"; then
-        fail "Guided configuration was cancelled."
-      fi
-    fi
-    if ! app_url="$(prompt_app_url)"; then
-      fail "Guided configuration was cancelled."
-    fi
-    if [[ "$auth_mode" == oidc ]]; then
-      if ! issuer="$(prompt_oidc_issuer)"; then
-        fail "Guided configuration was cancelled."
-      fi
-      if ! client_id="$(prompt_oidc_client_id)"; then
-        fail "Guided configuration was cancelled."
-      fi
-    fi
-  else
-    fail "Guided configuration needs a controlling terminal, or the complete ORBIT_CONFIGURE_APP_URL, ORBIT_CONFIGURE_OIDC_ISSUER and ORBIT_CONFIGURE_OIDC_CLIENT_ID environment set for non-interactive use."
-  fi
-
-  local normalized_app_url
-  if ! normalized_app_url="$(normalize_public_origin "$app_url")"; then
-    fail "APP_URL must be a complete https:// public origin with no credentials, path, query, fragment, loopback address or example.com placeholder."
-  fi
-
-  if [[ "$auth_mode" == local ]]; then
-    ensure_environment_file
-    # Local-only never touches OIDC_*: switching the provider off must not
-    # force deleting its configuration (owner, 2026-09-09, ADR-0023 section 1).
-    update_managed_keys \
-      APP_URL "$normalized_app_url" \
-      ORBIT_AUTH_OIDC false
-    printf 'Orbit guided configuration saved APP_URL and set ORBIT_AUTH_OIDC=false (local accounts only).\n'
-    return 0
-  fi
-
-  if ! validate_oidc_issuer "$issuer"; then
-    fail "OIDC_ISSUER must be a complete https:// issuer URL with no credentials, query, fragment, loopback address or example.com placeholder."
-  fi
-
-  if ! is_valid_client_id "$client_id"; then
-    fail "OIDC_CLIENT_ID must be a non-empty value with no whitespace or control characters."
-  fi
-
-  local callback_url="${normalized_app_url}/api/auth/callback"
-
-  ensure_environment_file
-  update_managed_keys \
-    APP_URL "$normalized_app_url" \
-    ORBIT_AUTH_OIDC true \
-    OIDC_ISSUER "$issuer" \
-    OIDC_CLIENT_ID "$client_id" \
-    OIDC_CALLBACK_URL "$callback_url"
-
-  printf 'Orbit guided configuration saved APP_URL, ORBIT_AUTH_OIDC=true, OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CALLBACK_URL.\n'
-}
-
-ensure_secret_file() {
-  local path="$1" existing_value secret
-
-  if [[ -e "$path" ]]; then
-    [[ -f "$path" && ! -L "$path" ]] ||
-      fail "Refusing to use ${path} because it is not a regular file."
-    existing_value="$(tr -d '\r\n' < "$path")"
-    [[ "$existing_value" =~ $secret_hex256_pattern ]] ||
-      fail "$(secret_file_format_message "$path")"
-    chmod 600 "$path" ||
-      fail "Could not restrict permissions on ${path}."
-    unset existing_value
-    return
-  fi
-
-  # #1151 RANGE-F1: a missing secret file on an EXISTING deployment is a lost
-  # or corrupted secret, not a first run -- generating a replacement here
-  # would make existing encrypted data unreadable (document-kek) or sign out
-  # every user (session-secret). Mirrors configure-engine.ts's ensureSecretFile
-  # isFreshInstall refusal exactly; only a fresh install (none of the three
-  # generated secrets existed before this run, see
-  # record_generated_secret_presence) may generate one.
-  if [[ "$generated_secret_existed_before_run" == 1 ]]; then
-    fail "${path} is missing on an existing Orbit deployment. Refusing to generate a replacement, which would make existing encrypted data unreadable or sign out every user. Restore ${path} from backup (or Orbit's recovery bundle) to the exact path ${repo_dir}/${path}, then run \`orbit configure\` again."
-  fi
-
-  secret="$(generate_hex_secret)"
-  temporary_file="$(mktemp "$secrets_directory/.installing.XXXXXX")" ||
-    fail "Could not create a temporary Orbit secret file."
-  printf '%s\n' "$secret" > "$temporary_file"
-  chmod 600 "$temporary_file" ||
-    fail "Could not restrict permissions on the Orbit secret."
-  mv -- "$temporary_file" "$path"
-  temporary_file=""
-  unset secret
-  printf 'Generated %s.\n' "$path"
-}
-
-environment_key_is_nonempty() {
-  local requested_key="$1" line value="" found=0
-  [[ -f "$environment_file" && ! -L "$environment_file" ]] || return 1
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" == "${requested_key}="* ]]; then
-      value="${line#*=}"
-      found=1
-    fi
-  done < "$environment_file"
-  [[ "$found" == 1 && -n "$value" ]]
-}
-
-# Creates a zero-byte, mode-0600 placeholder only when no OIDC client secret
-# file exists yet: the protected Compose secret declaration requires a host
-# source to exist even before an operator runs --set-oidc-secret. An existing
-# regular file is preserved byte-for-byte; a symlink or other non-regular path
-# is refused rather than silently followed or replaced.
-ensure_oidc_secret_placeholder() {
-  # Existing direct-value deployments remain valid and must not gain a second
-  # active secret form merely because the installer now performs readiness
-  # checks. A direct value and a file-backed value remain mutually exclusive.
-  if environment_key_is_nonempty OIDC_CLIENT_SECRET &&
-    ! environment_key_is_nonempty OIDC_CLIENT_SECRET_FILE; then
-    return 0
-  fi
-
-  if [[ -e "$oidc_secret_file" ]]; then
-    [[ -f "$oidc_secret_file" && ! -L "$oidc_secret_file" ]] ||
-      fail "Refusing to use ${oidc_secret_file} because it is not a regular file."
-    chmod 600 "$oidc_secret_file" ||
-      fail "Could not restrict permissions on ${oidc_secret_file}."
-    return
-  fi
-
-  # #1151 RANGE-F5: once OIDC_CLIENT_SECRET_FILE is itself already configured,
-  # a missing file here means the real secret was lost or deleted, not a
-  # first bootstrap -- writing a fresh zero-byte placeholder over it would
-  # silently and permanently disable OIDC sign-in while reporting success.
-  # Mirrors configure-engine.ts's ensureOidcSecretPlaceholder fileModeActive
-  # refusal exactly.
-  if environment_key_is_nonempty OIDC_CLIENT_SECRET_FILE; then
-    fail "${oidc_secret_file} is missing but OIDC_CLIENT_SECRET_FILE is already configured. Refusing to replace it with an empty placeholder, which would silently disable OIDC sign-in. Restore the OIDC client secret to ${oidc_secret_file}, or run \`orbit configure --set-oidc-secret\` again, then retry."
-  fi
-
-  temporary_file="$(mktemp "$secrets_directory/.installing.XXXXXX")" ||
-    fail "Could not create a temporary Orbit secret file."
-  chmod 600 "$temporary_file" ||
-    fail "Could not restrict permissions on the OIDC client secret placeholder."
-  mv -- "$temporary_file" "$oidc_secret_file"
-  temporary_file=""
-}
-
-# Reads the OIDC client secret once from standard input, never from an
-# argument, and never prints, logs or exports it. The secret is written
-# atomically to a mode-0600 file, and only after that write succeeds are the
-# matching environment variables persisted; update_managed_keys never
-# receives the secret value itself, only the fixed empty direct value and the
-# fixed canonical runtime file path.
-set_oidc_secret() {
-  local secret secret_bytes
-
-  if [[ "$machine_prompts" == 1 ]]; then
-    if ! secret="$(machine_prompt_collect OIDC_CLIENT_SECRET machine_validate_oidc_secret classify_oidc_secret_rejection)"; then
-      fail "Could not read a complete OIDC client secret from standard input."
-    fi
-  elif [[ "${ORBIT_CONFIGURE_TTY_INPUT:-}" == 1 ]] &&
-    open_controlling_terminal; then
-    if [[ "$installer_ui_input_loaded" == 1 ]]; then
-      secret="$(installer_ui_read_secret "$terminal_fd" 'OIDC client secret (input hidden): ' "$maximum_secret_bytes")" ||
-        fail "Could not read a complete OIDC client secret from the controlling terminal."
-    else
-      disable_terminal_echo
-      printf 'OIDC client secret (input hidden): ' >&"$terminal_fd"
-      if ! IFS= read -r -s -u "$terminal_fd" secret; then
-        restore_terminal_echo
-        printf '\n' >&"$terminal_fd"
-        fail "Could not read a complete OIDC client secret from the controlling terminal."
-      fi
-      restore_terminal_echo
-      printf '\n' >&"$terminal_fd"
-    fi
-  elif [[ -t 0 ]]; then
-    if ! IFS= read -r -s -p '' secret; then
-      fail "Could not read a complete OIDC client secret from standard input."
-    fi
-  elif ! IFS= read -r -p '' secret; then
-    fail "Could not read a complete OIDC client secret from standard input."
-  fi
-  [[ -n "$secret" ]] ||
-    fail "Could not read a non-empty OIDC client secret from standard input."
-  secret_bytes="$(printf '%s' "$secret" | wc -c | tr -d '[:space:]')"
-  [[ "$secret_bytes" =~ ^[0-9]+$ ]] ||
-    fail "Could not determine the OIDC client secret size."
-  [[ "$secret_bytes" -le "$maximum_secret_bytes" ]] ||
-    fail "The OIDC client secret exceeds the ${maximum_secret_bytes}-byte maximum."
-  unset secret_bytes
-
-  ensure_environment_file
-  ensure_secrets_directory
-
-  temporary_file="$(mktemp "$secrets_directory/.installing.XXXXXX")" ||
-    fail "Could not create a temporary Orbit secret file."
-  printf '%s' "$secret" > "$temporary_file"
-  unset secret
-  chmod 600 "$temporary_file" ||
-    fail "Could not restrict permissions on the OIDC client secret."
-  mv -- "$temporary_file" "$oidc_secret_file" ||
-    fail "Could not persist the OIDC client secret."
-  temporary_file=""
-
-  update_managed_keys \
-    OIDC_CLIENT_SECRET "" \
-    OIDC_CLIENT_SECRET_FILE "$oidc_secret_file_path"
-
-  printf 'Orbit saved the OIDC client secret to %s.\n' "$oidc_secret_file"
-}
-
-ensure_vapid_keys() {
-  local private_key_file="$secrets_directory/vapid-private-key" generated public_key private_key orbit_image bootstrap_image
-  if [[ -s "$private_key_file" ]]; then
-    chmod 600 "$private_key_file"
-    return
-  fi
-  command -v docker >/dev/null 2>&1 || fail "Docker is required to generate VAPID keys."
-  orbit_image="${ORBIT_IMAGE:-}"
-  generated=""
-  if [[ -n "$orbit_image" ]]; then
-    if [[ ! "$orbit_image" =~ ^orbit-local:[0-9a-f]{12}$ && ! "$orbit_image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]]; then
-      fail "ORBIT_IMAGE must be an immutable registry digest or the installer-generated local build tag."
-    fi
-    if docker image inspect "$orbit_image" >/dev/null 2>&1 ||
-      { [[ "$orbit_image" =~ @sha256: ]] && docker pull "$orbit_image" >/dev/null; }; then
-      generated="$(docker run --rm --entrypoint node "$orbit_image" /opt/orbit/scripts/generate-vapid.mjs 2>/dev/null || true)"
-    fi
-  fi
-  if [[ -z "$generated" ]]; then
-    printf 'Building the Orbit bootstrap image to generate VAPID keys.\n'
-    bootstrap_image="orbit-vapid-bootstrap:$(git rev-parse --short=12 HEAD)"
-    docker build --target vapid-generator --tag "$bootstrap_image" . >/dev/null || fail "Could not build the Orbit bootstrap image."
-    local run_status=0
-    generated="$(docker run --rm "$bootstrap_image")" || run_status=$?
-    # The image exists only to make these keys; a tag left per commit piled
-    # up 23 of them on one host (#1241). The build cache keeps a rebuild cheap.
-    docker image rm "$bootstrap_image" >/dev/null 2>&1 || true
-    [[ "$run_status" -eq 0 ]] || fail "Could not generate VAPID keys."
-  fi
-  public_key="$(printf '%s\n' "$generated" | sed -n 's/^public=//p')"
-  private_key="$(printf '%s\n' "$generated" | sed -n 's/^private=//p')"
-  [[ -n "$public_key" && -n "$private_key" ]] || fail "VAPID key generation returned invalid values."
-  temporary_file="$(mktemp "$secrets_directory/.vapid.installing.XXXXXX")"
-  printf '%s\n' "$private_key" > "$temporary_file"
-  chmod 600 "$temporary_file"
-  mv -- "$temporary_file" "$private_key_file"
-  temporary_file=""
-  update_managed_keys \
-    VAPID_PUBLIC_KEY "$public_key" \
-    VAPID_PRIVATE_KEY_FILE "/run/orbit-secrets/orbit-vapid-private-key"
-  printf 'Generated VAPID push keys.\n'
-}
-
-# Non-mutating readiness summary: fixed "ready"/"missing"/"optional" category
-# words and variable names only. Values are never read into output.
-run_check() {
-  [[ -f "$environment_example" && ! -L "$environment_example" ]] ||
-    fail "${environment_example} is missing."
-
-  local source_path=""
-  if [[ -e "$checked_environment_file" ]]; then
-    [[ -f "$checked_environment_file" && ! -L "$checked_environment_file" ]] ||
-      fail "Refusing to use ${checked_environment_file} because it is not a regular file."
-    [[ "$(stat -c '%a' -- "$checked_environment_file" 2>/dev/null)" == 600 ]] ||
-      fail "Refusing to check ${checked_environment_file} because its permissions are not restricted to the owner."
-    source_path="$checked_environment_file"
-  fi
-
-  local -A values=()
-  local line key value
-  if [[ -n "$source_path" ]]; then
-    while IFS= read -r line || [[ -n "$line" ]]; do
-      [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
-      key="${BASH_REMATCH[1]}"
-      value="${BASH_REMATCH[2]}"
-      values["$key"]="$value"
-    done < "$source_path"
-  fi
-
-  local overall_status=0
-
-  is_set() { [[ -n "${values[$1]:-}" ]]; }
-
-  any_set() {
-    local name
-    for name in "$@"; do
-      is_set "$name" && return 0
-    done
-    return 1
-  }
-
-  all_set() {
-    local name
-    for name in "$@"; do
-      is_set "$name" || return 1
-    done
-    return 0
-  }
-
-  exactly_one_set() {
-    local name count=0
-    for name in "$@"; do
-      if is_set "$name"; then
-        count=$((count + 1))
-      fi
-    done
-    [[ "$count" == 1 ]]
-  }
-
-  profile_enabled() {
-    local requested="$1" profile
-    local -a configured_profiles=()
-    IFS=',' read -r -a configured_profiles <<< "${values[COMPOSE_PROFILES]:-}"
-    for profile in "${configured_profiles[@]}"; do
-      profile="${profile//[[:space:]]/}"
-      [[ "$profile" == "$requested" ]] && return 0
-    done
-    return 1
-  }
-
-  report_required_bool() {
-    local label="$1" ready="$2"
-    if [[ "$ready" == 1 ]]; then
-      printf 'ready %s\n' "$label"
-    else
-      printf 'missing %s\n' "$label"
-      overall_status=1
-    fi
-  }
-
-  report_optional() {
-    local label="$1" ready="$2" present="$3"
-    if [[ "$ready" == 1 ]]; then
-      printf 'ready %s\n' "$label"
-    elif [[ "$present" == 1 ]]; then
-      printf 'missing %s\n' "$label"
-      overall_status=1
-    else
-      printf 'optional %s\n' "$label"
-    fi
-  }
-
-  # A service configured entirely from the administration screen (its
-  # credential lives in the database, not .env-orbit) is never ready/missing
-  # from environment facts alone, and never fails readiness.
-  report_app_managed() {
-    printf 'app-managed %s\n' "$1"
-  }
-
-  # ORBIT_AUTH_OIDC=false (the default): the provider fields may stay set --
-  # switching the provider off must not force deleting its configuration
-  # (owner, 2026-09-09, ADR-0023 section 1) -- so they are reported inert
-  # rather than missing, and never affect overall_status.
-  report_not_in_use() {
-    printf 'not in use %s\n' "$1"
-  }
-
-  local processing_present=0 processing_ready=0
-  if profile_enabled processing || is_set TIKA_URL; then processing_present=1; fi
-  if profile_enabled processing && is_set TIKA_URL; then processing_ready=1; fi
-
-  local ai_present=0 ai_ready=0
-  if profile_enabled ai || is_set OLLAMA_MODEL; then ai_present=1; fi
-  if profile_enabled ai && is_set OLLAMA_MODEL; then ai_ready=1; fi
-
-  local mail_present=0 mail_ready=0
-  if any_set SMTP_HOST SMTP_USER SMTP_PASSWORD SMTP_PASSWORD_FILE SMTP_URL SMTP_URL_FILE; then
-    mail_present=1
-  fi
-  if exactly_one_set SMTP_URL SMTP_URL_FILE && ! any_set SMTP_HOST SMTP_USER SMTP_PASSWORD SMTP_PASSWORD_FILE; then
-    mail_ready=1
-  elif all_set SMTP_HOST SMTP_USER \
-    && exactly_one_set SMTP_PASSWORD SMTP_PASSWORD_FILE \
-    && ! any_set SMTP_URL SMTP_URL_FILE; then
-    mail_ready=1
-  fi
-
-  local push_present=0 push_ready=0
-  if is_set VAPID_SUBJECT; then push_present=1; fi
-  if is_set VAPID_SUBJECT && is_set VAPID_PUBLIC_KEY \
-    && exactly_one_set VAPID_PRIVATE_KEY VAPID_PRIVATE_KEY_FILE; then
-    push_ready=1
-  fi
-
-  # A ready APP_URL and OIDC_ISSUER must be a deployment-ready HTTPS value,
-  # not the historical loopback default or a documented example.com
-  # placeholder. OIDC_CALLBACK_URL is ready only when it exactly matches the
-  # callback derived from a ready APP_URL.
-  local app_url_ready=0 image_ready=0 issuer_ready=0 client_id_ready=0 callback_ready=0
-  local normalized_app_url=""
-  if is_set APP_URL; then
-    normalized_app_url="$(normalize_public_origin "${values[APP_URL]}" || true)"
-    if [[ -n "$normalized_app_url" ]]; then
-      app_url_ready=1
-    fi
-  fi
-  if is_set OIDC_ISSUER && validate_oidc_issuer "${values[OIDC_ISSUER]}"; then
-    issuer_ready=1
-  fi
-  if is_set ORBIT_IMAGE && is_valid_orbit_image "${values[ORBIT_IMAGE]}"; then
-    image_ready=1
-  fi
-  if is_set OIDC_CLIENT_ID && is_valid_client_id "${values[OIDC_CLIENT_ID]}"; then
-    client_id_ready=1
-  fi
-  if [[ "$app_url_ready" == 1 && "${values[OIDC_CALLBACK_URL]:-}" == "${normalized_app_url}/api/auth/callback" ]]; then
-    callback_ready=1
-  fi
-
-  # Direct-only stays ready for upgrade compatibility. File-backed is ready
-  # only when the configured path is exactly the canonical runtime path and
-  # the host file it names is non-empty, regular and not a symlink; direct-
-  # plus-file, missing, empty, symlinked or non-canonical settings all report
-  # missing without disclosing the configured value.
-  local oidc_secret_ready=0
-  if is_set OIDC_CLIENT_SECRET && ! is_set OIDC_CLIENT_SECRET_FILE; then
-    oidc_secret_ready=1
-  elif ! is_set OIDC_CLIENT_SECRET && is_set OIDC_CLIENT_SECRET_FILE \
-    && [[ "${values[OIDC_CLIENT_SECRET_FILE]}" == "$oidc_secret_file_path" ]] \
-    && [[ -d "$secrets_directory" && ! -L "$secrets_directory" ]] \
-    && [[ "$(stat -c '%a' -- "$secrets_directory" 2>/dev/null)" == 700 ]] \
-    && [[ -f "$oidc_secret_file" && ! -L "$oidc_secret_file" && -s "$oidc_secret_file" ]] \
-    && [[ "$(stat -c '%a' -- "$oidc_secret_file" 2>/dev/null)" == 600 ]]; then
-    oidc_secret_ready=1
-  fi
-
-  local oidc_enabled=0
-  [[ "${values[ORBIT_AUTH_OIDC]:-}" == true ]] && oidc_enabled=1
-
-  report_required_bool APP_URL "$app_url_ready"
-  report_required_bool ORBIT_IMAGE "$image_ready"
-  if [[ "$oidc_enabled" == 1 ]]; then
-    report_required_bool OIDC_ISSUER "$issuer_ready"
-    report_required_bool OIDC_CLIENT_ID "$client_id_ready"
-    report_required_bool OIDC_CLIENT_SECRET "$oidc_secret_ready"
-    report_required_bool OIDC_CALLBACK_URL "$callback_ready"
-  else
-    report_not_in_use OIDC_ISSUER
-    report_not_in_use OIDC_CLIENT_ID
-    report_not_in_use OIDC_CLIENT_SECRET
-    report_not_in_use OIDC_CALLBACK_URL
-  fi
-  report_optional processing "$processing_ready" "$processing_present"
-  report_optional ai "$ai_ready" "$ai_present"
-  report_optional mail "$mail_ready" "$mail_present"
-  report_app_managed imap
-  report_optional push "$push_ready" "$push_present"
-
-  return "$overall_status"
-}
-
-# --- Engine delegation (issue #294) -----------------------------------------
-#
-# scripts/engine-check.sh established the pattern this section extends
-# (docs/engine-events.md, "In-container engine invocation (v0)"): host bash
-# remains the only thing that ever runs `docker`; the bundled orbit CLI
-# ships inside the already-resolved orbit-app image and is invoked as a
-# disposable `docker compose run --rm --no-deps` one-off, never handed the
-# Docker socket. `ORBIT_CONFIGURE_ENGINE=container` is this section's own
-# opt-in gate — engine-check.sh's `ORBIT_ENGINE_CHECK=container` sibling —
-# so every existing caller (unset, the default) keeps running the exact
-# bash logic below byte-for-byte; `engine_delegation_ready` always returns
-# false when unset, so every `if engine_delegation_ready; then ... else
-# <original bash> fi` site takes its `else` branch unconditionally. See
-# docs/adr-notes/294-configure-write-port-plan.md for the full design and
-# its flags (in particular: why a real controlling-terminal TTY session is
-# never delegated, and why the very first `.env-orbit` creation on a fresh
-# checkout always stays bash-only).
-
-# read_compose_project_name <compose-manifest>
-#
-# The same function install.sh, repair.sh, engine-check.sh and
-# end-maintenance.sh carry, copied here rather than sourced: these scripts are
-# deliberately standalone and source-less, and
-# scripts/compose-project-name-resolution.test.mjs proves the five copies are
-# the same text. #999 is why this one exists: every other derivation reached
-# docker-compose.yml's own `name:` before guessing from the directory, and
-# this one did not, so a deployment whose .env-orbit carries no
-# COMPOSE_PROJECT_NAME -- a legacy file, or a pre-provisioned bootstrap before
-# migration writes the key -- had configure.sh addressing <dirname> while
-# install.sh, repair.sh and engine-check.sh all addressed `orbit`.
-read_compose_project_name() {
-  local compose_manifest="$1" line value
-  [[ -f "$compose_manifest" ]] || return 1
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" =~ ^name:[[:space:]]*(.*)$ ]]; then
-      value="${BASH_REMATCH[1]%%#*}"
-      value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-      value="${value%\"}"
-      value="${value#\"}"
-      value="${value%\'}"
-      value="${value#\'}"
-      [[ -n "$value" ]] || return 1
-      printf '%s' "$value"
-      return 0
-    fi
-  done < "$compose_manifest"
-  return 1
-}
-
-engine_configure_project_name() {
-  local candidate="" line
-  if [[ -f "$environment_file" && ! -L "$environment_file" ]]; then
-    while IFS= read -r line || [[ -n "$line" ]]; do
-      if [[ "$line" == "COMPOSE_PROJECT_NAME="* ]]; then
-        candidate="${line#*=}"
-      fi
-    done < "$environment_file"
-  fi
-  if [[ "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
-    printf '%s' "$candidate"
-    return 0
-  fi
-  if [[ -n "${COMPOSE_PROJECT_NAME:-}" && "$COMPOSE_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
-    printf '%s' "$COMPOSE_PROJECT_NAME"
-    return 0
-  fi
-  candidate="$(read_compose_project_name "docker-compose.yml" 2>/dev/null || true)"
-  if [[ "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
-    printf '%s' "$candidate"
-    return 0
-  fi
-  candidate="$(basename -- "$(pwd -P)" 2>/dev/null || true)"
-  candidate="$(printf '%s' "$candidate" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-' 2>/dev/null || true)"
-  while [[ "$candidate" == [-_]* ]]; do
-    candidate="${candidate:1}"
-  done
-  if [[ -n "$candidate" && "$candidate" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
-    printf '%s' "$candidate"
-    return 0
-  fi
-  return 1
-}
-
-# True only when every precondition for a real, working one-off is met:
-# opted in, docker present, a valid *and already locally present* ORBIT_IMAGE
-# (bootstrap ordering: install.sh always resolves/pulls the image before
-# ever invoking configure.sh, but a bare `bash scripts/configure.sh` run on
-# a fresh checkout — before any image exists — must keep working exactly as
-# it does today), a derivable Compose project name, and — the first-run
-# boundary — an *already-existing* `.env-orbit` (docker compose's own
-# `--env-file` requires the file to exist; the very first creation of
-# `.env-orbit` on a brand-new deployment is therefore never delegated,
-# always bash, matching guarantee #6 exactly either way).
-engine_delegation_ready() {
-  [[ "${ORBIT_CONFIGURE_ENGINE:-}" == container ]] || return 1
-  command -v docker >/dev/null 2>&1 || return 1
-  [[ -f "$environment_file" && ! -L "$environment_file" ]] || return 1
-  [[ -n "${ORBIT_IMAGE:-}" ]] || return 1
-  is_valid_orbit_image "$ORBIT_IMAGE" || return 1
-  docker image inspect "$ORBIT_IMAGE" >/dev/null 2>&1 || return 1
-  engine_configure_project_name >/dev/null || return 1
-  return 0
-}
-
-# Runs the bundled orbit CLI's `configure` command as a disposable one-off
-# against this deployment directory, mounted read-write at /orbit-deploy —
-# the first :rw mount in the documented invocation contract (every command
-# shipped before issue #294 was read-only). `ORBIT_IMAGE` and, when set, the
-# machine-prompt/env-triad guided-configuration inputs are forwarded via -e
-# only when actually present, mirroring engine-check.sh's own minimal-surface
-# convention; stdin/stdout are left exactly as this script inherited them
-# (never redirected here), so a machine-prompt exchange or a piped OIDC
-# secret answer flows straight through to the container unchanged.
+# One `docker run --rm` (#1210 D1). Values travel as `-e NAME`, which docker
+# reads from this script's environment and passes only when set, so nothing
+# configured ever appears on a command line; the OIDC client secret only
+# ever arrives on standard input. `terminal` gives the engine the operator's
+# terminal (#1210 D3): this one when stdin and stdout are both terminals,
+# otherwise the controlling terminal itself, as configure.sh's own prompts
+# used it. Exit codes pass straight through.
 run_engine() {
-  local project=""
-  project="$(engine_configure_project_name)" || return 5
-  local -a extra_env=(-e "ORBIT_IMAGE=$ORBIT_IMAGE")
-  if [[ "$machine_prompts" == 1 ]]; then
-    extra_env+=(-e "ORBIT_CONFIGURE_PROMPTS=machine")
+  local mount_dir="$1" mount_mode="$2" input="$3"
+  shift 3
+  local -a docker_args=(run --rm --network none)
+  local use_controlling_terminal=0
+  case "$input" in
+    pipe) docker_args+=(-i) ;;
+    terminal)
+      docker_args+=(-i -t)
+      [[ -t 0 && -t 1 ]] || use_controlling_terminal=1
+      ;;
+  esac
+  docker_args+=(
+    -e ORBIT_HOST_UID="$host_uid"
+    -e ORBIT_HOST_GID="$host_gid"
+    -e ORBIT_IMAGE
+    -e ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE
+    -e ORBIT_CONFIGURE_PROMPTS
+    -e ORBIT_CONFIGURE_APP_URL
+    -e ORBIT_CONFIGURE_OIDC_ISSUER
+    -e ORBIT_CONFIGURE_OIDC_CLIENT_ID
+    -e ORBIT_CONFIGURE_AUTH_MODE
+    -v "${mount_dir}:${engine_mount}:${mount_mode}"
+    --entrypoint node
+    "$engine_image" "$engine_cli" "$@" --dir "$engine_mount"
+  )
+  if [[ "$use_controlling_terminal" == 1 ]]; then
+    exec docker "${docker_args[@]}" </dev/tty >/dev/tty
   fi
-  # The installer's trust marker travels with ORBIT_IMAGE, so the engine
-  # applies persist_orbit_image's own existing-deployment rule rather than
-  # re-pinning on whatever the shell happened to export.
-  if [[ "${ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE:-}" == 1 ]]; then
-    extra_env+=(-e "ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1")
+  if [[ "$input" == none ]]; then
+    exec docker "${docker_args[@]}" </dev/null
   fi
-  local env_var
-  # O1-F1: ORBIT_CONFIGURE_AUTH_MODE forwarded alongside the OIDC triad — a
-  # machine-prompt --init that delegates (run above) must carry the same
-  # local/oidc choice guided_init's own bash path reads, or the containerized
-  # engine (which has no local-only path to fall back on) always assumes
-  # oidc and demands OIDC_ISSUER/OIDC_CLIENT_ID answers a local-only operator
-  # never intended to give.
-  for env_var in ORBIT_CONFIGURE_APP_URL ORBIT_CONFIGURE_OIDC_ISSUER ORBIT_CONFIGURE_OIDC_CLIENT_ID ORBIT_CONFIGURE_AUTH_MODE; do
-    if [[ -n "${!env_var:-}" ]]; then
-      extra_env+=(-e "${env_var}=${!env_var}")
-    fi
-  done
-  local exit_code=0
-  docker compose --project-name "$project" --env-file "$environment_file" \
-    run --rm --no-deps -T --entrypoint node \
-    "${extra_env[@]}" \
-    --volume "$repo_dir:/orbit-deploy:rw" \
-    orbit-app /opt/orbit/cli/orbit.js configure "$@" --dir /orbit-deploy || exit_code=$?
-  return "$exit_code"
+  exec docker "${docker_args[@]}"
 }
 
-# --- end engine delegation ---------------------------------------------------
+# Whether this flow asks the operator questions on a terminal, and has one:
+# guided --init with neither the ORBIT_CONFIGURE_* answers nor machine
+# prompts, and --set-oidc-secret asked to read from the terminal
+# (ORBIT_CONFIGURE_TTY_INPUT=1, as install.sh does) or run at one.
+terminal_available() {
+  [[ -t 0 && -t 1 ]] && return 0
+  { : </dev/tty; } 2>/dev/null
+}
 
-case "${1:-}" in
-  "")
+init_input() {
+  if [[ "${ORBIT_CONFIGURE_PROMPTS:-}" != machine && -z "${ORBIT_CONFIGURE_APP_URL:-}" ]] && terminal_available; then
+    printf 'terminal'
+  else
+    printf 'pipe'
+  fi
+}
+
+secret_input() {
+  if [[ "${ORBIT_CONFIGURE_PROMPTS:-}" != machine ]] &&
+    { [[ "${ORBIT_CONFIGURE_TTY_INPUT:-}" == 1 ]] || [[ -t 0 ]]; } && terminal_available; then
+    printf 'terminal'
+  else
+    printf 'pipe'
+  fi
+}
+
+# --preflight/--migrate act on the file --file names (relative to the
+# caller's directory, default .env-orbit here): its directory is the mount,
+# because the rollback copy and the deploy lock live beside it.
+run_configuration_contract() {
+  local -a args=()
+  local file="$repo_dir/$environment_file" mode=ro
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --file)
+        [[ $# -ge 2 ]] || { usage; exit 2; }
+        file="$2"
+        [[ "$file" == /* ]] || file="$caller_dir/$file"
+        shift 2
+        ;;
+      --migrate) mode=rw; args+=("$1"); shift ;;
+      *) args+=("$1"); shift ;;
+    esac
+  done
+  local file_dir
+  file_dir="$(cd -- "$(dirname -- "$file")" 2>/dev/null && pwd -P)" || fail "configuration_syntax"
+  run_engine "$file_dir" "$mode" none configure "${args[@]}" --file "${engine_mount}/$(basename -- "$file")"
+}
+
+flow="${1:-}"
+case "$flow" in
+  "" | --init | --set-oidc-secret | --set-deployment-profile | --check | --check-rollback | --preflight | --migrate) ;;
+  *)
+    usage
+    exit 2
     ;;
-  --check)
-    if [[ $# -ne 1 ]]; then
+esac
+case "$flow" in
+  "" | --init | --set-oidc-secret | --check | --check-rollback)
+    if [[ $# -gt 1 ]]; then
       usage
       exit 2
     fi
-    if run_check; then
-      exit 0
-    else
-      exit 1
-    fi
-    ;;
-  --check-rollback)
-    # issue #529, ADR-0014 decision 7: identical to --check in every respect
-    # (readiness rules, exit codes, stderr behavior, never delegated to the
-    # containerized engine) except which .env-orbit-shaped file is read —
-    # $checked_environment_file was already set at startup, above, from this
-    # exact literal. .orbit-secrets and every other input still resolve to
-    # the real installation directory, since only run_check's own file-
-    # safety/read block consults $checked_environment_file.
-    if [[ $# -ne 1 ]]; then
-      usage
-      exit 2
-    fi
-    if run_check; then
-      exit 0
-    else
-      exit 1
-    fi
-    ;;
-  --init)
-    if [[ $# -ne 1 ]]; then
-      usage
-      exit 2
-    fi
-    # Delegation is scoped to the two shapes with no real controlling-
-    # terminal interaction: the fully-scripted ORBIT_CONFIGURE_* env triad,
-    # and the #297 machine-prompt grammar (the container speaks it itself
-    # over this script's own inherited stdio — see run_engine's own
-    # comment). A real human TTY session always stays bash-only.
-    if [[ "$machine_prompts" == 1 || (
-      -n "${ORBIT_CONFIGURE_APP_URL:-}" &&
-      -n "${ORBIT_CONFIGURE_OIDC_ISSUER:-}" &&
-      -n "${ORBIT_CONFIGURE_OIDC_CLIENT_ID:-}"
-    ) ]] && engine_delegation_ready; then
-      run_engine --init
-      exit $?
-    fi
-    guided_init
-    exit 0
-    ;;
-  --set-oidc-secret)
-    if [[ $# -ne 1 ]]; then
-      usage
-      exit 2
-    fi
-    # Delegation is scoped the same way --init is above: the #297
-    # machine-prompt grammar, or a plain non-terminal stdin pipe (bash's own
-    # final fallback branch in set_oidc_secret below) — both are a simple,
-    # blind byte stream with no real controlling-terminal interaction, so
-    # the container can read the same one line this script would have read
-    # itself. ORBIT_CONFIGURE_TTY_INPUT=1 and an interactive `[[ -t 0 ]]`
-    # session always stay bash-only (see docs/adr-notes/
-    # 294-configure-write-port-plan.md's Flags section).
-    if [[ ( "$machine_prompts" == 1 || (
-      "${ORBIT_CONFIGURE_TTY_INPUT:-}" != 1 && ! -t 0
-    ) ) ]] && engine_delegation_ready; then
-      run_engine --set-oidc-secret
-      exit $?
-    fi
-    set_oidc_secret
-    exit 0
     ;;
   --set-deployment-profile)
     if [[ $# -lt 2 || $# -gt 3 ]]; then
       usage
       exit 2
     fi
-    if engine_delegation_ready; then
-      run_engine --set-deployment-profile "$2" "${3:-}"
-      exit $?
-    fi
-    if ! set_deployment_profile "$2" "${3:-}"; then
-      usage
-      exit 2
-    fi
-    exit 0
-    ;;
-  *)
-    usage
-    exit 2
     ;;
 esac
 
-if engine_delegation_ready; then
-  run_engine || fail "Configuration failed; restoring the previous deployment."
-else
-  ensure_environment_file
-  run_configuration_preflight
-  persist_orbit_image
-  ensure_secrets_directory
-  # #1151 RANGE-R5: two concurrent first-time runs both see every secret
-  # missing and each generate their own; the later mv silently overwrote the
-  # earlier one's file. Same lock, same reason as the container engine's
-  # secret loop (runConfigureApply). persist_orbit_image's own
-  # acquire/release has already completed above, so this never nests.
-  acquire_deploy_lock "orbit configure"
-  record_generated_secret_presence
-  ensure_secret_file "$secrets_directory/session-secret"
-  ensure_secret_file "$secrets_directory/postgres-password"
-  # A 32-byte hexadecimal KEK is generated only when absent and is never printed.
-  ensure_secret_file "$secrets_directory/document-kek"
-  release_deploy_lock
-  ensure_oidc_secret_placeholder
-fi
-# ensure_vapid_keys always runs here, delegated or not: it is the one
-# sub-step that genuinely needs `docker` to run/build an image, which the
-# containerized engine can never do (issue #295's hard architectural
-# boundary — "the engine can never manage the Docker socket. Ever.").
-ensure_vapid_keys
+resolve_engine_image
+engine_host_identity
 
-printf 'Orbit configuration is ready. Existing values were preserved.\n'
+case "$flow" in
+  "") run_engine "$repo_dir" rw none configure ;;
+  --init) run_engine "$repo_dir" rw "$(init_input)" configure --init ;;
+  --set-oidc-secret) run_engine "$repo_dir" rw "$(secret_input)" configure --set-oidc-secret ;;
+  --set-deployment-profile) run_engine "$repo_dir" rw none configure "$@" ;;
+  --check) run_engine "$repo_dir" ro none check ;;
+  --check-rollback) run_engine "$repo_dir" ro none check --rollback ;;
+  --preflight | --migrate) run_configuration_contract "$@" ;;
+esac
