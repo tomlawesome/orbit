@@ -12,6 +12,7 @@ fixing the cause deletes the heading in the same commit.
 - 2026-09-26 · a7dcd3d1 (#1125's phone settings, no change near this script) · local `scripts/test-backend.sh` · timed out at the 5s default; green on an immediate rerun of the file alone. Third sighting: #1134.
 - 2026-09-27 · 6420d955 (+ #1057's uncommitted desk search wiring, none of it near this script) · local `scripts/test-backend.sh` (worktree, seven parallel builds sharing the host) · timed out at the 5s default alongside the other two tests in this file's describe block, below and in the new heading below. All three green on an immediate rerun of the file alone (12.3s total, ~3s each). Still #1134.
 - 2026-09-27 · 6420d955 (+ #1003's uncommitted notification-history work, none of it near this script) · local `scripts/test-backend.sh`, worktree `1003-notification-history`, seven agents building in parallel on the same shared host · timed out at the 5s default; a solo rerun of just this file moments later still missed the 5s budget (5.3-6.2s each) while the other six agents' builds were still running, consistent with the wall-clock-under-load shape rather than a new cause.
+- 2026-10-06 · b76eede2 (#1211, no change near this script) · local `scripts/test-backend.sh`, several agents building on the host · one test in this file failed (the reporting agent did not record which); the file passed when run alone. Still #1134, which names the whole file.
 
 ## check-base-image-current.test.mjs "falls back to fetching dev when it is not already present locally" (#1134)
 
