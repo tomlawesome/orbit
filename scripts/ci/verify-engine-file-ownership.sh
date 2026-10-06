@@ -20,7 +20,8 @@ readonly operator_gid="${ORBIT_TEST_OPERATOR_GID:-1000}"
 repo_root="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly repo_root
 
-if docker info --format '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless; then
+security_options="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null || true)"
+if [[ "$security_options" == *rootless* ]]; then
   printf 'verify-engine-file-ownership: rootless Docker; nothing to prove here.\n'
   exit 0
 fi

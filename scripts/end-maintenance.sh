@@ -110,7 +110,7 @@ read_compose_project_name() {
   return 1
 }
 
-# Compose project-name derivation, mirroring engine-check.sh and repair.sh
+# Compose project-name derivation, mirroring repair.sh and install.sh
 # precedence exactly: .env-orbit's own COMPOSE_PROJECT_NAME, then the
 # caller's environment, then docker-compose.yml's own `name:` (#921), then a
 # sanitized fallback from the current directory's basename.

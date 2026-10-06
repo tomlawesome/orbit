@@ -69,7 +69,11 @@ resolve_engine_image() {
 # operator's own uid/gid. Never `--user`: under rootless Docker a numeric
 # --user maps to a subordinate uid the operator cannot access.
 engine_host_identity() {
-  if docker info --format '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless; then
+  # Read whole, then matched: `docker info | grep -q` under pipefail could
+  # report a SIGPIPE'd docker as "not rootless", the dangerous answer here.
+  local security_options
+  security_options="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null || true)"
+  if [[ "$security_options" == *rootless* ]]; then
     host_uid=0
     host_gid=0
   else
