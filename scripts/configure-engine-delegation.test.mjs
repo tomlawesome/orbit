@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -290,6 +290,41 @@ describe("which image runs the engine (D2)", () => {
     expect(result.stderr).toContain(`The Orbit image ${LOCAL_IMAGE} is not present locally`);
     expect(result.calls.map((call) => call[0])).not.toContain("pull");
     expect(runCall(result.calls)).toBeUndefined();
+  });
+
+  // A launcher config tree pins its image in .orbit-image at the tree root
+  // (orbit-launcher #197, #1225); that pin beats everything ambient.
+  it(".orbit-image wins over ORBIT_IMAGE and .env-orbit, and is the ORBIT_IMAGE the engine sees", () => {
+    const targetDir = makeFixture({ envFile: `ORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_IMAGE=orbit-local:111111111111\n` });
+    writeFileSync(join(targetDir, ".orbit-image"), `${LOCAL_IMAGE}\n`);
+    // Trusted, so the engine records the ORBIT_IMAGE it was handed in .env-orbit.
+    const result = run(targetDir, [], { env: { ORBIT_IMAGE: "orbit-local:222222222222", ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE: "1" } });
+    expect(result.status, result.stderr).toBe(0);
+    const call = shape(runCall(result.calls));
+    expect(call.image).toBe(LOCAL_IMAGE);
+    expect(call.env).toContain("ORBIT_IMAGE");
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toMatch(new RegExp(`^ORBIT_IMAGE=${LOCAL_IMAGE}$`, "m"));
+    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).not.toContain("orbit-local:111111111111");
+  });
+
+  it("refuses an invalid .orbit-image before any docker call", () => {
+    const targetDir = makeFixture({ envFile: `ORBIT_IMAGE=${LOCAL_IMAGE}\n` });
+    writeFileSync(join(targetDir, ".orbit-image"), "ghcr.io/tomlawesome/orbit:latest\n");
+    const result = run(targetDir, ["--check"], { env: { ORBIT_IMAGE: LOCAL_IMAGE } });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(".orbit-image");
+    expect(result.calls).toEqual([]);
+  });
+
+  it("refuses a symlinked .orbit-image, even to a valid reference, before any docker call", () => {
+    const targetDir = makeFixture({ envFile: `ORBIT_IMAGE=${LOCAL_IMAGE}\n` });
+    const elsewhere = scratchDir("orbit-configure-delegation-pin-");
+    writeFileSync(join(elsewhere, "pin"), `${LOCAL_IMAGE}\n`);
+    symlinkSync(join(elsewhere, "pin"), join(targetDir, ".orbit-image"));
+    const result = run(targetDir, ["--check"], { env: { ORBIT_IMAGE: LOCAL_IMAGE } });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(".orbit-image");
+    expect(result.calls).toEqual([]);
   });
 
   it("fails closed when a missing digest cannot be pulled", () => {

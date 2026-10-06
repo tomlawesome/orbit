@@ -41,6 +41,18 @@ is_valid_orbit_image() {
 # pulled; a local build tag that is not present cannot be, so it refuses.
 resolve_engine_image() {
   local image="${ORBIT_IMAGE:-}" candidate
+  # A launcher config tree pins its image in .orbit-image at the tree root
+  # (orbit-launcher #197, #1225): it beats everything ambient, and becomes
+  # the ORBIT_IMAGE the engine sees. A link or an invalid pin refuses rather
+  # than falling through. A normal deployment never has the file.
+  if [[ -e .orbit-image || -L .orbit-image ]]; then
+    [[ -f .orbit-image && ! -L .orbit-image ]] ||
+      fail "${repo_dir}/.orbit-image must be a regular file, not a link."
+    image="$(head -n 1 .orbit-image)"
+    is_valid_orbit_image "$image" ||
+      fail "${repo_dir}/.orbit-image must hold an immutable registry digest or the installer-generated local build tag."
+    export ORBIT_IMAGE="$image"
+  fi
   # --check-rollback may run while .env-orbit itself is damaged, so the
   # rollback copy beside it is the second place to look.
   for candidate in "$environment_file" "${environment_file}.orbit-config.rollback"; do
