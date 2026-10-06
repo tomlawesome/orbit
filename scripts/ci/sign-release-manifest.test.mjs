@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { describe, expect, it, vi } from "vitest";
@@ -20,6 +20,8 @@ import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "..
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const script = new URL("./sign-release-manifest.sh", import.meta.url).pathname;
+const realScript = script;
+const repoRoot = dirname(dirname(dirname(script)));
 
 const DIGEST = `sha256:${"1".repeat(64)}`;
 const OTHER_DIGEST = `sha256:${"2".repeat(64)}`;
@@ -48,7 +50,7 @@ const COSIGN_STUB = [
   '      output="$2"',
   "      shift 2",
   "      ;;",
-  '    --tlog-upload|--tlog-upload=*|--use-signing-config|--use-signing-config=*)',
+  '    --tlog-upload|--tlog-upload=*|--use-signing-config|--use-signing-config=*|--new-bundle-format|--new-bundle-format=*)',
   '      case "$1" in *=*) shift ;; *) shift 2 ;; esac',
   "      ;;",
   '    -y|--yes) shift ;;',
@@ -139,10 +141,54 @@ describe("sign-release-manifest.sh", () => {
     expect(cosignCall[1]).toContain(`--key ${keyFile}`);
     expect(cosignCall[1]).toContain("--tlog-upload=false");
     expect(cosignCall[1]).toContain("--use-signing-config=false");
+    // cosign v3 refuses --output-signature without this (#1230); the bare
+    // base64 DER .sig is what every verifier reads.
+    expect(cosignCall[1]).toContain("--new-bundle-format=false");
     expect(cosignCall[1]).toContain(`--output-signature ${manifestPath}.sig`);
     expect(cosignCall[1]).toContain(manifestPath);
     expect(existsSync(`${manifestPath}.sig`)).toBe(true);
     expect(readFileSync(`${manifestPath}.sig`, "utf8").trim().length).toBeGreaterThan(0);
+  });
+
+  /*
+   * The stub above cannot catch a flag the real cosign rejects: v3.1.3
+   * refused --output-signature on the first preview run of v0.3.0 while this
+   * file stayed green (#1230). So, where the pinned binary is already on the
+   * host (ensure-cosign.sh's install path, or ORBIT_COSIGN), sign a fixture
+   * with a throwaway key and run the real verifier over it. Skipped, and
+   * named as skipped, where no cosign is present: the download is not this
+   * suite's to make.
+   */
+  const realCosign = [process.env.ORBIT_COSIGN, join(homedir(), ".local", "bin", "cosign")].find(
+    (candidate) => candidate && existsSync(candidate),
+  );
+  (realCosign ? it : it.skip)("signs with the real pinned cosign and verify-release-manifest.sh accepts the .sig", () => {
+    const dir = mkdtempSync(join(tmpdir(), "sign-fixture-"));
+    const manifestPath = manifestFixture(dir);
+    const keygen = spawnSync(realCosign, ["generate-key-pair"], {
+      cwd: dir,
+      env: { ...process.env, COSIGN_PASSWORD: "throwaway" },
+      encoding: "utf8",
+    });
+    expect(keygen.status, keygen.stderr).toBe(0);
+    const signed = spawnSync("bash", [realScript, manifestPath, DIGEST], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        ORBIT_COSIGN: realCosign,
+        COSIGN_PRIVATE_KEY: join(dir, "cosign.key"),
+        COSIGN_PASSWORD: "throwaway",
+      },
+      encoding: "utf8",
+    });
+    expect(signed.status, signed.stderr).toBe(0);
+    const verified = spawnSync("bash", [join(repoRoot, "scripts", "ci", "verify-release-manifest.sh"), manifestPath], {
+      cwd: repoRoot,
+      env: { ...process.env, ORBIT_COSIGN: realCosign, COSIGN_PUBLIC_KEY: join(dir, "cosign.pub") },
+      encoding: "utf8",
+    });
+    expect(verified.status, verified.stderr).toBe(0);
+    expect(verified.stdout).toContain("with cosign and openssl");
   });
 
   it("takes both key and password from ORBIT_SIGNING_DIR, the runner mount, when set", () => {
