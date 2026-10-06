@@ -82,7 +82,7 @@
   /*
    * Signing out from a sub-screen (#410, §15).
    *
-   * Two taps, and the second one REVOKES before it navigates: this control
+   * One press (owner, 2026-10-06), and it REVOKES before it navigates: this control
    * used to walk to /logout without ending anything, which meant the goodbye
    * screen was a picture of a sign-out rather than a sign-out. The session is
    * gone before the reader leaves this page.
@@ -94,16 +94,19 @@
    * Carrying the full flight onto every sub-screen is a follow-up, not a
    * silent invention.
    */
-  let armedOut = $state(false);
+  /* set while the request is in flight, so a second press never fires a
+     second, concurrent signOut() (#1151 W1-R7, as home has it) */
+  let signingOut = $state(false);
   /** @type {string | null} */
   let signOutProblem = $state(null);
   async function tapSignOut() {
-    if (!armedOut) { armedOut = true; return; }
+    if (signingOut) return;
+    signingOut = true;
     signOutProblem = null;
     try {
       await signOut();
     } catch (error) {
-      armedOut = false;
+      signingOut = false;
       signOutProblem = /** @type {{ message?: string }} */ (error)?.message ?? "still signed in — try again";
       return;
     }
@@ -159,7 +162,7 @@
   </div>
   <!-- Beside the theme, as on the phone (#1189). -->
   <button class="watch" onclick={() => { open = false; void watchTour(); }}>↻ watch the tour</button>
-  <button class="signout" onclick={tapSignOut}>{armedOut ? "tap again to sign out" : "sign out →"}</button>
+  <button class="signout" onclick={tapSignOut} disabled={signingOut}>sign out →</button>
   {#if signOutProblem}<div class="signout-problem">{signOutProblem}</div>{/if}
 </div>
 
