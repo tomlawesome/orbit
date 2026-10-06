@@ -199,6 +199,40 @@
     markEl.classList.add("collapse");
     restoreGlyphVisibility();
   }
+  /* THE MARK IS FLOWN THROUGH (#1253 ruling 4, orbit-site flight.js
+     flyThroughMark): as the climb comes up to speed the ring opens past the
+     edges of the screen, a thin hoop the camera goes through, tipping a
+     little as the climb steepens, and the gold planet sweeps by close and is
+     gone; the dawn's mark is set back behind it, unseen. Reduced motion, a
+     mark with no circles, and a pinned fixture (whose frame must hold still)
+     drop it as before. */
+  /** @type {Animation[]} */
+  let flyThrough = [];
+  /** @param {boolean} instant */
+  function flyThroughMark(instant) {
+    restoreGlyphVisibility();
+    const svg = markEl.querySelector("svg"), circles = svg ? [...svg.querySelectorAll("circle")] : [];
+    if (!svg || !circles.length || instant || reduced()) { dropMark(); return; }
+    const timing = { duration: 760, easing: "cubic-bezier(.5,0,.9,.5)", fill: /** @type {const} */ ("forwards") };
+    circles[0].style.vectorEffect = "non-scaling-stroke";
+    const anims = circles.map((c) => {
+      Object.assign(c.style, { transformOrigin: "100px 100px", transformBox: "view-box" });
+      return c.animate([{ transform: "scale(1)", opacity: 1 }, { transform: "scale(2.4)", opacity: 1, offset: 0.5 }, { transform: "scale(9)", opacity: 0 }], timing);
+    });
+    anims.push(svg.animate([{ transform: "none" }, { transform: "rotateX(-16deg)" }], timing));
+    flyThrough = anims;
+    anims[0].finished.then(() => {
+      markEl.style.transition = "none"; markEl.classList.remove("on");
+      setTimeout(() => { if (flyThrough === anims) settleFlyThrough(); markEl.style.transition = ""; }, 120);
+    }).catch(() => {});
+  }
+  /** Put the mark's ring and planet back as they were drawn. */
+  function settleFlyThrough() {
+    for (const a of flyThrough) a.cancel();
+    flyThrough = [];
+    const first = markEl?.querySelector("circle");
+    if (first) first.style.vectorEffect = "";
+  }
   /* the way down: the mark appears at centre and rides to the lockup's glyph.
      Same FLIP treatment as liftMark above, mirrored: the box goes straight to
      its resting geometry (the glyph's own rect) and the visual start (centre
@@ -253,7 +287,7 @@
                    MARK_ARRIVE, MARK_RIDE_UP, pinned !== undefined);
           break;
         case "release": b.classList.remove("showdawn"); break;
-        case "markOut": dropMark(); break;
+        case "markOut": flyThroughMark(pinned !== undefined); break;
         case "nameOn": nameEl.classList.add("on"); break;
         case "nameOff": nameEl.classList.remove("on"); break;
         case "land":
@@ -328,6 +362,7 @@
     markEl?.classList.remove("on", "collapse");
     nameEl?.classList.remove("on");
     restoreGlyphVisibility();
+    if (markEl) settleFlyThrough();
   }
 
   /**
