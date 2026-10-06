@@ -285,62 +285,37 @@ const SCREENS = [
   },
   {
     /*
-     * THE CREATE-SYSTEM CARD (#410, §15). The sheet's own DEFAULT state — the
-     * card standing alone on the dawn, three fields, a button and air, with the
-     * login screen taken off it entirely (fourth pass) — so this ports against
-     * the sheet exactly as the login and the goodbye do, and reads 0.
+     * THE "NAME YOUR OWN SYSTEM" DRAWER (#1263, ruling revised 2026-10-06).
+     * The create questions stand in the belong card since the arrival flies
+     * once: the newcomer's question arrived at, its footer's handle open and
+     * the three fields, the sections note and Create dropped in below. It
+     * replaces the ported create card (`first-run`, against
+     * design/v19/first-run.html), which the ruling supersedes for the
+     * arrival, so like `newcomer` it is the app against itself: there is no
+     * sheet for the drawer to port against.
      *
-     * The arrival's stages are named through the fixture harness (see the front
-     * door's +page.server.js): the fixture workspace has households, and this
-     * surface belongs to a reader who has none, which is a state the workspace
-     * fixture cannot be in. The fixture pins the two answers the card reads off
-     * the browser — the time zone and the currency — to the sheet's own first
-     * options, because a select shows what the machine running the gate
-     * happens to be set to otherwise.
+     * The fixture pins the two answers the drawer reads off the browser — the
+     * time zone and the currency — to the card's own first options, because
+     * a select shows what the machine running the gate is set to otherwise.
      */
-    name: "first-run",
-    path: "/?arrival=create",
-    stage: "porting",
-    mockup: "/design/v19/first-run.html",
-    /*
-     * One predicate, both sides. The sheet opens ON this state (its own
-     * `toForm()` runs at load), and the app reaches it once the card is drawn:
-     * first light, the card showing, and the card in the document.
-     */
-    settle: () => document.body.classList.contains("lit")
-      && document.body.classList.contains("showform")
-      && Boolean(document.querySelector(".card")),
-    /* The sheet's own scaffolding: the demos toolbar that replays the flight
-       and switches packs, and the footer line describing the proposal. */
-    mockupOnly: [".demos", ".sheet"],
+    name: "newcomer-drawer",
+    path: "/?arrival=newcomer&drawer=1",
+    settle: () => document.querySelectorAll(".minisys").length > 0
+      && document.body.classList.contains("belong")
+      && Boolean(document.querySelector(".nf .belong #hhname")),
   },
   {
     /*
-     * THE SEALED REJECTION, in one warm line (§15 third pass: "the rejection is
-     * one line"). Its own entry because it is a ruling in its own right and
-     * because it is genuinely at rest: the settle-back has finished, the field
-     * wears the warm outline, and the line under it names the system that holds
-     * the name and offers the road to it.
+     * THE ONE-LINE REFUSAL, in the drawer (§15 third pass: "the rejection is
+     * one line"; #1263): the warm line under the name, naming the system that
+     * holds it and offering the road to it. The ring's settle-back went with
+     * the ring, so this is at rest as soon as it is drawn.
      */
-    name: "first-run-error",
-    path: "/?arrival=create&reject=Lawson%20Home",
-    stage: "porting",
-    mockup: "/design/v19/first-run.html",
-    /*
-     * The sheet reaches this state through its own demo (`showError()`, which
-     * is what its ERROR STATE chip calls); the app reaches it through the
-     * fixture's `reject` name. Both then settle the same way: rejected, and no
-     * longer grounded — the climb has started, caught, and set back down.
-     */
-    settle: () => {
-      if (typeof (/** @type {any} */ (window)).showError === "function" && !document.body.classList.contains("rejected")) {
-        (/** @type {any} */ (window)).showError();
-      }
-      return document.body.classList.contains("lit")
-        && document.body.classList.contains("rejected")
-        && !document.body.classList.contains("grounded");
-    },
-    mockupOnly: [".demos", ".sheet"],
+    name: "newcomer-drawer-error",
+    path: "/?arrival=newcomer&drawer=1&reject=Lawson%20Home",
+    settle: () => document.querySelectorAll(".minisys").length > 0
+      && document.body.classList.contains("belong")
+      && document.body.classList.contains("rejected"),
   },
   /*
    * ══ THE DOOR'S FOUR CARDS AND THE SETUP SCREEN (#914) ═══════════════════

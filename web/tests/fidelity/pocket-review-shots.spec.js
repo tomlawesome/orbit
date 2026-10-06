@@ -77,7 +77,7 @@ const DESK = /** @type {Record<string, string[]>} */ ({
   home: ["home.png", "mobile.png"], item: ["item.png"], "item-i-mot": ["item.png"], create: ["create.png"],
   inbox: ["inbox.png"], "household-hh-lawson-1": ["household.png"], "household-hh-seaside-4551": ["household.png"],
   settings: ["settings.png"], "settings-mail": ["relay.png"], administration: ["administration.png"],
-  door: ["first-run.png", "first-run-error.png", "newcomer.png"],
+  door: ["newcomer-drawer.png", "newcomer-drawer-error.png", "newcomer.png"],
   login: ["login.png", "door-mixed.png", "door-local.png", "door-identity.png", "door-claim.png"],
   setup: ["setup.png"], logout: ["logout.png"], 404: ["notfound.png"], 500: ["stumble.png"],
   maintenance: ["maintenance.png", "maintenance-mobile.png"],
