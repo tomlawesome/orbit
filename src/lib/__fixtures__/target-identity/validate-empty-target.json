@@ -1,0 +1,12 @@
+{
+  "name": "validate empty target",
+  "mode": "validate",
+  "setup": [],
+  "requested": null,
+  "targetBasename": "_Parity.Target",
+  "bash": {
+    "status": 0,
+    "stdout": "target_was_empty=1",
+    "stderr": ""
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "derive invalid compose name falls through",
+  "mode": "derive",
+  "setup": [
+    {
+      "path": "docker-compose.yml",
+      "file": "name: Not_Valid!\n"
+    }
+  ],
+  "requested": null,
+  "targetBasename": "_Parity.Target",
+  "bash": {
+    "status": 0,
+    "stdout": "compose_project_name=parity-target explicit=0 provisional=1",
+    "stderr": ""
+  }
+}

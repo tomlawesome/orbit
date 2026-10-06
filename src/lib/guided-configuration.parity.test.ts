@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +7,7 @@ import { createInterface } from "node:readline";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { readGolden } from "./__fixtures__/golden";
-import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard, processWatchdog } from "../../scripts/process-budget.mjs";
+import { PROCESS_TEST_TIMEOUT_MS, processWatchdog } from "../../scripts/process-budget.mjs";
 import {
   missingConfigurationFields,
   missingGuidedFields,
@@ -20,124 +20,68 @@ import {
   type MachinePromptSessionResult,
 } from "./guided-configuration";
 
-// Two independent parity strategies for issue #295 slice 4, mirroring the
-// two shapes prior slices already established:
+// Two independent parity strategies for issue #295 slice 4:
 //
-// 1. Source-extraction parity (missing_*_fields,
-//    print_noninteractive_configuration_guidance): install.sh has no
-//    standalone entry point for these helpers, so — exactly like
-//    install-transaction.parity.test.ts and target-identity.parity.test.ts —
-//    this test extracts (via awk, by function name, never hand-copied) the
-//    exact current bodies from the real, unmodified scripts/install.sh,
-//    wraps them in a minimal driver, and compares byte-for-byte against
-//    this module's pure functions.
-// 2. Whole-script parity for the #297 machine-prompt grammar itself:
-//    scripts/configure.sh already has real, independently-invocable --init
-//    and --set-oidc-secret entry points, so — exactly like
-//    configuration-migration.parity.test.ts — this test spawns the real,
-//    unmodified script directly with ORBIT_CONFIGURE_PROMPTS=machine, and
-//    drives it through a reference adapter local to this file (not shipped)
-//    built only from this module's own parseMachinePromptLine, proving the
-//    exported grammar parser actually drives the live script to a
-//    completed guided configuration — not just a stub.
+// 1. Golden-file parity (missing_*_fields,
+//    print_noninteractive_configuration_guidance): what install.sh's own
+//    helpers printed for each fixture, captured before #1212 deleted them,
+//    compared byte-for-byte against this module's pure functions.
+// 2. Machine-prompt grammar parity (#297): the engine's
+//    `orbit configure` is spawned with ORBIT_CONFIGURE_PROMPTS=machine and
+//    driven through a reference adapter local to this file (not shipped)
+//    built only from this module's own parseMachinePromptLine, and each
+//    transcript is compared with what the retired configure.sh printed.
 
-// This file spawns real awk and the real configure.sh under bash; a spawn
-// that takes 0.7s quiet took 4.3s on a starved core (#698). Budget and
-// reasoning: scripts/process-budget.mjs.
+// This file spawns the engine CLI under node; a spawn that takes 0.7s quiet
+// took 4.3s on a starved core (#698). Budget and reasoning:
+// scripts/process-budget.mjs.
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
-const installScriptPath = join(repoRoot, "scripts", "install.sh");
+// install.sh half: what its missing_*_fields and
+// print_noninteractive_configuration_guidance produced, captured from
+// 9757e42f before #1212 deleted them (src/lib/__fixtures__/README.md,
+// flow install-guided-configuration). Golden-file characterization: the
+// fixtures are bash's, never regenerated from this module. bash printed the
+// field list with no trailing newline.
 
-function extractFunction(name: string): string {
-  const script = `
-    $0 ~ "^${name}\\\\(\\\\) \\\\{" { found = 1 }
-    found { print; if ($0 == "}") { found = 0; exit } }
-  `;
-  const result = failOnProcessDeadline(spawnSync("awk", [script, installScriptPath], { encoding: "utf8", ...processGuard() }), { label: "extractFunction" });
-  if (result.status !== 0 || !result.stdout.trim()) {
-    throw new Error(`Could not extract ${name}() from install.sh; it may have been renamed.`);
-  }
-  return result.stdout;
+interface MissingFieldsGolden {
+  cases: Array<{
+    readiness: string;
+    bash: Record<"required" | "guided" | "configuration", { stdout: string; stderr: string }>;
+  }>;
 }
 
-const driverDir = mkdtempSync(join(tmpdir(), "orbit-guided-configuration-parity-driver-"));
-const driverPath = join(driverDir, "driver.sh");
+const missingFields = readGolden<MissingFieldsGolden>("install-guided-configuration", "missing fields");
 
-function buildDriverScript(): string {
-  const functions = [
-    "missing_required_fields",
-    "missing_guided_fields",
-    "missing_configuration_fields",
-    "print_noninteractive_configuration_guidance",
-  ]
-    .map(extractFunction)
-    .join("\n");
-
-  return [
-    "#!/usr/bin/env bash",
-    "set -Eeuo pipefail",
-    "",
-    functions,
-    "",
-    'mode="$1"; shift',
-    'case "$mode" in',
-    "  required) missing_required_fields \"$(cat)\" ;;",
-    "  guided) missing_guided_fields \"$(cat)\" ;;",
-    "  configuration) missing_configuration_fields \"$(cat)\" ;;",
-    '  guidance) print_noninteractive_configuration_guidance "$1" ;;',
-    "esac",
-    "",
-  ].join("\n");
-}
-
-writeFileSync(driverPath, buildDriverScript(), { mode: 0o755 });
-
-afterAll(() => {
-  rmSync(driverDir, { recursive: true, force: true });
-});
-
-function runDriver(mode: "required" | "guided" | "configuration", readiness: string): { stdout: string; stderr: string };
-function runDriver(mode: "guidance", missing: string): { stdout: string; stderr: string };
-function runDriver(mode: string, input: string): { stdout: string; stderr: string } {
-  const args = mode === "guidance" ? [driverPath, mode, input] : [driverPath, mode];
-  const result = failOnProcessDeadline(spawnSync("bash", args, {
-    encoding: "utf8",
-    input: mode === "guidance" ? undefined : input,
-    ...processGuard(),
-  }), { label: "runDriver" });
-  return { stdout: result.stdout, stderr: result.stderr };
-}
-
-const READINESS_FIXTURES = [
-  "ready APP_URL\nready ORBIT_IMAGE\nready OIDC_ISSUER\nready OIDC_CLIENT_ID\nready OIDC_CLIENT_SECRET\nready OIDC_CALLBACK_URL\noptional processing\noptional ai\noptional mail\noptional imap\noptional push\n",
-  "missing APP_URL\nmissing ORBIT_IMAGE\nmissing OIDC_ISSUER\nmissing OIDC_CLIENT_ID\nmissing OIDC_CLIENT_SECRET\nmissing OIDC_CALLBACK_URL\noptional processing\noptional ai\noptional mail\noptional imap\noptional push\n",
-  "ready APP_URL\nready ORBIT_IMAGE\nmissing OIDC_ISSUER\nready OIDC_CLIENT_ID\nmissing OIDC_CLIENT_SECRET\nready OIDC_CALLBACK_URL\nmissing processing\nmissing ai\noptional mail\noptional imap\noptional push\n",
-  "",
-];
-
-describe("missing_*_fields parity (install.sh:843-877)", () => {
-  it.each(READINESS_FIXTURES)("agrees on missing_required_fields for fixture %#", (readiness) => {
-    const bash = runDriver("required", readiness);
-    expect(bash.stdout).toBe(missingRequiredFields(readiness).join(" "));
+describe("missing_*_fields parity (golden)", () => {
+  it("has every captured readiness fixture", () => {
+    expect(missingFields.cases.length).toBe(4);
   });
 
-  it.each(READINESS_FIXTURES)("agrees on missing_guided_fields for fixture %#", (readiness) => {
-    const bash = runDriver("guided", readiness);
-    expect(bash.stdout).toBe(missingGuidedFields(readiness).join(" "));
-  });
+  missingFields.cases.forEach((testCase, index) => {
+    it(`agrees on missing_required_fields for fixture ${index}`, () => {
+      expect(missingRequiredFields(testCase.readiness).join(" ")).toBe(testCase.bash.required.stdout);
+    });
 
-  it.each(READINESS_FIXTURES)("agrees on missing_configuration_fields for fixture %#", (readiness) => {
-    const bash = runDriver("configuration", readiness);
-    expect(bash.stdout).toBe(missingConfigurationFields(readiness).join(" "));
+    it(`agrees on missing_guided_fields for fixture ${index}`, () => {
+      expect(missingGuidedFields(testCase.readiness).join(" ")).toBe(testCase.bash.guided.stdout);
+    });
+
+    it(`agrees on missing_configuration_fields for fixture ${index}`, () => {
+      expect(missingConfigurationFields(testCase.readiness).join(" ")).toBe(testCase.bash.configuration.stdout);
+    });
   });
 });
 
-describe("print_noninteractive_configuration_guidance parity (install.sh:879-885, guarantee #24)", () => {
+describe("print_noninteractive_configuration_guidance parity, guarantee #24 (golden)", () => {
   it("agrees byte-for-byte on the exact remediation lines", () => {
-    const missing = "APP_URL OIDC_CLIENT_SECRET";
-    const bash = runDriver("guidance", missing);
-    expect(bash.stderr).toBe(noninteractiveConfigurationGuidance(missing.split(" ")).join("\n") + "\n");
+    const golden = readGolden<{ missing: string; bash: { stdout: string; stderr: string } }>(
+      "install-guided-configuration",
+      "noninteractive configuration guidance",
+    );
+    expect(golden.bash.stdout).toBe("");
+    expect(noninteractiveConfigurationGuidance(golden.missing.split(" ")).join("\n") + "\n").toBe(golden.bash.stderr);
   });
 });
 

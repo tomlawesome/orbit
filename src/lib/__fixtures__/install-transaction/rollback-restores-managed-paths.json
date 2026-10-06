@@ -1,0 +1,51 @@
+{
+  "managedPaths": [
+    {
+      "path": ".env-orbit",
+      "type": "file"
+    },
+    {
+      "path": ".orbit-secrets",
+      "type": "directory"
+    }
+  ],
+  "bash": {
+    "originalSnapshot": {
+      ".env-orbit": {
+        "mode": 384,
+        "type": "file",
+        "content": "APP_URL=https://parity.invalid\n"
+      },
+      ".orbit-secrets": {
+        "mode": 448,
+        "type": "directory",
+        "entries": {
+          "oidc-client-secret": {
+            "mode": 384,
+            "type": "file",
+            "content": "original-secret-bytes"
+          }
+        }
+      }
+    },
+    "rollbackStatus": 0,
+    "final": {
+      ".env-orbit": {
+        "mode": 384,
+        "type": "file",
+        "content": "APP_URL=https://parity.invalid\n"
+      },
+      ".orbit-secrets": {
+        "mode": 448,
+        "type": "directory",
+        "entries": {
+          "oidc-client-secret": {
+            "mode": 384,
+            "type": "file",
+            "content": "original-secret-bytes"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "cases": [
+    {
+      "name": "no .env-orbit at all",
+      "envOrbit": null,
+      "bash": {
+        "stdout": "status=0 profile=standard"
+      }
+    },
+    {
+      "name": "empty triple (standard)",
+      "envOrbit": "",
+      "bash": {
+        "stdout": "status=0 profile=standard"
+      }
+    },
+    {
+      "name": "processing triple",
+      "envOrbit": "COMPOSE_PROFILES=processing\nTIKA_URL=http://orbit-tika:9998\n",
+      "bash": {
+        "stdout": "status=0 profile=processing"
+      }
+    },
+    {
+      "name": "ai triple",
+      "envOrbit": "COMPOSE_PROFILES=ai\nOLLAMA_MODEL=llama3\n",
+      "bash": {
+        "stdout": "status=0 profile=ai"
+      }
+    },
+    {
+      "name": "full triple",
+      "envOrbit": "COMPOSE_PROFILES=processing,ai\nTIKA_URL=http://orbit-tika:9998\nOLLAMA_MODEL=llama3\n",
+      "bash": {
+        "stdout": "status=0 profile=full"
+      }
+    },
+    {
+      "name": "ai triple with invalid model",
+      "envOrbit": "COMPOSE_PROFILES=ai\nOLLAMA_MODEL=bad space\n",
+      "bash": {
+        "stdout": "status=1 profile="
+      }
+    },
+    {
+      "name": "processing triple with unexpected TIKA_URL",
+      "envOrbit": "COMPOSE_PROFILES=processing\nTIKA_URL=http://other:9998\n",
+      "bash": {
+        "stdout": "status=1 profile="
+      }
+    },
+    {
+      "name": "unrecognised COMPOSE_PROFILES value",
+      "envOrbit": "COMPOSE_PROFILES=bogus\n",
+      "bash": {
+        "stdout": "status=1 profile="
+      }
+    },
+    {
+      "name": "empty COMPOSE_PROFILES but stray TIKA_URL",
+      "envOrbit": "TIKA_URL=http://orbit-tika:9998\n",
+      "bash": {
+        "stdout": "status=1 profile="
+      }
+    }
+  ]
+}

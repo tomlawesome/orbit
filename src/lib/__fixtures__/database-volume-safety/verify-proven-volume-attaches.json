@@ -1,0 +1,36 @@
+{
+  "name": "verify proven volume attaches",
+  "kind": "verify",
+  "target": {
+    "envOrbit": "ORBIT_IMAGE=ghcr.io/tomlawesome/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+    "composeFile": null,
+    "postgresPassword": "hunter2"
+  },
+  "targetWasEmpty": false,
+  "requested": null,
+  "scenario": {
+    "volumeLabels": {
+      "orbit_orbit-db-data": "orbit|orbit-db-data"
+    },
+    "volumeProjectLabel": {
+      "orbit_orbit-db-data": "orbit"
+    },
+    "containersByVolume": {
+      "orbit_orbit-db-data": "aaaaaaaaaaaa|orbit|orbit-db"
+    },
+    "containersByProject": {
+      "orbit": "bbbbbbbbbbbb|orbit|orbit-app"
+    },
+    "containerImage": {
+      "bbbbbbbbbbbb": "ghcr.io/tomlawesome/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "volumeLsSubstring": {
+      "orbit-db-data": "orbit_orbit-db-data"
+    }
+  },
+  "bash": {
+    "status": 0,
+    "stdout": "database_volume_checked=1\ndatabase_volume_seen=1\ndatabase_volume_name=orbit_orbit-db-data\ncompose_project_name=orbit\ncompose_project_name_explicit=0\ncompose_project_name_provisional=0",
+    "stderr": ""
+  }
+}
