@@ -11,16 +11,18 @@ import { describe, expect, it } from "vitest";
 // update here -- this is what enforces that promise for the readiness
 // report, comparing implemented against documented in both directions.
 //
-// configure.sh's own run_check() calls are the source of truth for what is
-// implemented: report_required_bool() is called once per required field,
-// report_optional() once per optional group, report_app_managed() once per
-// app-managed group (ADR-0017 slice 2, #743: a group whose credential lives
-// in the database, set from the administration screen, never in .env-orbit).
+// The engine's evaluateReadiness (src/lib/config-contract.ts) is the source
+// of truth for what is implemented since #1210 (configure.sh --check runs
+// `orbit check`): required() is called once per required field, optional()
+// once per optional group, appManaged() once per app-managed group
+// (ADR-0017 slice 2, #743: a group whose credential lives in the database,
+// set from the administration screen, never in .env-orbit).
 
-const configureSource = readFileSync(
-  fileURLToPath(new URL("./configure.sh", import.meta.url)),
+const contractSource = readFileSync(
+  fileURLToPath(new URL("../src/lib/config-contract.ts", import.meta.url)),
   "utf8",
 ).replaceAll("\r\n", "\n");
+const readinessSource = contractSource.slice(contractSource.indexOf("export function evaluateReadiness("));
 const contract = readFileSync(
   fileURLToPath(new URL("../docs/engine-events.md", import.meta.url)),
   "utf8",
@@ -28,18 +30,18 @@ const contract = readFileSync(
 
 function implementedFields() {
   const required = [
-    ...configureSource.matchAll(/report_required_bool\s+([A-Za-z_][A-Za-z0-9_]*)\s/gu),
+    ...readinessSource.matchAll(/\brequired\("([A-Za-z_][A-Za-z0-9_]*)",/gu),
   ].map((match) => match[1]);
   const optional = [
-    ...configureSource.matchAll(/report_optional\s+([a-z][a-z]*)\s/gu),
+    ...readinessSource.matchAll(/\boptional\("([a-z][a-z]*)",/gu),
   ].map((match) => match[1]);
   const appManaged = [
-    ...configureSource.matchAll(/report_app_managed\s+([a-z][a-z]*)\s*$/gmu),
+    ...readinessSource.matchAll(/\bappManaged\("([a-z][a-z]*)"\)/gu),
   ].map((match) => match[1]);
 
-  expect(required.length, "found no report_required_bool calls in configure.sh").toBeGreaterThan(0);
-  expect(optional.length, "found no report_optional calls in configure.sh").toBeGreaterThan(0);
-  expect(appManaged.length, "found no report_app_managed calls in configure.sh").toBeGreaterThan(0);
+  expect(required.length, "found no required() calls in evaluateReadiness").toBeGreaterThan(0);
+  expect(optional.length, "found no optional() calls in evaluateReadiness").toBeGreaterThan(0);
+  expect(appManaged.length, "found no appManaged() calls in evaluateReadiness").toBeGreaterThan(0);
 
   return { required: new Set(required), optional: new Set(optional), appManaged: new Set(appManaged) };
 }
@@ -79,36 +81,36 @@ function documentedFields() {
 }
 
 describe("configuration readiness report v0 contract", () => {
-  it("documents exactly the required fields configure.sh --check can report", () => {
+  it("documents exactly the required fields orbit check (configure.sh --check) can report", () => {
     const implemented = implementedFields().required;
     const documented = documentedFields().required;
 
     const undocumented = [...implemented].filter((value) => !documented.has(value)).sort();
     const phantom = [...documented].filter((value) => !implemented.has(value)).sort();
 
-    expect(undocumented, "reported by configure.sh but absent from engine-events.md").toEqual([]);
+    expect(undocumented, "reported by orbit check but absent from engine-events.md").toEqual([]);
     expect(phantom, "documented in engine-events.md but never reported").toEqual([]);
   });
 
-  it("documents exactly the optional groups configure.sh --check can report", () => {
+  it("documents exactly the optional groups orbit check (configure.sh --check) can report", () => {
     const implemented = implementedFields().optional;
     const documented = documentedFields().optional;
 
     const undocumented = [...implemented].filter((value) => !documented.has(value)).sort();
     const phantom = [...documented].filter((value) => !implemented.has(value)).sort();
 
-    expect(undocumented, "reported by configure.sh but absent from engine-events.md").toEqual([]);
+    expect(undocumented, "reported by orbit check but absent from engine-events.md").toEqual([]);
     expect(phantom, "documented in engine-events.md but never reported").toEqual([]);
   });
 
-  it("documents exactly the app-managed groups configure.sh --check can report", () => {
+  it("documents exactly the app-managed groups orbit check (configure.sh --check) can report", () => {
     const implemented = implementedFields().appManaged;
     const documented = documentedFields().appManaged;
 
     const undocumented = [...implemented].filter((value) => !documented.has(value)).sort();
     const phantom = [...documented].filter((value) => !implemented.has(value)).sort();
 
-    expect(undocumented, "reported by configure.sh but absent from engine-events.md").toEqual([]);
+    expect(undocumented, "reported by orbit check but absent from engine-events.md").toEqual([]);
     expect(phantom, "documented in engine-events.md but never reported").toEqual([]);
   });
 

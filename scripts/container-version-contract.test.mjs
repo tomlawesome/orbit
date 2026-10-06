@@ -84,18 +84,10 @@ describe("immutable container version identity", () => {
     expect(entrypoint).not.toContain("${ORBIT_CHANNEL:-");
   });
 
-  it("keeps bootstrap key generation separate from the versioned runtime image", () => {
-    const helperStart = dockerfile.indexOf("FROM base AS vapid-generator");
-    const runtimeStart = dockerfile.indexOf(" AS runner");
-    const helper = dockerfile.slice(helperStart, runtimeStart);
-
-    expect(helperStart).toBeGreaterThanOrEqual(0);
-    expect(runtimeStart).toBeGreaterThan(helperStart);
-    expect(helper).toContain("COPY scripts/generate-vapid.mjs ./scripts/generate-vapid.mjs");
-    expect(helper).not.toContain("ORBIT_VERSION");
-    expect(helper).not.toContain("ORBIT_CHANNEL");
-    expect(configureScript).toContain("docker build --target vapid-generator");
-    expect(configureScript).not.toContain("docker build --target runner");
+  it("keeps no Docker-backed key generation: the engine makes VAPID keys itself (#1210 D7)", () => {
+    expect(dockerfile).not.toContain("vapid-generator");
+    expect(dockerfile).not.toContain("generate-vapid");
+    expect(configureScript).not.toMatch(/docker build/u);
   });
 
   it("removes the VAPID bootstrap image once the keys are made, so no per-commit tag is left behind (#1241)", () => {
