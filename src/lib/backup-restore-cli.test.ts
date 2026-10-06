@@ -29,8 +29,8 @@ import { CORRESPONDENCE_QUERIES, type CorrespondenceReports, type RestoreDockerA
 // (docs/adr-notes/296-backup-port-plan.md): every function in
 // backup-restore-cli.ts exercised end-to-end against a trivial in-memory
 // fake adapter (no process spawning, no Docker daemon — same "(1) in-memory
-// fake adapter" layer recovery-bundle.docker-adapter.test.ts and
-// restore-engine.docker-adapter.test.ts already established), proving the
+// fake adapter" layer recovery-bundle.backup.test.ts and
+// restore-engine.lifecycle.test.ts already established), proving the
 // pieces are actually wired together and that every live mutation still
 // goes through RestoreRun's journal/checkpoint machinery.
 

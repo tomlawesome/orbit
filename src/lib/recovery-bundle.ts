@@ -866,18 +866,15 @@ export function verifyChecksumsFile(extractedDir: string, checksumsPath: string)
 
 // ---------------------------------------------------------------------------
 // BackupDockerAdapter — the thin, injectable edge over the handful of
-// operations that genuinely need a live Docker/Postgres deployment
-// (`pg_restore --list`, `pg_dump`, the document-tar collection, and
-// stopping/starting `orbit-app` around a point-in-time backup). Mirrors the
-// plan's "thin injected adapter" shape (docs/adr-notes/296-backup-port-plan.md):
-// the orchestration functions below (validateBackupBundleContents,
-// createBackupBundle) depend only on this interface, never on `docker`
-// directly, so they are fully testable with an in-memory fake and require no
-// live daemon. createDockerComposeBackupAdapter is the real implementation,
-// spawning the exact `docker compose ...` argument lists backup.sh uses
-// (:30-32,126-127,147,149-157) — its own shape is exercised in
-// recovery-bundle.docker-adapter.test.ts via a PATH-shim fake `docker`
-// executable, never a real daemon.
+// operations that genuinely need a live Postgres deployment (`pg_restore
+// --list`, `pg_dump`, the document-tar collection, and stopping/starting
+// `orbit-app` around a point-in-time backup). Mirrors the plan's "thin
+// injected adapter" shape (docs/adr-notes/296-backup-port-plan.md): the
+// orchestration functions below (validateBackupBundleContents,
+// createBackupBundle) depend only on this interface, so they are fully
+// testable with an in-memory fake. The shipped implementation is
+// src/lib/in-container-adapter.ts (#1211): the engine runs inside the
+// deployment and reaches Postgres and the document volume directly.
 // ---------------------------------------------------------------------------
 
 export interface BackupDockerAdapter {
@@ -894,10 +891,8 @@ export interface BackupDockerAdapter {
    * Records that a recovery bundle export just completed (#968, slice 1 of
    * #966): one `audit_log` row (`entity_type = 'recovery_bundle'`,
    * `action = 'recovery_bundle_exported'`), written the same way `dumpDatabase`
-   * reaches Postgres — a `psql` call shelled through `orbit-db`, because
-   * `orbit export-recovery-bundle` runs on the host (`refuseDockerInContainer`
-   * forbids it inside `orbit-app`) and the host has no other path to the
-   * database. Carries no bundle content, no passphrase and no key material —
+   * reaches Postgres — a `psql` call against `orbit-db` from inside the
+   * deployment (#1211). Carries no bundle content, no passphrase and no key material —
    * `changes` is the empty object — because the fact and the timestamp are
    * everything the administration card needs, and everything the issue's
    * "nothing about the bundle or its passphrase is persisted" line allows.
@@ -905,136 +900,11 @@ export interface BackupDockerAdapter {
   recordRecoveryBundleExported(): void;
 }
 
-export interface DockerComposeAdapterOptions {
-  /** The `--env-file` path passed to every `docker compose` invocation, mirroring backup.sh's `compose()` helper. */
-  envFile: string;
-  /** Working directory for the `docker` subprocess (defaults to the current process's cwd, matching backup.sh's own `cd "$repo_dir"`). */
-  cwd?: string;
-  /** Overrides the `docker` executable name/path. Defaults to `"docker"`. */
-  dockerBinary?: string;
-  /**
-   * Environment for the `docker` subprocess (defaults to `process.env`). The
-   * PATH-shim test seam: tests prepend a directory holding a fake `docker`
-   * executable to `PATH` here instead of mutating `process.env` globally —
-   * see recovery-bundle.docker-adapter.test.ts, following the same technique
-   * as scripts/configure.test.mjs's `fakeDockerScript`.
-   */
-  env?: NodeJS.ProcessEnv;
-}
-
 function openWriteSecretDescriptor(path: string, mode: number = SECURE_FILE_MODE): number {
   const descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, mode);
   fchmodSync(descriptor, mode);
   applyHostOwnership(path);
   return descriptor;
-}
-
-/**
- * The real BackupDockerAdapter: spawns the literal `docker compose` argument
- * lists backup.sh uses, over the exact fixed command shape (no shell
- * interpolation of caller-controlled data beyond the two path/envFile
- * arguments Node's `spawnSync` array form passes as discrete argv entries,
- * never through a shell).
- */
-export function createDockerComposeBackupAdapter(options: DockerComposeAdapterOptions): BackupDockerAdapter {
-  const dockerBinary = options.dockerBinary ?? "docker";
-  const cwd = options.cwd;
-  const env = options.env ?? process.env;
-  const composeArgs = (...args: string[]): string[] => ["compose", "--env-file", options.envFile, ...args];
-
-  return {
-    stopApp(): void {
-      const result = spawnSync(dockerBinary, composeArgs("stop", "orbit-app"), { cwd, env, stdio: ["ignore", "ignore", "inherit"] });
-      if (result.status !== 0) refuse("app-stop-failed", "The Orbit application could not be stopped for the backup.");
-    },
-    startApp(): void {
-      const result = spawnSync(dockerBinary, composeArgs("start", "orbit-app"), { cwd, env, stdio: ["ignore", "ignore", "inherit"] });
-      if (result.status !== 0) refuse("app-start-failed", "The Orbit application could not be restarted after the backup.");
-    },
-    dumpDatabase(outputPath: string): void {
-      const descriptor = openWriteSecretDescriptor(outputPath);
-      try {
-        const result = spawnSync(
-          dockerBinary,
-          composeArgs(
-            "exec",
-            "-T",
-            "orbit-db",
-            "sh",
-            "-c",
-            'exec pg_dump --format=custom --compress=6 --no-owner --no-acl --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"',
-          ),
-          { cwd, env, stdio: ["ignore", descriptor, "inherit"] },
-        );
-        if (result.status !== 0) refuse("database-dump-failed", "PostgreSQL could not be dumped.");
-        if (fstatSync(descriptor).size === 0) refuse("empty-database-dump", "PostgreSQL produced an empty backup.");
-      } finally {
-        closeSync(descriptor);
-      }
-    },
-    pgRestoreListOk(dumpPath: string): boolean {
-      const descriptor = openSync(dumpPath, constants.O_RDONLY | constants.O_NOFOLLOW);
-      try {
-        const result = spawnSync(dockerBinary, composeArgs("exec", "-T", "orbit-db", "pg_restore", "--list"), {
-          cwd,
-          env,
-          stdio: [descriptor, "ignore", "ignore"],
-        });
-        return result.status === 0;
-      } finally {
-        closeSync(descriptor);
-      }
-    },
-    collectDocumentsArchive(outputPath: string): void {
-      const descriptor = openWriteSecretDescriptor(outputPath);
-      try {
-        const result = spawnSync(
-          dockerBinary,
-          composeArgs(
-            "run",
-            "--rm",
-            "--no-deps",
-            // The container's own DOCUMENTS_ROOT (env_file: .env-orbit), not
-            // a value read on the host: matches wherever the app actually
-            // writes documents (#1151 RANGE-F2, the TS-side counterpart of
-            // SF2-F1's backup.sh fix). `--entrypoint tar` cannot expand a
-            // variable in its own argument, so this runs through sh instead.
-            "--entrypoint",
-            "sh",
-            "orbit-app",
-            "-c",
-            // SS2-S1: excludes the household portable-archive export, not
-            // an entry validateDocumentArchiveEntries's allow-list
-            // recognizes. Before this exclusion, any export sitting on disk
-            // made `orbit backup` refuse outright the moment it
-            // re-validated its own freshly collected archive.
-            'exec tar -C "${DOCUMENTS_ROOT:-/var/lib/orbit/documents}" --exclude=./portable-archives -cf - .',
-          ),
-          { cwd, env, stdio: ["ignore", descriptor, "inherit"] },
-        );
-        if (result.status !== 0) refuse("document-archive-collection-failed", "The document archive could not be collected.");
-      } finally {
-        closeSync(descriptor);
-      }
-    },
-    recordRecoveryBundleExported(): void {
-      const result = spawnSync(
-        dockerBinary,
-        composeArgs(
-          "exec",
-          "-T",
-          "orbit-db",
-          "sh",
-          "-c",
-          `exec psql -v ON_ERROR_STOP=1 --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" -c "insert into audit_log (entity_type, entity_id, action, changes) values ('recovery_bundle', gen_random_uuid(), 'recovery_bundle_exported', '{}'::jsonb)"`,
-        ),
-        { cwd, env, stdio: ["ignore", "ignore", "inherit"] },
-      );
-      if (result.status !== 0) {
-        refuse("recovery-bundle-record-failed", "The recovery bundle was created but could not be recorded; the administration card will not clear.");
-      }
-    },
-  };
 }
 
 /**
