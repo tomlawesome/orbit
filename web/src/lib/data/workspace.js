@@ -1421,6 +1421,37 @@ function instanceLineOf(build) {
 }
 
 /**
+ * The same three parts without their labels or the self-hosted line, for
+ * the About page's Orbit row (#1256): "0.3.0 · preview · fd6a7e6". Empty
+ * when the build knows none of them.
+ *
+ * @param {{ version: ?string, channel: ?string, revision: ?string }} build
+ * @returns {string}
+ */
+export function buildLineOf(build) {
+  return [build.version, build.channel, build.revision?.slice(0, 7)].filter(Boolean).join(" · ");
+}
+
+/**
+ * @typedef {{
+ *   build: { version: ?string, channel: ?string, revision: ?string, image: ?string },
+ *   node: ?string,
+ *   sidecars: { id: "postgres" | "tika" | "clamav" | "ollama", state: "running" | "off", version: ?string }[],
+ * }} AboutFacts
+ */
+
+/**
+ * What this Orbit runs on (#1256), from `GET /api/about`.
+ *
+ * @returns {Promise<AboutFacts>}
+ */
+export async function readAbout() {
+  /** @type {{ about: AboutFacts }} */
+  const body = await json(await fetch("/api/about", { credentials: "same-origin" }));
+  return body.about;
+}
+
+/**
  * Named apart from format.js's and belt.js's own `shortDate` (#1151 W2-Q5):
  * those take a bare date and append T00:00:00Z themselves; this one takes a
  * document's full `availableAt` instant as it already arrives from the API.

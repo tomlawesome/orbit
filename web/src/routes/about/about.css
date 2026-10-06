@@ -1,0 +1,104 @@
+/* About (#1256): the helm's own furniture (settings/settings.css), copied
+ * under .about-page rather than shared, so the two screens can move apart
+ * without one dragging the other. One layout at every width: full-width
+ * cards in one column, and below the pocket switch the pocket floor --
+ * nothing under 12px, body 16px, 44px targets (pocket/tokens.css). */
+
+html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:var(--ink);
+          font-family:var(--ui);line-height:1.55;transition:background .4s,color .4s}
+.about-page *{box-sizing:border-box;margin:0}
+.about-page{min-height:100vh}
+
+.about-page .sky{position:fixed;inset:0;pointer-events:none;opacity:var(--stars);
+     transition:opacity .4s;z-index:0}
+.about-page .sky svg{position:absolute;inset:0;width:100%;height:100%}
+.about-page .sky .far{animation:driftf 400s linear infinite}
+.about-page .sky .near{animation:driftn 195s linear infinite}
+.about-page .vignette{position:fixed;inset:0;pointer-events:none;z-index:1;
+          background:radial-gradient(ellipse at 50% 34%, transparent 55%, rgba(0,0,0,.28) 100%)}
+[data-theme=clouds] .about-page .vignette,[data-theme=dawn] .about-page .vignette{background:none}
+
+.about-page .page{position:relative;z-index:2;max-width:1060px;margin:0 auto;padding:96px 24px 120px}
+.about-page .cards{display:grid;grid-template-columns:1fr;gap:18px;margin-top:22px;align-items:start}
+.about-page .cards .card{margin-top:0}
+.about-page header.screen h1{font:600 26px var(--display);letter-spacing:.01em}
+.about-page header.screen .sub{font:11px var(--mono);color:var(--ink-mid);margin-top:6px;letter-spacing:.04em}
+
+.about-page .card{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
+      border-radius:16px;padding:20px 22px;margin-top:22px;min-width:0}
+.about-page .card h2{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+         color:var(--ink-quiet);margin-bottom:14px}
+
+/* Card 1 and card 3: the helm's .kv rows, name left, value right. */
+.about-page .kv{display:flex;justify-content:space-between;align-items:center;gap:14px;
+    font:11.5px var(--mono);color:var(--ink-mid);padding:9px 2px;
+    border-bottom:1px solid var(--line-soft)}
+.about-page .kv:last-child{border:0}
+.about-page .kv b{color:var(--ink);font-weight:500;text-align:right;min-width:0}
+.about-page .kv a{color:var(--ink-mid);text-decoration:none}
+.about-page .kv a:hover{color:var(--accent-text)}
+.about-page .kv .unknown{font-style:normal;color:var(--ink-quiet)}
+/* The full digest, never cut short: it wraps instead. */
+.about-page .kv.image{align-items:flex-start}
+.about-page .kv.image b{overflow-wrap:anywhere;word-break:break-all}
+
+/* The settings voice for what could not be shown, and its way to try again
+   (the helm's own ghost button). */
+.about-page .note{margin-top:10px;font:11px var(--mono);color:var(--warm)}
+.about-page .again{margin-top:12px;font:11px var(--mono);color:var(--ink-mid);background:none;
+      border:1px solid var(--line);border-radius:9px;padding:7px 13px;cursor:pointer}
+.about-page .again:hover{border-color:var(--accent);color:var(--accent-text)}
+.about-page .again:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* Card 2's index: administration's .tells, same-page pills with counts. */
+.about-page .tells{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.about-page .role{font:10px var(--mono);letter-spacing:.1em;text-transform:uppercase;
+      border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--ink-mid);
+      text-decoration:none}
+.about-page .role:hover{border-color:var(--accent);color:var(--accent-text)}
+
+/* A group's heading: the helm's sub-heading voice (Sign-in methods). */
+.about-page .group{font:10.5px var(--mono);letter-spacing:.18em;text-transform:uppercase;
+      color:var(--ink-quiet);margin:22px 0 4px}
+
+/* The libraries' A–Z strip: letters with entries link, the rest are quiet. */
+.about-page .letters{display:flex;flex-wrap:wrap;gap:2px 10px;padding:6px 2px 8px;
+      font:11px var(--mono);letter-spacing:.06em}
+.about-page .letters a{color:var(--ink-mid);text-decoration:none}
+.about-page .letters a:hover{color:var(--accent-text)}
+.about-page .letters span{color:var(--ink-quiet)}
+
+/* One row per entry, in the rhythm of settings' "sent" rows. */
+.about-page .credit{padding:9px 2px;border-bottom:1px solid var(--line-soft)}
+.about-page .credit b{display:block;font-weight:520;color:var(--ink);font-size:13.5px;overflow-wrap:anywhere}
+.about-page .credit small{display:block;font:10.5px var(--mono);color:var(--ink-faint);overflow-wrap:anywhere}
+.about-page .credit a{color:var(--ink-mid);text-decoration:none}
+.about-page .credit a:hover{color:var(--accent-text);text-decoration:underline}
+
+.about-page a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+/* An anchor's target lands clear of the fixed chrome. */
+.about-page [id]{scroll-margin-top:96px}
+
+/* THE POCKET FLOOR, below the dialect switch Chrome.svelte uses (CON-10):
+   the same cards, at the kit's sizes. */
+@media (max-width:900px), (max-height:600px){
+  .about-page .page{padding:calc(var(--p-chrome) + env(safe-area-inset-top) + 16px) var(--p-gutter) 96px}
+  .about-page header.screen h1{font-size:var(--p-type-title);line-height:var(--p-type-title-lh)}
+  .about-page header.screen .sub{font-size:var(--p-type-meta)}
+  .about-page .cards{gap:var(--p-card-gap)}
+  .about-page .card{padding:var(--p-card-pad);border-radius:var(--p-card-radius)}
+  .about-page .card h2,.about-page .group{font-size:var(--p-type-caps);letter-spacing:var(--p-type-caps-track)}
+  .about-page .kv,.about-page .note,.about-page .again{font-size:var(--p-type-meta)}
+  .about-page .again{min-height:var(--p-hit);padding:0 16px}
+  .about-page .credit b{font-size:var(--p-type-body)}
+  .about-page .credit small{font-size:var(--p-type-meta)}
+  .about-page .tells{gap:var(--p-pill-gap)}
+  .about-page .role{font-size:var(--p-type-caps);min-height:var(--p-hit);display:inline-flex;align-items:center;padding:0 14px}
+  .about-page .letters{gap:0;font-size:var(--p-type-meta)}
+  .about-page .letters a,.about-page .letters span{min-width:var(--p-hit);min-height:var(--p-hit);
+      display:inline-grid;place-items:center}
+  .about-page [id]{scroll-margin-top:calc(var(--p-chrome) + env(safe-area-inset-top) + 16px)}
+}
+@media (prefers-reduced-motion: reduce){
+  .about-page .sky .far,.about-page .sky .near{animation:none!important}
+}

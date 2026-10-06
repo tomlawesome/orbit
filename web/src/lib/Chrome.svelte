@@ -37,6 +37,9 @@
     ["inbox", "Inbox", "/inbox"],
     ["settings", "Settings", "/settings"],
     ["administration", "Administration", "/administration"],
+    /* #1256: last in every menu, for every member -- the credits reach
+       everyone who uses what they credit. */
+    ["about", "About", "/about"],
   ];
   /* The five swatches and the act of choosing one: $lib/theme-swatches.js,
      shared with the pocket hatch (#1120). */
@@ -150,6 +153,7 @@
       <a href={href === "/item" ? resolve("/item")
           : href === "/inbox" ? resolve("/inbox")
           : href === "/settings" ? resolve("/settings")
+          : href === "/about" ? resolve("/about")
           : resolve("/administration")} aria-current={key === current ? "page" : undefined}>{label}</a>
     {/each}
   </nav>
