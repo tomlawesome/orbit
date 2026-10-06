@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   BLOOM_T0, BLOOM_DUR, DOWN, DOWNDUR, PROPS_DOWN, PROPS_UP, REV, SWEEP, UP, UPDUR,
-  bloomAt, hexa, mirror,
+  bloomAt, hexa, homeProps, mirror, mirrored, othersOf,
 } from "$lib/flight/engine.js";
 import {
   D, MARK_ARRIVE, MARK_RIDE_DOWN, MARK_RIDE_UP, T,
@@ -298,5 +298,34 @@ describe("the flight's skies are seeded, never rolled", () => {
       expect(Boolean(star.delay)).toBe(index % 6 === 0);
     }
     for (const star of DAWN_NEAR) expect(star.delay).toBeNull();
+  });
+});
+
+describe("the climb passes the reader's real other households (#1253 ruling 3)", () => {
+  const galaxy = {
+    mine: { name: "Mine", role: "owner", pos: [0, 0], planets: [[18, 0, 2, "--ok"]] },
+    near: { name: "Near", role: "member", pos: [40, 90], planets: [[0, 30, 2, "--warm"], [-18, 0, 2.5, "--ok"]] },
+  };
+  it("passes everyone but the household in the middle, each planet on its own bearing", () => {
+    const others = othersOf(galaxy, "mine");
+    expect(others.map((h) => h.name)).toEqual(["Near"]);
+    const [[x0, y0, t0, r0], [x1, y1]] = others[0].bodies;
+    expect([Math.round(x0), Math.round(y0), t0, r0]).toEqual([0, 80, "--warm", 3.2]);
+    expect([Math.round(x1), Math.round(y1)]).toEqual([-22, 0]);
+  });
+  it("passes nothing for a reader with one household", () => {
+    expect(othersOf({ mine: galaxy.mine }, "mine")).toEqual([]);
+    expect(homeProps([])).toEqual([]);
+  });
+  it("schedules them as the site's demo flight does, and mirrors them on the way down", () => {
+    const up = homeProps([{ name: "A", bodies: [] }, { name: "B", bodies: [] }]);
+    expect(up.map(({ kind, t0, dur, ang, z }) => ({ kind, t0, dur, ang, z }))).toEqual([
+      { kind: "home", t0: 760, dur: 2000, ang: 44, z: 0.5 },
+      { kind: "home", t0: 1140, dur: 2350, ang: 136, z: 0.42 },
+    ]);
+    const down = mirrored(up);
+    expect(down[0].dur).toBeCloseTo(2000 * REV * SWEEP);
+    expect(down[0].t0).toBeCloseTo((UPDUR - 2760) * REV);
+    expect(down[0].name).toBe("A");
   });
 });
