@@ -3,6 +3,7 @@ import { householdRegister } from "./support/households";
 import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { bodyClassSeen, witnessBodyClasses } from "./support/arrival";
 import { answerPushWithoutAService } from "./support/webkit-push";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -206,15 +207,19 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   );
 
   /* THE READER. Through the door, by its own button, so the launch is owed and
-     the climb plays. */
+     the climb plays. The witness goes in first: it is what proves the climb
+     below (see witnessBodyClasses). */
+  await witnessBodyClasses(page);
   await signInThroughTheDoor(page, workerAccount("newcomer"));
 
   /* The door KEEPS them: first-run sits on top of the login screen, and a
      reader with no household is not handed on to a home they do not have. */
   await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
 
-  /* THE CLIMB — the ratified launch, whole, on the authenticated return. */
-  await expect(page.locator("body")).toHaveClass(/showwarp/, { timeout: 20_000 });
+  /* THE CLIMB — the ratified launch, whole, on the authenticated return.
+     Asked of the witness, not of <body> at the moment of asking: the warp is
+     a 4.6 s window a stalled poll can miss entirely (#1233). */
+  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: 20_000 }).toBe(true);
   /* and while it flies, the question has not arrived: the staging is
      class-driven, so the beat that has not happened is a class that is absent */
   await expect(page.locator("body")).not.toHaveClass(/belong/);

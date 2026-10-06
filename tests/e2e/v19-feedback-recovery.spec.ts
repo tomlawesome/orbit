@@ -70,21 +70,24 @@ type Journey = {
   fire: (page: Page, household: Household) => Promise<() => Promise<void>>;
   /** The failure itself is never shown, so neither check below can run:
    *  both tests expect-fail on it ahead of their own defect. */
-  shownDefect?: () => string | undefined;
   announceDefect?: () => string | undefined;
   focusDefect?: () => string | undefined;
 };
 
-/* #1196: WebKit's driver stops applying a `page.route` mock once the service
-   worker controls the page -- the request reaches Orbit for real -- so a
-   journey whose failure is staged by a mock shows one or not by timing. A
-   timing-dependent expected failure cannot be marked `fail`, so on the
-   desktop-webkit project these journeys are `fixme` until the driver gap
-   closes (owner, 2026-10-05). Detail on #1196. */
-const ROUTE_MOCK_SKIPPED_ON_DESKTOP_WEBKIT = (what: string) =>
-  test.info().project.name === "desktop-webkit"
-    ? `#1196: desktop Safari applies the route mock only until the service worker controls the page, so by timing ${what}`
-    : undefined;
+/* #1233 (#1196, #1219): every journey here stages its failure with a
+   `page.route` mock, and Playwright does not route a request the service
+   worker handles (its documentation says to block service workers wherever
+   routing is relied on). On WebKit the mock applied only until Orbit's
+   worker took the page, so the /inbox journey drew the real, empty inbox
+   instead of the synthetic suggestion (desktop: pipeline 2203, job 32545,
+   `/api/imap-inbox` answered by the server; phone: pipeline 2188). The
+   same cure as v19-mail-review.spec.ts and v19-hit-routing.spec.ts: nothing
+   here is about the worker, so on WebKit it is kept out. */
+test.use({
+  serviceWorkers: async ({}, use, testInfo) => {
+    await use(testInfo.project.use.defaultBrowserType === "webkit" ? "block" : "allow");
+  },
+});
 
 /* The defect common to three journeys: the button that was pressed disables
    itself (or is swapped for a disabled copy) while the request is out, and a
@@ -155,8 +158,6 @@ const createOffline: Journey = {
      (pipeline 1989, mobile-webkit) -- the opposite of Chromium's #1178
      defect, not a timing race like Firefox's. Nothing to expect-fail here. */
   focusDefect: () => isWebkit() ? undefined : FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket create bar (.pk-save)" : "the desk create card (#card .btn-primary)"),
-  /* The mock on /api/workspace/commands above (pipeline 2011: both checks). */
-  shownDefect: () => ROUTE_MOCK_SKIPPED_ON_DESKTOP_WEBKIT("the save succeeds and no failure is shown"),
 };
 
 /* ── IMAP review ───────────────────────────────────────────────────────── */
@@ -239,10 +240,6 @@ const itemViewApproval: Journey = {
     };
   },
   focusDefect: () => FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket suggestion card's Add to orbit" : "the desk amend card's accept into orbit"),
-  /* The GET mock on /api/imap-inbox/<id> (interceptFailingMail): without it
-     the item view has no synthetic receipt to draw, so the amend card's act
-     never appears (pipeline 2011, :207 toBeEnabled). */
-  shownDefect: () => ROUTE_MOCK_SKIPPED_ON_DESKTOP_WEBKIT("the item view never draws the synthetic suggestion"),
 };
 
 const inboxApproval: Journey = {
@@ -342,8 +339,7 @@ const JOURNEYS = [createOffline, itemViewApproval, inboxApproval, householdDelet
 
 for (const journey of JOURNEYS) {
   test(`${journey.name} is announced, and the act can be repeated by keyboard`, async ({ page }) => {
-    const defect = journey.shownDefect?.() ?? journey.announceDefect?.();
-    test.fixme(Boolean(journey.shownDefect?.()), journey.shownDefect?.());
+    const defect = journey.announceDefect?.();
     test.fail(Boolean(defect), defect);
     test.setTimeout(90_000);
     await signIn(page, "/home");
@@ -360,8 +356,7 @@ for (const journey of JOURNEYS) {
   });
 
   test(`${journey.name} leaves focus where the reader was`, async ({ page }) => {
-    const defect = journey.shownDefect?.() ?? journey.focusDefect?.();
-    test.fixme(Boolean(journey.shownDefect?.()), journey.shownDefect?.());
+    const defect = journey.focusDefect?.();
     test.fixme(Boolean(defect) && isFirefox(), FOCUS_DEFECT_RACES_ON_FIREFOX);
     test.fail(Boolean(defect), defect);
     test.setTimeout(90_000);
