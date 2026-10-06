@@ -1,94 +1,71 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+# Orbit recovery export: the host shell around `orbit export-recovery-bundle`
+# (#1211). Verifying the source backup, the passphrase prompts, wrapping the
+# document key and packaging the bundle all run in the engine inside the
+# Orbit image (src/lib/backup-restore-cli.ts) as a `docker compose run --rm
+# --no-deps` one-off on orbit-app, the deployment mounted at /orbit-deploy.
+# orbit-app keeps running: an export reads a backup and changes nothing live.
+# The passphrase only ever travels on standard input, or the terminal.
+
+repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_dir"
 
-readonly source_bundle="${1:-}"
 readonly environment_file="${ORBIT_ENV_FILE:-.env-orbit}"
 readonly backup_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
-readonly kek_file="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}/document-kek"
-readonly timestamp="$(date -u +%Y%m%d-%H%M%S)"
-temporary_directory=""
-temporary_path=""
+readonly secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
 
 fail() { printf 'Orbit recovery export: %s\n' "$*" >&2; exit 1; }
+compose() { docker compose --env-file "$environment_file" "$@"; }
 
-# Race-free equivalent of `mv --no-clobber`: `ln` succeeds atomically only
-# if $final_path does not already exist (POSIX EEXIST). `mv --no-clobber`'s
-# own existence check is a separate stat-then-rename, not atomic, and on a
-# same-second timestamp collision it silently exits 0 without moving
-# anything -- the script then reports success naming the OLD recovery
-# bundle, while the new one is forgotten as a stale .tar.installing file
-# cleanup never runs for, since temporary_path is cleared right after.
-# Mirrors publish_bundle_atomically in scripts/backup.sh.
-# $temporary_path and $final_path must be on the same filesystem, which they
-# already are (both under $backup_directory).
-publish_bundle_atomically() {
-  local link_error=""
-  if ! link_error="$(ln -- "$temporary_path" "$final_path" 2>&1)"; then
-    # Only a name that is really taken is a collision; anything else (a
-    # full or read-only disk) is reported as what it is, or the operator
-    # retries a timestamp forever.
-    [[ -e "$final_path" ]] && fail "A recovery bundle already exists at $final_path; rerun to get a distinct timestamp."
-    fail "Could not publish the recovery bundle at $final_path: ${link_error#ln: }"
-  fi
-  rm -f -- "$temporary_path"
+require_deployment() {
+  command -v docker >/dev/null 2>&1 || fail "Docker is required."
+  docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required."
+  [[ -f "$environment_file" ]] || fail "Missing ${environment_file}."
+  [[ -f "$secrets_directory/document-kek" && ! -L "$secrets_directory/document-kek" ]] || fail "Missing regular document KEK file."
 }
-cleanup() { [[ -z "$temporary_directory" ]] || rm -rf -- "$temporary_directory"; [[ -z "$temporary_path" ]] || rm -f -- "$temporary_path"; }
-trap cleanup EXIT
 
-read_recovery_passphrase() {
-  if [[ "${ORBIT_RECOVERY_TEST_MODE:-false}" == true ]]; then
-    read -r -s -p '' recovery_passphrase || fail "A recovery passphrase is required on standard input."
+# Who owns what the engine writes: configure.sh's own text (#1210 D5).
+engine_host_identity() {
+  # Read whole, then matched: `docker info | grep -q` under pipefail could
+  # report a SIGPIPE'd docker as "not rootless", the dangerous answer here.
+  local security_options
+  security_options="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null || true)"
+  if [[ "$security_options" == *rootless* ]]; then
+    host_uid=0
+    host_gid=0
   else
-    read -r -s -p 'Recovery passphrase: ' recovery_passphrase </dev/tty || fail "An interactive terminal is required."
-    printf '\n' >&2
+    host_uid="$(id -u)"
+    host_gid="$(id -g)"
   fi
 }
 
-[[ -n "$source_bundle" && -f "$source_bundle" && ! -L "$source_bundle" ]] ||
-  fail "Usage: bash scripts/export-recovery-bundle.sh <backup.tar>"
-command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required."
-command -v tar >/dev/null 2>&1 || fail "tar is required."
-command -v docker >/dev/null 2>&1 || fail "Docker is required."
-[[ -f "$environment_file" ]] || fail "Missing ${environment_file}."
-[[ -f "$kek_file" && ! -L "$kek_file" ]] || fail "Missing regular document KEK file."
-bash scripts/backup.sh --verify "$source_bundle" >/dev/null
-
-read_recovery_passphrase
-[[ "${#recovery_passphrase}" -ge 12 ]] || fail "Use a recovery passphrase of at least 12 characters."
-if [[ "${ORBIT_RECOVERY_TEST_MODE:-false}" == true ]]; then
-  read -r -s -p '' recovery_passphrase_confirmation || fail "A recovery passphrase confirmation is required on standard input."
-else
-  read -r -s -p 'Confirm recovery passphrase: ' recovery_passphrase_confirmation </dev/tty || fail "An interactive terminal is required."
-  printf '\n' >&2
-fi
-[[ "$recovery_passphrase" == "$recovery_passphrase_confirmation" ]] || fail "Recovery passphrases do not match."
-unset recovery_passphrase_confirmation
-
-mkdir -p -- "$backup_directory"
-chmod 700 "$backup_directory"
-umask 077
-temporary_directory="$(mktemp -d "$backup_directory/.orbit-recovery.XXXXXX")"
-cp -- "$source_bundle" "$temporary_directory/orbit-backup.tar"
-compose() {
-  docker compose --env-file "$environment_file" "$@"
+# run_engine <bundle> <orbit args...>: see backup.sh. ORBIT_RECOVERY_TEST_MODE
+# (answers as lines on standard input) is forwarded when set.
+run_engine() {
+  local input_file="$1" && shift
+  local -a run_args=(run --rm --no-deps -i) directory_args=()
+  if [[ -t 0 && -t 1 ]]; then run_args+=(-t); else run_args+=(-T); fi
+  run_args+=(-e "ORBIT_HOST_UID=$host_uid" -e "ORBIT_HOST_GID=$host_gid" -e "ORBIT_HOST_DEPLOY_DIR=$repo_dir")
+  [[ -z "${ORBIT_RECOVERY_TEST_MODE:-}" ]] || run_args+=(-e "ORBIT_RECOVERY_TEST_MODE=$ORBIT_RECOVERY_TEST_MODE")
+  run_args+=(-v "$repo_dir:/orbit-deploy:rw")
+  if [[ "$backup_directory" != "$repo_dir/backups" ]]; then
+    { mkdir -p -- "$backup_directory" && chmod 700 -- "$backup_directory"; } || fail "Could not create ${backup_directory}."
+    run_args+=(-v "$backup_directory:/orbit-backups:rw" -e "ORBIT_HOST_BACKUP_DIR=$backup_directory") && directory_args+=(--backup-dir /orbit-backups)
+  fi
+  if [[ "$secrets_directory" != "$repo_dir/.orbit-secrets" ]]; then
+    run_args+=(-v "$secrets_directory:/orbit-secrets:rw" -e "ORBIT_HOST_SECRETS_DIR=$secrets_directory") && directory_args+=(--secrets-dir /orbit-secrets)
+  fi
+  run_args+=(-v "$input_file:/orbit-input/bundle.tar:ro" -e "ORBIT_HOST_INPUT_FILE=$input_file")
+  compose "${run_args[@]}" --entrypoint node orbit-app /opt/orbit/cli/orbit.js "$@" --dir /orbit-deploy "${directory_args[@]}"
 }
-printf '%s' "$recovery_passphrase" |
-  compose run --rm --no-deps -T --entrypoint node orbit-app \
-    /opt/orbit/scripts/recovery-crypto.mjs encrypt /run/secrets/orbit-document-kek \
-    > "$temporary_directory/document-kek.enc"
-unset recovery_passphrase
-[[ "$(head -c 8 "$temporary_directory/document-kek.enc")" == "ORBKEK01" ]] ||
-  fail "Could not create a valid authenticated recovery-key envelope."
-(cd "$temporary_directory" && sha256sum orbit-backup.tar document-kek.enc > checksums.sha256)
-printf 'format_version=1\nkey_encryption=aes-256-gcm-scrypt-n131072-r8-p1\n' > "$temporary_directory/manifest"
-temporary_path="$backup_directory/orbit-recovery-$timestamp.tar.installing"
-tar -C "$temporary_directory" -cf "$temporary_path" manifest checksums.sha256 orbit-backup.tar document-kek.enc
-final_path="$backup_directory/orbit-recovery-$timestamp.tar"
-publish_bundle_atomically
-# Cleared only once the publish succeeded: a refused publish exits above
-# with temporary_path still set, so the cleanup trap removes it.
-temporary_path=""
-printf 'Orbit recovery bundle created: %s\n' "$final_path"
+
+[[ "$#" == 1 ]] || fail "Usage: bash scripts/export-recovery-bundle.sh <backup.tar>"
+source_bundle="$1"
+[[ "$source_bundle" == /* ]] || source_bundle="$PWD/$source_bundle"
+[[ -f "$source_bundle" && ! -L "$source_bundle" && "$source_bundle" != *:* ]] ||
+  fail "Usage: bash scripts/export-recovery-bundle.sh <backup.tar>"
+require_deployment
+engine_host_identity
+run_engine "$source_bundle" export-recovery-bundle /orbit-input/bundle.tar

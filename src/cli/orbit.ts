@@ -277,6 +277,9 @@ function resolveBackupRestorePaths(deployDir: string, directories: BackupRestore
   };
 }
 
+/** EX_TEMPFAIL: another backup or restore holds the backup/restore lock; try again once it finishes. */
+const BACKUP_RESTORE_LOCKED_EXIT_CODE = 75;
+
 const DEPLOYMENT_SHELLS: Record<string, string> = {
   backup: "backup.sh",
   restore: "restore.sh",
@@ -1903,6 +1906,12 @@ function main(): void {
     // attacker-controlled path/member names — asserted by each module's own
     // no-leak sweep), so surfacing `error.message` directly here is safe;
     // anything else is a genuine bug and should keep its stack trace.
+    // Another backup or restore holds the lock: a status of its own, so the
+    // shell leaves orbit-app to the run that owns it (#1211 E3).
+    if (error instanceof BackupRestoreCliRefusal && error.code === "restore-locked") {
+      process.stderr.write(`${displayHostPaths(`orbit: ${error.message}`)}\n`);
+      process.exit(BACKUP_RESTORE_LOCKED_EXIT_CODE);
+    }
     if (
       error instanceof RecoveryBundleRefusal ||
       error instanceof RestoreEngineRefusal ||

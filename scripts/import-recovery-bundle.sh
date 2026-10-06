@@ -1,177 +1,107 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+# Orbit recovery import: the host shell around `orbit import-recovery-bundle`
+# (#1211), which checks the bundle, asks for the passphrase and IMPORT
+# RECOVERY, swaps the document key and restores the inner backup -- all in
+# the engine inside the Orbit image (src/lib/backup-restore-cli.ts) as a
+# compose one-off on orbit-app. This stops orbit-app, runs the engine, then
+# starts orbit-app and waits for health -- unless the inner restore left a
+# journal, which keeps Orbit stopped for restore.sh --recover (build E3).
+
+repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_dir"
 
-readonly recovery_bundle="${1:-}"
 readonly environment_file="${ORBIT_ENV_FILE:-.env-orbit}"
-readonly secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
-readonly live_kek="$secrets_directory/document-kek"
-readonly document_kek_next="$secrets_directory/document-kek-next"
 readonly backup_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
-readonly restore_journal="$backup_directory/.orbit-restore/restore.journal"
-# Same file backup.sh and restore.sh lock on.
-readonly lock_file="${ORBIT_BACKUP_RESTORE_LOCK_FILE:-$backup_directory/.orbit-backup-restore.lock}"
-lock_fd=""
-temporary_directory=""
-previous_kek=""
-key_replaced=false
-app_stopped=false
-unfinished_restore=false
+readonly secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
+readonly journal_path="$backup_directory/.orbit-restore/restore.journal"
+readonly engine_locked_status=75 # another backup/restore holds the lock: that run owns orbit-app
 
 fail() { printf 'Orbit recovery import: %s\n' "$*" >&2; exit 1; }
 compose() { docker compose --env-file "$environment_file" "$@"; }
-cleanup() {
-  if [[ "$unfinished_restore" == true ]]; then
-    printf 'Orbit recovery import: the inner restore evidence was preserved; keep Orbit stopped and run bash scripts/restore.sh --recover.\n' >&2
-  elif [[ "$key_replaced" == true ]]; then
-    # O2-R1: key_replaced is set BEFORE the first of the two renames below,
-    # not after both complete, so a Ctrl-C or dropped session between them
-    # still lands here. Inspect the actual file rather than trusting that
-    # both renames finished: $previous_kek existing on disk is what proves
-    # the live key still needs restoring, whether that is because only the
-    # first rename ran, or because both ran and something later failed.
-    if [[ -f "$previous_kek" && ! -L "$previous_kek" ]]; then
-      compose stop orbit-app >/dev/null 2>&1 || true
-      if mv -f -- "$previous_kek" "$live_kek"; then
-        compose start orbit-app >/dev/null 2>&1 || true
-      else
-        # The rename back failed: $previous_kek -- possibly the ONLY
-        # remaining copy of the old key -- is still inside
-        # $temporary_directory. Never delete that directory in this state;
-        # leave it for the operator rather than destroying the one copy an
-        # already-failing automatic recovery could not restore.
-        printf 'Orbit recovery import: could not restore the previous document key from %s; Orbit is stopped. Restore it by hand before starting Orbit again.\n' \
-          "$previous_kek" >&2
-        return
-      fi
-    elif [[ "$app_stopped" == true ]]; then
-      compose start orbit-app >/dev/null 2>&1 || true
-    fi
-  elif [[ "$app_stopped" == true ]]; then
-    compose start orbit-app >/dev/null 2>&1 || true
-  fi
-  [[ -z "$temporary_directory" ]] || rm -rf -- "$temporary_directory"
-}
-trap cleanup EXIT
 
-read_recovery_passphrase() {
-  if [[ "${ORBIT_RECOVERY_TEST_MODE:-false}" == true ]]; then
-    read -r -s -p '' recovery_passphrase || fail "A recovery passphrase is required on standard input."
+require_deployment() {
+  command -v docker >/dev/null 2>&1 || fail "Docker is required."
+  docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required."
+  command -v curl >/dev/null 2>&1 || fail "curl is required."
+  [[ -f "$environment_file" ]] || fail "Missing ${environment_file}."
+  [[ -d "$secrets_directory" && ! -L "$secrets_directory" ]] || fail "Missing regular secrets directory."
+  [[ -f "$secrets_directory/document-kek" && ! -L "$secrets_directory/document-kek" ]] ||
+    fail "preflight/key failed; the configured document key is missing."
+}
+
+# Who owns what the engine writes: configure.sh's own text (#1210 D5).
+engine_host_identity() {
+  # Read whole, then matched: `docker info | grep -q` under pipefail could
+  # report a SIGPIPE'd docker as "not rootless", the dangerous answer here.
+  local security_options
+  security_options="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null || true)"
+  if [[ "$security_options" == *rootless* ]]; then
+    host_uid=0
+    host_gid=0
   else
-    read -r -s -p 'Recovery passphrase: ' recovery_passphrase </dev/tty || fail "An interactive terminal is required."
-    printf '\n' >&2
+    host_uid="$(id -u)"
+    host_gid="$(id -g)"
   fi
 }
 
-[[ -n "$recovery_bundle" && -f "$recovery_bundle" && ! -L "$recovery_bundle" ]] ||
+# run_engine <bundle> <orbit args...>: see backup.sh; also forwards the drill's switches when set.
+run_engine() {
+  local input_file="$1" name && shift
+  local -a run_args=(run --rm --no-deps -i) directory_args=()
+  if [[ -t 0 && -t 1 ]]; then run_args+=(-t); else run_args+=(-T); fi
+  run_args+=(-e "ORBIT_HOST_UID=$host_uid" -e "ORBIT_HOST_GID=$host_gid" -e "ORBIT_HOST_DEPLOY_DIR=$repo_dir")
+  for name in ORBIT_RECOVERY_TEST_MODE ORBIT_RESTORE_TEST_MODE ORBIT_RESTORE_TEST_SYNC_FAILURE_STAGE \
+    ORBIT_RESTORE_TEST_FAILURE_STAGE ORBIT_RESTORE_TEST_CHECKPOINT_FAILURE ORBIT_RESTORE_TEST_HARD_INTERRUPT_STAGE; do
+    [[ -z "${!name:-}" ]] || run_args+=(-e "$name=${!name}")
+  done
+  run_args+=(-v "$repo_dir:/orbit-deploy:rw")
+  if [[ "$backup_directory" != "$repo_dir/backups" ]]; then
+    { mkdir -p -- "$backup_directory" && chmod 700 -- "$backup_directory"; } || fail "Could not create ${backup_directory}."
+    run_args+=(-v "$backup_directory:/orbit-backups:rw" -e "ORBIT_HOST_BACKUP_DIR=$backup_directory") && directory_args+=(--backup-dir /orbit-backups)
+  fi
+  if [[ "$secrets_directory" != "$repo_dir/.orbit-secrets" ]]; then
+    run_args+=(-v "$secrets_directory:/orbit-secrets:rw" -e "ORBIT_HOST_SECRETS_DIR=$secrets_directory") && directory_args+=(--secrets-dir /orbit-secrets)
+  fi
+  run_args+=(-v "$input_file:/orbit-input/bundle.tar:ro" -e "ORBIT_HOST_INPUT_FILE=$input_file")
+  compose "${run_args[@]}" --entrypoint node orbit-app /opt/orbit/cli/orbit.js "$@" --dir /orbit-deploy "${directory_args[@]}"
+}
+
+# Where compose published orbit-app; an exported value wins over the file (#383, #1241).
+health_probe_url() {
+  local bind_address port
+  bind_address="$(awk -F= '$1 == "ORBIT_BIND_ADDRESS" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
+  port="$(awk -F= '$1 == "ORBIT_PORT" { sub(/^[^=]*=/, ""); value = $0 } END { print value }' "$environment_file")"
+  bind_address="${ORBIT_BIND_ADDRESS:-${bind_address:-0.0.0.0}}"
+  [[ "$bind_address" == "0.0.0.0" ]] && bind_address="127.0.0.1"
+  printf 'http://%s:%s/api/health' "$bind_address" "${ORBIT_PORT:-${port:-3000}}"
+}
+
+wait_for_health() { # 45s, as restore.sh
+  local health_deadline=$((SECONDS + 45)) probe_url
+  probe_url="$(health_probe_url)"
+  until curl --fail --silent --max-time 2 "$probe_url" >/dev/null 2>&1; do
+    (( SECONDS < health_deadline )) || return 1
+    sleep 1
+  done
+}
+
+[[ "$#" == 1 ]] || fail "Usage: bash scripts/import-recovery-bundle.sh <recovery.tar>"
+recovery_bundle="$1"
+[[ "$recovery_bundle" == /* ]] || recovery_bundle="$PWD/$recovery_bundle"
+[[ -f "$recovery_bundle" && ! -L "$recovery_bundle" && "$recovery_bundle" != *:* ]] ||
   fail "Usage: bash scripts/import-recovery-bundle.sh <recovery.tar>"
-command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required."
-command -v tar >/dev/null 2>&1 || fail "tar is required."
-command -v docker >/dev/null 2>&1 || fail "Docker is required."
-[[ -f "$environment_file" ]] || fail "Missing ${environment_file}."
-[[ -d "$secrets_directory" && ! -L "$secrets_directory" ]] || fail "Missing regular secrets directory."
-[[ ! -e "$restore_journal" && ! -L "$restore_journal" ]] ||
-  fail "preflight/journal failed; an unfinished restore exists; run bash scripts/restore.sh --recover before importing another recovery bundle."
-# SS1-S3: a document-KEK rotation holds TWO live keys at once (DOCUMENT_KEK
-# and DOCUMENT_KEK_NEXT, staged at this path per docs/administrator-
-# operations.md's "Rotating the document key-encryption key"). Swapping
-# DOCUMENT_KEK under a rotation in progress would leave the rewrap worker
-# reading one key from this file and a different, unrelated one from
-# DOCUMENT_KEK_NEXT -- never a state this script may create.
-refuse_if_rotation_open() {
-  [[ ! -e "$document_kek_next" && ! -L "$document_kek_next" ]] ||
-    fail "preflight/rotation failed; a document-KEK rotation is open ($document_kek_next exists). Finish it (pnpm rewrap-kek --next-key-file $document_kek_next, then mv $document_kek_next $live_kek and redeploy) or abort it (remove $document_kek_next and redeploy without the docker-compose.kek-rotation.yml overlay) before importing a recovery bundle."
-}
-refuse_if_rotation_open
-
-temporary_directory="$(mktemp -d "${TMPDIR:-/tmp}/orbit-recovery-import.XXXXXX")"
-if ! tar -tf "$recovery_bundle" 2>/dev/null | sort > "$temporary_directory/contents"; then
-  fail "preflight/archive failed; the recovery bundle archive is invalid."
+require_deployment
+engine_host_identity
+compose stop orbit-app >/dev/null || fail "Orbit could not be stopped; the document KEK was not changed."
+status=0
+run_engine "$recovery_bundle" import-recovery-bundle /orbit-input/bundle.tar || status=$?
+[[ "$status" != "$engine_locked_status" ]] || exit "$status"
+if [[ -f "$journal_path" ]]; then
+  printf 'Orbit recovery import: the inner restore evidence was preserved; keep Orbit stopped and run bash scripts/restore.sh --recover.\n' >&2
+  exit "$((status == 0 ? 1 : status))"
 fi
-if ! tar -tvf "$recovery_bundle" 2>/dev/null | awk 'substr($1, 1, 1) != "-" { exit 1 }' >/dev/null; then
-  fail "preflight/archive failed; the recovery bundle contains a link or special file."
-fi
-printf '%s\n' checksums.sha256 document-kek.enc manifest orbit-backup.tar | sort > "$temporary_directory/expected"
-cmp --silent "$temporary_directory/expected" "$temporary_directory/contents" ||
-  fail "preflight/archive failed; the recovery bundle does not contain the expected files."
-if ! tar -xf "$recovery_bundle" -C "$temporary_directory" 2>/dev/null; then
-  fail "preflight/archive failed; the recovery bundle could not be extracted."
-fi
-grep --quiet '^format_version=1$' "$temporary_directory/manifest" ||
-  fail "preflight/manifest failed; the recovery bundle format is unsupported."
-if ! (cd "$temporary_directory" && sha256sum --check --status checksums.sha256) 2>/dev/null; then
-  fail "preflight/checksum failed; a recovery bundle member is corrupt."
-fi
-
-read_recovery_passphrase
-[[ "${#recovery_passphrase}" -ge 12 ]] || fail "A recovery passphrase of at least 12 characters is required."
-chmod 600 "$temporary_directory/document-kek.enc"
-printf '%s' "$recovery_passphrase" |
-  compose run --rm --no-deps -T \
-    --volume "$temporary_directory/document-kek.enc:/recovery/document-kek.enc:ro" \
-    --entrypoint node orbit-app /opt/orbit/scripts/recovery-crypto.mjs decrypt /recovery/document-kek.enc \
-    > "$temporary_directory/document-kek" 2>/dev/null ||
-  fail "preflight/decryption failed; the recovery key could not be decrypted."
-unset recovery_passphrase
-recovered_kek="$(tr -d '\r\n' < "$temporary_directory/document-kek")"
-[[ "$recovered_kek" =~ ^[0-9a-fA-F]{64}$ ]] || fail "Recovery passphrase did not decrypt a valid document KEK."
-unset recovered_kek
-chmod 600 "$temporary_directory/document-kek"
-
-printf 'This will replace the local document KEK and restore:\n  %s\n' "$recovery_bundle"
-if [[ "${ORBIT_RECOVERY_TEST_MODE:-false}" == true ]]; then
-  read -r -p '' confirmation || fail "A recovery confirmation is required on standard input."
-else
-  read -r -p 'Type IMPORT RECOVERY to continue: ' confirmation </dev/tty || fail "An interactive terminal is required."
-fi
-[[ "$confirmation" == 'IMPORT RECOVERY' ]] || fail "Recovery import cancelled."
-# The passphrase and confirmation prompts above can sit open for as long as
-# the operator takes; a rotation opened meanwhile must still be refused, so
-# the check runs again here, right before anything is swapped.
-refuse_if_rotation_open
-# Taken here, not left to restore.sh: the app stop and the key swap below
-# happen before restore.sh starts, and a scheduled backup landing in that gap
-# would otherwise encrypt a bundle with the swapped key. restore.sh inherits
-# this descriptor and, told so, does not take the lock a second time.
-mkdir -p "$backup_directory"
-exec {lock_fd}>"$lock_file" || fail "preflight/lock failed; could not open the backup/restore lock file at ${lock_file}."
-if ! flock -n "$lock_fd"; then
-  printf 'Orbit recovery import: another backup or restore is already running; waiting for it to finish...\n' >&2
-  flock "$lock_fd" || fail "preflight/lock failed; could not acquire the backup/restore lock at ${lock_file}."
-fi
-# And once more with the lock held: the wait above can last a whole backup,
-# and a rotation opened during it must still be refused before the swap.
-refuse_if_rotation_open
-[[ -f "$live_kek" && ! -L "$live_kek" ]] || fail "The current document KEK must be a regular file."
-compose stop orbit-app >/dev/null
-app_stopped=true
-previous_kek="$temporary_directory/previous-document-kek"
-# O2-R1: set BEFORE the first rename, not after both complete — see
-# cleanup()'s own comment for why the flag alone is no longer what decides
-# whether to restore; this only has to be true early enough that cleanup
-# always reaches the file-inspection branch while the swap is mid-flight.
-key_replaced=true
-mv -- "$live_kek" "$previous_kek"
-mv -- "$temporary_directory/document-kek" "$live_kek"
-
-# restore.sh authenticates the inner bundle with the recovered KEK. Revert the
-# key automatically if the inner restore fails, keeping the prior deployment usable.
-if ORBIT_RESTORE_ROLLBACK_KEK_FILE="$previous_kek" ORBIT_BACKUP_RESTORE_LOCK_HELD=1 bash scripts/restore.sh "$temporary_directory/orbit-backup.tar"; then
-  app_stopped=false
-  key_replaced=false
-  rm -f -- "$previous_kek"
-  previous_kek=""
-  trap - EXIT
-  rm -rf -- "$temporary_directory"
-  temporary_directory=""
-  printf 'Orbit recovery import completed successfully.\n'
-else
-  if [[ -f "$restore_journal" ]]; then
-    unfinished_restore=true
-    key_replaced=false
-    fail "Inner backup restore left durable recovery evidence; run bash scripts/restore.sh --recover."
-  fi
-  fail "Inner backup restore failed; the previous document key was restored."
-fi
+compose start orbit-app >/dev/null 2>&1 || fail "Orbit could not be started again."
+wait_for_health || fail "Orbit did not become healthy after the import."
+exit "$status"
