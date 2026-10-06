@@ -19,8 +19,16 @@ the same commit and says why.
 | `configuration-migration/matrix.json` | `configuration.sh --check/--preflight/--migrate` over 94 inputs: exit status, stdout, stderr, the file, rollback copy and lock afterwards | `configuration-migration.parity.test.ts` |
 | `configuration-migration-parity/` | install.sh's preflight/migrate hand-off (`runConfigurationMigration`) | `configuration-migration.parity.test.ts` |
 | `session-secret-configure/` | `configure.sh` accepting or refusing each session-secret candidate | `session-secret.contract.test.ts` |
+| `restore-sh/` | restore.sh's correspondence queries and scan-lease statement as passed to psql, `checkpoint_sha256` on a fixed file, `load_recovery_journal`'s format rules, `check_capacity` at each threshold (#1211) | `restore-engine.parity.test.ts` |
+| `import-recovery-bundle-sh/` | `import-recovery-bundle.sh`'s refusals before its first Docker call: archive, member set, checksum, format, prior journal, open rotation (#1211) | `src/cli/orbit.backup-restore.test.ts` |
+| `backup-sh-verify/` | `backup.sh --verify`'s layout and format refusals (#1211) | `src/cli/orbit.backup-restore.test.ts` |
 
-How they were captured: the parity tests' own bash halves were run with a
+#1211 captured the last three from `6448f07e` (the scripts unchanged since
+`d6a365a3`), before backup.sh, restore.sh and the recovery-bundle scripts
+became thin shells, with a throwaway script that ran each bash half the
+retired parity tests ran.
+
+How the #1210 ones were captured: the parity tests' own bash halves were run with a
 one-off capture switch, and two throwaway scripts drove the remaining cases
 (`configure.sh` with a fake `docker`/`openssl` on PATH, and `configuration.sh`
 with the inputs of the retired `scripts/configuration.test.mjs`). Generated

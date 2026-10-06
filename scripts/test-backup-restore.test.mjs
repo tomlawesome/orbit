@@ -31,9 +31,9 @@ vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 // the answer.
 //
 // This is the same defect scripts/restore.sh had and fixed under #383
-// finding 3, which is why health_probe_url exists there. The suite below
-// mirrors scripts/restore.test.mjs deliberately, and like it tests the real
-// functions extracted verbatim out of the live shell script — never a
+// finding 3, which is why health_probe_url exists there (restore.sh keeps
+// this drill's own function, word for word, since #1211). The suite below
+// tests the real functions extracted verbatim out of the live shell script — never a
 // hand-typed duplicate — so a regression in the actual fix is caught here
 // rather than only in a copy.
 

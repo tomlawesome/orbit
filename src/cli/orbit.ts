@@ -26,6 +26,7 @@ import {
   runBackup,
   runExportRecoveryBundle,
   runImportRecoveryBundle,
+  runRecoverRestore,
   runRestore,
   verifyBackupBundle,
 } from "../lib/backup-restore-cli";
@@ -72,6 +73,7 @@ import {
 } from "../lib/restore-engine";
 import { formatEngineEventLine } from "../lib/engine-event";
 import { HostOwnershipError } from "../lib/host-ownership";
+import { displayHostPaths } from "../lib/host-paths";
 import { type InstallOrchestratorAdapters, type InstallOrchestratorContext, runInstall } from "../lib/install-orchestrator";
 import { createInstallDockerAdapter } from "../lib/install-docker-adapter";
 import { checkCurlAvailable, createInstallOidcFetchAdapter } from "../lib/install-curl-adapter";
@@ -101,29 +103,6 @@ import {
 function fail(message: string): never {
   process.stderr.write(`${displayHostPaths(message)}\n`);
   process.exit(1);
-}
-
-// The backup/restore shells mount the deployment, an outside backup or
-// secrets directory, and the bundle being read at fixed container paths
-// (#1211 build note E5) and say where each came from on the host, so a path
-// the engine prints is one the operator can open: "Orbit backup created:
-// /srv/orbit/backups/...", never "/orbit-deploy/backups/...".
-const HOST_PATH_MAPPINGS: readonly (readonly [string, string])[] = [
-  ["/orbit-input/bundle.tar", "ORBIT_HOST_INPUT_FILE"],
-  ["/orbit-deploy", "ORBIT_HOST_DEPLOY_DIR"],
-  ["/orbit-backups", "ORBIT_HOST_BACKUP_DIR"],
-  ["/orbit-secrets", "ORBIT_HOST_SECRETS_DIR"],
-];
-
-function displayHostPaths(text: string): string {
-  let result = text;
-  for (const [mount, variable] of HOST_PATH_MAPPINGS) {
-    const hostPath = process.env[variable];
-    if (!hostPath || !hostPath.startsWith("/")) continue;
-    const escaped = mount.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    result = result.replace(new RegExp(`${escaped}(?=/|\\s|$|[).,;:])`, "g"), () => hostPath);
-  }
-  return result;
 }
 
 function writeResult(line: string): void {
@@ -1008,7 +987,7 @@ function commandRestore(deployDir: string, args: string[], directories: BackupRe
     if (backupFile !== undefined || yesFlag) fail("orbit: usage: --recover accepts no other arguments");
     const workDir = mkdtempSync(join(tmpdir(), "orbit-restore-recover-"));
     withScratchDirectory(workDir, () => {
-      recoverRestore({ adapter, paths: restorePaths, workDir, hooks });
+      runRecoverRestore({ adapter, paths: restorePaths, workDir, hooks });
       writeResult("Orbit recovery completed; the prior database, document tree, and key state were restored.");
     });
     process.exit(0);
