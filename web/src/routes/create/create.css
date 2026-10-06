@@ -110,9 +110,14 @@ body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
 .create-page .field.mono input{font-family:var(--mono)}
 
 /* The heading IS the name (owner, 2026-08-15): you edit the title of the
-   card itself, so there is no separate name box. Styled as the card's h2. */
+   card itself, so there is no separate name box. Styled as the card's h2.
+   It ships empty (#1251): a quiet placeholder at heading size and a resting
+   underline say "type here" where a pre-filled default read as named, and
+   entry.js's refusalOf holds the save until a name is given. */
 .create-page .name-title{display:block;width:100%;background:none;border:0;padding:0;
+  border-bottom:1px solid var(--line);
   font:600 22px var(--display);line-height:1.25;color:var(--ink)}
+.create-page .name-title::placeholder{color:var(--ink-quiet);opacity:1}
 .create-page .name-title:focus{border-bottom:1px solid var(--accent)}
 
 .create-page .types{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}

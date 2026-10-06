@@ -101,3 +101,49 @@ test("the create form saves a real item into the orbit", async ({ page }) => {
     await households.sweep(page);
   }
 });
+
+/**
+ * #1251: the title ships empty, so an item cannot be saved under a name
+ * nobody gave it. On the desk the heading field arrives focused with a
+ * "Name this entry" placeholder and the save waits for a name; the phone's
+ * own form already refuses an empty name in the same words, pinned here.
+ */
+test("the create form will not save an entry nobody has named", async ({ page }) => {
+  await answerPushWithoutAService(page);
+  await page.goto("/api/auth/login?returnTo=/home");
+  await page.getByRole("link", { name: workerAccount("administrator") }).click();
+  await settleArrival(page);
+  await ensureWorkerAdministrator(page);
+  households.track(await seedHousehold(page));
+
+  try {
+    await gotoCreate(page);
+    const dueDate = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+    if (test.info().project.name.startsWith("mobile")) {
+      const form = page.getByRole("form", { name: "New entry" });
+      await form.getByRole("button", { name: "service" }).click();
+      await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+      await form.getByLabel("due date").fill(dueDate);
+      const save = page.getByRole("button", { name: "Add to orbit" });
+      await expect(save).toBeDisabled();
+      await expect(page.locator("#pk-refusal")).toHaveText("not yet — give it a name");
+      await form.getByRole("textbox", { name: "name", exact: true }).fill("Gutter clearing proving");
+      await expect(save).toBeEnabled();
+    } else {
+      const name = page.locator("#f-name");
+      await expect(name).toBeFocused();
+      await expect(name).toHaveValue("");
+      await expect(name).toHaveAttribute("placeholder", "Name this entry");
+      await page.locator('#types button[data-type="service"]').click();
+      await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+      await page.locator("#f-date").fill(dueDate);
+      const save = page.locator(".btn-primary");
+      await expect(save).toBeDisabled();
+      await expect(page.locator("#save-note")).toHaveText("not yet — give it a name");
+      await name.fill("Gutter clearing proving");
+      await expect(save).toBeEnabled();
+    }
+  } finally {
+    await households.sweep(page);
+  }
+});

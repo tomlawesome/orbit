@@ -65,6 +65,10 @@
 
   onMount(() => {
     form = mountCreate();
+    /* #1251: the desk's heading is the form's first control and ships empty,
+       so it takes the caret on arrival. Not on a phone: the keyboard must
+       not pop over the page. */
+    if (!isPocket()) document.getElementById("f-name")?.focus({ preventScroll: true });
     let disposed = false;
     let backdropTeardown = () => {};
     /* The backdrop's households come through the same seam home's sky does
@@ -119,7 +123,7 @@
   <div class="lanes">
 
   <form class="glass card" id="card">
-    <input id="f-name" class="name-title" value="New Entry" aria-label="name" autocomplete="off">
+    <input id="f-name" class="name-title" placeholder="Name this entry" aria-label="name" autocomplete="off">
     <div class="sub">add something to your orbit</div>
 
     <div class="field">
