@@ -1,0 +1,8 @@
+[
+  {
+    "kind": "preflight",
+    "status": 1,
+    "stdout": "",
+    "file": "this is not a valid assignment line\n"
+  }
+]

@@ -1,0 +1,7 @@
+{
+  "bash": {
+    "status": 1,
+    "stdout": "",
+    "stderr": "Orbit configuration: Refusing to check .env-orbit because its permissions are not restricted to the owner.\n"
+  }
+}

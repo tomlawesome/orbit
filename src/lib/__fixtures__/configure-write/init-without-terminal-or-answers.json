@@ -1,0 +1,8 @@
+{
+  "result": {
+    "status": 1,
+    "stdout": "",
+    "stderr": "Orbit configuration: Guided configuration needs a controlling terminal, or the complete ORBIT_CONFIGURE_APP_URL, ORBIT_CONFIGURE_OIDC_ISSUER and ORBIT_CONFIGURE_OIDC_CLIENT_ID environment set for non-interactive use.\n"
+  },
+  "env": null
+}

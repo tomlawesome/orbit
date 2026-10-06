@@ -1,0 +1,7 @@
+{
+  "bash": {
+    "status": 1,
+    "stdout": "missing APP_URL\nmissing ORBIT_IMAGE\nnot in use OIDC_ISSUER\nnot in use OIDC_CLIENT_ID\nnot in use OIDC_CLIENT_SECRET\nnot in use OIDC_CALLBACK_URL\noptional processing\noptional ai\noptional mail\napp-managed imap\noptional push\n",
+    "stderr": ""
+  }
+}
