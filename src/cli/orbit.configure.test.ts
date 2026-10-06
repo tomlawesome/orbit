@@ -157,10 +157,10 @@ describe("orbit configure --init", () => {
     expect(existsSync(join(sandbox, ".env-orbit"))).toBe(false);
   });
 
-  it("refuses (no crash, no partial write) with neither env vars nor machine-prompt mode set — this engine has no controlling terminal", () => {
+  it("refuses (no crash, no partial write) with no answers, no machine prompts and no terminal", () => {
     const result = runCli(["configure", "--init", "--dir", sandbox]);
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("no controlling terminal");
+    expect(result.stderr).toContain("Guided configuration needs a controlling terminal, or the complete ORBIT_CONFIGURE_APP_URL");
     expect(existsSync(join(sandbox, ".env-orbit"))).toBe(false);
   });
 });
