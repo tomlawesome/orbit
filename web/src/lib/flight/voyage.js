@@ -489,10 +489,16 @@ void main(){
 
 /* the door's camera (tools/dawn.py): over the Atlantic, facing the sunrise over Europe */
 const RE = 6371, ALT = 800, LAT = 46, LON = -27, HEAD = 72, SUN_UNDER = 0.15;
+/** @typedef {number[]} V3 */
+/** @param {V3} a @param {V3} b @returns {V3} */
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+/** @param {V3} a @param {V3} b */
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+/** @param {V3} a @param {V3} b @returns {V3} */
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+/** @param {V3} a @param {number} k @returns {V3} */
 const mul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
+/** @param {V3} a @returns {V3} */
 const norm = (a) => mul(a, 1 / Math.hypot(...a));
 function doorCamera() {
   const r = Math.PI / 180, la = LAT * r, lo = LON * r, hd = HEAD * r;
@@ -534,9 +540,10 @@ function createVoyage() {
   if (typeof document === "undefined") return null;
   const canvas = document.createElement("canvas");
   canvas.id = "warpgl"; canvas.setAttribute("aria-hidden", "true");
-  const gl = /** @type {WebGL2RenderingContext | null} */ (canvas.getContext("webgl2",
+  const asked = /** @type {WebGL2RenderingContext | null} */ (canvas.getContext("webgl2",
     { antialias: false, alpha: false, depth: false, powerPreference: "high-performance" }));
-  if (!gl || !gl.getExtension("EXT_color_buffer_float")) return null;
+  if (!asked || !asked.getExtension("EXT_color_buffer_float")) return null;
+  const gl = asked;
   gl.getExtension("OES_texture_float_linear");
   const since = performance.now();
 

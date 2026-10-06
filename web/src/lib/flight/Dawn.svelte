@@ -64,7 +64,8 @@
     const images = /** @type {SVGImageElement[]} */ ([...world.querySelectorAll("image[data-href]")]);
     /** @param {SVGImageElement} im */
     const arrive = (im) => new Promise((resolve) => {
-      const done = (/** @type {Event} */ e) => {
+      /** @type {(e: Event) => void} */
+      const done = (e) => {
         if (!cancelled && e.type === "load") {
           im.classList.add("in");
           if (im.classList.contains("pre")) world.classList.add("earthy");
