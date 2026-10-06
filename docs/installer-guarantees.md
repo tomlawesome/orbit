@@ -915,8 +915,8 @@ and a separate `--recover` manual-recovery mode for crash safety.
 
 1. Accepts at most one argument, and it must be exactly `--no-pull`, or the script refuses with usage text.
    `build-container.sh:10-13` — category: input-validation — criticality: LOW
-2. Requires `.env-orbit` to exist, pointing the operator to `configure.sh` if missing, before attempting a build.
-   `build-container.sh:15-18` — category: input-validation / refusal — criticality: MEDIUM
+2. Needs no `.env-orbit`: the image is built straight from the Dockerfile with `docker buildx build`, not through Compose, so a checkout with no configuration can still build the image that configuration runs inside (#1210).
+   `build-container.sh:15-18` — category: deployment-correctness — criticality: MEDIUM
 3. Requires docker, Node.js, and Docker Compose v2 before proceeding.
    `build-container.sh:19-30` — category: input-validation — criticality: MEDIUM
 4. Built image is tagged with the short (12-char) git commit hash of `HEAD`, tying every local image to an exact, unambiguous source commit.
@@ -932,7 +932,7 @@ and a separate `--recover` manual-recovery mode for crash safety.
 
 1. Mode argument is restricted to exactly `--pull` or `--build`; anything else fails with usage text.
    `deploy-container.sh:16-17` — category: input-validation — criticality: LOW
-2. Requires `.env-orbit`, docker, and Docker Compose v2 present before doing anything.
+2. Requires docker and Docker Compose v2 present before doing anything; it does not need `.env-orbit`, because `configure.sh` creates it after the image is built or pulled.
    `deploy-container.sh:18-21` — category: input-validation — criticality: MEDIUM
 3. In `--pull` mode, `ORBIT_IMAGE` must resolve to a fully-qualified, immutable registry digest reference (`name@sha256:<64-hex>`) — a mutable tag (e.g. `latest`) is refused, so pull-based deploys are always pinned to an exact image.
    `deploy-container.sh:23-29` — category: provenance/immutability — criticality: HIGH

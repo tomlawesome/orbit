@@ -185,12 +185,10 @@ Two scripts then matter, and each needs something the other can produce.
 `bash scripts/configure.sh` runs inside the Orbit image, so it needs one: an
 `ORBIT_IMAGE` in your environment (a registry digest, or the local tag
 `build-container.sh` builds) or in `.env-orbit`; a local tag that has not
-been built yet is refused. `bash scripts/build-container.sh` still needs an
-existing `.env-orbit`. How a source build should start on a checkout that has
-no `.env-orbit` yet is an open question on issue #1210 (configure runs in the
-engine), so this page does not give a command sequence for that case. On a
-checkout that already has `.env-orbit`, `bash scripts/deploy-container.sh
---build` does the whole job, in the right order.
+been built yet is refused. `bash scripts/build-container.sh` needs no
+`.env-orbit`, so on a fresh checkout `bash scripts/deploy-container.sh
+--build` does the whole job in the right order: build the image, run
+configuration, start Orbit.
 
 [Running Orbit](operating.md#running-a-source-checkout) covers starting and
 updating a checkout, and [Testing Orbit](testing.md#local-development) covers
