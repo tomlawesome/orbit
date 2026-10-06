@@ -75,8 +75,14 @@ body.lit .rays{opacity:1;transform:scale(1,1)}
              animation:sway2 63s ease-in-out infinite alternate}
 @keyframes sway1{from{transform:rotate(-1.8deg)}to{transform:rotate(2.1deg)}}
 @keyframes sway2{from{transform:rotate(1.5deg)}to{transform:rotate(-1.3deg)}}
-.scatter{animation:breathe-band 9s ease-in-out infinite alternate}
-@keyframes breathe-band{from{opacity:.8}to{opacity:1}}
+/* THE EARTH (#1253, Dawn.svelte): each picture fades in as it arrives; the
+   one with the sunrise on it waits for first light and comes up slowly with
+   it, and the crisp rim gives way once the picture carries the limb */
+#dawn .earth image{opacity:0;transition:opacity 1.2s ease}
+#dawn .earth image.in{opacity:1}
+#dawn .earth .up.in{opacity:0;transition:opacity 4.5s cubic-bezier(.4,0,.3,1) .3s}
+body.lit #dawn .earth .up.in{opacity:1}
+#dawn .world.earthy .rim{opacity:0}
 .zodiacal{animation:zbreathe 13s ease-in-out infinite alternate;mix-blend-mode:screen}
 @keyframes zbreathe{from{opacity:.55}to{opacity:.95}}
 
@@ -280,9 +286,15 @@ body[data-state="incomplete"] #dawn .state-primary{top:calc(50% + 172px)}
 body[data-state="incomplete"] #dawn .state-sub{top:calc(50% + 204px)}
 
 /* ══ THE FLIGHT ══════════════════════════════════════════════════════════ */
-#warp{position:fixed;inset:0;z-index:5;opacity:0;pointer-events:none;
+/* #warpgl is the flight's WebGL2 world (voyage.js), set just beneath #warp
+   when it can be had; the two come and go together */
+#warp,#warpgl{position:fixed;inset:0;z-index:5;opacity:0;pointer-events:none;
       transition:opacity 1.7s cubic-bezier(.45,.05,.55,.95)}
-body.showwarp #warp{opacity:1;transition:opacity .45s ease}
+body.showwarp #warp,body.showwarp #warpgl{opacity:1;transition:opacity .45s ease}
+/* holding (#1253, Flight.svelte): the climb started before its world was
+   ready waits on its opening, the mark at the centre breathing (orbit-site) */
+body.holding #flightmark.on circle:first-child{animation:holding 1.1s ease-in-out infinite alternate}
+@keyframes holding{from{opacity:.85}to{opacity:.4}}
 /* §15 second pass, ruling 2: the canvas does NOT cut out under the bloom. It
    dissolves over 1.7 near-linear seconds, so the glow it is holding is still
    on the screen while the planets condense out of it. */
@@ -359,7 +371,7 @@ body.showwarp .grain{opacity:.26}
    not then play out from where they were — they are the journey, and the
    journey is already over. Fixture-only: nothing sets `pinned` in the
    product. */
-body.pinned #dawn,body.pinned #dusk,body.pinned #warp,body.pinned #flightmark,
+body.pinned #dawn,body.pinned #dusk,body.pinned #warp,body.pinned #warpgl,body.pinned #flightmark,
 body.pinned #launchname,body.pinned .loginchrome,body.pinned .gate{
   transition:none!important}
 
@@ -371,7 +383,7 @@ body.pinned #launchname,body.pinned .loginchrome,body.pinned .gate{
    tells the same story without any motion. */
 @media (prefers-reduced-motion: reduce){
   #dawn *,#dusk *{animation:none!important}
-  #flightmark,#launchname,#warp{display:none!important}
+  #flightmark,#launchname,#warp,#warpgl{display:none!important}
   #dawn,#dusk,.loginchrome,.loginchrome .lockup{
     transition-duration:.7s!important;transition-timing-function:ease!important}
   /* .gate, not .gate-wrap: the wrapper's transform is the layout that drops
@@ -379,6 +391,10 @@ body.pinned #launchname,body.pinned .loginchrome,body.pinned .gate{
      would land the button on top of the name (08-14's own note). */
   .dawnlayer,.rim,#dawn .shimmer,.sunpt,.rays,.gate{
     opacity:1!important;transform:none!important;transition:none}
+  /* the Earth arrives at once; the crisp rim still gives way to it */
+  #dawn .earth image{transition:none!important}
+  #dawn .earth image.in{opacity:1!important}
+  #dawn .world.earthy .rim{opacity:0!important}
   /* The held-dawn dimming above is motion-adjacent mood, not the state's
      accessible channel — that is the text and the button's presence, both
      unaffected by this block — so reduced motion keeps the sky at rest
