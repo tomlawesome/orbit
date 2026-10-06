@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
+import { settleArrival } from "./support/arrival";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
@@ -39,6 +40,11 @@ async function signIn(page: Page, returnTo: string) {
   await page.getByRole("link", { name: READER() }).click();
   /* #1080: waits for the session, then holds administrator access. */
   await ensureWorkerAdministrator(page);
+  /* #1249: an administrator with no household lands on the arrival, which
+     decides from its own reads; one answered after the seed below hands the
+     reader to /home with location.replace and aborts the goto that follows
+     (net::ERR_ABORTED, NS_BINDING_ABORTED). Wait for the decision first. */
+  await settleArrival(page, 20_000, returnTo);
 }
 
 /**
