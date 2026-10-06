@@ -10,9 +10,8 @@ import { checkCurlAvailable, createInstallOidcFetchAdapter } from "./install-cur
 // (OidcDiscoveryFetchAdapter), and the host-tool check. There is no
 // asset-fetch adapter to cover any more: ADR-0019 moved the deployment
 // assets inside the image. A fake `curl` bash script logs its exact argv
-// (mirroring recovery-bundle.docker-adapter.test.ts's fakeDockerScript
-// technique) so
-// each method's flag set can be asserted precisely against install.sh's own
+// (the same PATH-shim fake-tool technique in-container-adapter.test.ts
+// uses) so each method's flag set can be asserted precisely against install.sh's own
 // cited call sites, with no real network access.
 
 const sandboxes: string[] = [];

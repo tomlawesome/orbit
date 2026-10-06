@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -23,7 +23,6 @@ import {
   type RestorePaths,
   RestoreEngineRefusal,
   RestoreRun,
-  createDockerComposeRestoreAdapter,
   deriveRestorePaths,
   listOrphanedCheckpoints,
   loadRestoreJournal,
@@ -33,7 +32,7 @@ import {
 
 // End-to-end RestoreRun/recoverRestore coverage against a trivial in-memory
 // fake RestoreDockerAdapter — no process spawning, no Docker daemon,
-// mirroring recovery-bundle.docker-adapter.test.ts's "(1) in-memory fake
+// mirroring recovery-bundle.backup.test.ts's "(1) in-memory fake
 // adapter" section. The real createDockerComposeRestoreAdapter's argv shape
 // is proven separately by restore-engine.parity.test.ts's awk-extracted SQL
 // text equality (a live daemon is out of reach in this sandbox, matching
@@ -657,142 +656,6 @@ describe("preflightValidateBundle (restore.sh:334-353, guarantees #7-10)", () =>
     expect(() => preflightValidateBundle({ adapter, databaseDumpPath, stagedDocumentsRoot, stagingId: "preflight-test-2" })).toThrow(RestoreEngineRefusal);
     // Live documents are completely untouched by a preflight-only check.
     expect(readFileSync(join(liveDocumentsRoot, "objects", ORIGINAL_KEY.slice(0, 2), ORIGINAL_KEY.slice(2, 4), `${ORIGINAL_KEY}.bin`))).toHaveLength(10);
-  });
-});
-
-// --- createDockerComposeRestoreAdapter: PATH-shim, no real daemon — psql
-// maxBuffer (#383) ----------------------------------------------------------
-//
-// queryReport/queryActiveReport spawn `docker compose exec ... psql` with
-// stdio "pipe" and previously no explicit maxBuffer, so Node's 1 MiB default
-// applied: once a correspondence report's stdout exceeded it, spawnSync
-// SIGTERMed the child (status=null, error.code=ENOBUFS) and the adapter
-// refused as "query-report-failed" — indistinguishable from a genuine query
-// failure. A real crypto-correspondence report row is ~120 bytes, so this
-// bites at roughly 8,700 document_crypto rows, an ordinary size for a
-// multi-year household. This drives a fake `docker` executable (mirroring
-// recovery-bundle.docker-adapter.test.ts's own PATH-shim technique) that
-// emits a synthetic >1 MiB psql report and asserts it comes back intact.
-
-const fakePsqlDockerScript = [
-  "#!/usr/bin/env bash",
-  // Deliberately no `-o pipefail`: the `yes | head -c` pipeline below is
-  // *expected* to have `yes` killed by SIGPIPE once `head` stops reading —
-  // under pipefail that would make the pipeline itself "fail" and abort the
-  // script under `-e`, even though the report is emitted correctly.
-  "set -Eeu",
-  "# Real Docker's refusals, so this fake cannot be more permissive than the",
-  "# tool the adapter really drives. Verified against docker 29.7.2 /",
-  "# compose v2.41.0 on 2026-09-08 and re-asserted against the real binaries by",
-  "# scripts/tool-parity.test.mjs: the `docker` CLI answers an unknown flag with",
-  "# exit 125 and an unknown subcommand with exit 1, while `docker compose`,",
-  "# being a plugin, uses exit 1 for both. `-T` is a real `compose exec` flag and",
-  "# has never been a plain `docker exec` one -- which is how #607 shipped",
-  "# `docker exec -T` past 66 green tests.",
-  "refuse_flag() {",
-  '  printf "unknown flag: %s\\n" "$1" >&2',
-  '  exit "${2:-125}"',
-  "}",
-  "refuse_shorthand() {",
-  "  printf \"unknown shorthand flag: '%s' in -%s\\n\" \"$1\" \"$1\" >&2",
-  '  exit "${2:-125}"',
-  "}",
-  "parse_flags() {",
-  '  local value_flags=" $1 " bool_flags=" $2 " stop_early="$3" status="$4" flag',
-  "  shift 4",
-  "  positionals=()",
-  "  while (( $# > 0 )); do",
-  '    case "$1" in',
-  '      --) shift; positionals+=("$@"); return 0 ;;',
-  "      -*)",
-  '        flag="${1%%=*}"',
-  '        if [[ "$value_flags" == *" $flag "* ]]; then',
-  '          if [[ "$1" == *=* ]]; then',
-  "            shift",
-  "          elif (( $# >= 2 )); then",
-  "            shift 2",
-  "          else",
-  '            printf "flag needs an argument: %s\\n" "$flag" >&2',
-  '            exit "$status"',
-  "          fi",
-  '        elif [[ "$bool_flags" == *" $flag "* ]]; then',
-  "          shift",
-  '        elif [[ "$flag" == --* ]]; then',
-  '          refuse_flag "$flag" "$status"',
-  "        else",
-  '          refuse_shorthand "${flag:1:1}" "$status"',
-  "        fi",
-  "        ;;",
-  "      *)",
-  '        positionals+=("$1")',
-  "        shift",
-  '        if [[ "$stop_early" == "1" ]]; then positionals+=("$@"); return 0; fi',
-  "        ;;",
-  "    esac",
-  "  done",
-  "}",
-  '[[ "${1:-}" == "compose" ]] || { printf \'docker: unknown command: docker %s\\n\' "${1:-}" >&2; exit 1; }',
-  '# Both adapters only ever issue `docker compose --env-file <path> ...`.',
-  '  parse_flags "-p --project-name --env-file -f --file --project-directory --profile --progress --ansi --parallel" "--dry-run --compatibility --all-resources" 1 1 "${@:2}"',
-  '  compose_subcommand="${positionals[0]:-}"',
-  '  compose_rest=("${positionals[@]:1}")',
-  '  case "$compose_subcommand" in',
-  '    stop|start) parse_flags "-t --timeout" "" 1 1 "${compose_rest[@]}" ;;',
-  '    exec) parse_flags "-e --env -u --user -w --workdir --index" "-d --detach --privileged -T --no-TTY -i --interactive -t --tty" 1 1 "${compose_rest[@]}" ;;',
-  '    run) parse_flags "-e --env -l --label -u --user -w --workdir -v --volume -p --publish --name --entrypoint --scale" "--rm --no-deps -T --no-TTY -d --detach -i --interactive -t --tty --build --quiet-pull --use-aliases --remove-orphans --service-ports" 1 1 "${compose_rest[@]}" ;;',
-  '    ps) parse_flags "--filter --format --status" "-a --all -q --quiet --services --no-trunc --orphans" 0 1 "${compose_rest[@]}" ;;',
-  '    *) printf \'unknown docker command: "compose %s"\\n\' "$compose_subcommand" >&2; exit 1 ;;',
-  "  esac",
-  'joined="$*"',
-  'case "$joined" in',
-  "  *psql*)",
-  // Emits a report well past Node's old 1 MiB spawnSync maxBuffer default,
-  // shaped like real correspondence rows (uuid|64-hex|size|lifecycle).
-  '    yes "11111111-1111-4111-8111-111111111111|deadbeef|1024|available" | head -c 3145728',
-  "    exit 0",
-  "    ;;",
-  "  *)",
-  "    # Not a docker refusal: 99 is this fake's own sentinel for a call it does",
-  "    # not model, deliberately a status no real docker produces so an",
-  "    # unmodelled call can never be read as a real failure. The flag parser",
-  "    # above is what stands in for docker's actual refusals.",
-  "    exit 99",
-  "    ;;",
-  "esac",
-  "",
-].join("\n");
-
-function makeFakePsqlDockerBin(): string {
-  const binDir = mkdtempSync(join(tmpdir(), "orbit-restore-psql-fakebin-"));
-  writeFileSync(join(binDir, "docker"), fakePsqlDockerScript);
-  chmodSync(join(binDir, "docker"), 0o755);
-  return binDir;
-}
-
-describe("createDockerComposeRestoreAdapter's psql maxBuffer (#383)", () => {
-  let binDir: string;
-  let envFile: string;
-
-  beforeEach(() => {
-    binDir = makeFakePsqlDockerBin();
-    envFile = join(sandbox, ".env-orbit-psql-maxbuffer");
-    writeFileSync(envFile, "FAKE=1\n");
-  });
-
-  afterEach(() => {
-    rmSync(binDir, { recursive: true, force: true });
-  });
-
-  it("queryReport returns a >1 MiB report intact instead of refusing query-report-failed", () => {
-    const adapter = createDockerComposeRestoreAdapter({ envFile, env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` } });
-    const report = adapter.queryReport("orbit_restore_stage_test", CORRESPONDENCE_QUERIES.crypto);
-    expect(report.length).toBeGreaterThan(1024 * 1024);
-  });
-
-  it("queryActiveReport returns a >1 MiB report intact instead of refusing query-report-failed", () => {
-    const adapter = createDockerComposeRestoreAdapter({ envFile, env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` } });
-    const report = adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto);
-    expect(report.length).toBeGreaterThan(1024 * 1024);
   });
 });
 

@@ -65,7 +65,14 @@ function newFixture(overrides: NodeJS.ProcessEnv = {}): Fixture {
 
   writeFileSync(join(bin, "pg_dump"), fakeTool("pg_dump", 'if [[ "${1:-}" == --version ]]; then printf "pg_dump (PostgreSQL) %s\\n" "${FAKE_PG_DUMP_VERSION:-18.6}"; exit 0; fi\nprintf "PGDMP-fake"\nexit "${FAKE_PG_DUMP_STATUS:-0}"'), { mode: 0o755 });
   writeFileSync(join(bin, "pg_restore"), fakeTool("pg_restore", 'exit "${FAKE_PG_RESTORE_STATUS:-0}"'), { mode: 0o755 });
-  writeFileSync(join(bin, "psql"), fakeTool("psql", 'printf "%b" "${FAKE_PSQL_STDOUT:-}"\nexit "${FAKE_PSQL_STATUS:-0}"'), { mode: 0o755 });
+  writeFileSync(
+    join(bin, "psql"),
+    fakeTool(
+      "psql",
+      'if [[ -n "${FAKE_PSQL_ROWS:-}" ]]; then yes "${FAKE_PSQL_ROW}" | head -n "$FAKE_PSQL_ROWS"; printf "%s\\n" "${FAKE_PSQL_TERMINATOR}"; exit 0; fi\nprintf "%b" "${FAKE_PSQL_STDOUT:-}"\nexit "${FAKE_PSQL_STATUS:-0}"',
+    ),
+    { mode: 0o755 },
+  );
   writeFileSync(join(bin, "tar"), fakeTool("tar", `exec ${JSON.stringify(realTar)} "$@"`).replace('stdin_bytes="$(wc -c | tr -d " ")"', "stdin_bytes=stream"), { mode: 0o755 });
 
   const env: NodeJS.ProcessEnv = {
@@ -219,6 +226,18 @@ describe("createInContainerAdapter: exact argv, password only in the environment
     setFake(fixture, values);
     expect(() => fixture.adapter.queryReport("s", CORRESPONDENCE_QUERIES.crypto)).toThrow(RestoreEngineRefusal);
     expect(() => fixture.adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto)).toThrow(RestoreEngineRefusal);
+  });
+
+  // #383: a correspondence report is one ~120-byte row per document, so
+  // Node's 1 MiB spawnSync default would cut a household-sized report off
+  // and call it a failed query.
+  it("returns a report larger than 1 MiB intact", () => {
+    const fixture = newFixture();
+    const row = `11111111-1111-4111-8111-111111111111|${"ab".repeat(32)}|1234|available`;
+    setFake(fixture, { FAKE_PSQL_ROWS: "20000", FAKE_PSQL_ROW: row, FAKE_PSQL_TERMINATOR: REPORT_TERMINATOR });
+    const report = fixture.adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto);
+    expect(report.length).toBeGreaterThan(1024 * 1024);
+    expect(report.split("\n").filter(Boolean)).toHaveLength(20000);
   });
 
   it("resets scan recovery leases with restore.sh's statement against the live database", () => {
