@@ -2242,8 +2242,8 @@ smoke_firefox:
 # The same trick works locally from inside the CI Playwright image on the
 # host network, where the process is root: `--add-host orbit-oidc:127.0.0.1`
 # plus a forward from 4443 to the port the local stack published for the
-# sidecar (TEST_OIDC_PORT is a random free port there). #1235 folds that into
-# scripts/test-e2e-local.sh; until then its recipe is on the issue.
+# sidecar (TEST_OIDC_PORT is a random free port there). scripts/test-e2e-local.sh
+# does exactly that for any run that includes a WebKit project (#1235).
 .webkit_oidc_hosts: &webkit_oidc_hosts |
   grep -q '[[:space:]]orbit-oidc$' /etc/hosts || echo "127.0.0.1 orbit-oidc" >> /etc/hosts
 
