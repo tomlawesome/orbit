@@ -908,6 +908,8 @@ export function createFlight(canvas, options = {}) {
       world3d?.canvas.remove();
       world3d = null; voyage = null;
     },
+    /** whether the flight under way is drawn over the WebGL2 world */
+    get drawingWorld() { return flight !== null && voyage !== null; },
     /** whether the next flight will be drawn over the WebGL2 world */
     get world() { return !!world3d?.ready; },
     /**
