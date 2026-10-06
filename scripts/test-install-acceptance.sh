@@ -32,7 +32,32 @@
 #   --negative-only  run only the fast refusal scenarios (no image build)
 #   --red            after a green run, deliberately violate an asserted
 #                    guarantee and prove the assertions fail (red-run demo)
-#   --keep           keep the work directory and containers on exit
+#   --keep           keep everything the run created, and print the exact
+#                    commands that tear it down. The only way to leave
+#                    anything behind (#1241).
+#
+# What a run creates, and what its teardown removes (#1241). Every run tears
+# down all of it and nothing else, on success, on failure and on SIGINT or
+# SIGTERM, exactly once:
+#   - the work directory /tmp/orbit-acceptance.* (shim, manifest, targets)
+#   - Compose project <project> and <project>-local: containers, profile
+#     services and orphans, named volumes, networks (removed by `compose
+#     down`, then by the project label so a SIGKILLed run's debris goes too)
+#   - the local registry container <project>-registry and its anonymous
+#     volume (`docker rm -v`; registry:2 declares a VOLUME)
+#   - the image tags it made: 127.0.0.1:<port>/acceptance/orbit (the tag and
+#     any digest reference the installer pulled) and, only when this run built
+#     it, orbit-acceptance-local:<revision>. An image named by
+#     ORBIT_ACCEPTANCE_IMAGE is borrowed and left alone.
+#   - the installer process group of the lifecycle interruption scenario
+# It never touches another Compose project, another run's registry, or images
+# pulled from public registries.
+#
+# A failed run keeps its evidence: before anything is removed, the installer
+# log, the compose logs and state, the registry log and the failure reason are
+# copied to $ORBIT_EVIDENCE_ROOT/test-install-acceptance-<timestamp>/
+# (default ~/projects/.backups/orbit), and that path is printed on exit. The
+# copy leaves out .env-orbit and .orbit-secrets.
 #
 # Environment:
 #   ORBIT_ACCEPTANCE_IMAGE  prebuilt orbit image reference to test; when
@@ -40,6 +65,8 @@
 #   COMPOSE_PROJECT_NAME    override the per-run Compose project name derived
 #                           below (#894); install.sh honours the same
 #                           variable, so an explicit value here reaches it.
+#   ORBIT_EVIDENCE_ROOT     where a failed run's evidence is copied (default
+#                           ~/projects/.backups/orbit).
 set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -55,9 +82,14 @@ for arg in "$@"; do
 done
 
 note() { printf '[acceptance] %s\n' "$*"; }
-fail() { printf '[acceptance] FAIL: %s\n' "$*" >&2; exit 1; }
-
 workdir="$(mktemp -d /tmp/orbit-acceptance.XXXXXX)"
+# The reason is kept beside the installer log so the evidence copy explains
+# the run without the terminal scrollback (#1241).
+fail() {
+  printf '[acceptance] FAIL: %s\n' "$*" >&2
+  printf '%s\n' "$*" >> "$workdir/failure.txt" 2>/dev/null || true
+  exit 1
+}
 # Set once positive_scenario pushes the image under test and writes a manifest
 # for it (ADR-0031 #7); empty until then. run_installer() hands it to
 # install.sh via ORBIT_RELEASE_MANIFEST whenever it is set, so install.sh does
@@ -67,6 +99,12 @@ workdir="$(mktemp -d /tmp/orbit-acceptance.XXXXXX)"
 # before install.sh ever reaches manifest resolution, so an empty value there
 # is harmless -- install.sh treats it exactly like an absent one.
 release_manifest=""
+# The image under test is pushed to this run's own throwaway registry, so it
+# can never carry the GitHub countersignature a stable channel demands when
+# cosign is installed (install.sh's release_manifest_stable, ADR-0031 #7).
+# What is being accepted is a preview digest, so install it as one (#1257);
+# stable_channel_refusal proves the stable rule still bites.
+readonly install_channel=preview
 
 free_port() {
   node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{process.stdout.write(String(s.address().port));s.close();});'
@@ -114,36 +152,173 @@ target="$workdir/$project_name"
 local_only_target="$workdir/local-only-deploy"
 local_only_project_name="${project_name}-local"
 
+# Image references this run created, for teardown (#1241). built_image is set
+# only once this run's own `docker build` succeeded, so a borrowed
+# ORBIT_ACCEPTANCE_IMAGE is never removed; pushed_digest is set once the push
+# is recorded. The registry-side reference is derived, not recorded, because it
+# is unique to this run's port and removing a reference that was never made is
+# a harmless no-op.
+built_image=""
+pushed_digest=""
+registry_image="127.0.0.1:$registry_port/$repository"
+# Process group of the lifecycle scenario's backgrounded installer, so a signal
+# that arrives while it is parked cannot leave it running (#1241).
+installer_pgid=""
+evidence_dir=""
+
 sweep_debris() {
   local sweep_project="${1:-$project_name}"
-  docker rm -f "$registry_name" >/dev/null 2>&1 || true
+  # -v: a container's anonymous volumes die with it. registry:2 declares a
+  # VOLUME, so a plain `rm -f` left one dangling per run (#1241).
+  docker rm -f -v "$registry_name" >/dev/null 2>&1 || true
   docker ps -aq --filter label=com.docker.compose.project="$sweep_project" |
-    xargs -r docker rm -f >/dev/null 2>&1 || true
+    xargs -r docker rm -f -v >/dev/null 2>&1 || true
   docker volume ls -q --filter label=com.docker.compose.project="$sweep_project" |
     xargs -r docker volume rm >/dev/null 2>&1 || true
   docker network ls -q --filter label=com.docker.compose.project="$sweep_project" |
     xargs -r docker network rm >/dev/null 2>&1 || true
 }
 
+# Remove only the image references this run made. Never by image ID: an ID can
+# carry other tags, including a borrowed ORBIT_ACCEPTANCE_IMAGE.
+remove_run_images() {
+  local repo tag digest
+  docker rmi "$registry_image:latest" >/dev/null 2>&1 || true
+  [[ -z "$pushed_digest" ]] || docker rmi "$registry_image@$pushed_digest" >/dev/null 2>&1 || true
+  # Anything else the installer pulled under this run's registry address.
+  while read -r repo tag digest; do
+    [[ -n "$repo" ]] || continue
+    if [[ "$tag" != "<none>" ]]; then
+      docker rmi "$repo:$tag" >/dev/null 2>&1 || true
+    elif [[ -n "$digest" && "$digest" != "<none>" ]]; then
+      docker rmi "$repo@$digest" >/dev/null 2>&1 || true
+    fi
+  done < <(docker image ls "$registry_image" --digests --format '{{.Repository}} {{.Tag}} {{.Digest}}' 2>/dev/null || true)
+  [[ -z "$built_image" ]] || docker rmi "$built_image" >/dev/null 2>&1 || true
+}
+
+compose_down_target() {
+  local dir="$1"
+  if [[ -f "$dir/.env-orbit" && -f "$dir/docker-compose.yml" ]]; then
+    chmod 600 "$dir/.env-orbit" 2>/dev/null || true
+    (cd "$dir" && timeout 180 docker compose --env-file .env-orbit down --volumes --remove-orphans >/dev/null 2>&1) || true
+  fi
+}
+
+# Copy what a failed run needs to be diagnosed, before teardown removes it
+# (#1241; the installer log used to die with the work directory, #1239). The
+# deployment's .env-orbit and .orbit-secrets are deliberately left out.
+collect_evidence() {
+  local status="$1" root dir target_dir f
+  root="${ORBIT_EVIDENCE_ROOT:-${HOME:-/nonexistent}/projects/.backups/orbit}"
+  dir="$root/test-install-acceptance-$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p -- "$root" && mkdir -m 700 -- "$dir" 2>/dev/null || return 1
+  {
+    printf 'exit_status=%s\nproject=%s\nlocal_only_project=%s\nregistry=%s\nworkdir=%s\n' \
+      "$status" "$project_name" "$local_only_project_name" "$registry_name" "$workdir"
+  } > "$dir/run-info.txt"
+  for f in "$workdir"/*.log "$workdir"/failure.txt "$workdir"/orbit-release-manifest.json; do
+    if [[ -f "$f" ]]; then cp -- "$f" "$dir/" 2>/dev/null || true; fi
+  done
+  for target_dir in "$target" "$local_only_target"; do
+    [[ -f "$target_dir/.env-orbit" && -f "$target_dir/docker-compose.yml" ]] || continue
+    f="$dir/compose-$(basename -- "$target_dir")"
+    chmod 600 "$target_dir/.env-orbit" 2>/dev/null || true
+    (cd "$target_dir" && timeout 60 docker compose --env-file .env-orbit ps -a) > "$f.ps.txt" 2>&1 || true
+    (cd "$target_dir" && timeout 120 docker compose --env-file .env-orbit logs --no-color --timestamps) > "$f.log" 2>&1 || true
+    ls -la -- "$target_dir" > "$f.listing.txt" 2>&1 || true
+  done
+  docker logs "$registry_name" > "$dir/registry.log" 2>&1 || true
+  evidence_dir="$dir"
+}
+
+print_keep_instructions() {
+  local dir
+  note "kept by --keep: work directory $workdir, project $project_name (and ${local_only_project_name}), registry $registry_name"
+  note "to tear it all down, run:"
+  for dir in "$target" "$local_only_target"; do
+    if [[ -f "$dir/docker-compose.yml" ]]; then
+      printf '  (cd %q && docker compose --env-file .env-orbit down --volumes --remove-orphans)\n' "$dir"
+    fi
+  done
+  for dir in "$project_name" "$local_only_project_name"; do
+    printf '  docker ps -aq --filter label=com.docker.compose.project=%s | xargs -r docker rm -f -v\n' "$dir"
+    printf '  docker volume ls -q --filter label=com.docker.compose.project=%s | xargs -r docker volume rm\n' "$dir"
+    printf '  docker network ls -q --filter label=com.docker.compose.project=%s | xargs -r docker network rm\n' "$dir"
+  done
+  printf '  docker rm -f -v %s\n' "$registry_name"
+  printf '  docker rmi %s:latest\n' "$registry_image"
+  [[ -z "$pushed_digest" ]] || printf '  docker rmi %s@%s\n' "$registry_image" "$pushed_digest"
+  [[ -z "$built_image" ]] || printf '  docker rmi %s\n' "$built_image"
+  printf '  rm -rf -- %q\n' "$workdir"
+}
+
+# Teardown is the one exit path (#1241): EXIT runs it, and INT/TERM turn into
+# an exit so the same trap runs it. `torn_down` makes it fire exactly once
+# however the run ends; signals are ignored while it runs so a second Ctrl-C
+# cannot abandon it half way.
+torn_down=0
 cleanup() {
   local status=$?
-  if [[ "$keep_mode" == 1 || ( "$status" -ne 0 && -n "${ORBIT_ACCEPTANCE_KEEP_ON_FAIL:-}" ) ]]; then
-    note "keeping work directory: $workdir (project $project_name)"
-    return
+  [[ "$torn_down" == 0 ]] || return 0
+  torn_down=1
+  trap '' INT TERM
+  set +e +E +u
+  note "teardown: starting (exit status $status)"
+
+  # The lifecycle scenario's installer runs in its own process group, which a
+  # signal to this script does not reach.
+  if [[ -n "$installer_pgid" ]]; then
+    kill -9 -- "-$installer_pgid" 2>/dev/null || true
   fi
-  if [[ -f "$target/.env-orbit" && -f "$target/docker-compose.yml" ]]; then
-    chmod 600 "$target/.env-orbit" 2>/dev/null || true
-    (cd "$target" && docker compose --env-file .env-orbit down --volumes --remove-orphans >/dev/null 2>&1) || true
+
+  local evidence_failed=0
+  if [[ "$status" -ne 0 ]]; then
+    collect_evidence "$status" || evidence_failed=1
   fi
-  if [[ -f "$local_only_target/.env-orbit" && -f "$local_only_target/docker-compose.yml" ]]; then
-    chmod 600 "$local_only_target/.env-orbit" 2>/dev/null || true
-    (cd "$local_only_target" && docker compose --env-file .env-orbit down --volumes --remove-orphans >/dev/null 2>&1) || true
+
+  if [[ "$keep_mode" == 1 ]]; then
+    print_keep_instructions
+  else
+    compose_down_target "$target"
+    compose_down_target "$local_only_target"
+    sweep_debris "$project_name"
+    sweep_debris "$local_only_project_name"
+    remove_run_images
+    if [[ "$evidence_failed" == 1 ]]; then
+      # The logs only exist here, so the directory is the one thing kept.
+      note "teardown: could not write evidence; keeping $workdir so the logs survive"
+    else
+      rm -rf -- "$workdir"
+      note "teardown: complete"
+    fi
   fi
-  sweep_debris "$project_name"
-  sweep_debris "$local_only_project_name"
-  rm -rf -- "$workdir"
+  if [[ -n "$evidence_dir" ]]; then
+    note "evidence kept in: $evidence_dir"
+  fi
+}
+# bash runs a trap only after its foreground command ends. A terminal's Ctrl-C,
+# a runner's cancel and `timeout` signal the whole process group, so that
+# command dies with the script and the trap runs at once; on_signal also stops
+# anything still running underneath (an installer left running would go on
+# creating containers after teardown). A signal sent to this one process alone
+# is acted on when the command it is waiting for returns.
+kill_descendants() {
+  local child
+  for child in $(pgrep -P "$1" 2>/dev/null || true); do
+    kill_descendants "$child"
+    kill -TERM "$child" 2>/dev/null || true
+  done
+}
+on_signal() {
+  local code="$1"
+  trap '' INT TERM
+  kill_descendants "$$"
+  exit "$code"
 }
 trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
 
 # --- negative scenarios (no image, no network, fail-closed refusals) -------
 
@@ -210,9 +385,29 @@ run_installer() {
   (cd "$target" && env PATH="$workdir/shim:$PATH" \
     COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$project_name}" \
     ORBIT_REGISTRY="127.0.0.1:$registry_port" ORBIT_REPOSITORY="$repository" \
-    ORBIT_RELEASE_MANIFEST="$release_manifest" \
+    ORBIT_RELEASE_MANIFEST="$release_manifest" ORBIT_CHANNEL="${ORBIT_CHANNEL_UNDER_TEST:-$install_channel}" \
     timeout 900 bash "$repo_root/scripts/install.sh" </dev/null) \
     > "$workdir/install.log" 2>&1
+}
+
+# With cosign installed, the same unsigned image on channel latest must be
+# refused at the identity phase, before anything in the target changes
+# (#1257). Without cosign install.sh cannot check signatures at all, so there
+# is nothing to prove and it says so.
+stable_channel_refusal() {
+  if ! command -v cosign >/dev/null 2>&1; then
+    note "stable-channel refusal: skipped, cosign is not installed"
+    return 0
+  fi
+  cp -- "$target/.env-orbit" "$workdir/env-before-stable"
+  if ORBIT_CHANNEL_UNDER_TEST=latest run_installer; then
+    fail "stable-channel refusal: install.sh accepted an unsigned image on channel latest"
+  fi
+  grep -q 'could not verify the countersignature' "$workdir/install.log" ||
+    fail "stable-channel refusal: install.sh failed for another reason (see install.log)"
+  cmp -s "$target/.env-orbit" "$workdir/env-before-stable" ||
+    fail "stable-channel refusal: the refused install changed .env-orbit"
+  note "negative: unsigned image refused on channel latest (ADR-0031 #7)"
 }
 
 negative_scenarios() {
@@ -414,9 +609,12 @@ positive_scenario() {
       --build-arg ORBIT_REVISION="$revision" \
       --build-arg ORBIT_CHANNEL=ci "$repo_root" >/dev/null ||
       fail "working-tree image build failed"
+    # Recorded only after a successful build, so teardown removes exactly the
+    # tag this run made and never a borrowed ORBIT_ACCEPTANCE_IMAGE.
+    built_image="$image"
   fi
 
-  docker rm -f "$registry_name" >/dev/null 2>&1 || true
+  docker rm -f -v "$registry_name" >/dev/null 2>&1 || true
   # Pinned by digest, the same one scripts/ci/start-installer-registry.sh uses
   # (ai/orbit#1111): a moving `:2` tag is what let this local-run harness keep
   # hitting Docker Hub's anonymous pull rate limit.
@@ -435,6 +633,7 @@ positive_scenario() {
   digest="$(docker inspect --format '{{index .RepoDigests}}' "127.0.0.1:$registry_port/$repository:latest" |
     grep -oE 'sha256:[0-9a-f]{64}' | sed -n '1p')"
   [[ -n "$digest" ]] || fail "could not capture the pushed digest"
+  pushed_digest="$digest"
 
   # ADR-0031 #7: install.sh now refuses to run without a release manifest it
   # can verify, and this is a locally built, unpublished image, so hand it one
@@ -448,6 +647,7 @@ positive_scenario() {
 
   write_shim
   make_preprovisioned_target
+  stable_channel_refusal
 
   if [[ "$lifecycle_mode" == 1 ]]; then
     # catalogue Part 1 / install.sh #31: a hard interruption before the
@@ -485,10 +685,11 @@ positive_scenario() {
     set -m
     ( cd "$target" && env PATH="$workdir/shim:$PATH" \
         ORBIT_REGISTRY="127.0.0.1:$registry_port" ORBIT_REPOSITORY="$repository" \
-        ORBIT_RELEASE_MANIFEST="$release_manifest" \
+        ORBIT_RELEASE_MANIFEST="$release_manifest" ORBIT_CHANNEL="$install_channel" \
         bash "$repo_root/scripts/install.sh" </dev/null ) \
         > "$workdir/install.log" 2>&1 &
     local install_bg=$! waited=0 install_status=0
+    installer_pgid="$install_bg"
     set +m
     # The bound only has to cover host checks, the image pull and the banner
     # render before the assets phase begins; a slow runner spends longer there
@@ -503,12 +704,14 @@ positive_scenario() {
         # with the scenario that leaked it.
         kill -9 -- "-$install_bg" 2>/dev/null || true
         wait "$install_bg" 2>/dev/null || true
+        installer_pgid=""
         fail "interruption: assets phase never observed"
       fi
       kill -0 "$install_bg" 2>/dev/null || fail "interruption: installer exited before the assets phase"
     done
     kill -9 -- "-$install_bg" 2>/dev/null || true
     wait "$install_bg" 2>/dev/null || install_status=$?
+    installer_pgid=""
     printf 'go\n' >&"$release_fd"
     exec {release_fd}>&-
     rm -f "$workdir/assets-gate.armed"
@@ -654,7 +857,33 @@ sweep_debris
 # container. This hook stops right after the one real sweep_debris call
 # above (itself a no-op against a fresh fake docker) so the test can inspect
 # what it invoked without going anywhere near install.sh.
+#
+# #1241: the same test also proves teardown, so two more values leave the run
+# in the state a real one reaches mid-scenario -- a target holding Compose
+# files and an installer log -- and then end it the two ways that matter:
+#   fail  exits through fail(), as an assertion would
+#   wait  announces itself and blocks until a signal arrives
 if [[ -n "${TEST_INSTALL_ACCEPTANCE_DRY_RUN:-}" ]]; then
+  case "$TEST_INSTALL_ACCEPTANCE_DRY_RUN" in
+    fail | wait)
+      mkdir -p -- "$target" "$local_only_target"
+      : > "$target/docker-compose.yml"
+      : > "$target/.env-orbit"
+      : > "$local_only_target/docker-compose.yml"
+      : > "$local_only_target/.env-orbit"
+      printf 'installer log marker for %s\n' "$project_name" > "$workdir/install.log"
+      built_image="orbit-acceptance-local:dry-run"
+      pushed_digest="sha256:$(printf '0%.0s' {1..64})"
+      ;;
+  esac
+  case "$TEST_INSTALL_ACCEPTANCE_DRY_RUN" in
+    fail) fail "dry run: simulated assertion failure" ;;
+    wait)
+      note "dry run: waiting for a signal"
+      sleep 300 &
+      wait "$!"
+      ;;
+  esac
   note "dry run: exiting after sweep_debris, before any installer run"
   exit 0
 fi
