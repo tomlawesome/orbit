@@ -366,6 +366,7 @@ test.describe("the door's cards", () => {
        in front of a provider this instance does not have. */
     await expect(page.locator("#idname")).toHaveCount(0);
     await expect(page.locator("#gate")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "continue with your identity provider" })).toHaveCount(0);
     await expect(page.locator("#idbtn")).toHaveText("Sign in");
     await expect(page.locator(".bigring .ringglass")).toBeAttached();
 
@@ -389,8 +390,16 @@ test.describe("the door's cards", () => {
     await expect(page.locator("#idemail")).toBeVisible();
     await expect(page.locator("#idpassword")).toBeVisible();
     await expect(page.locator("#gate")).toHaveCount(0);
+    /* ...with the provider still in reach: §2.7's one line under the fields
+       (#1278; the owner was left with no way to it after a wrong password) */
+    const provider = page.getByRole("button", { name: "continue with your identity provider" });
+    await expect(provider).toBeVisible();
 
     await sweep(page);
+
+    const toProvider = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/auth/login");
+    await provider.click();
+    await toProvider;
   });
 
   test("the local login line stays off when no local credential exists", async ({ page }) => {
