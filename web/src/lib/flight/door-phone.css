@@ -68,17 +68,15 @@
      dawn's and the goodbye's own column are gone; what the phone adds to the
      door is below. */
 
-  /* THE GATE, at the site's size on a phone: 12px, .86em of padding, about
-     39px tall. The pocket's floors are a 44px hit and 15px type; whether the
-     door's one pill gets them is the owner's open question 10 (#1253), so the
-     rule that would give them is held back below, commented out, and the
-     site's size is live. To adopt the floors, remove the comment markers
-     round the rule (44px and 15px are --p-hit and --p-type-button). */
-  /* #1253 phone gate: owner question 10 */
-  /*
+  /* THE GATE on a phone (owner, 2026-10-07, question 10, option b): the
+     site's glass pill keeps its look, but at the pocket's floors, a 44px hit
+     and 15px type (--p-hit, --p-type-button), the label centred, and the
+     site's horizontal proportion (2.3em) kept. Dawn's pill and the goodbye's
+     "Sign back in" alike. */
   #dawn .gate,#dusk .gate-wrap a{display:inline-flex;align-items:center;justify-content:center;
-        min-height:44px;font-size:15px;padding:0 34px}
-  */
+        min-height:44px;font-size:15px;padding-block:0;padding-inline:2.3em}
+  /* `incomplete` keeps the pill, so its words stand under the taller one */
+  body[data-state="incomplete"] #dawn .state{margin-top:calc(var(--R) * .03 + 44px + 18px)}
 
   /* `local login` stands under the gate, inside `.gate-wrap` (flight.css):
      at a 44px hit, 13px mono. */
