@@ -1,6 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { DAWN_FAR, DAWN_NEAR } from "./starfields.js";
+  import { firstLight, startLate } from "./first-light.js";
 
   /**
    * THE DAWN — the sky the launch leaves from, and the sign-in's own surface.
@@ -67,7 +68,10 @@
       /** @type {(e: Event) => void} */
       const done = (e) => {
         if (!cancelled && e.type === "load") {
-          im.classList.add("in");
+          /* the day side's fade waits for its picture as well as for `lit`;
+             a picture later than first light catches up too (#1253) */
+          const due = document.body.classList.contains("lit") ? firstLight.dueAt : NaN;
+          startLate(im, due, () => im.classList.add("in"));
           if (im.classList.contains("pre")) world.classList.add("earthy");
         }
         resolve(undefined);

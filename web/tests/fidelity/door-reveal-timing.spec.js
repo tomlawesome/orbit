@@ -11,7 +11,14 @@ import { expect, test } from "@playwright/test";
  * Earth's day side (`#dawn .earth .up`) arriving, after `lit`. Tightened
  * 2026-10-07 (flight.css): after `lit` the button is ready at about 1.05s,
  * the day side is in at about 2.5s and the rays last, at about 2.6s; with
- * `lit` at 0.4-0.7s that is the sunrise done at about 3-3.3s.
+ * `lit` due at 0.5s from navigation (first-light.js) that is the sunrise
+ * done at about 3.1s.
+ *
+ * The sunrise is a target, not an edge (owner, 2026-10-07: "It's
+ * approximate and it's from page load ideally"), so it is held to 3-3.5s
+ * give or take SUNRISE_GIVE; the button's 2s stays firm. The `late page`
+ * runs hold the page's code back LATE_MS, as a slow connection would: first
+ * light then catches up (first-light.js) rather than running late.
  *
  * Shaped like launch-timing.spec.js and for the same reason kept out of the
  * per-merge-request `fidelity` project (playwright.config.js runs it as
@@ -31,6 +38,11 @@ const HEALTHY = { configured: true, phase: "running", contactAddress: null };
 const DOOR = { ...HEALTHY, claimed: true, methods: { local: true, oidc: true, localAccounts: true } };
 /** @param {import("@playwright/test").Route} route @param {number} status @param {unknown} body */
 const answer = (route, status, body) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+
+/* either side of the 3-3.5s sunrise target */
+const SUNRISE_GIVE = 250;
+/* how long the late-page runs hold back every script the page asks for */
+const LATE_MS = 700;
 
 const SIZES = [
   { name: "desktop", viewport: { width: 1600, height: 1000 } },
@@ -60,44 +72,53 @@ function installReveal() {
   requestAnimationFrame(tick);
 }
 
-for (const size of SIZES) {
-  for (const run of [1, 2]) {
-    test(`door first light — ${size.name}, run ${run}`, async ({ page, browserName }) => {
-      test.setTimeout(30_000);
-      await page.setViewportSize(size.viewport);
-      await page.route("**/api/health", (r) => answer(r, 200, { status: "ready" }));
-      await page.route("**/api/auth/availability", (r) => answer(r, 200, DOOR));
-      await page.route("**/api/auth/session", (r) => answer(r, 401, { error: "unauthenticated" }));
-      await page.addInitScript(installReveal);
+const RUNS = [
+  ...SIZES.flatMap((size) => [1, 2].map((run) => ({ size, run, late: 0 }))),
+  ...SIZES.map((size) => ({ size, run: 1, late: LATE_MS })),
+];
 
-      await page.goto(`${APP}/login`, { waitUntil: "load" });
-      /* waited out rather than thrown, so a moment that never comes is
-         named below instead of hidden behind a timeout */
-      await page.waitForFunction(() => {
-        const at = /** @type {any} */ (window).__reveal;
-        return at && at.button && at.sunrise;
-      }, null, { timeout: 15_000 }).catch(() => {});
-      const at = await page.evaluate(() => /** @type {any} */ (window).__reveal);
-      if (!at.button || !at.sunrise) {
-        const seen = await page.evaluate(() => {
-          const g = document.querySelector(".gate"), r = document.querySelector("#dawn .rays");
-          return {
-            body: document.body.className, state: document.body.dataset.state ?? null,
-            gate: g ? getComputedStyle(g).opacity : "absent",
-            rays: r ? `${getComputedStyle(r).opacity} ${getComputedStyle(r).transform}` : "absent",
-            day: [...document.querySelectorAll("#dawn .earth .up")].map((u) => `${u.getAttribute("class")} ${getComputedStyle(u).opacity}`),
-          };
-        });
-        console.log(`DOOR_TIMING incomplete ${JSON.stringify({ at, seen })}`);
-      }
-      const ms = { lit: Math.round(at.lit), button: Math.round(at.button), sunrise: Math.round(at.sunrise) };
-      console.log(`DOOR_TIMING ${JSON.stringify({ browser: browserName, size: size.name, run, ...ms })}`);
+for (const { size, run, late } of RUNS) {
+  test(`door first light — ${size.name}${late ? ", late page" : ""}, run ${run}`, async ({ page, browserName }) => {
+    test.setTimeout(30_000);
+    await page.setViewportSize(size.viewport);
+    if (late) {
+      await page.route("**/_app/immutable/**/*.js", async (r) => {
+        await new Promise((resolve) => setTimeout(resolve, late));
+        await r.continue();
+      });
+    }
+    await page.route("**/api/health", (r) => answer(r, 200, { status: "ready" }));
+    await page.route("**/api/auth/availability", (r) => answer(r, 200, DOOR));
+    await page.route("**/api/auth/session", (r) => answer(r, 401, { error: "unauthenticated" }));
+    await page.addInitScript(installReveal);
 
-      expect(ms.button, "the button never became ready").toBeGreaterThan(0);
-      expect(ms.sunrise, "the sunrise never ended").toBeGreaterThan(0);
-      expect(ms.button, "the button is ready by 2s").toBeLessThanOrEqual(2000);
-      expect(ms.sunrise, "the sunrise ends by 3.5s").toBeLessThanOrEqual(3500);
-      expect(ms.sunrise, "the sunrise takes 3s at least").toBeGreaterThanOrEqual(3000);
-    });
-  }
+    await page.goto(`${APP}/login`, { waitUntil: "load" });
+    /* waited out rather than thrown, so a moment that never comes is
+       named below instead of hidden behind a timeout */
+    await page.waitForFunction(() => {
+      const at = /** @type {any} */ (window).__reveal;
+      return at && at.button && at.sunrise;
+    }, null, { timeout: 15_000 }).catch(() => {});
+    const at = await page.evaluate(() => /** @type {any} */ (window).__reveal);
+    if (!at.button || !at.sunrise) {
+      const seen = await page.evaluate(() => {
+        const g = document.querySelector(".gate"), r = document.querySelector("#dawn .rays");
+        return {
+          body: document.body.className, state: document.body.dataset.state ?? null,
+          gate: g ? getComputedStyle(g).opacity : "absent",
+          rays: r ? `${getComputedStyle(r).opacity} ${getComputedStyle(r).transform}` : "absent",
+          day: [...document.querySelectorAll("#dawn .earth .up")].map((u) => `${u.getAttribute("class")} ${getComputedStyle(u).opacity}`),
+        };
+      });
+      console.log(`DOOR_TIMING incomplete ${JSON.stringify({ at, seen })}`);
+    }
+    const ms = { lit: Math.round(at.lit), button: Math.round(at.button), sunrise: Math.round(at.sunrise) };
+    console.log(`DOOR_TIMING ${JSON.stringify({ browser: browserName, size: size.name, late, run, ...ms })}`);
+
+    expect(ms.button, "the button never became ready").toBeGreaterThan(0);
+    expect(ms.sunrise, "the sunrise never ended").toBeGreaterThan(0);
+    expect(ms.button, "the button is ready by 2s").toBeLessThanOrEqual(2000);
+    expect(ms.sunrise, "the sunrise ends by about 3.5s").toBeLessThanOrEqual(3500 + SUNRISE_GIVE);
+    expect(ms.sunrise, "the sunrise takes about 3s at least").toBeGreaterThanOrEqual(3000 - SUNRISE_GIVE);
+  });
 }
