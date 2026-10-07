@@ -2,6 +2,7 @@ import { goto } from "$app/navigation";
 import { WorkspaceError, activeHousehold, applyCommand, attachItemDocument, inspectPickedDocument, previewPickedDocument } from "$lib/data/workspace.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
 import { screenScope } from "$lib/teardown.js";
+import { wireDropFeedback } from "./drop-feedback.js";
 import { createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, refusalOf } from "./entry.js";
 
 /**
@@ -499,11 +500,10 @@ export function mountCreate() {
     }
   });
   on(picker, "change", () => takeFile(picker.files?.[0]));
-  on(dropzone, "dragover", (event) => event.preventDefault());
-  on(dropzone, "drop", (event) => {
-    event.preventDefault();
-    takeFile(event.dataTransfer?.files?.[0]);
-  });
+  /* #1244: the zone answers a file in the air (armed over the page, locked
+     over the zone, a settle on the drop) and takes what is dropped on it;
+     drop-feedback.js holds the drag states and their flicker guard. */
+  const dropFeedback = wireDropFeedback({ on, dropzone, live: document.getElementById("dz-live"), takeFile });
 
   /* Accepting a suggestion clears the field's suggested marking. Nothing
      suggests anything yet — see the note above — but the grammar ships with
@@ -626,6 +626,8 @@ export function mountCreate() {
       reading?.abort();
       reading = null;
       clearSheet();
+      /* `dragging`, `over` and the zone's `landed` go with `doc` (#1244). */
+      dropFeedback.clear();
       document.body.classList.remove("doc");
     },
     /** Whether a misclick or a close would discard something typed

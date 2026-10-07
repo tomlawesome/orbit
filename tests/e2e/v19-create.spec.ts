@@ -279,6 +279,83 @@ test("picking a document shows its front page while the read runs alongside", as
 });
 
 /**
+ * #1244: a file dragged over the desk's drop zone shows it has registered
+ * (design/v19/create-dragover.html, owner's "8a yes"). Real DragEvents
+ * carrying a real File, dispatched through the zone's own child the way the
+ * mockup was exercised: the flicker trap (dragenter zone, dragenter child,
+ * dragleave zone) must leave the zone locked, an off-target drop must be
+ * refused rather than handed to the browser, and the drop itself takes the
+ * file and says so in the polite live region.
+ */
+test("dragging a file over the drop zone shows it has registered", async ({ page }) => {
+  test.skip(test.info().project.name.startsWith("mobile"), "the pocket's document row is a tap target with no drag (#1244 build notes)");
+  test.setTimeout(90_000);
+  await answerPushWithoutAService(page);
+  await page.goto("/api/auth/login?returnTo=/home");
+  await page.getByRole("link", { name: workerAccount("administrator") }).click();
+  await settleArrival(page);
+  await ensureWorkerAdministrator(page);
+  households.track(await seedHousehold(page));
+
+  try {
+    await gotoCreate(page);
+    const body = page.locator("body");
+    const zone = page.locator("#dropzone");
+    const files = await page.evaluateHandle(({ name, bytes }) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([Uint8Array.from(atob(bytes), (c) => c.charCodeAt(0))], name, { type: "application/pdf" }));
+      return transfer;
+    }, { name: DOCUMENT, bytes: DOCUMENT_BYTES.toString("base64") });
+    const start = page.url();
+
+    // Armed: over the page, not yet the zone.
+    await page.locator("#card").dispatchEvent("dragenter", { dataTransfer: files });
+    await expect(body).toHaveClass(/\bdragging\b/);
+    await expect(body).not.toHaveClass(/\bover\b/);
+    await expect(zone.locator('.dz-hint [data-when="arm"]')).toBeVisible();
+
+    // Locked, and it holds while the pointer crosses the zone's own words.
+    await zone.dispatchEvent("dragenter", { dataTransfer: files });
+    await zone.locator(".dz-main [data-when=rest]").dispatchEvent("dragenter", { dataTransfer: files });
+    await zone.dispatchEvent("dragleave", { dataTransfer: files });
+    await expect(body).toHaveClass(/\bover\b/);
+    await expect(zone.locator('.dz-main [data-when="lock"]')).toBeVisible();
+    await expect(zone.locator('.dz-main [data-when="lock"]')).toHaveText("release to add it");
+    await expect(page.locator("#dz-live")).toHaveText("Release to add the document");
+
+    // Off the zone, a drop is refused rather than opened by the browser.
+    const refused = await page.evaluate((transfer) => {
+      const target = document.querySelector("#f-name") as HTMLElement;
+      const over = new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: transfer });
+      target.dispatchEvent(over);
+      const drop = new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer });
+      target.dispatchEvent(drop);
+      return { over: over.defaultPrevented, effect: transfer.dropEffect, drop: drop.defaultPrevented };
+    }, files);
+    expect(refused).toEqual({ over: true, effect: "none", drop: true });
+    expect(page.url()).toBe(start);
+    await expect(body).not.toHaveClass(/\b(dragging|over)\b/);
+    await expect(body).not.toHaveClass(/\bdoc\b/);
+
+    // The drop on the zone takes the file, settles, and says so.
+    await zone.dispatchEvent("dragenter", { dataTransfer: files });
+    await zone.locator(".dz-main [data-when=rest]").dispatchEvent("drop", { dataTransfer: files });
+    await expect(body).toHaveClass(/\bdoc\b/);
+    await expect(body).not.toHaveClass(/\b(dragging|over)\b/);
+    await expect(zone).toHaveClass(/\blanded\b/);
+    await expect(page.locator("#dz-held-name")).toHaveText(DOCUMENT);
+    await expect(page.locator("#dz-live")).toHaveText(`${DOCUMENT} added. Reading it in the lane on the right.`);
+
+    // With a document held, the zone offers a swap.
+    await zone.dispatchEvent("dragenter", { dataTransfer: files });
+    await expect(zone.locator('.dz-main [data-when="swap"]')).toBeVisible();
+    await expect(page.locator("#dz-live")).toHaveText("Release to swap the document");
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+/**
  * #1246: "Add to orbit" closes the form and lands on the main screen at the
  * saved item — never a "Saved" line on a form left open.
  */
