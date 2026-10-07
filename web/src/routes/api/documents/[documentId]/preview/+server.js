@@ -1,11 +1,16 @@
 import { readDocumentPagePreview } from "orbit/server/document-preview";
+import { parseDocumentPreviewPage } from "orbit/server/documents/preview-page";
 
 import { placeholderPageSvg, requireFixtureDocument } from "$lib/server/document-content-fixture.js";
 import { placeholderResponse, previewResponse } from "$lib/server/preview-response.js";
 import { read } from "$lib/server/api.js";
 
 /**
- * A page-one picture of a stored document, for visual identification (#476).
+ * A picture of one page of a stored document, for visual identification
+ * (#476). `?page=N` asks for page N (#1300; page one when absent); the
+ * answer's `X-Orbit-Page-Count` header says how many there are. A malformed
+ * or out-of-cap page is a 400 before the document is read; a page past the
+ * end is a 404 once every existing check has passed.
  *
  * The response carries the download endpoint's headers: private and
  * non-cacheable, sniff-proof, and served under a null CSP, because the bytes
@@ -19,7 +24,8 @@ import { read } from "$lib/server/api.js";
 export const GET = read(
   async (event, session) => {
     const documentId = /** @type {string} */ (event.params.documentId);
-    const preview = await readDocumentPagePreview(session.user.id, documentId);
+    const page = parseDocumentPreviewPage(event.url.searchParams);
+    const preview = await readDocumentPagePreview(session.user.id, documentId, page);
     return previewResponse(preview);
   },
   {
@@ -28,8 +34,9 @@ export const GET = read(
        could not draw a picture at all, whatever the document. A generated
        placeholder page keeps the same headers the real route carries. */
     fixture: (event) => {
+      const page = parseDocumentPreviewPage(event.url.searchParams);
       const doc = requireFixtureDocument(/** @type {string} */ (event.params.documentId));
-      return placeholderResponse(placeholderPageSvg(doc.displayName));
+      return placeholderResponse(placeholderPageSvg(doc.displayName), page);
     },
   },
 );

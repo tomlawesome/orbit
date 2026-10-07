@@ -16,7 +16,8 @@ export interface ItemDocumentPagePreview extends DocumentPagePreview {
 }
 
 /**
- * Page one of a file the Add item form has just been given, before any item
+ * One page of a file the Add item form has just been given (page one unless
+ * `page` asks for another, #1300), before any item
  * exists for it to be attached to (#1245; the render is #476's).
  *
  * The create form's reading lane shows the page as soon as it is drawn,
@@ -38,6 +39,8 @@ export async function previewItemDocument(input: {
   householdId: string;
   body: ReadableStream<Uint8Array> | null;
   declaredBytes?: number;
+  /** The page to draw, already bounded by `parseDocumentPreviewPage`; 1 when absent (#1300). */
+  page?: number;
   /** Called once the scan has passed (`true`), or at once where scanning is
       off (`false`), before anything opens the file: the reading card's cue
       that Orbit has moved on from the virus check to the preview. */
@@ -107,8 +110,8 @@ export async function previewItemDocument(input: {
     input.onScanned?.(scanned);
     const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
     try {
-      const page = await renderDocumentPagePreview(bytes, mediaType);
-      return { ...page, scanned };
+      const drawn = await renderDocumentPagePreview(bytes, mediaType, input.page ?? 1);
+      return { ...drawn, scanned };
     } finally {
       bytes.fill(0);
     }
