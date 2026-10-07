@@ -150,11 +150,13 @@ describe("the wall clock", () => {
        slowed the draw-in; v5 (design/v19/first-run.html at 9476480) landed
        with different figures for the draw-in and wins, per the amendment's
        own rule. Everything either side of it is still the sheet's own. */
-    expect(T.dwell).toBe(2000);
+    expect(T.dwell).toBe(600);
     expect(T.instrument).toBe(1800);
-    /* the dwell comes BEFORE the instrument (§15 second pass, ruling 3) */
-    expect(T.instrumentAt).toBe(8400);
-    expect(T.instrumentAt - T.condensed).toBe(T.dwell);
+    /* THE SITE'S OWN AMENDMENT (orbit-site timeline.js:58-62, #1253): the
+       instrument arrives as the dial finishes settling, 1.1s after the
+       landing, not after the bare sky's dwell */
+    expect(T.instrumentAt).toBe(5900);
+    expect(T.instrumentAt - T.land).toBe(1100);
   });
 
   it("mirrors the name's window on the way down", () => {
@@ -229,13 +231,14 @@ describe("running the timeline", () => {
     const up = ascentBeatsReduced().map((beat) => beat.act);
     /* the sky still lands bare, the three seconds still pass, the instrument
        still arrives after them — and nothing ever asks the canvas to run */
-    expect(up).toEqual(["land", "instrument"]);
-    expect(ascentBeatsReduced()[1].at).toBe(700 + T.dwell);   /* 2700 */
+    /* the release lets the surface it left go (orbit-site timeline.js:53, 57) */
+    expect(up).toEqual(["release", "land", "instrument"]);
+    expect(ascentBeatsReduced()[2].at).toBe(700 + T.dwell);   /* 1300 */
     expect(up).not.toContain("warp");
     const down = descentBeatsReduced().map((beat) => beat.act);
     /* `disperse` takes the landing off the screen — without it the dusk
        arrives on top of a home that is still there. */
-    expect(down).toEqual(["withdraw", "disperse", "dusk", "farewell"]);
+    expect(down).toEqual(["withdraw", "disperse", "release", "dusk", "farewell"]);
     expect(down).not.toContain("warp");
   });
 });
