@@ -2,6 +2,8 @@ import { building } from "$app/environment";
 import { env } from "$env/dynamic/private";
 import { redirect } from "@sveltejs/kit";
 
+import { bodyLimitFor, limitRequestBody } from "$lib/server/body-limit.js";
+
 /**
  * The screens a reader may open without a session (#789).
  *
@@ -101,6 +103,18 @@ export async function init() {
        diagnosis (scripts/repair.sh) have something to see. */
     process.exit(1);
   }
+}
+
+/**
+ * The administrator's upload size limit (#1285), read only for an upload
+ * route's request; imported on demand like the workspace read below, so a
+ * request with no body never loads the database client here.
+ *
+ * @returns {Promise<number>}
+ */
+async function readUploadLimit() {
+  const { readEffectiveUploadLimit } = await import("orbit/server/upload-limit");
+  return readEffectiveUploadLimit();
 }
 
 /**
@@ -207,6 +221,17 @@ export async function handle({ event, resolve }) {
      adapter prerenders /login and /logout, where there is no session, no
      database, and no dynamic environment to read. */
   if (building) return resolve(event);
+
+  /* Per-route request body limits (#1285), ahead of every other step and for
+     every route, the API included: the image lets any body up to the largest
+     a route may take through (BODY_SIZE_LIMIT), and this holds each route to
+     its own. web/src/lib/server/body-limit.js has the routes and limits. */
+  if (event.request.body !== null) {
+    const rule = await bodyLimitFor(event.route.id, readUploadLimit);
+    const held = limitRequestBody(event.request, rule);
+    if (held instanceof Response) return held;
+    event.request = held;
+  }
 
   /* A null id is a path the router did not match, which belongs to the 404
      screen. Letting it through gates nothing new: route names already ship in

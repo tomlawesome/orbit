@@ -20,6 +20,15 @@ vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   scanFileWithClamAv: vi.fn(),
 }));
 
+// The administrator's upload limit (#1285) is proven in
+// src/server/upload-limit.test.ts; here it answers the configured default,
+// read from the same environment this file configures.
+const limit = vi.hoisted(() => ({ effective: null as number | null }));
+vi.mock("@/server/upload-limit", async () => {
+  const { getDocumentConfig } = await import("@/server/documents/config");
+  return { readEffectiveUploadLimit: async (config = getDocumentConfig()) => limit.effective ?? config.maxBytes };
+});
+
 const originalEnvironment = { ...process.env };
 let root: string;
 
@@ -27,6 +36,7 @@ afterEach(async () => {
   for (const key of Object.keys(process.env)) if (!(key in originalEnvironment)) delete process.env[key];
   for (const [key, value] of Object.entries(originalEnvironment)) process.env[key] = value;
   resetDocumentConfigForTests();
+  limit.effective = null;
   vi.mocked(scanFileWithClamAv).mockReset();
   if (root) await rm(root, { recursive: true, force: true });
 });
@@ -40,6 +50,23 @@ function configure(scanMode: "required" | "disabled" = "disabled") {
 }
 
 describe("private IMAP attachment holding", () => {
+  it("refuses a mailed attachment over the administrator's limit, and leaves no quarantine (#1285)", async () => {
+    root = await mkdtemp(join(tmpdir(), "orbit-imap-limit-"));
+    configure("required");
+    limit.effective = 1_048_576;
+    const bytes = Buffer.concat([syntheticPdf("over the limit"), Buffer.alloc(1_048_576, 0x20)]);
+    await expect(scanAndHoldImapAttachment({
+      bytes,
+      filename: "large.pdf",
+      declaredMediaType: "application/pdf",
+      recipientUserId: "10000000-0000-4000-8000-000000000001",
+      receiptId: "20000000-0000-4000-8000-000000000002",
+      mailboxIngestion: true,
+    })).rejects.toMatchObject({ code: "document_too_large" });
+    expect(scanFileWithClamAv).not.toHaveBeenCalled();
+    await expect(readdir(join(root, "quarantine")).catch(() => [])).resolves.toEqual([]);
+  });
+
   it("binds encryption to the verified recipient and receipt, and stores ciphertext only", async () => {
     root = await mkdtemp(join(tmpdir(), "orbit-imap-holding-"));
     configure();

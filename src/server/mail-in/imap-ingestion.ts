@@ -8,6 +8,7 @@ import { getNotificationWorkerConfig, verifySmtpProviderConnection, type Notific
 import { purgeHeldImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
 import { adjudicateProposal } from "@/server/documents/adjudication";
 import { getDocumentConfig } from "@/server/documents/config";
+import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { MODEL_MAILBOX_DEADLINE_MS } from "@/server/documents/model-extraction";
 import { proposalFromText } from "@/server/documents/suggestions";
 import { extractTextWithTika } from "@/server/documents/tika";
@@ -807,7 +808,9 @@ async function processImapAttachments(
 ): Promise<void> {
   const held: Array<{ storageKey: string; id: string }> = [];
   try {
-    const classification = classifyImapBodyStructure(message.bodyStructure, { maxDocumentBytes: getDocumentConfig().maxBytes, mailboxPdfOnly: true });
+    // The administrator's limit, read per message so a change needs no restart (#1285).
+    const maxDocumentBytes = await readEffectiveUploadLimit();
+    const classification = classifyImapBodyStructure(message.bodyStructure, { maxDocumentBytes, mailboxPdfOnly: true });
     if (!classification.ok) throw new Error(classification.code ?? "mime_structure_invalid");
     if (classification.candidates.length === 0) {
       const [finished] = await getDb().update(imapIngestionMessages).set({ status: "failed", receiptStatus: "cancelled", failureCode: "no_supported_pdf", attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, attachmentProcessingNextAttemptAt: null, updatedAt: new Date() }).where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.attachmentProcessingLeaseToken, receipt.leaseToken))).returning({ id: imapIngestionMessages.id });

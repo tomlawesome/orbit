@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
+import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
@@ -88,13 +89,15 @@ export async function scanAndHoldImapAttachment(input: {
   onCiphertextAllocated?: (object: { id: string; storageKey: string }) => Promise<void>;
 }): Promise<HeldImapAttachment> {
   const config = getDocumentConfig();
+  // The administrator's limit, read now so a change needs no restart (#1285).
+  const maxBytes = await readEffectiveUploadLimit(config);
   const id = randomUUID();
   const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(input.bytes); controller.close(); } });
-  const received = await storage().receive(body, id, config.maxBytes, input.bytes.length);
+  const received = await storage().receive(body, id, maxBytes, input.bytes.length);
   try {
-    const bytes = await storage().readQuarantine(received.quarantinePath, config.maxBytes);
+    const bytes = await storage().readQuarantine(received.quarantinePath, maxBytes);
     try {
-      const validated = await validateImapAttachmentBytes(bytes, input.declaredMediaType, { maximumDocumentBytes: config.maxBytes, pdfOnly: input.mailboxIngestion === true });
+      const validated = await validateImapAttachmentBytes(bytes, input.declaredMediaType, { maximumDocumentBytes: maxBytes, pdfOnly: input.mailboxIngestion === true });
       if (!validated.ok) throw new Error(validated.code);
       const mediaType = validated.mediaType;
       const displayName = normalizeImapAttachmentName(input.filename ?? "email-attachment", mediaType);

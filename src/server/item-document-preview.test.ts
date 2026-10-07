@@ -18,10 +18,17 @@ const mocks = vi.hoisted(() => ({
   scan: vi.fn(),
   render: vi.fn(),
   config: vi.fn(),
+  effectiveLimit: null as number | null,
 }));
 
 vi.mock("@/server/workspace-access", () => ({ requireHouseholdAccess: mocks.access }));
 vi.mock("@/server/documents/config", () => ({ getDocumentConfig: mocks.config }));
+// The administrator's upload limit (#1285) is proven in
+// src/server/upload-limit.test.ts; here it answers the configured default
+// unless a test sets its own.
+vi.mock("@/server/upload-limit", () => ({
+  readEffectiveUploadLimit: async (config: { maxBytes: number }) => mocks.effectiveLimit ?? config.maxBytes,
+}));
 vi.mock("@/server/documents/scanner", () => ({ scanFileWithClamAv: mocks.scan }));
 vi.mock("@/server/documents/preview", () => ({ renderDocumentPagePreview: mocks.render }));
 vi.mock("@/server/documents/storage", () => ({
@@ -65,6 +72,7 @@ const input = () => ({
 describe("item document preview (pre-attachment page one)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.effectiveLimit = null;
     mocks.config.mockReturnValue(config);
     mocks.access.mockResolvedValue(undefined);
     mocks.receive.mockResolvedValue(received());
@@ -83,6 +91,13 @@ describe("item document preview (pre-attachment page one)", () => {
     expect(mocks.render).toHaveBeenCalledWith(expect.any(Buffer), "application/pdf");
     expect(mocks.scan.mock.invocationCallOrder[0]).toBeLessThan(mocks.render.mock.invocationCallOrder[0]);
     expect(result).toEqual({ ...page(), scanned: true });
+  });
+
+  it("holds the upload to the administrator's limit, not the configured default (#1285)", async () => {
+    mocks.effectiveLimit = 2 * 1_048_576;
+    await previewItemDocument(input());
+    expect(mocks.receive).toHaveBeenCalledWith(null, expect.any(String), 2 * 1_048_576, 1234);
+    expect(mocks.readQuarantine).toHaveBeenCalledWith(QUARANTINE, 2 * 1_048_576);
   });
 
   it("retains nothing: the quarantine copy is discarded and the bytes zeroed, on success and on refusal", async () => {

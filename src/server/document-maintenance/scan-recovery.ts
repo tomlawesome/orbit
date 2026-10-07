@@ -15,7 +15,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documents, reviewedIntakeOperations } from "@/db/schema";
 import { log } from "@/lib/logger";
-import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
+import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
@@ -192,7 +192,9 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
   let finalStorageKey: string | undefined;
   let availabilityFinalized = false;
   try {
-    ciphertext = await storage.readStagingCiphertext(record.stagingStorageKey, config.maxBytes);
+    // Staged under whatever limit applied when it was uploaded, so it is read
+    // against the hard ceiling: lowering the limit (#1285) must not strand it.
+    ciphertext = await storage.readStagingCiphertext(record.stagingStorageKey, DOCUMENT_MAX_BYTES_CEILING);
     // Picks by the staged object's own key_id (#954): held staging objects
     // outlive a poll cycle (up to `scanRecoveryRetentionHours`), long enough
     // to span a rotation window.
