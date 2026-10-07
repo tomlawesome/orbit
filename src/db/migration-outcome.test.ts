@@ -33,7 +33,7 @@ describe("migration outcome bookkeeping", () => {
 
     expect(client.calls).toHaveLength(1);
     expect(client.calls[0]?.query).toMatch(/INSERT INTO "drizzle"\."orbit_migration_runs"/u);
-    expect(client.calls[0]?.params).toEqual([startedAt, finishedAt, "succeeded", null]);
+    expect(client.calls[0]?.params).toEqual([startedAt.toISOString(), finishedAt.toISOString(), "succeeded", null]);
   });
 
   it("records a failed run against a fixed enum reason token", async () => {
@@ -43,7 +43,7 @@ describe("migration outcome bookkeeping", () => {
 
     await recordMigrationOutcome(client, { startedAt, finishedAt, outcome: "failed", reason: "migration_failed" });
 
-    expect(client.calls[0]?.params).toEqual([startedAt, finishedAt, "failed", "migration_failed"]);
+    expect(client.calls[0]?.params).toEqual([startedAt.toISOString(), finishedAt.toISOString(), "failed", "migration_failed"]);
   });
 
   it("passes values as bind parameters rather than interpolating them into SQL", async () => {
