@@ -9,6 +9,7 @@ import {
   detectDocumentMediaType,
   normalizedDocumentFilename,
   PDF_STRUCTURE_PARSER_OPTIONS,
+  type PdfDocumentParameters,
   validateSupportedDocumentStructure,
 } from "./validation";
 import { syntheticJpeg, syntheticPdf, syntheticPdfWithXrefStream, syntheticPng } from "../../../tests/support/synthetic-documents";
@@ -162,15 +163,28 @@ describe("structural document classification", () => {
     });
   });
 
+  it("names no pdf.js option the pinned version does not have (#1294)", () => {
+    // Neither is a getDocument parameter in pdfjs-dist 6.3: eval was removed,
+    // and scripting belongs to the viewer's annotation layer, which Orbit
+    // never builds. Naming them did nothing.
+    expect(PDF_STRUCTURE_PARSER_OPTIONS).not.toHaveProperty("isEvalSupported");
+    expect(PDF_STRUCTURE_PARSER_OPTIONS).not.toHaveProperty("enableScripting");
+    // The type check is the guard for the next upgrade: a name pdf.js drops
+    // stops compiling. These two lines fail `pnpm typecheck` if it ever stops.
+    // @ts-expect-error -- not a getDocument parameter in the pinned pdf.js
+    const removedEval = { isEvalSupported: false } satisfies PdfDocumentParameters;
+    // @ts-expect-error -- scripting is the viewer's option, not getDocument's
+    const viewerScripting = { enableScripting: false } satisfies PdfDocumentParameters;
+    expect([removedEval, viewerScripting]).toHaveLength(2);
+  });
+
   it("keeps parser security options explicit", () => {
     expect(PDF_STRUCTURE_PARSER_OPTIONS).toMatchObject({
       disableAutoFetch: true,
       disableFontFace: true,
       disableRange: true,
       disableStream: true,
-      enableScripting: false,
       enableXfa: false,
-      isEvalSupported: false,
       isImageDecoderSupported: false,
       isOffscreenCanvasSupported: false,
       stopAtErrors: true,

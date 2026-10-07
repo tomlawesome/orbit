@@ -17,15 +17,28 @@ const MAX_IMAGE_DIMENSION = 20_000;
 const MAX_IMAGE_PIXELS = 40_000_000;
 export const PDF_STRUCTURE_MAX_PAGES = 1_000;
 export const PDF_STRUCTURE_INSPECTION_BUDGET_MS = 5_000;
-type PdfStructureParserOptions = NonNullable<Parameters<typeof getDocument>[0]> & { isEvalSupported: false };
+/**
+ * The parameters the installed pdf.js's own `getDocument` declares. Options
+ * are checked against this with `satisfies`, so an option the pinned version
+ * does not know fails the type check instead of silently doing nothing, as
+ * `isEvalSupported` and `enableScripting` did (#1294).
+ */
+export type PdfDocumentParameters = NonNullable<Parameters<typeof getDocument>[0]>;
+
+/**
+ * How Orbit's one PDF parser opens untrusted bytes, for the structure check
+ * and the page-one renderer alike (ADR-0033 pattern C): no XFA, no worker,
+ * no network or range fetching, no system or browser fonts, no WebAssembly
+ * or platform image decoders, and errors stop the parse. Nothing a PDF
+ * carries can run: pdf.js runs document scripts only through the viewer's
+ * annotation layer and scripting manager, which Orbit never builds.
+ */
 export const PDF_STRUCTURE_PARSER_OPTIONS = Object.freeze({
   disableAutoFetch: true,
   disableFontFace: true,
   disableRange: true,
   disableStream: true,
-  enableScripting: false,
   enableXfa: false,
-  isEvalSupported: false,
   isImageDecoderSupported: false,
   isOffscreenCanvasSupported: false,
   stopAtErrors: true,
@@ -33,7 +46,7 @@ export const PDF_STRUCTURE_PARSER_OPTIONS = Object.freeze({
   useWasm: false,
   useWorkerFetch: false,
   verbosity: VerbosityLevel.ERRORS,
-}) as Readonly<PdfStructureParserOptions>;
+} satisfies PdfDocumentParameters);
 
 function startsWith(bytes: Buffer, signature: number[]): boolean {
   return signature.every((value, index) => bytes[index] === value);
