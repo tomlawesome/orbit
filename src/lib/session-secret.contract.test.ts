@@ -1,11 +1,9 @@
-import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "../../scripts/process-budget.mjs";
+import { readGolden } from "./__fixtures__/golden";
 import { envOrbitSchema, isValidSessionSecret, secretFileFormatMessage } from "./config-contract";
 import { ensureSecretFile } from "./configure-engine";
 import { getAuthConfig } from "./env";
@@ -21,12 +19,6 @@ import { getAuthConfig } from "./env";
 // single rule. This is the drift alarm: widening or narrowing any one of them
 // on its own fails here.
 
-// This file spawns the real configure.sh under bash; a spawn that takes
-// 0.7s quiet took 4.3s on a starved core (#698). Budget and reasoning:
-// scripts/process-budget.mjs.
-vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
-
-const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const scratchDirs: string[] = [];
 
 afterEach(() => {
@@ -102,85 +94,36 @@ function engineAccepts(value: string): boolean {
   }
 }
 
-// --- layer 5: the real scripts/configure.sh -----------------------------
+// --- layer 5: scripts/configure.sh ----------------------------------------
+//
+// Since #1210 configure.sh runs layer 4 (the engine) in a container, so there
+// is no fifth implementation left to drift. What the retired bash did with
+// each candidate was captured before it was deleted
+// (src/lib/__fixtures__/session-secret-configure); the engine is held to it.
 
-const FAKE_OPENSSL_SCRIPT = [
-  "#!/usr/bin/env bash",
-  "set -Eeuo pipefail",
-  'if [[ "${1:-}" == "rand" ]]; then',
-  "  printf 'a%.0s' {1..64}",
-  "  printf '\\n'",
-  "  exit 0",
-  "fi",
-  "exit 1",
-  "",
-].join("\n");
-
-// ensure_vapid_keys is bash-only and always runs after ensure_secret_file; it
-// would otherwise try to build a real image from a scratch directory that is
-// not a git checkout. Mirrors scripts/configure.test.mjs's fake docker.
-const FAKE_DOCKER_SCRIPT = [
-  "#!/usr/bin/env bash",
-  "set -Eeuo pipefail",
-  'case "${1:-}" in',
-  "  image) exit 0 ;;",
-  "  pull) exit 0 ;;",
-  "  run)",
-  "    printf 'public=fake-public-key\\nprivate=%s\\n' \"$(printf 'c%.0s' {1..64})\"",
-  "    exit 0",
-  "    ;;",
-  "esac",
-  "exit 1",
-  "",
-].join("\n");
-
-function makeFakeBin(): string {
-  const binDir = scratchDir("orbit-session-secret-fakebin-");
-  for (const [name, script] of [
-    ["openssl", FAKE_OPENSSL_SCRIPT],
-    ["docker", FAKE_DOCKER_SCRIPT],
-  ] as const) {
-    writeFileSync(join(binDir, name), script);
-    chmodSync(join(binDir, name), 0o755);
-  }
-  return binDir;
+interface CapturedBash {
+  value: string;
+  valid: boolean;
+  status: number;
+  stderr: string;
 }
 
-/** Runs the real, unmodified configure.sh bare flow over a pre-seeded session-secret file. */
-function runBashConfigure(value: string): { status: number | null; stderr: string } {
-  const dir = scratchDir("orbit-session-secret-bash-");
-  mkdirSync(join(dir, "scripts"));
-  // configuration.sh is deliberately not copied: run_configuration_preflight
-  // returns early without it, keeping this fixture scoped to ensure_secret_file.
-  for (const script of ["configure.sh", "installer-ui.sh"]) {
-    writeFileSync(join(dir, "scripts", script), readFileSync(join(repoRoot, "scripts", script)));
-    chmodSync(join(dir, "scripts", script), 0o755);
-  }
-  writeFileSync(join(dir, ".env-orbit.example"), readFileSync(join(repoRoot, ".env-orbit.example")));
+function capturedBash(label: string): CapturedBash {
+  return readGolden<CapturedBash>("session-secret-configure", label);
+}
+
+/** The engine's own refusal message for a session-secret value, or "" when it accepts it. */
+function engineRefusal(value: string): string {
+  const dir = scratchDir("orbit-session-secret-engine-message-");
   mkdirSync(join(dir, ".orbit-secrets"));
   chmodSync(join(dir, ".orbit-secrets"), 0o700);
-  const secretPath = join(dir, ".orbit-secrets", "session-secret");
-  writeFileSync(secretPath, `${value}\n`);
-  chmodSync(secretPath, 0o600);
-  // The engine refuses a lost sibling secret on an existing deployment, so the fixture must look like a real one.
-  for (const sibling of ["postgres-password", "document-kek"]) {
-    writeFileSync(join(dir, ".orbit-secrets", sibling), `${"a".repeat(64)}\n`);
-    chmodSync(join(dir, ".orbit-secrets", sibling), 0o600);
+  writeFileSync(join(dir, ".orbit-secrets", "session-secret"), `${value}\n`, { mode: 0o600 });
+  try {
+    ensureSecretFile(dir, ".orbit-secrets/session-secret", false);
+    return "";
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
   }
-
-  const binDir = makeFakeBin();
-  const result = failOnProcessDeadline(spawnSync("bash", [join(dir, "scripts", "configure.sh")], {
-    cwd: dir,
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH}`,
-      HOME: process.env.HOME ?? tmpdir(),
-      ORBIT_IMAGE: "orbit-local:abcdef123456",
-    },
-    ...processGuard(),
-  }), { label: "runBashConfigure" });
-  return { status: result.status, stderr: result.stderr ?? "" };
 }
 
 describe("a valid session secret has exactly one definition", () => {
@@ -197,15 +140,11 @@ describe("a valid session secret has exactly one definition", () => {
     expect(engineAccepts(value)).toBe(valid);
   });
 
-  it.each(CANDIDATES)("configure.sh agrees about $label", ({ value, valid }) => {
-    const { status, stderr } = runBashConfigure(value);
-    if (valid) {
-      expect(stderr).not.toContain("does not contain a valid 256-bit hexadecimal secret");
-      expect(status).toBe(0);
-    } else {
-      expect(status).not.toBe(0);
-      expect(stderr).toContain("does not contain a valid 256-bit hexadecimal secret");
-    }
+  it.each(CANDIDATES)("the retired bash configure.sh agreed about $label (captured)", ({ label, value, valid }) => {
+    const bash = capturedBash(label);
+    expect(bash.value).toBe(value);
+    expect(bash.status === 0).toBe(valid);
+    expect(engineAccepts(value)).toBe(bash.status === 0);
   });
 
   it("an empty SESSION_SECRET is a blank .env-orbit field, never a runtime value", () => {
@@ -227,18 +166,15 @@ describe("a valid session secret has exactly one definition", () => {
     expect(message).toContain("openssl rand -hex 32");
     expect(message).toContain("active sessions stay signed in");
 
-    const { stderr } = runBashConfigure("z".repeat(64));
-    expect(stderr).toContain("openssl rand -hex 32");
-    expect(stderr).toContain("active sessions stay signed in");
+    const refusal = engineRefusal("z".repeat(64));
+    expect(refusal).toContain("openssl rand -hex 32");
+    expect(refusal).toContain("active sessions stay signed in");
   });
 
-  it("bash and TypeScript word that refusal identically", () => {
-    // Bash cannot import config-contract.ts, so the wording is restated there
-    // and pinned here rather than left to drift.
-    const { stderr } = runBashConfigure("z".repeat(64));
-    expect(stderr.trim()).toBe(
-      `Orbit configuration: ${secretFileFormatMessage(".orbit-secrets/session-secret")}`,
-    );
+  it("the engine words that refusal exactly as the retired bash did", () => {
+    const bash = capturedBash("64 non-hexadecimal characters");
+    expect(bash.stderr.trim()).toBe(`Orbit configuration: ${secretFileFormatMessage(".orbit-secrets/session-secret")}`);
+    expect(engineRefusal("z".repeat(64))).toBe(secretFileFormatMessage(".orbit-secrets/session-secret"));
   });
 
   it("only the session secret carries the sign-out warning", () => {

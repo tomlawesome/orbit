@@ -1,0 +1,8 @@
+{
+  "env": "APP_URL=https://orbit.parity.invalid\nNOT_A_KEY=1\n",
+  "bash": {
+    "status": 1,
+    "stdout": "ready APP_URL\nmissing ORBIT_IMAGE\nnot in use OIDC_ISSUER\nnot in use OIDC_CLIENT_ID\nnot in use OIDC_CLIENT_SECRET\nnot in use OIDC_CALLBACK_URL\noptional processing\noptional ai\noptional mail\napp-managed imap\noptional push\n",
+    "stderr": ""
+  }
+}

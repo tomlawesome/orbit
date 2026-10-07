@@ -10,14 +10,29 @@
 # .github/workflows/publish-container.yml, so the GitLab pipeline can run the
 # same setup rather than a paraphrase of it (#801).
 #
-# Inputs: none. Writes .env-orbit and .orbit-secrets/ in the repository root.
+# Inputs: ORBIT_IMAGE, the loaded image under test: configure.sh runs inside
+# it (#1210). Writes .env-orbit and .orbit-secrets/ in the repository root.
 set -Eeuo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly repo_root
 cd "${repo_root}"
 
-bash scripts/configure.sh
+: "${ORBIT_IMAGE:?ORBIT_IMAGE must name the loaded image under test; configure.sh runs inside it}"
+# configure.sh accepts only a digest or an orbit-local:<12 hex> tag, the two
+# shapes an operator's deployment can carry. A CI tag (orbit-ci:<commit>) is
+# given the second shape first, naming the same image by its own ID.
+engine_image="${ORBIT_IMAGE}"
+if [[ ! "${engine_image}" =~ ^orbit-local:[0-9a-f]{12}$ && ! "${engine_image}" =~ @sha256:[0-9a-f]{64}$ ]]; then
+  image_id="$(docker image inspect --format '{{.Id}}' "${engine_image}")"
+  image_id="${image_id#sha256:}"
+  engine_image="orbit-local:${image_id:0:12}"
+  docker tag "${ORBIT_IMAGE}" "${engine_image}"
+fi
+ORBIT_IMAGE="${engine_image}" bash scripts/configure.sh
+# #1258: whatever configure created belongs to whoever ran it.
+not_owned="$(find .env-orbit .orbit-secrets \( ! -uid "$(id -u)" -o ! -gid "$(id -g)" \) -print)"
+[[ -z "${not_owned}" ]] || { printf 'configure.sh left paths not owned by %s:%s:\n%s\n' "$(id -u)" "$(id -g)" "${not_owned}" >&2; exit 1; }
 # The GreenMail sidecar's imaps listener and the app's trust anchor are
 # bind-mounted from these two files. A missing source is silently
 # created as a directory, which surfaces 16 minutes later as a mail

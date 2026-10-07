@@ -1,10 +1,10 @@
-import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { writeEngineDockerShim } from "../../scripts/engine-docker-shim.mjs";
 import { PROCESS_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
 import {
   createInstallConfigurationScriptAdapter,
@@ -14,21 +14,16 @@ import {
 import { runConfigurationMigration, runConfigurationPreflight } from "./configuration-migration";
 import { type MachinePromptAnswerProvider, prepareConfiguration, stageGuidedInstallConfiguration } from "./guided-configuration";
 
-// Whole-script coverage for issue #295 slice 5's shipped subprocess
-// adapters — the production implementations the plan deferred from slice 3
-// (ConfigurationScriptAdapter) and slice 4 (GuidedConfigurationAdapter).
-// Both spawn the real, unmodified scripts/configuration.sh and
-// scripts/configure.sh directly (the same "spawn the real script" strategy
-// configuration-migration.parity.test.ts and guided-configuration.parity.
-// test.ts already established for these two scripts specifically, since
-// both have real, independently-invocable entry points), proving this
-// slice's own shipped adapters — not a local, unshipped reference adapter —
-// actually drive configuration-migration.ts's/guided-configuration.ts's pure
-// orchestration functions to a real, correct result.
+// Coverage for the install engine's shipped configuration adapters (issue
+// #295 slice 5). The configuration adapter runs the configuration contract
+// port in-process since #1210; the guided adapter spawns the real
+// scripts/configure.sh, which runs the engine as a container one-off -- here
+// through scripts/engine-docker-shim.mjs, a fake docker that runs this
+// checkout's CLI instead, so no daemon or image is needed.
 
-// This file spawns the real configuration.sh/configure.sh under bash and
-// builds/runs a real docker image; a spawn that takes 0.7s quiet took 4.3s
-// on a starved core (#698). Budget and reasoning: scripts/process-budget.mjs.
+// This file spawns the real configure.sh and CLI; a spawn that takes 0.7s
+// quiet took 4.3s on a starved core (#698). Budget and reasoning:
+// scripts/process-budget.mjs.
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -47,11 +42,9 @@ const IMAGE = "ghcr.io/tomlawesome/orbit@sha256:" + "c".repeat(64);
 const DIGEST = "sha256:" + "c".repeat(64);
 
 describe("createInstallConfigurationScriptAdapter (issue #295 slice 3 deferral)", () => {
-  it("drives the real configuration.sh --preflight/--migrate to a successful migration", () => {
+  it("drives the configuration contract's preflight and migration to a successful migration", () => {
     const sandbox = newSandbox("orbit-install-config-adapter-");
-    mkdirSync(join(sandbox, "scripts"));
-    const scriptPath = join(sandbox, "scripts", "configuration.sh");
-    writeFileSync(scriptPath, readFileSync(join(repoRoot, "scripts", "configuration.sh")));
+    const scriptPath = join(sandbox, "scripts", "configure.sh");
     const environmentFile = join(sandbox, ".env-orbit");
     writeFileSync(environmentFile, [`ORBIT_IMAGE=${IMAGE}`, ""].join("\n"), { mode: 0o600 });
 
@@ -75,9 +68,7 @@ describe("createInstallConfigurationScriptAdapter (issue #295 slice 3 deferral)"
 
   it("fails closed on a structurally invalid configuration file", () => {
     const sandbox = newSandbox("orbit-install-config-adapter-invalid-");
-    mkdirSync(join(sandbox, "scripts"));
-    const scriptPath = join(sandbox, "scripts", "configuration.sh");
-    writeFileSync(scriptPath, readFileSync(join(repoRoot, "scripts", "configuration.sh")));
+    const scriptPath = join(sandbox, "scripts", "configure.sh");
     const environmentFile = join(sandbox, ".env-orbit");
     writeFileSync(environmentFile, "this is not valid\n", { mode: 0o600 });
 
@@ -88,32 +79,18 @@ describe("createInstallConfigurationScriptAdapter (issue #295 slice 3 deferral)"
 });
 
 describe("createInstallGuidedConfigurationAdapter (issue #295 slice 4 deferral)", () => {
-  // Every configure.sh path this suite exercises passes through the bare
-  // default invocation at least once (guided-configuration.ts's own
-  // stageGuidedInstallConfiguration/prepareConfiguration both call
-  // adapter.runDefault), which reaches ensure_vapid_keys
-  // (configure.sh:879-916). That function only avoids a real `docker build`
-  // (and, from a plain tmp-dir sandbox outside any git worktree, a `git
-  // rev-parse` that fails) when ORBIT_IMAGE is already a locally-inspectable
-  // image. Rather than pre-seed a fake vapid-private-key file (which would
-  // make `.orbit-secrets` already exist and falsely trip guarded-
-  // configuration's own guarantee-#30 "no pre-existing .orbit-secrets"
-  // precondition for the staged-guided-install test), this suite builds the
-  // repo's own `vapid-generator` Dockerfile target once — the same minimal
-  // image ensure_vapid_keys's primary path already expects to run
-  // `/opt/orbit/scripts/generate-vapid.mjs` inside — and tags it as a valid
-  // `orbit-local:<12 hex>` reference so `docker image inspect` finds it
-  // locally with no registry pull and no git dependency.
+  // configure.sh needs an image it can run; the fake docker answers that a
+  // local tag is present and runs the engine for it.
   const VAPID_FIXTURE_TAG = "orbit-local:0f00d00face1";
-  let vapidFixtureAvailable = false;
+  let shimBin = "";
+  const vapidFixtureAvailable = true;
 
   beforeAll(() => {
-    const build = spawnSync("docker", ["build", "--target", "vapid-generator", "--tag", VAPID_FIXTURE_TAG, "."], {
-      cwd: repoRoot,
-      encoding: "utf8",
-    });
-    vapidFixtureAvailable = build.status === 0;
-  }, 60_000);
+    shimBin = newSandbox("orbit-install-guided-adapter-docker-");
+    writeEngineDockerShim(shimBin);
+  });
+
+  const adapterEnv = (): NodeJS.ProcessEnv => ({ ...process.env, PATH: `${shimBin}:${process.env.PATH}` });
 
   function makeConfigureSandbox(): string {
     const sandbox = newSandbox("orbit-install-guided-adapter-");
@@ -132,7 +109,11 @@ describe("createInstallGuidedConfigurationAdapter (issue #295 slice 4 deferral)"
     writeFileSync(
       join(sandbox, ".env-orbit"),
       [
+        // install.sh migrates an existing file before it configures (#1210:
+        // configure's preflight always runs now, so the fixture is a migrated one).
+        "ORBIT_CONFIG_SCHEMA_VERSION=1",
         "APP_URL=https://guided.adapter.test",
+        "ORBIT_AUTH_OIDC=true",
         "OIDC_ISSUER=https://issuer.adapter.test",
         "OIDC_CLIENT_ID=adapter-client",
         "OIDC_CLIENT_SECRET=",
@@ -149,7 +130,7 @@ describe("createInstallGuidedConfigurationAdapter (issue #295 slice 4 deferral)"
     mkdirSync(join(sandbox, ".orbit-secrets"), { mode: 0o700 });
     writeFileSync(join(sandbox, ".orbit-secrets", "oidc-client-secret"), "s3cr3t-adapter-value", { mode: 0o600 });
 
-    const adapter = createInstallGuidedConfigurationAdapter({ cwd: sandbox });
+    const adapter = createInstallGuidedConfigurationAdapter({ cwd: sandbox, env: adapterEnv() });
     const configureScript = join(sandbox, "scripts", "configure.sh");
 
     const result = await prepareConfiguration(
@@ -172,7 +153,7 @@ describe("createInstallGuidedConfigurationAdapter (issue #295 slice 4 deferral)"
   it("prepareConfiguration refuses closed with install.sh's exact guidance when required fields are missing and there is no controlling terminal (guarantee #24)", async () => {
     expect(vapidFixtureAvailable).toBe(true);
     const sandbox = makeConfigureSandbox();
-    const adapter = createInstallGuidedConfigurationAdapter({ cwd: sandbox });
+    const adapter = createInstallGuidedConfigurationAdapter({ cwd: sandbox, env: adapterEnv() });
     const configureScript = join(sandbox, "scripts", "configure.sh");
 
     const result = await prepareConfiguration(
@@ -202,7 +183,7 @@ describe("createInstallGuidedConfigurationAdapter (issue #295 slice 4 deferral)"
     const sandbox = makeConfigureSandbox();
     const stagingEnvironmentFile = join(sandbox, ".env-orbit");
     const stagingSecretsDirectory = join(sandbox, ".orbit-secrets");
-    const adapter = createInstallGuidedConfigurationAdapter({ cwd: sandbox });
+    const adapter = createInstallGuidedConfigurationAdapter({ cwd: sandbox, env: adapterEnv() });
     const configureScript = join(sandbox, "scripts", "configure.sh");
 
     const answers = {

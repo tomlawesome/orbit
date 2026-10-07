@@ -15,34 +15,40 @@ fail() {
 
 [[ "$mode" == "--pull" || "$mode" == "--build" ]] ||
   fail "Usage: bash scripts/deploy-container.sh [--pull|--build]"
-[[ -f "$environment_file" ]] ||
-  fail "Missing ${environment_file}; run bash scripts/configure.sh first."
 command -v docker >/dev/null 2>&1 || fail "Docker is required."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required."
 
 if [[ "$mode" == "--build" ]]; then
   export ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)"
 else
-  configured_image="${ORBIT_IMAGE:-$(sed -n 's/^ORBIT_IMAGE=//p' "$environment_file" | tail -n 1)}"
+  configured_image="${ORBIT_IMAGE:-}"
+  if [[ -z "$configured_image" && -f "$environment_file" ]]; then
+    configured_image="$(sed -n 's/^ORBIT_IMAGE=//p' "$environment_file" | tail -n 1)"
+  fi
   [[ "$configured_image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] ||
     fail "Pull deployments require ORBIT_IMAGE to identify an immutable registry digest."
   export ORBIT_IMAGE="$configured_image"
 fi
 
-bash scripts/configure.sh
-
 compose() {
   docker compose --env-file "$environment_file" "$@"
 }
 
-# Prepare the selected application image before touching a running deployment.
-compose pull orbit-db
-compose pull orbit-clamav
+# The image has to exist before configuration, because configuration runs
+# inside it (#1210 D4): build or pull it first. Nothing here touches the
+# existing .env-orbit, secrets or volumes, so an existing deployment keeps
+# its data.
 if [[ "$mode" == "--build" ]]; then
   bash scripts/build-container.sh
 else
-  compose pull orbit-app
+  docker pull "$ORBIT_IMAGE"
 fi
+
+bash scripts/configure.sh
+
+# Prepare the remaining images before touching a running deployment.
+compose pull orbit-db
+compose pull orbit-clamav
 
 # Database migrations happen on application startup. Preserve a validated
 # recovery point whenever this is an update rather than a first deployment.

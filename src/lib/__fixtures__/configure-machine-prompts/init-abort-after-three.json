@@ -1,0 +1,7 @@
+{
+  "status": 1,
+  "stdout": "prompt field=APP_URL kind=url required=true attempt=1\nprompt-reject field=APP_URL reason=empty\nprompt field=APP_URL kind=url required=true attempt=2\nprompt-reject field=APP_URL reason=empty\nprompt field=APP_URL kind=url required=true attempt=3\nprompt-reject field=APP_URL reason=empty\nprompt-abort field=APP_URL\n",
+  "stderr": "Orbit configuration: Guided configuration was cancelled.\n",
+  "env": null,
+  "secret": null
+}

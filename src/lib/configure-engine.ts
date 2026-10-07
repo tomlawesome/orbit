@@ -1,19 +1,14 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import {
   chmodSync,
-  closeSync,
-  constants,
-  fstatSync,
   lstatSync,
   mkdirSync,
-  openSync,
   readFileSync,
   renameSync,
   rmSync,
   statSync,
   type Stats,
   writeFileSync,
-  writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -30,7 +25,10 @@ import {
   normalizePublicOrigin,
   secretFileFormatMessage,
 } from "./config-contract";
-import { parseEnvOrbitContent } from "./env-orbit-file";
+import { acquireDeployLock as acquireSharedDeployLock } from "./deploy-lock";
+import { HostOwnershipError, applyHostOwnership } from "./host-ownership";
+import { preflightEnvironmentFile } from "./configuration-migration";
+import { ensureVapidKeys } from "./vapid-keys";
 
 // The write side of scripts/configure.sh, ported to the TypeScript engine
 // (issue #294, completing the port begun for `--check` in src/lib/
@@ -39,30 +37,14 @@ import { parseEnvOrbitContent } from "./env-orbit-file";
 // and are re-asserted by name in src/lib/configure-engine.test.ts and
 // src/lib/configure-engine.parity.test.ts.
 //
-// Scope: every configure.sh write flow EXCEPT `ensure_vapid_keys`
-// (configure.sh:684-716, guarantees #24-26), which is the one sub-step that
-// genuinely needs `docker` (to either run an already-resolved ORBIT_IMAGE or
-// build+run a throwaway bootstrap image). Per the settled #295 engine-
-// delivery architecture ("the engine can never manage the Docker socket.
-// Ever." / "host scripts remain the only Docker-touching layer"), that step
-// cannot move into this module or into the containerized `orbit configure`
-// CLI command it backs — it stays bash-only, always, run by
-// scripts/configure.sh itself immediately after delegating (or running
-// locally) everything else this module implements. This is a permanent
-// scope boundary, not a placeholder: see docs/adr-notes/294-configure-write-
-// port-plan.md, "Docker-dependency audit".
+// Scope: every configure.sh write flow, VAPID key generation included since
+// #1210 (build note D7, src/lib/vapid-keys.ts). scripts/configure.sh is now
+// only the shell that runs this engine as a one-off container; it writes no
+// configuration itself.
 //
-// Schema-migration handoff: configure.sh's own `run_configuration_preflight`
-// delegates to `configuration.sh --preflight` as a subprocess. That script
-// is not shipped inside the app image (only the bundled `orbit` CLI itself
-// is — see the Dockerfile's `cli-builder`/`runner` stages), so a real
-// in-container subprocess hand-off is not possible here. Instead
-// runConfigurePreflight below reuses src/lib/env-orbit-file.ts's
-// parseEnvOrbitContent — itself already the parity-proven TypeScript mirror
-// of configuration.sh's own `parse_file` (established for #292/the `check`
-// port) — rather than re-deriving new parsing/validation logic. This is
-// "mirror it, don't reimplement it" applied to the one mirror that already
-// exists and is already proven, not a fresh reimplementation.
+// Schema-migration preflight: runConfigurePreflight below applies
+// src/lib/configuration-migration.ts's preflight (the TypeScript port of the
+// retired scripts/configuration.sh, #1210 D8) to .env-orbit.
 //
 // Every mutating function here operates on real files under an explicit
 // `deployDir` (mirroring src/cli/orbit.ts's existing `--dir` convention),
@@ -159,13 +141,15 @@ function atomicWriteFile(finalPath: string, content: string | Buffer, mode: numb
   try {
     writeFileSync(tmpPath, content, { mode });
     chmodSync(tmpPath, mode);
-  } catch {
+    // #1258: handed to the host operator before it takes its final name.
+    applyHostOwnership(tmpPath);
+  } catch (error) {
     try {
       rmSync(tmpPath, { force: true });
     } catch {
       /* best effort cleanup */
     }
-    refuse(`Could not write ${finalPath}.`, "write-failed");
+    refuse(error instanceof HostOwnershipError ? error.message : `Could not write ${finalPath}.`, "write-failed");
   }
   try {
     renameSync(tmpPath, finalPath);
@@ -181,85 +165,10 @@ function atomicWriteFile(finalPath: string, content: string | Buffer, mode: numb
 
 // --- cross-process lock (O1-R8/O1-R7) ---------------------------------------
 //
-// Shared (same file name, same algorithm) with install-transaction.ts's own
-// acquireDeployLock: both modules mutate the same managed paths
-// (.env-orbit/.orbit-secrets) under the same deployment directory, and
-// neither had any cross-process exclusion before this (two concurrent
-// `orbit configure` writers could each read-modify-write
-// updateManagedKeys's target and lose the other's keys; a concurrent
-// install/update could do the same to install-transaction.ts's commits).
-// Using one lock file for both closes both gaps with a single mechanism: a
-// second `orbit configure`, `orbit install` or `orbit update` targeting the
-// same directory fails fast with a clear message instead of racing.
-//
-// A plain `open(O_CREAT|O_EXCL)` is the exclusion primitive (atomic across
-// processes on every real filesystem this runs on, unlike a stat-then-create
-// pair); a lock file older than DEPLOY_LOCK_STALE_MS is treated as abandoned
-// by a crashed process (this engine has no PID-liveness check available
-// across a container boundary) and taken over rather than blocking forever.
-const DEPLOY_LOCK_FILE_NAME = ".orbit-engine.lock";
-const DEPLOY_LOCK_STALE_MS = 10 * 60 * 1000;
-
-/** Acquires the deployment-directory lock, or refuses if another run holds it. Returns a release function the caller must call exactly once, success or failure. */
+// The one deploy lock (src/lib/deploy-lock.ts, #1210 D9), shared with the
+// configuration migration and install/update's file transaction.
 function acquireDeployLock(deployDir: string, operationLabel: string): () => void {
-  const lockPath = join(deployDir, DEPLOY_LOCK_FILE_NAME);
-
-  const takeLock = (): number => openSync(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
-
-  let fd: number;
-  try {
-    fd = takeLock();
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-      refuse(`Could not take the ${operationLabel} lock at ${lockPath}.`, "locked");
-    }
-    let staleEnough: boolean;
-    try {
-      staleEnough = Date.now() - statSync(lockPath).mtimeMs > DEPLOY_LOCK_STALE_MS;
-    } catch {
-      staleEnough = true; // Lock vanished between the EEXIST and this stat; retry once below.
-    }
-    if (!staleEnough) {
-      refuse(
-        `Another ${operationLabel} is already running against this deployment (lock held at ${lockPath}). Wait for it to finish, or remove the lock file yourself once you are certain no other run is active.`,
-        "locked",
-      );
-    }
-    // Reclaim by rename, not unlink-then-create (same shape as
-    // install-transaction.ts's copy): two processes that both saw the stale
-    // lock would otherwise each unlink and recreate it, and the slower unlink
-    // removed the faster one's fresh lock, leaving both believing they held
-    // it. Only one rename succeeds; the other tries the plain create once
-    // more and refuses if it is taken.
-    const reclaimed = `${lockPath}.stale-${process.pid}`;
-    try {
-      renameSync(lockPath, reclaimed);
-      rmSync(reclaimed, { force: true });
-    } catch {
-      /* the other process reclaimed it first; the create below decides */
-    }
-    try {
-      fd = takeLock();
-    } catch {
-      refuse(`Another ${operationLabel} is already running against this deployment (lock held at ${lockPath}).`, "locked");
-    }
-  }
-  // The lock names its holder, so a release never removes a lock that was
-  // reclaimed from this process as stale and now belongs to another run.
-  const owner = `${process.pid}:${randomUUID()}\n`;
-  writeSync(fd, owner);
-  closeSync(fd);
-
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    try {
-      if (readFileSync(lockPath, "utf8") === owner) rmSync(lockPath, { force: true });
-    } catch {
-      /* best effort */
-    }
-  };
+  return acquireSharedDeployLock(deployDir, operationLabel, (message) => new ConfigureEngineRefusal(message, "locked"));
 }
 
 function generateHexSecret(): string {
@@ -382,6 +291,11 @@ export interface EnsureEnvironmentFileResult {
   message?: string;
 }
 
+/** ensure_environment_file's own "Created ..." line, as a prefix for a flow's closing message (bash printed both). */
+function withCreatedLine(created: EnsureEnvironmentFileResult, message: string): string {
+  return created.message ? `${created.message}\n${message}` : message;
+}
+
 /** ensure_environment_file (configure.sh:171-198, guarantees #4-6). */
 export function ensureEnvironmentFile(deployDir: string): EnsureEnvironmentFileResult {
   const examplePath = join(deployDir, ENVIRONMENT_EXAMPLE_NAME);
@@ -455,14 +369,22 @@ function updateManagedKeysLocked(deployDir: string, pairs: ReadonlyArray<readonl
     inputLines = inputLines.slice(0, -1);
   }
 
+  // Windows files keep their own ending: lines this function writes get CRLF;
+  // copied lines are untouched and already carry their own "\r".
+  const crlf = raw.includes("\r\n");
   const outputLines: string[] = [];
+  const generated = new Set<number>();
+  const emit = (line: string): void => {
+    generated.add(outputLines.length);
+    outputLines.push(line);
+  };
   const written = new Set<string>();
   const hasOidcSecretFilePending = pending.has("OIDC_CLIENT_SECRET_FILE");
 
   for (const line of inputLines) {
     if (hasOidcSecretFilePending && line.startsWith("# OIDC_CLIENT_SECRET_FILE=")) {
       if (!written.has("OIDC_CLIENT_SECRET_FILE")) {
-        outputLines.push(`OIDC_CLIENT_SECRET_FILE=${pending.get("OIDC_CLIENT_SECRET_FILE")}`);
+        emit(`OIDC_CLIENT_SECRET_FILE=${pending.get("OIDC_CLIENT_SECRET_FILE")}`);
         written.add("OIDC_CLIENT_SECRET_FILE");
       }
       continue;
@@ -476,7 +398,7 @@ function updateManagedKeysLocked(deployDir: string, pairs: ReadonlyArray<readonl
           // Relocated elsewhere (the commented selector above, or right
           // after OIDC_CLIENT_SECRET below) — this stale copy is dropped.
         } else if (!written.has(key)) {
-          outputLines.push(`${key}=${pending.get(key)}`);
+          emit(`${key}=${pending.get(key)}`);
           written.add(key);
         }
         break;
@@ -488,20 +410,22 @@ function updateManagedKeysLocked(deployDir: string, pairs: ReadonlyArray<readonl
     }
 
     if (hasOidcSecretFilePending && !written.has("OIDC_CLIENT_SECRET_FILE") && line.startsWith("OIDC_CLIENT_SECRET=")) {
-      outputLines.push(`OIDC_CLIENT_SECRET_FILE=${pending.get("OIDC_CLIENT_SECRET_FILE")}`);
+      emit(`OIDC_CLIENT_SECRET_FILE=${pending.get("OIDC_CLIENT_SECRET_FILE")}`);
       written.add("OIDC_CLIENT_SECRET_FILE");
     }
   }
 
   for (const key of order) {
     if (!written.has(key)) {
-      outputLines.push(`${key}=${pending.get(key)}`);
+      emit(`${key}=${pending.get(key)}`);
       finalNewline = true;
     }
   }
 
   const content = outputLines
-    .map((line, index) => (index === outputLines.length - 1 && !finalNewline ? line : `${line}\n`))
+    .map((line, index) =>
+      index === outputLines.length - 1 && !finalNewline ? line : `${line}${crlf && generated.has(index) ? "\r\n" : "\n"}`,
+    )
     .join("");
 
   atomicWriteFile(envPath, content, 0o600, "env-orbit.updating");
@@ -534,6 +458,11 @@ export function ensureSecretsDirectory(deployDir: string): void {
       mkdirSync(dirPath);
     } catch {
       refuse(`Could not create ${SECRETS_DIRECTORY_NAME}.`, "secrets-directory-invalid");
+    }
+    try {
+      applyHostOwnership(dirPath);
+    } catch (error) {
+      refuse((error as Error).message, "write-failed");
     }
   }
   try {
@@ -722,7 +651,7 @@ export function applySetOidcSecret(deployDir: string, secret: string): string {
     refuse(`The OIDC client secret exceeds the ${MAXIMUM_SECRET_BYTES}-byte maximum.`, "oidc-secret-invalid");
   }
 
-  ensureEnvironmentFile(deployDir);
+  const created = ensureEnvironmentFile(deployDir);
   ensureSecretsDirectory(deployDir);
 
   const secretPath = join(deployDir, OIDC_SECRET_RELATIVE_PATH);
@@ -767,7 +696,7 @@ export function applySetOidcSecret(deployDir: string, secret: string): string {
     releaseLock();
   }
 
-  return `Orbit saved the OIDC client secret to ${OIDC_SECRET_RELATIVE_PATH}.`;
+  return withCreatedLine(created, `Orbit saved the OIDC client secret to ${OIDC_SECRET_RELATIVE_PATH}.`);
 }
 
 // --- guided configuration (--init) --------------------------------------
@@ -803,12 +732,12 @@ export function applyGuidedInit(deployDir: string, input: GuidedInitInput): stri
   }
 
   if (input.authMode === "local") {
-    ensureEnvironmentFile(deployDir);
+    const created = ensureEnvironmentFile(deployDir);
     updateManagedKeys(deployDir, [
       ["APP_URL", normalizedAppUrl],
       ["ORBIT_AUTH_OIDC", "false"],
     ]);
-    return "Orbit guided configuration saved APP_URL and set ORBIT_AUTH_OIDC=false (local accounts only).";
+    return withCreatedLine(created, "Orbit guided configuration saved APP_URL and set ORBIT_AUTH_OIDC=false (local accounts only).");
   }
 
   if (!isValidOidcIssuer(input.issuer ?? "")) {
@@ -822,7 +751,7 @@ export function applyGuidedInit(deployDir: string, input: GuidedInitInput): stri
   }
 
   const callbackUrl = `${normalizedAppUrl}${OIDC_CALLBACK_PATH}`;
-  ensureEnvironmentFile(deployDir);
+  const created = ensureEnvironmentFile(deployDir);
   updateManagedKeys(deployDir, [
     ["APP_URL", normalizedAppUrl],
     ["ORBIT_AUTH_OIDC", "true"],
@@ -831,7 +760,7 @@ export function applyGuidedInit(deployDir: string, input: GuidedInitInput): stri
     ["OIDC_CALLBACK_URL", callbackUrl],
   ]);
 
-  return "Orbit guided configuration saved APP_URL, ORBIT_AUTH_OIDC=true, OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CALLBACK_URL.";
+  return withCreatedLine(created, "Orbit guided configuration saved APP_URL, ORBIT_AUTH_OIDC=true, OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CALLBACK_URL.");
 }
 
 // --- deployment profile ---------------------------------------------------
@@ -862,14 +791,14 @@ export function setDeploymentProfile(deployDir: string, preset: string, model: s
       refuse(`Unknown deployment profile preset: ${preset}.`, "deployment-profile-invalid");
   }
 
-  ensureEnvironmentFile(deployDir);
+  const created = ensureEnvironmentFile(deployDir);
   updateManagedKeys(deployDir, [
     ["COMPOSE_PROFILES", profiles],
     ["TIKA_URL", tikaUrl],
     ["OLLAMA_MODEL", model ?? ""],
   ]);
 
-  return `Orbit deployment profile saved: ${preset}.`;
+  return withCreatedLine(created, `Orbit deployment profile saved: ${preset}.`);
 }
 
 // --- configuration preflight (configuration.sh --preflight handoff) --------
@@ -879,52 +808,24 @@ export type ConfigurePreflightOutcome =
   | { ok: false; code: "preflight-failed" | "configuration-migration-required" };
 
 /**
- * run_configuration_preflight (configure.sh:42-51, guarantee #2). bash
- * drives `configuration.sh --preflight` as a subprocess; that script is not
- * shipped inside the app image, so this reuses env-orbit-file.ts's
- * parseEnvOrbitContent — the existing parity-proven mirror of
- * configuration.sh's own `parse_file` — instead (see this module's header
- * comment). File-safety (regular, non-symlink, mode 600) is re-checked here
- * the same way src/cli/orbit.ts's commandCheck does: a single O_NOFOLLOW
- * descriptor so the safety check and the content read cannot be split by a
- * file swap. Deliberately not a separate existsSync-then-open pair (CodeQL
- * js/file-system-race): "does the file exist" is answered by the same
- * openSync call that reads it, dispatching on its own failure code —
- * mirroring recovery-bundle.ts's readRegularFileNoFollow, whose own comment
- * notes "a dangling/symlink path surfaces as ELOOP/ENOENT from the single
- * open call itself." Only a true ENOENT (nothing at this path at all) skips
- * preflight, matching bash's `[[ ! -e ]]`; a symlinked `.env-orbit` (ELOOP)
- * fails closed here rather than bash's own dangling-symlink-only skip —
- * strictly more conservative, not a behavioral regression.
+ * run_configuration_preflight (configure.sh guarantee #2): an existing
+ * .env-orbit must pass the configuration contract's preflight
+ * (src/lib/configuration-migration.ts, the port of configuration.sh); a file
+ * with no schema marker needs the installer's migration first. Nothing at
+ * the path at all (bash's `[[ ! -e ]]`) skips the check.
  */
 export function runConfigurePreflight(deployDir: string): ConfigurePreflightOutcome {
   const envPath = join(deployDir, ENVIRONMENT_FILE_NAME);
-
-  let descriptor: number;
-  try {
-    descriptor = openSync(envPath, constants.O_RDONLY | constants.O_NOFOLLOW);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { ok: true };
-    return { ok: false, code: "preflight-failed" };
+  if (!pathInfo(envPath).existsFollowing && !pathInfo(envPath).isSymlink) return { ok: true };
+  const result = preflightEnvironmentFile(envPath);
+  if (result.status !== 0) return { ok: false, code: "preflight-failed" };
+  if (/^safely_migratable ORBIT_CONFIG_SCHEMA_VERSION$/m.test(result.stdout)) {
+    return { ok: false, code: "configuration-migration-required" };
   }
-  let content: string;
-  try {
-    const stat = fstatSync(descriptor);
-    if (!stat.isFile() || (stat.mode & 0o777) !== 0o600) {
-      return { ok: false, code: "preflight-failed" };
-    }
-    content = readFileSync(descriptor, "utf8");
-  } finally {
-    closeSync(descriptor);
-  }
-
-  const parsed = parseEnvOrbitContent(content);
-  if (!parsed.ok) return { ok: false, code: "preflight-failed" };
-  if (!parsed.schemaPresent) return { ok: false, code: "configuration-migration-required" };
   return { ok: true };
 }
 
-// --- the bare (no-argument) flow, minus ensure_vapid_keys ------------------
+// --- the bare (no-argument) flow ----------------------------------------------
 
 const GENERATED_SECRET_RELATIVE_PATHS = [
   `${SECRETS_DIRECTORY_NAME}/session-secret`,
@@ -937,13 +838,10 @@ export interface ConfigureApplyResult {
 }
 
 /**
- * configure.sh's bare/default invocation (configure.sh:1156-1167), minus
- * `ensure_vapid_keys` (guarantees #24-26) — see this module's header
- * comment for why that step is permanently out of scope here. The caller
- * (scripts/configure.sh, when delegating, or src/cli/orbit.ts's `configure`
- * command) is responsible for running the VAPID step and printing the final
- * "Orbit configuration is ready..." message itself, in that order, so
- * combined output stays in the same sequence configure.sh has always used.
+ * configure.sh's bare/default invocation (guarantees #1-9, #15-19, #24-26,
+ * #33): the environment file, preflight, the pinned image, the generated
+ * secrets, the OIDC placeholder and, last, the VAPID key pair. The CLI
+ * prints the returned messages, then "Orbit configuration is ready...".
  */
 export function runConfigureApply(
   deployDir: string,
@@ -1008,6 +906,10 @@ export function runConfigureApply(
   }
 
   ensureOidcSecretPlaceholder(deployDir);
+
+  // #1210 D7: VAPID keys are generated here now, not by a Docker-backed bash step.
+  const vapid = ensureVapidKeys(deployDir);
+  if (vapid.message) messages.push(vapid.message);
 
   return { messages };
 }
@@ -1178,6 +1080,7 @@ export function collectMachineOidcSecret(driver: ConfigureMachinePromptDriver): 
 // the predicate logic above — mirrors guided-configuration.ts's/install-
 // transaction.ts's own `internal` export.
 export const internal = {
+  atomicWriteFile,
   pathInfo,
   exampleActiveValue,
   buildMinimalEnvironmentContent,

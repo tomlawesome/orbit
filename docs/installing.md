@@ -92,8 +92,8 @@ different build behind your back.
 The Compose files and operator scripts come out of that same build, so they
 always match the version they came with. The directory ends up holding
 `docker-compose.yml`, `docker-compose.mail.yml`, `.env-orbit.example`,
-`config/tika-config.json`, the scripts `configure.sh`, `configuration.sh`,
-`backup.sh`, `restore.sh`, `repair.sh`, `engine-check.sh` and
+`config/tika-config.json`, the scripts `configure.sh`,
+`backup.sh`, `restore.sh`, `repair.sh` and
 `installer-ui.sh`, your settings in `.env-orbit`, and your secrets in
 `.orbit-secrets/`.
 
@@ -118,6 +118,20 @@ bash scripts/configure.sh --init
 bash scripts/configure.sh --set-oidc-secret
 bash scripts/configure.sh --check
 ```
+
+These commands run inside the Orbit image, so Docker must be running and
+the image must be available, even for a one-line change. `configure.sh`
+takes the image from `ORBIT_IMAGE` in your environment, or else from the
+`ORBIT_IMAGE=` line the installer wrote to `.env-orbit`. If it finds neither
+it stops with:
+
+```text
+Orbit configuration: No Orbit image to run configuration with. Set ORBIT_IMAGE to an immutable registry digest (or the local tag scripts/build-container.sh builds), or install with get-orbit.sh, which records it in .env-orbit.
+```
+
+To go on, set `ORBIT_IMAGE` to the build's registry digest and run the
+command again. A digest that is not on this machine yet is pulled first.
+Files `configure.sh` creates belong to the user who ran it.
 
 ## Logged and unattended runs
 
@@ -165,9 +179,16 @@ not offer it. Clone the repository and build:
 
 ```bash
 git clone https://github.com/tomlawesome/orbit.git && cd orbit
-bash scripts/configure.sh
-bash scripts/build-container.sh
 ```
+
+Two scripts then matter, and each needs something the other can produce.
+`bash scripts/configure.sh` runs inside the Orbit image, so it needs one: an
+`ORBIT_IMAGE` in your environment (a registry digest, or the local tag
+`build-container.sh` builds) or in `.env-orbit`; a local tag that has not
+been built yet is refused. `bash scripts/build-container.sh` needs no
+`.env-orbit`, so on a fresh checkout `bash scripts/deploy-container.sh
+--build` does the whole job in the right order: build the image, run
+configuration, start Orbit.
 
 [Running Orbit](operating.md#running-a-source-checkout) covers starting and
 updating a checkout, and [Testing Orbit](testing.md#local-development) covers

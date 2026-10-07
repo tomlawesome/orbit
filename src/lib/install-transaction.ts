@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -10,15 +9,15 @@ import {
   mkdtempSync,
   openSync,
   readdirSync,
-  readFileSync,
   renameSync,
   rmdirSync,
   rmSync,
-  statSync,
   writeFileSync,
   writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
+
+import { acquireDeployLock as acquireSharedDeployLock } from "./deploy-lock";
 
 // The staged, atomic .env-orbit + secrets-directory commit/rollback
 // transaction (issue #295 slice 1), ported from scripts/install.sh's
@@ -82,77 +81,12 @@ export class InstallTransactionRefusal extends Error {
 
 // --- cross-process lock (O1-R7/O1-R8) ---------------------------------------
 //
-// Shared (same file name, same algorithm) with configure-engine.ts's own
-// acquireDeployLock: both modules mutate the same managed paths
-// (.env-orbit/.orbit-secrets) under the same deployment directory, and
-// neither had any cross-process exclusion before this — a concurrent
-// install/update could revert a configure writer's committed changes, or
-// two concurrent install/update runs could revert each other's. One lock
-// file for both closes both gaps: a second `orbit install`, `orbit update`
-// or `orbit configure` targeting the same directory fails fast with a
-// clear message instead of racing.
-const DEPLOY_LOCK_FILE_NAME = ".orbit-engine.lock";
-const DEPLOY_LOCK_STALE_MS = 10 * 60 * 1000;
-
-/** Acquires the deployment-directory lock, or refuses if another run holds it. Returns a release function the caller must call exactly once, success or failure. */
+// The one deploy lock (src/lib/deploy-lock.ts, #1210 D9), shared with
+// `orbit configure` and the configuration migration: a concurrent
+// install/update must fail fast rather than revert another writer's
+// committed changes.
 function acquireDeployLock(targetDir: string, operationLabel: string): () => void {
-  const lockPath = join(targetDir, DEPLOY_LOCK_FILE_NAME);
-
-  const takeLock = (): number => openSync(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
-
-  let fd: number;
-  try {
-    fd = takeLock();
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-      throw new InstallTransactionRefusal(`Could not take the ${operationLabel} lock at ${lockPath}.`, "locked");
-    }
-    let staleEnough: boolean;
-    try {
-      staleEnough = Date.now() - statSync(lockPath).mtimeMs > DEPLOY_LOCK_STALE_MS;
-    } catch {
-      staleEnough = true; // Lock vanished between the EEXIST and this stat; retry once below.
-    }
-    if (!staleEnough) {
-      throw new InstallTransactionRefusal(
-        `Another ${operationLabel} is already running against this deployment (lock held at ${lockPath}). Wait for it to finish, or remove the lock file yourself once you are certain no other run is active.`,
-        "locked",
-      );
-    }
-    // Reclaim by rename, not unlink-then-create: two processes that both saw
-    // the stale lock would otherwise each unlink and recreate it, and the
-    // slower unlink removed the faster one's fresh lock, leaving both
-    // believing they held it. Only one rename of the stale file succeeds;
-    // the other gets ENOENT and simply tries the plain create once more.
-    const reclaimed = `${lockPath}.stale-${process.pid}`;
-    try {
-      renameSync(lockPath, reclaimed);
-      rmSync(reclaimed, { force: true });
-    } catch {
-      /* the other process reclaimed it first; the create below decides */
-    }
-    try {
-      fd = takeLock();
-    } catch {
-      throw new InstallTransactionRefusal(`Another ${operationLabel} is already running against this deployment (lock held at ${lockPath}).`, "locked");
-    }
-  }
-  // The lock names its holder, so a release never removes a lock that was
-  // reclaimed from this process as stale and now belongs to another run.
-  const owner = `${process.pid}:${randomUUID()}\n`;
-  writeSync(fd, owner);
-  closeSync(fd);
-
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    try {
-      if (readFileSync(lockPath, "utf8") === owner) rmSync(lockPath, { force: true });
-    } catch {
-      /* best effort */
-    }
-  };
+  return acquireSharedDeployLock(targetDir, operationLabel, (message) => new InstallTransactionRefusal(message, "locked"));
 }
 
 export interface RollbackFailure {

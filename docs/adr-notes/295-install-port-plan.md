@@ -1,5 +1,12 @@
 # #295 slice plan: port the guided/unattended install flow to the orbit CLI
 
+> **2026-10-06:** the `ORBIT_CONFIGURE_ENGINE` opt-in and the
+> `scripts/configuration.sh` hand-off described below were retired by #1210:
+> `configure.sh` always runs the engine, and the configuration preflight and
+> migration are ported to `src/lib/configuration-migration.ts`
+> (`configure.sh --preflight`/`--migrate`). The note below is the plan as it
+> stood.
+
 Status: proposed (slices 1-5 implemented; the bootstrap flip itself — issue
 #295's own release decision to switch `install.sh`'s dispatch or
 `orbit-launcher`'s fetch target to the CLI path — has not happened). This is

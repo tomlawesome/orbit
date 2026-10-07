@@ -4,7 +4,6 @@ set -Eeuo pipefail
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
-readonly environment_file=".env-orbit"
 pull_option="--pull"
 
 [[ "$#" -le 1 && ( "$#" -eq 0 || "$1" == "--no-pull" ) ]] || {
@@ -12,10 +11,6 @@ pull_option="--pull"
   exit 1
 }
 [[ "${1:-}" != "--no-pull" ]] || pull_option=""
-[[ -f "$environment_file" ]] || {
-  printf 'Orbit build: missing %s; run bash scripts/configure.sh first.\n' "$environment_file" >&2
-  exit 1
-}
 command -v docker >/dev/null 2>&1 || {
   printf 'Orbit build: Docker is required.\n' >&2
   exit 1
@@ -24,10 +19,18 @@ command -v node >/dev/null 2>&1 || {
   printf 'Orbit build: Node.js is required to calculate the release-train version.\n' >&2
   exit 1
 }
-docker compose version >/dev/null 2>&1 || {
-  printf 'Orbit build: Docker Compose v2 is required.\n' >&2
-  exit 1
-}
+# DOCKER_BUILDKIT=0 selects the legacy builder (see
+# diagnose_registry_reachability below); otherwise the build is BuildKit's,
+# the same `docker buildx build` CI's build_image job runs.
+if [[ "${DOCKER_BUILDKIT:-}" == "0" ]]; then
+  build_command=(docker build)
+else
+  docker buildx version >/dev/null 2>&1 || {
+    printf 'Orbit build: Docker Buildx is required.\n' >&2
+    exit 1
+  }
+  build_command=(docker buildx build --load)
+fi
 export ORBIT_IMAGE="orbit-local:$(git rev-parse --short=12 HEAD)"
 export ORBIT_VERSION="$(node scripts/calculate-version.mjs --channel preview)"
 export ORBIT_REVISION="$(git rev-parse HEAD)"
@@ -70,7 +73,7 @@ done
 # property of some hosts' Docker network configuration, not of BuildKit in
 # general, so pinning every build to the deprecated legacy builder to work
 # around a minority of hosts would be the wrong trade for everyone else.
-# Where it does happen, `DOCKER_BUILDKIT=0 COMPOSE_DOCKER_CLI_BUILD=0` builds
+# Where it does happen, `DOCKER_BUILDKIT=0` builds
 # through the same Dockerfile with the legacy builder and produces an
 # equivalent image: same digest-pinned base images, same ORBIT_VERSION /
 # ORBIT_REVISION / ORBIT_CHANNEL contract, because only the engine executing
@@ -89,18 +92,17 @@ diagnose_registry_reachability() {
     printf 'Orbit build: configuration first.\n' >&2
     printf 'Orbit build: if this is BuildKit network isolation and you cannot fix the network,\n' >&2
     printf 'Orbit build: retry with the legacy builder as a workaround:\n' >&2
-    printf 'Orbit build:   DOCKER_BUILDKIT=0 COMPOSE_DOCKER_CLI_BUILD=0 bash scripts/build-container.sh\n' >&2
+    printf 'Orbit build:   DOCKER_BUILDKIT=0 bash scripts/build-container.sh\n' >&2
   fi
 }
 
-# The build context lives in an overlay, because the base compose file
-# describes a deployment that has no source tree.
-readonly build_files=(-f docker-compose.yml -f compose/docker-compose.build.yml)
-
-if [[ -n "$pull_option" ]]; then
-  docker compose --env-file "$environment_file" "${build_files[@]}" build --pull orbit-app \
-    || { diagnose_registry_reachability; exit 1; }
-else
-  docker compose --env-file "$environment_file" "${build_files[@]}" build orbit-app \
-    || { diagnose_registry_reachability; exit 1; }
-fi
+# The image is built straight from the Dockerfile, not through Compose, so
+# producing it needs no .env-orbit: configuration runs inside this image
+# (#1210), so the image has to exist before configuration does.
+"${build_command[@]}" ${pull_option} \
+  --build-arg ORBIT_VERSION \
+  --build-arg ORBIT_REVISION \
+  --build-arg ORBIT_CHANNEL \
+  --tag "$ORBIT_IMAGE" \
+  --file Dockerfile . \
+  || { diagnose_registry_reachability; exit 1; }

@@ -4,60 +4,53 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { writeEngineDockerShim } from "./engine-docker-shim.mjs";
 import { runGuidedFlow } from "./engine-prompt-renderer.fixture.mjs";
 
 import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./process-budget.mjs";
 
-// Tests here run configure.sh (directly, or through runGuidedFlow's own real
-// spawn) under bash; a spawn that takes tens of milliseconds quiet takes
-// seconds on a starved core (#698). Budget and reasoning:
-// scripts/process-budget.mjs.
+// Tests here run configure.sh, which runs the orbit CLI through the fake
+// docker of scripts/engine-docker-shim.mjs; a spawn that takes tens of
+// milliseconds quiet takes seconds on a starved core (#698). Budget and
+// reasoning: scripts/process-budget.mjs.
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
-// Pins docs/engine-events.md's "Machine prompts (v0)" section against
-// scripts/configure.sh, the same way scripts/engine-events.test.mjs pins the
-// plain-mode event stream against scripts/installer-ui.sh: (a) the
+// Pins docs/engine-events.md's "Machine prompts (v0)" section against the
+// configure engine (src/lib/configure-engine.ts), which has spoken the
+// grammar since #1210 made scripts/configure.sh a shell around it: (a) the
 // field/kind/reason vocabularies must match exactly in both directions, and
-// (b)-(c) a live sandboxed run of the guided flow, driven only through the
-// documented line grammar by the schema-blind
+// (b)-(c) a live sandboxed run of the guided flow -- the real configure.sh,
+// whose `docker run` the shim answers with this checkout's CLI -- driven only
+// through the documented line grammar by the schema-blind
 // scripts/engine-prompt-renderer.fixture.mjs, must produce exactly the
 // events the contract promises.
 
 const scriptsDir = fileURLToPath(new URL(".", import.meta.url));
 const repoDir = join(scriptsDir, "..");
 const configureScriptSource = readFileSync(join(scriptsDir, "configure.sh"), "utf8");
+const engineSource = readFileSync(join(repoDir, "src", "lib", "configure-engine.ts"), "utf8");
 const contractPath = join(repoDir, "docs", "engine-events.md");
 const contractSource = readFileSync(contractPath, "utf8");
 
-function implementedVocabulary() {
-  const kindStart = configureScriptSource.indexOf("machine_prompt_field_kind() {");
-  const kindEnd = configureScriptSource.indexOf("esac", kindStart);
-  expect(kindStart).toBeGreaterThan(-1);
-  expect(kindEnd).toBeGreaterThan(kindStart);
-  const kindBody = configureScriptSource.slice(kindStart, kindEnd);
-
-  const field = new Set();
-  const kind = new Set();
-  for (const match of kindBody.matchAll(/^\s*([A-Z][A-Z0-9_]*)\)\s*printf '([a-z]+)'/gm)) {
-    field.add(match[1]);
-    kind.add(match[2]);
-  }
-
-  const reasonStart = configureScriptSource.indexOf(
-    '# --- reason vocabulary (docs/engine-events.md "Machine prompts (v0)") -------',
-  );
-  const reasonEnd = configureScriptSource.indexOf("# --- end reason vocabulary", reasonStart);
-  expect(reasonStart).toBeGreaterThan(-1);
-  expect(reasonEnd).toBeGreaterThan(reasonStart);
-  const reasonBody = configureScriptSource.slice(reasonStart, reasonEnd);
-
-  const reason = new Set();
-  for (const match of reasonBody.matchAll(/printf '([a-z][a-z-]*)'/gu)) {
-    reason.add(match[1]);
-  }
-
-  return { field, kind, reason };
+/** The string literals of one exported union type in configure-engine.ts. */
+function unionMembers(typeName) {
+  const match = engineSource.match(new RegExp(`export type ${typeName} =([^;]+);`, "u"));
+  expect(match, `src/lib/configure-engine.ts must export ${typeName}`).not.toBeNull();
+  return new Set([...match[1].matchAll(/"([^"]+)"/gu)].map((member) => member[1]));
 }
+
+function implementedVocabulary() {
+  return {
+    field: unionMembers("ConfigureMachineField"),
+    kind: unionMembers("ConfigureMachineKind"),
+    reason: unionMembers("ConfigureMachineReason"),
+  };
+}
+
+// The contract lists OIDC_CALLBACK_URL as a field although it is derived
+// from APP_URL and "never itself prompted for" (its own words); the bash
+// kept it in its field-to-kind table, the engine's field type does not.
+const DOCUMENTED_NEVER_PROMPTED = new Set(["OIDC_CALLBACK_URL"]);
 
 const DOC_HEADINGS = { field: "field", kind: "kind", reason: "reason-class" };
 
@@ -83,7 +76,9 @@ describe("machine prompt protocol v0 contract", () => {
   for (const key of ["field", "kind", "reason"]) {
     it(`documents exactly the implemented ${key} vocabulary`, () => {
       const undocumented = [...implemented[key]].filter((value) => !documented[key].has(value));
-      const phantom = [...documented[key]].filter((value) => !implemented[key].has(value));
+      const phantom = [...documented[key]].filter(
+        (value) => !implemented[key].has(value) && !(key === "field" && DOCUMENTED_NEVER_PROMPTED.has(value)),
+      );
       expect(undocumented, `implemented but undocumented ${key} values`).toEqual([]);
       expect(phantom, `documented but unimplemented ${key} values`).toEqual([]);
     });
@@ -108,9 +103,17 @@ function makeFixtureDir(envOrbitContent) {
   return targetDir;
 }
 
+// A fake docker that runs this checkout's orbit CLI for configure.sh's one
+// `docker run` (scripts/engine-docker-shim.mjs); no daemon is reached.
+function engineDockerBin() {
+  const binDir = mkdtempSync(join(tmpdir(), "orbit-engine-prompts-fakebin-"));
+  writeEngineDockerShim(binDir);
+  return binDir;
+}
+
 function guidedFlowEnv(overrides = {}) {
   return {
-    PATH: process.env.PATH ?? "",
+    PATH: `${engineDockerBin()}:${process.env.PATH ?? ""}`,
     HOME: process.env.HOME ?? tmpdir(),
     ORBIT_IMAGE: "orbit-local:abcdef123456",
     ORBIT_CONFIGURE_PROMPTS: "machine",
@@ -246,7 +249,7 @@ describe("scripts/configure.sh --init (ORBIT_CONFIGURE_PROMPTS=machine)", () => 
 
   it("leaves default (non-machine) behaviour untouched when ORBIT_CONFIGURE_PROMPTS is unset", () => {
     const targetDir = makeFixtureDir("UNRELATED_KEY=keep-me\n");
-    const binDir = mkdtempSync(join(tmpdir(), "orbit-engine-prompts-fakebin-"));
+    const binDir = engineDockerBin();
 
     const result = failOnProcessDeadline(spawnSync(
       "bash",

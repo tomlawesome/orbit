@@ -1,0 +1,8 @@
+{
+  "result": {
+    "status": 1,
+    "stdout": "",
+    "stderr": "Orbit configuration: APP_URL must be a complete https:// public origin with no credentials, path, query, fragment, loopback address or example.com placeholder.\n"
+  },
+  "env": null
+}

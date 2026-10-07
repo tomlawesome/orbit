@@ -36,7 +36,11 @@ import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard } from "./
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const installScript = fileURLToPath(new URL("./install.sh", import.meta.url));
-const configurationScriptPath = fileURLToPath(new URL("./configuration.sh", import.meta.url));
+const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
+// The engine configure.sh runs in a container (#1210); the real-engine mode of
+// the fake configure.sh below runs the same CLI from this checkout instead.
+const engineTsx = join(repositoryRoot, "node_modules", "tsx", "dist", "cli.mjs");
+const engineCli = join(repositoryRoot, "src", "cli", "orbit.ts");
 const backupScriptPath = fileURLToPath(new URL("./backup.sh", import.meta.url));
 const restoreScriptPath = fileURLToPath(new URL("./restore.sh", import.meta.url));
 const upgradeProcedurePath = fileURLToPath(new URL("../docs/installer-guarantees.md", import.meta.url));
@@ -83,11 +87,9 @@ const deploymentAssets = [
   "config/tika-config.json",
   "scripts/configure.sh",
   "scripts/installer-ui.sh",
-  "scripts/configuration.sh",
   "scripts/backup.sh",
   "scripts/restore.sh",
   "scripts/repair.sh",
-  "scripts/engine-check.sh",
 ];
 
 // Not on the installer's fixed allowlist; the bundle carries them so every run
@@ -105,9 +107,35 @@ const fakeConfigureScript =
     "#!/usr/bin/env bash",
     "set -Eeuo pipefail",
     'repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"',
+    'caller_dir="$PWD"',
     'cd "$repo_dir"',
-    "printf 'CONFIGURE_INVOKED ORBIT_IMAGE=%s\\n' \"${ORBIT_IMAGE:-}\"",
+    // The announcement stays out of --preflight/--migrate: install.sh parses
+    // --migrate's whole stdout as the engine's one result line.
     "case \"${1:-}\" in",
+    "  --preflight | --migrate) ;;",
+    "  *) printf 'CONFIGURE_INVOKED ORBIT_IMAGE=%s\\n' \"${ORBIT_IMAGE:-}\" ;;",
+    "esac",
+    "case \"${1:-}\" in",
+    // #1210: configure.sh passes --preflight and --migrate straight to the
+    // engine. FAKE_USE_REAL_CONFIGURATION=1 runs this checkout's CLI exactly
+    // as the container would (same arguments, --file made absolute and its
+    // directory as --dir, as configure.sh's run_configuration_contract does);
+    // otherwise the stand-in reports an already current configuration.
+    "  --preflight | --migrate)",
+    '    if [[ "${FAKE_USE_REAL_CONFIGURATION:-}" != "1" ]]; then',
+    "      printf 'Orbit configuration: already current schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n'",
+    "      exit 0",
+    "    fi",
+    '    engine_args=(); engine_file=".env-orbit"',
+    '    while [[ $# -gt 0 ]]; do',
+    '      case "$1" in',
+    '        --file) engine_file="$2"; shift 2 ;;',
+    '        *) engine_args+=("$1"); shift ;;',
+    "      esac",
+    "    done",
+    '    [[ "$engine_file" == /* ]] || engine_file="$caller_dir/$engine_file"',
+    `    exec node ${JSON.stringify(engineTsx)} ${JSON.stringify(engineCli)} configure "\${engine_args[@]}" --file "$engine_file" --dir "$(dirname -- "$engine_file")"`,
+    "    ;;",
     "  --check)",
     // #1225: only an optional field missing, so prepare_configuration passes
     // its required-field check and refuses at the final --check instead.
@@ -169,6 +197,10 @@ const fakeConfigureScript =
     "    exit 0",
     "    ;;",
     "  --set-oidc-secret)",
+    // The cue for tests that must answer the silent secret prompt (#1210:
+    // every call now carries ORBIT_IMAGE, so the announcement alone no longer
+    // singles this flow out).
+    "    printf 'CONFIGURE_AWAITING_OIDC_SECRET\\n'",
     '    if [[ "${ORBIT_CONFIGURE_TTY_INPUT:-}" == "1" ]]; then',
     "      exec {fake_tty_fd}<>/dev/tty",
     '      IFS= read -r -s -u "$fake_tty_fd" secret || exit 1',
@@ -242,13 +274,6 @@ const fakeConfigureScript =
     "fi",
   ].join("\n") + "\n";
 
-const fakeConfigurationScript =
-  [
-    "#!/usr/bin/env bash",
-    "set -Eeuo pipefail",
-    "printf 'Orbit configuration: already current schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n'",
-  ].join("\n") + "\n";
-
 function fakeAnnouncingScript(announcement) {
   return ["#!/usr/bin/env bash", "set -Eeuo pipefail", `printf '${announcement}\\n'`].join("\n") + "\n";
 }
@@ -275,14 +300,7 @@ function makeImageDeployFixture(environment) {
   contents.set("scripts/backup.sh", fakeAnnouncingScript("BACKUP_INVOKED"));
   contents.set("scripts/restore.sh", fakeAnnouncingScript("RESTORE_INVOKED"));
   contents.set("scripts/repair.sh", fakeAnnouncingScript("REPAIR_INVOKED"));
-  contents.set("scripts/engine-check.sh", fakeAnnouncingScript("ENGINE_CHECK_INVOKED"));
   contents.set("scripts/installer-ui.sh", readFileSync(environment.FAKE_INSTALLER_UI_PATH ?? installerUiPath));
-  contents.set(
-    "scripts/configuration.sh",
-    environment.FAKE_USE_REAL_CONFIGURATION === "1"
-      ? readFileSync(environment.FAKE_CONFIGURATION_SCRIPT_PATH ?? configurationScriptPath)
-      : fakeConfigurationScript,
-  );
   // Two files the allowlist does not name. Neither may ever be installed, and
   // the script must never reach `bash -n` either: it could not pass.
   contents.set(unmanagedBundleScript, "this is not valid shell syntax (\n");
@@ -838,10 +856,17 @@ const fakeStatScript = [
 ].join("\n");
 
 // Shadows cat to fail one read (#1225): any argument ending in
-// FAKE_CAT_FAIL_PATH makes it exit 1. Every other call is the real cat.
+// FAKE_CAT_FAIL_PATH makes it exit 1. Reading an argument ending in
+// FAKE_CAT_PLANT_AFTER first creates the file FAKE_CAT_PLANT_FILE, standing
+// in for an entry that appears mid-copy. Every other call is the real cat.
 const fakeCatScript = [
   "#!/usr/bin/env bash",
   "set -Eeuo pipefail",
+  'if [[ -n "${FAKE_CAT_PLANT_AFTER:-}" && -n "${FAKE_CAT_PLANT_FILE:-}" ]]; then',
+  '  for argument in "$@"; do',
+  '    [[ "$argument" != *"${FAKE_CAT_PLANT_AFTER}" ]] || printf \'PLANTED\\n\' > "${FAKE_CAT_PLANT_FILE}"',
+  "  done",
+  "fi",
   'if [[ -n "${FAKE_CAT_FAIL_PATH:-}" ]]; then',
   '  for argument in "$@"; do',
   '    [[ "$argument" != *"${FAKE_CAT_FAIL_PATH}" ]] || exit 1',
@@ -1046,7 +1071,7 @@ function readOptionalFile(path) {
 }
 
 // The bundle the fake `docker cp` serves depends on what the run asked for
-// (a real configuration.sh, a different installer UI), so it is built from
+// (a different installer UI), so it is built from
 // the environment the installer will actually see.
 function withImageDeployFixture(environment) {
   return { ...environment, FAKE_IMAGE_DEPLOY_DIR: makeImageDeployFixture(environment) };
@@ -1077,7 +1102,6 @@ function runInstall(targetDir, envOverrides = {}, args = []) {
       FAKE_DOCKER_RUNNING_CONFIG_HASH: "f".repeat(64),
       FAKE_CALL_LOG: logPath,
       FAKE_PROBE_COUNTER_DIR: logDir,
-      FAKE_CONFIGURATION_SCRIPT_PATH: configurationScriptPath,
       FAKE_INSTALLER_UI_PATH: installerUiPath,
       FAKE_USE_REAL_CONFIGURATION: "0",
       FAKE_CONFIGURE_READY: "1",
@@ -1302,7 +1326,8 @@ describe("install.sh", () => {
     // on a starved core, where the installer had not reached the prompt the
     // next answer was meant for (#698). The secret has no visible prompt --
     // the stand-in configure reads it silently -- so its cue is the stand-in
-    // announcing a call with no ORBIT_IMAGE, which only --set-oidc-secret does.
+    // announcing that it is waiting for the secret, which only
+    // --set-oidc-secret does.
     const result = await runInstallWithPromptedTerminalInput(
       targetDir,
       { TERM: "dumb" },
@@ -1312,7 +1337,7 @@ describe("install.sh", () => {
         { after: "Bounded local model identifier:", input: `${model}\n` },
         { after: "Prepare the selected local model after Ollama becomes healthy?", input: "2\n" },
         { after: "Review: profile only", input: "1\n" },
-        { after: "CONFIGURE_INVOKED ORBIT_IMAGE=\r", input: "full-secret\n" },
+        { after: "CONFIGURE_AWAITING_OIDC_SECRET", input: "full-secret\n" },
         { after: "Final review: apply the collected core settings", input: "1\n" },
       ],
     );
@@ -1736,7 +1761,6 @@ describe("install.sh", () => {
   describe("ORBIT_LAUNCHER_CONFIG_TREE handover on a configuration-failure exit (#1225)", () => {
     const handedOver = [
       "scripts/configure.sh",
-      "scripts/configuration.sh",
       "scripts/installer-ui.sh",
       ".env-orbit.example",
     ];
@@ -1770,14 +1794,15 @@ describe("install.sh", () => {
       expect(stagingLeftovers(targetDir)).toEqual([]);
     }
 
-    // The four files, byte-identical to what the image bundles, owner-only.
+    // The three files, byte-identical to what the image bundles, owner-only,
+    // and the image pin: the resolved digest reference on one line.
     function expectTreeHandedOver(tree) {
       const bundle = makeImageDeployFixture({});
       try {
         expect(readdirSync(tree, { recursive: true }).sort()).toEqual([
           ".env-orbit.example",
+          ".orbit-image",
           "scripts",
-          "scripts/configuration.sh",
           "scripts/configure.sh",
           "scripts/installer-ui.sh",
         ]);
@@ -1789,6 +1814,11 @@ describe("install.sh", () => {
           expect(lstatSync(path).mode & 0o7777).toBe(0o600);
           expect(readFileSync(path)).toEqual(readFileSync(join(bundle, asset)));
         }
+        const pin = join(tree, ".orbit-image");
+        expect(lstatSync(pin).isSymbolicLink()).toBe(false);
+        expect(lstatSync(pin).isFile()).toBe(true);
+        expect(lstatSync(pin).mode & 0o7777).toBe(0o600);
+        expect(readFileSync(pin, "utf8")).toBe(`${resolvedReference}\n`);
       } finally {
         rmSync(bundle, { recursive: true, force: true });
       }
@@ -1953,6 +1983,27 @@ describe("install.sh", () => {
         expectRefusalUnchanged(result, targetDir);
         expect(noticeLines(result.stderr)).toEqual([
           "Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because scripts/installer-ui.sh could not be written.",
+        ]);
+        expect(readdirSync(tree)).toEqual([]);
+      } finally {
+        cleanUp(targetDir, tree);
+      }
+    });
+
+    it("refuses the whole hand-over when .orbit-image appears mid-copy, and says so once", () => {
+      const targetDir = makeTarget();
+      const tree = makeLauncherTree();
+      try {
+        const result = runInstall(targetDir, {
+          FAKE_CONFIGURE_READY: "0",
+          ORBIT_LAUNCHER_CONFIG_TREE: tree,
+          FAKE_CAT_PLANT_AFTER: "/launcher-config-tree/.env-orbit.example",
+          FAKE_CAT_PLANT_FILE: join(tree, ".orbit-image"),
+        });
+
+        expectRefusalUnchanged(result, targetDir);
+        expect(noticeLines(result.stderr)).toEqual([
+          "Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because .orbit-image could not be written.",
         ]);
         expect(readdirSync(tree)).toEqual([]);
       } finally {
@@ -2274,20 +2325,19 @@ describe("install.sh", () => {
     expect(existsSync(join(targetDir, "config", "tika-config.json"))).toBe(true);
     expect(existsSync(join(targetDir, "scripts", "backup.sh"))).toBe(true);
     expect(existsSync(join(targetDir, "scripts", "restore.sh"))).toBe(true);
-    // issue #383 shipping gap: repair.sh and engine-check.sh must be fetched
-    // and installed onto every deployed target exactly like backup.sh/
-    // restore.sh, or `bash scripts/repair.sh`/`bash scripts/engine-check.sh`
-    // fails with "no such file" on any real deployment despite both scripts
-    // being fully operator-facing (repair.sh's own header documents running
-    // it directly against a deployed target; engine-check.sh's header
-    // states it is "exactly like configure.sh/repair.sh").
+    // issue #383 shipping gap: repair.sh must be fetched and installed onto
+    // every deployed target exactly like backup.sh/restore.sh, or
+    // `bash scripts/repair.sh` fails with "no such file" on any real
+    // deployment (its own header documents running it directly against a
+    // deployed target). configuration.sh and engine-check.sh are gone with
+    // the engine flip (#1210): neither is installed any more.
     expect(existsSync(join(targetDir, "scripts", "repair.sh"))).toBe(true);
-    expect(existsSync(join(targetDir, "scripts", "engine-check.sh"))).toBe(true);
+    expect(existsSync(join(targetDir, "scripts", "engine-check.sh"))).toBe(false);
+    expect(existsSync(join(targetDir, "scripts", "configuration.sh"))).toBe(false);
     expect(existsSync(join(targetDir, ".env-orbit.orbit-config.rollback"))).toBe(false);
     expect(lstatSync(join(targetDir, "scripts", "backup.sh")).isFile()).toBe(true);
     expect(lstatSync(join(targetDir, "scripts", "restore.sh")).isFile()).toBe(true);
     expect(lstatSync(join(targetDir, "scripts", "repair.sh")).isFile()).toBe(true);
-    expect(lstatSync(join(targetDir, "scripts", "engine-check.sh")).isFile()).toBe(true);
     // The scripts are no longer downloaded one by one: the whole bundle comes
     // out of the digest just resolved, in one extraction whose container is
     // removed again (ADR-0019).
@@ -2298,7 +2348,6 @@ describe("install.sh", () => {
     expect(result.stdout).not.toContain("BACKUP_INVOKED");
     expect(result.stdout).not.toContain("RESTORE_INVOKED");
     expect(result.stdout).not.toContain("REPAIR_INVOKED");
-    expect(result.stdout).not.toContain("ENGINE_CHECK_INVOKED");
     const backup = failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "backup.sh")], {
       encoding: "utf8",
       ...processGuard(),
@@ -2311,12 +2360,6 @@ describe("install.sh", () => {
     }), { label: "repair.sh stand-in" });
     expect(repair.status).toBe(0);
     expect(repair.stdout).toBe("REPAIR_INVOKED\n");
-    const engineCheck = failOnProcessDeadline(spawnSync("bash", [join(targetDir, "scripts", "engine-check.sh")], {
-      encoding: "utf8",
-      ...processGuard(),
-    }), { label: "engine-check.sh stand-in" });
-    expect(engineCheck.status).toBe(0);
-    expect(engineCheck.stdout).toBe("ENGINE_CHECK_INVOKED\n");
     expect(stagingLeftovers(targetDir)).toEqual([]);
   });
 

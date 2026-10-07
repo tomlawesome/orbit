@@ -929,7 +929,7 @@ journey_retained_volume_new_target() {
   cp -a -- "$target/.env-orbit" "$newtarget/.env-orbit"
   cp -a -- "$target/docker-compose.yml" "$newtarget/docker-compose.yml"
   cp -a -- "$target/scripts/repair.sh" "$newtarget/scripts/repair.sh"
-  for helper in configuration.sh recovery-crypto.mjs release-metadata-patterns.sh; do
+  for helper in recovery-crypto.mjs release-metadata-patterns.sh; do
     [[ -f "$target/scripts/$helper" ]] && cp -a -- "$target/scripts/$helper" "$newtarget/scripts/$helper"
   done
 
@@ -1453,8 +1453,8 @@ journey_successful_rollback() {
   for managed in docker-compose.yml docker-compose.mail.yml \
       .env-orbit.example \
       config/tika-config.json scripts/configure.sh scripts/installer-ui.sh \
-      scripts/configuration.sh scripts/backup.sh scripts/restore.sh \
-      scripts/repair.sh scripts/engine-check.sh .env-orbit .orbit-secrets; do
+      scripts/backup.sh scripts/restore.sh \
+      scripts/repair.sh .env-orbit .orbit-secrets; do
     [[ -e "$target/$managed" ]] || continue
     mkdir -p -- "$staging/rollback/original/$(dirname -- "$managed")"
     cp -a -- "$target/$managed" "$staging/rollback/original/$managed"
