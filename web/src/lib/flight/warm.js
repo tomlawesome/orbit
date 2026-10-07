@@ -16,7 +16,10 @@
  *     length of the compile, so there the door fetches the pictures only;
  *   · home asks, hurried, when the sign-out is armed (its first tap), so the
  *     descent has its world by the time the second tap has revoked the
- *     session;
+ *     session; and long before that, unhurried, a few seconds after it has
+ *     arrived and its painted animations are done (`readyFlightAtLeisure`,
+ *     #1299), as orbit-site readies its journeys on any page but the door:
+ *     a descent that waits for nothing has found its world already made;
  *   · the arrival (`/`, Arrival.svelte) asks, hurried, the moment it knows a
  *     launch is owed -- before its session and workspace answers -- and asks
  *     again, proving, once the session says this reader will fly here (#1222);
@@ -101,4 +104,47 @@ export function readyFlight({ hurry = false, gentle = false, prove = true } = {}
  */
 export function hurryFlight() {
   return readyFlight({ hurry: true, gentle: true, prove: false });
+}
+
+/*
+ * orbit-site's "a little later" (main.js: `setTimeout(() => { warmJourneys();
+ * openChores(); }, 4000)` on arriving anywhere but the door), for a page that
+ * is not the door: the flight's world is readied once the page has had a few
+ * seconds and its painted animations have finished, so the chores (which
+ * touch the GPU, and a compile on the page's own thread) never run under a
+ * reveal that is still being drawn (#1299). The same wait as SignIn.svelte's
+ * `drawnIn`, which that file keeps for the door.
+ *
+ * It is the door's own ask (gentle, no test frames): never under save-data,
+ * never a compile that would stop the page, and a call that comes after the
+ * sign-out has begun readying finds `asked` set and does nothing more.
+ */
+const COMPOSITED = new Set(["transform", "opacity", "offset", "easing", "composite", "computedOffset"]);
+/** @param {Animation} a */
+const painted = (a) => {
+  try {
+    const t = /** @type {KeyframeEffect} */ (a.effect).target;
+    if (typeof SVGElement === "function" && t instanceof SVGElement && !(t instanceof SVGSVGElement)) return true;
+    const tp = /** @type {any} */ (a).transitionProperty;
+    const props = tp ? [tp] : /** @type {KeyframeEffect} */ (a.effect).getKeyframes().flatMap(Object.keys);
+    return props.some((k) => !COMPOSITED.has(k));
+  } catch { return true; }
+};
+const drawnIn = () => {
+  try {
+    const ends = document.getAnimations().filter((a) => Number.isFinite(a.effect?.getComputedTiming().endTime) && painted(a));
+    return Promise.all(ends.map((a) => a.finished.catch(() => {})));
+  } catch { return Promise.resolve([]); }
+};
+
+/**
+ * @param {{ after?: number }} [how]  after: ms from now (orbit-site's 4000)
+ * @returns {() => void} stops it, if the page is left first
+ */
+export function readyFlightAtLeisure({ after = 4000 } = {}) {
+  let off = false;
+  const timer = setTimeout(() => {
+    drawnIn().then(() => { if (!off) readyFlight({ gentle: true, prove: false }); });
+  }, after);
+  return () => { off = true; clearTimeout(timer); };
 }
