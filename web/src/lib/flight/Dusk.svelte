@@ -32,7 +32,8 @@
    * filter graphs by orbit-site's tools/glows.cjs, the same pictures the
    * site's dusk shows; nothing is rasterised in the browser any more. What
    * animates is still only `.afterglow` (breathe-ember) and `.belt`
-   * (zbreathe), both opacity, and the shimmer's dash sweep. The frame is laid
+   * (zbreathe), both opacity, and the shimmer's dash sweep, each on a layer of
+   * its own since #1299 (see the markup). The frame is laid
    * from the bottom (xMidYMax slice), as the dawn and the canvas world are.
    * `data-rasterised` is "pending" until every picture has loaded (or failed
    * to), then "ready", for the fidelity gate.
@@ -40,6 +41,28 @@
   let { children = undefined } = $props();
   /** @type {HTMLDivElement} */
   let world;
+  /** @type {HTMLDivElement} */
+  let sky;
+  /* the far stars that twinkle, and those that do not, each set its own
+     layer (#1299); the field and its order are starfields.js's */
+  const STILL = DUSK_FAR.filter((s) => !s.delay);
+  const TWINKLERS = DUSK_FAR.filter((s) => s.delay);
+
+  /* #1299: the sky's layers drift a whole tile, 1600 of the picture's units,
+     in screen pixels (orbit-site's sky.js measureTile, unrounded): the
+     picture is scaled to cover the sky, so a unit is the larger of the two
+     ratios */
+  onMount(() => {
+    const measure = () => {
+      const box = sky.getBoundingClientRect();
+      sky.style.setProperty("--tile", `${1600 * Math.max(box.width / 1600, box.height / 1000)}px`);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(measure);
+    watch.observe(sky);
+    return () => watch.disconnect();
+  });
 
   onMount(() => {
     let cancelled = false;
@@ -68,26 +91,37 @@
 </script>
 
 <div id="dusk">
-  <div class="sky" aria-hidden="true"><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <!-- #1299: each moving part of the sky is a picture of its own, moved whole
+       (orbit-site's sky.js mountFlightSky): the still far stars, each
+       twinkler, and the near stars. A layer that only slides or fades is the
+       GPU's to move; a star moving inside one shared picture had the page
+       repaint the whole of it every frame. -->
+  <div class="sky" aria-hidden="true" bind:this={sky}>
     <!-- #444: the star fills follow the packs, as cfa8388 made them everywhere
          else. The literals came back when this sky moved out of
          logout/+page.svelte into a shared component; the tokens equal these
          values on the dark packs, so nothing moves, and a daylight pack finally
          gets stars it can see. -->
-    <g class="far" fill="var(--star-far, #e9edf8)"><g id="dk-far">
-      {#each DUSK_FAR as s, i (i)}
-        {#if s.delay}<circle class="tw" style="animation-delay:{s.delay}s" cx={s.cx} cy={s.cy} r={s.r} opacity={s.opacity}/>
-        {:else}<circle cx={s.cx} cy={s.cy} r={s.r} opacity={s.opacity}/>{/if}
-      {/each}
-    </g><use href="#dk-far" x="1600"/></g>
-    <g class="near" fill="var(--star-near, #f4f0ff)"><g id="dk-near">
-      {#each DUSK_NEAR as s, i (i)}
-        <circle cx={s.cx} cy={s.cy} r={s.r} opacity={s.opacity}/>
-      {/each}
-    </g><use href="#dk-near" x="1600"/></g>
-  </svg></div>
-  <div class="world" aria-hidden="true" bind:this={world}><svg viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMax slice">
-    <defs>
+    <svg class="far" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice"><g fill="var(--star-far, #e9edf8)"><g id="dk-far">
+      {#each STILL as s, i (i)}<circle cx={s.cx} cy={s.cy} r={s.r} opacity={s.opacity}/>{/each}
+    </g><use href="#dk-far" x="1600"/></g></svg>
+    <!-- a twinkler is drawn at full strength and its layer carries its
+         opacity (--o, flight.css): its own resting value until its twinkle
+         starts, then the twinkle's, exactly as the star's own opacity did -->
+    {#each TWINKLERS as s, i (i)}
+      <svg class="far tw" style="--o:{s.opacity};animation-delay:0s,{s.delay}s" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice"><g fill="var(--star-far, #e9edf8)"><g id="dk-tw{i}"><circle cx={s.cx} cy={s.cy} r={s.r}/></g><use href="#dk-tw{i}" x="1600"/></g></svg>
+    {/each}
+    <svg class="near" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice"><g fill="var(--star-near, #f4f0ff)"><g id="dk-near">
+      {#each DUSK_NEAR as s, i (i)}<circle cx={s.cx} cy={s.cy} r={s.r} opacity={s.opacity}/>{/each}
+    </g><use href="#dk-near" x="1600"/></g></svg>
+  </div>
+  <!-- #1299: the world is laid as orbit-site lays it (index.html, #dusk
+       .world): one picture per moving part, so the belt's and the afterglow's
+       breathing fade a layer the GPU holds, and the shimmer's sweep redraws
+       only its own thin layer, never the full-screen pictures under it. The
+       order of drawing is unchanged. -->
+  <div class="world" aria-hidden="true" bind:this={world}>
+    <svg class="defs" width="0" height="0"><defs>
       <!-- d-rim: the crisp rim circle below; its blurred sibling is a
            picture (glow-rim.webp) -->
       <linearGradient id="d-rim" x1="0" y1="0" x2="0" y2="1">
@@ -104,40 +138,48 @@
       </linearGradient>
       <!-- the glow, the belt, the afterglow and the blurred rim are pictures
            (static/flight/dusk/), drawn from their own gradients and blurs -->
-    </defs>
-    <rect x="0" y="0" width="1600" height="1000" fill="url(#d-wash)"/>
-    <!-- #501: a picture (glow-glow.webp). -->
-    <image data-href="/flight/dusk/glow-glow.webp" x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
-    <!-- #501: a picture (glow-belt.webp); class stays here since .belt's
-         opacity/blend animation is display-time CSS, not baked in. -->
-    <image class="belt" data-href="/flight/dusk/glow-belt.webp" x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
+    </defs></svg>
+    <svg class="wash" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMax slice">
+      <rect x="0" y="0" width="1600" height="1000" fill="url(#d-wash)"/>
+      <!-- #501: a picture (glow-glow.webp). -->
+      <image data-href="/flight/dusk/glow-glow.webp" x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
+    </svg>
+    <!-- #501: a picture (glow-belt.webp); .belt's opacity animation is
+         display-time CSS, not baked in, and now fades its own layer. -->
+    <svg class="belt" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMax slice">
+      <image data-href="/flight/dusk/glow-belt.webp" x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
+    </svg>
     <!-- afterglow hugging the limb: no white core, the sun is already under.
          It breathes, as the dawn's scattering does — slower and cooler.
          #501: a picture as one image (glow-afterglow.webp) so .afterglow's own
          breathe-ember animation still applies to the whole ring stack. -->
-    <g class="afterglow">
+    <svg class="afterglow" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMax slice">
       <image data-href="/flight/dusk/glow-afterglow.webp" x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
-    </g>
-    <circle cx="800" cy="3920" r="3000" fill="#03050b"/>
-    <!-- the Earth, from orbit: the very one the dawn door shows (owner,
-         2026-10-07: sign out and sign in use the same photo), both its
-         pictures, at the same place and in the same order, under the ember
-         rim and the dusk's own glow (#1253) -->
-    <g class="earth">
-      <image class="pre" data-href="/flight/door/dawn-pre.webp" x="0" y="640" width="1600" height="360" preserveAspectRatio="none"/>
-      <image class="up" data-href="/flight/door/dawn.webp" x="0" y="640" width="1600" height="360" preserveAspectRatio="none"/>
-    </g>
-    <!-- #501: a picture (glow-rim.webp) — the blurred half of the rim. No
-         class here, matching the original: unlike Dawn's rim this one never
-         had a fade-in transition. -->
-    <image data-href="/flight/dusk/glow-rim.webp" x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
-    <circle class="crisp" cx="800" cy="3920" r="3000" fill="none" stroke="url(#d-rim)"
-            stroke-width="1.8" stroke-opacity=".6"/>
+    </svg>
+    <svg class="limb" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMax slice">
+      <circle cx="800" cy="3920" r="3000" fill="#03050b"/>
+      <!-- the Earth, from orbit: the very one the dawn door shows (owner,
+           2026-10-07: sign out and sign in use the same photo), both its
+           pictures, at the same place and in the same order, under the ember
+           rim and the dusk's own glow (#1253) -->
+      <g class="earth">
+        <image class="pre" data-href="/flight/door/dawn-pre.webp" x="0" y="640" width="1600" height="360" preserveAspectRatio="none"/>
+        <image class="up" data-href="/flight/door/dawn.webp" x="0" y="640" width="1600" height="360" preserveAspectRatio="none"/>
+      </g>
+      <!-- #501: a picture (glow-rim.webp) — the blurred half of the rim. No
+           class here, matching the original: unlike Dawn's rim this one never
+           had a fade-in transition. -->
+      <image data-href="/flight/dusk/glow-rim.webp" x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
+      <circle class="crisp" cx="800" cy="3920" r="3000" fill="none" stroke="url(#d-rim)"
+              stroke-width="1.8" stroke-opacity=".6"/>
+    </svg>
     <!-- the dawn's travelling shimmer, cooled to an ember and running the
          other way round the limb -->
-    <circle class="shimmer" pathLength="100" cx="800" cy="3920" r="3000" fill="none"
-            stroke="#ffb37a" stroke-width="3" stroke-linecap="round"/>
-  </svg></div>
+    <svg class="shimmerlayer" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMax slice">
+      <circle class="shimmer" pathLength="100" cx="800" cy="3920" r="3000" fill="none"
+              stroke="#ffb37a" stroke-width="3" stroke-linecap="round"/>
+    </svg>
+  </div>
   <!-- the login's own lockup, so both ends of a session show one face, and so
        the descent's mark sets down on the shape the climb lifted off -->
   <div class="loginchrome">
