@@ -912,6 +912,24 @@ export function matchesOf(bodies, query) {
   return found;
 }
 
+/** How many ITEMS a search lit (#1303), for the note's "N of M lit", whose M
+ *  counts items. A paper's name lights its item and the paper itself, so
+ *  counting seats said "2 of 1 lit"; an item lit either way counts once. A
+ *  seated suggestion is not in M (#1145), so it is not in N either.
+ *
+ * @param   {Body[]}           bodies
+ * @param   {Iterable<number>} hits  lit seats
+ * @returns {number} */
+export function litItemCountOf(bodies, hits) {
+  /** @type {Set<number>} */
+  const items = new Set();
+  for (const i of hits) {
+    const b = bodies[i];
+    if (b && !b.item.suggestion) items.add(b.itemIdx);
+  }
+  return items.size;
+}
+
 /* A paper still folded inside its item is not somewhere you can be sent —
    its item is. */
 /** @type {(bodies: Body[], i: number, bloom: number[]) => boolean} */
