@@ -34,7 +34,9 @@ import { seededRng } from "$lib/sky.js";
  *
  * The apex — the highest point of the projected ellipse, found analytically,
  * not assumed — is then translated to the horizontal centre of the viewport
- * at 35% of its height. Everything else follows from that one pin.
+ * at half its height — mid-page (owner, 2026-10-06, #1247: "the apex of the
+ * centreline of the belt semi circle should be mid-page"; it hung at 35%
+ * before). Everything else follows from that one pin.
  *
  * Ring angle phi runs anticlockwise; on screen INCREASING PHI MOVES LEFT.
  * Since the manifest runs sooner-left to later-right, a body's angular
@@ -223,7 +225,7 @@ export const NODE = -12 * RAD;
 export const COS_I = Math.cos(INC), SIN_I = Math.sin(INC);
 const COS_N = Math.cos(NODE), SIN_N = Math.sin(NODE);
 export const A_FRAC = 0.74, A_MIN = 1150;   /* ring radius against the viewport */
-export const APEX_FRAC = 0.35;              /* where the apex hangs in the sky   */
+export const APEX_FRAC = 0.5;               /* where the apex hangs: mid-page    */
 export const R_ITEM = 25;                   /* an item's radius                  */
 export const R_DOC = 17;                    /* a document's — smaller, on purpose */
 export const RADIAL = 0.19;                 /* the band's radial half-spread     */
