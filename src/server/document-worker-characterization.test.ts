@@ -57,6 +57,7 @@ const mocks = vi.hoisted(() => ({
   decryptDocument: vi.fn(),
   encryptDocument: vi.fn(),
   scanFile: vi.fn(),
+  validateStructure: vi.fn(),
   readStagingCiphertext: vi.fn(),
   writeQuarantineBytes: vi.fn(),
   discardQuarantine: vi.fn(),
@@ -243,6 +244,11 @@ vi.mock("@/server/documents/crypto", () => ({
 
 vi.mock("@/server/documents/scanner", () => ({ scanFileWithClamAv: mocks.scanFile }));
 
+vi.mock("@/server/documents/validation", async (importActual) => ({
+  ...await importActual<typeof import("@/server/documents/validation")>(),
+  validateSupportedDocumentStructure: mocks.validateStructure,
+}));
+
 vi.mock("@/server/documents/storage", async (importActual) => ({
   // STORAGE_KEY_PATTERN is real (#1151 A2-Q4): purge-jobs.ts now imports it
   // from here instead of restating its own copy, so the mock must still
@@ -400,6 +406,10 @@ beforeEach(() => {
   mocks.scanFile.mockImplementation(async () => {
     mocks.steps.push("scanner.scan");
     return { status: "clean" };
+  });
+  mocks.validateStructure.mockImplementation(async () => {
+    mocks.steps.push("validation.structure");
+    return true;
   });
   mocks.readStagingCiphertext.mockImplementation(async () => {
     mocks.steps.push("storage.readStagingCiphertext");
@@ -588,6 +598,8 @@ describe("scanner recovery — the clean path publishes only after a clean scan"
       "scanner.scan",
       // The plaintext leaves the disk before anything else happens.
       "storage.discardQuarantine",
+      // Nothing opens the file until the scan has passed (ADR-0033).
+      "validation.structure",
       "crypto.encrypt",
       "storage.writeCiphertext",
       // The publish transaction: fenced, then the document becomes available.
