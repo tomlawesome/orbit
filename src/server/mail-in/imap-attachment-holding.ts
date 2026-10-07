@@ -4,8 +4,8 @@ import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
-import { validateImapAttachmentBytes, normalizeImapAttachmentName } from "./core/imap-attachment-validation";
-import type { SupportedDocumentMediaType } from "@/server/documents/validation";
+import { identifyImapAttachmentBytes, normalizeImapAttachmentName } from "./core/imap-attachment-validation";
+import { validateSupportedDocumentStructure, type SupportedDocumentMediaType } from "@/server/documents/validation";
 
 let purgeImplementationForTests: ((storageKey: string) => Promise<void>) | undefined;
 
@@ -97,15 +97,18 @@ export async function scanAndHoldImapAttachment(input: {
   try {
     const bytes = await storage().readQuarantine(received.quarantinePath, maxBytes);
     try {
-      const validated = await validateImapAttachmentBytes(bytes, input.declaredMediaType, { maximumDocumentBytes: maxBytes, pdfOnly: input.mailboxIngestion === true });
-      if (!validated.ok) throw new Error(validated.code);
-      const mediaType = validated.mediaType;
+      // Size, magic bytes and declared type only: nothing opens the file yet.
+      const identified = identifyImapAttachmentBytes(bytes, input.declaredMediaType, { maximumDocumentBytes: maxBytes, pdfOnly: input.mailboxIngestion === true });
+      if (!identified.ok) throw new Error(identified.code);
+      const mediaType = identified.mediaType;
       const displayName = normalizeImapAttachmentName(input.filename ?? "email-attachment", mediaType);
       if (input.mailboxIngestion && config.scanMode !== "required") throw new Error("scanner_disabled");
       if (config.scanMode === "required") {
         const scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
         if (scan.status !== "clean") throw new Error(scan.status === "infected" ? "malware_detected" : "scanner_unavailable");
       }
+      // ADR-0033: the renderer opens it only once the scan has passed.
+      if (!await validateSupportedDocumentStructure(bytes, mediaType)) throw new Error("mime_structure_invalid");
       return await holdBytes(id, { bytes, displayName, mediaType }, input.recipientUserId, input.receiptId, input.onCiphertextAllocated);
     } finally { bytes.fill(0); }
   } finally {

@@ -189,11 +189,16 @@ export function normalizeImapAttachmentName(input: string | undefined, mediaType
   return result || fallback;
 }
 
-export async function validateImapAttachmentBytes(
+/**
+ * Size, magic bytes and declared type only: nothing here opens the file, so
+ * it may run before the malware scan (ADR-0033). The structure check that
+ * does open it is `validateImapAttachmentBytes`, run after the scan passes.
+ */
+export function identifyImapAttachmentBytes(
   bytes: Buffer,
   declaredMediaType: string | undefined,
   maximumDocumentBytesOrOptions: number | { maximumDocumentBytes?: number; pdfOnly?: boolean } = IMAP_ATTACHMENT_LIMITS.aggregateAttachmentBytes,
-): Promise<{ ok: true; mediaType: SupportedDocumentMediaType } | { ok: false; code: ImapAttachmentValidationCode }> {
+): { ok: true; mediaType: SupportedDocumentMediaType } | { ok: false; code: ImapAttachmentValidationCode } {
   const maximumDocumentBytes = typeof maximumDocumentBytesOrOptions === "number"
     ? maximumDocumentBytesOrOptions
     : maximumDocumentBytesOrOptions.maximumDocumentBytes ?? IMAP_ATTACHMENT_LIMITS.aggregateAttachmentBytes;
@@ -208,6 +213,17 @@ export async function validateImapAttachmentBytes(
   const declared = declaredMediaType?.toLowerCase().split(";", 1)[0].trim();
   if (declared && declared !== detected) return { ok: false, code: "mime_type_mismatch" };
   if (pdfOnly && detected !== "application/pdf") return { ok: false, code: "mime_type_mismatch" };
-  if (!await validateSupportedDocumentStructure(bytes, detected)) return { ok: false, code: "mime_structure_invalid" };
   return { ok: true, mediaType: detected };
+}
+
+/** Identifies the attachment, then has the renderer open it; call only once the scan has passed (ADR-0033). */
+export async function validateImapAttachmentBytes(
+  bytes: Buffer,
+  declaredMediaType: string | undefined,
+  maximumDocumentBytesOrOptions: number | { maximumDocumentBytes?: number; pdfOnly?: boolean } = IMAP_ATTACHMENT_LIMITS.aggregateAttachmentBytes,
+): Promise<{ ok: true; mediaType: SupportedDocumentMediaType } | { ok: false; code: ImapAttachmentValidationCode }> {
+  const identified = identifyImapAttachmentBytes(bytes, declaredMediaType, maximumDocumentBytesOrOptions);
+  if (!identified.ok) return identified;
+  if (!await validateSupportedDocumentStructure(bytes, identified.mediaType)) return { ok: false, code: "mime_structure_invalid" };
+  return identified;
 }
