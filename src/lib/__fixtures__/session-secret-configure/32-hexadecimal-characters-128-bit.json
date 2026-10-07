@@ -1,0 +1,6 @@
+{
+  "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "valid": false,
+  "status": 1,
+  "stderr": "Orbit configuration: .orbit-secrets/session-secret does not contain a valid 256-bit hexadecimal secret: it must be 64 hexadecimal characters (a 256-bit secret), as produced by: openssl rand -hex 32. Rotating the session secret invalidates CSRF tokens issued before it, which recover on the next session read; active sessions stay signed in.\n"
+}

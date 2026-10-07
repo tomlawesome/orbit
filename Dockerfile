@@ -18,10 +18,6 @@ ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
 WORKDIR /opt/orbit
 
-FROM base AS vapid-generator
-COPY scripts/generate-vapid.mjs ./scripts/generate-vapid.mjs
-ENTRYPOINT ["node", "/opt/orbit/scripts/generate-vapid.mjs"]
-
 FROM base AS deps
 COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml* ./
 # web/ is a workspace member (#419): one root lockfile covers both packages,
@@ -173,9 +169,8 @@ COPY scripts/web-pdfjs-runtime-check.mjs ./scripts/web-pdfjs-runtime-check.mjs
 RUN ORBIT_WEB_BUILD_ROOT=/opt/orbit/web node scripts/web-pdfjs-runtime-check.mjs \
   && rm -f /opt/orbit/scripts/web-pdfjs-runtime-check.mjs
 COPY --chown=orbit:orbit scripts/recovery-crypto.mjs ./scripts/recovery-crypto.mjs
-COPY --chown=orbit:orbit scripts/generate-vapid.mjs ./scripts/generate-vapid.mjs
 COPY --chown=root:root scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
-# The eleven deployment assets, at the same relative paths an install uses
+# The nine deployment assets, at the same relative paths an install uses
 # them at (ADR-0019). They travel with the digest, so the compose file an
 # operator runs and the image it configures are the same artifact, and an
 # install needs nothing but the registry. Root-owned data: the installer
@@ -185,11 +180,9 @@ COPY --chown=root:root config/tika-config.json ./deploy/config/
 COPY --chown=root:root \
   scripts/configure.sh \
   scripts/installer-ui.sh \
-  scripts/configuration.sh \
   scripts/backup.sh \
   scripts/restore.sh \
   scripts/repair.sh \
-  scripts/engine-check.sh \
   ./deploy/scripts/
 # The bundled engine CLI (single file, no node_modules dependency at
 # runtime — see scripts/bundle-orbit-cli.mjs). Root-owned and read-only,

@@ -1449,11 +1449,9 @@ readonly -a restore_transaction_paths=(
   config/tika-config.json
   scripts/configure.sh
   scripts/installer-ui.sh
-  scripts/configuration.sh
   scripts/backup.sh
   scripts/restore.sh
   scripts/repair.sh
-  scripts/engine-check.sh
   .env-orbit
   .orbit-secrets
 )
@@ -1753,7 +1751,7 @@ read_environment_value() {
 # top-level scalar key, so a line anchored at column 0 is enough, and this
 # must stay dependency-free (no docker, no node) since it runs inside the
 # same standalone, source-less scripts as read_environment_value above.
-# Identical text in end-maintenance.sh and engine-check.sh --
+# Identical text in end-maintenance.sh and install.sh --
 # scripts/compose-project-name-resolution.test.mjs proves that.
 read_compose_project_name() {
   local compose_manifest="$1" line value

@@ -17,6 +17,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { isatty } from "node:tty";
 import { basename, join, resolve } from "node:path";
 
 import {
@@ -27,7 +28,15 @@ import {
   runRestore,
   verifyBackupBundle,
 } from "../lib/backup-restore-cli";
-import { evaluateReadiness, type OidcSecretFileFacts } from "../lib/config-contract";
+import {
+  evaluateReadiness,
+  isValidClientId,
+  isValidOidcIssuer,
+  normalizePublicOrigin,
+  type EnvOrbitRecord,
+  type OidcSecretFileFacts,
+} from "../lib/config-contract";
+import { CONFIGURATION_ROLLBACK_SUFFIX, runConfigurationCommand } from "../lib/configuration-migration";
 import { parseEnvOrbitContent } from "../lib/env-orbit-file";
 import { InstallTransaction, type ManagedPath } from "../lib/install-transaction";
 import {
@@ -154,33 +163,48 @@ function gatherOidcSecretFacts(deployDir: string): OidcSecretFileFacts {
   };
 }
 
-function commandCheck(deployDir: string): never {
-  const environmentFile = join(deployDir, ".env-orbit");
+/**
+ * `orbit check [--rollback]`: the value-free readiness report configure.sh
+ * --check (and, with --rollback, --check-rollback) prints. --rollback reads
+ * the configuration migration's rollback copy, `.env-orbit.orbit-config.
+ * rollback`, under the same rules (#1210 D6, ADR-0014 decision 7); the
+ * secrets directory is still the live one. No file at all reports every
+ * field missing, as configure.sh --check did; a file that is not a regular,
+ * owner-only file, or does not parse, fails with its configuration_* code.
+ */
+function commandCheck(deployDir: string, rollback = false): never {
+  const environmentFile = join(deployDir, rollback ? `.env-orbit${CONFIGURATION_ROLLBACK_SUFFIX}` : ".env-orbit");
   // Open first with O_NOFOLLOW, then verify and read through the same
   // descriptor: the safety check and the content read cannot be split by a
   // file swap (CodeQL js/file-system-race).
-  let descriptor: number;
+  let descriptor: number | undefined;
   try {
     descriptor = openSync(environmentFile, constants.O_RDONLY | constants.O_NOFOLLOW);
-  } catch {
-    fail("configuration_syntax");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") fail("configuration_syntax");
   }
-  let content: string;
-  try {
-    const stat = fstatSync(descriptor);
-    if (!stat.isFile() || (stat.mode & 0o777) !== 0o600) {
-      fail("configuration_syntax");
+  let content = "";
+  if (descriptor !== undefined) {
+    try {
+      const stat = fstatSync(descriptor);
+      if (!stat.isFile() || (stat.mode & 0o777) !== 0o600) {
+        fail("configuration_syntax");
+      }
+      content = readFileSync(descriptor, "utf8");
+    } finally {
+      closeSync(descriptor);
     }
-    content = readFileSync(descriptor, "utf8");
-  } finally {
-    closeSync(descriptor);
   }
 
-  const parsed = parseEnvOrbitContent(content);
-  if (!parsed.ok) fail(parsed.code);
+  let record: EnvOrbitRecord = {};
+  if (descriptor !== undefined) {
+    const parsed = parseEnvOrbitContent(content);
+    if (!parsed.ok) fail(parsed.code);
+    record = parsed.record;
+  }
 
   const facts = gatherOidcSecretFacts(deployDir);
-  const report = evaluateReadiness(parsed.record, facts);
+  const report = evaluateReadiness(record, facts);
   process.stdout.write(report.lines.join("\n") + "\n");
   process.exit(report.ok ? 0 : 1);
 }
@@ -387,28 +411,19 @@ function makeRestoreConfirmer(useYesFlag: boolean): () => boolean {
 }
 
 // ---------------------------------------------------------------------------
-// orbit configure / orbit configure --init / orbit configure --set-oidc-
-// secret / orbit configure --set-deployment-profile (issue #294): the write
-// side of scripts/configure.sh, ported onto src/lib/configure-engine.ts.
-// File work only (no `docker`; VAPID key generation is permanently
-// bash-only — see that module's header comment), so unlike install/backup/
-// restore/etc. above this never calls refuseDockerInContainer: it is exactly
-// as safe to run inside the disposable engine container as `check` is.
-// scripts/configure.sh delegates to this command as a
-// `docker compose run --rm --no-deps` one-off (docs/adr-notes/
-// 294-configure-write-port-plan.md) when ORBIT_CONFIGURE_ENGINE=container
-// and the image is available, falling back to its own bash logic otherwise.
+// orbit configure / --init / --set-oidc-secret / --set-deployment-profile /
+// --preflight / --migrate: everything scripts/configure.sh does (#294,
+// #1210). File work only, no `docker`, so unlike install/backup/restore
+// above this never calls refuseDockerInContainer. scripts/configure.sh is
+// now only the shell that runs this command as a `docker run --rm` one-off
+// with the deployment directory mounted at /orbit-deploy (docs/
+// engine-events.md, "In-container engine invocation").
 //
-// Machine prompts: this CLI has no controlling terminal of its own
-// (mirroring install-orchestrator.ts's `hasControllingTerminal: false`), so
-// `--init` and `--set-oidc-secret` only ever collect an answer two ways: the
-// complete ORBIT_CONFIGURE_APP_URL/_OIDC_ISSUER/_OIDC_CLIENT_ID environment
-// triad (fully scripted, no exchange needed), or the #297
-// `ORBIT_CONFIGURE_PROMPTS=machine` line grammar this engine now speaks
-// itself (src/lib/configure-engine.ts's collectMachineGuidedInit/
-// collectMachineOidcSecret). A real human TTY session is never delegated —
-// scripts/configure.sh keeps that path bash-only (see the delegation plan
-// doc's Flags section).
+// Answers for --init and --set-oidc-secret come, in order of precedence,
+// from the ORBIT_CONFIGURE_* environment set, the #297
+// `ORBIT_CONFIGURE_PROMPTS=machine` line grammar, the operator's terminal
+// (the shell passes one through with `docker run -t`), or for the secret a
+// single piped line.
 // ---------------------------------------------------------------------------
 
 function isConfigureMachinePromptMode(): boolean {
@@ -437,8 +452,11 @@ function commandConfigureApply(deployDir: string): never {
       trustOrbitImage: process.env.ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE === "1",
     });
     for (const message of result.messages) {
-      process.stdout.write(`${message}\n`);
+      // The one advisory line goes to stderr, where configure.sh printed it.
+      if (message.startsWith("Orbit configure: ignoring")) process.stderr.write(`${message}\n`);
+      else process.stdout.write(`${message}\n`);
     }
+    process.stdout.write("Orbit configuration is ready. Existing values were preserved.\n");
     process.exit(0);
   } catch (error) {
     if (error instanceof ConfigureEngineRefusal) fail(`orbit: ${error.message}`);
@@ -454,6 +472,106 @@ function readConfigureAuthMode(): "local" | "oidc" | undefined {
   fail("orbit: ORBIT_CONFIGURE_AUTH_MODE must be 'local' or 'oidc'.");
 }
 
+// --- terminal prompting for --init / --set-oidc-secret (#1210 D3) ----------
+//
+// scripts/configure.sh gives the one-off container the operator's terminal
+// (`docker run -t`) when there is one, and this engine prompts on it itself,
+// as git and ssh do: the questions, validators, wording and retry rules of
+// configure.sh's own guided_init / set_oidc_secret, which are deleted.
+
+const sleepBuffer = new Int32Array(new SharedArrayBuffer(4));
+
+/** One byte from fd 0, blocking; retries EAGAIN, which a TTY stream Node has opened in non-blocking mode returns. undefined at end of input. */
+function readTerminalByte(): number | undefined {
+  const buffer = Buffer.alloc(1);
+  for (;;) {
+    try {
+      return readSync(0, buffer, 0, 1, null) === 0 ? undefined : buffer[0];
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EAGAIN") throw error;
+      Atomics.wait(sleepBuffer, 0, 0, 20);
+    }
+  }
+}
+
+/** A visible line from the terminal; undefined on end of input (Ctrl-D on an empty line). */
+function readTerminalLine(promptText: string): string | undefined {
+  process.stdout.write(promptText);
+  const bytes: number[] = [];
+  for (;;) {
+    const byte = readTerminalByte();
+    if (byte === undefined) return bytes.length > 0 ? Buffer.from(bytes).toString("utf8") : undefined;
+    if (byte === 10) return Buffer.from(bytes).toString("utf8");
+    if (byte !== 13) bytes.push(byte);
+  }
+}
+
+/** A hidden line (no echo); undefined on end of input. Ctrl-C restores the terminal and exits 130. */
+function readTerminalSecret(promptText: string): string | undefined {
+  // Echo goes off before the prompt appears, so nothing typed early is echoed or lost.
+  process.stdin.setRawMode(true);
+  process.stdout.write(promptText);
+  const bytes: number[] = [];
+  let ended = false;
+  try {
+    for (;;) {
+      const byte = readTerminalByte();
+      if (byte === undefined || (byte === 4 && bytes.length === 0)) {
+        ended = true;
+        break;
+      }
+      if (byte === 3) {
+        process.stdin.setRawMode(false);
+        process.stdout.write("\n");
+        process.exit(130);
+      }
+      if (byte === 13 || byte === 10) break;
+      if (byte === 127 || byte === 8) {
+        bytes.pop();
+        continue;
+      }
+      bytes.push(byte);
+    }
+  } finally {
+    process.stdin.setRawMode(false);
+  }
+  process.stdout.write("\n");
+  return ended ? undefined : Buffer.from(bytes).toString("utf8");
+}
+
+function hasTerminal(): boolean {
+  return isatty(0) && isatty(1);
+}
+
+function cancelGuidedConfiguration(): never {
+  fail("orbit: Guided configuration was cancelled.");
+}
+
+/** Asks until a valid answer or end of input (configure.sh's prompt_* loops). */
+function promptUntilValid<T>(promptText: string, validate: (input: string) => T | undefined, rejection: string): T {
+  for (;;) {
+    const input = readTerminalLine(promptText);
+    if (input === undefined) cancelGuidedConfiguration();
+    const value = validate(input);
+    if (value !== undefined) return value;
+    process.stderr.write(`${rejection}\n`);
+  }
+}
+
+/** prompt_auth_mode (ADR-0023 section 1): local accounts by default. */
+function promptAuthMode(): "local" | "oidc" {
+  return promptUntilValid(
+    "Sign in with local accounts only, or also with an identity provider? OIDC can be added later with configure.sh. [local/oidc] (default: local): ",
+    (input) => {
+      const answer = input.toLowerCase();
+      if (answer === "" || answer === "local") return "local" as const;
+      if (answer === "oidc") return "oidc" as const;
+      return undefined;
+    },
+    'Enter "local" for local accounts only, or "oidc" to also enable an identity provider.',
+  );
+}
+
 function commandConfigureInit(deployDir: string): never {
   const envAppUrl = process.env.ORBIT_CONFIGURE_APP_URL;
   const envIssuer = process.env.ORBIT_CONFIGURE_OIDC_ISSUER;
@@ -466,7 +584,14 @@ function commandConfigureInit(deployDir: string): never {
   let clientId: string | undefined;
   let resolvedAuthMode: "local" | "oidc";
 
-  if (providedCount === 3) {
+  if (authMode === "local" && envAppUrl) {
+    // guided_init's local-only environment form: APP_URL alone.
+    if (envIssuer || envClientId) {
+      fail("orbit: ORBIT_CONFIGURE_AUTH_MODE=local conflicts with a supplied OIDC issuer/client ID environment set.");
+    }
+    resolvedAuthMode = "local";
+    appUrl = envAppUrl;
+  } else if (providedCount === 3) {
     if (authMode === "local") {
       fail("orbit: ORBIT_CONFIGURE_AUTH_MODE=local conflicts with a supplied OIDC issuer/client ID environment set.");
     }
@@ -476,12 +601,10 @@ function commandConfigureInit(deployDir: string): never {
     clientId = envClientId as string;
   } else if (providedCount > 0) {
     fail(
-      "orbit: guided configuration requires all of ORBIT_CONFIGURE_APP_URL, ORBIT_CONFIGURE_OIDC_ISSUER and ORBIT_CONFIGURE_OIDC_CLIENT_ID together, not a partial set.",
+      "orbit: Guided configuration requires all of ORBIT_CONFIGURE_APP_URL, ORBIT_CONFIGURE_OIDC_ISSUER and ORBIT_CONFIGURE_OIDC_CLIENT_ID together, not a partial set.",
     );
   } else if (isConfigureMachinePromptMode()) {
-    // O1-F1: a local-only machine-prompt init only ever needs APP_URL —
-    // this previously always collected (and so always demanded) the OIDC
-    // fields too, regardless of ORBIT_CONFIGURE_AUTH_MODE.
+    // O1-F1: a local-only machine-prompt init only ever needs APP_URL.
     resolvedAuthMode = authMode ?? "oidc";
     try {
       const collected = collectMachineGuidedInit(stdoutConfigureMachineDriver(), resolvedAuthMode);
@@ -489,12 +612,31 @@ function commandConfigureInit(deployDir: string): never {
       issuer = collected.issuer;
       clientId = collected.clientId;
     } catch (error) {
-      if (error instanceof ConfigureMachinePromptAbortedError) fail("orbit: guided configuration was cancelled.");
+      if (error instanceof ConfigureMachinePromptAbortedError) cancelGuidedConfiguration();
       throw error;
+    }
+  } else if (hasTerminal()) {
+    resolvedAuthMode = authMode ?? promptAuthMode();
+    appUrl = promptUntilValid(
+      "Public Orbit origin (e.g. https://orbit.your-domain.tld): ",
+      (input) => normalizePublicOrigin(input) ?? undefined,
+      "Enter a complete https:// public origin with no credentials, path, query, fragment, loopback address or example.com placeholder.",
+    );
+    if (resolvedAuthMode === "oidc") {
+      issuer = promptUntilValid(
+        "OIDC issuer URL (e.g. https://sso.your-domain.tld/application/o/orbit/): ",
+        (input) => (isValidOidcIssuer(input) ? input : undefined),
+        "Enter a complete https:// issuer URL with no credentials, query, fragment, loopback address or example.com placeholder.",
+      );
+      clientId = promptUntilValid(
+        "OIDC client ID: ",
+        (input) => (isValidClientId(input) ? input : undefined),
+        "Enter a non-empty OIDC client ID with no whitespace or control characters.",
+      );
     }
   } else {
     fail(
-      "orbit: guided configuration requires ORBIT_CONFIGURE_PROMPTS=machine or the complete ORBIT_CONFIGURE_APP_URL, ORBIT_CONFIGURE_OIDC_ISSUER and ORBIT_CONFIGURE_OIDC_CLIENT_ID environment set — this engine has no controlling terminal of its own.",
+      "orbit: Guided configuration needs a controlling terminal, or the complete ORBIT_CONFIGURE_APP_URL, ORBIT_CONFIGURE_OIDC_ISSUER and ORBIT_CONFIGURE_OIDC_CLIENT_ID environment set for non-interactive use.",
     );
   }
 
@@ -519,11 +661,14 @@ function commandConfigureSetOidcSecret(deployDir: string): never {
       }
       throw error;
     }
+  } else if (hasTerminal()) {
+    // set_oidc_secret's terminal form: one hidden entry, no retry; an empty
+    // or oversized answer is refused by applySetOidcSecret below.
+    const line = readTerminalSecret("OIDC client secret (input hidden): ");
+    if (line === undefined) fail("orbit: Could not read a complete OIDC client secret from the controlling terminal.");
+    secret = line;
   } else {
-    // Mirrors configure.sh's own non-machine, non-TTY fallback
-    // (`elif ! IFS= read -r -p '' secret`): a single raw line piped in, no
-    // hidden-terminal handling — this engine has no controlling terminal to
-    // offer that on (see this section's own header comment).
+    // A single raw line piped in (configure.sh's `read -r` fallback).
     const line = readSyncLine(0);
     if (line === undefined) fail("orbit: could not read a complete OIDC client secret from standard input.");
     secret = line;
@@ -557,11 +702,20 @@ function commandConfigureSetDeploymentProfile(deployDir: string, preset: string,
   }
 }
 
+/** `orbit configure --preflight|--migrate ...`: the retired scripts/configuration.sh's grammar over the port (#1210 D8). */
+function commandConfigureMigration(deployDir: string, args: string[]): never {
+  const result = runConfigurationCommand(args, join(deployDir, ".env-orbit"));
+  process.stdout.write(result.stdout);
+  process.stderr.write(result.stderr);
+  process.exit(result.status);
+}
+
 function commandConfigure(deployDir: string, args: string[]): never {
   if (args.length === 0) {
     commandConfigureApply(deployDir);
   }
   const [first, ...rest] = args;
+  if (first === "--preflight" || first === "--migrate") commandConfigureMigration(deployDir, args);
   switch (first) {
     case "--init":
       if (rest.length > 0) usageExit("orbit: usage: orbit configure --init");
@@ -580,7 +734,9 @@ function commandConfigure(deployDir: string, args: string[]): never {
       break;
     }
     default:
-      usageExit(`orbit: unknown option ${first} (usage: orbit configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]])`);
+      usageExit(
+        `orbit: unknown option ${first} (usage: orbit configure [--init|--set-oidc-secret|--set-deployment-profile PRESET [MODEL]|--preflight ...|--migrate ...])`,
+      );
   }
 }
 
@@ -1560,8 +1716,10 @@ function main(): void {
   try {
     switch (command) {
       case "check":
-        if (commandArgs.length > 0) fail(`orbit: unknown option ${commandArgs[0]}`);
-        commandCheck(deployDir);
+        if (commandArgs.length > 1 || (commandArgs.length === 1 && commandArgs[0] !== "--rollback")) {
+          usageExit(`orbit: unknown option ${commandArgs.at(-1)} (usage: orbit check [--rollback])`);
+        }
+        commandCheck(deployDir, commandArgs[0] === "--rollback");
         break;
       case "configure":
         commandConfigure(deployDir, commandArgs);

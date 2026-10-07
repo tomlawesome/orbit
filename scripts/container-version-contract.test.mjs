@@ -84,29 +84,18 @@ describe("immutable container version identity", () => {
     expect(entrypoint).not.toContain("${ORBIT_CHANNEL:-");
   });
 
-  it("keeps bootstrap key generation separate from the versioned runtime image", () => {
-    const helperStart = dockerfile.indexOf("FROM base AS vapid-generator");
-    const runtimeStart = dockerfile.indexOf(" AS runner");
-    const helper = dockerfile.slice(helperStart, runtimeStart);
-
-    expect(helperStart).toBeGreaterThanOrEqual(0);
-    expect(runtimeStart).toBeGreaterThan(helperStart);
-    expect(helper).toContain("COPY scripts/generate-vapid.mjs ./scripts/generate-vapid.mjs");
-    expect(helper).not.toContain("ORBIT_VERSION");
-    expect(helper).not.toContain("ORBIT_CHANNEL");
-    expect(configureScript).toContain("docker build --target vapid-generator");
-    expect(configureScript).not.toContain("docker build --target runner");
+  it("keeps no Docker-backed key generation: the engine makes VAPID keys itself (#1210 D7)", () => {
+    expect(dockerfile).not.toContain("vapid-generator");
+    expect(dockerfile).not.toContain("generate-vapid");
+    expect(configureScript).not.toMatch(/docker build/u);
   });
 
-  it("removes the VAPID bootstrap image once the keys are made, so no per-commit tag is left behind (#1241)", () => {
-    const build = configureScript.indexOf('docker build --target vapid-generator --tag "$bootstrap_image"');
-    const run = configureScript.indexOf('docker run --rm "$bootstrap_image"', build);
-    const remove = configureScript.indexOf('docker image rm "$bootstrap_image"', run);
-
-    expect(build).toBeGreaterThanOrEqual(0);
-    expect(run).toBeGreaterThan(build);
-    expect(remove).toBeGreaterThan(run);
-    expect(configureScript.slice(run, remove)).not.toContain("fail ");
+  it("builds no VAPID bootstrap image at all, so no per-commit tag can be left behind (#1241, #1210)", () => {
+    // #1241 removed the bootstrap image after its one run; #1210 moved key
+    // generation into the engine (src/lib/vapid-keys.ts), so configure.sh
+    // no longer builds one.
+    expect(configureScript).not.toContain("vapid-generator");
+    expect(configureScript).not.toContain("bootstrap_image");
   });
 
   it("handles --version before root and secret bootstrap checks", () => {

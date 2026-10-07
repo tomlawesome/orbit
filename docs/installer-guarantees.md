@@ -61,7 +61,9 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 12. `installer_ui_terminal_width` clamps any reported/derived terminal width to the range [20, 240] and falls back to `COLUMNS`/80 if the value is non-numeric, so a bogus `stty size` result cannot produce a malformed or unbounded render width. — installer-ui.sh:317-328 — category: input-validation — criticality: LOW
 13. The plain-mode status-line format and its field vocabulary are a documented, versioned machine interface ("engine event stream v0", consumed by orbit-launcher); vocabulary drift without a matching `docs/engine-events.md` update fails CI. — installer-ui.sh:86-110, docs/engine-events.md, scripts/engine-events.test.mjs — category: provenance/immutability — criticality: MEDIUM
 
-## configuration.sh (invoked as a subprocess by configure.sh and install.sh — never sourced)
+## configuration.sh (retired by #1210 and ported to `src/lib/configuration-migration.ts`; reached through `configure.sh --preflight`/`--migrate`, never sourced)
+
+`scripts/configuration.sh` no longer exists. The configure engine implements these guarantees as `orbit configure --preflight` and `--migrate`, with the same arguments, exit codes and output; `configure.sh --preflight`/`--migrate` run them in the Orbit image. The `configuration.sh:line` citations below point at the deleted bash (commit `b0ee5929`). The tests that assert each guarantee now are in the table after entry 26.
 
 1. The operator's `.env-orbit` file is parsed as inert text (line-by-line regex), never `source`d or evaluated as shell — a value like `` $(rm -rf) `` or backticks in the file can never execute. — configuration.sh:5-6,112-148 — category: input-validation — criticality: HIGH
 2. Refuses to read the configuration file at all unless it is a regular, non-symlink file with exact mode `600`; a symlinked, non-regular, or loosely-permissioned `.env-orbit` fails closed with `configuration_syntax` before any content is parsed. — configuration.sh:106-110,117 — category: permissions/ownership — criticality: HIGH
@@ -90,10 +92,46 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 25. `parse_file` distinguishes three outcomes for callers: fully valid current schema (0), valid-but-legacy/unversioned data needing migration (2, reported as `safely_migratable ORBIT_CONFIG_SCHEMA_VERSION`), or hard failure (any other exit) — callers (e.g. configure.sh's preflight) can require an explicit migration step rather than silently treating an old file as current. — configuration.sh:150-157,168-174,296-306 — category: provenance/immutability — criticality: MEDIUM
 26. A direct secret value and its `_FILE` counterpart (`SESSION_SECRET`, `DOCUMENT_KEK`, `DOCUMENT_KEK_NEXT`, `POSTGRES_PASSWORD`, `OIDC_CLIENT_SECRET`, `VAPID_PRIVATE_KEY`, `SMTP_PASSWORD`, `DATABASE_URL`, `SMTP_URL`) set together fail closed as `configuration_secret_conflict`, matching src/lib/config-contract.ts's own mutually-exclusive pairs — `--check`/`--preflight` never certifies a file the app refuses at runtime (#1151 O1-Q1). — configuration.sh:168-174 — category: input-validation — criticality: MEDIUM
 
-## configure.sh (operator-run `--check`/`--init`/`--set-oidc-secret`/`--set-deployment-profile` entry point; also runs with no args to finish bootstrapping secrets)
 
-1. An `EXIT` trap (`cleanup`) unconditionally restores terminal echo, closes any opened controlling-terminal fd, and deletes any dangling `temporary_file` on every exit path (success, `fail`, or signal) — an interrupted run never leaves the operator's terminal silently echo-less or a stray temp file behind. — configure.sh:47-59 — category: recovery — criticality: MEDIUM
-2. `run_configuration_preflight` runs `configuration.sh --preflight` before configure.sh touches anything else; a non-zero preflight result fails closed ("restoring the previous deployment"), and a report of `safely_migratable ORBIT_CONFIG_SCHEMA_VERSION` fails closed as `configuration_migration_required` — configure.sh never proceeds past an invalid or unmigrated schema. — configure.sh:26-34,960 — category: refusal/fail-closed — criticality: HIGH
+### configuration.sh guarantees: now asserted by
+
+Every case name below is a case in `src/lib/__fixtures__/configuration-migration/matrix.json`, captured from the bash before it was deleted, and each runs as one test of the same name in `src/lib/configuration-migration.parity.test.ts`. A case compares exit status, stdout, the stderr code and the file, rollback copy and lock left behind. "Grammar N" and "value N" are the case's position in its group, as the case names are written.
+
+| # | Asserted by |
+|---:|---|
+| 1 | check: rejects grammar 2, 3, 4 and 7 (`${...}`, `$...`, `$(...)` and backticks are refused as text, never evaluated) |
+| 2 | check: loose mode; check: symlink; check: directory; check: missing file |
+| 3 | check: rejects grammar 1 (unknown key); check: removed imap key; preflight: removed imap key |
+| 4 | check: deprecated direct secrets; preflight: deprecated direct secrets |
+| 5 | check: rejects grammar 2 to 8, 16 (over 4096 bytes), 18 (NUL) and 19 (ESC); check: rejects grammar 17 (exactly 4096 bytes, accepted); migrate: accepts value 0 to 5; migrate: accepts value 6 (a tab, refused) |
+| 6 | check: rejects grammar 11, 15, 20 and 21 |
+| 7 | check: rejects grammar 18 |
+| 8 | check: rejects grammar 0 |
+| 9 | check: rejects grammar 12, 13 and 14 |
+| 10 | preflight: provenance 0; preflight: provenance 1 |
+| 11 | preflight: provenance 2, 3 and 4 (not semver, digest mismatch, local tag not digest-pinned) |
+| 12 | check: compose project p0 to p5; migrate: bad target project; migrate: missing project |
+| 13 | check: schema version 2; check: schema version 0; check: schema version 1x; check: schema version 01 |
+| 14 | migrate: invalid file |
+| 15 | migrate: partial target; migrate: target image digest mismatch; migrate: target bad version; migrate: target mutable image |
+| 16 | migrate: no target and no provenance; migrate: no target with provenance; migrate: no target with provenance but no project; migrate: no target with provenance project given |
+| 17 | migrate: project mismatch; migrate: existing project kept; "agrees: a compose project mismatch fails the migration closed (configuration.sh #17)" |
+| 18 | migrate: already current; migrate: already current transaction; "agrees: an already-current file reports already current and preflight passes" |
+| 19 | migrate: leftover identical rollback retried; migrate: leftover different rollback refused; migrate: leftover rollback ignored in transaction. A symlinked rollback copy has no captured case. |
+| 20 | Every migrate case compares the file and rollback copy modes. `src/lib/configuration-migration.port.test.ts`: "restores the original from the rollback copy when the final rename fails, leaving no scratch file (configuration.sh #20)" |
+| 21 | Every migrate case compares the scratch files left behind. `configuration-migration.port.test.ts`: "a signal during a migration (#1151 O1-R4)" |
+| 22 | `configuration-migration.port.test.ts`: "restores the original from the rollback copy when the final rename fails, leaving no scratch file (configuration.sh #20)" (the test's own label cites the old number) |
+| 23 | migrate: legacy crlf; migrate: comments crlf no final newline |
+| 24 | usage: transaction without migrate |
+| 25 | check: legacy file; preflight: legacy file; "agrees: a legacy unversioned file migrates and preflight still passes (configuration.sh #25)" |
+| 26 | check: secret pair conflict; preflight: secret pair conflict; check: empty direct beside file |
+
+## configure.sh (operator-run `--check`/`--check-rollback`/`--init`/`--set-oidc-secret`/`--set-deployment-profile` entry point, plus the `--preflight`/`--migrate` pass-throughs; also runs with no args to finish bootstrapping secrets)
+
+Since #1210 `configure.sh` is a thin shell: it resolves which Orbit image to run (a launcher config tree's `.orbit-image` pin, written there by `install.sh` and refused if it is a link or not a valid image; else `ORBIT_IMAGE`; else the `ORBIT_IMAGE=` line in `.env-orbit`; else it refuses — orbit-launcher #197), pulls a missing digest, and runs every flow as a disposable `docker run --rm` of `orbit check` or `orbit configure` in that image ([engine invocation](engine-events.md#in-container-engine-invocation-v0)). The guarantees below are unchanged; the engine implements them. The `configure.sh:line` citations point at the bash that did so before the flip (commit `b0ee5929`) and no longer exist. The tests that assert each guarantee now are in the table after entry 34.
+
+1. An `EXIT` trap (`cleanup`) unconditionally restores terminal echo, closes any opened controlling-terminal fd, and deletes any dangling `temporary_file` on every exit path (success, `fail`, or signal) — an interrupted run never leaves the operator's terminal silently echo-less or a stray temp file behind. Since #1210 the shell holds neither: the engine reads the terminal itself and removes its own staging files. — configure.sh:47-59 — category: recovery — criticality: MEDIUM
+2. The engine's configuration preflight (`runConfigurePreflight`, the port of `configuration.sh --preflight`) runs before configure touches anything else; a non-zero preflight result fails closed ("restoring the previous deployment"), and a report of `safely_migratable ORBIT_CONFIG_SCHEMA_VERSION` fails closed as `configuration_migration_required` — configure never proceeds past an invalid or unmigrated schema. — configure.sh:26-34,960 — category: refusal/fail-closed — criticality: HIGH
 3. `generate_hex_secret` requires OpenSSL or a readable `/dev/urandom`+`od`; if neither is available it fails closed rather than falling back to a weaker source, and the generated value is re-validated against `^[0-9a-fA-F]{64}$` before being trusted. — configure.sh:99-112 — category: secret-handling — criticality: HIGH
 4. `ensure_environment_file` refuses to proceed at all if `.env-orbit.example` is missing (no default template to fall back to). — configure.sh:152-154 — category: refusal/fail-closed — criticality: LOW
 5. If `.env-orbit` already exists, it is refused unless it is a regular, non-symlink file, and its permissions are forced to `600` before any further use — directly refuses a symlinked `.env-orbit`. — configure.sh:156-161 — category: permissions/ownership — criticality: HIGH
@@ -113,10 +151,10 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 19. The OIDC secret placeholder path is refused outright if it exists as a symlink or other non-regular file (never silently followed or replaced); a fresh placeholder is created as a 0-byte, atomically-moved, mode-600 file. — configure.sh:598,607-621 — category: secret-handling — criticality: HIGH
 20. `set_oidc_secret` reads the client secret exactly once, only from the controlling terminal (echo disabled / hidden-input widget) or stdin — it is never accepted as a CLI argument, so it can never appear in `ps` output or shell history. — configure.sh:623-654 — category: secret-handling — criticality: HIGH
 21. The OIDC client secret is never printed, logged, or exported at any point in `set_oidc_secret` (explicit design comment plus code review of the path confirms no echo of `$secret`). — configure.sh:623-628 — category: secret-handling — criticality: HIGH
-22. The read secret must be non-empty and must not exceed `maximum_secret_bytes` (65536); an empty or oversized secret fails closed before any file is touched. — configure.sh:655-661 — category: secret-handling — criticality: HIGH
+22. The read secret must be non-empty and must not exceed `maximum_secret_bytes` (65536); an empty or oversized secret fails closed before any file is touched. Since #1210 a secret piped in with no final newline is accepted (the bash refused it, an artefact of `read` rather than a rule). — configure.sh:655-661 — category: secret-handling — criticality: HIGH
 23. The secret is written to a `chmod 600` temp file and atomically moved to the canonical `oidc-client-secret` path; only after that succeeds are the `.env-orbit` pointers updated, and `update_managed_keys` is only ever given an empty direct-value placeholder and the fixed canonical file path — the raw secret is never written into `.env-orbit` itself. — configure.sh:664-682 — category: secret-handling — criticality: HIGH
-24. `ensure_vapid_keys` reuses an existing non-empty private-key file as-is (only re-asserting `chmod 600`) instead of regenerating it — rerunning configure.sh does not rotate VAPID keys. — configure.sh:684-689 — category: idempotency — criticality: MEDIUM
-25. `ensure_vapid_keys` validates `ORBIT_IMAGE` against the same immutable local-tag/digest-pinned pattern before using it in `docker run`/`docker pull`, refusing to execute an unpinned or arbitrary image reference to generate keys. — configure.sh:693-696 — category: provenance/immutability — criticality: HIGH
+24. VAPID key generation (the engine's `ensureVapidKeys`, `src/lib/vapid-keys.ts`; ADR-0032 amendment of 2026-10-06) reuses an existing non-empty private-key file as-is (only re-asserting `chmod 600`) instead of regenerating it — rerunning configure.sh does not rotate VAPID keys. — configure.sh:684-689 — category: idempotency — criticality: MEDIUM
+25. The image that runs configuration, and so generates the VAPID keys, is validated before anything runs: `ORBIT_IMAGE` must be the installer-generated local tag or a registry reference pinned by digest, or `configure.sh` refuses to run an unpinned or arbitrary image. There is no separate key-generating image or `docker run`/`docker pull` any more. — configure.sh:693-696 — category: provenance/immutability — criticality: HIGH
 26. Generated VAPID keys are only accepted if both the public and private values are non-empty (fails closed otherwise); the private key is written to a `mktemp`+`chmod 600` file and atomically moved into place. — configure.sh:708-715 — category: secret-handling — criticality: HIGH
 27. `run_check` refuses to inspect `.env-orbit` for readiness unless it is a regular, non-symlink file with permissions exactly `600` — a symlinked or loosely-permissioned file is refused rather than silently read for the report. — configure.sh:725-735 — category: permissions/ownership — criticality: HIGH
 28. `run_check`'s readiness report emits only fixed category words (`ready`/`missing`/`optional`) and variable names — actual configured values, including secrets, are never included in the output (explicit design comment plus reviewed reporting functions). — configure.sh:722-724,789-809 — category: secret-handling — criticality: HIGH
@@ -125,7 +163,49 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 31. `OIDC_CALLBACK_URL` is reported ready only when it exactly equals the callback re-derived from the currently-ready, normalized `APP_URL` — a stale callback URL left over from a changed `APP_URL` is caught rather than silently accepted. — configure.sh:876-878 — category: provenance/immutability — criticality: MEDIUM
 32. Each CLI subcommand (`--check`, `--init`, `--set-oidc-secret`, `--set-deployment-profile`) strictly validates its argument count and exits 2 with usage on any deviation instead of guessing intent. — configure.sh:912-956 — category: input-validation — criticality: LOW
 33. The default (no-argument) invocation explicitly states "Existing values were preserved" after running `ensure_environment_file` → preflight → `persist_orbit_image` → secrets directory → per-secret ensure/generate → OIDC placeholder → VAPID keys — rerunning configure.sh with no arguments is designed to be idempotent and never rotates/overwrites already-configured secrets. — configure.sh:959-970 — category: idempotency — criticality: MEDIUM
-34. `--check-rollback` (issue #529, ADR-0014 decision 7, added for `repair.sh`'s `configuration-migration-interrupted` diagnosis) runs `run_check`'s identical readiness/exit-code/stderr logic — same required-field rules, same enum-only "ready"/"missing"/"optional" output, same never-delegated-to-the-container-engine behavior — against `configuration.sh`'s own rollback copy (`<environment_file>.orbit-config.rollback`) at its fixed conventional location instead of the live file. The checked filename is a single variable (`$checked_environment_file`) set once at startup from the selected mode, never accepted as a command-line path argument or override, so this mode adds no untrusted path input; a nonstandard layout simply cannot be checked, the same fail-safe fallback every other undetectable repair case already has. Every other input — `.orbit-secrets` included — still resolves to the real installation directory exactly as plain `--check` does, and the file-safety gate (regular, non-symlink, mode 600) applies identically; a missing rollback copy fails cleanly and non-zero rather than inventing a result. — configure.sh:7-19,951-962,1254-1270 — category: refusal/fail-closed — criticality: HIGH
+34. `--check-rollback` (issue #529, ADR-0014 decision 7, added for `repair.sh`'s `configuration-migration-interrupted` diagnosis) runs `--check`'s identical readiness/exit-code/stderr logic — same required-field rules, same enum-only "ready"/"missing"/"optional" output — against the configuration migration's own rollback copy (`<environment_file>.orbit-config.rollback`) at its fixed conventional location instead of the live file. Since #1210 both `--check` and `--check-rollback` run in the engine as `orbit check` and `orbit check --rollback`, a read-only mount of the deployment directory; the earlier "never delegated to the container engine" rule belonged to the opt-in era and is gone, and `repair.sh` still calls `configure.sh --check`/`--check-rollback` and gets the same output. The checked filename is fixed by the `--rollback` flag, never accepted as a command-line path argument or override, so this mode adds no untrusted path input; a nonstandard layout simply cannot be checked, the same fail-safe fallback every other undetectable repair case already has. Every other input — `.orbit-secrets` included — still resolves to the real installation directory exactly as plain `--check` does, and the file-safety gate (regular, non-symlink, mode 600) applies identically; a missing rollback copy fails cleanly and non-zero rather than inventing a result. — configure.sh:7-19,951-962,1254-1270 — category: refusal/fail-closed — criticality: HIGH
+
+
+### configure.sh guarantees: now asserted by
+
+Test names are quoted from the files named. `CE` is `src/lib/configure-engine.test.ts`, `CEP` is `src/lib/configure-engine.parity.test.ts` (compares the engine with what the bash wrote, captured in `src/lib/__fixtures__/configure-write`), `RB` is `src/lib/configure-engine.retired-bash.test.ts`, `OC` is `src/cli/orbit.configure.test.ts`, `TTY` is `src/cli/orbit.configure-tty.test.ts`, `CHK` is `src/cli/orbit.check.test.ts`, `CCP` is `src/lib/config-contract.parity.test.ts` (compares the engine with the captured `--check` output), `VK` is `src/lib/vapid-keys.test.ts`, and `DEL` is `scripts/configure-engine-delegation.test.mjs` (the shell, with a fake `docker`).
+
+| # | Asserted by |
+|---:|---|
+| 1 | RB: "leaves no temporary files behind after success or a later failure", "removes the atomic update file when securing it fails". TTY: "reads the secret without echoing it", "is cancelled by end of input and writes nothing" |
+| 2 | CE: the four "guarantee #2" tests (no file yet, invalid file, schema-less file reports migration required, loose permissions) |
+| 3 | CE: "guarantee #16: generates a mode-0600 64-hex-character secret when absent". CEP: "each generated secret is a freshly random, valid 64-hex-character value". The engine uses `node:crypto`, so the bash refusal when no random source existed has no equivalent |
+| 4 | CE: "guarantee #4: refuses when .env-orbit.example is missing". OC: "fails closed (exit 1) rather than silently succeeding when .env-orbit.example is missing" |
+| 5 | CE: "guarantee #5: refuses a symlinked .env-orbit", "guarantee #5: forces an existing regular file's permissions to 600" |
+| 6 | CE: "guarantee #6: creates a fresh, mode-0600 file assembled atomically from the example" |
+| 7 | CE: the five "guarantee #7" tests. RB: "preserves unrelated comments and operator values byte-for-byte", "preserves an existing file's final newline state around managed updates" |
+| 8 | CE: the three "guarantee #8" tests |
+| 9 | CE: the four "guarantee #9" tests. CEP: "persistOrbitImage: engine vs captured bash". DEL: "refuses a mutable tag" (the shell refuses it first) |
+| 10 | CE: the five "guarantee #10" tests. CEP: the two "guarantee #10" tests, "profile ai without model is a usage error (exit 2) that writes nothing". OC: "an unknown preset exits 2 (usage error), not 1", "wrong argument count exits 2 with a usage message" |
+| 11 | CE: "guarantee #11: rejects a loopback APP_URL". CEP: "configure.sh #11-14 / engine applyGuidedInit produce identical .env-orbit content" (the first-run values) and the captured "init invalid app url" case. TTY: "asks the sign-in mode, then the OIDC fields, rejecting and re-asking an invalid answer" |
+| 12 | OC: "refuses a partial ORBIT_CONFIGURE_* triad rather than blending in a missing field". CEP: the captured "init partial env set" case |
+| 13 | CE: "guarantee #13: derives OIDC_CALLBACK_URL from the normalized APP_URL". CEP: "configure.sh #11-14 / engine applyGuidedInit produce identical .env-orbit content" |
+| 14 | CE: "guarantee #14: writes nothing when APP_URL is invalid". TTY: "is cancelled by end of input and writes nothing" |
+| 15 | CE: the three "guarantee #15" tests |
+| 16 | CE: "guarantee #16: generates a mode-0600 64-hex-character secret when absent" |
+| 17 | CE: the four "guarantee #17" tests |
+| 18 | CE: "guarantee #18: does not create a placeholder when a direct OIDC_CLIENT_SECRET is already active alone" |
+| 19 | CE: "guarantee #19: creates a zero-byte, mode-0600 placeholder when absent", "guarantee #19: refuses a symlinked placeholder path" |
+| 20 | CE: "guarantee #20-23: writes the secret to the canonical file...". OC: "reads a single piped line and writes the canonical secret file plus .env-orbit pointers, never echoing the value". TTY: "reads the secret without echoing it". DEL: "the OIDC secret arrives on stdin and the answers by -e NAME, never as values in argv" |
+| 21 | CE: "guarantee #21: the secret value never appears in the thrown refusal's message for an oversized secret". OC and TTY: the no-echo tests above |
+| 22 | CE: "guarantee #22: refuses an empty secret", "guarantee #22: refuses a secret exceeding the maximum byte size". CEP: "set oidc secret empty", "set oidc secret oversized". RB: "applies the 65,536-byte bound to multibyte input rather than character count" |
+| 23 | CE: "guarantee #20-23: writes the secret to the canonical file...". CEP: "configure.sh guarantees #20-23 / engine applySetOidcSecret write identical files" |
+| 24 | VK: "keeps an existing non-empty key and never touches .env-orbit". CE: "ends with the VAPID step (#1210 D7, guarantees #24-26): a key pair on the first run, kept on the next" |
+| 25 | DEL: "refuses a mutable tag", "refuses with both ways to supply one when there is no image anywhere, before any docker run" (the shell checks the image before any engine run) |
+| 26 | VK: "generates a pair, writes the private key at 600 and records both keys (#24-26)", "replaces an empty key file", "refuses a symlinked key path rather than following it" |
+| 27 | CCP: "a loose-mode file fails with configuration_syntax (bash named the permissions, also exit 1)" |
+| 28 | CHK: "never discloses configured values, only fixed categories and names". CCP: the captured readiness cases, each a test named by the case |
+| 29 | CHK: "reports a file-backed OIDC secret as missing when its permissions are too broad", "reports OIDC_CLIENT_SECRET_FILE as missing when the canonical host file is empty", "...is a symlink", "reports direct and file secret conflicts as incomplete without disclosing values". CCP: "non-canonical secret path is not ready", "missing secret file is not ready", "loose secrets directory is not ready" |
+| 30 | CHK: "treats the historical loopback default and documented example.com placeholders as missing". CCP: "loopback APP_URL is not deployment-ready", "example.com placeholder refused" |
+| 31 | CCP: "callback must derive exactly from APP_URL" |
+| 32 | DEL: "usage errors are exit 2 and never reach docker". OC: "an unknown preset exits 2 (usage error), not 1", "wrong argument count exits 2 with a usage message", "exits 2 with a usage message for an unrecognised flag". CHK: "rejects an extra argument as a usage error (exit 2), as a plain check does" |
+| 33 | CE, OC and CEP: "guarantee #33: is idempotent — a second run preserves already-generated secrets" (CEP: "configure.sh guarantee #33 / engine runConfigureApply: a second run changes nothing") |
+| 34 | CHK: the five `orbit check --rollback` tests (good copy, symlink, loose permissions, "checks only the rollback copy, never the live .env-orbit", extra argument). CCP: "--rollback with no rollback copy reports every field missing, as --check-rollback did", "--rollback reads the rollback copy, not the live file". DEL: "--check-rollback can read the image from the rollback copy when .env-orbit has none", "--check never gets -t, so its output stays plain lines" |
 
 ## installer-simulation.sh (non-mutating rehearsal of the installer command centre — issue #260)
 
@@ -206,7 +286,7 @@ Test files (`*.test.mjs`) and other scripts were explicitly excluded from the re
 47. `prepare_rollback_area` creates the rollback staging area and its `original/` backup subdirectory at mode 700 and backs up every currently-existing managed path with `cp -a` (preserving exact content, permissions, and structure) before any of those paths is touched — nothing in the real target is mutated until a complete backup exists. — install.sh:1372-1393 — category: transactional/rollback — criticality: HIGH
 48. Every deployment asset is extracted into a private, mode-700 staging directory and fully validated (non-symlink, regular, non-empty, and — for scripts — `bash -n`-clean) before anything in the real target directory is touched — an extraction or validation failure at this stage can never mutate an existing deployment. — install.sh:1464-1512 — category: transactional/rollback — criticality: HIGH
 49. The file transaction only begins (`file_transaction_active=1`) after both `preflight_final_paths` (destination-safety) and `prepare_rollback_area` (backup) have completed — no target directory is created and no rollback tracking starts until every final destination has already been proven safe and backed up. — install.sh:1435-1439 — category: transactional/rollback — criticality: HIGH
-50. For an existing `.env-orbit`, a `configuration.sh --preflight` check and a full `--migrate --transaction` run both happen before any extracted asset is installed or `configure.sh` runs — legacy/invalid configuration is caught and migrated (or the whole run fails closed) at the earliest point, and is still fully covered by the outer file-transaction rollback. — install.sh:1441-1448 — category: transactional/rollback — criticality: HIGH
+50. For an existing `.env-orbit`, a configuration preflight (`configure.sh --preflight`, run by the engine) and a full `--migrate --transaction` run both happen before any extracted asset is installed or `configure.sh` runs — legacy/invalid configuration is caught and migrated (or the whole run fails closed) at the earliest point, and is still fully covered by the outer file-transaction rollback. — install.sh:1441-1448 — category: transactional/rollback — criticality: HIGH
 51. Every deployment asset directory and asset file is re-checked for the same safe-type invariants (real directory / regular non-symlink file) a second time immediately before being created/overwritten — not just during the earlier preflight — catching a TOCTOU change that occurred between preflight and write. — install.sh:1450-1474 — category: refusal/fail-closed — criticality: HIGH
 52. Guided-configuration output (`.env-orbit`, `.orbit-secrets`) staged during a fresh install is moved into place with `mv` (same-filesystem atomic rename), never copied — no partially-written configuration or secrets directory can ever be observed at the final path. — install.sh:1460-1465 — category: transactional/rollback — criticality: HIGH
 53. The resolved image digest is written into `.env-orbit`'s `ORBIT_IMAGE` as the fully-qualified digest reference; the moving channel tag is explicitly never persisted here, and this write is a deliberate defense-in-depth repetition of the same value `configure.sh` already persisted from the environment. — install.sh:1501-1536 — category: provenance/immutability — criticality: HIGH
@@ -401,8 +481,8 @@ All citations are `file.sh:line` against `/home/codex/projects/orbit/scripts/<fi
 This is the operator procedure around an upgrade: running the install line
 again and choosing Update (see [Installing Orbit](installing.md#what-the-installer-asks)).
 Run every command here from the deployment directory. It uses `backup.sh`,
-`restore.sh` and `configuration.sh`, whose guarantees are catalogued in
-their own sections.
+`restore.sh` and `configure.sh --preflight`/`--migrate` (formerly
+`configuration.sh`), whose guarantees are catalogued in their own sections.
 
 Before an upgrade, take a backup, check it, and keep a copy of the current
 `.env-orbit` beside it, readable only by you. The backup deliberately holds
@@ -453,11 +533,11 @@ What the installer guarantees during an upgrade:
   Keep `.orbit-secrets/postgres-password` exactly as it is.
 
 A configuration file from an older Orbit that no installer has migrated can be
-inspected with `scripts/configuration.sh --preflight` and upgraded explicitly,
+inspected with `scripts/configure.sh --preflight` and upgraded explicitly,
 giving it the new build's details:
 
 ```sh
-bash scripts/configuration.sh --migrate --orbit-image \
+bash scripts/configure.sh --migrate --orbit-image \
   'registry.example/orbit@sha256:<64 lowercase hexadecimal characters>' \
   --applied-version v0.3.0 \
   --applied-digest 'sha256:<64 lowercase hexadecimal characters>' \
@@ -835,8 +915,8 @@ and a separate `--recover` manual-recovery mode for crash safety.
 
 1. Accepts at most one argument, and it must be exactly `--no-pull`, or the script refuses with usage text.
    `build-container.sh:10-13` — category: input-validation — criticality: LOW
-2. Requires `.env-orbit` to exist, pointing the operator to `configure.sh` if missing, before attempting a build.
-   `build-container.sh:15-18` — category: input-validation / refusal — criticality: MEDIUM
+2. Needs no `.env-orbit`: the image is built straight from the Dockerfile with `docker buildx build`, not through Compose, so a checkout with no configuration can still build the image that configuration runs inside (#1210).
+   `build-container.sh:15-18` — category: deployment-correctness — criticality: MEDIUM
 3. Requires docker, Node.js, and Docker Compose v2 before proceeding.
    `build-container.sh:19-30` — category: input-validation — criticality: MEDIUM
 4. Built image is tagged with the short (12-char) git commit hash of `HEAD`, tying every local image to an exact, unambiguous source commit.
@@ -852,11 +932,11 @@ and a separate `--recover` manual-recovery mode for crash safety.
 
 1. Mode argument is restricted to exactly `--pull` or `--build`; anything else fails with usage text.
    `deploy-container.sh:16-17` — category: input-validation — criticality: LOW
-2. Requires `.env-orbit`, docker, and Docker Compose v2 present before doing anything.
+2. Requires docker and Docker Compose v2 present before doing anything; it does not need `.env-orbit`, because `configure.sh` creates it after the image is built or pulled.
    `deploy-container.sh:18-21` — category: input-validation — criticality: MEDIUM
 3. In `--pull` mode, `ORBIT_IMAGE` must resolve to a fully-qualified, immutable registry digest reference (`name@sha256:<64-hex>`) — a mutable tag (e.g. `latest`) is refused, so pull-based deploys are always pinned to an exact image.
    `deploy-container.sh:23-29` — category: provenance/immutability — criticality: HIGH
-4. `configure.sh` is re-run before deploying, so the live configuration always reflects current settings at deploy time.
+4. `configure.sh` is re-run before deploying, after the image has been built (`--build`) or pulled (`--pull`), because configuration runs inside that image (#1210). The live configuration always reflects current settings at deploy time.
    `deploy-container.sh:32` — category: deployment-correctness — criticality: MEDIUM
 5. The new/updated application (and dependency) images are fully pulled or built before any currently running deployment is touched — image acquisition happens before cutover.
    `deploy-container.sh:38-45` — category: transactional/rollback — criticality: MEDIUM
@@ -882,7 +962,9 @@ and a separate `--recover` manual-recovery mode for crash safety.
 
 ---
 
-## generate-vapid.mjs
+## generate-vapid.mjs (deleted by #1210: key generation moved into the configure engine, `src/lib/vapid-keys.ts`)
+
+The three guarantees still hold for the engine's key generation and are asserted by `src/lib/vapid-keys.test.ts`: "returns a usable P-256 pair in unpadded base64url" (1 and 3) and "is random" (1). Guarantee 2 holds: the module generates keys with `node:crypto`, not the `web-push` package. The citations below are to the deleted script.
 
 1. Generates a fresh P-256 (`prime256v1`) ECDH key pair on every invocation — no hardcoded or reused key material, satisfying the VAPID/web-push key-type requirement.
    `generate-vapid.mjs:6-7` — category: secret-handling — criticality: MEDIUM

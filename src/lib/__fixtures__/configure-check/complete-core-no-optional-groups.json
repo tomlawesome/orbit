@@ -1,0 +1,29 @@
+{
+  "fixture": {
+    "record": {
+      "APP_URL": "https://orbit.parity.invalid",
+      "ORBIT_AUTH_OIDC": "true",
+      "OIDC_ISSUER": "https://oidc.parity.invalid/application/o/orbit/",
+      "OIDC_CLIENT_ID": "orbit-parity",
+      "OIDC_CLIENT_SECRET_FILE": "/run/orbit-secrets/orbit-oidc-client-secret",
+      "OIDC_CALLBACK_URL": "https://orbit.parity.invalid/api/auth/callback",
+      "ORBIT_IMAGE": "registry.parity.invalid/acceptance/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "bash": {
+    "lines": [
+      "ready APP_URL",
+      "ready ORBIT_IMAGE",
+      "ready OIDC_ISSUER",
+      "ready OIDC_CLIENT_ID",
+      "ready OIDC_CLIENT_SECRET",
+      "ready OIDC_CALLBACK_URL",
+      "optional processing",
+      "optional ai",
+      "optional mail",
+      "app-managed imap",
+      "optional push"
+    ],
+    "status": 0
+  }
+}

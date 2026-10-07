@@ -1,0 +1,8 @@
+[
+  {
+    "kind": "migrate",
+    "status": 1,
+    "stdout": "",
+    "file": "ORBIT_IMAGE=ghcr.io/tomlawesome/orbit@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nORBIT_CONFIG_SCHEMA_VERSION=1\nCOMPOSE_PROJECT_NAME=some-other-project\n"
+  }
+]

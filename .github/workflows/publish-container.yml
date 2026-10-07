@@ -597,9 +597,6 @@ jobs:
       - name: Install browser test dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Create isolated test configuration
-        run: bash scripts/ci/create-test-configuration.sh
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
@@ -661,6 +658,11 @@ jobs:
           EXPECTED_VERSION: ${{ steps.version.outputs.version }}
           ORBIT_REVISION: ${{ github.sha }}
         run: bash scripts/ci/verify-image-identity.sh
+
+      # After the image exists: configure.sh runs inside it (#1210), and the
+      # identity step above exported ORBIT_IMAGE.
+      - name: Create isolated test configuration
+        run: bash scripts/ci/create-test-configuration.sh
 
       - name: Install acceptance exemplar
         env:

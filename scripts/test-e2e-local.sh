@@ -651,9 +651,35 @@ else
     fi
   done
 
+  # --- Build the app image: configuration runs inside it (#1210) ------------
+
+  orbit_short_sha="$(git rev-parse --short=12 HEAD)"
+  orbit_revision="$(git rev-parse HEAD)"
+  orbit_version="$(node scripts/calculate-version.mjs --channel preview)"
+  # Per-run tag (#1241): the image is this run's to remove at teardown, which
+  # is only safe if no other run at the same commit shares the tag. Layers
+  # stay cached by the builder, so a rebuild costs nothing extra.
+  readonly orbit_image="orbit-local:${orbit_short_sha}-$$"
+  readonly orbit_revision
+  readonly orbit_version
+  readonly orbit_channel="dev"
+
+  # From here on there is something to tear down, even if the build fails
+  # half way (a built image, a created network).
+  created_anything=1
+  orbit_image_built=1
+  log "building ${orbit_image} (version ${orbit_version})"
+  # Straight from the Dockerfile, as scripts/build-container.sh does, but
+  # with this suite's own dev channel (build-container.sh stamps preview).
+  docker buildx build --load \
+    --build-arg ORBIT_VERSION="$orbit_version" \
+    --build-arg ORBIT_REVISION="$orbit_revision" \
+    --build-arg ORBIT_CHANNEL="$orbit_channel" \
+    --tag "$orbit_image" --file Dockerfile .
+
   # --- Local secrets and TLS material: generate only what is missing --------
 
-  bash scripts/configure.sh
+  ORBIT_IMAGE="$orbit_image" bash scripts/configure.sh
   [[ -f .env-orbit ]] || fail "scripts/configure.sh did not create .env-orbit."
 
   # docker-compose.yml's orbit-oidc-client-secret Compose secret always needs a
@@ -749,26 +775,6 @@ fi
 if [[ -n "$reuse_project" ]]; then
   : # already identified, health-checked and logged above (#947).
 else
-  orbit_short_sha="$(git rev-parse --short=12 HEAD)"
-  orbit_revision="$(git rev-parse HEAD)"
-  orbit_version="$(node scripts/calculate-version.mjs --channel preview)"
-  # Per-run tag (#1241): the image is this run's to remove at teardown, which
-  # is only safe if no other run at the same commit shares the tag. Layers
-  # stay cached by the builder, so a rebuild costs nothing extra.
-  readonly orbit_image="orbit-local:${orbit_short_sha}-$$"
-  readonly orbit_revision
-  readonly orbit_version
-  readonly orbit_channel="dev"
-
-  # From here on there is something to tear down, even if the build fails
-  # half way (a built image, a created network).
-  created_anything=1
-  orbit_image_built=1
-  log "building ${orbit_image} (version ${orbit_version})"
-  env ORBIT_IMAGE="$orbit_image" ORBIT_VERSION="$orbit_version" ORBIT_REVISION="$orbit_revision" ORBIT_CHANNEL="$orbit_channel" \
-    docker compose -p "$project_name" --env-file .env-orbit -f docker-compose.yml -f compose/docker-compose.build.yml \
-    build orbit-app
-
   if [[ "$profile" == "local-only" ]]; then
     log "local-only profile: no identity provider to build"
   else

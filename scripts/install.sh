@@ -14,9 +14,10 @@ set -Eeuo pipefail
 #   ORBIT_LAUNCHER_CONFIG_TREE  set by orbit-launcher to an empty directory it
 #     created, mode 0700 and owned by the running user. On any exit whose
 #     event reason is configuration-failure the installer copies
-#     scripts/configure.sh, scripts/configuration.sh, scripts/installer-ui.sh
-#     and .env-orbit.example, as verified from the image, into it before
-#     rolling back, owner-only (0600/0700), all or nothing. It writes nothing,
+#     scripts/configure.sh, scripts/installer-ui.sh and .env-orbit.example,
+#     as verified from the image, and .orbit-image, the resolved digest
+#     reference on one line, into it before rolling back, owner-only
+#     (0600/0700), all or nothing. It writes nothing,
 #     and says so in one stderr line, if the directory is missing, not a
 #     directory, a symlink, not mode 0700, not empty or not owned by the
 #     current user (#1225, docs/engine-events.md).
@@ -371,11 +372,11 @@ launcher_tree_write() {
     launcher_tree_notice "its scripts directory could not be created"
     return 1
   fi
-  for asset in "${launcher_config_tree_assets[@]}"; do
+  for asset in "${launcher_config_tree_files[@]}"; do
     if ! is_real_non_symlink_directory scripts || [[ -e "$asset" || -L "$asset" ]] ||
       ! (set -o noclobber; cat -- "$snapshot/$asset" > "$asset") 2>/dev/null ||
       ! cmp -s -- "$snapshot/$asset" "$asset"; then
-      rm -rf -- scripts .env-orbit.example
+      rm -rf -- scripts .env-orbit.example .orbit-image
       launcher_tree_notice "${asset} could not be written"
       return 1
     fi
@@ -623,7 +624,7 @@ validate_target() {
 # top-level scalar key, so a line anchored at column 0 is enough, and this
 # must stay dependency-free (no docker, no node) since it runs inside the
 # same standalone, source-less scripts as read_environment_value above.
-# Identical text in end-maintenance.sh, engine-check.sh and repair.sh --
+# Identical text in end-maintenance.sh and repair.sh --
 # scripts/compose-project-name-resolution.test.mjs proves that. #999 brought
 # the same function here; install.sh was the one place #921 left out.
 read_compose_project_name() {
@@ -1375,7 +1376,7 @@ prepare_configuration() {
     fail "Configuration did not leave a real, non-symlink ${secrets_directory} directory."
 
   readiness_status=0
-  readiness="$(bash scripts/configure.sh --check 2>/dev/null)" || readiness_status=$?
+  readiness="$(ORBIT_IMAGE="$resolved_reference" bash scripts/configure.sh --check 2>/dev/null)" || readiness_status=$?
   if [[ "$readiness_status" -ne 0 ]]; then
     missing="$(missing_required_fields "$readiness")"
     if [[ -n "$missing" ]] && has_controlling_terminal; then
@@ -1395,17 +1396,17 @@ prepare_configuration() {
           *) configure_auth_mode="${ORBIT_CONFIGURE_AUTH_MODE:-}" ;;
         esac
         if [[ -n "$configure_auth_mode" ]]; then
-          ORBIT_CONFIGURE_AUTH_MODE="$configure_auth_mode" bash scripts/configure.sh --init ||
+          ORBIT_IMAGE="$resolved_reference" ORBIT_CONFIGURE_AUTH_MODE="$configure_auth_mode" bash scripts/configure.sh --init ||
             fail "Guided configuration was cancelled or invalid; restoring the previous deployment."
         else
-          bash scripts/configure.sh --init ||
+          ORBIT_IMAGE="$resolved_reference" bash scripts/configure.sh --init ||
             fail "Guided configuration was cancelled or invalid; restoring the previous deployment."
         fi
       fi
 
-      readiness="$(bash scripts/configure.sh --check 2>/dev/null)" || true
+      readiness="$(ORBIT_IMAGE="$resolved_reference" bash scripts/configure.sh --check 2>/dev/null)" || true
       if grep -q '^missing OIDC_CLIENT_SECRET$' <<< "$readiness"; then
-        ORBIT_CONFIGURE_TTY_INPUT=1 bash scripts/configure.sh --set-oidc-secret ||
+        ORBIT_IMAGE="$resolved_reference" ORBIT_CONFIGURE_TTY_INPUT=1 bash scripts/configure.sh --set-oidc-secret ||
           fail "OIDC client secret collection was cancelled or invalid; restoring the previous deployment."
       fi
     elif [[ -n "$missing" ]]; then
@@ -1415,7 +1416,7 @@ prepare_configuration() {
   fi
 
   readiness_status=0
-  readiness="$(bash scripts/configure.sh --check 2>/dev/null)" || readiness_status=$?
+  readiness="$(ORBIT_IMAGE="$resolved_reference" bash scripts/configure.sh --check 2>/dev/null)" || readiness_status=$?
   if [[ "$readiness_status" -ne 0 ]]; then
     missing="$(missing_configuration_fields "$readiness")"
     [[ -n "$missing" ]] || missing="APP_URL ORBIT_IMAGE OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CALLBACK_URL"
@@ -1425,10 +1426,12 @@ prepare_configuration() {
   installer_ui_event configuration configuration running configuration-migration verify
 }
 
+# The configuration migration runs in the engine, through configure.sh's
+# --migrate pass-through, from the image this install resolved (#1210).
 run_configuration_migration() {
-  local configuration_script="$1" migration_output="" migration_status=0
+  local configure_script="$1" migration_output="" migration_status=0
 
-  migration_output="$(bash "$configuration_script" \
+  migration_output="$(ORBIT_IMAGE="$resolved_reference" bash "$configure_script" \
     --migrate --transaction --file "$environment_file" \
     --orbit-image "$resolved_reference" \
     --applied-version "$image_version" \
@@ -1470,7 +1473,7 @@ stage_guided_install_configuration() {
   local staged_auth_mode=""
   staged_auth_mode="$(grep -m1 '^ORBIT_AUTH_OIDC=' -- "$staging_dir/$environment_file" 2>/dev/null || true)"
   if [[ "$staged_auth_mode" != 'ORBIT_AUTH_OIDC=false' ]]; then
-    ORBIT_CONFIGURE_TTY_INPUT=1 bash "$staging_dir/scripts/configure.sh" --set-oidc-secret ||
+    ORBIT_IMAGE="$resolved_reference" ORBIT_CONFIGURE_TTY_INPUT=1 bash "$staging_dir/scripts/configure.sh" --set-oidc-secret ||
       fail_with configuration-failure retry "OIDC client secret collection was cancelled or invalid; the target remains unchanged."
   fi
 
@@ -1485,7 +1488,7 @@ stage_guided_install_configuration() {
         fail_with configuration-failure retry "Deployment profile configuration failed; the target remains unchanged."
     fi
   fi
-  readiness="$(bash "$staging_dir/scripts/configure.sh" --check 2>/dev/null)" ||
+  readiness="$(ORBIT_IMAGE="$resolved_reference" bash "$staging_dir/scripts/configure.sh" --check 2>/dev/null)" ||
     fail_with configuration-failure retry "Guided configuration is incomplete; the target remains unchanged."
   [[ -n "$readiness" ]] ||
     fail_with configuration-failure retry "Guided configuration did not return a readiness summary; the target remains unchanged."
@@ -1864,29 +1867,28 @@ readonly deployment_assets=(
   "config/tika-config.json"
   "scripts/configure.sh"
   "scripts/installer-ui.sh"
-  "scripts/configuration.sh"
   "scripts/backup.sh"
   "scripts/restore.sh"
   "scripts/repair.sh"
-  "scripts/engine-check.sh"
 )
 readonly deployment_scripts=(
   "scripts/configure.sh"
   "scripts/installer-ui.sh"
-  "scripts/configuration.sh"
   "scripts/backup.sh"
   "scripts/restore.sh"
   "scripts/repair.sh"
-  "scripts/engine-check.sh"
 )
 # What hand_over_launcher_config_tree copies; every entry is also a
 # deployment asset, so it is staged and checked with the rest.
 readonly launcher_config_tree_assets=(
   "scripts/configure.sh"
-  "scripts/configuration.sh"
   "scripts/installer-ui.sh"
   ".env-orbit.example"
 )
+# Everything the launcher tree receives: those assets plus the image pin,
+# which is written only into the launcher tree's snapshot, never into a
+# deployment.
+readonly launcher_config_tree_files=("${launcher_config_tree_assets[@]}" ".orbit-image")
 declare -a asset_directories=()
 declare -A asset_directory_seen=()
 for asset in "${deployment_assets[@]}"; do
@@ -2001,7 +2003,9 @@ done
 
 # The staged files move into the target below and leave with the rollback on
 # a refusal, so the launcher's copy is taken now, while they are exactly what
-# was extracted and checked, into the private staging directory (#1225).
+# was extracted and checked, into the private staging directory (#1225). The
+# image pin, .orbit-image, is written here and nowhere else, so a deployment
+# never has one.
 if [[ -n "$launcher_config_tree" ]]; then
   launcher_tree_snapshot="$staging_dir/launcher-config-tree"
   if mkdir -- "$launcher_tree_snapshot" 2>/dev/null && chmod 700 "$launcher_tree_snapshot" &&
@@ -2012,6 +2016,11 @@ if [[ -n "$launcher_config_tree" ]]; then
         break
       }
     done
+    if [[ -n "$launcher_tree_snapshot" ]] &&
+      ! { (umask 077; printf '%s\n' "$resolved_reference" > "$launcher_tree_snapshot/.orbit-image") &&
+        chmod 600 "$launcher_tree_snapshot/.orbit-image"; } 2>/dev/null; then
+      launcher_tree_snapshot=""
+    fi
   else
     launcher_tree_snapshot=""
   fi
@@ -2060,9 +2069,9 @@ fi
 # Validate and, for a legacy v0 file, add only the schema marker before any
 # extracted asset or configure.sh mutation. The transaction above owns rollback.
 if [[ -e "$environment_file" ]]; then
-  bash "$staging_dir/scripts/configuration.sh" --preflight --file "$environment_file" >/dev/null ||
+  ORBIT_IMAGE="$resolved_reference" bash "$staging_dir/scripts/configure.sh" --preflight --file "$environment_file" >/dev/null ||
     fail "Configuration preflight failed; restoring the previous deployment."
-  run_configuration_migration "$staging_dir/scripts/configuration.sh"
+  run_configuration_migration "$staging_dir/scripts/configure.sh"
   configuration_migration_completed=1
 fi
 
@@ -2101,7 +2110,7 @@ verify_database_volume_safety
 verify_database_password_preserved
 
 if [[ "$configuration_migration_completed" == 0 ]]; then
-  run_configuration_migration "scripts/configuration.sh"
+  run_configuration_migration "scripts/configure.sh"
   configuration_migration_completed=1
 fi
 installer_ui_event configuration configuration completed configuration-migration verify

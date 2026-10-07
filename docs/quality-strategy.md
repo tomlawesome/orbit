@@ -461,7 +461,7 @@ the launcher contract (`--plain`, `--install|--update|--repair`) and the
 journey it drives both hold for this commit. Line grammars are still enforced
 per merge request, against `docs/engine-events.md`, by
 `scripts/engine-events.test.mjs` (the `phase=...` event stream) and
-`scripts/configure.test.mjs` (`configure.sh --check`'s readiness lines).
+`scripts/configure-check-contract.test.mjs` (`configure.sh --check`'s readiness lines).
 Ruling: #606; pairing against the pipeline's own image: #736, delivered with
 #890.
 

@@ -1,0 +1,2100 @@
+{
+  "constants": {
+    "V": "v1.2.0",
+    "D": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "I": "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "P": "orbit-test"
+  },
+  "cases": [
+    {
+      "name": "check: legacy file",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "current APP_URL\ncurrent POSTGRES_DB\nsafely_migratable ORBIT_CONFIG_SCHEMA_VERSION\nsafely_migratable ORBIT_CONFIG_APPLIED_VERSION\nsafely_migratable ORBIT_CONFIG_APPLIED_DIGEST\nsafely_migratable COMPOSE_PROJECT_NAME\n",
+        "stderr": "",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: current file",
+      "input": {
+        "content": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "current ORBIT_IMAGE\ncurrent ORBIT_CONFIG_SCHEMA_VERSION\ncurrent ORBIT_CONFIG_APPLIED_VERSION\ncurrent ORBIT_CONFIG_APPLIED_DIGEST\ncurrent COMPOSE_PROJECT_NAME\ncurrent APP_URL\ncurrent POSTGRES_DB\n",
+        "stderr": "",
+        "file": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: example keys direct",
+      "input": {
+        "content": "ORBIT_CONFIG_SCHEMA_VERSION=1\nAPP_URL=value\nORBIT_AUTH_OIDC=value\nOIDC_ISSUER=value\nOIDC_CLIENT_ID=value\nOIDC_CLIENT_SECRET=value\nOIDC_CALLBACK_URL=value\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nSESSION_SECRET=value\nDOCUMENT_KEK=value\nDOCUMENT_KEK_NEXT=value\nPOSTGRES_PASSWORD=value\nVAPID_PUBLIC_KEY=value\nVAPID_PRIVATE_KEY=value\nORBIT_BIND_ADDRESS=value\nORBIT_PORT=value\nORBIT_LOG_LEVEL=value\nORBIT_LOG_FORMAT=value\nCOMPOSE_PROFILES=value\nPOSTGRES_DB=value\nPOSTGRES_USER=value\nPOSTGRES_HOST=value\nPOSTGRES_PORT=value\nDATABASE_URL=value\nDOCUMENTS_ROOT=value\nDOCUMENTS_QUARANTINE_ROOT=value\nDOCUMENT_MAX_BYTES=value\nDOCUMENT_HOUSEHOLD_QUOTA_BYTES=value\nDOCUMENT_INSTANCE_QUOTA_BYTES=value\nDOCUMENT_RETENTION_DAYS=value\nDOCUMENT_SCAN_RECOVERY_RETENTION_HOURS=value\nDOCUMENT_SCAN_MODE=value\nCLAMAV_HOST=value\nCLAMAV_PORT=value\nCLAMAV_TIMEOUT_MS=value\nCLAMAV_MEMORY_LIMIT=value\nTIKA_URL=value\nTIKA_TIMEOUT_MS=value\nTIKA_MEMORY_LIMIT=value\nOLLAMA_MODEL=value\nOLLAMA_MEMORY_LIMIT=value\nOLLAMA_CPUS=value\nOLLAMA_MAX_QUEUE=value\nOLLAMA_KEEP_ALIVE=value\nSMTP_HOST=value\nSMTP_PORT=value\nSMTP_SECURITY=value\nSMTP_USER=value\nSMTP_PASSWORD=value\nSMTP_FROM=value\nSMTP_URL=value\nVAPID_SUBJECT=value\nSESSION_TTL_SECONDS=value\nOIDC_SCOPES=value\nOIDC_EMAIL_CLAIM=value\nOIDC_EMAIL_VERIFIED_CLAIM=value\nOIDC_NAME_CLAIM=value\nOIDC_AVATAR_CLAIM=value\nWORKER_POLL_SECONDS=value\nMAINTENANCE_TICK_SECONDS=value\nNOTIFICATION_MAX_ATTEMPTS=value\nMIGRATE_ON_START=value\nWORKER_ENABLED=value\nDRIZZLE_MIGRATIONS_PATH=value\nORBIT_SECRETS_DIR=value\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "current ORBIT_CONFIG_SCHEMA_VERSION\ncurrent APP_URL\ncurrent ORBIT_AUTH_OIDC\ncurrent OIDC_ISSUER\ncurrent OIDC_CLIENT_ID\ndeprecated_supported OIDC_CLIENT_SECRET\ncurrent OIDC_CALLBACK_URL\ncurrent ORBIT_IMAGE\ncurrent COMPOSE_PROJECT_NAME\ncurrent ORBIT_CONFIG_APPLIED_VERSION\ncurrent ORBIT_CONFIG_APPLIED_DIGEST\ndeprecated_supported SESSION_SECRET\ndeprecated_supported DOCUMENT_KEK\ncurrent DOCUMENT_KEK_NEXT\ndeprecated_supported POSTGRES_PASSWORD\ncurrent VAPID_PUBLIC_KEY\ndeprecated_supported VAPID_PRIVATE_KEY\ncurrent ORBIT_BIND_ADDRESS\ncurrent ORBIT_PORT\ncurrent ORBIT_LOG_LEVEL\ncurrent ORBIT_LOG_FORMAT\ncurrent COMPOSE_PROFILES\ncurrent POSTGRES_DB\ncurrent POSTGRES_USER\ncurrent POSTGRES_HOST\ncurrent POSTGRES_PORT\ndeprecated_supported DATABASE_URL\ncurrent DOCUMENTS_ROOT\ncurrent DOCUMENTS_QUARANTINE_ROOT\ncurrent DOCUMENT_MAX_BYTES\ncurrent DOCUMENT_HOUSEHOLD_QUOTA_BYTES\ncurrent DOCUMENT_INSTANCE_QUOTA_BYTES\ncurrent DOCUMENT_RETENTION_DAYS\ncurrent DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS\ncurrent DOCUMENT_SCAN_MODE\ncurrent CLAMAV_HOST\ncurrent CLAMAV_PORT\ncurrent CLAMAV_TIMEOUT_MS\ncurrent CLAMAV_MEMORY_LIMIT\ncurrent TIKA_URL\ncurrent TIKA_TIMEOUT_MS\ncurrent TIKA_MEMORY_LIMIT\ncurrent OLLAMA_MODEL\ncurrent OLLAMA_MEMORY_LIMIT\ncurrent OLLAMA_CPUS\ncurrent OLLAMA_MAX_QUEUE\ncurrent OLLAMA_KEEP_ALIVE\ncurrent SMTP_HOST\ncurrent SMTP_PORT\ncurrent SMTP_SECURITY\ncurrent SMTP_USER\ndeprecated_supported SMTP_PASSWORD\ncurrent SMTP_FROM\ndeprecated_supported SMTP_URL\ncurrent VAPID_SUBJECT\ncurrent SESSION_TTL_SECONDS\ncurrent OIDC_SCOPES\ncurrent OIDC_EMAIL_CLAIM\ncurrent OIDC_EMAIL_VERIFIED_CLAIM\ncurrent OIDC_NAME_CLAIM\ncurrent OIDC_AVATAR_CLAIM\ncurrent WORKER_POLL_SECONDS\ncurrent MAINTENANCE_TICK_SECONDS\ncurrent NOTIFICATION_MAX_ATTEMPTS\ncurrent MIGRATE_ON_START\ncurrent WORKER_ENABLED\ncurrent DRIZZLE_MIGRATIONS_PATH\ncurrent ORBIT_SECRETS_DIR\n",
+        "stderr": "",
+        "file": "ORBIT_CONFIG_SCHEMA_VERSION=1\nAPP_URL=value\nORBIT_AUTH_OIDC=value\nOIDC_ISSUER=value\nOIDC_CLIENT_ID=value\nOIDC_CLIENT_SECRET=value\nOIDC_CALLBACK_URL=value\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nSESSION_SECRET=value\nDOCUMENT_KEK=value\nDOCUMENT_KEK_NEXT=value\nPOSTGRES_PASSWORD=value\nVAPID_PUBLIC_KEY=value\nVAPID_PRIVATE_KEY=value\nORBIT_BIND_ADDRESS=value\nORBIT_PORT=value\nORBIT_LOG_LEVEL=value\nORBIT_LOG_FORMAT=value\nCOMPOSE_PROFILES=value\nPOSTGRES_DB=value\nPOSTGRES_USER=value\nPOSTGRES_HOST=value\nPOSTGRES_PORT=value\nDATABASE_URL=value\nDOCUMENTS_ROOT=value\nDOCUMENTS_QUARANTINE_ROOT=value\nDOCUMENT_MAX_BYTES=value\nDOCUMENT_HOUSEHOLD_QUOTA_BYTES=value\nDOCUMENT_INSTANCE_QUOTA_BYTES=value\nDOCUMENT_RETENTION_DAYS=value\nDOCUMENT_SCAN_RECOVERY_RETENTION_HOURS=value\nDOCUMENT_SCAN_MODE=value\nCLAMAV_HOST=value\nCLAMAV_PORT=value\nCLAMAV_TIMEOUT_MS=value\nCLAMAV_MEMORY_LIMIT=value\nTIKA_URL=value\nTIKA_TIMEOUT_MS=value\nTIKA_MEMORY_LIMIT=value\nOLLAMA_MODEL=value\nOLLAMA_MEMORY_LIMIT=value\nOLLAMA_CPUS=value\nOLLAMA_MAX_QUEUE=value\nOLLAMA_KEEP_ALIVE=value\nSMTP_HOST=value\nSMTP_PORT=value\nSMTP_SECURITY=value\nSMTP_USER=value\nSMTP_PASSWORD=value\nSMTP_FROM=value\nSMTP_URL=value\nVAPID_SUBJECT=value\nSESSION_TTL_SECONDS=value\nOIDC_SCOPES=value\nOIDC_EMAIL_CLAIM=value\nOIDC_EMAIL_VERIFIED_CLAIM=value\nOIDC_NAME_CLAIM=value\nOIDC_AVATAR_CLAIM=value\nWORKER_POLL_SECONDS=value\nMAINTENANCE_TICK_SECONDS=value\nNOTIFICATION_MAX_ATTEMPTS=value\nMIGRATE_ON_START=value\nWORKER_ENABLED=value\nDRIZZLE_MIGRATIONS_PATH=value\nORBIT_SECRETS_DIR=value\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: example keys file",
+      "input": {
+        "content": "ORBIT_CONFIG_SCHEMA_VERSION=1\nAPP_URL=value\nORBIT_AUTH_OIDC=value\nOIDC_ISSUER=value\nOIDC_CLIENT_ID=value\nOIDC_CLIENT_SECRET_FILE=value\nOIDC_CALLBACK_URL=value\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nSESSION_SECRET_FILE=value\nDOCUMENT_KEK_FILE=value\nDOCUMENT_KEK_NEXT_FILE=value\nPOSTGRES_PASSWORD_FILE=value\nVAPID_PUBLIC_KEY=value\nVAPID_PRIVATE_KEY_FILE=value\nORBIT_BIND_ADDRESS=value\nORBIT_PORT=value\nORBIT_LOG_LEVEL=value\nORBIT_LOG_FORMAT=value\nCOMPOSE_PROFILES=value\nPOSTGRES_DB=value\nPOSTGRES_USER=value\nPOSTGRES_HOST=value\nPOSTGRES_PORT=value\nDATABASE_URL_FILE=value\nDOCUMENTS_ROOT=value\nDOCUMENTS_QUARANTINE_ROOT=value\nDOCUMENT_MAX_BYTES=value\nDOCUMENT_HOUSEHOLD_QUOTA_BYTES=value\nDOCUMENT_INSTANCE_QUOTA_BYTES=value\nDOCUMENT_RETENTION_DAYS=value\nDOCUMENT_SCAN_RECOVERY_RETENTION_HOURS=value\nDOCUMENT_SCAN_MODE=value\nCLAMAV_HOST=value\nCLAMAV_PORT=value\nCLAMAV_TIMEOUT_MS=value\nCLAMAV_MEMORY_LIMIT=value\nTIKA_URL=value\nTIKA_TIMEOUT_MS=value\nTIKA_MEMORY_LIMIT=value\nOLLAMA_MODEL=value\nOLLAMA_MEMORY_LIMIT=value\nOLLAMA_CPUS=value\nOLLAMA_MAX_QUEUE=value\nOLLAMA_KEEP_ALIVE=value\nSMTP_HOST=value\nSMTP_PORT=value\nSMTP_SECURITY=value\nSMTP_USER=value\nSMTP_PASSWORD_FILE=value\nSMTP_FROM=value\nSMTP_URL_FILE=value\nVAPID_SUBJECT=value\nSESSION_TTL_SECONDS=value\nOIDC_SCOPES=value\nOIDC_EMAIL_CLAIM=value\nOIDC_EMAIL_VERIFIED_CLAIM=value\nOIDC_NAME_CLAIM=value\nOIDC_AVATAR_CLAIM=value\nWORKER_POLL_SECONDS=value\nMAINTENANCE_TICK_SECONDS=value\nNOTIFICATION_MAX_ATTEMPTS=value\nMIGRATE_ON_START=value\nWORKER_ENABLED=value\nDRIZZLE_MIGRATIONS_PATH=value\nORBIT_SECRETS_DIR=value\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "current ORBIT_CONFIG_SCHEMA_VERSION\ncurrent APP_URL\ncurrent ORBIT_AUTH_OIDC\ncurrent OIDC_ISSUER\ncurrent OIDC_CLIENT_ID\ncurrent OIDC_CLIENT_SECRET_FILE\ncurrent OIDC_CALLBACK_URL\ncurrent ORBIT_IMAGE\ncurrent COMPOSE_PROJECT_NAME\ncurrent ORBIT_CONFIG_APPLIED_VERSION\ncurrent ORBIT_CONFIG_APPLIED_DIGEST\ncurrent SESSION_SECRET_FILE\ncurrent DOCUMENT_KEK_FILE\ncurrent DOCUMENT_KEK_NEXT_FILE\ncurrent POSTGRES_PASSWORD_FILE\ncurrent VAPID_PUBLIC_KEY\ncurrent VAPID_PRIVATE_KEY_FILE\ncurrent ORBIT_BIND_ADDRESS\ncurrent ORBIT_PORT\ncurrent ORBIT_LOG_LEVEL\ncurrent ORBIT_LOG_FORMAT\ncurrent COMPOSE_PROFILES\ncurrent POSTGRES_DB\ncurrent POSTGRES_USER\ncurrent POSTGRES_HOST\ncurrent POSTGRES_PORT\ncurrent DATABASE_URL_FILE\ncurrent DOCUMENTS_ROOT\ncurrent DOCUMENTS_QUARANTINE_ROOT\ncurrent DOCUMENT_MAX_BYTES\ncurrent DOCUMENT_HOUSEHOLD_QUOTA_BYTES\ncurrent DOCUMENT_INSTANCE_QUOTA_BYTES\ncurrent DOCUMENT_RETENTION_DAYS\ncurrent DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS\ncurrent DOCUMENT_SCAN_MODE\ncurrent CLAMAV_HOST\ncurrent CLAMAV_PORT\ncurrent CLAMAV_TIMEOUT_MS\ncurrent CLAMAV_MEMORY_LIMIT\ncurrent TIKA_URL\ncurrent TIKA_TIMEOUT_MS\ncurrent TIKA_MEMORY_LIMIT\ncurrent OLLAMA_MODEL\ncurrent OLLAMA_MEMORY_LIMIT\ncurrent OLLAMA_CPUS\ncurrent OLLAMA_MAX_QUEUE\ncurrent OLLAMA_KEEP_ALIVE\ncurrent SMTP_HOST\ncurrent SMTP_PORT\ncurrent SMTP_SECURITY\ncurrent SMTP_USER\ncurrent SMTP_PASSWORD_FILE\ncurrent SMTP_FROM\ncurrent SMTP_URL_FILE\ncurrent VAPID_SUBJECT\ncurrent SESSION_TTL_SECONDS\ncurrent OIDC_SCOPES\ncurrent OIDC_EMAIL_CLAIM\ncurrent OIDC_EMAIL_VERIFIED_CLAIM\ncurrent OIDC_NAME_CLAIM\ncurrent OIDC_AVATAR_CLAIM\ncurrent WORKER_POLL_SECONDS\ncurrent MAINTENANCE_TICK_SECONDS\ncurrent NOTIFICATION_MAX_ATTEMPTS\ncurrent MIGRATE_ON_START\ncurrent WORKER_ENABLED\ncurrent DRIZZLE_MIGRATIONS_PATH\ncurrent ORBIT_SECRETS_DIR\n",
+        "stderr": "",
+        "file": "ORBIT_CONFIG_SCHEMA_VERSION=1\nAPP_URL=value\nORBIT_AUTH_OIDC=value\nOIDC_ISSUER=value\nOIDC_CLIENT_ID=value\nOIDC_CLIENT_SECRET_FILE=value\nOIDC_CALLBACK_URL=value\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nSESSION_SECRET_FILE=value\nDOCUMENT_KEK_FILE=value\nDOCUMENT_KEK_NEXT_FILE=value\nPOSTGRES_PASSWORD_FILE=value\nVAPID_PUBLIC_KEY=value\nVAPID_PRIVATE_KEY_FILE=value\nORBIT_BIND_ADDRESS=value\nORBIT_PORT=value\nORBIT_LOG_LEVEL=value\nORBIT_LOG_FORMAT=value\nCOMPOSE_PROFILES=value\nPOSTGRES_DB=value\nPOSTGRES_USER=value\nPOSTGRES_HOST=value\nPOSTGRES_PORT=value\nDATABASE_URL_FILE=value\nDOCUMENTS_ROOT=value\nDOCUMENTS_QUARANTINE_ROOT=value\nDOCUMENT_MAX_BYTES=value\nDOCUMENT_HOUSEHOLD_QUOTA_BYTES=value\nDOCUMENT_INSTANCE_QUOTA_BYTES=value\nDOCUMENT_RETENTION_DAYS=value\nDOCUMENT_SCAN_RECOVERY_RETENTION_HOURS=value\nDOCUMENT_SCAN_MODE=value\nCLAMAV_HOST=value\nCLAMAV_PORT=value\nCLAMAV_TIMEOUT_MS=value\nCLAMAV_MEMORY_LIMIT=value\nTIKA_URL=value\nTIKA_TIMEOUT_MS=value\nTIKA_MEMORY_LIMIT=value\nOLLAMA_MODEL=value\nOLLAMA_MEMORY_LIMIT=value\nOLLAMA_CPUS=value\nOLLAMA_MAX_QUEUE=value\nOLLAMA_KEEP_ALIVE=value\nSMTP_HOST=value\nSMTP_PORT=value\nSMTP_SECURITY=value\nSMTP_USER=value\nSMTP_PASSWORD_FILE=value\nSMTP_FROM=value\nSMTP_URL_FILE=value\nVAPID_SUBJECT=value\nSESSION_TTL_SECONDS=value\nOIDC_SCOPES=value\nOIDC_EMAIL_CLAIM=value\nOIDC_EMAIL_VERIFIED_CLAIM=value\nOIDC_NAME_CLAIM=value\nOIDC_AVATAR_CLAIM=value\nWORKER_POLL_SECONDS=value\nMAINTENANCE_TICK_SECONDS=value\nNOTIFICATION_MAX_ATTEMPTS=value\nMIGRATE_ON_START=value\nWORKER_ENABLED=value\nDRIZZLE_MIGRATIONS_PATH=value\nORBIT_SECRETS_DIR=value\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: secret pair conflict",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nSESSION_SECRET=abc123\nSESSION_SECRET_FILE=/run/secrets/orbit-session-secret\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_secret_conflict\n",
+        "file": "APP_URL=https://orbit.example.invalid\nSESSION_SECRET=abc123\nSESSION_SECRET_FILE=/run/secrets/orbit-session-secret\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: empty direct beside file",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nOIDC_CLIENT_SECRET=\nOIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "current APP_URL\ndeprecated_supported OIDC_CLIENT_SECRET\ncurrent OIDC_CLIENT_SECRET_FILE\nsafely_migratable ORBIT_CONFIG_SCHEMA_VERSION\nsafely_migratable ORBIT_CONFIG_APPLIED_VERSION\nsafely_migratable ORBIT_CONFIG_APPLIED_DIGEST\nsafely_migratable COMPOSE_PROJECT_NAME\n",
+        "stderr": "",
+        "file": "APP_URL=https://orbit.example.invalid\nOIDC_CLIENT_SECRET=\nOIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: removed imap key",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nIMAP_HOST=mail\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "removed_incompatible configuration\n",
+        "stderr": "configuration_removed_key\n",
+        "file": "APP_URL=https://orbit.example.invalid\nIMAP_HOST=mail\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: deprecated direct secrets",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nSMTP_PASSWORD=x\nDATABASE_URL=postgres://x\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "current APP_URL\ndeprecated_supported SMTP_PASSWORD\ndeprecated_supported DATABASE_URL\nsafely_migratable ORBIT_CONFIG_SCHEMA_VERSION\nsafely_migratable ORBIT_CONFIG_APPLIED_VERSION\nsafely_migratable ORBIT_CONFIG_APPLIED_DIGEST\nsafely_migratable COMPOSE_PROJECT_NAME\n",
+        "stderr": "",
+        "file": "APP_URL=https://orbit.example.invalid\nSMTP_PASSWORD=x\nDATABASE_URL=postgres://x\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "preflight: legacy file",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--preflight"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "current APP_URL\ncurrent POSTGRES_DB\nsafely_migratable ORBIT_CONFIG_SCHEMA_VERSION\nsafely_migratable ORBIT_CONFIG_APPLIED_VERSION\nsafely_migratable ORBIT_CONFIG_APPLIED_DIGEST\nsafely_migratable COMPOSE_PROJECT_NAME\n",
+        "stderr": "",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "preflight: current file",
+      "input": {
+        "content": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--preflight"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "current ORBIT_IMAGE\ncurrent ORBIT_CONFIG_SCHEMA_VERSION\ncurrent ORBIT_CONFIG_APPLIED_VERSION\ncurrent ORBIT_CONFIG_APPLIED_DIGEST\ncurrent COMPOSE_PROJECT_NAME\ncurrent APP_URL\ncurrent POSTGRES_DB\n",
+        "stderr": "",
+        "file": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "preflight: example keys direct",
+      "input": {
+        "content": "ORBIT_CONFIG_SCHEMA_VERSION=1\nAPP_URL=value\nORBIT_AUTH_OIDC=value\nOIDC_ISSUER=value\nOIDC_CLIENT_ID=value\nOIDC_CLIENT_SECRET=value\nOIDC_CALLBACK_URL=value\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nSESSION_SECRET=value\nDOCUMENT_KEK=value\nDOCUMENT_KEK_NEXT=value\nPOSTGRES_PASSWORD=value\nVAPID_PUBLIC_KEY=value\nVAPID_PRIVATE_KEY=value\nORBIT_BIND_ADDRESS=value\nORBIT_PORT=value\nORBIT_LOG_LEVEL=value\nORBIT_LOG_FORMAT=value\nCOMPOSE_PROFILES=value\nPOSTGRES_DB=value\nPOSTGRES_USER=value\nPOSTGRES_HOST=value\nPOSTGRES_PORT=value\nDATABASE_URL=value\nDOCUMENTS_ROOT=value\nDOCUMENTS_QUARANTINE_ROOT=value\nDOCUMENT_MAX_BYTES=value\nDOCUMENT_HOUSEHOLD_QUOTA_BYTES=value\nDOCUMENT_INSTANCE_QUOTA_BYTES=value\nDOCUMENT_RETENTION_DAYS=value\nDOCUMENT_SCAN_RECOVERY_RETENTION_HOURS=value\nDOCUMENT_SCAN_MODE=value\nCLAMAV_HOST=value\nCLAMAV_PORT=value\nCLAMAV_TIMEOUT_MS=value\nCLAMAV_MEMORY_LIMIT=value\nTIKA_URL=value\nTIKA_TIMEOUT_MS=value\nTIKA_MEMORY_LIMIT=value\nOLLAMA_MODEL=value\nOLLAMA_MEMORY_LIMIT=value\nOLLAMA_CPUS=value\nOLLAMA_MAX_QUEUE=value\nOLLAMA_KEEP_ALIVE=value\nSMTP_HOST=value\nSMTP_PORT=value\nSMTP_SECURITY=value\nSMTP_USER=value\nSMTP_PASSWORD=value\nSMTP_FROM=value\nSMTP_URL=value\nVAPID_SUBJECT=value\nSESSION_TTL_SECONDS=value\nOIDC_SCOPES=value\nOIDC_EMAIL_CLAIM=value\nOIDC_EMAIL_VERIFIED_CLAIM=value\nOIDC_NAME_CLAIM=value\nOIDC_AVATAR_CLAIM=value\nWORKER_POLL_SECONDS=value\nMAINTENANCE_TICK_SECONDS=value\nNOTIFICATION_MAX_ATTEMPTS=value\nMIGRATE_ON_START=value\nWORKER_ENABLED=value\nDRIZZLE_MIGRATIONS_PATH=value\nORBIT_SECRETS_DIR=value\n",
+        "args": [
+          "--preflight"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "current ORBIT_CONFIG_SCHEMA_VERSION\ncurrent APP_URL\ncurrent ORBIT_AUTH_OIDC\ncurrent OIDC_ISSUER\ncurrent OIDC_CLIENT_ID\ndeprecated_supported OIDC_CLIENT_SECRET\ncurrent OIDC_CALLBACK_URL\ncurrent ORBIT_IMAGE\ncurrent COMPOSE_PROJECT_NAME\ncurrent ORBIT_CONFIG_APPLIED_VERSION\ncurrent ORBIT_CONFIG_APPLIED_DIGEST\ndeprecated_supported SESSION_SECRET\ndeprecated_supported DOCUMENT_KEK\ncurrent DOCUMENT_KEK_NEXT\ndeprecated_supported POSTGRES_PASSWORD\ncurrent VAPID_PUBLIC_KEY\ndeprecated_supported VAPID_PRIVATE_KEY\ncurrent ORBIT_BIND_ADDRESS\ncurrent ORBIT_PORT\ncurrent ORBIT_LOG_LEVEL\ncurrent ORBIT_LOG_FORMAT\ncurrent COMPOSE_PROFILES\ncurrent POSTGRES_DB\ncurrent POSTGRES_USER\ncurrent POSTGRES_HOST\ncurrent POSTGRES_PORT\ndeprecated_supported DATABASE_URL\ncurrent DOCUMENTS_ROOT\ncurrent DOCUMENTS_QUARANTINE_ROOT\ncurrent DOCUMENT_MAX_BYTES\ncurrent DOCUMENT_HOUSEHOLD_QUOTA_BYTES\ncurrent DOCUMENT_INSTANCE_QUOTA_BYTES\ncurrent DOCUMENT_RETENTION_DAYS\ncurrent DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS\ncurrent DOCUMENT_SCAN_MODE\ncurrent CLAMAV_HOST\ncurrent CLAMAV_PORT\ncurrent CLAMAV_TIMEOUT_MS\ncurrent CLAMAV_MEMORY_LIMIT\ncurrent TIKA_URL\ncurrent TIKA_TIMEOUT_MS\ncurrent TIKA_MEMORY_LIMIT\ncurrent OLLAMA_MODEL\ncurrent OLLAMA_MEMORY_LIMIT\ncurrent OLLAMA_CPUS\ncurrent OLLAMA_MAX_QUEUE\ncurrent OLLAMA_KEEP_ALIVE\ncurrent SMTP_HOST\ncurrent SMTP_PORT\ncurrent SMTP_SECURITY\ncurrent SMTP_USER\ndeprecated_supported SMTP_PASSWORD\ncurrent SMTP_FROM\ndeprecated_supported SMTP_URL\ncurrent VAPID_SUBJECT\ncurrent SESSION_TTL_SECONDS\ncurrent OIDC_SCOPES\ncurrent OIDC_EMAIL_CLAIM\ncurrent OIDC_EMAIL_VERIFIED_CLAIM\ncurrent OIDC_NAME_CLAIM\ncurrent OIDC_AVATAR_CLAIM\ncurrent WORKER_POLL_SECONDS\ncurrent MAINTENANCE_TICK_SECONDS\ncurrent NOTIFICATION_MAX_ATTEMPTS\ncurrent MIGRATE_ON_START\ncurrent WORKER_ENABLED\ncurrent DRIZZLE_MIGRATIONS_PATH\ncurrent ORBIT_SECRETS_DIR\n",
+        "stderr": "",
+        "file": "ORBIT_CONFIG_SCHEMA_VERSION=1\nAPP_URL=value\nORBIT_AUTH_OIDC=value\nOIDC_ISSUER=value\nOIDC_CLIENT_ID=value\nOIDC_CLIENT_SECRET=value\nOIDC_CALLBACK_URL=value\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nSESSION_SECRET=value\nDOCUMENT_KEK=value\nDOCUMENT_KEK_NEXT=value\nPOSTGRES_PASSWORD=value\nVAPID_PUBLIC_KEY=value\nVAPID_PRIVATE_KEY=value\nORBIT_BIND_ADDRESS=value\nORBIT_PORT=value\nORBIT_LOG_LEVEL=value\nORBIT_LOG_FORMAT=value\nCOMPOSE_PROFILES=value\nPOSTGRES_DB=value\nPOSTGRES_USER=value\nPOSTGRES_HOST=value\nPOSTGRES_PORT=value\nDATABASE_URL=value\nDOCUMENTS_ROOT=value\nDOCUMENTS_QUARANTINE_ROOT=value\nDOCUMENT_MAX_BYTES=value\nDOCUMENT_HOUSEHOLD_QUOTA_BYTES=value\nDOCUMENT_INSTANCE_QUOTA_BYTES=value\nDOCUMENT_RETENTION_DAYS=value\nDOCUMENT_SCAN_RECOVERY_RETENTION_HOURS=value\nDOCUMENT_SCAN_MODE=value\nCLAMAV_HOST=value\nCLAMAV_PORT=value\nCLAMAV_TIMEOUT_MS=value\nCLAMAV_MEMORY_LIMIT=value\nTIKA_URL=value\nTIKA_TIMEOUT_MS=value\nTIKA_MEMORY_LIMIT=value\nOLLAMA_MODEL=value\nOLLAMA_MEMORY_LIMIT=value\nOLLAMA_CPUS=value\nOLLAMA_MAX_QUEUE=value\nOLLAMA_KEEP_ALIVE=value\nSMTP_HOST=value\nSMTP_PORT=value\nSMTP_SECURITY=value\nSMTP_USER=value\nSMTP_PASSWORD=value\nSMTP_FROM=value\nSMTP_URL=value\nVAPID_SUBJECT=value\nSESSION_TTL_SECONDS=value\nOIDC_SCOPES=value\nOIDC_EMAIL_CLAIM=value\nOIDC_EMAIL_VERIFIED_CLAIM=value\nOIDC_NAME_CLAIM=value\nOIDC_AVATAR_CLAIM=value\nWORKER_POLL_SECONDS=value\nMAINTENANCE_TICK_SECONDS=value\nNOTIFICATION_MAX_ATTEMPTS=value\nMIGRATE_ON_START=value\nWORKER_ENABLED=value\nDRIZZLE_MIGRATIONS_PATH=value\nORBIT_SECRETS_DIR=value\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "preflight: example keys file",
+      "input": {
+        "content": "ORBIT_CONFIG_SCHEMA_VERSION=1\nAPP_URL=value\nORBIT_AUTH_OIDC=value\nOIDC_ISSUER=value\nOIDC_CLIENT_ID=value\nOIDC_CLIENT_SECRET_FILE=value\nOIDC_CALLBACK_URL=value\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nSESSION_SECRET_FILE=value\nDOCUMENT_KEK_FILE=value\nDOCUMENT_KEK_NEXT_FILE=value\nPOSTGRES_PASSWORD_FILE=value\nVAPID_PUBLIC_KEY=value\nVAPID_PRIVATE_KEY_FILE=value\nORBIT_BIND_ADDRESS=value\nORBIT_PORT=value\nORBIT_LOG_LEVEL=value\nORBIT_LOG_FORMAT=value\nCOMPOSE_PROFILES=value\nPOSTGRES_DB=value\nPOSTGRES_USER=value\nPOSTGRES_HOST=value\nPOSTGRES_PORT=value\nDATABASE_URL_FILE=value\nDOCUMENTS_ROOT=value\nDOCUMENTS_QUARANTINE_ROOT=value\nDOCUMENT_MAX_BYTES=value\nDOCUMENT_HOUSEHOLD_QUOTA_BYTES=value\nDOCUMENT_INSTANCE_QUOTA_BYTES=value\nDOCUMENT_RETENTION_DAYS=value\nDOCUMENT_SCAN_RECOVERY_RETENTION_HOURS=value\nDOCUMENT_SCAN_MODE=value\nCLAMAV_HOST=value\nCLAMAV_PORT=value\nCLAMAV_TIMEOUT_MS=value\nCLAMAV_MEMORY_LIMIT=value\nTIKA_URL=value\nTIKA_TIMEOUT_MS=value\nTIKA_MEMORY_LIMIT=value\nOLLAMA_MODEL=value\nOLLAMA_MEMORY_LIMIT=value\nOLLAMA_CPUS=value\nOLLAMA_MAX_QUEUE=value\nOLLAMA_KEEP_ALIVE=value\nSMTP_HOST=value\nSMTP_PORT=value\nSMTP_SECURITY=value\nSMTP_USER=value\nSMTP_PASSWORD_FILE=value\nSMTP_FROM=value\nSMTP_URL_FILE=value\nVAPID_SUBJECT=value\nSESSION_TTL_SECONDS=value\nOIDC_SCOPES=value\nOIDC_EMAIL_CLAIM=value\nOIDC_EMAIL_VERIFIED_CLAIM=value\nOIDC_NAME_CLAIM=value\nOIDC_AVATAR_CLAIM=value\nWORKER_POLL_SECONDS=value\nMAINTENANCE_TICK_SECONDS=value\nNOTIFICATION_MAX_ATTEMPTS=value\nMIGRATE_ON_START=value\nWORKER_ENABLED=value\nDRIZZLE_MIGRATIONS_PATH=value\nORBIT_SECRETS_DIR=value\n",
+        "args": [
+          "--preflight"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "current ORBIT_CONFIG_SCHEMA_VERSION\ncurrent APP_URL\ncurrent ORBIT_AUTH_OIDC\ncurrent OIDC_ISSUER\ncurrent OIDC_CLIENT_ID\ncurrent OIDC_CLIENT_SECRET_FILE\ncurrent OIDC_CALLBACK_URL\ncurrent ORBIT_IMAGE\ncurrent COMPOSE_PROJECT_NAME\ncurrent ORBIT_CONFIG_APPLIED_VERSION\ncurrent ORBIT_CONFIG_APPLIED_DIGEST\ncurrent SESSION_SECRET_FILE\ncurrent DOCUMENT_KEK_FILE\ncurrent DOCUMENT_KEK_NEXT_FILE\ncurrent POSTGRES_PASSWORD_FILE\ncurrent VAPID_PUBLIC_KEY\ncurrent VAPID_PRIVATE_KEY_FILE\ncurrent ORBIT_BIND_ADDRESS\ncurrent ORBIT_PORT\ncurrent ORBIT_LOG_LEVEL\ncurrent ORBIT_LOG_FORMAT\ncurrent COMPOSE_PROFILES\ncurrent POSTGRES_DB\ncurrent POSTGRES_USER\ncurrent POSTGRES_HOST\ncurrent POSTGRES_PORT\ncurrent DATABASE_URL_FILE\ncurrent DOCUMENTS_ROOT\ncurrent DOCUMENTS_QUARANTINE_ROOT\ncurrent DOCUMENT_MAX_BYTES\ncurrent DOCUMENT_HOUSEHOLD_QUOTA_BYTES\ncurrent DOCUMENT_INSTANCE_QUOTA_BYTES\ncurrent DOCUMENT_RETENTION_DAYS\ncurrent DOCUMENT_SCAN_RECOVERY_RETENTION_HOURS\ncurrent DOCUMENT_SCAN_MODE\ncurrent CLAMAV_HOST\ncurrent CLAMAV_PORT\ncurrent CLAMAV_TIMEOUT_MS\ncurrent CLAMAV_MEMORY_LIMIT\ncurrent TIKA_URL\ncurrent TIKA_TIMEOUT_MS\ncurrent TIKA_MEMORY_LIMIT\ncurrent OLLAMA_MODEL\ncurrent OLLAMA_MEMORY_LIMIT\ncurrent OLLAMA_CPUS\ncurrent OLLAMA_MAX_QUEUE\ncurrent OLLAMA_KEEP_ALIVE\ncurrent SMTP_HOST\ncurrent SMTP_PORT\ncurrent SMTP_SECURITY\ncurrent SMTP_USER\ncurrent SMTP_PASSWORD_FILE\ncurrent SMTP_FROM\ncurrent SMTP_URL_FILE\ncurrent VAPID_SUBJECT\ncurrent SESSION_TTL_SECONDS\ncurrent OIDC_SCOPES\ncurrent OIDC_EMAIL_CLAIM\ncurrent OIDC_EMAIL_VERIFIED_CLAIM\ncurrent OIDC_NAME_CLAIM\ncurrent OIDC_AVATAR_CLAIM\ncurrent WORKER_POLL_SECONDS\ncurrent MAINTENANCE_TICK_SECONDS\ncurrent NOTIFICATION_MAX_ATTEMPTS\ncurrent MIGRATE_ON_START\ncurrent WORKER_ENABLED\ncurrent DRIZZLE_MIGRATIONS_PATH\ncurrent ORBIT_SECRETS_DIR\n",
+        "stderr": "",
+        "file": "ORBIT_CONFIG_SCHEMA_VERSION=1\nAPP_URL=value\nORBIT_AUTH_OIDC=value\nOIDC_ISSUER=value\nOIDC_CLIENT_ID=value\nOIDC_CLIENT_SECRET_FILE=value\nOIDC_CALLBACK_URL=value\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nSESSION_SECRET_FILE=value\nDOCUMENT_KEK_FILE=value\nDOCUMENT_KEK_NEXT_FILE=value\nPOSTGRES_PASSWORD_FILE=value\nVAPID_PUBLIC_KEY=value\nVAPID_PRIVATE_KEY_FILE=value\nORBIT_BIND_ADDRESS=value\nORBIT_PORT=value\nORBIT_LOG_LEVEL=value\nORBIT_LOG_FORMAT=value\nCOMPOSE_PROFILES=value\nPOSTGRES_DB=value\nPOSTGRES_USER=value\nPOSTGRES_HOST=value\nPOSTGRES_PORT=value\nDATABASE_URL_FILE=value\nDOCUMENTS_ROOT=value\nDOCUMENTS_QUARANTINE_ROOT=value\nDOCUMENT_MAX_BYTES=value\nDOCUMENT_HOUSEHOLD_QUOTA_BYTES=value\nDOCUMENT_INSTANCE_QUOTA_BYTES=value\nDOCUMENT_RETENTION_DAYS=value\nDOCUMENT_SCAN_RECOVERY_RETENTION_HOURS=value\nDOCUMENT_SCAN_MODE=value\nCLAMAV_HOST=value\nCLAMAV_PORT=value\nCLAMAV_TIMEOUT_MS=value\nCLAMAV_MEMORY_LIMIT=value\nTIKA_URL=value\nTIKA_TIMEOUT_MS=value\nTIKA_MEMORY_LIMIT=value\nOLLAMA_MODEL=value\nOLLAMA_MEMORY_LIMIT=value\nOLLAMA_CPUS=value\nOLLAMA_MAX_QUEUE=value\nOLLAMA_KEEP_ALIVE=value\nSMTP_HOST=value\nSMTP_PORT=value\nSMTP_SECURITY=value\nSMTP_USER=value\nSMTP_PASSWORD_FILE=value\nSMTP_FROM=value\nSMTP_URL_FILE=value\nVAPID_SUBJECT=value\nSESSION_TTL_SECONDS=value\nOIDC_SCOPES=value\nOIDC_EMAIL_CLAIM=value\nOIDC_EMAIL_VERIFIED_CLAIM=value\nOIDC_NAME_CLAIM=value\nOIDC_AVATAR_CLAIM=value\nWORKER_POLL_SECONDS=value\nMAINTENANCE_TICK_SECONDS=value\nNOTIFICATION_MAX_ATTEMPTS=value\nMIGRATE_ON_START=value\nWORKER_ENABLED=value\nDRIZZLE_MIGRATIONS_PATH=value\nORBIT_SECRETS_DIR=value\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "preflight: secret pair conflict",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nSESSION_SECRET=abc123\nSESSION_SECRET_FILE=/run/secrets/orbit-session-secret\n",
+        "args": [
+          "--preflight"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_secret_conflict\n",
+        "file": "APP_URL=https://orbit.example.invalid\nSESSION_SECRET=abc123\nSESSION_SECRET_FILE=/run/secrets/orbit-session-secret\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "preflight: empty direct beside file",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nOIDC_CLIENT_SECRET=\nOIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n",
+        "args": [
+          "--preflight"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "current APP_URL\ndeprecated_supported OIDC_CLIENT_SECRET\ncurrent OIDC_CLIENT_SECRET_FILE\nsafely_migratable ORBIT_CONFIG_SCHEMA_VERSION\nsafely_migratable ORBIT_CONFIG_APPLIED_VERSION\nsafely_migratable ORBIT_CONFIG_APPLIED_DIGEST\nsafely_migratable COMPOSE_PROJECT_NAME\n",
+        "stderr": "",
+        "file": "APP_URL=https://orbit.example.invalid\nOIDC_CLIENT_SECRET=\nOIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "preflight: removed imap key",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nIMAP_HOST=mail\n",
+        "args": [
+          "--preflight"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "removed_incompatible configuration\n",
+        "stderr": "configuration_removed_key\n",
+        "file": "APP_URL=https://orbit.example.invalid\nIMAP_HOST=mail\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "preflight: deprecated direct secrets",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nSMTP_PASSWORD=x\nDATABASE_URL=postgres://x\n",
+        "args": [
+          "--preflight"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "current APP_URL\ndeprecated_supported SMTP_PASSWORD\ndeprecated_supported DATABASE_URL\nsafely_migratable ORBIT_CONFIG_SCHEMA_VERSION\nsafely_migratable ORBIT_CONFIG_APPLIED_VERSION\nsafely_migratable ORBIT_CONFIG_APPLIED_DIGEST\nsafely_migratable COMPOSE_PROJECT_NAME\n",
+        "stderr": "",
+        "file": "APP_URL=https://orbit.example.invalid\nSMTP_PASSWORD=x\nDATABASE_URL=postgres://x\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 0",
+      "input": {
+        "content": "APP_URL=https://a.example.invalid\nAPP_URL=https://b.example.invalid\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL=https://a.example.invalid\nAPP_URL=https://b.example.invalid\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 1",
+      "input": {
+        "content": "NOT_IN_CONTRACT=value\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "unknown configuration\n",
+        "stderr": "configuration_unknown_key\n",
+        "file": "NOT_IN_CONTRACT=value\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 2",
+      "input": {
+        "content": "APP_URL=${HOST}\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL=${HOST}\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 3",
+      "input": {
+        "content": "APP_URL=$HOST\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL=$HOST\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 4",
+      "input": {
+        "content": "APP_URL=$(hostname)\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL=$(hostname)\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 5",
+      "input": {
+        "content": "APP_URL=\"https://a.example.invalid\"\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL=\"https://a.example.invalid\"\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 6",
+      "input": {
+        "content": "APP_URL='https://a.example.invalid\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL='https://a.example.invalid\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 7",
+      "input": {
+        "content": "APP_URL=`hostname`\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL=`hostname`\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 8",
+      "input": {
+        "content": "APP_URL=https://a.example.invalid #comment\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL=https://a.example.invalid #comment\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 9",
+      "input": {
+        "content": "APP_URL= leading\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL= leading\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 10",
+      "input": {
+        "content": "APP_URL=trailing \n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL=trailing \n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 11",
+      "input": {
+        "content": " APP_URL=https://a.example.invalid\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": " APP_URL=https://a.example.invalid\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 12",
+      "input": {
+        "content": "\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 13",
+      "input": {
+        "content": "# only a comment\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "# only a comment\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 14",
+      "input": {
+        "content": "",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 15",
+      "input": {
+        "content": "APP_URL=https://a.example.invalid\nPOSTGRES_DB=bad\u0001\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL=https://a.example.invalid\nPOSTGRES_DB=bad\u0001\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 16",
+      "input": {
+        "content": "APP_URL=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 17",
+      "input": {
+        "content": "APP_URL=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "current APP_URL\nsafely_migratable ORBIT_CONFIG_SCHEMA_VERSION\nsafely_migratable ORBIT_CONFIG_APPLIED_VERSION\nsafely_migratable ORBIT_CONFIG_APPLIED_DIGEST\nsafely_migratable COMPOSE_PROJECT_NAME\n",
+        "stderr": "",
+        "file": "APP_URL=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 18",
+      "input": {
+        "content": "APP_URL=a\u0000b\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL=a\u0000b\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 19",
+      "input": {
+        "content": "APP_URL=a\u001bb\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL=a\u001bb\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 20",
+      "input": {
+        "content": "app_url=lower\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "app_url=lower\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: rejects grammar 21",
+      "input": {
+        "content": "APP_URL\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: accepts value 0",
+      "input": {
+        "content": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=Xk7#pq2rLm\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=Xk7#pq2rLm\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
+        "fileMode": 384,
+        "rollback": {
+          "content": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=Xk7#pq2rLm\n",
+          "mode": 384
+        },
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: accepts value 1",
+      "input": {
+        "content": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=a\\b\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=a\\b\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
+        "fileMode": 384,
+        "rollback": {
+          "content": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=a\\b\n",
+          "mode": 384
+        },
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: accepts value 2",
+      "input": {
+        "content": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=abc\"def\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=abc\"def\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
+        "fileMode": 384,
+        "rollback": {
+          "content": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=abc\"def\n",
+          "mode": 384
+        },
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: accepts value 3",
+      "input": {
+        "content": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=abc'def\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=abc'def\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
+        "fileMode": 384,
+        "rollback": {
+          "content": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=abc'def\n",
+          "mode": 384
+        },
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: accepts value 4",
+      "input": {
+        "content": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=https://a.example.invalid#fragment\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=https://a.example.invalid#fragment\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
+        "fileMode": 384,
+        "rollback": {
+          "content": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=https://a.example.invalid#fragment\n",
+          "mode": 384
+        },
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: accepts value 5",
+      "input": {
+        "content": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=C:\\Users\\orbit\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=C:\\Users\\orbit\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
+        "fileMode": 384,
+        "rollback": {
+          "content": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=C:\\Users\\orbit\n",
+          "mode": 384
+        },
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: accepts value 6",
+      "input": {
+        "content": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=tab\tinside\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL=https://a.example.invalid\nSMTP_PASSWORD=tab\tinside\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: compose project p0",
+      "input": {
+        "content": "APP_URL=https://a.example.invalid\nCOMPOSE_PROJECT_NAME=\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_project\n",
+        "file": "APP_URL=https://a.example.invalid\nCOMPOSE_PROJECT_NAME=\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: compose project p1",
+      "input": {
+        "content": "APP_URL=https://a.example.invalid\nCOMPOSE_PROJECT_NAME=Orbit\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_project\n",
+        "file": "APP_URL=https://a.example.invalid\nCOMPOSE_PROJECT_NAME=Orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: compose project p2",
+      "input": {
+        "content": "APP_URL=https://a.example.invalid\nCOMPOSE_PROJECT_NAME=-orbit\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_project\n",
+        "file": "APP_URL=https://a.example.invalid\nCOMPOSE_PROJECT_NAME=-orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: compose project p3",
+      "input": {
+        "content": "APP_URL=https://a.example.invalid\nCOMPOSE_PROJECT_NAME=orbit project\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_project\n",
+        "file": "APP_URL=https://a.example.invalid\nCOMPOSE_PROJECT_NAME=orbit project\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: compose project p4",
+      "input": {
+        "content": "APP_URL=https://a.example.invalid\nCOMPOSE_PROJECT_NAME=orbit$host\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL=https://a.example.invalid\nCOMPOSE_PROJECT_NAME=orbit$host\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: compose project p5",
+      "input": {
+        "content": "APP_URL=https://a.example.invalid\nCOMPOSE_PROJECT_NAME=orbit_ok-1\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "current APP_URL\ncurrent COMPOSE_PROJECT_NAME\nsafely_migratable ORBIT_CONFIG_SCHEMA_VERSION\nsafely_migratable ORBIT_CONFIG_APPLIED_VERSION\nsafely_migratable ORBIT_CONFIG_APPLIED_DIGEST\n",
+        "stderr": "",
+        "file": "APP_URL=https://a.example.invalid\nCOMPOSE_PROJECT_NAME=orbit_ok-1\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: schema version 2",
+      "input": {
+        "content": "ORBIT_CONFIG_SCHEMA_VERSION=2\nAPP_URL=https://a.example.invalid\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_version\n",
+        "file": "ORBIT_CONFIG_SCHEMA_VERSION=2\nAPP_URL=https://a.example.invalid\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: schema version 0",
+      "input": {
+        "content": "ORBIT_CONFIG_SCHEMA_VERSION=0\nAPP_URL=https://a.example.invalid\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_version\n",
+        "file": "ORBIT_CONFIG_SCHEMA_VERSION=0\nAPP_URL=https://a.example.invalid\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: schema version 1x",
+      "input": {
+        "content": "ORBIT_CONFIG_SCHEMA_VERSION=1x\nAPP_URL=https://a.example.invalid\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_version\n",
+        "file": "ORBIT_CONFIG_SCHEMA_VERSION=1x\nAPP_URL=https://a.example.invalid\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: schema version 01",
+      "input": {
+        "content": "ORBIT_CONFIG_SCHEMA_VERSION=01\nAPP_URL=https://a.example.invalid\n",
+        "args": [
+          "--check"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_version\n",
+        "file": "ORBIT_CONFIG_SCHEMA_VERSION=01\nAPP_URL=https://a.example.invalid\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "preflight: provenance 0",
+      "input": {
+        "content": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nAPP_URL=https://orbit.example.invalid\n",
+        "args": [
+          "--preflight"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_provenance\n",
+        "file": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nAPP_URL=https://orbit.example.invalid\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "preflight: provenance 1",
+      "input": {
+        "content": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nAPP_URL=https://orbit.example.invalid\n",
+        "args": [
+          "--preflight"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_provenance\n",
+        "file": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nAPP_URL=https://orbit.example.invalid\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "preflight: provenance 2",
+      "input": {
+        "content": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_APPLIED_VERSION=not-semver\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nAPP_URL=https://orbit.example.invalid\n",
+        "args": [
+          "--preflight"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_provenance\n",
+        "file": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_APPLIED_VERSION=not-semver\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nAPP_URL=https://orbit.example.invalid\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "preflight: provenance 3",
+      "input": {
+        "content": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nAPP_URL=https://orbit.example.invalid\n",
+        "args": [
+          "--preflight"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_provenance\n",
+        "file": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nAPP_URL=https://orbit.example.invalid\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "preflight: provenance 4",
+      "input": {
+        "content": "ORBIT_IMAGE=orbit-local:abcdef123456\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "args": [
+          "--preflight"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_provenance\n",
+        "file": "ORBIT_IMAGE=orbit-local:abcdef123456\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: legacy crlf",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\r\nPOSTGRES_DB=spaces and = signs==\r\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "APP_URL=https://orbit.example.invalid\r\nPOSTGRES_DB=spaces and = signs==\r\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nORBIT_CONFIG_SCHEMA_VERSION=1\r\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\r\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nCOMPOSE_PROJECT_NAME=orbit-test\r\n",
+        "fileMode": 384,
+        "rollback": {
+          "content": "APP_URL=https://orbit.example.invalid\r\nPOSTGRES_DB=spaces and = signs==\r\n",
+          "mode": 384
+        },
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: legacy with comment",
+      "input": {
+        "content": "# keep\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "# keep\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
+        "fileMode": 384,
+        "rollback": {
+          "content": "# keep\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+          "mode": 384
+        },
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: transaction no final newline",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test",
+          "--transaction"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: placeholders canonical sections",
+      "input": {
+        "content": "# --- Core ---\nORBIT_CONFIG_SCHEMA_VERSION=1\nAPP_URL=https://orbit.example.invalid\nORBIT_IMAGE=\n# ORBIT_CONFIG_APPLIED_VERSION=\n# ORBIT_CONFIG_APPLIED_DIGEST=\n\n# --- Authentication ---\nOIDC_ISSUER=https://auth.example.invalid/application/o/orbit/\n\n# --- Deployment ---\n# COMPOSE_PROJECT_NAME=\nORBIT_PORT=3000\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test",
+          "--transaction"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v1 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "# --- Core ---\nORBIT_CONFIG_SCHEMA_VERSION=1\nAPP_URL=https://orbit.example.invalid\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\n# --- Authentication ---\nOIDC_ISSUER=https://auth.example.invalid/application/o/orbit/\n\n# --- Deployment ---\nCOMPOSE_PROJECT_NAME=orbit-test\nORBIT_PORT=3000\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: comments crlf no final newline",
+      "input": {
+        "content": "  # retained\r\nPOSTGRES_DB=internal spaces and = signs==",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "  # retained\r\nPOSTGRES_DB=internal spaces and = signs==\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nORBIT_CONFIG_SCHEMA_VERSION=1\r\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\r\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nCOMPOSE_PROJECT_NAME=orbit-test\r\n",
+        "fileMode": 384,
+        "rollback": {
+          "content": "  # retained\r\nPOSTGRES_DB=internal spaces and = signs==",
+          "mode": 384
+        },
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: already current",
+      "input": {
+        "content": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: already current schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: already current transaction",
+      "input": {
+        "content": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test",
+          "--transaction"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: already current schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: no target and no provenance",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\n",
+        "args": [
+          "--migrate"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_provenance_required\n",
+        "file": "APP_URL=https://orbit.example.invalid\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: no target with provenance",
+      "input": {
+        "content": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--migrate"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: already current schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: no target with provenance but no project",
+      "input": {
+        "content": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--migrate"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_project_required\n",
+        "file": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: no target with provenance project given",
+      "input": {
+        "content": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--migrate",
+          "--compose-project-name",
+          "other"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\nCOMPOSE_PROJECT_NAME=other\n",
+        "fileMode": 384,
+        "rollback": {
+          "content": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+          "mode": 384
+        },
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: partial target",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_provenance\n",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: target image digest mismatch",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_provenance\n",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: target bad version",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_provenance\n",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: target mutable image",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit:latest",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_provenance\n",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: bad target project",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "Bad"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_project\n",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: missing project",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_project_required\n",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: project mismatch",
+      "input": {
+        "content": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=one\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "two"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_project_mismatch\n",
+        "file": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=one\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: existing project kept",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nCOMPOSE_PROJECT_NAME=mine\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "APP_URL=https://orbit.example.invalid\nCOMPOSE_PROJECT_NAME=mine\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "fileMode": 384,
+        "rollback": {
+          "content": "APP_URL=https://orbit.example.invalid\nCOMPOSE_PROJECT_NAME=mine\n",
+          "mode": 384
+        },
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: newer version from current",
+      "input": {
+        "content": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "--applied-version",
+          "v1.3.0",
+          "--applied-digest",
+          "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa to schema v1 version v1.3.0 digest sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\n",
+        "stderr": "",
+        "file": "ORBIT_IMAGE=registry.example/orbit@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.3.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\nCOMPOSE_PROJECT_NAME=orbit-test\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": {
+          "content": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\nAPP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+          "mode": 384
+        },
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: invalid file",
+      "input": {
+        "content": "garbage line\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "garbage line\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: duplicate managed keys",
+      "input": {
+        "content": "ORBIT_IMAGE=\n# ORBIT_IMAGE=\nAPP_URL=x\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ]
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "ORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nAPP_URL=x\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
+        "fileMode": 384,
+        "rollback": {
+          "content": "ORBIT_IMAGE=\n# ORBIT_IMAGE=\nAPP_URL=x\n",
+          "mode": 384
+        },
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: leftover identical rollback retried",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ],
+        "rollback": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n"
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
+        "fileMode": 384,
+        "rollback": {
+          "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+          "mode": 384
+        },
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: leftover different rollback refused",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ],
+        "rollback": "APP_URL=https://a-genuinely-different-prior-deployment.invalid\n"
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_migration\n",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": {
+          "content": "APP_URL=https://a-genuinely-different-prior-deployment.invalid\n",
+          "mode": 384
+        },
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: leftover rollback ignored in transaction",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test",
+          "--transaction"
+        ],
+        "rollback": "APP_URL=https://different.invalid\n"
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
+        "fileMode": 384,
+        "rollback": {
+          "content": "APP_URL=https://different.invalid\n",
+          "mode": 384
+        },
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: lock held",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ],
+        "lock": "12345:1:2\n"
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_migration\n",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": "12345:1:2\n",
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "migrate: stale lock reclaimed",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--migrate",
+          "--orbit-image",
+          "registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--applied-version",
+          "v1.2.0",
+          "--applied-digest",
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "--compose-project-name",
+          "orbit-test"
+        ],
+        "lock": "99999:1:1\n",
+        "lockAgeMinutes": 11
+      },
+      "bash": {
+        "status": 0,
+        "stdout": "Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.0 digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "stderr": "",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\nORBIT_IMAGE=registry.example/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nORBIT_CONFIG_SCHEMA_VERSION=1\nORBIT_CONFIG_APPLIED_VERSION=v1.2.0\nORBIT_CONFIG_APPLIED_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nCOMPOSE_PROJECT_NAME=orbit-test\n",
+        "fileMode": 384,
+        "rollback": {
+          "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+          "mode": 384
+        },
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "usage: transaction without migrate",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--preflight",
+          "--transaction"
+        ]
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_migration\n",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "usage: unknown argument",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--bogus"
+        ]
+      },
+      "bash": {
+        "status": 2,
+        "stdout": "",
+        "stderr": "configuration_usage\n",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "usage: missing option value",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--migrate",
+          "--orbit-image"
+        ],
+        "noFile": true
+      },
+      "bash": {
+        "status": 2,
+        "stdout": "",
+        "stderr": "configuration_usage\n",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: loose mode",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--check"
+        ],
+        "mode": 416
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 416,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: symlink",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--check"
+        ],
+        "symlink": true
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: directory",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--check"
+        ],
+        "directory": true
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    },
+    {
+      "name": "check: missing file",
+      "input": {
+        "content": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "args": [
+          "--check"
+        ],
+        "missing": true
+      },
+      "bash": {
+        "status": 1,
+        "stdout": "",
+        "stderr": "configuration_syntax\n",
+        "file": "APP_URL=https://orbit.example.invalid\nPOSTGRES_DB=orbit\n",
+        "fileMode": 384,
+        "rollback": null,
+        "lock": null,
+        "migratingLeftovers": 0
+      }
+    }
+  ]
+}

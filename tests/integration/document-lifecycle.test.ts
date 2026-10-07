@@ -996,6 +996,32 @@ describe("authenticated encrypted document lifecycle", () => {
     });
   });
 
+  it("purges a staged object under a key this instance does not hold, instead of retrying it forever (#1260)", async () => {
+    const fixture = await createIntegrationFixture("document-scan-unheld-key-stage");
+    const documentId = randomUUID();
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "protocol" });
+    await withRequiredScanMode(async () => {
+      expect((await uploadWithFilename(fixture, "policy.pdf", documentId)).response.status).toBe(202);
+      const [stage] = await getDb().select({ storageKey: documentStagingObjects.storageKey })
+        .from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId));
+      // The backup drill's fixture: a stage wrapped under a key id that is
+      // neither the current nor the next key here.
+      await getDb().update(documentStagingObjects).set({ keyId: "key-this-instance-never-held" })
+        .where(eq(documentStagingObjects.documentId, documentId));
+      const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
+      await getDb().update(documentJobs).set({ nextAttemptAt: new Date(Date.now() - 1_000) })
+        .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+      await runDocumentMaintenanceCycle();
+      expect(await getDb().select({ status: documentJobs.status }).from(documentJobs)
+        .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan"))))
+        .toEqual([{ status: "completed" }]);
+      expect(await getDb().select({ lifecycle: documents.lifecycle, failureCode: documents.failureCode }).from(documents).where(eq(documents.id, documentId)))
+        .toEqual([{ lifecycle: "rejected", failureCode: "staging_object_invalid" }]);
+      expect(await getDb().select({ documentId: documentStagingObjects.documentId }).from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId))).toHaveLength(0);
+      await expect(storage.readStagingCiphertext(stage!.storageKey, getDocumentConfig().maxBytes)).rejects.toThrow();
+    });
+  });
+
   it("keeps reviewed direct intake pending until a recovery worker makes the document available", async () => {
     const fixture = await createIntegrationFixture("reviewed-document-recovery");
     const member = await fixture.session("member");

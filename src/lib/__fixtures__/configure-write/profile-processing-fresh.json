@@ -1,0 +1,8 @@
+{
+  "result": {
+    "status": 0,
+    "stdout": "Created .env-orbit from .env-orbit.example.\nOrbit deployment profile saved: processing.\n",
+    "stderr": ""
+  },
+  "env": "# --- Core ---\nORBIT_CONFIG_SCHEMA_VERSION=1\nAPP_URL=https://orbit.example.com\nORBIT_IMAGE=\n# ORBIT_CONFIG_APPLIED_VERSION=\n# ORBIT_CONFIG_APPLIED_DIGEST=\n\n# --- Authentication ---\nORBIT_AUTH_OIDC=false\nOIDC_ISSUER=https://auth.example.com/application/o/orbit/\nOIDC_CLIENT_ID=\nOIDC_CLIENT_SECRET=\n# OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\nOIDC_CALLBACK_URL=https://orbit.example.com/api/auth/callback\n\n# --- Generated secrets and keys ---\nSESSION_SECRET_FILE=.orbit-secrets/session-secret\nDOCUMENT_KEK_FILE=.orbit-secrets/document-kek\nPOSTGRES_PASSWORD_FILE=.orbit-secrets/postgres-password\nVAPID_PUBLIC_KEY=\nVAPID_PRIVATE_KEY_FILE=\n\n# --- Deployment ---\n# COMPOSE_PROJECT_NAME=\nORBIT_BIND_ADDRESS=0.0.0.0\nORBIT_PORT=3000\nCOMPOSE_PROFILES=processing\nPOSTGRES_DB=orbit\nPOSTGRES_USER=orbit\n\n# --- Optional services ---\nTIKA_URL=http://orbit-tika:9998\nOLLAMA_MODEL=\n\n# --- Observability ---\nORBIT_LOG_LEVEL=info\nORBIT_LOG_FORMAT=text\n\n"
+}

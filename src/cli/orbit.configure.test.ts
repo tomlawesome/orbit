@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,8 +42,8 @@ afterEach(() => {
   rmSync(sandbox, { recursive: true, force: true });
 });
 
-describe("orbit configure (bare, no flags): the write side minus VAPID", () => {
-  it("creates .env-orbit and .orbit-secrets, generating the three non-VAPID secrets", () => {
+describe("orbit configure (bare, no flags): the whole write side", () => {
+  it("creates .env-orbit and .orbit-secrets, generating the three secrets and the VAPID pair", () => {
     const result = runCli(["configure", "--dir", sandbox]);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Created .env-orbit from .env-orbit.example.");
@@ -54,9 +54,9 @@ describe("orbit configure (bare, no flags): the write side minus VAPID", () => {
       expect(readFileSync(secretPath, "utf8")).toMatch(/^[0-9a-f]{64}\n$/);
       expect(statSync(secretPath).mode & 0o777).toBe(0o600);
     }
-    // The engine never touches VAPID (bash-only, docker-backed) or prints
-    // the bash script's own final "ready" message — see configure-engine.ts.
-    expect(existsSync(join(sandbox, ".orbit-secrets", "vapid-private-key"))).toBe(false);
+    // #1210 D7: the engine generates the VAPID pair itself now.
+    expect(existsSync(join(sandbox, ".orbit-secrets", "vapid-private-key"))).toBe(true);
+    expect(result.stdout).toContain("Generated VAPID push keys.\n");
   });
 
   it("guarantee #33: is idempotent — a second run preserves already-generated secrets", () => {
@@ -157,10 +157,10 @@ describe("orbit configure --init", () => {
     expect(existsSync(join(sandbox, ".env-orbit"))).toBe(false);
   });
 
-  it("refuses (no crash, no partial write) with neither env vars nor machine-prompt mode set — this engine has no controlling terminal", () => {
+  it("refuses (no crash, no partial write) with no answers, no machine prompts and no terminal", () => {
     const result = runCli(["configure", "--init", "--dir", sandbox]);
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("no controlling terminal");
+    expect(result.stderr).toContain("Guided configuration needs a controlling terminal, or the complete ORBIT_CONFIGURE_APP_URL");
     expect(existsSync(join(sandbox, ".env-orbit"))).toBe(false);
   });
 });
@@ -255,5 +255,143 @@ describe("in-container fail-closed guard: configure is unaffected, like check", 
     expect(result.status).toBe(0);
     expect(readFileSync(callLogPath, "utf8")).toBe("");
     rmSync(binDir, { recursive: true, force: true });
+  });
+});
+
+// Cases of the retired scripts/configure.test.mjs that no other engine test
+// covered, ported onto `orbit configure` before that suite was deleted
+// (#1210 build note D10; the mapping is docs/adr-notes/1210-bash-test-
+// retirement.md). Same titles, setup and assertions; refusals now read
+// "orbit:" where configure.sh printed "Orbit configuration:".
+describe("orbit configure (ported from scripts/configure.test.mjs)", () => {
+  const validAppUrl = "https://orbit.guided-test.internal";
+  const validIssuer = "https://auth.guided-test.internal/application/o/orbit/";
+  const validClientId = "guided-test-client-id";
+  const bareEnv = (extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({ PATH: process.env.PATH, HOME: process.env.HOME, ...extra });
+  const envFile = () => join(sandbox, ".env-orbit");
+  const leftovers = () => readdirSync(sandbox).filter((name) => name.includes(".updating.") || name.includes(".installing."));
+
+  function seed(content: string): void {
+    writeFileSync(envFile(), content, { mode: 0o600 });
+  }
+
+  it("rejects missing or hostile local-model identifiers without mutation or disclosure", () => {
+    const initial = "COMPOSE_PROFILES=\nTIKA_URL=\nOLLAMA_MODEL=\n";
+    seed(initial);
+
+    const missing = runCli(["configure", "--set-deployment-profile", "full", "--dir", sandbox], { env: bareEnv() });
+    expect(missing.status).toBe(2);
+    expect(readFileSync(envFile(), "utf8")).toBe(initial);
+
+    const hostileValue = "private-model;print-secret";
+    const hostile = runCli(["configure", "--set-deployment-profile", "full", hostileValue, "--dir", sandbox], { env: bareEnv() });
+    expect(hostile.status).toBe(2);
+    expect(`${hostile.stdout}${hostile.stderr}`).not.toContain(hostileValue);
+    expect(readFileSync(envFile(), "utf8")).toBe(initial);
+  });
+
+  it("--init derives and atomically writes all four values and ORBIT_AUTH_OIDC=true from a complete environment set without printing them", () => {
+    seed("UNRELATED_KEY=keep-me\n");
+
+    const result = runCli(["configure", "--init", "--dir", sandbox], {
+      env: bareEnv({
+        ORBIT_CONFIGURE_APP_URL: validAppUrl,
+        ORBIT_CONFIGURE_OIDC_ISSUER: validIssuer,
+        ORBIT_CONFIGURE_OIDC_CLIENT_ID: validClientId,
+      }),
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).not.toContain(validClientId);
+    expect(result.stdout).not.toContain("orbit.guided-test.internal");
+    const updated = readFileSync(envFile(), "utf8");
+    expect(updated).toContain("UNRELATED_KEY=keep-me");
+    expect(updated).toContain(`APP_URL=${validAppUrl}`);
+    expect(updated).toContain("ORBIT_AUTH_OIDC=true");
+    expect(updated).toContain(`OIDC_ISSUER=${validIssuer}`);
+    expect(updated).toContain(`OIDC_CLIENT_ID=${validClientId}`);
+    expect(updated).toContain(`OIDC_CALLBACK_URL=${validAppUrl}/api/auth/callback`);
+    expect(leftovers()).toEqual([]);
+  });
+
+  it("--init with ORBIT_CONFIGURE_AUTH_MODE=local writes only APP_URL and ORBIT_AUTH_OIDC=false, never the OIDC trio", () => {
+    seed("UNRELATED_KEY=keep-me\n");
+
+    const result = runCli(["configure", "--init", "--dir", sandbox], {
+      env: bareEnv({ ORBIT_CONFIGURE_AUTH_MODE: "local", ORBIT_CONFIGURE_APP_URL: validAppUrl }),
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("ORBIT_AUTH_OIDC=false");
+    const updated = readFileSync(envFile(), "utf8");
+    expect(updated).toContain("UNRELATED_KEY=keep-me");
+    expect(updated).toContain(`APP_URL=${validAppUrl}`);
+    expect(updated).toContain("ORBIT_AUTH_OIDC=false");
+    expect(updated).not.toContain("OIDC_ISSUER=");
+    expect(updated).not.toContain("OIDC_CLIENT_ID=");
+    expect(updated).not.toContain("OIDC_CALLBACK_URL=");
+  });
+
+  it("--init switching to local-only preserves an existing OIDC configuration instead of deleting it (ADR-0023 section 1)", () => {
+    seed(
+      [
+        "APP_URL=https://old.guided-test.internal",
+        "OIDC_ISSUER=https://old-auth.guided-test.internal/o/orbit/",
+        "OIDC_CLIENT_ID=old-client-id",
+        "OIDC_CALLBACK_URL=https://old.guided-test.internal/api/auth/callback",
+        "",
+      ].join("\n"),
+    );
+
+    const result = runCli(["configure", "--init", "--dir", sandbox], {
+      env: bareEnv({ ORBIT_CONFIGURE_AUTH_MODE: "local", ORBIT_CONFIGURE_APP_URL: validAppUrl }),
+    });
+
+    expect(result.status).toBe(0);
+    const updated = readFileSync(envFile(), "utf8");
+    expect(updated).toContain(`APP_URL=${validAppUrl}`);
+    expect(updated).toContain("ORBIT_AUTH_OIDC=false");
+    expect(updated).toContain("OIDC_ISSUER=https://old-auth.guided-test.internal/o/orbit/");
+    expect(updated).toContain("OIDC_CLIENT_ID=old-client-id");
+  });
+
+  it("--init rejects ORBIT_CONFIGURE_AUTH_MODE=local combined with a complete OIDC environment set", () => {
+    const initial = "UNRELATED_KEY=keep-me\n";
+    seed(initial);
+
+    const result = runCli(["configure", "--init", "--dir", sandbox], {
+      env: bareEnv({
+        ORBIT_CONFIGURE_AUTH_MODE: "local",
+        ORBIT_CONFIGURE_APP_URL: validAppUrl,
+        ORBIT_CONFIGURE_OIDC_ISSUER: validIssuer,
+        ORBIT_CONFIGURE_OIDC_CLIENT_ID: validClientId,
+      }),
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(envFile(), "utf8")).toBe(initial);
+    expect(leftovers()).toEqual([]);
+  });
+
+  it("--init rejects an invalid ORBIT_CONFIGURE_AUTH_MODE value without mutation", () => {
+    const initial = "UNRELATED_KEY=keep-me\n";
+    seed(initial);
+
+    const result = runCli(["configure", "--init", "--dir", sandbox], {
+      env: bareEnv({ ORBIT_CONFIGURE_AUTH_MODE: "sso", ORBIT_CONFIGURE_APP_URL: validAppUrl }),
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(envFile(), "utf8")).toBe(initial);
+  });
+
+  it("--set-oidc-secret rejects an empty line on standard input without creating an environment file or secret", () => {
+    const result = runCli(["configure", "--set-oidc-secret", "--dir", sandbox], { input: "\n", env: bareEnv() });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("non-empty OIDC client secret");
+    expect(existsSync(envFile())).toBe(false);
+    expect(existsSync(join(sandbox, ".orbit-secrets", "oidc-client-secret"))).toBe(false);
   });
 });

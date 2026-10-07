@@ -70,16 +70,14 @@ node --test scripts/bump-launcher-pin.test.mjs
 # ORBIT_TEST_SKIP_DOCKER (#950): the CI `fast` job runs on the unprivileged
 # `big` lane, which has no `docker` binary on PATH at all -- confirmed by
 # running every test file that mentions Docker with a PATH built from
-# /usr/bin minus `docker`. Two files actually fail that way, not the five
-# once assumed (pipeline 163, 2026-09-04, was $NODE_IMAGE with no Docker CLI
-# at all, a coarser signal): src/lib/install-script-adapters.test.ts, whose
-# beforeAll runs a real `docker build --target vapid-generator .`, and
-# src/lib/recovery-bundle.parity.test.ts, whose "no Docker daemon reachable"
+# /usr/bin minus `docker`. One file fails that way since #1210 moved VAPID key
+# generation into the engine (install-script-adapters.test.ts no longer builds
+# an image): src/lib/recovery-bundle.parity.test.ts, whose "no Docker daemon reachable"
 # blocks are true to their name -- they never reach a live daemon -- but
 # still spawn the real import-recovery-bundle.sh/backup.sh, and both scripts
 # gate on `command -v docker`/`docker compose version` in their own preflight
 # before the archive-validation logic these tests exercise. `fast_docker`,
-# on the privileged `orbit-build` lane, runs both files.
+# on the privileged `orbit-build` lane, runs it.
 #
 # The exclusion itself is read straight from this variable by
 # vitest.config.ts, not passed here as a CLI `--exclude`: that flag is

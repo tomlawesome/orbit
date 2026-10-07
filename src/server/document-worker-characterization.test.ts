@@ -780,6 +780,20 @@ describe("scanner recovery — fail-closed scanning order", () => {
     expectNoPublish();
   });
 
+  it("rejects a staged object under a key this instance does not hold instead of retrying it (#1260)", async () => {
+    armScanJob();
+    mocks.executeRows.readOwnedScanRecord = [{ ...scanRecoveryRecord(), keyId: "key-this-instance-never-held" }];
+
+    await runDocumentMaintenanceCycle();
+
+    expect(mocks.decryptDocument).not.toHaveBeenCalled();
+    expect(mocks.scanFile).not.toHaveBeenCalled();
+    expect(documentTransitions()).toEqual([
+      expect.objectContaining({ lifecycle: "rejected", scanStatus: "error", failureCode: "staging_object_invalid" }),
+    ]);
+    expectNoPublish();
+  });
+
   it("never reaches the scanner once the recovery window has expired", async () => {
     world.stageExpiresAt = new Date(Date.now() - 1_000);
     armScanJob();
