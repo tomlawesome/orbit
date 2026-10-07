@@ -119,8 +119,7 @@ viewer; pdf.js runs only in the server, drawing page one.
 - A scanner outage still holds or refuses the file exactly as before (held
   for recovery on upload, refused on inspection, preview and mail-in); the
   difference is that nothing else touches the file in the meantime.
-- Roughly 500 lines of parsing code and their tests are deleted; the
-  specimen count moves from 84 of 87 to 87 of 87 on the local set.
+- Roughly 500 lines of parsing code and their tests are deleted.
 - pdf.js remains the one parser of untrusted bytes in Orbit's own process,
   as it is today for previews, and it now opens only files ClamAV has
   passed; keeping it patched is the standing cost.
