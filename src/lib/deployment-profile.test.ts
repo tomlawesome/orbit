@@ -65,6 +65,21 @@ describe("chooseDeploymentProfile: install", () => {
     expect(terminal.output()).toContain("Profiles keep data inside the private Compose network.");
   });
 
+  it("states the fixed resource classes, the optional boundaries and local privacy before the choice", () => {
+    const terminal = scriptedTerminal(["standard", "apply"]);
+    chooseDeploymentProfile(terminal, context);
+    const shown = terminal.output();
+    for (const line of [
+      "Profiles keep data inside the private Compose network. Resource classes are fixed relative labels: standard, medium, and high; they are not hardware guarantees.",
+      "Required Orbit core and private scanning stay enabled; document processing and local AI are optional services.",
+      "Sign-in is chosen separately: local accounts always work, and an identity provider (OIDC) is optional (configure.sh --init).",
+      "Ollama is optional local infrastructure and is not yet consumed by Orbit product workflows.",
+    ]) {
+      expect(shown).toContain(line);
+    }
+    expect(shown.indexOf("Resource classes")).toBeLessThan(shown.indexOf("Choose a deployment profile"));
+  });
+
   it("offers the four custom combinations, including local AI alone", () => {
     const terminal = scriptedTerminal(["custom", "ai", "llama3.2:3b", "", "apply"]);
     expect(chooseDeploymentProfile(terminal, context)).toMatchObject({ selectedProfile: "ai", selectedModel: "llama3.2:3b" });

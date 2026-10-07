@@ -324,6 +324,23 @@ describe("verifyOidcDiscovery, fetched in the engine (#1212 F5)", () => {
     expect(result).toMatchObject({ status: "failed", reason: "provider-unavailable" });
   });
 
+  it.each([
+    ["unavailable", (_request: IncomingMessage, response: ServerResponse) => response.destroy()],
+    ["answering with a rejected document", (_request: IncomingMessage, response: ServerResponse) => {
+      response.writeHead(200, { "content-type": "application/json" }).end('{"issuer":"https://evil.example.invalid/","secret":"BODY-MARKER"}');
+    }],
+  ])("never repeats the provider's address or its response when it is %s", async (_label, handler) => {
+    const dir = makeSandbox();
+    seedIssuer(dir, ISSUER);
+    const provider = await fixtureProvider(handler);
+    const result = await verifyOidcDiscovery(dir, { fetchImpl: provider.fetchImpl });
+    expect(result.status).toBe("failed");
+    const text = JSON.stringify(result);
+    expect(text).not.toContain("BODY-MARKER");
+    expect(text).not.toContain("evil.example");
+    expect(text).not.toContain(new URL(ISSUER).host);
+  });
+
   it("reports a refused connection as unavailable", async () => {
     const dir = makeSandbox();
     seedIssuer(dir, ISSUER);

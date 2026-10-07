@@ -313,6 +313,10 @@ describe("runInstall: deployment assets from the image (F2, #42, #45)", () => {
       symlinkSync("/etc/passwd", join(root, "scripts/repair.sh"));
     }, "Bundled scripts/repair.sh is not a regular file."],
     ["empty", (root: string) => writeFileSync(join(root, "docker-compose.mail.yml"), ""), "Bundled docker-compose.mail.yml is empty."],
+    ["a directory", (root: string) => {
+      rmSync(join(root, "scripts/backup.sh"));
+      mkdirSync(join(root, "scripts/backup.sh"));
+    }, "Bundled scripts/backup.sh is not a regular file."],
   ])("refuses a bundle whose asset is %s, before touching the target", async (_label, damage, message) => {
     const target = preprovisioned();
     const before = snapshot(target);
@@ -345,6 +349,79 @@ describe("runInstall: refusals inside the transaction roll back (#11, #56)", () 
     const before = snapshot(target);
     const { outcome } = await run(target, {}, { fetchImpl: async () => Promise.reject(new Error("offline")) });
     expect(outcome).toMatchObject({ status: "failed", phase: "oidc", reason: "provider-unavailable", action: "retry" });
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("hands the launcher its tree once, before rolling back, on a configuration failure such as a non-2xx discovery answer (#1225)", async () => {
+    const target = preprovisioned(ENV_OIDC);
+    const before = snapshot(target);
+    let handedOver = 0;
+    let targetAtHandOver: Record<string, string> | undefined;
+    const { outcome } = await run(target, {}, {
+      fetchImpl: discoveryFetch("not here", 404),
+      onConfigurationFailure: () => {
+        handedOver += 1;
+        targetAtHandOver = snapshot(target);
+      },
+    });
+    expect(outcome).toMatchObject({ status: "failed", phase: "oidc", reason: "configuration-failure" });
+    expect(handedOver).toBe(1);
+    // Called while the transaction still held the run's changes: before the rollback.
+    expect(targetAtHandOver).not.toEqual(before);
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("never offers the launcher tree for a failure that is not a configuration failure", async () => {
+    let handedOver = 0;
+    const { outcome } = await run(preprovisioned(ENV_OIDC), {}, {
+      fetchImpl: async () => Promise.reject(new Error("offline")),
+      onConfigurationFailure: () => {
+        handedOver += 1;
+      },
+    });
+    expect(outcome).toMatchObject({ status: "failed", reason: "provider-unavailable" });
+    expect(handedOver).toBe(0);
+  });
+
+  it("rolls back a recognised update if configuration changed the preserved database password (#19)", async () => {
+    const target = recognised();
+    const before = snapshot(target);
+    const password = join(target, ".orbit-secrets", "postgres-password");
+    let tampered = false;
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) }, {
+      // Inside the transaction (after its backup), as a misbehaving configure step would.
+      say: () => {
+        if (tampered) return;
+        tampered = true;
+        writeFileSync(password, `${"f".repeat(64)}\n`, { mode: 0o600 });
+      },
+    });
+    expect(tampered).toBe(true);
+    expect(outcome).toMatchObject({
+      status: "failed",
+      message: "The existing POSTGRES_PASSWORD_FILE changed during configuration; refusing to start Compose.",
+    });
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("persists exactly one resolved image line on its own line, from a file with no final newline (#53)", async () => {
+    const target = recognised();
+    const environment = join(target, ".env-orbit");
+    writeFileSync(environment, readFileSync(environment, "utf8").replace(/\n$/, ""), { mode: 0o600 });
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "ok" });
+    const content = readFileSync(environment, "utf8");
+    expect(content.split("\n").filter((line) => line.startsWith("ORBIT_IMAGE"))).toEqual([`ORBIT_IMAGE=${REFERENCE}`]);
+    expect(content.endsWith("\n")).toBe(true);
+  });
+
+  it("refuses, and rolls back, a file that assigns the image twice: the preflight never lets a duplicated key through (#50, #53)", async () => {
+    const target = recognised();
+    const environment = join(target, ".env-orbit");
+    writeFileSync(environment, `${readFileSync(environment, "utf8")}ORBIT_IMAGE=${OLD_REFERENCE}\n`, { mode: 0o600 });
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "failed", message: "Configuration preflight failed; restoring the previous deployment." });
     expect(snapshot(target)).toEqual(before);
   });
 
