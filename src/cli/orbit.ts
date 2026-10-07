@@ -1504,8 +1504,12 @@ function commandInstallOrUpdate(command: "install" | "update", deployDirArg: str
     throw error;
   }
   const elapsedOffset = /^[0-9]{1,6}$/.test(process.env.ORBIT_INSTALLER_ELAPSED ?? "") ? Number(process.env.ORBIT_INSTALLER_ELAPSED) : 0;
-  const interactive = process.env.ORBIT_INSTALL_INTERACTIVE === "1" && hasTerminal();
-  const terminal = interactive ? installTerminal() : undefined;
+  // install.sh had an operator to ask: on a terminal it passed through, or,
+  // under ORBIT_CONFIGURE_PROMPTS=machine, over the machine-prompt grammar
+  // on stdin (the launcher). Only a real terminal gets the menus.
+  const machinePrompts = isConfigureMachinePromptMode();
+  const interactive = process.env.ORBIT_INSTALL_INTERACTIVE === "1" && (hasTerminal() || machinePrompts);
+  const terminal = interactive && !machinePrompts && hasTerminal() ? installTerminal() : undefined;
   const guidedIo = guidedIoFor(terminal);
   const configureAuthMode = readConfigureAuthMode();
   const assetsRoot = process.env.ORBIT_INSTALL_TEST_ASSETS_ROOT || DEPLOYMENT_ASSETS_ROOT;
