@@ -47,9 +47,10 @@ handoff stretch), then retry.
 A consumer that wants to run that configuration itself sets
 `ORBIT_LAUNCHER_CONFIG_TREE` to an empty directory it created (mode 0700,
 owned by the running user) (#1225). On any exit whose event reason is
-`configuration-failure`, before the event and before rolling back,
-`install.sh` copies the configure tree it verified from the digest-pinned
-image into it at the same relative paths: `scripts/configure.sh`,
+`configuration-failure`, before the event and before rolling back, the
+install engine copies the configure tree from its own digest-pinned image
+into it at the same relative paths (`src/lib/launcher-config-tree.ts`;
+`install.sh` only mounts the directory into the engine, #1212): `scripts/configure.sh`,
 `scripts/installer-ui.sh` and `.env-orbit.example`, plus the image pin
 `.orbit-image`, which holds the resolved digest reference
 (`ghcr.io/<repo>@sha256:<64 hex>`) on one newline-terminated line. All are
@@ -656,6 +657,56 @@ docker run --rm --network none [-i [-t]] \
   `--user` maps to a subordinate id the operator cannot access. If it cannot
   hand a file over it refuses rather than leave one behind (#1258).
 
+**`install`/`update`: the install engine one-off.** `scripts/install.sh`
+runs the engine once, from the image it has just pulled and verified, as a
+plain `docker run` with the deployment directory mounted (#1212):
+
+```
+docker run --rm --init [-i [-t]] [-e ORBIT_INSTALL_INTERACTIVE=1] \
+  [-e ORBIT_INSTALLER_PLAIN=1] [-e COMPOSE_PROJECT_NAME] \
+  [-v "<launcher-tree>:/orbit-launcher-config-tree:rw" \
+   -e ORBIT_LAUNCHER_CONFIG_TREE=/orbit-launcher-config-tree
+   | -e ORBIT_LAUNCHER_CONFIG_TREE_UNAVAILABLE=<reason>] \
+  -e ORBIT_HOST_UID=<uid> -e ORBIT_HOST_GID=<gid> \
+  -e ORBIT_IMAGE=<verified digest reference> -e ORBIT_CHANNEL=<channel> \
+  -e ORBIT_INSTALLER_ELAPSED=<seconds> -e ORBIT_INSTALL_HOST_FACTS \
+  -e ORBIT_CONFIGURE_PROMPTS -e ORBIT_CONFIGURE_APP_URL \
+  -e ORBIT_CONFIGURE_OIDC_ISSUER -e ORBIT_CONFIGURE_OIDC_CLIENT_ID \
+  -e ORBIT_CONFIGURE_AUTH_MODE \
+  -v "<host-deployment-dir>:/orbit-deploy:rw" \
+  -v "<private-temp-dir>:/orbit-install-result:rw" \
+  --entrypoint node "$resolved_reference" /opt/orbit/cli/orbit.js \
+  install --action <install|update|auto> --dir /orbit-deploy \
+  --outcome /orbit-install-result/outcome
+```
+
+- Unlike `configure`, the default network: OIDC discovery runs in here,
+  over the network the application itself will use.
+- `--init` makes the engine an ordinary child of a minimal init, so a
+  signal reaches it as a signal; the engine rolls its transaction back on
+  SIGINT/SIGTERM before exiting.
+- `ORBIT_INSTALL_HOST_FACTS` is JSON: every Docker output the engine's
+  volume-safety check needs, gathered by the shell with the argv
+  `src/lib/database-volume-safety.ts` documents and base64-encoded byte for
+  byte, `null` for a call that failed (`src/lib/host-facts.ts`). Anything
+  malformed fails closed.
+- A terminal is passed through (`-i -t`, `ORBIT_INSTALL_INTERACTIVE=1`)
+  when install.sh has one; under `ORBIT_CONFIGURE_PROMPTS=machine` stdin is
+  passed without `-t`; otherwise stdin is closed, so a piped `curl | bash`
+  never feeds the rest of the script to the engine.
+- The engine prints its own events (assets, configuration, oidc) as plain
+  lines and asks its own questions; the shell renders the phases before and
+  after it. The outcome file is owner-only `key=value` lines: `status=ok`
+  with `fresh`, `profile`, `model-pull` and `database-volume`;
+  `status=failed` with `phase`, `component`, `reason`, `action` and
+  `message`; `status=stopped` with `message`; or `status=repair`. Exit
+  status 0, 1, 130 (cancelled), 2 (an answer refused) or 3 (Repair). The
+  terminal `failed` event is the shell's to emit. An engine that leaves no
+  usable outcome is reported with `docker run`'s exit status and
+  `reason=failure`.
+- `orbit install` refuses to run outside the image
+  (`ORBIT_ENGINE_CONTEXT=container`).
+
 **Commands that need the deployment itself (`backup`, `restore`,
 `export-recovery-bundle`, `import-recovery-bundle`): the compose-attached
 one-off.** They read and write the database, the document volume and the
@@ -755,10 +806,10 @@ any such attempt.
    container started any other way (a host checkout run directly via
    `pnpm run orbit`/`tsx`, with no image involved) never has it set.
 2. Every command whose adapters would ever spawn `docker`
-   (`install`/`update` via `src/lib/install-docker-adapter.ts`) calls
-   `refuseDockerInContainer` as the FIRST statement in its command function
-   — before any adapter is constructed, so the code path that would spawn
-   `docker` is never reached, not merely made to fail once reached. When
+   must call `refuseDockerInContainer` as the FIRST statement in its command
+   function — before any adapter is constructed, so the code path that would
+   spawn `docker` is never reached, not merely made to fail once reached.
+   No command does today (see 3). When
    `ORBIT_ENGINE_CONTEXT=container` is set, that call prints
    `orbit: refused command=<command> reason=docker-command-forbidden-in-container`
    to stderr and exits `9`, before touching the target directory or any
@@ -774,6 +825,10 @@ any such attempt.
    deployment, and anywhere else refuse with `orbit: <command> runs inside
    the deployment; use bash scripts/<script>.sh.` (exit 1).
    `src/cli/orbit.test.ts` asserts a booby-trapped `docker` is never called.
+   `install`/`update` spawn no `docker` at all since #1212: everything they
+   need from Docker arrives as data, and they refuse to run anywhere but
+   inside the image (`scripts/bundle-orbit-cli.test.mjs` traps `docker`
+   around them too).
 
 This is a permanent architectural boundary, not a placeholder pending a
 future slice: any command that genuinely needs to touch Docker stays a
@@ -795,7 +850,7 @@ no opt-in variable and no bash fallback. With no image to run,
 | `--set-deployment-profile PRESET [MODEL]` | `configure --set-deployment-profile PRESET [MODEL]` | `:rw` |
 | `--check` | `check` | `:ro` |
 | `--check-rollback` | `check --rollback` | `:ro` |
-| `--preflight`, `--migrate` | `configure --preflight`, `configure --migrate` (with `--file`; install.sh's arguments) | the file's directory, `:ro` and `:rw` |
+| `--preflight`, `--migrate` | `configure --preflight`, `configure --migrate` (with `--file`; the arguments install.sh passed before #1212) | the file's directory, `:ro` and `:rw` |
 
 - The exit status and standard output are the engine's, unchanged: `--check`
   and `--check-rollback` print the same enum-only readiness report (see
@@ -809,8 +864,10 @@ no opt-in variable and no bash fallback. With no image to run,
   are the same as before: the fully-scripted `ORBIT_CONFIGURE_*` environment
   triad, the `ORBIT_CONFIGURE_PROMPTS=machine` grammar above, and a piped
   secret line.
-- `install.sh` and `repair.sh` call `scripts/configure.sh`; `deploy-container.sh`
-  builds or pulls the image first, then runs `configure.sh`.
+- `repair.sh` calls `scripts/configure.sh`; `deploy-container.sh` builds or
+  pulls the image first, then runs `configure.sh`. `install.sh` no longer
+  calls it: since #1212 the install engine runs the configure engine and the
+  configuration migration in its own process.
 - `backup`, `restore` and the recovery-bundle commands use the compose-attached
   shape above (#1211).
 

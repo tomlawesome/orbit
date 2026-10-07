@@ -354,14 +354,13 @@ explicitly instead, as `isApplicationRelative` in
 `web/src/routes/login/+page.svelte` does, and give it cases for the empty
 string, a protocol-relative `//` and a backslash.
 
-**`scripts/test-install-acceptance.sh` refuses while any Orbit database
-volume exists on the host — the demo stack's `orbit-demo_orbit-db-data`
-included.** `install.sh`'s fresh-install guard (#13, #21) matches every
-volume ending `orbit-db-data`, whatever Compose project owns it, so with a
-demo or review stack up the harness fails one second into the positive
-scenario with "An existing Orbit database volume requires a recognized
-deployment". CI does not run this harness (deferred, see the top of
-`.gitlab-ci.yml`), so take the demo stack down first or run it elsewhere.
+**Another stack's database volume no longer blocks an install run —
+closed (#1239, #1261).** A fresh install is blocked only by the volume it
+would itself attach to, and an update whose project name is known skips a
+volume labelled with another project that is not provably its own. Two
+volumes that could both be this deployment's still refuse, so a leftover
+volume of the *same* Compose project does too: `scripts/cleanup-stacks.sh`
+lists them.
 
 **A lockfile diff adding an `@pnpm/exe` block is pnpm 11 talking, not your
 change.** The host's PATH `pnpm` is 11.9.0 and writes that block while

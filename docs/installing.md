@@ -93,9 +93,16 @@ The Compose files and operator scripts come out of that same build, so they
 always match the version they came with. The directory ends up holding
 `docker-compose.yml`, `docker-compose.mail.yml`, `.env-orbit.example`,
 `config/tika-config.json`, the scripts `configure.sh`,
-`backup.sh`, `restore.sh`, `repair.sh` and
-`installer-ui.sh`, your settings in `.env-orbit`, and your secrets in
-`.orbit-secrets/`.
+`backup.sh`, `restore.sh`, `repair.sh`, `export-recovery-bundle.sh`,
+`import-recovery-bundle.sh` and `installer-ui.sh`, your settings in
+`.env-orbit`, and your secrets in `.orbit-secrets/`.
+
+The installer itself only fetches, checks and starts things. Everything that
+reads or writes the directory — checking it is safe to install into, asking
+your questions, writing the settings and secrets, and checking your sign-in
+provider — runs inside that same build, in a short-lived container that is
+removed when it finishes. If anything goes wrong before Orbit starts, it puts
+the directory back exactly as it was.
 
 The installer then generates four separate secrets: one for sign-in
 sessions, the database password, the document encryption key, and a key
