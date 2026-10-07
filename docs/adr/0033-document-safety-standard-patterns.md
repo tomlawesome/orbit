@@ -30,11 +30,12 @@ openable, **E. a mature library opens it and finds at least one page**
 (Papermerge). Only Dangerzone sandboxes parsers (**G**) and rebuilds files
 from pixels (**H**); only Orbit rejects active content (**I**).
 
-What Orbit already has: A, B (a server-drawn page-one picture is the only
+What Orbit already has: A, B (a server-drawn page picture is the only
 thing a browser ever renders; downloads are attachments under
 `default-src 'none'; sandbox` and `nosniff`), D, F (ClamAV, fail-closed),
 and part of G (Tika in an isolated container). Orbit has no in-browser PDF
-viewer; pdf.js runs only in the server, drawing page one.
+viewer; pdf.js runs only in the server, drawing any requested page,
+bounded by the page cap (page one when none is asked for; #1300).
 
 ## Decision
 
@@ -67,7 +68,7 @@ viewer; pdf.js runs only in the server, drawing page one.
    no library sets them for us.
 4. **The viewer is the server-side renderer, and it must enforce C.** One
    option set (`PDF_STRUCTURE_PARSER_OPTIONS`) serves the open check and the
-   page-one renderer: `enableXfa: false`, no worker, no network or range
+   page renderer: `enableXfa: false`, no worker, no network or range
    fetching, no system or browser fonts, no WebAssembly. Scripts need no
    switch: pdf.js runs document scripts only through the viewer's annotation
    layer and scripting manager, which Orbit never builds, so nothing a PDF

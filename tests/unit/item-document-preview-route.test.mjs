@@ -24,11 +24,13 @@ vi.mock("orbit/server/item-document-preview", () => ({ previewItemDocument: mock
 
 const HOUSEHOLD = "22222222-2222-4222-8222-222222222222";
 
-function event(headers = { "x-orbit-filename": "my%20policy.pdf", "x-orbit-declared-bytes": "4" }) {
+function event(headers = { "x-orbit-filename": "my%20policy.pdf", "x-orbit-declared-bytes": "4" }, query = "") {
+  const url = new URL(`http://localhost/api/households/${HOUSEHOLD}/item-document-preview${query}`);
   return {
     cookies: { get: () => undefined, set: () => {} },
     params: { householdId: HOUSEHOLD },
-    request: new Request(`http://localhost/api/households/${HOUSEHOLD}/item-document-preview`, {
+    url,
+    request: new Request(url, {
       method: "POST",
       headers: { "content-type": "application/pdf", ...headers },
       body: new Uint8Array([37, 80, 68, 70]),
@@ -109,9 +111,33 @@ describe("item-document-preview route: stages as NDJSON (ADR-0033 step 5)", () =
     ]);
     expect([...bytes]).toEqual([0, 0, 0, 0]);
     expect(mocks.previewItemDocument).toHaveBeenCalledWith(expect.objectContaining({
-      userId: "u1", householdId: HOUSEHOLD, declaredBytes: 4,
+      userId: "u1", householdId: HOUSEHOLD, declaredBytes: 4, page: 1,
     }));
   });
+
+  it("draws the page asked for, and says how many there are on the picture's line (#1300)", async () => {
+    const { POST } = await route();
+    mocks.previewItemDocument.mockImplementation(async (input) => {
+      input.onScanned(true);
+      return { bytes: Buffer.from([1]), mediaType: "image/png", width: 1, height: 1, pageCount: 3, scanned: true };
+    });
+    const response = await POST(event(undefined, "?page=2"));
+
+    expect((await lines(response))[1]).toMatchObject({ stage: "preview", pageCount: 3 });
+    expect(mocks.previewItemDocument).toHaveBeenCalledWith(expect.objectContaining({ page: 2 }));
+  });
+
+  it.each(["?page=0", "?page=-1", "?page=1.5", "?page=two"])(
+    "refuses %s as JSON before anything is received or scanned (#1300)",
+    async (query) => {
+      const { POST } = await route();
+      const response = await POST(event(undefined, query));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe("document_preview_page_invalid");
+      expect(mocks.previewItemDocument).not.toHaveBeenCalled();
+    },
+  );
 
   it("sends the scan's line before the picture has been drawn", async () => {
     const { POST } = await route();
@@ -171,6 +197,7 @@ describe("item-document-preview route: stages as NDJSON (ADR-0033 step 5)", () =
     expect(answer[0]).toEqual({ stage: "scanned", scanned: false });
     expect(answer[1].stage).toBe("preview");
     expect(answer[1].mediaType).toBe("image/svg+xml");
+    expect(answer[1].pageCount).toBe(1);
     expect(Buffer.from(answer[1].bytes, "base64").toString("utf8")).toMatch(/^<svg[\s\S]*my policy\.pdf/u);
     expect(mocks.previewItemDocument).not.toHaveBeenCalled();
   });

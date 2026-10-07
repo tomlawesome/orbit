@@ -279,10 +279,16 @@ recoverable state.
 - Authentication-tag verification must complete successfully; corrupt content
   is not partially returned as a successful download.
 
-### Page-one preview safety
+### Page preview safety
 
-- `GET /api/documents/{documentId}/preview` renders page one of a stored
-  document as an image so a person can recognise it visually (#476). It is
+- `GET /api/documents/{documentId}/preview` renders one page of a stored
+  document as an image so a person can recognise and read it (#476): page one,
+  or any requested page `?page=N` bounded by the page cap (#1300). A malformed,
+  zero, negative or past-the-cap page is refused with a 400 before the
+  document is read; a page past the document's end is a 404 answered only
+  after every check below has passed. The response's `X-Orbit-Page-Count`
+  header is pdf.js's own page count, read after the open check (1 for an
+  image), so no count is stored. It is
   reachable exactly where a download is: it obtains plaintext through the same
   authorization, readiness and integrity path, and refuses everything a
   download refuses with the same non-disclosing response.
@@ -302,16 +308,21 @@ recoverable state.
 - Output is bounded to a 1200-pixel long edge and carries the download
   response's headers: `Cache-Control: private, no-store`,
   `X-Content-Type-Options: nosniff` and a restrictive content security policy.
+- `GET /api/imap-inbox/{receiptId}/attachments/{attachmentId}/preview` draws
+  a page of an attachment still waiting in a mail receipt (#1155), for the
+  mail's recipient only, through the same renderer, `page` parameter and
+  headers.
 - `POST /api/households/{householdId}/item-document-preview` draws the same
-  page one from a file the create form has just been given, before any item
+  page (one, or `?page=N`) from a file the create form has just been given, before any item
   exists for it (#1245). It takes the inspection route's temporary-upload
   shape and retains nothing: the bytes are received into quarantine,
   identified, scanned by ClamAV where the instance scans (a scanner refusal
   answers exactly as the inspection and upload paths do, and malware is
   refused before anything is drawn), rendered in memory through the renderer
-  above, then zeroed and discarded. The response carries the same headers plus
-  `X-Orbit-Scan: clean|skipped`, so a screen says "scanned clean" only when
-  something scanned it. Household membership is required, as for inspection.
+  above, then zeroed and discarded. The answer is a private, unsniffed NDJSON
+  stream: a line saying whether the scan passed or scanning is off, so a
+  screen says "scanned clean" only when something scanned it, then the page
+  and the page count, or an error line. Household membership is required, as for inspection.
 
 ### Availability and resource controls
 

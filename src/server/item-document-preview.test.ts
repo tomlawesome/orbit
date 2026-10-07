@@ -88,9 +88,16 @@ describe("item document preview (pre-attachment page one)", () => {
     expect(mocks.access).toHaveBeenCalledWith("user-1", input().householdId);
     expect(mocks.receive).toHaveBeenCalledWith(null, expect.any(String), config.maxBytes, 1234);
     expect(mocks.scan).toHaveBeenCalledWith(QUARANTINE, config.clamAv);
-    expect(mocks.render).toHaveBeenCalledWith(expect.any(Buffer), "application/pdf");
+    expect(mocks.render).toHaveBeenCalledWith(expect.any(Buffer), "application/pdf", 1);
     expect(mocks.scan.mock.invocationCallOrder[0]).toBeLessThan(mocks.render.mock.invocationCallOrder[0]);
     expect(result).toEqual({ ...page(), scanned: true });
+  });
+
+  it("draws the page it was asked for, after the same scan (#1300)", async () => {
+    await previewItemDocument({ ...input(), page: 3 });
+
+    expect(mocks.render).toHaveBeenCalledWith(expect.any(Buffer), "application/pdf", 3);
+    expect(mocks.scan.mock.invocationCallOrder[0]).toBeLessThan(mocks.render.mock.invocationCallOrder[0]);
   });
 
   it("holds the upload to the administrator's limit, not the configured default (#1285)", async () => {

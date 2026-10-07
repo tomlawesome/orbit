@@ -1,12 +1,14 @@
 import { AppError, appErrorResponse } from "orbit/lib/app-error";
 import { previewItemDocument } from "orbit/server/item-document-preview";
+import { documentPreviewPageNotFound, parseDocumentPreviewPage } from "orbit/server/documents/preview-page";
 
 import { placeholderPageSvg } from "$lib/server/document-content-fixture.js";
 import { write } from "$lib/server/api.js";
 
 /**
- * Page one of a file the create form has just been given, before it belongs
- * to any item (#1245; the render is #476's).
+ * One page of a file the create form has just been given, before it belongs
+ * to any item (#1245; the render is #476's): page one, or page N for
+ * `?page=N` (#1300), refused as the other preview routes refuse it.
  *
  * The body streams straight through to `previewItemDocument`, exactly as
  * the sibling inspection route streams to `inspectItemDocument` — filename
@@ -21,7 +23,7 @@ import { write } from "$lib/server/api.js";
  *                                        instance has scanning off, so the
  *                                        lane says "scanned clean" only
  *                                        when something scanned it)
- *   {"stage":"preview","mediaType":"image/png","bytes":"<base64>"}
+ *   {"stage":"preview","mediaType":"image/png","pageCount":3,"bytes":"<base64>"}
  *   or {"error":{"code":"...","message":"..."}}   if drawing failed
  *
  * Anything refused before the scan has finished — the session, the name,
@@ -63,6 +65,7 @@ const base64 = (bytes) => Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byte
 export const POST = write(
   async (event, session) => {
     const householdId = /** @type {string} */ (event.params.householdId);
+    const page = parseDocumentPreviewPage(event.url.searchParams);
     const encodedFilename = event.request.headers.get("x-orbit-filename");
     if (!encodedFilename) throw new AppError("document_filename_required", "The document filename is required", 422);
     try {
@@ -87,13 +90,14 @@ export const POST = write(
       householdId,
       body: event.request.body,
       declaredBytes,
+      page,
       onScanned: (scanned) => markScanned(scanned),
     });
     /* Whichever comes first. A refusal before the scan has passed rejects
        here, and `write` answers it as the ordinary JSON error. onScanned
        always fires before the preview can resolve, so the second branch is
        only a guard. */
-    const scanned = await Promise.race([scannedOnce, preview.then((page) => page.scanned)]);
+    const scanned = await Promise.race([scannedOnce, preview.then((drawn) => drawn.scanned)]);
 
     let cancelled = false;
     const body = new ReadableStream({
@@ -104,11 +108,11 @@ export const POST = write(
         send({ stage: "scanned", scanned });
         preview
           .then(
-            (page) => {
+            (drawn) => {
               try {
-                send({ stage: "preview", mediaType: page.mediaType, bytes: base64(page.bytes) });
+                send({ stage: "preview", mediaType: drawn.mediaType, pageCount: drawn.pageCount, bytes: base64(drawn.bytes) });
               } finally {
-                page.bytes.fill(0);
+                drawn.bytes.fill(0);
               }
             },
             async (error) => send(await errorLine(error)),
@@ -132,6 +136,7 @@ export const POST = write(
        fixture harness's lane lands a sheet rather than a 500. Nothing was
        scanned, so the first line says so. */
     fixture: (event) => {
+      if (parseDocumentPreviewPage(event.url.searchParams) !== 1) throw documentPreviewPageNotFound();
       let name = "document";
       try {
         name = decodeURIComponent(event.request.headers.get("x-orbit-filename") ?? "document");
@@ -140,7 +145,7 @@ export const POST = write(
       }
       const svg = Buffer.from(placeholderPageSvg(name), "utf8").toString("base64");
       const text = `${JSON.stringify({ stage: "scanned", scanned: false })}\n`
-        + `${JSON.stringify({ stage: "preview", mediaType: "image/svg+xml", bytes: svg })}\n`;
+        + `${JSON.stringify({ stage: "preview", mediaType: "image/svg+xml", pageCount: 1, bytes: svg })}\n`;
       return new Response(text, { status: 200, headers: STREAM_HEADERS });
     },
   },
