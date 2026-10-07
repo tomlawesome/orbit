@@ -6,6 +6,7 @@ import {
 } from "$lib/data/document-read.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
 import { screenScope } from "$lib/teardown.js";
+import { takeHeldDocument } from "$lib/data/held-document.js";
 import { wireDropFeedback } from "./drop-feedback.js";
 import { createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, refusalOf } from "./entry.js";
 
@@ -498,6 +499,9 @@ export function mountCreate() {
      over the zone, a settle on the drop) and takes what is dropped on it;
      drop-feedback.js holds the drag states and their flicker guard. */
   const dropFeedback = wireDropFeedback({ on, dropzone, live: document.getElementById("dz-live"), takeFile });
+  /* #1243: a file the home drawer's quick add was given arrives here, and
+     is taken exactly as if it had been dropped on this zone. */
+  takeFile(takeHeldDocument());
 
   /* Accepting a suggestion clears the field's suggested marking. Nothing
      suggests anything yet — see the note above — but the grammar ships with

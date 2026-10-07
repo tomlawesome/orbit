@@ -286,6 +286,55 @@ test("picking a document shows its front page while the read runs alongside", as
 });
 
 /**
+ * #1243: the quick add in the north star's drawer is a real way in for a
+ * document. Its box opens the file picker when clicked and takes a file
+ * dropped on it; either way the full form opens with the file already in its
+ * reading lane. It used to be a dashed label that did neither.
+ */
+test("the quick add's box takes a document by click or by drop, and opens the full form with it", async ({ page }) => {
+  test.skip(test.info().project.name.startsWith("mobile"), "the north star's drawer is the desk's; the pocket creates from its own sheet");
+  test.setTimeout(90_000);
+  await answerPushWithoutAService(page);
+  await page.goto("/api/auth/login?returnTo=/home");
+  await page.getByRole("link", { name: workerAccount("administrator") }).click();
+  await settleArrival(page);
+  await ensureWorkerAdministrator(page);
+  households.track(await seedHousehold(page));
+
+  const openQuickAdd = async () => {
+    await page.goto("/home");
+    await settleArrival(page);
+    await page.locator("#nstar").click();
+    await expect(page.locator("#createdrawer")).toHaveClass(/\bopen\b/);
+  };
+  const expectFormHoldsDocument = async () => {
+    await expect(page).toHaveURL(/\/create$/);
+    await expect(page.locator("body")).toHaveClass(/\bdoc\b/);
+    await expect(page.locator("#rc-file")).toContainText(DOCUMENT);
+  };
+
+  try {
+    await openQuickAdd();
+    const chooser = page.waitForEvent("filechooser");
+    await page.locator("#cdrop").click();
+    await (await chooser).setFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+    await expectFormHoldsDocument();
+
+    await openQuickAdd();
+    const dataTransfer = await page.evaluateHandle(({ name, bytes }) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([new Uint8Array(bytes)], name, { type: "application/pdf" }));
+      return transfer;
+    }, { name: DOCUMENT, bytes: [...DOCUMENT_BYTES] });
+    await page.locator("#cdrop").dispatchEvent("dragover", { dataTransfer });
+    await page.locator("#cdrop").dispatchEvent("drop", { dataTransfer });
+    await expectFormHoldsDocument();
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+/**
  * #1279: the phone's create form reads a picked document as the desk does
  * (design/v19/create-phone-reading.html, owner's "14a"). The reading card
  * lands straight under TYPE in place of the "add a document" row, page one
