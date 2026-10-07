@@ -115,7 +115,8 @@ export async function purgeScannerStage(job: ClaimedScanJob, record: ScanRecover
       .where(and(eq(documentStagingObjects.documentId, job.documentId), eq(documentStagingObjects.storageKey, record.stagingStorageKey), eq(documentStagingObjects.status, "pending")));
     await transaction.update(documents).set({
       lifecycle: "rejected",
-      scanStatus: failureCode === "malware_detected" ? "infected" : "error",
+      // A file the scan passed but the renderer could not open (ADR-0033) was scanned clean.
+      scanStatus: failureCode === "malware_detected" ? "infected" : failureCode === "unsupported_structure" ? "clean" : "error",
       failureCode,
       updatedAt: now,
     }).where(and(eq(documents.id, job.documentId), eq(documents.lifecycle, "scanning")));
@@ -130,7 +131,9 @@ export async function purgeScannerStage(job: ClaimedScanJob, record: ScanRecover
       actorUserId: null,
       entityType: "document",
       entityId: job.documentId,
-      action: failureCode === "malware_detected" ? "document_rejected_malware" : "document_rejected_scanner",
+      action: failureCode === "malware_detected"
+        ? "document_rejected_malware"
+        : failureCode === "unsupported_structure" ? "document_rejected_structure" : "document_rejected_scanner",
       changes: { itemId: record.itemId, reason: failureCode },
     });
     return true;

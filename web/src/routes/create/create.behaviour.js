@@ -1,8 +1,8 @@
 import { goto } from "$app/navigation";
 import { WorkspaceError, activeHousehold, applyCommand, attachItemDocument } from "$lib/data/workspace.js";
 import {
-  CAP_READING, FOCUS_READING, FOCUS_REFUSED, FOCUS_UNDRAWABLE, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
-  WHY_UNDRAWABLE, captionOf, readPickedDocument, suggestionsToCarry,
+  CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
+  WHY_UNDRAWABLE, captionOf, focusAfterScan, readPickedDocument, suggestionsToCarry,
 } from "$lib/data/document-read.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
 import { screenScope } from "$lib/teardown.js";
@@ -328,7 +328,7 @@ export function mountCreate() {
     delete readcard.dataset.page;
     readcard.dataset.reading = "true";
     readHead.textContent = READING_HEAD;
-    focusline.textContent = FOCUS_READING;
+    focusline.textContent = FOCUS_SCANNING;
     focusWhy.innerHTML = WHY_READING;
     capline.textContent = CAP_READING;
     honest.textContent = "";
@@ -403,7 +403,13 @@ export function mountCreate() {
     const householdId = (household ?? await activeHousehold()).id;
     if (!current()) return;
 
-    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal });
+    /* ADR-0033 step 5: the focus line moves on from the virus check to the
+       preview the moment the scan has passed, before anything opens the file. */
+    const onScanned = (/** @type {boolean} */ scanned) => {
+      if (!current() || pageState !== "pending") return;
+      focusline.textContent = focusAfterScan(scanned);
+    };
+    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned });
 
     const page = outcomes.page.then((outcome) => {
       if (!current()) {

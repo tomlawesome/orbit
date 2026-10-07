@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resetDocumentConfigForTests } from "@/server/documents/config";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
+import { validateSupportedDocumentStructure } from "@/server/documents/validation";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { syntheticPdf } from "../../../tests/support/synthetic-documents";
 import { readHeldImapAttachment, holdImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
@@ -19,6 +20,13 @@ vi.mock("@/server/documents/scanner", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/server/documents/scanner")>(),
   scanFileWithClamAv: vi.fn(),
 }));
+
+// ADR-0033: the structure check is where pdf.js and the image decoders first
+// open the bytes, so it is spied on (still real) to prove the scan comes first.
+vi.mock("@/server/documents/validation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/documents/validation")>();
+  return { ...actual, validateSupportedDocumentStructure: vi.fn(actual.validateSupportedDocumentStructure) };
+});
 
 // The administrator's upload limit (#1285) is proven in
 // src/server/upload-limit.test.ts; here it answers the configured default,
@@ -38,6 +46,7 @@ afterEach(async () => {
   resetDocumentConfigForTests();
   limit.effective = null;
   vi.mocked(scanFileWithClamAv).mockReset();
+  vi.mocked(validateSupportedDocumentStructure).mockClear();
   if (root) await rm(root, { recursive: true, force: true });
 });
 
@@ -128,6 +137,47 @@ describe("private IMAP attachment holding", () => {
     expect(scanFileWithClamAv).toHaveBeenCalledTimes(1);
     const written = await readdir(join(root, "objects"), { recursive: true });
     expect(written.some((file) => String(file).endsWith(".bin"))).toBe(false);
+  });
+
+  it("required mode: scans a mailed attachment before anything opens it (ADR-0033)", async () => {
+    root = await mkdtemp(join(tmpdir(), "orbit-imap-scan-first-"));
+    configure("required");
+    const order: string[] = [];
+    vi.mocked(scanFileWithClamAv).mockImplementation(async () => {
+      order.push("scan");
+      return { status: "clean" };
+    });
+    vi.mocked(validateSupportedDocumentStructure).mockImplementationOnce(async () => {
+      order.push("open");
+      return true;
+    });
+    await scanAndHoldImapAttachment({
+      bytes: syntheticPdf("scan first"),
+      filename: "scan-first.pdf",
+      declaredMediaType: "application/pdf",
+      recipientUserId: "10000000-0000-4000-8000-000000000001",
+      receiptId: "20000000-0000-4000-8000-000000000002",
+      mailboxIngestion: true,
+    });
+    expect(order).toEqual(["scan", "open"]);
+  });
+
+  it.each([
+    ["infected", { status: "infected", signature: "Eicar-Test-Signature" }, "malware_detected"],
+    ["unreachable", { status: "error", reason: "unavailable" }, "scanner_unavailable"],
+  ] as const)("required mode: never opens a mailed attachment whose scan was %s (ADR-0033)", async (_label, outcome, message) => {
+    root = await mkdtemp(join(tmpdir(), "orbit-imap-scan-stops-"));
+    configure("required");
+    vi.mocked(scanFileWithClamAv).mockResolvedValue(outcome);
+    await expect(scanAndHoldImapAttachment({
+      bytes: syntheticPdf("scan stops"),
+      filename: "scan-stops.pdf",
+      declaredMediaType: "application/pdf",
+      recipientUserId: "10000000-0000-4000-8000-000000000001",
+      receiptId: "20000000-0000-4000-8000-000000000002",
+      mailboxIngestion: true,
+    })).rejects.toThrow(message);
+    expect(validateSupportedDocumentStructure).not.toHaveBeenCalled();
   });
 
   it("allocates the storage key before writing and removes it when registration fails", async () => {

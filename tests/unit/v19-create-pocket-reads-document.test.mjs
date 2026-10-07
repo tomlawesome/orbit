@@ -50,7 +50,10 @@ afterEach(() => {
 describe("#1279: one read of a picked document, shared by the desk and the phone", () => {
   it("lands page one and hands back only the four fields the forms carry", async () => {
     stubFetch((href) => href.endsWith("/item-document-preview")
-      ? new Response(new Uint8Array([0xff, 0xd8]), { status: 200, headers: { "content-type": "image/jpeg", "x-orbit-scan": "clean" } })
+      ? new Response(
+        `${JSON.stringify({ stage: "scanned", scanned: true })}\n${JSON.stringify({ stage: "preview", mediaType: "image/jpeg", bytes: "/9g=" })}\n`,
+        { status: 200, headers: { "content-type": "application/x-ndjson; charset=utf-8" } },
+      )
       : json({
         extracted: true, attachmentDisposition: "attachable",
         suggestions: [
@@ -88,6 +91,23 @@ describe("#1279: one read of a picked document, shared by the desk and the phone
     expect(whyLines("<b>a server's words</b><br>stay one line")).toHaveLength(1);
   });
 
+  it("tells the card when the virus check is done, before the picture (ADR-0033 step 5)", async () => {
+    /** @type {string[]} */
+    const order = [];
+    stubFetch((href) => href.endsWith("/item-document-preview")
+      ? new Response(
+        `${JSON.stringify({ stage: "scanned", scanned: false })}\n${JSON.stringify({ stage: "preview", mediaType: "image/png", bytes: "iVA=" })}\n`,
+        { status: 200, headers: { "content-type": "application/x-ndjson; charset=utf-8" } },
+      )
+      : json({ extracted: false, suggestions: [], attachmentDisposition: "attachable" }));
+    const { readPickedDocument, focusAfterScan, FOCUS_SCANNED, FOCUS_PREVIEWING } = await import("../../web/src/lib/data/document-read.js");
+    const { page } = readPickedDocument("h1", file(), { onScanned: (scanned) => order.push(`scanned:${scanned}`) });
+    await page.then((outcome) => order.push(outcome.kind));
+    expect(order).toEqual(["scanned:false", "up"]);
+    expect(focusAfterScan(true)).toBe(FOCUS_SCANNED);
+    expect(focusAfterScan(false)).toBe(FOCUS_PREVIEWING);
+  });
+
   it("never carries a suggestion over what someone typed", async () => {
     const { suggestionsToCarry } = await import("../../web/src/lib/data/document-read.js");
     const typed = /** @type {Record<string, string>} */ ({ provider: "Octopus", reference: " " });
@@ -109,6 +129,12 @@ describe("#1279: the phone's create form shows page one and the read, as the des
     expect(pocket).toMatch(/import \{[^}]*\breadPickedDocument\b[^}]*\} from "\$lib\/data\/document-read\.js"/u);
     expect(desk).toMatch(/import \{[^}]*\breadPickedDocument\b[^}]*\} from "\$lib\/data\/document-read\.js"/u);
     expect(desk).not.toMatch(/\bpreviewPickedDocument\(|\binspectPickedDocument\(/u);
+  });
+
+  it("moves the phone card's focus line from the virus check to the preview (ADR-0033 step 5)", () => {
+    expect(pocket).toMatch(/line: FOCUS_SCANNING,/u);
+    expect(pocket).toMatch(/picked\.line = focusAfterScan\(scanned\);/u);
+    expect(pocket).toMatch(/readPickedDocument\(householdId, file, \{ signal: controller\.signal, onScanned \}\)/u);
   });
 
   it("lands the reading card straight under TYPE, in place of the row that picked the file", () => {

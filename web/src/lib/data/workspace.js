@@ -1595,12 +1595,18 @@ async function postDocumentBytes(url, file, headers, { retryCsrf = true, signal 
  * `scanned` is false only where the instance has scanning switched off —
  * the lane says "scanned clean" only when something scanned it.
  *
+ * The route answers NDJSON as each stage ends (ADR-0033 step 5): first the
+ * virus check, which `onStage("scanned", { scanned })` reports the moment
+ * its line arrives so the card can say Orbit has moved on to the preview,
+ * then the picture itself, or the server's own words if it could not be
+ * drawn. A refusal before the scan finished is an ordinary JSON error.
+ *
  * @param {string} householdId
  * @param {File} file
- * @param {{ signal?: AbortSignal }} [options]
+ * @param {{ signal?: AbortSignal, onStage?: (stage: "scanned", detail: { scanned: boolean }) => void }} [options]
  * @returns {Promise<{ url: string, scanned: boolean }>}
  */
-export async function previewPickedDocument(householdId, file, { signal } = {}) {
+export async function previewPickedDocument(householdId, file, { signal, onStage } = {}) {
   const response = await postDocumentBytes(
     `/api/households/${encodeURIComponent(householdId)}/item-document-preview`,
     file,
@@ -1608,10 +1614,80 @@ export async function previewPickedDocument(householdId, file, { signal } = {}) 
     { signal },
   );
   if (!response.ok) await json(response); /* throws the server's own words */
-  return {
-    url: URL.createObjectURL(await response.blob()),
-    scanned: response.headers.get("x-orbit-scan") === "clean",
+  const unreachable = () => new WorkspaceError(`Orbit could not be reached (${response.status})`, { status: response.status });
+  let scanned = false;
+  for await (const event of ndjsonLines(response, unreachable)) {
+    if (event.error) {
+      throw new WorkspaceError(
+        typeof event.error.message === "string" ? event.error.message : `Orbit could not be reached (${response.status})`,
+        { status: response.status, code: typeof event.error.code === "string" ? event.error.code : undefined },
+      );
+    }
+    if (event.stage === "scanned") {
+      scanned = event.scanned === true;
+      onStage?.("scanned", { scanned });
+    } else if (event.stage === "preview") {
+      if (!PREVIEW_MEDIA_TYPES.has(event.mediaType) || typeof event.bytes !== "string") {
+        throw new WorkspaceError("Orbit could not draw a picture of this document", { status: response.status, code: "document_preview_failed" });
+      }
+      let bytes;
+      try {
+        bytes = Uint8Array.from(atob(event.bytes), (char) => char.charCodeAt(0));
+      } catch {
+        throw unreachable();
+      }
+      return { url: URL.createObjectURL(new Blob([bytes], { type: event.mediaType })), scanned };
+    }
+  }
+  /* The stream ended without a picture or an error: something answered
+     that was never the whole route. */
+  throw unreachable();
+}
+
+/** The only pictures the preview route draws; anything else is refused. */
+const PREVIEW_MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/svg+xml"]);
+
+/**
+ * The JSON objects of an NDJSON body, one per line, as they arrive. A line
+ * that is not a JSON object means whatever answered was not Orbit's route.
+ *
+ * @param {Response} response
+ * @param {() => Error} unreachable
+ * @returns {AsyncGenerator<Record<string, any>>}
+ */
+async function* ndjsonLines(response, unreachable) {
+  if (!response.body) throw unreachable();
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let pending = "";
+  /** @param {string} text */
+  const parse = (text) => {
+    let value;
+    try {
+      value = JSON.parse(text);
+    } catch {
+      throw unreachable();
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw unreachable();
+    return value;
   };
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      pending += value;
+      let newline = pending.indexOf("\n");
+      while (newline !== -1) {
+        const text = pending.slice(0, newline).trim();
+        pending = pending.slice(newline + 1);
+        if (text) yield parse(text);
+        newline = pending.indexOf("\n");
+      }
+    }
+    if (pending.trim()) yield parse(pending.trim());
+  } finally {
+    /* Stopping early (a picture, an error) lets the rest of the body go. */
+    reader.cancel().catch(() => undefined);
+  }
 }
 
 /**

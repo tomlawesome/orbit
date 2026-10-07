@@ -171,45 +171,6 @@ function objectStreamPdf(): Buffer {
   return bytes;
 }
 
-function compressedJavaScriptObjectStreamPdf(): Buffer {
-  const objectStreamHeader = text("4 0 ");
-  const objectStreamBody = Buffer.concat([objectStreamHeader, text("<< /S /JavaScript /JS (app.alert) >>")]);
-  const compressedObjectStream = deflateSync(objectStreamBody);
-  const content = text("q Q");
-  const objects = [
-    object(1, "<< /Type /Catalog /Pages 2 0 R /OpenAction 4 0 R >>"),
-    object(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
-    object(3, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R >>"),
-    object(5, streamObject(`/Type /ObjStm /N 1 /First ${objectStreamHeader.length} /Length ${compressedObjectStream.length} /Filter /FlateDecode`, compressedObjectStream)),
-    object(6, streamObject(`/Length ${content.length}`, content)),
-  ];
-  let bytes = text("%PDF-1.7\n");
-  const offsets = new Map<number, number>();
-  for (const entry of objects) {
-    offsets.set(entry.id, bytes.length);
-    bytes = Buffer.concat([bytes, text(`${entry.id} 0 obj\n`), entry.body, text("\nendobj\n")]);
-  }
-  const xrefOffset = bytes.length;
-  const xrefEntries = [
-    xrefEntry(0, 0, 65535),
-    xrefEntry(1, offsets.get(1)!, 0),
-    xrefEntry(1, offsets.get(2)!, 0),
-    xrefEntry(1, offsets.get(3)!, 0),
-    xrefEntry(2, 5, 0),
-    xrefEntry(1, offsets.get(5)!, 0),
-    xrefEntry(1, offsets.get(6)!, 0),
-    xrefEntry(1, xrefOffset, 0),
-  ];
-  const compressedEntries = deflateSync(Buffer.concat(xrefEntries));
-  bytes = Buffer.concat([
-    bytes,
-    text("7 0 obj\n"),
-    streamObject(`/Type /XRef /Size 8 /Root 1 0 R /W [1 4 2] /Index [0 8] /Length ${compressedEntries.length} /Filter /FlateDecode`, compressedEntries),
-    text(`\nendobj\nstartxref\n${xrefOffset}\n%%EOF\n`),
-  ]);
-  return bytes;
-}
-
 function incrementalPdf(): Buffer {
   const content = pageContent();
   const base = buildClassicPdf(pageObjects(object(5, streamObject(`/Length ${content.length}`, content))));
@@ -236,14 +197,8 @@ export interface ModernPdfOptions {
   packed?: Record<number, string>;
   /** Extra top-level streams: id to [dictionary entries, payload]. */
   streams?: Record<number, [string, Buffer]>;
-  /** Object stream dictionary entries other than /N and /First; defaults to a typed Flate stream. */
-  objectStreamDictionary?: string;
-  /** Encodes the object stream payload; defaults to Flate. */
-  encodeObjectStream?: (payload: Buffer) => Buffer;
   /** Lists every object as its own /Index subsection, so /Type /XRef lands far from the dictionary's start. */
   longIndex?: boolean;
-  /** false writes the cross-reference rows unpredicted, with no nested /DecodeParms dictionary. */
-  xrefPredictor?: boolean;
 }
 
 /**
@@ -277,8 +232,8 @@ export function syntheticModernPdf(options: ModernPdfOptions = {}): Buffer {
     header += `${id} ${body.length} `;
     body += `${packed[id]}\n`;
   }
-  const encoded = (options.encodeObjectStream ?? deflateSync)(text(header + body));
-  const objectStreamDictionary = options.objectStreamDictionary ?? "/Type /ObjStm /Filter /FlateDecode";
+  const encoded = deflateSync(text(header + body));
+  const objectStreamDictionary = "/Type /ObjStm /Filter /FlateDecode";
 
   let bytes = text("%PDF-1.7\n%\xe2\xe3\xcf\xd3\n");
   const offsets = new Map<number, number>();
@@ -316,13 +271,12 @@ export function syntheticModernPdf(options: ModernPdfOptions = {}): Buffer {
     Buffer.from([2]),
     Buffer.from(row.map((value, column) => (value - (index === 0 ? 0 : rows[index - 1][column])) & 0xff)),
   ]));
-  const usePredictor = options.xrefPredictor ?? true;
-  const compressedRows = deflateSync(Buffer.concat(usePredictor ? predicted : rows));
+  const compressedRows = deflateSync(Buffer.concat(predicted));
   const index = options.longIndex
     ? Array.from({ length: xrefId + 1 }, (_, id) => `${id} 1`).join(" ")
     : `0 ${xrefId + 1}`;
   const identifier = "0123456789abcdef0123456789abcdef";
-  const xrefDictionary = `${usePredictor ? "/DecodeParms << /Columns 6 /Predictor 12 >> " : ""}/Filter /FlateDecode /ID [<${identifier}> <${identifier}>] `
+  const xrefDictionary = `/DecodeParms << /Columns 6 /Predictor 12 >> /Filter /FlateDecode /ID [<${identifier}> <${identifier}>] `
     + `/Index [${index}] /Length ${compressedRows.length} /Root 1 0 R /Size ${xrefId + 1} /Type /XRef /W [1 4 1]`;
   return Buffer.concat([
     bytes,
@@ -335,26 +289,36 @@ export function syntheticModernPdf(options: ModernPdfOptions = {}): Buffer {
 const javaScriptAction = "<< /S /JavaScript /JS (app.alert\\(1\\)) >>";
 const launchAction = "<< /S /Launch /F (payload.exe) >>";
 
-/** Active content and embedded files hidden inside the object stream of an otherwise ordinary modern PDF. */
-export const syntheticModernPdfHiddenFeatures: ReadonlyArray<{ name: string; options: ModernPdfOptions }> = [
-  { name: "named JavaScript", options: { catalog: "/Names << /JavaScript 6 0 R >>", packed: { 6: "<< /Names [(run) 7 0 R] >>", 7: javaScriptAction } } },
-  { name: "open action JavaScript", options: { catalog: "/OpenAction 6 0 R", packed: { 6: javaScriptAction } } },
-  { name: "open action launch", options: { catalog: "/OpenAction 6 0 R", packed: { 6: launchAction } } },
-  { name: "link annotation JavaScript", options: { page: "/Annots [6 0 R]", packed: { 6: "<< /Type /Annot /Subtype /Link /Rect [0 0 99 99] /A 7 0 R >>", 7: javaScriptAction } } },
-  { name: "link annotation launch", options: { page: "/Annots [6 0 R]", packed: { 6: "<< /Type /Annot /Subtype /Link /Rect [0 0 99 99] /A 7 0 R >>", 7: launchAction } } },
-  { name: "form field JavaScript", options: { catalog: "/AcroForm << /Fields [6 0 R] >>", page: "/Annots [6 0 R]", packed: { 6: "<< /Type /Annot /Subtype /Widget /FT /Tx /T (field) /Rect [0 0 99 20] /P 3 0 R /AA << /K 7 0 R >> >>", 7: javaScriptAction } } },
-  { name: "outline JavaScript", options: { catalog: "/Outlines 6 0 R", packed: { 6: "<< /Type /Outlines /First 7 0 R /Last 7 0 R /Count 1 >>", 7: `<< /Title (Open) /Parent 6 0 R /A ${javaScriptAction} >>` } } },
-  { name: "XFA form", options: { catalog: "/AcroForm << /Fields [] /XFA 6 0 R >>", streams: { 6: ["", text("<xdp:xdp xmlns:xdp=\"http://ns.adobe.com/xdp/\"><template/></xdp:xdp>")] } } },
-  { name: "embedded file", options: { catalog: "/Names << /EmbeddedFiles 6 0 R >>", packed: { 6: "<< /Names [(payload.bin) 7 0 R] >>", 7: "<< /Type /Filespec /F (payload.bin) /EF << /F 8 0 R >> >>" }, streams: { 8: ["", text("payload")] } } },
-  {
-    name: "embedded file on a file attachment with no /Type names",
-    options: { page: "/Annots [6 0 R]", packed: { 6: "<< /Subtype /FileAttachment /Rect [0 0 9 9] /FS << /F (payload.bin) /EF << /F 8 0 R >> >> >>" }, streams: { 8: ["", text("payload")] } },
-  },
-  {
-    name: "launch in an untyped object stream with an escaped filter name",
-    options: { catalog: "/OpenAction 6 0 R", packed: { 6: launchAction }, objectStreamDictionary: "/Fil#74er /FlateDecode" },
-  },
+/**
+ * Active content and attachments in an otherwise ordinary modern PDF, packed
+ * into its object stream as producers write them. Orbit accepts every one
+ * (ADR-0033): pdf.js opens the file with scripting and XFA off, so none of it
+ * ever runs in Orbit.
+ */
+export const syntheticPdfActiveContent: ReadonlyArray<{ name: string; options: ModernPdfOptions }> = [
+  { name: "document-level JavaScript", options: { catalog: "/Names << /JavaScript 6 0 R >>", packed: { 6: "<< /Names [(run) 7 0 R] >>", 7: javaScriptAction } } },
+  { name: "a JavaScript open action", options: { catalog: "/OpenAction 6 0 R", packed: { 6: javaScriptAction } } },
+  { name: "a launch open action", options: { catalog: "/OpenAction 6 0 R", packed: { 6: launchAction } } },
+  { name: "a link annotation running JavaScript", options: { page: "/Annots [6 0 R]", packed: { 6: "<< /Type /Annot /Subtype /Link /Rect [0 0 99 99] /A 7 0 R >>", 7: javaScriptAction } } },
+  { name: "a form field with a keystroke script", options: { catalog: "/AcroForm << /Fields [6 0 R] >>", page: "/Annots [6 0 R]", packed: { 6: "<< /Type /Annot /Subtype /Widget /FT /Tx /T (field) /Rect [0 0 99 20] /P 3 0 R /AA << /K 7 0 R >> >>", 7: javaScriptAction } } },
+  { name: "an XFA form", options: { catalog: "/AcroForm << /Fields [] /XFA 6 0 R >>", streams: { 6: ["", text("<xdp:xdp xmlns:xdp=\"http://ns.adobe.com/xdp/\"><template/></xdp:xdp>")] } } },
+  { name: "an embedded file", options: { catalog: "/Names << /EmbeddedFiles 6 0 R >>", packed: { 6: "<< /Names [(payload.bin) 7 0 R] >>", 7: "<< /Type /Filespec /F (payload.bin) /EF << /F 8 0 R >> >>" }, streams: { 8: ["", text("payload")] } } },
 ];
+
+/** A PDF with `pages` pages sharing one content stream, for the page cap. */
+export function syntheticPdfWithPages(pages: number): Buffer {
+  const content = pageContent();
+  const kids = Array.from({ length: pages }, (_, index) => `${index + 6} 0 R`).join(" ");
+  const objects = [
+    object(1, "<< /Type /Catalog /Pages 2 0 R >>"),
+    object(2, `<< /Type /Pages /Kids [${kids}] /Count ${pages} >>`),
+    object(4, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
+    object(5, streamObject(`/Length ${content.length}`, content)),
+    ...Array.from({ length: pages }, (_, index) => object(index + 6, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>")),
+  ];
+  objects.push(object(3, "<< /Producer (page cap fixture) >>"));
+  return buildClassicPdf(objects).bytes;
+}
 
 export const syntheticStructurePdfFixtures = [
   { name: "classic compressed stream with indirect length and filter array", bytes: classicCompressedPdf() },
@@ -362,47 +326,3 @@ export const syntheticStructurePdfFixtures = [
   { name: "compressed object stream", bytes: objectStreamPdf() },
   { name: "incremental update with a new catalog generation", bytes: incrementalPdf() },
 ] as const;
-
-export function syntheticPdfWithHarmlessFeatureName(): Buffer {
-  return classicCompressedPdf(pageContent("Harmless text /JavaScript /Launch /RichMedia /XFA"));
-}
-
-export function syntheticPdfWithCompressedJavaScript(): Buffer {
-  return compressedJavaScriptObjectStreamPdf();
-}
-
-export function syntheticPdfWithCatalogFeature(feature: string): Buffer {
-  const content = pageContent();
-  const baseObjects = pageObjects(object(5, streamObject(`/Length ${content.length}`, content)));
-  const catalog = baseObjects.find(({ id }) => id === 1);
-  if (!catalog) throw new Error("catalog fixture object is missing");
-  const extras: PdfObject[] = [];
-  if (feature.includes("/Launch")) {
-    catalog.body = text("<< /Type /Catalog /Pages 2 0 R /OpenAction 6 0 R >>");
-    extras.push(object(6, "<< /S /Launch /F (payload.bin) >>"));
-  } else if (feature.includes("/OpenAction")) {
-    catalog.body = text("<< /Type /Catalog /Pages 2 0 R /OpenAction 6 0 R >>");
-    extras.push(object(6, "<< /S /JavaScript /JS (app.alert) >>"));
-  } else if (feature.includes("/EmbeddedFiles")) {
-    catalog.body = text("<< /Type /Catalog /Pages 2 0 R /Names 6 0 R >>");
-    extras.push(
-      object(6, "<< /EmbeddedFiles 7 0 R >>"),
-      object(7, "<< /Names [(payload.bin) 8 0 R] >>"),
-      object(8, "<< /Type /Filespec /F (payload.bin) /EF << /F 9 0 R >> >>"),
-      object(9, streamObject("/Length 7", text("payload"))),
-    );
-  } else if (feature.includes("/RichMedia")) {
-    catalog.body = text("<< /Type /Catalog /Pages 2 0 R /RichMedia 6 0 R >>");
-    extras.push(object(6, "<< /Type /RichMedia >>"));
-  } else if (feature.includes("/XFA")) {
-    const xfa = text("<template/>");
-    catalog.body = text("<< /Type /Catalog /Pages 2 0 R /AcroForm 6 0 R >>");
-    extras.push(
-      object(6, "<< /XFA 7 0 R >>"),
-      object(7, streamObject(`/Length ${xfa.length}`, xfa)),
-    );
-  } else {
-    catalog.body = text(`<< /Type /Catalog /Pages 2 0 R ${feature} >>`);
-  }
-  return buildClassicPdf([...baseObjects, ...extras]).bytes;
-}

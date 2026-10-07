@@ -85,15 +85,17 @@ safety property while giving both sources one approval boundary.
 - Mailbox ingestion is PDF-only in v1. Non-PDF parts, including incidental
   inline logos and signatures, are not downloaded or staged; they still count
   toward the raw-message and MIME-structure bounds. A part represented as a
-  PDF must be detected as a structurally valid PDF after bounded download or
-  the receipt fails safely. A message with no PDF candidate reaches a bounded
+  PDF must pass the malware scan and then open in pdf.js after bounded
+  download, or the receipt fails safely (ADR-0033). A message with no PDF candidate reaches a bounded
   private `no_supported_pdf` outcome and cannot produce a review draft or
   household mutation. Direct upload continues to support PDF, JPEG, and PNG.
   All supported direct-upload formats remain subject to the same
   hostile-content, parser/OCR isolation, bounded-output, and indirect prompt
   injection controls as mailbox PDFs.
-- Archives and active content are not decompressed or previewed. Extracted PDF
-  input is bounded to the existing parser character limit.
+- Archives are not decompressed or previewed. Active content inside an
+  accepted PDF is never run: the preview renderer has scripting and XFA off
+  (ADR-0033). Extracted PDF input is bounded to the existing parser character
+  limit.
 - Raw messages, subjects, bodies, headers, and unsafe bytes are not durably
   stored by Orbit. Supported PDFs are scanned before encrypted staging;
   malware and incomplete staging are purged immediately.

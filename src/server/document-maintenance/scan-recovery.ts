@@ -7,9 +7,11 @@
  * write re-checks that token and the document generation. The staged
  * ciphertext is decrypted under the `scanner_recovery` purpose, written to
  * quarantine, scanned, and the quarantine copy discarded before anything
- * else. Only a `clean` result reaches encryption, a ciphertext write and the
- * publish transaction; a retryable outage reschedules the job, and every
- * other outcome ends the recovery terminally with the stage purged.
+ * else. Only a `clean` result reaches the structure check (ADR-0033: nothing
+ * opened the staged bytes before this scan), and only a file that passes it
+ * reaches encryption, a ciphertext write and the publish transaction; a
+ * retryable outage reschedules the job, and every other outcome ends the
+ * recovery terminally with the stage purged.
  */
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -19,6 +21,7 @@ import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wra
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
+import { validateSupportedDocumentStructure, type SupportedDocumentMediaType } from "@/server/documents/validation";
 import {
   isScannerRecoveryExpired,
   retryableScannerFailureCode,
@@ -228,6 +231,13 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
         return;
       }
       await purgeScannerStage(job, record, scan.status === "infected" ? "malware_detected" : "scanner_failed");
+      return;
+    }
+    // ADR-0033: a staged upload was held before anything opened it, so the
+    // renderer's structure check runs here, after the recovery scan passed,
+    // exactly where the upload path would have run it.
+    if (!await validateSupportedDocumentStructure(plaintext, record.mediaType as SupportedDocumentMediaType)) {
+      await purgeScannerStage(job, record, "unsupported_structure");
       return;
     }
     finalStorageKey = storage.createStorageKey();

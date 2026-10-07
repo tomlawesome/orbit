@@ -18,8 +18,8 @@ import { extractTextWithTika, MAX_EXTRACTED_CHARACTERS } from "@/server/document
 import { requireHouseholdAccess } from "@/server/workspace-access";
 const parserRecoveryMessage = "Suggestions are unavailable right now. Review the fields manually; the document can still be attached.";
 const processorDisabledMessage = "Automatic suggestions require the optional document processor. You can still attach this file.";
-const unsupportedStructureMessage = "Orbit could not safely inspect this document structure. Choose another PDF, JPEG, or PNG before adding the item.";
-const prohibitedContentMessage = "Orbit rejected this document because it contains prohibited active or embedded content. Choose another document.";
+const unsupportedStructureMessage = "Orbit could not open this document. Choose another PDF, JPEG, or PNG.";
+const passwordRequiredMessage = "This document needs a password to open, so Orbit cannot show or read it. Choose a copy without a password.";
 
 export const itemDocumentSuggestionFields = [
   "title",
@@ -147,35 +147,10 @@ export async function inspectItemDocument(input: {
   const received = await storage.receive(input.body, operationId, maxBytes, input.declaredBytes);
   try {
     const mediaType = detectDocumentMediaType(received.leadingBytes);
-    const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
-    try {
-      const structureReason = await classifyDocumentStructure(bytes, mediaType);
-      if (structureReason !== "supported_structure") {
-        log.info({
-          event: "document.inspection",
-          state: "exhausted",
-          reason: structureReason,
-          action: "check_parser",
-          impact: "document_processing_blocked",
-        });
-        return {
-          extracted: false,
-          message: structureReason === "prohibited_content" ? prohibitedContentMessage : unsupportedStructureMessage,
-          suggestions: [],
-          attachmentDisposition: "rejected",
-          reason: structureReason,
-        };
-      }
-      log.info({ event: "document.inspection", state: "ready", reason: "supported_structure", action: "none" });
-      if (config.scanMode !== "required") {
-        return {
-          extracted: false,
-          message: parserRecoveryMessage,
-          suggestions: buildDocumentSuggestions(input.filename, undefined),
-          attachmentDisposition: "attachable",
-          reason: structureReason,
-        };
-      }
+    // ADR-0033: the scan comes before anything opens the file -- not the
+    // structure check's pdf.js or image decoder, not Tika. ClamAV reads the
+    // quarantine copy over its own socket; nothing here has read it yet.
+    if (config.scanMode === "required") {
       log.info({ event: "document.scan", state: "starting", action: "check_scanner" });
       const scanStartedAt = Date.now();
       const scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
@@ -220,6 +195,36 @@ export async function inspectItemDocument(input: {
         );
       }
       log.info({ event: "document.scan", state: "ready", action: "none", durationMs: scanMs });
+    }
+    const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
+    try {
+      const structureReason = await classifyDocumentStructure(bytes, mediaType);
+      if (structureReason !== "supported_structure") {
+        log.info({
+          event: "document.inspection",
+          state: "exhausted",
+          reason: structureReason,
+          action: "check_parser",
+          impact: "document_processing_blocked",
+        });
+        return {
+          extracted: false,
+          message: structureReason === "password_required" ? passwordRequiredMessage : unsupportedStructureMessage,
+          suggestions: [],
+          attachmentDisposition: "rejected",
+          reason: structureReason,
+        };
+      }
+      log.info({ event: "document.inspection", state: "ready", reason: "supported_structure", action: "none" });
+      if (config.scanMode !== "required") {
+        return {
+          extracted: false,
+          message: parserRecoveryMessage,
+          suggestions: buildDocumentSuggestions(input.filename, undefined),
+          attachmentDisposition: "attachable",
+          reason: structureReason,
+        };
+      }
       let text = "";
       let extracted = false;
       let message: string | undefined;

@@ -136,6 +136,31 @@ describe("item document preview (pre-attachment page one)", () => {
     expect(result.scanned).toBe(false);
   });
 
+  describe("announces the end of the scan, so the reading card can say it moved on (ADR-0033)", () => {
+    it("says the scan passed after scanning and before the renderer opens anything", async () => {
+      const onScanned = vi.fn();
+      await previewItemDocument({ ...input(), onScanned });
+      expect(onScanned).toHaveBeenCalledExactlyOnceWith(true);
+      expect(mocks.scan.mock.invocationCallOrder[0]).toBeLessThan(onScanned.mock.invocationCallOrder[0]);
+      expect(onScanned.mock.invocationCallOrder[0]).toBeLessThan(mocks.readQuarantine.mock.invocationCallOrder[0]);
+      expect(onScanned.mock.invocationCallOrder[0]).toBeLessThan(mocks.render.mock.invocationCallOrder[0]);
+    });
+
+    it("says nothing was scanned where scanning is disabled", async () => {
+      mocks.config.mockReturnValue({ ...config, scanMode: "disabled" as const });
+      const onScanned = vi.fn();
+      await previewItemDocument({ ...input(), onScanned });
+      expect(onScanned).toHaveBeenCalledExactlyOnceWith(false);
+    });
+
+    it("never announces a scan that did not pass", async () => {
+      mocks.scan.mockResolvedValue({ status: "infected" });
+      const onScanned = vi.fn();
+      await expect(previewItemDocument({ ...input(), onScanned })).rejects.toMatchObject({ code: "document_malware_detected" });
+      expect(onScanned).not.toHaveBeenCalled();
+    });
+  });
+
   it("refuses a file that is not a PDF, JPEG or PNG without reading it further", async () => {
     mocks.receive.mockResolvedValue(received(Buffer.from("plain text, not a document")));
     await expect(previewItemDocument(input())).rejects.toMatchObject({ code: "document_type_unsupported", status: 415 });
