@@ -74,9 +74,9 @@ for (const height of HEIGHTS) {
     const gate = toEdges(await box("#dusk .gate-wrap a"));
     const farewell = toEdges(await box("#dusk .farewell"));
 
-    // The button sits inside the ring by design (§10: "the ask sits inside
-    // the ring directly beneath the word") — that overlap is not the bug.
-    // Only the farewell colliding with either is.
+    // The button stands under the ring since #1253 (orbit-site's lockup),
+    // and the farewell hangs under the button: none of the three may meet.
+    expect(intersects(ring, gate), "ring overlaps the sign-back-in button").toBe(false);
     expect(intersects(ring, farewell), "ring overlaps the farewell").toBe(false);
     expect(intersects(gate, farewell), "the sign-back-in button overlaps the farewell").toBe(false);
   });

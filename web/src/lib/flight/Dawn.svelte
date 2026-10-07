@@ -171,14 +171,15 @@
     </g>
   </svg></div>
 
-  <!-- The 08-14 hero (§15, owner 2026-08-17): the ring at 420px, the word set
-       plain inside it with no filled centre, the ratified pill inside the ring
-       beneath the word. No ribbon, no footer. Drawn for THIS size rather than
-       scaled up from the favicon geometry — at 420px the mark's own 9-unit
-       stroke renders ~19px and its 20-unit planet an 84px disc, which reads as
-       a heavy badge instead of a slim ring with a small body riding it. 2
-       units = ~4px of line, 7 units = a ~29px planet; the planet still sits on
-       the ring at radius 72. -->
+  <!-- The 08-14 hero (§15, owner 2026-08-17), as orbit-site draws it since
+       #1253: the ring --R wide (flight.css, `--R:min(400px,80vw,46svh)`, the
+       glyph's own width; the ring in it is .72R), the word set plain inside it
+       with no filled centre, the pill in the row under it. No ribbon, no
+       footer. The 200-unit viewBox is the site's: a slim ring with a small
+       body riding it, the planet on the ring at radius 72. The `runner` is the
+       light that runs the ring while the dawn's first pieces come
+       (body.loading); the ring's three circles carry pathLength so one dash
+       draws them (draw-ring). -->
   <div class="loginchrome">
     <div class="lockup">
       <div class="glyph" id="login-glyph"><svg width="420" height="420" viewBox="0 0 200 200">
@@ -189,10 +190,10 @@
           <linearGradient id="trail" gradientUnits="userSpaceOnUse" x1="46.5" y1="51.8" x2="163" y2="63.5"><stop offset="0" stop-color="#ffd68c" stop-opacity="0"/><stop offset=".46" stop-color="#ffd68c" stop-opacity=".08"/><stop offset="1" stop-color="#ffdea0" stop-opacity=".75"/></linearGradient>
         </defs>
         <g class="lux"><circle cx="100" cy="100" r="71" fill="url(#disclit)"/><circle cx="100" cy="100" r="71" fill="url(#discwarm)"/></g>
-        <g class="lux"><circle cx="100" cy="100" r="72" fill="none" stroke="url(#ringlit)" stroke-width="9" stroke-opacity=".05"/>
-        <circle cx="100" cy="100" r="72" fill="none" stroke="url(#ringlit)" stroke-width="3.6" stroke-opacity=".12"/></g>
-        <circle class="ring" cx="100" cy="100" r="72" fill="none" stroke="url(#ringlit)" stroke-width="1.6"/>
-        <g class="tr"><path d="M46.5 51.8 A72 72 0 0 1 163 63.5" fill="none" stroke="url(#trail)" stroke-width="3.2" stroke-linecap="round"/><image class="world" href="/flight/door/planet-gold.webp" x="145" y="45.5" width="36" height="36"/></g></svg></div>
+        <g class="lux"><circle class="ring" cx="100" cy="100" r="72" fill="none" stroke="url(#ringlit)" stroke-width="9" stroke-opacity=".05" pathLength="100"/>
+        <circle class="ring" cx="100" cy="100" r="72" fill="none" stroke="url(#ringlit)" stroke-width="3.6" stroke-opacity=".12" pathLength="100"/></g>
+        <circle class="ring" cx="100" cy="100" r="72" fill="none" stroke="url(#ringlit)" stroke-width="1.6" pathLength="100"/>
+        <g class="tr"><path d="M46.5 51.8 A72 72 0 0 1 163 63.5" fill="none" stroke="url(#trail)" stroke-width="3.2" stroke-linecap="round"/><image class="world" href="/flight/door/planet-gold.webp" x="145" y="45.5" width="36" height="36"/></g></svg><i class="runner" aria-hidden="true"></i></div>
       <div class="name">orbit</div>
       <div class="gate-wrap">{@render children?.()}</div>
       <div class="state" role="status" aria-live="polite">

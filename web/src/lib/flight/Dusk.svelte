@@ -155,11 +155,16 @@
         <circle class="ring" cx="100" cy="100" r="72" fill="none" stroke="url(#d-ringlit)" stroke-width="1.6"/>
         <g class="tr"><path d="M46.5 51.8 A72 72 0 0 1 163 63.5" fill="none" stroke="url(#d-trail)" stroke-width="3.2" stroke-linecap="round"/><image class="world" href="/flight/door/planet-gold.webp" x="145" y="45.5" width="36" height="36"/></g></svg></div>
       <div class="name">orbit</div>
-      <div class="gate-wrap">{@render children?.()}</div>
-    </div>
-    <div class="farewell">
-      <div class="said">You are signed out.</div>
-      <div class="sub">the sky keeps turning &middot; your systems keep their orbits</div>
+      <!-- the farewell hangs off the way back in's own box (flight.css, "THE
+           FAREWELL RIDES WITH THE WAY BACK IN"): out of flow, so the lockup
+           is centred exactly as the door's is, and the same gap under the pill
+           at any height -->
+      <div class="gate-wrap">{@render children?.()}
+        <div class="farewell">
+          <div class="said">You are signed out.</div>
+          <div class="sub">the sky keeps turning &middot; your systems keep their orbits</div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
