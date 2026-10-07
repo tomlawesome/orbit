@@ -28,11 +28,11 @@
    * then unfolds in place, because a sheet never stacks on a sheet (§1.4).
    *
    * The reading card sits below the fields (§2.5, the desk's second lane)
-   * and only once a document is chosen. Reading is not wired on either
-   * dialect yet (create.behaviour.js, departure 1), and upload only on the
-   * desk's form (#1245), so the card holds
-   * the paper and says plainly that it is not read or kept; `readings` is
-   * where that build will hand the rows in.
+   * and only once a document is chosen. The host attaches the paper to the
+   * item it saves (#1245, both dialects); reading is wired on the desk's
+   * form only (create.behaviour.js, departure 1), so here the card holds the
+   * paper's name and size, and `readings` is where a phone read would hand
+   * the rows in.
    * @typedef {import('./entry.js').FormHousehold} FormHousehold
    * @typedef {{ label: string, value: string, sure: boolean, field: "provider" | "reference" | "dueDate" | "cost" }} Reading
    * @typedef {{
@@ -281,8 +281,6 @@
       </div>
       {#if readings.length}
         {@render readingRows()}
-      {:else}
-        <p class="pc-honest">Orbit does not read or keep documents from this form yet: the entry saves without this one.</p>
       {/if}
       <button type="button" class="p-pill pc-drop" onclick={() => { attachment = null; if (picker) picker.value = ""; }}>not this one</button>
     </section>
@@ -429,8 +427,9 @@
     text-transform:uppercase;color:var(--ok-text);grid-column:1}
   .pc-read-sure.unsure{color:var(--warm-text)}
   .pc-accept{grid-column:2;grid-row:1 / span 3}
-  .pc-honest{margin:4px 0 14px;font:var(--p-type-meta)/1.5 var(--mono);color:var(--ink-mid)}
   .pc-drop{--act:var(--overdue);--act-text:var(--overdue-text)}
+  /* With no readings the pill stands straight under the paper's row. */
+  .pc-paper + .pc-drop{margin-top:8px}
 
   @media (prefers-reduced-motion:reduce){ .pc-chip{transition:none} }
 </style>

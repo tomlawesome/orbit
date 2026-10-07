@@ -155,6 +155,21 @@ test("the create form will not save an entry nobody has named", async ({ page })
 const DOCUMENT = "chromium-synthetic.pdf";
 const DOCUMENT_BYTES = readFileSync(resolve(__dirname, "../support/fixtures", DOCUMENT));
 
+/** The pocket's form, filled and saved with a document picked (#1245, 11a). */
+async function savePocketEntryWithDocument(page: Page, name: string): Promise<void> {
+  await gotoCreate(page);
+  const form = page.getByRole("form", { name: "New entry" });
+  /* "add a document" opens this hidden picker; setting it is the same change. */
+  await form.locator('input[type="file"]').setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+  // The reading card holds the paper, and no longer says it will not be kept.
+  await expect(form.locator(".pc-reading")).toContainText(DOCUMENT);
+  await expect(form).not.toContainText("does not read or keep documents");
+  await form.getByRole("textbox", { name: "name", exact: true }).fill(name);
+  await form.getByRole("button", { name: "document", exact: true }).click();
+  await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+  await page.getByRole("button", { name: "Add to orbit" }).click();
+}
+
 /** The desk form, filled and saved with a document picked. */
 async function saveDeskEntryWithDocument(page: Page, name: string): Promise<void> {
   await gotoCreate(page);
@@ -175,11 +190,11 @@ async function itemIdOf(page: Page, householdId: string, title: string): Promise
 }
 
 /**
- * #1245: a document picked on the desk's /create is attached to the item it
- * saves — it used to be dropped with "documents are not wired up yet".
+ * #1245: a document picked on /create is attached to the item it saves — the
+ * desk's used to be dropped with "documents are not wired up yet", and the
+ * phone's with "was not kept" until the owner's 11a ruling (2026-10-07).
  */
 test("a document picked on the create form is attached to the saved item", async ({ page }) => {
-  test.skip(test.info().project.name.startsWith("mobile"), "the pocket's form still says it does not keep documents (#1245 open question)");
   test.setTimeout(90_000);
   await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
@@ -190,7 +205,10 @@ test("a document picked on the create form is attached to the saved item", async
 
   try {
     const name = "Boiler cover proving";
-    await saveDeskEntryWithDocument(page, name);
+    const pocket = test.info().project.name.startsWith("mobile");
+    await (pocket ? savePocketEntryWithDocument : saveDeskEntryWithDocument)(page, name);
+    // The pocket approaches the new item once the document is on it (§2.5).
+    if (pocket) await expect(page).toHaveURL(/\/item\/[0-9a-f-]{36}$/, { timeout: 30_000 });
     await expect.poll(() => itemIdOf(page, household.id, name), { timeout: 15_000 }).not.toBeNull();
     const itemId = (await itemIdOf(page, household.id, name)) as string;
     await expect.poll(async () => {
