@@ -26,12 +26,17 @@ proxy's own limit fails with "413" before it reaches Orbit. Set the proxy a
 little above the limit your administrator chooses: 51 MiB for the default,
 or 101 MiB to cover every possible setting.
 
-- nginx: `client_max_body_size 51m;` (or `101m;`). Its default is 1 MB, so
-  this setting is needed.
+Bringing a household in from an Orbit archive that includes documents sends
+a larger request, up to 172 MiB. If you will import archives, set the proxy
+to 172 MiB instead; it covers every document setting too.
+
+- nginx: `client_max_body_size 51m;` (or `101m;`, or `172m;`). Its default
+  is 1 MB, so this setting is needed.
 - Caddy: limits request bodies only if you set
-  `request_body { max_size 51MiB }` (or `101MiB`).
+  `request_body { max_size 51MiB }` (or `101MiB`, or `172MiB`).
 - Traefik: limits request bodies only if the buffering middleware sets
-  `maxRequestBodyBytes` (53477376 is 51 MiB; 105906176 is 101 MiB).
+  `maxRequestBodyBytes` (53477376 is 51 MiB; 105906176 is 101 MiB;
+  180355072 is 172 MiB).
 
 If the document limit is raised later, raise the proxy setting to match.
 

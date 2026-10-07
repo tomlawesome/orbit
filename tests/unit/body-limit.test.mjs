@@ -22,6 +22,7 @@ vi.mock("orbit/server/upload-limit", () => ({
 }));
 
 import { appErrorResponse } from "orbit/lib/app-error";
+import { MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "orbit/server/portable-archive-limits";
 import {
   SERVER_BODY_LIMIT,
   SMALL_BODY_LIMIT,
@@ -69,10 +70,26 @@ describe("which limit a route gets", () => {
       .resolves.toMatchObject({ limit: 100 * MIB, code: "document_too_large" });
   });
 
-  it("gives the portable-archive routes the server-wide ceiling, and every other route the small limit", async () => {
-    await expect(bodyLimitFor("/api/portable-archives/import", readLimit)).resolves.toMatchObject({ limit: SERVER_BODY_LIMIT });
+  it("gives every route but the upload and archive routes the small limit", async () => {
     await expect(bodyLimitFor("/api/admin/contact", readLimit)).resolves.toMatchObject({ limit: SMALL_BODY_LIMIT, code: "request_too_large" });
     await expect(bodyLimitFor(null, readLimit)).resolves.toMatchObject({ limit: SMALL_BODY_LIMIT });
+  });
+
+  it("lets through the largest archive import Orbit's own export can produce, well past 101 MiB (#1290)", async () => {
+    /* The body the import screen sends for an archive at the format's cap:
+       the encrypted archive as the export wrote it, at the longest ciphertext
+       the import accepts, plus the largest conflict list the route allows. The
+       ciphertext is measured, not built: a 171 MiB string proves nothing more. */
+    const conflictItemIds = Array.from({ length: 10_000 }, () => "00000000-0000-4000-8000-000000000000");
+    const archive = { version: 1, algorithm: "aes-256-gcm", kdf: "scrypt", salt: "s".repeat(22), iv: "i".repeat(16), authTag: "t".repeat(22), ciphertext: "" };
+    const envelope = JSON.stringify({ householdId: conflictItemIds[0], archive, passphrase: "p".repeat(256), conflictItemIds, currentPassword: "c".repeat(1_024) });
+    const largestBody = Buffer.byteLength(envelope) + MAX_ARCHIVE_CIPHERTEXT_CHARACTERS;
+    expect(largestBody).toBeGreaterThan(101 * MIB);
+    for (const route of ["/api/portable-archives/import", "/api/portable-archives/preview"]) {
+      const rule = await bodyLimitFor(route, readLimit);
+      expect(rule.limit).toBeGreaterThanOrEqual(largestBody);
+      expect(rule.limit).toBeLessThanOrEqual(SERVER_BODY_LIMIT);
+    }
   });
 
   it("keeps the small limit above the 512 KB every route has run under until now", () => {
