@@ -38,6 +38,8 @@ async function handleRoute(routeId, { cacheControl = "max-age=3600" } = {}) {
   const event = {
     route: { id: routeId },
     url: new URL(`http://orbit.test${routeId}`),
+    /* a GET, so no body: the body-size gate reads `request.body` first */
+    request: new Request(`http://orbit.test${routeId}`),
     cookies: {},
     locals: {},
     fetch: vi.fn(),
@@ -107,6 +109,7 @@ describe("hooks.server handle: cache-control on gated screens (#1264)", () => {
     const event = {
       route: { id: "/home" },
       url: new URL("http://orbit.test/home"),
+      request: new Request("http://orbit.test/home"),
       cookies: {},
       locals: {},
       fetch: vi.fn(),
