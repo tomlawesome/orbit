@@ -213,6 +213,10 @@ describe("publish-channel.sh", () => {
     const create = recorded.find((call) => call[1]?.includes("imagetools create"));
     expect(create[1]).toContain(`--tag ${IMAGE}:preview`);
     expect(create[1]).toContain(`${IMAGE}@${DIGEST}`);
+    // Without this flag buildx wraps a single-manifest source in a new index
+    // with a new digest, so the tag would land on something nobody validated
+    // or signed (#1179).
+    expect(create[1]).toContain("--prefer-index=false");
     // The verifier runs before anything touches the image, and publication
     // moves no bytes: a tag is created, nothing is pushed or attested. The
     // manifest verifier runs before the tag is created too (ADR-0031 #4).

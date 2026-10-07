@@ -246,7 +246,12 @@ fi
 printf '%s' "$GHCR_PUBLISH_TOKEN" | docker login ghcr.io -u tomlawesome --password-stdin
 
 # `:latest`, not `:stable`: install.sh defaults ORBIT_CHANNEL to latest.
+# --prefer-index=false copies the tested manifest as it is. By default buildx
+# wraps a single-manifest source in a new, unsigned OCI index with a new
+# digest (#1179); the check below would catch that, but only after the tags
+# had moved.
 docker buildx imagetools create \
+  --prefer-index=false \
   --tag "${image}:${version}" \
   --tag "${image}:latest" \
   "${image}@${PREVIEW_DIGEST}"
