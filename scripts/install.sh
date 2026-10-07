@@ -1,39 +1,48 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Orbit installer.
+# Orbit installer: the bootstrap shell around the install engine (#1212).
 #
-# Deploys a published, digest-pinned image. First installs can collect core
-# configuration from a controlling terminal; unattended runs require a safe
-# pre-provisioned configuration shape. It does not clone the repository: a
-# deployment needs compose assets and a published image, not source or tests.
+# Deploys a published, digest-pinned image. It does not clone the
+# repository: a deployment needs compose assets and a published image, not
+# source or tests. Building from source is a separate developer workflow;
+# see the README.
 #
-# Building from source is a separate developer workflow; see the README.
+# Three phases, two owners (#1212 build note F1). This script does what
+# touches Docker or the network before an image exists: tool checks, the
+# release manifest and its signatures, the pull, the image's labels and
+# banner, and the Docker facts the engine needs (gather_host_facts). It then
+# runs the install engine once, from the image it has just verified, as a
+# disposable `docker run --rm` one-off with the deployment directory
+# mounted (run_engine). The engine (src/lib/install-orchestrator.ts) does
+# everything between: target validation, the install/update menu and the
+# profile wizard on the terminal passed through to it, database-volume
+# safety, the deployment assets out of its own image, guided configuration,
+# the configuration migration, OIDC discovery, and the file transaction,
+# which it commits or rolls back. The engine never touches Docker (#295):
+# what Docker must do afterwards comes back in its outcome file, and this
+# script starts Compose, waits for readiness and prints the completion
+# screen. Nothing here writes a deployment file.
 #
 # Environment (besides the settings read below):
 #   ORBIT_LAUNCHER_CONFIG_TREE  set by orbit-launcher to an empty directory it
 #     created, mode 0700 and owned by the running user. On any exit whose
-#     event reason is configuration-failure the installer copies
+#     event reason is configuration-failure the engine copies
 #     scripts/configure.sh, scripts/installer-ui.sh and .env-orbit.example,
-#     as verified from the image, and .orbit-image, the resolved digest
-#     reference on one line, into it before rolling back, owner-only
-#     (0600/0700), all or nothing. It writes nothing,
-#     and says so in one stderr line, if the directory is missing, not a
-#     directory, a symlink, not mode 0700, not empty or not owned by the
-#     current user (#1225, docs/engine-events.md).
+#     from its own image, and .orbit-image, the resolved digest reference on
+#     one line, into it before rolling back, owner-only (0600/0700), all or
+#     nothing. It writes nothing, and says so in one stderr line, if the
+#     directory is missing, not a directory, a symlink, not mode 0700, not
+#     empty or not owned by the current user (#1225, docs/engine-events.md).
+#     This script only mounts the directory into the engine.
 
 readonly repository="${ORBIT_REPOSITORY:-tomlawesome/orbit}"
 readonly registry="${ORBIT_REGISTRY:-ghcr.io}"
 readonly channel="${ORBIT_CHANNEL:-latest}"
 readonly environment_file=".env-orbit"
-readonly compose_file="docker-compose.yml"
-readonly secrets_directory="${ORBIT_SECRETS_DIR:-.orbit-secrets}"
 readonly launcher_config_tree="${ORBIT_LAUNCHER_CONFIG_TREE:-}"
 readonly database_volume_key="orbit-db-data"
-# The `name:` the bundled docker-compose.yml declares (#999, #1239).
-readonly bundled_compose_project_name="orbit"
 readonly image_repository="${registry}/${repository}"
-readonly oidc_discovery_max_bytes=1048576
 # ADR-0031 #7: byte-identical to cosign.pub (scripts/get-orbit.test.mjs also
 # checks this, and the copy embedded in scripts/get-orbit.sh, against the
 # same file). Rotation: docs/releasing.md.
@@ -49,31 +58,11 @@ readonly countersign_oidc_issuer='https://token.actions.githubusercontent.com'
 # ORBIT_RELEASE_MANIFEST is not set. Never for user environments.
 readonly release_manifest_base_url="${ORBIT_INSTALL_TEST_MANIFEST_BASE_URL:-https://github.com/tomlawesome/orbit}"
 readonly installer_process_started_at="$SECONDS"
-readonly oidc_discovery_parser='const fs = require("node:fs");
-const maximumInputBytes = 1048576 + 8192;
-const input = fs.readFileSync(0, "utf8");
-if (Buffer.byteLength(input, "utf8") > maximumInputBytes) process.exit(1);
-const separator = input.indexOf("\n");
-if (separator <= 0) process.exit(1);
-const issuer = input.slice(0, separator);
-let document;
-try {
-  document = JSON.parse(input.slice(separator + 1));
-} catch {
-  process.exit(1);
-}
-if (document === null || typeof document !== "object" || Array.isArray(document)) process.exit(1);
-if (document.issuer !== issuer) process.exit(1);
-for (const field of ["authorization_endpoint", "token_endpoint", "jwks_uri"]) {
-  if (typeof document[field] !== "string") process.exit(1);
-  let endpoint;
-  try {
-    endpoint = new URL(document[field]);
-  } catch {
-    process.exit(1);
-  }
-  if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.hash) process.exit(1);
-}'
+# Where the engine one-off sees what this script hands it (run_engine).
+readonly engine_cli="/opt/orbit/cli/orbit.js"
+readonly engine_mount="/orbit-deploy"
+readonly engine_result_mount="/orbit-install-result"
+readonly engine_launcher_tree_mount="/orbit-launcher-config-tree"
 readonly app_readiness_probe='fetch("http://127.0.0.1:3000/api/health", { cache: "no-store", signal: AbortSignal.timeout(3000) })
   .then(async (response) => {
     let body;
@@ -181,51 +170,32 @@ else
   readonly release_manifest_stable=1
 fi
 
-staging_dir=""
-rollback_dir=""
 release_manifest_work_dir=""
+engine_work_dir=""
 cosign_usable=0
-deploy_container_id=""
-file_transaction_active=0
-file_transaction_committed=0
-target_was_empty=0
-database_volume_seen=0
-database_volume_checked=0
 compose_project_name=""
-compose_project_name_explicit=0
-# 1 while the project name is only the working-directory guess, so a later
-# derivation may still improve on it (#999); see derive_compose_project_name.
-compose_project_name_provisional=0
-database_volume_name=""
-configuration_migration_completed=0
 installer_ui_loaded=0
 installer_ui_phase=host
 installer_ui_component=host
 installer_failure_reason=""
 installer_failure_action=""
-installer_action=""
 selected_profile=""
-selected_model=""
-profile_change=0
 model_pull_requested=0
 model_pull_value=""
-launcher_tree_snapshot=""
-launcher_tree_path=""
-launcher_tree_state=idle
-guided_configuration_staged=0
-declare -a created_directories=()
-declare -A managed_was_present=()
+target_was_empty=0
 declare -a pending_ui_events=()
 
+# installer-ui.sh renders this script's own phases (build note F6). It is
+# sourced only from the deployment the engine has just committed, which the
+# engine copied out of the verified image at the asset's checked mode, and
+# only after bash -n: never from a deployment copy before the engine has
+# replaced it. Until then events are queued, and replayed here, exactly as
+# before; a failure before this point prints them as plain lines.
 load_installer_ui() {
-  local candidate
+  local candidate="scripts/installer-ui.sh"
 
-  [[ -n "$staging_dir" ]] || return 1
-  candidate="$staging_dir/scripts/installer-ui.sh"
   is_regular_non_symlink_file "$candidate" || return 1
-  # The caller has extracted this helper from the resolved image's own
-  # digest and completed bash -n before it can be sourced. Never source an
-  # existing deployment copy before those checks.
+  bash -n "$candidate" 2>/dev/null || return 1
   # shellcheck source=/dev/null
   source "$candidate"
   declare -F installer_ui_init >/dev/null || return 1
@@ -254,6 +224,16 @@ installer_ui_event() {
   fi
 }
 
+flush_pending_ui_events() {
+  local pending phase component state reason action elapsed
+  for pending in "${pending_ui_events[@]}"; do
+    IFS='|' read -r phase component state reason action elapsed <<< "$pending"
+    printf 'phase=%s component=%s state=%s reason=%s action=%s elapsed=%ss\n' \
+      "$phase" "$component" "$state" "$reason" "$action" "$elapsed"
+  done
+  pending_ui_events=()
+}
+
 default_failure_reason() {
   case "${installer_ui_phase:-host}" in
     host) printf 'docker-host' ;;
@@ -277,7 +257,6 @@ default_failure_action() {
 fail() {
   local reason action phase component elapsed
   reason="${installer_failure_reason:-$(default_failure_reason)}"
-  [[ "$reason" == configuration-failure ]] && hand_over_launcher_config_tree
   action="${installer_failure_action:-$(default_failure_action)}"
   phase="${installer_ui_phase:-host}"
   component="${installer_ui_component:-host}"
@@ -285,6 +264,7 @@ fail() {
   if [[ "$installer_ui_loaded" == 1 ]]; then
     installer_ui_emit "$phase" "$component" failed "$reason" "$action" "$elapsed" || true
   else
+    flush_pending_ui_events
     printf 'phase=%s component=%s state=failed reason=%s action=%s elapsed=%ss\n' \
       "$phase" "$component" "$reason" "$action" "$elapsed"
   fi
@@ -310,564 +290,6 @@ is_regular_non_symlink_file() {
   [[ -f "$1" && ! -L "$1" ]]
 }
 
-is_real_non_symlink_directory() {
-  [[ -d "$1" && ! -L "$1" ]]
-}
-
-target_is_empty() {
-  local entries
-  shopt -s nullglob dotglob
-  entries=(*)
-  shopt -u nullglob dotglob
-  [[ ${#entries[@]} -eq 0 ]]
-}
-
-has_mode() {
-  [[ "$(stat -c '%a' -- "$1" 2>/dev/null)" == "$2" ]]
-}
-
-is_owned_by_current_user() {
-  [[ "$(stat -c '%u' -- "$1" 2>/dev/null)" == "$EUID" ]]
-}
-
-# ORBIT_LAUNCHER_CONFIG_TREE (#1225): leave the launcher the configure tree
-# this run verified, on any exit whose event reason is configuration-failure
-# (fail calls this before the event and before rollback). Writing into a
-# directory another program owns follows the installer's own write and
-# rollback rules: never through a symlink, never over an existing entry
-# (noclobber creates, as configure.sh's lock does), and only from the private
-# copy taken out of the digest-pinned image at staging. The copy is
-# all-or-nothing with cleanup on failure: a failed or mismatched copy removes
-# everything written, and cleanup does the same if a signal interrupts it.
-# Every outcome returns 0: the exit it precedes is unchanged.
-launcher_tree_notice() {
-  printf 'Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because %s.\n' "$1" >&2
-}
-
-# Runs with the launcher's directory as the working directory: prints why it
-# must not be written, or nothing.
-launcher_tree_refusal() {
-  if ! is_owned_by_current_user .; then
-    printf 'it is not owned by the current user'
-  elif ! has_mode . 700; then
-    printf 'it is not mode 0700'
-  elif ! target_is_empty; then
-    printf 'it is not empty'
-  fi
-}
-
-# Runs with the launcher's directory as the working directory and umask 077,
-# so the files are 0600 and scripts is 0700. The refusal checks are repeated
-# from inside the directory being written, so a path swapped since the first
-# check is refused rather than written.
-launcher_tree_write() {
-  local snapshot="$1" reason asset
-
-  reason="$(launcher_tree_refusal)"
-  if [[ -n "$reason" ]]; then
-    launcher_tree_notice "$reason"
-    return 1
-  fi
-  if ! mkdir -- scripts 2>/dev/null; then
-    launcher_tree_notice "its scripts directory could not be created"
-    return 1
-  fi
-  for asset in "${launcher_config_tree_files[@]}"; do
-    if ! is_real_non_symlink_directory scripts || [[ -e "$asset" || -L "$asset" ]] ||
-      ! (set -o noclobber; cat -- "$snapshot/$asset" > "$asset") 2>/dev/null ||
-      ! cmp -s -- "$snapshot/$asset" "$asset"; then
-      rm -rf -- scripts .env-orbit.example .orbit-image
-      launcher_tree_notice "${asset} could not be written"
-      return 1
-    fi
-  done
-}
-
-hand_over_launcher_config_tree() {
-  local tree="$launcher_config_tree" snapshot="" reason=""
-
-  [[ -n "$tree" ]] || return 0
-  while [[ "$tree" == */ && "$tree" != / ]]; do
-    tree="${tree%/}"
-  done
-  if [[ -L "$tree" ]]; then
-    reason="it is a symlink"
-  elif [[ ! -e "$tree" ]]; then
-    reason="it does not exist"
-  elif [[ ! -d "$tree" ]]; then
-    reason="it is not a directory"
-  elif ! reason="$(cd -- "$tree" 2>/dev/null && launcher_tree_refusal)"; then
-    reason="it could not be entered"
-  elif [[ -z "$reason" ]] &&
-    ! snapshot="$(cd -- "${launcher_tree_snapshot:-/nonexistent}" 2>/dev/null && pwd -P)"; then
-    reason="the verified copies are unavailable"
-  fi
-  if [[ -n "$reason" ]]; then
-    launcher_tree_notice "$reason"
-    return 0
-  fi
-
-  launcher_tree_path="$tree"
-  launcher_tree_state=writing
-  if (
-    cd -- "$tree" 2>/dev/null || {
-      launcher_tree_notice "it could not be entered"
-      exit 1
-    }
-    umask 077
-    launcher_tree_write "$snapshot"
-  ); then
-    launcher_tree_state=complete
-  else
-    launcher_tree_state=failed
-  fi
-  return 0
-}
-
-is_preprovisioned_input() {
-  local child
-  local -a entries=() children=()
-
-  is_regular_non_symlink_file "$environment_file" && has_mode "$environment_file" 600 || return 1
-  is_real_non_symlink_directory "$secrets_directory" && has_mode "$secrets_directory" 700 || return 1
-
-  shopt -s nullglob dotglob
-  entries=(*)
-  children=("$secrets_directory"/*)
-  shopt -u nullglob dotglob
-  [[ ${#entries[@]} -eq 2 ]] || return 1
-  [[ -e "$environment_file" && -e "$secrets_directory" ]] || return 1
-
-  for child in "${children[@]}"; do
-    [[ -f "$child" && ! -L "$child" ]] || return 1
-    [[ -s "$child" ]] || return 1
-    has_mode "$child" 600 || return 1
-  done
-
-  is_regular_non_symlink_file "$secrets_directory/oidc-client-secret" || return 1
-  [[ -s "$secrets_directory/oidc-client-secret" ]] || return 1
-}
-
-remove_target_path() {
-  local path="$1"
-
-  if [[ -L "$path" || -f "$path" ]]; then
-    rm -f -- "$path"
-  elif [[ -d "$path" ]]; then
-    rm -rf -- "$path"
-  elif [[ -e "$path" ]]; then
-    rm -f -- "$path"
-  fi
-}
-
-rollback_transaction() {
-  local rollback_status=0
-  local path backup_path parent index
-
-  printf 'Orbit installer: restoring the previous file state.\n' >&2
-
-  # Remove paths that did not exist before the transaction. Never operate on a
-  # child through a parent symlink: configuration is untrusted input even
-  # though it came out of the resolved image itself.
-  for ((index = ${#managed_paths[@]} - 1; index >= 0; index--)); do
-    path="${managed_paths[index]}"
-    [[ "${managed_was_present[$path]:-0}" == 1 ]] && continue
-    parent="$(dirname -- "$path")"
-    if [[ "$parent" != "." && -L "$parent" ]]; then
-      printf 'Orbit installer: rollback refused to follow symlinked parent %s.\n' "$parent" >&2
-      rollback_status=1
-      continue
-    fi
-    if ! remove_target_path "$path"; then
-      printf 'Orbit installer: could not remove newly created %s during rollback.\n' "$path" >&2
-      rollback_status=1
-    fi
-  done
-
-  # Restore every backed-up path with a same-filesystem rename. The backup was
-  # made with cp -a, so this restores content, permissions and directory
-  # entries rather than reconstructing only the files the installer knows.
-  for path in "${managed_paths[@]}"; do
-    [[ "${managed_was_present[$path]:-0}" == 1 ]] || continue
-    parent="$(dirname -- "$path")"
-    if [[ "$parent" != "." ]] && ! is_real_non_symlink_directory "$parent"; then
-      printf 'Orbit installer: rollback cannot restore %s because its parent is missing or unsafe.\n' "$path" >&2
-      rollback_status=1
-      continue
-    fi
-    backup_path="$rollback_dir/original/$path"
-    if ! remove_target_path "$path"; then
-      printf 'Orbit installer: could not clear %s before rollback.\n' "$path" >&2
-      rollback_status=1
-      continue
-    fi
-    if ! mv -- "$backup_path" "$path"; then
-      printf 'Orbit installer: could not restore %s during rollback.\n' "$path" >&2
-      rollback_status=1
-    fi
-  done
-
-  # Only remove directories created by this invocation. Existing directories
-  # are deliberately left alone, even if they are empty after restoration.
-  for ((index = ${#created_directories[@]} - 1; index >= 0; index--)); do
-    path="${created_directories[index]}"
-    if [[ -L "$path" || -f "$path" ]]; then
-      if ! rm -f -- "$path"; then
-        printf 'Orbit installer: could not remove created directory path %s during rollback.\n' "$path" >&2
-        rollback_status=1
-      fi
-    elif [[ -d "$path" ]]; then
-      if ! rmdir -- "$path"; then
-        printf 'Orbit installer: could not remove created directory %s during rollback.\n' "$path" >&2
-        rollback_status=1
-      fi
-    elif [[ -e "$path" ]]; then
-      printf 'Orbit installer: created directory path %s became an unsupported file type during rollback.\n' "$path" >&2
-      rollback_status=1
-    fi
-  done
-
-  return "$rollback_status"
-}
-
-# The extraction container holds no process (`docker create` starts nothing),
-# but it must not outlive this run on any path, including every `fail`.
-remove_deploy_container() {
-  [[ -n "$deploy_container_id" ]] || return 0
-  docker rm -f "$deploy_container_id" >/dev/null 2>&1 || true
-  deploy_container_id=""
-}
-
-cleanup() {
-  local exit_status=$?
-
-  # A signal during the launcher handover leaves nothing half-written (#1225).
-  if [[ "$launcher_tree_state" == writing && ! -L "$launcher_tree_path" ]]; then
-    rm -rf -- "$launcher_tree_path/scripts" "$launcher_tree_path/.env-orbit.example" 2>/dev/null || true
-  fi
-
-  remove_deploy_container
-
-  if [[ "$file_transaction_active" == 1 && "$file_transaction_committed" == 0 ]]; then
-    if rollback_transaction; then
-      file_transaction_active=0
-    else
-      printf 'Orbit installer: rollback incomplete; recovery staging preserved at %s.\n' "$staging_dir" >&2
-      exit 1
-    fi
-  fi
-
-  if [[ -n "$staging_dir" ]] && ! rm -rf -- "$staging_dir"; then
-    printf 'Orbit installer: could not remove staging; recovery files remain at %s.\n' "$staging_dir" >&2
-    exit_status=1
-  fi
-
-  if [[ -n "$release_manifest_work_dir" ]] && ! rm -rf -- "$release_manifest_work_dir"; then
-    printf 'Orbit installer: could not remove a temporary directory: %s.\n' "$release_manifest_work_dir" >&2
-    exit_status=1
-  fi
-
-  exit "$exit_status"
-}
-
-trap cleanup EXIT
-
-# A non-empty target must already be a recognizable Orbit deployment, never an
-# arbitrary directory: the installer must not overwrite unrelated user files,
-# and a symlinked marker could redirect the install at attacker-controlled
-# paths. This runs before any pull or asset extraction.
-validate_target() {
-  if target_is_empty; then
-    target_was_empty=1
-    return
-  fi
-  if is_regular_non_symlink_file "$environment_file" &&
-    is_regular_non_symlink_file "$compose_file" &&
-    is_real_non_symlink_directory "$secrets_directory"; then
-    return
-  fi
-  if is_preprovisioned_input; then
-    target_was_empty=1
-    return
-  fi
-  # A leftover `.orbit-install-staging.*` directory here means an earlier
-  # install attempt was interrupted hard enough (SIGKILL, OOM, power loss)
-  # that the EXIT trap's own `rm -rf -- "$staging_dir"` never ran — an
-  # ordinary Ctrl-C/SIGTERM already cleans this up via `cleanup` above.
-  # Left in place, it makes an otherwise-empty target fail every one of the
-  # checks above (issue #383, install.sh:270 finding). Name it explicitly
-  # here instead of folding it into the generic refusal below, so the
-  # operator is not left doing filesystem archaeology to find what is
-  # blocking a retry; deliberately never auto-removed by this script, since
-  # only a human can confirm no other install is concurrently in progress.
-  local -a leftover_staging=()
-  shopt -s nullglob dotglob
-  leftover_staging=(.orbit-install-staging.*)
-  shopt -u nullglob dotglob
-  if [[ ${#leftover_staging[@]} -gt 0 ]]; then
-    fail "A previous install attempt was interrupted and left ${leftover_staging[*]} behind in this directory. Review its contents, then remove it (safe once you have confirmed no install is still in progress) and retry."
-  fi
-  fail "The installation directory is not empty and is not a recognizable Orbit deployment or safe pre-provisioned bootstrap. Refusing to install here."
-}
-
-# read_compose_project_name <compose-manifest>
-#
-# Prints <compose-manifest>'s own top-level `name:` value and returns 0, or
-# returns 1 with nothing printed when the file has no such line -- the
-# caller's directory-basename fallback then runs exactly as before (#921:
-# docker-compose.yml:1 declares `name: orbit`, but this derivation used to
-# fall from an explicit COMPOSE_PROJECT_NAME straight to a guess from the
-# current directory's basename, never reading the compose file's own name,
-# so a worktree or an operator directory not literally called "orbit"
-# addressed a Compose project that was never created). Deliberately a
-# top-level-key line read, not a YAML parse -- `name:` is Compose's own
-# top-level scalar key, so a line anchored at column 0 is enough, and this
-# must stay dependency-free (no docker, no node) since it runs inside the
-# same standalone, source-less scripts as read_environment_value above.
-# Identical text in end-maintenance.sh and repair.sh --
-# scripts/compose-project-name-resolution.test.mjs proves that. #999 brought
-# the same function here; install.sh was the one place #921 left out.
-read_compose_project_name() {
-  local compose_manifest="$1" line value
-  [[ -f "$compose_manifest" ]] || return 1
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" =~ ^name:[[:space:]]*(.*)$ ]]; then
-      value="${BASH_REMATCH[1]%%#*}"
-      value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-      value="${value%\"}"
-      value="${value#\"}"
-      value="${value%\'}"
-      value="${value#\'}"
-      [[ -n "$value" ]] || return 1
-      printf '%s' "$value"
-      return 0
-    fi
-  done < "$compose_manifest"
-  return 1
-}
-
-# derive_compose_project_name [compose-manifest]
-#
-# <compose-manifest> defaults to the target's own docker-compose.yml. The
-# re-derivation below passes the staged copy instead, because it has to run
-# before the first configuration migration persists a name and that is a
-# moment when the bundled file is still in the staging directory (#999).
-derive_compose_project_name() {
-  local compose_manifest="${1:-$compose_file}"
-  local requested_name="" configured_name="" declared_name=""
-  if is_regular_non_symlink_file "$environment_file" &&
-    configured_name="$(read_environment_value COMPOSE_PROJECT_NAME 2>/dev/null)"; then
-    [[ "$configured_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]] ||
-      fail "Could not verify the configured Docker Compose project name; refusing to start Compose."
-    compose_project_name="$configured_name"
-    compose_project_name_explicit=1
-  fi
-
-  if [[ -n "${COMPOSE_PROJECT_NAME:-}" ]]; then
-    requested_name="$COMPOSE_PROJECT_NAME"
-    [[ "$requested_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]] ||
-      fail "Could not determine a safe Docker Compose project name; refusing to start Compose."
-    if [[ "$compose_project_name_explicit" == 1 && "$compose_project_name" != "$requested_name" ]]; then
-      fail "The configured Docker Compose project name does not match the requested project; refusing to start Compose."
-    fi
-    compose_project_name="$requested_name"
-    compose_project_name_explicit=1
-  elif [[ "$compose_project_name_explicit" == 1 ]]; then
-    return
-  else
-    # docker-compose.yml's own `name: orbit` (#999). Read only through the
-    # same regular-file, no-symlink gate every other target read uses, and
-    # only trusted when it is a name Compose itself would accept -- anything
-    # else falls through to the basename guess below rather than aborting an
-    # otherwise healthy run, exactly as the three maintenance scripts #921
-    # fixed already do. On a fresh install the bundled compose file has not
-    # been extracted yet when this first runs, so nothing is found here and
-    # the guess below stands in; the install path re-derives once the file is
-    # in place, which is what makes `orbit` reachable at all.
-    if is_regular_non_symlink_file "$compose_manifest"; then
-      declared_name="$(read_compose_project_name "$compose_manifest" 2>/dev/null || true)"
-    fi
-    if [[ "$declared_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
-      compose_project_name="$declared_name"
-      compose_project_name_provisional=0
-      return
-    fi
-    requested_name="$(basename -- "$(pwd -P)")" ||
-      fail "Could not determine a safe Docker Compose project name; refusing to start Compose."
-    requested_name="$(printf '%s' "$requested_name" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-')" ||
-      fail "Could not determine a safe Docker Compose project name; refusing to start Compose."
-    while [[ "$requested_name" == [-_]* ]]; do requested_name="${requested_name:1}"; done
-    [[ -n "$requested_name" && "$requested_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]] ||
-      fail "Could not determine a safe Docker Compose project name; refusing to start Compose."
-    compose_project_name="$requested_name"
-    compose_project_name_provisional=1
-  fi
-}
-
-volume_belongs_to_deployment() {
-  local candidate_volume="$1" expected_image="$2"
-  local volume_labels="" volume_project="" volume_key="" extra=""
-  local db_containers="" app_containers=""
-  local db_id="" db_project="" db_service="" app_id="" app_project="" app_service="" app_image=""
-  local discovered_project=""
-  local db_count=0 app_count=0
-
-  # Docker's Go-template formatter does not guarantee shell-style escape
-  # interpretation. Use a literal delimiter and reject any extra field.
-  if ! volume_labels="$(docker volume inspect --format '{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}' "$candidate_volume" 2>/dev/null)"; then
-    return 2
-  fi
-  [[ ${#volume_labels} -le 256 ]] || return 2
-  [[ "$volume_labels" != *$'\n'* ]] || return 2
-  IFS='|' read -r volume_project volume_key extra <<< "$volume_labels"
-  [[ -n "$volume_project" && "$volume_project" =~ ^[a-z0-9][a-z0-9_-]*$ &&
-    "$volume_key" == "$database_volume_key" &&
-    "$candidate_volume" == "${volume_project}_${database_volume_key}" && -z "$extra" ]] || return 2
-
-  if ! db_containers="$(docker ps -a --filter "volume=$candidate_volume" \
-    --format '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}' 2>/dev/null)"; then
-    return 2
-  fi
-  [[ ${#db_containers} -le 65536 ]] || return 2
-  while IFS='|' read -r db_id db_project db_service extra ||
-    [[ -n "$db_id" || -n "$db_project" || -n "$db_service" || -n "$extra" ]]; do
-    [[ -z "$db_id" && -z "$db_project" && -z "$db_service" && -z "$extra" ]] && continue
-    [[ "$db_id" =~ ^[0-9a-f]{12,64}$ && "$db_project" == "$volume_project" && -z "$extra" ]] ||
-      return 2
-    [[ "$db_service" == "orbit-db" ]] || return 1
-    db_count=$((db_count + 1))
-  done <<< "$db_containers"
-  [[ "$db_count" == 1 ]] || return 1
-
-  if ! app_containers="$(docker ps -a --filter "label=com.docker.compose.project=$volume_project" \
-    --format '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}' 2>/dev/null)"; then
-    return 2
-  fi
-  [[ ${#app_containers} -le 65536 ]] || return 2
-  while IFS='|' read -r app_id app_project app_service extra ||
-    [[ -n "$app_id" || -n "$app_project" || -n "$app_service" || -n "$extra" ]]; do
-    [[ -z "$app_id" && -z "$app_project" && -z "$app_service" && -z "$extra" ]] && continue
-    [[ "$app_id" =~ ^[0-9a-f]{12,64}$ && "$app_project" == "$volume_project" && -z "$extra" ]] ||
-      return 2
-    [[ "$app_service" == "orbit-app" ]] || continue
-    app_count=$((app_count + 1))
-    [[ "$app_count" == 1 ]] || return 1
-    if ! app_image="$(docker inspect --format '{{.Config.Image}}' "$app_id" 2>/dev/null)"; then
-      return 2
-    fi
-    [[ ${#app_image} -le 4096 ]] || return 2
-    [[ "$app_image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] || return 2
-    [[ "$app_image" == "$expected_image" ]] || return 1
-  done <<< "$app_containers"
-  [[ "$app_count" == 1 ]] || return 1
-}
-
-verify_database_volume_safety() {
-  local volume_list="" volume="" old_image="" status=0 scoped=0 scope_project=""
-  local -a candidates=() scope_projects=()
-
-  if [[ "$database_volume_checked" == 1 ]]; then
-    [[ "$database_volume_seen" == 1 ]] || return 0
-    volume_list="$(docker volume ls --filter "name=^$database_volume_name\$" --format '{{.Name}}' 2>/dev/null)" ||
-      fail "Could not verify the existing Orbit database volume; refusing to start Compose."
-    [[ "$volume_list" == "$database_volume_name" && "$volume_list" != *$'\n'* ]] ||
-      fail "The existing Orbit database volume changed during installation; refusing to start Compose."
-    return 0
-  fi
-
-  derive_compose_project_name
-  # The projects this install may end up using. Before the bundled compose
-  # file is staged the name is only the directory-based guess; once staged it
-  # is replaced by that file's own `name:` (#999), which is `orbit`. Both are
-  # checked now so the later re-derivation cannot reach a volume this
-  # preflight never looked at.
-  scope_projects=("$compose_project_name")
-  if [[ "$compose_project_name_provisional" == 1 ]]; then
-    scope_projects+=("$bundled_compose_project_name")
-  fi
-  volume_list="$(docker volume ls --filter "name=$database_volume_key" --format '{{.Name}}' 2>/dev/null)" ||
-    fail "Could not verify the existing Orbit database volume; refusing to start Compose."
-  [[ ${#volume_list} -le 1048576 ]] ||
-    fail "Could not verify the existing Orbit database volume; refusing to start Compose."
-  while IFS= read -r volume || [[ -n "$volume" ]]; do
-    [[ -z "$volume" ]] && continue
-    [[ "$volume" == *"$database_volume_key" ]] || continue
-    # #1239: a fresh install is only blocked by the volume it would itself
-    # attach to, i.e. one named <this install's Compose project>_orbit-db-data.
-    # Another stack's volume on the same host is none of its business and is
-    # skipped without a word. An existing deployment keeps the broad search:
-    # its project may be a renamed one that only the volume's labels can prove.
-    if [[ "$target_was_empty" == 1 ]]; then
-      scoped=0
-      for scope_project in "${scope_projects[@]}"; do
-        [[ "$volume" == "${scope_project}_${database_volume_key}" ]] && scoped=1
-      done
-      [[ "$scoped" == 1 ]] || continue
-    fi
-    [[ "$volume" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ && "$volume" =~ (^|_)orbit-db-data$ ]] ||
-      fail "Could not verify the existing Orbit database volume; refusing to start Compose."
-    candidates+=("$volume")
-  done <<< "$volume_list"
-
-  if [[ "${#candidates[@]}" == 0 ]]; then
-    database_volume_checked=1
-    return 0
-  fi
-  if [[ "$target_was_empty" == 1 ]]; then
-    # #1151 O1-S3: names the volume and the exact command, rather than
-    # leaving the operator to guess -- the normal case this now reaches is
-    # a volume a prior interruption's own failure path (wait_for_deployment_
-    # readiness) could not remove, since on a fresh install nothing else
-    # could have created it.
-    fail "An existing Orbit database volume (${candidates[*]}) requires a recognized deployment with its preserved database credentials; refusing to start Compose. If this is leftover from a previous failed install rather than a deployment you want to keep, remove it first: docker volume rm -- ${candidates[*]}"
-  fi
-  [[ "${#candidates[@]}" == 1 ]] ||
-    fail "Multiple Orbit database volumes were found; refusing to start Compose until exactly one recognized deployment can be proven."
-  old_image="$(read_environment_value ORBIT_IMAGE 2>/dev/null)" ||
-    fail "Could not verify the existing Orbit database volume ownership; refusing to start Compose."
-  [[ "$old_image" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] ||
-    fail "Could not verify the existing Orbit database volume ownership; refusing to start Compose."
-
-  if volume_belongs_to_deployment "${candidates[0]}" "$old_image"; then
-    database_volume_name="${candidates[0]}"
-    database_volume_seen=1
-    discovered_project="$(docker volume inspect --format '{{index .Labels "com.docker.compose.project"}}' \
-      "$database_volume_name" 2>/dev/null)" ||
-      fail "Could not verify the existing Orbit database volume ownership; refusing to start Compose."
-    [[ "$discovered_project" =~ ^[a-z0-9][a-z0-9_-]*$ ]] ||
-      fail "Could not verify the existing Orbit database volume ownership; refusing to start Compose."
-    if [[ "$compose_project_name_explicit" == 1 && "$compose_project_name" != "$discovered_project" ]]; then
-      fail "The configured Docker Compose project does not match the recognized database volume; refusing to start Compose."
-    fi
-    compose_project_name="$discovered_project"
-    # The project that owns the recognised volume is the deployment's real
-    # identity: never let the later re-derivation (#999) replace it with the
-    # compose file's declared name and address a project this host has not
-    # got.
-    compose_project_name_provisional=0
-    if ! is_regular_non_symlink_file "$secrets_directory/postgres-password" ||
-      ! has_mode "$secrets_directory/postgres-password" 600; then
-      fail "An existing Orbit database volume requires the preserved POSTGRES_PASSWORD_FILE; refusing to start Compose."
-    fi
-  else
-    status=$?
-    case "$status" in
-      1) fail "Could not prove that the existing Orbit database volume belongs to this Orbit deployment; refusing to start Compose." ;;
-      *) fail "Could not verify the existing Orbit database volume ownership; refusing to start Compose." ;;
-    esac
-  fi
-  database_volume_checked=1
-}
-
-verify_database_password_preserved() {
-  local previous_password="$rollback_dir/original/$secrets_directory/postgres-password"
-  [[ "$database_volume_seen" == 1 ]] || return 0
-  if ! cmp -s "$previous_password" "$secrets_directory/postgres-password" ||
-    ! has_mode "$secrets_directory/postgres-password" 600; then
-    fail "The existing POSTGRES_PASSWORD_FILE changed during configuration; refusing to start Compose."
-  fi
-}
-
 has_controlling_terminal() {
   local terminal_fd=""
   if ! { exec {terminal_fd}<>/dev/tty; } 2>/dev/null; then
@@ -888,345 +310,22 @@ read_environment_value() {
   printf '%s' "$value"
 }
 
-is_valid_local_model() {
-  local value="$1"
-  [[ ${#value} -ge 1 && ${#value} -le 128 ]] || return 1
-  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9][A-Za-z0-9._-]*)?(@sha256:[0-9a-f]{64})?$ ]]
-}
+cleanup() {
+  local exit_status=$?
 
-check_local_ai_capacity() {
-  local cpu_count="" memory_kib="" available_kib=""
-  cpu_count="$(getconf _NPROCESSORS_ONLN 2>/dev/null || true)"
-  memory_kib="$(awk '/^MemTotal:/ { print $2; exit }' /proc/meminfo 2>/dev/null || true)"
-  available_kib="$(df -Pk . 2>/dev/null | awk 'NR == 2 { print $4; exit }')"
-  [[ "$cpu_count" =~ ^[0-9]+$ && "$memory_kib" =~ ^[0-9]+$ && "$available_kib" =~ ^[0-9]+$ ]] || return 2
-  ((10#$cpu_count >= 2 && 10#$memory_kib >= 6291456 && 10#$available_kib > 0))
-}
-
-current_deployment_profile() {
-  local profiles="" tika_url="" model=""
-  [[ -f "$environment_file" ]] || {
-    printf 'standard'
-    return 0
-  }
-  profiles="$(read_environment_value COMPOSE_PROFILES 2>/dev/null || true)"
-  tika_url="$(read_environment_value TIKA_URL 2>/dev/null || true)"
-  model="$(read_environment_value OLLAMA_MODEL 2>/dev/null || true)"
-  case "$profiles" in
-    "")
-      [[ -z "$tika_url" && -z "$model" ]] || return 1
-      printf 'standard'
-      ;;
-    processing)
-      [[ "$tika_url" == "http://orbit-tika:9998" && -z "$model" ]] || return 1
-      printf 'processing'
-      ;;
-    ai)
-      [[ -z "$tika_url" ]] && is_valid_local_model "$model" || return 1
-      printf 'ai'
-      ;;
-    processing,ai)
-      [[ "$tika_url" == "http://orbit-tika:9998" ]] && is_valid_local_model "$model" || return 1
-      printf 'full'
-      ;;
-    *) return 1 ;;
-  esac
-}
-
-show_update_identity() {
-  local terminal_fd="$1" existing_profile="$2"
-  local current_schema="legacy/unknown" current_version="legacy/unknown" current_digest="legacy/unknown" value=""
-
-  value="$(read_environment_value ORBIT_CONFIG_SCHEMA_VERSION 2>/dev/null || true)"
-  [[ "$value" == 1 ]] && current_schema="v1"
-  value="$(read_environment_value ORBIT_CONFIG_APPLIED_VERSION 2>/dev/null || true)"
-  [[ "$value" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] && current_version="$value"
-  value="$(read_environment_value ORBIT_CONFIG_APPLIED_DIGEST 2>/dev/null || true)"
-  if [[ "$value" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-    current_digest="$value"
-  else
-    value="$(read_environment_value ORBIT_IMAGE 2>/dev/null || true)"
-    [[ "$value" =~ @((sha256:)[0-9a-f]{64})$ ]] && current_digest="${BASH_REMATCH[1]}"
+  if [[ -n "$engine_work_dir" ]] && ! rm -rf -- "$engine_work_dir"; then
+    printf 'Orbit installer: could not remove a temporary directory: %s.\n' "$engine_work_dir" >&2
+    exit_status=1
+  fi
+  if [[ -n "$release_manifest_work_dir" ]] && ! rm -rf -- "$release_manifest_work_dir"; then
+    printf 'Orbit installer: could not remove a temporary directory: %s.\n' "$release_manifest_work_dir" >&2
+    exit_status=1
   fi
 
-  printf '\nCurrent: schema=%s version=%s digest=%s optional-profile=%s\n' \
-    "$current_schema" "$current_version" "$current_digest" "$existing_profile" >&"$terminal_fd"
-  printf 'Target: schema=v1 version=%s digest=%s channel=%s\n\n' \
-    "$image_version" "$applied_digest" "$channel" >&"$terminal_fd"
+  exit "$exit_status"
 }
 
-choose_deployment_profile() {
-  local terminal_fd="$1" existing_profile="$2" choice status=0
-
-  if [[ "$installer_action" == update ]]; then
-    show_update_identity "$terminal_fd" "$existing_profile"
-    printf '\nCurrent optional-service configuration is valid. Preserve it unless you deliberately choose to change it.\n\n' >&"$terminal_fd"
-    choice="$(installer_ui_select "$terminal_fd" \
-      'Optional services' preserve \
-      preserve 'Preserve current profile (recommended)' \
-      change 'Choose a different supported profile' \
-      back 'Back')" || status=$?
-    [[ "$status" == 0 ]] || return "$status"
-    case "$choice" in
-      preserve)
-        selected_profile="$existing_profile"
-        profile_change=0
-        choice="$(installer_ui_select "$terminal_fd" \
-          "Review: preserve the current ${existing_profile} profile and OIDC configuration." apply \
-          apply 'Continue without changing optional-service choices' \
-          cancel 'Cancel without changing files or services')" || status=$?
-        [[ "$status" == 0 ]] || return "$status"
-        [[ "$choice" == apply ]] || return 130
-        return 0
-        ;;
-      back) return 130 ;;
-    esac
-  fi
-
-  printf '\nProfiles keep data inside the private Compose network. Resource classes are fixed relative labels: standard, medium, and high; they are not hardware guarantees.\n' >&"$terminal_fd"
-  printf 'Required Orbit core and private scanning stay enabled; document processing and local AI are optional services.\n' >&"$terminal_fd"
-  printf 'Sign-in is chosen separately: local accounts always work, and an identity provider (OIDC) is optional (configure.sh --init).\n' >&"$terminal_fd"
-  printf 'Ollama is optional local infrastructure and is not yet consumed by Orbit product workflows.\n\n' >&"$terminal_fd"
-  choice="$(installer_ui_select "$terminal_fd" \
-    'Choose a deployment profile' standard \
-    standard 'Standard Orbit - required core and private scanning; standard relative resources' \
-    processing 'Document processing - optional local Tika; medium relative resources' \
-    full 'Full local stack - optional Tika and local Ollama; high relative resources' \
-    custom 'Custom - choose one fixed supported optional-service combination' \
-    back 'Back')" || status=$?
-  [[ "$status" == 0 ]] || return "$status"
-  [[ "$choice" != back ]] || return 130
-
-  if [[ "$choice" == custom ]]; then
-    choice="$(installer_ui_select "$terminal_fd" \
-      'Custom optional services' standard \
-      standard 'No optional service' \
-      processing 'Document processing only' \
-      ai 'Local Ollama infrastructure only' \
-      full 'Document processing and local Ollama infrastructure' \
-      back 'Back')" || status=$?
-    [[ "$status" == 0 ]] || return "$status"
-    [[ "$choice" != back ]] || return 130
-  fi
-
-  selected_profile="$choice"
-  selected_model=""
-  if [[ "$selected_profile" == ai || "$selected_profile" == full ]]; then
-    printf '\nA model choice is saved now. Model preparation will require a separate confirmation before any large download.\n' >&"$terminal_fd"
-    selected_model="$(installer_ui_read_text "$terminal_fd" 'Bounded local model identifier: ' 128)" || return $?
-    is_valid_local_model "$selected_model" || return 2
-    status=0
-    if check_local_ai_capacity; then
-      printf 'Host capacity check: the configured local-service CPU and memory envelope is available; model storage remains model-dependent.\n\n' >&"$terminal_fd"
-    else
-      status=$?
-      if [[ "$status" == 1 ]]; then
-        printf 'Host capacity check: this host is below the configured local-service CPU or memory envelope; model preparation may fail.\n\n' >&"$terminal_fd"
-      else
-        printf 'Host capacity check: CPU, memory or available storage could not be verified; model preparation remains operator-controlled.\n\n' >&"$terminal_fd"
-      fi
-    fi
-    status=0
-    choice="$(installer_ui_select "$terminal_fd" \
-      'Prepare the selected local model after Ollama becomes healthy? This can be a large download.' skip \
-      skip 'Save the model choice without downloading it now' \
-      pull 'Confirm the separate model download step' \
-      cancel 'Cancel without changing files or services')" || status=$?
-    [[ "$status" == 0 ]] || return "$status"
-    [[ "$choice" != cancel ]] || return 130
-    if [[ "$choice" == pull ]]; then
-      model_pull_requested=1
-      model_pull_value="$selected_model"
-    fi
-  fi
-
-  choice="$(installer_ui_select "$terminal_fd" \
-    'Review: profile only; sign-in mode is unchanged, and provider discovery (when OIDC is on) does not prove client authentication or a completed sign-in.' apply \
-    apply "Continue with the selected ${selected_profile} profile" \
-    cancel 'Cancel without changing files or services')" || status=$?
-  [[ "$status" == 0 ]] || return "$status"
-  [[ "$choice" == apply ]] || return 130
-  profile_change=1
-}
-
-resolve_installer_action() {
-  local terminal_fd="" choice status=0 default_action existing_profile
-
-  default_action=install
-  [[ "$target_was_empty" == 1 ]] || default_action=update
-  installer_action="${requested_action:-$default_action}"
-
-  if [[ -z "$requested_action" && "$plain_mode" == 0 ]] && has_controlling_terminal; then
-    exec {terminal_fd}<>/dev/tty
-    choice="$(installer_ui_select "$terminal_fd" \
-      'Greetings, what can we do for you today?' "$default_action" \
-      install Install \
-      update Update \
-      repair Repair \
-      exit Exit)" || status=$?
-    if [[ "$status" != 0 ]]; then
-      exec {terminal_fd}>&-
-      return "$status"
-    fi
-    installer_action="$choice"
-  fi
-
-  case "$installer_action" in
-    install)
-      [[ "$target_was_empty" == 1 ]] || {
-        [[ -z "$terminal_fd" ]] || exec {terminal_fd}>&-
-        fail "Install requires an empty target or safe pre-provisioned bootstrap; use Update for a recognized deployment."
-      }
-      ;;
-    update)
-      [[ "$target_was_empty" == 0 ]] || {
-        [[ -z "$terminal_fd" ]] || exec {terminal_fd}>&-
-        fail "Update requires a recognized existing Orbit deployment."
-      }
-      ;;
-    repair)
-      # Signposts repair; never dispatches into it. The two scripts' exit-code
-      # vocabularies collide — install's 3 is "blocked", repair's 3 is
-      # "attention" (docs/engine-events.md, "Repair stream") — so a caller that
-      # received one script's code through the other would misread the outcome
-      # precisely when it matters. The operator runs repair themselves (#533).
-      # The reason enum stays `repair-unavailable`: it is an allowlisted value
-      # in installer-ui.sh and part of the interface consumers pin to, so
-      # renaming it belongs in its own documented change, not here. What
-      # changes is the prose, which was a dead end — it named an issue number
-      # rather than the command that does the job.
-      installer_ui_emit rollback installer blocked repair-unavailable repair || true
-      printf 'Orbit installer: repair_unavailable; this installer does not perform repair. Run "bash scripts/repair.sh --check" from this directory to diagnose, then "--plan" to see what it would do. No deployment files or services were changed.\n' >&2
-      [[ -z "$terminal_fd" ]] || exec {terminal_fd}>&-
-      return 3
-      ;;
-    exit)
-      [[ -z "$terminal_fd" ]] || exec {terminal_fd}>&-
-      return 130
-      ;;
-    *) return 2 ;;
-  esac
-
-  existing_profile="$(current_deployment_profile)" || {
-    [[ -z "$terminal_fd" ]] || exec {terminal_fd}>&-
-    fail "The existing optional-service configuration is unsupported or ambiguous."
-  }
-  if [[ -n "$terminal_fd" ]]; then
-    choose_deployment_profile "$terminal_fd" "$existing_profile" || status=$?
-    exec {terminal_fd}>&-
-    return "$status"
-  fi
-
-  selected_profile="$existing_profile"
-  if [[ "$installer_action" == install ]]; then
-    selected_profile=standard
-    profile_change=1
-  fi
-}
-
-missing_required_fields() {
-  local readiness="$1" field missing=""
-  local -a required_fields=(APP_URL ORBIT_IMAGE OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CALLBACK_URL)
-  for field in "${required_fields[@]}"; do
-    if grep -q "^missing ${field}$" <<< "$readiness"; then
-      [[ -z "$missing" ]] || missing+=" "
-      missing+="$field"
-    fi
-  done
-  printf '%s' "$missing"
-}
-
-missing_guided_fields() {
-  local readiness="$1" field missing=""
-  local -a guided_fields=(APP_URL OIDC_ISSUER OIDC_CLIENT_ID OIDC_CALLBACK_URL)
-  for field in "${guided_fields[@]}"; do
-    if grep -q "^missing ${field}$" <<< "$readiness"; then
-      [[ -z "$missing" ]] || missing+=" "
-      missing+="$field"
-    fi
-  done
-  printf '%s' "$missing"
-}
-
-missing_configuration_fields() {
-  local readiness="$1" field missing=""
-  local -a fields=(APP_URL ORBIT_IMAGE OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CALLBACK_URL processing ai mail imap push)
-  for field in "${fields[@]}"; do
-    if grep -q "^missing ${field}$" <<< "$readiness"; then
-      [[ -z "$missing" ]] || missing+=" "
-      missing+="$field"
-    fi
-  done
-  printf '%s' "$missing"
-}
-
-print_noninteractive_configuration_guidance() {
-  local missing="$1"
-  printf 'Orbit installer: configuration fields requiring attention: %s.\n' "$missing" >&2
-  printf 'Orbit installer: non-interactive use requires a complete .env-orbit and, when ORBIT_AUTH_OIDC=true, an existing owner-only .orbit-secrets/oidc-client-secret file.\n' >&2
-  printf 'Orbit installer: safe next command in a controlling terminal: curl -fsSL https://raw.githubusercontent.com/tomlawesome/orbit/main/scripts/get-orbit.sh | bash\n' >&2
-  printf 'Orbit installer: configure with --init, provide the secret with --set-oidc-secret if OIDC is on, then verify with --check before rerunning automation.\n' >&2
-}
-
-verify_oidc_discovery() {
-  local issuer discovery_url response_status curl_status discovery_size
-  local discovery_file="$staging_dir/oidc-discovery.json"
-
-  issuer="$(read_environment_value OIDC_ISSUER)" ||
-    fail_with configuration-failure retry "OIDC_ISSUER requires attention; run the guided configuration and rerun the installer."
-  if [[ "$issuer" == */ ]]; then
-    discovery_url="${issuer}.well-known/openid-configuration"
-  else
-    discovery_url="${issuer}/.well-known/openid-configuration"
-  fi
-
-  curl_status=0
-  response_status="$(curl --silent --show-error --location --connect-timeout 5 --max-time 10 \
-    --max-filesize "$oidc_discovery_max_bytes" \
-    --header 'Accept: application/json' \
-    --proto '=https' --proto-redir '=https' --tlsv1.2 \
-    --output "$discovery_file" --write-out '%{http_code}' "$discovery_url" 2>/dev/null)" ||
-    curl_status=$?
-  if [[ "$curl_status" -ne 0 ]]; then
-    if [[ "$curl_status" == 3 || "$curl_status" == 63 ]]; then
-      fail_with configuration-failure retry "OIDC provider configuration could not be validated; review the OIDC discovery response."
-    fi
-    fail_with provider-unavailable retry "OIDC provider is unavailable; retry without changing the configuration."
-  fi
-
-  case "$response_status" in
-    2[0-9][0-9]) ;;
-    000) fail_with provider-unavailable retry "OIDC provider is unavailable; retry without changing the configuration." ;;
-    *) fail_with configuration-failure retry "OIDC provider configuration could not be validated; review the OIDC discovery response." ;;
-  esac
-
-  is_regular_non_symlink_file "$discovery_file" ||
-    fail_with configuration-failure retry "OIDC provider configuration could not be validated; review the OIDC discovery response."
-  chmod 600 "$discovery_file" 2>/dev/null ||
-    fail_with configuration-failure retry "OIDC provider configuration could not be validated; review the OIDC discovery response."
-  discovery_size="$(stat -c '%s' -- "$discovery_file" 2>/dev/null)"
-  [[ "$discovery_size" =~ ^[0-9]+$ && "$discovery_size" -le "$oidc_discovery_max_bytes" ]] ||
-    fail_with configuration-failure retry "OIDC provider configuration could not be validated; review the OIDC discovery response."
-
-  if ! {
-    printf '%s\n' "$issuer"
-    cat -- "$discovery_file"
-  } | docker run --rm \
-    --interactive \
-    --entrypoint node \
-    --network none \
-    --read-only \
-    --cap-drop ALL \
-    --security-opt no-new-privileges \
-    --user 1001:1001 \
-    --pids-limit 64 \
-    --memory 64m \
-    --cpus 0.5 \
-    "$resolved_reference" \
-    --input-type=commonjs -e "$oidc_discovery_parser" >/dev/null 2>&1; then
-    fail_with configuration-failure retry "OIDC provider configuration could not be validated; review the OIDC discovery response."
-  fi
-}
+trap cleanup EXIT
 
 # manifest_field <manifest-path> <literal-key>
 #
@@ -1278,6 +377,10 @@ self_fetch_release_manifest() {
   else
     fail "ORBIT_CHANNEL (${channel}) has no known release-manifest location to fetch on its own; set ORBIT_RELEASE_MANIFEST to an already-verified manifest for this channel instead."
   fi
+
+  # The release manifest is the one thing this script still fetches over
+  # curl; OIDC discovery moved into the engine (#1212 F5).
+  command -v curl >/dev/null 2>&1 || fail "curl is required to fetch the release manifest."
 
   release_manifest_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/orbit-install-manifest.XXXXXX")" ||
     fail "Could not create a private temporary directory for the release manifest."
@@ -1341,171 +444,231 @@ self_fetch_release_manifest() {
   release_manifest_path="$manifest_json"
 }
 
-prepare_configuration() {
-  local readiness readiness_status missing guided_missing existing_auth_mode configure_auth_mode
+# --- the engine's Docker facts (build note F3) ------------------------------
 
-  installer_ui_phase=configuration
-  installer_ui_component=configuration
-  installer_ui_event configuration configuration starting configuration-migration configure
-  # ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1 is configure.sh's own opt-in marker
-  # (#1151 O1-S4): it never trusts an ambient ORBIT_IMAGE on an existing
-  # deployment without it, since install.sh is the only caller that has
-  # already run this image through the registry and signature checks above.
-  if ! ORBIT_IMAGE="$resolved_reference" ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1 bash scripts/configure.sh; then
-    fail "Configuration failed; restoring the previous deployment."
+# One fact for the engine: the output of a docker call, base64-encoded byte
+# for byte as $(...) captured it (so building JSON here needs no escaping),
+# or null when the call failed. The engine applies every bound and pattern
+# to the decoded text itself (src/lib/host-facts.ts); a gap fails closed.
+encoded_fact() {
+  local output
+  if output="$("$@" 2>/dev/null)"; then
+    printf '"%s"' "$(printf '%s' "$output" | base64 | tr -d '\n')"
+  else
+    printf 'null'
   fi
-  is_regular_non_symlink_file "$environment_file" ||
-    fail "Configuration did not leave a regular, non-symlink ${environment_file}."
-  is_real_non_symlink_directory "$secrets_directory" ||
-    fail "Configuration did not leave a real, non-symlink ${secrets_directory} directory."
-  if [[ "$profile_change" == 1 ]]; then
-    if [[ "$selected_profile" == ai || "$selected_profile" == full ]]; then
-      ORBIT_IMAGE="$resolved_reference" bash scripts/configure.sh \
-        --set-deployment-profile "$selected_profile" "$selected_model" ||
-        fail "Deployment profile configuration failed; restoring the previous deployment."
-    else
-      ORBIT_IMAGE="$resolved_reference" bash scripts/configure.sh \
-        --set-deployment-profile "$selected_profile" ||
-        fail "Deployment profile configuration failed; restoring the previous deployment."
-    fi
-    unset selected_model
-  fi
-  is_regular_non_symlink_file "$environment_file" ||
-    fail "Configuration did not leave a regular, non-symlink ${environment_file}."
-  is_real_non_symlink_directory "$secrets_directory" ||
-    fail "Configuration did not leave a real, non-symlink ${secrets_directory} directory."
-
-  readiness_status=0
-  readiness="$(ORBIT_IMAGE="$resolved_reference" bash scripts/configure.sh --check 2>/dev/null)" || readiness_status=$?
-  if [[ "$readiness_status" -ne 0 ]]; then
-    missing="$(missing_required_fields "$readiness")"
-    if [[ -n "$missing" ]] && has_controlling_terminal; then
-      guided_missing="$(missing_guided_fields "$readiness")"
-      if [[ -n "$guided_missing" ]]; then
-        # An existing deployment already chose its sign-in mode (#918): hand
-        # it to --init so a local-only target is asked for APP_URL alone and
-        # an OIDC one for its provider fields, rather than re-asking the mode
-        # question or, under machine prompts, demanding the OIDC trio a
-        # local-only deployment never uses. A file with no ORBIT_AUTH_OIDC at
-        # all leaves the choice to --init. An operator's own explicit
-        # ORBIT_CONFIGURE_AUTH_MODE still wins.
-        existing_auth_mode="$(read_environment_value ORBIT_AUTH_OIDC 2>/dev/null || true)"
-        case "${ORBIT_CONFIGURE_AUTH_MODE:-}:${existing_auth_mode}" in
-          :true) configure_auth_mode=oidc ;;
-          :false) configure_auth_mode=local ;;
-          *) configure_auth_mode="${ORBIT_CONFIGURE_AUTH_MODE:-}" ;;
-        esac
-        if [[ -n "$configure_auth_mode" ]]; then
-          ORBIT_IMAGE="$resolved_reference" ORBIT_CONFIGURE_AUTH_MODE="$configure_auth_mode" bash scripts/configure.sh --init ||
-            fail "Guided configuration was cancelled or invalid; restoring the previous deployment."
-        else
-          ORBIT_IMAGE="$resolved_reference" bash scripts/configure.sh --init ||
-            fail "Guided configuration was cancelled or invalid; restoring the previous deployment."
-        fi
-      fi
-
-      readiness="$(ORBIT_IMAGE="$resolved_reference" bash scripts/configure.sh --check 2>/dev/null)" || true
-      if grep -q '^missing OIDC_CLIENT_SECRET$' <<< "$readiness"; then
-        ORBIT_IMAGE="$resolved_reference" ORBIT_CONFIGURE_TTY_INPUT=1 bash scripts/configure.sh --set-oidc-secret ||
-          fail "OIDC client secret collection was cancelled or invalid; restoring the previous deployment."
-      fi
-    elif [[ -n "$missing" ]]; then
-      print_noninteractive_configuration_guidance "$missing"
-      fail "Required configuration fields require attention; refusing to start Compose."
-    fi
-  fi
-
-  readiness_status=0
-  readiness="$(ORBIT_IMAGE="$resolved_reference" bash scripts/configure.sh --check 2>/dev/null)" || readiness_status=$?
-  if [[ "$readiness_status" -ne 0 ]]; then
-    missing="$(missing_configuration_fields "$readiness")"
-    [[ -n "$missing" ]] || missing="APP_URL ORBIT_IMAGE OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CALLBACK_URL"
-    fail "Configuration fields require attention (${missing}); refusing to start Compose."
-  fi
-
-  installer_ui_event configuration configuration running configuration-migration verify
 }
 
-# The configuration migration runs in the engine, through configure.sh's
-# --migrate pass-through, from the image this install resolved (#1210).
-run_configuration_migration() {
-  local configure_script="$1" migration_output="" migration_status=0
+base64_string() {
+  printf '"%s"' "$(printf '%s' "$1" | base64 | tr -d '\n')"
+}
 
-  migration_output="$(ORBIT_IMAGE="$resolved_reference" bash "$configure_script" \
-    --migrate --transaction --file "$environment_file" \
-    --orbit-image "$resolved_reference" \
-    --applied-version "$image_version" \
-    --compose-project-name "$compose_project_name" \
-    --applied-digest "$applied_digest" 2>/dev/null)" || migration_status=$?
-  [[ "$migration_status" == 0 ]] ||
-    fail "Configuration migration failed; restoring the previous deployment."
-  case "$migration_output" in
-    "Orbit configuration: already current schema v1 version "*|"Orbit configuration: migrated from schema "*)
-      printf '%s\n' "$migration_output"
+# gather_host_facts
+#
+# Runs the docker calls the engine's volume-safety check needs, with the
+# argv src/lib/database-volume-safety.ts documents for each, and leaves the
+# JSON in ORBIT_INSTALL_HOST_FACTS. Every Orbit database volume on the host
+# is described -- its labels, the containers attached to it, the containers
+# of the project its labels name and the image of each orbit-app among them
+# -- because which of them matters is the engine's decision (#1239, #1261),
+# not this script's.
+# The facts are JSON, not shell words: their quotes are data for the
+# engine's parser.
+# shellcheck disable=SC2089,SC2090
+gather_host_facts() {
+  local volume_list="" volume labels project container_id service
+  local volumes_json="" projects_json="" images_json="" volume_list_json
+  local -a volume_names=() project_names=() app_containers=()
+  local -A project_seen=() container_seen=()
+
+  if volume_list="$(docker volume ls --filter "name=${database_volume_key}" --format '{{.Name}}' 2>/dev/null)"; then
+    volume_list_json="$(base64_string "$volume_list")"
+    while IFS= read -r volume || [[ -n "$volume" ]]; do
+      [[ "$volume" == *"$database_volume_key" ]] || continue
+      [[ "$volume" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || continue
+      volume_names+=("$volume")
+    done <<< "$volume_list"
+  else
+    volume_list_json=null
+  fi
+  ((${#volume_names[@]} <= 256)) ||
+    fail "Could not verify the existing Orbit database volume; refusing to start Compose."
+
+  for volume in "${volume_names[@]}"; do
+    [[ -z "$volumes_json" ]] || volumes_json+=","
+    volumes_json+="{\"name\":$(base64_string "$volume")"
+    project=""
+    if labels="$(docker volume inspect --format '{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}' "$volume" 2>/dev/null)"; then
+      volumes_json+=",\"labels\":$(base64_string "$labels")"
+      project="${labels%%|*}"
+    else
+      volumes_json+=",\"labels\":null"
+    fi
+    volumes_json+=",\"containers\":$(encoded_fact docker ps -a --filter "volume=$volume" --format '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}')}"
+    if [[ "$project" =~ ^[a-z0-9][a-z0-9_-]*$ && -z "${project_seen[$project]:-}" ]]; then
+      project_seen["$project"]=1
+      project_names+=("$project")
+    fi
+  done
+
+  for project in "${project_names[@]}"; do
+    local containers=""
+    [[ -z "$projects_json" ]] || projects_json+=","
+    if containers="$(docker ps -a --filter "label=com.docker.compose.project=$project" \
+      --format '{{.ID}}|{{.Label "com.docker.compose.project"}}|{{.Label "com.docker.compose.service"}}' 2>/dev/null)"; then
+      projects_json+="{\"name\":$(base64_string "$project"),\"containers\":$(base64_string "$containers")}"
+      while IFS='|' read -r container_id _ service _ || [[ -n "$container_id" ]]; do
+        [[ "$service" == orbit-app && "$container_id" =~ ^[0-9a-f]{12,64}$ && -z "${container_seen[$container_id]:-}" ]] || continue
+        container_seen["$container_id"]=1
+        app_containers+=("$container_id")
+      done <<< "$containers"
+    else
+      projects_json+="{\"name\":$(base64_string "$project"),\"containers\":null}"
+    fi
+  done
+
+  for container_id in "${app_containers[@]}"; do
+    [[ -z "$images_json" ]] || images_json+=","
+    images_json+="{\"container\":$(base64_string "$container_id"),\"image\":$(encoded_fact docker inspect --format '{{.Config.Image}}' "$container_id")}"
+  done
+
+  local cosign_json=false
+  [[ "$cosign_usable" == 1 ]] && cosign_json=true
+  ORBIT_INSTALL_HOST_FACTS="{\"targetBasename\":$(base64_string "$(basename -- "$target_dir")")"
+  ORBIT_INSTALL_HOST_FACTS+=",\"cosignUsable\":${cosign_json},\"imageVersion\":\"${image_version}\""
+  ORBIT_INSTALL_HOST_FACTS+=",\"imageRevision\":\"${revision}\",\"appliedDigest\":\"${applied_digest}\""
+  ORBIT_INSTALL_HOST_FACTS+=",\"volumeList\":${volume_list_json}"
+  ORBIT_INSTALL_HOST_FACTS+=",\"volumes\":[${volumes_json}],\"projects\":[${projects_json}],\"images\":[${images_json}]}"
+  export ORBIT_INSTALL_HOST_FACTS
+}
+
+# --- the engine one-off ------------------------------------------------------
+
+# Files the engine writes on the host belong to the operator (#1210 D5).
+engine_host_identity() {
+  local security_options
+  security_options="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null || true)"
+  if [[ "$security_options" == *rootless* ]]; then
+    host_uid=0
+    host_gid=0
+  else
+    host_uid="$(id -u)"
+    host_gid="$(id -g)"
+  fi
+}
+
+# run_engine
+#
+# One `docker run --rm` of the verified image's engine (#1210 D1's shape,
+# #1212 F1): the deployment directory mounted read-write at /orbit-deploy, a
+# private directory for the outcome file, the launcher's directory when it
+# gave one. Unlike configure.sh's one-offs it keeps the default network:
+# OIDC discovery runs in here, against the same network the application
+# will use (F5). `--init` makes the engine an ordinary child of a minimal
+# init, so a signal reaches it as a signal. A terminal is passed through
+# (D3) when there is one; machine prompts read stdin; otherwise stdin is
+# closed, so a piped `curl | bash` never feeds the rest of this script to
+# the engine. Sets engine_status.
+run_engine() {
+  local -a docker_args=(run --rm --init)
+  local action="${requested_action:-auto}" tree reason=""
+  local input=none
+
+  engine_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/orbit-install-engine.XXXXXX")" ||
+    fail "Could not create a private temporary directory for the install engine."
+  chmod 700 "$engine_work_dir" || fail "Could not restrict the install engine's temporary directory."
+
+  if [[ "${ORBIT_CONFIGURE_PROMPTS:-}" == machine ]]; then
+    input=pipe
+    docker_args+=(-i -e ORBIT_INSTALL_INTERACTIVE=1)
+  elif has_controlling_terminal; then
+    input=terminal
+    docker_args+=(-i -t -e ORBIT_INSTALL_INTERACTIVE=1)
+  fi
+  [[ "$plain_mode" == 1 ]] && docker_args+=(-e ORBIT_INSTALLER_PLAIN=1)
+  [[ -n "${COMPOSE_PROJECT_NAME:-}" ]] && docker_args+=(-e COMPOSE_PROJECT_NAME)
+
+  if [[ -n "$launcher_config_tree" ]]; then
+    tree="$launcher_config_tree"
+    while [[ "$tree" == */ && "$tree" != / ]]; do
+      tree="${tree%/}"
+    done
+    if [[ -L "$tree" ]]; then
+      reason="it is a symlink"
+    elif [[ ! -e "$tree" ]]; then
+      reason="it does not exist"
+    elif [[ ! -d "$tree" ]]; then
+      reason="it is not a directory"
+    elif [[ "$tree" == *:* ]] || ! tree="$(cd -- "$tree" 2>/dev/null && pwd -P)"; then
+      reason="it could not be entered"
+    fi
+    if [[ -n "$reason" ]]; then
+      docker_args+=(-e "ORBIT_LAUNCHER_CONFIG_TREE_UNAVAILABLE=${reason}")
+    else
+      docker_args+=(-v "${tree}:${engine_launcher_tree_mount}:rw" -e "ORBIT_LAUNCHER_CONFIG_TREE=${engine_launcher_tree_mount}")
+    fi
+  fi
+
+  docker_args+=(
+    -e ORBIT_HOST_UID="$host_uid"
+    -e ORBIT_HOST_GID="$host_gid"
+    -e ORBIT_IMAGE="$resolved_reference"
+    -e ORBIT_CHANNEL="$channel"
+    -e ORBIT_INSTALLER_ELAPSED="$((SECONDS - installer_process_started_at))"
+    -e ORBIT_INSTALL_HOST_FACTS
+    -e ORBIT_CONFIGURE_PROMPTS
+    -e ORBIT_CONFIGURE_APP_URL
+    -e ORBIT_CONFIGURE_OIDC_ISSUER
+    -e ORBIT_CONFIGURE_OIDC_CLIENT_ID
+    -e ORBIT_CONFIGURE_AUTH_MODE
+    -v "${target_dir}:${engine_mount}:rw"
+    -v "${engine_work_dir}:${engine_result_mount}:rw"
+    --entrypoint node
+    "$resolved_reference" "$engine_cli" install --action "$action"
+    --dir "$engine_mount" --outcome "${engine_result_mount}/outcome"
+  )
+
+  engine_status=0
+  case "$input" in
+    terminal)
+      if [[ -t 0 ]]; then
+        docker "${docker_args[@]}" || engine_status=$?
+      else
+        docker "${docker_args[@]}" </dev/tty || engine_status=$?
+      fi
       ;;
-    *)
-      fail "Configuration migration returned an unexpected result; restoring the previous deployment."
-      ;;
+    pipe) docker "${docker_args[@]}" || engine_status=$? ;;
+    *) docker "${docker_args[@]}" </dev/null || engine_status=$? ;;
   esac
 }
 
-stage_guided_install_configuration() {
-  local terminal_fd="" choice="" status=0 readiness=""
-  [[ "$installer_action" == install && "$plain_mode" == 0 ]] || return 0
-  [[ ! -e "$environment_file" && ! -L "$environment_file" &&
-    ! -e "$secrets_directory" && ! -L "$secrets_directory" ]] || return 0
-  has_controlling_terminal || return 0
-
-  installer_ui_phase=configuration
-  installer_ui_component=configuration
-  installer_ui_event configuration configuration starting configuration-migration configure
-  ORBIT_IMAGE="$resolved_reference" bash "$staging_dir/scripts/configure.sh" --init ||
-    fail_with configuration-failure retry "Guided configuration was cancelled or invalid; the target remains unchanged."
-  # See prepare_configuration's identical call for ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE (#1151 O1-S4).
-  ORBIT_IMAGE="$resolved_reference" ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE=1 bash "$staging_dir/scripts/configure.sh" ||
-    fail_with configuration-failure retry "Secret generation failed; the target remains unchanged."
-
-  # --init just asked the sign-in mode question (ADR-0023 section 1) and
-  # wrote its answer into the staged environment file; read it back rather
-  # than asking again here. Anything other than the literal "false" is
-  # treated as OIDC-enabled, the same fail-safe default guided_init itself
-  # uses when the key is missing or malformed.
-  local staged_auth_mode=""
-  staged_auth_mode="$(grep -m1 '^ORBIT_AUTH_OIDC=' -- "$staging_dir/$environment_file" 2>/dev/null || true)"
-  if [[ "$staged_auth_mode" != 'ORBIT_AUTH_OIDC=false' ]]; then
-    ORBIT_IMAGE="$resolved_reference" ORBIT_CONFIGURE_TTY_INPUT=1 bash "$staging_dir/scripts/configure.sh" --set-oidc-secret ||
-      fail_with configuration-failure retry "OIDC client secret collection was cancelled or invalid; the target remains unchanged."
-  fi
-
-  if [[ "$profile_change" == 1 ]]; then
-    if [[ "$selected_profile" == ai || "$selected_profile" == full ]]; then
-      ORBIT_IMAGE="$resolved_reference" bash "$staging_dir/scripts/configure.sh" \
-        --set-deployment-profile "$selected_profile" "$selected_model" ||
-        fail_with configuration-failure retry "Deployment profile configuration failed; the target remains unchanged."
-    else
-      ORBIT_IMAGE="$resolved_reference" bash "$staging_dir/scripts/configure.sh" \
-        --set-deployment-profile "$selected_profile" ||
-        fail_with configuration-failure retry "Deployment profile configuration failed; the target remains unchanged."
-    fi
-  fi
-  readiness="$(ORBIT_IMAGE="$resolved_reference" bash "$staging_dir/scripts/configure.sh" --check 2>/dev/null)" ||
-    fail_with configuration-failure retry "Guided configuration is incomplete; the target remains unchanged."
-  [[ -n "$readiness" ]] ||
-    fail_with configuration-failure retry "Guided configuration did not return a readiness summary; the target remains unchanged."
-
-  exec {terminal_fd}<>/dev/tty
-  choice="$(installer_ui_select "$terminal_fd" \
-    "Final review: apply the collected core settings and selected ${selected_profile} profile." apply \
-    apply 'Install the reviewed configuration' \
-    cancel 'Cancel without changing files or services')" || status=$?
-  exec {terminal_fd}>&-
-  [[ "$status" == 0 ]] || return "$status"
-  [[ "$choice" == apply ]] || return 130
-
-  guided_configuration_staged=1
-  profile_change=0
-  unset selected_model
-  installer_ui_event configuration configuration running configuration-migration verify
+# read_engine_outcome
+#
+# Reads the engine's key=value outcome file into engine_outcome[...]: only
+# known keys, each value checked against its own pattern, the file a
+# regular one. Returns 1 when there is no usable outcome.
+declare -A engine_outcome=()
+read_engine_outcome() {
+  local file="${engine_work_dir}/outcome" line key value
+  engine_outcome=()
+  is_regular_non_symlink_file "$file" || return 1
+  [[ "$(stat -c '%s' -- "$file" 2>/dev/null)" -le 8192 ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    key="${line%%=*}"
+    value="${line#*=}"
+    [[ "$line" == *=* ]] || return 1
+    case "$key" in
+      status) [[ "$value" =~ ^(ok|failed|stopped|repair)$ ]] || return 1 ;;
+      fresh|model-pull) [[ "$value" =~ ^[01]$ ]] || return 1 ;;
+      profile) [[ "$value" =~ ^(standard|processing|ai|full)$ ]] || return 1 ;;
+      database-volume) [[ -z "$value" || "$value" =~ ^[a-z0-9][a-z0-9_-]*_orbit-db-data$ ]] || return 1 ;;
+      phase|component|reason|action) [[ "$value" =~ ^[a-z][a-z-]{0,63}$ ]] || return 1 ;;
+      message) [[ "$value" != *[[:cntrl:]]* && ${#value} -le 4096 ]] || return 1 ;;
+      *) return 1 ;;
+    esac
+    engine_outcome["$key"]="$value"
+  done < "$file"
+  [[ -n "${engine_outcome[status]:-}" ]]
 }
 
 bounded_compose_probe() {
@@ -1713,36 +876,28 @@ print_completion_screen() {
   printf 'Export a recovery bundle now: run "bash scripts/backup.sh" then "bash scripts/export-recovery-bundle.sh <backup.tar>" in the deployment directory -- see "Exporting a recovery bundle" in the administrator guide. It is the only way back in if the encryption key is ever lost.\n'
 }
 
-installer_ui_event host host starting host-tools check
-validate_target
+# --- the bootstrap ------------------------------------------------------------
 
-# Explicit modes are automation-facing and can be rejected before any image
-# pull or deployment-asset extraction. Interactive choices occur later, after
-# the immutable presentation helper has been verified.
-case "$requested_action" in
-  install)
-    [[ "$target_was_empty" == 1 ]] ||
-      fail "Install requires an empty target or safe pre-provisioned bootstrap; use Update for a recognized deployment."
-    ;;
-  update)
-    [[ "$target_was_empty" == 0 ]] ||
-      fail "Update requires a recognized existing Orbit deployment."
-    ;;
-  repair)
-    printf 'phase=rollback component=installer state=blocked reason=repair-unavailable action=repair elapsed=%ss\n' \
-      "$((SECONDS - installer_process_started_at))"
-    printf 'Orbit installer: repair_unavailable; this installer does not perform repair. Run "bash scripts/repair.sh --check" from this directory to diagnose, then "--plan" to see what it would do. No deployment files or services were changed.\n' >&2
-    exit 3
-    ;;
-esac
+installer_ui_event host host starting host-tools check
+
+# repair is signposted, never run, before anything else (#533): the two
+# scripts' exit-code vocabularies collide (docs/engine-events.md, "Repair
+# stream"). Install and update are the engine's to accept or refuse, since
+# only it validates the target.
+if [[ "$requested_action" == repair ]]; then
+  printf 'phase=rollback component=installer state=blocked reason=repair-unavailable action=repair elapsed=%ss\n' \
+    "$((SECONDS - installer_process_started_at))"
+  printf 'Orbit installer: repair_unavailable; this installer does not perform repair. Run "bash scripts/repair.sh --check" from this directory to diagnose, then "--plan" to see what it would do. No deployment files or services were changed.\n' >&2
+  exit 3
+fi
+
+target_dir="$(pwd -P)" || fail "Could not resolve the installation directory."
+[[ "$target_dir" != *:* ]] ||
+  fail "The installation directory's path contains a character Docker cannot mount; choose a directory without ':'."
 
 command -v docker >/dev/null 2>&1 || fail "Docker is required."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is required."
-# Still required, for the OIDC discovery request; deployment assets no
-# longer travel over it (ADR-0019).
-command -v curl >/dev/null 2>&1 || fail "curl is required."
 command -v timeout >/dev/null 2>&1 || fail "GNU timeout is required for bounded health checks."
-verify_database_volume_safety
 installer_ui_event host host completed host-tools check
 
 # Resolve the release manifest (ADR-0031 #7) and pin the pull to the digest
@@ -1772,6 +927,8 @@ manifest_digest="$(manifest_field "$release_manifest_path" digest)"
   fail "The release manifest names no valid image digest."
 
 resolved_reference="${image_repository}@${manifest_digest}"
+[[ "$resolved_reference" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$ ]] ||
+  fail "The release manifest's image reference is not an immutable digest reference."
 docker pull --quiet "$resolved_reference" >/dev/null 2>&1 ||
   fail "Could not pull ${resolved_reference} named by the release manifest. If the image is private, authenticate with ${registry} first."
 
@@ -1860,356 +1017,81 @@ if ! docker run --rm --entrypoint /opt/orbit/scripts/container-entrypoint.sh \
 fi
 installer_ui_event identity image completed image-identity verify
 
-readonly deployment_assets=(
-  "docker-compose.yml"
-  "docker-compose.mail.yml"
-  ".env-orbit.example"
-  "config/tika-config.json"
-  "scripts/configure.sh"
-  "scripts/installer-ui.sh"
-  "scripts/backup.sh"
-  "scripts/restore.sh"
-  "scripts/repair.sh"
-)
-readonly deployment_scripts=(
-  "scripts/configure.sh"
-  "scripts/installer-ui.sh"
-  "scripts/backup.sh"
-  "scripts/restore.sh"
-  "scripts/repair.sh"
-)
-# What hand_over_launcher_config_tree copies; every entry is also a
-# deployment asset, so it is staged and checked with the rest.
-readonly launcher_config_tree_assets=(
-  "scripts/configure.sh"
-  "scripts/installer-ui.sh"
-  ".env-orbit.example"
-)
-# Everything the launcher tree receives: those assets plus the image pin,
-# which is written only into the launcher tree's snapshot, never into a
-# deployment.
-readonly launcher_config_tree_files=("${launcher_config_tree_assets[@]}" ".orbit-image")
-declare -a asset_directories=()
-declare -A asset_directory_seen=()
-for asset in "${deployment_assets[@]}"; do
-  asset_dir="$(dirname -- "$asset")"
-  [[ "$asset_dir" == "." ]] && continue
-  if [[ -z "${asset_directory_seen[$asset_dir]:-}" ]]; then
-    asset_directories+=("$asset_dir")
-    asset_directory_seen["$asset_dir"]=1
-  fi
-done
-readonly managed_paths=("${deployment_assets[@]}" "$environment_file" "$secrets_directory")
+gather_host_facts
+engine_host_identity
 
-preflight_final_paths() {
-  local asset asset_dir
+# The engine: everything that reads or writes the deployment (F1). It prints
+# its own events and questions; what happened comes back in its outcome.
+run_engine
+if ! read_engine_outcome; then
+  installer_ui_phase=configuration
+  installer_ui_component=configuration
+  fail_with failure retry "The install engine stopped without reporting a result (docker run exit status ${engine_status}); see the lines above. A hard interruption leaves its staging directory for review: remove it, then rerun."
+fi
+case "${engine_outcome[status]}" in
+  ok)
+    [[ "$engine_status" == 0 ]] ||
+      fail_with failure retry "The install engine reported success but exited with status ${engine_status}."
+    ;;
+  failed)
+    # The engine has already rolled back, and handed the launcher its tree
+    # on a configuration-failure; the terminal event is this script's.
+    installer_ui_phase="${engine_outcome[phase]:-configuration}"
+    installer_ui_component="${engine_outcome[component]:-configuration}"
+    fail_with "${engine_outcome[reason]:-failure}" "${engine_outcome[action]:-retry}" \
+      "${engine_outcome[message]:-The install engine failed.}"
+    ;;
+  stopped)
+    # Cancelled (130), the terminal closed (1) or an answer was refused (2);
+    # the engine said which, and nothing was changed.
+    flush_pending_ui_events
+    [[ "$engine_status" =~ ^(1|2|130)$ ]] || engine_status=1
+    exit "$engine_status"
+    ;;
+  repair)
+    flush_pending_ui_events
+    exit 3
+    ;;
+esac
 
-  if [[ -e "$environment_file" || -L "$environment_file" ]] &&
-    ! is_regular_non_symlink_file "$environment_file"; then
-    fail "Refusing to use ${environment_file} because it is not a regular, non-symlink file."
-  fi
-  if [[ -e "$secrets_directory" || -L "$secrets_directory" ]] &&
-    ! is_real_non_symlink_directory "$secrets_directory"; then
-    fail "Refusing to use ${secrets_directory} because it is not a real, non-symlink directory."
-  fi
+# --- after the commit: Compose (F1's third phase) ---------------------------
 
-  for asset_dir in "${asset_directories[@]}"; do
-    if [[ -e "$asset_dir" || -L "$asset_dir" ]] &&
-      ! is_real_non_symlink_directory "$asset_dir"; then
-      fail "Refusing to install into ${asset_dir} because it is not a real directory."
-    fi
-  done
+# The files are committed by now: a failure from here on never restores
+# files, and is never configuration-failure, which tells the launcher to
+# reconfigure (#1227).
+target_was_empty="${engine_outcome[fresh]}"
+selected_profile="${engine_outcome[profile]}"
+load_installer_ui || fail_with failure retry "The deployment's installer UI helper is unavailable."
 
-  for asset in "${deployment_assets[@]}"; do
-    if [[ -e "$asset" || -L "$asset" ]] &&
-      ! is_regular_non_symlink_file "$asset"; then
-      fail "Refusing to overwrite ${asset} because it is not a regular file."
-    fi
-  done
-}
+compose_project_name="$(read_environment_value COMPOSE_PROJECT_NAME 2>/dev/null)" ||
+  fail_with failure retry "Could not read the deployment's Docker Compose project name; refusing to start Compose."
+[[ "$compose_project_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]] ||
+  fail_with failure retry "Could not verify the configured Docker Compose project name; refusing to start Compose."
 
-prepare_rollback_area() {
-  local path backup_path backup_parent
-
-  rollback_dir="$staging_dir/rollback"
-  mkdir -- "$rollback_dir" || fail "Could not create the private rollback area."
-  chmod 700 "$rollback_dir" || fail "Could not restrict the rollback area."
-  mkdir -- "$rollback_dir/original" || fail "Could not create the rollback backup area."
-  chmod 700 "$rollback_dir/original" || fail "Could not restrict the rollback backup area."
-
-  for path in "${managed_paths[@]}"; do
-    managed_was_present["$path"]=0
-    if [[ -e "$path" || -L "$path" ]]; then
-      managed_was_present["$path"]=1
-      backup_path="$rollback_dir/original/$path"
-      backup_parent="$(dirname -- "$backup_path")"
-      mkdir -p -- "$backup_parent" || fail "Could not prepare the rollback backup for ${path}."
-      chmod 700 "$backup_parent" || fail "Could not restrict the rollback backup for ${path}."
-      cp -a -- "$path" "$backup_path" ||
-        fail "Could not securely back up ${path} before installation."
-    fi
-  done
-}
-
-# Every asset is extracted into a private staging directory and fully
-# validated before anything in the target is touched, so an extraction or
-# validation failure never mutates an existing deployment's files.
-staging_dir="$(mktemp -d "./.orbit-install-staging.XXXXXX")" ||
-  fail "Could not create a private staging directory."
-chmod 700 "$staging_dir" || fail "Could not restrict the staging directory."
-
-installer_ui_phase=assets
-installer_ui_component=assets
-installer_ui_event assets assets starting assets-verified fetch
-# Copy the bundle out of the image without running anything from it: `docker
-# create` makes a container and starts no process, `docker cp` reads its
-# filesystem, and the container is removed immediately (ADR-0019).
-image_assets_dir="$staging_dir/image-assets"
-mkdir -- "$image_assets_dir" || fail "Could not create the private asset extraction directory."
-chmod 700 "$image_assets_dir" || fail "Could not restrict the private asset extraction directory."
-deploy_container_id="$(docker create "$resolved_reference" 2>/dev/null)" ||
-  fail "Could not extract deployment assets from the published image."
-[[ "$deploy_container_id" =~ ^[0-9a-f]{64}$ ]] ||
-  fail "Could not extract deployment assets from the published image."
-docker cp "${deploy_container_id}:${bundled_assets_root}/." "$image_assets_dir/" >/dev/null 2>&1 ||
-  fail "Could not extract deployment assets from the published image."
-remove_deploy_container
-
-# The image's own modes never reach the deployment: each staged file is given
-# the mode the umask would have produced, exactly as the download it replaces
-# did. Only the fixed allowlist is staged; anything else the bundle carries is
-# left behind with the extraction directory.
-staged_asset_mode="$(printf '%04o' "$(( 0666 & ~0$(umask) ))")"
-readonly staged_asset_mode
-for asset in "${deployment_assets[@]}"; do
-  staged_path="$staging_dir/$asset"
-  extracted_path="$image_assets_dir/$asset"
-  mkdir -p -- "$(dirname "$staged_path")"
-  is_regular_non_symlink_file "$extracted_path" ||
-    fail "Bundled ${asset} is not a regular file."
-  [[ -s "$extracted_path" ]] || fail "Bundled ${asset} is empty."
-  cp -- "$extracted_path" "$staged_path" ||
-    fail "Could not stage ${asset} from the published image."
-  chmod "$staged_asset_mode" "$staged_path" ||
-    fail "Could not restrict the staged ${asset}."
-done
-rm -rf -- "$image_assets_dir" ||
-  fail "Could not remove the private asset extraction directory."
-
-for script in "${deployment_scripts[@]}"; do
-  bash -n "$staging_dir/$script" 2>/dev/null ||
-    fail "Bundled ${script} failed a syntax check."
-done
-
-# The staged files move into the target below and leave with the rollback on
-# a refusal, so the launcher's copy is taken now, while they are exactly what
-# was extracted and checked, into the private staging directory (#1225). The
-# image pin, .orbit-image, is written here and nowhere else, so a deployment
-# never has one.
-if [[ -n "$launcher_config_tree" ]]; then
-  launcher_tree_snapshot="$staging_dir/launcher-config-tree"
-  if mkdir -- "$launcher_tree_snapshot" 2>/dev/null && chmod 700 "$launcher_tree_snapshot" &&
-    mkdir -- "$launcher_tree_snapshot/scripts" 2>/dev/null; then
-    for asset in "${launcher_config_tree_assets[@]}"; do
-      cp -- "$staging_dir/$asset" "$launcher_tree_snapshot/$asset" 2>/dev/null || {
-        launcher_tree_snapshot=""
-        break
-      }
-    done
-    if [[ -n "$launcher_tree_snapshot" ]] &&
-      ! { (umask 077; printf '%s\n' "$resolved_reference" > "$launcher_tree_snapshot/.orbit-image") &&
-        chmod 600 "$launcher_tree_snapshot/.orbit-image"; } 2>/dev/null; then
-      launcher_tree_snapshot=""
-    fi
-  else
-    launcher_tree_snapshot=""
-  fi
+# Guarantee #17: the database volume this update attached to is still the
+# one, and the only one, by that exact name.
+if [[ -n "${engine_outcome[database-volume]}" ]]; then
+  recheck_volume="${engine_outcome[database-volume]}"
+  recheck_list="$(docker volume ls --filter "name=^${recheck_volume}\$" --format '{{.Name}}' 2>/dev/null)" ||
+    fail_with failure retry "Could not verify the existing Orbit database volume; refusing to start Compose."
+  [[ "$recheck_list" == "$recheck_volume" ]] ||
+    fail_with failure retry "The existing Orbit database volume changed during installation; refusing to start Compose."
 fi
 
-load_installer_ui || fail "Bundled installer UI helper is unavailable."
-installer_ui_event assets assets completed assets-verified fetch
-
-action_status=0
-resolve_installer_action || action_status=$?
-if [[ "$action_status" != 0 ]]; then
-  exit "$action_status"
+if [[ "${engine_outcome[model-pull]}" == 1 ]]; then
+  model_pull_requested=1
+  model_pull_value="$(read_environment_value OLLAMA_MODEL 2>/dev/null)" ||
+    fail_with failure retry "The confirmed local model could not be read from the configuration."
 fi
-
-action_status=0
-stage_guided_install_configuration || action_status=$?
-if [[ "$action_status" != 0 ]]; then
-  exit "$action_status"
-fi
-
-# Preflight all final file and parent paths before beginning the transaction.
-# No target directory is created until the backups are complete.
-preflight_final_paths
-prepare_rollback_area
-file_transaction_active=1
-
-# The bundled docker-compose.yml has been staged and syntax-checked but is
-# not in the target yet, and this is the last moment before anything writes a
-# project name down, so its own `name: orbit` is read from the staged copy
-# (#999). A fresh install had nothing but the working directory's name to go
-# on until now, which is how installing into ~/apps/household produced the
-# Compose project "household" and left the declaration in the compose file
-# unreachable. It has to happen before the migration below and not after the
-# assets move: an unattended pre-provisioned bootstrap arrives with its own
-# .env-orbit, that migration writes the name it is given into it, and a
-# derivation running afterwards would read that value straight back as an
-# explicit one and keep the directory name for good. An operator's
-# COMPOSE_PROJECT_NAME, a value already persisted in .env-orbit, and the
-# project that owns a recognised database volume all outrank the declaration
-# and are never provisional, so none of them is touched here. No Compose
-# command has run yet either.
-if [[ "$compose_project_name_provisional" == 1 ]]; then
-  derive_compose_project_name "$staging_dir/$compose_file"
-fi
-
-# Validate and, for a legacy v0 file, add only the schema marker before any
-# extracted asset or configure.sh mutation. The transaction above owns rollback.
-if [[ -e "$environment_file" ]]; then
-  ORBIT_IMAGE="$resolved_reference" bash "$staging_dir/scripts/configure.sh" --preflight --file "$environment_file" >/dev/null ||
-    fail "Configuration preflight failed; restoring the previous deployment."
-  run_configuration_migration "$staging_dir/scripts/configure.sh"
-  configuration_migration_completed=1
-fi
-
-for asset_dir in "${asset_directories[@]}"; do
-  if [[ -e "$asset_dir" || -L "$asset_dir" ]]; then
-    is_real_non_symlink_directory "$asset_dir" ||
-      fail "Refusing to install into ${asset_dir} because it is not a real directory."
-  else
-    mkdir -- "$asset_dir" || fail "Could not create the ${asset_dir} directory."
-    created_directories+=("$asset_dir")
-  fi
-done
-
-if [[ "$guided_configuration_staged" == 1 ]]; then
-  mv -- "$staging_dir/$environment_file" "$environment_file" ||
-    fail "Could not install the reviewed configuration; restoring the previous deployment."
-  mv -- "$staging_dir/$secrets_directory" "$secrets_directory" ||
-    fail "Could not install the reviewed secret files; restoring the previous deployment."
-fi
-
-for asset in "${deployment_assets[@]}"; do
-  if [[ -e "$asset" || -L "$asset" ]]; then
-    is_regular_non_symlink_file "$asset" ||
-      fail "Refusing to overwrite ${asset} because it is not a regular file."
-  fi
-  mv -f -- "$staging_dir/$asset" "$asset" ||
-    fail "Could not install ${asset}; restoring the previous deployment."
-done
-
-# The resolved digest is exported before configuration runs so VAPID key
-# generation and every other configuration step use the immutable published
-# image instead of falling back to git rev-parse and a local source build.
-prepare_configuration
-
-verify_database_volume_safety
-verify_database_password_preserved
-
-if [[ "$configuration_migration_completed" == 0 ]]; then
-  run_configuration_migration "scripts/configure.sh"
-  configuration_migration_completed=1
-fi
-installer_ui_event configuration configuration completed configuration-migration verify
-
-installer_ui_phase=oidc
-installer_ui_component=oidc
-# ADR-0023 section 1: local accounts are always available and OIDC is
-# opt-in. ORBIT_AUTH_OIDC absent or anything other than "true" means this
-# deployment never configured an identity provider, so there is nothing to
-# discover -- verify_oidc_discovery would otherwise fail a healthy
-# local-only install on a deliberately unset OIDC_ISSUER.
-oidc_auth_mode="$(read_environment_value ORBIT_AUTH_OIDC 2>/dev/null || true)"
-if [[ "$oidc_auth_mode" == true ]]; then
-  installer_ui_event oidc oidc starting provider-discovery verify
-  verify_oidc_discovery
-  installer_ui_event oidc oidc completed provider-discovery verify
-else
-  installer_ui_event oidc oidc skipped provider-discovery skip
-fi
-
-is_regular_non_symlink_file "$environment_file" ||
-  fail "Configuration did not leave a regular, non-symlink ${environment_file}."
-is_real_non_symlink_directory "$secrets_directory" ||
-  fail "Configuration did not leave a real, non-symlink ${secrets_directory} directory."
-
-# Record the resolved digest as the deployment reference. The channel tag is
-# never written here: what runs must be an immutable, attested artifact. This
-# repeats persistence as defence in depth: scripts/configure.sh already
-# persists ORBIT_IMAGE from the environment above.
-orbit_image_line="ORBIT_IMAGE=${resolved_reference}"
-# An env file that already carried the key twice would otherwise come out
-# still carrying it twice, both rewritten to the same value: harmless to
-# docker compose, which takes the last, but it leaves a duplicated managed
-# key behind for every later reader to disagree about. Emit the resolved
-# line once, at the position of the first occurrence, and drop the rest.
-orbit_image_line_written=0
-tmp_environment="$(mktemp "$staging_dir/.env-orbit.persist.XXXXXX")" ||
-  fail "Could not create the staged environment file."
-chmod 600 "$tmp_environment" || fail "Could not restrict the staged environment file."
-if grep -q '^ORBIT_IMAGE=' "$environment_file"; then
-  if ! {
-    while IFS= read -r line || [[ -n "$line" ]]; do
-      if [[ "$line" == ORBIT_IMAGE=* ]]; then
-        if [[ "$orbit_image_line_written" == 0 ]]; then
-          printf '%s\n' "$orbit_image_line"
-          orbit_image_line_written=1
-        fi
-      else
-        printf '%s\n' "$line"
-      fi
-    done < "$environment_file" > "$tmp_environment"
-  }; then
-    fail "Could not stage the resolved image digest in ${environment_file}."
-  fi
-else
-  grep_status=$?
-  [[ "$grep_status" -eq 1 ]] || fail "Could not inspect ${environment_file} for its image digest."
-  if ! {
-    while IFS= read -r line || [[ -n "$line" ]]; do
-      printf '%s\n' "$line"
-    done < "$environment_file"
-    printf 'ORBIT_IMAGE=%s\n' "$resolved_reference"
-  } > "$tmp_environment"; then
-    fail "Could not stage the resolved image digest in ${environment_file}."
-  fi
-fi
-
-mv -- "$tmp_environment" "$environment_file" ||
-  fail "Could not persist the resolved image digest in ${environment_file}."
 
 export ORBIT_IMAGE="$resolved_reference"
-
-if ! compose config --quiet >/dev/null 2>&1; then
-  fail "Docker Compose configuration is invalid; review the named configuration fields and rerun."
-fi
-
 installer_ui_phase=compose
 installer_ui_component=compose
+if ! compose config --quiet >/dev/null 2>&1; then
+  fail_with failure retry "Docker Compose configuration is invalid; review the named configuration fields and rerun."
+fi
 installer_ui_event compose compose completed compose-validation check
 printf 'Orbit installer: configuration, OIDC discovery, and Docker Compose preflight passed; starting services.\n'
-
-file_transaction_committed=1
-
-# Record the commit in the staging directory itself, not just in this
-# process's memory. If the host dies during the image-pull/health-wait phase
-# below (the longest phase of an install), the EXIT trap's own rollback never
-# runs and this staging directory can survive next to a successfully
-# installed deployment. repair.sh treats any leftover
-# ".orbit-install-staging.*" as evidence of an INTERRUPTED transaction and
-# offers to restore from it; without this marker it cannot tell that
-# transaction apart from one that already committed, and would silently
-# revert a successful install/update back to the pre-update files (issue
-# #383 finding 2). repair.sh's do_restore_transaction refuses outright when
-# this marker is present.
-# The files are committed by this line, so a failure here is the generic one,
-# never configuration-failure: that reason tells the launcher to reconfigure
-# and hands it the configure tree (#1227).
-: > "$staging_dir/committed" ||
-  fail_with failure retry "Could not record the installer's commit marker."
 
 prepare_service_images
 wait_for_deployment_readiness

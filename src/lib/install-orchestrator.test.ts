@@ -201,6 +201,8 @@ describe("runInstall: success", () => {
       expect(statSync(join(target, ".orbit-secrets", secret)).mode & 0o777).toBe(0o600);
     }
     expect(events.map(eventKey)).toEqual([
+      "assets assets starting assets-verified fetch",
+      "assets assets completed assets-verified fetch",
       "configuration configuration starting configuration-migration configure",
       "configuration configuration running configuration-migration verify",
       "configuration configuration completed configuration-migration verify",

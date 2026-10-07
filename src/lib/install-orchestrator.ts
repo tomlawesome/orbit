@@ -442,6 +442,7 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
   interruptCleanups.add(removeScratch);
 
   try {
+    onEvent({ phase: "assets", component: "assets", state: "starting", reason: "assets-verified", action: "fetch" });
     // The deployment assets, copied from this image's own bundle (F2,
     // guarantees #42, #45): only the fixed allowlist, each a non-empty
     // regular file, staged at the deployment's asset mode. The shell has
@@ -459,6 +460,7 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
         return fail("assets", "assets", `Could not stage ${asset} from the published image.`);
       }
     }
+    onEvent({ phase: "assets", component: "assets", state: "completed", reason: "assets-verified", action: "fetch" });
 
     // stage_guided_install_configuration (guarantees #30-32).
     let guidedStaged = false;

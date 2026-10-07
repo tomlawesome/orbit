@@ -1,21 +1,19 @@
 import type { ManagedPath } from "./install-transaction";
 
-// The fixed deployment-asset allowlist (issue #295 slice 5), transcribed
-// verbatim from scripts/install.sh's `deployment_assets` / `deployment_scripts`
-// array literals and the `asset_directories`/`managed_paths` derivation loop
-// (install.sh:1296-1332, guarantee #45). install.sh has no function wrapping
-// this — it is inline array literals and a loop in the main flow — so
-// deployment-assets.test.ts byte-compares this module's constants directly
-// against the array literals awk-extracted from the real script, the same
-// "extraction fails loudly if renamed" discipline every parity test in this
-// port uses, rather than a behavioural bash-vs-TS comparison.
+// The fixed deployment-asset allowlist (issue #295 slice 5, guarantee #45):
+// what the install engine copies out of its own image into a deployment.
+// Since #1212 this is the one list install uses; deployment-assets.test.ts
+// holds it equal to what the Dockerfile bundles and to repair.sh's
+// restore-transaction allowlist.
 
 /**
  * install.sh's deployment_assets array, in the installer's own fetch order.
  * scripts/repair.sh was added by issue #383's shipping-gap fix (an
  * operator-facing host script meant to run against a deployed target).
  * scripts/configuration.sh and scripts/engine-check.sh left the list with
- * #1210: the engine inside the image does their work now.
+ * #1210: the engine inside the image does their work now. The two
+ * recovery-bundle scripts joined with #1212: an operator needs them in the
+ * deployment, beside backup.sh.
  */
 export const DEPLOYMENT_ASSETS: readonly string[] = [
   "docker-compose.yml",
@@ -27,16 +25,12 @@ export const DEPLOYMENT_ASSETS: readonly string[] = [
   "scripts/backup.sh",
   "scripts/restore.sh",
   "scripts/repair.sh",
+  "scripts/export-recovery-bundle.sh",
+  "scripts/import-recovery-bundle.sh",
 ];
 
-/** install.sh:1326-1334's deployment_scripts array — the subset that must pass `bash -n` before being sourced/executed (guarantee #45). */
-export const DEPLOYMENT_SCRIPTS: readonly string[] = [
-  "scripts/configure.sh",
-  "scripts/installer-ui.sh",
-  "scripts/backup.sh",
-  "scripts/restore.sh",
-  "scripts/repair.sh",
-];
+/** The bundled shell scripts: each must pass `bash -n` (guarantee #45; deployment-assets.test.ts checks the sources the image copies). */
+export const DEPLOYMENT_SCRIPTS: readonly string[] = DEPLOYMENT_ASSETS.filter((asset) => asset.endsWith(".sh"));
 
 /**
  * install.sh:1371's deployment_assets_root: where an image built under
