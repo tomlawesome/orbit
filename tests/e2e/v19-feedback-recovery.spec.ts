@@ -152,8 +152,9 @@ const createOffline: Journey = {
       await page.unroute("**/api/workspace/commands", failCommands);
       await reach(page, save, "create, retry");
       await page.keyboard.press("Enter");
-      /* Saved: the desk returns to the orbit, the pocket approaches the item. */
-      await expect(page).toHaveURL(isPocket() ? /\/item\/[0-9a-f-]{36}$/ : /\/home$/, { timeout: 30_000 });
+      /* Saved: the desk closes onto the main screen at the saved item's own
+         address (#1246), the pocket approaches the item. */
+      await expect(page).toHaveURL(isPocket() ? /\/item\/[0-9a-f-]{36}$/ : /\/home\?item=[0-9a-f-]{36}$/, { timeout: 30_000 });
     };
   },
   /* #1192: WebKit keeps focus on the pressed button while it is disabled

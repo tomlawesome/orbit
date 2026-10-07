@@ -171,13 +171,14 @@ async function savePocketEntryWithDocument(page: Page, name: string): Promise<vo
 }
 
 /** The desk form, filled and saved with a document picked. */
-async function saveDeskEntryWithDocument(page: Page, name: string): Promise<void> {
+async function saveDeskEntryWithDocument(page: Page, name: string, keyDate?: string): Promise<void> {
   await gotoCreate(page);
   /* The drop target opens this hidden picker; setting it is the same change. */
   await page.locator('#card input[type="file"]').setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
   await page.locator("#f-name").fill(name);
   await page.locator('#types button[data-type="document"]').click();
   await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+  if (keyDate) await page.locator("#f-date").fill(keyDate);
   await page.locator(".btn-primary").click();
 }
 
@@ -302,95 +303,113 @@ async function answerInspection(page: Page, body: object): Promise<void> {
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) }));
 }
 
-test("the phone's create form shows page one and fills the fields the read found", async ({ page }) => {
-  test.skip(!test.info().project.name.startsWith("mobile"), "the desk's lane is proven above (#1245)");
-  test.setTimeout(90_000);
-  await signInWithHousehold(page);
+/* #1196: both phone tests stage the document read with a `page.route` mock,
+   and Playwright does not route a request the service worker handles (its
+   documentation says to block service workers wherever routing is relied on).
+   On mobile WebKit the mock applied only until Orbit's worker took the page, so
+   the reading card drew the real server's "found nothing to carry across"
+   instead of the mocked read. Nothing here is about the worker, so on WebKit it
+   is kept out -- the same cure as v19-feedback-recovery.spec.ts and
+   v19-mail-review.spec.ts; Chromium already routes these requests. */
+test.describe("the phone's create form reads a picked document", () => {
+  test.use({
+    serviceWorkers: async ({}, use, testInfo) => {
+      await use(testInfo.project.use.defaultBrowserType === "webkit" ? "block" : "allow");
+    },
+  });
 
-  try {
-    await answerInspection(page, {
-      extracted: true, attachmentDisposition: "attachable",
-      suggestions: [
-        { field: "provider", value: "British Gas", source: "document_text", confidence: "medium" },
-        { field: "reference", value: "BG-88214-HC", source: "document_text", confidence: "medium" },
-        { field: "cost", value: "144.00", source: "document_text", confidence: "medium" },
-      ],
-    });
-    await gotoCreate(page);
-    const form = page.getByRole("form", { name: "New entry" });
-    const reference = form.getByRole("textbox", { name: "reference" });
-    await reference.fill("MY-OWN-REF");
+  test("the phone's create form shows page one and fills the fields the read found", async ({ page }) => {
+    test.skip(!test.info().project.name.startsWith("mobile"), "the desk's lane is proven above (#1245)");
+    test.setTimeout(90_000);
+    await signInWithHousehold(page);
 
-    await form.locator('input[type="file"]').setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
-    const card = form.locator(".pc-reading");
-    await expect(card).toBeVisible();
-    await expect(card).toContainText(DOCUMENT);
-    await expect(form.getByRole("button", { name: /add a document/ })).toHaveCount(0);
-    // Straight under TYPE, ahead of the fields it fills.
-    const above = await card.evaluate((el) => el.previousElementSibling?.querySelector(".pc-kinds") !== null);
-    expect(above).toBe(true);
+    try {
+      await answerInspection(page, {
+        extracted: true, attachmentDisposition: "attachable",
+        suggestions: [
+          { field: "provider", value: "British Gas", source: "document_text", confidence: "medium" },
+          { field: "reference", value: "BG-88214-HC", source: "document_text", confidence: "medium" },
+          { field: "cost", value: "144.00", source: "document_text", confidence: "medium" },
+        ],
+      });
+      await gotoCreate(page);
+      const form = page.getByRole("form", { name: "New entry" });
+      const reference = form.getByRole("textbox", { name: "reference" });
+      await reference.fill("MY-OWN-REF");
 
-    // Page one lands, a real picture drawn from the file, and the head says so.
-    const sheet = card.getByRole("img", { name: `Page one of ${DOCUMENT}` });
-    await expect(sheet).toBeVisible({ timeout: 20_000 });
-    await expect.poll(() => sheet.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
-    await expect(card.getByRole("heading")).toHaveText(/page one/i);
-    await expect(card).toContainText("Page one of the file you added");
-    await expect(card).toContainText("scanned clean");
+      await form.locator('input[type="file"]').setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+      const card = form.locator(".pc-reading");
+      await expect(card).toBeVisible();
+      await expect(card).toContainText(DOCUMENT);
+      await expect(form.getByRole("button", { name: /add a document/ })).toHaveCount(0);
+      // Straight under TYPE, ahead of the fields it fills.
+      const above = await card.evaluate((el) => el.previousElementSibling?.querySelector(".pc-kinds") !== null);
+      expect(above).toBe(true);
 
-    // The read fills the empty fields and marks them; what was typed stays.
-    await expect(card).toContainText("the fields marked ◆ from document are what orbit read across into the form");
-    const provider = form.getByRole("textbox", { name: "provider" });
-    const cost = form.getByRole("textbox", { name: "cost" });
-    await expect(provider).toHaveValue("British Gas");
-    await expect(cost).toHaveValue("144.00");
-    await expect(reference).toHaveValue("MY-OWN-REF");
-    await expect(form.locator(".pc-field.sugg")).toHaveCount(2);
-    await expect(form.locator(".pc-field.sugg", { has: provider })).toContainText("◆ from document");
+      // Page one lands, a real picture drawn from the file, and the head says so.
+      const sheet = card.getByRole("img", { name: `Page one of ${DOCUMENT}` });
+      await expect(sheet).toBeVisible({ timeout: 20_000 });
+      await expect.poll(() => sheet.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+      await expect(card.getByRole("heading")).toHaveText(/page one/i);
+      await expect(card).toContainText("Page one of the file you added");
+      await expect(card).toContainText("scanned clean");
 
-    // Typing in a marked field accepts it: the mark clears, the value stays.
-    await provider.fill("British Gas Services");
-    await expect(form.locator(".pc-field.sugg")).toHaveCount(1);
+      // The read fills the empty fields and marks them; what was typed stays.
+      await expect(card).toContainText("the fields marked ◆ from document are what orbit read across into the form");
+      const provider = form.getByRole("textbox", { name: "provider" });
+      const cost = form.getByRole("textbox", { name: "cost" });
+      await expect(provider).toHaveValue("British Gas");
+      await expect(cost).toHaveValue("144.00");
+      await expect(reference).toHaveValue("MY-OWN-REF");
+      await expect(form.locator(".pc-field.sugg")).toHaveCount(2);
+      /* `has` is queried from inside the field, so a locator rooted at the form
+         never matches there; the field is found by its label's own word. */
+      await expect(form.locator(".pc-field.sugg", { hasText: "provider" })).toContainText("◆ from document");
 
-    // "not this one": the file and what it still suggested leave the entry.
-    await card.getByRole("button", { name: "not this one" }).click();
-    await expect(card).toHaveCount(0);
-    await expect(form.locator(".pc-field.sugg")).toHaveCount(0);
-    await expect(cost).toHaveValue("");
-    await expect(provider).toHaveValue("British Gas Services");
-    await expect(reference).toHaveValue("MY-OWN-REF");
-    await expect(form.getByRole("button", { name: /add a document/ })).toBeVisible();
-  } finally {
-    await households.sweep(page);
-  }
-});
+      // Typing in a marked field accepts it: the mark clears, the value stays.
+      await provider.fill("British Gas Services");
+      await expect(form.locator(".pc-field.sugg")).toHaveCount(1);
 
-/**
- * #1279: a file the upload would refuse leaves the phone's entry at once,
- * in the desk's words, and the "add a document" row is back to choose
- * another; there is nothing to drop, so no "not this one".
- */
-test("the phone's create form says when a picked document is refused", async ({ page }) => {
-  test.skip(!test.info().project.name.startsWith("mobile"), "the desk's refusal shares the same read (#1245)");
-  test.setTimeout(90_000);
-  await signInWithHousehold(page);
+      // "not this one": the file and what it still suggested leave the entry.
+      await card.getByRole("button", { name: "not this one" }).click();
+      await expect(card).toHaveCount(0);
+      await expect(form.locator(".pc-field.sugg")).toHaveCount(0);
+      await expect(cost).toHaveValue("");
+      await expect(provider).toHaveValue("British Gas Services");
+      await expect(reference).toHaveValue("MY-OWN-REF");
+      await expect(form.getByRole("button", { name: /add a document/ })).toBeVisible();
+    } finally {
+      await households.sweep(page);
+    }
+  });
 
-  try {
-    await answerInspection(page, { extracted: false, suggestions: [], attachmentDisposition: "rejected" });
-    await gotoCreate(page);
-    const form = page.getByRole("form", { name: "New entry" });
-    await form.locator('input[type="file"]').setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+  /**
+   * #1279: a file the upload would refuse leaves the phone's entry at once,
+   * in the desk's words, and the "add a document" row is back to choose
+   * another; there is nothing to drop, so no "not this one".
+   */
+  test("the phone's create form says when a picked document is refused", async ({ page }) => {
+    test.skip(!test.info().project.name.startsWith("mobile"), "the desk's refusal shares the same read (#1245)");
+    test.setTimeout(90_000);
+    await signInWithHousehold(page);
 
-    const card = form.locator(".pc-reading");
-    await expect(card).toContainText("Orbit refused this file.", { timeout: 20_000 });
-    await expect(card).toContainText("choose another document");
-    await expect(card).toContainText(/KB · refused/);
-    await expect(card.getByRole("img")).toHaveCount(0);
-    await expect(card.getByRole("button", { name: "not this one" })).toHaveCount(0);
-    await expect(form.getByRole("button", { name: /add a document/ })).toBeVisible();
-  } finally {
-    await households.sweep(page);
-  }
+    try {
+      await answerInspection(page, { extracted: false, suggestions: [], attachmentDisposition: "rejected" });
+      await gotoCreate(page);
+      const form = page.getByRole("form", { name: "New entry" });
+      await form.locator('input[type="file"]').setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+
+      const card = form.locator(".pc-reading");
+      await expect(card).toContainText("Orbit refused this file.", { timeout: 20_000 });
+      await expect(card).toContainText("choose another document");
+      await expect(card).toContainText(/KB · refused/);
+      await expect(card.getByRole("img")).toHaveCount(0);
+      await expect(card.getByRole("button", { name: "not this one" })).toHaveCount(0);
+      await expect(form.getByRole("button", { name: /add a document/ })).toBeVisible();
+    } finally {
+      await households.sweep(page);
+    }
+  });
 });
 
 /**
@@ -486,7 +505,10 @@ test("add to orbit closes the form and lands on the saved item", async ({ page }
 
   try {
     const name = "Home insurance proving";
-    await saveDeskEntryWithDocument(page, name);
+    /* The manifest is the dated schedule (corridorOf drops an item with no
+       due date), so the landing row exists only for an item with a key date. */
+    const keyDate = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+    await saveDeskEntryWithDocument(page, name, keyDate);
     await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: 30_000 });
     const itemId = new URL(page.url()).searchParams.get("item");
     expect(itemId).toBe(await itemIdOf(page, household.id, name));
