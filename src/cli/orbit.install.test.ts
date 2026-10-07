@@ -245,5 +245,12 @@ describe("orbit install: the interruption drill's kill point (guarantee #31)", (
     expect(statSync(join(target, staging[0])).mode & 0o777).toBe(0o700);
     expect(readFileSync(join(target, ".env-orbit"))).toEqual(before);
     expect(() => readFileSync(outcome)).toThrow();
+
+    // The next run names everything the killed one left, for the operator
+    // to review and remove; it never rolls a leftover back itself.
+    const rerun = runCli(["install", "--dir", target]);
+    expect(rerun.status).toBe(1);
+    expect(rerun.stderr).toContain(`A previous install attempt was interrupted and left .orbit-engine.lock ${staging[0]} behind in this directory.`);
+    expect(readdirSync(target).filter((entry) => entry.startsWith(".orbit-install-staging."))).toEqual(staging);
   });
 });

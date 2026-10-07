@@ -168,6 +168,16 @@ describe("validateTarget (guarantee #7)", () => {
     expect(lstatSync(join(targetDir, ".orbit-install-staging.AbC123")).isDirectory()).toBe(true);
   });
 
+  it("names the engine's leftover deploy lock with the staging it was left beside on a pre-provisioned target (#1212)", () => {
+    seedPreprovisioned();
+    mkdirSync(join(targetDir, ".orbit-install-staging.AbC123"), { mode: 0o700 });
+    writeFileSync(join(targetDir, ".orbit-engine.lock"), "1:owner\n", { mode: 0o600 });
+    expect(() => validateTarget(targetDir)).toThrow(
+      "A previous install attempt was interrupted and left .orbit-engine.lock .orbit-install-staging.AbC123 behind in this directory. Review its contents, then remove them (safe once you have confirmed no install is still in progress) and retry.",
+    );
+    expect(lstatSync(join(targetDir, ".orbit-engine.lock")).isFile()).toBe(true);
+  });
+
   it("refuses when .orbit-secrets is a symlink, even with the other two files correct", () => {
     writeFileSync(join(targetDir, ".env-orbit"), "APP_URL=https://example.invalid\n", { mode: 0o600 });
     writeFileSync(join(targetDir, "docker-compose.yml"), "services: {}\n");
