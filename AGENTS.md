@@ -368,13 +368,17 @@ volumes that could both be this deployment's still refuse, so a leftover
 volume of the *same* Compose project does too: `scripts/cleanup-stacks.sh`
 lists them.
 
-**A lockfile diff adding an `@pnpm/exe` block is pnpm 11 talking, not your
-change.** The host's PATH `pnpm` is 11.9.0 and writes that block while
-handing over to the pinned 12.3.4, which no longer pins it (the `pnpm`
-package is the native executable from v12): a correct 12.3.4 lockfile has no
-such block. Run `node --test scripts/lockfile-no-pnpm-exe.test.mjs` before
-committing a lockfile change — discard the diff if it fails, never commit it.
-CI activates 12.3.4 through corepack, so it never sees this (#884, #901).
+**A lockfile diff adding an `@pnpm/exe` block means the host's pnpm is
+older than the pin (#884, #901, #1185).** An older pnpm reads `packageManager`
+and hands over to the pinned version, but first writes `@pnpm/exe` into
+`pnpm-lock.yaml`, even with `--frozen-lockfile`. A correct 12.x lockfile has
+no such block. The owner upgraded `/usr/local/bin/pnpm` to the pin (12.4.1)
+on 2026-10-07, after which `CI=true pnpm install --frozen-lockfile` leaves
+`git status` clean. If the block reappears, the pin has moved ahead of the
+host: discard the lockfile diff, run `node --test
+scripts/lockfile-no-pnpm-exe.test.mjs` before committing a lockfile change,
+and ask the owner to upgrade the host pnpm (`sudo npm install -g
+pnpm@<pin>`). CI activates the pin through corepack, so it never sees this.
 
 ## Only ten fonts exist on this host, and the rest fail silently
 
