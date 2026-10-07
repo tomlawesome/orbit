@@ -429,10 +429,13 @@ export function labelledSkyOf(visibleHouseholds) {
 const MONTH_LABELS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
 /**
- * The approach corridor (#461): every active scheduled item across every
- * household, unrolled onto a line of time. Overdue sits in the red zone above
- * today; the rest of the current month follows headerless; each later month
- * with anything approaching gets its rule. An order, not a scale.
+ * The approach corridor (#461): every active item across every household,
+ * unrolled onto a line of time. Overdue sits in the red zone above today; the
+ * rest of the current month follows headerless; each later month with
+ * anything approaching gets its rule. An order, not a scale. An item kept
+ * without a date (#1281) rides at the foot, in `undated`, with the undated
+ * suggestions: counted in `total`, never in a month, and no part of the
+ * horizon.
  *
  * @typedef {object} CorridorRow  a scheduled item, or an un-accepted suggestion, on the line
  * @property {string} id
@@ -465,7 +468,7 @@ export function corridorOf(workspace, today, options = {}) {
   for (const household of workspace?.households ?? []) {
     const sections = new Map((household.sections ?? []).map((s) => [s.id, s]));
     for (const item of household.items ?? []) {
-      if (item.status !== "active" || !item.dueDate) continue;
+      if (item.status !== "active") continue;
       const days = daysUntil(item.dueDate, today);
       /* #867: the mark beside the entry — the section's own stored icon and
          accent, same as the Sections card and the dial's own legend read. */
@@ -478,8 +481,10 @@ export function corridorOf(workspace, today, options = {}) {
         section: section?.name ?? null,
         sectionIcon: section?.icon ?? null,
         sectionAccent: section?.accent ?? null,
-        days: /** @type {number} */ (days),
-        dueDate: item.dueDate,
+        /* #1281: no date sorts after every dated row, as an undated catch
+           does below; no date is invented. */
+        days: days ?? Number.MAX_SAFE_INTEGER,
+        dueDate: item.dueDate ?? null,
         band: bandOfKind(kindOfItem(item), days),
         provider: item.provider ?? null,
         costMinor: item.costMinor ?? null,
