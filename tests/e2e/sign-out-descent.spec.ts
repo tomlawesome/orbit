@@ -269,6 +269,23 @@ for (const size of WIDTHS.filter((s) => s.label !== "narrow desk")) {
         const d = document.getElementById("dusk");
         return d ? getComputedStyle(d).opacity : "absent";
       }), { message: "#1253: the dusk never arrived", timeout: 30_000 }).toBe("1");
+      /* and the page has left with the descent (home's own beats): settings'
+         content, the desk's or the phone's, is not left standing over the
+         dusk. Its main region and the menu's orb or top bar are looked for where drawn (the desk's
+         .page, the phone's main), and at least one must be drawn at all, or
+         a width whose other dialect is display:none would pass for nothing. */
+      await expect.poll(() => page.evaluate(() => {
+        const drawn = [...document.querySelectorAll("main, [role=main], .orb, .p-chrome")]
+          .filter((el) => el.getClientRects().length > 0 && !el.closest("#dusk"));
+        const standing = drawn.filter((el) => {
+          for (let e: Element | null = el; e; e = e.parentElement) {
+            const c = getComputedStyle(e);
+            if (c.visibility === "hidden" || c.opacity === "0") return false;
+          }
+          return true;
+        });
+        return drawn.length === 0 ? "nothing drawn" : standing.length ? "still showing" : "gone";
+      }), { message: "#1253: the page is still showing over the dusk", timeout: 10_000 }).toBe("gone");
       await expect(page, "#1253: the address never became /logout").toHaveURL(/\/logout$/, { timeout: 30_000 });
       await expect(page.getByRole("link", { name: "Sign back in" })).toBeVisible({ timeout: 10_000 });
 

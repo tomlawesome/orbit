@@ -290,6 +290,42 @@
   .signout:hover{color:var(--overdue-text)}
   .signout-problem{font:10.5px var(--mono);color:var(--overdue-text);margin-top:7px;line-height:1.7}
 
+  /*
+   * LEAVING, in home's own beats (#1253; owner ruling 2026-10-07): when the
+   * descent plays over one of these pages, the page's header, nav and hatch
+   * go first (chromeout, beat 0, home's `withdrawing`), then the page fades
+   * as home's own `.desk` does (beat 620, `dispersing`), so nothing of it
+   * stands over the dusk. The body classes are Flight.svelte's.
+   *
+   * The pages share no one wrapper, and each draws its desk and its phone
+   * (pocket) markup as separate roots, so the roots are listed here rather
+   * than every page re-marked: `.page` is the settings, inbox, about,
+   * household and administration desks'; `.belt-page`, `.stage` and
+   * `main.kit` are the belt, create/mail and kit ones; the `*-pocket` and
+   * `pk-*` classes are the phone dialects'. A new page that renders Chrome
+   * adds its root here, never a root that contains Chrome itself (the
+   * dusk is drawn inside it, and would go too: settings' `.helm-page`).
+   * The chrome itself
+   * (way back, orb, the pocket's top bar) goes with the page: `withdrawing`
+   * ends at the next beat, so `dispersing` keeps it gone.
+   */
+  :global(body.withdrawing .page > :is(header,nav,.hatch)){animation:chromeout .45s ease both}
+  :global(body.withdrawing :is(.back,.orb,.p-chrome)){animation:chromeout .45s ease both}
+  :global(body.dispersing :is(.page,.belt-page,.stage,main.kit,
+      .st-pocket,.pk-inbox,.ad-pocket,.pk-create,.hh-pocket,.rl-pocket,
+      .back,.orb,.account,.p-chrome)){
+    opacity:0;visibility:hidden;pointer-events:none;
+    transition:opacity .7s ease .15s,visibility 0s linear .85s}
+  :global(body.pinned :is(.page,.belt-page,.stage,main.kit,
+      .st-pocket,.pk-inbox,.ad-pocket,.pk-create,.hh-pocket,.rl-pocket,
+      .back,.orb,.account,.p-chrome)){transition:none!important}
+  @media (prefers-reduced-motion:reduce){
+    :global(body.withdrawing .page > *),:global(body.withdrawing :is(.back,.orb,.p-chrome)){animation:none!important}
+    :global(body.dispersing :is(.page,.belt-page,.stage,main.kit,
+        .st-pocket,.pk-inbox,.ad-pocket,.pk-create,.hh-pocket,.rl-pocket,
+        .back,.orb,.account,.p-chrome)){transition:none}
+  }
+
   /* The dialect switch (CON-10), the same query as home's pocket.css and
      $lib/pocket/media.js. Above it nothing here changes the desk. */
   .pocket-chrome{display:none}
