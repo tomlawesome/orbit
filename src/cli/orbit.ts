@@ -115,7 +115,7 @@ function writeResult(line: string): void {
 // config and is therefore present in every container started from it
 // regardless of `--entrypoint`/`--user` overrides; a container run any other
 // way (a plain host checkout driven by `pnpm run orbit`/`tsx`) never has it
-// set. This is the single fact this guard trusts.
+// set. This is the single fact the engine trusts about where it runs.
 //
 // No command spawns `docker` any more. backup, restore and the
 // recovery-bundle commands stopped in #1211: they run only here, inside the
@@ -123,28 +123,14 @@ function writeResult(line: string): void {
 // (src/lib/in-container-adapter.ts), and refuse anywhere else
 // (requireDeploymentContext below). install/update stopped in #1212 (build
 // note F7): they refuse the other way round, outside the engine container.
-// refuseDockerInContainer stays as the guard any future command that spawns
-// `docker` must call as the FIRST statement in its command function, before
-// any adapter is constructed. `check` (and any other pure-logic command)
-// never calls it and is unaffected.
+// With nothing left to refuse, the exit-9 refuseDockerInContainer guard went
+// too; a command that needed `docker` would be a host-side shell, never
+// engine code (docs/engine-events.md, "Fail-closed guard").
 const ENGINE_CONTAINER_ENV_VAR = "ORBIT_ENGINE_CONTEXT";
 const ENGINE_CONTAINER_CONTEXT_VALUE = "container";
 
-/** Reason enum for the refusal below — stable, machine-parseable, no free text. */
-type DockerForbiddenReason = "docker-command-forbidden-in-container";
-const DOCKER_FORBIDDEN_REASON: DockerForbiddenReason = "docker-command-forbidden-in-container";
-
-/** Exit code reserved for this refusal class; distinct from the generic `fail()` exit(1) and the Ctrl-C exit(130) already in use elsewhere in this file. */
-const DOCKER_FORBIDDEN_EXIT_CODE = 9;
-
 function isRunningAsEngineContainer(): boolean {
   return process.env[ENGINE_CONTAINER_ENV_VAR] === ENGINE_CONTAINER_CONTEXT_VALUE;
-}
-
-function refuseDockerInContainer(command: string): void {
-  if (!isRunningAsEngineContainer()) return;
-  process.stderr.write(`orbit: refused command=${command} reason=${DOCKER_FORBIDDEN_REASON}\n`);
-  process.exit(DOCKER_FORBIDDEN_EXIT_CODE);
 }
 
 /**
@@ -422,8 +408,7 @@ function makeRestoreConfirmer(useYesFlag: boolean): () => boolean {
 // ---------------------------------------------------------------------------
 // orbit configure / --init / --set-oidc-secret / --set-deployment-profile /
 // --preflight / --migrate: everything scripts/configure.sh does (#294,
-// #1210). File work only, no `docker`, so unlike install/backup/restore
-// above this never calls refuseDockerInContainer. scripts/configure.sh is
+// #1210). File work only, no `docker`. scripts/configure.sh is
 // now only the shell that runs this command as a `docker run --rm` one-off
 // with the deployment directory mounted at /orbit-deploy (docs/
 // engine-events.md, "In-container engine invocation").

@@ -159,10 +159,9 @@ describe("scripts/bundle-orbit-cli.mjs", () => {
 
   // No command spawns docker any more: backup, restore and the
   // recovery-bundle commands run only inside the deployment (#1211), and
-  // install/update only inside the engine container (#1212). So there is no
-  // Docker-backed command left for refuseDockerInContainer to refuse.
-  // install and update (#1212 build note F7) run from facts install.sh hands them,
-  // so in container mode they get past the guard's place and still never
+  // install/update only inside the engine container (#1212), so the exit-9
+  // refusal guard has gone. install and update (#1212 build note F7) run
+  // from facts install.sh hands them, so in container mode they still never
   // reach the booby-trapped docker; on a host they refuse outright.
   it("install and update never spawn docker in container mode, and refuse to run on a host", () => {
     const nodeDir = dirname(resolveTool("node"));

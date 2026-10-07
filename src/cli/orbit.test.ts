@@ -216,7 +216,7 @@ describe("orbit backup --verify: reaches real verification for a present-but-inv
 
 // Engine-delivery slice (issue #295, owner decision 2026-08-13: "the engine
 // can never manage the Docker socket. Ever."): ORBIT_ENGINE_CONTEXT=container
-// is the one fact refuseDockerInContainer trusts (baked into the shipped
+// is the one fact the engine trusts about where it runs (baked into the shipped
 // image via a Dockerfile ENV instruction — see docs/engine-events.md,
 // "In-container engine invocation (v0)"). Every command whose adapters would
 // spawn `docker` must refuse before constructing that adapter; `check` must
