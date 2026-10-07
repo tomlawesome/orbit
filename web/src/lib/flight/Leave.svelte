@@ -89,6 +89,9 @@
 </script>
 
 {#if leaving}
+  <!-- the ground under the dusk, so a daylight theme's page background never
+       shows beneath it (as the sign-in's own dawn has) -->
+  <div class="signin-stage" aria-hidden="true"></div>
   <Dusk>
     <!-- `backIn` is the identity provider's own end-session URL as often as
          it is "/": genuinely external, not a route this app can resolve(),
