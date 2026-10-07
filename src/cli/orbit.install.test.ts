@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -187,11 +187,30 @@ describe("orbit install: the launcher's configure tree on a configuration-failur
     const target = preprovisioned("ORBIT_AUTH_OIDC=false\n");
     const before = readFileSync(join(target, ".env-orbit"), "utf8");
     const tree = launcherTree();
-    const result = runCli(["install", "--dir", target, "--outcome", outcomeFile()], { ORBIT_LAUNCHER_CONFIG_TREE: tree });
+    const uid = process.getuid?.() ?? 0;
+    const gid = process.getgid?.() ?? 0;
+    const result = runCli(["install", "--dir", target, "--outcome", outcomeFile()], {
+      ORBIT_LAUNCHER_CONFIG_TREE: tree,
+      ORBIT_HOST_UID: String(uid),
+      ORBIT_HOST_GID: String(gid),
+    });
 
     expect(result.status).toBe(1);
     expect(result.stderr).not.toContain("ORBIT_LAUNCHER_CONFIG_TREE");
     expect(readdirSync(tree).sort()).toEqual([".env-orbit.example", ".orbit-image", "scripts"]);
+    // The launcher (v0.4.0, internal/deploy/trusted.go) refuses a tree with an
+    // entry owned by another uid, world-writable, or a symlink.
+    const entries = [".env-orbit.example", ".orbit-image", "scripts", "scripts/configure.sh", "scripts/installer-ui.sh"];
+    expect(readdirSync(join(tree, "scripts")).sort()).toEqual(["configure.sh", "installer-ui.sh"]);
+    expect(lstatSync(tree).uid).toBe(uid);
+    for (const entry of entries) {
+      const stat = lstatSync(join(tree, entry));
+      expect(stat.isSymbolicLink(), entry).toBe(false);
+      expect(stat.uid, `${entry} uid`).toBe(uid);
+      expect(stat.gid, `${entry} gid`).toBe(gid);
+      expect(stat.mode & 0o002, `${entry} world-write`).toBe(0);
+      expect(stat.mode & 0o777, `${entry} mode`).toBe(stat.isDirectory() ? 0o700 : 0o600);
+    }
     expect(readFileSync(join(tree, "scripts", "configure.sh"))).toEqual(readFileSync(join(repoRoot, "scripts", "configure.sh")));
     expect(readFileSync(join(tree, ".orbit-image"), "utf8")).toBe(`${REFERENCE}\n`);
     expect(readFileSync(join(target, ".env-orbit"), "utf8")).toBe(before);
