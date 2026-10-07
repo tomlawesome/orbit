@@ -174,3 +174,76 @@ describe("orbit install: a run, as install.sh starts it", () => {
     expect(result.stderr).toContain("Orbit installer: Update requires a recognized existing Orbit deployment.");
   });
 });
+
+describe("orbit install: the launcher's configure tree on a configuration-failure (#1225)", () => {
+  function launcherTree(): string {
+    const tree = join(newSandbox("orbit-cli-install-launcher-"), "tree");
+    mkdirSync(tree, { mode: 0o700 });
+    chmodSync(tree, 0o700);
+    return tree;
+  }
+
+  it("writes the image's tree and pin before rolling the target back", () => {
+    const target = preprovisioned("ORBIT_AUTH_OIDC=false\n");
+    const before = readFileSync(join(target, ".env-orbit"), "utf8");
+    const tree = launcherTree();
+    const result = runCli(["install", "--dir", target, "--outcome", outcomeFile()], { ORBIT_LAUNCHER_CONFIG_TREE: tree });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).not.toContain("ORBIT_LAUNCHER_CONFIG_TREE");
+    expect(readdirSync(tree).sort()).toEqual([".env-orbit.example", ".orbit-image", "scripts"]);
+    expect(readFileSync(join(tree, "scripts", "configure.sh"))).toEqual(readFileSync(join(repoRoot, "scripts", "configure.sh")));
+    expect(readFileSync(join(tree, ".orbit-image"), "utf8")).toBe(`${REFERENCE}\n`);
+    expect(readFileSync(join(target, ".env-orbit"), "utf8")).toBe(before);
+    expect(readdirSync(target).sort()).toEqual([".env-orbit", ".orbit-secrets"]);
+  });
+
+  it("says why when the shell could not mount the launcher's directory", () => {
+    const result = runCli(["install", "--dir", preprovisioned("ORBIT_AUTH_OIDC=false\n"), "--outcome", outcomeFile()], {
+      ORBIT_LAUNCHER_CONFIG_TREE_UNAVAILABLE: "it is a symlink",
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Orbit installer: ORBIT_LAUNCHER_CONFIG_TREE was not written because it is a symlink.\n");
+  });
+
+  it("writes nothing on a failure whose reason is not configuration-failure", () => {
+    const tree = launcherTree();
+    const result = runCli(["update", "--dir", newSandbox("orbit-cli-install-empty-"), "--outcome", outcomeFile()], {
+      ORBIT_LAUNCHER_CONFIG_TREE: tree,
+    });
+    expect(result.status).toBe(1);
+    expect(readdirSync(tree)).toEqual([]);
+  });
+});
+
+describe("orbit install: the interruption drill's kill point (guarantee #31)", () => {
+  it("kills itself right after the transaction begins: staging is owner-only and .env-orbit is untouched", () => {
+    const target = preprovisioned();
+    const before = readFileSync(join(target, ".env-orbit"));
+    const outcome = outcomeFile();
+    const docker = trappedDocker();
+    const result = failOnProcessDeadline(
+      spawnSync("node", [tsx, cliEntry, "install", "--dir", target, "--outcome", outcome], {
+        encoding: "utf8",
+        env: {
+          PATH: `${docker.bin}:${process.env.PATH}`,
+          HOME: process.env.HOME,
+          ORBIT_ENGINE_CONTEXT: "container",
+          ORBIT_IMAGE: REFERENCE,
+          ORBIT_INSTALL_HOST_FACTS: hostFacts(),
+          ORBIT_INSTALL_TEST_ASSETS_ROOT: assetsRoot(),
+          ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE: "transaction-begun",
+        },
+        ...processGuard(),
+      }),
+      { label: "hard interrupt" },
+    );
+    // tsx relays the child's death as its own exit status or signal.
+    expect(result.signal === "SIGKILL" || result.status === 137).toBe(true);
+    const staging = readdirSync(target).filter((entry) => entry.startsWith(".orbit-install-staging."));
+    expect(staging).toHaveLength(1);
+    expect(statSync(join(target, staging[0])).mode & 0o777).toBe(0o700);
+    expect(readFileSync(join(target, ".env-orbit"))).toEqual(before);
+    expect(() => readFileSync(outcome)).toThrow();
+  });
+});

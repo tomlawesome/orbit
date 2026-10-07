@@ -64,9 +64,13 @@ import {
 // install.sh to read).
 //
 // Before the commit every failure, and SIGINT/SIGTERM (runInterruptCleanups
-// below), rolls the transaction back. A failure's own terminal `failed` event
-// is the shell's to emit, after it has handed the launcher its config tree
-// (docs/engine-events.md, #1225); this module emits the progress events only.
+// below), rolls the transaction back; a configuration-failure first hands
+// the launcher its config tree (onConfigurationFailure, #1225). A failure's
+// own terminal `failed` event is the shell's to emit (docs/engine-events.md);
+// this module emits the progress events only. A leftover staging directory
+// from a hard kill is never rolled back by a later run: beside an otherwise
+// empty target validateTarget refuses it for the operator to remove (#383),
+// and beside a deployment it is repair.sh's to diagnose.
 
 export interface InstallContext {
   /** The deployment directory, as the engine sees it (/orbit-deploy). */
@@ -105,6 +109,14 @@ export interface InstallDependencies {
   capacity?: (deployDir: string) => LocalAiCapacity;
   /** The configure engine's own advisory lines, printed as configure.sh printed them. */
   say?: (line: string) => void;
+  /**
+   * Called once on a failure whose reason is configuration-failure, before
+   * anything is rolled back: the launcher's configure tree is handed over
+   * here (#1225, launcher-config-tree.ts).
+   */
+  onConfigurationFailure?: () => void;
+  /** Test hook: runs right after InstallTransaction.begin, before the first write (ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE). */
+  afterTransactionBegun?: () => void;
 }
 
 export type OnEvent = (event: EngineEvent) => void;
@@ -295,6 +307,7 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
   let lastFailure: InstallOutcomeFailed | undefined;
   const terminal = context.interactive ? dependencies.terminal : undefined;
 
+  let launcherTreeOffered = false;
   function fail(phase: string, component: string, message: string, reason?: string, action?: string, guidance?: string[]): InstallOutcomeFailed {
     lastFailure = {
       status: "failed",
@@ -305,6 +318,11 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       message,
       guidance,
     };
+    // Before the caller returns and the transaction rolls back (#1225).
+    if (lastFailure.reason === "configuration-failure" && !launcherTreeOffered) {
+      launcherTreeOffered = true;
+      dependencies.onConfigurationFailure?.();
+    }
     return lastFailure;
   }
 
@@ -509,6 +527,7 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
       transaction.dispose();
     };
     interruptCleanups.add(disposeTransaction);
+    dependencies.afterTransactionBegun?.();
 
     let committed = false;
     try {

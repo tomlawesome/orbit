@@ -70,6 +70,7 @@ import { type HostFacts, HostFactsRefusal, parseHostFacts } from "../lib/host-fa
 import { HostOwnershipError, applyHostOwnership } from "../lib/host-ownership";
 import { type InstallTerminal, declined } from "../lib/install-terminal";
 import { DEPLOYMENT_ASSETS_ROOT } from "../lib/deployment-assets";
+import { LAUNCHER_CONFIG_TREE_ENV, LAUNCHER_CONFIG_TREE_UNAVAILABLE_ENV, handOverLauncherConfigTree } from "../lib/launcher-config-tree";
 import {
   ConfigureEngineRefusal,
   ConfigureMachinePromptAbortedError,
@@ -1362,8 +1363,10 @@ function commandRestoreEngineRehearse(scenarioPath: string): never {
 // ORBIT_INSTALL_HOST_FACTS (its Docker facts, F3), ORBIT_CHANNEL,
 // COMPOSE_PROJECT_NAME, ORBIT_INSTALLER_PLAIN, ORBIT_INSTALL_INTERACTIVE (it
 // had a terminal and passed it through), ORBIT_INSTALLER_ELAPSED (seconds
-// already spent, so event times continue) and the ORBIT_CONFIGURE_* answers.
-// It reads the result back from FILE: what to start and how the run ended
+// already spent, so event times continue), the ORBIT_CONFIGURE_* answers,
+// and ORBIT_LAUNCHER_CONFIG_TREE (the launcher's directory, mounted) or
+// ORBIT_LAUNCHER_CONFIG_TREE_UNAVAILABLE (why it could not be). It reads the
+// result back from FILE: what to start and how the run ended
 // (docs/engine-events.md, "In-container engine invocation").
 
 const IMMUTABLE_REFERENCE = /^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$/;
@@ -1505,6 +1508,7 @@ function commandInstallOrUpdate(command: "install" | "update", deployDirArg: str
   const terminal = interactive ? installTerminal() : undefined;
   const guidedIo = guidedIoFor(terminal);
   const configureAuthMode = readConfigureAuthMode();
+  const assetsRoot = process.env.ORBIT_INSTALL_TEST_ASSETS_ROOT || DEPLOYMENT_ASSETS_ROOT;
 
   // A signal does not unwind try/finally: roll back first, then leave with
   // the signal's status (F8). Registered before anything else listens.
@@ -1534,7 +1538,7 @@ function commandInstallOrUpdate(command: "install" | "update", deployDirArg: str
       channel,
       requestedComposeProjectName: process.env.COMPOSE_PROJECT_NAME || undefined,
       facts,
-      assetsRoot: process.env.ORBIT_INSTALL_TEST_ASSETS_ROOT || DEPLOYMENT_ASSETS_ROOT,
+      assetsRoot,
     },
     {
       terminal,
@@ -1543,6 +1547,24 @@ function commandInstallOrUpdate(command: "install" | "update", deployDirArg: str
         oidcSecret: () => collectOidcSecret(guidedIo),
       },
       say: (line) => process.stdout.write(`${line}\n`),
+      onConfigurationFailure: () => {
+        handOverLauncherConfigTree({
+          tree: process.env[LAUNCHER_CONFIG_TREE_ENV] || undefined,
+          unavailableReason: process.env[LAUNCHER_CONFIG_TREE_UNAVAILABLE_ENV],
+          assetsRoot,
+          imageReference: resolvedReference,
+          notice: (line) => process.stderr.write(`${line}\n`),
+        });
+      },
+      // The interruption drill's kill point (scripts/test-install-acceptance.sh,
+      // guarantee #31), as restore.sh's ORBIT_RESTORE_TEST_HARD_INTERRUPT_STAGE:
+      // the staging and rollback areas exist and nothing has been written yet.
+      afterTransactionBegun:
+        process.env.ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE === "transaction-begun"
+          ? () => {
+              process.kill(process.pid, "SIGKILL");
+            }
+          : undefined,
     },
     (event) => {
       const elapsedSeconds = elapsedOffset + Math.max(0, Math.floor((Date.now() - startedAt) / 1000));

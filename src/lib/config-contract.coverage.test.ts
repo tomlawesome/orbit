@@ -73,6 +73,7 @@ const PLATFORM_KEYS = new Set([
   "ORBIT_INSTALL_INTERACTIVE",
   "ORBIT_INSTALLER_ELAPSED",
   "ORBIT_INSTALL_TEST_ASSETS_ROOT",
+  "ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE",
   // ADR-0017 slice 2 (#743): inbound mail (IMAP) credentials moved out of
   // the environment entirely — every IMAP_* key was removed from
   // ALLOWED_KEYS and no longer appears in .env-orbit.example. These five
