@@ -349,10 +349,10 @@ describe("item document inspection", () => {
     ["PDF", Buffer.from("%PDF-1.7\ntruncated"), "unsupported_structure"],
     ["JPEG", Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "unsupported_structure"],
     ["PNG", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "unsupported_structure"],
-  ])("degrades a structurally invalid %s without scanning or parsing it", async (_format, bytes, reason) => {
+  ])("degrades a structurally invalid %s after its scan, without extracting it", async (_format, bytes, reason) => {
     mocks.receive.mockResolvedValue(received(bytes));
     mocks.readQuarantine.mockResolvedValue(bytes);
-    mocks.classifyStructure.mockReturnValue(reason as "unsupported_structure" | "prohibited_content");
+    mocks.classifyStructure.mockReturnValue(reason as "unsupported_structure");
 
     const result = await inspectItemDocument({
       userId: "member-user",
@@ -363,12 +363,12 @@ describe("item document inspection", () => {
 
     expect(result).toEqual({
       extracted: false,
-      message: "Orbit could not safely inspect this document structure. Choose another PDF, JPEG, or PNG before adding the item.",
+      message: "Orbit could not open this document. Choose another PDF, JPEG, or PNG.",
       suggestions: [],
       attachmentDisposition: "rejected",
       reason,
     });
-    expect(mocks.scan).not.toHaveBeenCalled();
+    expect(mocks.scan).toHaveBeenCalledTimes(1);
     expect(mocks.extract).not.toHaveBeenCalled();
     expect(bytes.every((byte) => byte === 0)).toBe(true);
     expect(mocks.discardQuarantine).toHaveBeenCalledWith(received(bytes).quarantinePath);
@@ -454,38 +454,84 @@ describe("item document inspection", () => {
     expect(mocks.discardQuarantine).toHaveBeenCalledWith(received().quarantinePath);
   });
 
-  it("returns rejected disposition and prohibited_content reason for PDF with embedded files", async () => {
+  it("returns rejected disposition and says a password is needed for a PDF that needs one to open", async () => {
     const infoSpy = vi.spyOn(log, "info");
-    const bytes = syntheticPdf("/EmbeddedFile");
-    mocks.receive.mockResolvedValue(received(bytes));
-    mocks.readQuarantine.mockResolvedValue(bytes);
-    mocks.classifyStructure.mockReturnValue("prohibited_content");
+    mocks.classifyStructure.mockReturnValue("password_required");
 
     const result = await inspectItemDocument({
       userId: "member-user",
       householdId: "household-id",
-      filename: "embedded-file.pdf",
+      filename: "locked-statement.pdf",
       body: new ReadableStream<Uint8Array>(),
     });
 
     expect(result).toEqual({
       extracted: false,
-      message: "Orbit rejected this document because it contains prohibited active or embedded content. Choose another document.",
+      message: "This document needs a password to open, so Orbit cannot show or read it. Choose a copy without a password.",
       suggestions: [],
       attachmentDisposition: "rejected",
-      reason: "prohibited_content",
+      reason: "password_required",
+    });
+    const inspectionCalls = infoSpy.mock.calls.filter(([event]) => event.event === "document.inspection");
+    expect(inspectionCalls[0][0]).toEqual({ event: "document.inspection", state: "exhausted", reason: "password_required", action: "check_parser", impact: "document_processing_blocked" });
+    expect(JSON.stringify(inspectionCalls)).not.toContain("locked-statement");
+    expect(mocks.extract).not.toHaveBeenCalled();
+  });
+
+  describe("the scan comes before anything parses the file (ADR-0033)", () => {
+    function recordOrder() {
+      const order: string[] = [];
+      mocks.scan.mockImplementation(async () => {
+        order.push("scan");
+        return { status: "clean" };
+      });
+      mocks.classifyStructure.mockImplementation(async () => {
+        order.push("open");
+        return "supported_structure";
+      });
+      mocks.extract.mockImplementation(async () => {
+        order.push("extract");
+        return "Provider: Safe Cover";
+      });
+      return order;
+    }
+
+    it("scans, then lets the renderer open the file, then extracts", async () => {
+      const order = recordOrder();
+
+      await inspectItemDocument({
+        userId: "member-user",
+        householdId: "household-id",
+        filename: "policy.pdf",
+        body: new ReadableStream<Uint8Array>(),
+      });
+
+      expect(order).toEqual(["scan", "open", "extract"]);
     });
 
-    const inspectionCalls = infoSpy.mock.calls.filter(([event]) => event.event === "document.inspection");
-    expect(inspectionCalls).toHaveLength(1);
-    expect(inspectionCalls[0][0]).toEqual({ event: "document.inspection", state: "exhausted", reason: "prohibited_content", action: "check_parser", impact: "document_processing_blocked" });
-    expect(JSON.stringify(inspectionCalls)).not.toContain(OPERATION_ID);
-    expect(JSON.stringify(inspectionCalls)).not.toContain("embedded-file");
+    it.each([
+      ["infected", { status: "infected", signature: "Eicar-Test-Signature" }, "document_malware_detected"],
+      ["unreachable", { status: "error", reason: "unavailable" }, "document_scanner_unreachable"],
+      ["failed", { status: "error", reason: "scanner" }, "document_scanner_failed"],
+    ] as const)("never opens or extracts a file whose scan was %s", async (_label, outcome, code) => {
+      const order = recordOrder();
+      mocks.scan.mockImplementation(async () => {
+        order.push("scan");
+        return outcome;
+      });
 
-    expect(mocks.scan).not.toHaveBeenCalled();
-    expect(mocks.extract).not.toHaveBeenCalled();
-    expect(bytes.every((byte) => byte === 0)).toBe(true);
-    expect(mocks.discardQuarantine).toHaveBeenCalledWith(received(bytes).quarantinePath);
+      await expect(inspectItemDocument({
+        userId: "member-user",
+        householdId: "household-id",
+        filename: "policy.pdf",
+        body: new ReadableStream<Uint8Array>(),
+      })).rejects.toMatchObject({ code });
+
+      expect(order).toEqual(["scan"]);
+      expect(mocks.classifyStructure).not.toHaveBeenCalled();
+      expect(mocks.extract).not.toHaveBeenCalled();
+      expect(mocks.discardQuarantine).toHaveBeenCalledWith(received().quarantinePath);
+    });
   });
 
   it("authorizes before receiving any bytes", async () => {

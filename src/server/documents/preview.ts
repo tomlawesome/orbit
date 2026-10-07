@@ -2,12 +2,14 @@ import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, sep } from "node:path";
 import { createCanvas, loadImage, DOMMatrix, Path2D, type Canvas, type SKRSContext2D } from "@napi-rs/canvas";
-import { getDocument, VerbosityLevel } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { AppError } from "@/lib/app-error";
 import { log, type OperationalReason } from "@/lib/logger";
 import {
   classifyDocumentStructure,
   detectDocumentMediaType,
+  PDF_STRUCTURE_PARSER_OPTIONS,
+  type PdfDocumentParameters,
   type SupportedDocumentMediaType,
 } from "@/server/documents/validation";
 
@@ -20,9 +22,10 @@ import {
  * there is no temporary file to leak or forget to unlink; the caller owns
  * zeroing the decrypted buffer it passed in.
  *
- * The parser options mirror `validation.ts`: no scripting, no eval, no XFA, no
- * network, no worker. A preview must not become a wider execution surface than
- * the structure check the same bytes already passed.
+ * The parser options are `validation.ts`'s own (ADR-0033): no XFA, no
+ * network, no worker, and no annotation layer, so nothing a PDF carries runs.
+ * A preview must not become a wider execution surface than the structure
+ * check the same bytes already passed.
  */
 
 /** Longest edge, in pixels, of a rendered preview. */
@@ -41,25 +44,6 @@ export interface DocumentPagePreview {
   height: number;
 }
 
-type PdfPreviewParserOptions = NonNullable<Parameters<typeof getDocument>[0]> & { isEvalSupported: false };
-
-const PDF_PREVIEW_PARSER_OPTIONS = Object.freeze({
-  disableAutoFetch: true,
-  disableFontFace: true,
-  disableRange: true,
-  disableStream: true,
-  enableScripting: false,
-  enableXfa: false,
-  isEvalSupported: false,
-  isImageDecoderSupported: false,
-  isOffscreenCanvasSupported: false,
-  stopAtErrors: true,
-  useSystemFonts: false,
-  useWasm: false,
-  useWorkerFetch: false,
-  verbosity: VerbosityLevel.ERRORS,
-}) as Readonly<PdfPreviewParserOptions>;
-
 /**
  * Records a preview refusal or failure (#494).
  *
@@ -70,7 +54,7 @@ const PDF_PREVIEW_PARSER_OPTIONS = Object.freeze({
  * error text — so this stays inside the closed vocabulary's contract and
  * never becomes a second place content can leak. `document.preview` reuses
  * existing reasons/actions rather than inventing preview-specific ones: the
- * refusal categories here (unsupported structure, prohibited content, parser
+ * refusal categories here (unsupported structure, a password needed, parser
  * output invalid, processing interrupted) are exactly the categories
  * `document.inspection` and `document.parse` already log at upload time.
  */
@@ -239,11 +223,11 @@ async function renderPdfPageOne(bytes: Buffer): Promise<DocumentPagePreview> {
   try {
     pinRenderingGlobals();
     loadingTask = getDocument({
-      ...PDF_PREVIEW_PARSER_OPTIONS,
+      ...PDF_STRUCTURE_PARSER_OPTIONS,
       CanvasFactory: PinnedCanvasFactory,
       data: new Uint8Array(bytes),
       standardFontDataUrl: standardFontDirectory(),
-    });
+    } satisfies PdfDocumentParameters);
     const pdf = await loadingTask.promise;
     if (pdf.numPages < 1) throw failedPreview();
     const page = await pdf.getPage(1);

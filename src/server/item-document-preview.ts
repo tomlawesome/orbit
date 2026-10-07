@@ -38,6 +38,10 @@ export async function previewItemDocument(input: {
   householdId: string;
   body: ReadableStream<Uint8Array> | null;
   declaredBytes?: number;
+  /** Called once the scan has passed (`true`), or at once where scanning is
+      off (`false`), before anything opens the file: the reading card's cue
+      that Orbit has moved on from the virus check to the preview. */
+  onScanned?: (scanned: boolean) => void;
 }): Promise<ItemDocumentPagePreview> {
   await requireHouseholdAccess(input.userId, input.householdId);
   const config = getDocumentConfig();
@@ -49,56 +53,60 @@ export async function previewItemDocument(input: {
   const received = await storage.receive(input.body, operationId, maxBytes, input.declaredBytes);
   try {
     const mediaType = detectDocumentMediaType(received.leadingBytes);
-    const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
-    try {
-      let scanned = false;
-      if (config.scanMode === "required") {
-        log.info({ event: "document.scan", state: "starting", action: "check_scanner" });
-        const scanStartedAt = Date.now();
-        const scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
-        const scanMs = Math.max(0, Date.now() - scanStartedAt);
-        if (scan.status !== "clean") {
-          const infected = scan.status === "infected";
-          // `scan.reason` is a fixed enumeration from the scanner adapter, never
-          // provider text or the scanner's virus signature, so it is safe to record.
-          const scannerReason = infected
-            ? "malware_detected"
-            : scan.reason === "unavailable"
-              ? "scanner_unavailable"
-              : scan.reason === "timeout"
-                ? "scanner_timeout"
-                : scan.reason === "protocol"
-                  ? "scanner_protocol"
-                  : "scanner_failed";
-          log.warn({
-            event: "document.scan",
-            state: infected ? "exhausted" : "degraded",
-            reason: scannerReason,
-            action: "check_scanner",
-            impact: "document_processing_blocked",
-            durationMs: scanMs,
-          });
-          if (infected) {
-            throw new AppError(
-              "document_malware_detected",
-              "Orbit rejected that document because malware was detected",
-              422,
-            );
-          }
-          // Attributed exactly as the inspection and upload paths attribute it,
-          // so all three scanner-dependent journeys report the same cause.
-          const unreachable = scan.reason === "unavailable" || scan.reason === "timeout";
+    let scanned = false;
+    // ADR-0033: nothing opens the file before the scan passes. ClamAV reads
+    // the quarantine copy over its own socket; the bytes are read for the
+    // renderer only afterwards.
+    if (config.scanMode === "required") {
+      log.info({ event: "document.scan", state: "starting", action: "check_scanner" });
+      const scanStartedAt = Date.now();
+      const scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
+      const scanMs = Math.max(0, Date.now() - scanStartedAt);
+      if (scan.status !== "clean") {
+        const infected = scan.status === "infected";
+        // `scan.reason` is a fixed enumeration from the scanner adapter, never
+        // provider text or the scanner's virus signature, so it is safe to record.
+        const scannerReason = infected
+          ? "malware_detected"
+          : scan.reason === "unavailable"
+            ? "scanner_unavailable"
+            : scan.reason === "timeout"
+              ? "scanner_timeout"
+              : scan.reason === "protocol"
+                ? "scanner_protocol"
+                : "scanner_failed";
+        log.warn({
+          event: "document.scan",
+          state: infected ? "exhausted" : "degraded",
+          reason: scannerReason,
+          action: "check_scanner",
+          impact: "document_processing_blocked",
+          durationMs: scanMs,
+        });
+        if (infected) {
           throw new AppError(
-            unreachable ? "document_scanner_unreachable" : "document_scanner_failed",
-            unreachable
-              ? "Document inspection is not possible because the malware scanner cannot be reached. It stays blocked until the scanner is running."
-              : "Document inspection is not possible because the malware scanner reported a failure. It stays blocked until the scanner is healthy.",
-            503,
+            "document_malware_detected",
+            "Orbit rejected that document because malware was detected",
+            422,
           );
         }
-        log.info({ event: "document.scan", state: "ready", action: "none", durationMs: scanMs });
-        scanned = true;
+        // Attributed exactly as the inspection and upload paths attribute it,
+        // so all three scanner-dependent journeys report the same cause.
+        const unreachable = scan.reason === "unavailable" || scan.reason === "timeout";
+        throw new AppError(
+          unreachable ? "document_scanner_unreachable" : "document_scanner_failed",
+          unreachable
+            ? "Document inspection is not possible because the malware scanner cannot be reached. It stays blocked until the scanner is running."
+            : "Document inspection is not possible because the malware scanner reported a failure. It stays blocked until the scanner is healthy.",
+          503,
+        );
       }
+      log.info({ event: "document.scan", state: "ready", action: "none", durationMs: scanMs });
+      scanned = true;
+    }
+    input.onScanned?.(scanned);
+    const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
+    try {
       const page = await renderDocumentPagePreview(bytes, mediaType);
       return { ...page, scanned };
     } finally {
