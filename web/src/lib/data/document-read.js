@@ -22,7 +22,12 @@ import { saveProblem } from "./metadata-status.js";
 
 export const READING_HEAD = "Reading your document";
 export const PAGE_HEAD = "Page one";
-export const FOCUS_READING = "Focusing on the anomaly";
+/* ADR-0033 step 5 (owner, 2026-10-07): "Virus scan first before _anything_
+   opens it. We keep the user informed, then tell them we've moved onto
+   generating a preview." The focus line says which stage the page is in. */
+export const FOCUS_SCANNING = "Checking this file for viruses…";
+export const FOCUS_SCANNED = "No viruses found. Making a preview…";
+export const FOCUS_PREVIEWING = "Making a preview…";
 export const WHY_READING = "orbit is reading the pages it was given<br>nothing is saved, and nothing is assumed";
 export const FOCUS_UNDRAWABLE = "Orbit could not draw a picture of this document.";
 export const WHY_UNDRAWABLE = "it is still attached when you add this entry<br>orbit just could not turn it into a page to read here";
@@ -59,6 +64,15 @@ export const SUGGESTION_FIELDS = /** @type {const} */ (["provider", "reference",
  * }} PickedRead
  */
 
+/**
+ * The focus line once the virus check is done: "no viruses found" only when
+ * something scanned the file, as "scanned clean" is.
+ * @param {boolean} scanned
+ */
+export function focusAfterScan(scanned) {
+  return scanned ? FOCUS_SCANNED : FOCUS_PREVIEWING;
+}
+
 /** @param {string} why */
 export function whyLines(why) {
   return why === WHY_READING || why === WHY_UNDRAWABLE || why === WHY_TOO_LARGE || why === WHY_REFUSED ? why.split("<br>") : [why];
@@ -81,15 +95,21 @@ const tooLarge = (error) =>
  * Starts both requests from one pick. Each promise resolves with how its
  * half ended and never rejects; an aborted read resolves too, so the caller
  * decides by its own `current()` check whether the outcome is still wanted
- * (and revokes an `up` page's object URL when it is not).
+ * (and revokes an `up` page's object URL when it is not). `onScanned` is
+ * called once the preview route's virus check has passed (or was skipped),
+ * before the picture is drawn, so the card can move its focus line on; the
+ * same `current()` check applies.
  *
  * @param {string} householdId
  * @param {File} file
- * @param {{ signal?: AbortSignal }} [options]
+ * @param {{ signal?: AbortSignal, onScanned?: (scanned: boolean) => void }} [options]
  * @returns {{ page: Promise<PageOutcome>, read: Promise<ReadOutcome> }}
  */
-export function readPickedDocument(householdId, file, { signal } = {}) {
-  const page = previewPickedDocument(householdId, file, { signal }).then(
+export function readPickedDocument(householdId, file, { signal, onScanned } = {}) {
+  const onStage = onScanned
+    ? (/** @type {"scanned"} */ _stage, /** @type {{ scanned: boolean }} */ detail) => onScanned(detail.scanned)
+    : undefined;
+  const page = previewPickedDocument(householdId, file, { signal, onStage }).then(
     (preview) => /** @type {PageOutcome} */ ({ kind: "up", url: preview.url, scanned: preview.scanned }),
     (error) => {
       const code = codeOf(error);

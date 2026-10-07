@@ -50,16 +50,30 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/**
+ * The preview route's NDJSON answer (ADR-0033 step 5): the scan's line, then
+ * the picture's (or an error line).
+ * @param {unknown[]} events
+ */
+const ndjson = (events) => new Response(events.map((one) => `${JSON.stringify(one)}\n`).join(""), {
+  status: 200, headers: { "content-type": "application/x-ndjson; charset=utf-8" },
+});
+const b64 = (/** @type {number[]} */ bytes) => Buffer.from(bytes).toString("base64");
+
 describe("#1245: previewPickedDocument draws page one of a picked file before any item exists", () => {
   it("posts the bytes to the household's pre-attachment preview route and hands back a picture", async () => {
-    stubFetch(() => new Response(new Uint8Array([0xff, 0xd8, 0xff]), {
-      status: 200, headers: { "content-type": "image/jpeg", "x-orbit-scan": "clean" },
-    }));
+    stubFetch(() => ndjson([
+      { stage: "scanned", scanned: true },
+      { stage: "preview", mediaType: "image/jpeg", bytes: b64([0xff, 0xd8, 0xff]) },
+    ]));
     const { previewPickedDocument } = await import("../../web/src/lib/data/workspace.js");
     const picked = file();
     const preview = await previewPickedDocument("h 1", picked);
 
     expect(preview).toEqual({ url: "blob:page-one", scanned: true });
+    const blob = /** @type {Blob} */ (vi.mocked(URL.createObjectURL).mock.calls[0][0]);
+    expect(blob.type).toBe("image/jpeg");
+    expect([...new Uint8Array(await blob.arrayBuffer())]).toEqual([0xff, 0xd8, 0xff]);
     expect(posts).toHaveLength(1);
     expect(posts[0].url).toBe("/api/households/h%201/item-document-preview");
     expect(posts[0].init.body).toBe(picked);
@@ -72,7 +86,7 @@ describe("#1245: previewPickedDocument draws page one of a picked file before an
   });
 
   it("says when the page was drawn without a scan", async () => {
-    stubFetch(() => new Response(new Uint8Array([1]), { status: 200, headers: { "content-type": "image/png", "x-orbit-scan": "skipped" } }));
+    stubFetch(() => ndjson([{ stage: "scanned", scanned: false }, { stage: "preview", mediaType: "image/png", bytes: b64([1]) }]));
     const { previewPickedDocument } = await import("../../web/src/lib/data/workspace.js");
     await expect(previewPickedDocument("h1", file())).resolves.toMatchObject({ scanned: false });
   });
@@ -81,6 +95,73 @@ describe("#1245: previewPickedDocument draws page one of a picked file before an
     stubFetch(() => new Response(JSON.stringify({ error: { code: "document_preview_unsupported", message: "Orbit cannot show a picture of this document" } }), { status: 415 }));
     const { previewPickedDocument } = await import("../../web/src/lib/data/workspace.js");
     await expect(previewPickedDocument("h1", file())).rejects.toMatchObject({ code: "document_preview_unsupported" });
+  });
+});
+
+describe("ADR-0033 step 5: previewPickedDocument reads the preview stream a stage at a time", () => {
+  it("reports the scan the moment its line arrives, before the picture", async () => {
+    /** @type {(text: string) => void} */
+    let push = () => {};
+    /** @type {() => void} */
+    let end = () => {};
+    const body = new ReadableStream({
+      start(controller) {
+        const encoder = new TextEncoder();
+        push = (text) => controller.enqueue(encoder.encode(text));
+        end = () => controller.close();
+      },
+    });
+    stubFetch(() => new Response(body, { status: 200, headers: { "content-type": "application/x-ndjson" } }));
+    const { previewPickedDocument } = await import("../../web/src/lib/data/workspace.js");
+    /** @type {unknown[]} */
+    const stages = [];
+    /** @type {() => void} */
+    let scannedSeen = () => {};
+    const seen = new Promise((resolve) => { scannedSeen = () => resolve(undefined); });
+    const preview = previewPickedDocument("h1", file(), {
+      onStage: (stage, detail) => { stages.push([stage, detail]); scannedSeen(); },
+    });
+
+    push('{"stage":"scanned",');
+    push('"scanned":true}\n');
+    await seen;
+    expect(stages).toEqual([["scanned", { scanned: true }]]);
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+
+    push(`${JSON.stringify({ stage: "preview", mediaType: "image/png", bytes: b64([137, 80]) })}\n`);
+    end();
+    await expect(preview).resolves.toEqual({ url: "blob:page-one", scanned: true });
+    expect(stages).toHaveLength(1);
+  });
+
+  it("throws the server's own words from an error line after the scan", async () => {
+    stubFetch(() => ndjson([
+      { stage: "scanned", scanned: true },
+      { error: { code: "document_preview_failed", message: "Orbit could not draw that document" } },
+    ]));
+    const { previewPickedDocument } = await import("../../web/src/lib/data/workspace.js");
+    const onStage = vi.fn();
+    await expect(previewPickedDocument("h1", file(), { onStage })).rejects.toMatchObject({
+      name: "WorkspaceError", code: "document_preview_failed", message: "Orbit could not draw that document",
+    });
+    expect(onStage).toHaveBeenCalledWith("scanned", { scanned: true });
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it("refuses a picture of any type but PNG, JPEG or SVG", async () => {
+    stubFetch(() => ndjson([{ stage: "scanned", scanned: true }, { stage: "preview", mediaType: "text/html", bytes: b64([60]) }]));
+    const { previewPickedDocument } = await import("../../web/src/lib/data/workspace.js");
+    await expect(previewPickedDocument("h1", file())).rejects.toMatchObject({ code: "document_preview_failed" });
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it("says Orbit could not be reached when the stream ends without a picture, or is not NDJSON", async () => {
+    stubFetch(() => ndjson([{ stage: "scanned", scanned: true }]));
+    const { previewPickedDocument } = await import("../../web/src/lib/data/workspace.js");
+    await expect(previewPickedDocument("h1", file())).rejects.toThrow("Orbit could not be reached (200)");
+
+    stubFetch(() => new Response("<html>offline</html>", { status: 200, headers: { "content-type": "text/html" } }));
+    await expect(previewPickedDocument("h1", file())).rejects.toThrow("Orbit could not be reached (200)");
   });
 });
 
@@ -143,6 +224,15 @@ describe("#1245: the desk form reads the document the moment it is picked", () =
     expect(page).toMatch(/Focusing on the anomaly/u);
     expect(shared).toMatch(/"Page one"/u);
     expect(page).toMatch(/Page one of the file you added/u);
+  });
+
+  it("says the virus check is under way, then that the preview is being made (ADR-0033 step 5)", () => {
+    expect(shared).toMatch(/"Checking this file for viruses…"/u);
+    expect(shared).toMatch(/"No viruses found\. Making a preview…"/u);
+    expect(shared).toMatch(/"Making a preview…"/u);
+    expect(behaviour).toMatch(/focusline\.textContent = FOCUS_SCANNING;/u);
+    expect(behaviour).toMatch(/focusline\.textContent = focusAfterScan\(scanned\);/u);
+    expect(behaviour).toMatch(/readPickedDocument\(householdId, file, \{ signal: controller\.signal, onScanned \}\)/u);
   });
 
   it("offers 'not this one', which drops the file and what it suggested", () => {

@@ -38,6 +38,10 @@ export async function previewItemDocument(input: {
   householdId: string;
   body: ReadableStream<Uint8Array> | null;
   declaredBytes?: number;
+  /** Called once the scan has passed (`true`), or at once where scanning is
+      off (`false`), before anything opens the file: the reading card's cue
+      that Orbit has moved on from the virus check to the preview. */
+  onScanned?: (scanned: boolean) => void;
 }): Promise<ItemDocumentPagePreview> {
   await requireHouseholdAccess(input.userId, input.householdId);
   const config = getDocumentConfig();
@@ -100,6 +104,7 @@ export async function previewItemDocument(input: {
       log.info({ event: "document.scan", state: "ready", action: "none", durationMs: scanMs });
       scanned = true;
     }
+    input.onScanned?.(scanned);
     const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
     try {
       const page = await renderDocumentPagePreview(bytes, mediaType);

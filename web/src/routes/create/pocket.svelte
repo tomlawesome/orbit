@@ -6,7 +6,7 @@
   import { WorkspaceError, applyCommand, attachItemDocument, readWorkspace } from "$lib/data/workspace.js";
   import { saveProblem } from "$lib/data/metadata-status.js";
   import {
-    CAP_READING, FOCUS_READING, FOCUS_REFUSED, FOCUS_UNDRAWABLE, WHY_READING, captionOf, readPickedDocument,
+    CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, WHY_READING, captionOf, focusAfterScan, readPickedDocument,
     suggestionsToCarry,
   } from "$lib/data/document-read.js";
   import Sheet from "$lib/pocket/Sheet.svelte";
@@ -131,11 +131,17 @@
     picks += 1;
     picked = {
       key: picks, name: file.name, size: file.size, page: null, scanned: false, refused: false,
-      settled: false, line: FOCUS_READING, why: WHY_READING, read: false, caption: CAP_READING,
+      settled: false, line: FOCUS_SCANNING, why: WHY_READING, read: false, caption: CAP_READING,
     };
     const householdId = entry.householdId;
     if (!householdId) return;
-    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal });
+    /* ADR-0033 step 5: the focus line moves on from the virus check to the
+       preview the moment the scan has passed, before anything opens the file. */
+    const onScanned = (/** @type {boolean} */ scanned) => {
+      if (!current() || !picked || picked.page || picked.settled) return;
+      picked.line = focusAfterScan(scanned);
+    };
+    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned });
     /** @type {string | null} */
     let undrawable = null;
 
