@@ -330,7 +330,7 @@ describe("the jumble", () => {
     expect(Math.abs(seat.h)).toBe(0);
     const point = DESK.project(seat.phi, seat.rho, seat.h);
     expect(point.x).toBeCloseTo(800, 9);
-    expect(point.y).toBeCloseTo(350, 9);
+    expect(point.y).toBeCloseTo(500, 9);           // mid-page (#1247)
     // A neighbour, by contrast, is thrown off the ring.
     const neighbour = seatOf(BODIES, at("i-boiler"), {
       roll: BODIES[sel].off, berth: BERTH_WIDE, geom: DESK,
@@ -357,13 +357,14 @@ describe("the jumble", () => {
 });
 
 describe("the ring, seen at an angle", () => {
-  it("pins the apex to the middle of every sky, at 35% of its height", () => {
+  /* #1247 (owner, 2026-10-06): mid-page, not 35% of the height. */
+  it("pins the apex to the middle of every sky, at half its height", () => {
     for (const [w, h] of [[1600, 1000], [1280, 800], [1112, 1000], [900, 700], [400, 850]]) {
       const geom = geometryOf(w, h);
       const apex = geom.project(geom.PHI_APEX, geom.A, 0);
       expect(apex.x).toBeCloseTo(w / 2, 9);
-      expect(apex.y).toBeCloseTo(Math.round(h * 0.35), 9);
-      expect(geom.APEX_Y).toBe(Math.round(h * 0.35));
+      expect(apex.y).toBeCloseTo(Math.round(h * 0.5), 9);
+      expect(geom.APEX_Y).toBe(Math.round(h * 0.5));
     }
   });
 

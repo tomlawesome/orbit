@@ -276,8 +276,10 @@
                         to{opacity:.17;transform:scale(1.14)}}
 
   /* ---- the card, seated at the apex ----------------------------------
-     item.css's glass card, unchanged in its parts, hung so that the band's
-     highest point crosses it a third of the way down: the band's thickness
+     item.css's glass card, unchanged in its parts, hung by its own middle
+     on the band's highest point, whatever height it takes (owner,
+     2026-10-06, #1247: "document cards should always be centralised on the
+     belt"; it hung a third of the way down before). The band's thickness
      (~430px at the apex) and the card's height are of an order, which is
      what makes it read as riding IN the belt rather than floating above it.
      The 16px backdrop blur is doing real work here — the rubble streaming
@@ -286,8 +288,8 @@
     transition:width .75s cubic-bezier(.4,.5,.15,1);
     max-height:calc(100vh - 150px);overflow:auto;
     --cdx:0px; --cdy:0px; --csc:1;
-    transform:translate(calc(-50% + var(--cdx)),calc(-34% + var(--cdy))) scale(var(--csc));
-    transform-origin:50% 34%;}
+    transform:translate(calc(-50% + var(--cdx)),calc(-50% + var(--cdy))) scale(var(--csc));
+    transform-origin:50% 50%;}
   .belt-page .cardwrap.rollout{opacity:0;
     transition:transform 190ms cubic-bezier(.55,0,.85,.4),opacity 165ms linear}
   .belt-page .cardwrap.rollpre{transition:none;opacity:0}
@@ -534,7 +536,7 @@
    OWN -50% centring is handed to the grid, which centres the track itself
    now that the track's own width is the card's width (--cardw). */
 .belt-page .lanes .cardwrap{position:relative;left:auto;grid-row:1;grid-column:1;
-      transform:translate(var(--cdx),calc(-34% + var(--cdy))) scale(var(--csc))}
+      transform:translate(var(--cdx),calc(-50% + var(--cdy))) scale(var(--csc))}
 .belt-page .lanes.left .cardwrap{grid-column:2}
 
 /* the open paper keeps its rim lit while its reading card is out */
