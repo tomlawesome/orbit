@@ -63,7 +63,6 @@ export const operationalReasons = [
   "scanner_failed",
   "malware_detected",
   "supported_structure",
-  "prohibited_content",
   "unsupported_structure",
   "password_required",
   "infected",

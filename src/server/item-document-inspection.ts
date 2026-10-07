@@ -20,7 +20,6 @@ const parserRecoveryMessage = "Suggestions are unavailable right now. Review the
 const processorDisabledMessage = "Automatic suggestions require the optional document processor. You can still attach this file.";
 const unsupportedStructureMessage = "Orbit could not open this document. Choose another PDF, JPEG, or PNG.";
 const passwordRequiredMessage = "This document needs a password to open, so Orbit cannot show or read it. Choose a copy without a password.";
-const prohibitedContentMessage = "Orbit rejected this document because it contains prohibited active or embedded content. Choose another document.";
 
 export const itemDocumentSuggestionFields = [
   "title",
@@ -210,9 +209,7 @@ export async function inspectItemDocument(input: {
         });
         return {
           extracted: false,
-          message: structureReason === "prohibited_content"
-            ? prohibitedContentMessage
-            : structureReason === "password_required" ? passwordRequiredMessage : unsupportedStructureMessage,
+          message: structureReason === "password_required" ? passwordRequiredMessage : unsupportedStructureMessage,
           suggestions: [],
           attachmentDisposition: "rejected",
           reason: structureReason,

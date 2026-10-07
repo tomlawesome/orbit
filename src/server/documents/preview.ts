@@ -70,7 +70,7 @@ const PDF_PREVIEW_PARSER_OPTIONS = Object.freeze({
  * error text — so this stays inside the closed vocabulary's contract and
  * never becomes a second place content can leak. `document.preview` reuses
  * existing reasons/actions rather than inventing preview-specific ones: the
- * refusal categories here (unsupported structure, prohibited content, parser
+ * refusal categories here (unsupported structure, a password needed, parser
  * output invalid, processing interrupted) are exactly the categories
  * `document.inspection` and `document.parse` already log at upload time.
  */

@@ -352,7 +352,7 @@ describe("item document inspection", () => {
   ])("degrades a structurally invalid %s after its scan, without extracting it", async (_format, bytes, reason) => {
     mocks.receive.mockResolvedValue(received(bytes));
     mocks.readQuarantine.mockResolvedValue(bytes);
-    mocks.classifyStructure.mockReturnValue(reason as "unsupported_structure" | "prohibited_content");
+    mocks.classifyStructure.mockReturnValue(reason as "unsupported_structure");
 
     const result = await inspectItemDocument({
       userId: "member-user",
@@ -454,38 +454,28 @@ describe("item document inspection", () => {
     expect(mocks.discardQuarantine).toHaveBeenCalledWith(received().quarantinePath);
   });
 
-  it("returns rejected disposition and prohibited_content reason for PDF with embedded files", async () => {
+  it("returns rejected disposition and says a password is needed for a PDF that needs one to open", async () => {
     const infoSpy = vi.spyOn(log, "info");
-    const bytes = syntheticPdf("/EmbeddedFile");
-    mocks.receive.mockResolvedValue(received(bytes));
-    mocks.readQuarantine.mockResolvedValue(bytes);
-    mocks.classifyStructure.mockReturnValue("prohibited_content");
+    mocks.classifyStructure.mockReturnValue("password_required");
 
     const result = await inspectItemDocument({
       userId: "member-user",
       householdId: "household-id",
-      filename: "embedded-file.pdf",
+      filename: "locked-statement.pdf",
       body: new ReadableStream<Uint8Array>(),
     });
 
     expect(result).toEqual({
       extracted: false,
-      message: "Orbit rejected this document because it contains prohibited active or embedded content. Choose another document.",
+      message: "This document needs a password to open, so Orbit cannot show or read it. Choose a copy without a password.",
       suggestions: [],
       attachmentDisposition: "rejected",
-      reason: "prohibited_content",
+      reason: "password_required",
     });
-
     const inspectionCalls = infoSpy.mock.calls.filter(([event]) => event.event === "document.inspection");
-    expect(inspectionCalls).toHaveLength(1);
-    expect(inspectionCalls[0][0]).toEqual({ event: "document.inspection", state: "exhausted", reason: "prohibited_content", action: "check_parser", impact: "document_processing_blocked" });
-    expect(JSON.stringify(inspectionCalls)).not.toContain(OPERATION_ID);
-    expect(JSON.stringify(inspectionCalls)).not.toContain("embedded-file");
-
-    expect(mocks.scan).toHaveBeenCalledTimes(1);
+    expect(inspectionCalls[0][0]).toEqual({ event: "document.inspection", state: "exhausted", reason: "password_required", action: "check_parser", impact: "document_processing_blocked" });
+    expect(JSON.stringify(inspectionCalls)).not.toContain("locked-statement");
     expect(mocks.extract).not.toHaveBeenCalled();
-    expect(bytes.every((byte) => byte === 0)).toBe(true);
-    expect(mocks.discardQuarantine).toHaveBeenCalledWith(received(bytes).quarantinePath);
   });
 
   describe("the scan comes before anything parses the file (ADR-0033)", () => {
