@@ -193,6 +193,54 @@ test("pressing the page opens the reader over the belt, and Esc closes it", asyn
   }
 });
 
+/* #1301: a click off the page closes the reader and the preview card
+   together, and the next paper pressed opens the preview card again -- not
+   the reader. The reader's own controls and its page are not "off". Desk
+   only: on the phone the preview is a sheet that closes itself (#1072). */
+test("on the desk, a click off the reader returns to the belt, the reader's own controls do not, and the next press opens the preview first", async ({ page }) => {
+  test.skip(test.info().project.name.startsWith("mobile"), "the pocket's preview is a sheet with its own close (#1072)");
+  test.setTimeout(60_000);
+  await signInAsAdmin(page);
+  const { itemId, householdId } = await seedHouseholdWithItem(page);
+
+  try {
+    await uploadDocument(page, householdId, itemId, "reader-closing.pdf");
+    await page.goto(`/item/${itemId}`);
+    await expect(page.getByRole("heading", { name: "Preview proving item" })).toBeVisible();
+    const paper = page.getByRole("button", { name: /reader-closing\.pdf/ }).first();
+    const pageButton = page.getByRole("button", { name: "Read reader-closing.pdf" });
+    const reader = page.getByRole("dialog", { name: "reader-closing.pdf, Preview proving item" });
+
+    await paper.click();
+    await expect(pageButton).toBeEnabled({ timeout: 20_000 });
+    await pageButton.click();
+    await expect(reader).toBeVisible();
+
+    /* The reader's own controls keep it open. */
+    await reader.getByRole("button", { name: "Zoom in" }).click();
+    await expect(reader).toBeVisible();
+    await expect(reader.locator(".rd-pct")).not.toHaveText("100%");
+    await reader.getByRole("button", { name: "fit" }).click();
+    await expect(reader).toBeVisible();
+    await reader.getByRole("img", { name: /reader-closing\.pdf/ }).click();
+    await expect(reader).toBeVisible();
+
+    /* Off the page: the stage's own edge, beside the fitted page. */
+    const stage = await reader.locator(".rd-stage").boundingBox();
+    if (!stage) throw new Error("the reader's stage has no box");
+    await page.mouse.click(stage.x + 4, stage.y + stage.height / 2);
+    await expect(reader).toBeHidden({ timeout: 2_000 });
+    await expect(pageButton).toBeHidden({ timeout: 2_000 });
+
+    /* The same paper again: the preview card first, not the reader. */
+    await paper.click();
+    await expect(pageButton).toBeEnabled({ timeout: 20_000 });
+    await expect(reader).toBeHidden();
+  } finally {
+    await households.sweep(page);
+  }
+});
+
 test("a removed document shows its own line, honestly, and no page", async ({ page }) => {
   test.setTimeout(60_000);
   await signInAsAdmin(page);
