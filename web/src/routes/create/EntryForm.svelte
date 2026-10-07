@@ -4,6 +4,7 @@
   import StagedPage from "$lib/pocket/StagedPage.svelte";
   import { stagedPreviewHref } from "$lib/pocket/review.js";
   import { DAMAGED, DAMAGED_PLACEHOLDER } from "$lib/data/metadata-status.js";
+  import { PAGE_HEAD, READING_HEAD, whyLines } from "$lib/data/document-read.js";
   import {
     KINDS, RECURRENCE_MAX, REMINDER_CHOICES, kindHasDate, kindRecurs, recurrenceWords, stepRecurrence, toggleReminder,
   } from "./entry.js";
@@ -27,12 +28,18 @@
    * `nested` says the form is already inside a sheet: the reminders callout
    * then unfolds in place, because a sheet never stacks on a sheet (§1.4).
    *
-   * The reading card sits below the fields (§2.5, the desk's second lane)
-   * and only once a document is chosen. The host attaches the paper to the
-   * item it saves (#1245, both dialects); reading is wired on the desk's
-   * form only (create.behaviour.js, departure 1), so here the card holds the
-   * paper's name and size, and `readings` is where a phone read would hand
-   * the rows in.
+   * A document picked on /create is read the way the desk reads it (#1279,
+   * design/v19/create-phone-reading.html, owner's "14a"): the host starts the
+   * shared read ($lib/data/document-read.js) and hands its state in as
+   * `picked`. The reading card lands straight under TYPE, in place of the
+   * row that picked the file -- not below the fields, where it would be off
+   * screen at the moment the page lands -- with the desk's reticle while the
+   * file is on its way, then page one on the cream sheet. The empty fields
+   * the read filled are named in `marked` and carry "◆ from document" in the
+   * label's right-hand slot; typing in one is accepting it, so the mark
+   * clears. No accept pill: four of them would push the form down for an act
+   * that only clears a mark. The host attaches the paper to the item it saves
+   * (#1245, both dialects). `readings` are review mode's own rows (§2.6).
    * @typedef {import('./entry.js').FormHousehold} FormHousehold
    * @typedef {{ label: string, value: string, sure: boolean, field: "provider" | "reference" | "dueDate" | "cost" }} Reading
    * @typedef {{
@@ -44,6 +51,10 @@
    *   referenceState?: string | null,
    *   notesState?: string | null,
    *   attachment?: File | null,
+   *   picked?: import('$lib/data/document-read.js').PickedRead | null,
+   *   marked?: import('$lib/data/document-read.js').SuggestionField[],
+   *   onpick?: (file: File) => void,
+   *   ondrop?: () => void,
    *   readings?: Reading[],
    *   papers?: { id?: string | null, name: string, meta: string, drawable?: boolean }[],
    *   receiptId?: string | null,
@@ -59,6 +70,10 @@
     referenceState = null,
     notesState = null,
     attachment = $bindable(null),
+    picked = null,
+    marked = $bindable([]),
+    onpick,
+    ondrop,
     readings = [],
     papers = [],
     receiptId = null,
@@ -95,10 +110,26 @@
   let picker = $state();
   /** @param {Event} event */
   function onPick(event) {
-    const file = /** @type {HTMLInputElement} */ (event.currentTarget).files?.[0];
+    const input = /** @type {HTMLInputElement} */ (event.currentTarget);
+    const file = input.files?.[0];
     if (!file) return;
+    /* Held here, not in the input: cleared so the same file can be picked
+       again after a refusal or "not this one" (`change` only fires on a change). */
+    input.value = "";
     attachment = file;
     if (!entry.name.trim()) entry.name = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").slice(0, 100);
+    onpick?.(file);
+  }
+  /** "not this one": the file leaves the entry, with what it suggested. */
+  function dropDocument() {
+    attachment = null;
+    if (picker) picker.value = "";
+    ondrop?.();
+  }
+  /** Typing in a field the read filled is accepting it: its mark clears. */
+  /** @param {import('$lib/data/document-read.js').SuggestionField} field */
+  function unmark(field) {
+    if (marked.includes(field)) marked = marked.filter((one) => one !== field);
   }
   /** A reading accepted is copied into its field; nothing is saved until the form is. */
   /** @param {Reading} reading */
@@ -106,6 +137,9 @@
     if (reading.field === "cost") entry.cost = reading.value.replace(/[^\d.]/g, "");
     else entry[reading.field] = reading.value;
   }
+  /** The paper row's separator, as an expression: a block's leading space
+      is trimmed, which ran "17 KB· refused" together. */
+  const SEP = " · ";
   /** @type {(bytes: number) => string} */
   const size = (bytes) =>
     bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -128,18 +162,75 @@
     {/if}
 
     {#if mode === "create"}
-      <button type="button" class="pc-doc" onclick={() => picker?.click()} disabled={disabled}>
-        <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
-        <span class="pc-doc-words">
-          <b>add a document</b>
-          <span>photo or file · read for you</span>
-        </span>
-      </button>
+      <!-- Once a file is held, the row's job is done: the reading card takes
+           its place. A refused file is out of the entry, so the row is back. -->
+      {#if !attachment}
+        <button type="button" class="pc-doc" onclick={() => picker?.click()} disabled={disabled}>
+          <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
+          <span class="pc-doc-words">
+            <b>add a document</b>
+            <span>photo or file · read for you</span>
+          </span>
+        </button>
+      {/if}
       <input bind:this={picker} type="file" accept="application/pdf,image/*" hidden onchange={onPick}>
     {/if}
   </section>
 
-  <section class="p-card pc-card" style:--i="1" aria-labelledby="{uid}-details">
+  {#if mode === "create" && picked}
+    <!-- The reading card (#1279): in the TYPE card's wake, where the thumb
+         just was. aria-live so the head's change and the caption's are
+         announced. Keyed by the pick, so a new file lands a new card. -->
+    {#key picked.key}
+      <section class="p-card proposed pc-card pc-reading" class:pc-snap={Boolean(picked.page)} class:pc-still={picked.settled}
+               class:pc-refused={picked.refused} class:pc-done={picked.read}
+               style:--i="1" aria-labelledby="{uid}-reading" aria-live="polite">
+        <h2 class="p-caps" id="{uid}-reading">{picked.page ? PAGE_HEAD : READING_HEAD}</h2>
+
+        <div class="pc-paper pc-paper-row">
+          <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
+          <span class="pc-paper-words"><b>{picked.name}</b>
+            <span>{size(picked.size)}{#if picked.scanned}{SEP}<span class="clean">scanned clean</span>{/if}{#if picked.refused}{SEP}<span class="refusedword">refused</span>{/if}</span></span>
+        </div>
+
+        {#if picked.page}
+          <!-- Page one, drawn by the household's pre-attachment preview
+               route (#1245/#476), on the cream sheet with the tilted second
+               sheet under it. -->
+          <div class="pc-topsheet">
+            <div class="pc-sheet"><img src={picked.page} alt="Page one of {picked.name}"></div>
+            <p class="pc-cap"><b>Page one of the file you added</b>
+              <span class="p-body up breathing" aria-hidden="true"></span><span>{picked.caption}</span></p>
+          </div>
+        {:else}
+          <div class="pc-focus">
+            <svg class="pc-reticle" viewBox="0 0 96 96" aria-hidden="true">
+              <circle cx="48" cy="48" r="43" fill="none" stroke="var(--chart-line)" stroke-width="1"
+                      stroke-dasharray="3 7" opacity=".8"/>
+              <g class="sweep">
+                <line x1="48" y1="5" x2="48" y2="14" stroke="var(--accent)" stroke-width="1.2" opacity=".8"/>
+                <line x1="48" y1="82" x2="48" y2="91" stroke="var(--accent)" stroke-width="1.2" opacity=".35"/>
+              </g>
+              <g class="pull" fill="none" stroke="var(--accent)" stroke-width="1.1" opacity=".7">
+                <path d="M 26 18 H 18 V 26"/><path d="M 70 18 H 78 V 26"/>
+                <path d="M 26 78 H 18 V 70"/><path d="M 70 78 H 78 V 70"/>
+              </g>
+              <circle cx="48" cy="48" r="16" fill="none" stroke="var(--chart-line)" stroke-width="1" opacity=".9"/>
+              <circle cx="48" cy="48" r="1.8" fill="var(--accent)"/>
+            </svg>
+            <p class="pc-focusline">{picked.line}</p>
+            <p class="pc-why">{#each whyLines(picked.why) as line, index (index)}{#if index}<br>{/if}{line}{/each}</p>
+          </div>
+        {/if}
+
+        {#if !picked.refused}
+          <button type="button" class="p-pill pc-drop" {disabled} onclick={dropDocument}>not this one</button>
+        {/if}
+      </section>
+    {/key}
+  {/if}
+
+  <section class="p-card pc-card" style:--i={mode === "create" ? 2 : 1} aria-labelledby="{uid}-details">
     <h2 class="p-caps" id="{uid}-details">details</h2>
 
     <div class="pc-field">
@@ -177,23 +268,23 @@
       </div>
     {/if}
 
-    <div class="pc-field">
-      <label for="{uid}-provider">provider</label>
+    <div class="pc-field" class:sugg={marked.includes("provider")}>
+      <label for="{uid}-provider">provider <span class="pc-from">◆ from document</span></label>
       <input id="{uid}-provider" bind:value={entry.provider} maxlength="100" autocomplete="off" enterkeyhint="next"
-             placeholder="optional · e.g. Kwik Fit" {disabled}>
+             placeholder="optional · e.g. Kwik Fit" {disabled} oninput={() => unmark("provider")}>
     </div>
 
-    <div class="pc-field">
-      <label for="{uid}-reference">reference</label>
+    <div class="pc-field" class:sugg={marked.includes("reference")}>
+      <label for="{uid}-reference">reference <span class="pc-from">◆ from document</span></label>
       <input id="{uid}-reference" class="mono" bind:value={entry.reference} maxlength="80" autocomplete="off"
-             enterkeyhint="next" {disabled}
+             enterkeyhint="next" {disabled} oninput={() => unmark("reference")}
              placeholder={referenceState === DAMAGED ? DAMAGED_PLACEHOLDER : "optional · policy no."}>
     </div>
 
     {#if kindHasDate(entry.kind)}
-      <div class="pc-field">
-        <label for="{uid}-due">{entry.kind === "document" ? "expires on" : "due date"}</label>
-        <input id="{uid}-due" type="date" class="mono" bind:value={entry.dueDate} {disabled}>
+      <div class="pc-field" class:sugg={marked.includes("dueDate")}>
+        <label for="{uid}-due">{entry.kind === "document" ? "expires on" : "due date"} <span class="pc-from">◆ from document</span></label>
+        <input id="{uid}-due" type="date" class="mono" bind:value={entry.dueDate} {disabled} oninput={() => unmark("dueDate")}>
         {#if entry.kind === "document"}<p class="pc-hint">optional · a document ends once and does not come round</p>{/if}
       </div>
     {/if}
@@ -219,12 +310,12 @@
       </div>
     {/if}
 
-    <div class="pc-field">
-      <label for="{uid}-cost">cost</label>
+    <div class="pc-field" class:sugg={marked.includes("cost")}>
+      <label for="{uid}-cost">cost <span class="pc-from">◆ from document</span></label>
       <div class="pc-money">
         <span class="pc-sym" aria-hidden="true">{symbol}</span>
         <input id="{uid}-cost" class="mono" bind:value={entry.cost} inputmode="decimal" autocomplete="off"
-               enterkeyhint="next" placeholder="0.00" aria-describedby="{uid}-cur" {disabled}>
+               enterkeyhint="next" placeholder="0.00" aria-describedby="{uid}-cur" {disabled} oninput={() => unmark("cost")}>
         <span class="pc-cur" id="{uid}-cur">{currency}</span>
       </div>
     </div>
@@ -270,19 +361,6 @@
         {/if}
       {/each}
       {@render readingRows()}
-    </section>
-  {:else if attachment}
-    <!-- The reading card, below the fields (§2.5). -->
-    <section class="p-card proposed pc-card pc-reading" style:--i="2" aria-labelledby="{uid}-reading" aria-live="polite">
-      <h2 class="p-caps" id="{uid}-reading">the document</h2>
-      <div class="pc-paper">
-        <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
-        <span class="pc-paper-words"><b>{attachment.name}</b><span>{size(attachment.size)}</span></span>
-      </div>
-      {#if readings.length}
-        {@render readingRows()}
-      {/if}
-      <button type="button" class="p-pill pc-drop" onclick={() => { attachment = null; if (picker) picker.value = ""; }}>not this one</button>
     </section>
   {/if}
 
@@ -428,8 +506,67 @@
   .pc-read-sure.unsure{color:var(--warm-text)}
   .pc-accept{grid-column:2;grid-row:1 / span 3}
   .pc-drop{--act:var(--overdue);--act-text:var(--overdue-text)}
-  /* With no readings the pill stands straight under the paper's row. */
-  .pc-paper + .pc-drop{margin-top:8px}
 
-  @media (prefers-reduced-motion:reduce){ .pc-chip{transition:none} }
+  /* A FIELD FILLED FROM THE DOCUMENT (#1279): the desk's own mark (create.css
+     .field.sugg), the accent rule down the field's left edge, and "◆ from
+     document" in the label's right-hand slot -- the slot "required · choose
+     one" already uses -- so no field grows taller. Hidden, not absent, while
+     unmarked, so it never joins the field's accessible name. */
+  .pc-from{display:none;letter-spacing:.04em;text-transform:none;font-size:var(--p-type-caps);color:var(--accent-text)}
+  .pc-field.sugg .pc-from{display:inline}
+  .pc-field.sugg input{border-left:3px solid var(--accent)}
+
+  /* THE READING CARD (#1279), straight under TYPE: the paper's row, then the
+     desk's reading lane -- the reticle and its breathing line while the file
+     is on its way, the top sheet once page one is drawn -- then the caption,
+     then "not this one". design/v19/create-phone-reading.html, verbatim, its
+     state classes prefixed (pc-snap, pc-still, pc-refused, pc-done) so no
+     route stylesheet's bare `.refused` or `.read` can reach them. */
+  .pc-paper-words .clean{color:var(--ok-text)}
+  .pc-paper-row{border-bottom:1px solid var(--line-soft);padding-bottom:4px;margin-bottom:8px}
+  .pc-refused .pc-paper-words b{color:var(--ink-mid)}
+  .pc-paper-words .refusedword{color:var(--degraded-text)}
+
+  /* the focus block: the desk's reticle (create.css), the phone's line and
+     why (StagedPage's bp-line / bp-why) */
+  .pc-focus{display:flex;flex-direction:column;align-items:center;text-align:center;padding:14px 0 6px}
+  .pc-reticle{width:96px;height:96px;margin-bottom:16px}
+  .pc-reticle .sweep{transform-origin:48px 48px;animation:sweep 9s linear infinite}
+  .pc-reticle .pull{transform-origin:48px 48px;animation:pull 3.6s ease-in-out infinite}
+  @keyframes sweep{to{transform:rotate(360deg)}}
+  @keyframes pull{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(.88);opacity:.5}}
+  .pc-focusline{margin:0;font:600 var(--p-type-body)/1.35 var(--display);color:var(--ink);
+    animation:breathe 4.2s ease-in-out infinite}
+  @keyframes breathe{0%,100%{opacity:.96}50%{opacity:.42}}
+  .pc-why{font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet);margin:8px 0 0;text-wrap:balance}
+  .pc-still .pc-focusline{animation:none}
+  .pc-refused .pc-focusline{color:var(--degraded-text)}
+  .pc-refused .pc-reticle{opacity:.35}
+
+  /* the top sheet: page one whole on the cream sheet, the tilted second
+     sheet under it (StagedPage's bp-page, create.css's .sheet -- one idiom).
+     Page one at a glance, not the item card's near edge-to-edge preview: the
+     form is the job here, so the page stops at 40% of the screen (the belt
+     is one tap away for anyone who needs to read it). */
+  .pc-topsheet{padding:8px 0 4px;animation:landed .6s cubic-bezier(.3,.7,.2,1) backwards}
+  @keyframes landed{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+  .pc-sheet{position:relative;width:max-content;max-width:100%;margin:0 auto;padding:8px;box-sizing:border-box;
+    background:#f6f4ee;border-radius:5px;
+    box-shadow:0 18px 44px rgba(0,0,0,.45),0 1px 0 rgba(255,255,255,.4) inset}
+  .pc-sheet::before{content:"";position:absolute;inset:0;background:#e7e3d8;border-radius:5px;
+    transform:rotate(-1.6deg) translate(-4px,4px);z-index:-1}
+  .pc-sheet img{display:block;max-width:100%;height:auto;max-height:min(calc(100dvh * .4), 340px);
+    border-radius:2px;background:#fff}
+
+  /* the caption (the desk's .cap, in the phone's prose face) */
+  .pc-cap{margin:14px 0 0;text-align:center;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet);text-wrap:pretty}
+  .pc-cap b{display:block;font-weight:500;color:var(--ink)}
+  .pc-cap .p-body{display:inline-block;vertical-align:middle;margin:0 8px 2px 0}
+  .pc-done .pc-cap .p-body{display:none}
+  .pc-reading .pc-drop{margin-top:14px}
+
+  @media (prefers-reduced-motion:reduce){
+    .pc-chip{transition:none}
+    .pc-topsheet,.pc-reticle .sweep,.pc-reticle .pull,.pc-focusline{animation:none}
+  }
 </style>

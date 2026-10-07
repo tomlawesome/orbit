@@ -232,7 +232,7 @@ test("a document picked on the create form is attached to the saved item", async
  * anomaly" for good.
  */
 test("picking a document shows its front page while the read runs alongside", async ({ page }) => {
-  test.skip(test.info().project.name.startsWith("mobile"), "the pocket's own form has no reading lane (#1245 open question)");
+  test.skip(test.info().project.name.startsWith("mobile"), "the pocket's reading card is proven by its own tests below (#1279)");
   test.setTimeout(90_000);
   await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
@@ -273,6 +273,121 @@ test("picking a document shows its front page while the read runs alongside", as
     await page.locator("#rc-drop").click();
     await expect(page.locator("body")).not.toHaveClass(/\bdoc\b/);
     await expect(page.locator("body")).not.toHaveClass(/\bsnap\b/);
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+/**
+ * #1279: the phone's create form reads a picked document as the desk does
+ * (design/v19/create-phone-reading.html, owner's "14a"). The reading card
+ * lands straight under TYPE in place of the "add a document" row, page one
+ * lands on its sheet -- drawn for real by the preview route -- and the read
+ * fills the empty fields marked "◆ from document", never over what was
+ * typed. The inspection answer is fixed here, so the marks do not depend on
+ * whether the stack has a document processor.
+ */
+async function signInWithHousehold(page: Page): Promise<void> {
+  await answerPushWithoutAService(page);
+  await page.goto("/api/auth/login?returnTo=/home");
+  await page.getByRole("link", { name: workerAccount("administrator") }).click();
+  await settleArrival(page);
+  await ensureWorkerAdministrator(page);
+  households.track(await seedHousehold(page));
+}
+
+/** @param body the inspection route's answer for this page */
+async function answerInspection(page: Page, body: object): Promise<void> {
+  await page.route("**/item-document-inspection", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) }));
+}
+
+test("the phone's create form shows page one and fills the fields the read found", async ({ page }) => {
+  test.skip(!test.info().project.name.startsWith("mobile"), "the desk's lane is proven above (#1245)");
+  test.setTimeout(90_000);
+  await signInWithHousehold(page);
+
+  try {
+    await answerInspection(page, {
+      extracted: true, attachmentDisposition: "attachable",
+      suggestions: [
+        { field: "provider", value: "British Gas", source: "document_text", confidence: "medium" },
+        { field: "reference", value: "BG-88214-HC", source: "document_text", confidence: "medium" },
+        { field: "cost", value: "144.00", source: "document_text", confidence: "medium" },
+      ],
+    });
+    await gotoCreate(page);
+    const form = page.getByRole("form", { name: "New entry" });
+    const reference = form.getByRole("textbox", { name: "reference" });
+    await reference.fill("MY-OWN-REF");
+
+    await form.locator('input[type="file"]').setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+    const card = form.locator(".pc-reading");
+    await expect(card).toBeVisible();
+    await expect(card).toContainText(DOCUMENT);
+    await expect(form.getByRole("button", { name: /add a document/ })).toHaveCount(0);
+    // Straight under TYPE, ahead of the fields it fills.
+    const above = await card.evaluate((el) => el.previousElementSibling?.querySelector(".pc-kinds") !== null);
+    expect(above).toBe(true);
+
+    // Page one lands, a real picture drawn from the file, and the head says so.
+    const sheet = card.getByRole("img", { name: `Page one of ${DOCUMENT}` });
+    await expect(sheet).toBeVisible({ timeout: 20_000 });
+    await expect.poll(() => sheet.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    await expect(card.getByRole("heading")).toHaveText(/page one/i);
+    await expect(card).toContainText("Page one of the file you added");
+    await expect(card).toContainText("scanned clean");
+
+    // The read fills the empty fields and marks them; what was typed stays.
+    await expect(card).toContainText("the fields marked ◆ from document are what orbit read across into the form");
+    const provider = form.getByRole("textbox", { name: "provider" });
+    const cost = form.getByRole("textbox", { name: "cost" });
+    await expect(provider).toHaveValue("British Gas");
+    await expect(cost).toHaveValue("144.00");
+    await expect(reference).toHaveValue("MY-OWN-REF");
+    await expect(form.locator(".pc-field.sugg")).toHaveCount(2);
+    await expect(form.locator(".pc-field.sugg", { has: provider })).toContainText("◆ from document");
+
+    // Typing in a marked field accepts it: the mark clears, the value stays.
+    await provider.fill("British Gas Services");
+    await expect(form.locator(".pc-field.sugg")).toHaveCount(1);
+
+    // "not this one": the file and what it still suggested leave the entry.
+    await card.getByRole("button", { name: "not this one" }).click();
+    await expect(card).toHaveCount(0);
+    await expect(form.locator(".pc-field.sugg")).toHaveCount(0);
+    await expect(cost).toHaveValue("");
+    await expect(provider).toHaveValue("British Gas Services");
+    await expect(reference).toHaveValue("MY-OWN-REF");
+    await expect(form.getByRole("button", { name: /add a document/ })).toBeVisible();
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+/**
+ * #1279: a file the upload would refuse leaves the phone's entry at once,
+ * in the desk's words, and the "add a document" row is back to choose
+ * another; there is nothing to drop, so no "not this one".
+ */
+test("the phone's create form says when a picked document is refused", async ({ page }) => {
+  test.skip(!test.info().project.name.startsWith("mobile"), "the desk's refusal shares the same read (#1245)");
+  test.setTimeout(90_000);
+  await signInWithHousehold(page);
+
+  try {
+    await answerInspection(page, { extracted: false, suggestions: [], attachmentDisposition: "rejected" });
+    await gotoCreate(page);
+    const form = page.getByRole("form", { name: "New entry" });
+    await form.locator('input[type="file"]').setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+
+    const card = form.locator(".pc-reading");
+    await expect(card).toContainText("Orbit refused this file.", { timeout: 20_000 });
+    await expect(card).toContainText("choose another document");
+    await expect(card).toContainText(/KB · refused/);
+    await expect(card.getByRole("img")).toHaveCount(0);
+    await expect(card.getByRole("button", { name: "not this one" })).toHaveCount(0);
+    await expect(form.getByRole("button", { name: /add a document/ })).toBeVisible();
   } finally {
     await households.sweep(page);
   }

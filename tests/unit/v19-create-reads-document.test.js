@@ -113,13 +113,17 @@ describe("#1245: the desk form reads the document the moment it is picked", () =
   const behaviour = here("../../web/src/routes/create/create.behaviour.js");
   const page = here("../../web/src/routes/create/+page.svelte");
   const css = here("../../web/src/routes/create/create.css");
+  const shared = here("../../web/src/lib/data/document-read.js");
   const takeFile = behaviour.slice(behaviour.indexOf("function takeFile"), behaviour.indexOf('on(dropzone, "click"'));
 
   it("starts the picture and the inspection together from the pick, not from the save", () => {
-    expect(takeFile).toMatch(/previewPickedDocument\(/u);
-    expect(takeFile).toMatch(/inspectPickedDocument\(/u);
+    /* #1279: both requests start in $lib/data/document-read.js, shared
+       with the phone's form, and the desk calls it from the pick. */
+    expect(takeFile).toMatch(/readPickedDocument\(/u);
+    expect(shared).toMatch(/previewPickedDocument\(/u);
+    expect(shared).toMatch(/inspectPickedDocument\(/u);
     const submitHandler = behaviour.slice(behaviour.indexOf('on(card, "submit"'));
-    expect(submitHandler).not.toMatch(/previewPickedDocument|inspectPickedDocument/u);
+    expect(submitHandler).not.toMatch(/readPickedDocument|previewPickedDocument|inspectPickedDocument/u);
   });
 
   it("lands the top sheet (body.snap, create-v3's own state) when the picture arrives", () => {
@@ -137,7 +141,7 @@ describe("#1245: the desk form reads the document the moment it is picked", () =
   it("keeps the ratified copy: the lane reads 'Reading your document' until the page is up, then 'Page one'", () => {
     expect(page).toMatch(/>Reading your document</u);
     expect(page).toMatch(/Focusing on the anomaly/u);
-    expect(behaviour).toMatch(/"Page one"/u);
+    expect(shared).toMatch(/"Page one"/u);
     expect(page).toMatch(/Page one of the file you added/u);
   });
 
