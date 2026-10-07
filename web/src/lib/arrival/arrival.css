@@ -98,7 +98,7 @@ body.shownew.instrument .nf .nstar{animation:chromein .95s ease .34s both}
             background:var(--panel);backdrop-filter:blur(16px);
             border:1px solid var(--line);border-radius:20px;overflow:hidden;
             box-shadow:0 34px 90px -30px rgba(0,0,0,.75),0 0 0 1px rgba(255,255,255,.03) inset;
-            transition:opacity 1.1s ease}
+            transition:opacity .45s ease}
 body.belong .nf .belong{opacity:1}
 .nf .belong .top{padding:20px 24px 15px;border-bottom:1px solid var(--line-soft);
                  background:var(--panel-raised);text-align:center}
