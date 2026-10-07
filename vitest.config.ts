@@ -65,6 +65,14 @@ const test: TestUserConfig = {
           "$app/environment": fileURLToPath(
             new URL("./tests/support/app-environment.ts", import.meta.url),
           ),
+          // home.behaviour.js navigates to the create form (#1243); no unit
+          // test follows it, but every test that mounts home loads it.
+          "$app/navigation": fileURLToPath(
+            new URL("./tests/support/app-navigation.ts", import.meta.url),
+          ),
+          "$app/paths": fileURLToPath(
+            new URL("./tests/support/app-paths.ts", import.meta.url),
+          ),
         },
       },
       test: {
