@@ -137,7 +137,8 @@
     if (!householdId) return;
     /* ADR-0033 step 5: the focus line moves on from the virus check to the
        preview the moment the scan has passed, before anything opens the file. */
-    const onScanned = (/** @type {boolean} */ scanned) => {
+    /** @type {(scanned: boolean) => void} */
+    const onScanned = (scanned) => {
       if (!current() || !picked || picked.page || picked.settled) return;
       picked.line = focusAfterScan(scanned);
     };
