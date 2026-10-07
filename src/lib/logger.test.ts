@@ -6,6 +6,7 @@ import {
   getLogLevel,
   log,
   operationalDetail,
+  operationalErrorDetail,
   resetLoggerForTests,
   setLoggerClockForTests,
   shouldUseColor,
@@ -328,6 +329,27 @@ describe("bounded detail (#718)", () => {
     process.env.ORBIT_LOG_FORMAT = "text";
     expect(formatRecord("error", mismatch, "2026-01-01T00:00:00.000Z")).toContain("detail=-");
     expect(JSON.parse(formatJsonRecord("error", mismatch, "2026-01-01T00:00:00.000Z"))).toMatchObject({ detail: null });
+  });
+});
+
+describe("operationalErrorDetail (#1288)", () => {
+  it("names the class, the status and the code, and nothing else", () => {
+    class UpstreamError extends Error {
+      status = 503;
+      code = "ECONNREFUSED";
+    }
+    expect(operationalErrorDetail(new UpstreamError("boom"))).toBe("error_class=UpstreamError status=503 code=ECONNREFUSED");
+    expect(operationalErrorDetail(new TypeError("x"))).toBe("error_class=TypeError");
+    expect(operationalErrorDetail("a thrown string")).toBe("error_class=string");
+    expect(operationalErrorDetail(null)).toBe("error_class=null");
+  });
+
+  it("never carries the message, and withholds a status or code that is not a bounded token", () => {
+    const url = "postgres://orbit:hunter2@db.internal:5432/orbit";
+    const failure = Object.assign(new Error(`connect failed for ${url}`), { status: 99999, code: url });
+    const detail = operationalErrorDetail(failure);
+    expect(detail).toBe("error_class=Error");
+    expect(detail).not.toContain("hunter2");
   });
 });
 

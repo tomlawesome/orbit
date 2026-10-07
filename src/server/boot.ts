@@ -256,7 +256,7 @@ export async function reportKekRotationInProgress(): Promise<void> {
 }
 
 export async function registerNode(): Promise<void> {
-  const [{ validateStartupConfiguration, StartupConfigurationError }, { getDatabaseClient }, { verifyMigrationIntegrity, verifyMigrationJournalComplete, MigrationIntegrityError }, { log }, { getConfigurationProblems }] = await Promise.all([
+  const [{ validateStartupConfiguration, StartupConfigurationError }, { getDatabaseClient }, { verifyMigrationIntegrity, verifyMigrationJournalComplete, MigrationIntegrityError }, { log, operationalErrorDetail }, { getConfigurationProblems }] = await Promise.all([
     import("@/lib/startup-config"),
     import("@/db"),
     import("@/db/migration-integrity"),
@@ -316,12 +316,14 @@ export async function registerNode(): Promise<void> {
        Reuses existing sentinel vocabulary (no new reason/impact tokens) -
        the migration's own outcome is already logged in full above/below;
        this only flags that its bookkeeping row may be missing. */
-    const logMigrationOutcomeUnavailable = () => log.warn({
+    const logMigrationOutcomeUnavailable = (error: unknown) => log.warn({
       event: "startup.migration",
       state: "degraded",
       reason: "unexpected_failure",
       action: "inspect_admin_diagnostics",
       impact: "none",
+      // #1288: the error's class and code only, never its message.
+      detail: operationalErrorDetail(error),
     });
     // Resolved once and reused below (#1151 A4-Q2): the integrity check, the
     // migrate() call and the post-migration journal check must all read the
@@ -371,8 +373,8 @@ export async function registerNode(): Promise<void> {
     }
     try {
       await ensureMigrationRunsTable(getDatabaseClient());
-    } catch {
-      logMigrationOutcomeUnavailable();
+    } catch (error) {
+      logMigrationOutcomeUnavailable(error);
     }
     const migrationStartedAt = new Date();
     try {
@@ -400,8 +402,8 @@ export async function registerNode(): Promise<void> {
           outcome: "failed",
           reason: "migration_failed",
         });
-      } catch {
-        logMigrationOutcomeUnavailable();
+      } catch (error) {
+        logMigrationOutcomeUnavailable(error);
       }
       throw new Error("migration_failed");
     }
@@ -412,8 +414,8 @@ export async function registerNode(): Promise<void> {
         outcome: "succeeded",
         reason: null,
       });
-    } catch {
-      logMigrationOutcomeUnavailable();
+    } catch (error) {
+      logMigrationOutcomeUnavailable(error);
     }
     try {
       await verifyMigrationJournalComplete(getDatabaseClient(), migrationsFolder);

@@ -1,7 +1,7 @@
 import { ZodError } from "zod";
 import { AppError, MaintenanceActiveError } from "@/lib/errors";
 import { AuthError } from "@/lib/auth/errors";
-import { log } from "@/lib/logger";
+import { log, operationalErrorDetail } from "@/lib/logger";
 
 /* The classes live in the framework-free `@/lib/errors` (ADR-0015 decision
    1) so operator artifacts can bundle domain code without linking Next.
@@ -37,6 +37,7 @@ export function appErrorResponse(error: unknown): Response {
     reason: "unexpected_failure",
     action: "inspect_admin_diagnostics",
     impact: "application_degraded",
+    detail: operationalErrorDetail(error),
   });
   return Response.json(
     { error: { code: "internal_error", message: "Orbit could not complete the request" } },

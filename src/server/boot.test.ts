@@ -389,6 +389,45 @@ describe("strict startup ordering", () => {
     expect(JSON.stringify(mocks.log.error.mock.calls)).not.toContain("private SQL detail");
   });
 
+  it("says what failed when the outcome bookkeeping fails, not just that it did (#1288)", async () => {
+    const { registerNode } = await import("./boot");
+    class OutcomeTableError extends Error {
+      code = "42P01";
+    }
+    mocks.ensureMigrationRunsTable.mockRejectedValueOnce(new OutcomeTableError("relation missing"));
+    mocks.recordMigrationOutcome.mockRejectedValueOnce(new TypeError("write failed"));
+
+    await registerNode();
+
+    const lines = mocks.renderedText.filter((line) => line.includes("impact=none"));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('detail="error_class=OutcomeTableError code=42P01"');
+    expect(lines[1]).toContain('detail="error_class=TypeError"');
+  });
+
+  it("names the class when recording a failed run also fails (#1288)", async () => {
+    const { registerNode } = await import("./boot");
+    mocks.migrate.mockRejectedValueOnce(new Error("migration broke"));
+    mocks.recordMigrationOutcome.mockRejectedValueOnce(new RangeError("write failed"));
+
+    await expect(registerNode()).rejects.toThrow("migration_failed");
+
+    expect(mocks.renderedText.some((line) => line.includes('impact=none') && line.includes('detail="error_class=RangeError"'))).toBe(true);
+  });
+
+  it("does not log a bookkeeping error's message when it carries a connection string (#1288)", async () => {
+    const { registerNode } = await import("./boot");
+    const url = "postgres://orbit:hunter2@db.internal:5432/orbit";
+    mocks.ensureMigrationRunsTable.mockRejectedValueOnce(new Error(`connect failed for ${url}`));
+
+    await registerNode();
+
+    const rendered = [...mocks.renderedText, ...mocks.renderedJson].join("\n");
+    expect(rendered).not.toContain("hunter2");
+    expect(rendered).not.toContain("postgres://");
+    expect(mocks.renderedText.some((line) => line.includes('detail="error_class=Error"'))).toBe(true);
+  });
+
   it("names which migration and its sqlstate when the journal can say so (#1151 A4-R1)", async () => {
     const { registerNode } = await import("./boot");
     const failure = Object.assign(new Error("duplicate key value violates unique constraint \"users_email_key\""), {
