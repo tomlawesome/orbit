@@ -61,6 +61,13 @@ test("the address opens the row", async ({ page }) => {
   await expect(boiler.locator(":scope > .face")).toHaveCSS("box-shadow", "none");
   await expect(boiler.locator(".p-row-open")).toHaveCSS("box-shadow", "none");
 });
+test("the address of an item the manifest does not list opens the item", async ({ page }) => {
+  /* Chimney sweep is 61 days out, so the manifest draws no row for it (#1282):
+     the address must not be left opening nothing. */
+  await page.goto(`${APP}/home?item=i-chimney`, { waitUntil: "load" });
+  await expect(page).toHaveURL(/\/item\/i-chimney$/);
+  await expect(page.locator(".item-card h2")).toHaveText("Chimney sweep");
+});
 test("open → morphs to the belt", async ({ page }) => {
   await page.goto(`${APP}/home`, { waitUntil: "load" });
   await settle(page);
