@@ -19,17 +19,19 @@ what each script promises.
   its database.
 
 Your reverse proxy must accept uploads a little larger than Orbit's document
-limit, which is 50 MiB by default and can be set as high as 100 MiB. Many
-proxies refuse much smaller requests unless told otherwise, and a document
-over the proxy's own limit fails with "413" before it reaches Orbit. Set the
-proxy a little above the limit your administrator chooses: 51 MiB for the
-default, or 101 MiB to cover every possible setting.
+limit. The limit is 50 MiB by default, and an administrator can change it
+(up to 100 MiB) with the upload size limit in Administration. Many proxies
+refuse much smaller requests unless told otherwise, and a document over the
+proxy's own limit fails with "413" before it reaches Orbit. Set the proxy a
+little above the limit your administrator chooses: 51 MiB for the default,
+or 101 MiB to cover every possible setting.
 
 - nginx: `client_max_body_size 51m;` (or `101m;`). Its default is 1 MB, so
   this setting is needed.
-- Caddy: has no limit unless you set `request_body { max_size 51MiB }`.
-- Traefik: has no limit unless the buffering middleware sets
-  `maxRequestBodyBytes` (53477376 is 51 MiB).
+- Caddy: limits request bodies only if you set
+  `request_body { max_size 51MiB }` (or `101MiB`).
+- Traefik: limits request bodies only if the buffering middleware sets
+  `maxRequestBodyBytes` (53477376 is 51 MiB; 105906176 is 101 MiB).
 
 If the document limit is raised later, raise the proxy setting to match.
 
