@@ -28,8 +28,9 @@
    * then unfolds in place, because a sheet never stacks on a sheet (§1.4).
    *
    * The reading card sits below the fields (§2.5, the desk's second lane)
-   * and only once a document is chosen. Upload and reading are not wired on
-   * either dialect yet (create.behaviour.js, departure 1), so the card holds
+   * and only once a document is chosen. Reading is not wired on either
+   * dialect yet (create.behaviour.js, departure 1), and upload only on the
+   * desk's form (#1245), so the card holds
    * the paper and says plainly that it is not read or kept; `readings` is
    * where that build will hand the rows in.
    * @typedef {import('./entry.js').FormHousehold} FormHousehold

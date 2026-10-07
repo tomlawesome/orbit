@@ -39,9 +39,10 @@ describe("#1151 W1-S1: the desktop create form warns before discarding", () => {
     // ...and a save that landed is not something to discard: leaving for
     // /home after it must not ask.
     expect(tail).toMatch(/isDirty:\s*\(\)\s*=>\s*!committed && disclose\.classList\.contains\("open"\)/u);
-    // Set before the attachment branch, so an entry the server already
-    // holds is committed whether or not a file was waiting to go with it.
-    expect(behaviour).toMatch(/committed = true;\s*\n\s*if \(attachment\) \{/u);
+    // Set once the picked document is attached too (#1245): an entry saved
+    // whose file then failed to go with it still holds that file only here,
+    // so leaving must still ask about it.
+    expect(behaviour).toMatch(/if \(attachment\) await attachItemDocument\([^\n]*\n(?:\s*\n|\s*(?:\/\*|\*|\s)[^\n]*\n)*?\s*committed = true;/u);
     // ...and only until the next edit. Typing reaches the card as input or
     // change; a type chip, a section button and a dropped file do not, so
     // each of those paths resets the flag by hand (fix review round 4).

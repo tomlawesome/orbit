@@ -1474,6 +1474,50 @@ export async function readItemDocuments(householdId, itemId) {
 }
 
 /**
+ * Attaches a file to an item the server already holds (#1245): the same
+ * per-item documents route, as a raw-body upload — the filename travels
+ * encoded in a header because the body is the file's own bytes.
+ *
+ * `documentId` is the caller's, minted once per file: a retry after a lost
+ * answer sends the same id with the same bytes, and the route's idempotency
+ * (document-repository.ts `uploadItemDocument`) hands back the document it
+ * already holds instead of storing a second copy. A 202 (held for a scan
+ * retry) is still an attached document, so only a refusal throws. A stale
+ * CSRF token is retried once, as applyCommand does.
+ *
+ * @param {string} householdId
+ * @param {string} itemId
+ * @param {File} file
+ * @param {string} documentId
+ * @param {{ retryCsrf?: boolean }} [options]
+ * @returns {Promise<DocumentSummary>}
+ */
+export async function attachItemDocument(householdId, itemId, file, documentId, { retryCsrf = true } = {}) {
+  const { csrfToken } = await readSession();
+  const response = await fetch(
+    `/api/households/${encodeURIComponent(householdId)}/items/${encodeURIComponent(itemId)}/documents`,
+    {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "content-type": file.type || "application/octet-stream",
+        "x-csrf-token": csrfToken,
+        "x-orbit-filename": encodeURIComponent(file.name),
+        "x-orbit-document-id": documentId,
+      },
+      body: file,
+    },
+  );
+  if (response.status === 403 && retryCsrf) {
+    await readSession({ refresh: true });
+    return attachItemDocument(householdId, itemId, file, documentId, { retryCsrf: false });
+  }
+  /** @type {{ document: DocumentSummary }} */
+  const body = await json(response);
+  return body.document;
+}
+
+/**
  * The signed-in user's mail-in relay (#432), live from
  * `GET /api/settings/mail-relay`.
  *

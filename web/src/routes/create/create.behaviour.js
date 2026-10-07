@@ -1,5 +1,5 @@
 import { goto } from "$app/navigation";
-import { WorkspaceError, activeHousehold, applyCommand } from "$lib/data/workspace.js";
+import { WorkspaceError, activeHousehold, applyCommand, attachItemDocument } from "$lib/data/workspace.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
 import { screenScope } from "$lib/teardown.js";
 import { createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, refusalOf } from "./entry.js";
@@ -31,12 +31,13 @@ import { createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, refusalOf
  *      which types "British Gas / BG-88214-HC / 2026-11-02" into the form and
  *      (after a timer) shows the top-sheet snapshot, to demonstrate what
  *      extraction looks like. That is demonstration, not product, so it does
- *      not ship. The real path — upload, scan, read, suggest — runs over the
- *      reviewed-intake protocol (operation ids, 202-recoverable polling,
- *      malware states) and is a build of its own. Here the drop target does
- *      the part it can honestly do: it takes a real file, opens the form,
- *      splits the lanes (`body.doc`, §14 ruling 3) and names the entry after
- *      it. The `.sugg`/accept-suggestion markup and the reading lane's
+ *      not ship. Reading and suggesting run over the reviewed-intake
+ *      protocol (operation ids, 202-recoverable polling, malware states) and
+ *      are a build of their own. Here the drop target does the part it can
+ *      honestly do: it takes a real file, opens the form, splits the lanes
+ *      (`body.doc`, §14 ruling 3) and names the entry after it, and the save
+ *      attaches the file to the item it creates (#1245) through the item's
+ *      own documents route. The `.sugg`/accept-suggestion markup and the reading lane's
  *      top-sheet snapshot stay, unused, waiting for that build and for a
  *      server-side page-one render (#476) respectively — `body.snap` is never
  *      added, so the sheet's own placeholder markup stays honestly
@@ -80,17 +81,16 @@ export function mountCreate() {
   /** Set the moment a save lands, so leaving for /home is never read as
       discarding what was typed. */
   let committed = false;
-  /* Only until the next edit: after a save that kept the form open (the
-     attachment branch of the submit handler) further typing is unsaved
-     work again, and leaving must ask about it (#1151 W1-S1). Bound on the
+  /* Only until the next edit: after a save that kept the form open
+     further typing is unsaved work again, and leaving must ask about it (#1151 W1-S1). Bound on the
      card, so every field's input or change bubbles to it; the type chips,
      the section buttons and a dropped file change the entry without either
      event, so their handlers call `edited` themselves. */
   const edited = () => { committed = false; };
   on(card, "input", edited);
   on(card, "change", edited);
-  /** A message from the last save attempt (a loud failure, or "saved, the
-      document was not attached"), held until the NEXT attempt — same as the
+  /** A message from the last save attempt (a loud failure), held until the
+      NEXT attempt — same as the
       pocket's own `problem`, which nothing typed clears early. */
   /** @type {string | null} */
   let sticky = null;
@@ -235,8 +235,13 @@ export function mountCreate() {
 
   /** @type {File | null | undefined} */
   let attachment = null;
+  /** Minted once per file picked, the way `draftId` is per draft (#1245):
+      a retry after a lost answer re-sends the same id with the same bytes,
+      so the documents route hands back the copy it already holds. */
+  let attachmentId = "";
   function takeFile(/** @type {File | null | undefined} */ file) {
     if (!file) return;
+    attachmentId = crypto.randomUUID();
     attachment = file;
     edited();
     reveal();
@@ -316,20 +321,15 @@ export function mountCreate() {
         throw error;
       });
 
-      /* Before either branch: the server holds the entry from here, so
-         leaving must not ask about discarding it (#1151 W1-S1). */
-      committed = true;
-      if (attachment) {
-        /* Deliberately not silent: the entry is saved, the document is not,
-           because that path is unbuilt. Saying so beats losing the file. */
-        sticky = `Saved. ${attachment.name} was not attached — documents are not wired up yet.`;
-        note.textContent = sticky;
-        save.textContent = label;
-        saving = false;
-        updateRefusal();
-        return;
-      }
+      /* #1245: the picked document goes onto the item just saved. A refusal
+         lands in the catch below like any failed save: the entry is kept,
+         and the next attempt re-sends both under the same ids, so neither
+         is stored twice. */
+      if (attachment) await attachItemDocument(active.id, draftId, attachment, attachmentId);
 
+      /* The server holds the entry, and its document, from here, so leaving
+         must not ask about discarding them (#1151 W1-S1). */
+      committed = true;
       await goto("/home");
     } catch (error) {
       /* #1058e: loud, not small print — the button goes back to "Add to

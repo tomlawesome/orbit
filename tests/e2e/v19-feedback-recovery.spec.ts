@@ -26,9 +26,11 @@ resetDatabaseBetweenSpecFiles();
  *   IMAP review              a mail suggestion whose approval fails, from the
  *                            item view and from /inbox
  *   signed-in lifecycle      a household deletion request that fails
- *   document-assisted item   a document picked on /create: v19 has no upload
- *                            yet, so the save says the file was not kept, and
- *                            that is the feedback to announce
+ *   document-assisted item   a document picked on the pocket's /create: its
+ *                            form has no upload yet, so the save says the file
+ *                            was not kept, and that is the feedback to
+ *                            announce. The desk attaches it (#1245), proven in
+ *                            v19-create.spec.ts
  *
  * What did not come across, because v19 has no equivalent to drive: the old
  * document journey's upload conflict, scanner-unavailable retry and
@@ -391,10 +393,10 @@ for (const journey of JOURNEYS) {
 
 /* ── document-assisted item ────────────────────────────────────────────── */
 
-/* Desk: "Saved. renewal-letter.pdf was not attached …" in #save-note
-   (aria-live="polite"), and the page stays; pocket: "… was not kept" in the
-   wake's status region (lib/pocket/Wake.svelte) as the new item opens. */
-const DOCUMENT_NOT_KEPT = /renewal-letter\.pdf was not (attached|kept)/;
+/* Pocket: "… was not kept" in the wake's status region
+   (lib/pocket/Wake.svelte) as the new item opens. The desk attaches the
+   document since #1245, so it has no "not kept" to announce. */
+const DOCUMENT_NOT_KEPT = /renewal-letter\.pdf was not kept/;
 
 /** Picks a document and saves an entry with it, by keyboard; returns its name. */
 async function saveWithDocument(page: Page): Promise<string> {
@@ -425,6 +427,7 @@ async function saveWithDocument(page: Page): Promise<string> {
 }
 
 test("a document picked on /create is announced as not kept, and the entry still saves", async ({ page }) => {
+  test.skip(!isPocket(), "#1245: the desk attaches the document — v19-create.spec.ts proves it");
   test.setTimeout(90_000);
   await signIn(page, "/home");
   const household = await seedHousehold(page, "feedback-recovery");
@@ -437,26 +440,6 @@ test("a document picked on /create is announced as not kept, and the entry still
     expect(listed.ok()).toBe(true);
     const { workspace } = (await listed.json()) as { workspace: { households: Array<{ id: string; items: Array<{ title: string }> }> } };
     expect(workspace.households.find((one) => one.id === household.id)?.items.map((item) => item.title)).toContain(name);
-  } finally {
-    await cleanup(page, household);
-  }
-});
-
-test("a document picked on /create leaves focus where the reader was", async ({ page }) => {
-  /* The pocket saves by opening the new item: a navigation, where focus
-     starting over is SvelteKit's own reset, not a loss. The desk stays put. */
-  test.skip(isPocket(), "the pocket save navigates to the new item; focus starting over there is not a loss");
-  test.fixme(isFirefox(), FOCUS_DEFECT_RACES_ON_FIREFOX);
-  test.fixme(test.info().project.name === "desktop-webkit", FOCUS_DEFECT_RACES_ON_DESKTOP_WEBKIT);
-  const defect = FOCUS_LOST_TO_DISABLED_BUTTON("the desk create card (#card .btn-primary)");
-  test.fail(Boolean(defect), defect);
-  test.setTimeout(90_000);
-  await signIn(page, "/home");
-  const household = await seedHousehold(page, "feedback-recovery");
-  try {
-    await saveWithDocument(page);
-    await expect(shownText(page, DOCUMENT_NOT_KEPT)).toBeVisible({ timeout: 15_000 });
-    expect(await focusedElement(page), "create, document: focus is not dropped to the page").not.toBe("body");
   } finally {
     await cleanup(page, household);
   }
