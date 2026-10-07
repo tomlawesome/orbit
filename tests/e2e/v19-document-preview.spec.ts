@@ -6,6 +6,7 @@ import { householdRegister, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { syntheticNumberedPageWidth, syntheticPdfWithNumberedPages } from "../support/generated-pdf-documents";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -105,8 +106,8 @@ async function uploadDocument(
   householdId: string,
   itemId: string,
   filename: string,
+  bytes: Buffer = readFileSync(FIXTURE_PATH),
 ): Promise<{ id: string; lifecycle: string }> {
-  const bytes = readFileSync(FIXTURE_PATH);
   const headers = { ...(await sessionHeaders(page)), "x-orbit-filename": encodeURIComponent(filename) };
   const response = await page.request.post(
     `/api/households/${householdId}/items/${itemId}/documents`,
@@ -279,6 +280,106 @@ test("a removed document shows its own line, honestly, and no page", async ({ pa
     // Never a fabricated page: the sheet does not exist at all here.
     await expect(readcard.locator(".sheet")).toHaveCount(0);
     await expect(readcard.getByRole("button", { name: "restore" })).toBeVisible();
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+/* #1300: page turning, as design/v19/document-card/round-2 and round-6 have
+   it -- a round arrow either side of the page, only where there is a page
+   that way; ← → PageUp PageDown Home End; the foot "page N of M" on a polite
+   live region; a one-page file says "one page" and has no arrows. Desk and
+   phone share the reader. The three-page file is synthetic and made here;
+   each of its pages is its own width, so the drawn picture's own width says
+   which page the server actually drew, not only what the foot claims. */
+test("the reader turns a multi-page document to its last page and back, by arrows and by keys", async ({ page }) => {
+  test.setTimeout(90_000);
+  await signInAsAdmin(page);
+  const { itemId, householdId } = await seedHouseholdWithItem(page);
+
+  try {
+    await uploadDocument(page, householdId, itemId, "pages-proving.pdf", syntheticPdfWithNumberedPages(3));
+    await page.goto(`/item/${itemId}`);
+    await expect(page.getByRole("heading", { name: "Preview proving item" })).toBeVisible();
+    await page.getByRole("button", { name: /pages-proving\.pdf/ }).first().click();
+    const pageButton = page.getByRole("button", { name: "Read pages-proving.pdf" });
+    await expect(pageButton).toBeEnabled({ timeout: 20_000 });
+    await pageButton.click();
+
+    const reader = page.getByRole("dialog", { name: "pages-proving.pdf, Preview proving item" });
+    await expect(reader).toBeVisible();
+    const foot = reader.locator(".rd-page");
+    const previous = reader.getByRole("button", { name: "Previous page" });
+    const next = reader.getByRole("button", { name: "Next page" });
+    const picture = reader.getByRole("img", { name: /pages-proving\.pdf/ });
+    /** The page the reader says it is on, and the one the server drew. */
+    const onPage = async (n: number) => {
+      await expect(foot).toHaveText(`page ${n} of 3`);
+      await expect(foot).toHaveAttribute("aria-live", "polite");
+      await expect(picture).toHaveAccessibleName(`Page ${n} of pages-proving.pdf`, { timeout: 20_000 });
+      await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0), { timeout: 20_000 })
+        .toBe(Math.round(syntheticNumberedPageWidth(n) * (1_200 / 792)));
+      await expect(previous).toHaveCount(n > 1 ? 1 : 0);
+      await expect(next).toHaveCount(n < 3 ? 1 : 0);
+    };
+
+    await onPage(1);
+    await next.click();
+    await onPage(2);
+    await next.click();
+    await onPage(3);
+    await previous.click();
+    await onPage(2);
+
+    await page.keyboard.press("End");
+    await onPage(3);
+    await page.keyboard.press("ArrowLeft");
+    await onPage(2);
+    await page.keyboard.press("Home");
+    await onPage(1);
+    await page.keyboard.press("PageDown");
+    await onPage(2);
+    await page.keyboard.press("ArrowRight");
+    await onPage(3);
+    // Past the end stays on the last page; before the start on the first.
+    await page.keyboard.press("ArrowRight");
+    await onPage(3);
+    await page.keyboard.press("PageUp");
+    await onPage(2);
+    await page.keyboard.press("PageUp");
+    await onPage(1);
+    await page.keyboard.press("ArrowLeft");
+    await onPage(1);
+
+    await page.keyboard.press("Escape");
+    await expect(reader).toBeHidden({ timeout: 2_000 });
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+test("a one-page document's reader says \"one page\" and has no arrows", async ({ page }) => {
+  test.setTimeout(60_000);
+  await signInAsAdmin(page);
+  const { itemId, householdId } = await seedHouseholdWithItem(page);
+
+  try {
+    await uploadDocument(page, householdId, itemId, "one-page-proving.pdf");
+    await page.goto(`/item/${itemId}`);
+    await expect(page.getByRole("heading", { name: "Preview proving item" })).toBeVisible();
+    await page.getByRole("button", { name: /one-page-proving\.pdf/ }).first().click();
+    const pageButton = page.getByRole("button", { name: "Read one-page-proving.pdf" });
+    await expect(pageButton).toBeEnabled({ timeout: 20_000 });
+    await pageButton.click();
+
+    const reader = page.getByRole("dialog", { name: "one-page-proving.pdf, Preview proving item" });
+    await expect(reader).toBeVisible();
+    await expect(reader.getByRole("img", { name: "Page 1 of one-page-proving.pdf" })).toBeVisible({ timeout: 20_000 });
+    await expect(reader.locator(".rd-page")).toHaveText("one page");
+    await expect(reader.getByRole("button", { name: /previous page|next page/i })).toHaveCount(0);
+    // The keys turn nothing either.
+    await page.keyboard.press("End");
+    await expect(reader.locator(".rd-page")).toHaveText("one page");
   } finally {
     await households.sweep(page);
   }
