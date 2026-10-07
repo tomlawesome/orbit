@@ -432,6 +432,15 @@ export async function json(response) {
        an HTML error page, a proxy, a process that isn't there — say that
        plainly rather than surfacing a bare "Not Found" the reader cannot act
        on. */
+    if (response.status === 413 && !body?.error?.message) {
+      /* Reached, and refused for size by something in front of Orbit (nginx's
+         1 MB default answers with a bare page): not "could not be reached"
+         (#1284). Orbit's own limit answers 413 with this same code. */
+      throw new WorkspaceError("That file is larger than this Orbit accepts", {
+        status: 413,
+        code: "document_too_large",
+      });
+    }
     const message =
       body?.error?.message ?? `Orbit could not be reached (${response.status})`;
     throw new WorkspaceError(message, {
