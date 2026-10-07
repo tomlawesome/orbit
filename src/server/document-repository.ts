@@ -22,7 +22,8 @@ import { LocalDocumentStorage } from "@/server/documents/storage";
 import {
   detectDocumentMediaType,
   normalizedDocumentFilename,
-  validateSupportedDocumentStructure,
+  classifyDocumentStructure,
+  type DocumentStructureReason,
 } from "@/server/documents/validation";
 import { canAccessHouseholdDocuments, canManageDocumentDeletion } from "@/server/documents/authorization";
 import { retryableScannerFailureCode, scannerRecoveryDelayMs } from "@/server/documents/staging";
@@ -481,18 +482,25 @@ export async function uploadItemDocument(input: {
     }
     if (!scan || scan.status === "clean") {
       const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
-      let structureValid = false;
+      let structure: DocumentStructureReason = "unsupported_structure";
       try {
-        structureValid = await validateSupportedDocumentStructure(bytes, mediaType);
+        structure = await classifyDocumentStructure(bytes, mediaType);
       } finally {
         // A buffer this block is about to discard has nowhere else left to be
         // wiped, so it is zeroed here (#1151 F13).
-        if (!structureValid) bytes.fill(0);
+        if (structure !== "supported_structure") bytes.fill(0);
       }
-      if (!structureValid) {
+      if (structure === "password_required") {
+        throw new AppError(
+          "document_password_required",
+          "This document needs a password to open. Choose a copy without a password.",
+          422,
+        );
+      }
+      if (structure !== "supported_structure") {
         throw new AppError(
           "document_structure_invalid",
-          "Choose a structurally valid PDF, JPEG, or PNG document",
+          "Orbit could not open this document. Choose another PDF, JPEG, or PNG.",
           422,
         );
       }

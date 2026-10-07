@@ -79,7 +79,7 @@ describe("document-assisted item inspection boundary", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       extracted: false,
-      message: "Orbit could not safely inspect this document structure. Choose another PDF, JPEG, or PNG before adding the item.",
+      message: "Orbit could not open this document. Choose another PDF, JPEG, or PNG.",
       suggestions: [],
       attachmentDisposition: "rejected",
       reason: "unsupported_structure",
