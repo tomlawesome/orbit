@@ -125,6 +125,11 @@ export const operationalReasons = [
      Orbit account (ADR-0023 §3, #1242): Orbit's rule, not a provider fault,
      and the person's remedy is to sign in to that account and link. */
   "link_required",
+  /* The claim's two provider refusals (ADR-0022, ADR-0023 §8, #1242): a
+     provider sign-in before the instance is claimed, and one after a local
+     administrator holds it. Orbit's rule, not a provider fault. */
+  "bootstrap_required",
+  "bootstrap_claimed",
   /* Tier 1 metadata (ADR-0024 decision 5): one stored value would not
      authenticate. The record names the table, column and row so an
      administrator can find it; it never carries the value, the ciphertext or
