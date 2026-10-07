@@ -6,7 +6,7 @@
     newcomerAscentBeats, newcomerAscentBeatsReduced,
     runTimeline, MARK_ARRIVE, MARK_RIDE_UP, MARK_RIDE_DOWN, D,
   } from "./timeline.js";
-  import { journeyClock } from "./journey-clock.js";
+  import { journeyClock, WORLD_WAIT } from "./journey-clock.js";
   import { readyFlight } from "./warm.js";
   import "./flight.css";
 
@@ -406,8 +406,12 @@
     /* #1253: the flight's world (voyage.js), readied now and hurried. If it
        is not ready yet the journey still starts at once, but its opening is
        the mark lifting to the centre (which needs nothing drawn), and the
-       clock holds just before the warp until the world is ready -- eight
-       seconds at most, and then the flight goes on its own canvas, as ever */
+       clock holds just before the warp until the world is ready -- two
+       seconds at most (#1222; the arrival has been readying it since before
+       its answers came, so what is left to wait for is short), and then the
+       flight goes on its own canvas, as ever. The hold is on a lit frame: the
+       dawn is up (showdawn, set before the flight starts) and the mark is
+       already at the centre, breathing. */
     let beats = newcomer ? newcomerAscentBeats() : ascentBeats();
     const engine = activeEngine();
     readyFlight({ hurry: true });
@@ -416,7 +420,7 @@
       const warp = beats.find((b) => b.act === "warp")?.at ?? 0;
       beats = beats.map((b) => (b.act === "mark" ? { ...b, at: Math.min(b.at, Math.max(0, warp - 80)) } : b));
       body().classList.add("holding");
-      clock.holdAt(Math.max(0, warp - 10), ready.finally(() => body().classList.remove("holding")));
+      clock.holdAt(Math.max(0, warp - 10), ready.finally(() => body().classList.remove("holding")), WORLD_WAIT);
     }
     cancelTimeline = runTimeline(beats, ascentStep(undefined), clock);
   }
