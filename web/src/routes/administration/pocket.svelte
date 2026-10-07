@@ -820,7 +820,7 @@
                  aria-labelledby="ad-uploads-head" data-ad="uploads">
           <div class="ad-cardhead"><h2 class="p-caps" id="ad-uploads-head">Upload size limit</h2></div>
           <Row title={megabytes(limit.maxBytes)}
-               meta={limit.overrideBytes === null ? "the configured default" : `set here · default ${megabytes(limit.defaultBytes)}`}
+               meta={limit.overrideBytes === null ? "the default" : "set here"}
                trail="change" trailTone="var(--accent-text)" trailName="change the upload size limit"
                onactivate={openUploadLimit}>
             {#snippet mark()}<span class="ad-kmark">↑</span>{/snippet}
@@ -1345,6 +1345,11 @@
   .ad-input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
   .ad-input::placeholder{color:var(--ink-quiet)}
   .ad-note{margin:12px 0 0;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet)}
+  /* A link inside the note keeps the pocket's 44px tap floor: vertical
+     padding on an inline box widens what a finger hits without moving the
+     line it sits on, and it reads at the controls' colour: the browser's
+     own link blue fails WCAG AA contrast here (#1285). */
+  .ad-note a{padding:14px 0;color:var(--ink-mid)}
   .ad-sheet-say{color:var(--ink-mid);margin:4px 0 12px}
   .ad-sheet-say code{font:var(--p-type-meta) var(--mono);color:var(--ink)}
   .ad-stepper{display:flex;align-items:center;gap:12px}
