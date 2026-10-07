@@ -122,9 +122,18 @@ async function seedHousehold(page: Page) {
 }
 
 /** Home as a real sign-in lands on it: the launch marker set, the ascent played. */
-async function arriveWithAscent(page: Page) {
+async function arriveWithAscent(page: Page, errors: string[]) {
   await page.evaluate(() => sessionStorage.setItem("orbit-launch", "departed"));
-  await page.goto("/home");
+  /* #1262: errors are counted from the home that signs out, from the moment
+     it is the document. Not before: sign-in can leave the reader on a /home
+     that is still loading (its pictures and first reads in flight), and this
+     goto cuts that page. WebKit reports
+     each in-flight load cut that way as a page error, "Fetch API cannot
+     load … due to access control checks.", however the page handles it (its
+     fetches are all caught), and a chunk import cut the same way rejects. */
+  await page.goto("/home", { waitUntil: "commit" });
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.waitForLoadState("load");
   await page.waitForFunction(() => !document.body.classList.contains("launching"), null, { timeout: 150_000 });
   await homeIsLive(page);
   const tour = page.locator("#orbit-tour-transport");
@@ -159,12 +168,11 @@ for (const size of WIDTHS) {
       if (world) await forceWorld(page);
       await watchDescent(page);
       const errors: string[] = [];
-      page.on("pageerror", (e) => errors.push(String(e)));
 
       await signIn(page);
       const household = await seedHousehold(page);
       try {
-        await arriveWithAscent(page);
+        await arriveWithAscent(page, errors);
         const { menu, signOut } = await openMenu(page, desk);
         await menu.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
 
