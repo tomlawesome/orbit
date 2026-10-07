@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   BAND_MARGIN, BERTH_NARROW, BERTH_WIDE, DOC_OFF, J_H, J_PHI, J_RHO, MAX_GAP,
   MIN_GAP, RAD, bedOf, berthFor, bloomTargetsOf, bodiesOf, cardWidthOf, docSpread,
-  geometryOf, itemOffsetsOf, lehmer, matchesOf, nearestMatchOf, paperLines, reachableAt,
+  geometryOf, itemOffsetsOf, lehmer, litItemCountOf, matchesOf, nearestMatchOf, paperLines, reachableAt,
   rollRangeOf, seatOf, shortName, stepFrom, warpOf, AMBIENT_SEED,
 } from "../../web/src/routes/item/[[id]]/band.js";
 import { beltManifestOf, documentPreviewStateOf, sizeLabel } from "../../web/src/lib/data/belt.js";
@@ -470,6 +470,15 @@ describe("the search box", () => {
     // — and lights the paper too, because it is already out.
     expect(ids("service history")).toEqual(["i-mot", "d-mot-history"]);
     expect(ids("nothing by that name")).toEqual([]);
+  });
+
+  it("counts lit ITEMS for the note, so an item and its paper lit together count once (#1303)", () => {
+    // "service history" lights i-mot AND its paper d-mot-history: two seats,
+    // one item. Counting seats made the note say "2 of 1 lit".
+    expect(matchesOf(BODIES, "service history").size).toBe(2); // the old N
+    expect(litItemCountOf(BODIES, matchesOf(BODIES, "service history"))).toBe(1);
+    expect(litItemCountOf(BODIES, matchesOf(BODIES, "vehicles"))).toBe(2);
+    expect(litItemCountOf(BODIES, matchesOf(BODIES, "nothing by that name"))).toBe(0);
   });
 
   it("dims, it does not hide: the belt keeps its shape", () => {

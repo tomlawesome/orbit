@@ -30,7 +30,7 @@
     COST_LOCKED, DAMAGED, DAMAGED_PLACEHOLDER, LOCKED, NOTES_WORDS, PANEL_LOCKED, REFERENCE_WORDS,
     evidenceReadable, fieldState, itemLocked, receiptWords, saveProblem,
   } from "$lib/data/metadata-status.js";
-  import { matchesOf, nearestMatchOf, reachableAt, stepFrom } from "./band.js";
+  import { litItemCountOf, matchesOf, nearestMatchOf, reachableAt, stepFrom } from "./band.js";
   import { searchBelt } from "./pocket-find.js";
   import { mountBelt } from "./belt.behaviour.js";
   import "./belt.css";
@@ -948,7 +948,7 @@
        keys keep working as the shortcut they always were. */
     if (!query.trim()) return `${itemCount} items${suggestedNote} · ${noQuerySuffix}`;
     return hitList.length
-      ? `${hitList.length} of ${itemCount} lit · enter centres the nearest`
+      ? `${litItemCountOf(bodies, hitList)} of ${itemCount} lit · enter centres the nearest`
       : "nothing matches · the belt keeps its shape";
   }
   const findnote = $derived(findnoteFor("in date order, sooner to later"));
