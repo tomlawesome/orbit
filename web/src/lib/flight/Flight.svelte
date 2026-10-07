@@ -214,8 +214,18 @@
     const svg = markEl.querySelector("svg"), circles = svg ? [...svg.querySelectorAll("circle")] : [];
     if (!svg || !circles.length || instant || reduced()) { dropMark(); return; }
     const timing = { duration: 760, easing: "cubic-bezier(.5,0,.9,.5)", fill: /** @type {const} */ ("forwards") };
-    circles[0].style.vectorEffect = "non-scaling-stroke";
-    const anims = circles.map((c) => {
+    /* the ring's line and halos keep the width they were drawn at (the glyph's
+       200-unit box on screen) while they grow: non-scaling-stroke measures in
+       screen pixels, so the width is handed over in them */
+    const k = svg.getBoundingClientRect().width / 200;
+    for (const c of /** @type {SVGElement[]} */ ([...svg.querySelectorAll("[data-w]")])) {
+      c.style.vectorEffect = "non-scaling-stroke";
+      c.style.strokeWidth = Number(c.dataset.w) * k + "px";
+    }
+    /* everything but the core grows from the ring's centre: the discs, halos
+       and line, and the planet with its wake (the group), which sweeps by */
+    const grow = [...circles, .../** @type {SVGElement[]} */ ([...svg.querySelectorAll(".tr")])];
+    const anims = grow.map((c) => {
       Object.assign(c.style, { transformOrigin: "100px 100px", transformBox: "view-box" });
       return c.animate([{ transform: "scale(1)", opacity: 1 }, { transform: "scale(2.4)", opacity: 1, offset: 0.5 }, { transform: "scale(9)", opacity: 0 }], timing);
     });
@@ -230,8 +240,9 @@
   function settleFlyThrough() {
     for (const a of flyThrough) a.cancel();
     flyThrough = [];
-    const first = markEl?.querySelector("circle");
-    if (first) first.style.vectorEffect = "";
+    for (const el of /** @type {SVGElement[]} */ ([...(markEl?.querySelectorAll("[data-w]") ?? [])])) {
+      el.style.vectorEffect = ""; el.style.strokeWidth = "";
+    }
   }
   /* the way down: the mark appears at centre and rides to the lockup's glyph.
      Same FLIP treatment as liftMark above, mirrored: the box goes straight to
@@ -441,15 +452,28 @@
 
 <canvas id="warp" aria-hidden="true" bind:this={canvas}></canvas>
 <div id="flightmark" aria-hidden="true" bind:this={markEl}>
-  <!-- Drawn to the HERO's proportions (ring stroke 2, planet r7 of the
-       200-unit box), because that is the mark it takes over from: the swap at
-       260ms happens at the hero's own 420px rect, and anything heavier would
-       pop. The white core is the one thing the hero does not have — it is the
+  <!-- Drawn as the door's own glyph (Dawn.svelte / Dusk.svelte, which are
+       identical here): the lit gradient line with its two halos, the dark and
+       warm discs, the gold planet picture and its wake, all on the glyph's
+       200-unit box with the ring at r72 and the planet at (163, 63.5), because
+       that is the mark the swap takes over from — a flatter ring here would
+       be the ring turning plain the moment the journey starts. The gradient
+       ids carry an fm- prefix so they never meet the glyphs' own on one page.
+       The white core is the one thing the glyph does not have — it is the
        heart lighting as the ring leaves, and the point the sun blooms from. -->
   <svg viewBox="0 0 200 200">
-    <circle cx="100" cy="100" r="72" fill="none" stroke="#e9edf8" stroke-width="2" opacity=".85"/>
+    <defs>
+      <linearGradient id="fm-ringlit" gradientUnits="userSpaceOnUse" x1="0" y1="26" x2="0" y2="174"><stop offset="0" stop-color="#6c76a0" stop-opacity=".6"/><stop offset=".5" stop-color="#aab2cf" stop-opacity=".85"/><stop offset=".86" stop-color="#ead2a4"/><stop offset="1" stop-color="#ffe2a8"/></linearGradient>
+      <radialGradient id="fm-disclit" cx="100" cy="100" r="72" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#03040a" stop-opacity=".55"/><stop offset=".8" stop-color="#05070f" stop-opacity=".35"/><stop offset="1" stop-color="#05070f" stop-opacity="0"/></radialGradient>
+      <radialGradient id="fm-discwarm" cx="100" cy="182" r="70" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ffcf8a" stop-opacity=".16"/><stop offset="1" stop-color="#ffcf8a" stop-opacity="0"/></radialGradient>
+      <linearGradient id="fm-trail" gradientUnits="userSpaceOnUse" x1="46.5" y1="51.8" x2="163" y2="63.5"><stop offset="0" stop-color="#ffd68c" stop-opacity="0"/><stop offset=".46" stop-color="#ffd68c" stop-opacity=".08"/><stop offset="1" stop-color="#ffdea0" stop-opacity=".75"/></linearGradient>
+    </defs>
+    <g class="lux"><circle class="fm-disc" cx="100" cy="100" r="71" fill="url(#fm-disclit)"/><circle class="fm-disc" cx="100" cy="100" r="71" fill="url(#fm-discwarm)"/></g>
+    <g class="lux"><circle class="fm-halo" data-w="9" cx="100" cy="100" r="72" fill="none" stroke="url(#fm-ringlit)" stroke-width="9" stroke-opacity=".05"/>
+    <circle class="fm-halo" data-w="3.6" cx="100" cy="100" r="72" fill="none" stroke="url(#fm-ringlit)" stroke-width="3.6" stroke-opacity=".12"/></g>
+    <circle class="fm-line" data-w="1.6" cx="100" cy="100" r="72" fill="none" stroke="url(#fm-ringlit)" stroke-width="1.6"/>
     <circle class="core" cx="100" cy="100" r="7"/>
-    <circle cx="163" cy="63.5" r="7" fill="#d8b45a"/>
+    <g class="tr"><path d="M46.5 51.8 A72 72 0 0 1 163 63.5" fill="none" stroke="url(#fm-trail)" stroke-width="3.2" stroke-linecap="round"/><image class="fm-planet" href="/flight/door/planet-gold.webp" x="145" y="45.5" width="36" height="36"/></g>
   </svg>
 </div>
 <div id="launchname" aria-hidden="true" bind:this={nameEl}>{name}<i>{subtitleText}</i></div>
