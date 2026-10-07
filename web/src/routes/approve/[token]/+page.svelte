@@ -132,7 +132,7 @@
          the ring is the door's mark rather than the card's window, it does
          (door-phone.css) -->
     <div class="pocketstroke"></div>
-    <div class="ringorbit"><i></i></div>
+    <div class="ringorbit"><b class="trail"></b><i></i></div>
   </div>
 
   <div id="formlayer">

@@ -1,6 +1,8 @@
 <script>
   import { onMount } from "svelte";
   import { DUSK_FAR, DUSK_NEAR } from "./starfields.js";
+  import "./flight.css";
+  import "./door-phone.css";
 
   /**
    * THE DUSK — where the descent sets down, and, since §15's 2026-08-17
@@ -45,8 +47,17 @@
     const images = /** @type {SVGImageElement[]} */ ([...world.querySelectorAll("image[data-href]")]);
     /** @param {SVGImageElement} im */
     const arrive = (im) => new Promise((resolve) => {
-      im.addEventListener("load", resolve, { once: true });
-      im.addEventListener("error", resolve, { once: true });
+      /** @type {(e: Event) => void} */
+      const done = (e) => {
+        /* the Earth fades in as the dawn's does, and the crisp rim gives way to it (#1253) */
+        if (!cancelled && e.type === "load" && im.closest(".earth")) {
+          im.classList.add("in");
+          if (im.classList.contains("pre")) world.classList.add("earthy");
+        }
+        resolve(undefined);
+      };
+      im.addEventListener("load", done, { once: true });
+      im.addEventListener("error", done, { once: true });
       im.setAttribute("href", /** @type {string} */ (im.dataset.href));
     });
     const frame = requestAnimationFrame(() => {
@@ -108,11 +119,19 @@
       <image data-href="/flight/dusk/glow-afterglow.webp" x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
     </g>
     <circle cx="800" cy="3920" r="3000" fill="#03050b"/>
+    <!-- the Earth, from orbit: the very one the dawn door shows (owner,
+         2026-10-07: sign out and sign in use the same photo), both its
+         pictures, at the same place and in the same order, under the ember
+         rim and the dusk's own glow (#1253) -->
+    <g class="earth">
+      <image class="pre" data-href="/flight/door/dawn-pre.webp" x="0" y="640" width="1600" height="360" preserveAspectRatio="none"/>
+      <image class="up" data-href="/flight/door/dawn.webp" x="0" y="640" width="1600" height="360" preserveAspectRatio="none"/>
+    </g>
     <!-- #501: a picture (glow-rim.webp) — the blurred half of the rim. No
          class here, matching the original: unlike Dawn's rim this one never
          had a fade-in transition. -->
     <image data-href="/flight/dusk/glow-rim.webp" x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
-    <circle cx="800" cy="3920" r="3000" fill="none" stroke="url(#d-rim)"
+    <circle class="crisp" cx="800" cy="3920" r="3000" fill="none" stroke="url(#d-rim)"
             stroke-width="1.8" stroke-opacity=".6"/>
     <!-- the dawn's travelling shimmer, cooled to an ember and running the
          other way round the limb -->
@@ -124,8 +143,17 @@
   <div class="loginchrome">
     <div class="lockup">
       <div class="glyph" id="dusk-glyph"><svg width="420" height="420" viewBox="0 0 200 200">
-        <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="2"/>
-        <g class="tr"><circle cx="163" cy="63.5" r="7" fill="#d8b45a"/></g></svg></div>
+        <defs>
+          <linearGradient id="d-ringlit" gradientUnits="userSpaceOnUse" x1="0" y1="26" x2="0" y2="174"><stop offset="0" stop-color="#6c76a0" stop-opacity=".6"/><stop offset=".5" stop-color="#aab2cf" stop-opacity=".85"/><stop offset=".86" stop-color="#ead2a4"/><stop offset="1" stop-color="#ffe2a8"/></linearGradient>
+          <radialGradient id="d-disclit" cx="100" cy="100" r="72" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#03040a" stop-opacity=".55"/><stop offset=".8" stop-color="#05070f" stop-opacity=".35"/><stop offset="1" stop-color="#05070f" stop-opacity="0"/></radialGradient>
+          <radialGradient id="d-discwarm" cx="100" cy="182" r="70" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ffcf8a" stop-opacity=".16"/><stop offset="1" stop-color="#ffcf8a" stop-opacity="0"/></radialGradient>
+          <linearGradient id="d-trail" gradientUnits="userSpaceOnUse" x1="46.5" y1="51.8" x2="163" y2="63.5"><stop offset="0" stop-color="#ffd68c" stop-opacity="0"/><stop offset=".46" stop-color="#ffd68c" stop-opacity=".08"/><stop offset="1" stop-color="#ffdea0" stop-opacity=".75"/></linearGradient>
+        </defs>
+        <g class="lux"><circle cx="100" cy="100" r="71" fill="url(#d-disclit)"/><circle cx="100" cy="100" r="71" fill="url(#d-discwarm)"/></g>
+        <g class="lux"><circle cx="100" cy="100" r="72" fill="none" stroke="url(#d-ringlit)" stroke-width="9" stroke-opacity=".05"/>
+        <circle cx="100" cy="100" r="72" fill="none" stroke="url(#d-ringlit)" stroke-width="3.6" stroke-opacity=".12"/></g>
+        <circle class="ring" cx="100" cy="100" r="72" fill="none" stroke="url(#d-ringlit)" stroke-width="1.6"/>
+        <g class="tr"><path d="M46.5 51.8 A72 72 0 0 1 163 63.5" fill="none" stroke="url(#d-trail)" stroke-width="3.2" stroke-linecap="round"/><image class="world" href="/flight/door/planet-gold.webp" x="145" y="45.5" width="36" height="36"/></g></svg></div>
       <div class="name">orbit</div>
       <div class="gate-wrap">{@render children?.()}</div>
     </div>

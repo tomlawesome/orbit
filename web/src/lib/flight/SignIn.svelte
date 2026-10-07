@@ -701,7 +701,7 @@
            closes on the compositor, this closes by width/height so the
            4.2px stroke never thins. See ringcard.css. -->
       <div class="ringstroke"></div>
-      <div class="ringorbit"><i></i></div>
+      <div class="ringorbit"><b class="trail"></b><i></i></div>
       <!-- the claim card has no heading, so on a phone the ring keeps the
            word (door-phone.css; hidden on the desk, where it never stood) -->
       {#if card === "claim"}<div class="ringword">orbit</div>{/if}

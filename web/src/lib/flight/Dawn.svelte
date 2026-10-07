@@ -2,6 +2,8 @@
   import { onMount } from "svelte";
   import { DAWN_FAR, DAWN_NEAR } from "./starfields.js";
   import { firstLight, startLate } from "./first-light.js";
+  import "./flight.css";
+  import "./door-phone.css";
 
   /**
    * THE DAWN — the sky the launch leaves from, and the sign-in's own surface.
@@ -178,8 +180,17 @@
   <div class="loginchrome">
     <div class="lockup">
       <div class="glyph" id="login-glyph"><svg width="420" height="420" viewBox="0 0 200 200">
-        <circle cx="100" cy="100" r="72" fill="none" stroke="#8791b3" stroke-width="2"/>
-        <g class="tr"><circle cx="163" cy="63.5" r="7" fill="#d8b45a"/></g></svg></div>
+        <defs>
+          <linearGradient id="ringlit" gradientUnits="userSpaceOnUse" x1="0" y1="26" x2="0" y2="174"><stop offset="0" stop-color="#6c76a0" stop-opacity=".6"/><stop offset=".5" stop-color="#aab2cf" stop-opacity=".85"/><stop offset=".86" stop-color="#ead2a4"/><stop offset="1" stop-color="#ffe2a8"/></linearGradient>
+          <radialGradient id="disclit" cx="100" cy="100" r="72" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#03040a" stop-opacity=".55"/><stop offset=".8" stop-color="#05070f" stop-opacity=".35"/><stop offset="1" stop-color="#05070f" stop-opacity="0"/></radialGradient>
+          <radialGradient id="discwarm" cx="100" cy="182" r="70" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ffcf8a" stop-opacity=".16"/><stop offset="1" stop-color="#ffcf8a" stop-opacity="0"/></radialGradient>
+          <linearGradient id="trail" gradientUnits="userSpaceOnUse" x1="46.5" y1="51.8" x2="163" y2="63.5"><stop offset="0" stop-color="#ffd68c" stop-opacity="0"/><stop offset=".46" stop-color="#ffd68c" stop-opacity=".08"/><stop offset="1" stop-color="#ffdea0" stop-opacity=".75"/></linearGradient>
+        </defs>
+        <g class="lux"><circle cx="100" cy="100" r="71" fill="url(#disclit)"/><circle cx="100" cy="100" r="71" fill="url(#discwarm)"/></g>
+        <g class="lux"><circle cx="100" cy="100" r="72" fill="none" stroke="url(#ringlit)" stroke-width="9" stroke-opacity=".05"/>
+        <circle cx="100" cy="100" r="72" fill="none" stroke="url(#ringlit)" stroke-width="3.6" stroke-opacity=".12"/></g>
+        <circle class="ring" cx="100" cy="100" r="72" fill="none" stroke="url(#ringlit)" stroke-width="1.6"/>
+        <g class="tr"><path d="M46.5 51.8 A72 72 0 0 1 163 63.5" fill="none" stroke="url(#trail)" stroke-width="3.2" stroke-linecap="round"/><image class="world" href="/flight/door/planet-gold.webp" x="145" y="45.5" width="36" height="36"/></g></svg></div>
       <div class="name">orbit</div>
       <div class="gate-wrap">{@render children?.()}</div>
       <div class="state" role="status" aria-live="polite">
