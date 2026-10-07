@@ -73,6 +73,15 @@ export const CREDITS = [
     ],
   },
   {
+    name: "The gold world on the ring, on the sign-in and the goodbye",
+    source: "Cassini's map of Jupiter (PIA07782), made into the gold world and backlit by the sunrise by orbit-site's tools/planets.py",
+    author: "NASA/JPL/Space Science Institute",
+    licence: "Public domain (NASA imagery is not copyrighted)",
+    licenceUrl: "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+    sourceUrl: "https://photojournal.jpl.nasa.gov/catalog/PIA07782",
+    files: ["flight/door/planet-gold.webp"],
+  },
+  {
     name: "The gold moon the flight passes",
     source: "NASA's CGI Moon Kit (LRO colour and LOLA elevation)",
     author: "NASA's Scientific Visualization Studio",

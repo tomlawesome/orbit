@@ -58,8 +58,8 @@ describe("creditsView (#1256)", () => {
     expect(users["Apache-2.0"]).toBe(2);
     expect(users["MPL-2.0"]).toBe(1);
     expect(users["OFL-1.1"]).toBe(FONTS.length);
-    // The two NASA pictures share one licence row.
-    expect(users["Public domain (NASA imagery is not copyrighted)"]).toBe(2);
+    // The three NASA pictures (the Earth, the gold world, the gold moon) share one licence row.
+    expect(users["Public domain (NASA imagery is not copyrighted)"]).toBe(3);
   });
 
   it("links SBOM ids to SPDX, hand-kept licences to their own text, and the fonts to the bundled OFL", () => {
