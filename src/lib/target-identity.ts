@@ -173,6 +173,18 @@ export function validateTarget(targetDir: string): ValidateTargetResult {
     return { targetWasEmpty: true };
   }
 
+  // A leftover `.orbit-install-staging.*` means an earlier attempt was
+  // killed hard enough (SIGKILL, OOM, power loss) that its own cleanup never
+  // ran. Named explicitly rather than folded into the generic refusal, and
+  // never removed here: only a person can confirm no other install is still
+  // running (#383).
+  const leftoverStaging = readdirSync(targetDir).filter((entry) => entry.startsWith(".orbit-install-staging.")).sort();
+  if (leftoverStaging.length > 0) {
+    throw new TargetValidationRefusal(
+      `A previous install attempt was interrupted and left ${leftoverStaging.join(" ")} behind in this directory. Review its contents, then remove it (safe once you have confirmed no install is still in progress) and retry.`,
+    );
+  }
+
   throw new TargetValidationRefusal(
     "The installation directory is not empty and is not a recognizable Orbit deployment or safe pre-provisioned bootstrap. Refusing to install here.",
   );

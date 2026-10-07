@@ -1,160 +1,123 @@
 import { chmodSync, closeSync, constants, copyFileSync, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { spawnSync } from "node:child_process";
 
-import {
-  type ConfigurationScriptAdapter,
-  runConfigurationMigration,
-  runConfigurationPreflight,
-} from "./configuration-migration";
+import { type ConfigurationMigrationTarget, runConfigurationMigration, runConfigurationPreflight } from "./configuration-migration";
+import { type GuidedInitInput, applyGuidedInit, applySetOidcSecret, runConfigureApply, setDeploymentProfile } from "./configure-engine";
 import {
   DEPLOYMENT_ASSET_FILE_MODE,
   DEPLOYMENT_ASSETS,
-  DEPLOYMENT_ASSETS_ROOT,
-  DEPLOYMENT_SCRIPTS,
   ENVIRONMENT_FILE,
   SECRETS_DIRECTORY,
   buildManagedPaths,
   deriveAssetDirectories,
 } from "./deployment-assets";
 import {
-  type CurrentDeploymentProfileResult,
   type DeploymentProfile,
+  type LocalAiCapacity,
+  type ProfileWizardResult,
+  chooseDeploymentProfile,
+  checkLocalAiCapacity,
   currentDeploymentProfile,
   resolveNonInteractiveProfileSelection,
+  updateIdentityLines,
 } from "./deployment-profile";
-import { type EngineEvent, defaultFailureAction, defaultFailureReason } from "./engine-event";
-import { type Clock, realClock, waitForComponentHealth } from "./health-wait";
-import type { ImageIdentityAdapter } from "./image-resolution";
-import { resolveImageIdentity } from "./image-resolution";
-import { InstallTransaction, InstallTransactionRefusal, type ManagedPath } from "./install-transaction";
+import { readinessReport } from "./deployment-readiness";
 import {
-  type DatabaseVolumeSafetyAdapter,
   type DatabaseVolumeSafetyState,
   DatabaseVolumeSafetyRefusal,
   type PostgresPasswordFacts,
   verifyDatabaseVolumeSafety,
 } from "./database-volume-safety";
-import {
-  type OidcDiscoveryAdapters,
-  type OidcDiscoveryFetchAdapter,
-  verifyOidcDiscovery,
-} from "./oidc-discovery";
-import {
-  type GuidedConfigurationAdapter,
-  type MachinePromptAnswerProvider,
-  prepareConfiguration,
-  stageGuidedInstallConfiguration,
-} from "./guided-configuration";
+import { type EngineEvent, defaultFailureAction, defaultFailureReason } from "./engine-event";
+import { missingConfigurationFields, missingGuidedFields, missingRequiredFields, noninteractiveConfigurationGuidance } from "./guided-configuration";
+import { type HostFacts, hostFactsVolumeAdapter } from "./host-facts";
+import { type InstallTerminal, InstallPromptStop, declined, selectChoice } from "./install-terminal";
+import { InstallTransaction, InstallTransactionRefusal } from "./install-transaction";
+import { verifyOidcDiscovery } from "./oidc-discovery";
 import {
   COMPOSE_FILE,
   ComposeProjectNameRefusal,
-  type DeriveComposeProjectNameResult,
   TargetValidationRefusal,
   deriveComposeProjectName,
   readEnvironmentValue,
   validateTarget,
 } from "./target-identity";
 
-// The install/update orchestrator (issue #295 slice 5): the single module
-// that drives slices 1-4's pure modules, plus this slice's own
-// image-resolution.ts/deployment-assets.ts/deployment-profile.ts/
-// health-wait.ts, through the exact sequencing scripts/install.sh's main
-// flow performs (install.sh:1259-1556). Every Docker/curl/subprocess call is
-// a caller-supplied adapter (src/lib/install-docker-adapter.ts,
-// install-curl-adapter.ts, install-script-adapters.ts ship the production
-// implementations this slice adds) so this module itself remains pure
-// sequencing/decision logic, fully testable with fakes — see
-// install-orchestrator.test.ts.
+// The install/update engine (#1212): the one TypeScript implementation of
+// install.sh's file transaction, run as a disposable one-off from the image
+// the bootstrap shell just resolved and verified.
 //
-// See docs/adr-notes/295-install-port-plan.md's Flags section for the
-// deliberate scope-narrowing decisions this module makes relative to
-// install.sh's own interactive branches (profile-selection wizard,
-// TTY-driven guided configuration transport).
+// Three phases, two owners (build note F1). scripts/install.sh does what
+// touches Docker or the network before an image exists -- tool checks, the
+// release manifest and its signatures, the pull, the label reads, the Docker
+// facts this engine needs (F3) -- then runs this engine once, then starts
+// Compose and waits for readiness. This module does everything between:
+// target validation, the install/update choice and the profile wizard on the
+// operator's terminal (F4), database-volume safety from the shell's facts,
+// copying the deployment assets out of its own image (F2), guided
+// configuration, the configuration migration, OIDC discovery (F5), and the
+// two-phase stage-then-switch file transaction whose commit marker is the
+// switch (F8). It never touches Docker (#295): everything it needs from
+// Docker arrives as data, and everything Docker must do afterwards it hands
+// back to the shell as an outcome (src/cli/orbit.ts writes it for
+// install.sh to read).
+//
+// Before the commit every failure, and SIGINT/SIGTERM (runInterruptCleanups
+// below), rolls the transaction back. A failure's own terminal `failed` event
+// is the shell's to emit, after it has handed the launcher its config tree
+// (docs/engine-events.md, #1225); this module emits the progress events only.
 
-export interface InstallOrchestratorAdapters {
-  docker: ImageIdentityAdapter & DatabaseVolumeSafetyAdapter & {
-    checkDockerAvailable(): boolean;
-    validateOidcDiscoverySandbox(resolvedReference: string, issuer: string, documentPath: string): boolean;
-    composePull(service: string): boolean;
-    composeUp(): boolean;
-    composeDown(): void;
-    removeLeftoverDatabaseVolume(): void;
-    composeConfigValidate(): boolean;
-    probeDatabaseHealth(): boolean;
-    probeApplicationHealth(): boolean;
-    probeClamavHealth(): boolean;
-    probeTikaHealth(): boolean;
-    probeOllamaHealth(): boolean;
-    probeApplicationLiveness(): boolean;
-    pullOllamaModel(model: string): boolean;
-    /** See InstallDockerAdapter.setComposeProjectName's own doc (install-docker-adapter.ts) for why this must be callable after construction. */
-    setComposeProjectName(name: string): void;
-    /** docker image inspect for the io.orbit.deployment-assets label (install.sh:1372, guarantee #42). */
-    inspectDeploymentAssetsLabel(resolvedReference: string): string | null;
-    /** docker create (install.sh:1480, guarantee #42). */
-    createAssetContainer(resolvedReference: string): string | null;
-    /** docker cp <container>:<source> <destination> (install.sh:1484, guarantee #42). */
-    copyFromContainer(containerId: string, sourcePath: string, destinationPath: string): boolean;
-    /** docker rm -f (install.sh:391-395, guarantee #42). */
-    removeAssetContainer(containerId: string): void;
-  };
-  /**
-   * install.sh still requires `curl` on the host (install.sh:1305) for the
-   * OIDC discovery request alone; deployment assets no longer travel over it
-   * (ADR-0019), so there is no asset-fetch adapter here any more.
-   */
-  checkCurlAvailable(): boolean;
-  oidcFetch: OidcDiscoveryFetchAdapter;
-  configurationScript: ConfigurationScriptAdapter;
-  guidedConfiguration: GuidedConfigurationAdapter;
-  answers: MachinePromptAnswerProvider;
-  clock?: Clock;
+export interface InstallContext {
+  /** The deployment directory, as the engine sees it (/orbit-deploy). */
+  targetDir: string;
+  /** `--install`/`--update`, or undefined to choose (the menu on a terminal, else from the target). */
+  requestedAction: "install" | "update" | undefined;
+  /** install.sh --plain: no menu, no profile wizard and no staged guided install. */
+  plainMode: boolean;
+  /** install.sh had a controlling terminal and passed it through (`docker run -t`). */
+  interactive: boolean;
+  /** The digest-pinned reference the shell resolved and verified (ORBIT_IMAGE). */
+  resolvedReference: string;
+  /** ORBIT_CHANNEL, shown on an update's identity line. */
+  channel: string;
+  /** COMPOSE_PROJECT_NAME from the shell's environment, if any. */
+  requestedComposeProjectName?: string;
+  facts: HostFacts;
+  /** Where this image keeps its deployment assets (/opt/orbit/deploy, ADR-0019). */
+  assetsRoot: string;
 }
 
-export interface InstallOrchestratorContext {
-  targetDir: string;
-  requestedAction: "install" | "update";
-  /** install.sh's $repository ("owner/repo", ORBIT_REPOSITORY). */
-  repository: string;
-  /** install.sh's $registry (ORBIT_REGISTRY). */
-  registry: string;
-  /** install.sh's $channel (ORBIT_CHANNEL). */
-  channel: string;
-  /** install.sh's ${COMPOSE_PROJECT_NAME:-}. */
-  requestedComposeProjectName?: string;
-  /** install.sh's `basename -- "$(pwd -P)"` fallback for derive_compose_project_name. */
-  fallbackBasename: string;
-  /**
-   * install.sh's has_controlling_terminal() (install.sh:597-603). The CLI
-   * has no real controlling terminal the way a spawned bash script's own
-   * `exec {fd}<>/dev/tty` does, so the shipped CLI (src/cli/orbit.ts) always
-   * passes `false` here — see this module's own Flags entry for why, and
-   * why this is left as an injected context field (not hardcoded) so a
-   * future slice wiring a real answer-provider/CLI-flag surface can flip it
-   * without changing this module.
-   */
-  hasControllingTerminal: boolean;
-  /** install.sh's $readiness_timeout_seconds (ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS, 1-900). */
-  readinessTimeoutSeconds: number;
-  /** install.sh's $readiness_poll_seconds (ORBIT_INSTALLER_POLL_INTERVAL_SECONDS, 1-9). */
-  readinessPollSeconds: number;
+/** What a guided configuration step needs answered: the configure engine's own sources, in its own order (src/cli/orbit.ts). */
+export interface ConfigurationAnswers {
+  /** `configure.sh --init`'s answers; the hint is the deployment's existing sign-in mode. Throws to refuse or cancel. */
+  guidedInit(authModeHint: "local" | "oidc" | undefined): GuidedInitInput;
+  /** `configure.sh --set-oidc-secret`'s secret. Throws to refuse or cancel. */
+  oidcSecret(): string;
+}
+
+export interface InstallDependencies {
+  /** Required when context.interactive. */
+  terminal?: InstallTerminal;
+  answers: ConfigurationAnswers;
+  /** The OIDC discovery transport (the global fetch in production). */
+  fetchImpl?: typeof fetch;
+  capacity?: (deployDir: string) => LocalAiCapacity;
+  /** The configure engine's own advisory lines, printed as configure.sh printed them. */
+  say?: (line: string) => void;
 }
 
 export type OnEvent = (event: EngineEvent) => void;
 
 export interface InstallOutcomeOk {
   status: "ok";
-  resolvedReference: string;
-  revision: string;
-  imageVersion: string;
-  appliedDigest: string;
-  composeProjectName: string;
+  /** install.sh's target_was_empty: a fresh install, whose failed first start is torn down. */
+  fresh: boolean;
   selectedProfile: DeploymentProfile;
-}
-
-export interface InstallOutcomeCancelled {
-  status: "cancelled";
+  /** Guarantee #20: the separately confirmed model download. */
+  modelPullRequested: boolean;
+  /** The pre-existing database volume this update attached to, for the shell's re-check before Compose (#17). */
+  databaseVolume: string | undefined;
 }
 
 export interface InstallOutcomeFailed {
@@ -164,36 +127,69 @@ export interface InstallOutcomeFailed {
   reason: string;
   action: string;
   message: string;
-  /**
-   * install.sh's print_noninteractive_configuration_guidance
-   * (install.sh:879-885, guarantee #24): the exact remediation lines,
-   * present only for prepareConfiguration's non-interactive
-   * required-fields-missing refusal. install.sh prints these to stderr
-   * directly — they are operator-facing remediation text, not part of the
-   * fixed-vocabulary engine-event stream (engine-event.ts's own module
-   * comment: only fixed-vocabulary values pass through `onEvent`), so the
-   * caller (the CLI) is responsible for surfacing them, exactly as
-   * install.sh's own printf calls do.
-   */
+  /** Remediation lines printed before the refusal (guarantee #24), and the rollback-incomplete line. */
   guidance?: string[];
 }
 
-export type InstallOutcome = InstallOutcomeOk | InstallOutcomeCancelled | InstallOutcomeFailed;
+/** The operator stopped (130), the terminal closed (1), or an answer was refused (2); nothing was changed. */
+export interface InstallOutcomeStopped {
+  status: "stopped";
+  exitCode: 130 | 1 | 2;
+  message: string;
+}
 
-/** ^[0-9a-f]{64}$ — the container id `docker create` prints (install.sh:1482). */
-const CONTAINER_ID_PATTERN = /^[0-9a-f]{64}$/;
+/** The Repair choice: signposted, never run (#533); exit 3. */
+export interface InstallOutcomeRepair {
+  status: "repair";
+}
+
+export type InstallOutcome = InstallOutcomeOk | InstallOutcomeFailed | InstallOutcomeStopped | InstallOutcomeRepair;
+
+export const REPAIR_SIGNPOST =
+  'Orbit installer: repair_unavailable; this installer does not perform repair. Run "bash scripts/repair.sh --check" from this directory to diagnose, then "--plan" to see what it would do. No deployment files or services were changed.';
+
+// --- interruption -----------------------------------------------------------
+
+const interruptCleanups = new Set<() => void>();
 
 /**
- * install.sh:1481-1485's single message for every step of the extraction:
- * create, the id check, and the copy all fail the same way, because from an
- * operator's point of view they are one action — getting the bundle out of
- * the image they just resolved.
+ * Rolls back whatever this process has in flight -- the transaction, the
+ * scratch directory -- for a SIGINT/SIGTERM handler that is about to exit.
+ * A signal does not unwind try/finally, so the CLI calls this first.
  */
-const EXTRACTION_FAILURE_MESSAGE = "Could not extract deployment assets from the published image.";
+export function runInterruptCleanups(): void {
+  for (const cleanup of [...interruptCleanups].reverse()) {
+    try {
+      cleanup();
+    } catch {
+      /* best effort: the next cleanup still runs */
+    }
+  }
+  interruptCleanups.clear();
+}
+
+// --- helpers ------------------------------------------------------------------
 
 function isRegularNonSymlinkFile(path: string): boolean {
   try {
     return lstatSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function isRealNonSymlinkDirectory(path: string): boolean {
+  try {
+    return lstatSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function pathExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
   } catch {
     return false;
   }
@@ -205,21 +201,15 @@ function readPostgresPasswordFacts(targetDir: string): PostgresPasswordFacts {
 }
 
 /**
- * verify_database_password_preserved (install.sh:588-595, guarantee #19):
- * once a run has attached to a pre-existing, proven database volume
- * (`databaseVolumeSeen`), the live `postgres-password` secret's content and
- * mode-600 permission must be byte-identical to the pre-transaction backup
- * (`InstallTransaction.originalDir`) — the one guarantee slice 2 explicitly
- * deferred to this orchestration slice (see database-volume-safety.ts's own
- * module comment) because it needs both slice 1's transaction and slice 2's
- * volume-safety state together.
+ * verify_database_password_preserved (guarantee #19): once this run has
+ * attached to a proven pre-existing volume, the live `postgres-password`
+ * must still be mode 600 and byte-identical to the transaction's backup.
  */
 function verifyDatabasePasswordPreserved(transaction: InstallTransaction, targetDir: string, databaseVolumeSeen: boolean): boolean {
   if (!databaseVolumeSeen) return true;
   const live = join(targetDir, SECRETS_DIRECTORY, "postgres-password");
   const backup = join(transaction.originalDir, SECRETS_DIRECTORY, "postgres-password");
-  // Single O_NOFOLLOW descriptor for the live secret: the mode check and the
-  // content read must observe the same file (no stat-then-open pair).
+  // One O_NOFOLLOW descriptor: the mode check and the read see the same file.
   let descriptor: number;
   try {
     descriptor = openSync(live, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -239,8 +229,7 @@ function verifyDatabasePasswordPreserved(transaction: InstallTransaction, target
 function stageSecretsDirectoryTree(transaction: InstallTransaction, sourceDir: string, relativeDir: string): void {
   for (const entry of readdirSync(sourceDir)) {
     const sourcePath = join(sourceDir, entry);
-    // Single O_NOFOLLOW descriptor per entry: the type/mode probe and the
-    // content read must observe the same file (no lstat-then-read pair).
+    // One O_NOFOLLOW descriptor per entry: the type probe and the read see the same file.
     let descriptor: number;
     try {
       descriptor = openSync(sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -259,86 +248,119 @@ function stageSecretsDirectoryTree(transaction: InstallTransaction, sourceDir: s
 }
 
 /**
- * runInstall — the full install/update orchestration
- * (install.sh:1259-1556). Adapters are injected (see
- * InstallOrchestratorAdapters); `onEvent` receives the same
- * `{phase,component,state,reason,action}` records docs/engine-events.md's
- * plain-mode stream documents (src/lib/engine-event.ts formats/validates
- * them). Never throws for an expected refusal — every failure path returns
- * `{status:"failed",...}`; only a genuine programming error propagates.
+ * The persisted image line (guarantees #53-54): the resolved digest at the
+ * first ORBIT_IMAGE line, every later duplicate dropped, appended when
+ * absent; written through the transaction, never in place.
  */
-export async function runInstall(
-  context: InstallOrchestratorContext,
-  adapters: InstallOrchestratorAdapters,
-  onEvent: OnEvent,
-): Promise<InstallOutcome> {
-  const clock = adapters.clock ?? realClock();
+function withResolvedImage(content: string, resolvedReference: string): string {
+  const line = `ORBIT_IMAGE=${resolvedReference}`;
+  const lines = content.split("\n");
+  const trailingNewline = content.endsWith("\n");
+  if (trailingNewline) lines.pop();
+  let written = false;
+  const rewritten: string[] = [];
+  for (const existing of lines) {
+    if (existing.startsWith("ORBIT_IMAGE=")) {
+      if (!written) rewritten.push(line);
+      written = true;
+    } else {
+      rewritten.push(existing);
+    }
+  }
+  if (!written) rewritten.push(line);
+  return `${rewritten.join("\n")}\n`;
+}
 
-  // install.sh's cleanup trap prints "rollback incomplete; recovery staging
-  // preserved at %s" (install.sh:395) whenever rollback_transaction fails —
-  // the staging directory is then the only copy of whatever the transaction
-  // was about to replace (e.g. the operator's original .env-orbit/
-  // .orbit-secrets). The outcome describing *why* the transaction failed in
-  // the first place is already returned by the time dispose() (in the
-  // `finally` below) discovers rollback also failed, so the last
-  // fail()-built outcome is tracked here and given a chance to gain that
-  // extra guidance line before it reaches the caller (issue #383).
+function readinessText(deployDir: string): { ok: boolean; text: string } {
+  const outcome = readinessReport(deployDir);
+  if (outcome.status === "refused") return { ok: false, text: "" };
+  return { ok: outcome.ok, text: outcome.lines.join("\n") };
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function say(dependencies: InstallDependencies, messages: readonly string[]): void {
+  for (const message of messages) dependencies.say?.(message);
+}
+
+// --- the run --------------------------------------------------------------------
+
+/**
+ * One install or update. Never throws for an expected refusal: every
+ * failure is an outcome, and only a programming error propagates.
+ */
+export async function runInstall(context: InstallContext, dependencies: InstallDependencies, onEvent: OnEvent): Promise<InstallOutcome> {
   let lastFailure: InstallOutcomeFailed | undefined;
+  const terminal = context.interactive ? dependencies.terminal : undefined;
 
-  function fail(
-    phase: string,
-    component: string,
-    message: string,
-    reason?: string,
-    action?: string,
-    guidance?: string[],
-  ): InstallOutcomeFailed {
-    const resolvedReason = reason ?? defaultFailureReason(phase);
-    const resolvedAction = action ?? defaultFailureAction(phase);
-    onEvent({ phase, component, state: "failed", reason: resolvedReason, action: resolvedAction });
-    const outcome: InstallOutcomeFailed = { status: "failed", phase, component, reason: resolvedReason, action: resolvedAction, message, guidance };
-    lastFailure = outcome;
-    return outcome;
+  function fail(phase: string, component: string, message: string, reason?: string, action?: string, guidance?: string[]): InstallOutcomeFailed {
+    lastFailure = {
+      status: "failed",
+      phase,
+      component,
+      reason: reason ?? defaultFailureReason(phase),
+      action: action ?? defaultFailureAction(phase),
+      message,
+      guidance,
+    };
+    return lastFailure;
   }
 
-  onEvent({ phase: "host", component: "host", state: "starting", reason: "host-tools", action: "check" });
+  function stopped(stop: InstallPromptStop): InstallOutcomeStopped {
+    return { status: "stopped", exitCode: stop.exitCode, message: stop.message };
+  }
 
+  // validate_target (guarantee #7).
   let targetWasEmpty: boolean;
   try {
     ({ targetWasEmpty } = validateTarget(context.targetDir));
   } catch (error) {
-    // validateTarget's own contract is to throw only TargetValidationRefusal
-    // for an expected refusal (see target-identity.ts); anything else is a
-    // genuine programming error and must propagate, matching this
-    // function's own header comment ("Never throws for an expected
-    // refusal ... only a genuine programming error propagates").
     if (!(error instanceof TargetValidationRefusal)) throw error;
     return fail("host", "host", error.message);
   }
 
-  // guarantee #21
-  if (context.requestedAction === "install" && !targetWasEmpty) {
-    return fail(
-      "host",
-      "host",
-      "Install requires an empty target or safe pre-provisioned bootstrap; use Update for a recognized deployment.",
-    );
+  // resolve_installer_action (guarantees #21-22): the menu only for an
+  // operator at a terminal who named no action.
+  let action = context.requestedAction;
+  let menuShown = false;
+  if (action === undefined) {
+    const defaultAction = targetWasEmpty ? "install" : "update";
+    if (!context.plainMode && terminal) {
+      let choice: string;
+      try {
+        choice = selectChoice(terminal, "Greetings, what can we do for you today?", defaultAction, [
+          ["install", "Install"],
+          ["update", "Update"],
+          ["repair", "Repair"],
+          ["exit", "Exit"],
+        ]);
+      } catch (error) {
+        if (error instanceof InstallPromptStop) return stopped(error);
+        throw error;
+      }
+      if (choice === "repair") {
+        // Signposts repair, never dispatches into it: the two scripts'
+        // exit codes collide (#533, docs/engine-events.md "Repair stream").
+        onEvent({ phase: "rollback", component: "installer", state: "blocked", reason: "repair-unavailable", action: "repair" });
+        return { status: "repair" };
+      }
+      if (choice === "exit") return stopped(declined());
+      action = choice as "install" | "update";
+      menuShown = true;
+    } else {
+      action = defaultAction;
+    }
   }
-  if (context.requestedAction === "update" && targetWasEmpty) {
+  if (action === "install" && !targetWasEmpty) {
+    return fail("host", "host", "Install requires an empty target or safe pre-provisioned bootstrap; use Update for a recognized deployment.");
+  }
+  if (action === "update" && targetWasEmpty) {
     return fail("host", "host", "Update requires a recognized existing Orbit deployment.");
   }
 
-  // guarantee #40 (curl/docker/compose availability; GNU `timeout` is not
-  // required — see install-docker-adapter.ts's own header comment for why).
-  if (!adapters.docker.checkDockerAvailable()) {
-    return fail("host", "host", "Docker and Docker Compose v2 are required.");
-  }
-  if (!adapters.checkCurlAvailable()) {
-    return fail("host", "host", "curl is required.");
-  }
-
-  // First verify_database_volume_safety call site (install.sh:1264, before
-  // any image pull) — guarantees #13-18.
+  // verify_database_volume_safety, from the shell's Docker facts (#13-18, F3).
   let volumeState: DatabaseVolumeSafetyState = {
     databaseVolumeChecked: false,
     databaseVolumeSeen: false,
@@ -352,312 +374,195 @@ export async function runInstall(
     volumeState = verifyDatabaseVolumeSafety(
       context.targetDir,
       context.requestedComposeProjectName,
-      context.fallbackBasename,
+      context.facts.targetBasename,
       volumeState,
       readPostgresPasswordFacts(context.targetDir),
-      adapters.docker,
+      hostFactsVolumeAdapter(context.facts),
     );
   } catch (error) {
-    // verifyDatabaseVolumeSafety's own first call re-derives the Compose
-    // project name (database-volume-safety.ts:228) without wrapping a
-    // ComposeProjectNameRefusal into its own DatabaseVolumeSafetyRefusal —
-    // bash's equivalent (derive_compose_project_name calling install.sh's
-    // shared `fail`) is just as fatal as any other verify_database_volume_
-    // safety refusal at this same call site, so both documented refusal
-    // types are expected-refusal here, not a programming error.
     if (!(error instanceof DatabaseVolumeSafetyRefusal) && !(error instanceof ComposeProjectNameRefusal)) throw error;
-    return fail("host", "host", (error as DatabaseVolumeSafetyRefusal | ComposeProjectNameRefusal).message);
-  }
-  // The Compose project name is now finally resolved (deriveComposeProjectName's
-  // own decision, possibly overridden by a proven pre-existing volume's own
-  // label — database-volume-safety.ts:305-313, install.sh:573). The docker
-  // adapter was constructed before this was known, so every later
-  // `compose`-wrapped call (composePull/composeUp/... — all only ever
-  // invoked below this point) must be told the final name now, mirroring
-  // install.sh's own `compose()` helper reading its `$compose_project_name`
-  // global fresh on every call rather than capturing it once.
-  adapters.docker.setComposeProjectName(volumeState.composeProjectName);
-  onEvent({ phase: "host", component: "host", state: "completed", reason: "host-tools", action: "check" });
-
-  // Image identity resolution (install.sh:1264-1310, guarantees #41-44).
-  onEvent({ phase: "identity", component: "image", state: "starting", reason: "image-identity", action: "pull" });
-  const imageRepository = `${context.registry}/${context.repository}`;
-  const identity = resolveImageIdentity(imageRepository, context.channel, adapters.docker);
-  if (identity.status === "failed") {
-    return fail("identity", "image", identity.message);
-  }
-  onEvent({ phase: "identity", component: "image", state: "running", reason: "image-identity", action: "inspect" });
-  onEvent({ phase: "identity", component: "image", state: "completed", reason: "image-identity", action: "verify" });
-
-  // The image says where it keeps the assets it was built from
-  // (install.sh:1368-1379, guarantee #42). An image without that label was
-  // built before ADR-0019: it carries nothing to extract, and the revision
-  // it names may no longer resolve — so it is refused, with no download to
-  // fall back to (ADR-0019 removed the second source deliberately). These
-  // checks run while install.sh is still in its `identity`/`image` phase,
-  // before the staging directory exists, so their failed events carry that
-  // phase rather than `assets`.
-  const bundledAssetsRoot = adapters.docker.inspectDeploymentAssetsLabel(identity.resolvedReference);
-  if (bundledAssetsRoot === null) {
-    return fail("identity", "image", `Could not inspect ${identity.resolvedReference} for its bundled deployment assets.`);
-  }
-  if (bundledAssetsRoot === "") {
-    return fail(
-      "identity",
-      "image",
-      "The published image was built before Orbit bundled its deployment assets and is not a supported install target (ADR-0016, ADR-0019).",
-    );
-  }
-  if (bundledAssetsRoot !== DEPLOYMENT_ASSETS_ROOT) {
-    return fail("identity", "image", `The published image records deployment assets somewhere other than ${DEPLOYMENT_ASSETS_ROOT}.`);
+    return fail("host", "host", error.message);
   }
 
-  const assetDirectories = deriveAssetDirectories(DEPLOYMENT_ASSETS);
-  const managedPaths: ManagedPath[] = buildManagedPaths(DEPLOYMENT_ASSETS);
+  // The existing optional-service profile (guarantee #23), then the wizard
+  // when the operator chose at the menu (F4), else the non-interactive rule.
+  const profileResult = currentDeploymentProfile(context.targetDir, existsSync(join(context.targetDir, ENVIRONMENT_FILE)));
+  if (!profileResult.ok) {
+    return fail("host", "host", "The existing optional-service configuration is unsupported or ambiguous.");
+  }
+  let profile: ProfileWizardResult;
+  if (menuShown && terminal) {
+    try {
+      profile = chooseDeploymentProfile(terminal, {
+        installerAction: action,
+        existingProfile: profileResult.profile,
+        capacity: () => (dependencies.capacity ?? checkLocalAiCapacity)(context.targetDir),
+        identityLines:
+          action === "update"
+            ? updateIdentityLines(context.targetDir, profileResult.profile, {
+                version: context.facts.imageVersion,
+                digest: context.facts.appliedDigest,
+                channel: context.channel,
+              })
+            : undefined,
+      });
+    } catch (error) {
+      if (error instanceof InstallPromptStop) return stopped(error);
+      throw error;
+    }
+  } else {
+    profile = { ...resolveNonInteractiveProfileSelection(action, profileResult.profile), selectedModel: undefined, modelPullRequested: false };
+  }
 
-  // A private scratch directory for asset extraction/validation and any
-  // guided-configuration staging, created and always removed here —
-  // distinct from InstallTransaction's own staging directory (created only
-  // once preflight_final_paths/prepare_rollback_area's equivalent begins,
-  // below). install.sh reuses a single staging_dir for both phases; see
-  // docs/adr-notes/295-install-port-plan.md's Flags section for why this
-  // port uses two.
-  const scratchDir = mkdtempSync(join(context.targetDir, ".orbit-install-scratch."));
+  // A private scratch directory inside the engine's own container: the
+  // assets copied out of the image and a staged guided install live here
+  // until the transaction moves them in, so nothing of it can be left in
+  // the deployment by a hard kill.
+  const scratchDir = mkdtempSync(join(tmpdir(), "orbit-install-scratch-"));
   chmodSync(scratchDir, 0o700);
+  const removeScratch = () => rmSync(scratchDir, { recursive: true, force: true });
+  interruptCleanups.add(removeScratch);
 
   try {
-    onEvent({ phase: "assets", component: "assets", state: "starting", reason: "assets-verified", action: "fetch" });
-    // Copy the bundle out of the image without running anything from it:
-    // `docker create` makes a container and starts no process, `docker cp`
-    // reads its filesystem, and the container is removed immediately, on
-    // every path including failure (install.sh:1473-1486, guarantee #42).
-    const imageAssetsDir = join(scratchDir, "image-assets");
-    mkdirSync(imageAssetsDir);
-    chmodSync(imageAssetsDir, 0o700);
-    const containerId = adapters.docker.createAssetContainer(identity.resolvedReference);
-    if (containerId === null) {
-      return fail("assets", "assets", EXTRACTION_FAILURE_MESSAGE);
-    }
-    try {
-      // install.sh:1482 checks the id it got back before using it, so a
-      // `docker create` that exits 0 while printing something other than a
-      // container id can never become part of a `docker cp` argument.
-      if (!CONTAINER_ID_PATTERN.test(containerId)) {
-        return fail("assets", "assets", EXTRACTION_FAILURE_MESSAGE);
-      }
-      if (!adapters.docker.copyFromContainer(containerId, `${bundledAssetsRoot}/.`, `${imageAssetsDir}/`)) {
-        return fail("assets", "assets", EXTRACTION_FAILURE_MESSAGE);
-      }
-    } finally {
-      adapters.docker.removeAssetContainer(containerId);
-    }
-
-    // Only the fixed allowlist is staged; whatever else the bundle carries
-    // is left behind with the extraction directory. The image's own modes
-    // never reach the deployment either — each staged file is given
-    // DEPLOYMENT_ASSET_FILE_MODE (install.sh:1488-1512, guarantee #45).
+    // The deployment assets, copied from this image's own bundle (F2,
+    // guarantees #42, #45): only the fixed allowlist, each a non-empty
+    // regular file, staged at the deployment's asset mode. The shell has
+    // already run `bash -n` over the same scripts from the same digest.
     for (const asset of DEPLOYMENT_ASSETS) {
-      const extractedPath = join(imageAssetsDir, asset);
-      const stagedPath = join(scratchDir, asset);
-      // install.sh:1497's own per-asset `mkdir -p -- "$(dirname
-      // "$staged_path")"`, run unconditionally (a no-op for a top-level
-      // asset whose dirname is already the staging root) — without it the
-      // nested assets' parents (scratchDir/config, scratchDir/scripts)
-      // would not exist to copy into.
-      mkdirSync(dirname(stagedPath), { recursive: true });
-      if (!isRegularNonSymlinkFile(extractedPath)) {
-        return fail("assets", "assets", `Bundled ${asset} is not a regular file.`);
-      }
-      if (lstatSync(extractedPath).size === 0) {
-        return fail("assets", "assets", `Bundled ${asset} is empty.`);
-      }
+      const source = join(context.assetsRoot, asset);
+      const staged = join(scratchDir, asset);
+      if (!isRegularNonSymlinkFile(source)) return fail("assets", "assets", `Bundled ${asset} is not a regular file.`);
+      if (lstatSync(source).size === 0) return fail("assets", "assets", `Bundled ${asset} is empty.`);
       try {
-        copyFileSync(extractedPath, stagedPath);
-        chmodSync(stagedPath, DEPLOYMENT_ASSET_FILE_MODE);
+        mkdirSync(dirname(staged), { recursive: true });
+        copyFileSync(source, staged);
+        chmodSync(staged, DEPLOYMENT_ASSET_FILE_MODE);
       } catch {
-        // install.sh's own `|| fail` on each cp/chmod (install.sh:1501-1504):
-        // an unreadable or unwritable staging copy is a refusal, never an
-        // escaped throw (issue #383's contract).
         return fail("assets", "assets", `Could not stage ${asset} from the published image.`);
       }
     }
-    try {
-      rmSync(imageAssetsDir, { recursive: true });
-    } catch {
-      return fail("assets", "assets", "Could not remove the private asset extraction directory.");
-    }
 
-    for (const script of DEPLOYMENT_SCRIPTS) {
-      const check = spawnSync("bash", ["-n", join(scratchDir, script)]);
-      if (check.status !== 0) {
-        return fail("assets", "assets", `Bundled ${script} failed a syntax check.`);
+    // stage_guided_install_configuration (guarantees #30-32).
+    let guidedStaged = false;
+    if (
+      action === "install" &&
+      !context.plainMode &&
+      terminal &&
+      !pathExists(join(context.targetDir, ENVIRONMENT_FILE)) &&
+      !pathExists(join(context.targetDir, SECRETS_DIRECTORY))
+    ) {
+      onEvent({ phase: "configuration", component: "configuration", state: "starting", reason: "configuration-migration", action: "configure" });
+      const unchanged = (message: string) => fail("configuration", "configuration", `${message}; the target remains unchanged.`, "configuration-failure", "retry");
+      try {
+        say(dependencies, [applyGuidedInit(scratchDir, dependencies.answers.guidedInit(undefined))]);
+      } catch {
+        return unchanged("Guided configuration was cancelled or invalid");
       }
+      try {
+        say(dependencies, runConfigureApply(scratchDir, context.resolvedReference, { trustOrbitImage: true }).messages);
+      } catch {
+        return unchanged("Secret generation failed");
+      }
+      // --init just asked the sign-in mode (ADR-0023 section 1); anything
+      // but the literal "false" is OIDC, guided_init's own fail-safe default.
+      if (readEnvironmentValue(scratchDir, "ORBIT_AUTH_OIDC") !== "false") {
+        try {
+          say(dependencies, [applySetOidcSecret(scratchDir, dependencies.answers.oidcSecret())]);
+        } catch {
+          return unchanged("OIDC client secret collection was cancelled or invalid");
+        }
+      }
+      if (profile.profileChange) {
+        try {
+          say(dependencies, [setDeploymentProfile(scratchDir, profile.selectedProfile, profile.selectedModel)]);
+        } catch {
+          return unchanged("Deployment profile configuration failed");
+        }
+      }
+      const readiness = readinessText(scratchDir);
+      if (!readiness.ok) return unchanged("Guided configuration is incomplete");
+      if (readiness.text === "") return unchanged("Guided configuration did not return a readiness summary");
+      try {
+        const choice = selectChoice(terminal, `Final review: apply the collected core settings and selected ${profile.selectedProfile} profile.`, "apply", [
+          ["apply", "Install the reviewed configuration"],
+          ["cancel", "Cancel without changing files or services"],
+        ]);
+        if (choice !== "apply") return stopped(declined());
+      } catch (error) {
+        if (error instanceof InstallPromptStop) return stopped(error);
+        throw error;
+      }
+      guidedStaged = true;
+      profile = { ...profile, profileChange: false };
+      onEvent({ phase: "configuration", component: "configuration", state: "running", reason: "configuration-migration", action: "verify" });
     }
-    onEvent({ phase: "assets", component: "assets", state: "completed", reason: "assets-verified", action: "fetch" });
 
-    // resolve_installer_action's non-interactive branch only (install.sh:
-    // 826-841) — see this module's own header comment / the plan's Flags
-    // section for why the interactive profile-selection wizard
-    // (choose_deployment_profile) is out of scope for this CLI.
-    const environmentFileExists = existsSync(join(context.targetDir, ENVIRONMENT_FILE));
-    const profileResult: CurrentDeploymentProfileResult = currentDeploymentProfile(context.targetDir, environmentFileExists);
-    if (!profileResult.ok) {
-      return fail("host", "host", "The existing optional-service configuration is unsupported or ambiguous.");
-    }
-    const { selectedProfile, profileChange } = resolveNonInteractiveProfileSelection(context.requestedAction, profileResult.profile);
-
-    // stage_guided_install_configuration (install.sh:1031-1077, guarantees
-    // #30-32) — always attempted for a fresh install; self-skips per its
-    // own guarded preconditions (pre-existing .env-orbit/.orbit-secrets, or
-    // context.hasControllingTerminal false).
-    const guidedOutcome = await stageGuidedInstallConfiguration(
-      {
-        installerAction: context.requestedAction,
-        plainMode: false,
-        hasControllingTerminal: context.hasControllingTerminal,
-        environmentFile: join(scratchDir, ENVIRONMENT_FILE),
-        secretsDirectory: join(scratchDir, SECRETS_DIRECTORY),
-        // Guarantee #30's precondition guard must see the target's own
-        // pre-existing files, not the always-empty scratch staging basis
-        // above (issue #383).
-        targetEnvironmentFile: join(context.targetDir, ENVIRONMENT_FILE),
-        targetSecretsDirectory: join(context.targetDir, SECRETS_DIRECTORY),
-        configureScript: join(scratchDir, "scripts", "configure.sh"),
-        orbitImage: identity.resolvedReference,
-        profileChange,
-        selectedProfile,
-        selectedModel: undefined,
-      },
-      adapters.guidedConfiguration,
-      adapters.answers,
-    );
-    if (guidedOutcome.status === "cancelled") return { status: "cancelled" };
-    if (guidedOutcome.status === "failed") {
-      return fail("configuration", "configuration", guidedOutcome.message, guidedOutcome.reason, guidedOutcome.action);
-    }
-    const guidedStaged = guidedOutcome.status === "staged";
-
-    // preflight_final_paths + prepare_rollback_area (install.sh:1435-1439,
-    // guarantees #46-49) — InstallTransaction.begin() performs both
-    // atomically.
+    // preflight_final_paths + prepare_rollback_area (#46-49), with the deploy lock.
     let transaction: InstallTransaction;
     try {
-      transaction = InstallTransaction.begin(context.targetDir, managedPaths);
+      transaction = InstallTransaction.begin(context.targetDir, buildManagedPaths(DEPLOYMENT_ASSETS));
     } catch (error) {
-      if (!(error instanceof InstallTransactionRefusal)) throw error;
-      return fail("compose", "compose", error.message);
+      if (!(error instanceof InstallTransactionRefusal) && !(error instanceof Error && error.name === "HostOwnershipError")) throw error;
+      return fail("compose", "compose", messageOf(error));
     }
+    const disposeTransaction = () => {
+      transaction.dispose();
+    };
+    interruptCleanups.add(disposeTransaction);
 
     let committed = false;
     try {
-      // install.sh's second derive_compose_project_name call (#999, ported
-      // by #1043). The bundled docker-compose.yml has been staged and
-      // syntax-checked but is not in the target yet, and this is the last
-      // moment before anything writes a project name down, so its own
-      // `name: orbit` is read from the staged copy: a fresh install had
-      // nothing but the working directory's name to go on until now, which
-      // is how installing into ~/apps/household produced the Compose project
-      // "household". It has to happen before the migration below and not
-      // after the assets are installed — an unattended pre-provisioned
-      // bootstrap arrives with its own .env-orbit, that migration writes the
-      // name it is given into it, and a derivation running afterwards would
-      // read that value straight back as an explicit one and keep the
-      // directory name for good. An operator's requested name, a value
-      // already persisted in .env-orbit and the project that owns a
-      // recognised database volume all outrank the declaration and leave
-      // `composeProjectNameProvisional` false, so none of them is touched
-      // here. No `compose`-wrapped call has run yet either (the first is the
-      // config validation below), so telling the docker adapter again here
-      // is enough to make every later call use it.
+      // The bundled compose file's own `name:` (#999), read from the staged
+      // copy before anything writes a project name down. Only a provisional
+      // (directory-name) guess is replaced.
       if (volumeState.composeProjectNameProvisional) {
-        let rederived: DeriveComposeProjectNameResult;
         try {
-          rederived = deriveComposeProjectName(
-            context.targetDir,
-            context.requestedComposeProjectName,
-            context.fallbackBasename,
-            join(scratchDir, COMPOSE_FILE),
-          );
+          const rederived = deriveComposeProjectName(context.targetDir, context.requestedComposeProjectName, context.facts.targetBasename, join(scratchDir, COMPOSE_FILE));
+          volumeState = {
+            ...volumeState,
+            composeProjectName: rederived.composeProjectName,
+            composeProjectNameExplicit: rederived.explicit,
+            composeProjectNameProvisional: rederived.provisional,
+          };
         } catch (error) {
-          // Unreachable in practice — the same basename already derived
-          // once, above — but a refusal is still a refusal, never an escaped
-          // throw (issue #383's contract).
           if (!(error instanceof ComposeProjectNameRefusal)) throw error;
           return fail("compose", "compose", error.message);
         }
-        volumeState = {
-          ...volumeState,
-          composeProjectName: rederived.composeProjectName,
-          composeProjectNameExplicit: rederived.explicit,
-          composeProjectNameProvisional: rederived.provisional,
-        };
-        adapters.docker.setComposeProjectName(volumeState.composeProjectName);
       }
 
-      // Configuration preflight + migrate for an *existing* .env-orbit,
-      // before any fetched asset is installed (install.sh:1441-1448,
-      // guarantee #50, first of the two configuration_migration_completed
-      // call sites).
+      const environmentFile = join(context.targetDir, ENVIRONMENT_FILE);
+      const migrationTarget: ConfigurationMigrationTarget = {
+        environmentFile,
+        orbitImage: context.resolvedReference,
+        appliedVersion: context.facts.imageVersion,
+        appliedDigest: context.facts.appliedDigest,
+        composeProjectName: volumeState.composeProjectName || context.facts.targetBasename,
+      };
+
+      // An existing .env-orbit is preflighted and migrated before anything
+      // else is installed (#50).
       let configurationMigrationCompleted = false;
-      const finalEnvironmentFile = join(context.targetDir, ENVIRONMENT_FILE);
-      const configurationScriptScratchPath = join(scratchDir, "scripts", "configuration.sh");
-      if (existsSync(finalEnvironmentFile)) {
-        const preflight = runConfigurationPreflight(configurationScriptScratchPath, finalEnvironmentFile, adapters.configurationScript);
+      if (existsSync(environmentFile)) {
+        const preflight = transaction.shareLock(() => runConfigurationPreflight(environmentFile));
         if (!preflight.ok) return fail("configuration", "configuration", preflight.message);
-        const migration = runConfigurationMigration(
-          configurationScriptScratchPath,
-          {
-            environmentFile: finalEnvironmentFile,
-            orbitImage: identity.resolvedReference,
-            appliedVersion: identity.imageVersion,
-            appliedDigest: identity.appliedDigest,
-            composeProjectName: volumeState.composeProjectName || context.fallbackBasename,
-          },
-          adapters.configurationScript,
-        );
+        const migration = transaction.shareLock(() => runConfigurationMigration(migrationTarget));
         if (!migration.ok) return fail("configuration", "configuration", migration.message);
+        say(dependencies, [migration.message]);
         configurationMigrationCompleted = true;
       }
 
-      // Create asset directories (install.sh:1450-1459, guarantee #51), move
-      // any staged guided-install configuration into place
-      // (install.sh:1460-1465, guarantee #52), and move every fetched asset
-      // into place (install.sh:1467-1474). install.sh routes every mkdir/mv
-      // failure here through its own `fail` (`|| fail "..."` on each mkdir/
-      // mv), so a refusal (e.g. a symlinked or stray `config`/`scripts`
-      // directory — buildManagedPaths never preflights asset directories,
-      // unlike install.sh's own preflight_final_paths) or an I/O error
-      // (ENOSPC, a failed read/rename) here must land as a terminal
-      // `state=failed` event too, not escape runInstall as a raw throw that
-      // skips fail() entirely (issue #383).
+      // Asset directories (#51), the reviewed guided configuration (#52,
+      // secrets before the file that names them), then every asset.
       try {
-        for (const directory of assetDirectories) {
-          transaction.ensureManagedDirectory(directory);
-        }
-
+        for (const directory of deriveAssetDirectories(DEPLOYMENT_ASSETS)) transaction.ensureManagedDirectory(directory);
         if (guidedStaged) {
-          // SR1-R6: secrets committed *before* the environment file that
-          // references them, not after — a crash between the two commits
-          // must never leave a committed .env-orbit whose DOCUMENT_KEK_FILE/
-          // SESSION_SECRET_FILE/etc. point at a .orbit-secrets tree that
-          // does not exist yet. The other order was exactly backwards:
-          // without .orbit-secrets, Orbit cannot start at all either way,
-          // but with .orbit-secrets and no .env-orbit yet, a retry simply
-          // redoes guided staging — a strictly safer crash state.
           stageSecretsDirectoryTree(transaction, join(scratchDir, SECRETS_DIRECTORY), SECRETS_DIRECTORY);
           transaction.commitMove(SECRETS_DIRECTORY, "directory");
           transaction.writeStagedFile(ENVIRONMENT_FILE, readFileSync(join(scratchDir, ENVIRONMENT_FILE)));
           transaction.commitMove(ENVIRONMENT_FILE, "file");
         }
-
-        // Assets are not secret-bearing (unlike the environment file/secrets
-        // tree above) and install.sh installs them at the ambient umask
-        // (typically 0644, never chmodded) — writeStagedFile's
-        // SECURE_FILE_MODE (0600) default is for secrets only, so pass
-        // DEPLOYMENT_ASSET_FILE_MODE explicitly (issue #383).
         for (const asset of DEPLOYMENT_ASSETS) {
-          const content = readFileSync(join(scratchDir, asset));
-          transaction.writeStagedFile(asset, content, DEPLOYMENT_ASSET_FILE_MODE);
+          transaction.writeStagedFile(asset, readFileSync(join(scratchDir, asset)), DEPLOYMENT_ASSET_FILE_MODE);
           transaction.commitMove(asset, "file");
         }
       } catch (error) {
@@ -665,331 +570,129 @@ export async function runInstall(
         return fail("compose", "compose", error.message);
       }
 
-      // prepare_configuration (install.sh:947-1008) — runs against the
-      // target's own just-installed scripts/configure.sh, not the scratch
-      // copy (see guided-configuration.ts's PrepareConfigurationContext doc).
-      // install.sh:952/1007 bracket this whole function with its own
-      // starting/running events (distinct from the "completed" event this
-      // port already emits once configuration-migration itself finishes,
-      // below) — never wired through this port until now (issue #383).
+      // prepare_configuration (guarantees #24, #28).
       onEvent({ phase: "configuration", component: "configuration", state: "starting", reason: "configuration-migration", action: "configure" });
-      const prepared = await prepareConfiguration(
-        {
-          environmentFile: finalEnvironmentFile,
-          secretsDirectory: join(context.targetDir, SECRETS_DIRECTORY),
-          configureScript: join(context.targetDir, "scripts", "configure.sh"),
-          orbitImage: identity.resolvedReference,
-          hasControllingTerminal: context.hasControllingTerminal,
-          profileChange,
-          selectedProfile,
-          selectedModel: undefined,
-        },
-        adapters.guidedConfiguration,
-        adapters.answers,
-      );
-      if (prepared.status === "failed") {
-        return fail("configuration", "configuration", prepared.message, "configuration-failure", "retry", prepared.guidance);
+      const configurationFailure = (message: string, guidance?: string[]) =>
+        fail("configuration", "configuration", message, "configuration-failure", "retry", guidance);
+      const leftSafeShape = () => {
+        if (!isRegularNonSymlinkFile(environmentFile)) return `Configuration did not leave a regular, non-symlink ${ENVIRONMENT_FILE}.`;
+        if (!isRealNonSymlinkDirectory(join(context.targetDir, SECRETS_DIRECTORY))) return `Configuration did not leave a real, non-symlink ${SECRETS_DIRECTORY} directory.`;
+        return undefined;
+      };
+      try {
+        say(dependencies, transaction.shareLock(() => runConfigureApply(context.targetDir, context.resolvedReference, { trustOrbitImage: true })).messages);
+      } catch {
+        return configurationFailure("Configuration failed; restoring the previous deployment.");
+      }
+      let shapeProblem = leftSafeShape();
+      if (shapeProblem) return configurationFailure(shapeProblem);
+      if (profile.profileChange) {
+        try {
+          say(dependencies, [transaction.shareLock(() => setDeploymentProfile(context.targetDir, profile.selectedProfile, profile.selectedModel))]);
+        } catch {
+          return configurationFailure("Deployment profile configuration failed; restoring the previous deployment.");
+        }
+        shapeProblem = leftSafeShape();
+        if (shapeProblem) return configurationFailure(shapeProblem);
+      }
+
+      let readiness = readinessText(context.targetDir);
+      if (!readiness.ok) {
+        const missing = missingRequiredFields(readiness.text);
+        if (missing.length > 0 && context.interactive) {
+          if (missingGuidedFields(readiness.text).length > 0) {
+            // An existing deployment already chose its sign-in mode (#918).
+            const existingMode = readEnvironmentValue(context.targetDir, "ORBIT_AUTH_OIDC");
+            const hint = existingMode === "true" ? "oidc" : existingMode === "false" ? "local" : undefined;
+            try {
+              say(dependencies, [transaction.shareLock(() => applyGuidedInit(context.targetDir, dependencies.answers.guidedInit(hint)))]);
+            } catch {
+              return configurationFailure("Guided configuration was cancelled or invalid; restoring the previous deployment.");
+            }
+            readiness = readinessText(context.targetDir);
+          }
+          if (readiness.text.split("\n").includes("missing OIDC_CLIENT_SECRET")) {
+            try {
+              say(dependencies, [transaction.shareLock(() => applySetOidcSecret(context.targetDir, dependencies.answers.oidcSecret()))]);
+            } catch {
+              return configurationFailure("OIDC client secret collection was cancelled or invalid; restoring the previous deployment.");
+            }
+            readiness = readinessText(context.targetDir);
+          }
+        } else if (missing.length > 0) {
+          return configurationFailure("Required configuration fields require attention; refusing to start Compose.", noninteractiveConfigurationGuidance(missing));
+        }
+      }
+      if (!readiness.ok) {
+        let missing = missingConfigurationFields(readiness.text);
+        if (missing.length === 0) missing = ["APP_URL", "ORBIT_IMAGE", "OIDC_ISSUER", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_CALLBACK_URL"];
+        return configurationFailure(`Configuration fields require attention (${missing.join(" ")}); refusing to start Compose.`);
       }
       onEvent({ phase: "configuration", component: "configuration", state: "running", reason: "configuration-migration", action: "verify" });
 
-      // Second verify_database_volume_safety call site (install.sh:1481,
-      // guarantee #17's TOCTOU re-check) + verify_database_password_preserved
-      // (install.sh:1482, guarantee #19).
-      try {
-        volumeState = verifyDatabaseVolumeSafety(
-          context.targetDir,
-          context.requestedComposeProjectName,
-          context.fallbackBasename,
-          volumeState,
-          readPostgresPasswordFacts(context.targetDir),
-          adapters.docker,
-        );
-      } catch (error) {
-        if (!(error instanceof DatabaseVolumeSafetyRefusal)) throw error;
-        // install.sh's phase/component are still "configuration" here
-        // (installer_ui_phase/component are set to configuration at
-        // install.sh:950-951 and not reassigned before this second
-        // verify_database_volume_safety call at :1481-1482 — the next
-        // reassignment is installer_ui_phase=database at :1164-1166, which
-        // comes later, around wait_for_deployment_readiness), so this is
-        // `configuration-failure`/`retry`, never the database phase's
-        // `database-auth-migration`/`repair` defaults (issue #383).
-        return fail("configuration", "configuration", error.message, "configuration-failure", "retry");
-      }
       if (!verifyDatabasePasswordPreserved(transaction, context.targetDir, volumeState.databaseVolumeSeen)) {
-        return fail(
-          "configuration",
-          "configuration",
-          "The existing POSTGRES_PASSWORD_FILE changed during configuration; refusing to start Compose.",
-          "configuration-failure",
-          "retry",
-        );
+        return configurationFailure("The existing POSTGRES_PASSWORD_FILE changed during configuration; refusing to start Compose.");
       }
 
-      // Second configuration-migration call site, only if the first one
-      // never ran (install.sh:1484-1487).
       if (!configurationMigrationCompleted) {
-        const targetConfigurationScript = join(context.targetDir, "scripts", "configuration.sh");
-        const migration = runConfigurationMigration(
-          targetConfigurationScript,
-          {
-            environmentFile: finalEnvironmentFile,
-            orbitImage: identity.resolvedReference,
-            appliedVersion: identity.imageVersion,
-            appliedDigest: identity.appliedDigest,
-            composeProjectName: volumeState.composeProjectName || context.fallbackBasename,
-          },
-          adapters.configurationScript,
-        );
+        const migration = transaction.shareLock(() => runConfigurationMigration(migrationTarget));
         if (!migration.ok) return fail("configuration", "configuration", migration.message);
-        configurationMigrationCompleted = true;
+        say(dependencies, [migration.message]);
       }
       onEvent({ phase: "configuration", component: "configuration", state: "completed", reason: "configuration-migration", action: "verify" });
 
-      // verify_oidc_discovery (install.sh:1491-1493, guarantees #25-27).
-      onEvent({ phase: "oidc", component: "oidc", state: "starting", reason: "provider-discovery", action: "verify" });
-      const discoveryPath = transaction.stagingPathFor("oidc-discovery.json");
-      const oidcOutcome = verifyOidcDiscovery(context.targetDir, discoveryPath, {
-        fetch: adapters.oidcFetch,
-        sandbox: { validate: (issuer, documentPath) => adapters.docker.validateOidcDiscoverySandbox(identity.resolvedReference, issuer, documentPath) },
-      } satisfies OidcDiscoveryAdapters);
-      if (oidcOutcome.status === "failed") {
-        return fail("oidc", "oidc", oidcOutcome.message, oidcOutcome.reason, oidcOutcome.action);
+      // OIDC discovery (#25-27, F5): only for a deployment that turned an
+      // identity provider on (ADR-0023 section 1).
+      if (readEnvironmentValue(context.targetDir, "ORBIT_AUTH_OIDC") === "true") {
+        onEvent({ phase: "oidc", component: "oidc", state: "starting", reason: "provider-discovery", action: "verify" });
+        const discovery = await verifyOidcDiscovery(context.targetDir, { fetchImpl: dependencies.fetchImpl });
+        if (discovery.status === "failed") return fail("oidc", "oidc", discovery.message, discovery.reason, discovery.action);
+        onEvent({ phase: "oidc", component: "oidc", state: "completed", reason: "provider-discovery", action: "verify" });
+      } else {
+        onEvent({ phase: "oidc", component: "oidc", state: "skipped", reason: "provider-discovery", action: "skip" });
       }
-      onEvent({ phase: "oidc", component: "oidc", state: "completed", reason: "provider-discovery", action: "verify" });
 
-      // Persist the resolved digest into ORBIT_IMAGE (install.sh:1495-1536,
-      // guarantees #53-54) — same fail-closed discipline as the mkdir/mv
-      // block above (issue #383): a read/write/rename failure here must
-      // still emit a terminal `state=failed` event.
+      shapeProblem = leftSafeShape();
+      if (shapeProblem) return fail("compose", "compose", shapeProblem);
+
+      // The resolved digest, persisted through the transaction (#53-54).
       try {
-        const currentContent = readFileSync(finalEnvironmentFile, "utf8");
-        const orbitImageLine = `ORBIT_IMAGE=${identity.resolvedReference}`;
-        const lines = currentContent.split("\n");
-        let sawKey = false;
-        const rewritten = lines.map((line) => {
-          if (line.startsWith("ORBIT_IMAGE=")) {
-            sawKey = true;
-            return orbitImageLine;
-          }
-          return line;
-        });
-        const finalContent = sawKey ? rewritten.join("\n") : `${currentContent.replace(/\n$/, "")}\n${orbitImageLine}\n`;
-        transaction.writeStagedFile(ENVIRONMENT_FILE, finalContent, 0o600);
+        transaction.writeStagedFile(ENVIRONMENT_FILE, withResolvedImage(readFileSync(environmentFile, "utf8"), context.resolvedReference), 0o600);
         transaction.commitMove(ENVIRONMENT_FILE, "file");
       } catch (error) {
         if (!(error instanceof Error)) throw error;
         return fail("compose", "compose", error.message);
       }
 
-      // docker compose config --quiet (install.sh:1539-1541, guarantee #55)
-      // — must succeed *before* the transaction is marked committed
-      // (guarantee #56).
-      if (!adapters.docker.composeConfigValidate()) {
-        return fail(
-          "compose",
-          "compose",
-          "Docker Compose configuration is invalid; review the named configuration fields and rerun.",
-        );
+      // The switch (F1, F8): from here a failure no longer restores files.
+      try {
+        transaction.commit();
+      } catch (error) {
+        if (!(error instanceof Error)) throw error;
+        return fail("compose", "compose", error.message);
       }
-      onEvent({ phase: "compose", component: "compose", state: "completed", reason: "compose-validation", action: "check" });
-
-      transaction.commit();
       committed = true;
     } finally {
+      interruptCleanups.delete(disposeTransaction);
       const disposal = transaction.dispose();
       if (!committed && !disposal.rollbackSucceeded) {
         onEvent({ phase: "rollback", component: "installer", state: "blocked", reason: "rollback", action: "repair" });
-        // install.sh:395's exact operator-facing line — the staging
-        // directory disposal just discovered is the only remaining copy of
-        // whatever the transaction was about to replace. `lastFailure` is
-        // the same object already returned by whichever `fail()` call
-        // triggered this `finally`; mutating its `guidance` here is still
-        // visible to the caller once this `finally` completes (issue #383).
         if (disposal.preservedStagingDirectory && lastFailure) {
-          lastFailure.guidance = [
-            ...(lastFailure.guidance ?? []),
-            `Orbit installer: rollback incomplete; recovery staging preserved at ${disposal.preservedStagingDirectory}.`,
-          ];
+          const relative = disposal.preservedStagingDirectory.slice(context.targetDir.length).replace(/^\/+/, "");
+          lastFailure.guidance = [...(lastFailure.guidance ?? []), `Orbit installer: rollback incomplete; recovery staging preserved at ./${relative}.`];
         }
       }
     }
 
-    if (!committed) {
-      // A failure already returned above; this branch only exists to
-      // satisfy the type checker's control-flow analysis for the `finally`
-      // block above (functionally unreachable — every failure path already
-      // returned).
-      return fail("compose", "compose", "The installation could not be committed.");
-    }
-
-    // Service image preparation (install.sh:1125-1162, guarantee #36) —
-    // outside the file transaction's rollback scope from this point on
-    // (guarantee #56).
-    onEvent({ phase: "preparation", component: "database", state: "starting", reason: "service-preparation", action: "pull" });
-    if (!adapters.docker.composePull("orbit-db")) {
-      return fail("preparation", "database", "Could not prepare the Orbit database image.");
-    }
-    onEvent({ phase: "preparation", component: "database", state: "completed", reason: "service-preparation", action: "pull" });
-    onEvent({ phase: "preparation", component: "application", state: "completed", reason: "service-preparation", action: "pull" });
-
-    onEvent({ phase: "preparation", component: "clamav", state: "starting", reason: "service-preparation", action: "pull" });
-    if (!adapters.docker.composePull("orbit-clamav")) {
-      return fail("preparation", "clamav", "Could not prepare the private scanner image.");
-    }
-    onEvent({ phase: "preparation", component: "clamav", state: "completed", reason: "service-preparation", action: "pull" });
-
-    if (selectedProfile === "processing" || selectedProfile === "full") {
-      onEvent({ phase: "preparation", component: "tika", state: "starting", reason: "service-preparation", action: "pull" });
-      if (!adapters.docker.composePull("orbit-tika")) {
-        return fail("preparation", "tika", "Could not prepare the optional document-processing image.");
-      }
-      onEvent({ phase: "preparation", component: "tika", state: "completed", reason: "service-preparation", action: "pull" });
-    } else {
-      onEvent({ phase: "preparation", component: "tika", state: "skipped", reason: "service-preparation", action: "skip" });
-    }
-
-    if (selectedProfile === "ai" || selectedProfile === "full") {
-      onEvent({ phase: "preparation", component: "ollama", state: "starting", reason: "service-preparation", action: "pull" });
-      if (!adapters.docker.composePull("orbit-ollama")) {
-        return fail("preparation", "ollama", "Could not prepare the optional local-model service image.");
-      }
-      onEvent({ phase: "preparation", component: "ollama", state: "completed", reason: "service-preparation", action: "pull" });
-    } else {
-      onEvent({ phase: "preparation", component: "ollama", state: "skipped", reason: "service-preparation", action: "skip" });
-    }
-
-    // wait_for_deployment_readiness (install.sh:1164-1219).
-    onEvent({ phase: "database", component: "database", state: "starting", reason: "database-health", action: "start" });
-    if (!adapters.docker.composeUp()) {
-      // install.sh:1471-1483: on a fresh install the database volume this
-      // attempt created is removed too, or every retry refuses on it.
-      if (targetWasEmpty) {
-        adapters.docker.composeDown();
-        adapters.docker.removeLeftoverDatabaseVolume();
-      }
-      // install.sh:1172's `fail_with docker-host repair` — defaultFailureReason("host")
-      // already matches ("docker-host"), but defaultFailureAction("host") is
-      // "retry", not the "repair" bash actually routes this to (issue #383).
-      return fail("host", "host", "Orbit services could not be created or started.", "docker-host", "repair");
-    }
-    const databaseHealthy = await waitForComponentHealth({
-      probe: () => adapters.docker.probeDatabaseHealth(),
-      timeoutSeconds: context.readinessTimeoutSeconds,
-      pollSeconds: context.readinessPollSeconds,
-      clock,
-      onWaiting: () => onEvent({ phase: "database", component: "database", state: "waiting", reason: "database-health", action: "wait" }),
-      onHealthy: () => onEvent({ phase: "database", component: "database", state: "healthy", reason: "database-health", action: "health" }),
-    });
-    if (!databaseHealthy) {
-      return fail("database", "database", "The database did not become healthy within the bounded startup window.");
-    }
-
-    onEvent({ phase: "application", component: "application", state: "starting", reason: "application-health", action: "start" });
-    const applicationHealthy = await waitForComponentHealth({
-      probe: () => adapters.docker.probeApplicationHealth(),
-      timeoutSeconds: context.readinessTimeoutSeconds,
-      pollSeconds: context.readinessPollSeconds,
-      clock,
-      onWaiting: () => onEvent({ phase: "application", component: "application", state: "waiting", reason: "application-health", action: "wait" }),
-      onHealthy: () => onEvent({ phase: "application", component: "application", state: "healthy", reason: "application-health", action: "health" }),
-    });
-    if (!applicationHealthy) {
-      if (adapters.docker.probeApplicationLiveness()) {
-        // install.sh:1177-1179's alive-but-not-ready branch is `fail_with
-        // health-timeout repair` — already exactly defaultFailureReason/
-        // Action("application"), so no explicit override is needed, but
-        // this is deliberately still distinct from the dead branch below.
-        return fail("application", "application", "Orbit did not report ready within the bounded startup window.");
-      }
-      // install.sh:1184's dead-container branch is `fail_with
-      // application-startup repair` — a different reason than the
-      // alive-but-not-ready branch above, so probeApplicationLiveness()'s
-      // whole point (telling the two apart) isn't lost once it reaches the
-      // event stream (issue #383).
-      return fail(
-        "application",
-        "application",
-        "Orbit stopped before it could report ready; the bounded status does not claim an unproven cause.",
-        "application-startup",
-        "repair",
-      );
-    }
-
-    onEvent({ phase: "optional", component: "clamav", state: "starting", reason: "optional-status", action: "health" });
-    const clamavHealthy = await waitForComponentHealth({
-      probe: () => adapters.docker.probeClamavHealth(),
-      timeoutSeconds: context.readinessTimeoutSeconds,
-      pollSeconds: context.readinessPollSeconds,
-      clock,
-      onWaiting: () => onEvent({ phase: "optional", component: "clamav", state: "waiting", reason: "optional-status", action: "health" }),
-      onHealthy: () => onEvent({ phase: "optional", component: "clamav", state: "healthy", reason: "optional-status", action: "health" }),
-    });
-    if (!clamavHealthy) {
-      return fail("optional", "clamav", "The private scanner did not become healthy within the bounded startup window.");
-    }
-
-    if (selectedProfile === "processing" || selectedProfile === "full") {
-      onEvent({ phase: "optional", component: "tika", state: "starting", reason: "optional-status", action: "health" });
-      const tikaHealthy = await waitForComponentHealth({
-        probe: () => adapters.docker.probeTikaHealth(),
-        timeoutSeconds: context.readinessTimeoutSeconds,
-        pollSeconds: context.readinessPollSeconds,
-        clock,
-        onWaiting: () => onEvent({ phase: "optional", component: "tika", state: "waiting", reason: "optional-status", action: "health" }),
-        onHealthy: () => onEvent({ phase: "optional", component: "tika", state: "healthy", reason: "optional-status", action: "health" }),
-      });
-      if (!tikaHealthy) {
-        return fail("optional", "tika", "The selected document-processing service did not become healthy within the bounded startup window.");
-      }
-    } else {
-      onEvent({ phase: "optional", component: "tika", state: "skipped", reason: "optional-status", action: "skip" });
-    }
-
-    if (selectedProfile === "ai" || selectedProfile === "full") {
-      onEvent({ phase: "optional", component: "ollama", state: "starting", reason: "optional-status", action: "health" });
-      const ollamaHealthy = await waitForComponentHealth({
-        probe: () => adapters.docker.probeOllamaHealth(),
-        timeoutSeconds: context.readinessTimeoutSeconds,
-        pollSeconds: context.readinessPollSeconds,
-        clock,
-        onWaiting: () => onEvent({ phase: "optional", component: "ollama", state: "waiting", reason: "optional-status", action: "health" }),
-        onHealthy: () => onEvent({ phase: "optional", component: "ollama", state: "healthy", reason: "optional-status", action: "health" }),
-      });
-      if (!ollamaHealthy) {
-        return fail("optional", "ollama", "The selected local-model service did not become healthy within the bounded startup window.");
-      }
-      // Guarantee #20: a confirmed model download is always a separate,
-      // explicitly-confirmed step, never a side effect of profile
-      // selection — this CLI never sets a requested model to pull (see the
-      // plan's Flags section), so that step is always skipped here.
-    } else {
-      onEvent({ phase: "optional", component: "ollama", state: "skipped", reason: "optional-status", action: "skip" });
-    }
-
-    onEvent({ phase: "complete", component: "installer", state: "completed", reason: "deployment-ready", action: "complete" });
-
     return {
       status: "ok",
-      resolvedReference: identity.resolvedReference,
-      revision: identity.revision,
-      imageVersion: identity.imageVersion,
-      appliedDigest: identity.appliedDigest,
-      composeProjectName: volumeState.composeProjectName || deriveFallbackComposeProjectName(context),
-      selectedProfile,
+      fresh: targetWasEmpty,
+      selectedProfile: profile.selectedProfile,
+      modelPullRequested: profile.modelPullRequested,
+      databaseVolume: volumeState.databaseVolumeSeen ? volumeState.databaseVolumeName : undefined,
     };
   } finally {
-    rmSync(scratchDir, { recursive: true, force: true });
+    interruptCleanups.delete(removeScratch);
+    removeScratch();
   }
 }
-
-function deriveFallbackComposeProjectName(context: InstallOrchestratorContext): string {
-  try {
-    return deriveComposeProjectName(context.targetDir, context.requestedComposeProjectName, context.fallbackBasename).composeProjectName;
-  } catch {
-    return context.fallbackBasename;
-  }
-}
-
-// Re-exported for the CLI and tests.
-export { readEnvironmentValue };

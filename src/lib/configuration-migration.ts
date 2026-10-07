@@ -433,76 +433,49 @@ export function runConfigurationCommand(args: readonly string[], defaultFile: st
 }
 
 // ---------------------------------------------------------------------------
-// install's hand-off (issue #295 slice 3), unchanged in meaning: the
-// adapter now runs the port above rather than a bash subprocess.
+// install's hand-off (issue #295 slice 3). Since #1212 the install engine
+// calls the port above in its own process, under the deploy lock its file
+// transaction already holds (src/lib/deploy-lock.ts, share()).
 
 export interface ConfigurationMigrationTarget {
-  /** Path to the .env-orbit file being migrated (install.sh's $environment_file). */
+  /** Absolute path to the .env-orbit file being migrated. */
   environmentFile: string;
   /** The already digest-verified resolved image reference (install.sh's $resolved_reference). */
   orbitImage: string;
-  /** The image's own recorded semantic version (install.sh's $image_version). */
+  /** The image's own recorded semantic version. */
   appliedVersion: string;
-  /** The image's own recorded digest (install.sh's $applied_digest). */
+  /** The image's own recorded digest. */
   appliedDigest: string;
-  /** The already-derived Compose project name (src/lib/target-identity.ts's deriveComposeProjectName — this is how this module "wires onto slice 2's validated identity"). */
+  /** The already-derived Compose project name (src/lib/target-identity.ts's deriveComposeProjectName). */
   composeProjectName: string;
 }
 
-export interface ConfigurationScriptResult {
-  status: number;
-  stdout: string;
+/** `--preflight --file <environmentFile>`, as install ran it. */
+export function installPreflightCommand(environmentFile: string): ConfigurationCommandResult {
+  return preflightEnvironmentFile(environmentFile);
 }
 
-export interface ConfigurationScriptAdapter {
-  /** `--preflight --file <environmentFile>` (install.sh:1444). */
-  runPreflight(configurationScript: string, environmentFile: string): ConfigurationScriptResult;
-  /** `--migrate --transaction --file <environmentFile> --orbit-image <orbitImage> --applied-version <appliedVersion> --compose-project-name <composeProjectName> --applied-digest <appliedDigest>` (install.sh:1013-1018). */
-  runMigrate(configurationScript: string, target: ConfigurationMigrationTarget): ConfigurationScriptResult;
-}
-
-/** Exact argv the preflight is invoked with (install.sh:1444). */
-export function buildPreflightArgv(environmentFile: string): string[] {
-  return ["--preflight", "--file", environmentFile];
-}
-
-/** Exact argv the transactional migration is invoked with, in install.sh's own order (install.sh:1013-1018). */
-export function buildMigrateArgv(target: ConfigurationMigrationTarget): string[] {
-  return [
-    "--migrate",
-    "--transaction",
-    "--file",
-    target.environmentFile,
-    "--orbit-image",
-    target.orbitImage,
-    "--applied-version",
-    target.appliedVersion,
-    "--compose-project-name",
-    target.composeProjectName,
-    "--applied-digest",
-    target.appliedDigest,
-  ];
+/** `--migrate --transaction --file ... --orbit-image ... --applied-version ... --compose-project-name ... --applied-digest ...`, as install ran it. */
+export function installMigrateCommand(target: ConfigurationMigrationTarget): ConfigurationCommandResult {
+  return migrateEnvironmentFile(target.environmentFile, {
+    transaction: true,
+    orbitImage: target.orbitImage,
+    appliedVersion: target.appliedVersion,
+    appliedDigest: target.appliedDigest,
+    composeProjectName: target.composeProjectName,
+  });
 }
 
 export type ConfigurationPreflightOutcome = { ok: true } | { ok: false; message: string };
 
 /**
- * install.sh:1443-1445: run only for an existing `.env-orbit`, before any
- * fetched asset or configure.sh mutation — a non-zero preflight fails
- * closed with install.sh's exact message. Part of guarantee #50: preflight
- * and migrate both happen before any asset is installed, and both remain
- * covered by the outer file transaction (src/lib/install-transaction.ts) —
- * this is how this module "wires onto slice 1's transaction": the caller is
- * expected to hold an active InstallTransaction across both calls so a
- * preflight or migration failure rolls back cleanly.
+ * Run only for an existing `.env-orbit`, before any asset or configure step:
+ * a failed preflight fails closed with install.sh's exact message. Part of
+ * guarantee #50: preflight and migrate both happen inside the install's file
+ * transaction (src/lib/install-transaction.ts), so a failure rolls back.
  */
-export function runConfigurationPreflight(
-  configurationScript: string,
-  environmentFile: string,
-  adapter: ConfigurationScriptAdapter,
-): ConfigurationPreflightOutcome {
-  const result = adapter.runPreflight(configurationScript, environmentFile);
-  if (result.status !== 0) {
+export function runConfigurationPreflight(environmentFile: string): ConfigurationPreflightOutcome {
+  if (installPreflightCommand(environmentFile).status !== 0) {
     return { ok: false, message: "Configuration preflight failed; restoring the previous deployment." };
   }
   return { ok: true };
@@ -516,21 +489,17 @@ const ALREADY_CURRENT_PREFIX = "Orbit configuration: already current schema v1 v
 const MIGRATED_PREFIX = "Orbit configuration: migrated from schema ";
 
 /**
- * run_configuration_migration (install.sh:1010-1029, guarantee #29):
- * invokes the migration only with the already digest-verified resolved
- * image reference and derived project name, and accepts only the two
- * known-good output strings above — any other output, including a
- * plausible-looking but unexpected result, is treated as failure and fails
- * closed with install.sh's exact message. Bash's `migration_output="$(...)"`
- * command substitution strips all trailing newlines before the case match;
- * this port does the same to the adapter's raw stdout before classifying.
+ * run_configuration_migration (guarantee #29): migrates only with the
+ * already digest-verified image reference and derived project name, and
+ * accepts only the two known-good output strings above — any other output,
+ * even a plausible-looking one, fails closed with install.sh's exact message.
  */
-export function runConfigurationMigration(
-  configurationScript: string,
-  target: ConfigurationMigrationTarget,
-  adapter: ConfigurationScriptAdapter,
-): ConfigurationMigrationOutcome {
-  const result = adapter.runMigrate(configurationScript, target);
+export function runConfigurationMigration(target: ConfigurationMigrationTarget): ConfigurationMigrationOutcome {
+  return classifyMigrationResult(installMigrateCommand(target));
+}
+
+/** runConfigurationMigration's decision on one migration result. */
+export function classifyMigrationResult(result: ConfigurationCommandResult): ConfigurationMigrationOutcome {
   if (result.status !== 0) {
     return { ok: false, message: "Configuration migration failed; restoring the previous deployment." };
   }

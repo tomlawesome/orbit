@@ -5,20 +5,19 @@ import {
   copyFileSync,
   existsSync,
   fstatSync,
-  lstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,
   readFileSync,
   readSync,
-  realpathSync,
+  writeSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { isatty } from "node:tty";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 import {
   BackupRestoreCliRefusal,
@@ -30,16 +29,9 @@ import {
   runRestore,
   verifyBackupBundle,
 } from "../lib/backup-restore-cli";
-import {
-  evaluateReadiness,
-  isValidClientId,
-  isValidOidcIssuer,
-  normalizePublicOrigin,
-  type EnvOrbitRecord,
-  type OidcSecretFileFacts,
-} from "../lib/config-contract";
-import { CONFIGURATION_ROLLBACK_SUFFIX, runConfigurationCommand } from "../lib/configuration-migration";
-import { parseEnvOrbitContent } from "../lib/env-orbit-file";
+import { isValidClientId, isValidOidcIssuer, normalizePublicOrigin } from "../lib/config-contract";
+import { runConfigurationCommand } from "../lib/configuration-migration";
+import { readinessReport } from "../lib/deployment-readiness";
 import { InstallTransaction, type ManagedPath } from "../lib/install-transaction";
 import { createInContainerAdapter, preflightPostgresClient } from "../lib/in-container-adapter";
 import {
@@ -72,14 +64,12 @@ import {
   recoverRestore,
 } from "../lib/restore-engine";
 import { formatEngineEventLine } from "../lib/engine-event";
-import { HostOwnershipError } from "../lib/host-ownership";
 import { displayHostPaths } from "../lib/host-paths";
-import { type InstallOrchestratorAdapters, type InstallOrchestratorContext, runInstall } from "../lib/install-orchestrator";
-import { createInstallDockerAdapter } from "../lib/install-docker-adapter";
-import { checkCurlAvailable, createInstallOidcFetchAdapter } from "../lib/install-curl-adapter";
-import { createInstallConfigurationScriptAdapter, createInstallGuidedConfigurationAdapter } from "../lib/install-script-adapters";
-import { ComposeProjectNameRefusal, deriveComposeProjectName } from "../lib/target-identity";
-import type { MachinePromptAnswerProvider } from "../lib/guided-configuration";
+import { type InstallOutcome, REPAIR_SIGNPOST, runInstall, runInterruptCleanups } from "../lib/install-orchestrator";
+import { type HostFacts, HostFactsRefusal, parseHostFacts } from "../lib/host-facts";
+import { HostOwnershipError, applyHostOwnership } from "../lib/host-ownership";
+import { type InstallTerminal, declined } from "../lib/install-terminal";
+import { DEPLOYMENT_ASSETS_ROOT } from "../lib/deployment-assets";
 import {
   ConfigureEngineRefusal,
   ConfigureMachinePromptAbortedError,
@@ -90,15 +80,15 @@ import {
   runConfigureApply,
   setDeploymentProfile,
   type ConfigureMachinePromptDriver,
+  type GuidedInitInput,
 } from "../lib/configure-engine";
 
 // The orbit engine CLI (ADR-0011, issue #294). Flows: `check` — the
 // value-free readiness report, output-identical to `configure.sh --check`
 // (proven by src/lib/config-contract.parity.test.ts); `install`/`update` —
-// issue #295 slice 5's orchestrated install/update flow
-// (src/lib/install-orchestrator.ts), driven with the shipped subprocess
-// adapters below. Non-interactive by design; interactive presentation
-// belongs to orbit-launcher.
+// the install transaction scripts/install.sh runs as a one-off from the
+// image it has verified (src/lib/install-orchestrator.ts, #1212), which
+// asks its questions on the terminal install.sh passes through.
 
 function fail(message: string): never {
   process.stderr.write(`${displayHostPaths(message)}\n`);
@@ -126,16 +116,16 @@ function writeResult(line: string): void {
 // way (a plain host checkout driven by `pnpm run orbit`/`tsx`) never has it
 // set. This is the single fact this guard trusts.
 //
-// Every command whose adapters spawn `docker` (install/update via
-// install-docker-adapter.ts) calls refuseDockerInContainer as the FIRST
-// statement in its command function below — before any adapter is
-// constructed, so the code path that would spawn `docker` is never reached,
-// not merely made to fail once reached. `check` (and any other pure-logic
-// command) never calls this guard and is unaffected. backup, restore and
-// the recovery-bundle commands spawn no `docker` at all since #1211: they
-// run only here, inside the deployment, through the in-container adapter
+// No command spawns `docker` any more. backup, restore and the
+// recovery-bundle commands stopped in #1211: they run only here, inside the
+// deployment, through the in-container adapter
 // (src/lib/in-container-adapter.ts), and refuse anywhere else
-// (requireDeploymentContext below).
+// (requireDeploymentContext below). install/update stopped in #1212 (build
+// note F7): they refuse the other way round, outside the engine container.
+// refuseDockerInContainer stays as the guard any future command that spawns
+// `docker` must call as the FIRST statement in its command function, before
+// any adapter is constructed. `check` (and any other pure-logic command)
+// never calls it and is unaffected.
 const ENGINE_CONTAINER_ENV_VAR = "ORBIT_ENGINE_CONTEXT";
 const ENGINE_CONTAINER_CONTEXT_VALUE = "container";
 
@@ -156,24 +146,6 @@ function refuseDockerInContainer(command: string): void {
   process.exit(DOCKER_FORBIDDEN_EXIT_CODE);
 }
 
-function gatherOidcSecretFacts(deployDir: string): OidcSecretFileFacts {
-  const secretsDirectory = join(deployDir, ".orbit-secrets");
-  const secretFile = join(secretsDirectory, "oidc-client-secret");
-  const directoryStat = statSync(secretsDirectory, { throwIfNoEntry: false });
-  const directoryLstat = lstatSync(secretsDirectory, { throwIfNoEntry: false });
-  const fileLstat = lstatSync(secretFile, { throwIfNoEntry: false });
-  return {
-    secretsDirectoryExists: directoryStat?.isDirectory() ?? false,
-    secretsDirectoryIsSymlink: directoryLstat?.isSymbolicLink() ?? false,
-    secretsDirectoryMode: directoryStat ? directoryStat.mode & 0o777 : null,
-    secretFileExists: fileLstat !== undefined,
-    secretFileIsRegular: fileLstat?.isFile() ?? false,
-    secretFileIsSymlink: fileLstat?.isSymbolicLink() ?? false,
-    secretFileMode: fileLstat ? fileLstat.mode & 0o777 : null,
-    secretFileSize: fileLstat?.size ?? 0,
-  };
-}
-
 /**
  * `orbit check [--rollback]`: the value-free readiness report configure.sh
  * --check (and, with --rollback, --check-rollback) prints. --rollback reads
@@ -184,40 +156,10 @@ function gatherOidcSecretFacts(deployDir: string): OidcSecretFileFacts {
  * owner-only file, or does not parse, fails with its configuration_* code.
  */
 function commandCheck(deployDir: string, rollback = false): never {
-  const environmentFile = join(deployDir, rollback ? `.env-orbit${CONFIGURATION_ROLLBACK_SUFFIX}` : ".env-orbit");
-  // Open first with O_NOFOLLOW, then verify and read through the same
-  // descriptor: the safety check and the content read cannot be split by a
-  // file swap (CodeQL js/file-system-race).
-  let descriptor: number | undefined;
-  try {
-    descriptor = openSync(environmentFile, constants.O_RDONLY | constants.O_NOFOLLOW);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") fail("configuration_syntax");
-  }
-  let content = "";
-  if (descriptor !== undefined) {
-    try {
-      const stat = fstatSync(descriptor);
-      if (!stat.isFile() || (stat.mode & 0o777) !== 0o600) {
-        fail("configuration_syntax");
-      }
-      content = readFileSync(descriptor, "utf8");
-    } finally {
-      closeSync(descriptor);
-    }
-  }
-
-  let record: EnvOrbitRecord = {};
-  if (descriptor !== undefined) {
-    const parsed = parseEnvOrbitContent(content);
-    if (!parsed.ok) fail(parsed.code);
-    record = parsed.record;
-  }
-
-  const facts = gatherOidcSecretFacts(deployDir);
-  const report = evaluateReadiness(record, facts);
-  process.stdout.write(report.lines.join("\n") + "\n");
-  process.exit(report.ok ? 0 : 1);
+  const outcome = readinessReport(deployDir, { rollback });
+  if (outcome.status === "refused") fail(outcome.code);
+  process.stdout.write(outcome.lines.join("\n") + "\n");
+  process.exit(outcome.ok ? 0 : 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -609,24 +551,38 @@ function hasTerminal(): boolean {
   return isatty(0) && isatty(1);
 }
 
-function cancelGuidedConfiguration(): never {
-  fail("orbit: Guided configuration was cancelled.");
+/** Why a guided answer could not be collected; commandConfigureInit/SetOidcSecret print it and exit 1, install fails the step. */
+class GuidedAnswerStop extends Error {}
+
+/** Where guided questions are asked: the configure command's own terminal, or the install engine's (src/lib/install-terminal.ts). */
+interface GuidedPromptIo {
+  line(promptText: string): string | undefined;
+  secret(promptText: string): string | undefined;
+  /** A rejection or advice line. */
+  notice(text: string): void;
 }
 
+const configureTerminalIo: GuidedPromptIo = {
+  line: readTerminalLine,
+  secret: readTerminalSecret,
+  notice: (text) => process.stderr.write(`${text}\n`),
+};
+
 /** Asks until a valid answer or end of input (configure.sh's prompt_* loops). */
-function promptUntilValid<T>(promptText: string, validate: (input: string) => T | undefined, rejection: string): T {
+function promptUntilValid<T>(io: GuidedPromptIo, promptText: string, validate: (input: string) => T | undefined, rejection: string): T {
   for (;;) {
-    const input = readTerminalLine(promptText);
-    if (input === undefined) cancelGuidedConfiguration();
+    const input = io.line(promptText);
+    if (input === undefined) throw new GuidedAnswerStop("orbit: Guided configuration was cancelled.");
     const value = validate(input);
     if (value !== undefined) return value;
-    process.stderr.write(`${rejection}\n`);
+    io.notice(rejection);
   }
 }
 
 /** prompt_auth_mode (ADR-0023 section 1): local accounts by default. */
-function promptAuthMode(): "local" | "oidc" {
+function promptAuthMode(io: GuidedPromptIo): "local" | "oidc" {
   return promptUntilValid(
+    io,
     "Sign in with local accounts only, or also with an identity provider? OIDC can be added later with configure.sh. [local/oidc] (default: local): ",
     (input) => {
       const answer = input.toLowerCase();
@@ -638,76 +594,109 @@ function promptAuthMode(): "local" | "oidc" {
   );
 }
 
-function commandConfigureInit(deployDir: string): never {
+/**
+ * guided_init's answers, from the first source that has them: the
+ * ORBIT_CONFIGURE_* environment, the machine-prompt grammar on stdio, or the
+ * operator's terminal (`io`, absent when there is none). `authMode` is
+ * ORBIT_CONFIGURE_AUTH_MODE, else what the caller already knows. Throws
+ * GuidedAnswerStop with configure's own message on anything else.
+ */
+function collectGuidedInitInput(authMode: "local" | "oidc" | undefined, io: GuidedPromptIo | undefined): GuidedInitInput {
   const envAppUrl = process.env.ORBIT_CONFIGURE_APP_URL;
   const envIssuer = process.env.ORBIT_CONFIGURE_OIDC_ISSUER;
   const envClientId = process.env.ORBIT_CONFIGURE_OIDC_CLIENT_ID;
   const providedCount = [envAppUrl, envIssuer, envClientId].filter((value) => !!value).length;
-  const authMode = readConfigureAuthMode();
-
-  let appUrl: string;
-  let issuer: string | undefined;
-  let clientId: string | undefined;
-  let resolvedAuthMode: "local" | "oidc";
 
   if (authMode === "local" && envAppUrl) {
     // guided_init's local-only environment form: APP_URL alone.
     if (envIssuer || envClientId) {
-      fail("orbit: ORBIT_CONFIGURE_AUTH_MODE=local conflicts with a supplied OIDC issuer/client ID environment set.");
+      throw new GuidedAnswerStop("orbit: ORBIT_CONFIGURE_AUTH_MODE=local conflicts with a supplied OIDC issuer/client ID environment set.");
     }
-    resolvedAuthMode = "local";
-    appUrl = envAppUrl;
-  } else if (providedCount === 3) {
+    return { appUrl: envAppUrl, authMode: "local" };
+  }
+  if (providedCount === 3) {
     if (authMode === "local") {
-      fail("orbit: ORBIT_CONFIGURE_AUTH_MODE=local conflicts with a supplied OIDC issuer/client ID environment set.");
+      throw new GuidedAnswerStop("orbit: ORBIT_CONFIGURE_AUTH_MODE=local conflicts with a supplied OIDC issuer/client ID environment set.");
     }
-    resolvedAuthMode = "oidc";
-    appUrl = envAppUrl as string;
-    issuer = envIssuer as string;
-    clientId = envClientId as string;
-  } else if (providedCount > 0) {
-    fail(
+    return { appUrl: envAppUrl as string, authMode: "oidc", issuer: envIssuer as string, clientId: envClientId as string };
+  }
+  if (providedCount > 0) {
+    throw new GuidedAnswerStop(
       "orbit: Guided configuration requires all of ORBIT_CONFIGURE_APP_URL, ORBIT_CONFIGURE_OIDC_ISSUER and ORBIT_CONFIGURE_OIDC_CLIENT_ID together, not a partial set.",
     );
-  } else if (isConfigureMachinePromptMode()) {
+  }
+  if (isConfigureMachinePromptMode()) {
     // O1-F1: a local-only machine-prompt init only ever needs APP_URL.
-    resolvedAuthMode = authMode ?? "oidc";
+    const resolvedAuthMode = authMode ?? "oidc";
     try {
-      const collected = collectMachineGuidedInit(stdoutConfigureMachineDriver(), resolvedAuthMode);
-      appUrl = collected.appUrl;
-      issuer = collected.issuer;
-      clientId = collected.clientId;
+      return { ...collectMachineGuidedInit(stdoutConfigureMachineDriver(), resolvedAuthMode), authMode: resolvedAuthMode };
     } catch (error) {
-      if (error instanceof ConfigureMachinePromptAbortedError) cancelGuidedConfiguration();
+      if (error instanceof ConfigureMachinePromptAbortedError) throw new GuidedAnswerStop("orbit: Guided configuration was cancelled.");
       throw error;
     }
-  } else if (hasTerminal()) {
-    resolvedAuthMode = authMode ?? promptAuthMode();
-    appUrl = promptUntilValid(
+  }
+  if (io) {
+    const resolvedAuthMode = authMode ?? promptAuthMode(io);
+    const appUrl = promptUntilValid(
+      io,
       "Public Orbit origin (e.g. https://orbit.your-domain.tld): ",
       (input) => normalizePublicOrigin(input) ?? undefined,
       "Enter a complete https:// public origin with no credentials, path, query, fragment, loopback address or example.com placeholder.",
     );
-    if (resolvedAuthMode === "oidc") {
-      issuer = promptUntilValid(
-        "OIDC issuer URL (e.g. https://sso.your-domain.tld/application/o/orbit/): ",
-        (input) => (isValidOidcIssuer(input) ? input : undefined),
-        "Enter a complete https:// issuer URL with no credentials, query, fragment, loopback address or example.com placeholder.",
-      );
-      clientId = promptUntilValid(
-        "OIDC client ID: ",
-        (input) => (isValidClientId(input) ? input : undefined),
-        "Enter a non-empty OIDC client ID with no whitespace or control characters.",
-      );
-    }
-  } else {
-    fail(
-      "orbit: Guided configuration needs a controlling terminal, or the complete ORBIT_CONFIGURE_APP_URL, ORBIT_CONFIGURE_OIDC_ISSUER and ORBIT_CONFIGURE_OIDC_CLIENT_ID environment set for non-interactive use.",
+    if (resolvedAuthMode === "local") return { appUrl, authMode: "local" };
+    const issuer = promptUntilValid(
+      io,
+      "OIDC issuer URL (e.g. https://sso.your-domain.tld/application/o/orbit/): ",
+      (input) => (isValidOidcIssuer(input) ? input : undefined),
+      "Enter a complete https:// issuer URL with no credentials, query, fragment, loopback address or example.com placeholder.",
     );
+    const clientId = promptUntilValid(
+      io,
+      "OIDC client ID: ",
+      (input) => (isValidClientId(input) ? input : undefined),
+      "Enter a non-empty OIDC client ID with no whitespace or control characters.",
+    );
+    return { appUrl, authMode: "oidc", issuer, clientId };
   }
+  throw new GuidedAnswerStop(
+    "orbit: Guided configuration needs a controlling terminal, or the complete ORBIT_CONFIGURE_APP_URL, ORBIT_CONFIGURE_OIDC_ISSUER and ORBIT_CONFIGURE_OIDC_CLIENT_ID environment set for non-interactive use.",
+  );
+}
 
+/** set_oidc_secret's answer: machine prompts, one hidden entry on the terminal (no retry), or one raw line piped in. */
+function collectOidcSecret(io: GuidedPromptIo | undefined): string {
+  if (isConfigureMachinePromptMode()) {
+    try {
+      return collectMachineOidcSecret(stdoutConfigureMachineDriver());
+    } catch (error) {
+      if (error instanceof ConfigureMachinePromptAbortedError) {
+        throw new GuidedAnswerStop("orbit: could not read a complete OIDC client secret from standard input.");
+      }
+      throw error;
+    }
+  }
+  if (io) {
+    // An empty or oversized answer is refused by applySetOidcSecret.
+    const line = io.secret("OIDC client secret (input hidden): ");
+    if (line === undefined) throw new GuidedAnswerStop("orbit: Could not read a complete OIDC client secret from the controlling terminal.");
+    return line;
+  }
+  // A single raw line piped in (configure.sh's `read -r` fallback).
+  const line = readSyncLine(0);
+  if (line === undefined) throw new GuidedAnswerStop("orbit: could not read a complete OIDC client secret from standard input.");
+  return line;
+}
+
+function commandConfigureInit(deployDir: string): never {
+  let input: GuidedInitInput;
   try {
-    const message = applyGuidedInit(deployDir, { appUrl, authMode: resolvedAuthMode, issuer, clientId });
+    input = collectGuidedInitInput(readConfigureAuthMode(), hasTerminal() ? configureTerminalIo : undefined);
+  } catch (error) {
+    if (error instanceof GuidedAnswerStop) fail(error.message);
+    throw error;
+  }
+  try {
+    const message = applyGuidedInit(deployDir, input);
     process.stdout.write(`${message}\n`);
     process.exit(0);
   } catch (error) {
@@ -718,28 +707,12 @@ function commandConfigureInit(deployDir: string): never {
 
 function commandConfigureSetOidcSecret(deployDir: string): never {
   let secret: string;
-  if (isConfigureMachinePromptMode()) {
-    try {
-      secret = collectMachineOidcSecret(stdoutConfigureMachineDriver());
-    } catch (error) {
-      if (error instanceof ConfigureMachinePromptAbortedError) {
-        fail("orbit: could not read a complete OIDC client secret from standard input.");
-      }
-      throw error;
-    }
-  } else if (hasTerminal()) {
-    // set_oidc_secret's terminal form: one hidden entry, no retry; an empty
-    // or oversized answer is refused by applySetOidcSecret below.
-    const line = readTerminalSecret("OIDC client secret (input hidden): ");
-    if (line === undefined) fail("orbit: Could not read a complete OIDC client secret from the controlling terminal.");
-    secret = line;
-  } else {
-    // A single raw line piped in (configure.sh's `read -r` fallback).
-    const line = readSyncLine(0);
-    if (line === undefined) fail("orbit: could not read a complete OIDC client secret from standard input.");
-    secret = line;
+  try {
+    secret = collectOidcSecret(hasTerminal() && !isConfigureMachinePromptMode() ? configureTerminalIo : undefined);
+  } catch (error) {
+    if (error instanceof GuidedAnswerStop) fail(error.message);
+    throw error;
   }
-
   try {
     const message = applySetOidcSecret(deployDir, secret);
     process.stdout.write(`${message}\n`);
@@ -1381,194 +1354,221 @@ function commandRestoreEngineRehearse(scenarioPath: string): never {
   }
 }
 
-// `orbit install --dir <deployment>` / `orbit update --dir <deployment>`
-// (issue #295 slice 5): drives install-orchestrator.ts's runInstall with the
-// real subprocess adapters (install-docker-adapter.ts, install-curl-
-// adapter.ts, install-script-adapters.ts). Explicit invocation only — unlike
-// `check`, which defaults an omitted --dir to the current directory,
-// install/update refuse outright without one: these flows mutate a real
-// deployment target, so silently defaulting to cwd is a materially higher-
-// stakes mistake than for a read-only readiness report.
+// `orbit install|update --dir /orbit-deploy [--action install|update|auto]
+// [--outcome FILE]` (#1212): the install engine, run only by
+// scripts/install.sh as a disposable one-off from the image it has just
+// resolved and verified (build note F1). The shell hands over what it knows
+// as environment: ORBIT_IMAGE (the verified digest reference),
+// ORBIT_INSTALL_HOST_FACTS (its Docker facts, F3), ORBIT_CHANNEL,
+// COMPOSE_PROJECT_NAME, ORBIT_INSTALLER_PLAIN, ORBIT_INSTALL_INTERACTIVE (it
+// had a terminal and passed it through), ORBIT_INSTALLER_ELAPSED (seconds
+// already spent, so event times continue) and the ORBIT_CONFIGURE_* answers.
+// It reads the result back from FILE: what to start and how the run ended
+// (docs/engine-events.md, "In-container engine invocation").
 
+const IMMUTABLE_REFERENCE = /^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$/;
 /** install.sh:148-151 (ORBIT_CHANNEL). */
 const CHANNEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-/** install.sh:152-155 (ORBIT_REPOSITORY). */
-const REPOSITORY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}\/[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
-/** install.sh:156-159 (ORBIT_REGISTRY). */
-const REGISTRY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9.-]*(:[0-9]{1,5})?$/;
-/** install.sh:139-143 (ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS: 1-999 by pattern, further bounded to <=900). */
-const READINESS_TIMEOUT_PATTERN = /^[1-9][0-9]{0,2}$/;
-/** install.sh:144-147 (ORBIT_INSTALLER_POLL_INTERVAL_SECONDS: a single digit, 1-9). */
-const READINESS_POLL_PATTERN = /^[1-9]$/;
-
-interface InstallEnvironmentConfig {
-  repository: string;
-  registry: string;
-  channel: string;
-  readinessTimeoutSeconds: number;
-  readinessPollSeconds: number;
-}
 
 /**
- * Reads and validates ORBIT_REPOSITORY/ORBIT_REGISTRY/ORBIT_CHANNEL/
- * ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS/ORBIT_INSTALLER_POLL_INTERVAL_SECONDS
- * exactly the way install.sh does at its own top-of-script argument/env
- * validation (install.sh:13-15,137-159) — install-orchestrator.ts itself
- * has no reason to own environment-variable parsing (it takes an already-
- * validated context), so this is this CLI's own responsibility, the same
- * way it already owns `--dir` parsing for `check`. Fails closed with
- * install.sh's own messages on anything invalid.
+ * The install engine's terminal: raw mode, so Ctrl-C arrives as a byte the
+ * engine handles (rolling back) rather than a signal it could not act on
+ * while blocked reading, with the line echoed by hand.
  */
-function resolveInstallEnvironmentConfig(env: NodeJS.ProcessEnv): InstallEnvironmentConfig {
-  const repository = env.ORBIT_REPOSITORY ?? "tomlawesome/orbit";
-  const registry = env.ORBIT_REGISTRY ?? "ghcr.io";
-  const channel = env.ORBIT_CHANNEL ?? "latest";
-  const readinessTimeoutRaw = env.ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS ?? "180";
-  const readinessPollRaw = env.ORBIT_INSTALLER_POLL_INTERVAL_SECONDS ?? "2";
-
-  if (!READINESS_TIMEOUT_PATTERN.test(readinessTimeoutRaw) || Number(readinessTimeoutRaw) > 900) {
-    fail("orbit: ORBIT_INSTALLER_READINESS_TIMEOUT_SECONDS must be between 1 and 900.");
-  }
-  if (!READINESS_POLL_PATTERN.test(readinessPollRaw)) {
-    fail("orbit: ORBIT_INSTALLER_POLL_INTERVAL_SECONDS must be between 1 and 9.");
-  }
-  if (!CHANNEL_PATTERN.test(channel)) {
-    fail("orbit: ORBIT_CHANNEL is invalid.");
-  }
-  if (!REPOSITORY_PATTERN.test(repository)) {
-    fail("orbit: ORBIT_REPOSITORY is invalid.");
-  }
-  if (!REGISTRY_PATTERN.test(registry)) {
-    fail("orbit: ORBIT_REGISTRY is invalid.");
-  }
-
+function installTerminal(): InstallTerminal {
+  const read = (promptText: string, echo: boolean): string | undefined => {
+    process.stdout.write(promptText);
+    process.stdin.setRawMode(true);
+    const bytes: number[] = [];
+    try {
+      for (;;) {
+        const byte = readTerminalByte();
+        if (byte === undefined || (byte === 4 && bytes.length === 0)) {
+          process.stdout.write("\r\n");
+          return undefined;
+        }
+        if (byte === 3) {
+          process.stdout.write("\r\n");
+          throw declined();
+        }
+        if (byte === 13 || byte === 10) {
+          process.stdout.write("\r\n");
+          return Buffer.from(bytes).toString("utf8");
+        }
+        if (byte === 127 || byte === 8) {
+          if (bytes.length > 0) {
+            bytes.pop();
+            if (echo) process.stdout.write("\b \b");
+          }
+          continue;
+        }
+        if (byte < 32) continue;
+        bytes.push(byte);
+        if (echo) process.stdout.write(Buffer.from([byte]));
+      }
+    } finally {
+      process.stdin.setRawMode(false);
+    }
+  };
   return {
-    repository,
-    registry,
-    channel,
-    readinessTimeoutSeconds: Number(readinessTimeoutRaw),
-    readinessPollSeconds: Number(readinessPollRaw),
+    write: (text) => process.stdout.write(text),
+    readLine: (promptText) => read(promptText, true),
+    readSecret: (promptText) => read(promptText, false),
   };
 }
 
-/** install.sh's own `basename -- "$(pwd -P)"` fallback (install.sh:453) — `pwd -P` resolves symlinks in the cwd; realpathSync mirrors that for an arbitrary --dir target. */
-function deriveFallbackBasename(targetDir: string): string {
-  let resolved = targetDir;
-  try {
-    resolved = realpathSync(targetDir);
-  } catch {
-    // targetDir was just created if it didn't already exist (see
-    // commandInstallOrUpdate below), so this only matters if realpath
-    // itself fails for some other reason — fall back to the literal path.
-  }
-  return basename(resolved);
+function guidedIoFor(terminal: InstallTerminal | undefined): GuidedPromptIo | undefined {
+  if (!terminal) return undefined;
+  return {
+    line: (promptText) => terminal.readLine(promptText),
+    secret: (promptText) => terminal.readSecret(promptText),
+    notice: (text) => terminal.write(`${text}\n`),
+  };
 }
 
-// stageGuidedInstallConfiguration/prepareConfiguration only ever call
-// `answers.answer` when hasControllingTerminal is true
-// (guided-configuration.ts), and this CLI always passes false below (see
-// InstallOrchestratorContext.hasControllingTerminal's own doc in
-// install-orchestrator.ts and docs/adr-notes/295-install-port-plan.md's
-// Flags section) — collecting real answer values from CLI flags/environment
-// for an interactive-equivalent surface is explicitly deferred to a future
-// slice. This provider exists only so the type is satisfied; reaching it is
-// a programming error, not an expected runtime path.
-const UNREACHABLE_ANSWERS: MachinePromptAnswerProvider = {
-  answer(): never {
-    throw new Error("orbit: interactive guided configuration is not available from this CLI yet");
-  },
-};
+function outcomeLines(outcome: InstallOutcome): string[] {
+  const clean = (value: string) => value.replace(/[\r\n]+/g, " ");
+  switch (outcome.status) {
+    case "ok":
+      return [
+        "status=ok",
+        `fresh=${outcome.fresh ? 1 : 0}`,
+        `profile=${outcome.selectedProfile}`,
+        `model-pull=${outcome.modelPullRequested ? 1 : 0}`,
+        `database-volume=${outcome.databaseVolume ?? ""}`,
+      ];
+    case "failed":
+      return [
+        "status=failed",
+        `phase=${outcome.phase}`,
+        `component=${outcome.component}`,
+        `reason=${outcome.reason}`,
+        `action=${outcome.action}`,
+        `message=${clean(outcome.message)}`,
+      ];
+    case "stopped":
+      return ["status=stopped", `message=${clean(outcome.message)}`];
+    case "repair":
+      return ["status=repair"];
+  }
+}
 
-function commandInstallOrUpdate(action: "install" | "update", deployDirArg: string | undefined): void {
-  refuseDockerInContainer(action);
-  if (!deployDirArg) {
-    fail(`orbit: ${action} requires --dir <deployment>`);
+/** The result install.sh reads: key=value lines, owner-only, the operator's. */
+function writeInstallOutcome(path: string | undefined, outcome: InstallOutcome): void {
+  if (!path) return;
+  const descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o600);
+  try {
+    applyHostOwnership(path);
+    writeSync(descriptor, `${outcomeLines(outcome).join("\n")}\n`);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function commandInstallOrUpdate(command: "install" | "update", deployDirArg: string | undefined, args: string[]): void {
+  // F7: the engine runs inside its own image, never on a host.
+  if (!isRunningAsEngineContainer()) {
+    fail(`orbit: ${command} runs only inside the Orbit image, started by scripts/install.sh.`);
+  }
+  if (!deployDirArg) fail(`orbit: ${command} requires --dir <deployment>`);
+  let requestedAction: "install" | "update" | undefined = command === "update" ? "update" : "install";
+  let outcomePath: string | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const flag = args[index];
+    const value = args[index + 1];
+    if (flag === "--action" && command === "install" && (value === "install" || value === "update" || value === "auto")) {
+      requestedAction = value === "auto" ? undefined : value;
+      index += 1;
+    } else if (flag === "--outcome" && value) {
+      outcomePath = value;
+      index += 1;
+    } else {
+      usageExit(`orbit: usage: orbit ${command} --dir <deployment> [--action install|update|auto] [--outcome FILE]`);
+    }
   }
   const targetDir = resolve(deployDirArg);
-  if (!existsSync(targetDir)) {
-    mkdirSync(targetDir, { recursive: true });
-  } else if (!statSync(targetDir).isDirectory()) {
-    fail(`orbit: ${targetDir} is not a directory.`);
-  }
+  if (!existsSync(targetDir) || !statSync(targetDir).isDirectory()) fail(`orbit: ${targetDir} is not a directory.`);
 
-  const config = resolveInstallEnvironmentConfig(process.env);
-  const fallbackBasename = deriveFallbackBasename(targetDir);
-  const requestedComposeProjectName = process.env.COMPOSE_PROJECT_NAME;
-
-  // Best-effort initial value only: createInstallDockerAdapter needs some
-  // starting --project-name at construction time, before
-  // verify_database_volume_safety's own resolution (possibly a proven
-  // pre-existing volume's own label) has run. install-orchestrator.ts calls
-  // adapters.docker.setComposeProjectName with the final resolved value
-  // immediately once that resolution completes and before any `compose`-
-  // wrapped call — see that module's own comment at the call site. A
-  // ComposeProjectNameRefusal here is deliberately swallowed: runInstall's
-  // own internal call raises the identical refusal as a graceful
-  // {status:"failed"} outcome, printed below like every other failure.
-  let initialComposeProjectName = fallbackBasename;
+  const resolvedReference = process.env.ORBIT_IMAGE ?? "";
+  if (!IMMUTABLE_REFERENCE.test(resolvedReference)) fail("orbit: ORBIT_IMAGE must be the immutable digest reference install.sh resolved.");
+  const channel = process.env.ORBIT_CHANNEL ?? "latest";
+  if (!CHANNEL_PATTERN.test(channel)) fail("orbit: ORBIT_CHANNEL is invalid.");
+  let facts: HostFacts;
   try {
-    initialComposeProjectName = deriveComposeProjectName(targetDir, requestedComposeProjectName, fallbackBasename).composeProjectName;
+    facts = parseHostFacts(process.env.ORBIT_INSTALL_HOST_FACTS);
   } catch (error) {
-    if (!(error instanceof ComposeProjectNameRefusal)) throw error;
+    if (error instanceof HostFactsRefusal) fail(`orbit: ${error.message}`);
+    throw error;
   }
+  const elapsedOffset = /^[0-9]{1,6}$/.test(process.env.ORBIT_INSTALLER_ELAPSED ?? "") ? Number(process.env.ORBIT_INSTALLER_ELAPSED) : 0;
+  const interactive = process.env.ORBIT_INSTALL_INTERACTIVE === "1" && hasTerminal();
+  const terminal = interactive ? installTerminal() : undefined;
+  const guidedIo = guidedIoFor(terminal);
+  const configureAuthMode = readConfigureAuthMode();
 
-  const docker = createInstallDockerAdapter({
-    cwd: targetDir,
-    envFile: ".env-orbit",
-    composeProjectName: initialComposeProjectName,
-  });
-
-  const adapters: InstallOrchestratorAdapters = {
-    docker,
-    // Deployment assets come out of the resolved image itself (ADR-0019);
-    // `curl` is still required on the host, for the OIDC discovery request.
-    checkCurlAvailable: () => checkCurlAvailable({ cwd: targetDir }),
-    oidcFetch: createInstallOidcFetchAdapter({ cwd: targetDir }),
-    configurationScript: createInstallConfigurationScriptAdapter({ cwd: targetDir }),
-    guidedConfiguration: createInstallGuidedConfigurationAdapter({ cwd: targetDir }),
-    answers: UNREACHABLE_ANSWERS,
-  };
-
-  const context: InstallOrchestratorContext = {
-    targetDir,
-    requestedAction: action,
-    repository: config.repository,
-    registry: config.registry,
-    channel: config.channel,
-    requestedComposeProjectName,
-    fallbackBasename,
-    // This CLI has no controlling terminal to hand a spawned configure.sh
-    // the way install.sh's own `exec {fd}<>/dev/tty` does — see
-    // InstallOrchestratorContext's own doc in install-orchestrator.ts.
-    hasControllingTerminal: false,
-    readinessTimeoutSeconds: config.readinessTimeoutSeconds,
-    readinessPollSeconds: config.readinessPollSeconds,
-  };
+  // A signal does not unwind try/finally: roll back first, then leave with
+  // the signal's status (F8). Registered before anything else listens.
+  for (const [signal, code] of [
+    ["SIGINT", 130],
+    ["SIGTERM", 143],
+  ] as const) {
+    process.on(signal, () => {
+      runInterruptCleanups();
+      try {
+        writeInstallOutcome(outcomePath, { status: "stopped", exitCode: 130, message: "Interrupted; the previous file state was restored." });
+      } catch {
+        /* the shell treats a missing outcome as a failure */
+      }
+      process.exit(code);
+    });
+  }
 
   const startedAt = Date.now();
-  runInstall(context, adapters, (event) => {
-    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-    process.stdout.write(`${formatEngineEventLine(event, elapsedSeconds)}\n`);
-  })
+  runInstall(
+    {
+      targetDir,
+      requestedAction,
+      plainMode: process.env.ORBIT_INSTALLER_PLAIN === "1",
+      interactive,
+      resolvedReference,
+      channel,
+      requestedComposeProjectName: process.env.COMPOSE_PROJECT_NAME || undefined,
+      facts,
+      assetsRoot: process.env.ORBIT_INSTALL_TEST_ASSETS_ROOT || DEPLOYMENT_ASSETS_ROOT,
+    },
+    {
+      terminal,
+      answers: {
+        guidedInit: (hint) => collectGuidedInitInput(configureAuthMode ?? hint, guidedIo),
+        oidcSecret: () => collectOidcSecret(guidedIo),
+      },
+      say: (line) => process.stdout.write(`${line}\n`),
+    },
+    (event) => {
+      const elapsedSeconds = elapsedOffset + Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+      process.stdout.write(`${formatEngineEventLine(event, elapsedSeconds)}\n`);
+    },
+  )
     .then((outcome) => {
-      if (outcome.status === "ok") {
-        process.stdout.write(
-          `orbit: ${action} complete. resolvedReference=${outcome.resolvedReference} version=${outcome.imageVersion} profile=${outcome.selectedProfile}\n`,
-        );
-        process.exit(0);
+      if (outcome.status === "failed") {
+        for (const line of outcome.guidance ?? []) process.stderr.write(`${line}\n`);
+      } else if (outcome.status === "stopped") {
+        process.stderr.write(`Orbit installer: ${outcome.message}\n`);
+      } else if (outcome.status === "repair") {
+        process.stderr.write(`${REPAIR_SIGNPOST}\n`);
       }
-      if (outcome.status === "cancelled") {
-        process.stderr.write(`orbit: ${action} cancelled.\n`);
-        process.exit(130);
+      writeInstallOutcome(outcomePath, outcome);
+      // Without an outcome file there is no shell to emit the terminal event.
+      if (outcome.status === "failed" && !outcomePath) {
+        process.stdout.write(`${formatEngineEventLine({ ...outcome, state: "failed" }, elapsedOffset)}\n`);
+        process.stderr.write(`Orbit installer: ${outcome.message}\n`);
       }
-      process.stderr.write(`orbit: ${outcome.message}\n`);
-      for (const line of outcome.guidance ?? []) {
-        process.stderr.write(`${line}\n`);
-      }
-      process.exit(1);
+      const exitCodes = { ok: 0, failed: 1, repair: 3 } as const;
+      process.exit(outcome.status === "stopped" ? outcome.exitCode : exitCodes[outcome.status]);
     })
     .catch((error: unknown) => {
-      process.stderr.write(`orbit: unexpected error during ${action}: ${(error as Error).message}\n`);
+      runInterruptCleanups();
+      process.stderr.write(`orbit: unexpected error during ${command}: ${(error as Error).message}\n`);
       process.exit(1);
     });
 }
@@ -1870,8 +1870,7 @@ function main(): void {
         break;
       case "install":
       case "update":
-        if (commandArgs.length > 0) fail(`orbit: unknown option ${commandArgs[0]}`);
-        commandInstallOrUpdate(command, deployDirArg);
+        commandInstallOrUpdate(command, deployDirArg, commandArgs);
         break;
       case "backup":
         commandBackup(deployDir, commandArgs, directories);
