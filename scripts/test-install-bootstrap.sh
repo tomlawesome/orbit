@@ -25,9 +25,11 @@
 # every network fetch is intercepted so no external state can influence the
 # result; here the network path *is* the subject, so fetches are real. The
 # one stand-in is the identity provider: the disposable sidecar in tests/oidc,
-# issuing as https://orbit-oidc:4443/. OIDC discovery runs inside the install
+# issuing as https://orbit-oidc.invalid:4443/ (the dotted alias its
+# certificate names: the configuration contract refuses a bare single-label
+# issuer host). OIDC discovery runs inside the install
 # engine's container (#1212 note 30988), so a PATH docker shim gives that one
-# engine run the host entry for orbit-oidc (the sidecar's bridge address)
+# engine run the host entry for that name (the sidecar's bridge address)
 # and the sidecar's CA, as scripts/test-e2e-local.sh does for its own
 # containers; every other call reaches the real docker unchanged. The
 # request, the response and the certificate check are real. No provider
@@ -68,7 +70,7 @@ done
 
 repository="tomlawesome/orbit"
 registry="ghcr.io"
-issuer="https://orbit-oidc:4443/"
+issuer="https://orbit-oidc.invalid:4443/"
 
 note() { printf 'test-install-bootstrap: %s\n' "$1"; }
 fail() { printf 'test-install-bootstrap: %s\n' "$1" >&2; exit 1; }
@@ -175,7 +177,7 @@ make_shim() {
 # passes neither.
 set -Eeuo pipefail
 if [[ "\${1:-}" == "run" && " \$* " == *" /opt/orbit/cli/orbit.js install "* ]]; then
-  exec "$real_docker" run --add-host "orbit-oidc:${oidc_address}" \\
+  exec "$real_docker" run --add-host "orbit-oidc.invalid:${oidc_address}" \\
     -v "$workdir/oidc-ca.pem:/orbit-test-oidc-ca.pem:ro" \\
     -e NODE_EXTRA_CA_CERTS=/orbit-test-oidc-ca.pem "\${@:2}"
 fi
