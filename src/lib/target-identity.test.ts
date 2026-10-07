@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -145,6 +145,14 @@ describe("validateTarget (guarantee #7)", () => {
     symlinkSync(join(targetDir, "real-compose.yml"), join(targetDir, "docker-compose.yml"));
     mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
     expect(() => validateTarget(targetDir)).toThrow(TargetValidationRefusal);
+  });
+
+  it("names a leftover staging directory from an interrupted attempt instead of the generic refusal, and never removes it (#383, now the engine's)", () => {
+    mkdirSync(join(targetDir, ".orbit-install-staging.AbC123"), { mode: 0o700 });
+    expect(() => validateTarget(targetDir)).toThrow(
+      "A previous install attempt was interrupted and left .orbit-install-staging.AbC123 behind in this directory. Review its contents, then remove it (safe once you have confirmed no install is still in progress) and retry.",
+    );
+    expect(lstatSync(join(targetDir, ".orbit-install-staging.AbC123")).isDirectory()).toBe(true);
   });
 
   it("refuses when .orbit-secrets is a symlink, even with the other two files correct", () => {

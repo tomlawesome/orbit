@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -224,8 +224,9 @@ describe("orbit backup --verify: reaches real verification for a present-but-inv
 // booby-trapped `docker` ahead of the real one on PATH, so a passing test
 // means the code path was never reached, not merely that it failed cleanly.
 describe("in-container fail-closed guard (ORBIT_ENGINE_CONTEXT=container)", () => {
-  const DOCKER_NEEDING_COMMANDS = ["install", "update"];
-  // #1211: these spawn no docker at all now; they run only inside the deployment.
+  // No command spawns docker any more: backup, restore and the
+  // recovery-bundle commands run only inside the deployment (#1211), and
+  // install/update only inside the image (#1212, build note F7, below).
   const DEPLOYMENT_COMMANDS = ["backup", "restore", "export-recovery-bundle", "import-recovery-bundle"];
 
   // Placed inside `sandbox` (not a separate mkdtemp) so the shared afterEach
@@ -237,20 +238,6 @@ describe("in-container fail-closed guard (ORBIT_ENGINE_CONTEXT=container)", () =
     writeFileSync(join(binDir, "docker"), script, { mode: 0o755 });
     return binDir;
   }
-
-  it.each(DOCKER_NEEDING_COMMANDS)("%s refuses with exit 9 and the reason enum, before ever constructing a docker adapter", (command) => {
-    const callLogPath = join(sandbox, "docker-calls.log");
-    writeFileSync(callLogPath, "");
-    const trapBinDir = makeBoobyTrappedDockerBinDir(callLogPath);
-
-    const result = runCli([command, "--dir", sandbox], {
-      env: { ...process.env, PATH: `${trapBinDir}:${process.env.PATH}`, ORBIT_ENGINE_CONTEXT: "container" },
-    });
-
-    expect(result.status).toBe(9);
-    expect(result.stderr).toContain(`orbit: refused command=${command} reason=docker-command-forbidden-in-container`);
-    expect(readFileSync(callLogPath, "utf8")).toBe("");
-  });
 
   it.each(DEPLOYMENT_COMMANDS)("%s runs in container mode without ever calling docker", (command) => {
     const callLogPath = join(sandbox, "docker-calls.log");
@@ -300,59 +287,27 @@ describe("in-container fail-closed guard (ORBIT_ENGINE_CONTEXT=container)", () =
     expect(readFileSync(callLogPath, "utf8")).toBe("");
   });
 
-  // Both "inert" tests below deliberately still put a fake `docker` on PATH
-  // (never the real binary): the point of these two tests is only that
-  // refuseDockerInContainer itself doesn't fire outside container mode, not
-  // that the full real install flow against a real Docker daemon succeeds
-  // or fails a particular way. An earlier version of this test used the
-  // sandbox's own real PATH/docker — under CI's coverage-instrumented,
-  // resource-constrained run, that let a real, un-mocked `docker compose
-  // version` subprocess call (install-docker-adapter.ts's
-  // checkDockerAvailable, which has no spawnSync-level timeout of its own)
-  // run loose from inside a test for the first time in this suite, which is
-  // exactly the kind of call that can turn into an indefinite hang under
-  // load rather than a clean pass/fail — this fake is fast and
-  // deterministic regardless of host conditions.
-  it("the guard is inert when ORBIT_ENGINE_CONTEXT is unset: host-mode behavior is unchanged", () => {
-    // The install target must stay empty (a fresh subdirectory of `sandbox`,
-    // not `sandbox` itself): once the guard doesn't fire, install's own
-    // pre-existing target-content validation runs for real, and it refuses
-    // a non-empty target before ever reaching the docker check — that would
-    // fail this test for an unrelated reason (an empty callLog, but from a
-    // different early refusal, not from the guard).
+  // #1212 (build note F7): install and update no longer have Docker
+  // adapters at all, so the guard has nothing to refuse for them; the rule is
+  // the reverse one. They run only inside the image, started by install.sh,
+  // and refuse on a host before reading the target or spawning anything.
+  it.each(["install", "update"])("%s refuses to run outside the image, touching nothing", (command) => {
     const targetDir = join(sandbox, "target");
     mkdirSync(targetDir);
     const callLogPath = join(sandbox, "docker-calls.log");
     writeFileSync(callLogPath, "");
     const trapBinDir = makeBoobyTrappedDockerBinDir(callLogPath);
 
-    const result = runCli(["install", "--dir", targetDir], {
-      env: { ...process.env, PATH: `${trapBinDir}:${process.env.PATH}` },
-    });
-
-    // No ORBIT_ENGINE_CONTEXT set: the guard never fires, so install
-    // proceeds to its own (pre-existing) docker-availability check, which
-    // does reach the fake docker — proving the guard adds a refusal only in
-    // container mode, without altering host-mode behavior.
-    expect(result.status).not.toBe(9);
-    expect(result.stderr).not.toContain("docker-command-forbidden-in-container");
-    expect(readFileSync(callLogPath, "utf8")).not.toBe("");
-  });
-
-  it("the guard is inert when ORBIT_ENGINE_CONTEXT is set to any value other than the literal \"container\"", () => {
-    const targetDir = join(sandbox, "target");
-    mkdirSync(targetDir);
-    const callLogPath = join(sandbox, "docker-calls.log");
-    writeFileSync(callLogPath, "");
-    const trapBinDir = makeBoobyTrappedDockerBinDir(callLogPath);
-
-    const result = runCli(["install", "--dir", targetDir], {
-      env: { ...process.env, PATH: `${trapBinDir}:${process.env.PATH}`, ORBIT_ENGINE_CONTEXT: "host" },
-    });
-
-    expect(result.status).not.toBe(9);
-    expect(result.stderr).not.toContain("docker-command-forbidden-in-container");
-    expect(readFileSync(callLogPath, "utf8")).not.toBe("");
+    for (const context of [undefined, "host"]) {
+      const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${trapBinDir}:${process.env.PATH}` };
+      if (context === undefined) delete env.ORBIT_ENGINE_CONTEXT;
+      else env.ORBIT_ENGINE_CONTEXT = context;
+      const result = runCli([command, "--dir", targetDir], { env });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(`orbit: ${command} runs only inside the Orbit image, started by scripts/install.sh.`);
+    }
+    expect(readFileSync(callLogPath, "utf8")).toBe("");
+    expect(readdirSync(targetDir)).toEqual([]);
   });
 });
 
