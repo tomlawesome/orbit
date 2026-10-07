@@ -86,8 +86,7 @@ export function gpu() {
       failIfMajorPerformanceCaveat: true,
     }));
     if (gl) {
-      const info = gl.getExtension("WEBGL_debug_renderer_info");
-      const renderer = info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : "";
+      const renderer = rendererOf(gl);
       if (SOFTWARE.test(renderer)) {
         gl.getExtension("WEBGL_lose_context")?.loseContext();
         sayVerdict(`off: software renderer (${renderer})`);
@@ -98,6 +97,22 @@ export function gpu() {
     } else sayVerdict("off: no WebGL2 here, or the browser calls it a major performance caveat");
   } catch { sayVerdict("off: WebGL2 refused"); }
   return verdict;
+}
+
+/*
+ * THE RENDERER'S NAME (#1299). Firefox gives the real name through plain
+ * RENDERER and warns that WEBGL_debug_renderer_info is deprecated and will
+ * be removed; Chromium and WebKit still answer RENDERER with the masked
+ * "WebKit WebGL". So RENDERER first, and the extension only when that is
+ * masked or empty.
+ */
+const MASKED = /^(webkit webgl|mozilla)?$/i;
+/** @param {Pick<WebGL2RenderingContext, "getParameter" | "getExtension" | "RENDERER">} gl */
+function rendererOf(gl) {
+  const plain = String(gl.getParameter(gl.RENDERER) ?? "").trim();
+  if (!MASKED.test(plain)) return plain;
+  const info = gl.getExtension("WEBGL_debug_renderer_info");
+  return info ? String(gl.getParameter(info.UNMASKED_RENDERER_WEBGL)) : plain;
 }
 
 /** the renderer names that are refused, for tests @param {string} renderer */
