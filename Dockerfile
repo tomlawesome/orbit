@@ -92,6 +92,12 @@ ENV PORT=3000
 # both default to these values, and they are set explicitly so the listening
 # address is visible in `docker inspect` rather than only in the adapter.
 ENV HOST=0.0.0.0
+# adapter-node's server-wide request body limit (#1285). Its 512K default
+# refused every document over 512 KB. Set to the largest body any route may
+# take -- the 100 MiB upload ceiling plus 1 MiB -- and the request pipeline
+# then holds each route to its own, smaller limit
+# (web/src/lib/server/body-limit.js, SERVER_BODY_LIMIT must match this).
+ENV BODY_SIZE_LIMIT=101M
 ENV MIGRATE_ON_START=true
 ENV WORKER_ENABLED=true
 # Baked into the image config itself, so it is present in every container
