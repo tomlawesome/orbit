@@ -1217,6 +1217,7 @@
       <div class="p-kv"><span>state</span><b class={BODY[service[0]] ?? ""}>{split(service[2]).word}</b></div>
       {#if serviceRaw}
         <div class="p-kv"><span>last checked</span><b>{stamp(serviceRaw.checkedAt)}</b></div>
+        {#if serviceRaw.signaturesAt}<div class="p-kv"><span>signatures from</span><b>{stamp(serviceRaw.signaturesAt)}</b></div>{/if}
         {#if serviceRaw.lastSuccessAt}<div class="p-kv"><span>last success</span><b>{stamp(serviceRaw.lastSuccessAt)}</b></div>{/if}
         {#if serviceRaw.lastErrorAt}<div class="p-kv"><span>last error</span><b class="over">{stamp(serviceRaw.lastErrorAt)}</b></div>{/if}
       {:else}

@@ -1068,6 +1068,7 @@ export async function commandUploadLimit(command) {
  * @property {string} checkedAt
  * @property {?string} [lastSuccessAt]
  * @property {?string} [lastErrorAt]
+ * @property {?string} [signaturesAt] virus scanner only: when its loaded signatures were built (#1296)
  */
 
 /**
@@ -1374,6 +1375,10 @@ function serviceDetailOf(service, now) {
   const isWorker = /** @type {readonly string[]} */ (WORKER_IDS).includes(service.id);
   if (service.state === "off") return "not enabled";
   if (service.state === "down") return isWorker ? "stopped" : "unreachable";
+  if (service.state === "warn" && service.id === "virus-scanner") {
+    // Old signatures, or a reply that gave no date at all (#1296).
+    return service.signaturesAt ? `out of date · signatures ${ago(service.signaturesAt, now)}` : "signature age unknown";
+  }
   if (service.state === "warn") {
     return service.lastErrorAt ? `retrying · last error ${ago(service.lastErrorAt, now)}` : "retrying";
   }
