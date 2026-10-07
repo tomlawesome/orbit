@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import { constants as zlibConstants, inflateSync } from "node:zlib";
 import { AppError } from "@/lib/app-error";
 import { getDocument, VerbosityLevel } from "pdfjs-dist/legacy/build/pdf.mjs";
 
@@ -17,6 +18,11 @@ const MAX_IMAGE_DIMENSION = 20_000;
 const MAX_IMAGE_PIXELS = 40_000_000;
 const MAX_PNG_CHUNKS = 4_096;
 const MAX_PDF_XREF_ENTRIES = 1_250_000;
+/** How far past startxref the final cross-reference dictionary may run (long /Index arrays after incremental saves). */
+const PDF_XREF_DICTIONARY_WINDOW_BYTES = 64 * 1024;
+/** Total decoded object-stream bytes inspected per document; more is refused, never skipped. */
+export const PDF_OBJECT_STREAM_DECODED_MAX_BYTES = 64 * 1024 * 1024;
+const PDF_OBJECT_STREAM_MAX_DEPTH = 2;
 export const PDF_STRUCTURE_MAX_PAGES = 1_000;
 export const PDF_STRUCTURE_INSPECTION_BUDGET_MS = 5_000;
 type PdfStructureParserOptions = NonNullable<Parameters<typeof getDocument>[0]> & { isEvalSupported: false };
@@ -281,9 +287,139 @@ function nextPdfToken(bytes: Buffer, offset: number, token: string): number {
   return candidate;
 }
 
-/** Removes comments, literal/hex strings and stream payloads before inspecting PDF names. */
-function structuralPdfText(bytes: Buffer): string {
+/** Replaces each PDF name token with its #-escape-decoded spelling, as a PDF reader sees it. */
+function decodedPdfNames(content: string): string {
+  return content.replace(/\/([^\x00\t\n\f\r ()<>[\]{}/%]*)/gu, (_, name: string) => `/${pdfNameValue(name)}`);
+}
+
+/**
+ * The top level of the dictionary that `content` (strings and comments already
+ * removed) ends with, looking no further back than `floor` -- the end of the
+ * previous stream -- so a run of streams costs linear time, not quadratic.
+ */
+function trailingPdfDictionary(content: string, floor: number): string | undefined {
+  let end = content.length - 1;
+  while (end >= floor && "\x00\t\n\f\r ".includes(content[end])) end -= 1;
+  end -= 1;
+  if (end < floor || !content.startsWith(">>", end)) return undefined;
+  let depth = 0;
+  for (let index = end + 1; index > floor; index -= 1) {
+    if (content[index] === ">" && content[index - 1] === ">") {
+      depth += 1;
+      index -= 1;
+    } else if (content[index] === "<" && content[index - 1] === "<") {
+      depth -= 1;
+      index -= 1;
+      if (depth === 0) return pdfDictionaryAt(content, index);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Reads the balanced dictionary starting at `content[start]` ("<<") and returns
+ * its top level with names decoded and nested dictionaries collapsed to
+ * "<<>>", so a key inside /DecodeParms cannot stand in for a top-level key.
+ */
+function pdfDictionaryAt(content: string, start: number): string | undefined {
+  if (!content.startsWith("<<", start)) return undefined;
+  let depth = 0;
+  let topLevel = "";
+  for (let index = start; index < content.length; index += 1) {
+    if (content.startsWith("<<", index)) {
+      depth += 1;
+      index += 1;
+      if (depth === 2) topLevel += " <<>> ";
+      continue;
+    }
+    if (content.startsWith(">>", index)) {
+      depth -= 1;
+      index += 1;
+      if (depth === 0) return decodedPdfNames(topLevel);
+      continue;
+    }
+    if (depth === 1) topLevel += content[index];
+  }
+  return undefined;
+}
+
+/** Splits a dictionary's top level (strings removed, nested dictionaries collapsed) into tokens. */
+function pdfTokens(topLevel: string): string[] {
+  return topLevel.match(/<<>>|\[|\]|\/[^\x00\t\n\f\r ()<>[\]{}/%]*|[^\x00\t\n\f\r ()<>[\]{}/%]+/gu) ?? [];
+}
+
+/** The value of a top-level key, as space-joined tokens; an array or indirect reference is kept whole. */
+function pdfDictionaryValue(topLevel: string, key: string): string | undefined {
+  const tokens = pdfTokens(topLevel);
+  let index = 0;
+  while (index < tokens.length) {
+    const name = tokens[index];
+    index += 1;
+    if (!name.startsWith("/")) continue;
+    const valueStart = index;
+    if (tokens[index] === "[") {
+      let depth = 0;
+      do {
+        if (tokens[index] === "[") depth += 1;
+        else if (tokens[index] === "]") depth -= 1;
+        index += 1;
+      } while (index < tokens.length && depth > 0);
+    } else if (/^\d+$/u.test(tokens[index] ?? "") && /^\d+$/u.test(tokens[index + 1] ?? "") && tokens[index + 2] === "R") {
+      index += 3;
+    } else {
+      index += 1;
+    }
+    if (name === `/${key}`) return tokens.slice(valueStart, index).join(" ");
+  }
+  return undefined;
+}
+
+interface PdfInspectionBudget {
+  decodedObjectStreamBytes: number;
+}
+
+/**
+ * An object stream (ISO 32000-1 7.5.7) holds the document's own dictionaries;
+ * a reader resolves it by /N and /First alone, whatever /Type says. Decodes it
+ * only through the filters a modern producer writes and refuses the rest, so an
+ * object the parser will read is never one the name inspection skipped.
+ */
+function decodedPdfObjectStream(dictionary: string, payload: Buffer, budget: PdfInspectionBudget): Buffer | undefined {
+  const filter = pdfDictionaryValue(dictionary, "Filter");
+  const parameters = pdfDictionaryValue(dictionary, "DecodeParms");
+  if (parameters !== undefined && parameters !== "null" && parameters !== "[ null ]") return undefined;
+  const remaining = PDF_OBJECT_STREAM_DECODED_MAX_BYTES - budget.decodedObjectStreamBytes;
+  let decoded: Buffer;
+  if (filter === undefined || filter === "[ ]") {
+    decoded = payload;
+  } else if (["/FlateDecode", "/Fl", "[ /FlateDecode ]", "[ /Fl ]"].includes(filter)) {
+    try {
+      decoded = inflateSync(payload, { finishFlush: zlibConstants.Z_SYNC_FLUSH, maxOutputLength: Math.max(1, remaining + 1) });
+    } catch {
+      return undefined;
+    }
+  } else {
+    return undefined;
+  }
+  if (decoded.length > remaining) return undefined;
+  budget.decodedObjectStreamBytes += decoded.length;
+  return decoded;
+}
+
+function isPdfObjectStreamDictionary(dictionary: string): boolean {
+  return pdfDictionaryValue(dictionary, "N") !== undefined && pdfDictionaryValue(dictionary, "First") !== undefined;
+}
+
+/**
+ * Removes comments, literal/hex strings and stream payloads before inspecting
+ * PDF names, and appends the same view of every object stream's decoded
+ * objects. Returns undefined when an object stream cannot be decoded within
+ * budget: refusing is the only safe answer to objects that cannot be inspected.
+ */
+function structuralPdfText(bytes: Buffer, budget: PdfInspectionBudget = { decodedObjectStreamBytes: 0 }, nesting = 0): string | undefined {
   let output = "";
+  let previousStreamEnd = 0;
+  const objectStreams: string[] = [];
   let offset = 0;
   while (offset < bytes.length) {
     const value = bytes[offset];
@@ -317,15 +453,35 @@ function structuralPdfText(bytes: Buffer): string {
       offset += 6;
       if (bytes[offset] === 0x0d && bytes[offset + 1] === 0x0a) offset += 2;
       else if (bytes[offset] === 0x0a || bytes[offset] === 0x0d) offset += 1;
+      const dictionary = trailingPdfDictionary(output, previousStreamEnd);
+      previousStreamEnd = output.length;
+      // A stream with no dictionary we can read might be an object stream.
+      if (dictionary === undefined) return undefined;
+      const isObjectStream = isPdfObjectStreamDictionary(dictionary);
       const endstream = nextPdfToken(bytes, offset, "endstream");
-      if (endstream < 0) break;
+      if (endstream < 0) {
+        if (isObjectStream) return undefined;
+        break;
+      }
+      if (isObjectStream) {
+        let payloadEnd = endstream;
+        if (bytes[payloadEnd - 1] === 0x0a) payloadEnd -= 1;
+        if (bytes[payloadEnd - 1] === 0x0d) payloadEnd -= 1;
+        const decoded = nesting < PDF_OBJECT_STREAM_MAX_DEPTH
+          ? decodedPdfObjectStream(dictionary, bytes.subarray(offset, Math.max(offset, payloadEnd)), budget)
+          : undefined;
+        if (!decoded) return undefined;
+        const objects = structuralPdfText(decoded, budget, nesting + 1);
+        if (objects === undefined) return undefined;
+        objectStreams.push(objects);
+      }
       offset = endstream + 9;
       continue;
     }
     output += String.fromCharCode(value);
     offset += 1;
   }
-  return output;
+  return objectStreams.length > 0 ? `${output}\n${objectStreams.join("\n")}` : output;
 }
 
 function hasUnsafePdfName(content: string): boolean {
@@ -338,21 +494,17 @@ function hasTooManyPdfObjects(content: string): boolean {
   return objectHeaders > MAX_PDF_XREF_ENTRIES;
 }
 
-function hasValidPdfStartxref(bytes: Buffer): boolean {
+/**
+ * Follows startxref to the final cross-reference section and checks it is a
+ * table or a cross-reference stream whose declared entry count is within
+ * budget, reading the whole stream dictionary (nested /DecodeParms included)
+ * rather than a fixed window of it.
+ */
+function hasBoundedPdfIndex(bytes: Buffer): boolean {
   const tail = bytes.subarray(Math.max(0, bytes.length - 1_024)).toString("latin1");
   const match = tail.match(/startxref\s+(\d+)\s+%%EOF[\x00\t\n\f\r ]*$/u);
   if (!match) return false;
   const offset = Number(match[1]);
-  if (!Number.isSafeInteger(offset) || offset < 0 || offset >= bytes.length) return false;
-  const target = bytes.subarray(offset, Math.min(bytes.length, offset + 512)).toString("latin1");
-  return /^xref(?:\s|$)/u.test(target)
-    || /^\d+\s+\d+\s+obj\s*<<[\s\S]*?\/Type\s*\/XRef\b/u.test(target);
-}
-
-function hasPdfIndexBudget(bytes: Buffer): boolean {
-  const tail = bytes.subarray(Math.max(0, bytes.length - 1_024)).toString("latin1");
-  const match = tail.match(/startxref\s+(\d+)\s+%%EOF[\x00\t\n\f\r ]*$/u);
-  const offset = Number(match?.[1]);
   if (!Number.isSafeInteger(offset) || offset < 0 || offset >= bytes.length) return false;
   const target = bytes.subarray(offset).toString("latin1");
   if (/^xref(?:\s|$)/u.test(target)) {
@@ -362,9 +514,14 @@ function hasPdfIndexBudget(bytes: Buffer): boolean {
     const total = subsectionCounts.reduce((sum, line) => sum + Number(line.match(/\d+\s*$/u)?.[0] ?? 0), 0);
     return total <= MAX_PDF_XREF_ENTRIES;
   }
-  const dictionary = target.match(/^\d+\s+\d+\s+obj\s*<<([\s\S]*?)>>/u)?.[1] ?? "";
-  const size = Number(dictionary.match(/\/Size\s+(\d+)\b/u)?.[1]);
-  const index = dictionary.match(/\/Index\s*\[([^\]]+)\]/u)?.[1]
+  const objectHeader = target.match(/^\d+\s+\d+\s+obj\s*/u);
+  if (!objectHeader) return false;
+  const window = bytes.subarray(offset + objectHeader[0].length, Math.min(bytes.length, offset + PDF_XREF_DICTIONARY_WINDOW_BYTES));
+  const dictionaryText = structuralPdfText(window);
+  const dictionary = dictionaryText === undefined ? undefined : pdfDictionaryAt(dictionaryText, dictionaryText.search(/\S/u));
+  if (!dictionary || pdfDictionaryValue(dictionary, "Type") !== "/XRef") return false;
+  const size = Number(pdfDictionaryValue(dictionary, "Size"));
+  const index = pdfDictionaryValue(dictionary, "Index")?.match(/^\[([^\]]*)\]$/u)?.[1]
     ?.trim()
     .split(/\s+/u)
     .map(Number);
@@ -421,11 +578,11 @@ export type DocumentStructureReason = "supported_structure" | "unsupported_struc
 async function classifyPdfStructure(bytes: Buffer): Promise<DocumentStructureReason> {
   if (bytes.length < 24
     || !/^%PDF-[12]\.\d/u.test(bytes.subarray(0, 8).toString("ascii"))
-    || !hasValidPdfStartxref(bytes)
-    || !hasPdfIndexBudget(bytes)
+    || !hasBoundedPdfIndex(bytes)
     || hasTooManyPdfObjects(bytes.toString("latin1"))) return "unsupported_structure";
 
   const structuralContent = structuralPdfText(bytes);
+  if (structuralContent === undefined) return "unsupported_structure";
   if (hasUnsafePdfName(structuralContent)) return "prohibited_content";
 
   let loadingTask: ReturnType<typeof getDocument> | undefined;

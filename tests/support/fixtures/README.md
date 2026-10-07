@@ -11,10 +11,7 @@ Apache-2.0 ([license](https://github.com/qpdf/qpdf/blob/babad179ce5db9a21635c8d1
 - `qpdf-object-stream.pdf`: [`qpdf/qtest/qpdf/object-stream.pdf`](https://github.com/qpdf/qpdf/blob/babad179ce5db9a21635c8d1ac17baa59637eada/qpdf/qtest/qpdf/object-stream.pdf), blob `1a468202c18fc9d26f53031bcd55ea3094993c02`, 792 bytes. This is the accepted object-stream/xref-stream fixture.
 - `qpdf-incremental-3.pdf`: [`qpdf/qtest/qpdf/incremental-3.pdf`](https://github.com/qpdf/qpdf/blob/babad179ce5db9a21635c8d1ac17baa59637eada/qpdf/qtest/qpdf/incremental-3.pdf), blob `da1279d4f96c274f9e81778c91b06a8f5604d161`, 944 bytes. This is the accepted incremental-update fixture.
 
-The supplied `compress-objstm-xref.pdf` candidate (blob
-`a121ef24ac2463bf1fa7e9c0f25eb259a1478435`) was inspected but Orbit correctly
-classifies it as `unsupported_structure`, so it is not committed as acceptance
-evidence.
+- `qpdf-compress-objstm-xref.pdf`: [`qpdf/qtest/qpdf/compress-objstm-xref.pdf`](https://github.com/qpdf/qpdf/blob/babad179ce5db9a21635c8d1ac17baa59637eada/qpdf/qtest/qpdf/compress-objstm-xref.pdf), blob `a121ef24ac2463bf1fa7e9c0f25eb259a1478435`, 743 bytes. Compressed object streams indexed by a predicted cross-reference stream, as current producers write them. It was once recorded here as correctly refused; that refusal was the defect that refused most modern PDFs (a nested `/DecodeParms` hid `/Size` from the index check), so it is now acceptance evidence.
 
 Regenerate it locally with:
 

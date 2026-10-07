@@ -131,7 +131,13 @@ recoverable state.
   process. PDF active/embedded-file
   features are classified separately from unfamiliar structure; names are
   inspected outside comments, strings, and stream payloads so harmless text in
-  compressed page content does not become active content. Malformed JPEG
+  compressed page content does not become active content. Object streams
+  (any stream with `/N` and `/First`, as the parser finds them, whatever
+  `/Type` says) are the exception: they hold the document's own objects, so
+  they are decoded, Flate only and at most 64 MiB per document, and their
+  objects get the same name inspection. One that cannot be decoded -- another
+  filter, a predictor, encryption, over budget -- is refused as unsupported
+  structure, never skipped. Malformed JPEG
   marker streams, malformed PNG chunk/CRC structure, and decompression-risk
   image dimensions are rejected. Magic bytes alone are not structural
   validation.

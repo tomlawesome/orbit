@@ -1,14 +1,18 @@
 import { readFileSync } from "node:fs";
+import { deflateSync } from "node:zlib";
 import { describe, expect, it, vi } from "vitest";
 import {
   classifyDocumentStructure,
   detectDocumentMediaType,
+  PDF_OBJECT_STREAM_DECODED_MAX_BYTES,
   normalizedDocumentFilename,
   PDF_STRUCTURE_PARSER_OPTIONS,
   validateSupportedDocumentStructure,
 } from "./validation";
 import { syntheticJpeg, syntheticPdf, syntheticPdfWithXrefStream, syntheticPng } from "../../../tests/support/synthetic-documents";
 import {
+  syntheticModernPdf,
+  syntheticModernPdfHiddenFeatures,
   syntheticPdfWithCatalogFeature,
   syntheticPdfWithCompressedJavaScript,
   syntheticPdfWithHarmlessFeatureName,
@@ -21,6 +25,7 @@ const validJpeg = syntheticJpeg();
 const chromiumPdf = readFileSync(new URL("../../../tests/support/fixtures/chromium-synthetic.pdf", import.meta.url));
 const qpdfObjectStreamPdf = readFileSync(new URL("../../../tests/support/fixtures/qpdf-object-stream.pdf", import.meta.url));
 const qpdfIncrementalPdf = readFileSync(new URL("../../../tests/support/fixtures/qpdf-incremental-3.pdf", import.meta.url));
+const qpdfCompressedObjectStreamPdf = readFileSync(new URL("../../../tests/support/fixtures/qpdf-compress-objstm-xref.pdf", import.meta.url));
 
 function forgedPdfXref(): Buffer {
   let value = "%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n";
@@ -54,6 +59,7 @@ describe("structural document classification", () => {
     ["Chromium PDF producer", chromiumPdf],
     ["qpdf object and xref streams", qpdfObjectStreamPdf],
     ["qpdf incremental update", qpdfIncrementalPdf],
+    ["qpdf compressed object streams with a predicted xref stream", qpdfCompressedObjectStreamPdf],
   ] as const)("accepts independent producer fixture: %s", async (_name, bytes) => {
     await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("supported_structure");
     await expect(validateSupportedDocumentStructure(bytes, "application/pdf")).resolves.toBe(true);
@@ -62,6 +68,39 @@ describe("structural document classification", () => {
   it.each(syntheticStructurePdfFixtures)("accepts synthetic standards-valid PDF structure from $name", async ({ bytes }) => {
     await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("supported_structure");
     await expect(validateSupportedDocumentStructure(bytes, "application/pdf")).resolves.toBe(true);
+  });
+
+  describe("modern producer structure: object streams indexed by a compressed cross-reference stream", () => {
+    it("accepts the ordinary shape, with a nested /DecodeParms ahead of /Size", async () => {
+      await expect(classifyDocumentStructure(syntheticModernPdf(), "application/pdf")).resolves.toBe("supported_structure");
+    });
+
+    it("accepts a cross-reference dictionary long enough to push /Type /XRef past its first 512 bytes", async () => {
+      await expect(classifyDocumentStructure(syntheticModernPdf({ longIndex: true }), "application/pdf"))
+        .resolves.toBe("supported_structure");
+    });
+
+    it.each(syntheticModernPdfHiddenFeatures.flatMap(({ name, options }) => [
+      { name, xref: "predicted", options },
+      { name, xref: "unpredicted", options: { ...options, xrefPredictor: false } },
+    ]))("refuses $name hidden inside the object stream ($xref cross-reference rows)", async ({ options }) => {
+      await expect(classifyDocumentStructure(syntheticModernPdf(options), "application/pdf")).resolves.toBe("prohibited_content");
+    });
+
+    it("refuses an object stream it cannot decode rather than skipping it", async () => {
+      const bytes = syntheticModernPdf({
+        objectStreamDictionary: "/Type /ObjStm /Filter /ASCIIHexDecode",
+        encodeObjectStream: (payload) => Buffer.from(`${payload.toString("hex")}>`, "latin1"),
+      });
+      await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("unsupported_structure");
+    });
+
+    it("refuses object streams that decode past the inspection budget", async () => {
+      const bytes = syntheticModernPdf({
+        encodeObjectStream: (payload) => deflateSync(Buffer.concat([payload, Buffer.alloc(PDF_OBJECT_STREAM_DECODED_MAX_BYTES, 0x20)])),
+      });
+      await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("unsupported_structure");
+    });
   });
 
   it("does not classify feature names inside compressed page content as active content", async () => {
