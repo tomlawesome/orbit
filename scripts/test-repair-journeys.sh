@@ -197,6 +197,12 @@ case "\$url" in
 esac
 SHIM
   chmod 755 "$workdir/shim/curl"
+  # This image is built here and never signed, so a host cosign would refuse
+  # it (install.sh verifies only when cosign answers `cosign version`). CI's
+  # job image has no cosign; hide this host's so the install takes the same
+  # path, and leave signature checks to the harnesses that test them.
+  printf '#!/bin/sh\nexit 127\n' > "$workdir/shim/cosign"
+  chmod 755 "$workdir/shim/cosign"
 }
 
 make_target() {
