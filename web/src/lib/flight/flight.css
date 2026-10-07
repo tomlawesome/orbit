@@ -328,6 +328,10 @@ body.holding #flightmark.on circle:first-child{animation:holding 1.1s ease-in-ou
 #flightmark.collapse{opacity:0;transform:scale(.05);
             transition:opacity .55s ease .1s,transform .7s cubic-bezier(.6,0,.9,.4)}
 #flightmark svg{width:100%;height:100%;display:block}
+/* the mark tilts into the direction of travel while the flight is at speed, and
+   levels to land (orbit-site assets/site.css:599-609) */
+#flightmark{perspective:600px}
+#flightmark svg{overflow:visible}
 #flightmark .core{fill:#fff6e6;display:none}
 /* the household's name written on the void, once, at the top of the climb */
 #launchname{position:fixed;left:0;right:0;top:26%;z-index:7;text-align:center;
