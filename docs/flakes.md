@@ -311,11 +311,6 @@ page's URL at failure, which this one has to infer.
 
 - 2026-09-27 · 6420d955 (+ #1069's uncommitted desk-create work, nowhere near backup/restore) · local `scripts/test-backend.sh`, seven worktrees running it at once · `Error: Test timed out in 5000ms`, alongside the sighting above in the same file. Same rerun, same result: green alone. First sighting.
 
-## veil.js's fade timer fires after a tour unit file has ended — "window is not defined" (whichever file ran last)
-
-- 2026-10-04 · 91a3ada2 (!1021; the batch's only veil change, W3-S1, adds no timer, and the fade timer itself dates from 2026-09-22) · local `scripts/test-backend.sh` (full 393-file run, two integration suites sharing the host) · every test passed, but Vitest caught one unhandled `ReferenceError: window is not defined` at `removeListeners web/src/lib/tour/veil.js:280`, from `hideVeil`'s `setTimeout` teardown firing after the file's jsdom window was gone, and exited 1. The same file alone passed three times in a row straight after on the same code, and CI's `fast` job was green on `bc9ba29e`. First sighting; an issue on the third.
-- 2026-10-04 · 440eb552 (!1024 rebased onto 6329566d; no `web/` change in the branch) · pipeline 2101 / fast (job 31506) · the same unhandled error, this time attributed to `tests/unit/v19-tour-vocabulary.test.mjs`, same stack (`removeListeners` ← `teardownOverlay` ← the `hideTimer` timeout at veil.js:388); 393 files, 5469 tests passed, and the one unhandled error failed the job. The same `dev` code passed `fast` on pipelines 2100 (31486) and 2102 (31526) within the hour. Second sighting; the attributed file differs because the timer outlives whichever file ran last, hence this heading names the mechanism rather than one file. Retried as a job retry on 2101.
-
 ## pocket-measure.spec.js:540 "/home · film-create meets the pocket floors" — pocket-measure, 390x664
 
 - 2026-09-30 · 0135f516 (!1006, the batch that built this film chapter) · pipeline 1855 / fidelity (job 27168) · `page.waitForFunction` hit the 60000ms test timeout. The same test passed on pipeline 1836 (same film code), and the job retried as 27270 on the same commit was green. First sighting; an issue on the third.

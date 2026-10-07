@@ -342,6 +342,21 @@ function teardownOverlay() {
 }
 
 /**
+ * Tears the veil down at once: the pending fade timer is cancelled, the
+ * overlay removed, the listeners dropped. For a test's cleanup (#1234): a
+ * fade left running past the end of a unit-test file fires into a window
+ * that is already gone ("window is not defined" from removeListeners, three
+ * sightings). The product never needs this -- hideVeil's fade is the point.
+ */
+export function dropVeil() {
+  if (hideTimer !== null) {
+    clearTimeout(hideTimer);
+    hideTimer = null;
+  }
+  teardownOverlay();
+}
+
+/**
  * Shows the veil, fading it in to `options.opacity` (default the ratified
  * 0.62). Mounts the overlay once; calling this again while it is already
  * showing just cancels any pending hide.

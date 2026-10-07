@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { dropVeil } from "../../web/src/lib/tour/veil.js";
 
 import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmPlayer } from "../../web/src/lib/tour/player.js";
@@ -96,6 +97,9 @@ beforeEach(() => {
 
 afterEach(() => {
   setReducedMotion(false);
+  /* #1234: a veil left fading when a test ends fires its timer after the
+     file's window is gone. Tear it down now, timer and all. */
+  dropVeil();
 });
 
 describe("a control is a selector", () => {
