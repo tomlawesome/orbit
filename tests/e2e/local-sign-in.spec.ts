@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { claimCodeFromLog, stackLog } from "./support/bootstrap";
+import { bodyClassSeen, witnessBodyClasses } from "./support/arrival";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
@@ -194,4 +195,195 @@ test("and the password signs them back in", async ({ page }) => {
   expect(session.ok()).toBe(true);
   expect((await session.json()) as { user: { displayName: string } })
     .toMatchObject({ user: { displayName: ADMINISTRATOR.displayName } });
+});
+
+/*
+ * ══ NO SIGN-IN CARD OVER ANY ARRIVAL STAGE (#1271) ═══════════════════════
+ *
+ * On a local-only instance the door draws its sign-in card from the PUBLIC
+ * availability answer, whoever is signed in -- so a reader who has gone
+ * through the door carries a `.ringcard` layer into the arrival, over the
+ * newcomer's sky, where it can sit on top of the drawer and take its clicks.
+ * #1263 stopped drawing it once the arrival leaves the door
+ * (Arrival.svelte's `past-door`, arrival.css); nothing walked it on a stack
+ * where it can exist. The oidc profile cannot: its door has no local card.
+ *
+ * The administrator above belongs to nothing, so this is the empty
+ * instance's newcomer. The stages a local-only reader can reach:
+ *   · the climb the sign-in card's own departure owes (launch marker set);
+ *   · the arrival with no climb owed (a refresh, a bookmark, a Back), drawer
+ *     open because there is nothing to ask to join;
+ *   · the same with systems on the sky -- the count and the chooser -- which
+ *     this stack cannot hold without making a household the next spec's
+ *     privacy checks would then see, so the workspace read is answered in the
+ *     browser (the way v19-first-run-door.spec.ts answers availability);
+ *   · an invited reader's first landing, the session's `justJoined` stubbed
+ *     for the same reason.
+ * At every one: no `.ringcard` is drawn while the newcomer's frame is, and
+ * the stage's own main control is what a click at its centre reaches.
+ */
+
+/** Signs in with the local password, from the door's own route, with no launch owed. */
+async function signInWithoutLaunch(page: Page): Promise<void> {
+  await page.goto("/login");
+  const status = await page.evaluate(async ({ email, password }) => {
+    const response = await fetch("/api/auth/local/login", {
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    return response.status;
+  }, ADMINISTRATOR);
+  expect(status).toBe(200);
+}
+
+/**
+ * Frame by frame, from inside the page: is any `.ringcard` drawn (has a box)
+ * while the newcomer's own frame (`.nf`) is in the document? Sampled every
+ * animation frame because the climb is seconds long and a poll from outside
+ * can miss it whole (the same reason witnessBodyClasses is an observer).
+ */
+async function watchCardLayer(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const seen = { frames: 0, drawn: 0 };
+    (window as unknown as { __orbitCardLayer: typeof seen }).__orbitCardLayer = seen;
+    const sample = () => {
+      if (document.querySelector(".nf")) {
+        seen.frames += 1;
+        if ([...document.querySelectorAll(".ringcard")].some((layer) => layer.getClientRects().length > 0)) seen.drawn += 1;
+      }
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+}
+
+async function cardLayerSamples(page: Page): Promise<{ frames: number; drawn: number }> {
+  return page.evaluate(() => (window as unknown as { __orbitCardLayer: { frames: number; drawn: number } }).__orbitCardLayer);
+}
+
+/** No sign-in card layer is drawn, now, and none was in any frame the newcomer's frame was up. */
+async function expectNoCardLayer(page: Page, where: string): Promise<void> {
+  await expect(page.locator(".nf"), `${where}: the newcomer's frame is not up`).toBeAttached();
+  const drawn = await page.evaluate(
+    () => [...document.querySelectorAll(".ringcard")].filter((layer) => layer.getClientRects().length > 0).length,
+  );
+  expect(drawn, `${where}: a sign-in card layer is drawn over the arrival`).toBe(0);
+  const samples = await cardLayerSamples(page);
+  expect(samples.frames, `${where}: the frame sampler never saw the newcomer's frame`).toBeGreaterThan(0);
+  expect(samples.drawn, `${where}: a sign-in card layer was drawn in ${samples.drawn} of ${samples.frames} frames`).toBe(0);
+}
+
+/** A click at the control's centre lands on the control itself, not on a layer above it. */
+async function expectClickReaches(page: Page, control: ReturnType<Page["locator"]>, where: string): Promise<void> {
+  await control.scrollIntoViewIfNeeded();
+  await expect.poll(async () => control.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+    if (!hit) return "nothing at the control's centre";
+    if (hit.closest(".ringcard")) return "the sign-in card layer";
+    return element === hit || element.contains(hit) ? "the control" : `something else: <${hit.tagName.toLowerCase()} class="${hit.className}">`;
+  }), { message: `${where}: a click at the control's centre`, timeout: 10_000 }).toBe("the control");
+}
+
+const NO_HOUSEHOLD_SKY = {
+  version: 1,
+  householdLanding: "choose",
+  activeHouseholdId: null,
+  households: [],
+  recoverableHouseholds: [],
+  visibleHouseholds: [
+    { id: "hh-stub-1", name: "Stub Harbour", requested: false },
+    { id: "hh-stub-2", name: "Stub Cottage", requested: false },
+  ],
+};
+
+test("no sign-in card sits over the climb, or the drawer it lands on", async ({ page }) => {
+  test.setTimeout(120_000);
+  await watchCardLayer(page);
+  await witnessBodyClasses(page);
+
+  /* The card's own departure: it writes the launch marker, so the arrival
+     flies. This is the only road that crosses from the card to the climb. */
+  await page.goto("/login");
+  await expect(page.locator("#idbtn")).toHaveText("Sign in");
+  await page.fill("#idemail", ADMINISTRATOR.email);
+  await page.fill("#idpassword", ADMINISTRATOR.password);
+  await page.locator("#idbtn").click();
+
+  await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
+  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: 20_000 }).toBe(true);
+  await expect(page.locator(".nf")).toBeAttached();
+  /* mid-climb */
+  await expectNoCardLayer(page, "the climb");
+
+  /* landed: the card with the drawer already open, an empty instance */
+  await expect(page.locator("body")).toHaveClass(/\bbelong\b/, { timeout: 40_000 });
+  await expectNoCardLayer(page, "the landing");
+  await expectClickReaches(page, page.locator(".nf .belong #hhname"), "the drawer's name field");
+  await expectClickReaches(page, page.locator("#gobtn"), "the drawer's Create");
+  await expectClickReaches(page, page.getByRole("button", { name: "name your own system" }), "the drawer's handle");
+});
+
+test("no sign-in card sits over the arrival with no climb owed", async ({ page }) => {
+  await watchCardLayer(page);
+  await signInWithoutLaunch(page);
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "where do you belong?" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator("body")).toHaveClass(/\bbelong\b/);
+  await expectNoCardLayer(page, "the arrival, no climb");
+  await expectClickReaches(page, page.locator(".nf .belong #hhname"), "the drawer's name field");
+  await expectClickReaches(page, page.locator("#gobtn"), "the drawer's Create");
+  await expectClickReaches(page, page.getByRole("button", { name: "name your own system" }), "the drawer's handle");
+
+  /* and the handle really works, which a layer over it would prevent */
+  await page.getByRole("button", { name: "name your own system" }).click();
+  await expect(page.getByRole("button", { name: "name your own system" })).toHaveAttribute("aria-expanded", "false");
+  await page.getByRole("button", { name: "name your own system" }).click();
+  await expect(page.locator(".nf .belong #hhname")).toBeVisible();
+});
+
+test("no sign-in card sits over the chooser and the count", async ({ page }) => {
+  await watchCardLayer(page);
+  await signInWithoutLaunch(page);
+  await page.route("**/api/workspace", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ workspace: NO_HOUSEHOLD_SKY }) }));
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "where do you belong?" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator("body")).toHaveClass(/\bbelong\b/);
+  await expect(page.locator(".nf .disc")).toBeVisible();
+  await expectNoCardLayer(page, "the chooser");
+  await expectClickReaches(page, page.getByRole("button", { name: "Request to join Stub Harbour" }), "a system's ask to join");
+  await expectClickReaches(page, page.getByRole("button", { name: "name your own system" }), "the drawer's handle");
+  /* the handle opens the drawer, and the drawer's field takes the click too */
+  const handle = page.getByRole("button", { name: "name your own system" });
+  if ((await handle.getAttribute("aria-expanded")) !== "true") await handle.click();
+  await expectClickReaches(page, page.locator(".nf .belong #hhname"), "the drawer's name field");
+});
+
+test("no sign-in card sits over an invited reader's landing", async ({ page }) => {
+  test.setTimeout(120_000);
+  await watchCardLayer(page);
+  await witnessBodyClasses(page);
+  await signInWithoutLaunch(page);
+  /* The invited landing hands on to /home at the beat the chooser would
+     stand on; with the session stubbed it has nowhere real to go, so that
+     navigation is answered with a blank page and the climb is judged before it. */
+  await page.route("**/home", (route) => route.fulfill({ status: 200, contentType: "text/html", body: "<title>home</title>" }));
+  await page.route("**/api/auth/session", async (route) => {
+    const real = await route.fetch();
+    const session = await real.json() as Record<string, unknown>;
+    await route.fulfill({
+      response: real,
+      json: { ...session, activeHouseholdId: "hh-stub-1", justJoined: true, visibleHouseholds: NO_HOUSEHOLD_SKY.visibleHouseholds },
+    });
+  });
+  await page.goto("/");
+  await expect.poll(() => bodyClassSeen(page, "showwarp"), { timeout: 20_000 }).toBe(true);
+  await expect(page.locator(".nf")).toBeAttached();
+  await expectNoCardLayer(page, "the invited climb");
 });
