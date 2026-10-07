@@ -1,6 +1,7 @@
 <script>
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
+  import { tick } from "svelte";
   import { signOut } from "$lib/data/workspace.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
   import { SWATCHES, applyTheme } from "$lib/theme-swatches.js";
@@ -83,20 +84,53 @@
   const isAdmin = $derived(Boolean(page.data?.isAdmin));
 
   /*
-   * Signing out from a sub-screen (#410, §15).
+   * Signing out from any page (#410, §15, #1253).
    *
-   * One press (owner, 2026-10-06), and it REVOKES before it navigates: this control
-   * used to walk to /logout without ending anything, which meant the goodbye
-   * screen was a picture of a sign-out rather than a sign-out. The session is
-   * gone before the reader leaves this page.
+   * One press (owner, 2026-10-06), and it REVOKES before anything is shown:
+   * the session is gone before the descent begins, so a lid closed mid-flight
+   * can never leave a live session behind.
    *
-   * The ratified DESCENT — instrument withdrawing, bodies dispersing, the
-   * bloom read backwards — belongs to home, because home is the surface that
-   * has an instrument and bodies to take away. From a sub-screen there is
-   * nothing to withdraw, so the reader is handed to the dusk directly.
-   * Carrying the full flight onto every sub-screen is a follow-up, not a
-   * silent invention.
+   * Then the reader gets the ratified DESCENT, the same one home plays
+   * (owner, 2026-10-07: "signing out should always play the reverse flight.
+   * No matter where you are."). It is $lib/flight/Leave.svelte, shared with
+   * home, and it is imported only when the menu is opened or a sign-out is
+   * pressed, so a page that is never signed out from does not carry the
+   * flight. The hatch below hands its sign-out to it as well.
    */
+  /** @type {import('svelte').Component<any> | null} */
+  let LeaveView = $state(null);
+  /** @type {{ ready: () => void, descendFrom: (redirectTo: string | null) => Promise<void> } | null} */
+  let leave = $state(null);
+  /** @type {Promise<void> | null} */
+  let loading = null;
+  /** Fetches the flight code once; false if it could not be had. */
+  function loadLeave() {
+    loading ??= import("$lib/flight/Leave.svelte").then((m) => { LeaveView = m.default; });
+    return loading;
+  }
+  /* the menu opened: fetch the flight and ready its world, so both are there
+     by the time the press has revoked the session */
+  async function wake() {
+    try { await loadLeave(); } catch { loading = null; return; }
+    await tick();
+    leave?.ready();
+  }
+  /** @param {string | null} redirectTo the provider's own logout URL, if any */
+  async function descend(redirectTo) {
+    try {
+      await loadLeave();
+      await tick();
+      if (!leave) throw new Error("no flight");
+    } catch {
+      /* the flight cannot be had: the reader is signed out all the same, and
+         the dusk is at /logout */
+      loading = null;
+      location.href = "/logout";
+      return;
+    }
+    await leave.descendFrom(redirectTo);
+  }
+
   /* set while the request is in flight, so a second press never fires a
      second, concurrent signOut() (#1151 W1-R7, as home has it) */
   let signingOut = $state(false);
@@ -106,17 +140,19 @@
     if (signingOut) return;
     signingOut = true;
     signOutProblem = null;
+    /** @type {string | null} */
+    let redirectTo = null;
     try {
-      await signOut();
+      redirectTo = await signOut();
     } catch (error) {
       signingOut = false;
       signOutProblem = /** @type {{ message?: string }} */ (error)?.message ?? "still signed in — try again";
       return;
     }
-    /* #1262: the menu closes as the sign-out goes ahead, not left standing
-       while the next page loads */
+    /* #1262: the menu closes as the sign-out goes ahead, never left standing
+       over the descent */
     open = false;
-    location.href = "/logout";
+    await descend(redirectTo);
   }
 
   /*
@@ -145,7 +181,7 @@
      straight through as an opaque string. -->
 <a class="back" href={back === "/settings" ? resolve("/settings") : resolve("/home")}>{backLabel}</a>
 <button class="orb" aria-expanded={open} aria-controls="account" title="Menu"
-        onclick={() => (open = !open)}>{initials}</button>
+        onclick={() => { open = !open; if (open) void wake(); }}>{initials}</button>
 <div class="account" class:open id="account" role="region" aria-label="Account and menu">
   <div class="who"><b>{user?.displayName ?? ""}</b><span>{role}</span></div>
   <nav>
@@ -178,7 +214,12 @@
     {/snippet}
   </TopChrome>
 </div>
-<Hatch bind:open={hatchOpen} name={user?.displayName ?? ""} roleLine={role} {current} {isAdmin} />
+<Hatch bind:open={hatchOpen} name={user?.displayName ?? ""} roleLine={role} {current} {isAdmin}
+       onopened={wake} onsignedout={descend} />
+{#if LeaveView}
+  <!-- no household name to hand on a page that is not home's: the void's name line is empty -->
+  <LeaveView bind:this={leave} />
+{/if}
 
 <style>
   /*

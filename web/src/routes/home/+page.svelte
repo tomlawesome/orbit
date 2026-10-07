@@ -5,14 +5,12 @@
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
   import { mountAccount, mountEmptySky, mountHome } from "./home.behaviour.js";
-  import Flight from "$lib/flight/Flight.svelte";
+  import Leave from "$lib/flight/Leave.svelte";
   import Sun from "$lib/sun/Sun.svelte";
   import { SUN_R } from "$lib/sun/furnace.js";
   import { othersOf } from "$lib/flight/engine.js";
   import Dawn from "$lib/flight/Dawn.svelte";
-  import Dusk from "$lib/flight/Dusk.svelte";
   import { consumeLaunch } from "$lib/flight/arrival.js";
-  import { readyFlight } from "$lib/flight/warm.js";
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
@@ -149,7 +147,7 @@
        coming back from the identity provider and the dawn must already be
        over home. A fixture waits for the household to arrive first, so the
        beats after the landing have a dial to land on. */
-    if (launching && !fixtureFlight) flight?.ascend();
+    if (launching && !fixtureFlight) leave?.ascend();
   });
 
   /* ---- A REFUSED SIGN-IN, SAID ONCE (#1033, ADR-0027 consequences) -------
@@ -181,12 +179,12 @@
   async function driveFixture() {
     if (!fixtureFlight) return;
     await tick();
-    if (fixtureFlight === "up") flight?.ascend({ at: fixtureAt });
+    if (fixtureFlight === "up") leave?.ascend({ at: fixtureAt });
     else if (fixtureFlight === "down") {
       /* the descent leaves from a settled arrival, so it starts from one */
       document.body.classList.add("instrument");
       await tick();
-      flight?.descend({ at: fixtureAt });
+      leave?.descend({ at: fixtureAt });
     }
   }
 
@@ -207,9 +205,10 @@
    * backwards, the name is written on the void with "signing out" under it,
    * and the mark sets down on the dusk's own lockup.
    */
-  /** @type {import('$lib/flight/Flight.svelte').default | null} */
-  let flight = $state(null);
-  let leaving = $state(fixtureFlight === "down");
+  /* The descent, its dusk and the farewell are $lib/flight/Leave.svelte,
+     shared with every other page's menu (#1253). */
+  /** @type {import('$lib/flight/Leave.svelte').default | null} */
+  let leave = $state(null);
   /** Set for the span of the actual signOut() request (#1151 W1-R7), so a
       second press while it is still in flight never fires a second,
       concurrent signOut() call. */
@@ -217,12 +216,7 @@
   /** @type {string | null} */
   let signOutProblem = $state(null);
 
-  /* #1253, #1262: the menu holds the sign-out, so when it opens the descent's
-     world is readied (never a compile that would stop the page: warm.js),
-     and it is there by the time the one press has revoked the session */
-  function readyDescent() {
-    readyFlight({ hurry: true, gentle: true });
-  }
+  const readyDescent = () => leave?.ready();
 
   async function tapSignOut() {
     /* One press (owner, 2026-10-06): the plain sign-out does not arm first. */
@@ -249,40 +243,13 @@
        (it stands above the flight's canvas). Closed the way "watch the
        tour" closes it; kept open on a refusal above, so its line is read. */
     closeAccount();
-    await descendFrom(redirectTo);
-  }
-  /* The descent, once the session is ended: the desk's menu above and the
-     pocket's hatch (#1253; owner, 2026-10-07, signing out on a phone) both
-     end here, so a phone flies out the way it flew in. */
-  /** @param {string | null} redirectTo the provider's own logout URL, if any */
-  async function descendFrom(redirectTo) {
-    providerLogout = redirectTo;
-    leaving = true;
-    await tick();
-    flight?.descend();
+    await leave?.descendFrom(redirectTo);
   }
   /* The account card closes the way home.behaviour.js's closeOverlays
      closes it. */
   function closeAccount() {
     document.getElementById("account")?.classList.remove("open");
     document.querySelector("button.orb")?.setAttribute("aria-expanded", "false");
-  }
-  /* The provider's own end-session URL, kept for the way back: following it
-     now would yank the reader off the ratified goodbye, so "sign back in"
-     carries it instead, and the identity provider asks its question again. */
-  /** @type {string | null} */
-  let providerLogout = $state(null);
-  const backIn = $derived(providerLogout ?? "/");
-
-  function onFarewell() {
-    /*
-     * The address catches up with the state. The descent plays over home, but
-     * the reader is signed out when it ends, and /home is no longer theirs: a
-     * refresh here would bounce them at the identity provider instead of
-     * showing them the goodbye. Replace, never push — Back must not walk into
-     * a signed-out /home either.
-     */
-    try { history.replaceState(history.state, "", "/logout"); } catch { /* no history, no harm */ }
   }
   export const snapshot = {
     capture: () => window.scrollY,
@@ -1110,7 +1077,7 @@
 <!-- #466/#1120: the pocket's two-tap decisions land on the same idempotent
      approve protocol the desk rows use (one operation id per receipt), and
      answer with the problem, if any, for the sheet to show. -->
-<Pocket {view} {arrive} onsignedout={descendFrom} onmenu={readyDescent}
+<Pocket {view} {arrive} onsignedout={(redirectTo) => leave?.descendFrom(redirectTo)} onmenu={readyDescent}
         onapprove={async (suggestion) => { armed = { id: suggestion.id, act: "approve" }; await tapReceipt(suggestion, "approve"); return mailProblem; }}
         ondismiss={async (suggestion) => { armed = { id: suggestion.id, act: "dismiss" }; await tapReceipt(suggestion, "dismiss"); return mailProblem; }}
         onamend={amendReceipt}
@@ -1132,19 +1099,8 @@
      descent lands on, and the canvas, mark and void-name between them. Each
      is here only for the journey that needs it. -->
 {#if launching}<Dawn />{/if}
-{#if leaving}
-  <Dusk>
-    <!-- `backIn` is the identity provider's own end-session URL as often as
-         it is "/": genuinely external, not a route this app can resolve(),
-         which is what `rel="external"` tells the lint rule (and anyone
-         reading the markup) rather than a suppression. -->
-    <a class="again" rel="external" href={backIn}>Sign back in</a>
-  </Dusk>
-{/if}
-{#if launching || leaving}
-  <Flight bind:this={flight} name={view?.household?.name ?? ""} onfarewell={onFarewell}
-          homes={view && !view.emptySky ? othersOf(view.galaxy, view.primary) : []} />
-{/if}
+<Leave bind:this={leave} {launching} leaving={fixtureFlight === "down"} name={view?.household?.name ?? ""}
+       homes={view && !view.emptySky ? othersOf(view.galaxy, view.primary) : []} />
 
 <div class="desk" class:arrive role="main">
 <!-- #843: sr-only, since the wordmark and dial carry the title visually. -->

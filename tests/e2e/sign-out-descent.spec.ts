@@ -227,3 +227,61 @@ for (const size of WIDTHS) {
     });
   }
 }
+
+/**
+ * #1253 (owner, 2026-10-07): "signing out should always play the reverse
+ * flight. No matter where you are." Chrome's menu (every desk page but home)
+ * revoked and then walked to /logout with no descent, so the dusk was never
+ * flown to. Signed out from /settings, with the motion on, the reader must
+ * see the descent start and end, the dusk, the address /logout and "Sign back
+ * in", as from home.
+ */
+for (const size of WIDTHS.filter((s) => s.label !== "narrow desk")) {
+  test(`sign out from another page's menu plays the descent (${size.label})`, async ({ page }, info) => {
+    test.setTimeout(240_000);
+    const desk = size.width >= 901;
+    test.skip(info.project.name.startsWith("mobile") && desk, "a phone has no desk");
+    if (!info.project.name.startsWith("mobile")) await page.setViewportSize({ width: size.width, height: size.height });
+    await watchDescent(page);
+    const errors: string[] = [];
+
+    await signIn(page);
+    const household = await seedHousehold(page);
+    try {
+      page.on("pageerror", (e) => errors.push(String(e)));
+      await page.goto("/settings");
+      if (desk) {
+        await page.locator("button.orb").click();
+      } else {
+        await page.locator("button.porb").click();
+      }
+      const menu = desk ? page.locator("#account") : page.locator('.p-sheet-layer:has(nav[aria-label="Go to"])');
+      await expect(menu).toHaveClass(/open/);
+      await menu.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
+      const signOut = desk ? menu.locator("button.signout") : menu.getByRole("button", { name: /sign out/ });
+
+      await signOut.click();
+
+      /* the menu closes as the sign-out starts (#1262) */
+      if (desk) await expect.soft(menu, "#1253: the menu is still open after sign-out started").not.toHaveClass(/open/, { timeout: 2_000 });
+      else await expect(menu, "#1253: the menu is still open after sign-out started").toBeHidden({ timeout: 2_000 });
+      await expect.poll(() => page.evaluate(() => {
+        const d = document.getElementById("dusk");
+        return d ? getComputedStyle(d).opacity : "absent";
+      }), { message: "#1253: the dusk never arrived", timeout: 30_000 }).toBe("1");
+      await expect(page, "#1253: the address never became /logout").toHaveURL(/\/logout$/, { timeout: 30_000 });
+      await expect(page.getByRole("link", { name: "Sign back in" })).toBeVisible({ timeout: 10_000 });
+
+      const drawn = await page.evaluate(() => (window as unknown as { __descent?: { withdraw: number; farewell: number } }).__descent ?? null);
+      expect(drawn?.withdraw && drawn?.farewell, "#1253: the descent was not seen to start and end").toBeTruthy();
+      expect(errors, "#1253: the page threw during the sign-out").toEqual([]);
+    } finally {
+      const live = await page.evaluate(async () => {
+        const r = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
+        return ((await r.json()) as { authenticated?: boolean }).authenticated === true;
+      }).catch(() => false);
+      if (!live) await signIn(page);
+      await cleanupHousehold(page, await sessionHeaders(page), household.id, household.name);
+    }
+  });
+}
