@@ -2,7 +2,7 @@
   import { beforeNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { WorkspaceError, applyCommand, readWorkspace } from "$lib/data/workspace.js";
+  import { WorkspaceError, applyCommand, attachItemDocument, readWorkspace } from "$lib/data/workspace.js";
   import { saveProblem } from "$lib/data/metadata-status.js";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
@@ -22,8 +22,9 @@
    * the refusal beside save while something is missing (#1058: no section
    * is chosen for you); saving; a failure that is loud and stays until the
    * next attempt, with nothing typed lost (#1058); saved, which raises the
-   * wake and approaches the new item on its belt. Leaving with something
-   * typed asks first.
+   * wake and approaches the new item on its belt. A document picked goes
+   * onto the saved item, as the desk's does (#1245, owner's 11a). Leaving
+   * with something typed asks first.
    *
    * `?name=` prefills the name (search's `add "x" as an item`, §2.4).
    */
@@ -46,6 +47,21 @@
       after a dropped response reuses it, so the server's upsert-by-id
       idempotency absorbs the retry instead of creating a second item. */
   const draftId = crypto.randomUUID();
+  /** Minted once per file picked, the way `draftId` is per draft (#1245),
+      as the desk's takeFile does: a retry after a lost answer re-sends the
+      same id with the same bytes, so the documents route hands back the copy
+      it already holds instead of storing a second. */
+  /** @type {WeakMap<File, string>} */
+  const documentIds = new WeakMap();
+  /** @param {File} file */
+  function documentIdOf(file) {
+    let id = documentIds.get(file);
+    if (!id) {
+      id = crypto.randomUUID();
+      documentIds.set(file, id);
+    }
+    return id;
+  }
 
   const refusal = $derived(phase === "ready" ? refusalOf(entry) : null);
   const dirty = $derived(!saved && (entryChanged(entry, start) || attachment !== null));
@@ -83,8 +99,13 @@
         if (error instanceof WorkspaceError && error.code === "version_required") return;
         throw error;
       });
+      /* #1245 (11a): the picked document goes onto the item just saved,
+         through the same route the desk's form uses. A refusal lands in the
+         catch below like any failed save: the entry is kept, and the next
+         attempt re-sends both under the same ids, so neither is stored twice. */
+      if (attachment) await attachItemDocument(household.id, draftId, attachment, documentIdOf(attachment));
       saved = true;
-      wake(attachment ? `added to your orbit · ${attachment.name} was not kept` : `added to your orbit · ${entry.name.trim()}`);
+      wake(`added to your orbit · ${entry.name.trim()}`);
       /* The approach (§2.5): the new item, seated on its belt. */
       await goto(resolve("/item/[[id]]", { id: draftId }));
     } catch (error) {
