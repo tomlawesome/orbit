@@ -189,6 +189,26 @@ function closedForMaintenance(page, maintenance) {
 }
 
 /**
+ * A gated screen's answer, marked never to be stored (#1264).
+ *
+ * Without it a browser may keep a signed-in page in its back/forward cache or
+ * HTTP cache, so Back after sign-out shows household content without asking
+ * the server. Set here, beside the gate, so a screen added tomorrow is
+ * uncached the day its folder exists. The ETag goes too: a copy cached before
+ * this header existed could otherwise be revalidated into a 304 and shown
+ * again. Same shape as `closedForMaintenance`; the response is rebuilt rather
+ * than mutated because a redirect or fetched response has immutable headers.
+ *
+ * @param {Response} page
+ */
+function neverStored(page) {
+  const headers = new Headers(page.headers);
+  headers.set("cache-control", "no-store");
+  headers.delete("etag");
+  return new Response(page.body, { status: page.status, statusText: page.statusText, headers });
+}
+
+/**
  * The gates for every screen: maintenance (#526), then authentication (#789).
  *
  * The cut deleted Next's AuthenticationGate along with the rest of `src/app/`
@@ -314,5 +334,5 @@ export async function handle({ event, resolve }) {
 
   /* Carried on locals so a server load never has to ask a second time. */
   event.locals.session = session;
-  return resolve(event);
+  return neverStored(await resolve(event));
 }
