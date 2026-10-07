@@ -47,6 +47,19 @@ describe("isPreprovisionedInput (guarantee #6)", () => {
     expect(isPreprovisionedInput(targetDir)).toBe(true);
   });
 
+  it("refuses a symlinked secret file inside .orbit-secrets, even to a valid file elsewhere", () => {
+    seedPreprovisioned();
+    const elsewhere = mkdtempSync(join(tmpdir(), "orbit-target-identity-elsewhere-"));
+    try {
+      writeFileSync(join(elsewhere, "real-secret"), "s3cr3t", { mode: 0o600 });
+      rmSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"));
+      symlinkSync(join(elsewhere, "real-secret"), join(targetDir, ".orbit-secrets", "oidc-client-secret"));
+      expect(isPreprovisionedInput(targetDir)).toBe(false);
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
   it("refuses when .env-orbit is missing", () => {
     const secretsDir = join(targetDir, ".orbit-secrets");
     mkdirSync(secretsDir, { mode: 0o700 });

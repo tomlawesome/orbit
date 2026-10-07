@@ -445,8 +445,10 @@ export async function runInstall(context: InstallContext, dependencies: InstallD
     onEvent({ phase: "assets", component: "assets", state: "starting", reason: "assets-verified", action: "fetch" });
     // The deployment assets, copied from this image's own bundle (F2,
     // guarantees #42, #45): only the fixed allowlist, each a non-empty
-    // regular file, staged at the deployment's asset mode. The shell has
-    // already run `bash -n` over the same scripts from the same digest.
+    // regular file, staged at the deployment's asset mode. Every bundled
+    // script is held `bash -n`-clean where the image is built from
+    // (deployment-assets.test.ts), and install.sh checks installer-ui.sh
+    // again before it sources it.
     for (const asset of DEPLOYMENT_ASSETS) {
       const source = join(context.assetsRoot, asset);
       const staged = join(scratchDir, asset);
