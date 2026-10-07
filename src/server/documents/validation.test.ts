@@ -1,5 +1,9 @@
 import { readFileSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { LocalDocumentStorage } from "./storage";
 import {
   classifyDocumentStructure,
   detectDocumentMediaType,
@@ -10,7 +14,8 @@ import {
 import { syntheticJpeg, syntheticPdf, syntheticPdfWithXrefStream, syntheticPng } from "../../../tests/support/synthetic-documents";
 import {
   syntheticModernPdf,
-  syntheticPdfWithHarmlessFeatureName,
+  syntheticPdfActiveContent,
+  syntheticPdfWithPages,
   syntheticStructurePdfFixtures,
 } from "../../../tests/support/generated-pdf-documents";
 import { syntheticOwnerPasswordPdf, syntheticUserPasswordPdf } from "../../../tests/support/encrypted-pdf-documents";
@@ -77,12 +82,11 @@ describe("structural document classification", () => {
     });
   });
 
-  it("does not classify feature names inside compressed page content as active content", async () => {
-    await expect(classifyDocumentStructure(syntheticPdfWithHarmlessFeatureName(), "application/pdf"))
-      .resolves.toBe("supported_structure");
-  });
-
   describe("pdf.js opens it with no password and finds page one (ADR-0033)", () => {
+    it.each(syntheticPdfActiveContent)("accepts a PDF carrying $name: the renderer runs none of it", async ({ options }) => {
+      await expect(classifyDocumentStructure(syntheticModernPdf(options), "application/pdf")).resolves.toBe("supported_structure");
+    });
+
     it("accepts an owner-password-only PDF with an encrypted object stream: pdf.js decrypts it itself (#1292)", async () => {
       await expect(classifyDocumentStructure(syntheticOwnerPasswordPdf(), "application/pdf")).resolves.toBe("supported_structure");
     });
@@ -95,6 +99,30 @@ describe("structural document classification", () => {
     it("accepts a PDF whose final offset is wrong but which pdf.js repairs and draws, since that is the file it shows", async () => {
       const wrongOffset = Buffer.from(validPdf.toString("latin1").replace(/startxref\n\d+/u, "startxref\n1"), "latin1");
       await expect(classifyDocumentStructure(wrongOffset, "application/pdf")).resolves.toBe("supported_structure");
+    });
+
+    it("refuses a file that is not a PDF, JPEG or PNG by its magic bytes, whatever it is called", () => {
+      const html = Buffer.from("<!doctype html><title>invoice.pdf</title><script>alert(1)</script>");
+      expect(() => detectDocumentMediaType(html)).toThrow(expect.objectContaining({ code: "document_type_unsupported" }));
+    });
+
+    it("refuses a PDF over the page cap, though pdf.js would open it", async () => {
+      await expect(classifyDocumentStructure(syntheticPdfWithPages(1_000), "application/pdf")).resolves.toBe("supported_structure");
+      await expect(classifyDocumentStructure(syntheticPdfWithPages(1_001), "application/pdf")).resolves.toBe("unsupported_structure");
+    });
+
+    it("refuses a file over the size limit as it arrives, before anything reads it", async () => {
+      const root = await mkdtemp(join(tmpdir(), "orbit-size-limit-"));
+      try {
+        const storage = new LocalDocumentStorage(join(root, "objects"), join(root, "quarantine"));
+        const bytes = Buffer.concat([validPdf, Buffer.alloc(4_096, 0x20)]);
+        const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(bytes); controller.close(); } });
+        await expect(storage.receive(body, "33333333-3333-4333-8333-333333333333", 1_024))
+          .rejects.toMatchObject({ code: "document_too_large" });
+        await expect(storage.listQuarantineFiles()).resolves.toEqual([]);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
     });
 
     it("refuses a PDF whose page tree names no page pdf.js can find", async () => {

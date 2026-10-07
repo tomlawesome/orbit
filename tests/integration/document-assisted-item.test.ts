@@ -42,7 +42,7 @@ describe("document-assisted item inspection boundary", () => {
       extracted: boolean;
       suggestions: Array<{ field: string; value: string; source: string; confidence: string }>;
       attachmentDisposition: "attachable" | "rejected";
-      reason: "supported_structure" | "unsupported_structure" | "prohibited_content";
+      reason: "supported_structure" | "unsupported_structure" | "password_required";
       proposal?: unknown;
       text?: unknown;
     };
