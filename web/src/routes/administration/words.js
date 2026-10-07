@@ -60,6 +60,15 @@ export function setupWords(error) {
   return /** @type {{ message?: string }} */ (error)?.message ?? String(error);
 }
 
+/**
+ * A document size limit as the upload limit card says it (#1285): whole MB
+ * where it is whole, which every limit set here is. @param {number} bytes
+ */
+export const megabytes = (bytes) => {
+  const mb = bytes / 1048576;
+  return `${Number.isInteger(mb) ? mb : mb.toFixed(1)} MB`;
+};
+
 /** @param {string} word */
 export const plainly = (word) => word.replaceAll("_", " ");
 

@@ -99,6 +99,14 @@ describe("PostgreSQL migration evidence", () => {
       `SELECT "singleton", "mailbox_result", "relay_result" FROM "mail_probe_results"`,
     );
     expect(mailProbeRows).toEqual([{ singleton: true, mailbox_result: null, relay_result: null }]);
+
+    /* 0049 seeds the upload-limit singleton unconditionally too (#1285):
+       every fresh instance starts with no administrator override, so the
+       limit is DOCUMENT_MAX_BYTES until someone chooses otherwise. */
+    const uploadLimitRows = await database.client.unsafe(
+      `SELECT "singleton", "max_bytes", "version" FROM "instance_upload_limit"`,
+    );
+    expect(uploadLimitRows).toEqual([{ singleton: true, max_bytes: null, version: "1" }]);
   });
 
   it("converts a live maintenance singleton and its pending notices into windows and updates", async () => {

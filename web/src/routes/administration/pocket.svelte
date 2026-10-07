@@ -5,7 +5,7 @@
   import Sheet from "$lib/pocket/Sheet.svelte";
   import { wake } from "$lib/pocket/wake.js";
   import {
-    addMember, commandContact, commandMailbox, createLocalUser, createSystem, hardDeleteHousehold,
+    addMember, commandContact, commandMailbox, commandUploadLimit, createLocalUser, createSystem, hardDeleteHousehold,
     restoreHousehold, retryDocumentJob, sendSetupLink, setUserDisabled, testMail,
   } from "$lib/data/workspace.js";
   import { deletionNameMatches } from "$lib/data/household.js";
@@ -14,8 +14,8 @@
   import { constellationPlanetsOf } from "$lib/data/chart.js";
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import {
-    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, ingestShort, initialsOf, lapsesShort, openFor, plainly,
-    sendWords, setupWords, shortDay, stamp, testVerdict, versionLine,
+    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, ingestShort, initialsOf, lapsesShort,
+    megabytes, openFor, plainly, sendWords, setupWords, shortDay, stamp, testVerdict, versionLine,
   } from "./words.js";
 
   /*
@@ -428,6 +428,37 @@
     }
   }
 
+  /* ── upload size limit (#1285) ───────────────────────────────────────── */
+  let uploadLimitOpen = $state(false);
+  /** @type {number | null} */
+  let uploadLimitDraft = $state(null);
+  let uploadLimitBusy = $state(false);
+  /** @type {string | null} */
+  let uploadLimitProblem = $state(null);
+  function openUploadLimit() {
+    const current = view?.uploadLimit;
+    uploadLimitDraft = current ? Math.round(current.maxBytes / 1048576) : null;
+    uploadLimitProblem = null;
+    uploadLimitOpen = true;
+  }
+  /** @param {{ action: "set", megabytes: number } | { action: "default" }} partial */
+  async function uploadLimitAction(partial) {
+    const current = view?.uploadLimit;
+    if (!current || uploadLimitBusy) return;
+    uploadLimitBusy = true;
+    uploadLimitProblem = null;
+    try {
+      const { uploadLimit } = await commandUploadLimit({ ...partial, expectedVersion: current.version });
+      uploadLimitOpen = false;
+      wake(`the upload size limit is ${megabytes(uploadLimit.maxBytes)}`);
+      await reread();
+    } catch (error) {
+      uploadLimitProblem = said(error);
+    } finally {
+      uploadLimitBusy = false;
+    }
+  }
+
   /* ── mail machinery (#743) ────────────────────────────────────────────── */
   /** @type {string | null} */
   let mailBusy = $state(null);
@@ -782,6 +813,23 @@
         {/if}
       </section>
 
+      <!-- UPLOAD SIZE LIMIT (#1285): absent where the route cannot answer. -->
+      {#if view.uploadLimit}
+        {@const limit = view.uploadLimit}
+        <section class="p-card ad-card ad-flush" style:--i="5" id="ad-uploads" tabindex="-1"
+                 aria-labelledby="ad-uploads-head" data-ad="uploads">
+          <div class="ad-cardhead"><h2 class="p-caps" id="ad-uploads-head">Upload size limit</h2></div>
+          <Row title={megabytes(limit.maxBytes)}
+               meta={limit.overrideBytes === null ? "the configured default" : `set here · default ${megabytes(limit.defaultBytes)}`}
+               trail="change" trailTone="var(--accent-text)" trailName="change the upload size limit"
+               onactivate={openUploadLimit}>
+            {#snippet mark()}<span class="ad-kmark">↑</span>{/snippet}
+          </Row>
+          <p class="ad-note ad-inset ad-lastline">A reverse proxy in front of Orbit must allow uploads at least this large —
+            <a href="https://github.com/tomlawesome/orbit/blob/main/docs/installing.md#what-you-need" target="_blank" rel="noopener noreferrer">see the install guide</a>.</p>
+        </section>
+      {/if}
+
       <!-- MAIL MACHINERY (§2.12 7, §15, #743). -->
       <section class="p-card ad-card ad-flush" style:--i="6" id="ad-mail" tabindex="-1"
                aria-labelledby="ad-mail-head" data-ad="mail">
@@ -1052,6 +1100,29 @@
       <button class="p-pill filled" type="submit" form="ad-contact-form" disabled={contactBusy}>{contactBusy ? "saving…" : "save"}</button>
       {#if view?.contact?.address}
         <button class="p-pill danger" type="button" disabled={contactBusy} onclick={() => contactAction({ action: "clear" })}>clear</button>
+      {/if}
+    {/snippet}
+  </Sheet>
+
+  <Sheet bind:open={uploadLimitOpen} size="callout" title="Upload size limit">
+    <form id="ad-uploads-form" onsubmit={(event) => { event.preventDefault();
+      if (uploadLimitDraft !== null) uploadLimitAction({ action: "set", megabytes: uploadLimitDraft }); }}>
+      <label class="ad-label" for="ad-uploads-field">limit in MB</label>
+      <input id="ad-uploads-field" class="ad-input" type="number" inputmode="numeric" step="1" enterkeyhint="done"
+             min={view?.uploadLimit ? Math.round(view.uploadLimit.minBytes / 1048576) : 1}
+             max={view?.uploadLimit ? Math.round(view.uploadLimit.ceilingBytes / 1048576) : 100}
+             bind:value={uploadLimitDraft} required>
+      {#if view?.uploadLimit}
+        <p class="ad-note">From {megabytes(view.uploadLimit.minBytes)} to {megabytes(view.uploadLimit.ceilingBytes)}. It applies to
+          the next upload; documents already kept are unaffected.</p>
+      {/if}
+      {#if uploadLimitProblem}<p class="p-error" role="alert">{uploadLimitProblem}</p>{/if}
+    </form>
+    {#snippet foot()}
+      <button class="p-pill filled" type="submit" form="ad-uploads-form" disabled={uploadLimitBusy}>{uploadLimitBusy ? "saving…" : "save"}</button>
+      {#if view?.uploadLimit && view.uploadLimit.overrideBytes !== null}
+        <button class="p-pill" type="button" disabled={uploadLimitBusy}
+                onclick={() => uploadLimitAction({ action: "default" })}>use the default</button>
       {/if}
     {/snippet}
   </Sheet>

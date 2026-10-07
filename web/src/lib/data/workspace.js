@@ -1011,6 +1011,44 @@ export async function commandContact(command) {
 }
 
 /**
+ * The document upload size limit, as an administrator sees it (#1285): a
+ * stored override, falling back to the configured default. `null` means the
+ * route could not answer — for a signed-in user who is not an instance
+ * administrator, or an older server.
+ *
+ * @typedef {object} UploadLimitSettings
+ * @property {number} maxBytes the limit every upload is held to right now
+ * @property {number} defaultBytes the configured default (`DOCUMENT_MAX_BYTES`)
+ * @property {?number} overrideBytes the administrator's own choice, or null
+ * @property {number} minBytes
+ * @property {number} ceilingBytes
+ * @property {number} version
+ * @property {?string} updatedAt
+ *
+ * @returns {Promise<?UploadLimitSettings>}
+ */
+export async function readUploadLimitSettings() {
+  try {
+    /** @type {{ uploadLimit?: ?UploadLimitSettings }} */
+    const body = await json(await fetch("/api/admin/upload-limit", { credentials: "same-origin" }));
+    return body.uploadLimit ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sets the limit in whole MB, or goes back to the configured default, and
+ * answers with the limit as it now stands.
+ *
+ * @param {{ action: "set", expectedVersion: number, megabytes: number } | { action: "default", expectedVersion: number }} command
+ * @returns {Promise<{ uploadLimit: UploadLimitSettings }>}
+ */
+export async function commandUploadLimit(command) {
+  return json(await csrfFetch("/api/admin/upload-limit", { body: command }));
+}
+
+/**
  * One row of `GET /api/admin/health`'s `services` array
  * (src/server/admin-health.ts, AdministratorServiceHealth) — states and
  * timestamps only, never a hostname, URL or error string.
@@ -1042,7 +1080,7 @@ export async function commandContact(command) {
  * moved them to household management, so this screen never asks for them.
  */
 export async function readAdminScreen() {
-  const [workspace, session, users, mailbox, contact, rotation, metadata, recoveryBundle, health, operations] =
+  const [workspace, session, users, mailbox, contact, uploadLimit, rotation, metadata, recoveryBundle, health, operations] =
     await Promise.all([
     readWorkspace(),
     readSession().catch(() => null),
@@ -1054,6 +1092,7 @@ export async function readAdminScreen() {
       .catch(() => []),
     readMailboxSettings(),
     readContactSettings(),
+    readUploadLimitSettings(),
     /* An open document-key rotation (#956). Additive: a route that cannot
        answer (fixture harness, older server) means no card, never a sunk
        screen — and "no rotation open" renders as nothing at all. */
@@ -1143,6 +1182,7 @@ export async function readAdminScreen() {
     recoverable: workspace.recoverableHouseholds ?? [],
     mailbox,
     contact,
+    uploadLimit,
     rotation,
     metadata,
     recoveryBundle,

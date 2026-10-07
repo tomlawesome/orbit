@@ -15,7 +15,8 @@ import {
 import { AppError } from "@/lib/app-error";
 import { log, operationalReasons, type OperationalReason } from "@/lib/logger";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
-import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
+import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
+import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import {
@@ -385,9 +386,12 @@ export async function uploadItemDocument(input: {
 }): Promise<DocumentSummary> {
   await requireHouseholdAndItemAccess(input.userId, input.householdId, input.itemId);
   const config = getDocumentConfig();
+  // The administrator's limit, read now so a change needs no restart (#1285).
+  // Held for the whole upload, so every read below agrees with the receive.
+  const maxBytes = await readEffectiveUploadLimit(config);
   const storage = documentStorage();
   const documentId = input.documentId ?? randomUUID();
-  const received = await storage.receive(input.body, documentId, config.maxBytes, input.declaredBytes);
+  const received = await storage.receive(input.body, documentId, maxBytes, input.declaredBytes);
   let storageKey: string | undefined;
   let stagingKey: string | undefined;
   let metadataReserved = false;
@@ -465,7 +469,7 @@ export async function uploadItemDocument(input: {
     // there is no such gap -- the second read bought nothing but duplicate
     // I/O -- so that path reuses this buffer instead of reading again.
     const reuseValidationBytesForEncrypt = config.scanMode === "disabled";
-    const validationBytes = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
+    const validationBytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
     // Reuse only covers a validated buffer handed on to the encrypt stage
     // below, which is the only place that zeroes it on that path. A buffer
     // this block is about to discard instead -- structure validation failed,
@@ -526,7 +530,7 @@ export async function uploadItemDocument(input: {
           durationMs: scanMs,
         });
         if (retryableFailureCode) {
-          const plaintext = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
+          const plaintext = await storage.readQuarantine(received.quarantinePath, maxBytes);
           try {
             // The next key while a rotation is in progress (#955).
             const stagingWrap = wrappingKey(config);
@@ -658,7 +662,7 @@ export async function uploadItemDocument(input: {
 
     const plaintext = reuseValidationBytesForEncrypt
       ? validationBytes
-      : await storage.readQuarantine(received.quarantinePath, config.maxBytes);
+      : await storage.readQuarantine(received.quarantinePath, maxBytes);
     let encrypted: ReturnType<typeof encryptDocument>;
     // The next key while a rotation is in progress (#955).
     const publishWrap = wrappingKey(config);
@@ -797,7 +801,10 @@ export async function readDocumentDownload(
   }
   let ciphertext: Buffer;
   try {
-    ciphertext = await documentStorage().readCiphertext(crypto.storageKey, config.maxBytes + 64);
+    // A stored document was accepted under whatever limit applied then, so it
+    // is read against the hard ceiling: lowering the limit (#1285) must never
+    // make an existing document unreadable.
+    ciphertext = await documentStorage().readCiphertext(crypto.storageKey, DOCUMENT_MAX_BYTES_CEILING + 64);
   } catch {
     throw new AppError("document_unavailable", "That document cannot currently be opened", 503);
   }
