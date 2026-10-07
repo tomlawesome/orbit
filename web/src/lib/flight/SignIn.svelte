@@ -1,5 +1,6 @@
 <script>
   import { onMount } from "svelte";
+  import { navigating } from "$app/state";
   import Grain from "$lib/Grain.svelte";
   import Dawn from "./Dawn.svelte";
   import Claim from "./Claim.svelte";
@@ -7,6 +8,7 @@
   import Waiting from "./Waiting.svelte";
   import { clearLaunch, markLaunch } from "./arrival.js";
   import { readyFlight, hurryFlight } from "./warm.js";
+  import { FIRST_LIGHT_MS, firstLight, originFor, startLate } from "./first-light.js";
   import {
     APPROVAL_BACKSTOP_MS, CLAIM, DOOR, LOCAL, STARTING, STARTING_BACKSTOP_MS,
     applyStartingBackstop, availabilityOf, cardMessageFor, claimFromHash, doorMessageFor,
@@ -456,8 +458,14 @@
     const timers = [];
     /** @param {number} ms @param {() => void} fn */
     const after = (ms, fn) => timers.push(setTimeout(fn, ms));
-    /* first light: the dawn breaks once on load (CON-9, POL-13) */
-    const frame = requestAnimationFrame(() => after(180, () => document.body.classList.add("lit")));
+    /* first light: the dawn breaks once on load (CON-9, POL-13), due
+       FIRST_LIGHT_MS after the page started loading; a late page catches
+       up rather than running the whole sunrise late (first-light.js) */
+    const dueAt = originFor(!navigating.to) + FIRST_LIGHT_MS;
+    firstLight.dueAt = dueAt;
+    const frame = requestAnimationFrame(() => after(Math.max(0, dueAt - performance.now()), () => {
+      startLate(document.body, dueAt, () => document.body.classList.add("lit"));
+    }));
 
     let disposed = false;
     /** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -613,6 +621,7 @@
       cancelAnimationFrame(frame);
       timers.forEach(clearTimeout);
       document.body.classList.remove("lit", "switched", "returning", "returned");
+      firstLight.dueAt = NaN;
       /* Same rule as showCard: never take down a card somebody else put up. */
       showCard(false);
       delete document.body.dataset.state;
