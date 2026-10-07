@@ -6,7 +6,7 @@
   import Identity from "./Identity.svelte";
   import Waiting from "./Waiting.svelte";
   import { clearLaunch, markLaunch } from "./arrival.js";
-  import { readyFlight, hurryFlight } from "./warm.js";
+  import { compileFlightNow, compileStopsPage, readyFlight, hurryFlight } from "./warm.js";
   import { earthSettled, isFirstVisit, startFirstLight } from "./first-light.js";
   import {
     APPROVAL_BACKSTOP_MS, CLAIM, DOOR, LOCAL, STARTING, STARTING_BACKSTOP_MS,
@@ -489,10 +489,16 @@
        starts the ring's drawing */
     const world = document.querySelector("#dawn .world");
     const runner = document.querySelector("#dawn .lockup .runner");
+    const behindRing = compileStopsPage();
     const stopFirstLight = startFirstLight({
       critical: Promise.all([document.fonts?.ready, earthSettled(world)]),
       runner,
-      minLaps: isFirstVisit(localStorage) ? 1 : 0,
+      /* #1299: where shaders compile on the page's own thread (Firefox,
+         Safari) the ring runs on, at least a lap, while the flight's world is
+         compiled behind it: a pause better spent there than on the drawn
+         door or on the descent (orbit-site's `waitCompiled`) */
+      minLaps: isFirstVisit(localStorage) || behindRing ? 1 : 0,
+      compile: behindRing ? compileFlightNow : null,
       loading: () => document.body.classList.add("loading"),
       animated: () => !!runner && getComputedStyle(runner).animationName !== "none",
       light: () => {

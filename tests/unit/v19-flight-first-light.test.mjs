@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  BACKSTOP_MS, GRACE_MS, MAX_LAPS, SEEN_FRESH_MS, SEEN_KEY, isFirstVisit, startFirstLight, within,
+  BACKSTOP_MS, COMPILE_CAP_MS, GRACE_MS, MAX_LAPS, SEEN_FRESH_MS, SEEN_KEY, isFirstVisit, startFirstLight, within,
 } from "../../web/src/lib/flight/first-light.js";
 
 /* #1253: first light is orbit-site's (main.js showDoor): `lit` waits for the
@@ -129,5 +129,67 @@ describe("waiting for first light", () => {
     await vi.advanceTimersByTimeAsync(GRACE_MS + 10);
     await expect(within(Promise.reject(new Error("no")), 10)).resolves.toBeUndefined();
     d.stop();
+  });
+});
+
+/* #1299: where shaders compile on the page's own thread (Firefox, Safari) the
+   ring runs on while they are compiled behind it, as the site's `waitCompiled`
+   does, for at most 9 s. */
+describe("waiting for first light with the flight's shaders compiling behind the ring", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("requestAnimationFrame", (/** @type {() => void} */ fn) => setTimeout(fn, 16));
+  });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+  function door() {
+    const target = new EventTarget();
+    const calls = /** @type {string[]} */ ([]);
+    let compiled = () => {};
+    const compile = vi.fn(() => { calls.push("compile"); return new Promise((r) => { compiled = () => r(undefined); }); });
+    startFirstLight({
+      critical: Promise.resolve(), runner: target, minLaps: 1, compile,
+      loading: () => calls.push("loading"), animated: () => true, light: () => calls.push("light"),
+    });
+    const lap = () => target.dispatchEvent(new Event("animationiteration"));
+    return { calls, compile, lap, compiled: () => compiled() };
+  }
+
+  it("compiles only once the ring is up and running, and lights only after it is done", async () => {
+    const d = door();
+    /* the ring is shown first; the compile is two frames behind it */
+    await vi.advanceTimersByTimeAsync(10);
+    expect(d.calls).toEqual(["loading"]);
+    await vi.advanceTimersByTimeAsync(60);
+    expect(d.calls).toEqual(["loading", "compile"]);
+    d.lap();
+    await vi.advanceTimersByTimeAsync(40);
+    expect(d.calls).toEqual(["loading", "compile"]);
+    d.compiled();
+    await vi.advanceTimersByTimeAsync(10);
+    d.lap();
+    await vi.advanceTimersByTimeAsync(40);
+    expect(d.calls).toEqual(["loading", "compile", "light"]);
+  });
+
+  it("stops waiting for the compile after 9 s", async () => {
+    const d = door();
+    await vi.advanceTimersByTimeAsync(GRACE_MS + 100 + COMPILE_CAP_MS + 10);
+    d.lap();
+    await vi.advanceTimersByTimeAsync(40);
+    expect(d.calls).toEqual(["loading", "compile", "light"]);
+  });
+
+  it("a compile that throws does not hold the door", async () => {
+    const target = new EventTarget();
+    const calls = /** @type {string[]} */ ([]);
+    startFirstLight({
+      critical: Promise.resolve(), runner: target, minLaps: 1, compile: () => { throw new Error("no"); },
+      loading: () => calls.push("loading"), animated: () => true, light: () => calls.push("light"),
+    });
+    await vi.advanceTimersByTimeAsync(GRACE_MS + 100);
+    target.dispatchEvent(new Event("animationiteration"));
+    await vi.advanceTimersByTimeAsync(40);
+    expect(calls).toEqual(["loading", "light"]);
   });
 });

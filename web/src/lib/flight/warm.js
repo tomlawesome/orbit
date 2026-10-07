@@ -12,8 +12,10 @@
  *     is the browser's own caches -- the pictures in its HTTP cache, the
  *     compiled programs in its shader cache -- for the landing's flight. A
  *     browser that compiles on the page's own thread (no
- *     KHR_parallel_shader_compile: Firefox) would freeze the door for the
- *     length of the compile, so there the door fetches the pictures only;
+ *     KHR_parallel_shader_compile: Firefox, Safari) would freeze the door
+ *     for the length of the compile, so there the compile is done behind
+ *     first light's running ring, as orbit-site does (`compileFlightNow`,
+ *     held by `startFirstLight`, at most 9 s; #1299), never on the drawn door;
  *   · home asks, hurried, when the sign-out is armed (its first tap), so the
  *     descent has its world by the time the second tap has revoked the
  *     session; and long before that, unhurried, a few seconds after it has
@@ -43,23 +45,37 @@ const EARTH = "/flight/door/dawn.webp";
 const reduced = () =>
   typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-/** @type {Promise<void> | null} */
+/** the page's GPU verdict, asked for once (the first call's chore)
+ * @type {Promise<import("./fitness.js").Gpu | null> | null} */
 let asked = null;
-/** the page's world, once the chore that makes it has run
- * @type {{ warm: (how?: { prove?: boolean }) => Promise<unknown> } | null} */
-let readied = null;
-/** whether the world's test frames have been asked for
+/** the world's making, once a call that may make it has queued it
  * @type {Promise<unknown> | null} */
-let proving = null;
+let making = null;
+/** the page's world, once the chore that makes it has run
+ * @type {{ made: Promise<unknown>, warm: (how?: { prove?: boolean }) => Promise<unknown> } | null} */
+let readied = null;
+/** whether the world's test frames have been asked for */
+let proving = false;
+/** set when the world's shaders are made (or it was never going to be) */
+let compiledSignal = () => {};
+const compiledSoon = new Promise((resolve) => { compiledSignal = () => resolve(undefined); });
 
 /**
- * @param {{ hurry?: boolean, gentle?: boolean, prove?: boolean }} [how]
+ * @param {{ hurry?: boolean, gentle?: boolean, prove?: boolean, compile?: boolean }} [how]
  *   hurry: the flight is wanted now. gentle: only where the compile cannot
- *   stop the page (the door). prove: false leaves the world's test frames
- *   for the flight (the door); a later call that proves still gets them run
- *   (#1222), so the arrival can have them done before its answers are back.
+ *   stop the page (the door), and never under save-data. compile: with
+ *   gentle, make the world even where the browser compiles on the page's own
+ *   thread (Firefox, Safari), for a caller that has chosen a quiet moment for
+ *   the pause (#1299). prove: false leaves the world's test frames for the
+ *   flight (the door); a later call that proves still gets them run (#1222),
+ *   so the arrival can have them done before its answers are back.
+ *
+ * Every call is judged by its own options, whoever asked first: a gentle ask
+ * that was refused a world on a browser that compiles on the page's thread
+ * leaves the way open for a later ask that may make it (the flight's own),
+ * and a world already made or queued is never made twice (#1299).
  */
-export function readyFlight({ hurry = false, gentle = false, prove = true } = {}) {
+export function readyFlight({ hurry = false, gentle = false, prove = true, compile = false } = {}) {
   if (reduced() || typeof document === "undefined") return Promise.resolve();
   /* a reader who has asked the browser to save data is not warmed for (orbit-site
      main.js:70). Only the speculative asks (`gentle`: the door's, and home's on
@@ -69,32 +85,67 @@ export function readyFlight({ hurry = false, gentle = false, prove = true } = {}
   if (!asked) {
     fetchOnce(EARTH).catch(() => {});
     asked = chore(() => gpu(), 60, "flight").then((g) => {
-      if (!g) return null;
-      fetchVoyage();
-      if (gentle && !g.parallel) return null;
+      if (g) fetchVoyage();
+      else compiledSignal();
+      return g;
+    });
+    asked.catch(() => compiledSignal());
+  }
+  const result = asked.then((g) => {
+    if (!g || (gentle && !g.parallel && !compile)) return null;
+    if (!making) {
       /* the world made (its shaders set compiling) as a chore of its own, so
          even that waits for the page's say-so */
-      return chore(() => {
+      if (prove) proving = true;
+      making = chore(() => {
         /* wrapped, so this chore ends here: the warm-up queues chores of its
            own, and a chore that waited on them would never let them run */
         const world = voyageOnce();
         readied = world;
+        if (world) world.made.then(compiledSignal, compiledSignal); else compiledSignal();
         return { warming: world ? world.warm({ prove }) : null };
       }, 60, "flight").then(({ warming }) => warming);
-    }).then(() => {}, () => {});
-    if (prove) proving = asked;
-  }
-  /* an earlier call that did not prove (the door's) left the test frames
-     undone: run them now that someone wants them. Where the world was never
-     made (the GPU refused, or a gentle ask without parallel compile) there is
-     nothing to prove; `warm` remembers its own answer, so this is once. */
-  if (prove && !proving) {
-    proving = asked.then(() => (readied
-      ? chore(() => ({ done: readied?.warm({ prove: true }) }), 60, "flight").then(({ done }) => done)
-      : null)).then(() => {}, () => {});
-  }
+      return making;
+    }
+    /* an earlier call that did not prove (the door's) left the test frames
+       undone: run them now that someone wants them. `warm` remembers its own
+       answer, so this is once. */
+    if (prove && !proving) {
+      proving = true;
+      return making.then(() => (readied
+        ? chore(() => ({ done: readied?.warm({ prove: true }) }), 60, "flight").then(({ done }) => done)
+        : null));
+    }
+    return making;
+  }).then(() => {}, () => {});
   if (hurry) hurryChores("flight"); else openChores();
-  return asked;
+  return result;
+}
+
+/**
+ * Whether making the flight's world here would stop the page for the length
+ * of the compile: a browser that compiles on the page's own thread (no
+ * KHR_parallel_shader_compile: Firefox, Safari), where the page may use the
+ * GPU at all, and the reader has asked for neither reduced motion nor
+ * save-data. The door holds its first light's ring for it (#1299). Asks the
+ * page's one GPU verdict (fitness.js), which is the same context the world
+ * then uses.
+ */
+export function compileStopsPage() {
+  if (reduced() || typeof document === "undefined") return false;
+  if (/** @type {any} */ (navigator).connection?.saveData) return false;
+  const g = gpu();
+  return !!g && !g.parallel;
+}
+
+/**
+ * Make the world now, hurried, behind the door's running ring (#1299), and
+ * resolve when its shaders are compiled (not when the whole warm-up is done).
+ * The caller bounds the wait.
+ */
+export function compileFlightNow() {
+  const done = readyFlight({ hurry: true, gentle: true, compile: true, prove: false });
+  return Promise.race([compiledSoon, done]);
 }
 
 /**
@@ -115,9 +166,11 @@ export function hurryFlight() {
  * reveal that is still being drawn (#1299). The same wait as SignIn.svelte's
  * `drawnIn`, which that file keeps for the door.
  *
- * It is the door's own ask (gentle, no test frames): never under save-data,
- * never a compile that would stop the page, and a call that comes after the
- * sign-out has begun readying finds `asked` set and does nothing more.
+ * It is the door's own ask (gentle, no test frames): never under save-data
+ * or reduced motion. Where the browser compiles on the page's own thread
+ * (Firefox) it still makes the world, as orbit-site does: one pause of about
+ * a second while the page is quiet, which is the owner's choice (#1299). A
+ * call that comes after the world is made or queued does nothing more.
  */
 const COMPOSITED = new Set(["transform", "opacity", "offset", "easing", "composite", "computedOffset"]);
 /** @param {Animation} a */
@@ -144,7 +197,7 @@ const drawnIn = () => {
 export function readyFlightAtLeisure({ after = 4000 } = {}) {
   let off = false;
   const timer = setTimeout(() => {
-    drawnIn().then(() => { if (!off) readyFlight({ gentle: true, prove: false }); });
+    drawnIn().then(() => { if (!off) readyFlight({ gentle: true, compile: true, prove: false }); });
   }, after);
   return () => { off = true; clearTimeout(timer); };
 }
