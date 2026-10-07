@@ -190,14 +190,32 @@ const drawnIn = () => {
   } catch { return Promise.resolve([]); }
 };
 
+/** the leisure asks still waiting to be made, each by its own stop
+ * @type {Set<() => void>} */
+const leisure = new Set();
+
 /**
  * @param {{ after?: number }} [how]  after: ms from now (orbit-site's 4000)
  * @returns {() => void} stops it, if the page is left first
  */
 export function readyFlightAtLeisure({ after = 4000 } = {}) {
   let off = false;
+  const stop = () => { off = true; clearTimeout(timer); leisure.delete(stop); };
   const timer = setTimeout(() => {
-    drawnIn().then(() => { if (!off) readyFlight({ gentle: true, compile: true, prove: false }); });
+    drawnIn().then(() => { if (!off) { leisure.delete(stop); readyFlight({ gentle: true, compile: true, prove: false }); } });
   }, after);
-  return () => { off = true; clearTimeout(timer); };
+  leisure.add(stop);
+  return stop;
+}
+
+/**
+ * The descent has begun (Leave.svelte): a leisure ask not yet made is
+ * dropped. A sign-out within a few seconds of arriving would otherwise have
+ * it fire mid-descent, and where the browser compiles on the page's own
+ * thread (Firefox) that is a pause of over a second in the middle of the
+ * flight (#1299). The descent never waits for its world: it flies the world
+ * if it is already made, and its own canvas if not, as ever.
+ */
+export function stopLeisure() {
+  for (const stop of [...leisure]) stop();
 }
