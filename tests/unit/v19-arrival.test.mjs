@@ -265,10 +265,10 @@ describe("the waiting note (owner-decisions §23): the marker is not the explana
 });
 
 describe("the newcomer's clock is the sealed one", () => {
-  it("keeps its own 3s dwell while the login landing keeps the trimmed 2s", () => {
-    expect(T.dwell).toBe(2000);
+  it("keeps its own 3s dwell while the login landing takes the site's earlier instrument", () => {
+    expect(T.dwell).toBe(600);
     expect(T.newDwell).toBe(3000);
-    expect(T.instrumentAt).toBe(8400);
+    expect(T.instrumentAt).toBe(5900);
     expect(T.newInstrumentAt).toBe(9400);
   });
 

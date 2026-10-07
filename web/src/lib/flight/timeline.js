@@ -19,8 +19,9 @@
  *     4800   handoff INSIDE the light — the canvas dissolves over 1.7s while
  *            the bodies condense out of it over 1.3s
  *     6400   the bare sky is readable: planets, sun, the household's name
- *     8400   two seconds later the instrument arrives (1.8s, arrive style) —
- *            v5's draw-in, slower again and on a softer curve; see T below
+ *     5900   the dial has finished settling: the instrument arrives (1.8s,
+ *            arrive style) — v5's draw-in, slower again and on a softer curve;
+ *            the site's amendment, see `SETTLE` below
  *
  *   DESCENT · the ascent mirrored, in the DOM as well as on the canvas
  *      0     the instrument withdraws (arrive, reversed)
@@ -52,11 +53,16 @@
 const ASCENT_BASE = {
   warp: 200, mark: 260, release: 430, markOut: 1340,
   nameOn: 1560, nameOff: 2600,
-  land: 4800, condensed: 6400, dwell: 2000, instrument: 1800,
+  land: 4800, condensed: 6400, dwell: 600, instrument: 1800,
   tourGap: 450,
 };
-const instrumentAt = ASCENT_BASE.condensed + ASCENT_BASE.dwell;              /*  8400 */
-const tourAt = instrumentAt + ASCENT_BASE.instrument + ASCENT_BASE.tourGap;  /* 10650 */
+/* THE SITE'S OWN AMENDMENT (owner, 2026-10; orbit-site timeline.js:58-62): on the site the bare sky's dwell read
+   as a wait, not a breath. The instrument now arrives as the dial finishes settling (its condense runs 1.3s from
+   the landing), not two seconds after the settle: the land and the draw-in are untouched, the dead air between
+   them is gone */
+const SETTLE = 1100;
+const instrumentAt = ASCENT_BASE.land + SETTLE;                               /*  5900 */
+const tourAt = instrumentAt + ASCENT_BASE.instrument + ASCENT_BASE.tourGap;  /*  8150 */
 
 /*
  * THE NEWCOMER'S CLOCK (§15 second pass, ruling 4; the count sealed in the
@@ -189,6 +195,7 @@ export function descentBeats() {
  */
 export function ascentBeatsReduced() {
   return [
+    { at: 0, act: "release" },
     { at: 0, act: "land" },
     { at: 700 + T.dwell, act: "instrument" },
   ];
@@ -219,6 +226,7 @@ export function descentBeatsReduced() {
   return [
     { at: 0, act: "withdraw" },
     { at: 0, act: "disperse" },
+    { at: 0, act: "release" },
     { at: 0, act: "dusk" },
     { at: 0, act: "farewell" },
   ];
