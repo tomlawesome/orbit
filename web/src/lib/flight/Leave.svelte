@@ -2,7 +2,7 @@
   import { tick } from "svelte";
   import Flight from "./Flight.svelte";
   import Dusk from "./Dusk.svelte";
-  import { readyFlight } from "./warm.js";
+  import { readyFlight, stopLeisure } from "./warm.js";
 
   /**
    * SIGNING OUT, ONE WAY EVERYWHERE (#1253; owner, 2026-10-07: "signing out
@@ -70,6 +70,9 @@
    * @param {string | null} redirectTo the provider's own logout URL, if any
    */
   export async function descendFrom(redirectTo) {
+    /* #1299: the page's unhurried readying, if still to come, would land in
+       the middle of the descent (warm.js) */
+    stopLeisure();
     providerLogout = redirectTo;
     leaving = true;
     await tick();

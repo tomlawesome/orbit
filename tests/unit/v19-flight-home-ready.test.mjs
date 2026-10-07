@@ -119,6 +119,56 @@ describe("home readies the flight's world once it has arrived (#1299)", () => {
   });
 });
 
+describe("a sign-out drops the leisure ask still to come (#1299)", () => {
+  /* Home's leisure ask is stopped only when home unmounts, and a sign-out
+     does not unmount home: signing out within about four seconds of
+     arriving let it fire mid-descent, a compile of over a second on a
+     browser that compiles on the page's own thread. */
+  it("asks nothing once the descent has begun before its 4 s are up", async () => {
+    const page = stubPage({ parallel: false });
+    const { readyFlightAtLeisure, stopLeisure } = await import("$lib/flight/warm.js");
+    readyFlightAtLeisure();
+    await vi.advanceTimersByTimeAsync(2000);
+    stopLeisure();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await settle();
+    expect(page.gpu).not.toHaveBeenCalled();
+    expect(page.voyageOnce).not.toHaveBeenCalled();
+  });
+
+  it("asks nothing when the descent begins while it waits for the page's painted animations", async () => {
+    const drawing = paintedAnimation();
+    const page = stubPage({ parallel: false, animations: [drawing.animation] });
+    const { readyFlightAtLeisure, stopLeisure } = await import("$lib/flight/warm.js");
+    readyFlightAtLeisure();
+    await vi.advanceTimersByTimeAsync(4100);
+    stopLeisure();
+    drawing.end();
+    await settle();
+    expect(page.gpu).not.toHaveBeenCalled();
+  });
+
+  it("leaves an ask already made alone, and stopping twice is harmless", async () => {
+    const page = stubPage();
+    const { readyFlightAtLeisure, stopLeisure } = await import("$lib/flight/warm.js");
+    const stop = readyFlightAtLeisure();
+    await vi.advanceTimersByTimeAsync(4100);
+    await settle();
+    expect(page.gpu).toHaveBeenCalledOnce();
+    stopLeisure();
+    stop();
+    expect(page.voyageOnce).toHaveBeenCalledOnce();
+  });
+
+  it("Leave drops it first thing in descendFrom, before the descent starts", () => {
+    const leave = readFileSync(resolve(import.meta.dirname, "../../web/src/lib/flight/Leave.svelte"), "utf8");
+    expect(leave).toMatch(/import \{ readyFlight, stopLeisure \} from "\.\/warm\.js";/u);
+    const body = leave.slice(leave.indexOf("export async function descendFrom("));
+    expect(body.indexOf("stopLeisure();")).toBeGreaterThan(-1);
+    expect(body.indexOf("stopLeisure();")).toBeLessThan(body.indexOf("flight?.descend();"));
+  });
+});
+
 describe("home asks for it (#1299)", () => {
   const HOME = readFileSync(resolve(import.meta.dirname, "../../web/src/routes/home/+page.svelte"), "utf8");
   it("on mount, except on a launch, whose climb readies its own world; and stops if home is left", () => {
