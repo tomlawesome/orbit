@@ -652,6 +652,10 @@
 
 <svelte:head>
   <title>{title}</title>
+  <!-- the door's Earth comes with the page, the sunrise picture just after it
+       (orbit-site's index.html:26-27) -->
+  <link rel="preload" as="image" href="/flight/door/dawn-pre.webp" fetchpriority="high" />
+  <link rel="preload" as="image" href="/flight/door/dawn.webp" fetchpriority="low" />
 </svelte:head>
 
 <!-- The mockup's own page ground (#04060e), carried as a layer rather than as

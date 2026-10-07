@@ -142,14 +142,16 @@
     </defs>
     <g class="dawnlayer">
       <rect x="0" y="0" width="1600" height="1000" fill="url(#skywash)"/>
-      <image class="zodiacal" data-href="/flight/door/glow-zod.webp" x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
       <!-- the two swaying fans: the CSS rotation (flight.css) rides the picture -->
       <g class="rays">
         <image class="sway1" data-href="/flight/door/glow-sway1.webp" x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
         <image class="sway2" data-href="/flight/door/glow-sway2.webp" x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
       </g>
+      <!-- the glows that breathe, breathing together as one layer, the
+           zodiacal cone first, as orbit-site lays them (index.html:68) -->
       <g class="sunpt">
         <g class="sunpt-breathe">
+          <image class="zodiacal" data-href="/flight/door/glow-zod.webp" x="0" y="0" width="1600" height="1000" preserveAspectRatio="none"/>
           <circle cx="800" cy="922" r="520" fill="url(#sun-wide)"/>
           <circle cx="800" cy="922" r="240" fill="url(#sun-mid)"/>
           <circle cx="800" cy="920" r="86" fill="url(#sun-core)"/>
