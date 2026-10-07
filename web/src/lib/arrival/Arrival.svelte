@@ -5,6 +5,7 @@
   import SignIn from "$lib/flight/SignIn.svelte";
   import Flight from "$lib/flight/Flight.svelte";
   import { consumeLaunch, markLaunch } from "$lib/flight/arrival.js";
+  import { readyFlight } from "$lib/flight/warm.js";
   import { applyCommand, readWorkspace, requestToJoin } from "$lib/data/workspace.js";
   import { labelledSkyOf } from "$lib/data/chart.js";
   import { ARRIVAL_FIXTURES } from "$lib/data/fixtures/arrival.js";
@@ -132,6 +133,14 @@
   let disposed = false;
 
   onMount(() => {
+    /* #1222: a launch is owed, so a flight is coming whichever way the answers
+       fall (the climb here, or /home's after the hand-on). Ready its world NOW,
+       hurried, while the session and workspace are still being asked, instead
+       of when the climb starts and has to hold for it. Gentle, as the door's
+       own ask is: never under save-data, never a compile that would stop the
+       page; and without the test frames, which wait until this reader is known
+       to fly here (decide(), below). */
+    if (launchOwed) readyFlight({ hurry: true, gentle: true, prove: false });
     decide();
     return () => {
       disposed = true;
@@ -204,6 +213,10 @@
         return;
       }
       if (session?.activeHouseholdId) { handOn(); return; }
+      /* a session pointing nowhere flies here (the newcomer's climb, or the
+         invited one): have the world's test frames run while the workspace is
+         read, so the climb finds the verdict made (#1222) */
+      if (launchOwed) readyFlight({ hurry: true, gentle: true });
       workspace = await readWorkspace();
       if (disposed) return;
     } catch {

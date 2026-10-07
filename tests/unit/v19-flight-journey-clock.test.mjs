@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { journeyClock } from "../../web/src/lib/flight/journey-clock.js";
+import { journeyClock, WORLD_WAIT } from "../../web/src/lib/flight/journey-clock.js";
 
 /*
  * #1262: the descent keeps time.
@@ -87,5 +87,25 @@ describe("#1262: the journey clock and the descent", () => {
     expect(descent).not.toMatch(/clock\.stalls\(activeEngine\(\)\.drawingWorld\)/u);
     const descend = src.slice(src.indexOf("export function descend("));
     expect(descend).toMatch(/clock\.stalls\(false\)/u);
+  });
+
+  it("#1222: a hold waits two seconds for the world at most, and the climb says so", () => {
+    expect(WORLD_WAIT).toBe(2000);
+    const src = readFileSync(resolve(import.meta.dirname, "../../web/src/lib/flight/Flight.svelte"), "utf8");
+    expect(src).toMatch(/clock\.holdAt\([^;]*WORLD_WAIT\)/u);
+  });
+
+  it("#1222: a hold lets go by itself when its cap passes, the world ready or not", async () => {
+    vi.useFakeTimers();
+    try {
+      const page = slowPage(16);
+      const clock = journeyClock(page.env);
+      let fired = null;
+      clock.holdAt(500, new Promise(() => {}), 300);
+      clock.schedule(() => { fired = page.now; }, 800);
+      await vi.advanceTimersByTimeAsync(300);
+      page.run(10_000);
+      expect(fired).not.toBeNull();
+    } finally { vi.useRealTimers(); }
   });
 });

@@ -17,6 +17,9 @@
  *   · home asks, hurried, when the sign-out is armed (its first tap), so the
  *     descent has its world by the time the second tap has revoked the
  *     session;
+ *   · the arrival (`/`, Arrival.svelte) asks, hurried, the moment it knows a
+ *     launch is owed -- before its session and workspace answers -- and asks
+ *     again, proving, once the session says this reader will fly here (#1222);
  *   · the flight itself asks, hurried, when a journey starts (Flight.svelte).
  *
  * Under reduced motion there is no flight, so nothing is readied.
@@ -39,12 +42,19 @@ const reduced = () =>
 
 /** @type {Promise<void> | null} */
 let asked = null;
+/** the page's world, once the chore that makes it has run
+ * @type {{ warm: (how?: { prove?: boolean }) => Promise<unknown> } | null} */
+let readied = null;
+/** whether the world's test frames have been asked for
+ * @type {Promise<unknown> | null} */
+let proving = null;
 
 /**
  * @param {{ hurry?: boolean, gentle?: boolean, prove?: boolean }} [how]
  *   hurry: the flight is wanted now. gentle: only where the compile cannot
  *   stop the page (the door). prove: false leaves the world's test frames
- *   for the flight (the door).
+ *   for the flight (the door); a later call that proves still gets them run
+ *   (#1222), so the arrival can have them done before its answers are back.
  */
 export function readyFlight({ hurry = false, gentle = false, prove = true } = {}) {
   if (reduced() || typeof document === "undefined") return Promise.resolve();
@@ -65,9 +75,20 @@ export function readyFlight({ hurry = false, gentle = false, prove = true } = {}
         /* wrapped, so this chore ends here: the warm-up queues chores of its
            own, and a chore that waited on them would never let them run */
         const world = voyageOnce();
+        readied = world;
         return { warming: world ? world.warm({ prove }) : null };
       }, 60, "flight").then(({ warming }) => warming);
     }).then(() => {}, () => {});
+    if (prove) proving = asked;
+  }
+  /* an earlier call that did not prove (the door's) left the test frames
+     undone: run them now that someone wants them. Where the world was never
+     made (the GPU refused, or a gentle ask without parallel compile) there is
+     nothing to prove; `warm` remembers its own answer, so this is once. */
+  if (prove && !proving) {
+    proving = asked.then(() => (readied
+      ? chore(() => ({ done: readied?.warm({ prove: true }) }), 60, "flight").then(({ done }) => done)
+      : null)).then(() => {}, () => {});
   }
   if (hurry) hurryChores("flight"); else openChores();
   return asked;

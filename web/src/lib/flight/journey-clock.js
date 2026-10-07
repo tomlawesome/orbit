@@ -20,6 +20,10 @@
  * A hold lets go by itself after `cap` milliseconds.
  */
 
+/** How long a hold waits for the flight's world before letting the climb go on
+ *  without it, in ms (#1222: two seconds, down from eight). */
+export const WORLD_WAIT = 2000;
+
 /**
  * @param {{ now?: () => number, frame?: (fn: () => void) => number, cancelFrame?: (id: number) => void }} [env]
  */
@@ -70,7 +74,7 @@ export function journeyClock(env = {}) {
      * Hold the clock `ms` from now until `until` settles (or `cap` ms pass).
      * @param {number} ms @param {Promise<unknown>} until @param {number} [cap]
      */
-    holdAt(ms, until, cap = 8000) {
+    holdAt(ms, until, cap = WORLD_WAIT) {
       const h = { at: now() + ms, done: false }; hold = h;
       const free = () => { h.done = true; };
       until.then(free, free); setTimeout(free, cap);
