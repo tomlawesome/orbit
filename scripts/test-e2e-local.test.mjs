@@ -416,7 +416,7 @@ describe("teardown removes everything the run created (#1241)", () => {
     expect(downs[0]).toContain(`-p ${fx.project} `);
     expect(downs[0]).toContain(DOWN_TAIL);
     // The application image is this run's own per-run tag, removed by name.
-    expect(dockerCalls(fx)).toContainEqual(expect.stringMatching(/^image rm orbit-local:[0-9a-f]{12}-\d+$/));
+    expect(dockerCalls(fx)).toContainEqual(expect.stringMatching(/^image rm orbit-local:[0-9a-f]{12}$/));
     // Every compose call, teardown included, stays inside this run's project.
     for (const call of dockerCalls(fx).filter((l) => l.startsWith("compose ") && !l.startsWith("compose version"))) {
       expect(call).toContain(`-p ${fx.project} `);
