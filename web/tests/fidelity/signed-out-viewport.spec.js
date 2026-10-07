@@ -81,3 +81,59 @@ for (const height of HEIGHTS) {
     expect(intersects(gate, farewell), "the sign-back-in button overlaps the farewell").toBe(false);
   });
 }
+
+/*
+ * The farewell's words stay on screen on a phone. The farewell is centred by
+ * its own box, and a build once lost that centring (the `translate` it was
+ * centred with was dropped from the built CSS, which the dev server never
+ * showed), so on the owner's phone "You are signed out." began at the ring's
+ * right edge and ran off the screen. The ring and the way back in were fine,
+ * so nothing else caught it. This reads the built page: the heading and the
+ * line must both lie wholly inside the viewport, and sit on the ring's axis.
+ */
+for (const [width, height] of [[390, 844], [390, 664], [360, 640], [320, 568]]) {
+  test.describe(`the farewell's words on a phone at ${width}x${height}`, () => {
+    test.use({ viewport: { width, height }, hasTouch: true, isMobile: true, reducedMotion: "reduce" });
+
+    test("the heading and its line lie inside the viewport, centred on the ring", async ({ page }) => {
+      await page.route("**/api/auth/session", (route) =>
+        route.fulfill({ status: 401, contentType: "application/json", body: '{"error":"unauthenticated"}' }),
+      );
+      await page.route("**/api/health", (route) =>
+        route.fulfill({ status: 200, contentType: "application/json", body: '{"status":"ready"}' }),
+      );
+      await page.route("**/api/auth/availability", (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ configured: true, phase: "running", contactAddress: null }),
+        }),
+      );
+      await page.goto(APP + "/logout", { waitUntil: "load" });
+      await page.waitForFunction(() =>
+        document.body.classList.contains("showdusk") && document.body.classList.contains("farewell"),
+      );
+      await page.evaluate(() => document.fonts.ready);
+      await page.waitForTimeout(1700);
+
+      const ring = await page.locator("#dusk .glyph svg").boundingBox();
+      expect(ring, "the ring has no box").toBeTruthy();
+      const axis = /** @type {{x:number,width:number}} */ (ring).x + /** @type {{x:number,width:number}} */ (ring).width / 2;
+      for (const selector of ["#dusk .farewell .said", "#dusk .farewell .sub"]) {
+        // The heading is a block of a set width and the line wraps, so judge the
+        // glyphs themselves: the text's own line boxes, not the element's.
+        const lines = await page.locator(selector).evaluate((el) => {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          return [...range.getClientRects()].map((r) => ({ left: r.left, right: r.right }));
+        });
+        expect(lines.length, `${selector} has no text`).toBeGreaterThan(0);
+        const left = Math.min(...lines.map((l) => l.left));
+        const right = Math.max(...lines.map((l) => l.right));
+        expect(left, `${selector} runs off the left edge`).toBeGreaterThanOrEqual(0);
+        expect(right, `${selector} runs off the right edge (${right.toFixed(0)} of ${width})`).toBeLessThanOrEqual(width);
+        expect(Math.abs((left + right) / 2 - axis), `${selector} is off the ring's axis`).toBeLessThanOrEqual(4);
+      }
+    });
+  });
+}
