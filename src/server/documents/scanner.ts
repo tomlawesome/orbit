@@ -35,6 +35,48 @@ export async function pingClamAv(
   });
 }
 
+/**
+ * Asks clamd for its VERSION line, e.g. `ClamAV 1.5.4/28137/Mon Sep 28
+ * 06:24:12 2026` (engine / signature number / date of the signature set clamd
+ * has loaded). Answers the raw reply, or null when clamd cannot be reached or
+ * does not answer in time. Submits no document content.
+ */
+export async function readClamAvVersion(
+  options: { host: string; port: number; timeoutMs: number },
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: options.host, port: options.port });
+    let settled = false;
+    let reply = "";
+    const finish = (value: string | null) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve(value);
+    };
+    socket.setTimeout(Math.min(options.timeoutMs, 5_000), () => finish(null));
+    socket.on("error", () => finish(null));
+    socket.on("data", (chunk: Buffer) => {
+      reply += chunk.toString("ascii");
+      if (reply.includes("\0")) finish(reply.replace(/\0+$/, "").trim());
+    });
+    socket.on("connect", () => socket.write(Buffer.from("zVERSION\0", "ascii")));
+    socket.on("close", () => finish(reply ? reply.replace(/\0+$/, "").trim() : null));
+  });
+}
+
+/**
+ * The date of the loaded signature set, from a clamd VERSION reply, or null
+ * when the reply has no readable date. clamd prints it in the container's
+ * clock, which in the ClamAV image is UTC.
+ */
+export function parseClamAvSignatureDate(reply: string): Date | null {
+  const parts = reply.replace(/\0+$/, "").trim().split("/");
+  if (parts.length < 3) return null;
+  const parsed = Date.parse(`${parts.slice(2).join("/").trim()} UTC`);
+  return Number.isNaN(parsed) ? null : new Date(parsed);
+}
+
 function writeSocket(socket: ReturnType<typeof createConnection>, bytes: Buffer): Promise<void> {
   if (socket.write(bytes)) return Promise.resolve();
   return new Promise((resolve, reject) => {

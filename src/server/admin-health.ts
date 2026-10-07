@@ -2,7 +2,7 @@ import { checkDatabaseReachable } from "@/server/readiness";
 import { getNotificationWorkerHealth } from "@/server/notification-worker";
 import { getImapIngestionConfig, getImapIngestionWorkerHealth } from "@/server/mail-in/imap-ingestion";
 import { getDocumentConfig } from "@/server/documents/config";
-import { pingClamAv } from "@/server/documents/scanner";
+import { parseClamAvSignatureDate, readClamAvVersion } from "@/server/documents/scanner";
 import { getTikaHealth } from "@/server/documents/tika";
 
 /**
@@ -15,6 +15,13 @@ import { getTikaHealth } from "@/server/documents/tika";
  */
 
 const PROBE_TIMEOUT_MS = 2_000;
+
+/**
+ * How old the scanner's signatures may be before the row warns (#1296). Seven
+ * days is ClamAV's own limit: freshclam prints "The virus database is older
+ * than 7 days!" at the same age.
+ */
+const SIGNATURES_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1_000;
 
 /** Races a probe against a hard timeout; the timeout side never rejects. */
 function withTimeout<T>(promise: Promise<T>, fallback: T, timeoutMs = PROBE_TIMEOUT_MS): Promise<T> {
@@ -62,6 +69,8 @@ export interface AdministratorServiceHealth {
   checkedAt: string;
   lastSuccessAt?: string | null;
   lastErrorAt?: string | null;
+  /** Virus scanner only: when the signature set clamd has loaded was built; null when it could not be read. */
+  signaturesAt?: string | null;
 }
 
 export interface AdministratorHealth {
@@ -137,11 +146,22 @@ async function probeVirusScanner(checkedAt: string): Promise<AdministratorServic
     return { id: "virus-scanner", state: "down", checkedAt };
   }
   if (config.scanMode === "disabled") return { id: "virus-scanner", state: "off", checkedAt };
-  const ready = await withTimeout(
-    pingClamAv({ ...config.clamAv, timeoutMs: Math.min(config.clamAv.timeoutMs, PROBE_TIMEOUT_MS) }),
-    false,
+  const reply = await withTimeout(
+    readClamAvVersion({ ...config.clamAv, timeoutMs: Math.min(config.clamAv.timeoutMs, PROBE_TIMEOUT_MS) }),
+    null,
   );
-  return { id: "virus-scanner", state: ready ? "ok" : "down", checkedAt };
+  if (reply === null) return { id: "virus-scanner", state: "down", checkedAt };
+  // clamd answered, so the scanner works; whether it is current is the
+  // separate question the signature date answers. A reply with no readable
+  // date cannot show the scanner is current, so it warns rather than says ok.
+  const signaturesAt = parseClamAvSignatureDate(reply);
+  const stale = signaturesAt === null || Date.parse(checkedAt) - signaturesAt.getTime() > SIGNATURES_MAX_AGE_MS;
+  return {
+    id: "virus-scanner",
+    state: stale ? "warn" : "ok",
+    checkedAt,
+    signaturesAt: signaturesAt ? signaturesAt.toISOString() : null,
+  };
 }
 
 async function probeDocumentParser(checkedAt: string): Promise<AdministratorServiceHealth> {
