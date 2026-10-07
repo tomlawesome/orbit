@@ -1,9 +1,17 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { applyHostOwnership } from "./host-ownership";
 import { LAUNCHER_CONFIG_TREE_ASSETS, handOverLauncherConfigTree } from "./launcher-config-tree";
+
+// Wraps the real function, so ownership is still applied; the spy only records
+// which paths the tree writer handed over.
+vi.mock("./host-ownership", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./host-ownership")>();
+  return { ...actual, applyHostOwnership: vi.fn(actual.applyHostOwnership) };
+});
 
 // The launcher's configure tree, written by the install engine on a
 // configuration-failure exit (#1225; #1212 amendment note 30988). These are
@@ -14,6 +22,7 @@ const scratch: string[] = [];
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.mocked(applyHostOwnership).mockClear();
   for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -51,6 +60,17 @@ function handOver(tree: string | undefined, extra: { unavailableReason?: string;
   return { result, notices };
 }
 
+/** Every entry under root (not root itself), as paths relative to it, directories included; never follows a symlink. */
+function walk(root: string, relative = ""): string[] {
+  const found: string[] = [];
+  for (const name of readdirSync(join(root, relative)).sort()) {
+    const entry = join(relative, name);
+    found.push(entry);
+    if (lstatSync(join(root, entry)).isDirectory()) found.push(...walk(root, entry));
+  }
+  return found;
+}
+
 describe("handOverLauncherConfigTree (#1225)", () => {
   it("writes the image's three files and the image pin, owner-only, with an owner-only scripts directory", () => {
     const root = assets();
@@ -67,6 +87,45 @@ describe("handOverLauncherConfigTree (#1225)", () => {
     expect(readFileSync(join(tree, ".orbit-image"), "utf8")).toBe(`${REFERENCE}\n`);
     expect(statSync(join(tree, ".orbit-image")).mode & 0o777).toBe(0o600);
     expect(statSync(join(tree, "scripts")).mode & 0o777).toBe(0o700);
+  });
+
+  // The pinned launcher (v0.4.0, internal/deploy/trusted.go) refuses the tree
+  // unless every entry belongs to the uid that owns the tree root, none is
+  // world-writable and none is a symlink; and .orbit-image is one exact line.
+  it("hands every file and directory to the host user, with no symlink or world-write, and pins the image on one line", () => {
+    const uid = process.getuid?.() ?? 0;
+    const gid = process.getgid?.() ?? 0;
+    vi.stubEnv("ORBIT_HOST_UID", String(uid));
+    vi.stubEnv("ORBIT_HOST_GID", String(gid));
+    const tree = emptyTree();
+    const { result, notices } = handOver(tree);
+    expect(result).toBe("written");
+    expect(notices).toEqual([]);
+
+    const entries = walk(tree);
+    expect(entries).toEqual([".env-orbit.example", ".orbit-image", "scripts", join("scripts", "configure.sh"), join("scripts", "installer-ui.sh")]);
+    expect(entries.filter((entry) => !lstatSync(join(tree, entry)).isDirectory()).sort()).toEqual(
+      [".env-orbit.example", ".orbit-image", "scripts/configure.sh", "scripts/installer-ui.sh"].sort(),
+    );
+
+    const rootOwner = lstatSync(tree).uid;
+    expect(rootOwner).toBe(uid);
+    for (const entry of entries) {
+      const stat = lstatSync(join(tree, entry));
+      expect(stat.isSymbolicLink(), entry).toBe(false);
+      expect(stat.uid, `${entry} uid`).toBe(rootOwner);
+      expect(stat.uid, `${entry} uid`).toBe(uid);
+      expect(stat.gid, `${entry} gid`).toBe(gid);
+      expect(stat.mode & 0o002, `${entry} world-write`).toBe(0);
+      expect(stat.mode & 0o777, `${entry} mode`).toBe(stat.isDirectory() ? 0o700 : 0o600);
+    }
+
+    // The test cannot chown to anyone else, so also prove each written path,
+    // directories included, was handed to the ownership function.
+    const handed = vi.mocked(applyHostOwnership).mock.calls.map(([path]) => path).sort();
+    expect(handed).toEqual(entries.map((entry) => join(tree, entry)).sort());
+
+    expect(readFileSync(join(tree, ".orbit-image"), "utf8")).toBe(`${REFERENCE}\n`);
   });
 
   it("writes owner-only files even under umask 000", () => {
