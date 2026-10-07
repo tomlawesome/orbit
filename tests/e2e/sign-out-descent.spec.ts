@@ -41,8 +41,9 @@ resetDatabaseBetweenSpecFiles();
 const READER = () => workerAccount("administrator");
 
 /* Desk from 901px (home/+page.svelte DESK); below it the pocket's hatch,
-   which hands the reader to /logout without a descent. The owner's window
-   was narrow, so a narrow desk is walked as well as a wide one. */
+   whose sign-out plays the same descent (owner, 2026-10-07, on an iPhone:
+   "the dice didn't happen in reverse"). The owner's window was narrow, so a
+   narrow desk is walked as well as a wide one. */
 const WIDTHS = [
   { label: "phone-narrow", width: 400, height: 860 },
   { label: "narrow desk", width: 960, height: 760 },
@@ -197,13 +198,13 @@ for (const size of WIDTHS) {
 
         const drawn = await page.evaluate(() => (window as unknown as { __descent?: { world: boolean; warp: boolean; withdraw: number; farewell: number } }).__descent ?? null);
         const took = drawn && drawn.withdraw && drawn.farewell ? Math.round(drawn.farewell - drawn.withdraw) : null;
-        console.log(`#1262 ${info.project.name} ${size.label}: descent ${desk ? (drawn?.warp ? (drawn.world ? "over the WebGL2 world" : "on the canvas") : "not seen") : "none (pocket)"}; dusk ${dusk} ms, /logout ${away} ms after the press; descent ${took ?? "-"} ms`);
+        console.log(`#1262 ${info.project.name} ${size.label}: descent ${drawn?.warp ? (drawn.world ? "over the WebGL2 world" : "on the canvas") : "not seen"}; dusk ${dusk} ms, /logout ${away} ms after the press; descent ${took ?? "-"} ms`);
         /* the descent keeps time (timeline.js D: farewell at 5350ms), as it
            does on dev, however slowly the frames are drawn: one waiting on
            slow frames is the fault, not a slow machine. Measured in the page,
            first beat to last, so the revocation and the browser's own speed
            at navigating are not counted. */
-        if (desk) expect(took, "#1262: the descent was not seen to start and end").not.toBeNull();
+        expect(took, "#1262: the descent was not seen to start and end").not.toBeNull();
         /* Asked where the fault lived: over the world, whose slow frames the
            capped clock waited on (19s and more on SwiftShader). A canvas
            descent never had the cap, and in a loaded container (WebKit in

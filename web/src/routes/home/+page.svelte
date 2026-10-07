@@ -245,11 +245,18 @@
       signOutProblem = /** @type {any} */ (error)?.message ?? "still signed in — try again";
       return;
     }
-    providerLogout = redirectTo;
     /* #1262: the menu goes as the descent begins, never left open over it
        (it stands above the flight's canvas). Closed the way "watch the
        tour" closes it; kept open on a refusal above, so its line is read. */
     closeAccount();
+    await descendFrom(redirectTo);
+  }
+  /* The descent, once the session is ended: the desk's menu above and the
+     pocket's hatch (#1253; owner, 2026-10-07, signing out on a phone) both
+     end here, so a phone flies out the way it flew in. */
+  /** @param {string | null} redirectTo the provider's own logout URL, if any */
+  async function descendFrom(redirectTo) {
+    providerLogout = redirectTo;
     leaving = true;
     await tick();
     flight?.descend();
@@ -1103,7 +1110,7 @@
 <!-- #466/#1120: the pocket's two-tap decisions land on the same idempotent
      approve protocol the desk rows use (one operation id per receipt), and
      answer with the problem, if any, for the sheet to show. -->
-<Pocket {view} {arrive}
+<Pocket {view} {arrive} onsignedout={descendFrom} onmenu={readyDescent}
         onapprove={async (suggestion) => { armed = { id: suggestion.id, act: "approve" }; await tapReceipt(suggestion, "approve"); return mailProblem; }}
         ondismiss={async (suggestion) => { armed = { id: suggestion.id, act: "dismiss" }; await tapReceipt(suggestion, "dismiss"); return mailProblem; }}
         onamend={amendReceipt}
