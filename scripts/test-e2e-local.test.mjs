@@ -402,6 +402,9 @@ const downCalls = (fx) => dockerCalls(fx).filter((l) => /^compose .* down( |$)/.
 const DOWN_TAIL = "--profile * down --volumes --remove-orphans --rmi local";
 const chromium = ["--project", "desktop-chromium"];
 
+/* configure.sh's is_valid_orbit_image, local half (#1275) */
+const LOCAL_TAG_CALL = /^image rm orbit-local:[0-9a-f]{12}$/;
+
 describe("teardown removes everything the run created (#1241)", () => {
   it("takes down profile services, volumes, networks and the images it built, on success", async () => {
     const fx = makeFixture();
@@ -423,6 +426,18 @@ describe("teardown removes everything the run created (#1241)", () => {
     }
     // A clean run leaves no evidence directory behind.
     expect(existsSync(fx.artifactRoot)).toBe(false);
+  });
+
+  it("gives two runs at the same commit different tags (#1241, #1275)", async () => {
+    const tags = [];
+    for (const _ of [1, 2]) {
+      const fx = makeFixture();
+      const result = await runToEnd(fx, chromium);
+      expect(result.status, result.stderr).toBe(0);
+      tags.push(dockerCalls(fx).find((l) => LOCAL_TAG_CALL.test(l)));
+    }
+    expect(tags[0]).toBeDefined();
+    expect(tags[0]).not.toBe(tags[1]);
   });
 
   it("sweeps up a container of the project that `down` did not remove", async () => {
