@@ -26,6 +26,8 @@ export const FOCUS_READING = "Focusing on the anomaly";
 export const WHY_READING = "orbit is reading the pages it was given<br>nothing is saved, and nothing is assumed";
 export const FOCUS_UNDRAWABLE = "Orbit could not draw a picture of this document.";
 export const WHY_UNDRAWABLE = "it is still attached when you add this entry<br>orbit just could not turn it into a page to read here";
+export const TOO_LARGE = "this file is too large to send — it is larger than this orbit accepts";
+export const WHY_TOO_LARGE = `${TOO_LARGE}<br>choose a smaller document`;
 export const FOCUS_REFUSED = "Orbit refused this file.";
 export const WHY_REFUSED = "it did not pass what orbit checks before keeping a file<br>choose another document";
 export const CAP_READING = "orbit is reading the pages it was given";
@@ -59,11 +61,21 @@ export const SUGGESTION_FIELDS = /** @type {const} */ (["provider", "reference",
 
 /** @param {string} why */
 export function whyLines(why) {
-  return why === WHY_READING || why === WHY_UNDRAWABLE || why === WHY_REFUSED ? why.split("<br>") : [why];
+  return why === WHY_READING || why === WHY_UNDRAWABLE || why === WHY_TOO_LARGE || why === WHY_REFUSED ? why.split("<br>") : [why];
 }
 
 /** @param {unknown} error */
 const codeOf = (error) => /** @type {{ code?: string }} */ (error)?.code;
+
+/**
+ * A file refused for its size, by Orbit's own limit or by a proxy in front of
+ * it (#1284): Orbit was reached, so it is not "could not be reached". A 413
+ * that names another code (a storage quota) is not about this file's size.
+ * @param {unknown} error
+ */
+const tooLarge = (error) =>
+  codeOf(error) === "document_too_large" ||
+  (/** @type {{ status?: number }} */ (error)?.status === 413 && codeOf(error) === undefined);
 
 /**
  * Starts both requests from one pick. Each promise resolves with how its
@@ -82,6 +94,7 @@ export function readPickedDocument(householdId, file, { signal } = {}) {
     (error) => {
       const code = codeOf(error);
       if (code === "document_malware_detected") return /** @type {PageOutcome} */ ({ kind: "refused", why: WHY_REFUSED });
+      if (tooLarge(error)) return /** @type {PageOutcome} */ ({ kind: "undrawable", why: WHY_TOO_LARGE });
       /* Unsupported or undrawable is the page's own fault and the file is
          fine; anything else (the scanner, the connection) is said in the
          server's own words, since the save will meet the same wall. */
@@ -109,7 +122,10 @@ export function readPickedDocument(householdId, file, { signal } = {}) {
         message: result.message ?? "",
       });
     },
-    (error) => /** @type {ReadOutcome} */ ({ kind: "unread", message: saveProblem(/** @type {{ message?: string }} */ (error)) }),
+    (error) => /** @type {ReadOutcome} */ ({
+      kind: "unread",
+      message: tooLarge(error) ? TOO_LARGE : saveProblem(/** @type {{ message?: string }} */ (error)),
+    }),
   );
 
   return { page, read };

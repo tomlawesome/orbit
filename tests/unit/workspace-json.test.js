@@ -65,4 +65,12 @@ describe("json() on a non-2xx response", () => {
       status: 502,
     });
   });
+  it("says a bare 413 was a size refusal, not that Orbit could not be reached (#1284)", async () => {
+    const response = fakeResponse({ ok: false, status: 413, parseFails: true });
+    await expect(json(response)).rejects.toMatchObject({
+      message: "That file is larger than this Orbit accepts",
+      status: 413,
+      code: "document_too_large",
+    });
+  });
 });
