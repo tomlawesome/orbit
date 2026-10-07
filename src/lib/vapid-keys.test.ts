@@ -33,6 +33,16 @@ describe("generateVapidKeyPair", () => {
     expect(ecdh.getPublicKey().toString("base64url")).toBe(pair.publicKey);
   });
 
+  // Node's ECDH returns the private scalar without leading zero bytes, so about
+  // one key in 256 comes back 31 bytes long, and web-push refuses any VAPID
+  // private key that is not exactly 32. 3000 draws make such a key all but
+  // certain to appear (1 - (255/256)^3000 > 0.9999).
+  it("always encodes the private key as the full 32 bytes", () => {
+    for (let draw = 0; draw < 3000; draw += 1) {
+      expect(Buffer.from(generateVapidKeyPair().privateKey, "base64url")).toHaveLength(32);
+    }
+  });
+
   it("is random", () => {
     expect(generateVapidKeyPair().privateKey).not.toBe(generateVapidKeyPair().privateKey);
   });
