@@ -157,39 +157,36 @@ describe("scripts/bundle-orbit-cli.mjs", () => {
     expect(readFileSync(callLogPath, "utf8")).toBe("");
   });
 
-  it("fail-closed: a docker-needing command run in-container-mode refuses before ever spawning docker", () => {
-    const targetDir = scratchDir();
-    const callLogPath = join(scratchDir(), "docker-calls.log");
-    writeFileSync(callLogPath, "");
-    const trapBinDir = makeBoobyTrappedDockerBinDir(callLogPath);
+  // No command spawns docker any more: backup, restore and the
+  // recovery-bundle commands run only inside the deployment (#1211), and
+  // install/update only inside the engine container (#1212). So there is no
+  // Docker-backed command left for refuseDockerInContainer to refuse.
+  // install and update (#1212 build note F7) run from facts install.sh hands them,
+  // so in container mode they get past the guard's place and still never
+  // reach the booby-trapped docker; on a host they refuse outright.
+  it("install and update never spawn docker in container mode, and refuse to run on a host", () => {
     const nodeDir = dirname(resolveTool("node"));
-
-    const result = failOnProcessDeadline(spawnSync("node", [bundlePath, "install", "--dir", targetDir], {
-      ...SPAWN_OPTS,
-      env: { PATH: `${trapBinDir}:${nodeDir}`, ORBIT_ENGINE_CONTEXT: "container" },
-    }), { label: "docker-needing command refuses before spawning docker" });
-
-    expect(result.status).toBe(9);
-    expect(result.stderr).toContain("reason=docker-command-forbidden-in-container");
-    expect(result.stderr).toContain("command=install");
-    expect(readFileSync(callLogPath, "utf8")).toBe("");
-  });
-
-  // backup, restore and the recovery-bundle commands spawn no docker since
-  // #1211 (they run inside the deployment), so only install/update remain.
-  it("fail-closed guard covers every Docker-backed command (install, update)", () => {
-    const targetDir = scratchDir();
-    const dockerlessBinDir = makeDockerlessBinDir();
-    const dockerNeedingCommands = ["install", "update"];
-
-    for (const command of dockerNeedingCommands) {
-      const result = failOnProcessDeadline(spawnSync("node", [bundlePath, command, "--dir", targetDir], {
+    const bashDir = dirname(resolveTool("bash"));
+    for (const command of ["install", "update"]) {
+      const targetDir = scratchDir();
+      const callLogPath = join(scratchDir(), "docker-calls.log");
+      writeFileSync(callLogPath, "");
+      const trapBinDir = makeBoobyTrappedDockerBinDir(callLogPath);
+      const inContainer = failOnProcessDeadline(spawnSync("node", [bundlePath, command, "--dir", targetDir], {
         ...SPAWN_OPTS,
-        env: { PATH: dockerlessBinDir, ORBIT_ENGINE_CONTEXT: "container" },
-      }), { label: `fail-closed guard command=${command}` });
-      expect(result.status, `command=${command}`).toBe(9);
-      expect(result.stderr, `command=${command}`).toContain(`reason=docker-command-forbidden-in-container`);
-      expect(result.stderr, `command=${command}`).toContain(`command=${command}`);
+        env: { PATH: `${trapBinDir}:${nodeDir}:${bashDir}`, ORBIT_ENGINE_CONTEXT: "container" },
+      }), { label: `${command} in container mode` });
+      expect(inContainer.status, `command=${command}`).toBe(1);
+      expect(inContainer.stderr, `command=${command}`).toContain("ORBIT_IMAGE must be the immutable digest reference");
+      expect(readFileSync(callLogPath, "utf8"), `command=${command}`).toBe("");
+
+      const onHost = failOnProcessDeadline(spawnSync("node", [bundlePath, command, "--dir", targetDir], {
+        ...SPAWN_OPTS,
+        env: { PATH: `${trapBinDir}:${nodeDir}:${bashDir}` },
+      }), { label: `${command} on a host` });
+      expect(onHost.status, `command=${command}`).toBe(1);
+      expect(onHost.stderr, `command=${command}`).toContain(`orbit: ${command} runs only inside the Orbit image`);
+      expect(readFileSync(callLogPath, "utf8"), `command=${command}`).toBe("");
     }
   });
 
@@ -243,28 +240,5 @@ describe("scripts/bundle-orbit-cli.mjs", () => {
     expect(recoveryLink.stderr.trim().split("\n")).toHaveLength(1);
     expect(recoveryLink.stderr).not.toContain("@node-rs/argon2");
     expect(recoveryLink.stderr).not.toContain("Cannot find module");
-  });
-
-  it("the guard is inert outside container mode (ORBIT_ENGINE_CONTEXT unset): behavior is unchanged from before this slice", () => {
-    const targetDir = scratchDir();
-    const callLogPath = join(scratchDir(), "docker-calls.log");
-    writeFileSync(callLogPath, "");
-    const trapBinDir = makeBoobyTrappedDockerBinDir(callLogPath);
-    const nodeDir = dirname(resolveTool("node"));
-    // The trap script's own `#!/usr/bin/env bash` shebang needs bash
-    // resolvable too, on top of `docker` itself.
-    const bashDir = dirname(resolveTool("bash"));
-
-    const result = failOnProcessDeadline(spawnSync("node", [bundlePath, "install", "--dir", targetDir], {
-      ...SPAWN_OPTS,
-      env: { PATH: `${trapBinDir}:${nodeDir}:${bashDir}` },
-    }), { label: "guard inert outside container mode" });
-
-    // No ORBIT_ENGINE_CONTEXT set: the guard never fires, so install
-    // proceeds to its own (pre-existing) docker-availability check, which
-    // does reach the trapped docker — proving the guard adds a refusal only
-    // in container mode, without altering host-mode behavior.
-    expect(result.status).not.toBe(9);
-    expect(readFileSync(callLogPath, "utf8")).not.toBe("");
   });
 });
