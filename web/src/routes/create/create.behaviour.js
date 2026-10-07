@@ -330,7 +330,10 @@ export function mountCreate() {
       /* The server holds the entry, and its document, from here, so leaving
          must not ask about discarding them (#1151 W1-S1). */
       committed = true;
-      await goto("/home");
+      /* #1246: the form closes onto the main screen, landing on the item
+         just saved — home's own `?item=` address puts that row on screen
+         and opens it, as following a link to it would. */
+      await goto(`/home?item=${encodeURIComponent(draftId)}`);
     } catch (error) {
       /* #1058e: loud, not small print — the button goes back to "Add to
          orbit", the reason sits beside it, and nothing typed is lost. No
