@@ -89,24 +89,6 @@ body.shownew.bare .nf .nstar{opacity:0}
 body.shownew.instrument .nf .nstar{animation:chromein .95s ease .34s both}
 @keyframes chromein{from{opacity:0}to{opacity:1}}
 
-/* ── THE COUNT IS A MOMENT, NOT A PANEL (owner, §15 third pass) ───────────
-   It belongs to the NEWCOMER, who arrives to a sky that already has systems
-   in it — and it is a BEAT, not a fixture. The labelled sky settles, the count
-   fades in on the bare sky with no box around it, holds, fades out, and only
-   then does the question arrive in the space it left. */
-.nf .disc{position:absolute;left:50%;top:50%;z-index:4;text-align:center;
-          width:min(560px,86vw);opacity:0;pointer-events:none;
-          transform:translate(-50%,calc(-50% + 14px));
-          /* #870: retimed 800ms -> 450ms, the beat before it (countGap,
-             flight/timeline.js) and its hold (countHold) alongside it */
-          transition:opacity .45s ease,transform .45s cubic-bezier(.3,.7,.3,1)}
-body.counting .nf .disc{opacity:1;transform:translate(-50%,-50%)}
-.nf .disc .big{font:600 clamp(72px,8.6vw,118px) var(--display);line-height:.84;
-               letter-spacing:-.035em;color:var(--accent-text)}
-.nf .disc p{font:11.5px var(--mono);color:var(--ink-mid);letter-spacing:.2em;
-            text-transform:uppercase;margin-top:20px}
-.nf .disc p b{color:var(--ink);font-weight:400}
-
 /* THE NEWCOMER'S CARD sits in the MIDDLE (owner, §15 "first-run asks three
    things only"): the question, the households they can ask to join, and the
    one other road — name their own system. Kept as thin as the admin's three
@@ -196,14 +178,14 @@ body.belong .nf .belong{opacity:1}
 body.pinned #formlayer,body.pinned :where(.arrival) .card,body.pinned .nf,body.pinned :where(.arrival) .bigring,
 body.pinned :where(.arrival) .bigring .ringglass,body.pinned :where(.arrival) .bigring .ringstroke,
 body.pinned :where(.arrival) .bigring .ringorbit,
-body.pinned .nf .disc,body.pinned .nf .belong{transition:none!important}
+body.pinned .nf .belong{transition:none!important}
 body.pinned .nf .minisys,body.pinned .nf .nstar{animation:none!important;opacity:1}
 
 /* ══ REDUCED MOTION ══════════════════════════════════════════════════════
    The staging survives intact, because the staging is class-driven and not
-   motion-driven: the bare labelled sky still lands bare, the ratified 3s dwell
-   still passes, the count still takes its turn and yields to the question.
-   Only the movement goes. */
+   motion-driven: the bare labelled sky still lands bare, the site's dwell still
+   passes, and the question still arrives with the instrument. Only the
+   movement goes. */
 @media (prefers-reduced-motion: reduce){
   .nf *{animation:none!important}
   #formlayer,:where(.arrival) .card,.nf,:where(.arrival) .bigring,:where(.arrival) .bigring .ringglass,
@@ -212,8 +194,6 @@ body.pinned .nf .minisys,body.pinned .nf .nstar{animation:none!important;opacity
   #formlayer{animation:none!important}
   .nf .minisys,.nf .nstar{opacity:1}
   .nf .belong{transform:translate(-50%,-50%)!important}
-  /* the count still appears and yields, with no fade and no drift */
-  .nf .disc{transition:none!important;transform:translate(-50%,-50%)!important}
   /* the drawer opens with no transition (#1263) */
   .nf .belong .drawer{transition:none!important}
 }

@@ -93,7 +93,7 @@ body.showform #formlayer{opacity:1;pointer-events:auto}
 :where(.arrival, .ringcard) .bigring{position:fixed;inset:0;display:grid;place-items:center;z-index:3;
          opacity:0;visibility:hidden;pointer-events:none;
          transition:opacity .16s ease .46s,visibility .16s .46s}
-body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
+body.showform:not(.reclaimed):not(.shownew):not(.instrument)
   :not(.bare):not(.showwarp):not(.launching):not(.belong) :where(.arrival, .ringcard) .bigring{
          opacity:1;visibility:visible;
          transition:opacity .8s ease,visibility .8s}
