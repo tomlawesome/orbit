@@ -93,8 +93,9 @@ test("the create form saves a real item into the orbit", async ({ page }) => {
       await page.locator("#f-date").fill(dueDate);
       await page.locator(".btn-primary").click();
 
-      // Saved and returned to the orbit, where the new item needs attention.
-      await expect(page).toHaveURL(/\/home$/);
+      // Saved and returned to the orbit at the new item (#1246), where it
+      // needs attention.
+      await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/);
       const row = page.locator(".item", { hasText: "Gutter clearing proving" });
       await expect(row).toBeVisible();
       await expect(row).toContainText("T−20d");
@@ -198,6 +199,33 @@ test("a document picked on the create form is attached to the saved item", async
       const { documents } = (await response.json()) as { documents: Array<{ displayName: string }> };
       return documents.map((one) => one.displayName).join(",");
     }, { timeout: 30_000 }).toContain(DOCUMENT);
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+/**
+ * #1246: "Add to orbit" closes the form and lands on the main screen at the
+ * saved item — never a "Saved" line on a form left open.
+ */
+test("add to orbit closes the form and lands on the saved item", async ({ page }) => {
+  test.skip(test.info().project.name.startsWith("mobile"), "the pocket's save opens the new item on its belt (#1120, §2.5)");
+  test.setTimeout(90_000);
+  await answerPushWithoutAService(page);
+  await page.goto("/api/auth/login?returnTo=/home");
+  await page.getByRole("link", { name: workerAccount("administrator") }).click();
+  await settleArrival(page);
+  await ensureWorkerAdministrator(page);
+  const household = households.track(await seedHousehold(page));
+
+  try {
+    const name = "Home insurance proving";
+    await saveDeskEntryWithDocument(page, name);
+    await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: 30_000 });
+    const itemId = new URL(page.url()).searchParams.get("item");
+    expect(itemId).toBe(await itemIdOf(page, household.id, name));
+    await expect(page.locator("#save-note")).toHaveCount(0);
+    await expect(page.locator(".item", { hasText: name })).toBeVisible();
   } finally {
     await households.sweep(page);
   }
