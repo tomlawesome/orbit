@@ -687,10 +687,11 @@ positive_scenario() {
     [[ -z "$lax_staging_dir" ]] ||
       fail "interruption left staging evidence that is not owner-only"
     note "lifecycle: hard interruption left the target byte-identical (install.sh #31)"
-    # Recovery is the operator's documented step: staging evidence is kept
-    # until inspected, then removed before rerunning -- the engine's target
-    # validation (install.sh #7) deliberately refuses a target containing it.
-    rm -rf -- "$target"/.orbit-install-staging.* 2>/dev/null || true
+    # Recovery is the operator's documented step: staging evidence, and the
+    # deploy lock the killed engine held, are kept until inspected, then
+    # removed before rerunning -- the engine's target validation (install.sh
+    # #7) deliberately refuses a target containing them, and names both.
+    rm -rf -- "$target"/.orbit-install-staging.* "$target/.orbit-engine.lock" 2>/dev/null || true
   fi
 
   note "running unmocked install.sh against 127.0.0.1:$registry_port/$repository"
