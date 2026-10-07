@@ -4,7 +4,7 @@ import {
   ASKING, DOOR, INVITED, NEWCOMER, ONWARD,
   CURRENCIES, DEFAULT_SECTIONS, NAME_LIMIT, TIME_ZONES,
   arrivalStageOf, belongRowsOf, collidingHouseholdOf,
-  createSystemCommand, discoveredCountOf, isInvitedLanding, preferredCurrency, preferredTimeZone,
+  createSystemCommand, isInvitedLanding, preferredCurrency, preferredTimeZone,
   sectionNote, sectionNoteTitle, WAITING_APPROVAL_NOTE,
 } from "$lib/arrival/stage.js";
 import {
@@ -112,20 +112,6 @@ describe("the invited landing's climb is the newcomer's own, to the beat the cho
     const reduced = newcomerAscentBeatsReduced();
     expect(reduced.at(-1)).toEqual({ at: 700 + T.dwell, act: "belong" });
     expect(reduced.map((beat) => beat.act)).toEqual(["land", "instrument", "belong"]);
-  });
-});
-
-describe("the count is a moment, and it is real", () => {
-  it("reads the number off the households and pluralises on it", () => {
-    expect(discoveredCountOf([{ id: "a" }, { id: "b" }, { id: "c" }])).toEqual({ count: 3, word: "systems" });
-    expect(discoveredCountOf([{ id: "a" }])).toEqual({ count: 1, word: "system" });
-    expect(discoveredCountOf([])).toEqual({ count: 0, word: "systems" });
-    expect(discoveredCountOf(undefined)).toEqual({ count: 0, word: "systems" });
-  });
-
-  it("counts the fixture's five, which is the sheet's own number", () => {
-    expect(discoveredCountOf(NEWCOMER_ARRIVAL_FIXTURE.visibleHouseholds))
-      .toEqual({ count: 5, word: "systems" });
   });
 });
 

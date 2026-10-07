@@ -39,18 +39,16 @@
      * WHERE THE CLIMB SETS DOWN (§15 second pass, ruling 4): "home" is the
      * landing every member gets, and "newcomer" is the one a reader who
      * belongs to nothing yet gets — the same flight to the millisecond, the
-     * ratified 3s dwell instead of the trimmed 2s, and the count's own three
-     * beats after it. The host draws both; this only says when.
+     * site's own dwell and instrument beat (#1222), and the question arriving
+     * with the instrument. The host draws both; this only says when.
      *
      * "invited" (#871) flies the identical newcomer beats — the host's own
-     * INVITED stage feeds `Newcomer.svelte` the same sky and count a plain
+     * INVITED stage feeds `Newcomer.svelte` the same sky a plain
      * newcomer gets — and differs at exactly one beat: see `onbelong` below.
      */
     landing = "home",
     /* the landing: the host reveals its own surface here (bare sky) */
     onland = () => {},
-    /* the instrument has arrived and the journey is over */
-    onsettled = () => {},
     /*
      * WHERE THE CHOOSER WOULD STAND (#871). On landing "newcomer" this beat is
      * drawn — `belong` arrives as a body class and the host's own markup shows
@@ -310,13 +308,10 @@
         case "instrument":
           b.classList.remove("bare");
           b.classList.add("instrument");
-          onsettled();
           break;
-        /* THE COUNT (the newcomer's and the invited reader's landing alike): a
-           moment on the settled sky, boxless, and then the question — or,
-           landing "invited", the move — in the space it left. */
-        case "countOn": b.classList.add("counting"); break;
-        case "countOff": b.classList.remove("counting"); break;
+        /* THE QUESTION (the newcomer's and the invited reader's landing
+           alike), with the instrument (#1222) — or, landing "invited", the
+           move. */
         case "belong": if (landing === "invited") onbelong(); else b.classList.add("belong"); break;
       }
     };
@@ -371,7 +366,7 @@
     engine?.clear();
     body().classList.remove("arming", "showdawn", "showwarp", "launching", "bare",
                             "instrument", "withdrawing", "dispersing", "showdusk",
-                            "farewell", "pinned", "counting", "belong");
+                            "farewell", "pinned", "belong");
     body().classList.remove("holding");
     clock.stalls(false);
     markEl?.classList.remove("on", "collapse");

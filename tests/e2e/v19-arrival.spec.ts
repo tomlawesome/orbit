@@ -225,11 +225,10 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   /* no dial, because they belong to nothing yet */
   await expect(page.locator(".dialwrap")).toHaveCount(0);
 
-  /* THE COUNT — a moment on the settled sky, boxless, and REAL: the number is
-     read off the households that exist, never written.
-     It is the real list that is counted, not the sky: the sky draws at most
-     twelve (#670), and on a shared instance (#730) more exist than it can
-     draw, so the sky is a lower bound and `visibleHouseholds` is the number.
+  /* THE LIST IS REAL: the households are read off the ones that exist, never
+     written. The sky draws at most twelve (#670), and on a shared instance
+     (#730) more exist than it can draw, so the sky is a lower bound and
+     `visibleHouseholds` is the list the card shows.
      Read from `ownWorkspaceRead` above, not a fresh fetch: a second,
      independent read taken this many beats after the page's own would race
      every other worker's fixtures under #1080 rather than only this file's. */
@@ -247,13 +246,11 @@ test("the newcomer's arrival: the climb, the labelled sky, the real count, the q
   const drawn = await page.locator(".minisys").count();
   expect(drawn).toBeGreaterThan(0);
   expect(drawn).toBeLessThanOrEqual(discovered);
-  await expect(page.locator("body")).toHaveClass(/counting/, { timeout: 30_000 });
-  await expect(page.locator(".nf .disc .big")).toHaveText(String(discovered));
-  await expect(page.locator(".nf .disc p")).toContainText("discovered in this universe");
 
-  /* AND THEN THE QUESTION, in the space the count left. */
+  /* THE QUESTION arrives with the instrument (#1222, owner 2026-10-07): no
+     count beat stands between the landing and the card. */
   await expect(page.getByRole("heading", { name: "where do you belong?" })).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator("body")).not.toHaveClass(/counting/);
+  await expect(page.locator(".nf .disc")).toHaveCount(0);
 
   /* The card lists the same systems as the sky, and one road out of it. */
   const row = page.locator(".nf .belong li", { hasText: HOUSEHOLD });
