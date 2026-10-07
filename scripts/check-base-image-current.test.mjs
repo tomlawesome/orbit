@@ -204,7 +204,17 @@ describe("scripts/check-base-image-current.sh", () => {
 // the advice to hand-edit the FROM line was wrong in that case -- it went
 // green while leaving the branch behind, and would have written a second,
 // conflicting re-pin commit against the one already on `dev`.
-describe("scripts/check-base-image-current.sh -- moved tag vs. behind dev (#1027)", () => {
+//
+// The tests in this block each build one or two real git repositories, which
+// is a dozen git processes. Measured on an otherwise quiet host: 0.9s to 1.8s
+// per test, of which about 0.8s per `git commit` is the host's global git hook
+// (the pre-commit secret scan) running in these throwaway repositories. A host
+// running several builds at once stretches that to 5-6s per test, past
+// Vitest's 5s default, which timed these out on a green script (#1134). 20s is
+// roughly ten times the quiet-host time: a stuck git still fails promptly, a
+// busy host does not. The global default stays at 5s; only this block asks for
+// more.
+describe("scripts/check-base-image-current.sh -- moved tag vs. behind dev (#1027)", { timeout: 20_000 }, () => {
   const pinnedTag = "ghcr.io/tomlawesome/orbit-base-image:latest";
 
   it("tells the reader to merge dev when dev already pins the tag's current digest", () => {
