@@ -604,6 +604,10 @@
    what makes the page read as a document rather than a loose picture. */
 .belt-page .sheet::before{content:"";position:absolute;inset:0;background:#e7e3d8;border-radius:5px;
                transform:rotate(-1.1deg) translate(-4px,3px);z-index:-1}
+/* #1298: the sheet is the reader's button on the desk; it keeps the look. */
+.belt-page button.sheet{appearance:none;border:0;margin:0;font:inherit;color:inherit;display:block;cursor:zoom-in}
+.belt-page button.sheet:disabled{cursor:default}
+.belt-page button.sheet:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
 .belt-page .sheet img{display:block;border-radius:2px;background:#fff;width:auto;
              max-width:100%;height:auto;max-height:min(60vh,520px)}
 

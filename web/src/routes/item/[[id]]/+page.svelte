@@ -1732,7 +1732,10 @@
 
         {#if state === "available"}
           <div class="topsheet">
-            <div class="sheet">
+            <!-- §18 on the desk too (#1298): the page is a button, and pressing
+                 it opens the reader over the belt, as the phone's does. -->
+            <button type="button" class="sheet" aria-label="Read {previewDoc.name}"
+                    disabled={!previewShowing || previewDoc.staged} onclick={() => { readerOpen = true; }}>
               <!-- previewSrc starts "" for a staged paper, while loadStagedPage's
                    fetch is still in flight (#1155's own build, fixed here): an
                    `<img src="">` is not "no image" to a browser, it is a request
@@ -1744,7 +1747,7 @@
                    so this changes nothing for it. -->
               <img src={previewSrc || undefined} alt="Page one of {previewDoc.name}"
                    onload={previewLoaded} onerror={previewFailed} />
-            </div>
+            </button>
           </div>
         {/if}
       </div>
