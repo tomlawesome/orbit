@@ -321,10 +321,11 @@ page's URL at failure, which this one has to infer.
 
 - 2026-09-30 · 0135f516 (!1006, the batch that built this film chapter) · pipeline 1855 / fidelity (job 27168) · `page.waitForFunction` hit the 60000ms test timeout. The same test passed on pipeline 1836 (same film code), and the job retried as 27270 on the same commit was green. First sighting; an issue on the third.
 
-## fidelity: door-station.spec.js:103 "the ring's hand-over to a card at 390x664, motion no-preference › the ring travels from the door's station to the card's"
+## fidelity: door-station.spec.js:103 "the ring's hand-over to a card at 390x664, motion no-preference › the ring travels from the door's station to the card's" — #1306
 
 - 2026-10-01 · d3141346 (!1013, #1183's Firefox projects for tests/e2e; nothing under web/ or tests/fidelity) · pipeline 1926 / fidelity (job 28697) · "a jump between frames at 317ms": 38.9 against the < 20 bound. The full fidelity runs on !1010 and !1012 just before it passed, and the same pipeline's smoke ran about eleven minutes longer than usual alongside it on the shared runner. First sighting; an issue on the third.
 - 2026-10-04 · bc9ba29e (!1021, #1151's audit fixes; the only door-side change since the green run on bcaf64e0 is a waiting-card timeout constant, nothing in the ring's motion) · pipeline 2064 / fidelity (job 31041) · "a jump between frames at 280ms": 25.5 against the < 20 bound, same shape as the first sighting. The same test passed on pipeline 2054 ten commits earlier. Second sighting; an issue on the third.
+- 2026-10-07 · 5a12b2bd (!1043, the create-form batch; nothing in the ring's motion) · pipeline 2233 / fidelity (job 33106) · "a jump between frames at 328ms": 20.008 against the < 20 bound. Third sighting: filed as #1306.
 
 ## tour-pocket-webkit.spec.js "plays end to end at 430x932 under normal motion" — pill moving between places (#1174)
 
@@ -354,9 +355,11 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-04 · harness change on `fix/1208-webkit-fidelity-wait` (0098575b): each typed-over field is judged from a settled frame (shot until two in a row match, at most 20) instead of 350ms after the hold. Ten isolated runs in the pinned image could not reproduce the fault before or after the change, so CI is the proof.
 - 2026-10-05 · cause found, on the pre-preview batch (`217496af`, `b9a84c57`): once the second picture was itself a settled frame, the 430x932 case failed 3 of 3 on `#c8-name`, and a probe showed why: removing the placeholder of a field half off the top of the screen makes WebKit scroll the page 10 px (scroll anchoring; scrollY 475 to 485), so the second picture was of a different strip (5.92% of pixels differing; 0.0% scrolled back; the film's cover box equals the input's). The old check sometimes shot before the scroll, hence the flake. The check now restores the scroll position before each picture: 9 of 9 across the three sizes and the whole file 24 of 24 in the pinned image. Not a product fault; #1208 closes with the batch.
 
-## v19-layout-and-themes.spec.ts:282, /household/[id] axe check — desktop-firefox
+## v19-layout-and-themes.spec.ts:282, /household/[id] axe check — desktop-firefox, desktop-chromium — #1307
 
 - 2026-10-03 · 594b745a (!1017) · pipeline 1999 / smoke_firefox (job 30199) · two theme packs in one run, each a real axe violation rather than a timeout: "/household/[id] in the clouds pack has no WCAG A/AA violations" reported one violation, `color-contrast` on `.zero`; "/household/[id] in the dawn pack has no WCAG A/AA violations" reported the same, `color-contrast` on `.zero`. The merged report's own outcome field marks both "expected" (its usual sign that a later attempt passed), but that later attempt's own result is not present in this job's artifact, so this entry records only the one failing attempt actually captured — not why or how it later passed, and not whether other packs or screens share the same `.zero` contrast gap without being caught. First sighting; an issue on the third.
+- 2026-10-07 · 5a12b2bd (!1043; nothing on /household) · pipeline 2233 / smoke (job 33111, desktop-chromium) · "/household/[id] in the clouds pack" and "… in the dawn pack" each failed once and passed on the in-job retry. The rule is not in the output, because a passing retry prints no detail. Second sighting.
+- 2026-10-07 · the same batch plus its pipeline fixes, uncommitted · local `test-e2e-local.sh`, desktop-chromium · the same two tests, the same shape: failed once, passed on retry. Third sighting: filed as #1307.
 
 ## v19-arrival.spec.ts:290 — the newcomer never reaches /home — desktop-webkit
 
