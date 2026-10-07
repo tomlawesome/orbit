@@ -335,6 +335,9 @@ test("no sign-in card sits over the arrival with no climb owed", async ({ page }
   await expect(page.getByRole("heading", { name: "where do you belong?" })).toBeVisible({ timeout: 30_000 });
   await expect(page.locator("body")).toHaveClass(/\bbelong\b/);
   await expectNoCardLayer(page, "the arrival, no climb");
+  /* the north star's "create" opens the drawer too; the stars' layer is
+     drawn after it and must not take its click (#1277) */
+  await expectClickReaches(page, page.locator(".nf .nstar"), "the north star");
   await expectClickReaches(page, page.locator(".nf .belong #hhname"), "the drawer's name field");
   await expectClickReaches(page, page.locator("#gobtn"), "the drawer's Create");
   await expectClickReaches(page, page.getByRole("button", { name: "name your own system" }), "the drawer's handle");
