@@ -13,7 +13,9 @@
  * the GPU at all (the flight's own verdict, lib/flight/fitness.js `gpu()`:
  * a performance caveat or a software renderer), and until the shader has
  * drawn its first frame. The shader draws only while the sun is
- * on screen and the tab is showing.
+ * on screen, the tab is showing and the sun has not been hidden: a sign-out
+ * fades the page out under the descent and then hides it (home.css,
+ * `body.dispersing`), which neither of the first two notices (#1299).
  */
 import { gpu } from "$lib/flight/fitness.js";
 
@@ -124,7 +126,7 @@ export function mountFurnace(box, canvas) {
   let gl = null;
   /** @type {Record<string, WebGLUniformLocation | null>} */
   let u = {};
-  let failed = false, onScreen = false, raf = 0, w = 0;
+  let failed = false, onScreen = false, shown = true, raf = 0, w = 0;
   const t0 = performance.now();
   const root = document.documentElement;
 
@@ -188,10 +190,13 @@ export function mountFurnace(box, canvas) {
   }
 
   function frame() { raf = 0; draw(); loop(); }
-  function loop() { if (!raf && gl && onScreen && !document.hidden) raf = requestAnimationFrame(frame); }
+  function loop() { if (!raf && gl && onScreen && shown && !document.hidden) raf = requestAnimationFrame(frame); }
   function stop() { if (raf) cancelAnimationFrame(raf); raf = 0; }
   function wake() {
-    if (failed || !onScreen || document.hidden) { stop(); return; }
+    /* #1299: read only when something that could hide or show it has
+       happened (below), never per frame */
+    shown = getComputedStyle(box).visibility !== "hidden";
+    if (failed || !onScreen || !shown || document.hidden) { stop(); return; }
     if (!gl && !make()) { failed = true; return; }
     loop();
   }
@@ -206,10 +211,24 @@ export function mountFurnace(box, canvas) {
   const mo = new MutationObserver(() => setSun(sunOf(root.dataset.theme)));
   mo.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
   document.addEventListener("visibilitychange", wake);
+  /* #1299: the sign-out hides the page by a body class, a beat after the
+     descent starts, once the page has faded (`visibility` follows the fade
+     off at its end, so the sun draws for as long as any of it can be seen).
+     The class changing, that hidden step landing, and a page brought back
+     from the back-forward cache are each a moment to look again: a sign-out
+     undone (the classes cleared) or a page restored lights it again. */
+  const classes = new MutationObserver(wake);
+  classes.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+  /** @param {TransitionEvent} e */
+  const hid = (e) => { if (e.propertyName === "visibility") wake(); };
+  document.addEventListener("transitionend", hid);
+  addEventListener("pageshow", wake);
 
   return () => {
-    stop(); io.disconnect(); ro?.disconnect(); mo.disconnect();
+    stop(); io.disconnect(); ro?.disconnect(); mo.disconnect(); classes.disconnect();
     document.removeEventListener("visibilitychange", wake);
+    document.removeEventListener("transitionend", hid);
+    removeEventListener("pageshow", wake);
     gl?.getExtension("WEBGL_lose_context")?.loseContext();
     gl = null; box.classList.remove("live");
   };
