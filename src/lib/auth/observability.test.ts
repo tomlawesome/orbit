@@ -155,4 +155,25 @@ describe("authentication operational diagnostics", () => {
     expect(mocks.log.warn).toHaveBeenCalledTimes(1);
     expect(mocks.log.error).not.toHaveBeenCalled();
   });
+
+  it.each(["bootstrap_required", "bootstrap_claimed"] as const)(
+    "records a provider sign-in refused by the claim (%s) as that refusal, not a provider fault (#1242)",
+    (code) => {
+      /* ADR-0022/0023: a provider identity arriving before the instance is
+         claimed (`bootstrap_required`), or one trying to claim an instance a
+         local administrator already holds (`bootstrap_claimed`), is Orbit's own
+         rule working -- not `unexpected_failure` with `check_provider`. */
+      reportAuthCallbackFailure(code);
+
+      expect(mocks.log.warn).toHaveBeenCalledWith({
+        event: "auth.provider",
+        state: "invalid",
+        reason: code,
+        action: "none",
+        impact: "sign_in_blocked",
+      });
+      expect(mocks.log.warn).toHaveBeenCalledTimes(1);
+      expect(mocks.log.error).not.toHaveBeenCalled();
+    },
+  );
 });

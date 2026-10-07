@@ -59,12 +59,15 @@ export function reportAuthCallbackFailure(code: AuthErrorCode, tokenReason?: Tok
      (ADR-0023 §3, #1242). Orbit's own rule refused it, so the record says so:
      filed under `unexpected_failure` with `check_provider` it sent the reader
      of the log to a provider that had done nothing wrong. Never the address,
-     the subject or the account. */
-  if (code === "link_required") {
+     the subject or the account. The claim's two refusals get the same
+     treatment: a provider sign-in before the instance is claimed
+     (`bootstrap_required`), or one arriving after a local administrator holds
+     it (`bootstrap_claimed`), is Orbit's rule working, not a provider fault. */
+  if (code === "link_required" || code === "bootstrap_required" || code === "bootstrap_claimed") {
     log.warn({
       event: "auth.provider",
       state: "invalid",
-      reason: "link_required",
+      reason: code,
       action: "none",
       impact: "sign_in_blocked",
     });
