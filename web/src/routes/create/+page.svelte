@@ -148,11 +148,26 @@
       <div class="sections" id="sections" role="group" aria-labelledby="sections-label"></div>
     </div>
 
+    <!-- #1244 (design/v19/create-dragover.html): the four brackets are the
+         reticle's corners, parked on the zone; the words carry one copy per
+         state, stacked in one cell so the zone never changes height. The
+         live region below speaks the state a sighted reader sees. -->
     <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="drop a document, or press enter to choose one">
-      <div class="dz-main">drop a document — we'll read what we can</div>
-      <div class="dz-hint mono">PDF, email or photo &middot; dates, amounts &amp; reference numbers extracted automatically</div>
+      <span class="dz-corner tl" aria-hidden="true"></span><span class="dz-corner tr" aria-hidden="true"></span>
+      <span class="dz-corner br" aria-hidden="true"></span><span class="dz-corner bl" aria-hidden="true"></span>
+      <div class="dz-main">
+        <span data-when="rest">drop a document — we'll read what we can</span>
+        <span data-when="lock">release to add it</span>
+        <span data-when="swap">release to swap the document</span>
+      </div>
+      <div class="dz-hint mono">
+        <span data-when="rest">PDF, email or photo &middot; dates, amounts &amp; reference numbers extracted automatically</span>
+        <span data-when="arm">bring it to this box &middot; PDF, email or photo</span>
+        <span data-when="lock">orbit will read what it can &middot; nothing is saved until you say</span>
+      </div>
       <div class="dz-held" id="dz-held">&#9670; <b id="dz-held-name"></b> &middot; <span id="dz-held-size"></span> &middot; held in the lane on the right</div>
     </div>
+    <div class="sr-only" id="dz-live" aria-live="polite"></div>
 
     <div class="disclose" id="disclose">
       <div class="disclose-inner"><div class="disclose-content">

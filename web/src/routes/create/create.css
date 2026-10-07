@@ -139,7 +139,7 @@ body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
 .create-page .sections button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent);background:rgba(216,180,90,.08)}
 .create-page .sec-dot{width:7px;height:7px;border-radius:50%;flex:none}
 
-.create-page .dropzone{border:1.5px dashed var(--line);border-radius:12px;padding:19px;text-align:center;
+.create-page .dropzone{position:relative;border:1.5px dashed var(--line);border-radius:12px;padding:19px;text-align:center;
           cursor:pointer;transition:border-color .2s,background .2s}
 .create-page .dropzone:hover,.create-page .dropzone:focus-visible{border-color:var(--accent);background:rgba(216,180,90,.04)}
 /* #848: the dashed border's colour shift alone is too quiet for a keyboard
@@ -153,6 +153,69 @@ body.doc .dropzone .dz-main,body.doc .dropzone .dz-hint{display:none}
 .create-page .dz-held{display:none;font:11px var(--mono);color:var(--ink-mid);letter-spacing:.03em}
 .create-page .dz-held b{color:var(--accent-text);font-weight:400}
 body.doc .dz-held{display:block}
+
+/* ---- #1244: the zone while a file is in the air ---------------------------
+   design/v19/create-dragover.html, owner-approved 2026-10-07 ("8a yes"), as
+   Fable's build notes on #1244 carry it. Two classes on <body>, set by
+   drop-feedback.js: `dragging` (a file is somewhere over the page) and
+   `over` (it is over the zone). Unscoped like `body.doc`, because they gate
+   on <body>. Nothing is re-laid out, and the zone keeps its height through
+   every state, so the card's centre never moves (§14 ruling 2).
+
+   The marks are the reading lane's own: the reticle's four corner brackets.
+   Armed, they hang loose outside the corners at half strength; locked, they
+   pull in to the corners at full strength and breathe on the reticle's own
+   3.6s curve. The reduced-motion rule below stops the pull and the breathe. */
+.create-page .dz-corner{position:absolute;width:14px;height:14px;pointer-events:none;opacity:0;
+  border:0 solid var(--accent);border-top-width:1.5px;border-left-width:1.5px;border-top-left-radius:3px;
+  --dx:-7px;--dy:-7px;transform:translate(var(--dx),var(--dy));
+  transition:opacity .25s ease,transform .3s cubic-bezier(.3,.7,.2,1)}
+.create-page .dz-corner.tl{top:6px;left:6px}
+.create-page .dz-corner.tr{top:6px;right:6px;--dx:7px;transform:translate(var(--dx),var(--dy)) rotate(90deg)}
+.create-page .dz-corner.br{bottom:6px;right:6px;--dx:7px;--dy:7px;transform:translate(var(--dx),var(--dy)) rotate(180deg)}
+.create-page .dz-corner.bl{bottom:6px;left:6px;--dy:7px;transform:translate(var(--dx),var(--dy)) rotate(270deg)}
+
+/* armed: the file is over the page, not yet over the zone. Quiet on
+   purpose: the user is still aiming.
+
+   Where a state rule carries `.create-page` after `body.…`, it is only to
+   outrank the scoped resting rules (`.create-page .dropzone:hover`,
+   `:focus-visible`, `.dz-main`'s colour, the .tr/.br/.bl offsets), which the
+   mockup's unscoped sheet never had to: the look is the mockup's. */
+body.dragging .create-page .dropzone{border-color:color-mix(in srgb, var(--accent) 55%, var(--line))}
+body.dragging .dz-corner{opacity:.5}
+body.dragging:not(.over) .dropzone .dz-hint{color:var(--accent-text)}
+/* the words: one copy per state in one grid cell, so the line takes the
+   tallest copy's height in every state */
+.create-page .dz-main,.create-page .dz-hint{display:grid}
+.create-page .dz-main span,.create-page .dz-hint span{grid-area:1/1;align-self:center;visibility:hidden}
+.create-page .dz-main [data-when=rest],.create-page .dz-hint [data-when=rest]{visibility:visible}
+body.dragging:not(.over) .dz-hint [data-when=rest]{visibility:hidden}
+body.dragging:not(.over) .dz-hint [data-when=arm]{visibility:visible}
+
+/* locked: the file is over the zone. The fill is the 10% accent the
+   pocket's pressed document row already uses (EntryForm.svelte .pc-doc:active). */
+body.over .create-page .dropzone{border-style:solid;border-color:var(--accent);
+  background:color-mix(in srgb, var(--accent) 10%, transparent)}
+body.over .create-page .dz-corner{opacity:1;--dx:0px;--dy:0px;animation:dz-pull 3.6s ease-in-out infinite}
+@keyframes dz-pull{0%,100%{opacity:1}50%{opacity:.55}}
+body.over .create-page .dz-main{color:var(--ink)}
+body.over .dz-main [data-when=rest]{visibility:hidden}
+body.over .dz-main [data-when=lock]{visibility:visible}
+body.over .dz-hint [data-when=rest]{visibility:hidden}
+body.over .dz-hint [data-when=lock]{visibility:visible;color:var(--accent-text)}
+/* a document already held: the zone still takes a replacement, and says so */
+body.doc.over .dropzone .dz-main{display:grid}
+body.doc.over .dz-held{display:none}
+body.doc.over .dz-main [data-when=lock]{visibility:hidden}
+body.doc.over .dz-main [data-when=swap]{visibility:visible}
+
+/* landed: the drop. body.doc's held line takes over at once; the zone's
+   line settles from accent back to the quiet solid line over .6s (the top
+   sheet's `landed` timing). */
+body.doc .dropzone.landed{animation:dz-landed .6s cubic-bezier(.3,.7,.2,1) backwards}
+@keyframes dz-landed{from{border-color:var(--accent);background:color-mix(in srgb, var(--accent) 10%, transparent)}
+  to{border-color:var(--line-soft);background:none}}
 
 .create-page .disclose{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .55s ease,opacity .4s ease}
 .create-page .disclose.open{grid-template-rows:1fr;opacity:1}
