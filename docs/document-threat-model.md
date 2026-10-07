@@ -262,6 +262,16 @@ recoverable state.
 - Output is bounded to a 1200-pixel long edge and carries the download
   response's headers: `Cache-Control: private, no-store`,
   `X-Content-Type-Options: nosniff` and a restrictive content security policy.
+- `POST /api/households/{householdId}/item-document-preview` draws the same
+  page one from a file the create form has just been given, before any item
+  exists for it (#1245). It takes the inspection route's temporary-upload
+  shape and retains nothing: the bytes are received into quarantine,
+  identified, scanned by ClamAV where the instance scans (a scanner refusal
+  answers exactly as the inspection and upload paths do, and malware is
+  refused before anything is drawn), rendered in memory through the renderer
+  above, then zeroed and discarded. The response carries the same headers plus
+  `X-Orbit-Scan: clean|skipped`, so a screen says "scanned clean" only when
+  something scanned it. Household membership is required, as for inspection.
 
 ### Availability and resource controls
 

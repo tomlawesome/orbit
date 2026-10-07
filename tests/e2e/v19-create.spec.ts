@@ -205,6 +205,62 @@ test("a document picked on the create form is attached to the saved item", async
 });
 
 /**
+ * #1245, the §14 walk (design/v19/create-v3.html's `doc` → `snap`): the
+ * moment a document is picked the lanes split and "Reading your document"
+ * breathes; page one lands on the top sheet as soon as it is drawn, while
+ * the read is still running; the read settles on its own, without the page
+ * ever having waited for it. The sheet used to be a sketched placeholder
+ * nothing reached, and the owner saw the lane sit on "Focusing on the
+ * anomaly" for good.
+ */
+test("picking a document shows its front page while the read runs alongside", async ({ page }) => {
+  test.skip(test.info().project.name.startsWith("mobile"), "the pocket's own form has no reading lane (#1245 open question)");
+  test.setTimeout(90_000);
+  await answerPushWithoutAService(page);
+  await page.goto("/api/auth/login?returnTo=/home");
+  await page.getByRole("link", { name: workerAccount("administrator") }).click();
+  await settleArrival(page);
+  await ensureWorkerAdministrator(page);
+  households.track(await seedHousehold(page));
+
+  try {
+    await gotoCreate(page);
+    const readcard = page.locator("#readcard");
+    await page.locator('#card input[type="file"]').setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+
+    // The lanes split and the lane says what it is doing, straight away.
+    await expect(page.locator("body")).toHaveClass(/\bdoc\b/);
+    await expect(readcard).toBeVisible();
+    await expect(readcard).toHaveAttribute("data-reading", "true");
+    await expect(page.locator("#read-head")).toHaveText("Reading your document");
+
+    // Page one lands — a real picture, drawn from the file — within seconds,
+    // and the heading says so.
+    await expect(page.locator("body")).toHaveClass(/\bsnap\b/, { timeout: 20_000 });
+    await expect(page.locator("#read-head")).toHaveText("Page one");
+    const sheet = page.locator("#sheet-page");
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toHaveAttribute("alt", `Page one of ${DOCUMENT}`);
+    await expect.poll(() => sheet.evaluate((img) => (img as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+    await expect(page.locator("#rc-file")).toContainText(DOCUMENT);
+    await expect(page.locator("#rc-scan")).toBeVisible();
+
+    // The read settles on its own, whatever it found (the stack may have no
+    // processor), and never undoes the page.
+    await expect(readcard).not.toHaveAttribute("data-reading", "true", { timeout: 45_000 });
+    await expect(page.locator("body")).toHaveClass(/\bsnap\b/);
+    await expect(page.locator("#rc-capline")).not.toHaveText("orbit is reading the pages it was given");
+
+    // "not this one" takes the file out again and closes the lane.
+    await page.locator("#rc-drop").click();
+    await expect(page.locator("body")).not.toHaveClass(/\bdoc\b/);
+    await expect(page.locator("body")).not.toHaveClass(/\bsnap\b/);
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+/**
  * #1246: "Add to orbit" closes the form and lands on the main screen at the
  * saved item — never a "Saved" line on a form left open.
  */
