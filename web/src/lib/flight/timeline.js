@@ -65,20 +65,37 @@ const instrumentAt = ASCENT_BASE.land + SETTLE;                               /*
 const tourAt = instrumentAt + ASCENT_BASE.instrument + ASCENT_BASE.tourGap;  /*  8150 */
 
 /*
- * THE NEWCOMER'S CLOCK (#1222, owner 2026-10-07: "Remove all the silly
- * settles. Go with the site's timings and remove any unnecessary timing
- * gaps. We want it to feel performant.").
+ * THE NEWCOMER'S CLOCK (#1222; the count sealed in the §15 third pass and
+ * retimed in #870, restored here by the owner, 2026-10-07: "It's deliberately
+ * supposed to display to new users who don't have a household only. It's a
+ * separate display, which disappears after a few seconds and the join
+ * household card shows afterwards, if applicable.").
  *
  * The newcomer flies the SAME climb as everybody else and sets down somewhere
  * else, on the site's own figures: the instrument (here, the labelled sky's
- * chrome and the question) arrives at `instrumentAt`, 5900, as the dial would.
- * This replaces the ratified second-pass newcomer figures (3s bare dwell,
- * chrome at 9400, count 9700-12900, question at 13800), which made the card
- * arrive 8s after the landing.
+ * chrome) arrives at `instrumentAt`, 5900, as the dial would, with no
+ * newcomer-only dwell. The count keeps its own offsets from that beat:
+ *
+ *     5900   the labelled sky's chrome arrives
+ *     6200   the count fades IN on the settling sky, boxless (0.45s)
+ *     9400   it fades OUT again (0.45s) — ~4.55s of screen time in all
+ *    10300   and the question arrives in the space it left
+ *
+ * (An instance with no households has nothing to count against: the host
+ * draws the card at the instrument beat.)
  */
+const countGap = 300;
+const countHold = 3200;
+const countFade = 900;
+const countOn = instrumentAt + countGap;                  /*  6200 */
+const countOff = countOn + countHold;                     /*  9400 */
+const belongAt = countOff + countFade;                    /* 10300 */
+
 export const T = {
   ...ASCENT_BASE,
   instrumentAt, tourAt,
+  countGap, countHold, countFade,
+  countOn, countOff, belongAt,
 };
 
 /* the descent's own offsets, kept as the mockup wrote them: the flight starts
@@ -127,11 +144,15 @@ export function ascentBeats() {
 
 /**
  * The launch again, landing where the newcomer lands: the same beats to the
- * millisecond, and the question arrives WITH the instrument (`belong` at
- * `instrumentAt`), whether or not there are households to list.
+ * millisecond up to the instrument, and then the count's own three.
  */
 export function newcomerAscentBeats() {
-  return [...ascentBeats(), { at: T.instrumentAt, act: "belong" }].sort(byTime);
+  return [
+    ...ascentBeats(),
+    { at: T.countOn, act: "countOn" },
+    { at: T.countOff, act: "countOff" },
+    { at: T.belongAt, act: "belong" },
+  ].sort(byTime);
 }
 
 /** The descent, as beats. */
@@ -167,16 +188,19 @@ export function ascentBeatsReduced() {
   ];
 }
 /**
- * The newcomer under reduced motion: the crossfade replaces the climb, the
- * site's own dwell still passes on the bare labelled sky, and the question
- * arrives with the instrument.
+ * The newcomer under reduced motion. The mockup's own rule: the crossfade
+ * replaces the climb, the site's own dwell still passes on the bare labelled
+ * sky, and "the count still takes its turn — it appears, holds, and yields to
+ * the question. Only the fade is dropped." Its hold is the mockup's own 1900.
  */
 export function newcomerAscentBeatsReduced() {
   const landed = 700 + T.dwell;
   return [
     { at: 0, act: "land" },
     { at: landed, act: "instrument" },
-    { at: landed, act: "belong" },
+    { at: landed, act: "countOn" },
+    { at: landed + 1900, act: "countOff" },
+    { at: landed + 1900, act: "belong" },
   ];
 }
 

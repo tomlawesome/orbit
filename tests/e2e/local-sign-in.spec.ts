@@ -349,7 +349,7 @@ test("no sign-in card sits over the arrival with no climb owed", async ({ page }
   await expect(page.locator(".nf .belong #hhname")).toBeVisible();
 });
 
-test("no sign-in card sits over the chooser", async ({ page }) => {
+test("no sign-in card sits over the chooser and the count", async ({ page }) => {
   await watchCardLayer(page);
   await signInWithoutLaunch(page);
   await page.route("**/api/workspace", (route) =>
@@ -358,6 +358,7 @@ test("no sign-in card sits over the chooser", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "where do you belong?" })).toBeVisible({ timeout: 30_000 });
   await expect(page.locator("body")).toHaveClass(/\bbelong\b/);
+  await expect(page.locator(".nf .disc")).toBeVisible();
   await expectNoCardLayer(page, "the chooser");
   await expectClickReaches(page, page.getByRole("button", { name: "Request to join Stub Harbour" }), "a system's ask to join");
   await expectClickReaches(page, page.getByRole("button", { name: "name your own system" }), "the drawer's handle");

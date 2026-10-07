@@ -3,7 +3,7 @@
   import NorthStarMark from "$lib/NorthStarMark.svelte";
   import CreateSystem from "./CreateSystem.svelte";
   import { NEWCOMER_FAR, NEWCOMER_NEAR } from "$lib/flight/starfields.js";
-  import { belongRowsOf, WAITING_APPROVAL_NOTE } from "./stage.js";
+  import { belongRowsOf, discoveredCountOf, WAITING_APPROVAL_NOTE } from "./stage.js";
   /*
    * #428's placement law, imported rather than copied: "bearings are sacred,
    * radii negotiate", and the whole thing is one pure function of (households,
@@ -20,10 +20,11 @@
    * A reader who belongs to nothing yet flies exactly the same launch as
    * everybody else and sets down HERE instead of on the dial: the #453
    * labelled sky, every household in the instance hanging as a sub-system with
-   * its label and its leader rule, and the question arriving with the
-   * instrument (#1222: the count that used to precede it is gone).
+   * its label and its leader rule, the boxless count as a MOMENT on the settled
+   * sky, and then the question in the space it left.
    *
-   * The beats are body classes (`bare`, `instrument`, `belong`) applied by the flight's own timeline, so the staging survives
+   * The three beats are body classes (`bare`, `instrument`, `counting`,
+   * `belong`) applied by the flight's own timeline, so the staging survives
    * reduced motion and can be pinned to one millisecond for a screenshot. This
    * component draws; it never decides when.
    */
@@ -47,7 +48,7 @@
   let {
     /* the labelled sky, from $lib/data/chart.js's labelledSkyOf */
     galaxy = {},
-    /* every system on the instance, as the join list reads it */
+    /* every system on the instance, as the count reads it */
     visibleHouseholds = [],
     onask = () => {},
     oncreate = () => {},
@@ -129,6 +130,7 @@
   const rows = $derived(
     belongRowsOf(Object.fromEntries((visibleHouseholds ?? []).map((household) => [household.id, household]))),
   );
+  const discovered = $derived(discoveredCountOf(visibleHouseholds));
 
   /* The household cards on the sky, as plain descriptors — the layout maths
      is unchanged, it just lands in state instead of DOM nodes so the markup
@@ -252,6 +254,16 @@
       </div>
     {/each}
   </div>
+  <!-- the count: a beat between the settled sky and the question. No box, no
+       border, no panel — the number and the words on the sky itself. Not
+       drawn on an empty instance (#1263, owner 2026-10-06): there is nothing
+       to count, and the card lands straight away instead. -->
+  {#if discovered.count > 0}
+  <div class="disc" aria-hidden="true">
+    <div class="big">{discovered.count}</div>
+    <p><b>{discovered.word}</b> discovered in this universe</p>
+  </div>
+  {/if}
   {#if showChooser}
   <div class="belong" class:drawn={drawerOpen} role="group" aria-label="Where do you belong?">
     <div class="top">

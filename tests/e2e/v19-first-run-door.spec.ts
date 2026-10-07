@@ -119,11 +119,14 @@ test("the local first run flies once and lands on the drawer, then home without 
   const handle = page.getByRole("button", { name: "name your own system" });
   await expect(handle).toHaveAttribute("aria-expanded", "true");
   await expect(page.locator(".nf .belong #hhname")).toBeVisible();
-  /* the owner's answers (2026-10-06, 2026-10-07): the card lands with the
-     sky's chrome, and no count is drawn at all */
+  /* the owner's answer (2026-10-06): an empty instance skips the count — the
+     card lands with the sky's chrome, ahead of where the count would start,
+     and no count is drawn at all */
   const order = await bodyClassOrder(page);
   expect(order).toContain("instrument");
-  expect(order).not.toContain("counting");
+  if (order.includes("counting")) {
+    expect(order.indexOf("belong"), "the card waited for the count beat").toBeLessThan(order.indexOf("counting"));
+  }
   await expect(page.locator(".nf .disc")).toHaveCount(0);
   expect(await bodyClassAdds(page, "showwarp")).toBe(1);
 
