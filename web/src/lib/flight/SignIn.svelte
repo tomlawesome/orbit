@@ -34,9 +34,9 @@
    * THE HONEST DEVIATION, stated where it happens. The mockup's flight runs
    * unbroken from this button. Pressing it in the product leaves Orbit for the
    * identity provider, so the journey is cut at the departure and nowhere
-   * else: the gate flashes over the mockup's own 420 → 900ms window, and at
-   * 900 — exactly the beat the mockup hands over to the climb — this page
-   * hands over to /api/auth/login instead. The climb itself, whole and
+   * else: the gate flashes as it does on orbit-site's door (at the press) and
+   * this page hands over to /api/auth/login at once (#1222, owner 2026-10-07:
+   * no waiting gap — it used to flash at 420 ms and leave at 900 ms). The climb itself, whole and
    * unaltered, plays on the authenticated return (see Flight.svelte and the
    * launch overlay on /home). A one-shot marker written here and consumed
    * there is what tells the landing that a genuine sign-in just happened; see
@@ -668,11 +668,8 @@
     leaving = true;
     hurryFlight();
     markLaunch();
-    const rm = reduced();
-    setTimeout(() => gate.classList.add("flash"), rm ? 0 : 420);
-    setTimeout(() => {
-      location.href = `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
-    }, rm ? 200 : 900);
+    gate.classList.add("flash");
+    location.href = `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
   }
 </script>
 
