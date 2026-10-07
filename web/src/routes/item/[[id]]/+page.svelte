@@ -723,6 +723,11 @@
   function closePreview() {
     if (!previewDoc) return;
     previewOpen = false;
+    /* #1301: the reader goes with the card. It unmounts when previewDoc
+       clears, and an `open` left true would mount the next paper's reader
+       already open. Closing it here, while it is still mounted, also lets
+       it take its own history entry back off. */
+    readerOpen = false;
     clearTimeout(previewBeatTimer);
     clearTimeout(previewLoadTimer);
     previewAbort?.abort();
@@ -1166,6 +1171,9 @@
     if (!previewDoc || pocket) return;
     const target = /** @type {Element | null} */ (event.target instanceof Element ? event.target : null);
     if (target?.closest?.(".readcard, .cardwrap, .hit, .find, .back, .orb, .account")) return;
+    /* #1301: the reader is portalled out of everything above, so its own
+       controls and its page have to be named; its backdrop stays dead space. */
+    if (target?.closest?.(".rd-panel :is(button, a, output, img), .rd-zoom")) return;
     belt?.closeDoc();
   }
 
