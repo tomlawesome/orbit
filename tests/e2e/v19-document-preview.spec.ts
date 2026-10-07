@@ -166,6 +166,33 @@ test("pressing a paper opens the preview, and Esc closes it", async ({ page }) =
   }
 });
 
+/* §18: "The page is a button. Pressing it opens the reader" -- on the desk
+   and on the phone alike (#1298: the desk's page was a plain picture, so
+   only the phone ever reached the reader). */
+test("pressing the page opens the reader over the belt, and Esc closes it", async ({ page }) => {
+  test.setTimeout(60_000);
+  await signInAsAdmin(page);
+  const { itemId, householdId } = await seedHouseholdWithItem(page);
+
+  try {
+    await uploadDocument(page, householdId, itemId, "reader-proving.pdf");
+    await page.goto(`/item/${itemId}`);
+    await expect(page.getByRole("heading", { name: "Preview proving item" })).toBeVisible();
+    await page.getByRole("button", { name: /reader-proving\.pdf/ }).first().click();
+
+    const pageButton = page.getByRole("button", { name: "Read reader-proving.pdf" });
+    await expect(pageButton).toBeEnabled({ timeout: 20_000 });
+    await pageButton.click();
+
+    const reader = page.getByRole("dialog", { name: "reader-proving.pdf, Preview proving item" });
+    await expect(reader).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(reader).toBeHidden({ timeout: 2_000 });
+  } finally {
+    await households.sweep(page);
+  }
+});
+
 test("a removed document shows its own line, honestly, and no page", async ({ page }) => {
   test.setTimeout(60_000);
   await signInAsAdmin(page);
