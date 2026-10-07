@@ -745,7 +745,31 @@ describe("scanner recovery — fail-closed scanning order", () => {
     expect(documentTransitions()).toEqual([
       expect.objectContaining({ lifecycle: "rejected", scanStatus: "infected", failureCode: "malware_detected" }),
     ]);
+    expect(mocks.validateStructure).not.toHaveBeenCalled();
     expectNoPublish();
+  });
+
+  it("rejects a clean file the renderer cannot open, after the scan and never before it (ADR-0033)", async () => {
+    armScanJob();
+    mocks.validateStructure.mockImplementation(async () => {
+      mocks.steps.push("validation.structure");
+      return false;
+    });
+
+    await runDocumentMaintenanceCycle();
+
+    expect(traceAfter("execute:claimScanJobs").slice(4, 7)).toEqual([
+      "scanner.scan",
+      "storage.discardQuarantine",
+      "validation.structure",
+    ]);
+    expect(documentTransitions()).toEqual([
+      expect.objectContaining({ lifecycle: "rejected", scanStatus: "clean", failureCode: "unsupported_structure" }),
+    ]);
+    // Not expectNoPublish(): the scan really did pass, so scanStatus is clean.
+    expect(mocks.encryptDocument).not.toHaveBeenCalled();
+    expect(mocks.writeCiphertext).not.toHaveBeenCalled();
+    expect(mocks.steps).not.toContain("insert:document_crypto");
   });
 
   it("treats a non-retryable scanner error as terminal scanner_failed, not as a retry", async () => {
