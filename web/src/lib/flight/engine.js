@@ -444,6 +444,12 @@ export function createFlight(canvas, options = {}) {
   let rnd = seededRng(FLIGHT_SEED);
   /** @type {Star[]} */
   const STARS = [];
+  /* the celestial sphere (orbit-site engine.js:430-435): the chart's ruling as
+     the sky you move through: its parallels are rings about the way ahead that
+     sweep past with the speed of the flight, its meridians the lines they cross */
+  /** @type {{ r: number, z: number }[]} */
+  const SPHERE = [];
+  const SPHERE_N = 9, MERIDIANS = 15;
   const NEB = NEB_SPEC.map((n) => ({ ...n }));
   /** @type {FlightState | null} */
   let flight = null;
@@ -480,6 +486,11 @@ export function createFlight(canvas, options = {}) {
         z: 0.28 + rnd() * 0.72, c: starColour(),
       });
     }
+  }
+  /* orbit-site engine.js:468-471 */
+  function seedSphere() {
+    SPHERE.length = 0;
+    for (let i = 0; i < SPHERE_N; i++) SPHERE.push({ r: ((i + 0.5) / SPHERE_N) * RMAX * 0.85, z: 0.14 + (i % 3) * 0.03 });
   }
   /* Running the flight backwards, stars shrink toward the vanishing point
      instead of streaming away from it — so a spent star has to be reborn at
@@ -808,6 +819,31 @@ export function createFlight(canvas, options = {}) {
       ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
     }
 
+    /* the sphere, ruled faint beneath the stars (orbit-site engine.js:834-857): its
+       rings ride the same law as the streaks, only slower, so they read as the
+       far sky */
+    if (av > 0.02 && !voyage) {
+      const lift = Math.min(1, (av - 0.02) / 0.3);
+      ctx.strokeStyle = PACK.pen; ctx.lineWidth = 1.1;
+      for (const ring of SPHERE) {
+        ring.r *= (1 + v * dt * P.K * ring.z);
+        if (ring.r > RMAX * 0.98 || ring.r < 24) { ring.r = active.rev ? RMAX * 0.9 : 24 + rnd() * 40; }
+        const a = 0.26 * lift * Math.min(1, ring.r / 260) * Math.min(1, (RMAX - ring.r) / (RMAX * 0.35));
+        if (a <= 0.004) continue;
+        ctx.globalAlpha = a;
+        ctx.beginPath(); ctx.arc(VPX, VPY, ring.r, A0 - 0.2, A1 + 0.2); ctx.stroke();
+      }
+      ctx.globalAlpha = 0.10 * lift;
+      ctx.beginPath();
+      for (let k = 0; k < MERIDIANS; k++) {
+        const a = A0 + (k + 0.5) / MERIDIANS * (A1 - A0);
+        ctx.moveTo(VPX + Math.cos(a) * 180, VPY + Math.sin(a) * 180);
+        ctx.lineTo(VPX + Math.cos(a) * RMAX, VPY + Math.sin(a) * RMAX);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
     /* stars — additive, so the dense lanes bloom where they cross */
     ctx.lineCap = "round";
     ctx.globalCompositeOperation = "lighter";
@@ -819,7 +855,10 @@ export function createFlight(canvas, options = {}) {
       if (x1 < -420 || x1 > W + 420 || y1 < -520 || y1 > H + 520) continue;
       const near = Math.min(1, st.r / RMAX);
       const al = Math.min(1, (0.10 + 0.95 * near) * (0.35 + 0.65 * st.z));
-      const r0 = st.r / (1 + v * SHUTTER * P.K * st.z);
+      /* at speed the exposure lengthens and the streak thins: the feel of pace,
+         not just its measure (orbit-site engine.js:867-870, 879) */
+      const rush = av * av;
+      const r0 = st.r / (1 + v * SHUTTER * (1 + 0.9 * rush) * P.K * st.z);
       const x0 = VPX + Math.cos(st.a) * r0, y0 = VPY + Math.sin(st.a) * r0;
       const len = Math.hypot(x1 - x0, y1 - y0);
       ctx.globalAlpha = al;
@@ -828,12 +867,24 @@ export function createFlight(canvas, options = {}) {
         ctx.beginPath(); ctx.arc(x1, y1, 0.55 + 1.15 * near * st.z, 0, 6.284); ctx.fill();
       } else {
         ctx.strokeStyle = st.c;
-        ctx.lineWidth = 0.55 + 1.9 * near * st.z;
+        ctx.lineWidth = (0.55 + 1.9 * near * st.z) * (1 - 0.32 * rush);
         ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
       }
     }
     ctx.globalCompositeOperation = "source-over";
     ctx.globalAlpha = 1;
+    /* the doppler wash (orbit-site engine.js:885-897): the sky ahead shifts cool
+       and the edges warm, rising with the square of the speed so it lives only
+       at the fastest point and is gone before the landing */
+    if (av > 0.55 && !voyage) {
+      const d = Math.pow((av - 0.55) / 0.45, 2) * 0.16;
+      const g = ctx.createRadialGradient(VPX, VPY, 0, VPX, VPY, DIAG * 0.9);
+      g.addColorStop(0, hexa("#8fb8ff", d));
+      g.addColorStop(0.42, hexa("#8fb8ff", 0));
+      g.addColorStop(0.78, hexa("#e2772b", 0));
+      g.addColorStop(1, hexa("#e2772b", d * 0.55));
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    }
 
     /* props: relative motion does not stop when the engine does — a prop that
        is still on screen when you brake keeps sailing out of frame. Reversed,
@@ -918,7 +969,7 @@ export function createFlight(canvas, options = {}) {
        the warp), so its fade in with #warp is a transition, never a cut */
     if (world3d) world3d.canvas.style.visibility = voyage ? "" : "hidden";
     const dpr = sizeCanvas();
-    setCamera(P); seedStars();
+    setCamera(P); seedStars(); seedSphere();
     for (const g of P.props) {
       g.p = P.rev ? 1 : 0;             /* reversed, the traffic starts at the edge */
       g.rad = g.ang * Math.PI / 180;
