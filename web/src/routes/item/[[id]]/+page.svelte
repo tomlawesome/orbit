@@ -921,6 +921,12 @@
   function onFind(event) {
     query = event.currentTarget.value;
     matches = matchesOf(bodies, query);
+    /* #1302: a search closes an open paper on the desk, the way dead space
+       and Esc do. With the reader out, the card and the page together fill
+       the sky to within 24px of each side, so there is no sky left for the
+       hit list beside them; and the search ends by moving the apex or
+       opening another paper, either of which closes the reader anyway. */
+    if (query.trim() && previewDoc && !pocket) belt?.closeDoc();
     belt?.setQuery(query, matches);
   }
   const hitList = $derived(
