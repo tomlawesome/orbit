@@ -45,11 +45,14 @@ describe("the card is centred on the belt (#1247)", () => {
     /* .cardwrap on its own and .lanes .cardwrap (#1088) — both hang the card. */
     expect(rules.length).toBeGreaterThanOrEqual(2);
     for (const { selector, body } of rules) {
-      expect(body, selector).toMatch(/calc\(-50% \+ var\(--cdy\)\)/);
+      /* by its middle (-50%), but never up into the top strip (#1302): the
+         lift is -50% clamped by the strip, checked below */
+      expect(body, selector).toMatch(/calc\(var\(--belt-card-lift\) \+ var\(--cdy\)\)/);
       expect(body, selector).not.toMatch(/-34%/);
     }
     const base = rules.find(({ selector }) => /^\.belt-page \.cardwrap$/.test(selector));
     expect(base?.body).toMatch(/transform-origin:50% 50%/);
+    expect(CSS.replace(/\s+/g, "")).toMatch(/\.belt-page\.cardwrap\{--belt-card-lift:max\(-50%,/);
   });
 
   it("keeps the porting sheet in step, so the fidelity gate compares like with like", () => {
