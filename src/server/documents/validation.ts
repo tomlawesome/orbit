@@ -43,8 +43,12 @@ export const PDF_STRUCTURE_PARSER_OPTIONS = Object.freeze({
   verbosity: VerbosityLevel.ERRORS,
 }) as Readonly<PdfStructureParserOptions>;
 const unsafePdfFeatures = new Set([
+  // /EF is the only way a file specification embeds a file; /Type /Filespec and
+  // /Type /EmbeddedFile are optional, so an attachment can carry neither.
+  "EF",
   "EmbeddedFile",
   "EmbeddedFiles",
+  "FileAttachment",
   "Filespec",
   "JavaScript",
   "JS",

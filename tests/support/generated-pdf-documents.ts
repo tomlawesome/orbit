@@ -347,6 +347,10 @@ export const syntheticModernPdfHiddenFeatures: ReadonlyArray<{ name: string; opt
   { name: "XFA form", options: { catalog: "/AcroForm << /Fields [] /XFA 6 0 R >>", streams: { 6: ["", text("<xdp:xdp xmlns:xdp=\"http://ns.adobe.com/xdp/\"><template/></xdp:xdp>")] } } },
   { name: "embedded file", options: { catalog: "/Names << /EmbeddedFiles 6 0 R >>", packed: { 6: "<< /Names [(payload.bin) 7 0 R] >>", 7: "<< /Type /Filespec /F (payload.bin) /EF << /F 8 0 R >> >>" }, streams: { 8: ["", text("payload")] } } },
   {
+    name: "embedded file on a file attachment with no /Type names",
+    options: { page: "/Annots [6 0 R]", packed: { 6: "<< /Subtype /FileAttachment /Rect [0 0 9 9] /FS << /F (payload.bin) /EF << /F 8 0 R >> >> >>" }, streams: { 8: ["", text("payload")] } },
+  },
+  {
     name: "launch in an untyped object stream with an escaped filter name",
     options: { catalog: "/OpenAction 6 0 R", packed: { 6: launchAction }, objectStreamDictionary: "/Fil#74er /FlateDecode" },
   },

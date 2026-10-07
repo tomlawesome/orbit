@@ -158,6 +158,7 @@ describe("structural document classification", () => {
     "/Names << /EmbeddedFiles << /Names [(payload.bin) 6 0 R] >> >>",
     "/RichMedia 6 0 R",
     "/XFA 6 0 R",
+    "/AF [<< /F (data.xml) /EF << /F 5 0 R >> >>]",
   ])("classifies parsed prohibited catalog feature %s as prohibited_content", async (feature) => {
     await expect(classifyDocumentStructure(syntheticPdfWithCatalogFeature(feature), "application/pdf"))
       .resolves.toBe("prohibited_content");
