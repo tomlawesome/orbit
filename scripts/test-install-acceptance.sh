@@ -137,10 +137,14 @@ while [[ "$orbit_port" == "$registry_port" ]]; do
   orbit_port="$(free_port)"
 done
 repository="acceptance/orbit"
-# tests/oidc's own fixed issuer, as compose/docker-compose.acceptance.yml and
-# scripts/test-e2e-local.sh use it; orbit-oidc resolves only inside the
-# engine run, through the host entry the docker shim adds.
-issuer="https://orbit-oidc:4443/"
+# The tests/oidc sidecar, under the dotted alias its certificate also names:
+# the configuration contract (src/lib/config-contract.ts) accepts only a
+# dotted issuer host, so the bare orbit-oidc that compose/docker-compose.
+# acceptance.yml and scripts/test-e2e-local.sh use (they never run configure
+# on it) would be refused. It resolves only inside the engine run, through
+# the host entry the docker shim adds.
+oidc_host="orbit-oidc.invalid"
+issuer="https://${oidc_host}:4443/"
 oidc_container="${project_name}-oidc"
 oidc_image=""
 # The target directory is named after this run's project so debris is
@@ -455,7 +459,7 @@ negative_scenarios() {
 # --- the identity provider, and the shims --------------------------------
 
 # This run's own disposable provider: the tests/oidc sidecar, issuing as
-# https://orbit-oidc:4443/ on the default bridge network, where the install
+# $issuer on the default bridge network, where the install
 # engine's one-off also runs. Its certificate is generated at start, so it is
 # taken from the running service over a loopback port published only for
 # that, and the engine is told to trust it -- verification is never turned
@@ -489,8 +493,8 @@ start_oidc() {
   done
   chmod 644 "$workdir/oidc-ca.pem"
   /usr/bin/curl --fail --silent --show-error --cacert "$workdir/oidc-ca.pem" \
-    --resolve "orbit-oidc:${host_port}:127.0.0.1" \
-    "https://orbit-oidc:${host_port}/.well-known/openid-configuration" > "$workdir/oidc-discovery.json" ||
+    --resolve "${oidc_host}:${host_port}:127.0.0.1" \
+    "https://${oidc_host}:${host_port}/.well-known/openid-configuration" > "$workdir/oidc-discovery.json" ||
     fail "the OIDC sidecar did not serve a discovery document"
   grep -qF "\"issuer\":\"$issuer\"" "$workdir/oidc-discovery.json" ||
     fail "the OIDC sidecar's discovery document does not name $issuer"
@@ -520,13 +524,13 @@ SHIM
 # Everything reaches the real docker unchanged (#616: this shim can never be
 # more permissive than the tool it stands in front of), except the one install
 # engine run, which also gets what a test provider needs: the host entry for
-# orbit-oidc and the sidecar's CA, as test-e2e-local.sh hands them to its own
+# the provider and the sidecar's CA, as test-e2e-local.sh hands them to its own
 # containers. While the interruption scenario is armed it also gets the
 # engine's kill point (ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE). Production
 # install.sh passes none of these.
 set -Eeuo pipefail
 if [[ "\${1:-}" == "run" && " \$* " == *" /opt/orbit/cli/orbit.js install "* ]]; then
-  extra=(--add-host "orbit-oidc:${oidc_address}"
+  extra=(--add-host "${oidc_host}:${oidc_address}"
     -v "$workdir/oidc-ca.pem:/orbit-test-oidc-ca.pem:ro"
     -e NODE_EXTRA_CA_CERTS=/orbit-test-oidc-ca.pem)
   if [[ -e "$workdir/interrupt.armed" ]]; then
