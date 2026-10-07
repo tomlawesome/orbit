@@ -115,7 +115,7 @@
         margin-top:calc(0px - var(--door-glyph-inset))}
   #dusk .farewell .said{position:absolute;left:50%;top:calc(0px - var(--door-ring) / 2);
         transform:translate(-50%,-50%);width:236px;
-        font:600 22px/1.2 var(--display);letter-spacing:.005em;color:#e9edf8}
+        font:600 22px/1.2 var(--display);letter-spacing:.005em;background:linear-gradient(180deg,#fdfbf7 12%,#f2e7d3 60%,#dcbd80 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 11px rgba(255,206,140,.2))}
   #dusk .farewell .sub{margin:26px 0 0;
         font-size:var(--p-type-meta);line-height:1.7;letter-spacing:.04em;color:#9aa0b8;
         text-shadow:0 1px 5px rgba(4,6,14,.9)}
@@ -150,14 +150,15 @@
   .ringcard .bigring .ringglass{display:none}
   .ringcard .bigring .ringstroke,.ringcard .bigring .pocketstroke,
   .ringcard .bigring .ringorbit{width:100%;height:100%}
-  .ringcard .bigring .pocketstroke{display:block;border-radius:50%;border:4.2px solid #8791b3;
+  .ringcard .bigring .pocketstroke{display:block;border-radius:50%;--stroke:3.4px;
+        filter:drop-shadow(0 0 4px rgba(234,210,164,.16));
         position:relative;z-index:1}
-  .ringcard .bigring .ringstroke,.ringcard .bigring .pocketstroke{transition:border-width .5s ease}
+  .ringcard .bigring .ringstroke,.ringcard .bigring .pocketstroke{transition:--stroke .5s ease}
   .ringcard .bigring .ringorbit i{transition:width .5s ease,height .5s ease,margin .5s ease}
   /* the claim card has no heading, and an empty ring is a hole: the ring
      keeps the word (round 1) */
   .ringcard .bigring .ringword{display:block;position:relative;z-index:1;
-        font:600 72px var(--display);letter-spacing:.015em;line-height:1;color:#e9edf8;
+        font:600 72px var(--display);letter-spacing:.01em;line-height:1;background:linear-gradient(180deg,#fdfbf7 12%,#f2e7d3 60%,#dcbd80 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 18.9px rgba(255,206,140,.2));
         transition:font-size .5s ease}
 
   .ringcard #formlayer{position:relative;inset:auto;z-index:4;flex:none;
@@ -171,7 +172,7 @@
   .ringcard #formlayer .card .ask{position:absolute;left:50%;
         top:calc(0px - var(--door-gap) - var(--door-ring) / 2);transform:translate(-50%,-50%);
         width:236px;height:auto;margin:0;padding:0;overflow:visible;clip:auto;white-space:normal;
-        font:600 22px/1.2 var(--display);letter-spacing:.005em;color:#e9edf8;text-align:center;
+        font:600 22px/1.2 var(--display);letter-spacing:.005em;background:linear-gradient(180deg,#fdfbf7 12%,#f2e7d3 60%,#dcbd80 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 11px rgba(255,206,140,.2));text-align:center;
         transition:top .5s cubic-bezier(.55,0,.2,1),font-size .5s ease,width .5s ease}
 
   /* THE FIELDS: full width in the column, 48px, 16px so iOS never zooms,
@@ -246,7 +247,7 @@
   @media (height < 760px){
     :where(body.showform:not(.launching)) .ringcard{--door-ring:240px}
     :where(body.showform:not(.launching)) .ringcard .bigring .ringstroke,
-    :where(body.showform:not(.launching)) .ringcard .bigring .pocketstroke{border-width:3.4px}
+    :where(body.showform:not(.launching)) .ringcard .bigring .pocketstroke{--stroke:2.7px}
     :where(body.showform:not(.launching)) .ringcard .bigring .ringorbit i{
           width:23.4px;height:23.4px;margin:-11.7px 0 0 -11.7px}
     :where(body.showform:not(.launching)) .ringcard #formlayer .card .ask{width:200px;font-size:20px}
@@ -270,7 +271,7 @@
           margin-top:clamp(calc(env(safe-area-inset-top, 0px) + 28px),
                            calc(40dvh - 151.2px),
                            calc(env(safe-area-inset-top, 0px) + 200px))}
-    .ringcard .bigring .ringstroke,.ringcard .bigring .pocketstroke{border-width:4.2px}
+    .ringcard .bigring .ringstroke,.ringcard .bigring .pocketstroke{--stroke:3.4px}
     .ringcard .bigring .ringorbit i{width:29.4px;height:29.4px;margin:-14.7px 0 0 -14.7px}
     .ringcard #formlayer .card .ask{top:calc(0px - var(--door-gap) - 151.2px);width:236px;font-size:22px}
   }
@@ -283,12 +284,12 @@
   body.typing .ringcard .bigring{width:96px;height:96px;
         margin-top:calc(env(safe-area-inset-top, 0px) + 12px)}
   body.typing .ringcard .bigring .ringstroke,
-  body.typing .ringcard .bigring .pocketstroke{border-width:1.5px}
+  body.typing .ringcard .bigring .pocketstroke{--stroke:1.5px}
   body.typing .ringcard .bigring .ringorbit i{width:9.4px;height:9.4px;margin:-4.7px 0 0 -4.7px}
-  body.typing .ringcard .bigring .ringword{font-size:22px}
+  body.typing .ringcard .bigring .ringword{font-size:22px;filter:drop-shadow(0 0 4px rgba(255,206,140,.2))}
   body.typing .ringcard #formlayer{margin-top:46px}
   body.typing .ringcard #formlayer .card .ask{top:-34px;transform:translate(-50%,0);
-        font-size:15px;width:100%}
+        font-size:15px;width:100%;filter:drop-shadow(0 0 4px rgba(255,206,140,.2))}
   body.typing .ringcard #formlayer .card .field{margin-bottom:10px}
   body.typing .ringcard #formlayer .card .act{margin-top:14px}
 }

@@ -88,6 +88,10 @@ body.lit .rays{opacity:1;transform:scale(1,1)}
    it, and the crisp rim gives way once the picture carries the limb */
 #dawn .earth image{opacity:0;transition:opacity 1.2s ease}
 #dawn .earth image.in{opacity:1}
+#dusk .earth image{opacity:0;transition:opacity 1.2s ease}
+#dusk .earth image.in{opacity:1}
+#dusk .crisp{transition:opacity 1s ease}
+#dusk .world.earthy .crisp{opacity:0}
 #dawn .earth .up.in{opacity:0;transition:opacity 2.3s cubic-bezier(.4,0,.3,1) .2s}
 body.lit #dawn .earth .up.in{opacity:1}
 #dawn .world.earthy .rim{opacity:0}
@@ -137,8 +141,11 @@ body.lit #dawn .earth .up.in{opacity:1}
 .loginchrome .lockup .glyph .tr{animation:spinback 40s linear infinite;
         transform-origin:100px 100px}
 @keyframes spinback{to{transform:rotate(360deg)}}
+/* the gold world keeps upright as its group turns: the same turn the other way
+   round its own centre (the site's rich finish, #1253) */
+.loginchrome .lockup .glyph .world{transform-origin:163px 63.5px;animation:spinback 40s linear infinite reverse}
 .loginchrome .lockup .name{grid-area:1/1;font:600 72px var(--display);
-        letter-spacing:.015em;line-height:1;color:#e9edf8}
+        letter-spacing:.01em;line-height:1;background:linear-gradient(180deg,#fdfbf7 12%,#f2e7d3 60%,#dcbd80 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 18.9px rgba(255,206,140,.2))}
 /* Dropped clear of the word inside the ring: 36px is half the name's line
    box, 20px the gap, 18px half the button. The offset lives on the wrapper
    and the entrance on .gate, so two transforms never fight over one element. */
@@ -321,7 +328,7 @@ body.holding #flightmark.on circle:first-child{animation:holding 1.1s ease-in-ou
 #flightmark.collapse{opacity:0;transform:scale(.05);
             transition:opacity .55s ease .1s,transform .7s cubic-bezier(.6,0,.9,.4)}
 #flightmark svg{width:100%;height:100%;display:block}
-#flightmark .core{fill:#fff6e6}
+#flightmark .core{fill:#fff6e6;display:none}
 /* the household's name written on the void, once, at the top of the climb */
 #launchname{position:fixed;left:0;right:0;top:26%;z-index:7;text-align:center;
             pointer-events:none;opacity:0;transition:opacity .55s ease;
@@ -334,9 +341,8 @@ body.holding #flightmark.on circle:first-child{animation:holding 1.1s ease-in-ou
 /* ══ THE DUSK GOODBYE (where the descent lands, and what /logout means) ══
    §15, owner 2026-08-17: the descent is the default logout, re-confirmed, and
    the old /logout sunset retires into it. */
-/* the login's ink exactly — the approved goodbye wore the same lockup as the
-   approved sign-in, and the descent's mark sets down on it (2026-08-17) */
-#dusk .lockup .name{color:#e9edf8}
+/* the word is the login's, gold-lit (.loginchrome .lockup .name) — the approved
+   goodbye wore the same lockup as the approved sign-in (2026-08-17) */
 /* THE SAME BUTTON, not a lookalike: the .gate rule above, one word changed.
    Only the ENTRANCE differs — on the login the pill arrives with first light,
    here it arrives with the farewell. */
@@ -371,6 +377,14 @@ body.farewell #dusk .farewell{opacity:1;transform:none}
    Venus breathes on the zodiacal cone's own period, and an ember shimmer
    travels the limb the other way round. */
 #dusk .lockup .glyph .tr{animation:spinforth 40s linear infinite}
+#dusk .lockup .glyph .world{animation:spinforth 40s linear infinite reverse}
+/* the glyph's planet (with its wake) is not on the screen while the flight
+   draws its own: the dawn's while the climb launches, the dusk's until the
+   farewell has set down (#1253) */
+.loginchrome .lockup .glyph .tr{transition:opacity .3s ease}
+body.launching #dawn .lockup .glyph .tr{opacity:0}
+#dusk .lockup .glyph .tr{transition:opacity .4s ease}
+body.showdusk:not(.farewell) #dusk .lockup .glyph .tr{opacity:0}
 @keyframes spinforth{to{transform:rotate(-360deg)}}
 #dusk .afterglow{animation:breathe-ember 12s ease-in-out infinite alternate}
 @keyframes breathe-ember{from{opacity:.85}to{opacity:1}}
@@ -409,9 +423,10 @@ body.pinned #launchname,body.pinned .loginchrome,body.pinned .gate{
   .dawnlayer,.rim,#dawn .shimmer,.sunpt,.rays,.gate{
     opacity:1!important;transform:none!important;transition:none}
   /* the Earth arrives at once; the crisp rim still gives way to it */
-  #dawn .earth image{transition:none!important}
-  #dawn .earth image.in{opacity:1!important}
+  #dawn .earth image,#dusk .earth image{transition:none!important}
+  #dawn .earth image.in,#dusk .earth image.in{opacity:1!important}
   #dawn .world.earthy .rim{opacity:0!important}
+  #dusk .world.earthy .crisp{opacity:0!important;transition:none!important}
   /* The held-dawn dimming above is motion-adjacent mood, not the state's
      accessible channel — that is the text and the button's presence, both
      unaffected by this block — so reduced motion keeps the sky at rest
