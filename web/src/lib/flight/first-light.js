@@ -32,6 +32,9 @@ export const MAX_LAPS = 7;
 /** The hard stop: the door lights this long after the wait began. */
 export const BACKSTOP_MS = 13000;
 
+/** The longest the ring runs on for the flight's shaders (the site's 9 s). */
+export const COMPILE_CAP_MS = 9000;
+
 /** The longest the pieces are waited for when the runner has no motion. */
 export const STILL_WAIT_MS = 8000;
 
@@ -93,9 +96,12 @@ export function earthSettled(world) {
  * @param {() => void} o.loading the pieces are not all here: shows the runner (`body.loading`)
  * @param {() => boolean} o.animated whether the runner has motion; asked after `loading` has run
  * @param {() => void} o.light first light
+ * @param {(() => Promise<unknown>) | null} [o.compile] where shaders would stop the page: asked for once the
+ *   pieces are here and the ring is running (two frames on), and waited for (at most COMPILE_CAP_MS) before
+ *   first light; the caller also owes at least one lap (minLaps) so the ring is there to hide the pause
  * @returns {() => void} stops everything still pending
  */
-export function startFirstLight({ critical, runner, minLaps, loading, animated, light }) {
+export function startFirstLight({ critical, runner, minLaps, loading, animated, light, compile = null }) {
   let here = false;
   let lit = false;
   let stopped = false;
@@ -113,11 +119,30 @@ export function startFirstLight({ critical, runner, minLaps, loading, animated, 
     laps++;
     if ((here && laps >= minLaps) || laps >= MAX_LAPS) go();
   };
-  critical.then(() => { here = true; }, () => { here = true; });
+  /* the shaders' compile, once the pieces are here AND the ring is up and
+     running (two frames on): the pause is spent behind the ring, never before
+     it is seen. Until it is done the pieces are not "here" for the lap. */
+  let pieces = false;
+  let ringUp = false;
+  let compiling = false;
+  const compileBehind = () => {
+    if (!compile || compiling || !pieces || !ringUp || stopped) return;
+    compiling = true;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (stopped) return;
+      let started;
+      try { started = compile(); } catch { started = undefined; }
+      within(started, COMPILE_CAP_MS).then(() => { here = true; });
+    }));
+  };
+  const arrived = () => { pieces = true; if (compile) compileBehind(); else here = true; };
+  critical.then(arrived, arrived);
   within(critical, GRACE_MS).then(() => {
     if (stopped) return;
     if (here && !minLaps) { go(); return; }
     loading();
+    ringUp = true;
+    compileBehind();
     runner?.addEventListener("animationiteration", lap);
     /* without the runner's motion there are no laps: just the pieces */
     if (!runner || !animated()) within(critical, STILL_WAIT_MS).then(go);

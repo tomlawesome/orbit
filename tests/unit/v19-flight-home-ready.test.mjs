@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 function stubPage({ parallel = true, saveData = false, reduced = false, animations = [] } = {}) {
   const gpu = vi.fn(() => ({ parallel }));
   const warm = vi.fn(() => Promise.resolve());
-  const voyageOnce = vi.fn(() => ({ warm }));
+  const voyageOnce = vi.fn(() => ({ warm, made: Promise.resolve(true) }));
   const fetchVoyage = vi.fn();
   const fetchOnce = vi.fn(() => Promise.resolve());
   const hurryChores = vi.fn();
@@ -87,14 +87,15 @@ describe("home readies the flight's world once it has arrived (#1299)", () => {
     expect(page.gpu).not.toHaveBeenCalled();
   });
 
-  it("makes no world where compiling would stop the page (no parallel compile), as the door does", async () => {
+  it("makes the world on a browser that compiles on the page's own thread too, as orbit-site does (owner, #1299)", async () => {
     const page = stubPage({ parallel: false });
     const { readyFlightAtLeisure } = await import("$lib/flight/warm.js");
     readyFlightAtLeisure();
     await vi.advanceTimersByTimeAsync(4100);
     await settle();
     expect(page.gpu).toHaveBeenCalledOnce();
-    expect(page.voyageOnce).not.toHaveBeenCalled();
+    expect(page.voyageOnce).toHaveBeenCalledOnce();
+    expect(page.warm).toHaveBeenCalledWith({ prove: false });
   });
 
   it.each([["save-data", { saveData: true }], ["reduced motion", { reduced: true }]])("asks nothing under %s", async (_name, how) => {
@@ -123,5 +124,71 @@ describe("home asks for it (#1299)", () => {
   it("on mount, except on a launch, whose climb readies its own world; and stops if home is left", () => {
     expect(HOME).toMatch(/import \{ readyFlightAtLeisure \} from "\$lib\/flight\/warm\.js";/u);
     expect(HOME).toMatch(/onMount\(\(\) => \(launching \? undefined : readyFlightAtLeisure\(\)\)\);/u);
+  });
+});
+
+describe("a gentle ask that was refused a world does not shut out a later ask that may make it (#1299)", () => {
+  it("the flight's own ask makes the world after a plain gentle ask was refused on a no-parallel browser", async () => {
+    const page = stubPage({ parallel: false });
+    const { readyFlight } = await import("$lib/flight/warm.js");
+    await readyFlight({ gentle: true, prove: false });
+    expect(page.voyageOnce).not.toHaveBeenCalled();
+    await readyFlight({ hurry: true });
+    expect(page.voyageOnce).toHaveBeenCalledOnce();
+    expect(page.warm).toHaveBeenCalledWith({ prove: true });
+    expect(page.gpu).toHaveBeenCalledOnce();
+  });
+
+  it("holds when both asks are made before the GPU verdict is in", async () => {
+    const page = stubPage({ parallel: false });
+    const { readyFlight } = await import("$lib/flight/warm.js");
+    const gentle = readyFlight({ gentle: true });
+    const flight = readyFlight({ hurry: true });
+    await Promise.all([gentle, flight]);
+    expect(page.voyageOnce).toHaveBeenCalledOnce();
+  });
+
+  it("makes the world once however many asks may make it, and runs the test frames once when a later ask wants them", async () => {
+    const page = stubPage({ parallel: true });
+    const { readyFlight } = await import("$lib/flight/warm.js");
+    await readyFlight({ gentle: true, prove: false });
+    await readyFlight({ hurry: true, gentle: true });
+    await readyFlight({ hurry: true });
+    expect(page.voyageOnce).toHaveBeenCalledOnce();
+    expect(page.warm.mock.calls.map((c) => c[0].prove)).toEqual([false, true]);
+  });
+
+  it("a gentle ask under save-data still leaves the later flight ask free to make it", async () => {
+    const page = stubPage({ parallel: false, saveData: true });
+    const { readyFlight } = await import("$lib/flight/warm.js");
+    await readyFlight({ gentle: true });
+    await readyFlight({ hurry: true });
+    expect(page.voyageOnce).toHaveBeenCalledOnce();
+  });
+});
+
+describe("the door compiles behind its ring where the browser would stop the page (#1299)", () => {
+  it("knows to only where the GPU is usable, the compile is on the page's thread, and the reader asked for neither save-data nor reduced motion", async () => {
+    const check = async (how) => { vi.resetModules(); stubPage(how); return (await import("$lib/flight/warm.js")).compileStopsPage(); };
+    expect(await check({ parallel: false })).toBe(true);
+    expect(await check({ parallel: true })).toBe(false);
+    expect(await check({ parallel: false, saveData: true })).toBe(false);
+    expect(await check({ parallel: false, reduced: true })).toBe(false);
+  });
+
+  it("compileFlightNow makes the world hurried, without test frames, and resolves once its shaders are made", async () => {
+    const page = stubPage({ parallel: false });
+    const { compileFlightNow } = await import("$lib/flight/warm.js");
+    await compileFlightNow();
+    expect(page.voyageOnce).toHaveBeenCalledOnce();
+    expect(page.warm).toHaveBeenCalledWith({ prove: false });
+    expect(page.hurryChores).toHaveBeenCalledWith("flight");
+  });
+
+  it("SignIn holds first light's ring for it", () => {
+    const door = readFileSync(resolve(import.meta.dirname, "../../web/src/lib/flight/SignIn.svelte"), "utf8");
+    expect(door).toMatch(/const behindRing = compileStopsPage\(\);/u);
+    expect(door).toMatch(/compile: behindRing \? compileFlightNow : null,/u);
+    expect(door).toMatch(/isFirstVisit\(localStorage\) \|\| behindRing \? 1 : 0/u);
   });
 });
