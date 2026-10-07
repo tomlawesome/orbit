@@ -226,8 +226,8 @@ foundation, not a deferred enhancement.
 
 - Manual upload from desktop and mobile file pickers, including camera capture
   where the platform supports it.
-- A replaceable storage interface with local volume storage as a possible
-  default and S3-compatible object storage as an optional backend.
+- A replaceable storage interface with local volume storage as the backend.
+  S3-compatible object storage was dropped (owner, 2026-10-07).
 - Database metadata for content hash, original name, media type, size, owner,
   household, item, storage key, scan state, and retention state.
 - Authenticated streaming download without public storage URLs.

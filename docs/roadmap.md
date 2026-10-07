@@ -118,7 +118,7 @@ closed.
 | RM-046 | Orphan cleanup and storage reconciliation | ORB-FUT-003 | v1.0 | delivered | #42 |
 | RM-047 | Document events recorded in the household audit history | ORB-FUT-003 | unscheduled | partial | events reach the instance audit log; only administrators read it; download auditing unconfirmed |
 | RM-048 | Optional Apache Tika parser, bounded, OCR off, on an internal network | ORB-FUT-003 | v1.1 | delivered | 1cb5917b |
-| RM-049 | Optional S3-compatible object storage | ORB-FUT-003 | unscheduled | not started | only local storage exists; no issue |
+| RM-049 | Optional S3-compatible object storage | ORB-FUT-003 | unscheduled | dropped | owner 2026-10-07: no S3 storage; local storage only (the charter already lists it as a non-goal) |
 | RM-050 | Upload from a phone's file picker or camera | ORB-FUT-003; ORB-FUT-007 | v1.0 | partial | picker accepts PDF and images; no capture setting |
 | RM-051 | Mobile capture with preview, rotate, remove, retry and progress that survives bad connectivity | ORB-FUT-007 | unscheduled | not started | no issue |
 | RM-052 | Open a document's preview and a reader with page turning over the belt | owner-decisions §18; decision #1059 | M14 | partial | #1059; reader shows page 1 only (#1300); desk press fails (#1298) |
@@ -146,7 +146,7 @@ closed.
 | RM-064 | Mail is tied to a user by envelope recipient and a signed alias, never the From line; unmatched mail is held for association | charter V1-DOC-03; ORB-FUT-001 | v1.0 | partial | #57; unmatched mail is deleted, not held |
 | RM-065 | Receipts are idempotent and bad messages reach a visible failed state after bounded retries | ORB-FUT-001 | v1.0 | delivered | #57, #58 |
 | RM-066 | Mailbox files are PDF only and bounded; unreviewed drafts expire after 45 days | ORB-FUT-001; site: "The relay" | v1.0 | delivered | #58, #964 |
-| RM-067 | Your mail stays in your mailbox; Orbit only reads copies | ORB-FUT-001; site: "The relay" | v1.0 | partial | accepted mail is kept, never labelled; mail for unknown recipients is expunged |
+| RM-067 | Your mail stays in your mailbox; Orbit only reads copies | ORB-FUT-001; site: "The relay" | v1.0 | delivered | the sender's originals stay in their own mailbox and Orbit reads copies; mail to an unknown relay address is deleted by design (owner 2026-10-07) |
 | RM-068 | Possible duplicates raise a comparison with create-separate or attach-without-changing, and never merge on their own | ORB-FUT-001; charter non-goals | unscheduled | not started | no ranking, comparison screen or attach path; no issue |
 | RM-069 | The administrator sets outbound SMTP: host, port, TLS, own credentials, sender name, From, reply-to, with a connection and delivery test | ORB-FUT-001 | v1.0 | partial | #60; set by file or environment, connection test only, no sender name or reply-to |
 | RM-070 | Orbit emails ingestion receipts, review prompts, duplicate warnings and reminders | ORB-FUT-001 | v1.0 | partial | receipts, review prompts and reminders work; no duplicate warning |
@@ -174,7 +174,7 @@ closed.
 | RM-082 | Install without secrets in Git, environment output, logs or process arguments | charter V1-OPS-01 | v1.0 | delivered | #180 |
 | RM-083 | Health and administrator views separate configuration, dependency, provider, queue and storage failures without leaking secrets | charter V1-OPS-02 | v1.0 | delivered | #95 |
 | RM-084 | Backup and restore keep the database and encrypted documents, detect corruption and a wrong key, and say the recovery key is separate | charter V1-OPS-04 | v1.0 | partial | #28, b8859295; the backup CLI never run against a real stack (#1199, #1211) |
-| RM-085 | Backups run on a schedule | charter quality attributes | unscheduled | not started | docs tell the operator to schedule backup.sh; no scheduler |
+| RM-085 | Backups run on a schedule | charter quality attributes | unscheduled | dropped | owner 2026-10-07: operators run their own backups; the docs tell them to schedule backup.sh |
 | RM-086 | Real restore exercises | charter quality attributes | M16 | partial | CI drill only; no operator drill (#1273) |
 | RM-087 | Deterministic update and rollback guidance | charter quality attributes | unscheduled | partial | orbit check --rollback exists; no standalone rollback guide |
 | RM-088 | Three containers on PostgreSQL 18, optional parser, scanner and model | charter supported deployment; site: "The system" | M5 | delivered | #686; the site still says PostgreSQL 17 |
@@ -240,11 +240,10 @@ closed.
 - RM-036 provider contact details (ORB-FUT-009): deferred, no issue.
 - RM-037 and RM-038 summary and AI-proposed notes (ORB-FUT-010): deferred, no issue.
 - RM-047 document events visible in the household's own history: no issue.
-- RM-049 S3-compatible storage (ORB-FUT-003): no issue.
 - RM-051 enhanced mobile capture (ORB-FUT-007): post-v1, no issue.
 - RM-063 OAuth2 mail-in for Outlook and Gmail (owner-decisions §7): no issue.
 - RM-068 duplicate comparison (ORB-FUT-001): the register calls mail-in required for v1, yet this part has no issue.
-- RM-085 scheduled backups, RM-087 rollback guide: no issue.
+- RM-087 rollback guide: no issue.
 - RM-095 provider test actions, RM-097 audit filter (ORB-FUT-004): no issue.
 - RM-108 human-readable export and per-document hash manifest (ORB-FUT-006): no issue.
 
@@ -257,8 +256,7 @@ closed.
 - "The sky's weather = your workload": nothing maps workload to the weather (RM-030).
 - "A history for everything": no screen lists an item's history (RM-022).
 - "Recolour your own sections": colour follows the chosen mark (RM-026).
-- "Three text sizes": the setting has no effect (RM-027).
-- "Originals stay in your mailbox": mail for unknown recipients is deleted (RM-067).
+- "Three text sizes": the setting has no effect (RM-027); scheduled for v0.4 (#1180).
 
 ### Delivered but nobody promised, which the site might claim
 
@@ -271,6 +269,7 @@ closed.
 - Requests to join a household, seen from the empty sky (#453).
 - Sent-reminder history in settings (#1003).
 - Maintenance notices with a public status page (#526).
+- Mail sent to an unknown relay address is deleted, not kept (owner 2026-10-07: a feature).
 
 ### Promises that still stand but are out of date
 
