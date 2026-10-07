@@ -161,6 +161,12 @@ group token or a second project token were not adopted.
   #1151 (audit, a Fable session), #1152 (`dev` to `preview`), #1153
   (acceptance), #1154 (signed-release trial) -- then #885 (promote to
   `main`). Each promotion merge still needs the owner's go-ahead.
+- Every feature and every fix is built for both the desk and the phone
+  (pocket) layouts, or the issue says why one is left out. Before closing an
+  issue, check both: the code for each layout, and a browser test on a
+  desktop and a mobile project. Halves kept going missing -- the reader was
+  built for the phone only (#1059, #1298), the quick-add drop box for
+  neither (#1243) (owner, 2026-10-07).
 - `main` stays at the retracted v1.2.0 until v0.3.0 ships, and is expected
   to be far behind. A Renovate-flagged stale pin on `main` is not work: check
   `dev` first; if `dev` is already fixed it clears when v0.3.0 ships.
