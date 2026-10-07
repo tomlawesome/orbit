@@ -46,6 +46,8 @@ body.showdusk #dusk{opacity:1}
 #dawn .sky svg,#dusk .sky svg,#dawn .world svg,#dusk .world svg{
     position:absolute;inset:0;width:100%;height:100%}
 #dawn .world,#dusk .world{position:absolute;inset:0}
+/* the dusk's gradients, kept in a drawing of their own with no size (#1299) */
+#dusk .world svg.defs{width:0;height:0}
 /* Mobile-Safari squeeze (#503): the far/near star groups were the OTHER
    candidate for will-change:transform below — they too run a `transform`
    forever (360s/180s linear, never settling). Tried and measured against the
@@ -59,7 +61,17 @@ body.showdusk #dusk{opacity:1}
    so it stays off: the two rows below are exactly HEAD's, unpromoted. The
    sway rasters (#502) took the same measurement and came back clean (0 px),
    which is the one difference: a still picture rotating loses nothing to
-   layer promotion; many 1-2px circles repainted at a new layer boundary do. */
+   layer promotion; many 1-2px circles repainted at a new layer boundary do.
+   THE DUSK'S SKY IS LAID OUT DIFFERENTLY SINCE #1299 (orbit-site's sky.js and
+   site.css:133-144): each drift and each twinkle moves a whole <svg> of its
+   own, so the browser slides or fades a layer instead of repainting every
+   star of one shared picture on every frame, which on Firefox was the
+   descent's lag. Still no will-change: a running animation is its own layer
+   anyway, and a frame held still is drawn exactly as before. The layers
+   drift a measured tile (--tile, Dusk.svelte) and show what lies past their
+   own box, so the sky clips them where each svg used to clip itself. */
+#dusk .sky{overflow:hidden}
+#dusk .sky svg{overflow:visible}
 /* the approach is POL-11's ordinary drift, at the flight's own periods, so it
    names $lib/atmosphere.css's driftf/driftn rather than a seventh copy (#445) */
 #dawn .sky .far{animation:driftf 360s linear infinite}
@@ -69,9 +81,12 @@ body.showdusk #dusk{opacity:1}
    genuinely not POL-11's, so it is the one that keeps its own keyframes. */
 #dusk .sky .far{animation:recede 360s linear infinite}
 #dusk .sky .near{animation:recede 180s linear infinite}
-@keyframes recede{from{transform:translateX(-1600px)}to{transform:translateX(0)}}
-/* the shared twinkle curve's default range IS this pair (atmosphere.css) */
-#dawn .sky .tw,#dusk .sky .tw{animation:twinkle 4.5s ease-in-out infinite alternate}
+@keyframes recede{from{transform:translateX(calc(-1 * var(--tile, 1600px)))}to{transform:translateX(0)}}
+/* the shared twinkle curve's default range IS this pair (atmosphere.css); a
+   dusk twinkler is a far layer of its own, so it drifts and twinkles at once
+   (its delay is the star's own, inline: Dusk.svelte) */
+#dawn .sky .tw{animation:twinkle 4.5s ease-in-out infinite alternate}
+#dusk .sky .tw{opacity:var(--o);animation:recede 360s linear infinite,twinkle 4.5s ease-in-out infinite alternate}
 /* first light: dawn breaks once on load, exactly as the login does it. The
    timings, curves and the 9s breath are orbit-site's own (assets/site.css
    145-172, c189d38): after `lit` the sky is up at about 3s, the sun point at
@@ -484,6 +499,10 @@ body.pinned .farewell,body.pinned #dawn .lockup .name,body.pinned #dawn .lockup 
    tells the same story without any motion. */
 @media (prefers-reduced-motion: reduce){
   #dawn *,#dusk *{animation:none!important}
+  /* with nothing to twinkle, a dusk twinkler's resting opacity goes back on
+     the star itself, so the still sky is drawn exactly as it was (#1299) */
+  #dusk .sky .tw{opacity:1}
+  #dusk .sky .tw circle{opacity:var(--o)}
   #flightmark,#launchname,#warp,#warpgl{display:none!important}
   #dawn,#dusk,.loginchrome,.loginchrome .lockup{
     transition-duration:.7s!important;transition-timing-function:ease!important}
