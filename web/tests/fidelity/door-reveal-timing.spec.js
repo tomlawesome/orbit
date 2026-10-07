@@ -8,8 +8,10 @@ import { expect, test } from "@playwright/test";
  * "Button ready" is the moment the gate can be pressed and looks it: the
  * `.gate` is in the document, `body.lit` is set and the gate's computed
  * opacity has reached 1. "Sunrise end" is the last of the rays and the
- * Earth's day side (`#dawn .earth .up`) arriving, after `lit`: the ruling
- * expects the day side at about 3.2s and the rays last, at about 3.4s.
+ * Earth's day side (`#dawn .earth .up`) arriving, after `lit`. Tightened
+ * 2026-10-07 (flight.css): after `lit` the button is ready at about 1.05s,
+ * the day side is in at about 2.5s and the rays last, at about 2.6s; with
+ * `lit` at 0.4-0.7s that is the sunrise done at about 3-3.3s.
  *
  * Shaped like launch-timing.spec.js and for the same reason kept out of the
  * per-merge-request `fidelity` project (playwright.config.js runs it as
@@ -95,7 +97,7 @@ for (const size of SIZES) {
       expect(ms.sunrise, "the sunrise never ended").toBeGreaterThan(0);
       expect(ms.button, "the button is ready by 2s").toBeLessThanOrEqual(2000);
       expect(ms.sunrise, "the sunrise ends by 3.5s").toBeLessThanOrEqual(3500);
-      expect(ms.sunrise, "the sunrise takes 3.2s at least").toBeGreaterThanOrEqual(3200);
+      expect(ms.sunrise, "the sunrise takes 3s at least").toBeGreaterThanOrEqual(3000);
     });
   }
 }
