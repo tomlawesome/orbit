@@ -425,10 +425,14 @@ body.farewell #dusk .gate-wrap a{opacity:1;transform:none}
    wrapper's last child and out of flow), so it is the same gap under the pill
    at any height and the lockup, centred as the door's is, never moves for it.
    It comes in .3s after the beat (site.css:251). */
-#dusk .farewell{position:absolute;top:100%;left:50%;translate:-50% 0;margin-top:22px;
+#dusk .farewell{position:absolute;top:100%;left:50%;margin-top:22px;
       width:max-content;max-width:92vw;text-align:center;
-      opacity:0;transform:translateY(9px);transition:opacity .9s ease .3s,transform .9s ease .3s}
-body.farewell #dusk .farewell{opacity:1;transform:none}
+      opacity:0;transform:translate(-50%,9px);transition:opacity .9s ease .3s,transform .9s ease .3s}
+body.farewell #dusk .farewell{opacity:1;transform:translateX(-50%)}
+/* The centring is in `transform`, not in the `translate` property: the build's
+   CSS lowering drops a lone `translate` from a rule that also sets `transform`
+   (the dev server keeps it), so the box sat with its left edge on the axis and
+   a phone's words ran off the right of the screen. Do not move it back. */
 #dusk .farewell .said{font:600 15px var(--display);color:#cfd3e4;letter-spacing:.01em}
 #dusk .farewell .sub{font:11px var(--mono);color:#7e819a;margin-top:9px;letter-spacing:.06em}
 
