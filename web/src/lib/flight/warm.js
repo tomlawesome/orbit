@@ -48,6 +48,11 @@ let asked = null;
  */
 export function readyFlight({ hurry = false, gentle = false, prove = true } = {}) {
   if (reduced() || typeof document === "undefined") return Promise.resolve();
+  /* a reader who has asked the browser to save data is not warmed for (orbit-site
+     main.js:70). Only the speculative asks (`gentle`: the door's, and home's on
+     its first tap): the flight itself, once it starts, still asks for what it
+     needs, and `asked` is left unset so that call is not shut out. */
+  if (gentle && /** @type {any} */ (navigator).connection?.saveData) return Promise.resolve();
   if (!asked) {
     fetchOnce(EARTH).catch(() => {});
     asked = chore(() => gpu(), 60, "flight").then((g) => {
