@@ -142,7 +142,7 @@ closed.
 | RM-060 | Forward a bill or policy to Orbit; it reads the attachment and asks before anything is added | charter V1-DOC-03; ORB-FUT-001; site: "The relay" | v1.0 | partial | #22, #57, #58, #59, #60; proof against a real mailbox open (#1255) |
 | RM-061 | Every user has their own relay address, which they can rotate and pause | decision #336; owner-decisions §7; site: "The relay" | M4 | delivered | #336, #744, #746 |
 | RM-062 | Mail-in pulls from one mailbox and never opens a port; container mail settings are for sending only | owner-decisions §7 | M4 | delivered | #742, #743, #747 |
-| RM-063 | Support Mailcow, Gmail and Outlook, with OAuth2 for Outlook and Hotmail | owner-decisions §7 | unscheduled | partial | password IMAP works; OAuth2 is a stored setting only, no flow; no issue |
+| RM-063 | Support Mailcow, Gmail and Outlook, with OAuth2 for Outlook and Hotmail | owner-decisions §7 | v0.4 | partial | password IMAP works; OAuth2 is a stored setting only, no flow; #1312 (owner 2026-10-07: build it in v0.4) |
 | RM-064 | Mail is tied to a user by envelope recipient and a signed alias, never the From line; unmatched mail is held for association | charter V1-DOC-03; ORB-FUT-001 | v1.0 | partial | #57; unmatched mail is deleted, not held |
 | RM-065 | Receipts are idempotent and bad messages reach a visible failed state after bounded retries | ORB-FUT-001 | v1.0 | delivered | #57, #58 |
 | RM-066 | Mailbox files are PDF only and bounded; unreviewed drafts expire after 45 days | ORB-FUT-001; site: "The relay" | v1.0 | delivered | #58, #964 |
@@ -241,7 +241,6 @@ closed.
 - RM-037 and RM-038 summary and AI-proposed notes (ORB-FUT-010): deferred, no issue.
 - RM-047 document events visible in the household's own history: no issue.
 - RM-051 enhanced mobile capture (ORB-FUT-007): post-v1, no issue.
-- RM-063 OAuth2 mail-in for Outlook and Gmail (owner-decisions §7): no issue.
 - RM-068 duplicate comparison (ORB-FUT-001): the register calls mail-in required for v1, yet this part has no issue.
 - RM-087 rollback guide: no issue.
 - RM-095 provider test actions, RM-097 audit filter (ORB-FUT-004): no issue.
