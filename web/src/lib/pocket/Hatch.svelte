@@ -15,8 +15,9 @@
    * from the orb, on every signed-in screen below the CON-10 switch. Its
    * content's height, not a list sheet's fixed 60%, which hid the swatches
    * behind the foot on an iPhone (#1188).
-   * Who you are; the journeys as 56px rows, the current page's in the accent
-   * text grade; the five theme swatches as 44px rings; sign-out as a ghost
+   * Who you are; the journeys as 56px rows (48px on screens 700px tall or
+   * less, #1256), the current page's in the accent text grade; the five theme
+   * swatches as 44px rings, now beside their label; sign-out as a ghost
    * pill, one tap (owner, 2026-10-06). Leaves by any of the sheet's dismisses.
    *
    * Differs from §2.2's list in one row, on purpose: "Items" stays, because
@@ -121,15 +122,18 @@
     <!-- #1256: last, for every member, in the plain mark Items and Inbox use. -->
     <Row title="About" href={resolve("/about")} current={current === "about"}>{#snippet mark()}<span></span>{/snippet}</Row>
   </nav>
-  <h3 class="p-caps" id="{uid}-theme">Theme</h3>
-  <div class="swatches" role="group" aria-labelledby="{uid}-theme">
-    {#each SWATCHES as swatch (swatch.id)}
-      <button class="swatch" title={swatch.title} aria-label="{swatch.title} theme"
-              aria-pressed={active === swatch.id}
-              onclick={() => { active = swatch.id; applyTheme(swatch.id); }}>
-        <span style:background={swatch.colour} style:box-shadow={swatch.shadow || undefined}></span>
-      </button>
-    {/each}
+  <!-- Label left, swatches right: the settings pocket's st-cardhead pattern (#1256). -->
+  <div class="theme">
+    <h3 class="p-caps" id="{uid}-theme">Theme</h3>
+    <div class="swatches" role="group" aria-labelledby="{uid}-theme">
+      {#each SWATCHES as swatch (swatch.id)}
+        <button class="swatch" title={swatch.title} aria-label="{swatch.title} theme"
+                aria-pressed={active === swatch.id}
+                onclick={() => { active = swatch.id; applyTheme(swatch.id); }}>
+          <span style:background={swatch.colour} style:box-shadow={swatch.shadow || undefined}></span>
+        </button>
+      {/each}
+    </div>
   </div>
   <!-- The body's quiet last line, which a sheet allows outside its foot. -->
   <button class="watch" onclick={watch}>↻ watch the tour</button>
@@ -149,7 +153,10 @@
   p.role{margin:0 0 12px}
   /* Rows sit on the sheet's glass, inset 4px, and their rail follows. */
   .rows{--p-gutter:4px;display:flex;flex-direction:column;padding:0 0 8px;border-bottom:1px solid var(--line-soft)}
+  @media (max-height:700px){ .rows{--p-row-min:48px} }
   .plus{font:600 var(--p-type-body)/1 var(--mono);color:var(--accent-text)}
+  .theme{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px}
+  .theme .p-caps{margin:0}
   .swatches{display:flex;gap:8px}
   .swatch{appearance:none;width:var(--p-hit);height:var(--p-hit);padding:0;border:0;background:none;
     border-radius:50%;display:grid;place-items:center;cursor:pointer}
