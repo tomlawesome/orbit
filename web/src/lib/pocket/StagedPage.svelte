@@ -87,5 +87,5 @@
 
 {#if reader && phase === "page"}
   <Reader bind:open={readerOpen} doc={{ name }} itemTitle={itemTitle} onremove={async () => {}} staged
-          previewSrc={pageUrl} />
+          previewSrc={pageUrl} pageHref={href} />
 {/if}

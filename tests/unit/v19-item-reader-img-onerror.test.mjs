@@ -26,7 +26,10 @@ describe("#1151 W1-R11: Reader's full-screen <img> has an onerror handler", () =
     const img = READER.slice(READER.indexOf("<img bind:this={img}"), READER.indexOf("<img bind:this={img}") + 900);
     expect(img).toMatch(/onload=\{/u);
     expect(img).toMatch(/onerror=\{\(\) => \{/u);
-    expect(img).toMatch(/problem = "this page could not be drawn/u);
+    /* #1300: the same words now also answer a page fetch that fails, so
+       they live in one constant both paths set. */
+    expect(img).toMatch(/problem = UNDRAWN;/u);
+    expect(READER).toMatch(/const UNDRAWN = "this page could not be drawn/u);
   });
 
   it("the error renders through the component's existing alert pattern", () => {
