@@ -64,7 +64,8 @@
     displayName = $bindable(""),
     password = $bindable(""),
     again = $bindable(""),
-    /* create mode only: whether there is an identity provider to offer */
+    /* whether there is an identity provider to offer: on the create card,
+       and on the sign-in card a mixed door opens (#1278) */
     provider = false,
     busy = false,
     /* Orbit's own words for a refusal, never the server's (door-state.js's
@@ -184,7 +185,7 @@
          'continue with your identity provider' line sits under the fields
          instead of a gate"). It is under the fields and above the act, in the
          note's own voice, so the card still has exactly one pill on it. -->
-    {#if mode === "create" && provider}
+    {#if provider}
       <p class="note">
         <button type="button" class="quietline" onclick={onprovider}>continue with your identity provider</button>
       </p>

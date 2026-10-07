@@ -393,6 +393,13 @@
     showCard(true);
   }
 
+  /** The sign-in card's one provider line, on a mixed door (#1278): the
+   *  gate's own way out, launch marker and all, so the arrival flies. */
+  function toProviderFromSignIn() {
+    markLaunch();
+    location.href = `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`;
+  }
+
   /** The create card's one provider line — the claim cookie authorises the
    *  bootstrap sign-in, exactly as the claim endpoint's own note describes. */
   function toProvider() {
@@ -708,7 +715,8 @@
                 provider={providerOffered} {busy} {message}
                 onsubmit={submitCreate} onprovider={toProvider} />
     {:else}
-      <Identity mode="signin" bind:email bind:password {busy} {message} onsubmit={submitSignIn} />
+      <Identity mode="signin" bind:email bind:password {busy} {message} onsubmit={submitSignIn}
+                provider={providerOffered} onprovider={toProviderFromSignIn} />
     {/if}
   </div>
 {/if}
