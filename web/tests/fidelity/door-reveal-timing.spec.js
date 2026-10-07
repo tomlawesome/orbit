@@ -1,24 +1,25 @@
 import { expect, test } from "@playwright/test";
 
 /*
- * THE DOOR'S FIRST LIGHT, TIMED (#1253; ruling of 2026-10-06, "first light
- * rebalanced"). The owner's limits: the button ready by 2s, the whole
- * sunrise done by 3-3.5s, both from navigation.
+ * THE DOOR'S FIRST LIGHT, TIMED (#1253). Since the owner's ruling of
+ * 2026-10-07 the door keeps orbit-site's own timing (first-light.js, ported
+ * from the site's main.js `showDoor`), and the 2026-10-06 limits (button by
+ * 2s, sunrise by 3-3.5s from navigation) are withdrawn.
+ *
+ * What is held now is the site's ORDER and its OFFSETS FROM `lit`:
+ *
+ *   · `lit` waits for the fonts and the Earth's first picture (`dawn-pre`),
+ *     and on a first visit (every Playwright context is one) for a whole lap
+ *     of the ring's running light, `body.loading`, about 1.8s: the door is
+ *     never lit before the pieces are in, and never without that lap;
+ *   · after `lit` the button is ready at about 2.45s (its 1.25s delay and
+ *     1.2s fade) and the sunrise is done at about 4.8s (the Earth's day side,
+ *     4.5s after .3s; the rays end at 4.4s), each give or take OFFSET_GIVE.
  *
  * "Button ready" is the moment the gate can be pressed and looks it: the
  * `.gate` is in the document, `body.lit` is set and the gate's computed
  * opacity has reached 1. "Sunrise end" is the last of the rays and the
- * Earth's day side (`#dawn .earth .up`) arriving, after `lit`. Tightened
- * 2026-10-07 (flight.css): after `lit` the button is ready at about 1.05s,
- * the day side is in at about 2.5s and the rays last, at about 2.6s; with
- * `lit` due at 0.5s from navigation (first-light.js) that is the sunrise
- * done at about 3.1s.
- *
- * The sunrise is a target, not an edge (owner, 2026-10-07: "It's
- * approximate and it's from page load ideally"), so it is held to 3-3.5s
- * give or take SUNRISE_GIVE; the button's 2s stays firm. The `late page`
- * runs hold the page's code back LATE_MS, as a slow connection would: first
- * light then catches up (first-light.js) rather than running late.
+ * Earth's day side (`#dawn .earth .up`) arriving, after `lit`.
  *
  * Shaped like launch-timing.spec.js and for the same reason kept out of the
  * per-merge-request `fidelity` project (playwright.config.js runs it as
@@ -26,7 +27,8 @@ import { expect, test } from "@playwright/test";
  * whatever machine it is given. Everything is read inside the page, on
  * every animation frame from before the first script, so nothing the test
  * runner does in between is counted. Two runs at each size, desktop and
- * phone.
+ * phone. (The late-page runs, which held the page's code back to prove
+ * first light caught up with a clock, went with the clock.)
  */
 
 const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
@@ -39,10 +41,12 @@ const DOOR = { ...HEALTHY, claimed: true, methods: { local: true, oidc: true, lo
 /** @param {import("@playwright/test").Route} route @param {number} status @param {unknown} body */
 const answer = (route, status, body) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 
-/* either side of the 3-3.5s sunrise target */
-const SUNRISE_GIVE = 250;
-/* how long the late-page runs hold back every script the page asks for */
-const LATE_MS = 700;
+/* the site's offsets after `lit` (site.css: gate 1.25s + 1.2s; Earth .3s + 4.5s) */
+const BUTTON_AFTER_LIT = 2450;
+const SUNRISE_AFTER_LIT = 4800;
+const OFFSET_GIVE = 250;
+/* one lap of the runner (site.css: `runner 1.8s`), the least `loading` lasts on a first visit */
+const LAP_MS = 1800;
 
 const SIZES = [
   { name: "desktop", viewport: { width: 1600, height: 1000 } },
@@ -50,15 +54,23 @@ const SIZES = [
 ];
 
 function installReveal() {
-  /** @type {{ lit: number, button: number, sunrise: number }} */
-  const at = { lit: 0, button: 0, sunrise: 0 };
+  /** @type {{ loading: number, lit: number, button: number, sunrise: number, fonts: string, earth: string, earthy: boolean }} */
+  const at = { loading: 0, lit: 0, button: 0, sunrise: 0, fonts: "", earth: "", earthy: false };
   /** @type {any} */ (window).__reveal = at;
   /** @param {Element | null} el */
   const opacity = (el) => (el ? Number(getComputedStyle(el).opacity) : 0);
   const tick = () => {
     const t = performance.now();
     const b = document.body;
-    if (b && !at.lit && b.classList.contains("lit")) at.lit = t;
+    if (b && !at.loading && b.classList.contains("loading")) at.loading = t;
+    if (b && !at.lit && b.classList.contains("lit")) {
+      at.lit = t;
+      /* what `lit` found: the fonts in, and the Earth's first picture settled and shown */
+      const world = document.querySelector("#dawn .world");
+      at.fonts = document.fonts.status;
+      at.earth = /** @type {HTMLElement | null} */ (world)?.dataset.earth ?? "";
+      at.earthy = !!world?.classList.contains("earthy");
+    }
     if (at.lit && !at.button && opacity(document.querySelector(".gate")) >= 1) at.button = t;
     if (at.lit && !at.sunrise) {
       const rays = document.querySelector("#dawn .rays");
@@ -72,21 +84,12 @@ function installReveal() {
   requestAnimationFrame(tick);
 }
 
-const RUNS = [
-  ...SIZES.flatMap((size) => [1, 2].map((run) => ({ size, run, late: 0 }))),
-  ...SIZES.map((size) => ({ size, run: 1, late: LATE_MS })),
-];
+const RUNS = SIZES.flatMap((size) => [1, 2].map((run) => ({ size, run })));
 
-for (const { size, run, late } of RUNS) {
-  test(`door first light — ${size.name}${late ? ", late page" : ""}, run ${run}`, async ({ page, browserName }) => {
-    test.setTimeout(30_000);
+for (const { size, run } of RUNS) {
+  test(`door first light: the site's order and offsets, ${size.name}, run ${run}`, async ({ page, browserName }) => {
+    test.setTimeout(40_000);
     await page.setViewportSize(size.viewport);
-    if (late) {
-      await page.route("**/_app/immutable/**/*.js", async (r) => {
-        await new Promise((resolve) => setTimeout(resolve, late));
-        await r.continue();
-      });
-    }
     await page.route("**/api/health", (r) => answer(r, 200, { status: "ready" }));
     await page.route("**/api/auth/availability", (r) => answer(r, 200, DOOR));
     await page.route("**/api/auth/session", (r) => answer(r, 401, { error: "unauthenticated" }));
@@ -98,7 +101,7 @@ for (const { size, run, late } of RUNS) {
     await page.waitForFunction(() => {
       const at = /** @type {any} */ (window).__reveal;
       return at && at.button && at.sunrise;
-    }, null, { timeout: 15_000 }).catch(() => {});
+    }, null, { timeout: 25_000 }).catch(() => {});
     const at = await page.evaluate(() => /** @type {any} */ (window).__reveal);
     if (!at.button || !at.sunrise) {
       const seen = await page.evaluate(() => {
@@ -112,13 +115,25 @@ for (const { size, run, late } of RUNS) {
       });
       console.log(`DOOR_TIMING incomplete ${JSON.stringify({ at, seen })}`);
     }
-    const ms = { lit: Math.round(at.lit), button: Math.round(at.button), sunrise: Math.round(at.sunrise) };
-    console.log(`DOOR_TIMING ${JSON.stringify({ browser: browserName, size: size.name, late, run, ...ms })}`);
+    const ms = {
+      loading: Math.round(at.loading), lit: Math.round(at.lit), button: Math.round(at.button), sunrise: Math.round(at.sunrise),
+      buttonAfterLit: Math.round(at.button - at.lit), sunriseAfterLit: Math.round(at.sunrise - at.lit),
+      loadingFor: Math.round(at.lit - at.loading),
+    };
+    console.log(`DOOR_TIMING ${JSON.stringify({ browser: browserName, size: size.name, run, ...ms, fonts: at.fonts, earth: at.earth })}`);
 
-    expect(ms.button, "the button never became ready").toBeGreaterThan(0);
-    expect(ms.sunrise, "the sunrise never ended").toBeGreaterThan(0);
-    expect(ms.button, "the button is ready by 2s").toBeLessThanOrEqual(2000);
-    expect(ms.sunrise, "the sunrise ends by about 3.5s").toBeLessThanOrEqual(3500 + SUNRISE_GIVE);
-    expect(ms.sunrise, "the sunrise takes about 3s at least").toBeGreaterThanOrEqual(3000 - SUNRISE_GIVE);
+    expect(at.lit, "first light never came").toBeGreaterThan(0);
+    /* `lit` waited for the fonts and the Earth's first picture */
+    expect(at.fonts, "`lit` came before the fonts").toBe("loaded");
+    expect(at.earth, "`lit` came before the Earth's first picture").toBe("settled");
+    expect(at.earthy, "`lit` came before the Earth's first picture was shown").toBe(true);
+    /* and, on a first visit, for a whole lap of the runner */
+    expect(at.loading, "the runner never ran").toBeGreaterThan(0);
+    expect(at.lit - at.loading, "a first visit runs at least a lap").toBeGreaterThanOrEqual(LAP_MS - 100);
+    /* the site's order and offsets after `lit` */
+    expect(at.button, "the button never became ready").toBeGreaterThan(at.lit);
+    expect(at.sunrise, "the sunrise never ended").toBeGreaterThan(at.button);
+    expect(Math.abs(at.button - at.lit - BUTTON_AFTER_LIT), "the button is ready about 2.45s after lit").toBeLessThanOrEqual(OFFSET_GIVE);
+    expect(Math.abs(at.sunrise - at.lit - SUNRISE_AFTER_LIT), "the sunrise ends about 4.8s after lit").toBeLessThanOrEqual(OFFSET_GIVE);
   });
 }
