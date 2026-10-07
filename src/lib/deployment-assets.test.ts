@@ -60,6 +60,20 @@ describe("the deployment asset list (guarantee #45)", () => {
     expect(repairAllowlist()).toEqual([...DEPLOYMENT_ASSETS, ENVIRONMENT_FILE, SECRETS_DIRECTORY]);
   });
 
+  // The successful-rollback journey stages a backup of each managed path by
+  // hand, and repair's restore removes any managed path with no staged backup
+  // as one the transaction created. A path missing here is deleted from the
+  // live deployment by a correct rollback, and the journey then fails its
+  // manifest check for a reason in the fixture (#1212's recovery-bundle
+  // scripts, pipeline 2234).
+  it("is what the repair-journeys successful-rollback fixture stages, path for path", () => {
+    const harness = readFileSync(join(repoRoot, "scripts", "test-repair-journeys.sh"), "utf8");
+    const match = /^ {2}for managed in ([\s\S]*?); do$/m.exec(harness);
+    if (!match) throw new Error("Could not find the successful-rollback staging loop in test-repair-journeys.sh.");
+    const staged = match[1].split(/[\s\\]+/).filter(Boolean);
+    expect(staged).toEqual(repairAllowlist());
+  });
+
   it("names every bundled shell script as a deployment script, and each passes bash -n", () => {
     expect(DEPLOYMENT_SCRIPTS).toEqual(DEPLOYMENT_ASSETS.filter((asset) => asset.startsWith("scripts/")));
     for (const script of DEPLOYMENT_SCRIPTS) {
