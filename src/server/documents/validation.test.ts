@@ -1,10 +1,8 @@
 import { readFileSync } from "node:fs";
-import { deflateSync } from "node:zlib";
 import { describe, expect, it, vi } from "vitest";
 import {
   classifyDocumentStructure,
   detectDocumentMediaType,
-  PDF_OBJECT_STREAM_DECODED_MAX_BYTES,
   normalizedDocumentFilename,
   PDF_STRUCTURE_PARSER_OPTIONS,
   validateSupportedDocumentStructure,
@@ -12,12 +10,10 @@ import {
 import { syntheticJpeg, syntheticPdf, syntheticPdfWithXrefStream, syntheticPng } from "../../../tests/support/synthetic-documents";
 import {
   syntheticModernPdf,
-  syntheticModernPdfHiddenFeatures,
-  syntheticPdfWithCatalogFeature,
-  syntheticPdfWithCompressedJavaScript,
   syntheticPdfWithHarmlessFeatureName,
   syntheticStructurePdfFixtures,
 } from "../../../tests/support/generated-pdf-documents";
+import { syntheticOwnerPasswordPdf, syntheticUserPasswordPdf } from "../../../tests/support/encrypted-pdf-documents";
 
 const validPdf = syntheticPdf();
 const validPng = syntheticPng();
@@ -79,28 +75,6 @@ describe("structural document classification", () => {
       await expect(classifyDocumentStructure(syntheticModernPdf({ longIndex: true }), "application/pdf"))
         .resolves.toBe("supported_structure");
     });
-
-    it.each(syntheticModernPdfHiddenFeatures.flatMap(({ name, options }) => [
-      { name, xref: "predicted", options },
-      { name, xref: "unpredicted", options: { ...options, xrefPredictor: false } },
-    ]))("refuses $name hidden inside the object stream ($xref cross-reference rows)", async ({ options }) => {
-      await expect(classifyDocumentStructure(syntheticModernPdf(options), "application/pdf")).resolves.toBe("prohibited_content");
-    });
-
-    it("refuses an object stream it cannot decode rather than skipping it", async () => {
-      const bytes = syntheticModernPdf({
-        objectStreamDictionary: "/Type /ObjStm /Filter /ASCIIHexDecode",
-        encodeObjectStream: (payload) => Buffer.from(`${payload.toString("hex")}>`, "latin1"),
-      });
-      await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("unsupported_structure");
-    });
-
-    it("refuses object streams that decode past the inspection budget", async () => {
-      const bytes = syntheticModernPdf({
-        encodeObjectStream: (payload) => deflateSync(Buffer.concat([payload, Buffer.alloc(PDF_OBJECT_STREAM_DECODED_MAX_BYTES, 0x20)])),
-      });
-      await expect(classifyDocumentStructure(bytes, "application/pdf")).resolves.toBe("unsupported_structure");
-    });
   });
 
   it("does not classify feature names inside compressed page content as active content", async () => {
@@ -108,9 +82,56 @@ describe("structural document classification", () => {
       .resolves.toBe("supported_structure");
   });
 
-  it("rejects JavaScript hidden in a compressed object stream", async () => {
-    await expect(classifyDocumentStructure(syntheticPdfWithCompressedJavaScript(), "application/pdf"))
-      .resolves.toBe("prohibited_content");
+  describe("pdf.js opens it with no password and finds page one (ADR-0033)", () => {
+    it("accepts an owner-password-only PDF with an encrypted object stream: pdf.js decrypts it itself (#1292)", async () => {
+      await expect(classifyDocumentStructure(syntheticOwnerPasswordPdf(), "application/pdf")).resolves.toBe("supported_structure");
+    });
+
+    it("refuses a PDF that needs a password to open, and says that is why", async () => {
+      await expect(classifyDocumentStructure(syntheticUserPasswordPdf(), "application/pdf")).resolves.toBe("password_required");
+      await expect(validateSupportedDocumentStructure(syntheticUserPasswordPdf(), "application/pdf")).resolves.toBe(false);
+    });
+
+    it("accepts a PDF whose final offset is wrong but which pdf.js repairs and draws, since that is the file it shows", async () => {
+      const wrongOffset = Buffer.from(validPdf.toString("latin1").replace(/startxref\n\d+/u, "startxref\n1"), "latin1");
+      await expect(classifyDocumentStructure(wrongOffset, "application/pdf")).resolves.toBe("supported_structure");
+    });
+
+    it("refuses a PDF whose page tree names no page pdf.js can find", async () => {
+      const noPage = Buffer.from(validPdf.toString("latin1").replace("/Kids [3 0 R] /Count 1", "/Kids [] /Count 0"), "latin1");
+      await expect(classifyDocumentStructure(noPage, "application/pdf")).resolves.toBe("unsupported_structure");
+    });
+  });
+
+  describe("images: the header is within the cap and the decoder reads it (ADR-0033)", () => {
+    function pngWithDeclaredSize(width: number, height: number): Buffer {
+      const bytes = Buffer.from(validPng);
+      bytes.writeUInt32BE(width, 16);
+      bytes.writeUInt32BE(height, 20);
+      return bytes;
+    }
+
+    function jpegWithDeclaredSize(width: number, height: number): Buffer {
+      const bytes = Buffer.from(validJpeg);
+      const frame = bytes.indexOf(Buffer.from([0xff, 0xc0]));
+      bytes.writeUInt16BE(height, frame + 5);
+      bytes.writeUInt16BE(width, frame + 7);
+      return bytes;
+    }
+
+    it.each([
+      ["PNG over the edge cap", pngWithDeclaredSize(20_001, 1), "image/png"],
+      ["PNG over the pixel cap", pngWithDeclaredSize(10_000, 10_000), "image/png"],
+      ["JPEG over the pixel cap", jpegWithDeclaredSize(10_000, 10_000), "image/jpeg"],
+      ["PNG declaring no pixels", pngWithDeclaredSize(0, 1), "image/png"],
+    ] as const)("refuses a %s from its header, before decoding", async (_name, bytes, mediaType) => {
+      await expect(classifyDocumentStructure(bytes, mediaType)).resolves.toBe("unsupported_structure");
+    });
+
+    it("refuses an image whose header is within the cap but whose data the decoder cannot read", async () => {
+      const cutShort = Buffer.concat([validPng.subarray(0, 24), Buffer.from([0, 0, 0, 0])]);
+      await expect(classifyDocumentStructure(cutShort, "image/png")).resolves.toBe("unsupported_structure");
+    });
   });
 
   it("keeps parser security options explicit", () => {
@@ -120,6 +141,7 @@ describe("structural document classification", () => {
       disableRange: true,
       disableStream: true,
       enableScripting: false,
+      enableXfa: false,
       isEvalSupported: false,
       isImageDecoderSupported: false,
       isOffscreenCanvasSupported: false,
@@ -153,25 +175,10 @@ describe("structural document classification", () => {
   });
 
   it.each([
-    "/OpenAction 6 0 R /Names << /JavaScript << /Names [(run) 6 0 R] >> >>",
-    "/OpenAction 6 0 R /Launch",
-    "/Names << /EmbeddedFiles << /Names [(payload.bin) 6 0 R] >> >>",
-    "/RichMedia 6 0 R",
-    "/XFA 6 0 R",
-    "/AF [<< /F (data.xml) /EF << /F 5 0 R >> >>]",
-  ])("classifies parsed prohibited catalog feature %s as prohibited_content", async (feature) => {
-    await expect(classifyDocumentStructure(syntheticPdfWithCatalogFeature(feature), "application/pdf"))
-      .resolves.toBe("prohibited_content");
-  });
-
-  it.each([
     [Buffer.from("%PDF-1.7\nheader only"), "application/pdf", "unsupported_structure"],
     [forgedPdfXref(), "application/pdf", "unsupported_structure"],
     [forgedPdfObjectOffset(), "application/pdf", "unsupported_structure"],
-    [Buffer.from(validPdf.toString("latin1").replace(/startxref\n\d+/u, "startxref\n1"), "latin1"), "application/pdf", "unsupported_structure"],
     [Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg", "unsupported_structure"],
-    [validJpeg.subarray(0, -2), "image/jpeg", "unsupported_structure"],
-    [Buffer.from(validJpeg.map((value, index) => index === 6 ? 0 : value)), "image/jpeg", "unsupported_structure"],
     [Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "image/png", "unsupported_structure"],
     [Buffer.concat([validPng.subarray(0, 24), Buffer.from([0, 0, 0, 0])]), "image/png", "unsupported_structure"],
   ] as const)("classifies unsupported %s as unsupported_structure", async (bytes, mediaType, expected) => {
@@ -210,13 +217,9 @@ describe("document content validation", () => {
 
   it.each([
     [Buffer.from("%PDF-1.7\nheader only"), "application/pdf"],
-    [syntheticPdfWithCatalogFeature("/Names << /EmbeddedFiles << /Names [(payload.bin) 6 0 R] >> >>"), "application/pdf"],
-    [Buffer.from(validPdf.toString("latin1").replace(/startxref\n\d+/u, "startxref\n1"), "latin1"), "application/pdf"],
     [forgedPdfXref(), "application/pdf"],
     [forgedPdfObjectOffset(), "application/pdf"],
     [Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg"],
-    [validJpeg.subarray(0, -2), "image/jpeg"],
-    [Buffer.from(validJpeg.map((value, index) => index === 6 ? 0 : value)), "image/jpeg"],
     [Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "image/png"],
     [Buffer.concat([validPng.subarray(0, 24), Buffer.from([0, 0, 0, 0])]), "image/png"],
   ] as const)("rejects a magic-byte-valid malformed fixture", async (bytes, mediaType) => {

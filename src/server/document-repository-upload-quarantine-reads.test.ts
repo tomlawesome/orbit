@@ -110,9 +110,9 @@ vi.mock("@/server/upload-limit", () => ({
 vi.mock("@/server/documents/validation", () => ({
   detectDocumentMediaType: () => "application/pdf",
   normalizedDocumentFilename: (name: string) => name,
-  validateSupportedDocumentStructure: async () => {
+  classifyDocumentStructure: async () => {
     mocks.order.push("open");
-    return mocks.structureValid;
+    return mocks.structureValid ? "supported_structure" : "unsupported_structure";
   },
 }));
 

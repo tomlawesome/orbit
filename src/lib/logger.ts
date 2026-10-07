@@ -65,6 +65,7 @@ export const operationalReasons = [
   "supported_structure",
   "prohibited_content",
   "unsupported_structure",
+  "password_required",
   "infected",
   "parser_disabled",
   "parser_output_invalid",

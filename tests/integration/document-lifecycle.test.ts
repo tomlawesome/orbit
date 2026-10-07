@@ -339,7 +339,7 @@ describe("authenticated encrypted document lifecycle", () => {
       expect(await response.json()).toEqual({
         error: {
           code: "document_structure_invalid",
-          message: "Choose a structurally valid PDF, JPEG, or PNG document",
+          message: "Orbit could not open this document. Choose another PDF, JPEG, or PNG.",
         },
       });
     }

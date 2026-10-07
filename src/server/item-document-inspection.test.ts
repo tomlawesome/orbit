@@ -363,7 +363,7 @@ describe("item document inspection", () => {
 
     expect(result).toEqual({
       extracted: false,
-      message: "Orbit could not safely inspect this document structure. Choose another PDF, JPEG, or PNG before adding the item.",
+      message: "Orbit could not open this document. Choose another PDF, JPEG, or PNG.",
       suggestions: [],
       attachmentDisposition: "rejected",
       reason,
