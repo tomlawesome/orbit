@@ -335,6 +335,48 @@ test("the quick add's box takes a document by click or by drop, and opens the fu
 });
 
 /**
+ * #1243, the way into the quick add: the north star pressed before home goes
+ * live. Home is drawn by the server long before readHome() has resolved and
+ * its behaviour is bound (#1064), and a press on the star inside that window
+ * used to be dropped with nothing to replay it -- the drawer simply never
+ * opened. The test above caught it in CI (pipeline 2236): its click landed
+ * about 150 ms before /api/workspace answered.
+ *
+ * The workspace read is held back so the window is wide enough to press into
+ * on purpose, and the press waits until that read has been asked for, which
+ * is after home's own mount has started listening for a missed press.
+ */
+test("the north star pressed before home goes live still opens the quick add", async ({ page }) => {
+  test.skip(test.info().project.name.startsWith("mobile"), "the north star's drawer is the desk's; the pocket creates from its own sheet");
+  test.setTimeout(60_000);
+  await answerPushWithoutAService(page);
+  await page.goto("/api/auth/login?returnTo=/home");
+  await page.getByRole("link", { name: workerAccount("administrator") }).click();
+  await settleArrival(page);
+  await ensureWorkerAdministrator(page);
+  households.track(await seedHousehold(page));
+
+  try {
+    let asked: () => void = () => {};
+    const workspaceAsked = new Promise<void>((resolve) => { asked = resolve; });
+    await page.route("**/api/workspace", async (route) => {
+      asked();
+      await new Promise((resolve) => setTimeout(resolve, 6_000));
+      await route.continue().catch(() => {});
+    });
+    await page.goto("/home");
+    await workspaceAsked;
+    await expect(page.locator("body[data-home-ready]")).toHaveCount(0);
+    await page.locator("#nstar").click();
+    await expect(page.locator("#createdrawer")).toHaveClass(/\bopen\b/, { timeout: 20_000 });
+    await expect(page.locator("#nstar")).toHaveAttribute("aria-expanded", "true");
+  } finally {
+    await page.unroute("**/api/workspace").catch(() => {});
+    await households.sweep(page);
+  }
+});
+
+/**
  * #1279: the phone's create form reads a picked document as the desk does
  * (design/v19/create-phone-reading.html, owner's "14a"). The reading card
  * lands straight under TYPE in place of the "add a document" row, page one

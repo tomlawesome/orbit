@@ -927,6 +927,12 @@
      * keystroke was lost the same way, and it takes the same two answers —
      * catch up on the press nobody was listening for, and say out loud when
      * the screen went live.
+     *
+     * #1243: the north star is the same kind of press. It opens the quick add
+     * (or, on the empty sky, sends the reader to "/"), and it was left out of
+     * the catch-up, so a reader who pressed it while readHome() was still out
+     * saw nothing happen and had to press again. CI caught it as the quick
+     * add test's drawer never opening (pipeline 2236).
      */
     /** @type {HTMLElement | null} */
     let missedPress = null;
@@ -934,7 +940,7 @@
     const rememberPress = (event) => {
       const target = event.target;
       if (target instanceof Element)
-        missedPress = /** @type {HTMLElement | null} */ (target.closest("button.orb, #morb"));
+        missedPress = /** @type {HTMLElement | null} */ (target.closest("button.orb, #morb, #nstar"));
     };
     /* Capture phase, so the press is recorded before anything else can stop
        it. A keyboard reader is recorded here too: both dialects' toggles are
