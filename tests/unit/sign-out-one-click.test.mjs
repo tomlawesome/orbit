@@ -17,6 +17,7 @@ const read = (path) => readFileSync(resolve(import.meta.dirname, "../..", path),
 const HOME = read("web/src/routes/home/+page.svelte");
 const CHROME = read("web/src/lib/Chrome.svelte");
 const HATCH = read("web/src/lib/pocket/Hatch.svelte");
+const LEAVE = read("web/src/lib/flight/Leave.svelte");
 
 /** @param {string} src @param {string} head */
 const body = (src, head) => src.slice(src.indexOf(head), src.indexOf(head) + 900);
@@ -46,7 +47,10 @@ describe("#1262: the plain sign-out is one press", () => {
   });
 
   it("home readies the descent's world when its menu opens, gently", () => {
-    expect(HOME).toMatch(/readyFlight\(\{ hurry: true, gentle: true \}\)/u);
+    // The descent is the shared Leave.svelte (#1253); home asks it to ready
+    // its world, and it does so gently.
+    expect(HOME).toMatch(/const readyDescent = \(\) => leave\?\.ready\(\);/u);
+    expect(body(LEAVE, "export function ready()")).toMatch(/readyFlight\(\{ hurry: true, gentle: true \}\)/u);
     expect(HOME).toMatch(/<button class="orb"[^>]*onclick=\{readyDescent\}/u);
   });
 });

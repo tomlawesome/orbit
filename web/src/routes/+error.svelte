@@ -694,7 +694,7 @@
            holds the status and one sentence says what happened. The desk
            keeps the bare fact; notfound.css draws the ring on phones only. -->
       <div class="station">
-        <div class="errring" aria-hidden="true"><i></i></div>
+        <div class="errring" aria-hidden="true"><b class="trail"></b><i></i></div>
         <div class="name mono">{page.status}</div>
       </div>
       <p class="said">Orbit couldn’t answer that · {page.status}</p>
