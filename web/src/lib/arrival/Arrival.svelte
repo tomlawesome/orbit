@@ -35,15 +35,16 @@
    *               still being asked, because it is the one surface on this page
    *               that needs no answer.
    *   newcomer  · signed in, no households: the same ratified climb, the
-   *               labelled sky and the question, arriving with the instrument
-   *               (#1222), whose "name your own system" drawer holds the three
-   *               create questions. On an empty instance the card lands with
-   *               the drawer already open (#1263, owner 2026-10-06).
+   *               labelled sky, the boxless count and the question, whose
+   *               "name your own system" drawer holds the three create
+   *               questions. On an empty instance the count is skipped and
+   *               the card lands with the drawer already open (#1263, owner
+   *               2026-10-06).
    *   onward    · a member. Home is theirs, and the door hands them on to it.
    *   invited   · #871: a reader whose FIRST look at the session follows
    *               redeeming an invitation (`isInvitedLanding`). The same
-   *               climb and sky as newcomer — the household is real and
-   *               theirs is one of the systems on it — but at the
+   *               climb, sky and count as newcomer — the household is real
+   *               and theirs is one of the systems discovered — but at the
    *               point the question would stand there is nothing to ask:
    *               the sky moves to the household the invitation named
    *               instead, by the same road ONWARD already takes there.
@@ -145,7 +146,7 @@
       disposed = true;
       body().classList.remove("showform", "showdawn", "rejected",
                               "shownew", "instrument", "belong",
-                              "bare", "launching", "pinned");
+                              "counting", "bare", "launching", "pinned");
     };
   });
 
@@ -319,12 +320,25 @@
   }
 
   /**
+   * THE EMPTY INSTANCE SKIPS THE COUNT (#1263, owner 2026-10-06): "skip the
+   * count beat: land straight on the belong card with the drawer down." There
+   * is nothing to count, so the card arrives with the labelled sky's chrome
+   * (Flight's `instrument` beat, its `onsettled`) rather than after the count's
+   * hold; Newcomer draws no count at all for zero systems, so the flight's own
+   * later `countOn`/`belong` beats find nothing left to change.
+   */
+  function settled() {
+    if (stage === NEWCOMER && visibleHouseholds.length === 0) body().classList.add("belong");
+  }
+
+  /**
    * The north star's "create" (and any other road to the drawer) while the
    * question has not arrived yet: bring the card in now rather than open a
    * drawer nobody can see.
    */
   function toDrawer() {
     if (stage !== NEWCOMER) return;
+    body().classList.remove("counting");
     body().classList.add("belong");
   }
 
@@ -439,6 +453,7 @@
       <Flight bind:this={flight} landing={stage === INVITED ? "invited" : "newcomer"}
               name="" subtitle="you are new here"
               onland={() => body().classList.add("shownew")}
+              onsettled={settled}
               onbelong={stage === INVITED ? toHousehold : undefined} />
     {/if}
   {/if}

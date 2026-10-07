@@ -3,7 +3,8 @@
  *
  * Everything the arrival decides, decided in one pure file so it can be read
  * and tested without a browser: WHICH surface an authenticated reader lands
- * on, what the create drawer may ask, and what the create command looks like.
+ * on, what the create drawer may ask, what the create command looks like, and
+ * how the newcomer's count reads.
  *
  * THE LAW THIS FILE SERVES (owner, 2026-08-16, sealed): "the first-run screen
  * doesn't get its own page — it sits ON TOP of the login screen". So there is
@@ -38,8 +39,8 @@ export const ASKING = "asking";
 export const NEWCOMER = "newcomer";
 /** A member. Home is theirs; the door hands them on to it. */
 export const ONWARD = "onward";
-/** An invited reader's first landing (#871): the newcomer's own climb and sky,
- *  and then the household the invitation named rather than a
+/** An invited reader's first landing (#871): the newcomer's own climb, sky
+ *  and count, and then the household the invitation named rather than a
  *  choice among any. See `isInvitedLanding` for how this is told apart from
  *  ONWARD, which the same session answers the same way ever after. */
 export const INVITED = "invited";
@@ -88,6 +89,20 @@ export function arrivalStageOf(workspace) {
  */
 export function isInvitedLanding(session) {
   return Boolean(session?.activeHouseholdId) && Boolean(session?.justJoined);
+}
+
+/**
+ * "N SYSTEMS DISCOVERED IN THIS UNIVERSE" — the newcomer's boxless beat.
+ *
+ * The count is READ off the households and never written (owner: "the number
+ * real"), and it is the newcomer's, not the first admin's: "a first admin
+ * always signs in to zero households, so counting them here was counting
+ * nothing."
+ * @param {VisibleHousehold[]} [visibleHouseholds]
+ */
+export function discoveredCountOf(visibleHouseholds) {
+  const count = (visibleHouseholds ?? []).length;
+  return { count, word: count === 1 ? "system" : "systems" };
 }
 
 /**

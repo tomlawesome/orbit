@@ -4,7 +4,7 @@ import {
   ASKING, DOOR, INVITED, NEWCOMER, ONWARD,
   CURRENCIES, DEFAULT_SECTIONS, NAME_LIMIT, TIME_ZONES,
   arrivalStageOf, belongRowsOf, collidingHouseholdOf,
-  createSystemCommand, isInvitedLanding, preferredCurrency, preferredTimeZone,
+  createSystemCommand, discoveredCountOf, isInvitedLanding, preferredCurrency, preferredTimeZone,
   sectionNote, sectionNoteTitle, WAITING_APPROVAL_NOTE,
 } from "$lib/arrival/stage.js";
 import {
@@ -107,11 +107,26 @@ describe("the invited landing's climb is the newcomer's own, to the beat the cho
        invited reader on a sky, no chooser and no move either. Pinned here
        rather than left to that surface's own DOM tests. */
     const full = newcomerAscentBeats();
-    expect(full.at(-1)).toEqual({ at: T.instrumentAt, act: "belong" });
+    expect(full.at(-1)).toEqual({ at: T.belongAt, act: "belong" });
 
     const reduced = newcomerAscentBeatsReduced();
-    expect(reduced.at(-1)).toEqual({ at: 700 + T.dwell, act: "belong" });
-    expect(reduced.map((beat) => beat.act)).toEqual(["land", "instrument", "belong"]);
+    expect(reduced.at(-1)).toEqual({ at: 700 + T.dwell + 1900, act: "belong" });
+    /* the count still takes its turn before that last beat, ordering unchanged */
+    expect(reduced.map((beat) => beat.act)).toEqual(["land", "instrument", "countOn", "countOff", "belong"]);
+  });
+});
+
+describe("the count is a moment, and it is real", () => {
+  it("reads the number off the households and pluralises on it", () => {
+    expect(discoveredCountOf([{ id: "a" }, { id: "b" }, { id: "c" }])).toEqual({ count: 3, word: "systems" });
+    expect(discoveredCountOf([{ id: "a" }])).toEqual({ count: 1, word: "system" });
+    expect(discoveredCountOf([])).toEqual({ count: 0, word: "systems" });
+    expect(discoveredCountOf(undefined)).toEqual({ count: 0, word: "systems" });
+  });
+
+  it("counts the fixture's five, which is the sheet's own number", () => {
+    expect(discoveredCountOf(NEWCOMER_ARRIVAL_FIXTURE.visibleHouseholds))
+      .toEqual({ count: 5, word: "systems" });
   });
 });
 
@@ -249,13 +264,23 @@ describe("the waiting note (owner-decisions §23): the marker is not the explana
   });
 });
 
-describe("the newcomer's clock is the site's (#1222, owner 2026-10-07)", () => {
-  it("takes the site's dwell and instrument beat, with no newcomer-only figures", () => {
+describe("the newcomer's clock is the site's, with the count hung off its instrument beat (#1222)", () => {
+  it("takes the site's dwell and instrument beat, with no newcomer-only dwell", () => {
     expect(T.dwell).toBe(600);
     expect(T.instrumentAt).toBe(5900);
-    for (const gone of ["newDwell", "newInstrumentAt", "countOn", "countOff", "belongAt"]) {
+    for (const gone of ["newDwell", "newInstrumentAt"]) {
       expect(T, gone).not.toHaveProperty(gone);
     }
+  });
+
+  it("keeps the count's own offsets from the instrument beat (#870)", () => {
+    expect(T.countOn - T.instrumentAt).toBe(300);
+    expect(T.countOn).toBe(6200);
+    expect(T.countOff).toBe(9400);
+    expect(T.belongAt).toBe(10300);
+    /* ~4.55s of screen time in all: 0.45s in, 3.2s held, 0.9s out */
+    expect(T.countOff - T.countOn).toBe(3200);
+    expect(T.belongAt - T.countOff).toBe(900);
   });
 
   it("flies the same climb to the millisecond and only lands differently", () => {
@@ -272,22 +297,19 @@ describe("the newcomer's clock is the site's (#1222, owner 2026-10-07)", () => {
     ]);
   });
 
-  it("lands, then the instrument and the question arrive together", () => {
+  it("lands, settles, counts and then asks — in that order", () => {
     expect(newcomerAscentBeats().map((beat) => beat.act)).toEqual([
       "arming", "warp", "mark", "release", "markOut", "nameOn", "nameOff",
-      "land", "instrument", "belong",
+      "land", "instrument", "countOn", "countOff", "belong",
     ]);
-    const at = Object.fromEntries(newcomerAscentBeats().map((beat) => [beat.act, beat.at]));
-    expect(at.instrument).toBe(5900);
-    expect(at.belong).toBe(at.instrument);
   });
 
   it("pins every beat up to a millisecond and schedules nothing", () => {
     const applied = [];
-    const cancel = runTimeline(newcomerAscentBeats(), (act) => applied.push(act), { at: T.instrumentAt });
+    const cancel = runTimeline(newcomerAscentBeats(), (act) => applied.push(act), { at: T.countOn });
     expect(applied).toEqual([
       "arming", "warp", "mark", "release", "markOut", "nameOn", "nameOff",
-      "land", "instrument", "belong",
+      "land", "instrument", "countOn",
     ]);
     expect(cancel).toBeTypeOf("function");
   });
@@ -297,10 +319,14 @@ describe("the newcomer's clock is the site's (#1222, owner 2026-10-07)", () => {
     expect(beats).toEqual([
       { at: 0, act: "land" },
       { at: 1300, act: "instrument" },
-      { at: 1300, act: "belong" },
+      { at: 1300, act: "countOn" },
+      { at: 3200, act: "countOff" },
+      { at: 3200, act: "belong" },
     ]);
     /* the bare labelled sky, the site's own 600 dwell, then the instrument */
     expect(beats[1].at).toBe(700 + T.dwell);
+    /* the count still takes its turn, on the mockup's own 1900 hold */
+    expect(beats[3].at - beats[1].at).toBe(1900);
   });
 });
 

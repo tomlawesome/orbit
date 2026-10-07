@@ -242,7 +242,7 @@
      list above cannot reach, which left the ring's travel -- and the close
      while typing -- without their .5s. The same selector, named for this
      column, restores the whole list. */
-  body.showform:not(.reclaimed):not(.shownew):not(.instrument)
+  body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
     :not(.bare):not(.showwarp):not(.launching):not(.belong) .ringcard .bigring{
         transition:opacity .8s ease,visibility .8s,
                    width .5s cubic-bezier(.55,0,.2,1),height .5s cubic-bezier(.55,0,.2,1),
