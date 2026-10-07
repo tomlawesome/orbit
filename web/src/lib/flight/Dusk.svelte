@@ -1,6 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { DUSK_FAR, DUSK_NEAR } from "./starfields.js";
+  import { decodeAhead } from "./decode-ahead.js";
   import "./flight.css";
   import "./door-phone.css";
 
@@ -68,6 +69,9 @@
     let cancelled = false;
     world.dataset.rasterised = "pending";
     const images = /** @type {SVGImageElement[]} */ ([...world.querySelectorAll("image[data-href]")]);
+    /* #1299: this mounts as the sign-out starts and is not seen until the
+       dusk beat; decoded now, its pictures are ready by then (decode-ahead.js) */
+    const pictures = decodeAhead(images.map((im) => /** @type {string} */ (im.dataset.href))).held;
     /** @param {SVGImageElement} im */
     const arrive = (im) => new Promise((resolve) => {
       /** @type {(e: Event) => void} */
@@ -86,7 +90,7 @@
     const frame = requestAnimationFrame(() => {
       Promise.all(images.map(arrive)).then(() => { if (!cancelled) world.dataset.rasterised = "ready"; });
     });
-    return () => { cancelled = true; cancelAnimationFrame(frame); };
+    return () => { cancelled = true; cancelAnimationFrame(frame); pictures.length = 0; };
   });
 </script>
 
