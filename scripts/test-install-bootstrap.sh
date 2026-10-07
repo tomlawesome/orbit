@@ -164,7 +164,7 @@ start_oidc() {
 make_shim() {
   local real_docker oidc_address
   real_docker="$(command -v docker)" || fail "docker is required"
-  oidc_address="$(docker inspect --format '{{.NetworkSettings.IPAddress}}' "$oidc_container")"
+  oidc_address="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$oidc_container")"
   [[ "$oidc_address" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "could not read the OIDC sidecar's bridge address"
   chmod 644 "$workdir/oidc-ca.pem"
   mkdir -p "$workdir/shim"
