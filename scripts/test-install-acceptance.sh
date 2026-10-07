@@ -477,7 +477,7 @@ start_oidc() {
     fail "could not start the disposable OIDC sidecar"
   host_port="$(docker port "$oidc_container" 4443/tcp | sed -n 's/^127\.0\.0\.1:\([0-9]*\)$/\1/p')"
   [[ "$host_port" =~ ^[0-9]+$ ]] || fail "could not read the OIDC sidecar's published port"
-  oidc_address="$(docker inspect --format '{{.NetworkSettings.IPAddress}}' "$oidc_container")"
+  oidc_address="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$oidc_container")"
   [[ "$oidc_address" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
     fail "could not read the OIDC sidecar's bridge address"
   until openssl s_client -connect "127.0.0.1:${host_port}" -showcerts </dev/null 2>/dev/null |
