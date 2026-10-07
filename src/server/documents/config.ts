@@ -6,10 +6,20 @@ import { readRuntimeSecret } from "@/lib/runtime-secret";
 const MIB = 1_048_576;
 const GIB = 1_073_741_824;
 
+/**
+ * The hard bounds on the document size limit (#1285). `DOCUMENT_MAX_BYTES`
+ * is only the starting default: an administrator can raise or lower the
+ * limit in Administration (src/server/upload-limit.ts), but never past these,
+ * whichever way it is set.
+ */
+export const DOCUMENT_MAX_BYTES_FLOOR = MIB;
+export const DOCUMENT_MAX_BYTES_CEILING = 100 * MIB;
+export const DOCUMENT_MAX_BYTES_DEFAULT = 50 * MIB;
+
 const documentEnvironmentSchema = z.object({
   DOCUMENTS_ROOT: z.string().min(1).default("/var/lib/orbit/documents"),
   DOCUMENTS_QUARANTINE_ROOT: z.string().min(1).default("/tmp/orbit-document-quarantine"),
-  DOCUMENT_MAX_BYTES: z.coerce.number().int().min(MIB).max(100 * MIB).default(25 * MIB),
+  DOCUMENT_MAX_BYTES: z.coerce.number().int().min(DOCUMENT_MAX_BYTES_FLOOR).max(DOCUMENT_MAX_BYTES_CEILING).default(DOCUMENT_MAX_BYTES_DEFAULT),
   DOCUMENT_HOUSEHOLD_QUOTA_BYTES: z.coerce.number().int().min(25 * MIB).max(10_000 * GIB).default(5 * GIB),
   DOCUMENT_INSTANCE_QUOTA_BYTES: z.coerce.number().int().min(25 * MIB).max(100_000 * GIB).default(20 * GIB),
   DOCUMENT_RETENTION_DAYS: z.coerce.number().int().min(1).max(3_650).default(30),
@@ -38,6 +48,12 @@ const documentEnvironmentSchema = z.object({
 export interface DocumentConfig {
   storageRoot: string;
   quarantineRoot: string;
+  /**
+   * The CONFIGURED default limit (`DOCUMENT_MAX_BYTES`). An upload path never
+   * reads this directly: it asks `readEffectiveUploadLimit()`
+   * (src/server/upload-limit.ts), which applies the administrator's override
+   * when one is set (#1285).
+   */
   maxBytes: number;
   householdQuotaBytes: number;
   instanceQuotaBytes: number;

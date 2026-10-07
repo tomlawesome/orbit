@@ -26,6 +26,11 @@ vi.mock("node:crypto", async (importOriginal) => ({
 
 vi.mock("@/server/workspace-access", () => ({ requireHouseholdAccess: mocks.access }));
 vi.mock("@/server/documents/config", () => ({ getDocumentConfig: mocks.config }));
+// The administrator's upload limit (#1285) is proven in
+// src/server/upload-limit.test.ts; here it answers the configured default.
+vi.mock("@/server/upload-limit", () => ({
+  readEffectiveUploadLimit: async (config: { maxBytes: number }) => config.maxBytes,
+}));
 vi.mock("@/server/documents/scanner", () => ({ scanFileWithClamAv: mocks.scan }));
 vi.mock("@/server/documents/tika", async () => ({
   ...await vi.importActual<typeof import("@/server/documents/tika")>("@/server/documents/tika"),

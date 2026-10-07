@@ -52,4 +52,15 @@ describe("application error diagnostics", () => {
     expect(logged).not.toContain("postgres://");
     expect(logged).toContain("error_class=Error");
   });
+
+  it("answers a body over a request size limit with 413, never 500 (#1285)", async () => {
+    // SvelteKit's own error when a body runs past BODY_SIZE_LIMIT: not an
+    // AppError, but a status of 413.
+    const response = appErrorResponse(Object.assign(new Error("request body size exceeded BODY_SIZE_LIMIT"), { status: 413 }));
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "request_too_large", message: "That request is too large" },
+    });
+    expect(mocks.log.error).not.toHaveBeenCalled();
+  });
 });

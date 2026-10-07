@@ -55,6 +55,11 @@ vi.mock("@/db", async () => {
 });
 
 vi.mock("@/server/documents/config", () => ({ getDocumentConfig: mocks.config }));
+// The administrator's upload limit (#1285) is proven in
+// src/server/upload-limit.test.ts; here it answers the configured default.
+vi.mock("@/server/upload-limit", () => ({
+  readEffectiveUploadLimit: async (config: { maxBytes: number }) => config.maxBytes,
+}));
 vi.mock("@/server/documents/crypto", () => ({
   decryptDocument: mocks.decryptDocument,
   encryptDocument: mocks.encryptDocument,
