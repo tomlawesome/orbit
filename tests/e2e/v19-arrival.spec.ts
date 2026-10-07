@@ -156,7 +156,7 @@ test.afterAll(async ({ browser }) => {
   }
 });
 
-test("the newcomer's arrival: the climb, the labelled sky, the real count, the question", async ({ page, browser }) => {
+test("the newcomer's arrival: the climb, the labelled sky, the question with the instrument", async ({ page, browser }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the journey is asserted on the desk dialect");
   test.setTimeout(180_000);
 
