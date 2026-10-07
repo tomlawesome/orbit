@@ -406,6 +406,9 @@ describe("scripts/ci/promote-stable.sh", () => {
     expect(createCall[1]).toContain(`--tag ${IMAGE}:latest`);
     expect(createCall[1]).toContain(`${IMAGE}@${PREVIEW_DIGEST}`);
     expect(createCall[1]).not.toContain(":stable");
+    // Copy the tested manifest unchanged: without this flag buildx wraps a
+    // single-manifest source in a new, unsigned index with a new digest (#1179).
+    expect(createCall[1]).toContain("--prefer-index=false");
 
     // Two logins: registry.tomlawson.io (so the verifier below can read the
     // attestation) then GHCR (to publish). Both piped on stdin, never argv.
