@@ -10,7 +10,9 @@
  *  - the document upload routes take the upload size limit an administrator
  *    sets (src/server/upload-limit.ts), read fresh on every request;
  *  - the portable-archive routes carry a whole household as JSON, document
- *    bytes included, so they get the server-wide ceiling;
+ *    bytes included, so they get the largest archive the import accepts
+ *    (src/server/portable-archive-limits.ts) plus room for the rest of the
+ *    request (#1290);
  *  - every other route gets `SMALL_BODY_LIMIT`, twice the 512 KB every route
  *    has run under until now.
  *
@@ -21,11 +23,25 @@
  */
 import { AppError } from "orbit/lib/app-error";
 import { DOCUMENT_MAX_BYTES_CEILING } from "orbit/server/documents/config";
+import { MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "orbit/server/portable-archive-limits";
 
-export const SMALL_BODY_LIMIT = 1_048_576;
+const MIB = 1_048_576;
 
-/** Must match the image's `BODY_SIZE_LIMIT=101M` (Dockerfile): 100 MiB + 1 MiB. */
-export const SERVER_BODY_LIMIT = DOCUMENT_MAX_BYTES_CEILING + SMALL_BODY_LIMIT;
+export const SMALL_BODY_LIMIT = MIB;
+
+/**
+ * An archive import or preview: the encrypted archive at the longest
+ * ciphertext the import accepts, and a small limit's room for the rest of
+ * the body (the passphrase, the conflict list, the archive's other fields).
+ */
+export const ARCHIVE_BODY_LIMIT = MAX_ARCHIVE_CIPHERTEXT_CHARACTERS + SMALL_BODY_LIMIT;
+
+/**
+ * The largest body any route may take, rounded up to whole MiB because the
+ * image states it in MiB. Must match the image's `BODY_SIZE_LIMIT=172M`
+ * (Dockerfile).
+ */
+export const SERVER_BODY_LIMIT = Math.ceil(Math.max(DOCUMENT_MAX_BYTES_CEILING + SMALL_BODY_LIMIT, ARCHIVE_BODY_LIMIT) / MIB) * MIB;
 
 /** Route ids, not pathnames: the router's own truth, as hooks.server.js's gates use. */
 export const UPLOAD_ROUTES = new Set([
@@ -62,7 +78,7 @@ export async function bodyLimitFor(routeId, readUploadLimit) {
     }
   }
   const [code, message] = REQUEST_TOO_LARGE;
-  if (routeId !== null && ARCHIVE_ROUTES.has(routeId)) return { limit: SERVER_BODY_LIMIT, code, message };
+  if (routeId !== null && ARCHIVE_ROUTES.has(routeId)) return { limit: ARCHIVE_BODY_LIMIT, code, message };
   return { limit: SMALL_BODY_LIMIT, code, message };
 }
 
