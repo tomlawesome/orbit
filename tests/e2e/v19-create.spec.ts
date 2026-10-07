@@ -212,6 +212,12 @@ test("a document picked on the create form is attached to the saved item", async
     if (pocket) await expect(page).toHaveURL(/\/item\/[0-9a-f-]{36}$/, { timeout: 30_000 });
     await expect.poll(() => itemIdOf(page, household.id, name), { timeout: 15_000 }).not.toBeNull();
     const itemId = (await itemIdOf(page, household.id, name)) as string;
+    /* #1281: this save has no key date, and the pocket seats it on its belt
+       all the same -- the address and the apex are the item just saved. */
+    if (pocket) {
+      expect(new URL(page.url()).pathname).toBe(`/item/${itemId}`);
+      await expect(page.getByRole("heading", { name })).toBeVisible();
+    }
     await expect.poll(async () => {
       const response = await page.request.get(`/api/households/${household.id}/items/${itemId}/documents`);
       if (!response.ok()) return `http_${response.status()}`;
@@ -505,8 +511,8 @@ test("add to orbit closes the form and lands on the saved item", async ({ page }
 
   try {
     const name = "Home insurance proving";
-    /* The manifest is the dated schedule (corridorOf drops an item with no
-       due date), so the landing row exists only for an item with a key date. */
+    /* A dated save lands on its row in the schedule; the undated one is
+       proven by the next test (#1281). */
     const keyDate = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
     await saveDeskEntryWithDocument(page, name, keyDate);
     await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: 30_000 });
@@ -514,6 +520,52 @@ test("add to orbit closes the form and lands on the saved item", async ({ page }
     expect(itemId).toBe(await itemIdOf(page, household.id, name));
     await expect(page.locator("#save-note")).toHaveCount(0);
     await expect(page.locator(".item", { hasText: name })).toBeVisible();
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+/**
+ * #1281: the key date is optional, and an item saved without one still lands
+ * on its own row -- at the corridor's foot, under the quiet "no date" rule
+ * where undated suggestions sit -- open, exactly as a dated save does. The
+ * dial places by days to the sun, so it draws no body for it.
+ */
+test("add to orbit lands an undated item on its row under the no-date rule", async ({ page }) => {
+  test.skip(test.info().project.name.startsWith("mobile"), "the pocket's save opens the new item on its belt (#1120, §2.5)");
+  test.setTimeout(90_000);
+  await answerPushWithoutAService(page);
+  await page.goto("/api/auth/login?returnTo=/home");
+  await page.getByRole("link", { name: workerAccount("administrator") }).click();
+  await settleArrival(page);
+  await ensureWorkerAdministrator(page);
+  const household = households.track(await seedHousehold(page));
+
+  try {
+    const name = "Washing machine warranty proving";
+    await saveDeskEntryWithDocument(page, name);
+    await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: 30_000 });
+    const itemId = new URL(page.url()).searchParams.get("item") as string;
+    expect(itemId).toBe(await itemIdOf(page, household.id, name));
+
+    const row = page.locator(`.manifest a.item[id="${itemId}"]`);
+    await expect(row).toBeVisible();
+    await expect(row).toHaveAttribute("aria-expanded", "true");
+    await expect(row).toContainText(name);
+
+    const rule = page.locator(".manifest .corridor .month", { hasText: "no date" });
+    await expect(rule).toHaveCount(1);
+    await expect(rule).toContainText("1 kept without a date");
+    // The nearest rule above the row is the no-date one, not a month's or today's.
+    const ruleAbove = await row.evaluate((el) => {
+      for (let at = el.previousElementSibling; at; at = at.previousElementSibling) {
+        if (at.matches(".month, .today")) return at.textContent?.trim() ?? "";
+      }
+      return null;
+    });
+    expect(ruleAbove).toMatch(/^no date/);
+
+    await expect(page.locator(`[data-body="${itemId}"]`)).toHaveCount(0);
   } finally {
     await households.sweep(page);
   }

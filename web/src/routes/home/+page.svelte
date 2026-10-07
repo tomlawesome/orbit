@@ -1664,6 +1664,11 @@
               onCopyAddress={copyAddress} />
           {/each}
         {/each}
+        <!-- #1281: what is kept without a date rides at the foot under its
+             own quiet rule, after the last month — never on the dial. -->
+        {#if corridor.undated.length}
+          <div class="month undated"><span>no date</span><div class="rule"></div><small>{corridor.undated.length} kept without a date</small></div>
+        {/if}
         {#each corridor.undated as row (row.id)}
           <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
             onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}

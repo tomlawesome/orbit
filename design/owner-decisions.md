@@ -145,6 +145,10 @@ a colour dot, a bold title, one quiet line (`Home · orbital period 1 year ·
 ~£150`) and a T-minus with the date. **Costs are printed** so size is never
 geometry-alone.
 
+Items kept without a date ride at the corridor's foot under a quiet `no date`
+rule, with the undated suggestions — never on the dial, which places by days
+(#1281).
+
 ### Chrome — the four edges
 
 - **Left edge**: a single vertical word, always present. Green **`status`** when
