@@ -1601,9 +1601,9 @@ fidelity_webkit:
     pull_policy: if-not-present
   # 18.8m measured on pipeline 1926 on a loaded host, one worker (the
   # `pocket-webkit` project is pinned to one, same as `fidelity`'s appearance
-  # project). 30m gives it the same headroom `fidelity` keeps for its own
-  # Playwright runs.
-  timeout: 30m
+  # project). It reached 24m with two boards side by side (#1237), so 45m
+  # keeps the headroom `fidelity` keeps for its own Playwright runs.
+  timeout: 45m
   rules:
     - *not_scheduled
     - when: on_success
