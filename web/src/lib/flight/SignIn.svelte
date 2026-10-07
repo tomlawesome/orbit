@@ -179,11 +179,28 @@
   let raised = false;
   /** @param {boolean} on */
   function showCard(on) {
+      /* the ring a card opens from is the door's own, as the site sizes it:
+         its diameter is .72 of the glyph and its top edge is where the glyph's
+         centre less its radius falls. Seeded as custom properties for
+         door-phone.css's @starting-style, so the card's ring travels from the
+         bare ring, not from a station it no longer has (#1253) */
+      const glyph = document.querySelector("#login-glyph svg");
+      if (glyph) {
+        const r = glyph.getBoundingClientRect();
+        if (r.width > 0) {
+          const ring = r.width * 0.72;
+          const root = document.documentElement.style;
+          root.setProperty("--door-from-ring", `${ring.toFixed(2)}px`);
+          root.setProperty("--door-from-top", `${(r.top + r.height / 2 - ring / 2).toFixed(2)}px`);
+        }
+      }
     if (on) {
       raised = true;
       document.body.classList.add("showform");
     } else if (raised) {
       raised = false;
+      document.documentElement.style.removeProperty("--door-from-ring");
+      document.documentElement.style.removeProperty("--door-from-top");
       document.body.classList.remove("showform");
     }
   }
