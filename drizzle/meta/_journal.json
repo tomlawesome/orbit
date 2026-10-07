@@ -344,6 +344,13 @@
       "when": 1789171200000,
       "tag": "0048_portable_archive_imports",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1789257600000,
+      "tag": "0049_instance_upload_limit",
+      "breakpoints": true
     }
   ]
 }

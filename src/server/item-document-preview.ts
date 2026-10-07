@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { AppError } from "@/lib/app-error";
 import { log } from "@/lib/logger";
 import { getDocumentConfig } from "@/server/documents/config";
+import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { renderDocumentPagePreview, type DocumentPagePreview } from "@/server/documents/preview";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
@@ -40,13 +41,15 @@ export async function previewItemDocument(input: {
 }): Promise<ItemDocumentPagePreview> {
   await requireHouseholdAccess(input.userId, input.householdId);
   const config = getDocumentConfig();
+  // The administrator's limit, read now so a change needs no restart (#1285).
+  const maxBytes = await readEffectiveUploadLimit(config);
   const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
   // Ephemeral opaque reference for this pre-attachment render only; never persisted.
   const operationId = randomUUID();
-  const received = await storage.receive(input.body, operationId, config.maxBytes, input.declaredBytes);
+  const received = await storage.receive(input.body, operationId, maxBytes, input.declaredBytes);
   try {
     const mediaType = detectDocumentMediaType(received.leadingBytes);
-    const bytes = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
+    const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
     try {
       let scanned = false;
       if (config.scanMode === "required") {

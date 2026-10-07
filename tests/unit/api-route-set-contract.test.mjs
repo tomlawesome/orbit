@@ -61,6 +61,8 @@ const EXPECTED_ROUTES = [
   // behind the Systems card's "new system" button, which was drawn from the
   // v19 mockup and left inert until the decision of 2026-09-19.
   "/api/admin/systems",
+  // The document upload size limit an administrator sets (#1285).
+  "/api/admin/upload-limit",
   "/api/admin/users",
   // Admin-issued setup and recovery links (M7 slice 8, #911, ADR-0023 §3):
   // re-issues a `recovery` token for a local user who has forgotten their
@@ -199,7 +201,7 @@ describe("SvelteKit API route-set contract (#735)", () => {
     expect(routeFiles.length).toBeGreaterThan(20);
   });
 
-  it("has exactly the expected 78 route families -- no fewer, no more", () => {
+  it("has exactly the expected 79 route families -- no fewer, no more", () => {
     const actual = routeFiles.map((file) => file.routePath).sort();
     expect(actual).toEqual(EXPECTED_ROUTES);
   });

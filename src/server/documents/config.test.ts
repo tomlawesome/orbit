@@ -7,7 +7,7 @@ const nextKey = "cd".repeat(32);
 describe("document configuration", () => {
   it("loads secure defaults and derives a stable non-secret key identifier", () => {
     const config = getDocumentConfig({ NODE_ENV: "test", DOCUMENT_KEK: key });
-    expect(config.maxBytes).toBe(25 * 1_048_576);
+    expect(config.maxBytes).toBe(50 * 1_048_576);
     expect(config.householdQuotaBytes).toBe(5 * 1_073_741_824);
     expect(config.instanceQuotaBytes).toBe(20 * 1_073_741_824);
     expect(config.scanRecoveryRetentionHours).toBe(24);

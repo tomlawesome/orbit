@@ -9,7 +9,8 @@ Orbit will attach encrypted documents to household items using a local
 persistent volume. The first release supports:
 
 - PDF, JPEG, and PNG content identified from file signatures;
-- a 25 MiB maximum file size;
+- a 50 MiB default maximum file size, which an administrator can change
+  in Administration within hard bounds of 1 to 100 MiB (#1285);
 - a 5 GiB default quota per household;
 - a 20 GiB default quota per instance;
 - 30-day soft deletion before irreversible purge;
@@ -98,8 +99,10 @@ recoverable state.
 
 ### Upload and validation
 
-- Reject requests exceeding 25 MiB before buffering the complete body where
-  platform support permits, and enforce the limit again while streaming.
+- Reject requests exceeding the effective size limit (the administrator's
+  setting, or `DOCUMENT_MAX_BYTES` when none is set; never over 100 MiB)
+  before buffering the complete body where platform support permits, and
+  enforce the limit again while streaming.
 - Normalize display filenames, remove path components/control characters, and
   cap their encoded length. Storage keys never derive from user filenames.
 - Identify supported types using magic bytes. Supplied media type and extension
