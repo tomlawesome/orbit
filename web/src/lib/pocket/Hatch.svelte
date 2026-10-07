@@ -31,6 +31,8 @@
    *   current?: string,
    *   isAdmin?: boolean,
    *   inboxCount?: number | null,
+   *   onsignedout?: (redirectTo: string | null) => unknown,
+   *   onopened?: () => unknown,
    * }} Props
    */
   /** @type {Props} */

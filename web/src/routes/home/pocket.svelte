@@ -60,6 +60,8 @@
    *   onamend?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion,
    *     item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null) => Promise<string | null>,
    *   onchanged?: () => Promise<unknown>,
+   *   onsignedout?: (redirectTo: string | null) => unknown,
+   *   onmenu?: () => unknown,
    * }} Props
    */
   /** @type {Props} */
