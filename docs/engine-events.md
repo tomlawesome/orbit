@@ -802,20 +802,16 @@ any such attempt.
 1. The Dockerfile's `runner` stage sets `ENV ORBIT_ENGINE_CONTEXT=container`.
    `ENV` (unlike `CMD`/`ENTRYPOINT`) is part of the image's own config and is
    present in every container started from it regardless of
-   `--entrypoint`/`--user` overrides — the one fact the guard trusts. A
+   `--entrypoint`/`--user` overrides — the one fact the engine trusts. A
    container started any other way (a host checkout run directly via
    `pnpm run orbit`/`tsx`, with no image involved) never has it set.
-2. Every command whose adapters would ever spawn `docker`
-   must call `refuseDockerInContainer` as the FIRST statement in its command
-   function — before any adapter is constructed, so the code path that would
-   spawn `docker` is never reached, not merely made to fail once reached.
-   No command does today (see 3). When
-   `ORBIT_ENGINE_CONTEXT=container` is set, that call prints
-   `orbit: refused command=<command> reason=docker-command-forbidden-in-container`
-   to stderr and exits `9`, before touching the target directory or any
-   subprocess. `check` and `configure` (the pure-logic commands — `configure`
+2. No command spawns `docker`, so nothing is left to refuse: the
+   `refuseDockerInContainer` guard (exit `9`,
+   `reason=docker-command-forbidden-in-container`) went once the
+   backup/restore commands (#1211) and `install`/`update` (#1212) stopped
+   spawning it. `check` and `configure` (the pure-logic commands — `configure`
    added by issue #294, and the commands that run in the plain `docker run`
-   shape above) never call this guard and are unaffected: they work fully
+   shape above) work fully
    against a bind-mounted deploy directory, in or out of a container, and
    never spawn `docker` under any invocation — `src/cli/orbit.test.ts`,
    `src/cli/orbit.configure.test.ts`, and the bundle's own smoke test assert

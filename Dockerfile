@@ -97,9 +97,9 @@ ENV WORKER_ENABLED=true
 # Baked into the image config itself, so it is present in every container
 # started from this image regardless of --entrypoint/--user overrides —
 # unlike CMD/ENTRYPOINT, ENV is not replaced by `docker compose run
-# --entrypoint`. This is the one fact src/cli/orbit.ts's in-container
-# fail-closed guard (refuseDockerInContainer) trusts to refuse any command
-# whose adapters would spawn `docker` before that spawn is ever attempted.
+# --entrypoint`. This is the one fact src/cli/orbit.ts trusts about where it
+# runs: install/update refuse without it, and backup/restore and the
+# recovery-bundle commands refuse without it. No engine command spawns `docker`.
 # See docs/engine-events.md, "In-container engine invocation".
 ENV ORBIT_ENGINE_CONTEXT=container
 LABEL org.opencontainers.image.title="Orbit"
