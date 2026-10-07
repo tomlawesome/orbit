@@ -1244,7 +1244,78 @@ describe("install.sh: identity, volumes and readiness across the seam", () => {
   });
 });
 
+describe("install.sh: the UI helper it sources after the commit (guarantee #5)", () => {
+  it.each([
+    ["a symlink", (path) => {
+      rmSync(path);
+      symlinkSync(join(assetsRoot, "scripts", "installer-ui.sh"), path);
+    }],
+    ["not valid bash", (path) => writeFileSync(path, "installer_ui_init() {\n")],
+  ])("refuses to source a committed installer-ui.sh that is %s, and starts nothing", (_label, damage) => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+    expect(runInstall(targetDir).status).toBe(0);
+    damage(join(targetDir, "scripts", "installer-ui.sh"));
+    const result = runInstall(targetDir, {
+      FAKE_ENGINE_EXIT: "0",
+      FAKE_ENGINE_OUTCOME: "status=ok\nfresh=0\nprofile=standard\nmodel-pull=0\ndatabase-volume=\n",
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("The deployment's installer UI helper is unavailable.");
+    expect(result.stdout).toMatch(/state=failed reason=failure action=retry/);
+    expect(result.calls).not.toContain("compose --project-name");
+  });
+});
+
+describe("install.sh: the application readiness probe (guarantee #34)", () => {
+  // The probe is the exact text install.sh runs in the application
+  // container; only its fixed address is pointed at a local server here.
+  function probeSource() {
+    const match = /^readonly app_readiness_probe='([\s\S]*?)'$/mu.exec(readFileSync(installScript, "utf8"));
+    expect(match).not.toBeNull();
+    return match[1];
+  }
+
+  async function probeAgainst(status, body) {
+    const { createServer } = await import("node:http");
+    const server = createServer((_request, response) => {
+      response.writeHead(status, { "content-type": "application/json" }).end(body);
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address();
+    try {
+      const source = probeSource().replace("http://127.0.0.1:3000/", `http://127.0.0.1:${port}/`);
+      return await new Promise((resolve) => {
+        const child = spawn("node", ["-e", source]);
+        child.on("close", (code) => resolve(code));
+      });
+    } finally {
+      server.close();
+    }
+  }
+
+  it.each([
+    ["ready, from orbit", 200, '{"status":"ready","service":"orbit"}', 0],
+    ["ready, from another service", 200, '{"status":"ready","service":"other"}', 1],
+    ["starting", 200, '{"status":"starting","service":"orbit"}', 1],
+    ["a 503", 503, '{"status":"ready","service":"orbit"}', 1],
+    ["not JSON", 200, "ready", 1],
+    ["a JSON array", 200, "[]", 1],
+  ])("answers %s with exit %#", async (_label, status, body, code) => {
+    expect(await probeAgainst(status, body)).toBe(code);
+  });
+});
+
 describe("install.sh: what it holds by its source", () => {
+  it("bounds every Compose health probe with timeout, stdin closed (guarantee #33)", () => {
+    const source = readFileSync(installScript, "utf8");
+    expect(source).toMatch(/timeout --signal=TERM --kill-after=1s 5s \\\n\s+docker compose --project-name "\$compose_project_name" --env-file "\$environment_file" "\$@" <\/dev\/null/u);
+    for (const probe of ["probe_database_health", "probe_application_health", "probe_clamav_health", "probe_tika_health", "probe_ollama_health"]) {
+      const body = new RegExp(`^${probe}\\(\\) \\{\\n([\\s\\S]*?)\\n\\}`, "mu").exec(source)?.[1] ?? "";
+      expect(body, probe).toContain("bounded_compose_probe exec -T");
+    }
+  });
+
   it("uses literal delimiters for every Docker template it parses, the formats the engine's volume check documents", () => {
     const source = readFileSync(installScript, "utf8");
     const engineSide = readFileSync(join(repositoryRoot, "src", "lib", "database-volume-safety.ts"), "utf8");
