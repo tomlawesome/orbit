@@ -1,7 +1,6 @@
 <script>
   import { onMount } from "svelte";
   import { DAWN_FAR, DAWN_NEAR } from "./starfields.js";
-  import { firstLight, startLate } from "./first-light.js";
   import "./flight.css";
   import "./door-phone.css";
 
@@ -69,11 +68,12 @@
     const arrive = (im) => new Promise((resolve) => {
       /** @type {(e: Event) => void} */
       const done = (e) => {
+        /* the first light waits for the night side's picture, loaded or not
+           (first-light.js); the day side's fade waits for its picture as well
+           as for `lit` (flight.css) */
+        if (im.classList.contains("pre")) world.dataset.earth = "settled";
         if (!cancelled && e.type === "load") {
-          /* the day side's fade waits for its picture as well as for `lit`;
-             a picture later than first light catches up too (#1253) */
-          const due = document.body.classList.contains("lit") ? firstLight.dueAt : NaN;
-          startLate(im, due, () => im.classList.add("in"));
+          im.classList.add("in");
           if (im.classList.contains("pre")) world.classList.add("earthy");
         }
         resolve(undefined);

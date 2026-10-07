@@ -1,6 +1,5 @@
 <script>
   import { onMount } from "svelte";
-  import { navigating } from "$app/state";
   import Grain from "$lib/Grain.svelte";
   import Dawn from "./Dawn.svelte";
   import Claim from "./Claim.svelte";
@@ -8,7 +7,7 @@
   import Waiting from "./Waiting.svelte";
   import { clearLaunch, markLaunch } from "./arrival.js";
   import { readyFlight, hurryFlight } from "./warm.js";
-  import { FIRST_LIGHT_MS, firstLight, originFor, startLate } from "./first-light.js";
+  import { earthSettled, isFirstVisit, startFirstLight } from "./first-light.js";
   import {
     APPROVAL_BACKSTOP_MS, CLAIM, DOOR, LOCAL, STARTING, STARTING_BACKSTOP_MS,
     applyStartingBackstop, availabilityOf, cardMessageFor, claimFromHash, doorMessageFor,
@@ -179,6 +178,7 @@
   let raised = false;
   /** @param {boolean} on */
   function showCard(on) {
+    if (on) {
       /* the ring a card opens from is the door's own, as the site sizes it:
          its diameter is .72 of the glyph and its top edge is where the glyph's
          centre less its radius falls. Seeded as custom properties for
@@ -194,14 +194,13 @@
           root.setProperty("--door-from-top", `${(r.top + r.height / 2 - ring / 2).toFixed(2)}px`);
         }
       }
-    if (on) {
       raised = true;
       document.body.classList.add("showform");
     } else if (raised) {
       raised = false;
+      document.body.classList.remove("showform");
       document.documentElement.style.removeProperty("--door-from-ring");
       document.documentElement.style.removeProperty("--door-from-top");
-      document.body.classList.remove("showform");
     }
   }
 
@@ -482,14 +481,25 @@
     const timers = [];
     /** @param {number} ms @param {() => void} fn */
     const after = (ms, fn) => timers.push(setTimeout(fn, ms));
-    /* first light: the dawn breaks once on load (CON-9, POL-13), due
-       FIRST_LIGHT_MS after the page started loading; a late page catches
-       up rather than running the whole sunrise late (first-light.js) */
-    const dueAt = originFor(!navigating.to) + FIRST_LIGHT_MS;
-    firstLight.dueAt = dueAt;
-    const frame = requestAnimationFrame(() => after(Math.max(0, dueAt - performance.now()), () => {
-      startLate(document.body, dueAt, () => document.body.classList.add("lit"));
-    }));
+    /* first light: the dawn breaks once on load (CON-9, POL-13), as
+       orbit-site's door does it (first-light.js, #1253): `lit` waits for the
+       fonts and the Earth's first picture and, on a first visit, for at least
+       one lap of the ring's running light (`body.loading`, flight.css), which
+       is on while the door waits and comes off in the same frame that `lit`
+       starts the ring's drawing */
+    const world = document.querySelector("#dawn .world");
+    const runner = document.querySelector("#dawn .lockup .runner");
+    const stopFirstLight = startFirstLight({
+      critical: Promise.all([document.fonts?.ready, earthSettled(world)]),
+      runner,
+      minLaps: isFirstVisit(localStorage) ? 1 : 0,
+      loading: () => document.body.classList.add("loading"),
+      animated: () => !!runner && getComputedStyle(runner).animationName !== "none",
+      light: () => {
+        document.body.classList.remove("loading");
+        document.body.classList.add("lit");
+      },
+    });
 
     let disposed = false;
     /** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -642,10 +652,9 @@
       approvalStopped = true;
       clearTimeout(approvalTimer);
       clearTimeout(pollTimer);
-      cancelAnimationFrame(frame);
+      stopFirstLight();
       timers.forEach(clearTimeout);
-      document.body.classList.remove("lit", "switched", "returning", "returned");
-      firstLight.dueAt = NaN;
+      document.body.classList.remove("loading", "lit", "switched", "returning", "returned");
       /* Same rule as showCard: never take down a card somebody else put up. */
       showCard(false);
       delete document.body.dataset.state;

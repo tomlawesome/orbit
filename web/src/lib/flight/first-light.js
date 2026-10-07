@@ -1,83 +1,131 @@
 /*
- * FIRST LIGHT, COUNTED FROM PAGE LOAD (#1253; owner, 2026-10-07: "It's
- * approximate and it's from page load ideally").
+ * FIRST LIGHT, WHEN IT HAPPENS (#1253; owner, 2026-10-07: the site's own
+ * timing). Ported from orbit-site's `showDoor` (assets/js/main.js:157-235,
+ * c189d38), without the wait on shader compilation the app does not have: the
+ * flight's warming is warm.js's and chores.js's, started by SignIn.svelte once
+ * the door is lit and drawn.
  *
- * The door's sunrise is CSS transitions started by `body.lit` (flight.css),
- * so on its own it is counted from whenever the page's code got round to
- * setting `lit`. A slow load pushes the whole sunrise, and the button with
- * it, later by however late that was. Here `lit` is due at FIRST_LIGHT_MS
- * after the page started loading; when the code arrives after that, each
- * first-light transition is moved on by the lateness, so it ends about where
- * it would have ended on time. The same goes for the Earth's day side, whose
- * transition waits for its picture as well as for `lit`.
+ * The door's sunrise is CSS transitions and animations started by `body.lit`
+ * (flight.css), so everything is counted from `lit`. `lit` itself does not
+ * wait on a clock: it waits for what the door is made of.
  *
- * Catching up never cuts a picture in: every transition keeps at least
- * KEEP_MS still to run, so a very late page gets a short fade rather than a
- * jump. The standard shape is a timeline with a fixed origin and late
- * starters seeking forward (Web Animations' `currentTime`).
+ *   · the fonts and the Earth's first picture (`dawn-pre`), the two pieces
+ *     that would change the door's face as they arrived;
+ *   · while they come, the ring is a light running its circle (`body.loading`,
+ *     the runner), a lap at a time. When they have come it finishes the lap it
+ *     is on, then goes straight into its own drawing;
+ *   · on a first visit it always runs at least one lap, so the first sight of
+ *     the door is the light and then the ring drawn, never the ring at once;
+ *   · it is given a quarter of a second to find everything there already, and
+ *     on a visit that is not the first it then lights at once;
+ *   · it never waits for ever: seven laps, or 13 s, and the door lights
+ *     regardless (and without the runner's motion, under reduced motion, on
+ *     the pieces alone, up to 8 s).
  */
 
-/** When `lit` is due, in ms after the page started loading. */
-export const FIRST_LIGHT_MS = 500;
+/** The longest the door waits for a lap-less start to find its pieces in. */
+export const GRACE_MS = 250;
 
-/** The least of any first-light transition left to run after catching up. */
-export const KEEP_MS = 400;
+/** Laps of the runner after which the door lights whatever has not come. */
+export const MAX_LAPS = 7;
+
+/** The hard stop: the door lights this long after the wait began. */
+export const BACKSTOP_MS = 13000;
+
+/** The longest the pieces are waited for when the runner has no motion. */
+export const STILL_WAIT_MS = 8000;
+
+/** localStorage key: when this browser last saw the door. */
+export const SEEN_KEY = "orbit-door-seen";
+
+/** A browser that has not seen the door for this long sees a first visit again. */
+export const SEEN_FRESH_MS = 36 * 3600e3;
 
 /**
- * When this page's `lit` was due, on `performance.now()`'s clock, for
- * pieces that start their own part of first light later (the day side
- * waits for its picture, Dawn.svelte). NaN while no door is counting.
+ * Whether this is a first visit: nothing seen, or nothing seen for 36 hours
+ * (the pictures are no longer kept, so the door has to come again). Records
+ * this visit. A browser that will not say is a first visit.
+ * @param {Pick<Storage, "getItem" | "setItem"> | undefined} storage
+ * @param {number} [now]
  */
-export const firstLight = { dueAt: NaN };
-
-/**
- * How far to move on a transition that started `lateMs` after its due time.
- * @param {number} lateMs how late the transition started
- * @param {number} endMs its delay plus its duration
- * @param {number} [doneMs] how much of it has already run
- * @returns {number} the ms to add to its current time, never negative
- */
-export function catchUp(lateMs, endMs, doneMs = 0) {
-  if (!(lateMs > 0) || !Number.isFinite(endMs)) return 0;
-  return Math.max(0, Math.min(lateMs, endMs - KEEP_MS - doneMs));
+export function isFirstVisit(storage, now = Date.now()) {
+  try {
+    if (!storage) return true;
+    const seen = storage.getItem(SEEN_KEY);
+    storage.setItem(SEEN_KEY, String(now));
+    return !seen || now - Number(seen) > SEEN_FRESH_MS;
+  } catch { return true; }
 }
 
 /**
- * The time first light counts from, on `performance.now()`'s clock: the
- * start of the page load when this page is the first the document showed,
- * otherwise now (an in-app move to the door, where the page load is long
- * past and counting from it would cut the whole sunrise to the minimum).
- * @param {boolean} firstPage
+ * A promise, or nothing at all, waited for at most `ms`.
+ * @param {Promise<unknown> | undefined} p
+ * @param {number} ms
+ * @returns {Promise<unknown>}
  */
-export function originFor(firstPage) {
-  return firstPage ? 0 : performance.now();
+export function within(p, ms) {
+  return Promise.race([Promise.resolve(p).catch(() => {}), new Promise((resolve) => setTimeout(resolve, ms))]);
 }
 
 /**
- * Makes a class change that starts part of first light, then moves on every
- * transition under `root` that the change started, by how late it came
- * against `dueAt`. Only those: what was already running before the change
- * (a hover, the previous beat) is not first light's to move. The moving
- * waits a frame, because Chromium has not made a change's transitions when
- * asked for them in the same task (Firefox has); what has run by then is
- * counted.
- * @param {Element} root
- * @param {number} dueAt when they should have started, on `performance.now()`'s clock
- * @param {() => void} change the class change that starts them
+ * Resolves when the Earth's first picture has arrived or failed to (a missing
+ * picture must not hold the door dark), at once if it already has. `world`
+ * carries `data-earth="settled"` from Dawn.svelte once either has happened.
+ * @param {Element | null} world
+ * @returns {Promise<void>}
  */
-export function startLate(root, dueAt, change) {
-  const late = performance.now() - dueAt;
-  if (!(late > 0) || typeof root.getAnimations !== "function") { change(); return; }
-  const before = new Set(root.getAnimations({ subtree: true }));
-  change();
-  requestAnimationFrame(() => {
-    for (const a of root.getAnimations({ subtree: true })) {
-      if (before.has(a) || !("transitionProperty" in a)) continue;
-      const timing = a.effect?.getComputedTiming();
-      if (!timing) continue;
-      const done = Number(a.currentTime ?? 0);
-      const by = catchUp(late, Number(timing.endTime), done);
-      if (by > 0) a.currentTime = done + by;
-    }
+export function earthSettled(world) {
+  const pre = world?.querySelector(".earth image.pre");
+  if (!world || !pre || /** @type {HTMLElement} */ (world).dataset.earth === "settled") return Promise.resolve();
+  return new Promise((resolve) => {
+    pre.addEventListener("load", () => resolve(), { once: true });
+    pre.addEventListener("error", () => resolve(), { once: true });
   });
+}
+
+/**
+ * Starts the wait for first light and calls `light` when it is over, in a
+ * frame of its own.
+ * @param {object} o
+ * @param {Promise<unknown>} o.critical the pieces first light waits for (fonts, the Earth)
+ * @param {Pick<EventTarget, "addEventListener" | "removeEventListener"> | null} o.runner the ring's running light
+ * @param {number} o.minLaps whole laps to run first (1 on a first visit)
+ * @param {() => void} o.loading the pieces are not all here: shows the runner (`body.loading`)
+ * @param {() => boolean} o.animated whether the runner has motion; asked after `loading` has run
+ * @param {() => void} o.light first light
+ * @returns {() => void} stops everything still pending
+ */
+export function startFirstLight({ critical, runner, minLaps, loading, animated, light }) {
+  let here = false;
+  let lit = false;
+  let stopped = false;
+  let laps = 0;
+  /** @type {ReturnType<typeof setTimeout>[]} */
+  const timers = [];
+  const go = () => {
+    if (lit || stopped) return;
+    lit = true;
+    runner?.removeEventListener("animationiteration", lap);
+    requestAnimationFrame(() => { if (!stopped) light(); });
+  };
+  /* a lap has ended: light if the pieces are here and the laps are run, or if it has been long enough */
+  const lap = () => {
+    laps++;
+    if ((here && laps >= minLaps) || laps >= MAX_LAPS) go();
+  };
+  critical.then(() => { here = true; }, () => { here = true; });
+  within(critical, GRACE_MS).then(() => {
+    if (stopped) return;
+    if (here && !minLaps) { go(); return; }
+    loading();
+    runner?.addEventListener("animationiteration", lap);
+    /* without the runner's motion there are no laps: just the pieces */
+    if (!runner || !animated()) within(critical, STILL_WAIT_MS).then(go);
+    timers.push(setTimeout(go, BACKSTOP_MS));
+  });
+  return () => {
+    stopped = true;
+    timers.forEach(clearTimeout);
+    runner?.removeEventListener("animationiteration", lap);
+  };
 }
