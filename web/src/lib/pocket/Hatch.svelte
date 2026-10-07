@@ -41,6 +41,12 @@
     current = "",
     isAdmin = false,
     inboxCount = null,
+    /* home's own descent (#1253): given the provider's logout URL once the
+       session is ended, it plays the flight out to the dusk. Without it (no
+       flight on this page) the hatch walks straight to /logout. */
+    onsignedout = undefined,
+    /* the menu opened: home readies the descent's world, as its desk orb does */
+    onopened = undefined,
   } = $props();
 
   const initials = $derived(
@@ -50,6 +56,7 @@
   let active = $state(DEFAULT_THEME);
   $effect(() => {
     if (open) active = document.documentElement.dataset.theme || DEFAULT_THEME;
+    if (open) onopened?.();
   });
 
   /* Sign-out revokes before it leaves (#410): the session is gone before the
@@ -77,14 +84,19 @@
     if (signingOut) return;
     signingOut = true;
     problem = null;
+    /** @type {string | null} */
+    let redirectTo = null;
     try {
-      await signOut();
+      redirectTo = await signOut();
     } catch (error) {
       signingOut = false;
       problem = /** @type {{ message?: string }} */ (error)?.message ?? "still signed in — try again";
       return;
     }
-    location.href = "/logout";
+    /* #1262: the menu goes as the sign-out goes ahead, never left over the flight */
+    open = false;
+    if (onsignedout) onsignedout(redirectTo);
+    else location.href = "/logout";
   }
 </script>
 

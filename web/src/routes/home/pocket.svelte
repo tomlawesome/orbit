@@ -65,6 +65,7 @@
   /** @type {Props} */
   let {
     view = null, arrive = false, onapprove = undefined, ondismiss = undefined, onamend = undefined, onchanged = undefined,
+    onsignedout = undefined, onmenu = undefined,
   } = $props();
   let sheetOpen = $state(false);
   let hatchOpen = $state(false);
@@ -1033,7 +1034,7 @@
 </Sheet>
 
 <Hatch bind:open={hatchOpen} name={view?.user?.displayName ?? ""} {roleLine} {isAdmin}
-       inboxCount={waiting || null} />
+       inboxCount={waiting || null} {onsignedout} onopened={onmenu} />
 
 <ReviewSheet bind:open={reviewOpen} title={reviewing?.title ?? ""} proposal={reviewing?.proposal}
              householdId={reviewing ? (reviewing.householdId ?? view?.primary ?? null) : null}
