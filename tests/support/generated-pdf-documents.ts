@@ -227,6 +227,131 @@ function incrementalPdf(): Buffer {
   return Buffer.concat([base.bytes, updatedCatalog, info, xref]);
 }
 
+export interface ModernPdfOptions {
+  /** Extra catalog entries, written inside the catalog dictionary. */
+  catalog?: string;
+  /** Extra page entries, written inside the page dictionary. */
+  page?: string;
+  /** Extra plain objects, packed into the object stream with the catalog and page tree. */
+  packed?: Record<number, string>;
+  /** Extra top-level streams: id to [dictionary entries, payload]. */
+  streams?: Record<number, [string, Buffer]>;
+  /** Object stream dictionary entries other than /N and /First; defaults to a typed Flate stream. */
+  objectStreamDictionary?: string;
+  /** Encodes the object stream payload; defaults to Flate. */
+  encodeObjectStream?: (payload: Buffer) => Buffer;
+  /** Lists every object as its own /Index subsection, so /Type /XRef lands far from the dictionary's start. */
+  longIndex?: boolean;
+  /** false writes the cross-reference rows unpredicted, with no nested /DecodeParms dictionary. */
+  xrefPredictor?: boolean;
+}
+
+/**
+ * The shape current producers write: PDF 1.7 with the catalog, page tree and
+ * annotations packed into a Flate object stream, indexed by a compressed
+ * cross-reference stream whose dictionary carries a nested /DecodeParms
+ * (PNG predictor) ahead of /Size, keys sorted as most writers sort them.
+ */
+export function syntheticModernPdf(options: ModernPdfOptions = {}): Buffer {
+  const content = pageContent();
+  const packed: Record<number, string> = {
+    1: `<< /Type /Catalog /Pages 2 0 R ${options.catalog ?? ""} >>`,
+    2: "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    3: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R ${options.page ?? ""} >>`,
+    4: "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ...options.packed,
+  };
+  const streams: Record<number, [string, Buffer]> = { 5: ["", content], ...options.streams };
+  if (options.longIndex) {
+    // Many objects listed one subsection each, as an incremental save writes them.
+    const firstFiller = Math.max(...Object.keys(packed).map(Number), ...Object.keys(streams).map(Number)) + 1;
+    for (let id = firstFiller; id < firstFiller + 120; id += 1) packed[id] = "<< /Producer (filler) >>";
+  }
+  const packedIds = Object.keys(packed).map(Number).sort((left, right) => left - right);
+  const streamIds = Object.keys(streams).map(Number).sort((left, right) => left - right);
+  const objectStreamId = Math.max(...packedIds, ...streamIds) + 1;
+  const xrefId = objectStreamId + 1;
+  let header = "";
+  let body = "";
+  for (const id of packedIds) {
+    header += `${id} ${body.length} `;
+    body += `${packed[id]}\n`;
+  }
+  const encoded = (options.encodeObjectStream ?? deflateSync)(text(header + body));
+  const objectStreamDictionary = options.objectStreamDictionary ?? "/Type /ObjStm /Filter /FlateDecode";
+
+  let bytes = text("%PDF-1.7\n%\xe2\xe3\xcf\xd3\n");
+  const offsets = new Map<number, number>();
+  for (const id of streamIds) {
+    const [dictionary, payload] = streams[id];
+    offsets.set(id, bytes.length);
+    bytes = Buffer.concat([bytes, text(`${id} 0 obj\n`), streamObject(`${dictionary} /Length ${payload.length}`, payload), text("\nendobj\n")]);
+  }
+  offsets.set(objectStreamId, bytes.length);
+  bytes = Buffer.concat([
+    bytes,
+    text(`${objectStreamId} 0 obj\n`),
+    streamObject(`${objectStreamDictionary} /N ${packedIds.length} /First ${header.length} /Length ${encoded.length}`, encoded),
+    text("\nendobj\n"),
+  ]);
+
+  const xrefOffset = bytes.length;
+  const rows: Buffer[] = [];
+  for (let id = 0; id <= xrefId; id += 1) {
+    const row = Buffer.alloc(6);
+    if (id in packed) {
+      row[0] = 2;
+      row.writeUInt32BE(objectStreamId, 1);
+      row[5] = packedIds.indexOf(id);
+    } else if (id === xrefId || offsets.has(id)) {
+      row[0] = 1;
+      row.writeUInt32BE(id === xrefId ? xrefOffset : offsets.get(id)!, 1);
+    } else {
+      row[5] = id === 0 ? 0xff : 0;
+    }
+    rows.push(row);
+  }
+  // PNG "Up" predictor, as producers write cross-reference streams.
+  const predicted = rows.map((row, index) => Buffer.concat([
+    Buffer.from([2]),
+    Buffer.from(row.map((value, column) => (value - (index === 0 ? 0 : rows[index - 1][column])) & 0xff)),
+  ]));
+  const usePredictor = options.xrefPredictor ?? true;
+  const compressedRows = deflateSync(Buffer.concat(usePredictor ? predicted : rows));
+  const index = options.longIndex
+    ? Array.from({ length: xrefId + 1 }, (_, id) => `${id} 1`).join(" ")
+    : `0 ${xrefId + 1}`;
+  const identifier = "0123456789abcdef0123456789abcdef";
+  const xrefDictionary = `${usePredictor ? "/DecodeParms << /Columns 6 /Predictor 12 >> " : ""}/Filter /FlateDecode /ID [<${identifier}> <${identifier}>] `
+    + `/Index [${index}] /Length ${compressedRows.length} /Root 1 0 R /Size ${xrefId + 1} /Type /XRef /W [1 4 1]`;
+  return Buffer.concat([
+    bytes,
+    text(`${xrefId} 0 obj\n`),
+    streamObject(xrefDictionary, compressedRows),
+    text(`\nendobj\nstartxref\n${xrefOffset}\n%%EOF\n`),
+  ]);
+}
+
+const javaScriptAction = "<< /S /JavaScript /JS (app.alert\\(1\\)) >>";
+const launchAction = "<< /S /Launch /F (payload.exe) >>";
+
+/** Active content and embedded files hidden inside the object stream of an otherwise ordinary modern PDF. */
+export const syntheticModernPdfHiddenFeatures: ReadonlyArray<{ name: string; options: ModernPdfOptions }> = [
+  { name: "named JavaScript", options: { catalog: "/Names << /JavaScript 6 0 R >>", packed: { 6: "<< /Names [(run) 7 0 R] >>", 7: javaScriptAction } } },
+  { name: "open action JavaScript", options: { catalog: "/OpenAction 6 0 R", packed: { 6: javaScriptAction } } },
+  { name: "open action launch", options: { catalog: "/OpenAction 6 0 R", packed: { 6: launchAction } } },
+  { name: "link annotation JavaScript", options: { page: "/Annots [6 0 R]", packed: { 6: "<< /Type /Annot /Subtype /Link /Rect [0 0 99 99] /A 7 0 R >>", 7: javaScriptAction } } },
+  { name: "link annotation launch", options: { page: "/Annots [6 0 R]", packed: { 6: "<< /Type /Annot /Subtype /Link /Rect [0 0 99 99] /A 7 0 R >>", 7: launchAction } } },
+  { name: "form field JavaScript", options: { catalog: "/AcroForm << /Fields [6 0 R] >>", page: "/Annots [6 0 R]", packed: { 6: "<< /Type /Annot /Subtype /Widget /FT /Tx /T (field) /Rect [0 0 99 20] /P 3 0 R /AA << /K 7 0 R >> >>", 7: javaScriptAction } } },
+  { name: "outline JavaScript", options: { catalog: "/Outlines 6 0 R", packed: { 6: "<< /Type /Outlines /First 7 0 R /Last 7 0 R /Count 1 >>", 7: `<< /Title (Open) /Parent 6 0 R /A ${javaScriptAction} >>` } } },
+  { name: "XFA form", options: { catalog: "/AcroForm << /Fields [] /XFA 6 0 R >>", streams: { 6: ["", text("<xdp:xdp xmlns:xdp=\"http://ns.adobe.com/xdp/\"><template/></xdp:xdp>")] } } },
+  { name: "embedded file", options: { catalog: "/Names << /EmbeddedFiles 6 0 R >>", packed: { 6: "<< /Names [(payload.bin) 7 0 R] >>", 7: "<< /Type /Filespec /F (payload.bin) /EF << /F 8 0 R >> >>" }, streams: { 8: ["", text("payload")] } } },
+  {
+    name: "launch in an untyped object stream with an escaped filter name",
+    options: { catalog: "/OpenAction 6 0 R", packed: { 6: launchAction }, objectStreamDictionary: "/Fil#74er /FlateDecode" },
+  },
+];
+
 export const syntheticStructurePdfFixtures = [
   { name: "classic compressed stream with indirect length and filter array", bytes: classicCompressedPdf() },
   { name: "compressed cross-reference stream", bytes: xrefStreamPdf() },
