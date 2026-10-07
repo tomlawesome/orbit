@@ -1,5 +1,9 @@
 import { goto } from "$app/navigation";
-import { WorkspaceError, activeHousehold, applyCommand, attachItemDocument, inspectPickedDocument, previewPickedDocument } from "$lib/data/workspace.js";
+import { WorkspaceError, activeHousehold, applyCommand, attachItemDocument } from "$lib/data/workspace.js";
+import {
+  CAP_READING, FOCUS_READING, FOCUS_REFUSED, FOCUS_UNDRAWABLE, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
+  WHY_UNDRAWABLE, captionOf, readPickedDocument, suggestionsToCarry,
+} from "$lib/data/document-read.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
 import { screenScope } from "$lib/teardown.js";
 import { wireDropFeedback } from "./drop-feedback.js";
@@ -276,21 +280,12 @@ export function mountCreate() {
   const dropFile = /** @type {HTMLButtonElement} */ (document.getElementById("rc-drop"));
   const docnote = /** @type {HTMLElement} */ (document.getElementById("docnote"));
 
-  /* The mockup's own words for each state, carried verbatim; the settled
-     states that create-v3 never drew (it ended on the timer) take the words
-     document-card/round-6 ratified for the item page's reading card. */
-  const READING_HEAD = "Reading your document";
-  const PAGE_HEAD = "Page one";
-  const FOCUS_READING = "Focusing on the anomaly";
-  const WHY_READING = "orbit is reading the pages it was given<br>nothing is saved, and nothing is assumed";
-  const FOCUS_UNDRAWABLE = "Orbit could not draw a picture of this document.";
-  const WHY_UNDRAWABLE = "it is still attached when you add this entry<br>orbit just could not turn it into a page to read here";
-  const FOCUS_REFUSED = "Orbit refused this file.";
-  const WHY_REFUSED = "it did not pass what orbit checks before keeping a file<br>choose another document";
-  const CAP_READING = "orbit is reading the pages it was given";
-  const CAP_CARRIED = "the fields marked ◆ from document are what orbit read across into the form";
-  const CAP_NOTHING = "orbit read the pages and found nothing to carry across";
-  const CAP_UNREAD = "orbit could not read the pages this time";
+  /* The words for each state (READING_HEAD, FOCUS_*, WHY_*, CAP_*) and the
+     two requests behind them live in $lib/data/document-read.js, shared
+     with the phone's form (#1279): the mockup's own words, carried
+     verbatim, and for the settled states create-v3 never drew (it ended on
+     the timer) the words document-card/round-6 ratified for the item page's
+     reading card. */
 
   /** The suggestion fields the form has a slot (and a "◆ from document"
       tag) for; the rest of the inspection's eight stay with the pocket's
@@ -408,69 +403,62 @@ export function mountCreate() {
     const householdId = (household ?? await activeHousehold()).id;
     if (!current()) return;
 
-    const page = previewPickedDocument(householdId, file, { signal: controller.signal })
-      .then((preview) => {
-        if (!current()) { URL.revokeObjectURL(preview.url); return; }
-        sheetUrl = preview.url;
+    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal });
+
+    const page = outcomes.page.then((outcome) => {
+      if (!current()) {
+        if (outcome.kind === "up") URL.revokeObjectURL(outcome.url);
+        return;
+      }
+      if (outcome.kind === "up") {
+        sheetUrl = outcome.url;
         sheetPage.alt = `Page one of ${file.name}`;
-        sheetPage.src = preview.url;
-        rcScan.hidden = !preview.scanned;
+        sheetPage.src = outcome.url;
+        rcScan.hidden = !outcome.scanned;
         pageState = "up";
         readcard.dataset.page = "up";
         readHead.textContent = PAGE_HEAD;
         document.body.classList.add("snap");
-      })
-      .catch((error) => {
-        if (!current()) return;
-        pageState = "failed";
-        readcard.dataset.page = "failed";
-        const code = /** @type {{ code?: string, message?: string }} */ (error)?.code;
-        if (code === "document_malware_detected") {
-          refuseDocument(file, WHY_REFUSED);
-          return;
-        }
-        /* Unsupported or undrawable is the page's own fault and the file is
-           fine; anything else (the scanner, the connection) is said in the
-           server's own words, since the save will meet the same wall. */
-        const ordinary = code === "document_preview_unsupported" || code === "document_preview_failed";
-        pageProblem = {
-          line: FOCUS_UNDRAWABLE,
-          why: ordinary ? WHY_UNDRAWABLE : saveProblem(/** @type {{ message?: string }} */ (error)),
-          refused: false,
-        };
-        if (readDone) settleFocus(pageProblem);
-      });
+        return;
+      }
+      pageState = "failed";
+      readcard.dataset.page = "failed";
+      if (outcome.kind === "refused") {
+        refuseDocument(file, outcome.why);
+        return;
+      }
+      pageProblem = { line: FOCUS_UNDRAWABLE, why: outcome.why, refused: false };
+      if (readDone) settleFocus(pageProblem);
+    });
 
-    const read = inspectPickedDocument(householdId, file, { signal: controller.signal })
-      .then((result) => {
+    const read = outcomes.read
+      .then((outcome) => {
         if (!current()) return;
-        if (result.attachmentDisposition === "rejected") {
+        if (outcome.kind === "refused") {
           /* The upload would refuse it too, so it leaves the entry now. */
-          refuseDocument(file, result.message ?? WHY_REFUSED);
+          refuseDocument(file, outcome.why);
           return;
         }
-        let carried = 0;
-        for (const suggestion of result.suggestions) {
-          const slot = SUGGESTION_SLOTS[suggestion.field];
-          if (!slot) continue;
-          const input = /** @type {HTMLInputElement} */ (document.getElementById(slot.input));
-          if (input.value.trim()) continue; /* never over what someone typed */
-          input.value = suggestion.value;
-          document.getElementById(slot.field)?.classList.add("sugg");
-          carried += 1;
+        if (outcome.kind === "unread") {
+          capline.textContent = captionOf(outcome, 0);
+          honest.textContent = outcome.message;
+          return;
         }
-        if (carried) {
+        const valueOf = (/** @type {string} */ field) =>
+          /** @type {HTMLInputElement} */ (document.getElementById(SUGGESTION_SLOTS[field].input)).value;
+        const carry = suggestionsToCarry(outcome.suggestions, valueOf);
+        for (const suggestion of carry) {
+          const slot = SUGGESTION_SLOTS[suggestion.field];
+          /** @type {HTMLInputElement} */ (document.getElementById(slot.input)).value = suggestion.value;
+          document.getElementById(slot.field)?.classList.add("sugg");
+        }
+        if (carry.length) {
           docnote.classList.add("show");
           edited();
           updateRefusal();
         }
-        capline.textContent = !result.extracted ? CAP_UNREAD : carried ? CAP_CARRIED : CAP_NOTHING;
-        honest.textContent = result.message ?? "";
-      })
-      .catch((error) => {
-        if (!current()) return;
-        capline.textContent = CAP_UNREAD;
-        honest.textContent = saveProblem(/** @type {{ message?: string }} */ (error));
+        capline.textContent = captionOf(outcome, carry.length);
+        honest.textContent = outcome.message;
       })
       .finally(() => {
         if (!current()) return;

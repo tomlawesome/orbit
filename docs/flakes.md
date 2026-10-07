@@ -382,3 +382,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 ## web/tests/fidelity screens.spec.js "household"
 
 - 2026-10-06 · f3e61aeb (#1248, #1251; neither touches the household screen) · local `pnpm --filter orbit-web fidelity` · drifted 0.1109% once, passed on the next run on the same code. First sighting.
+
+## mail-relay-senders-fixture.test.js "answers a seeded, unverified address instead of an empty list"
+
+- 2026-10-07 · 2a076315 (+ #1279's uncommitted phone create reading card, none of it near this fixture) · local `scripts/test-backend.sh`, worktree `fix-create-form`, other sessions using the host · timed out at the 5s default; it passed in the run before on the same code, and green on an immediate rerun of the file alone. First sighting.
