@@ -246,6 +246,14 @@ describe("runInstall: target and action (guarantees #7, #21)", () => {
     expect(readdirSync(target)).toEqual(["notes.txt"]);
   });
 
+  it("refuses an update whose optional-service configuration matches no supported profile (#23)", async () => {
+    const target = recognised(["COMPOSE_PROFILES=ai"]);
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "host", message: "The existing optional-service configuration is unsupported or ambiguous." });
+    expect(snapshot(target)).toEqual(before);
+  });
+
   it("refuses an explicit install over a recognised deployment, and an explicit update of an empty target", async () => {
     expect((await run(recognised(), { requestedAction: "install" })).outcome).toMatchObject({
       status: "failed",
