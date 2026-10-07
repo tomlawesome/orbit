@@ -1481,13 +1481,18 @@ journey_successful_rollback() {
   # rolled the deployment's own scripts out of existence (exit 127 on the
   # next repair invocation). The list mirrors repair.sh's
   # restore_transaction_paths, the same way interrupted-configuration-
-  # migration's whole-directory copy already leans on it.
+  # migration's whole-directory copy already leans on it, and
+  # src/lib/deployment-assets.test.ts holds the two equal: when #1212 added
+  # the recovery-bundle scripts there and not here, the rollback removed
+  # both from the deployment as paths the transaction had created.
   local managed
   for managed in docker-compose.yml docker-compose.mail.yml \
       .env-orbit.example \
       config/tika-config.json scripts/configure.sh scripts/installer-ui.sh \
       scripts/backup.sh scripts/restore.sh \
-      scripts/repair.sh .env-orbit .orbit-secrets; do
+      scripts/repair.sh \
+      scripts/export-recovery-bundle.sh scripts/import-recovery-bundle.sh \
+      .env-orbit .orbit-secrets; do
     [[ -e "$target/$managed" ]] || continue
     mkdir -p -- "$staging/rollback/original/$(dirname -- "$managed")"
     cp -a -- "$target/$managed" "$staging/rollback/original/$managed"
