@@ -213,7 +213,12 @@ Check the list before building a test rig or handing a check to the owner.
   `verify_bootstrap` in `.github/workflows/publish-from-gitlab.yml`, right
   after that workflow's `publish` job moves GHCR's `preview` tag — the
   publication path that can actually invalidate what the harness asserts
-- `scripts/test-backup-restore.sh` — backup and restore acceptance drill
+- `scripts/test-backup-restore.sh` — backup and restore acceptance drill.
+  Locally run it with `--own-stack`: it builds the working tree, installs a
+  throwaway deployment (Compose project `orbit-backup-drill`) and removes it
+  on every exit (#1273). Needs a host with no Orbit stack and no
+  `*orbit-db-data` volume. Without the flag it borrows the deployment
+  `.env-orbit` names and never removes it — CI's path (#1241)
 - `scripts/test-repair-journeys.sh` — live repair journeys: installs a real
   stack, breaks it, and proves `repair.sh` recovers it (`--list` shows which
   journeys are live and which are still absent)
