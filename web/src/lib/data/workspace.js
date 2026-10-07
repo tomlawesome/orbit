@@ -1493,28 +1493,109 @@ export async function readItemDocuments(householdId, itemId) {
  * @returns {Promise<DocumentSummary>}
  */
 export async function attachItemDocument(householdId, itemId, file, documentId, { retryCsrf = true } = {}) {
-  const { csrfToken } = await readSession();
-  const response = await fetch(
+  const response = await postDocumentBytes(
     `/api/households/${encodeURIComponent(householdId)}/items/${encodeURIComponent(itemId)}/documents`,
-    {
-      method: "POST",
-      credentials: "same-origin",
-      headers: {
-        "content-type": file.type || "application/octet-stream",
-        "x-csrf-token": csrfToken,
-        "x-orbit-filename": encodeURIComponent(file.name),
-        "x-orbit-document-id": documentId,
-      },
-      body: file,
-    },
+    file,
+    { "x-orbit-document-id": documentId },
+    { retryCsrf },
   );
-  if (response.status === 403 && retryCsrf) {
-    await readSession({ refresh: true });
-    return attachItemDocument(householdId, itemId, file, documentId, { retryCsrf: false });
-  }
   /** @type {{ document: DocumentSummary }} */
   const body = await json(response);
   return body.document;
+}
+
+/**
+ * One raw-body file POST, the shape all three document routes take: the
+ * bytes are the body, so the filename travels encoded in a header, with
+ * the CSRF token and whatever else the route asks for. A stale CSRF token
+ * is retried once, as applyCommand does. The caller reads the response —
+ * one answers JSON, one an image.
+ *
+ * @param {string} url
+ * @param {File} file
+ * @param {Record<string, string>} headers
+ * @param {{ retryCsrf?: boolean, signal?: AbortSignal }} [options]
+ * @returns {Promise<Response>}
+ */
+async function postDocumentBytes(url, file, headers, { retryCsrf = true, signal } = {}) {
+  const { csrfToken } = await readSession();
+  const response = await fetch(url, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      "content-type": file.type || "application/octet-stream",
+      "x-csrf-token": csrfToken,
+      "x-orbit-filename": encodeURIComponent(file.name),
+      ...headers,
+    },
+    body: file,
+    signal,
+  });
+  if (response.status === 403 && retryCsrf) {
+    await readSession({ refresh: true });
+    return postDocumentBytes(url, file, headers, { retryCsrf: false, signal });
+  }
+  return response;
+}
+
+/**
+ * Page one of a file the create form has just been given, before any item
+ * exists for it (#1245): the household's pre-attachment preview route draws
+ * it from the bytes and keeps nothing. The picture comes back as an object
+ * URL for an `<img>`; the caller revokes it when the sheet is cleared.
+ * `scanned` is false only where the instance has scanning switched off —
+ * the lane says "scanned clean" only when something scanned it.
+ *
+ * @param {string} householdId
+ * @param {File} file
+ * @param {{ signal?: AbortSignal }} [options]
+ * @returns {Promise<{ url: string, scanned: boolean }>}
+ */
+export async function previewPickedDocument(householdId, file, { signal } = {}) {
+  const response = await postDocumentBytes(
+    `/api/households/${encodeURIComponent(householdId)}/item-document-preview`,
+    file,
+    { "x-orbit-declared-bytes": String(file.size) },
+    { signal },
+  );
+  if (!response.ok) await json(response); /* throws the server's own words */
+  return {
+    url: URL.createObjectURL(await response.blob()),
+    scanned: response.headers.get("x-orbit-scan") === "clean",
+  };
+}
+
+/**
+ * What the picked file says, read before any item exists for it (#1245):
+ * the household's inspection route scans and extracts the bytes and keeps
+ * nothing. Started from the same pick as `previewPickedDocument`, so the
+ * page is on screen while this is still reading.
+ *
+ * @typedef {object} PickedDocumentSuggestion
+ * @property {string} field      "title" | "subtype" | "provider" | "reference" | "cost" | "dueDate" | "scheduleKind" | "recurrenceMonths"
+ * @property {string} value
+ * @property {string} source
+ * @property {string} confidence
+ *
+ * @typedef {object} PickedDocumentInspection
+ * @property {boolean} extracted
+ * @property {PickedDocumentSuggestion[]} suggestions
+ * @property {string} [message]       the honest reason nothing (or less) was read
+ * @property {"attachable" | "rejected"} attachmentDisposition
+ *
+ * @param {string} householdId
+ * @param {File} file
+ * @param {{ signal?: AbortSignal }} [options]
+ * @returns {Promise<PickedDocumentInspection>}
+ */
+export async function inspectPickedDocument(householdId, file, { signal } = {}) {
+  const response = await postDocumentBytes(
+    `/api/households/${encodeURIComponent(householdId)}/item-document-inspection`,
+    file,
+    { "x-orbit-declared-bytes": String(file.size) },
+    { signal },
+  );
+  return json(response);
 }
 
 /**
