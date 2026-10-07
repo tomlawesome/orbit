@@ -29,9 +29,30 @@
 #     restore intact, and a session created after the backup point does not
 #     survive restoring to before it existed.
 #
-# Ownership (#1241). Unlike the acceptance harnesses this drill does NOT bring
-# up a stack of its own: it runs against the deployment that ORBIT_ENV_FILE
-# (default .env-orbit) names, in CI the disposable container-validation one.
+# Usage: scripts/test-backup-restore.sh [--own-stack]
+#
+# Ownership (#1241, #1273). By default this drill does NOT bring up a stack of
+# its own: it runs against the deployment that ORBIT_ENV_FILE (default
+# .env-orbit) names, in CI the disposable container-validation one. The rest
+# of this paragraph describes that borrowed path.
+#
+# --own-stack is the local way to run it (#1273): the drill builds an image
+# from this working tree, installs a throwaway deployment with install.sh into
+# a `mktemp -d` target under its own Compose project (orbit-backup-drill,
+# app on 127.0.0.1:3212, local registry on 5302), copies this checkout's
+# backup, restore, recovery-bundle and end-maintenance scripts into it, and
+# runs against that. It owns the whole stack, so teardown removes it all on
+# every exit, as scripts/test-repair-journeys.sh does: `compose down --volumes
+# --remove-orphans`, every container, volume and network carrying the
+# project's label, the registry container and the target directory. The
+# working-tree image and its registry tag stay, like repair-journeys' own.
+# It refuses to start while any Orbit stack holds the fixed container names,
+# and install.sh refuses while any volume ending orbit-db-data exists
+# (AGENTS.md, "Traps when running things locally"). Environment values aimed
+# at another deployment (ORBIT_ENV_FILE, ORBIT_SECRETS_DIR, ORBIT_BACKUP_DIR,
+# ORBIT_BIND_ADDRESS, ORBIT_PORT, COMPOSE_FILE, COMPOSE_PROJECT_NAME) are
+# ignored. ORBIT_BACKUP_DRILL_IMAGE=<ref> skips the build. CI keeps the
+# borrowed path: its pipeline already supplies a throwaway deployment.
 #
 #   Borrowed, never removed: the Compose project and its orbit-app and orbit-db
 #   containers, every volume and network, the images, the live document KEK and
@@ -52,7 +73,9 @@
 #   left by a drill step that did not finish (`restore.sh --recover`), and a
 #   stopped or unhealthy orbit-app (restarted).
 #
-# The teardown is one trap on EXIT, INT and TERM and runs exactly once. A failed
+# The teardown is one trap on EXIT, INT and TERM and runs exactly once; with
+# --own-stack it removes the owned stack instead of putting a borrowed one
+# back, and a failed run's evidence also keeps install.sh's log. A failed
 # or interrupted run first copies compose state and logs, the restore journal
 # and the failure reason to $ORBIT_EVIDENCE_ROOT/test-backup-restore-<timestamp>/
 # (default ~/projects/.backups/orbit) and prints the path. A fixture-free
@@ -62,8 +85,44 @@ set -Eeuo pipefail
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_dir"
 
+own_stack=0
+while (($#)); do
+  case "$1" in
+    --own-stack) own_stack=1 ;;
+    *) printf 'Orbit backup test: unknown option %s (usage: scripts/test-backup-restore.sh [--own-stack])\n' "$1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+# The deployment the drill runs against: this checkout's, or with --own-stack
+# the throwaway one it installs (#1273). own_stack_started is set just before
+# the drill starts anything of its own in Docker, so a run that stops earlier
+# -- including one refused because another stack holds the container names --
+# never sweeps a project label it did not populate.
+deploy_dir="$repo_dir"
+own_workdir=""
+own_stack_started=0
+readonly own_project="orbit-backup-drill"
+readonly own_registry_name="orbit-backup-drill-registry"
+# Not the install harness's 5300/3210 nor repair-journeys' 5301/3211, so the
+# ports never collide with theirs.
+readonly own_registry_port=5302
+readonly own_orbit_port=3212
+readonly own_repository="backup-drill/orbit"
+readonly own_issuer="https://oidc.backup-drill.invalid/application/o/orbit/"
+if [[ "$own_stack" == 1 ]]; then
+  # The owned stack answers to its own files and project only: a value
+  # exported for another deployment must not point the drill, the scripts it
+  # runs or Compose's interpolation at that deployment.
+  unset ORBIT_ENV_FILE ORBIT_SECRETS_DIR ORBIT_BACKUP_DIR ORBIT_BIND_ADDRESS ORBIT_PORT COMPOSE_FILE
+  export COMPOSE_PROJECT_NAME="$own_project"
+  own_workdir="$(mktemp -d "${TMPDIR:-/tmp}/orbit-backup-drill.XXXXXX")"
+  deploy_dir="$own_workdir/$own_project"
+  ORBIT_ENV_FILE="$deploy_dir/.env-orbit"
+fi
+
 readonly environment_file="${ORBIT_ENV_FILE:-.env-orbit}"
-readonly secrets_directory="${ORBIT_SECRETS_DIR:-$repo_dir/.orbit-secrets}"
+readonly secrets_directory="${ORBIT_SECRETS_DIR:-$deploy_dir/.orbit-secrets}"
 readonly live_kek="$secrets_directory/document-kek"
 readonly document_id="11111111-1111-4111-8111-111111111111"
 readonly recovery_document_id="55555555-5555-4555-8555-555555555555"
@@ -102,7 +161,7 @@ variant_directory=""
 # deployment, so a run that fails a precondition never reaches for docker.
 # `journal_at_start` records whether an unfinished restore journal already
 # existed, so teardown only recovers one this run left behind.
-restore_state_directory="${ORBIT_BACKUP_DIR:-$repo_dir/backups}/.orbit-restore"
+restore_state_directory="${ORBIT_BACKUP_DIR:-$deploy_dir/backups}/.orbit-restore"
 drill_run_container="orbit-backup-drill-$$"
 touched=0
 fixtures_seeded=0
@@ -131,7 +190,7 @@ collect_evidence() {
   mkdir -p -- "$root" && mkdir -m 700 -- "$dir" 2>/dev/null || return 1
   {
     printf 'exit_status=%s\nfailure_reason=%s\nlast_failed_command=%s\n' "$status" "$failure_reason" "$last_error"
-    printf 'environment_file=%s\nbackup_directory=%s\n' "$environment_file" "${ORBIT_BACKUP_DIR:-$repo_dir/backups}"
+    printf 'environment_file=%s\nbackup_directory=%s\n' "$environment_file" "${ORBIT_BACKUP_DIR:-$deploy_dir/backups}"
   } > "$dir/run-info.txt"
   if [[ "$touched" == 1 ]]; then
     compose ps -a > "$dir/compose-ps.txt" 2>&1 || true
@@ -144,6 +203,9 @@ collect_evidence() {
   ls -laR -- "$restore_state_directory" > "$dir/restore-state-listing.txt" 2>&1 || true
   if [[ -n "$test_directory" ]]; then
     ls -la -- "$test_directory" > "$dir/test-directory-listing.txt" 2>&1 || true
+  fi
+  if [[ -n "$own_workdir" && -f "$own_workdir/install.log" ]]; then
+    cp -- "$own_workdir/install.log" "$dir/install.log" 2>/dev/null || true
   fi
   evidence_dir="$dir"
 }
@@ -181,6 +243,194 @@ restore_deployment() {
   timeout 60 docker rm -f -v "$drill_run_container" >/dev/null 2>&1 || true
 }
 
+# --- --own-stack: install, and remove, a throwaway deployment (#1273) -------
+#
+# Copied from scripts/test-repair-journeys.sh rather than shared with it: its
+# install helpers read that harness's own globals and apply its CI healthcheck
+# override, so sharing them would mean changing it. Same shape: a curl shim
+# serving a fixture OIDC discovery document, a throwaway local registry
+# holding the image, a release manifest naming the pushed digest, and
+# install.sh run under this drill's own COMPOSE_PROJECT_NAME.
+
+# Only one Orbit stack fits on a host: docker-compose.yml pins the container
+# names. Refuse before starting anything, so teardown has nothing to remove.
+refuse_foreign_stack() {
+  local existing owner
+  for existing in orbit orbit-postgres; do
+    owner="$(docker inspect "$existing" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)"
+    [[ -n "$owner" ]] || continue
+    [[ "$owner" == "$own_project" ]] &&
+      fail "a previous --own-stack run left '$existing' behind; remove it with: bash scripts/cleanup-stacks.sh --project $own_project --remove"
+    fail "container '$existing' already exists, owned by Compose project '$owner'. Only one Orbit stack can run at a time; stop that one first."
+  done
+}
+
+write_own_stack_shim() {
+  mkdir -p "$own_workdir/shim"
+  cat > "$own_workdir/discovery.json" <<EOF
+{
+  "issuer": "$own_issuer",
+  "authorization_endpoint": "https://oidc.backup-drill.invalid/application/o/authorize/",
+  "token_endpoint": "https://oidc.backup-drill.invalid/application/o/token/",
+  "jwks_uri": "https://oidc.backup-drill.invalid/application/o/orbit/jwks/",
+  "response_types_supported": ["code"],
+  "code_challenge_methods_supported": ["S256"],
+  "scopes_supported": ["openid", "profile", "email"],
+  "id_token_signing_alg_values_supported": ["RS256"]
+}
+EOF
+  cat > "$own_workdir/shim/curl" <<SHIM
+#!/usr/bin/env bash
+# Serves the fixture discovery document; every other URL fails closed, so an
+# unexpected network dependency surfaces as a failure. Same option grammar as
+# scripts/test-repair-journeys.sh's shim (curl 8.14.1).
+set -Eeuo pipefail
+discovery_url="${own_issuer}.well-known/openid-configuration"
+output="" write_out="" url=""
+refuse_option() {
+  printf 'curl: option %s: is unknown\\n' "\$1" >&2
+  exit 2
+}
+require_parameter() {
+  printf 'curl: option %s: requires parameter\\n' "\$1" >&2
+  exit 2
+}
+args=("\$@")
+for ((i = 0; i < \${#args[@]}; i++)); do
+  case "\${args[i]}" in
+    --output|-o)
+      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
+      output="\${args[i+1]}"; ((i++)) ;;
+    --write-out|-w)
+      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
+      write_out="\${args[i+1]}"; ((i++)) ;;
+    --header|-H|--connect-timeout|--max-time|-m|--max-filesize|--proto|--proto-redir|--retry|--resolve)
+      (( i + 1 < \${#args[@]} )) || require_parameter "\${args[i]}"
+      ((i++)) ;;
+    --fail|-f|--silent|-s|--show-error|-S|--location|-L|--tlsv1.2|--tlsv1.3) ;;
+    -*) refuse_option "\${args[i]}" ;;
+    *) url="\${args[i]}" ;;
+  esac
+done
+serve() {
+  [[ -z "\$output" ]] || cp -- "\$1" "\$output"
+  [[ -z "\$write_out" ]] || printf '200'
+}
+case "\$url" in
+  "\$discovery_url") serve "$own_workdir/discovery.json" ;;
+  *) [[ -z "\$write_out" ]] || printf '000'; exit 6 ;;
+esac
+SHIM
+  chmod 755 "$own_workdir/shim/curl"
+}
+
+# install.sh accepts a non-empty target only as a pre-provisioned input
+# holding exactly .env-orbit and .orbit-secrets.
+make_own_stack_target() {
+  rm -rf -- "$deploy_dir"
+  mkdir -p -- "$deploy_dir/.orbit-secrets"
+  chmod 700 "$deploy_dir/.orbit-secrets"
+  printf 'backup-drill-client-secret\n' > "$deploy_dir/.orbit-secrets/oidc-client-secret"
+  chmod 600 "$deploy_dir/.orbit-secrets/oidc-client-secret"
+  {
+    printf 'APP_URL=https://orbit.backup-drill.invalid\n'
+    printf 'ORBIT_PORT=%s\n' "$own_orbit_port"
+    printf 'ORBIT_BIND_ADDRESS=127.0.0.1\n'
+    printf 'OIDC_ISSUER=%s\n' "$own_issuer"
+    printf 'OIDC_CLIENT_ID=orbit-backup-drill\n'
+    printf 'OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n'
+    printf 'OIDC_CALLBACK_URL=https://orbit.backup-drill.invalid/api/auth/callback\n'
+  } > "$deploy_dir/.env-orbit"
+  chmod 600 "$deploy_dir/.env-orbit"
+}
+
+install_own_stack() {
+  local image revision local_tag pushed_digest release_manifest owner script
+  refuse_foreign_stack
+  revision="$(git -C "$repo_dir" rev-parse HEAD)"
+  if [[ -n "${ORBIT_BACKUP_DRILL_IMAGE:-}" ]]; then
+    image="$ORBIT_BACKUP_DRILL_IMAGE"
+  else
+    image="orbit-backup-drill-local:$revision"
+    printf 'Orbit backup test: building the working-tree image (this takes several minutes).\n' >&2
+    # Stamped at ADR-0016's supported-install floor, as repair-journeys does.
+    docker build --quiet -t "$image" \
+      --build-arg ORBIT_VERSION=v0.3.0 \
+      --build-arg ORBIT_REVISION="$revision" \
+      --build-arg ORBIT_CHANNEL=ci "$repo_dir" >/dev/null ||
+      fail 'working-tree image build failed'
+  fi
+
+  # From here this run owns Docker objects that teardown must remove.
+  own_stack_started=1
+  docker rm -f "$own_registry_name" >/dev/null 2>&1 || true
+  docker run -d --name "$own_registry_name" -p "127.0.0.1:$own_registry_port:5000" \
+      "registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373" >/dev/null ||
+    fail 'local registry did not start'
+  local_tag="127.0.0.1:$own_registry_port/$own_repository:latest"
+  docker tag "$image" "$local_tag"
+  docker push --quiet "$local_tag" >/dev/null || fail 'push to the local registry failed'
+  # install.sh needs a release manifest it can verify (ADR-0031 #7); hand it
+  # one naming the digest this push just gave the registry.
+  pushed_digest="$(
+    docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$local_tag" |
+      grep -m1 -F "127.0.0.1:$own_registry_port/$own_repository@"
+  )" || true
+  pushed_digest="${pushed_digest#*@}"
+  [[ "$pushed_digest" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+    fail "could not read the digest the local registry gave $local_tag"
+  release_manifest="$own_workdir/orbit-release-manifest.json"
+  bash "$repo_dir/scripts/ci/write-test-manifest.sh" \
+    "$release_manifest" "127.0.0.1:$own_registry_port/$own_repository" "$pushed_digest" >/dev/null ||
+    fail 'could not write the test release manifest'
+
+  write_own_stack_shim
+  make_own_stack_target
+
+  printf 'Orbit backup test: installing a throwaway deployment as Compose project %s.\n' "$own_project" >&2
+  (cd "$deploy_dir" && env PATH="$own_workdir/shim:$PATH" \
+      COMPOSE_PROJECT_NAME="$own_project" \
+      ORBIT_REGISTRY="127.0.0.1:$own_registry_port" ORBIT_REPOSITORY="$own_repository" \
+      ORBIT_RELEASE_MANIFEST="$release_manifest" \
+      bash "$repo_dir/scripts/install.sh" </dev/null) > "$own_workdir/install.log" 2>&1 ||
+    { tail -n 30 "$own_workdir/install.log" >&2; fail 'install.sh failed; its log is kept with the evidence'; }
+
+  # Prove the isolation rather than trust it: teardown removes this project's
+  # volumes, so the wrong label would aim it at somebody else's stack.
+  owner="$(docker inspect orbit-postgres --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)"
+  [[ "$owner" == "$own_project" ]] ||
+    fail "the stack is not owned by $own_project (got '${owner:-none}'); refusing to continue"
+
+  # The drill drives five scripts by relative path; a deployment carries only
+  # backup.sh and restore.sh. Put this checkout's copies of all five in place,
+  # so the drill exercises the working tree's scripts, as the borrowed path
+  # does, against this deployment's own files.
+  for script in backup restore export-recovery-bundle import-recovery-bundle end-maintenance; do
+    install -m 755 -- "$repo_dir/scripts/$script.sh" "$deploy_dir/scripts/$script.sh" ||
+      fail "could not place scripts/$script.sh in the throwaway deployment"
+  done
+}
+
+# Removes everything --own-stack created (#1273): the same steps as
+# scripts/test-repair-journeys.sh's cleanup, each bounded so a hung docker
+# cannot hang the teardown. Docker is touched only once this run started
+# something of its own there; the work directory goes either way.
+remove_own_stack() {
+  local label="label=com.docker.compose.project=$own_project"
+  if [[ "$own_stack_started" == 1 ]]; then
+    if [[ -f "$deploy_dir/.env-orbit" && -f "$deploy_dir/docker-compose.yml" ]]; then
+      chmod 600 "$deploy_dir/.env-orbit" 2>/dev/null || true
+      (cd "$deploy_dir" && timeout 300 docker compose --env-file .env-orbit down --volumes --remove-orphans >/dev/null 2>&1) || true
+    fi
+    timeout 60 docker rm -f "$own_registry_name" >/dev/null 2>&1 || true
+    timeout 60 docker ps -aq --filter "$label" 2>/dev/null | xargs -r timeout 60 docker rm -f >/dev/null 2>&1 || true
+    timeout 60 docker volume ls -q --filter "$label" 2>/dev/null | xargs -r timeout 60 docker volume rm >/dev/null 2>&1 || true
+    timeout 60 docker network ls -q --filter "$label" 2>/dev/null | xargs -r timeout 60 docker network rm >/dev/null 2>&1 || true
+  fi
+  [[ -z "$own_workdir" ]] || rm -rf -- "$own_workdir" 2>/dev/null ||
+    printf 'Orbit backup test: teardown: could not remove %s\n' "$own_workdir" >&2
+}
+
 # Teardown is the one exit path: EXIT runs it, and INT/TERM turn into an exit
 # so the same trap runs it. `torn_down` makes it fire exactly once however the
 # run ends, and signals are ignored while it runs so a second Ctrl-C cannot
@@ -203,11 +453,14 @@ cleanup() {
   if [[ -n "$key_backup" && -f "$key_backup" ]]; then
     mv -f -- "$key_backup" "$live_kek" || true
   fi
-  if [[ "$touched" == 1 ]]; then restore_deployment; fi
+  # An owned stack is about to be removed whole, so there is nothing to put
+  # back in it first.
+  if [[ "$touched" == 1 && "$own_stack" != 1 ]]; then restore_deployment; fi
   [[ -z "$backup_path" ]] || rm -f -- "$backup_path"
   [[ -z "$recovery_bundle_path" ]] || rm -f -- "$recovery_bundle_path"
   [[ -z "$maintenance_backup_path" ]] || rm -f -- "$maintenance_backup_path"
   [[ -z "$test_directory" ]] || rm -rf -- "$test_directory"
+  if [[ "$own_stack" == 1 ]]; then remove_own_stack; fi
   printf 'Orbit backup test: teardown: complete.\n' >&2
   if [[ -n "$evidence_dir" ]]; then
     printf 'Orbit backup test: evidence kept in: %s\n' "$evidence_dir" >&2
@@ -240,6 +493,12 @@ command -v openssl >/dev/null 2>&1 || fail 'OpenSSL is required.'
 command -v sha256sum >/dev/null 2>&1 || fail 'sha256sum is required.'
 command -v tar >/dev/null 2>&1 || fail 'tar is required.'
 command -v head >/dev/null 2>&1 || fail 'head is required.'
+if [[ "$own_stack" == 1 ]]; then
+  install_own_stack
+  # Every relative path below -- Compose's project directory and the
+  # `bash scripts/...` calls -- now resolves in the owned deployment.
+  cd "$deploy_dir"
+fi
 [[ -f "$environment_file" ]] || fail "Missing ${environment_file}."
 [[ -f "$live_kek" && ! -L "$live_kek" ]] || fail 'Missing regular disposable document key.'
 
@@ -766,7 +1025,7 @@ test_incomplete_correspondence_query() {
 }
 
 test_journal_publication_failures() {
-  local restore_root="${ORBIT_BACKUP_DIR:-$repo_dir/backups}/.orbit-restore"
+  local restore_root="${ORBIT_BACKUP_DIR:-$deploy_dir/backups}/.orbit-restore"
   if ORBIT_RESTORE_TEST_MODE=true ORBIT_RESTORE_TEST_SYNC_FAILURE_STAGE=journal-file \
     ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$backup_path" >/dev/null 2>&1; then
     fail 'Restore unexpectedly succeeded when initial journal file synchronization failed.'
@@ -814,7 +1073,7 @@ test_checkpoint_failure_recovery() {
     ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$backup_path" >/dev/null 2>&1; then
     fail 'The forced checkpoint restoration failure unexpectedly succeeded.'
   fi
-  [[ -f "${ORBIT_BACKUP_DIR:-$repo_dir/backups}/.orbit-restore/restore.journal" ]] ||
+  [[ -f "${ORBIT_BACKUP_DIR:-$deploy_dir/backups}/.orbit-restore/restore.journal" ]] ||
     fail 'Checkpoint failure did not preserve a restore journal.'
   if health_check; then fail 'Orbit restarted after checkpoint restoration failure.'; fi
   bash scripts/restore.sh --recover >/dev/null
@@ -868,13 +1127,13 @@ test_hard_interruption_recovery() {
     ORBIT_NONINTERACTIVE_RESTORE=true bash scripts/restore.sh --yes "$backup_path" >/dev/null 2>&1; then
     fail 'The hard-interruption seam unexpectedly returned success.'
   fi
-  [[ -f "${ORBIT_BACKUP_DIR:-$repo_dir/backups}/.orbit-restore/restore.journal" ]] ||
+  [[ -f "${ORBIT_BACKUP_DIR:-$deploy_dir/backups}/.orbit-restore/restore.journal" ]] ||
     fail 'Hard interruption did not preserve a restore journal.'
-  grep -Eq '^database_sha256=[0-9a-f]{64}$' "${ORBIT_BACKUP_DIR:-$repo_dir/backups}/.orbit-restore/restore.journal" ||
+  grep -Eq '^database_sha256=[0-9a-f]{64}$' "${ORBIT_BACKUP_DIR:-$deploy_dir/backups}/.orbit-restore/restore.journal" ||
     fail 'Hard interruption journal did not persist a database checkpoint digest.'
-  grep -Eq '^documents_sha256=[0-9a-f]{64}$' "${ORBIT_BACKUP_DIR:-$repo_dir/backups}/.orbit-restore/restore.journal" ||
+  grep -Eq '^documents_sha256=[0-9a-f]{64}$' "${ORBIT_BACKUP_DIR:-$deploy_dir/backups}/.orbit-restore/restore.journal" ||
     fail 'Hard interruption journal did not persist a document checkpoint digest.'
-  grep -Eq '^document_kek_sha256=[0-9a-f]{64}$' "${ORBIT_BACKUP_DIR:-$repo_dir/backups}/.orbit-restore/restore.journal" ||
+  grep -Eq '^document_kek_sha256=[0-9a-f]{64}$' "${ORBIT_BACKUP_DIR:-$deploy_dir/backups}/.orbit-restore/restore.journal" ||
     fail 'Hard interruption journal did not persist a checkpoint-key digest.'
   if health_check; then fail 'Orbit restarted after hard interruption.'; fi
   test_import_refuses_existing_journal
@@ -896,7 +1155,7 @@ test_import_refuses_existing_journal() {
     ORBIT_RECOVERY_TEST_MODE=true bash scripts/import-recovery-bundle.sh "$recovery_bundle_path" >/dev/null 2>&1; then
     fail 'Recovery import accepted an unfinished restore journal.'
   fi
-  [[ -f "${ORBIT_BACKUP_DIR:-$repo_dir/backups}/.orbit-restore/restore.journal" ]] ||
+  [[ -f "${ORBIT_BACKUP_DIR:-$deploy_dir/backups}/.orbit-restore/restore.journal" ]] ||
     fail 'Recovery import removed unfinished restore evidence.'
   if health_check; then fail 'Recovery import restarted Orbit despite unfinished restore evidence.'; fi
   after_started_at="$(docker inspect --format '{{.State.StartedAt}}' orbit)"
@@ -907,7 +1166,7 @@ test_import_refuses_existing_journal() {
 }
 
 test_corrupted_checkpoint_integrity() {
-  local restore_root="${ORBIT_BACKUP_DIR:-$repo_dir/backups}/.orbit-restore"
+  local restore_root="${ORBIT_BACKUP_DIR:-$deploy_dir/backups}/.orbit-restore"
   local restore_id checkpoint_key checkpoint_documents checkpoint_documents_backup before_key_hash output
   restore_id="$(awk -F= '$1 == "restore_id" { print $2 }' "$restore_root/restore.journal")"
   checkpoint_key="$restore_root/checkpoint-$restore_id/document-kek"
