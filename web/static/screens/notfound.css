@@ -130,7 +130,7 @@ body{background:#04070f}
   .stage .station>*{grid-area:1/1}
   /* #1151 W3-Q2: web/src/lib/ringcard.css's .bigring .ringstroke/.ringorbit
      i carry this exact same stroke/orb recipe (its stroke, 29.4px
-     #d8b45a orb at left:93.26%/top:24.94%), independently — this page never
+     gold-planet orb at left:93.26%/top:24.94%, and its wake), independently — this page never
      loads ringcard.css (+error.svelte links plain CSS only, deliberately,
      see its own header), so there is no shared variable to tie the two to.
      A retune there needs the same numbers carried over here by hand. */
@@ -147,7 +147,16 @@ body{background:#04070f}
       radial-gradient(closest-side,transparent calc(100% - var(--stroke) * 4.125 - .5px),rgba(0,0,0,0.12) calc(100% - var(--stroke) * 4.125),rgba(0,0,0,0.12) calc(100% - var(--stroke) * 1.875),transparent calc(100% - var(--stroke) * 1.875 + .5px)),
       radial-gradient(closest-side,transparent calc(100% - var(--stroke) * 5.8 - .5px),rgba(0,0,0,0.05) calc(100% - var(--stroke) * 5.8),rgba(0,0,0,0.05) calc(100% - var(--stroke) * 0.2),transparent calc(100% - var(--stroke) * 0.2 + .5px))}
   .stage .errring i{position:absolute;left:93.26%;top:24.94%;width:29.4px;height:29.4px;margin:-14.7px 0 0 -14.7px;
-      border-radius:50%;background:#d8b45a}
+      border-radius:50%;background:none;overflow:visible}
+  /* the gold world and its wake, as ringcard.css draws them (#1253); this
+     ring does not turn, so the picture needs no counter-spin */
+  .stage .errring i::before{content:"";position:absolute;inset:-78.6%;
+      background:url(/flight/door/planet-gold.webp) center/100% no-repeat}
+  .stage .errring b.trail{display:block;position:absolute;
+      left:-2.0833%;top:-2.0833%;width:104.1667%;height:104.1667%;border-radius:50%;
+      background:conic-gradient(from -50deg,rgba(255,214,140,0) 0deg,rgba(255,214,140,.08) 50deg,rgba(255,222,160,.75) 108deg,rgba(255,222,160,0) 109deg);
+      -webkit-mask:radial-gradient(closest-side,transparent 92.4%,#000 95.4%,#000 96.6%,transparent 99.6%);
+      mask:radial-gradient(closest-side,transparent 92.4%,#000 95.4%,#000 96.6%,transparent 99.6%)}
   .stage .name{font:500 48px var(--mono);color:var(--ink);letter-spacing:.04em}
   .stage .said{display:block;margin-top:28px;font:.9375rem/1.5 var(--ui);color:var(--ink-mid)}
   .stage .said+p{width:100%;margin-top:24px}

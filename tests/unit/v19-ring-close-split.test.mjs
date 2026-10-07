@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 /*
  * #873: the create/sign-in ring used to close from 500px to 302.4px as ONE
- * box — the 4.2px stroke, the translucent fill and a `backdrop-filter` blur
+ * box — the stroke, the translucent fill and a `backdrop-filter` blur
  * all on `.ringglass` — animating `width`/`height`. Every frame of the
  * hand-over therefore re-laid-out and re-blurred the glass: worst-case paint
  * 7.06ms against a 16ms budget.
@@ -89,14 +89,16 @@ describe("#873: the ring closes as a compensated split", () => {
     expect(decl(body, "border")).toBe("");
   });
 
-  it("keeps the 4.2px stroke on its own unblurred box that still resizes", () => {
+  it("keeps the stroke on its own unblurred box that still resizes", () => {
     const open = openRule(".ringstroke");
     expect(open).toHaveLength(1);
     const [{ body }] = open;
 
     expect(decl(body, "width")).toBe("500px");
     expect(decl(body, "height")).toBe("500px");
-    expect(decl(body, "border")).toBe("4.2px solid #8791b3");
+    // The line is orbit-site's lit ring (#1253): a width the mask reads,
+    // registered so the close can still animate it.
+    expect(decl(body, "--stroke")).toBe("3.4px");
     // Cheap to redraw is the whole point: nothing blurred on this box.
     expect(body).not.toMatch(/backdrop-filter/u);
     // A transformed sibling paints above plain in-flow boxes, so the stroke
