@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { householdRegister } from "./support/households";
 import { settleArrival } from "./support/arrival";
@@ -143,6 +145,59 @@ test("the create form will not save an entry nobody has named", async ({ page })
       await name.fill("Gutter clearing proving");
       await expect(save).toBeEnabled();
     }
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+/* A real, structurally valid PDF: the upload route refuses a stub. */
+const DOCUMENT = "chromium-synthetic.pdf";
+const DOCUMENT_BYTES = readFileSync(resolve(__dirname, "../support/fixtures", DOCUMENT));
+
+/** The desk form, filled and saved with a document picked. */
+async function saveDeskEntryWithDocument(page: Page, name: string): Promise<void> {
+  await gotoCreate(page);
+  /* The drop target opens this hidden picker; setting it is the same change. */
+  await page.locator('#card input[type="file"]').setInputFiles({ name: DOCUMENT, mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+  await page.locator("#f-name").fill(name);
+  await page.locator('#types button[data-type="document"]').click();
+  await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+  await page.locator(".btn-primary").click();
+}
+
+/** The saved item's id, read back by its title. */
+async function itemIdOf(page: Page, householdId: string, title: string): Promise<string | null> {
+  const response = await page.request.get("/api/workspace");
+  if (!response.ok()) return null;
+  const { workspace } = (await response.json()) as { workspace: { households: Array<{ id: string; items: Array<{ id: string; title: string }> }> } };
+  return workspace.households.find((one) => one.id === householdId)?.items.find((item) => item.title === title)?.id ?? null;
+}
+
+/**
+ * #1245: a document picked on the desk's /create is attached to the item it
+ * saves — it used to be dropped with "documents are not wired up yet".
+ */
+test("a document picked on the create form is attached to the saved item", async ({ page }) => {
+  test.skip(test.info().project.name.startsWith("mobile"), "the pocket's form still says it does not keep documents (#1245 open question)");
+  test.setTimeout(90_000);
+  await answerPushWithoutAService(page);
+  await page.goto("/api/auth/login?returnTo=/home");
+  await page.getByRole("link", { name: workerAccount("administrator") }).click();
+  await settleArrival(page);
+  await ensureWorkerAdministrator(page);
+  const household = households.track(await seedHousehold(page));
+
+  try {
+    const name = "Boiler cover proving";
+    await saveDeskEntryWithDocument(page, name);
+    await expect.poll(() => itemIdOf(page, household.id, name), { timeout: 15_000 }).not.toBeNull();
+    const itemId = (await itemIdOf(page, household.id, name)) as string;
+    await expect.poll(async () => {
+      const response = await page.request.get(`/api/households/${household.id}/items/${itemId}/documents`);
+      if (!response.ok()) return `http_${response.status()}`;
+      const { documents } = (await response.json()) as { documents: Array<{ displayName: string }> };
+      return documents.map((one) => one.displayName).join(",");
+    }, { timeout: 30_000 }).toContain(DOCUMENT);
   } finally {
     await households.sweep(page);
   }
