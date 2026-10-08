@@ -17,12 +17,12 @@
   import NorthStar from "$lib/pocket/NorthStar.svelte";
   import Sun from "$lib/sun/Sun.svelte";
   import { POCKET_SUN_R } from "$lib/sun/furnace.js";
-  import ReviewSheet from "$lib/pocket/ReviewSheet.svelte";
   import Row from "$lib/pocket/Row.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import TopChrome from "$lib/pocket/TopChrome.svelte";
   import { POCKET_QUERY, isPocket } from "$lib/pocket/media.js";
-  import { formReadingsOf, papersOf as reviewPapersOf } from "$lib/pocket/review.js";
+  import { reviewLockedOf } from "$lib/pocket/review.js";
+  import { amendedOf, proposedItemOf } from "$lib/editing/item-draft.js";
   import { rowOf } from "$lib/pocket/row.js";
   import { wake } from "$lib/pocket/wake.js";
   import { markDoor } from "../household/[id]/door.js";
@@ -54,10 +54,11 @@
    * on the dial does what the desk's does (owner's answer 6a): it opens its
    * row and wears the lit ring while the row is open.
    *
-   * Home's sheets are the search sheet (#1057), the hatch, opened from the
-   * orb, and the review sheet (round 3 §4): a suggestion's `review & amend →`
-   * and a second tap on its hollow body raise it in place, rather than
-   * going to the receipt page; the item sheet is gone (§2.1).
+   * Home's sheets are the search sheet (#1057) and the hatch, opened from
+   * the orb; the item sheet is gone (§2.1). A suggestion's `review & amend
+   * →`, and a second tap on its hollow body, put its row's own lines into
+   * editing, as the desk's drawer does (#1319, owner 2026-10-08): the review
+   * sheet that used to rise here is gone.
    * @typedef {{
    *   view?: import('$lib/data/workspace.js').HomeView | null,
    *   arrive?: boolean,
@@ -268,39 +269,62 @@
     }
   }
 
-  /* ---- review & amend, raised in place (round 3 §4): the sheet the inbox
-     and the receipt page raise too (ReviewSheet.svelte) ---- */
-  let reviewOpen = $state(false);
-  /** @type {import('$lib/data/workspace.js').ReceiptSuggestion | null} */
-  let reviewing = $state(null);
-  /** @type {string | null} */
-  let reviewProblem = $state(null);
-
+  /* ---- #1319: A SUGGESTION AMENDED IN ITS ROW'S OWN LINES ---------------
+     owner, 2026-10-08 ("Yeah, ideally"): the phone amends the way the desk
+     does since a3f8fa5a (home/+page.svelte's startAmend). `review & amend →`
+     puts the row's lines into editing (EditRows), the relay's proposal
+     standing in for the item it would become (proposedItemOf); the choosers
+     are the bottom sheet, as a filed item's are. `add to orbit` sends the
+     rows as the amended item on the two-tap decision's own operation id
+     (home's amendReceipt, as `onamend`), into the section the rows chose;
+     `cancel` puts the readings back. The review sheet that rose here is
+     gone. */
   /** @param {import('$lib/data/workspace.js').ReceiptSuggestion} s */
-  function openReview(s) {
-    reviewing = s;
-    reviewProblem = null;
-    reviewOpen = true;
-  }
-
-  /**
-   * @param {import('$lib/data/workspace.js').ItemProposal} item
-   * @param {string | null} sectionId
-   */
-  async function saveReview(item, sectionId) {
-    const target = reviewing;
-    if (!target || !onamend || busy) return false;
-    busy = true;
-    reviewProblem = null;
-    try {
-      const failed = await onamend(target, item, sectionId);
-      if (failed) { reviewProblem = failed; return false; }
-      wake(`${item.title ?? target.title} added to your orbit`);
-      return true;
-    } finally {
-      busy = false;
+  function startAmend(s) {
+    if (!s.receiptId || reviewLockedOf(s) || !view) return;
+    const householdId = s.householdId ?? view.primary;
+    if (!householdId) {
+      rowProblem[s.id] = "This account has no household yet";
+      return;
     }
+    const own = (view.households ?? []).find((one) => one.id === householdId)?.sections
+      ?? view.household?.sections ?? [];
+    const sectionId = (own.find((one) => one.visible !== false) ?? own[0])?.id ?? null;
+    delete rowProblem[s.id];
+    previewPaper = null;
+    modes.startEdit(proposedItemOf(s, { householdId, sectionId }));
+    focusInRow(s.id, '[data-ed="title"]');
   }
+  /**
+   * The rows' save for a suggestion: approved as amended, or refused in the
+   * rows' own words (EditSession says it under the rows).
+   * @param {import('$lib/data/commands.js').CommandItem} item
+   * @param {Partial<import('$lib/data/commands.js').CommandItem>} edits
+   */
+  async function addSuggestion(item, edits) {
+    const suggestion = view?.suggestions.find((one) => one.id === item.id);
+    if (!suggestion || !onamend) throw new Error("not added — this suggestion has gone");
+    const { item: amended, sectionId } = amendedOf(item, edits);
+    const problem = await onamend(suggestion, amended, sectionId);
+    if (problem?.startsWith("The item is recorded")) {
+      throw new Error("not finished — the item is recorded, but its documents need another try: add it again");
+    }
+    if (problem) throw new Error(`not added — ${problem}`);
+  }
+  async function addAmended() {
+    const title = modes.edit.draft?.title.trim() ?? "";
+    if (await modes.edit.commit()) wake(`added to your orbit · ${title}`);
+  }
+  /** What a suggestion's lines need while they are amended. @param {{ id: string }} s */
+  const amendActsOf = (s) => ({
+    modes,
+    sections,
+    onaccept: addAmended,
+    oncancel: () => {
+      modes.end();
+      focusInRow(s.id, "[data-amend]");
+    },
+  });
 
   // ---- the search sheet (#1057, §2.4) -------------------------------------
 
@@ -431,7 +455,7 @@
   let lit = $state(null);
   /* The star hides while a sheet is up and while any row is open (round 3
      §5): it stood over the open suggestion's `Dismiss`. */
-  const starHidden = $derived(sheetOpen || hatchOpen || reviewOpen || lit !== null);
+  const starHidden = $derived(sheetOpen || hatchOpen || lit !== null);
   /** @param {string} id */
   const onRowToggle = (id) => /** @type {(open: boolean) => void} */ ((open) => {
     if (open) { lit = id; loadSearchDocuments(); } else if (lit === id) lit = null;
@@ -451,7 +475,7 @@
     const again = lit === b.id;
     if (!(await openRow(b.id)) || !again || !b.suggestion) return;
     const suggested = view?.suggestions.find((one) => one.id === b.id);
-    if (suggested?.receiptId) openReview(suggested);
+    if (suggested) startAmend(suggested);
   }
   /* A press on the lit body must not close its row on the way down (row.js
      closes an open row on any press outside it), or the tap would close the
@@ -639,12 +663,20 @@
      as the bottom sheet, where the preview's sheet stands. */
   const modes = new DrawerModes({
     save: async (item, edits) => {
+      if (item.status === "suggested") { await addSuggestion(item, edits); return; }
       await applyCommand(upsertCommand(item, edits));
       await onchanged?.();
     },
     onchoose: () => { previewPaper = null; },
   });
-  const sections = $derived(view?.household?.sections ?? []);
+  /* The sections of the household the open item is in, or a suggestion
+     being amended will file into. */
+  const sections = $derived.by(() => {
+    const amended = view?.suggestions.find((one) => one.id === modes.id);
+    const householdId = amended ? (amended.householdId ?? view?.primary) : null;
+    return (householdId ? view?.households?.find((one) => one.id === householdId)?.sections : null)
+      ?? view?.household?.sections ?? [];
+  });
   /* .by: read at the top level, `view` would be narrowed to its default. */
   const chooserAsk = $derived.by(() => (view ? modes.askOf(sections, view.today) : null));
   /* A row closing, or another opening, ends whatever its drawer was doing. */
@@ -714,7 +746,7 @@
       if (!modes.escape()) return;
       event.preventDefault();
       event.stopPropagation();
-      if (!chooser) focusInRow(id, editing ? ".ivedit" : '[aria-label^="Complete "]');
+      if (!chooser) focusInRow(id, editing ? ".ivedit, [data-amend]" : '[aria-label^="Complete "]');
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
@@ -1101,17 +1133,25 @@
       <h2 class="p-caps" id="pk-signals-h">Signals{#if view.suggestions.length}<span class="p-count">{view.suggestions.length}</span>{/if}</h2>
       <div class="pk-pen" data-row-group data-row-cards>
         {#each view.suggestions as s (s.id)}
+          {@const amending = modes.edit.id === s.id}
+          <!-- #1319: while amended, the title is live in the row's head and
+               `add to orbit` / `cancel` (SuggestionDrawer) replace the two
+               decisions -->
+          {#snippet liveTitle()}{#if modes.edit.draft}<b class="ed" contenteditable="plaintext-only" spellcheck="false" role="textbox" tabindex="0"
+             aria-label="title" data-ed="title" bind:textContent={modes.edit.draft.title}></b>{/if}{/snippet}
           <Row title={s.title} key={s.id}
+               heading={amending ? liveTitle : undefined}
                meta={burnsIn(s) !== null ? `burns up in ${burnsIn(s)}d` : ""}
                trail={s.costMinor ? money(s.costMinor, s.currency, true) : ""}
                trailSub={s.renewsOn ? `${dateWord(s)} ${short(s.renewsOn)}` : ""} trailTone="var(--accent-text)"
-               acts={suggestionActs(s)} ontoggle={onRowToggle(s.id)}>
+               acts={amending ? [] : suggestionActs(s)} ontoggle={onRowToggle(s.id)}>
             {#snippet mark()}<span class="pk-dot hollow"></span>{/snippet}
             {#snippet detail()}<SuggestionDrawer suggestion={s} problem={rowProblem[s.id] ?? null}
-                                                  showingPaper={previewPaper?.id ?? null} onopenpaper={openPaperHere} />{/snippet}
+                                                  showingPaper={previewPaper?.id ?? null} onopenpaper={openPaperHere}
+                                                  acts={amendActsOf(s)} />{/snippet}
             {#snippet after()}
-              {#if s.receiptId}
-                <button class="p-quiet" aria-haspopup="dialog" onclick={() => openReview(s)}>review &amp; amend →</button>
+              {#if s.receiptId && !reviewLockedOf(s) && !amending}
+                <button class="p-quiet" data-amend onclick={() => startAmend(s)}>review &amp; amend →</button>
               {/if}
             {/snippet}
           </Row>
@@ -1203,8 +1243,4 @@
   </div>
 {/if}
 
-<ReviewSheet bind:open={reviewOpen} title={reviewing?.title ?? ""} proposal={reviewing?.proposal}
-             householdId={reviewing ? (reviewing.householdId ?? view?.primary ?? null) : null}
-             households={view?.households ?? []} readings={reviewing ? formReadingsOf(reviewing) : []}
-             papers={reviewing ? reviewPapersOf(reviewing) : []} receiptId={reviewing?.receiptId ?? null}
-             {busy} problem={reviewProblem} onsave={saveReview} />
+
