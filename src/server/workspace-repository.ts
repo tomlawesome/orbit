@@ -25,6 +25,7 @@ import { Refusal, snoozeRefusal } from "@/lib/refusals";
 import { nextDueDate } from "@/lib/next-due-date";
 import {
   completionActivity,
+  namedActivity,
   statusActivity,
   itemActivitySchema,
   workspaceItemSchema,
@@ -255,6 +256,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
         id: household.id,
         name: household.name,
         timezone: household.timezone,
+        today: householdToday(household.timezone),
         currency: household.currency,
         memberCount: memberRows.filter((member) => member.householdId === household.id).length,
         canManage: administrator || memberRows.some((member) => (
@@ -672,7 +674,7 @@ async function runWorkspaceCommand(
           daysBefore,
         })));
       }
-      if (command.activity) await recordActivity(itemId, command.activity);
+      if (command.activity) await recordActivity(itemId, namedActivity(command.activity, existing ? "updated" : "created"));
       return;
     }
 
@@ -748,7 +750,7 @@ async function runWorkspaceCommand(
       if (dryRun) return;
       await transaction.update(items).set({ status: "archived", version: sql`${items.version} + 1`, updatedAt: new Date() })
         .where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
-      await recordActivity(itemId, command.activity);
+      await recordActivity(itemId, namedActivity(command.activity, "archived"));
       return;
     }
 
@@ -835,7 +837,7 @@ async function runWorkspaceCommand(
       } else {
         await transaction.insert(dueEvents).values({ householdId, itemId, dueDate: command.dueDate, kind });
       }
-      await recordActivity(itemId, command.activity);
+      await recordActivity(itemId, namedActivity(command.activity, "rescheduled"));
       return;
     }
 
@@ -851,7 +853,7 @@ async function runWorkspaceCommand(
         version: sql`${items.version} + 1`,
         updatedAt: new Date(),
       }).where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
-      await recordActivity(itemId, command.activity);
+      await recordActivity(itemId, namedActivity(command.activity, "snoozed"));
       return;
     }
 

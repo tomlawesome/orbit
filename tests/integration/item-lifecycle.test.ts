@@ -27,21 +27,23 @@ async function expectError(response: Response, status: number, code: string) {
   expect((await json(response)).error).toEqual(expect.objectContaining({ code }));
 }
 
-function activity(itemId: string, kind: "created" | "updated" | "renewal_completed" | "service_completed" | "rescheduled" | "snoozed" | "cancelled" | "restored" | "archived", details: Record<string, unknown> = {}) {
+/**
+ * An item command's activity as a client sends it: never its kind, which the
+ * engine names from what the command did (ADR-0034, #1325). `kind` here only
+ * says which one the engine will record.
+ */
+function activity(itemId: string, _kind: "created" | "updated" | "renewal_completed" | "service_completed" | "rescheduled" | "snoozed" | "cancelled" | "restored" | "archived", details: Record<string, unknown> = {}) {
   return {
     id: randomUUID(),
     itemId,
-    kind,
     occurredAt: new Date().toISOString(),
     ...details,
   };
 }
 
-/** An activity for a command whose kind the engine names -- a completion or a
- * status change (ADR-0034, #1325): the client sends none. */
+/** An activity for a completion or a status change, which name no kind either. */
 function unnamedActivity(itemId: string, details: Record<string, unknown> = {}) {
-  const { kind: _kind, ...rest } = activity(itemId, "updated", details);
-  return rest;
+  return activity(itemId, "updated", details);
 }
 
 function deferred<T>() {
@@ -174,7 +176,7 @@ describe("conflict-safe item lifecycle", () => {
     // but on a non-"item" audit row -- the feed must be scoped by
     // entityType in the query, not merely by whether changes.activity
     // parses.
-    const impostorActivity = activity(fixture.item.id, "cancelled");
+    const impostorActivity = { ...activity(fixture.item.id, "cancelled"), kind: "cancelled" as const };
     await getDb().insert(auditLog).values({
       householdId: fixture.household.id,
       actorUserId: fixture.users.owner.id,

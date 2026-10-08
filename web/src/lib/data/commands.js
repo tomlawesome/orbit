@@ -55,19 +55,18 @@ const DEFAULT_IDS = {
 };
 
 /**
- * The activity a command records. `kind` is left out where the engine names
- * it from what happened -- a completion, a status change (ADR-0034, #1325).
+ * The activity a command records: its identity, the moment and the details.
+ * Never its kind, which the engine names from what the command did (ADR-0034,
+ * #1325) and refuses if sent.
  * @param {CommandItem} item
- * @param {string | null} kind
  * @param {Partial<import('./workspace.js').ItemActivity>} details
  * @param {IdSource} ids
- * @returns {Omit<import('./workspace.js').ItemActivity, "kind"> & { kind?: string }}
+ * @returns {Omit<import('./workspace.js').ItemActivity, "kind">}
  */
-function activityOf(item, kind, details, ids) {
+function activityOf(item, details, ids) {
   return {
     id: ids.uuid(),
     itemId: item.id,
-    ...(kind ? { kind } : {}),
     occurredAt: ids.now(),
     ...details,
   };
@@ -102,7 +101,7 @@ export function completeCommand(item, { completedDate, costMinor, cost, notes },
     ...(costMinor !== undefined && costMinor !== null ? { costMinor } : {}),
     ...(cost ? { cost } : {}),
     ...(notes ? { notes } : {}),
-    activity: activityOf(item, null, {
+    activity: activityOf(item, {
       effectiveDate: completedDate,
       ...(item.dueDate ? { previousDate: item.dueDate } : {}),
       ...(costMinor !== undefined && costMinor !== null ? { costMinor } : {}),
@@ -121,7 +120,7 @@ export function rescheduleCommand(item, dueDate, ids = DEFAULT_IDS) {
     type: "item.reschedule",
     ...base(item),
     dueDate,
-    activity: activityOf(item, "rescheduled", {
+    activity: activityOf(item, {
       ...(item.dueDate ? { previousDate: item.dueDate } : {}),
       nextDate: dueDate,
     }, ids),
@@ -138,7 +137,7 @@ export function snoozeCommand(item, snoozedUntil, ids = DEFAULT_IDS) {
     type: "item.snooze",
     ...base(item),
     snoozedUntil,
-    activity: activityOf(item, "snoozed", { effectiveDate: snoozedUntil }, ids),
+    activity: activityOf(item, { effectiveDate: snoozedUntil }, ids),
   };
 }
 
@@ -150,7 +149,7 @@ export function archiveCommand(item, ids = DEFAULT_IDS) {
   return {
     type: "item.archive",
     ...base(item),
-    activity: activityOf(item, "archived", {}, ids),
+    activity: activityOf(item, {}, ids),
   };
 }
 
@@ -166,7 +165,7 @@ export function statusCommand(item, status, ids = DEFAULT_IDS) {
     type: "item.status",
     ...base(item),
     status,
-    activity: activityOf(item, null, {}, ids),
+    activity: activityOf(item, {}, ids),
   };
 }
 
@@ -220,6 +219,6 @@ export function upsertCommand(item, edits, ids = DEFAULT_IDS) {
     householdId: item.householdId,
     ...(kind ? { kind } : {}),
     item: clean,
-    activity: activityOf(item, "updated", {}, ids),
+    activity: activityOf(item, {}, ids),
   };
 }

@@ -74,14 +74,16 @@ describe("command builders", () => {
   it("reschedule and snooze record where the date moved from", () => {
     const moved = rescheduleCommand(ITEM, "2026-09-12", IDS);
     expect(moved).toMatchObject({ type: "item.reschedule", dueDate: "2026-09-12", expectedVersion: 5 });
-    expect(moved.activity).toMatchObject({ kind: "rescheduled", previousDate: "2026-08-29", nextDate: "2026-09-12" });
+    expect(moved.activity).toMatchObject({ previousDate: "2026-08-29", nextDate: "2026-09-12" });
     const snoozed = snoozeCommand(ITEM, "2026-08-22", IDS);
     expect(snoozed).toMatchObject({ type: "item.snooze", snoozedUntil: "2026-08-22" });
-    expect(snoozed.activity.kind).toBe("snoozed");
+    expect(snoozed.activity).toMatchObject({ effectiveDate: "2026-08-22" });
   });
 
-  it("archive carries its kind; cancel and restore leave theirs to the engine (#1325)", () => {
-    expect(archiveCommand(ITEM, IDS).activity.kind).toBe("archived");
+  it("no command names its activity's kind: the engine records what it did (#1325)", () => {
+    expect(archiveCommand(ITEM, IDS).activity).not.toHaveProperty("kind");
+    expect(rescheduleCommand(ITEM, "2026-09-12", IDS).activity).not.toHaveProperty("kind");
+    expect(snoozeCommand(ITEM, "2026-08-22", IDS).activity).not.toHaveProperty("kind");
     expect(statusCommand(ITEM, "cancelled", IDS)).toMatchObject({ type: "item.status", status: "cancelled" });
     expect(statusCommand(ITEM, "cancelled", IDS).activity).not.toHaveProperty("kind");
     expect(statusCommand(ITEM, "active", IDS).activity).not.toHaveProperty("kind");
@@ -96,7 +98,7 @@ describe("command builders", () => {
     expect(command.item.householdId).toBeUndefined();
     expect(command.item.section).toBeUndefined();
     expect(command.item.documents).toBeUndefined();
-    expect(command.activity.kind).toBe("updated");
+    expect(command.activity).not.toHaveProperty("kind");
     // ADR-0034 (#1325): what the engine derives from the kind never travels.
     for (const field of ["scheduleKind", "subtype", "status"]) expect(command.item).not.toHaveProperty(field);
   });

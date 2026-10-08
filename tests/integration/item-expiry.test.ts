@@ -51,7 +51,7 @@ async function save(fixture: Fixture, session: Session, item: Record<string, unk
       householdId: fixture.household.id,
       kind: "document",
       item,
-      activity: { id: randomUUID(), itemId: String(item.id), kind: "created", occurredAt: new Date().toISOString() },
+      activity: { id: randomUUID(), itemId: String(item.id), occurredAt: new Date().toISOString() },
     }),
   });
 }

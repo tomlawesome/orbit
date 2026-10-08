@@ -128,7 +128,7 @@ test("add → swap → save → manifest shows it", async ({ page }) => {
           id: itemId, sectionId: rowId, title: "Allotment shed lock", currency: "GBP",
           dueDate, recurrenceMonths: 12,
         },
-        activity: { id: randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+        activity: { id: randomUUID(), itemId, occurredAt: new Date().toISOString() },
       },
     });
     expect(itemCreated.ok()).toBe(true);

@@ -387,7 +387,6 @@ async function createReviewedItem(userId: string, input: ReviewedIntakeApproval,
       activity: {
         id: input.operationId,
         itemId,
-        kind: "created",
         occurredAt: new Date().toISOString(),
       },
     });
