@@ -53,7 +53,6 @@ async function writeItem(input: {
       provider: input.provider,
       costMinor: input.costMinor,
       currency: "GBP",
-      status: "active",
     },
   });
   return itemId;

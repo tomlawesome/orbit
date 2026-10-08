@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 // #1319 — editing in the drawer's own rows: what the rows hold (draftOf), how
-// a typed reminders row reads (remindersOf), what a save sends or refuses
-// (editsOf) and the choices the choosers offer. Pure, no DOM.
+// a typed reminders row reads (remindersOf), what a save sends (editsOf) and
+// the choices the choosers offer. Pure, no DOM. Whether a save is allowed,
+// and what the kind schedules, are the engine's since #1325 (ADR-0034):
+// src/lib/refusals.test.ts and src/lib/item-kind.test.ts.
 import {
-  PERIODS, REMINDER_DAYS_MAX, TYPES, amendedOf, chooserAskOf, draftOf, editsOf, periodChoices, periodWords,
+  PERIODS, TYPES, amendedOf, chooserAskOf, draftOf, editsOf, periodChoices, periodWords,
   proposedItemOf, remindersOf, remindersWords, sectionChoices, typeChoices,
 } from "../../web/src/lib/editing/item-draft.js";
 
@@ -84,94 +86,44 @@ describe("draftOf", () => {
   });
 });
 
-describe("editsOf, refusing", () => {
-  const refusal = (over) => editsOf({ ...draftOf(item()), ...over }, item());
-
-  it("saves the unchanged draft", () => {
-    expect(editsOf(draftOf(item()), item())).toHaveProperty("edits");
-  });
-
-  it("refuses without a name or a section", () => {
-    expect(refusal({ title: "   " })).toEqual({ refusal: "not yet — give it a name" });
-    expect(refusal({ sectionId: null })).toEqual({ refusal: "not yet — choose a section" });
-  });
-
-  it("refuses a cost that is not a sum", () => {
-    expect(refusal({ cost: "12,50" })).toEqual({ refusal: "not yet — use a dot for pence, for example 12.50" });
-    expect(refusal({ cost: "lots" })).toHaveProperty("refusal");
-  });
-
-  it("refuses a repeat without a due date", () => {
-    expect(refusal({ dueDate: "", recurrence: 12 })).toEqual({ refusal: "not yet — a repeat needs a due date" });
-    expect(refusal({ dueDate: "", recurrence: 0 })).toHaveProperty("edits");
-  });
-
-  it("refuses more than eight reminders, and one too far ahead", () => {
-    const nine = "1 2 3 4 5 6 7 8 9";
-    expect(refusal({ reminders: nine })).toEqual({ refusal: "not yet — at most 8 reminders" });
-    expect(refusal({ reminders: "1 2 3 4 5 6 7 8" })).toHaveProperty("edits");
-    expect(refusal({ reminders: `${REMINDER_DAYS_MAX + 1}d before` }))
-      .toEqual({ refusal: `not yet — a reminder is at most ${REMINDER_DAYS_MAX} days before` });
-    expect(refusal({ reminders: `${REMINDER_DAYS_MAX}d before` })).toHaveProperty("edits");
-  });
-});
-
-describe("editsOf, the edits", () => {
-  it("sends the fields as the model holds them", () => {
-    const { edits } = editsOf(draftOf(item()), item());
-    expect(edits).toMatchObject({
+describe("editsOf: what the rows hold, as intent", () => {
+  it("sends the fields as typed, and the kind chosen", () => {
+    expect(editsOf(draftOf(item()))).toEqual({
       sectionId: "vehicle",
       title: "MOT",
       provider: "Kwik Fit",
       reference: "R-1",
-      costMinor: 5400,
+      cost: "£54.00",
       dueDate: "2026-11-01",
       recurrenceMonths: 12,
       reminderDays: [21, 7],
       notes: "bring V5C",
+      kind: "inspection",
     });
   });
 
-  it("reads the typed rows: trimmed title, the cost's sign dropped, reminders parsed", () => {
-    const { edits } = editsOf(
-      { ...draftOf(item()), title: "  MOT test ", cost: "£1,250.5", reminders: "3d before · 30d before" }, item());
-    expect(edits).toMatchObject({ title: "MOT test", costMinor: 125050, reminderDays: [30, 3] });
+  it("reads the typed reminders row, and leaves the cost as typed for the engine", () => {
+    const edits = editsOf({ ...draftOf(item()), title: "  MOT test ", cost: "£1,250.5", reminders: "3d before · 30d before" });
+    expect(edits).toMatchObject({ title: "  MOT test ", cost: "£1,250.5", reminderDays: [30, 3] });
   });
 
-  it("keeps the item's own schedule and writes no subtype while the type is unchanged", () => {
-    const { edits } = editsOf(draftOf(item()), item());
-    expect(edits.scheduleKind).toBe("service");
+  it("never sends what the engine decides from the kind", () => {
+    const edits = editsOf({ ...draftOf(item()), kind: "document" });
+    expect(edits).toMatchObject({ kind: "document", recurrenceMonths: 12 });
+    expect(edits).not.toHaveProperty("scheduleKind");
     expect(edits).not.toHaveProperty("subtype");
+    expect(edits).not.toHaveProperty("status");
   });
 
-  it("writes the new kind's subtype and schedule when the type is retyped", () => {
-    const draft = { ...draftOf(item()), kind: "renewal" };
-    const { edits } = editsOf(draft, item());
-    expect(edits).toMatchObject({ subtype: "renewal", scheduleKind: "renewal" });
+  it("refuses nothing itself: an empty name and no section still go to the engine to judge", () => {
+    expect(editsOf({ ...draftOf(item()), title: "", sectionId: null })).toMatchObject({ title: "", sectionId: null });
   });
 
-  it("retypes to inspection as a service with the inspection subtype", () => {
-    const service = item({ subtype: "service", scheduleKind: "service" });
-    const { edits } = editsOf({ ...draftOf(service), kind: "inspection" }, service);
-    expect(edits).toMatchObject({ subtype: "inspection", scheduleKind: "service" });
-  });
-
-  it("retypes to a document as an expiry that does not recur", () => {
-    const { edits } = editsOf({ ...draftOf(item()), kind: "document" }, item());
-    expect(edits).toMatchObject({ subtype: "document", scheduleKind: "expiry" });
-    expect(edits.recurrenceMonths).toBeUndefined();
-  });
-
-  it("drops the schedule without a due date", () => {
-    const { edits } = editsOf({ ...draftOf(item()), dueDate: "", recurrence: 0 }, item());
+  it("sends a cleared date and cost as left out", () => {
+    const edits = editsOf({ ...draftOf(item()), dueDate: "", cost: "" });
     expect(edits.dueDate).toBeUndefined();
-    expect(edits.scheduleKind).toBeUndefined();
-  });
-
-  it("treats giving a kindless item a type as a retype", () => {
-    const plain = item({ subtype: null, scheduleKind: null });
-    const { edits } = editsOf({ ...draftOf(plain), kind: "service" }, plain);
-    expect(edits).toMatchObject({ subtype: "service", scheduleKind: "service" });
+    expect(edits.cost).toBeUndefined();
+    expect(edits).toHaveProperty("cost");
   });
 });
 
@@ -315,29 +267,21 @@ describe("a suggestion amended in its drawer", () => {
     expect(item).toMatchObject({ title: "Home insurance renewal", provider: "Harbour", dueDate: "2026-10-03", costMinor: 40000 });
   });
 
-  it("sends the amended fields, keeps the relay's own subtype, and hands the section apart", () => {
+  it("sends the amended fields, the relay's own reading and the kind, and hands the section apart", () => {
     const item = proposedItemOf(/** @type {any} */ (suggestion()), where);
     const draft = { ...draftOf(item), cost: "£420.00", reference: "HM-7", sectionId: "s-dates" };
-    const out = editsOf(draft, item);
-    if ("refusal" in out) throw new Error(out.refusal);
-    const { item: amended, sectionId } = amendedOf(item, out.edits);
+    const { item: amended, sectionId } = amendedOf(item, editsOf(draft));
     expect(sectionId).toBe("s-dates");
     expect(amended).toMatchObject({
-      title: "Home insurance renewal", provider: "Harbour Mutual", reference: "HM-7", costMinor: 42000,
-      dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12, subtype: "insurance", currency: "GBP",
+      title: "Home insurance renewal", provider: "Harbour Mutual", reference: "HM-7", cost: "£420.00",
+      dueDate: "2026-10-03", recurrenceMonths: 12, subtype: "insurance", scheduleKind: "renewal", kind: "renewal",
+      currency: "GBP",
     });
     expect(amended).not.toHaveProperty("sectionId");
   });
 
-  it("writes the new type's subtype when the type was changed", () => {
+  it("sends the new kind when the type was changed, for the engine to map", () => {
     const item = proposedItemOf(/** @type {any} */ (suggestion()), where);
-    const out = editsOf({ ...draftOf(item), kind: "service" }, item);
-    if ("refusal" in out) throw new Error(out.refusal);
-    expect(amendedOf(item, out.edits).item).toMatchObject({ subtype: "service", scheduleKind: "service" });
-  });
-
-  it("refuses before anything is sent, as a filed item's rows do", () => {
-    const item = proposedItemOf(/** @type {any} */ (suggestion()), { householdId: "h1", sectionId: null });
-    expect(editsOf(draftOf(item), item)).toEqual({ refusal: "not yet — choose a section" });
+    expect(amendedOf(item, editsOf({ ...draftOf(item), kind: "service" })).item).toMatchObject({ kind: "service" });
   });
 });

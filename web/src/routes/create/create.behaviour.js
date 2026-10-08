@@ -8,7 +8,8 @@ import { saveProblem } from "$lib/data/metadata-status.js";
 import { screenScope } from "$lib/teardown.js";
 import { takeHeldDocument } from "$lib/data/held-document.js";
 import { wireDropFeedback } from "./drop-feedback.js";
-import { createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, refusalOf } from "./entry.js";
+import { dryRunner } from "$lib/data/dry-run.js";
+import { createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice } from "./entry.js";
 
 /**
  * The new-entry form's behaviour, carried across from design/v19/create-v3.html
@@ -26,10 +27,10 @@ import { createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, refusalOf
  * maps to a schedule (an inspection recurs, a document's date is optional and
  * never recurs, a suggestion schedules nothing); recurrence adds a fourth,
  * custom choice, 1–120 months; a save failure is loud, beside the button, and
- * nothing typed is lost. The mapping, the recurrence bound and the refusal
- * wording are not reimplemented here — `entry.js` is the one place they live,
- * shared with the pocket's own form (`pocket.svelte`, `EntryForm.svelte`),
- * which built the same five decisions first and is this file's reference.
+ * nothing typed is lost. The mapping and the refusals are the engine's
+ * (ADR-0034, #1325): the form sends what was typed and chosen
+ * (`entry.js` createCommandOf, shared with the pocket's own form), and asks
+ * the engine's dry run whether it could be saved.
  *
  * Three deliberate departures from the mockup:
  *
@@ -135,26 +136,40 @@ export function mountCreate() {
     };
   }
 
-  /** Why the entry cannot be saved yet, in entry.js's own refusal vocabulary. */
-  function currentRefusal() {
-    return refusalOf(entryFromForm());
+  /** The command the form would send now; the dry run asks about it and the save sends it. */
+  function commandFromForm() {
+    return createCommandOf(entryFromForm(), {
+      householdId: household?.id ?? "", currency: household?.currency ?? "GBP", id: draftId,
+    });
   }
 
+  /** The engine's last word on the entry (ADR-0034): null when it can be
+      saved, its refusal otherwise. Disabled until the first answer, as the
+      section refusal (#1058b) held it before. */
+  /** @type {string | null} */
+  let refusal = "";
   /**
-   * #1058b/#1058e: the save button stays disabled while the entry cannot be
-   * saved, the reason sits beside it — quiet while it is only a refusal,
-   * loud (see the `submit` handler's catch) once a save has actually failed.
+   * #1058b/#1058e: the save button stays disabled while the engine refuses
+   * the entry, its reason beside it — quiet while it is only a refusal, loud
+   * (see the `submit` handler's catch) once a save has actually failed.
    */
-  function updateRefusal() {
+  function showRefusal() {
     if (saving) return;
-    const refusal = currentRefusal();
-    save.disabled = Boolean(refusal);
+    save.disabled = refusal !== null;
     /* A sticky message from the last save attempt outranks the live refusal
        note until the next attempt clears it — typing does not erase it. */
     if (sticky) return;
     note.classList.remove("fail");
     note.removeAttribute("role");
     note.textContent = refusal ?? "";
+  }
+  const dryRun = dryRunner({
+    onanswer: (answer) => { refusal = answer; showRefusal(); },
+  });
+  /** Something changed: ask the engine again once the member pauses. */
+  function updateRefusal() {
+    showRefusal();
+    dryRun.ask(() => household ? commandFromForm() : null);
   }
 
   /* #1058c: what a kind schedules decides what the disclosed fields even
@@ -217,7 +232,7 @@ export function mountCreate() {
         });
         sections.appendChild(button);
       }
-      updateRefusal();
+      dryRun.now(commandFromForm);
     })
     .catch(() => {
       sections.textContent = "your sections could not load — reload the page and try again";
@@ -526,11 +541,8 @@ export function mountCreate() {
 
   on(card, "submit", async (event) => {
     event.preventDefault();
-    if (saving) return;
-    if (currentRefusal()) {
-      updateRefusal();
-      return;
-    }
+    if (saving || refusal !== null) return;
+    dryRun.stop();
 
     saving = true;
     sticky = null;
@@ -543,13 +555,8 @@ export function mountCreate() {
 
     try {
       const active = household ?? await activeHousehold();
-      // FormHousehold.currency is optional (entry.js) even though
-      // Household.currency is not — active can be either here, so this is
-      // really possibly undefined; the same fallback pocket.svelte's own
-      // save() already uses for the identical gap (#1151 W1-Q9).
-      await applyCommand(createCommandOf(entryFromForm(), {
-        householdId: active.id, currency: active.currency ?? "GBP", id: draftId,
-      })).catch((error) => {
+      household ??= active;
+      await applyCommand(commandFromForm()).catch((error) => {
         /* This draft id is new to the server, so "this item changed on another
            device" can only mean the earlier send landed and its answer was
            lost (same reading as pocket.svelte's save). */
@@ -573,7 +580,8 @@ export function mountCreate() {
     } catch (error) {
       /* #1058e: loud, not small print — the button goes back to "Add to
          orbit", the reason sits beside it, and nothing typed is lost. No
-         toast. saveProblem() is the same wording the pocket's form gives. */
+         toast. saveProblem() is the same wording the pocket's form gives;
+         a refusal the engine found only at the save reads in its own words. */
       sticky = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
       note.classList.add("fail");
       note.setAttribute("role", "alert");
@@ -618,6 +626,7 @@ export function mountCreate() {
     teardown: () => {
       teardown();
       delete card.dataset.ready;
+      dryRun.stop();
       /* A read still in flight is nobody's once the screen has gone; the
          sheet's object URL goes with it, and `body.snap`, like `body.doc`,
          must not outlive the screen. */

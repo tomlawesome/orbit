@@ -120,10 +120,10 @@ async function seedHouseholdAndItem(page: Page, name: string, itemTitle: string)
     await command({
       type: "item.upsert",
       householdId,
+      kind: "service",
       item: {
         id: itemId, sectionId, title: itemTitle, currency: "GBP",
-        scheduleKind: "service", dueDate: new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10),
-        status: "active",
+        dueDate: new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10),
       },
       activity: { id: crypto.randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
     });

@@ -15,7 +15,9 @@ import { describe, expect, it } from "vitest";
  * RECURRENCE_MAX or used entry.js's own comma-aware cost parser.
  *
  * The fix adds one entryFromForm() read fresh off the DOM, used by both the
- * existing refusal check and the save payload via createCommandOf.
+ * existing refusal check and the save payload via createCommandOf. Since
+ * #1325 (ADR-0034) the refusal check is the engine's dry run of that same
+ * command (commandFromForm), so the form asks about exactly what it sends.
  */
 
 const BEHAVIOUR = readFileSync(
@@ -25,22 +27,24 @@ const BEHAVIOUR = readFileSync(
 
 describe("#1151 W1-Q9: the desktop create form reuses entry.js's own mapping", () => {
   it("imports createCommandOf instead of scheduleOf", () => {
-    expect(BEHAVIOUR).toMatch(/import \{ createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, refusalOf \} from "\.\/entry\.js";/u);
+    expect(BEHAVIOUR).toMatch(/import \{ createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice \} from "\.\/entry\.js";/u);
     expect(BEHAVIOUR).not.toContain("scheduleOf(chosenType)");
   });
 
-  it("entryFromForm() builds the full Entry shape, used by both the refusal check and the save", () => {
-    const fn = BEHAVIOUR.slice(BEHAVIOUR.indexOf("function entryFromForm()"), BEHAVIOUR.indexOf("function currentRefusal()"));
+  it("entryFromForm() builds the full Entry shape, used by both the dry run and the save", () => {
+    const fn = BEHAVIOUR.slice(BEHAVIOUR.indexOf("function entryFromForm()"), BEHAVIOUR.indexOf("function commandFromForm()"));
     expect(fn).toMatch(/kind: chosenType,/u);
     expect(fn).toMatch(/sectionId: chosenSection,/u);
     expect(fn).toMatch(/reminderDays: \[Number\(value\("f-reminder"\)\)\],/u);
-    const refusalFn = BEHAVIOUR.slice(BEHAVIOUR.indexOf("function currentRefusal()"), BEHAVIOUR.indexOf("function currentRefusal()") + 150);
-    expect(refusalFn).toMatch(/return refusalOf\(entryFromForm\(\)\);/u);
+    const commandFn = BEHAVIOUR.slice(BEHAVIOUR.indexOf("function commandFromForm()"), BEHAVIOUR.indexOf("function commandFromForm()") + 200);
+    expect(commandFn).toMatch(/return createCommandOf\(entryFromForm\(\), \{/u);
+    expect(BEHAVIOUR).toMatch(/dryRun\.ask\(\(\) => household \? commandFromForm\(\) : null\)/u);
+    expect(BEHAVIOUR).not.toMatch(/refusalOf/u);
   });
 
   it("the submit handler calls createCommandOf instead of hand-building the item", () => {
     const submitHandler = BEHAVIOUR.slice(BEHAVIOUR.indexOf('on(card, "submit"'));
-    expect(submitHandler).toMatch(/await applyCommand\(createCommandOf\(entryFromForm\(\), \{\s*\n\s*householdId: active\.id, currency: active\.currency \?\? "GBP", id: draftId,\s*\n\s*\}\)\)/u);
+    expect(submitHandler).toMatch(/await applyCommand\(commandFromForm\(\)\)/u);
     // the hand-rolled recurrence/cost logic this used to carry is gone
     expect(submitHandler).not.toMatch(/kindRecurs\(chosenType\)/u);
     expect(submitHandler).not.toMatch(/Math\.round\(Number\(cost\)/u);

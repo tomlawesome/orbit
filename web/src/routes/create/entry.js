@@ -1,18 +1,17 @@
 /**
- * THE ENTRY: what create's form holds, and the item it becomes (#1120,
+ * THE ENTRY: what create's form holds, and the intent it sends (#1120,
  * proposal §2.5; the owner's #1058 decisions, built under #1069).
  *
- * Pure and shared, so the pocket's create page, the item's edit sheet and the
- * unit suite all read one set of rules:
+ * The rules are the engine's (ADR-0034, #1325): what a kind schedules, which
+ * subtype it records, that a new item is active, and every "not yet" refusal
+ * live in src/ (item-kind.ts, refusals.ts). This module holds what the form
+ * shows and offers — the kinds as chips, the recurrence and reminder
+ * choices, which fields a kind asks for — and turns what the member typed
+ * and chose into the command, unjudged. The form learns whether it can be
+ * saved from the engine's dry run (lib/data/dry-run.js).
  *
- *   · kind → schedule (#1058): service and renewal schedule themselves;
- *     inspection is a service with subtype `inspection`, so an MOT comes
- *     round; document is an expiry with an optional date, and happens once;
- *     suggestion schedules nothing.
- *   · recurrence is "every N months", 1 to 120 (`recurrenceMonths`' range),
- *     with 0 meaning once.
- *   · the section has no default: nothing saves until one is chosen, and the
- *     reason is said beside the save button (#1058).
+ *   · recurrence is "every N months", 1 to 120, with 0 meaning once.
+ *   · the section has no default (#1058); the engine says "choose a section".
  *   · no assignee: nothing in the model carries one (#1058).
  */
 
@@ -35,28 +34,11 @@ export const RECURRENCE_DEFAULT = 12;
 export const REMINDER_CHOICES = [90, 60, 30, 21, 14, 7, 3, 1];
 /** The two reminders a new entry starts with (§2.5). */
 export const REMINDER_DEFAULT = [21, 7];
-/** The model's own ceiling on reminders per item. */
-export const REMINDER_MAX = 8;
 
 /**
- * What a kind schedules (#1058).
- * @param {Kind | null | undefined} kind
- * @returns {{ scheduleKind: ScheduleKind | undefined, subtype: string | undefined }}
- */
-export function scheduleOf(kind) {
-  switch (kind) {
-    case "service": return { scheduleKind: "service", subtype: "service" };
-    case "renewal": return { scheduleKind: "renewal", subtype: "renewal" };
-    case "inspection": return { scheduleKind: "service", subtype: "inspection" };
-    case "document": return { scheduleKind: "expiry", subtype: "document" };
-    case "suggestion": return { scheduleKind: undefined, subtype: "suggestion" };
-    default: return { scheduleKind: undefined, subtype: undefined };
-  }
-}
-
-/**
- * The kind an existing item reads as: its subtype when that is one of the
- * five, otherwise what its schedule says. Null when neither says.
+ * The kind a stored item reads as, so the form lights the right chip: its
+ * subtype when that is one of the five, otherwise what its schedule says.
+ * Presentation only — it reads what the engine stored and never decides it.
  * @param {{ subtype?: string | null, scheduleKind?: string | null }} item
  * @returns {Kind | null}
  */
@@ -69,9 +51,9 @@ export function kindOf(item) {
   return null;
 }
 
-/** Whether a kind asks for a date at all (a suggestion schedules nothing). */
+/** Whether the form asks for a date for a kind (a suggestion schedules nothing). */
 export const kindHasDate = (/** @type {Kind | null} */ kind) => kind !== "suggestion";
-/** Whether a kind can come round (a document's expiry happens once). */
+/** Whether the form offers a repeat for a kind (a document's expiry happens once). */
 export const kindRecurs = (/** @type {Kind | null} */ kind) => kind !== "suggestion" && kind !== "document";
 
 /**
@@ -110,14 +92,14 @@ export function recurrenceOfChoice(choice, custom) {
 }
 
 /**
- * Reminders, toggled one day at a time, kept furthest-first and within the
- * model's ceiling.
+ * Reminders, toggled one day at a time, kept furthest-first. Too many is the
+ * engine's refusal to make, not a silent trim (#1325).
  * @param {number[]} days
  * @param {number} day
  */
 export function toggleReminder(days, day) {
   const next = days.includes(day) ? days.filter((one) => one !== day) : [...days, day];
-  return next.sort((a, b) => b - a).slice(0, REMINDER_MAX);
+  return next.sort((a, b) => b - a);
 }
 
 /**
@@ -188,77 +170,32 @@ export function entryOf(item) {
   };
 }
 
-/**
- * The message shown beside a cost field whose comma is not a thousands
- * separator in a valid position (#1151 W1-F1/W1-S4): Orbit is a UK product,
- * so a comma is only ever a thousands separator, never a decimal point.
- */
-export const COST_FORMAT_HINT = "Use a dot for pence, for example 12.50";
+/** Optional text as the command carries it: trimmed, or left out. @param {string} text */
+const optional = (text) => text.trim() || undefined;
 
 /**
- * A typed cost in minor units: undefined when empty, NaN when it is not a
- * sum of money. Accepts "84", "84.5", "£84.50", "1,250", "1,250.00". A
- * comma is only accepted as a thousands separator in a valid grouping
- * position — groups of exactly three digits after it, none after the
- * decimal point — so "12,50" and "1,2500" are rejected rather than
- * silently reinterpreted (#1151 W1-F1/W1-S4).
- * @param {string | undefined} text an optional form field (PanelForm.cost
- *   et al.) can genuinely be undefined; `String(text ?? "")` below already
- *   treats that the same as empty, so the type is corrected to say so
- *   rather than every optional-field caller narrowing it first.
- */
-export function minorOf(text) {
-  const clean = String(text ?? "").replace(/[£$€\s]/g, "");
-  if (!clean) return undefined;
-  if (!/^\d+(\.\d{0,2})?$|^\d{1,3}(,\d{3})+(\.\d{0,2})?$/.test(clean)) return Number.NaN;
-  return Math.round(Number(clean.replace(/,/g, "")) * 100);
-}
-
-/**
- * Why the entry cannot be saved yet, in the refusal vocabulary, or null
- * when it can. The first reason only: one line beside the button.
+ * What the member typed and chose, as `item.upsert` carries it (ADR-0034):
+ * the cost as typed and the repeat as chosen, for the engine to read and
+ * judge. Never the schedule kind, subtype or status, which follow from the
+ * kind in the engine.
  * @param {Entry} entry
  */
-export function refusalOf(entry) {
-  if (!entry.name.trim()) return "not yet — give it a name";
-  if (!entry.sectionId) return "not yet — choose a section";
-  const cost = minorOf(entry.cost);
-  if (cost !== undefined && Number.isNaN(cost)) return `not yet — ${COST_FORMAT_HINT.toLowerCase()}`;
-  if (entry.recurrence > 0 && kindRecurs(entry.kind) && !entry.dueDate && entry.kind)
-    return "not yet — a repeat needs a due date";
-  return null;
-}
-
-/**
- * The fields an entry writes, shared by create and edit. Schedule follows
- * the kind and only exists with a date (the schema's rule); recurrence only
- * with a schedule that comes round.
- * @param {Entry} entry
- * @param {{ scheduleKind?: string | undefined }} [keep] an edited item's own schedule, which wins
- */
-export function fieldsOf(entry, keep = {}) {
-  const dated = kindHasDate(entry.kind) && entry.dueDate ? entry.dueDate : undefined;
-  const scheduleKind = dated
-    ? (/** @type {ScheduleKind | undefined} */ (keep.scheduleKind) ?? scheduleOf(entry.kind).scheduleKind)
-    : undefined;
-  const recurs = Boolean(scheduleKind) && scheduleKind !== "expiry" && entry.recurrence > 0;
-  const cost = minorOf(entry.cost);
+export function intentOf(entry) {
   return {
-    sectionId: /** @type {string} */ (entry.sectionId),
-    title: entry.name.trim(),
-    provider: entry.provider.trim() || undefined,
-    reference: entry.reference.trim() || undefined,
-    costMinor: cost === undefined || Number.isNaN(cost) ? undefined : cost,
-    dueDate: dated,
-    scheduleKind,
-    recurrenceMonths: recurs ? Math.min(RECURRENCE_MAX, entry.recurrence) : undefined,
+    sectionId: entry.sectionId,
+    title: entry.name,
+    provider: optional(entry.provider),
+    reference: optional(entry.reference),
+    cost: optional(entry.cost),
+    dueDate: entry.dueDate || undefined,
+    recurrenceMonths: entry.recurrence,
     reminderDays: [...entry.reminderDays],
-    notes: entry.notes.trim() || undefined,
+    notes: optional(entry.notes),
   };
 }
 
 /**
- * The `item.upsert` a new entry sends.
+ * The `item.upsert` a new entry sends: the kind chosen, and the intent.
  * @param {Entry} entry
  * @param {{ householdId: string, currency: string, id: string }} where
  */
@@ -266,13 +203,8 @@ export function createCommandOf(entry, { householdId, currency, id }) {
   return {
     type: "item.upsert",
     householdId,
-    item: {
-      id,
-      ...fieldsOf(entry),
-      subtype: scheduleOf(entry.kind).subtype,
-      currency,
-      status: "active",
-    },
+    ...(entry.kind ? { kind: entry.kind } : {}),
+    item: { id, ...intentOf(entry), currency },
   };
 }
 
@@ -316,13 +248,22 @@ export function entryOfProposal(proposal = {}, { householdId = null } = {}) {
 }
 
 /**
- * The item a reviewed receipt is approved as: the same fields create writes,
- * the kind's subtype, and the currency the mail was read in. The section
- * travels beside it (approveReceipt), as the reviewed-intake route takes it.
+ * The item a reviewed receipt is approved as: the intent create sends, the
+ * kind chosen, and the currency the mail was read in. The section travels
+ * beside it (approveReceipt), as the reviewed-intake route takes it; the
+ * engine maps the kind and keeps the relay's own subtype unless the kind
+ * changed.
  * @param {Entry} entry
  * @param {string} currency
+ * @param {{ subtype?: string | null, scheduleKind?: string | null }} [reading]  the relay's
  */
-export function reviewItemOf(entry, currency) {
-  const { sectionId: _section, ...fields } = fieldsOf(entry);
-  return { ...fields, subtype: scheduleOf(entry.kind).subtype, currency };
+export function reviewItemOf(entry, currency, reading = {}) {
+  const { sectionId: _section, ...fields } = intentOf(entry);
+  return {
+    ...fields,
+    ...(reading.subtype ? { subtype: reading.subtype } : {}),
+    ...(reading.scheduleKind ? { scheduleKind: reading.scheduleKind } : {}),
+    ...(entry.kind ? { kind: entry.kind } : {}),
+    currency,
+  };
 }

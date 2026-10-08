@@ -86,16 +86,15 @@ test("names the household link and every rendered body, and hides the decorative
       data: {
         type: "item.upsert",
         householdId,
+        kind: "renewal",
         item: {
           id: itemId,
           sectionId,
           title: itemTitle,
           currency: "GBP",
           costMinor: 12550,
-          scheduleKind: "renewal",
           dueDate,
           recurrenceMonths: 12,
-          status: "active",
           version: 1,
           updatedAt: new Date().toISOString(),
         },

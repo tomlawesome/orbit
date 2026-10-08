@@ -747,7 +747,7 @@
   /** @param {{ id: string, title: string }} one @returns {import('./drawer-acts.js').DrawerActs} */
   const drawerActsOf = (one) => ({
     busy: footBusy?.id === one.id ? footBusy.kind : modes.edit.busy && modes.edit.id === one.id ? "save" : null,
-    problem: modes.id === one.id ? modes.edit.problem ?? modes.completeProblem : null,
+    problem: modes.id === one.id ? modes.edit.problem ?? modes.edit.refusal ?? modes.completeProblem : null,
     modes,
     sections,
     onsnooze: (from) => {

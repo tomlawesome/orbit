@@ -11,8 +11,24 @@
  * this one (the screens' own effects say when).
  */
 import { tick } from "svelte";
+import { upsertCommand } from "$lib/data/commands.js";
+import { dryRunner } from "$lib/data/dry-run.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
 import { draftOf, editsOf } from "./item-draft.js";
+
+/**
+ * The command a dry run asks about for these edits: the item's own upsert;
+ * for a suggestion, which is not an item yet, the upsert of the new item it
+ * would become, which meets the same "not yet" rules (ADR-0034, #1325).
+ * @param {import('$lib/data/commands.js').CommandItem} item
+ * @param {import('$lib/data/commands.js').ItemEdits} edits
+ * @param {string} newId  a stand-in id for a suggestion's would-be item
+ */
+export function checkedCommandOf(item, edits, newId) {
+  if (item.status !== "suggested") return upsertCommand(item, edits);
+  const { version: _version, updatedAt: _updated, subtype: _subtype, scheduleKind: _schedule, ...fields } = item;
+  return upsertCommand({ ...fields, id: newId }, edits);
+}
 
 /**
  * @typedef {"due" | "section" | "type" | "months"} ChooserKey
@@ -28,14 +44,23 @@ export class EditSession {
   /** The value whose chooser stands beside the drawer. @type {Choosing | null} */
   choosing = $state.raw(null);
   busy = $state(false);
-  /** @type {string | null} */
+  /** A save's failure, said until the next attempt. @type {string | null} */
   problem = $state(null);
+  /** The engine's last word on the rows (ADR-0034): null when they can be
+      saved, its refusal otherwise. @type {string | null} */
+  refusal = $state(null);
+  /** Whether the engine has answered for these rows yet. */
+  answered = $state(false);
   /** @type {CommandItem | null} */
   #item = null;
   /** @type {(item: CommandItem, edits: Partial<CommandItem>) => Promise<unknown>} */
   #save;
   /** @type {() => void} */
   #onchoose;
+  /** The item the dry run last opened on. @type {string | null} */
+  #askedFor = null;
+  #newId = crypto.randomUUID();
+  #dryRun = dryRunner({ onanswer: (answer) => { this.refusal = answer; this.answered = true; } });
 
   /**
    * @param {{
@@ -48,6 +73,29 @@ export class EditSession {
   constructor({ save, onchoose = () => {} }) {
     this.#save = save;
     this.#onchoose = onchoose;
+    /* Every change to the rows asks the engine again, ~300 ms after the last;
+       opening asks at once. */
+    $effect(() => {
+      const draft = this.draft;
+      const id = this.id;
+      if (!draft || !id) { this.#askedFor = null; this.#dryRun.stop(); return; }
+      JSON.stringify(draft); // every row is the question
+      const build = () => this.#checked();
+      if (this.#askedFor === id) this.#dryRun.ask(build);
+      else { this.#askedFor = id; this.#dryRun.now(build); }
+    });
+  }
+
+  /** Whether the save waits on the engine: no answer yet, or a refusal. */
+  get refused() {
+    return !this.answered || this.refusal !== null;
+  }
+
+  /** The command the rows would send now, for the dry run. */
+  #checked() {
+    const item = this.#item;
+    const draft = this.draft;
+    return item && draft ? checkedCommandOf(item, editsOf($state.snapshot(draft)), this.#newId) : null;
   }
 
   /** @param {CommandItem} item */
@@ -57,6 +105,8 @@ export class EditSession {
     this.draft = draftOf(item);
     this.choosing = null;
     this.problem = null;
+    this.refusal = null;
+    this.answered = false;
   }
 
   /** The item again, after a re-read, so a save answers its newest version. @param {CommandItem} item */
@@ -69,6 +119,8 @@ export class EditSession {
     this.draft = null;
     this.choosing = null;
     this.problem = null;
+    this.refusal = null;
+    this.answered = false;
     this.#item = null;
   }
 
@@ -102,21 +154,21 @@ export class EditSession {
   }
 
   /**
-   * Save: refused in the refusal vocabulary before anything is sent, as the
-   * belt's edit was; the server's refusal said loudly (#1058), the locked
-   * one in the member's own words (#941). True when it landed.
+   * Save: held while the engine refuses the rows (its dry run's words stand
+   * under them); the server's refusal at the save said loudly (#1058), the
+   * locked one in the member's own words (#941). True when it landed.
    */
   async commit() {
     const item = this.#item;
     const draft = this.draft;
     if (!item || !draft || this.busy) return false;
-    const out = editsOf($state.snapshot(draft), item);
-    if ("refusal" in out) { this.problem = out.refusal; return false; }
+    if (this.refusal !== null) return false;
+    this.#dryRun.stop();
     this.busy = true;
     this.problem = null;
     this.closeChooser(false);
     try {
-      await this.#save(item, out.edits);
+      await this.#save(item, editsOf($state.snapshot(draft)));
       if (this.id === item.id) this.cancel();
       await tick();
       return true;
