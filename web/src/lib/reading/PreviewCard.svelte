@@ -504,7 +504,8 @@
   .focusline{font:600 15.5px var(--display);letter-spacing:.01em;color:var(--ink);
     animation:pv-breathe 4.2s ease-in-out infinite}
   @keyframes pv-breathe{0%,100%{opacity:.96}50%{opacity:.42}}
-  .why{font:10.5px var(--mono);color:var(--ink-quiet);line-height:1.9;margin-top:12px}
+  /* 13px, the floor (#1319): it was 10.5px */
+  .why{font:13px var(--mono);color:var(--ink-quiet);line-height:1.7;margin-top:12px}
   /* the honest states hold still: the line said once, only the plate drawn */
   .readcard.still .focusline{animation:none}
   .readcard.still .why{color:var(--ink-mid)}

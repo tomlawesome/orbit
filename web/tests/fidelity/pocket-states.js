@@ -363,9 +363,7 @@ export const SIGNED_IN = [
     await mot.getByRole("button", { name: "Retire Car MOT" }).click();
     await mot.getByRole("button", { name: /tap again to confirm$/ }).waitFor();
   } },
-  { route: "/home", state: "document-preview",
-    defect: { "*": "#1319: the preview's .why line (PreviewCard.svelte) is 10.5px, under the 13px floor" },
-    reach: async (page) => {
+  { route: "/home", state: "document-preview", reach: async (page) => {
     await go(page, "/home");
     const mot = row(page, ".pk-below", "Car MOT");
     await openRow(page, mot);
