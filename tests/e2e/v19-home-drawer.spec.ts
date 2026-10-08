@@ -313,10 +313,12 @@ test.describe("on the phone", () => {
     await expect(sheet).toBeHidden();
     await expect(row).toHaveAttribute("data-open", "");
 
-    /* stage 2: the pencil edits the rows, the title a row of its own; the
+    /* stage 2: the pencil edits the rows, the title in the row's head; the
        due date's calendar is the bottom sheet; Escape takes it, then the edit */
     await row.getByRole("button", { name: "Edit this item" }).tap();
+    /* the title is live in the row's head; its button is put away meanwhile */
     await expect(row.getByRole("textbox", { name: "title" })).toBeFocused();
+    await expect(row.locator("[data-row-face]")).toBeHidden();
     await row.getByRole("button", { name: /^due: / }).tap();
     const calendar = page.getByRole("dialog", { name: /due date/i });
     await expect(calendar).toBeVisible();
