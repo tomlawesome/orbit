@@ -142,6 +142,35 @@ test.afterEach(async ({ page }) => {
 test.describe("on the desk", () => {
   test.skip(({ isMobile }) => isMobile, "the desk's drawer; the phone's is below");
 
+  /* #1305: the dial callout's documents chip opens the item's own drawer
+     with its real documents. It used to open a dialog of the mockup's two
+     made-up papers under whichever item's name. (The phone's dial has no
+     callout, so no chip.) */
+  test("the dial's documents chip opens the item's drawer at its real documents", async ({ page }) => {
+    test.setTimeout(90_000);
+    await signIn(page);
+    const { itemId, householdId } = await seedHouseholdWithItem(page);
+    await uploadDocument(page, householdId, itemId, "chip-proving.pdf");
+
+    await page.goto("/home");
+    const body = page.locator(`.body-link[data-body="${itemId}"]`);
+    await expect(body).toHaveAttribute("data-docs", "1", { timeout: 20_000 });
+    await body.dispatchEvent("mouseenter");
+    const chip = page.locator(".callout.show .chip");
+    await expect(chip).toHaveText("◆ 1 document");
+    await chip.click();
+
+    const drawer = page.locator(`[id="${itemId}-view"]`);
+    await expect(drawer).toBeVisible({ timeout: 20_000 });
+    await expect(page).toHaveURL(new RegExp(`/home\\?item=${itemId}$`));
+    const paper = drawer.getByRole("button", { name: "Open chip-proving.pdf" });
+    await expect(paper).toBeFocused();
+    await expect(drawer.locator("[data-doc-row]")).toHaveCount(1);
+    /* nothing made up, anywhere on the screen */
+    await expect(page.getByText("service-invoice-2026.pdf")).toHaveCount(0);
+    await expect(page.locator("#docview")).toHaveCount(0);
+  });
+
   test("a document opens its preview beside the drawer; the page opens the reader; Escape walks back", async ({ page }) => {
     test.setTimeout(90_000);
     await signIn(page);

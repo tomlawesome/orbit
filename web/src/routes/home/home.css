@@ -361,7 +361,7 @@
    * composed from ratified sources:
    *   .kv    settings-mail.html's read-only label/value row (via item.css)
    *   h4     the drawer's quiet label above a group
-   *   .doc   home's own document row, from .docview above
+   *   .doc   home's own document row (the old documents dialog's, #1305)
    *   the small print and the way onward: item.css's .note and .back
    * Scoped under .itemview so home borrows the grammar without inheriting
    * item.css, which also carries page-level rules this screen must not have.
@@ -434,21 +434,6 @@
   .itemview button.ivfull:disabled{opacity:.5;cursor:default}
   svg text{font-family:var(--mono)}
 
-  /* overscroll-behavior goes with the light-dismiss rule (owner, 2026-08-14):
-     the card is capped at 76vh and scrolls internally, so without this,
-     reaching the end of a long document list chains the scroll to the page and
-     the card dismisses itself out from under whoever is reading it. */
-  .desk .docview{position:fixed;z-index:9;top:50%;left:calc(75% + 10px);transform:translateY(-50%) scale(.97);
-           max-height:76vh;overflow:auto;overscroll-behavior:contain;
-           width:300px;background:var(--panel-raised);backdrop-filter:blur(16px);
-           border:1px solid var(--line);border-radius:16px;padding:20px 22px;
-           opacity:0;pointer-events:none;
-           /* #847: closed, the viewer's close button must leave the tab
-              order, on the same delayed-visibility rule as .account above. */
-           visibility:hidden;
-           transition:opacity .25s,transform .25s,visibility 0s .25s}
-  .desk .docview.open{opacity:1;pointer-events:auto;transform:translateY(-50%);
-                visibility:visible;transition-delay:0s}
   .drawer{position:fixed;top:0;bottom:0;z-index:10;width:290px;
           background:var(--panel-raised);backdrop-filter:blur(16px);
           padding:26px;
@@ -480,14 +465,6 @@
   .desk .svc small{color:var(--ink-quiet);font-size:10.5px}
   .keyrow{display:flex;align-items:center;gap:10px;font:12px var(--mono);color:var(--ink-mid);padding:6px 2px}
   .keyrow .sw{width:12px;height:12px;border-radius:50%;flex:none}
-  .desk .docview h2{font-size:14.5px;font-weight:600}
-  .desk .docview .sub{font:11px var(--mono);color:var(--ink-quiet);margin:2px 0 14px}
-  .desk .docview .doc{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;
-                border:1px solid var(--line-soft);margin-bottom:7px;font-size:13px}
-  .desk .docview .doc:hover{border-color:var(--accent)}
-  .desk .docview .doc small{display:block;font:10.5px var(--mono);color:var(--ink-mid)}
-  .desk .docview .close{position:absolute;top:12px;right:14px;background:none;border:0;
-                  color:var(--ink-quiet);font:14px var(--mono);cursor:pointer}
 
   /* CON-12 (new): the north star — creation lives in the sky. The star is
      the handle of a full-width top drawer; like every edge word, it rides
@@ -1189,12 +1166,12 @@
 [data-theme=clouds] :is(.item,.callout,.ctype,.orb){
   backdrop-filter:blur(14px) saturate(1.06);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.72),0 8px 20px rgba(48,66,98,.07)}
-[data-theme=dawn] :is(.account,.docview,.drawer,.drawer-top,.itemview),
-[data-theme=clouds] :is(.account,.docview,.drawer,.drawer-top,.itemview){
+[data-theme=dawn] :is(.account,.drawer,.drawer-top,.itemview),
+[data-theme=clouds] :is(.account,.drawer,.drawer-top,.itemview){
   backdrop-filter:blur(20px) saturate(1.06);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.78),0 16px 36px rgba(48,66,98,.10)}
-[data-theme=dawn] :is(.item,.account,.docview,.drawer-top,.callout),
-[data-theme=clouds] :is(.item,.account,.docview,.drawer-top,.callout){
+[data-theme=dawn] :is(.item,.account,.drawer-top,.callout),
+[data-theme=clouds] :is(.item,.account,.drawer-top,.callout){
   border-top-color:rgba(255,255,255,.85)}
 [data-theme=dawn] .desk .scrim,[data-theme=clouds] .desk .scrim{background:rgba(196,206,222,.5)}
 /* The bodies are hazy pastels rather than flat ink (their stops are in

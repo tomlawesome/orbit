@@ -378,6 +378,13 @@
         if (detailFor !== id) return;
         if (!found) detailProblem = "Orbit no longer holds this item.";
         detail = found;
+        if (docsTarget === id) {
+          revealTarget = null;
+          await tick();
+          document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "auto" });
+          await focusFirstDocument(id);
+          return;
+        }
         /* A row opened FROM the address is put on screen twice: once as soon
            as it opens, and again once the detail has given it its full height
            — otherwise the record you asked for settles half off the bottom. */
@@ -563,6 +570,31 @@
     } else {
       replaceState(resolve(`/home?item=${encodeURIComponent(id)}`), { orbitItem: id });
     }
+  }
+
+  /* #1305: the dial callout's documents chip opens the item's drawer with
+     its documents -- the real ones, read with the record -- in place of the
+     old documents dialog, which showed the mockup's two made-up papers under
+     any item's name. Once the record lands, the first document row is
+     brought into view and focused. */
+  /** @type {string | null} */
+  let docsTarget = null;
+  /** @param {string} id */
+  function openItemDocuments(id) {
+    docsTarget = id;
+    if (expanded === id && detail) { focusFirstDocument(id); return; }
+    openSearchResult(id);
+  }
+  /** @param {string} id */
+  async function focusFirstDocument(id) {
+    if (docsTarget !== id) return;
+    docsTarget = null;
+    await tick();
+    const first = /** @type {HTMLElement | null} */ (
+      document.getElementById(`${id}-view`)?.querySelector("[data-doc-row]") ?? null);
+    if (!first) return;
+    first.scrollIntoView({ block: "nearest", behavior: "auto" });
+    first.focus({ preventScroll: true });
   }
 
   /** @returns {Promise<boolean>} whether the address reached the clipboard */
@@ -1452,7 +1484,8 @@
            to the workspace under ORBIT_FIXTURES, which is what lets the gate
            photograph the same sky twice. */
         ? mountHome({ galaxy: asView(view).galaxy, primary: asView(view).primary,
-                      fixtures: Boolean(data?.fixtures), workspace: asView(view).primary ?? "" })
+                      fixtures: Boolean(data?.fixtures), workspace: asView(view).primary ?? "",
+                      onopendocs: openItemDocuments })
         /* #1120: the pocket binds its own controls (pocket.svelte, the kit's
            sheets and rows); its approve, dismiss and refresh are handed to it
            as props below. */
@@ -2173,13 +2206,6 @@
   <div class="keyrow">belt = documents attached</div>
   <div class="keyrow">the sky&rsquo;s weather = your workload</div>
 </aside>
-<div class="docview" id="docview" role="dialog" aria-label="Documents">
-  <button class="close">×</button>
-  <h2 id="docview-title">Car full service</h2>
-  <div class="sub">2 documents · encrypted · scanned clean</div>
-  <div class="doc">◆<span>service-invoice-2026.pdf<small>added 12 Jun · 240 KB</small></span></div>
-  <div class="doc">◆<span>service-checklist.pdf<small>added 12 Jun · 88 KB</small></span></div>
-</div>
 {/if}
 {#if askTarget}
 <!-- §11 (#453): the question IS the dialogue — one ask, two honest answers. -->
