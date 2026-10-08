@@ -35,6 +35,20 @@ live, with an accent underline and the caret; no boxed inputs.
 
 Scenes `?scene=` listed at the top of each file; packs by `?theme=`.
 
+## Notes from the build
+
+- D: the manifest column slides left on round 6's curve and the card
+  fades in at its right; the pair fits at 1280. The scanning row opens
+  the card too, in its "Still scanning this file" state. Under 560px the
+  head icons drop to their own line under the countdown (a DOES NOT FIT
+  comment marks it).
+- E: a fourth paper (the tyre receipt) is added for the cannot-draw
+  state; the `states` scene shows the 2025 certificate as removed. The
+  due date edits as text with no native picker. On the phone the icons
+  take their own line under the countdown, with a tall gap above them
+  that the next round should close.
+- Both: Playwright was taken from the main checkout's node_modules.
+
 ## Verdicts
 
 (none yet)
