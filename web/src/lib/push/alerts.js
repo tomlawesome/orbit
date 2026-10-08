@@ -51,14 +51,26 @@ export function alertsSupported(scope = globalThis) {
  * server state — this asks the browser itself, via the same two-step lookup
  * enableAlerts/disableAlerts use internally.
  *
+ * A lookup the browser cannot answer is null too, never a rejection. Firefox
+ * rejects `getSubscription()` with AbortError ("Error retrieving push
+ * subscription.") when it has no push service to ask, or when the page is
+ * leaving and the lookup is cut off. This is a read, made on mount where
+ * nobody waits on it to show an error, so a rejection here only ever
+ * escaped as an unhandled one. A switch reading off is the safe reading: the
+ * reader can turn it on, and enableAlerts reports any real failure then.
+ *
  * @param {*} [scope]
  * @returns {Promise<?PushSubscription>}
  */
 export async function currentSubscription(scope = globalThis) {
   if (!alertsSupported(scope)) return null;
-  const registration = await scope.navigator.serviceWorker.getRegistration();
-  if (!registration) return null;
-  return (await registration.pushManager.getSubscription()) ?? null;
+  try {
+    const registration = await scope.navigator.serviceWorker.getRegistration();
+    if (!registration) return null;
+    return (await registration.pushManager.getSubscription()) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
