@@ -49,3 +49,4 @@ changing implementation status.
 - [ADR-0031: The launcher is built from a pinned tag, signed with the image as one manifest, and shipped with each Orbit release](0031-signed-launcher-shipped-with-orbit.md) (Accepted; design details proposed)
 - [ADR-0032: TypeScript is the engine; bash is the thin Docker shell](0032-typescript-engine-bash-docker-shell.md) (Accepted)
 - [ADR-0033: Uploaded PDFs and images are kept safe the way established document systems do it, not by a checker of our own](0033-document-safety-standard-patterns.md) (Accepted)
+- [ADR-0034: The engine owns every rule; the browser sends intent and shows refusals](0034-engine-owns-every-rule.md) (Accepted)
