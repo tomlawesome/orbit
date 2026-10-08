@@ -196,9 +196,17 @@ test("a member sees their own last sent reminders, plainly, on both dialects", a
     await expect(rows.nth(0)).not.toContainText("smtp_unconfigured");
     await expect(outcome(1)).not.toContainText("couldn’t send");
 
-    /* The row leads to the item on the belt. */
+    /* The row leads to the item's drawer on home (#1319, owner-decisions
+       §34: the belt it used to lead to retired). */
+    await expect(rows.nth(1)).toHaveAttribute("href", `/home?item=${itemId}`);
     await rows.nth(1).click();
-    await expect(page).toHaveURL(new RegExp(`/item/${itemId}`));
+    await expect(page).toHaveURL(new RegExp(`/home\\?item=${itemId}$`));
+    if (isMobile) {
+      await expect(page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`))
+        .toHaveAttribute("data-open", "", { timeout: 20_000 });
+    } else {
+      await expect(page.locator(`[id="${itemId}-view"]`)).toBeVisible({ timeout: 20_000 });
+    }
   } finally {
     runSql(`delete from notification_deliveries where household_id = '${householdId}';`);
     await scheduleHouseholdDeletion(page, householdId, name);
