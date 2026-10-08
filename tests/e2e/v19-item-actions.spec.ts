@@ -371,6 +371,12 @@ test("editing on the desk widens the card and drops the repeated rows", async ({
  * middle on the apex, so the edit panel (#1248) growing it keeps it centred
  * rather than leaving the belt behind. The phone's card sits beneath its
  * band plate in the page's flow, so this is desk-only.
+ *
+ * #1302/#1315 (owner, 2026-10-08): the card never rises into the desk's top
+ * strip (belt.css --belt-strip), which the search field keeps. A card tall
+ * enough to meet it -- the edit form on a 14" screen -- starts under the
+ * strip instead, up to 15px below centre. So the card is where centring puts
+ * it, or under the strip, whichever is lower.
  */
 test("on the desk the card is centred on the belt's apex, at mid-page, even while editing", async ({ page }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "a phone's card sits beneath its band plate");
@@ -384,8 +390,11 @@ test("on the desk the card is centred on the belt's apex, at mid-page, even whil
     const card = page.locator("#cardwrap");
     const offCentre = async () => {
       const box = await card.boundingBox();
-      const sky = await page.evaluate(() => window.innerHeight);
-      return box ? Math.abs(box.y + box.height / 2 - sky / 2) : Infinity;
+      const { sky, strip } = await page.evaluate(() => ({
+        sky: window.innerHeight,
+        strip: parseFloat(getComputedStyle(document.querySelector(".belt-page") as Element).getPropertyValue("--belt-strip")),
+      }));
+      return box ? Math.abs(box.y - Math.max(sky / 2 - box.height / 2, strip)) : Infinity;
     };
     const height = async () => (await card.boundingBox())?.height ?? 0;
 
