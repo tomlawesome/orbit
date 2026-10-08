@@ -19,6 +19,7 @@
   import { POCKET_SUN_R } from "$lib/sun/furnace.js";
   import Row from "$lib/pocket/Row.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
+  import { inertPage } from "$lib/pocket/focus.js";
   import TopChrome from "$lib/pocket/TopChrome.svelte";
   import { POCKET_QUERY, isPocket } from "$lib/pocket/media.js";
   import { reviewLockedOf } from "$lib/pocket/review.js";
@@ -775,8 +776,28 @@
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   });
-  /* A press off the chooser sheet puts it away; a press on another value
-     switches it. */
+  /* #1319: the chooser sheet is modal. While it stands, everything behind
+     it is inert (focus.js's inertPage, the kit's sheets' own pattern), so
+     nothing it covers takes a tap; when it goes, the page comes back first
+     and focus goes back to the value that was pressed (the close asked for
+     that while the page was still inert, where it could not land). */
+  /** @param {HTMLElement} seat @param {HTMLElement | null} from */
+  function holdChooserSeat(seat, from) {
+    let opener = from;
+    const restore = inertPage(seat);
+    return {
+      /** @param {HTMLElement | null} next */
+      update(next) { if (next) opener = next; },
+      destroy() {
+        const lost = !document.activeElement || document.activeElement === document.body || seat.contains(document.activeElement);
+        restore();
+        if (lost && opener?.isConnected) opener.focus({ preventScroll: true });
+      },
+    };
+  }
+  /* A press off the chooser sheet puts it away: on its scrim (inside the
+     seat, so this leaves it to the scrim's own click), or anywhere else
+     still live, the wake's undo say. */
   $effect(() => {
     if (!modes.choosing) return;
     /** @param {PointerEvent} event */
@@ -1263,7 +1284,13 @@
 <!-- #1319 stage 2 (round 8, `narrow-editing-*`): the chooser card as the
      bottom sheet, where the preview's sheet stands -->
 {#if chooserAsk}
-  <div class="pk-chseat" data-chooser-card>
+  <div class="pk-chseat" data-chooser-card use:holdChooserSeat={modes.choosingFrom}>
+    <!-- The scrim is a pointer's dismiss, clear so the page reads through
+         it: it takes the press, so the tap that puts the sheet away never
+         lands on the page behind as well. Escape and close · esc are the
+         keyboard's, so it needs no key handler of its own. -->
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <div class="pk-chscrim" aria-hidden="true" onclick={() => modes.closeChooser(false)}></div>
     <ChooserCard ask={chooserAsk} layout="sheet" onpick={pickChoice} onclose={() => modes.closeChooser(true)} />
   </div>
 {/if}
