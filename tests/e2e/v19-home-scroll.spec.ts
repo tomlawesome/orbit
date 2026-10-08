@@ -65,7 +65,7 @@ async function addItem(page: Page, name: string) {
   await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
   await page.locator("#f-date").fill(new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10));
   await page.locator(".btn-primary").click();
-  await expect(page).toHaveURL(/\/home$/);
+  await expect(page).toHaveURL(/\/home(\?item=[^&]+)?$/);
   await expect(page.locator(".item", { hasText: name })).toBeVisible();
 }
 
@@ -94,7 +94,9 @@ test("after a save, the sky scrolls down to the manifest", async ({ page }) => {
 test("after a save, the item's way back returns to a sky that scrolls", async ({ page }) => {
   await signIn(page);
   await addItem(page, "Scroll via item");
-  await page.locator(".item", { hasText: "Scroll via item" }).click();
+  /* the save lands with the new row already open (`/home?item=`), so its
+     link to the item is there without a press on the row (a press would
+     close it) */
   await page.getByRole("link", { name: "manage this item →" }).click();
   await expect(page).toHaveURL(/\/item\/[0-9a-f-]{36}$/);
   await page.getByRole("link", { name: "← YOUR SKY" }).click();

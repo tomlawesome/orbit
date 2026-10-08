@@ -98,7 +98,7 @@ test("a member opens About from the menu and sees the three cards", async ({ pag
 
     /* Card 2's index and the pictures it must credit; card 3 lists each licence once. */
     const index = screen.getByRole("navigation", { name: "Credits index" });
-    await expect(index.getByRole("link")).toHaveText([/^Pictures · 3$/, /^Fonts · 3$/, /^Libraries · (\d+|—)$/, /^Sidecar images · 4$/]);
+    await expect(index.getByRole("link")).toHaveText([new RegExp(`^Pictures · ${CREDITS.length}$`), /^Fonts · 3$/, /^Libraries · (\d+|—)$/, /^Sidecar images · 4$/]);
     expect(GALAXY_ID, "#1256: the galaxy credit has no id on the page").toBeTruthy();
     const galaxy = screen.locator(`[id="${GALAXY_ID}"]`);
     await expect(galaxy.locator("b")).toHaveText(GALAXY.name);
