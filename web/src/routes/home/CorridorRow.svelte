@@ -90,6 +90,8 @@
      the rest follows it in the row's own ink. */
   const meta = $derived(
     [
+      /* #1319: a retired item, or a one-off already done, says so first */
+      row.state,
       row.provider,
       row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null,
     ].filter(Boolean),

@@ -27,6 +27,13 @@
    * place. EDIT, the pencil, puts them into editing: save and cancel in the
    * pills' place, the pencil lit while it lasts (round 8, `editing`).
    *
+   * WHAT FITS THE ITEM'S STATE (#1319; the coordinator's ruling,
+   * 2026-10-08: the drawer opens any item). A retired, cancelled or expired
+   * item (`standing: "ended"`) offers only RESTORE, the reverse of retire (the
+   * status command), and the chain link. A one-off already done (`standing:
+   * "done"`) offers nothing that would undo or end it: attach a document,
+   * the pencil and the chain link.
+   *
    * ATTACH opens the file picker; the file goes up through the per-item
    * documents route (workspace.js attachItemDocument) and its scan.
    *
@@ -37,6 +44,8 @@
    *   mode?: "read" | "edit" | "complete",
    *   snoozing?: boolean,
    *   held?: boolean,
+   *   standing?: "ended" | "done" | null,
+   *   onrestore?: () => unknown,
    *   onsnooze: (from: HTMLElement) => unknown,
    *   oncomplete: (from: HTMLElement) => unknown,
    *   onattach: (file: File) => unknown,
@@ -51,7 +60,7 @@
   /** @type {Props} */
   let {
     title, pocket = false, busy = null, mode = "read", snoozing = false, held = false,
-    onsnooze, oncomplete, onattach, onretire, oncopy, onedit, onsave, onrecord, oncancel,
+    standing = null, onrestore = undefined, onsnooze, oncomplete, onattach, onretire, oncopy, onedit, onsave, onrecord, oncancel,
   } = $props();
 
   let armed = $state(false);
@@ -118,6 +127,18 @@
               disabled={busy !== null} onclick={onrecord}>{busy === "complete" ? "recording…" : "record"}</button>
       <button type="button" class:p-pill={pocket} disabled={busy !== null} onclick={oncancel}>cancel</button>
     </div>
+  {:else if standing === "ended"}
+    <div class="ivacts" class:p-pills={pocket} role="group" aria-label="Actions for {title}">
+      <button type="button" class:p-pill={pocket} class="act-ok"
+              style="--act:var(--ok);--act-text:var(--ok-text)" disabled={busy !== null}
+              aria-label="Restore {title}" onclick={() => onrestore?.()}>{busy === "restore" ? "restoring…" : "restore"}</button>
+    </div>
+  {:else if standing === "done"}
+    <div class="ivacts" class:p-pills={pocket} role="group" aria-label="Actions for {title}">
+      <button type="button" class:p-pill={pocket} class="act-up"
+              style="--act:var(--upcoming);--act-text:var(--upcoming-text)" disabled={busy !== null}
+              aria-label="Attach a document to {title}" onclick={pick}>{busy === "attach" ? "attaching…" : "attach a document"}</button>
+    </div>
   {:else}
     <div class="ivacts" class:p-pills={pocket} role="group" aria-label="Actions for {title}">
       <button type="button" class:p-pill={pocket} class="act-warm" class:lit={snoozing} data-pick
@@ -140,12 +161,15 @@
   {/if}
   <span class="ivtools">
     <span class="copied" class:show={copiedShown} role="status" aria-live="polite">{copiedShown ? "link copied" : ""}</span>
-    <!-- the pencil: lit while the rows are being edited (round 8) -->
+    <!-- the pencil: lit while the rows are being edited (round 8); an
+         ended item is restored before it is edited -->
+    {#if standing !== "ended"}
     <button type="button" class="ivicon ivedit" class:on={mode === "edit"} aria-label="Edit this item"
             aria-pressed={mode === "edit"} title="edit" disabled={busy !== null && mode !== "edit"}
             onclick={() => { arm.disarm(); if (mode !== "edit") onedit(); }}>
       <i><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.6 2.6 13.4 5.4 5.6 13.2 2.4 13.6 2.8 10.4Z"/><path d="M9.2 4 12 6.8"/></svg></i>
     </button>
+    {/if}
     <button type="button" class="ivicon ivlink" aria-label="Copy link" title="copy link" onclick={copy}>
       <i><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2.4-2.4a2.6 2.6 0 0 0-3.7-3.7l-1 1"/><path d="M9.2 6.8a2.6 2.6 0 0 0-3.7 0L3.1 9.2a2.6 2.6 0 0 0 3.7 3.7l1-1"/></svg></i>
     </button>

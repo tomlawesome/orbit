@@ -9,8 +9,8 @@
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import { sectionColourOf } from "$lib/option-colour.js";
   import { DrawerModes, pressKeepsChooser } from "./drawer-modes.svelte.js";
-  import { archiveCommand, completeCommand, snoozeCommand, upsertCommand } from "$lib/data/commands.js";
-  import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf } from "$lib/data/chart.js";
+  import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
+  import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf, manifestRowOf } from "$lib/data/chart.js";
   import { money } from "$lib/format.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
   import Hatch from "$lib/pocket/Hatch.svelte";
@@ -383,15 +383,25 @@
   /** What went wrong acting from a row, by the row's id. @type {Record<string, string>} */
   const rowProblem = $state({});
 
-  /* #1319: the belt retired, so an active item the manifest does not list
-     (more than 30 days out, or undated) is drawn as one more row once it is
-     asked for -- its address, a search result, a paper, its body -- and
-     opens there like any other. One at a time: the latest ask. */
+  /* #1319: the belt retired, and the drawer opens any item (the
+     coordinator's ruling, 2026-10-08). An item the manifest does not list --
+     more than 30 days out, undated, or retired, cancelled or expired -- is
+     drawn as one more row once it is asked for (its address, a search
+     result, a paper, its body), and the list extends to hold it: in date
+     order among the rows, undated at the end, its state in its meta. One at
+     a time: the latest ask. */
   /** @type {string | null} */
   let asked = $state(null);
   const listed = $derived(groups ? (groups.attention.length ? groups.attention : groups.later.slice(0, 1)) : []);
-  const askedRow = $derived(asked && !listed.some((row) => row.id === asked)
-    ? rows.find((row) => row.id === asked) ?? null : null);
+  const askedRow = $derived.by(() => {
+    if (!asked || !view?.household || listed.some((row) => row.id === asked)) return null;
+    const item = view.household.items.find((one) => one.id === asked);
+    return item ? manifestRowOf(view.household, item, view.today) : null;
+  });
+  /** Whether home holds an item by this id at all, whatever its status. @param {string} id */
+  const holds = (id) => Boolean(view?.household?.items.some((one) => one.id === id));
+  /** Rows in date order, undated last. @param {any[]} list */
+  const byDate = (list) => [...list].sort((a, b) => (a.days ?? Infinity) - (b.days ?? Infinity));
 
   /** The manifest's row for an item, if the manifest draws one. @param {string} id */
   const manifestRow = (id) => document.querySelector(`.pocket .pk-below [data-row-key="${CSS.escape(id)}"]`);
@@ -406,7 +416,7 @@
   async function openRow(id, { focus = false } = {}) {
     await tick();
     let el = manifestRow(id);
-    if (!el && rows.some((row) => row.id === id)) {
+    if (!el && holds(id)) {
       asked = id;
       await tick();
       el = manifestRow(id);
@@ -435,13 +445,13 @@
      retired belt's `/item/<id>`, which the server answers with it): its
      row opens, once, as soon as the manifest has drawn it -- drawn for it if
      the manifest does not list it (openRow). A suggestion's address opens
-     its row in the signals, where it is reviewed. An address home holds no
-     row for at all (an item since retired or completed) opens nothing. */
+     its row in the signals, where it is reviewed. An id home does not hold
+     at all opens nothing. */
   let addressed = false;
   $effect(() => {
     const id = page.url.searchParams.get("item");
     if (addressed || !id || !groups || !isPocket()) return;
-    if (!rows.some((row) => row.id === id) && !view?.suggestions.some((one) => one.id === id)) {
+    if (!holds(id) && !view?.suggestions.some((one) => one.id === id)) {
       addressed = true;
       return;
     }
@@ -617,11 +627,11 @@
      gone: the drawer is the item, and its foot holds every act the belt had
      -- snooze, complete, attach a document, retire -- with the pencil and
      the chain link at its right end. */
-  /** @type {{ id: string, kind: "snooze" | "attach" | "retire" | "complete" } | null} */
+  /** @type {{ id: string, kind: "snooze" | "attach" | "retire" | "restore" | "complete" } | null} */
   let footBusy = $state(null);
   /**
    * @param {{ id: string, title: string }} one
-   * @param {"snooze" | "retire"} kind
+   * @param {"snooze" | "retire" | "restore"} kind
    * @param {(item: any) => object} build
    * @param {string} words
    */
@@ -795,6 +805,7 @@
     },
     onattach: (file) => attachTo(one, file),
     onretire: () => runRowAct(one, "retire", (item) => archiveCommand(item), `${one.title} retired`),
+    onrestore: () => runRowAct(one, "restore", (item) => statusCommand(item, "active"), `${one.title} restored`),
     oncopy: () => copyLink(one.id),
   });
   /** The relay's catch, decided from its row. @param {import('$lib/data/workspace.js').ReceiptSuggestion} s @returns {import('$lib/pocket/row.js').RowAct[]} */
@@ -1077,12 +1088,12 @@
          live in the row's head, as on the desk -->
     {#snippet liveTitle()}{#if modes.edit.draft}<b class="ed" contenteditable="plaintext-only" spellcheck="false" role="textbox" tabindex="0"
        aria-label="title" data-ed="title" bind:textContent={modes.edit.draft.title}></b>{/if}{/snippet}
-    <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")} key={one.id}
+    <Row title={one.title} meta={[one.section, one.state, cost(one)].filter(Boolean).join(" · ")} key={one.id}
          heading={modes.edit.id === one.id ? liveTitle : undefined}
          trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
          ontoggle={onRowToggle(one.id)}>
       <!-- round 8 (#1319): the section word in its own colour -->
-      {#snippet metaline()}{#if one.section}<i class="opt" data-opt={sectionColourOf(sectionOf(one.id))}>{one.section}</i>{#if cost(one)}{SEP}{/if}{/if}{cost(one)}{/snippet}
+      {#snippet metaline()}{#if one.section}<i class="opt" data-opt={sectionColourOf(sectionOf(one.id))}>{one.section}</i>{#if one.state || cost(one)}{SEP}{/if}{/if}{#if one.state}{one.state}{#if cost(one)}{SEP}{/if}{/if}{cost(one)}{/snippet}
       {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
       {#snippet detail()}
         <ItemDrawer {one} raw={rawItems.get(one.id)} papers={papersOf(one.id)} problem={rowProblem[one.id] ?? null}
@@ -1095,10 +1106,9 @@
   {#if groups?.attention.length}
     <h2 class="p-caps">Needs attention</h2>
     <div class="pk-list" data-row-group data-row-cards>
-      {#each groups.attention as one (one.id)}
+      {#each askedRow ? byDate([...groups.attention, askedRow]) : groups.attention as one (one.id)}
         {@render itemRow(one)}
       {/each}
-      {#if askedRow}{@render itemRow(askedRow)}{/if}
     </div>
   {:else if groups?.later.length}
     {@const next = groups.later[0]}
