@@ -337,7 +337,13 @@ test.describe("on the desk", () => {
     const provider = drawer.getByRole("textbox", { name: "provider" });
     await provider.click();
     await page.keyboard.type("Northgate Services");
-    await drawer.getByRole("group", { name: `Editing ${TITLE}` }).getByRole("button", { name: "save" }).click();
+    /* rows holding changes ask first (the coordinator's ruling, 2026-10-08):
+       Escape arms the cancel pill as "discard changes?" and the edit stays */
+    const editing = drawer.getByRole("group", { name: `Editing ${TITLE}` });
+    await page.keyboard.press("Escape");
+    await expect(editing.getByRole("button", { name: "discard changes?" })).toBeVisible();
+    await expect(provider).toHaveText("Northgate Services");
+    await editing.getByRole("button", { name: "save" }).click();
     await expect(drawer.getByText("Northgate Services")).toBeVisible({ timeout: 10_000 });
     await expect.poll(async () => (await itemOf(page, householdId, itemId))?.provider ?? null).toBe("Northgate Services");
   });
