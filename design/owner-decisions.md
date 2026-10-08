@@ -1568,3 +1568,36 @@ and ended state keeps the 16% ghost" (§32's round-5 text above): the ghost is
 retired, because "Watch the tour" (#1189) now does its one job. Round 5's and
 round 8's own READMEs (`design/v19/tour/round-5/`, `design/1083-tour-pocket/`)
 are left as written; this entry is the record of what changed since.
+
+## 34. The belt retires: home's drawer holds everything (owner, 2026-10-08)
+
+Rounds 1–3 under `design/v19/belt-purpose/` (#1304), each README holding the
+verdicts verbatim. Round 1: **"objectively I think the no belt at all version
+is simpler and easier to use."** Round 3 (F,
+`round-3/f-preview-beside-tracked.html`): **"approved. Very good."**
+
+- **Home's item drawer holds everything** an item has: its fields, notes,
+  documents and actions, on desk and phone alike. Notes sit above documents.
+- **The preview opens beside the drawer** on a wide screen, its top level
+  with the item card's top, moving with it on scroll and staying in view
+  beside a card taller than the window. A press anywhere off it removes it at
+  once, no fade. Under 1200px it is the phone's bottom sheet. Pressing the
+  page opens the reader over home.
+- **The foot row:** the four pills (snooze, complete, attach a document,
+  retire) centred, no "actions" heading; the pencil (edit) and chain link
+  (copy link) as 32px round glass icons at the row's right end.
+- **Editing happens in the read view's own rows**, no form: same labels,
+  right-aligned mono values, only the value live; save and cancel replace
+  the pills.
+- **No dropdowns and no typed date** (owner, on round 3): *"I don't like
+  these as drop downs very much"*; *"typing the date isn't acceptable. We
+  need a beautiful calendar picker to use with a mouse. When you click the
+  date, the date line expands to show a picker"*; *"Similarly, the drop down
+  lines also expand when you click to edit them."* How the opened rows look
+  is round 4 (`round-4/`): the owner's version and an alternative.
+- **`/item/<id>` retires**: mothballed, with its links redirected to
+  `/home?item=<id>`. This supersedes §27's "`/item/<receiptId>` is the
+  belt": a suggestion is reviewed in its home drawer.
+- **One search, one code path**, shown the same on home and wherever
+  documents are (#1318).
+- Scope: v0.3, after the door batch lands.
