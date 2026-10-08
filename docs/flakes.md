@@ -377,3 +377,13 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 ## sign-out-descent.spec.ts:252 "sign out from another page's menu plays the descent (phone-narrow)" on desktop-webkit
 
 - 2026-10-08 · 91df467a (door batch, !1044) · CI pipeline 2254 `smoke_webkit` · failed once, passed on retry. First sighting since the spec counts page errors from /settings once it is the document (ddab9b62).
+
+## v19-keyboard.spec.ts:338 "home: every control is reachable…" — Tab reached controls the snapshot missed
+
+Not the `ERR_ABORTED` under #1096 above: the test ran, and Tab reached two
+links the expected-controls snapshot (taken once, before the first press)
+had not listed — the sun's `Open <household>` link and the seeded item's
+second link (`…, T−20d · —`). The snapshot was taken before home finished
+drawing, the same shape as the item-page failure fixed in 34ae6e3d.
+
+- 2026-10-08 · 9fc44ba2 · local, `scripts/test-e2e-local.sh --spec tests/e2e/v19-keyboard.spec.ts` (desktop-webkit) — first run failed with the two unlisted links; the re-run on the same code passed 24/24, and pipeline 2271's smoke_webkit passed it too.
