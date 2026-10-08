@@ -148,4 +148,26 @@
   .choosing .pick svg{stroke:var(--accent-text)}
   /* round 8: the section and type words wear their own colour, lit or not */
   .opt{color:var(--opt-text, inherit)}
+
+  /* THE POCKET'S 44px FLOOR (#1319, AGENTS.md's tap floor): every live value
+     is itself a 44px target, not just its ::before. Each one pads its own box
+     to 44px and takes the padding back in negative margins, so the words sit
+     where round 8's `narrow-editing-*` draws them; the rows open to a 44px
+     pitch (13px above and below an 18px line) so no two targets overlap. The
+     1px accent line moves from a box-shadow (which would fall under the
+     padding) to a background line at the foot of the words. */
+  .pocket>.p-kv{padding-block:13px}
+  .pocket .pick,.pocket .ed:not(.notes){--pad:13px;padding-block:var(--pad);margin-block:calc(-1 * var(--pad));
+    min-width:44px;box-sizing:border-box;box-shadow:none;
+    background:linear-gradient(var(--accent),var(--accent)) left 0 bottom calc(var(--pad) - 1px)/100% 1px no-repeat}
+  .pocket .pick{justify-content:flex-end}
+  .pocket .ed:not(.notes){min-width:max(4ch, 44px)}
+  /* the notes grow up over their caption, never down onto a paper's row
+     just under them: the words keep their 1.6em and the line its place */
+  .pocket .notes.ed{--pad:1.5px;box-sizing:border-box;min-height:44px;
+    padding:calc(44px - 1.6em - var(--pad)) 0 var(--pad);margin:calc(1.6em + var(--pad) - 44px) 0 calc(-1 * var(--pad));
+    box-shadow:none;background:linear-gradient(var(--accent),var(--accent)) left 0 bottom calc(var(--pad) - 1px)/100% 1px no-repeat}
+  .pocket :is(.pick:focus-visible,.ed:focus),.pocket .choosing .pick{box-shadow:none;
+    background-position:left 0 bottom calc(var(--pad) - 1.5px);background-size:100% 1.5px}
+  .pocket .pick::before{content:none}
 </style>
