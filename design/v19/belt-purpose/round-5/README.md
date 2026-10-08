@@ -34,6 +34,11 @@ On the section chooser (starchart, Devices chosen):
 > This looks rubbish and it could be visually easier to see the choices
 > rather than left align words in a list.
 
-Not approved. The chooser beside stays; the section, type and period
+Then:
+
+> The card itself is fine, it's the words in a list that doesn't look
+> good, as it's visually more taxing
+
+Not approved. The chooser card itself stays as it is; the section, type and period
 choices need a more visual layout than a left-aligned list of words.
 Round 6 tries that. The calendar was not criticised.
