@@ -387,3 +387,7 @@ second link (`…, T−20d · —`). The snapshot was taken before home finished
 drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 
 - 2026-10-08 · 9fc44ba2 · local, `scripts/test-e2e-local.sh --spec tests/e2e/v19-keyboard.spec.ts` (desktop-webkit) — first run failed with the two unlisted links; the re-run on the same code passed 24/24, and pipeline 2271's smoke_webkit passed it too.
+
+## bootstrap-protection.spec.ts:387 "once the instance is claimed the code is spent, cookie or no cookie" — [unclaimed]
+
+- 2026-10-08 · 059878f1 (#1325, which touches no sign-in code) · local `scripts/test-e2e-local.sh --spec 'tests/e2e/v19-(home-drawer|create|item-actions|mail-review)\.spec\.ts'` · `expect(session.ok()).toBe(true)` at `tests/e2e/support/bootstrap.ts:112` (`claimInstanceAsAdministrator`): `/api/auth/session` was not OK straight after the claim's sign-in. Every project depends on `[unclaimed]`, so 141 tests did not run. The next run of the same command on the same commit passed it. Traces: `~/projects/.backups/orbit/e2e-orbit-e2e-local-ecd11949-2436667-20261008-222859`. First sighting.
