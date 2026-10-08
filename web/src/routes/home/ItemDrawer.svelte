@@ -46,8 +46,8 @@
   const notesState = $derived(fieldState(raw?.metadataStatus, "notes"));
 
   /* #1319 stage 2: editing in the rows, or asking for a completion
-     (drawer-modes.svelte.js), as on the desk. The phone's row head is the
-     kit Row's button, so the title edits as a row of its own here. */
+     (drawer-modes.svelte.js), as on the desk; the title edits live in the
+     row's head (pocket.svelte hands the kit Row its `heading`). */
   const mode = $derived(!acts ? "read" : acts.modes.edit.id === one.id ? "edit"
     : acts.modes.completing?.id === one.id ? "complete" : "read");
   const snoozing = $derived(Boolean(acts && acts.modes.foot?.key === "snooze" && acts.modes.id === one.id));
@@ -56,7 +56,7 @@
 </script>
 
 {#if acts && mode !== "read"}
-  <EditRows modes={acts.modes} sections={acts.sections} pocket titleRow snoozedUntil={raw?.snoozedUntil ?? null}
+  <EditRows modes={acts.modes} sections={acts.sections} pocket snoozedUntil={raw?.snoozedUntil ?? null}
             costLocked={itemLocked(raw?.metadataStatus)} />
 {:else}
 <div class="p-kv"><span>due</span>

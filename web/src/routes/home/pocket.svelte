@@ -1061,7 +1061,12 @@
     <h2 class="p-caps">Needs attention</h2>
     <div class="pk-list" data-row-group data-row-cards>
       {#each groups.attention as one (one.id)}
+        <!-- #1319 stage 2 (round 8): while the item is edited, its title is
+             live in the row's head, as on the desk -->
+        {#snippet liveTitle()}{#if modes.edit.draft}<b class="ed" contenteditable="plaintext-only" spellcheck="false" role="textbox" tabindex="0"
+           aria-label="title" data-ed="title" bind:textContent={modes.edit.draft.title}></b>{/if}{/snippet}
         <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")} key={one.id}
+             heading={modes.edit.id === one.id ? liveTitle : undefined}
              trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
              ontoggle={onRowToggle(one.id)}>
           <!-- round 8 (#1319): the section word in its own colour -->
@@ -1078,10 +1083,13 @@
     </div>
   {:else if groups?.later.length}
     {@const next = groups.later[0]}
+    {#snippet liveTitle()}{#if modes.edit.draft}<b class="ed" contenteditable="plaintext-only" spellcheck="false" role="textbox" tabindex="0"
+           aria-label="title" data-ed="title" bind:textContent={modes.edit.draft.title}></b>{/if}{/snippet}
     <h2 class="p-caps">Needs attention</h2>
     <!-- Nothing needs you: the one row is the next item up, and opens as it. -->
     <div class="pk-list" data-row-group data-row-cards>
       <Row title="nothing needs you" meta={`next up ${next.title}${next.days !== null ? `, ${tlabel(next)}` : ""}`} key={next.id}
+           heading={modes.edit.id === next.id ? liveTitle : undefined}
            ontoggle={onRowToggle(next.id)}>
         {#snippet mark()}<span class="pk-dot quiet"></span>{/snippet}
         {#snippet detail()}

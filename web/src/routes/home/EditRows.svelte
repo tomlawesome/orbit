@@ -16,8 +16,8 @@
    * through the calendar, the cost and the notes typed in place.
    *
    * The desk (ItemView.svelte) and the phone (ItemDrawer.svelte) alike; the
-   * phone's title is a row of its own, the desk's edits in the row's head
-   * (CorridorRow.svelte).
+   * title edits in the row's head at both widths (CorridorRow.svelte, and
+   * the kit Row's `heading` on the phone).
    */
   import { longDate } from "$lib/format.js";
   import { periodWords } from "$lib/editing/item-draft.js";
@@ -28,12 +28,11 @@
    *   modes: import('./drawer-modes.svelte.js').DrawerModes,
    *   sections: import('./drawer-modes.svelte.js').SectionChoice[],
    *   pocket?: boolean,
-   *   titleRow?: boolean,
    *   snoozedUntil?: string | null,
    *   status?: string | null,
    *   costLocked?: boolean,
    * }} */
-  let { modes, sections, pocket = false, titleRow = false, snoozedUntil = null, status = null, costLocked = false } = $props();
+  let { modes, sections, pocket = false, snoozedUntil = null, status = null, costLocked = false } = $props();
 
   const kv = $derived(pocket ? "p-kv" : "kv");
   const draft = $derived(modes.edit.draft);
@@ -61,11 +60,6 @@
 <div class="rows" class:pocket data-edit-rows {onkeydown}>
   {#snippet chevron()}<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M3.5 2 6.5 5 3.5 8"/></svg>{/snippet}
   {#if draft}
-    {#if titleRow}
-      <div class={kv}><span>title</span>
-        <b class="ed" contenteditable="plaintext-only" spellcheck="false" role="textbox" tabindex="0"
-           aria-label="title" data-ed="title" bind:textContent={draft.title}></b></div>
-    {/if}
     <div class={kv} class:choosing={lit === "due"}><span>due</span>
       <button type="button" class="pick" data-pick aria-haspopup="dialog" aria-expanded={lit === "due"}
               aria-label="due: {draft.dueDate ? longDate(draft.dueDate) : 'unscheduled'}"

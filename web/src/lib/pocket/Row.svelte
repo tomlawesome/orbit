@@ -56,6 +56,12 @@
    * its own colour (#1319: the section word, option-colour.js); `meta`
    * still says what the line holds, for its length and its face.
    *
+   * `heading` draws the title itself, live, while the row's item is being
+   * edited (#1319; round 8 edits the title in the row's head at every
+   * width): the face is then not a button but the same line with the
+   * snippet in the title's place, so a press in the title never folds the
+   * row. The button stays in the page, hidden, for row.js to keep hold of.
+   *
    * `below` draws a line under the row that is always there, not behind a
    * tap (a knock's approve and decline, which are the point of the row).
    *
@@ -78,6 +84,7 @@
    *   onmove?: (direction: -1 | 1) => void,
    *   mark?: import('svelte').Snippet,
    *   metaline?: import('svelte').Snippet,
+   *   heading?: import('svelte').Snippet,
    *   end?: import('svelte').Snippet,
    *   detail?: import('svelte').Snippet,
    *   after?: import('svelte').Snippet,
@@ -103,6 +110,7 @@
     onmove = undefined,
     mark = undefined,
     metaline = undefined,
+    heading = undefined,
     end = undefined,
     detail = undefined,
     after = undefined,
@@ -148,6 +156,19 @@
 
 <div class="p-row" class:current class:opens data-row data-row-key={key} bind:this={row}>
   <div class="face">
+    {#if heading}
+      <!-- The live head: the face's own line, the title live (heading). -->
+      <div class="hit live">
+        <span class="mark" aria-hidden="true">{@render mark?.()}</span>
+        <span class="text">
+          <span class="title live">{@render heading()}</span>
+          {#if meta}<span class="meta" class:ui={metaFace === "ui"} class:email={EMAIL.test(meta)}>{#if metaline}{@render metaline()}{:else}{meta}{/if}</span>{/if}
+        </span>
+        {#if trail || trailSub}
+          <span class="trail" class:bead style:color={trailTone || undefined}><span aria-hidden={trailName ? "true" : undefined}>{trail}</span>{#if trailName}<span class="sr-only">{trailName}</span>{/if}{#if trailSub}<small>{trailSub}</small>{/if}</span>
+        {/if}
+      </div>
+    {/if}
     <!-- One face whatever the row does: a link when it navigates, a button
          when it summons a sheet or opens in place, else inert. A dynamic
          element rather than three branches sharing a snippet: a snippet
@@ -156,7 +177,7 @@
     <!-- The key handler only ever acts on a row with `onmove`, and every
          row that moves opens, so its face is a button then. -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <svelte:element this={tag} class="hit" data-row-face
+    <svelte:element this={tag} class="hit" data-row-face hidden={heading ? true : undefined}
         href={href || undefined}
         type={tag === "button" ? "button" : undefined}
         aria-current={href && current ? "page" : undefined}
@@ -229,6 +250,9 @@
   .title{font:500 var(--p-type-body)/1.3 var(--ui);color:var(--ink);
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .current .title{color:var(--accent-text)}
+  /* the live title may wrap: it is being written, not read at a glance */
+  .title.live{white-space:normal;overflow:visible}
+  .hit[hidden]{display:none}
   /* One line, guarded (R8): the words are the fix, the ellipsis only the
      guard. An address may wrap once, anywhere, and no further. */
   .meta{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet);
