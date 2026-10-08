@@ -445,6 +445,7 @@ const MONTH_LABELS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "S
  * @property {?string} household
  * @property {boolean} away
  * @property {?string} [section]
+ * @property {?string} [sectionId]     issue 1319, the section word's colour (option-colour.js)
  * @property {?string} [sectionIcon]   issue 867, the mark printed beside the row
  * @property {?string} [sectionAccent]
  * @property {number} days
@@ -479,6 +480,7 @@ export function corridorOf(workspace, today, options = {}) {
         household: household.name,
         away: household.id !== primary,
         section: section?.name ?? null,
+        sectionId: section?.id ?? null,
         sectionIcon: section?.icon ?? null,
         sectionAccent: section?.accent ?? null,
         /* #1281: no date sorts after every dated row, as an undated catch
