@@ -538,14 +538,11 @@
 
   /* A completion a previous visit held and never saw confirmed (#1151
      W1-S3): the belt and stage 1's drawer held a completion for the wake's
-     four seconds and stashed it first. #1319 stage 2: the drawer now asks
-     for the completion in its rows and records it at once (below), so
-     nothing is held here any more; what an earlier visit stashed is still
-     picked up. The key a held completion is stashed under (#1151 W1-S3), the same
-      reasoning and the same literal key as item/[[id]]/+page.svelte's own
-      (W1-R5): a flush cut off by the page actually unloading — not merely
-      refused — is picked up on the next load instead of silently failing.
-      One slot: this screen only ever holds one completion at a time. */
+     four seconds and stashed it first, under the same literal key as
+     item/[[id]]/+page.svelte's own (W1-R5). #1319 stage 2: the drawer now
+     asks for the completion in its rows and records it at once, so nothing
+     is held here any more; what an earlier visit stashed is still picked up
+     on load and finished. */
   const HELD_COMPLETION_KEY = "orbit:pending-completion";
   /* A list, not one slot: completing a second item inside the first's undo
      window sends the first at once, and its send can still fail or answer
