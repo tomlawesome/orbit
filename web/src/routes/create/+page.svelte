@@ -139,8 +139,8 @@
 
     <!-- #1058(b)/#1069: a section must be picked, with no default; the save
          button stays disabled until one is chosen, and the reason sits beside
-         it (create.behaviour.js's refusal note), in entry.js's own vocabulary
-         (refusalOf). Populated from the household's sections once they load —
+         it (create.behaviour.js's refusal note), in the engine's words from
+         its dry run (ADR-0034). Populated from the household's sections once they load —
          mountCreate() draws the buttons, the same pattern #types already
          is, rather than a second, Svelte-reactive way of doing the same job. -->
     <div class="field">
