@@ -7,6 +7,7 @@
   import { portal } from "$lib/pocket/portal.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
   import { loadStagedPage, previewPageHref } from "$lib/data/staged-page.js";
+  import { pageKeyTarget, pageTurn } from "$lib/data/page-turn.js";
 
   /**
    * THE READER, on the desk and the phone alike (#1059, owner-decisions.md
@@ -28,14 +29,16 @@
    * Pages turn (#1300; design/v19/document-card/round-2 and round-6): a
    * round glass arrow either side of the page, only where there is a page
    * that way -- none on the left on page 1, none on the right on the last --
-   * and the keys ← → PageUp PageDown Home End. The foot says "page N of M"
-   * on a polite live region; a one-page file says "one page" and has no
-   * arrows. Page N is the preview endpoint's own address with `?page=N`,
+   * and the keys ← → PageUp PageDown Home End. Round 6 places the words:
+   * the head says "page N of M" after the item, the foot "N of M" centred on
+   * a polite live region (read as "page N of M"); a one-page file says "one
+   * page" and has no arrows. Page N is the preview endpoint's own address with `?page=N`,
    * fetched rather than set as a bare `<img src>` because M is that
    * response's `X-Orbit-Page-Count` header (Orbit stores no page count) and
    * an `<img>` never sees a header. pdf.js still draws every page on the
    * server (ADR-0033); nothing renders a PDF here. Until a response has said
-   * how many pages there are, the foot says "page N" and offers no arrows.
+   * how many pages there are, the head says "page N", the foot nothing, and
+   * there are no arrows.
    *
    * `staged` (#1155): a waiting attachment's page opens here too, from
    * StagedPage.svelte. There is nothing to download or remove -- the foot
@@ -47,7 +50,10 @@
    * rendered.
    *
    * `pageHref` (optional, #1300): where pages are fetched from. Defaults to
-   * `doc.previewHref` for an accepted document.
+   * `doc.previewHref` for an accepted document. `pageNo` (bindable, #1300)
+   * is the page on show: the item screen binds it to its preview's pager,
+   * so the reader opens on the preview's page, a turn here turns the
+   * preview too, and closing leaves the preview where the reader was.
    * @typedef {{
    *   open?: boolean,
    *   doc: { name: string, href?: string, previewHref?: string },
@@ -56,11 +62,13 @@
    *   staged?: boolean,
    *   previewSrc?: string,
    *   pageHref?: string,
+   *   pageNo?: number,
    * }} Props
    */
   /** @type {Props} */
   let {
     open = $bindable(false), doc, itemTitle, onremove, staged = false, previewSrc = "", pageHref = "",
+    pageNo = $bindable(1),
   } = $props();
 
   /** @type {HTMLElement | undefined} */
@@ -84,23 +92,19 @@
   /** @type {HTMLButtonElement | undefined} */
   let nextArrow = $state();
 
-  /* #1300: the page asked for, the page drawn, and how many there are. */
+  /* #1300: the page asked for (pageNo), the page drawn, and how many there are. */
   const source = $derived(pageHref || (staged ? "" : (doc.previewHref ?? "")));
-  let pageNo = $state(1);
   let shownPage = $state(1);
   /** @type {number | null} */
   let pageCount = $state(null);
   let pageUrl = $state("");
   const shownSrc = $derived(source ? pageUrl : previewSrc);
-  const canTurn = $derived(pageCount !== null && pageCount > 1);
-  const pageLine = $derived(
-    pageCount === 1 ? "one page" : pageCount ? `page ${pageNo} of ${pageCount}` : `page ${pageNo}`,
-  );
+  const turn = $derived(pageTurn(pageNo, pageCount));
   const UNDRAWN = "this page could not be drawn — try closing and reopening it";
 
   /** @param {number} next */
   function turnTo(next) {
-    if (!canTurn || pageCount === null) return;
+    if (!turn.arrows || pageCount === null) return;
     const target = Math.min(pageCount, Math.max(1, next));
     if (target === pageNo) return;
     /* An arrow that goes (the last page reached by the right one) hands
@@ -181,10 +185,8 @@
       event.stopPropagation();
       if (event.key === "Escape") { event.preventDefault(); close(); return; }
       if (event.target instanceof Element && event.target.closest("input, textarea")) return;
-      if (event.key === "ArrowLeft" || event.key === "PageUp") { event.preventDefault(); turnTo(pageNo - 1); }
-      else if (event.key === "ArrowRight" || event.key === "PageDown") { event.preventDefault(); turnTo(pageNo + 1); }
-      else if (event.key === "Home") { event.preventDefault(); turnTo(1); }
-      else if (event.key === "End") { event.preventDefault(); if (pageCount !== null) turnTo(pageCount); }
+      const target = pageKeyTarget(event.key, pageNo, pageCount);
+      if (target !== undefined) { event.preventDefault(); if (target !== null) turnTo(target); }
       else if (event.key === "+" || event.key === "=") { event.preventDefault(); zoomIn(); }
       else if (event.key === "-" || event.key === "_") { event.preventDefault(); zoomOut(); }
       else if (event.key === "0") { event.preventDefault(); fit(); }
@@ -207,8 +209,7 @@
       root.style.overflow = overflow;
       scale = null;
       problem = null;
-      pageNo = 1;
-      shownPage = 1;
+      /* pageNo stays: the preview beneath shows the page the reader was on. */
       pageCount = null;
       showPage("");
       if (opener?.isConnected) opener.focus({ preventScroll: true });
@@ -291,7 +292,8 @@
   <div class="rd-panel" role="dialog" aria-modal="true" aria-label="{doc.name}, {itemTitle}" tabindex="-1"
        bind:this={panel}>
     <header class="rd-head">
-      <p class="rd-name"><b>{doc.name}</b> <span>· {itemTitle}</span></p>
+      <!-- #1300, round 6: "page N of M" at the head's left, after the item. -->
+      <p class="rd-name"><b>{doc.name}</b> <span>· {itemTitle}</span> <span class="rd-of">· {turn.head}</span></p>
       <button class="p-pill rd-close" onclick={close}>close</button>
     </header>
     <div class="rd-zoom" role="group" aria-label="Zoom">
@@ -317,17 +319,19 @@
              }} />
       </div>
       <!-- #1300: either side of the page, only where there is a page that way. -->
-      {#if canTurn && pageNo > 1}
+      {#if turn.back}
         <button class="rd-arrow prev" aria-label="Previous page" title="← or PageUp" bind:this={prevArrow}
                 onclick={() => turnTo(pageNo - 1)}>←</button>
       {/if}
-      {#if canTurn && pageCount !== null && pageNo < pageCount}
+      {#if turn.forward}
         <button class="rd-arrow next" aria-label="Next page" title="→ or PageDown" bind:this={nextArrow}
                 onclick={() => turnTo(pageNo + 1)}>→</button>
       {/if}
     </div>
     <footer class="rd-foot">
-      <p class="rd-page" aria-live="polite">{pageLine}</p>
+      <!-- #1300, round 6: the foot's "2 of 3", centred; a screen reader hears
+           "page 2 of 3". -->
+      <p class="rd-page pgn" aria-live="polite">{#if turn.arrows}<span class="sr-only">page </span>{/if}{turn.of}</p>
       {#if staged}
         <p class="rcnote">not yet in orbit · attached on acceptance</p>
       {:else}
@@ -385,7 +389,7 @@
     .rd-arrow.next{right:26px}
   }
   .rd-foot{display:flex;flex-direction:column;align-items:center;gap:8px;padding-top:8px}
-  .rd-page{margin:0;font:var(--p-type-meta) var(--mono);color:var(--ink-mid);font-variant-numeric:tabular-nums}
+  .rd-page{margin:0;min-height:1.4em;font:var(--p-type-meta) var(--mono);color:var(--ink);font-variant-numeric:tabular-nums}
   /* #1155: the reading card's own one-line note, for a staged paper's foot. */
   .rcnote{font:10.5px var(--mono);color:var(--ink-quiet);letter-spacing:.02em;margin:0}
   .rd-acts{justify-content:center}

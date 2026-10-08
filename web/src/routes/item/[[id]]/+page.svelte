@@ -17,11 +17,13 @@
   import { POCKET_QUERY, isPocket } from "$lib/pocket/media.js";
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
   import Reader from "./Reader.svelte";
+  import Pager from "./Pager.svelte";
   import StagedPage from "$lib/pocket/StagedPage.svelte";
   import EntryForm from "../../create/EntryForm.svelte";
   import { COST_FORMAT_HINT, entryChanged, entryOf, fieldsOf, minorOf, refusalOf } from "../../create/entry.js";
   import { beltManifestOf, documentPreviewStateOf } from "$lib/data/belt.js";
-  import { loadStagedPage } from "$lib/data/staged-page.js";
+  import { loadStagedPage, previewPageHref } from "$lib/data/staged-page.js";
+  import { pageKeyTarget } from "$lib/data/page-turn.js";
   import {
     archiveCommand, completeCommand, nextDateAfter, rescheduleCommand,
     snoozeCommand, statusCommand, upsertCommand,
@@ -617,10 +619,17 @@
   let previewImgFailed = $state(false);
   /* #1155: a staged paper's bytes come from loadStagedPage, not a bare `<img
      src>` — only that loader can tell "gone" (404/410) apart from "could not
-     draw" (a status an <img> error event never carries). Both img tags and
-     the Reader read previewSrc regardless of origin; for an accepted
-     document it is simply doc.previewHref. */
+     draw" (a status an <img> error event never carries). #1300: an accepted
+     document's come the same way, because the pager needs the response's
+     X-Orbit-Page-Count and an <img> never sees a header. Both img tags read
+     previewSrc, an object URL, whatever the paper's origin. */
   let previewSrc = $state("");
+  /* #1300: the page the pager asks for (the reader binds it too), the page
+     previewSrc holds, and how many there are -- null until a response says. */
+  let previewPage = $state(1);
+  let previewShownPage = $state(1);
+  /** @type {number | null} */
+  let previewPageCount = $state(null);
   let previewGone = $state(false);
   /** @type {AbortController | null} */
   let previewAbort = null;
@@ -658,6 +667,16 @@
   const previewShowing = $derived(
     previewDocState === "available" && previewImgLoaded && previewBeatDone && !previewImgFailed && !previewGone,
   );
+  /* #1300: page one keeps the words it always had. */
+  const previewAlt = $derived.by(() =>
+    previewDoc ? `Page ${previewShownPage === 1 ? "one" : previewShownPage} of ${previewDoc.name}` : "",
+  );
+  /* #1300: the pager stands under an accepted paper's page once it has
+     drawn and a response has said how many pages there are. A staged
+     paper's foot keeps its one note (#1155). */
+  const previewPaged = $derived.by(() =>
+    previewShowing && previewPageCount !== null && Boolean(previewDoc && !previewDoc.staged),
+  );
   const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   function revokePreviewSrc() {
@@ -681,31 +700,69 @@
     previewGone = false;
     previewRestoring = false;
     previewProblem = null;
-    previewSrc = doc.staged ? "" : doc.previewHref;
+    previewSrc = "";
+    previewPage = 1;
+    previewShownPage = 1;
+    previewPageCount = null;
     previewBeatDone = documentPreviewStateOf(doc) !== "available";
     if (!previewBeatDone) {
       previewBeatTimer = setTimeout(() => { previewBeatDone = true; }, reducedMotion() ? 0 : 900);
     }
     if (!previewOpen) tick().then(() => { previewOpen = true; });
 
-    if (!doc.staged && previewSrc) {
+    /* Only a page Orbit can draw is asked for: a scanning, removed or
+       refused paper has none, and must not be timed out into "could not
+       draw" while it says so. */
+    if (documentPreviewStateOf(doc) !== "available" || !doc.previewHref) return;
+    if (!doc.staged) {
       previewLoadTimer = setTimeout(() => {
         if (token === previewToken) previewFailed();
       }, PREVIEW_LOAD_TIMEOUT_MS);
     }
-    if (doc.staged && doc.previewHref) {
-      const controller = new AbortController();
-      previewAbort = controller;
-      loadStagedPage(doc.previewHref, controller.signal).then((result) => {
-        if (token !== previewToken) return;
-        if (result.kind === "page") previewSrc = result.url;
-        else if (result.kind === "gone") previewGone = true;
-        else previewImgFailed = true;
-      }).catch((error) => {
-        if (token !== previewToken || (error instanceof DOMException && error.name === "AbortError")) return;
-        previewImgFailed = true;
-      });
-    }
+    loadPreviewPage(doc, 1, token);
+  }
+  const UNDRAWN_PAGE = "this page could not be drawn — try again";
+  /** #1300: page `n` of the open paper, through loadStagedPage. The page on
+      show stays up until the next has arrived; a turn made before it
+      arrives abandons it. Page one failing is the paper failing (gone, or
+      could not draw); a later page failing says so under the pager and
+      leaves the page that drew.
+      @param {import("./band.js").BeltDoc} doc
+      @param {number} n
+      @param {number} token */
+  function loadPreviewPage(doc, n, token) {
+    previewAbort?.abort();
+    const controller = new AbortController();
+    previewAbort = controller;
+    loadStagedPage(previewPageHref(doc.previewHref, n), controller.signal).then((result) => {
+      if (token !== previewToken || controller.signal.aborted) {
+        if (result.kind === "page") URL.revokeObjectURL(result.url);
+        return;
+      }
+      if (result.kind === "page") {
+        revokePreviewSrc();
+        previewSrc = result.url;
+        previewShownPage = n;
+        if (result.pageCount !== null) previewPageCount = result.pageCount;
+      } else if (n > 1) previewProblem = UNDRAWN_PAGE;
+      else if (result.kind === "gone" && doc.staged) previewGone = true;
+      else previewFailed();
+    }).catch((error) => {
+      if (token !== previewToken || (error instanceof DOMException && error.name === "AbortError")) return;
+      if (n > 1) previewProblem = UNDRAWN_PAGE;
+      else previewFailed();
+    });
+  }
+  /** #1300: the pager's arrows and keys, and the reader's turns (bound to
+      its pageNo), all land here, so the preview and the reader are always
+      on the same page.
+      @param {number} n */
+  function turnPreview(n) {
+    const doc = previewDoc;
+    if (!doc || n === previewPage) return;
+    previewPage = n;
+    previewProblem = null;
+    loadPreviewPage(doc, n, previewToken);
   }
   /** Shared by both the desk reticle's and the pocket sheet's own <img>
    *  (#1151 W1-R10): clears the stuck-preview deadline the instant a real
@@ -714,6 +771,8 @@
     clearTimeout(previewLoadTimer);
     previewImgLoaded = true;
     previewImgFailed = false; // a slow load that arrives is not a failed one
+    /* #1300: each page is its own size, so a turned page asks again. */
+    tick().then(() => belt?.remeasure());
   }
   function previewFailed() {
     clearTimeout(previewLoadTimer);
@@ -747,7 +806,7 @@
      Every visual change to the reading card's own height (opening, the page
      landing, an honest state replacing the loading block) has to ask again. */
   $effect(() => {
-    void previewDoc; void previewShowing; void previewState;
+    void previewDoc; void previewShowing; void previewState; void previewPageCount; void previewProblem;
     if (previewDoc) tick().then(() => belt?.remeasure());
   });
   /** The removed state's one foot action (#1054's restore, reached here
@@ -1032,6 +1091,12 @@
     if (event.key === "Escape" && previewDoc) { event.preventDefault(); belt?.closeDoc(); return; }
     if (event.key === "Escape" && panel) { closePanel(); return; }
     if (typing(event.target)) return;
+    /* #1300, round 6: while the preview is open its page has ← → PageUp
+       PageDown Home End -- the belt does not step under it. */
+    if (previewDoc && !pocket) {
+      const target = pageKeyTarget(event.key, previewPage, previewPaged ? previewPageCount : null);
+      if (target !== undefined) { event.preventDefault(); if (target !== null) turnPreview(target); return; }
+    }
     if (event.key === "ArrowLeft") {
       event.preventDefault();
       step(-1);
@@ -1759,14 +1824,21 @@
                    attribute instead of setting it empty, so no such request is
                    ever made; a non-staged document's previewSrc is never empty,
                    so this changes nothing for it. -->
-              <img src={previewSrc || undefined} alt="Page one of {previewDoc.name}"
+              <img src={previewSrc || undefined} alt={previewAlt}
                    onload={previewLoaded} onerror={previewFailed} />
             </button>
           </div>
         {/if}
       </div>
 
-      {#if state === "available" && previewDoc.staged}
+      {#if previewPaged}
+        <!-- #1300, round 6: under the page, its number, and an arrow each way
+             only where there is a page that way. -->
+        <Pager page={previewPage} count={previewPageCount} onturn={turnPreview} />
+        {#if previewProblem}
+          <div class="problem" role="alert">{previewProblem}</div>
+        {/if}
+      {:else if state === "available" && previewDoc.staged}
         <!-- #1155: the one deliberate extension of §18's foot rule -- nothing
              can be done with a staged paper here, and the foot says why in
              one line rather than staying empty. -->
@@ -1915,13 +1987,16 @@
       <StagedPage href={previewDoc.previewHref} name={previewDoc.name}
                   drawable={Boolean(previewDoc.previewHref)} reader itemTitle={row?.title ?? ""} />
     {:else if state === "available"}
-      <button class="bp-page" class:shown={previewShowing} disabled={!previewShowing}
+      <button class="bp-page" class:shown={previewShowing} class:paged={previewPaged} disabled={!previewShowing}
               aria-label="Read {previewDoc.name}" onclick={() => { readerOpen = true; }}>
         <span class="bp-under" aria-hidden="true"></span>
-        <img src={previewSrc} alt="Page one of {previewDoc.name}"
+        <img src={previewSrc || undefined} alt={previewAlt}
              onload={previewLoaded} onerror={previewFailed} />
       </button>
       {#if !previewShowing}<p class="bp-line quiet" aria-live="polite">Orbit is drawing the page</p>{/if}
+      <!-- #1300: the same pager as the desk's, under the page. -->
+      {#if previewPaged}<Pager page={previewPage} count={previewPageCount} onturn={turnPreview} />{/if}
+      {#if previewPaged && previewProblem}<p class="p-error" role="alert">{previewProblem}</p>{/if}
     {:else}
       <div class="bp-honest">
         <div class="bp-plate" class:scanning={state === "scanning"} aria-hidden="true">
@@ -2008,7 +2083,8 @@
 </Sheet>
 
 {#if previewDoc && previewShowing && row && !previewDoc.staged}
-  <Reader bind:open={readerOpen} doc={previewDoc} itemTitle={row.title} onremove={removePreviewDoc} />
+  <Reader bind:open={readerOpen} doc={previewDoc} itemTitle={row.title} onremove={removePreviewDoc}
+          bind:pageNo={() => previewPage, turnPreview} />
 {/if}
 
 <!-- #1145, round 3 §4: on a phone the suggestion's `review & amend →` raises

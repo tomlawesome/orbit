@@ -27,6 +27,9 @@
   let phase = $state("honest");
   let pageUrl = $state("");
   let readerOpen = $state(false);
+  /* #1300: the reader's page. This preview only ever shows page one, so the
+     reader opens there every time rather than where it was last closed. */
+  let readerPage = $state(1);
   const plate = $derived(plateOfName(name));
 
   $effect(() => {
@@ -53,7 +56,7 @@
 
 {#if phase === "page"}
   {#if reader}
-    <button class="bp-page shown" aria-label="Read {name}" onclick={() => { readerOpen = true; }}>
+    <button class="bp-page shown" aria-label="Read {name}" onclick={() => { readerPage = 1; readerOpen = true; }}>
       <span class="bp-under" aria-hidden="true"></span>
       <img src={pageUrl} alt="Page one of {name}" />
     </button>
@@ -87,5 +90,5 @@
 
 {#if reader && phase === "page"}
   <Reader bind:open={readerOpen} doc={{ name }} itemTitle={itemTitle} onremove={async () => {}} staged
-          previewSrc={pageUrl} pageHref={href} />
+          previewSrc={pageUrl} pageHref={href} bind:pageNo={readerPage} />
 {/if}
