@@ -52,6 +52,10 @@
    * ellipsis guard trims the name and never the number. The one exception
    * is an email address alone (proposal §2.12), which may wrap once.
    *
+   * `metaline` draws the meta line's words itself, when one of them wears
+   * its own colour (#1319: the section word, option-colour.js); `meta`
+   * still says what the line holds, for its length and its face.
+   *
    * `below` draws a line under the row that is always there, not behind a
    * tap (a knock's approve and decline, which are the point of the row).
    *
@@ -73,6 +77,7 @@
    *   acts?: import("./row.js").RowAct[],
    *   onmove?: (direction: -1 | 1) => void,
    *   mark?: import('svelte').Snippet,
+   *   metaline?: import('svelte').Snippet,
    *   end?: import('svelte').Snippet,
    *   detail?: import('svelte').Snippet,
    *   after?: import('svelte').Snippet,
@@ -97,6 +102,7 @@
     acts = [],
     onmove = undefined,
     mark = undefined,
+    metaline = undefined,
     end = undefined,
     detail = undefined,
     after = undefined,
@@ -162,7 +168,7 @@
       <span class="mark" aria-hidden="true">{@render mark?.()}</span>
       <span class="text">
         <span class="title">{title}</span>
-        {#if meta}<span class="meta" class:ui={metaFace === "ui"} class:email={EMAIL.test(meta)}>{meta}</span>{/if}
+        {#if meta}<span class="meta" class:ui={metaFace === "ui"} class:email={EMAIL.test(meta)}>{#if metaline}{@render metaline()}{:else}{meta}{/if}</span>{/if}
       </span>
       {#if trail || trailSub}
         <span class="trail" class:bead style:color={trailTone || undefined}><span aria-hidden={trailName ? "true" : undefined}>{trail}</span>{#if trailName}<span class="sr-only">{trailName}</span>{/if}{#if trailSub}<small>{trailSub}</small>{/if}</span>
