@@ -5,29 +5,31 @@ import { resolve } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import done, { SELECTORS } from "../../web/src/lib/tour/chapters/09-done.js";
+import item from "../../web/src/lib/tour/chapters/08-the-item.js";
 import { createClock } from "../../web/src/lib/tour/clock.js";
 import { createFilmContext } from "../../web/src/lib/tour/vocabulary.js";
+import { drawHome } from "./v19-tour-home-drawer-lib.mjs";
 
 /*
  * #866: chapter 9 is one of the three (5, 9, 12) whose lit ring travels with
  * a moving target rather than sitting still, the same device chapter 5 uses
  * — pinned here the same way v19-tour-chapter-time-runs.test.mjs pins it.
- * Unlike chapter 5, this chapter spans two real screens: the item screen
- * (where the complete button lives) and home (where the demo body swings
- * back out). `.item-card` and the complete button's position are pinned
- * against the item screen's own markup; `.dial` against home's; the drawn
- * `.tourfilm-time-body` is pinned by running the chapter, never against
- * either source.
+ * #1319: it opens on home's item drawer, as chapter 8 leaves it (the belt's
+ * item screen is retired), and teaches the drawer's own complete pill by
+ * its label. The drawer and the pill are pinned against home's own markup;
+ * the drawn `.tourfilm-time-body` by running the chapter, never against a
+ * source.
  */
 
 const web = (path) => resolve(import.meta.dirname, "../../web", path);
-const ITEM_SOURCE = readFileSync(web("src/routes/item/[[id]]/+page.svelte"), "utf8");
-const HOME_SOURCE = readFileSync(web("src/routes/home/+page.svelte"), "utf8");
-/* #1083: the pocket dialect of home — where the pocket's own dial, sun and
-   the demo body's real append target live (`.pocket .mdial`, `.pk-sun`). The
-   pocket's own complete button (`.ip-acts`, `.ip-complete`) is in the SAME
-   item screen file as the desk's, so ITEM_SOURCE already covers it. */
-const POCKET_SOURCE = readFileSync(web("src/routes/home/pocket.svelte"), "utf8");
+const read = (files) => files.map((file) => readFileSync(web(file), "utf8")).join("\n");
+const DRAWER_SOURCE = read(["src/routes/home/ItemView.svelte", "src/routes/home/FootRow.svelte"]);
+const HOME_SOURCE = read(["src/routes/home/+page.svelte", "src/routes/home/CorridorRow.svelte"]) + "\n" + DRAWER_SOURCE;
+/* #1083: the pocket dialect of home — the pocket's own dial, sun and the
+   demo body's real append target (`.pocket .mdial`, `.pk-sun`), and its
+   drawer (the kit Row's detail, ItemDrawer.svelte). */
+const POCKET_SOURCE = read(["src/routes/home/pocket.svelte", "src/routes/home/ItemDrawer.svelte", "src/lib/pocket/Row.svelte"])
+  + "\n" + DRAWER_SOURCE;
 
 function namesIn(source) {
   const names = new Set();
@@ -38,14 +40,6 @@ function namesIn(source) {
     }
   }
   return names;
-}
-
-/** Every attribute VALUE a source writes literally (not just class/id) — so
- *  `aria-label="Item actions"` can be pinned the same way a class is. */
-function attributeValuesIn(source) {
-  const values = new Set();
-  for (const match of source.matchAll(/aria-label\s*=\s*"([^"]*)"/gu)) values.add(match[1]);
-  return values;
 }
 
 function tokensOf(selector) {
@@ -64,10 +58,6 @@ function setReducedMotion(matches) {
 
 function rect(x, y, w, h) {
   return { left: x, top: y, width: w, height: h, right: x + w, bottom: y + h, x, y, toJSON() {} };
-}
-
-function box(el, r) {
-  el.getBoundingClientRect = () => rect(r.x, r.y, r.w, r.h);
 }
 
 /** happy-dom computes no real SVG layout, so the dial and the chapter's own
@@ -91,28 +81,6 @@ function patchRects() {
   };
 }
 
-/** Both screens the chapter visits, drawn at once: the recorder's stubbed
- *  `setScreen` never swaps real DOM, so both the item card and the dial have
- *  to already be there for the "played for real" tests below. */
-function drawScreens() {
-  document.body.innerHTML = `
-    <div class="hero" id="hero">
-      <article class="glass item-card">
-        <h2>Car MOT — Volvo V60</h2>
-        <div class="acts" role="group" aria-label="Item actions">
-          <button style="--act:var(--ok);--act-text:var(--ok-text)">complete</button>
-          <button style="--act:var(--upcoming);--act-text:var(--upcoming-text)">reschedule</button>
-          <button style="--act:var(--warm);--act-text:var(--warm-text)">snooze</button>
-          <button style="--act:var(--accent);--act-text:var(--accent-text)">edit</button>
-          <button style="--act:var(--overdue);--act-text:var(--overdue-text)">retire</button>
-        </div>
-      </article>
-      <svg class="dial" viewBox="0 0 380 380"></svg>
-    </div>`;
-  box(document.querySelector(".item-card"), { x: 445, y: 154, w: 390, h: 372 });
-  box(document.querySelector(".acts button"), { x: 467, y: 388, w: 92, h: 36 });
-}
-
 async function playOut(clock, promise, step = 100, cap = 400000) {
   let doneRunning = false;
   let failure = null;
@@ -124,6 +92,7 @@ async function playOut(clock, promise, step = 100, cap = 400000) {
     await settle();
   }
   if (failure) throw failure;
+  if (!doneRunning) throw new Error("the chapter never finished");
 }
 
 beforeEach(() => {
@@ -135,59 +104,36 @@ beforeEach(() => {
 });
 
 describe("the selectors chapter 9 names", () => {
-  it("the desk item screen's own ones (.item-card, the actions group) exist in its markup", () => {
-    const rendered = namesIn(ITEM_SOURCE);
-    for (const token of tokensOf(SELECTORS.DESK.card)) {
-      expect(rendered.has(token), `chapter 9's desk names "${SELECTORS.DESK.card}", but /item renders no "${token}"`).toBe(true);
-    }
-    for (const token of tokensOf(SELECTORS.DESK.done)) {
-      expect(rendered.has(token), `chapter 9's desk names "${SELECTORS.DESK.done}", but /item renders no "${token}"`).toBe(true);
-    }
-    expect(attributeValuesIn(ITEM_SOURCE).has("Item actions")).toBe(true);
-  });
-
-  it("the pocket's own ones (.item-card, .ip-acts/.ip-complete) exist in the same item screen markup", () => {
-    /* The pocket's complete button is the SAME item screen file as the
-       desk's (its own dialect branch, `class:ip={pocket}`) — no separate
-       pocket route to read. */
-    const rendered = namesIn(ITEM_SOURCE);
-    for (const token of tokensOf(SELECTORS.POCKET.card)) {
-      expect(rendered.has(token), `chapter 9's pocket names "${SELECTORS.POCKET.card}", but /item renders no "${token}"`).toBe(true);
-    }
-    for (const token of tokensOf(SELECTORS.POCKET.done)) {
-      expect(rendered.has(token), `chapter 9's pocket names "${SELECTORS.POCKET.done}", but /item renders no "${token}"`).toBe(true);
-    }
-    expect(attributeValuesIn(ITEM_SOURCE).has("Item actions")).toBe(true);
-  });
-
-  it("the desk's real dial exists in home's own markup", () => {
-    const rendered = namesIn(HOME_SOURCE);
-    for (const token of tokensOf(SELECTORS.DESK.dial)) {
-      expect(rendered.has(token), `chapter 9's desk names "${SELECTORS.DESK.dial}", but /home renders no "${token}"`).toBe(true);
-    }
-  });
-
-  it("the pocket's own dial, its svg, and the sun exist in the pocket dialect's own markup", () => {
-    const rendered = namesIn(POCKET_SOURCE);
-    for (const selector of [SELECTORS.POCKET.dial, SELECTORS.POCKET.dialSvg, SELECTORS.POCKET.sun]) {
-      for (const token of tokensOf(selector)) {
-        expect(rendered.has(token), `chapter 9's pocket names "${selector}", but the pocket dialect renders no "${token}"`).toBe(true);
+  for (const [dialect, table, source] of [["desk", SELECTORS.DESK, HOME_SOURCE], ["pocket", SELECTORS.POCKET, POCKET_SOURCE]]) {
+    it(`the ${dialect} drawer, its complete pill, the dial and the sun exist in home's own markup`, () => {
+      const rendered = namesIn(source);
+      for (const key of ["drawer", "done", "dial", "dialSvg", "sun"]) {
+        for (const token of tokensOf(table[key])) {
+          expect(rendered.has(token), `chapter 9's ${dialect} "${key}" names "${table[key]}", but home renders no "${token}"`).toBe(true);
+        }
       }
+    });
+  }
+
+  it("finds the complete pill by its own label, never by its place among the pills", () => {
+    for (const table of [SELECTORS.DESK, SELECTORS.POCKET]) {
+      expect(table.done).toContain('button[aria-label^="Complete "]');
+      expect(table.done).not.toMatch(/child|of-type/u);
+    }
+    expect(DRAWER_SOURCE).toContain('aria-label="Complete {title}"');
+  });
+
+  it("names nothing on the retired item screen", () => {
+    for (const table of [SELECTORS.DESK, SELECTORS.POCKET]) {
+      for (const selector of Object.values(table)) expect(selector).not.toMatch(/item-card|ip-acts|ip-complete/u);
     }
   });
 
   it("the drawn one (.tourfilm-time-body) is never real markup, on either dialect", () => {
-    /* Same value on both dialects (see the chapter's own SELECTORS export),
-       so one check covers it — but checked against the pocket's own source
-       too, not just the desk's. */
     expect(SELECTORS.POCKET.body).toBe(SELECTORS.DESK.body);
-    const item = namesIn(ITEM_SOURCE);
-    const home = namesIn(HOME_SOURCE);
-    const pocket = namesIn(POCKET_SOURCE);
-    for (const token of tokensOf(SELECTORS.DESK.body)) {
-      expect(item.has(token)).toBe(false);
-      expect(home.has(token)).toBe(false);
-      expect(pocket.has(token)).toBe(false);
+    for (const source of [HOME_SOURCE, POCKET_SOURCE]) {
+      const names = namesIn(source);
+      for (const token of tokensOf(SELECTORS.DESK.body)) expect(names.has(token)).toBe(false);
     }
   });
 });
@@ -201,44 +147,57 @@ describe("the chapter's shape", () => {
 });
 
 describe("the beats, against a recorder", () => {
-  function recorder() {
+  /** @param {{ open?: boolean, pocket?: boolean }} [options] the drawer
+   *  already open (played on from chapter 8), or not (a cold jump) */
+  function recorder({ open = true, pocket = false } = {}) {
+    const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
     const log = [];
-    const control = (sel) => ({ sel, els: [], ringEls: [], round: false, pad: 0, radius: 14, rings: [], lifted: false, saved: [] });
+    const control = (sel, els = []) => ({ sel, els, ringEls: els, round: false, pad: 0, radius: 14, rings: [], lifted: false, saved: [] });
+    const pill = document.createElement("button");
     return {
       log,
       ctx: {
-        doc: document,
+        pocket,
+        doc: { querySelector: (sel) => (open && (sel === S.done || sel.endsWith(".ivfootrow")) ? pill : null), defaultView: null },
         dry: () => false,
-        T: { cross: 350 },
+        T: { cross: 350, scroll: 600 },
         setScreen: async (route) => log.push(["setScreen", route]),
         veil: (on) => log.push(["veil", on]),
-        ctl: (spec) => { log.push(["ctl", spec.sel]); return control(spec.sel); },
+        ctl: (spec) => { log.push(["ctl", spec.sel]); return control(spec.sel, spec.sel === S.done && open ? [pill] : []); },
         goto: async (c) => log.push(["goto", c.sel]),
         press: async (c) => log.push(["press", c.sel]),
         light: (c) => log.push(["light", c.sel]),
         unlight: (c) => log.push(["unlight", c.sel]),
-        callout: async (text, anchor) => log.push(["callout", text, anchor.sel]),
+        callout: async (text, anchor, side, o) => { log.push(["callout", text, anchor.sel]); if (o?.mark) log.push(["mark", o.mark]); },
         dropCallout: () => log.push(["dropCallout"]),
-        tween: async (ms, fn) => { fn(1); log.push(["tween"]); },
-        w: async () => log.push(["w"]),
+        tween: async (ms, fn) => { fn(1); log.push(["tween", ms]); },
+        w: async (ms) => log.push(["w", ms]),
         mark: async (name) => log.push(["mark", name]),
+        open: (c) => { log.push(["open", c.sel]); return async () => {}; },
+        shut: async () => log.push(["shut"]),
+        waitForReal: async () => {},
+        room: () => {},
+        lit: () => [],
       },
     };
   }
 
-  it("opens on the item screen, veiled, and hands home back undimmed", async () => {
+  it("stays on /home, veiled for the pill, and hands the sky back undimmed once the drawer is put away", async () => {
     const { log, ctx } = recorder();
     await done.play(ctx);
-    expect(log[0]).toEqual(["setScreen", "/item"]);
-    expect(log[1]).toEqual(["veil", true]);
-    const homeIndex = log.findIndex(([w, route]) => w === "setScreen" && route === "/home");
-    expect(homeIndex).toBeGreaterThan(0);
-    expect(log[homeIndex + 1]).toEqual(["veil", false]);
+    expect(log[0]).toEqual(["setScreen", "/home"]);
+    expect(log.filter(([word]) => word === "setScreen").map(([, route]) => route)).toEqual(["/home"]);
+    const shutAt = log.findIndex(([word]) => word === "shut");
+    const pressAt = log.findIndex(([word]) => word === "press");
+    expect(pressAt).toBeGreaterThan(0);
+    expect(shutAt).toBeGreaterThan(pressAt);
+    expect(log[shutAt + 1]).toEqual(["veil", false]);
+    expect(log.slice(0, pressAt).some(([word, on]) => word === "veil" && on === true)).toBe(true);
     /* never raised again after that -- the swing back out plays undimmed */
-    expect(log.slice(homeIndex).some(([w, on]) => w === "veil" && on === true)).toBe(false);
+    expect(log.slice(shutAt).some(([word, on]) => word === "veil" && on === true)).toBe(false);
   });
 
-  it("says the corrected two ratified lines, in order, each pinned to its own control", async () => {
+  it("says the two lines, in order, the first at the drawer's complete pill, the closing line verbatim", async () => {
     const { log, ctx } = recorder();
     await done.play(ctx);
     const said = log.filter(([word]) => word === "callout").map(([, text, sel]) => [text, sel]);
@@ -248,47 +207,57 @@ describe("the beats, against a recorder", () => {
     ]);
   });
 
-  it("lights and unlights the card and the button before leaving for /home", async () => {
-    const { log, ctx } = recorder();
-    await done.play(ctx);
-    const homeIndex = log.findIndex(([w, route]) => w === "setScreen" && route === "/home");
-    const litCard = log.findIndex(([w, sel]) => w === "light" && sel === SELECTORS.DESK.card);
-    const unlitCard = log.findIndex(([w, sel]) => w === "unlight" && sel === SELECTORS.DESK.card);
-    const unlitDone = log.findIndex(([w, sel]) => w === "unlight" && sel === SELECTORS.DESK.done);
-    expect(litCard).toBeGreaterThanOrEqual(0);
-    expect(litCard).toBeLessThan(homeIndex);
-    expect(unlitCard).toBeLessThan(homeIndex);
-    expect(unlitDone).toBeLessThan(homeIndex);
+  it("says the first line at the sun when there is no drawer to open", async () => {
+    for (const pocket of [false, true]) {
+      const { log, ctx } = recorder({ open: false, pocket });
+      await done.play(ctx);
+      const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
+      expect(log.find(([word]) => word === "callout")).toEqual(["callout", "MOT passed — mark it done and it swings back out to next year.", S.sun]);
+    }
   });
 
-  it("presses only the done button", async () => {
+  it("presses only the complete pill, and only animates it", async () => {
     const { log, ctx } = recorder();
     await done.play(ctx);
-    const pressed = log.filter(([word]) => word === "press").map(([, sel]) => sel);
-    expect(pressed).toEqual([SELECTORS.DESK.done]);
+    expect(log.filter(([word]) => word === "press").map(([, sel]) => sel)).toEqual([SELECTORS.DESK.done]);
   });
 
-  // T-Q8 (#1151): renamed from "marks done-complete, done-swung and
-  // done-round", which promised all three but only ever checked one --
-  // done-complete and done-round ride inside their callouts' own options,
-  // which this recorder's `callout` stub does not see. All three are
-  // pinned for real below, against "the chapter played for real".
-  it("marks done-swung", async () => {
+  it("opens no drawer of its own when chapter 8 left one open", async () => {
     const { log, ctx } = recorder();
     await done.play(ctx);
-    const marks = log.filter(([word]) => word === "mark").map(([, name]) => name);
-    expect(marks).toEqual(["done-swung"]);
+    expect(log.filter(([word]) => word === "open")).toEqual([]);
+  });
+
+  it("takes the same time whether the drawer was open or not (the tick)", async () => {
+    const spent = async (open) => {
+      const { log, ctx } = recorder({ open });
+      await done.play(ctx);
+      return log.filter(([word]) => word === "w" || word === "tween").map(([, ms]) => ms);
+    };
+    expect(await spent(false)).toEqual(await spent(true));
+  });
+
+  it("marks done-complete, done-swung and done-round", async () => {
+    const { log, ctx } = recorder();
+    await done.play(ctx);
+    expect(log.filter(([word]) => word === "mark").map(([, name]) => name)).toEqual(["done-complete", "done-swung", "done-round"]);
   });
 });
 
 describe("the chapter played for real", () => {
-  it("draws the demo body swinging outward, and removes it again", async () => {
-    drawScreens();
+  function liveFilm() {
     const clock = createClock({ reducedMotion: () => false });
     const ctx = createFilmContext({ clock, doc: document });
     clock.setPlaying(true);
+    return { clock, ctx };
+  }
 
+  it("on a cold jump opens the drawer itself and puts it away; the demo body swings outward and goes", async () => {
+    const home = drawHome();
+    const { clock, ctx } = liveFilm();
+    /** @type {number[]} */
     const seenX = [];
+    let sawDrawer = false;
     let finished = false;
     const playing = done.play(ctx).then(() => { finished = true; }, () => { finished = true; });
     let spent = 0;
@@ -296,120 +265,59 @@ describe("the chapter played for real", () => {
       clock.advance(100);
       spent += 100;
       await settle();
+      if (document.querySelector(".itemview")) sawDrawer = true;
       const bodyEl = document.querySelector(".tourfilm-time-body");
       if (bodyEl) seenX.push(bodyEl.getBoundingClientRect().x);
     }
     await playing;
-
+    expect(sawDrawer).toBe(true);
+    expect(document.querySelector(".itemview")).toBeNull();
     expect(new Set(seenX).size).toBeGreaterThan(1);
     expect(document.querySelector(".tourfilm-time-body")).toBeNull();
+    expect(home.writes.count).toBe(0);
     ctx.destroy();
+    home.done();
   });
 
-  it("puts its two lines on the screen in order, with the corrected close", async () => {
-    drawScreens();
-    const clock = createClock({ reducedMotion: () => false });
-    const ctx = createFilmContext({ clock, doc: document });
-    clock.setPlaying(true);
-
+  it("puts its two lines on the screen in order", async () => {
+    const home = drawHome();
+    const { clock, ctx } = liveFilm();
     const seen = new Set();
     const said = [];
-    const sample = () => {
+    let finished = false;
+    const playing = done.play(ctx).then(() => { finished = true; }, () => { finished = true; });
+    let spent = 0;
+    while (!finished && spent < 400000) {
+      clock.advance(100);
+      spent += 100;
+      await settle();
       for (const note of document.querySelectorAll(".tourfilm-callout")) {
         if (seen.has(note)) continue;
         seen.add(note);
         said.push(note.textContent);
       }
-    };
-
-    let finished = false;
-    const playing = done.play(ctx).then(() => { finished = true; }, () => { finished = true; });
-    let spent = 0;
-    while (!finished && spent < 400000) {
-      clock.advance(100);
-      spent += 100;
-      await settle();
-      sample();
     }
     await playing;
-    sample();
-
     expect(said).toEqual([
       "MOT passed — mark it done and it swings back out to next year.",
       "Renewals start their orbit again, fixed length items disappear.",
     ]);
     ctx.destroy();
+    home.done();
   });
 
-  it("leaves the item card and its actions exactly as it found them", async () => {
-    /* `applyLift`/`restore` (vocabulary.js) put the button's own transform,
-       filter and transition back to their saved (empty) values -- but
-       touching `style.transform` at all makes a browser (happy-dom
-       included) reserialize the WHOLE inline style string, so
-       `--act:var(--ok);--act-text:var(--ok-text)` comes back as
-       `--act: var(--ok); --act-text: var(--ok-text);` -- same values,
-       cosmetic spacing only. Real markup carries exactly this kind of
-       inline style, so the comparison below normalizes style attributes
-       rather than asserting byte-for-byte equality a real lift could never
-       actually promise. */
-    const normalizeStyles = (html) =>
-      html.replace(/style="([^"]*)"/gu, (_, css) =>
-        `style="${css.split(";").map((rule) => rule.trim()).filter(Boolean)
-          .map((rule) => rule.replace(/\s*:\s*/u, ":")).join(";")}"`);
-
-    drawScreens();
-    const before = document.querySelector(".item-card").outerHTML;
-    const clock = createClock({ reducedMotion: () => false });
-    const ctx = createFilmContext({ clock, doc: document });
-    clock.setPlaying(true);
+  it("played on from chapter 8, closes the drawer chapter 8 opened and leaves home exactly as it found it", async () => {
+    const home = drawHome({ docs: 1 });
+    const before = home.scene.outerHTML;
+    const { clock, ctx } = liveFilm();
+    await playOut(clock, item.play(ctx));
+    expect(document.querySelector(".itemview")).not.toBeNull();
     await playOut(clock, done.play(ctx));
+    expect(document.querySelector(".itemview")).toBeNull();
+    expect(ctx.hasOpenUndo()).toBe(false);
+    expect(home.writes.count).toBe(0);
     ctx.destroy();
-    const after = document.querySelector(".item-card").outerHTML;
-    expect(normalizeStyles(after)).toBe(normalizeStyles(before));
+    expect(home.scene.outerHTML).toBe(before);
+    home.done();
   });
-});
-
-/* #1174 round 6 (Fable's call): with no body carrying a paper, "MOT
-   passed" is read over the sun with no press, and no item is opened. */
-describe("when no body carries a paper", () => {
-  it("the desk's sun exists in home's own markup", () => {
-    const rendered = namesIn(HOME_SOURCE);
-    for (const token of tokensOf(SELECTORS.DESK.sun)) {
-      expect(rendered.has(token), `chapter 9's desk names "${SELECTORS.DESK.sun}", but /home renders no "${token}"`).toBe(true);
-    }
-  });
-
-  for (const pocket of [false, true]) {
-    it(`reads the first line at the sun, presses nothing, and never opens /item (${pocket ? "pocket" : "desk"})`, async () => {
-      const log = [];
-      const control = (sel) => ({ sel, els: [], ringEls: [], round: false, pad: 0, radius: 14, rings: [], lifted: false, saved: [] });
-      const ctx = {
-        pocket,
-        carriesPapers: () => false,
-        doc: document,
-        dry: () => false,
-        T: { cross: 350 },
-        setScreen: async (route) => log.push(["setScreen", route]),
-        veil: (on) => log.push(["veil", on]),
-        ctl: (spec) => { log.push(["ctl", spec.sel]); return control(spec.sel); },
-        goto: async (c) => log.push(["goto", c.sel]),
-        press: async (c) => log.push(["press", c.sel]),
-        light: (c) => log.push(["light", c.sel]),
-        unlight: (c) => log.push(["unlight", c.sel]),
-        callout: async (text, anchor, side, o) => { log.push(["callout", text, anchor.sel]); if (o?.mark) log.push(["mark", o.mark]); },
-        dropCallout: () => log.push(["dropCallout"]),
-        tween: async (ms, fn) => { fn(1); log.push(["tween"]); },
-        w: async () => log.push(["w"]),
-        mark: async (name) => log.push(["mark", name]),
-      };
-      await done.play(ctx);
-      const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
-      expect(log.filter(([word]) => word === "setScreen").map(([, route]) => route)).not.toContain("/item");
-      expect(log.filter(([word]) => word === "press")).toEqual([]);
-      const said = log.filter(([word]) => word === "callout");
-      expect(said[0]).toEqual(["callout", "MOT passed — mark it done and it swings back out to next year.", S.sun]);
-      expect(said).toHaveLength(2);
-      expect(log.filter(([word]) => word === "mark").map(([, name]) => name)).toEqual(["done-complete", "done-swung", "done-round"]);
-    });
-  }
 });

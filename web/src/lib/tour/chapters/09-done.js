@@ -1,44 +1,27 @@
 /**
- * CHAPTER 9 — DONE (#866).
+ * CHAPTER 9 — DONE (#866; re-anchored on home's drawer, #1319).
  *
  * The ratified mockup's ninth `CH` entry (design/v19/tour/round-5/f-one-take.html,
  * lines 983-1015), with the copy correction dated 2026-09-19 ("Second
- * correction", design/v19/tour/round-5/README.md): the closing line no
- * longer claims nothing on a sky is ever finished — the product itself
- * contradicts that (the item screen prints "one-off — does not come round"
- * for an expiry, web/src/routes/item/[[id]]/+page.svelte:546) — so it now
- * reads "A repeat is never finished; it comes round. A one-off simply
- * ends." verbatim.
+ * correction", design/v19/tour/round-5/README.md). Its closing line,
+ * "Renewals start their orbit again, fixed length items disappear.", is
+ * the owner's own and stays verbatim (owner, 2026-10-08).
  *
- * WHERE THE MOCKUP'S SCREENS LAND. `setBg("belt.png", true)` is the item
- * screen (web/src/routes/item/[[id]]/+page.svelte — by the owner's own
- * ruling "this surface IS the item screen", the file's own header comment)
- * reached here as `/item` with no id: the belt seats whichever record rides
- * at the apex, the same way the product always arrives at one. `setBg("home.png")`
- * is `/home`, same as every other chapter.
+ * WHERE IT OPENS (#1319, design/v19/tour-drawer/round-2/README.md and
+ * round 1's "The handover to 09"). The belt's item screen is gone; the
+ * chapter opens on `/home` with the item's drawer open, as chapter 8 leaves
+ * it. On a cold jump the drawer is opened here the same way chapter 8 opens
+ * it (`openItem`, without the body's press), and either way the page takes
+ * the same `T.scroll` to bring it up, so the tick never depends on which.
+ * The drawer is lit, and the dot goes to the drawer's own complete pill —
+ * found by its own label (`Complete <title>`, FootRow.svelte), never by its
+ * place among the pills. `press` only animates: nothing is completed. With
+ * no item to open (a household with nothing in it) the line is said at the
+ * sun, for the same length.
  *
- * THE CARD AND THE BUTTON. The mockup lights two things at once — the whole
- * card at a dim "on" tier, and the complete button at full "goto" strength —
- * because it is compositing a screenshot and can paste both without one
- * fighting the other. Translated the way chapter 2 already establishes
- * (`02-add.js`, its own card/field split): `light(card)` keeps the whole
- * record's hole cut for the width of the beat, and `goto(done)` is what
- * actually rises, glows and presses. Both are explicitly `unlight`ed before
- * `/home` is asked for — the mockup's own `cuts.innerHTML = ""` does the
- * same cleanup by throwing its whole overlay away; a real lit `Control`
- * cannot be thrown away like that, because its `els` point at a page about
- * to be torn down, so unlighting it here is what stands in for that reset.
- *
- * THE BUTTON HAS NO NAME OF ITS OWN. The product's five item actions
- * (complete, reschedule, snooze, edit, retire) are plain `<button>`s with no
- * class or id — nothing distinguishes "complete" from its siblings by
- * selector alone. What IS fixed is its position: first child of the item
- * actions group, in that order, whenever the record is active
- * (`+page.svelte`'s own markup order). `SELECTORS.done` names that position
- * rather than inventing a class the product does not render. On a record
- * that is not active the group's first child is "restore" instead — a real
- * control, just not the one the mockup means — which is the one honest gap
- * this translation leaves; noted rather than hidden.
+ * Then the drawer is put away (`shut()`: the film's own Escape on the desk,
+ * the row's own toggle on the pocket — whatever chapter 8 opened), the page
+ * goes back to its top, undimmed, and the swing plays as it always has.
  *
  * THE SWING BACK OUT. No real record can be trusted to already be a
  * just-completed yearly MOT — a chapter must never depend on what is
@@ -56,12 +39,11 @@
  * comment names this chapter). As in chapter 5, `light(body)` is called
  * again on every tween frame purely to keep the ring synced to the body's
  * new box (`syncRings`, vocabulary.js) — the veil's own re-measure loop
- * keeps pace on its own. Unlike chapter 5, the mockup never raises the veil
- * for this walk (no `veil(true)` between `setBg("home.png")` and the
- * chapter's end), so it is never called here either: the swing back out
+ * keeps pace on its own. The veil is down for the walk: the swing back out
  * plays on the reader's own, undimmed sky.
  */
 import { drawDemoBody, ease, positionDemoBody } from "./demo-body.js";
+import { SELECTORS as ITEM, glide, itemBody, openItem } from "./08-the-item.js";
 
 /** Ratified beat: the demo body walks from 16 days out (just completed) to
  *  381 (next year), over a fixed 2200ms after a 200ms lead-in — the
@@ -73,34 +55,30 @@ const LEAD_MS = 200;
 
 /**
  * Every element this chapter names, so
- * tests/unit/v19-tour-chapter-done.test.mjs can pin the real ones (`.item-card`,
- * the done button's position, `.dial`) against the item and home screens'
- * own markup (desk) and pocket's (pocket). `.tourfilm-time-body` is not real
- * markup — this chapter draws and removes it itself — so it is pinned by
- * running the chapter instead.
+ * tests/unit/v19-tour-chapter-done.test.mjs can pin the real ones against
+ * home's own markup, desk and pocket. The drawer is chapter 8's (one table
+ * for both chapters). `.tourfilm-time-body` is not real markup — this
+ * chapter draws and removes it itself — so it is pinned by running the
+ * chapter instead.
  */
 export const SELECTORS = Object.freeze({
   DESK: Object.freeze({
-    /** The item screen's own card, whichever record rides at the apex. */
-    card: ".item-card",
-    /** The record's own complete action: first of the item's actions,
-     *  whenever it is active (see the header note on why this cannot be a
-     *  class or id instead). */
-    done: '.acts[aria-label="Item actions"] button:first-child',
+    /** The open drawer, chapter 8's. */
+    drawer: ITEM.DESK.drawer,
+    /** The drawer's own complete pill, by its own label (FootRow.svelte's
+     *  `aria-label="Complete {title}"`), never by its place. */
+    done: `${ITEM.DESK.acts} button[aria-label^="Complete "]`,
     /** The star chart, so the demo body has somewhere real to live. */
     dial: ".dial",
     dialSvg: ".dial",
-    /** The household's sun — where "MOT passed" is read when no body
-     *  carries a paper (#1174 round 6). */
+    /** The household's sun — where "MOT passed" is said with no drawer. */
     sun: ".sun-link",
     /** The demo body this chapter draws and removes; never a real item. */
     body: ".tourfilm-time-body",
   }),
   POCKET: Object.freeze({
-    /** Same class as desk. */
-    card: ".item-card",
-    /** The pocket's own complete action, a real class this time. */
-    done: '.ip-acts[aria-label="Item actions"] .ip-complete',
+    drawer: ITEM.POCKET.drawer,
+    done: `${ITEM.POCKET.acts} button[aria-label^="Complete "]`,
     /** The round dial. */
     dial: ".pocket .mdial",
     /** Its own `<svg>` — the demo body's real append target (§3.6). */
@@ -133,52 +111,45 @@ export default {
 
   /** @param {import("../vocabulary.js").FilmContext} ctx */
   async play(ctx) {
-    const { pocket, setScreen, veil, ctl, goto, press, light, unlight, callout, dropCallout, tween, w, T, mark, dry, doc } = ctx;
+    const {
+      pocket, setScreen, veil, ctl, goto, press, light, unlight, callout, dropCallout, tween, w, T, mark, dry, doc,
+      shut, room,
+    } = ctx;
     const S = pocket ? SELECTORS.POCKET : SELECTORS.DESK;
 
-    if (ctx.carriesPapers && !ctx.carriesPapers()) {
-      /* #1174 round 6 (Fable's call): no body carries a paper, so chapter 8
-         stayed on the sky and there is no item here to open. The first
-         line is read over the dial, the sun ringed, with no press; the
-         swing back out below plays as it always has. */
-      await setScreen("/home");
-      veil(true);
-      const sun = ctl({ sel: S.sun, round: true });
-      await goto(sun, { willPress: false });
-      await callout(
-        "MOT passed — mark it done and it swings back out to next year.",
-        sun,
-        pocket ? "bottom" : "top",
-        pocket ? { w: 240, dy: 30, mark: "done-complete" } : { w: 240, mark: "done-complete" },
-      );
-      dropCallout();
-      unlight(sun);
-    } else {
-      await setScreen("/item");
-      veil(true);
-
-      /* The whole card stays lit while the complete button is taught within it. */
-      const card = ctl({ sel: S.card, radius: 16, optional: true });
-      light(card);
-
-      const done = ctl({ sel: S.done, radius: pocket ? 22 : 10, optional: true });
-      await goto(done);
-      await callout(
-        "MOT passed — mark it done and it swings back out to next year.",
-        done,
-        "left",
-        { w: 240, mark: "done-complete" },
-      );
-      await press(done);
-      dropCallout();
-      unlight(done);
-      unlight(card);
-    }
-
-    /* Home again, undimmed: the item — drawn, never written — settles back
-       out to next year in front of the reader. */
     await setScreen("/home");
+    /* Played on from chapter 8 the drawer is open, veiled and lit; on a
+       cold jump it is opened here, on the sky as the reader left it. */
+    if (dry() || !doc.querySelector(S.done)) veil(false);
+    await openItem(ctx, itemBody(ctx));
+    veil(true);
+
+    /* The drawer stays lit while its complete pill is taught: chapter 8's
+       own ring, where it left one, else this chapter's. */
+    const left = ctx.lit?.().find((c) => c.sel === S.drawer);
+    const drawer = left ?? ctl({ sel: S.drawer, all: true, radius: 16, optional: true });
+    light(drawer);
+    const done = ctl({ sel: S.done, radius: pocket ? 22 : 16, pad: 2, optional: true });
+    const sun = ctl({ sel: S.sun, round: true, optional: true });
+    await goto(done);
+    await callout(
+      "MOT passed — mark it done and it swings back out to next year.",
+      done.els.length > 0 ? done : sun,
+      pocket ? "top" : "bottom",
+      { w: 240, mark: "done-complete" },
+    );
+    await press(done);
+    dropCallout();
+    unlight(done);
+    unlight(drawer);
+
+    /* Home again, undimmed: the drawer put away, the page at its top, and
+       the item — drawn, never written — settles back out to next year in
+       front of the reader. */
+    await shut();
     veil(false);
+    await glide(ctx, 0);
+    room(0);
 
     const dialSvg = ctl({ sel: S.dialSvg });
     let bodyEl = null;
@@ -200,7 +171,6 @@ export default {
        anchored to the sun, not the body. */
     await goto(body, { willPress: false });
     if (pocket) {
-      const sun = ctl({ sel: SELECTORS.POCKET.sun, round: true });
       await callout(
         "Renewals start their orbit again, fixed length items disappear.",
         sun,
