@@ -48,7 +48,7 @@
             title="← or PageUp" tabindex={turn.back ? undefined : -1} aria-hidden={turn.back ? undefined : "true"}
             onclick={() => go(page - 1)}>←</button>
   {/if}
-  <span class="pgn" aria-live="polite">{#if turn.arrows}<span class="sr-only">page </span>{/if}{turn.of}</span>
+  <span class="pgn" aria-live="polite">{#if turn.arrows}<span class="sr-only">page</span>{/if}{turn.arrows ? " " : ""}{turn.of}</span>
   {#if turn.arrows}
     <button type="button" class="pg" class:none={!turn.forward} bind:this={next} aria-label="Next page"
             title="→ or PageDown" tabindex={turn.forward ? undefined : -1} aria-hidden={turn.forward ? undefined : "true"}
