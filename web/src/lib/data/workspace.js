@@ -244,6 +244,15 @@
  */
 
 /**
+ * One paper as home's item drawer lists it (#1319): the belt's own document
+ * row (belt.js documentRowOf) — every field the preview card and the reader
+ * need to open it, its honest state included — plus the drawer's one-line
+ * `meta`: `added 12 Jun · 240 KB`, and the state word when it has one.
+ *
+ * @typedef {import('./belt.js').BeltDocumentRow & { meta: string }} DrawerDocument
+ */
+
+/**
  * What the item screen renders, whichever origin it came from: a real item
  * with its household, section and papers, or (#434) a mail-in suggestion in
  * that same view — amendable, with accept-into-orbit where the item actions
@@ -260,7 +269,7 @@
  *   suggestion?: boolean,
  *   householdId?: ?string,
  *   section?: ?string,
- *   documents?: { name: string, meta: string }[],
+ *   documents?: DrawerDocument[],
  *   proposal?: ItemProposal,
  *   attachmentCount?: number,
  * }} ItemView
@@ -588,6 +597,7 @@ import { ago } from "$lib/format.js";
 import { bandOf, daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
 import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
 import { householdScreenOf, householdUpdateCommandOf, sectionsCommandOf } from "./household.js";
+import { documentRowOf } from "./belt.js";
 
 /**
  * A mutating fetch with the session's CSRF token, like applyCommand's.
@@ -1467,6 +1477,35 @@ const sizeLabel = (bytes) =>
     : `${Math.round(bytes / 1024)} KB`;
 
 /**
+ * The word a paper's row adds when it cannot simply be read (#1319): the
+ * preview card's own honest states (belt.js documentPreviewStateOf), said
+ * in the drawer's meta so the row tells you before you press it.
+ * @param {DocumentSummary} doc
+ * @returns {?string}
+ */
+const stateWordOf = (doc) => {
+  if (doc.lifecycle === "pending_deletion") return "removed";
+  if (doc.lifecycle === "rejected") return "refused";
+  if (!doc.ready) return "scanning";
+  return null;
+};
+
+/**
+ * One paper as the desk's item drawer lists it (#1319, design/v19/
+ * belt-purpose/round-3): `added 12 Jun · 240 KB`, the honest state word
+ * after it, and underneath everything the preview and the reader need.
+ * @param {DocumentSummary} doc
+ * @returns {DrawerDocument}
+ */
+export function drawerDocumentOf(doc) {
+  return {
+    ...documentRowOf(doc),
+    meta: [`added ${shortAddedDate(doc.availableAt)}`, sizeLabel(doc.sizeBytes), stateWordOf(doc)]
+      .filter(Boolean).join(" · "),
+  };
+}
+
+/**
  * One item, or null. A membership test against data the session already sees
  * — never a request built from the URL — so an unknown id is a 404, not a
  * probe: there deliberately is no item-by-id route to widen (#451). The
@@ -1496,10 +1535,7 @@ export async function readItem(id, workspace) {
       householdId: household.id,
       today: todayOf(workspace),
       section: sections.get(item.sectionId) ?? null,
-      documents: (body.documents ?? []).map((doc) => ({
-        name: doc.displayName,
-        meta: `added ${shortAddedDate(doc.availableAt)} · ${sizeLabel(doc.sizeBytes)}`,
-      })),
+      documents: (body.documents ?? []).map(drawerDocumentOf),
     };
   }
   /* #434: the id may be a mail-in receipt — a suggestion opens in the same
@@ -1533,11 +1569,13 @@ export async function readItem(id, workspace) {
  * #1057): the per-item documents route readItem and readBelt already read,
  * with each paper's id kept so a row can say which one it means. The
  * household id comes from the home view the caller already holds, which the
- * route's own membership check still guards.
+ * route's own membership check still guards. Each paper carries the belt's
+ * own row too (#1319, belt.js documentRowOf), so the phone's drawer opens it
+ * in the same preview card and reader the desk's does.
  *
  * @param {string} householdId
  * @param {string} itemId
- * @returns {Promise<{ id: string, itemId: string, name: string, meta: string }[]>}
+ * @returns {Promise<(import('./belt.js').BeltDocumentRow & { itemId: string, meta: string })[]>}
  */
 export async function readItemDocuments(householdId, itemId) {
   /** @type {{ documents?: DocumentSummary[] }} */
@@ -1547,13 +1585,16 @@ export async function readItemDocuments(householdId, itemId) {
     }),
   );
   return (body.documents ?? []).map((doc) => ({
+    /* #1319: the belt's own row first, so a paper in the phone's drawer
+       opens the same preview and reader; the search's own words after. */
+    ...documentRowOf(doc),
     id: doc.id,
     itemId,
     name: doc.displayName,
     meta: [
       sizeLabel(doc.sizeBytes),
       `added ${shortAddedDate(doc.availableAt)}`,
-      doc.lifecycle === "pending_deletion" ? "removed" : null,
+      stateWordOf(doc),
     ].filter(Boolean).join(" · "),
   }));
 }

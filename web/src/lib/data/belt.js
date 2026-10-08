@@ -116,7 +116,9 @@ export const whenOf = (kind, days, date) => {
 export const PREVIEW_SUPPORTED_MEDIA_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
 
 /**
- * One document, as a body in the band and as its own card.
+ * One document, as a body in the band and as its own card — and, since
+ * #1319, as a row in home's item drawer, which opens the same preview card
+ * and reader from it (workspace.js readItem, readItemDocuments).
  *
  * `href` is the honest v1 display the owner ruled for (§15): details, and the
  * original in your hands. #476's page-one render is a seam, not a promise —
@@ -124,7 +126,7 @@ export const PREVIEW_SUPPORTED_MEDIA_TYPES = new Set(["application/pdf", "image/
  * @param {import('./workspace.js').DocumentSummary} doc
  * @returns {BeltDocumentRow}
  */
-function documentRowOf(doc) {
+export function documentRowOf(doc) {
   const { plate, type } = kindOfFile(doc.mediaType);
   return {
     id: doc.id,
