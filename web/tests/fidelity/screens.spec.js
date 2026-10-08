@@ -209,7 +209,8 @@ const SCREENS = [
      * The 08-14 hero is therefore current, in the sheet and in the app alike,
      * which is why this entry still ports against the sheet and still reads 0.
      */
-    stage: "porting",
+    /* owned (owner, 2026-10-08): the door follows orbit-site now (#1253, #1321), not design/v19/first-run.html. */
+    stage: "owned",
     mockup: "/design/v19/first-run.html",
     /*
      * The sheet's DEFAULT state is the first-run card standing on the login.
@@ -248,7 +249,8 @@ const SCREENS = [
      * ends of one session. It earns a fresh baseline against the design the
      * way every ported screen does.
      */
-    stage: "porting",
+    /* owned (owner, 2026-10-08): the door follows orbit-site now (#1253, #1321), not design/v19/first-run.html. */
+    stage: "owned",
     mockup: "/design/v19/first-run.html",
     /*
      * The sheet's DEFAULT state is the first-run card on the login; the state
@@ -728,7 +730,8 @@ const SCREENS = [
   {
     name: "home",
     path: "/home",
-    stage: "porting",
+    /* owned (owner, 2026-10-08): the sun is the live Furnace (#1250); design/v19/home.html still draws the old one. */
+    stage: "owned",
     mockup: "/design/v19/home.html",
     /* Home settles once the galaxy has been placed, rather than on a dawn. */
     settle: () => document.querySelectorAll(".minisys").length > 0,
