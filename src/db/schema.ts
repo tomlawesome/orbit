@@ -270,6 +270,28 @@ export const instanceContact = pgTable("instance_contact", {
 ]);
 
 /**
+ * The administrator's document size limit (#1285): "stored override, falling
+ * back to configured default". `max_bytes` null is the normal state and
+ * means "use `DOCUMENT_MAX_BYTES`"; a value is the administrator's own
+ * choice, held inside the same hard bounds the configuration has (1 MiB to
+ * 100 MiB, src/server/documents/config.ts), which the CHECK repeats so no
+ * writer can store anything past them. Follows `instance_contact`'s shape
+ * (0033): singleton primary key, `id` for `audit_log.entity_id`, `version`
+ * gating every administrator write, and a row the 0049 migration seeds
+ * unconditionally.
+ */
+export const instanceUploadLimit = pgTable("instance_upload_limit", {
+  singleton: boolean("singleton").primaryKey().default(true),
+  id: uuid("id").notNull().defaultRandom(),
+  maxBytes: integer("max_bytes"),
+  version: bigint("version", { mode: "number" }).notNull().default(1),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  check("instance_upload_limit_singleton", sql`${table.singleton}`),
+  check("instance_upload_limit_max_bytes_bounds", sql`${table.maxBytes} IS NULL OR ${table.maxBytes} BETWEEN 1048576 AND 104857600`),
+]);
+
+/**
  * The last answer of each of the two live mail tests (#1071): "test this
  * mailbox" (the IMAP verify and the relay half together) and "test the
  * relay". Follows `instance_contact`'s singleton shape (0033) — the 0047

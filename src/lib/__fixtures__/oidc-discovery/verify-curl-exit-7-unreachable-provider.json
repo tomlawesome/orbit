@@ -1,0 +1,23 @@
+{
+  "name": "curl exit 7 unreachable provider",
+  "envOrbit": "OIDC_ISSUER=https://idp.parity.invalid\n",
+  "issuer": "https://idp.parity.invalid",
+  "curl": {
+    "curlExitCode": 7,
+    "httpStatus": "000"
+  },
+  "dockerExitCode": 0,
+  "bash": {
+    "status": 1,
+    "stdout": "",
+    "stderr": "reason=provider-unavailable action=retry\nOIDC provider is unavailable; retry without changing the configuration.",
+    "requestedUrls": [
+      "https://idp.parity.invalid/.well-known/openid-configuration"
+    ],
+    "failure": {
+      "reason": "provider-unavailable",
+      "action": "retry",
+      "message": "OIDC provider is unavailable; retry without changing the configuration."
+    }
+  }
+}

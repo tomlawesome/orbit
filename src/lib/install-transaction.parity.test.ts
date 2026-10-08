@@ -1,88 +1,26 @@
-import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, closeSync, constants as fsConstants, fstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { closeSync, constants as fsConstants, fstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { PROCESS_TEST_TIMEOUT_MS, failOnProcessDeadline, processGuard, processWatchdog } from "../../scripts/process-budget.mjs";
+import { readGolden } from "./__fixtures__/golden";
 import { InstallTransaction, type ManagedPath } from "./install-transaction";
 
-// Byte-for-byte evidence-layout parity between scripts/install.sh's staging
-// transaction and InstallTransaction (issue #295 slice 1).
+// Evidence-layout parity between scripts/install.sh's staging transaction
+// (prepare_rollback_area, rollback_transaction, remove_target_path,
+// is_real_non_symlink_directory) and InstallTransaction (issue #295 slice
+// 1), against what the bash produced, captured from 9757e42f before #1212
+// deleted it (src/lib/__fixtures__/README.md). Golden-file
+// characterization: the fixtures are bash's, never regenerated from this
+// module.
 //
-// install.sh has no standalone entry point for just the transaction phase
-// (unlike scripts/configuration.sh's --preflight/--migrate, which
-// config-contract.parity.test.ts spawns directly), so this test cannot
-// spawn the whole script the way that parity suite does. Instead it
-// mechanically extracts the current bodies of prepare_rollback_area,
-// rollback_transaction, is_real_non_symlink_directory and
-// remove_target_path from the real, unmodified scripts/install.sh via awk
-// keyed on function name (never hand-copied), wraps them in a minimal
-// driver that reproduces install.sh's own top-level variable contract
-// (managed_paths, managed_was_present, created_directories, staging_dir,
-// rollback_dir), and diffs the resulting directory tree against
-// InstallTransaction driven through the identical scenario. If a cited
-// function is ever renamed in install.sh, extraction returns empty and
-// this test fails loudly rather than silently comparing against stale text
-// — see docs/adr-notes/295-install-port-plan.md's Flags section.
+// Each golden holds the managed paths and, from the bash run, the
+// rollback/original backup tree right after prepare_rollback_area, the
+// rollback status, and the restored entries afterwards (symlink targets
+// written relative to the target as `<target>`). The seed and the
+// mid-transaction mutation are the same code bash ran against, below.
 
-// This file spawns real awk and a bash driver script; a spawn that takes
-// 0.7s quiet took 4.3s on a starved core (#698). Budget and reasoning:
-// scripts/process-budget.mjs.
-vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
-
-const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
-const installScriptPath = join(repoRoot, "scripts", "install.sh");
-
-function extractFunction(name: string): string {
-  const script = `
-    $0 ~ "^${name}\\\\(\\\\) \\\\{" { found = 1 }
-    found { print; if ($0 == "}") { found = 0; exit } }
-  `;
-  const result = failOnProcessDeadline(spawnSync("awk", [script, installScriptPath], { encoding: "utf8", ...processGuard() }), { label: "extractFunction" });
-  if (result.status !== 0 || !result.stdout.trim()) {
-    throw new Error(`Could not extract ${name}() from install.sh; it may have been renamed.`);
-  }
-  return result.stdout;
-}
-
-const driverDir = mkdtempSync(join(tmpdir(), "orbit-install-tx-parity-driver-"));
-const driverPath = join(driverDir, "driver.sh");
-
-function buildDriverScript(): string {
-  const functions = [
-    "is_real_non_symlink_directory",
-    "remove_target_path",
-    "prepare_rollback_area",
-    "rollback_transaction",
-  ]
-    .map(extractFunction)
-    .join("\n");
-
-  return [
-    "#!/usr/bin/env bash",
-    "set -Eeuo pipefail",
-    "fail() { printf '%s\\n' \"$*\" >&2; exit 1; }",
-    "",
-    functions,
-    "",
-    'target_dir="$1"; staging_dir="$2"; shift 2',
-    'managed_paths=("$@")',
-    "declare -A managed_was_present=()",
-    "declare -a created_directories=()",
-    'cd -- "$target_dir"',
-    "prepare_rollback_area",
-    "printf 'prepared\\n'",
-    "IFS= read -r _continue_signal",
-    "rollback_status=0",
-    "rollback_transaction || rollback_status=$?",
-    'printf "rolled-back status=%s\\n" "$rollback_status"',
-    "",
-  ].join("\n");
-}
-
-writeFileSync(driverPath, buildDriverScript(), { mode: 0o755 });
+const FLOW = "install-transaction";
 
 interface Snapshot {
   [name: string]: {
@@ -126,165 +64,81 @@ function snapshotTree(root: string): Snapshot {
   return snapshot;
 }
 
-/** Runs the bash driver, applying `mutate` to targetDir between prepare and rollback. */
-function runBashRoundTrip(
-  targetDir: string,
-  managedPaths: ManagedPath[],
-  mutate: () => void,
-): Promise<{ originalSnapshot: Snapshot; finalSnapshot: Snapshot; rollbackStatus: number }> {
-  return new Promise((resolvePromise, reject) => {
-    const stagingDir = mkdtempSync(join(targetDir, ".orbit-install-staging."));
-    chmodSync(stagingDir, 0o700);
-    const child = spawn(
-      "bash",
-      [driverPath, targetDir, stagingDir, ...managedPaths.map((managed) => managed.path)],
-      { stdio: ["pipe", "pipe", "pipe"] },
-    );
-    let stdout = "";
-    let stderr = "";
-    let originalSnapshot: Snapshot | undefined;
-    const watchdog = processWatchdog({ label: "runBashRoundTrip", kill: () => child.kill("SIGKILL") });
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString("utf8");
-      watchdog.touch();
-      if (!originalSnapshot && stdout.includes("prepared\n")) {
-        originalSnapshot = snapshotTree(join(stagingDir, "rollback", "original"));
-        mutate();
-        child.stdin.write("continue\n");
-      }
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8");
-      watchdog.touch();
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      watchdog.stop();
-      if (watchdog.reason) {
-        reject(watchdog.error({ stdout, stderr }));
-        return;
-      }
-      if (!originalSnapshot) {
-        reject(new Error(`bash driver never reported "prepared" (exit ${code}): ${stderr}`));
-        return;
-      }
-      const match = /rolled-back status=(\d+)/.exec(stdout);
-      if (!match) {
-        reject(new Error(`bash driver did not report a rollback status: ${stdout}\n${stderr}`));
-        return;
-      }
-      resolvePromise({
-        originalSnapshot,
-        finalSnapshot: snapshotTree(targetDir),
-        rollbackStatus: Number(match[1]),
-      });
-    });
-  });
+interface TransactionGolden {
+  managedPaths: ManagedPath[];
+  bash: { originalSnapshot: Snapshot; rollbackStatus: number; final: Snapshot };
 }
 
-let targetA: string;
-let targetB: string;
+let target: string;
 
 beforeEach(() => {
-  targetA = mkdtempSync(join(tmpdir(), "orbit-install-tx-parity-bash-"));
-  targetB = mkdtempSync(join(tmpdir(), "orbit-install-tx-parity-ts-"));
+  target = mkdtempSync(join(tmpdir(), "orbit-install-tx-parity-"));
 });
 
 afterEach(() => {
-  rmSync(targetA, { recursive: true, force: true });
-  rmSync(targetB, { recursive: true, force: true });
+  rmSync(target, { recursive: true, force: true });
 });
 
-function seedIdenticalInitialState(target: string): void {
-  writeFileSync(join(target, ".env-orbit"), "APP_URL=https://parity.invalid\n", { mode: 0o600 });
-  const secretsDir = join(target, ".orbit-secrets");
+function seedInitialState(dir: string): void {
+  writeFileSync(join(dir, ".env-orbit"), "APP_URL=https://parity.invalid\n", { mode: 0o600 });
+  const secretsDir = join(dir, ".orbit-secrets");
   mkdirSync(secretsDir, { mode: 0o700 });
   writeFileSync(join(secretsDir, "oidc-client-secret"), "original-secret-bytes", { mode: 0o600 });
 }
 
-describe("install-transaction parity against the real install.sh staging functions", () => {
-  const managedPaths: ManagedPath[] = [
-    { path: ".env-orbit", type: "file" },
-    { path: ".orbit-secrets", type: "directory" },
-  ];
+describe("install-transaction parity against install.sh's staging functions (golden)", () => {
+  it("produces install.sh's rollback/original backup layout and restores the original state", () => {
+    const golden = readGolden<TransactionGolden>(FLOW, "rollback restores managed paths");
+    seedInitialState(target);
 
-  it("produces a byte-for-byte identical rollback/original backup layout to install.sh's prepare_rollback_area", async () => {
-    seedIdenticalInitialState(targetA);
-    seedIdenticalInitialState(targetB);
+    const tx = InstallTransaction.begin(target, golden.managedPaths);
+    // Same relative paths, permission bits and bytes as bash's backup.
+    expect(snapshotTree(tx.originalDir)).toEqual(golden.bash.originalSnapshot);
 
-    const applyMutation = (target: string) => () => {
-      // Mirrors what configure.sh would do mid-transaction: rewrite
-      // .env-orbit and rotate the OIDC secret file.
-      writeFileSync(join(target, ".env-orbit"), "APP_URL=https://parity.invalid\nOIDC_ISSUER=https://idp.invalid\n", {
-        mode: 0o600,
-      });
-      const secretsDir = join(target, ".orbit-secrets");
-      rmSync(secretsDir, { recursive: true, force: true });
-      mkdirSync(secretsDir, { mode: 0o700 });
-      writeFileSync(join(secretsDir, "oidc-client-secret"), "rotated-secret-bytes", { mode: 0o600 });
-    };
+    // Mirrors what configure.sh would do mid-transaction: rewrite
+    // .env-orbit and rotate the OIDC secret file.
+    writeFileSync(join(target, ".env-orbit"), "APP_URL=https://parity.invalid\nOIDC_ISSUER=https://idp.invalid\n", {
+      mode: 0o600,
+    });
+    const secretsDir = join(target, ".orbit-secrets");
+    rmSync(secretsDir, { recursive: true, force: true });
+    mkdirSync(secretsDir, { mode: 0o700 });
+    writeFileSync(join(secretsDir, "oidc-client-secret"), "rotated-secret-bytes", { mode: 0o600 });
 
-    const bashResult = await runBashRoundTrip(targetA, managedPaths, applyMutation(targetA));
-
-    const tx = InstallTransaction.begin(targetB, managedPaths);
-    const tsOriginalSnapshot = snapshotTree(tx.originalDir);
-    applyMutation(targetB)();
     const rollback = tx.rollback();
-
-    // The backup evidence captured before either implementation touched
-    // anything must match exactly: same relative paths, same permission
-    // bits, same bytes.
-    expect(tsOriginalSnapshot).toEqual(bashResult.originalSnapshot);
-
-    // Both implementations must restore to the identical, original state.
-    expect(bashResult.rollbackStatus).toBe(0);
+    expect(golden.bash.rollbackStatus).toBe(0);
     expect(rollback.ok).toBe(true);
-    const bashFinal = bashResult.finalSnapshot;
-    const tsFinal = snapshotTree(targetB);
-    // Compare only the managed entries (the bash driver's target directory
-    // has no staging-directory leftover to exclude here because the driver
-    // is invoked with stagingDir already outside the snapshot loop's
-    // concern — assert the managed paths directly).
-    expect(tsFinal[".env-orbit"]).toEqual(bashFinal[".env-orbit"]);
-    expect(tsFinal[".orbit-secrets"]).toEqual(bashFinal[".orbit-secrets"]);
-    expect(tsFinal[".env-orbit"].content).toBe("APP_URL=https://parity.invalid\n");
+    const final = snapshotTree(target);
+    expect({ ".env-orbit": final[".env-orbit"], ".orbit-secrets": final[".orbit-secrets"] }).toEqual(golden.bash.final);
   });
 
-  it("refuses to restore a pre-existing path through a symlinked parent identically in both implementations (guarantee #8)", async () => {
-    // The file pre-exists (managed_was_present=1), so both implementations
-    // take the *restore* branch of rollback, not the *remove-newly-created*
-    // branch: install.sh's own restore-branch check
-    // (`is_real_non_symlink_directory "$parent"`, install.sh:348) folds a
-    // symlinked parent into the same "missing or unsafe" refusal as a
-    // genuinely missing parent, rather than a distinct symlink-specific
-    // message — InstallTransaction mirrors that exactly (reason
-    // "unsafe-parent"). The remove-newly-created branch's distinct
-    // "symlinked-parent" refusal is characterized separately in
-    // install-transaction.test.ts's "refuses to remove a newly-created path
-    // through a symlinked parent" case.
-    mkdirSync(join(targetA, "config"));
-    mkdirSync(join(targetB, "config"));
-    writeFileSync(join(targetA, "config", "tika-config.json"), "{}", { mode: 0o644 });
-    writeFileSync(join(targetB, "config", "tika-config.json"), "{}", { mode: 0o644 });
-    const nested: ManagedPath[] = [{ path: "config/tika-config.json", type: "file" }];
+  it("refuses to restore a pre-existing path through a symlinked parent, as install.sh did (guarantee #8)", () => {
+    // The file pre-exists, so rollback takes the *restore* branch: install.sh
+    // folds a symlinked parent into the same "missing or unsafe" refusal as a
+    // missing one (`is_real_non_symlink_directory "$parent"`), and
+    // InstallTransaction mirrors that (reason "unsafe-parent"). The
+    // remove-newly-created branch's distinct "symlinked-parent" refusal is
+    // characterized in install-transaction.test.ts.
+    const golden = readGolden<TransactionGolden>(FLOW, "symlinked parent refuses restore");
+    mkdirSync(join(target, "config"));
+    writeFileSync(join(target, "config", "tika-config.json"), "{}", { mode: 0o644 });
 
-    const swapParentForSymlink = (target: string) => () => {
-      rmSync(join(target, "config"), { recursive: true, force: true });
-      const elsewhere = join(target, "elsewhere");
-      mkdirSync(elsewhere);
-      symlinkSync(elsewhere, join(target, "config"));
-    };
+    const tx = InstallTransaction.begin(target, golden.managedPaths);
+    expect(snapshotTree(tx.originalDir)).toEqual(golden.bash.originalSnapshot);
 
-    const bashResult = await runBashRoundTrip(targetA, nested, swapParentForSymlink(targetA));
-
-    const tx = InstallTransaction.begin(targetB, nested);
-    swapParentForSymlink(targetB)();
+    rmSync(join(target, "config"), { recursive: true, force: true });
+    mkdirSync(join(target, "elsewhere"));
+    symlinkSync(join(target, "elsewhere"), join(target, "config"));
     const rollback = tx.rollback();
 
-    // install.sh's rollback_transaction returns non-zero when it refuses to
-    // restore through an unsafe parent; so must InstallTransaction.rollback().
-    expect(bashResult.rollbackStatus).not.toBe(0);
+    // install.sh's rollback_transaction returned non-zero; so must rollback().
+    expect(golden.bash.rollbackStatus).not.toBe(0);
     expect(rollback.ok).toBe(false);
     expect(rollback.failures[0]).toMatchObject({ path: "config/tika-config.json", reason: "unsafe-parent" });
+    // Nothing was restored through the symlink. (The mode of `elsewhere`
+    // follows the umask, so only its entries are compared.)
+    const final = JSON.parse(JSON.stringify(snapshotTree(target)).split(target).join("<target>")) as Snapshot;
+    expect(final.config).toEqual(golden.bash.final.config);
+    expect(final.elsewhere.entries).toEqual(golden.bash.final.elsewhere.entries);
   });
 });

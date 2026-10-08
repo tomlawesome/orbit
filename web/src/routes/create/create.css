@@ -25,8 +25,9 @@
  *   2. the New Entry card sits vertically centred and grows symmetrically
  *      from its middle as fields are earned — its centre never moves;
  *   3. adding a document splits the screen: the form slides left, a reading
- *      card fades in on the right ("Focusing on the anomaly"), and (once a
- *      server render exists, #476) a top-sheet snapshot of page one lands.
+ *      card fades in on the right ("Focusing on the anomaly"), and a
+ *      top-sheet snapshot of page one lands — drawn for real since #1245,
+ *      by #476's renderer, while the read carries on beside it.
  */
 
 /* html body, not body: family.css loads via <link> AFTER this bundled sheet,
@@ -110,9 +111,14 @@ body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
 .create-page .field.mono input{font-family:var(--mono)}
 
 /* The heading IS the name (owner, 2026-08-15): you edit the title of the
-   card itself, so there is no separate name box. Styled as the card's h2. */
+   card itself, so there is no separate name box. Styled as the card's h2.
+   It ships empty (#1251): a quiet placeholder at heading size and a resting
+   underline say "type here" where a pre-filled default read as named, and
+   entry.js's refusalOf holds the save until a name is given. */
 .create-page .name-title{display:block;width:100%;background:none;border:0;padding:0;
+  border-bottom:1px solid var(--line);
   font:600 22px var(--display);line-height:1.25;color:var(--ink)}
+.create-page .name-title::placeholder{color:var(--ink-quiet);opacity:1}
 .create-page .name-title:focus{border-bottom:1px solid var(--accent)}
 
 .create-page .types{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
@@ -133,7 +139,7 @@ body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
 .create-page .sections button[aria-pressed=true]{color:var(--accent-text);border-color:var(--accent);background:rgba(216,180,90,.08)}
 .create-page .sec-dot{width:7px;height:7px;border-radius:50%;flex:none}
 
-.create-page .dropzone{border:1.5px dashed var(--line);border-radius:12px;padding:19px;text-align:center;
+.create-page .dropzone{position:relative;border:1.5px dashed var(--line);border-radius:12px;padding:19px;text-align:center;
           cursor:pointer;transition:border-color .2s,background .2s}
 .create-page .dropzone:hover,.create-page .dropzone:focus-visible{border-color:var(--accent);background:rgba(216,180,90,.04)}
 /* #848: the dashed border's colour shift alone is too quiet for a keyboard
@@ -147,6 +153,69 @@ body.doc .dropzone .dz-main,body.doc .dropzone .dz-hint{display:none}
 .create-page .dz-held{display:none;font:11px var(--mono);color:var(--ink-mid);letter-spacing:.03em}
 .create-page .dz-held b{color:var(--accent-text);font-weight:400}
 body.doc .dz-held{display:block}
+
+/* ---- #1244: the zone while a file is in the air ---------------------------
+   design/v19/create-dragover.html, owner-approved 2026-10-07 ("8a yes"), as
+   Fable's build notes on #1244 carry it. Two classes on <body>, set by
+   drop-feedback.js: `dragging` (a file is somewhere over the page) and
+   `over` (it is over the zone). Unscoped like `body.doc`, because they gate
+   on <body>. Nothing is re-laid out, and the zone keeps its height through
+   every state, so the card's centre never moves (§14 ruling 2).
+
+   The marks are the reading lane's own: the reticle's four corner brackets.
+   Armed, they hang loose outside the corners at half strength; locked, they
+   pull in to the corners at full strength and breathe on the reticle's own
+   3.6s curve. The reduced-motion rule below stops the pull and the breathe. */
+.create-page .dz-corner{position:absolute;width:14px;height:14px;pointer-events:none;opacity:0;
+  border:0 solid var(--accent);border-top-width:1.5px;border-left-width:1.5px;border-top-left-radius:3px;
+  --dx:-7px;--dy:-7px;transform:translate(var(--dx),var(--dy));
+  transition:opacity .25s ease,transform .3s cubic-bezier(.3,.7,.2,1)}
+.create-page .dz-corner.tl{top:6px;left:6px}
+.create-page .dz-corner.tr{top:6px;right:6px;--dx:7px;transform:translate(var(--dx),var(--dy)) rotate(90deg)}
+.create-page .dz-corner.br{bottom:6px;right:6px;--dx:7px;--dy:7px;transform:translate(var(--dx),var(--dy)) rotate(180deg)}
+.create-page .dz-corner.bl{bottom:6px;left:6px;--dy:7px;transform:translate(var(--dx),var(--dy)) rotate(270deg)}
+
+/* armed: the file is over the page, not yet over the zone. Quiet on
+   purpose: the user is still aiming.
+
+   Where a state rule carries `.create-page` after `body.…`, it is only to
+   outrank the scoped resting rules (`.create-page .dropzone:hover`,
+   `:focus-visible`, `.dz-main`'s colour, the .tr/.br/.bl offsets), which the
+   mockup's unscoped sheet never had to: the look is the mockup's. */
+body.dragging .create-page .dropzone{border-color:color-mix(in srgb, var(--accent) 55%, var(--line))}
+body.dragging .dz-corner{opacity:.5}
+body.dragging:not(.over) .dropzone .dz-hint{color:var(--accent-text)}
+/* the words: one copy per state in one grid cell, so the line takes the
+   tallest copy's height in every state */
+.create-page .dz-main,.create-page .dz-hint{display:grid}
+.create-page .dz-main span,.create-page .dz-hint span{grid-area:1/1;align-self:center;visibility:hidden}
+.create-page .dz-main [data-when=rest],.create-page .dz-hint [data-when=rest]{visibility:visible}
+body.dragging:not(.over) .dz-hint [data-when=rest]{visibility:hidden}
+body.dragging:not(.over) .dz-hint [data-when=arm]{visibility:visible}
+
+/* locked: the file is over the zone. The fill is the 10% accent the
+   pocket's pressed document row already uses (EntryForm.svelte .pc-doc:active). */
+body.over .create-page .dropzone{border-style:solid;border-color:var(--accent);
+  background:color-mix(in srgb, var(--accent) 10%, transparent)}
+body.over .create-page .dz-corner{opacity:1;--dx:0px;--dy:0px;animation:dz-pull 3.6s ease-in-out infinite}
+@keyframes dz-pull{0%,100%{opacity:1}50%{opacity:.55}}
+body.over .create-page .dz-main{color:var(--ink)}
+body.over .dz-main [data-when=rest]{visibility:hidden}
+body.over .dz-main [data-when=lock]{visibility:visible}
+body.over .dz-hint [data-when=rest]{visibility:hidden}
+body.over .dz-hint [data-when=lock]{visibility:visible;color:var(--accent-text)}
+/* a document already held: the zone still takes a replacement, and says so */
+body.doc.over .dropzone .dz-main{display:grid}
+body.doc.over .dz-held{display:none}
+body.doc.over .dz-main [data-when=lock]{visibility:hidden}
+body.doc.over .dz-main [data-when=swap]{visibility:visible}
+
+/* landed: the drop. body.doc's held line takes over at once; the zone's
+   line settles from accent back to the quiet solid line over .6s (the top
+   sheet's `landed` timing). */
+body.doc .dropzone.landed{animation:dz-landed .6s cubic-bezier(.3,.7,.2,1) backwards}
+@keyframes dz-landed{from{border-color:var(--accent);background:color-mix(in srgb, var(--accent) 10%, transparent)}
+  to{border-color:var(--line-soft);background:none}}
 
 .create-page .disclose{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .55s ease,opacity .4s ease}
 .create-page .disclose.open{grid-template-rows:1fr;opacity:1}
@@ -193,7 +262,7 @@ body.doc .dz-held{display:block}
 .create-page .cancel-link{font:12px var(--mono);color:var(--ink-quiet);text-decoration:none}
 .create-page .cancel-link:hover{color:var(--ink-mid)}
 
-/* ---- the right lane: reading, then the top sheet (#476 placeholder) ---- */
+/* ---- the right lane: reading, then the top sheet ---- */
 .create-page .readcard{width:100%;min-width:0;overflow:hidden;padding:26px 26px 22px;
           opacity:0;transform:translateX(-16px);pointer-events:none;
           transition:opacity .55s ease .18s,transform .65s cubic-bezier(.4,.5,.15,1) .18s}
@@ -213,19 +282,27 @@ body.snap .focus{display:none}
            animation:breathe 4.2s ease-in-out infinite}
 @keyframes breathe{0%,100%{opacity:.96}50%{opacity:.42}}
 .create-page .focus .why{font:10.5px var(--mono);color:var(--ink-quiet);line-height:1.9;margin-top:12px}
+/* the lane's honest, settled states (document-card/round-6's `still` and
+   `refused`, as the item page's reading card already draws them): the
+   words stop breathing once there is nothing left to wait for. */
+.create-page .readcard.still .focusline{animation:none}
+.create-page .readcard.rc-refused .focusline{color:var(--degraded)}
 
-/* the top sheet: a real picture of page one, so the eye can confirm it.
-   #476: the product has no server render yet, so this stays the sheet's own
-   honest placeholder, unreachable — see create.behaviour.js. */
+/* the top sheet: a real picture of page one, so the eye can confirm it —
+   the page whole on the cream sheet, with the tilted second sheet under it
+   (document-card/round-6, the idiom belt.css already carries). */
 .create-page .topsheet{display:none}
 body.snap .topsheet{display:block;animation:landed .6s cubic-bezier(.3,.7,.2,1) backwards}
 @keyframes landed{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
 .create-page .sheet{position:relative;background:#f6f4ee;border-radius:5px;padding:9px;
+       width:max-content;max-width:100%;margin:0 auto;
        box-shadow:0 18px 44px rgba(0,0,0,.45),0 1px 0 rgba(255,255,255,.4) inset}
-/* the sheet under it — this is the TOP sheet of a four-page file */
+/* the sheet under it — ALWAYS there, whatever the file (round 5): it is
+   what makes the page read as a document rather than a loose picture. */
 .create-page .sheet::before{content:"";position:absolute;inset:0;background:#e7e3d8;border-radius:5px;
                transform:rotate(-1.1deg) translate(-4px,3px);z-index:-1}
-.create-page .sheet svg{display:block;width:100%;height:auto;border-radius:2px}
+.create-page .sheet img{display:block;border-radius:2px;background:#fff;width:auto;
+             max-width:100%;height:auto;max-height:min(60vh,520px)}
 .create-page .cap{font:10.5px var(--mono);color:var(--ink-mid);line-height:1.8;margin-top:14px;text-align:center}
 .create-page .cap b{color:var(--ink);font-weight:400}
 .create-page .honest{font:9.5px var(--mono);color:var(--ink-quiet);line-height:1.8;margin-top:8px;text-align:center}
@@ -237,15 +314,10 @@ body.snap .topsheet{display:block;animation:landed .6s cubic-bezier(.3,.7,.2,1) 
 .create-page .attach button{margin-left:auto;font:10.5px var(--mono);color:var(--ink-quiet);
                background:none;border:0;cursor:pointer;padding:0}
 .create-page .attach button:hover{color:var(--overdue)}
-/* the three marks the read actually produced, lit on the page they came from.
-   #1051: this was a bare .lit{...} rule, which also matched <body class="lit">
-   — $lib/flight sets that on /setup for its own reveal — once this chunk had
-   stayed loaded past a client-side navigation. */
-.create-page .lit{opacity:0;animation:lit .5s ease forwards}
-body.snap .lit:nth-of-type(1){animation-delay:.55s}
-body.snap .lit:nth-of-type(2){animation-delay:.75s}
-body.snap .lit:nth-of-type(3){animation-delay:.95s}
-@keyframes lit{to{opacity:1}}
+/* The mockup's three "lit" marks went with its sketched page: a real page
+   carries no marks to light, so what was read is marked ◆ on the fields
+   instead (`.field.sugg` above). Any rule here stays scoped under
+   .create-page (#1051: a bare .lit once matched <body class="lit">). */
 
 @media (max-width:1040px){
   .create-page .lanes,body.doc .lanes{grid-template-columns:minmax(0,600px);gap:0}
@@ -254,7 +326,6 @@ body.snap .lit:nth-of-type(3){animation-delay:.95s}
 }
 @media (prefers-reduced-motion: reduce){
   .create-page *{animation:none!important;transition:none!important}
-  .create-page .lit{opacity:1}
 }
 
 /* #1058e/#1069: the save note carries two registers, decided by the owner

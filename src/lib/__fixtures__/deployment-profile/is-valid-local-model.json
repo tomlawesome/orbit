@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "candidate": "llama3",
+      "bash": {
+        "status": 0
+      }
+    },
+    {
+      "candidate": "llama3:8b",
+      "bash": {
+        "status": 0
+      }
+    },
+    {
+      "candidate": "family/model-name.v2:tag_1",
+      "bash": {
+        "status": 0
+      }
+    },
+    {
+      "candidate": "",
+      "bash": {
+        "status": 1
+      }
+    },
+    {
+      "candidate": "-leading-hyphen",
+      "bash": {
+        "status": 1
+      }
+    },
+    {
+      "candidate": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "bash": {
+        "status": 1
+      }
+    },
+    {
+      "candidate": "has spaces",
+      "bash": {
+        "status": 1
+      }
+    },
+    {
+      "candidate": "bad$char",
+      "bash": {
+        "status": 1
+      }
+    }
+  ]
+}

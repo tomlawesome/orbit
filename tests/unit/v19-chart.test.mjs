@@ -235,6 +235,48 @@ describe("corridorOf", () => {
   });
 });
 
+// #1281: an active item kept without a key date has a seat at the corridor's
+// foot (with the undated suggestions), so a desk save with no date opens on a
+// row like any other. It is counted, but it is never overdue, never in this
+// month and never under a month's rule: there is no date to put it there.
+describe("corridorOf with an undated item", () => {
+  const [lawson] = WORKSPACE_FIXTURE.households;
+  const undatedItem = {
+    id: "i-warranty", title: "Washing machine warranty", sectionId: "s-home",
+    status: "active", dueDate: null, scheduleKind: "expiry",
+  };
+  const plain = corridorOf({ households: [lawson], activeHouseholdId: lawson.id }, TODAY);
+  const corridor = corridorOf(
+    { households: [{ ...lawson, items: [...lawson.items, undatedItem] }], activeHouseholdId: lawson.id },
+    TODAY,
+  );
+
+  it("seats it in the undated bucket and counts it", () => {
+    expect(corridor.undated.map((row) => row.id)).toEqual(["i-warranty"]);
+    expect(corridor.total).toBe(plain.total + 1);
+    const row = corridor.undated[0];
+    expect(row.dueDate).toBe(null);
+    expect(row.band).toBe("unscheduled");
+    expect(row.section).toBe("Home");
+  });
+
+  it("keeps it out of the red zone, this month and every month's rule", () => {
+    const ids = (/** @type {{ id: string }[]} */ rows) => rows.map((row) => row.id);
+    expect(ids(corridor.overdue)).not.toContain("i-warranty");
+    expect(ids(corridor.current)).not.toContain("i-warranty");
+    for (const month of corridor.months) expect(ids(month.rows)).not.toContain("i-warranty");
+    expect(corridor.months).toEqual(plain.months);
+    expect(corridor.horizon).toBe(plain.horizon);
+    expect(corridor.monthsSpanned).toBe(plain.monthsSpanned);
+  });
+
+  it("sorts after every dated row", () => {
+    const dated = [...corridor.overdue, ...corridor.current, ...corridor.months.flatMap((month) => month.rows)];
+    expect(dated.length).toBeGreaterThan(0);
+    for (const row of dated) expect(row.days).toBeLessThan(corridor.undated[0].days);
+  });
+});
+
 // §14 (#469): suggestions ride the corridor in date order — the manifest and
 // the corridor are ONE surface now.
 describe("corridorOf with suggestions", () => {

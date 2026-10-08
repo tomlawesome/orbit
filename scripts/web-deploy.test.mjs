@@ -46,8 +46,8 @@ function stubPnpm(directory, { exitCode = 0 } = {}) {
  * workspace state, printing a nanosecond timestamp to `logPath` the instant
  * it starts and again the instant it is about to finish -- #1151 D1-S3's
  * own real two-process race proof, the same ACQUIRED/RELEASING timestamp
- * technique scripts/backup-restore-lock.test.mjs already uses for
- * acquire_backup_restore_lock.
+ * technique the retired scripts/backup-restore-lock.test.mjs used for
+ * acquire_backup_restore_lock (#1211).
  */
 function stubPnpmSlow(directory, { logPath, holdSeconds = 1 }) {
   const path = join(directory, "pnpm");

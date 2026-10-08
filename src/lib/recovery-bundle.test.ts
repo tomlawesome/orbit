@@ -298,7 +298,7 @@ describe("AES-256-CBC document-archive crypto (backup.sh #19-20,27-28)", () => {
     // refusal ("refuses when the bundle was encrypted with a different
     // document KEK ('wrong key', #15)" below), its HMAC over manifest +
     // checksums, and validateBackupBundleContents refusing garbage that is
-    // not a tar (recovery-bundle.docker-adapter.test.ts).
+    // not a tar (recovery-bundle.backup.test.ts).
   });
 
   it("never returns the original plaintext under a wrong KEK, whatever salt is rolled (the property behind #659)", () => {

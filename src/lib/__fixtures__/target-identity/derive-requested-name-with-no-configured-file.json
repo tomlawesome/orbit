@@ -1,0 +1,12 @@
+{
+  "name": "derive requested name with no configured file",
+  "mode": "derive",
+  "setup": [],
+  "requested": "requested-project",
+  "targetBasename": "_Parity.Target",
+  "bash": {
+    "status": 0,
+    "stdout": "compose_project_name=requested-project explicit=1 provisional=0",
+    "stderr": ""
+  }
+}

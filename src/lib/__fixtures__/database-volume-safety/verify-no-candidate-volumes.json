@@ -1,0 +1,21 @@
+{
+  "name": "verify no candidate volumes",
+  "kind": "verify",
+  "target": {
+    "envOrbit": "ORBIT_IMAGE=ghcr.io/tomlawesome/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+    "composeFile": null,
+    "postgresPassword": "hunter2"
+  },
+  "targetWasEmpty": false,
+  "requested": null,
+  "scenario": {
+    "volumeLsSubstring": {
+      "orbit-db-data": ""
+    }
+  },
+  "bash": {
+    "status": 0,
+    "stdout": "database_volume_checked=1\ndatabase_volume_seen=0\ndatabase_volume_name=\ncompose_project_name=parity-target\ncompose_project_name_explicit=0\ncompose_project_name_provisional=1",
+    "stderr": ""
+  }
+}

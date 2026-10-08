@@ -132,7 +132,12 @@ bash "${ORBIT_VERIFY_MANIFEST_SCRIPT:-${repo_root}/scripts/ci/verify-release-man
 # --- Publication: the tag is the only thing this script creates ------------
 
 channel_reference="${CI_REGISTRY_IMAGE}:${channel_tag}"
-docker buildx imagetools create --tag "$channel_reference" "$pinned"
+# --prefer-index=false copies the validated manifest as it is. By default buildx
+# wraps a single-manifest source in a new OCI index, which has a new digest, so
+# the tag would land on something nobody validated or signed (#1179). The check
+# below still refuses if the tag ever resolves anywhere else, but by then the
+# tag has already moved; the flag is what stops it moving.
+docker buildx imagetools create --prefer-index=false --tag "$channel_reference" "$pinned"
 
 # Post-publication re-check: the tag must resolve to the exact digest that
 # was verified, or something moved underneath this job. Same awk shape as

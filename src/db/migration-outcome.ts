@@ -36,11 +36,17 @@ export async function ensureMigrationRunsTable(client: SqlClient): Promise<void>
  * Records one migrator run. Callers pass a client outside drizzle's own
  * migration transaction, so this insert commits on its own even when a
  * failed migration rolled back (#528).
+ *
+ * The timestamps go in as ISO strings, not Dates: boot's client is the one
+ * `getDb()` hands to drizzle, and drizzle replaces that client's timestamp
+ * serializers with pass-throughs, so a Date bound after `migrate(getDb())`
+ * makes postgres.js throw before the insert is sent and the run goes
+ * unrecorded.
  */
 export async function recordMigrationOutcome(client: SqlClient, run: MigrationRunRecord): Promise<void> {
   await client.unsafe(
     'INSERT INTO "drizzle"."orbit_migration_runs" ("started_at", "finished_at", "outcome", "reason") '
-    + "VALUES ($1, $2, $3, $4)",
-    [run.startedAt, run.finishedAt, run.outcome, run.reason],
+    + "VALUES ($1::timestamptz, $2::timestamptz, $3, $4)",
+    [run.startedAt.toISOString(), run.finishedAt.toISOString(), run.outcome, run.reason],
   );
 }

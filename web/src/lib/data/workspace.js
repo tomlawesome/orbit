@@ -432,6 +432,15 @@ export async function json(response) {
        an HTML error page, a proxy, a process that isn't there — say that
        plainly rather than surfacing a bare "Not Found" the reader cannot act
        on. */
+    if (response.status === 413 && !body?.error?.message) {
+      /* Reached, and refused for size by something in front of Orbit (nginx's
+         1 MB default answers with a bare page): not "could not be reached"
+         (#1284). Orbit's own limit answers 413 with this same code. */
+      throw new WorkspaceError("That file is larger than this Orbit accepts", {
+        status: 413,
+        code: "document_too_large",
+      });
+    }
     const message =
       body?.error?.message ?? `Orbit could not be reached (${response.status})`;
     throw new WorkspaceError(message, {
@@ -1011,6 +1020,44 @@ export async function commandContact(command) {
 }
 
 /**
+ * The document upload size limit, as an administrator sees it (#1285): a
+ * stored override, falling back to the configured default. `null` means the
+ * route could not answer — for a signed-in user who is not an instance
+ * administrator, or an older server.
+ *
+ * @typedef {object} UploadLimitSettings
+ * @property {number} maxBytes the limit every upload is held to right now
+ * @property {number} defaultBytes the configured default (`DOCUMENT_MAX_BYTES`)
+ * @property {?number} overrideBytes the administrator's own choice, or null
+ * @property {number} minBytes
+ * @property {number} ceilingBytes
+ * @property {number} version
+ * @property {?string} updatedAt
+ *
+ * @returns {Promise<?UploadLimitSettings>}
+ */
+export async function readUploadLimitSettings() {
+  try {
+    /** @type {{ uploadLimit?: ?UploadLimitSettings }} */
+    const body = await json(await fetch("/api/admin/upload-limit", { credentials: "same-origin" }));
+    return body.uploadLimit ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sets the limit in whole MB, or goes back to the configured default, and
+ * answers with the limit as it now stands.
+ *
+ * @param {{ action: "set", expectedVersion: number, megabytes: number } | { action: "default", expectedVersion: number }} command
+ * @returns {Promise<{ uploadLimit: UploadLimitSettings }>}
+ */
+export async function commandUploadLimit(command) {
+  return json(await csrfFetch("/api/admin/upload-limit", { body: command }));
+}
+
+/**
  * One row of `GET /api/admin/health`'s `services` array
  * (src/server/admin-health.ts, AdministratorServiceHealth) — states and
  * timestamps only, never a hostname, URL or error string.
@@ -1021,6 +1068,7 @@ export async function commandContact(command) {
  * @property {string} checkedAt
  * @property {?string} [lastSuccessAt]
  * @property {?string} [lastErrorAt]
+ * @property {?string} [signaturesAt] virus scanner only: when its loaded signatures were built (#1296)
  */
 
 /**
@@ -1042,7 +1090,7 @@ export async function commandContact(command) {
  * moved them to household management, so this screen never asks for them.
  */
 export async function readAdminScreen() {
-  const [workspace, session, users, mailbox, contact, rotation, metadata, recoveryBundle, health, operations] =
+  const [workspace, session, users, mailbox, contact, uploadLimit, rotation, metadata, recoveryBundle, health, operations] =
     await Promise.all([
     readWorkspace(),
     readSession().catch(() => null),
@@ -1054,6 +1102,7 @@ export async function readAdminScreen() {
       .catch(() => []),
     readMailboxSettings(),
     readContactSettings(),
+    readUploadLimitSettings(),
     /* An open document-key rotation (#956). Additive: a route that cannot
        answer (fixture harness, older server) means no card, never a sunk
        screen — and "no rotation open" renders as nothing at all. */
@@ -1143,6 +1192,7 @@ export async function readAdminScreen() {
     recoverable: workspace.recoverableHouseholds ?? [],
     mailbox,
     contact,
+    uploadLimit,
     rotation,
     metadata,
     recoveryBundle,
@@ -1325,6 +1375,10 @@ function serviceDetailOf(service, now) {
   const isWorker = /** @type {readonly string[]} */ (WORKER_IDS).includes(service.id);
   if (service.state === "off") return "not enabled";
   if (service.state === "down") return isWorker ? "stopped" : "unreachable";
+  if (service.state === "warn" && service.id === "virus-scanner") {
+    // Old signatures, or a reply that gave no date at all (#1296).
+    return service.signaturesAt ? `out of date · signatures ${ago(service.signaturesAt, now)}` : "signature age unknown";
+  }
   if (service.state === "warn") {
     return service.lastErrorAt ? `retrying · last error ${ago(service.lastErrorAt, now)}` : "retrying";
   }
@@ -1471,6 +1525,207 @@ export async function readItemDocuments(householdId, itemId) {
       doc.lifecycle === "pending_deletion" ? "removed" : null,
     ].filter(Boolean).join(" · "),
   }));
+}
+
+/**
+ * Attaches a file to an item the server already holds (#1245): the same
+ * per-item documents route, as a raw-body upload — the filename travels
+ * encoded in a header because the body is the file's own bytes.
+ *
+ * `documentId` is the caller's, minted once per file: a retry after a lost
+ * answer sends the same id with the same bytes, and the route's idempotency
+ * (document-repository.ts `uploadItemDocument`) hands back the document it
+ * already holds instead of storing a second copy. A 202 (held for a scan
+ * retry) is still an attached document, so only a refusal throws. A stale
+ * CSRF token is retried once, as applyCommand does.
+ *
+ * @param {string} householdId
+ * @param {string} itemId
+ * @param {File} file
+ * @param {string} documentId
+ * @param {{ retryCsrf?: boolean }} [options]
+ * @returns {Promise<DocumentSummary>}
+ */
+export async function attachItemDocument(householdId, itemId, file, documentId, { retryCsrf = true } = {}) {
+  const response = await postDocumentBytes(
+    `/api/households/${encodeURIComponent(householdId)}/items/${encodeURIComponent(itemId)}/documents`,
+    file,
+    { "x-orbit-document-id": documentId },
+    { retryCsrf },
+  );
+  /** @type {{ document: DocumentSummary }} */
+  const body = await json(response);
+  return body.document;
+}
+
+/**
+ * One raw-body file POST, the shape all three document routes take: the
+ * bytes are the body, so the filename travels encoded in a header, with
+ * the CSRF token and whatever else the route asks for. A stale CSRF token
+ * is retried once, as applyCommand does. The caller reads the response —
+ * one answers JSON, one an image.
+ *
+ * @param {string} url
+ * @param {File} file
+ * @param {Record<string, string>} headers
+ * @param {{ retryCsrf?: boolean, signal?: AbortSignal }} [options]
+ * @returns {Promise<Response>}
+ */
+async function postDocumentBytes(url, file, headers, { retryCsrf = true, signal } = {}) {
+  const { csrfToken } = await readSession();
+  const response = await fetch(url, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      "content-type": file.type || "application/octet-stream",
+      "x-csrf-token": csrfToken,
+      "x-orbit-filename": encodeURIComponent(file.name),
+      ...headers,
+    },
+    body: file,
+    signal,
+  });
+  if (response.status === 403 && retryCsrf) {
+    await readSession({ refresh: true });
+    return postDocumentBytes(url, file, headers, { retryCsrf: false, signal });
+  }
+  return response;
+}
+
+/**
+ * Page one of a file the create form has just been given, before any item
+ * exists for it (#1245): the household's pre-attachment preview route draws
+ * it from the bytes and keeps nothing. The picture comes back as an object
+ * URL for an `<img>`; the caller revokes it when the sheet is cleared.
+ * `scanned` is false only where the instance has scanning switched off —
+ * the lane says "scanned clean" only when something scanned it.
+ *
+ * The route answers NDJSON as each stage ends (ADR-0033 step 5): first the
+ * virus check, which `onStage("scanned", { scanned })` reports the moment
+ * its line arrives so the card can say Orbit has moved on to the preview,
+ * then the picture itself, or the server's own words if it could not be
+ * drawn. A refusal before the scan finished is an ordinary JSON error.
+ *
+ * @param {string} householdId
+ * @param {File} file
+ * @param {{ signal?: AbortSignal, onStage?: (stage: "scanned", detail: { scanned: boolean }) => void }} [options]
+ * @returns {Promise<{ url: string, scanned: boolean }>}
+ */
+export async function previewPickedDocument(householdId, file, { signal, onStage } = {}) {
+  const response = await postDocumentBytes(
+    `/api/households/${encodeURIComponent(householdId)}/item-document-preview`,
+    file,
+    { "x-orbit-declared-bytes": String(file.size) },
+    { signal },
+  );
+  if (!response.ok) await json(response); /* throws the server's own words */
+  const unreachable = () => new WorkspaceError(`Orbit could not be reached (${response.status})`, { status: response.status });
+  let scanned = false;
+  for await (const event of ndjsonLines(response, unreachable)) {
+    if (event.error) {
+      throw new WorkspaceError(
+        typeof event.error.message === "string" ? event.error.message : `Orbit could not be reached (${response.status})`,
+        { status: response.status, code: typeof event.error.code === "string" ? event.error.code : undefined },
+      );
+    }
+    if (event.stage === "scanned") {
+      scanned = event.scanned === true;
+      onStage?.("scanned", { scanned });
+    } else if (event.stage === "preview") {
+      if (!PREVIEW_MEDIA_TYPES.has(event.mediaType) || typeof event.bytes !== "string") {
+        throw new WorkspaceError("Orbit could not draw a picture of this document", { status: response.status, code: "document_preview_failed" });
+      }
+      let bytes;
+      try {
+        bytes = Uint8Array.from(atob(event.bytes), (char) => char.charCodeAt(0));
+      } catch {
+        throw unreachable();
+      }
+      return { url: URL.createObjectURL(new Blob([bytes], { type: event.mediaType })), scanned };
+    }
+  }
+  /* The stream ended without a picture or an error: something answered
+     that was never the whole route. */
+  throw unreachable();
+}
+
+/** The only pictures the preview route draws; anything else is refused. */
+const PREVIEW_MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/svg+xml"]);
+
+/**
+ * The JSON objects of an NDJSON body, one per line, as they arrive. A line
+ * that is not a JSON object means whatever answered was not Orbit's route.
+ *
+ * @param {Response} response
+ * @param {() => Error} unreachable
+ * @returns {AsyncGenerator<Record<string, any>>}
+ */
+async function* ndjsonLines(response, unreachable) {
+  if (!response.body) throw unreachable();
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let pending = "";
+  /** @param {string} text */
+  const parse = (text) => {
+    let value;
+    try {
+      value = JSON.parse(text);
+    } catch {
+      throw unreachable();
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw unreachable();
+    return value;
+  };
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      pending += value;
+      let newline = pending.indexOf("\n");
+      while (newline !== -1) {
+        const text = pending.slice(0, newline).trim();
+        pending = pending.slice(newline + 1);
+        if (text) yield parse(text);
+        newline = pending.indexOf("\n");
+      }
+    }
+    if (pending.trim()) yield parse(pending.trim());
+  } finally {
+    /* Stopping early (a picture, an error) lets the rest of the body go. */
+    reader.cancel().catch(() => undefined);
+  }
+}
+
+/**
+ * What the picked file says, read before any item exists for it (#1245):
+ * the household's inspection route scans and extracts the bytes and keeps
+ * nothing. Started from the same pick as `previewPickedDocument`, so the
+ * page is on screen while this is still reading.
+ *
+ * @typedef {object} PickedDocumentSuggestion
+ * @property {string} field      "title" | "subtype" | "provider" | "reference" | "cost" | "dueDate" | "scheduleKind" | "recurrenceMonths"
+ * @property {string} value
+ * @property {string} source
+ * @property {string} confidence
+ *
+ * @typedef {object} PickedDocumentInspection
+ * @property {boolean} extracted
+ * @property {PickedDocumentSuggestion[]} suggestions
+ * @property {string} [message]       the honest reason nothing (or less) was read
+ * @property {"attachable" | "rejected"} attachmentDisposition
+ *
+ * @param {string} householdId
+ * @param {File} file
+ * @param {{ signal?: AbortSignal }} [options]
+ * @returns {Promise<PickedDocumentInspection>}
+ */
+export async function inspectPickedDocument(householdId, file, { signal } = {}) {
+  const response = await postDocumentBytes(
+    `/api/households/${encodeURIComponent(householdId)}/item-document-inspection`,
+    file,
+    { "x-orbit-declared-bytes": String(file.size) },
+    { signal },
+  );
+  return json(response);
 }
 
 /**

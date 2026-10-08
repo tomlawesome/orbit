@@ -1,0 +1,683 @@
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// O2-Q12: spawnSync is mocked (not spied) because it's a Node builtin ESM
+// export — vi.spyOn can't redefine it directly (see vitest's module-mocking
+// docs). The mock delegates to the real implementation so every other test
+// in this file (which spawns the real `tar` binary throughout) is unaffected;
+// only the one test below reads `spawnSyncMock.mock.calls`.
+const spawnSyncMock = vi.hoisted(() => vi.fn());
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  spawnSyncMock.mockImplementation(actual.spawnSync);
+  return { ...actual, spawnSync: spawnSyncMock };
+});
+
+import { createTar, extractTar } from "./recovery-bundle";
+import {
+  CORRESPONDENCE_QUERIES,
+  type CorrespondenceReports,
+  type RestoreDockerAdapter,
+  type RestorePaths,
+  RestoreEngineRefusal,
+  RestoreRun,
+  deriveRestorePaths,
+  listOrphanedCheckpoints,
+  loadRestoreJournal,
+  preflightValidateBundle,
+  recoverRestore,
+} from "./restore-engine";
+
+// End-to-end RestoreRun/recoverRestore coverage against a trivial in-memory
+// fake RestoreDockerAdapter — no process spawning, no Docker daemon,
+// mirroring recovery-bundle.backup.test.ts's "(1) in-memory fake
+// adapter" section. The real createDockerComposeRestoreAdapter's argv shape
+// is proven separately by restore-engine.parity.test.ts's awk-extracted SQL
+// text equality (a live daemon is out of reach in this sandbox, matching
+// how recovery-bundle's own adapter tests use a PATH-shim rather than a
+// real daemon; the SQL/argv text itself is what's characterized here).
+//
+// This file is the primary evidence for the task's "every mutating step of
+// the state machine has a journal entry before it and a rollback path"
+// requirement: each `it` below interrupts (via a thrown error, not a real
+// SIGKILL — see restore-engine.interruption.test.ts for that) at a specific
+// step and asserts the journal/checkpoint left behind is exactly what the
+// next attempt (rollback, in-process, or --recover, a fresh process) needs.
+
+const DOCUMENT_ID = "11111111-1111-4111-8111-111111111111";
+const LIVE_KEK = "a".repeat(64);
+
+function reportsFor(storageKey: string, contentLength: number): CorrespondenceReports {
+  return {
+    crypto: `${DOCUMENT_ID}|${storageKey}|${contentLength}|available\n`,
+    visible: `${DOCUMENT_ID}|available|${storageKey}|${contentLength}\n`,
+    attachments: "",
+    staging: "",
+    documentStaging: "",
+    transientCount: "0",
+  };
+}
+
+function lookupReportField(reports: CorrespondenceReports, query: string): string {
+  const entry = (Object.entries(CORRESPONDENCE_QUERIES) as Array<[keyof CorrespondenceReports, string]>).find(([, text]) => text === query);
+  if (!entry) throw new Error(`unrecognised correspondence query: ${query}`);
+  return reports[entry[0]];
+}
+
+/**
+ * Stands in for Docker/Postgres entirely in-memory: "the database" is just
+ * a CorrespondenceReports value tagged by name, and "the document volume" is
+ * a real directory this fake extracts/collects real tar archives into/out
+ * of (via the real `tar` binary through recovery-bundle.ts's createTar/
+ * extractTar — no shell interpolation, no Docker).
+ */
+class FakeRestoreAdapter implements RestoreDockerAdapter {
+  stopCalls = 0;
+  startCalls = 0;
+  stopOk = true;
+  healthOk = true;
+  pgRestoreOk = true;
+  replaceDocumentsOk = true;
+  restoreActiveDatabaseOk = true;
+  restoreDumpToDatabaseOk = true;
+  resetScanLeasesOk = true;
+  /** #383: records every dropStageDatabase(name) call, in order, so tests can assert cleanup ran even when createStageDatabase itself failed. */
+  dropCalls: string[] = [];
+  /** #383: when set, createStageDatabase throws this once per matching name instead of succeeding — simulates restore.sh's own "CREATE DATABASE fails/refuses" case. */
+  createStageDatabaseThrowsFor: string | undefined;
+  private appRunning = true;
+  private readonly stageContents = new Map<string, CorrespondenceReports>();
+  private liveReports: CorrespondenceReports;
+
+  constructor(
+    private readonly liveDocumentsRoot: string,
+    initialStorageKey: string,
+    initialContentLength: number,
+  ) {
+    this.liveReports = reportsFor(initialStorageKey, initialContentLength);
+  }
+
+  dumpDatabase(outputPath: string): void {
+    writeFileSync(outputPath, JSON.stringify(this.liveReports));
+  }
+  pgRestoreListOk(): boolean {
+    return this.pgRestoreOk;
+  }
+  collectDocumentsArchive(outputPath: string): void {
+    createTar(this.liveDocumentsRoot, outputPath, ["."]);
+  }
+  stopApp(): boolean {
+    this.stopCalls += 1;
+    if (!this.stopOk) return false;
+    this.appRunning = false;
+    return true;
+  }
+  startApp(): boolean {
+    this.startCalls += 1;
+    this.appRunning = true;
+    return true;
+  }
+  createStageDatabase(name: string): void {
+    if (this.createStageDatabaseThrowsFor === name) {
+      this.createStageDatabaseThrowsFor = undefined;
+      throw new Error(`simulated CREATE DATABASE failure for ${name}`);
+    }
+    // Otherwise a no-op: restoreDumpToDatabase records the staged content directly.
+  }
+  dropStageDatabase(name: string): void {
+    this.dropCalls.push(name);
+    this.stageContents.delete(name);
+  }
+  restoreDumpToDatabase(name: string, dumpPath: string): boolean {
+    if (!this.restoreDumpToDatabaseOk) return false;
+    this.stageContents.set(name, JSON.parse(readFileSync(dumpPath, "utf8")) as CorrespondenceReports);
+    return true;
+  }
+  restoreActiveDatabase(dumpPath: string): boolean {
+    if (!this.restoreActiveDatabaseOk) return false;
+    this.liveReports = JSON.parse(readFileSync(dumpPath, "utf8")) as CorrespondenceReports;
+    return true;
+  }
+  replaceDocumentsFromArchive(archivePath: string): boolean {
+    if (!this.replaceDocumentsOk) return false;
+    rmSync(this.liveDocumentsRoot, { recursive: true, force: true });
+    mkdirSync(this.liveDocumentsRoot, { recursive: true });
+    extractTar(archivePath, this.liveDocumentsRoot);
+    return true;
+  }
+  resetScanRecoveryLeases(): boolean {
+    return this.resetScanLeasesOk;
+  }
+  queryReport(name: string, query: string): string {
+    const reports = this.stageContents.get(name);
+    if (!reports) throw new Error(`no staged content for ${name}`);
+    return lookupReportField(reports, query);
+  }
+  queryActiveReport(query: string): string {
+    return lookupReportField(this.liveReports, query);
+  }
+  waitForHealth(): boolean {
+    return this.healthOk && this.appRunning;
+  }
+  measureLiveDatabaseSizeBytes(): number {
+    return 1024;
+  }
+  measureLiveDocumentTreeKib(): number {
+    return 1;
+  }
+  measureDocumentVolumeAvailableKib(): number {
+    return 1_000_000;
+  }
+}
+
+let sandbox: string;
+let paths: RestorePaths;
+let documentKekFile: string;
+
+function buildDocumentTree(root: string, storageKey: string, contentLength: number, fillByte = 5): void {
+  rmSync(root, { recursive: true, force: true });
+  const objectDir = join(root, "objects", storageKey.slice(0, 2), storageKey.slice(2, 4));
+  mkdirSync(objectDir, { recursive: true });
+  mkdirSync(join(root, "staging"), { recursive: true });
+  writeFileSync(join(objectDir, `${storageKey}.bin`), Buffer.alloc(contentLength, fillByte));
+}
+
+function tarOf(root: string, dest: string): string {
+  createTar(root, dest, ["."]);
+  return dest;
+}
+
+beforeEach(() => {
+  sandbox = mkdtempSync(join(tmpdir(), "orbit-restore-run-"));
+  const backupDirectory = join(sandbox, "backups");
+  mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+  documentKekFile = join(sandbox, "document-kek");
+  writeFileSync(documentKekFile, `${LIVE_KEK}\n`, { mode: 0o600 });
+  paths = deriveRestorePaths(backupDirectory, documentKekFile);
+});
+
+afterEach(() => {
+  rmSync(sandbox, { recursive: true, force: true });
+});
+
+const ORIGINAL_KEY = "a".repeat(64);
+const NEW_KEY = "b".repeat(64);
+
+describe("RestoreRun full lifecycle (checkpoint -> cutover -> finalize)", () => {
+  it("completes a restore end-to-end, replacing live documents/database and leaving no journal or checkpoint behind", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    run.createCheckpoint();
+    expect(run.isCheckpointVerified()).toBe(true);
+    expect(readFileSync(paths.journalPath, "utf8")).toContain("state=checkpointed\n");
+
+    const newDocumentsRoot = join(sandbox, "new-documents");
+    buildDocumentTree(newDocumentsRoot, NEW_KEY, 20);
+    const newDocumentsTar = tarOf(newDocumentsRoot, join(sandbox, "new-documents.tar"));
+    run.cutoverDocuments(newDocumentsTar);
+    expect(readFileSync(paths.journalPath, "utf8")).toContain("state=documents-replaced\n");
+
+    const newDatabaseDump = join(sandbox, "new-database.dump");
+    writeFileSync(newDatabaseDump, JSON.stringify(reportsFor(NEW_KEY, 20)));
+    run.cutoverDatabase(newDatabaseDump);
+    expect(readFileSync(paths.journalPath, "utf8")).toContain("state=database-restored\n");
+
+    run.finalize();
+    expect(run.isCompleted()).toBe(true);
+    expect(() => readFileSync(paths.journalPath)).toThrow();
+    expect(adapter.startCalls).toBe(1);
+
+    const disposeResult = run.dispose();
+    expect(disposeResult.outcome).toBe("completed");
+    // A second dispose() is a no-op (idempotent, like InstallTransaction.dispose()).
+    expect(run.dispose().outcome).toBe("completed");
+  });
+});
+
+describe("Interruption-test matrix: every mutating step has a journal entry before it and a rollback path", () => {
+  it("interrupted immediately after createCheckpoint (before any live mutation): dispose() rolls back to a healthy, unchanged app with no journal/checkpoint left", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+
+    run.createCheckpoint();
+    // Simulated interruption: no cutover step ever runs. dispose() is the
+    // in-process EXIT-trap equivalent (real-process SIGKILL recovery is
+    // proven in restore-engine.interruption.test.ts).
+    const result = run.dispose();
+
+    expect(result.outcome).toBe("rolled-back");
+    expect(() => readFileSync(paths.journalPath)).toThrow();
+    expect(adapter.startCalls).toBe(1);
+    expect(adapter.waitForHealth()).toBe(true);
+    // Rollback re-applies the checkpoint, which is identical to the
+    // original live state here (nothing was ever mutated) — the live tree
+    // must still contain exactly the original object.
+    expect(readFileSync(join(liveDocumentsRoot, "objects", ORIGINAL_KEY.slice(0, 2), ORIGINAL_KEY.slice(2, 4), `${ORIGINAL_KEY}.bin`))).toHaveLength(10);
+  });
+
+  it("interrupted after cutoverDocuments (first live mutation, journaled): dispose() rolls the document tree back to the checkpoint", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    run.createCheckpoint();
+
+    const newDocumentsRoot = join(sandbox, "new-documents");
+    buildDocumentTree(newDocumentsRoot, NEW_KEY, 20);
+    run.cutoverDocuments(tarOf(newDocumentsRoot, join(sandbox, "new-documents.tar")));
+    expect(readFileSync(paths.journalPath, "utf8")).toContain("state=documents-replaced\n");
+    // Live documents were genuinely replaced by this point.
+    expect(readFileSync(join(liveDocumentsRoot, "objects", NEW_KEY.slice(0, 2), NEW_KEY.slice(2, 4), `${NEW_KEY}.bin`))).toHaveLength(20);
+
+    const result = run.dispose();
+
+    expect(result.outcome).toBe("rolled-back");
+    expect(() => readFileSync(paths.journalPath)).toThrow();
+    // Rollback restores the ORIGINAL object, not the interrupted new one.
+    expect(readFileSync(join(liveDocumentsRoot, "objects", ORIGINAL_KEY.slice(0, 2), ORIGINAL_KEY.slice(2, 4), `${ORIGINAL_KEY}.bin`))).toHaveLength(10);
+  });
+
+  it("interrupted after cutoverDatabase (second live mutation, journaled): dispose() rolls the database and document tree both back to the checkpoint", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    run.createCheckpoint();
+
+    const newDocumentsRoot = join(sandbox, "new-documents");
+    buildDocumentTree(newDocumentsRoot, NEW_KEY, 20);
+    run.cutoverDocuments(tarOf(newDocumentsRoot, join(sandbox, "new-documents.tar")));
+    const newDatabaseDump = join(sandbox, "new-database.dump");
+    writeFileSync(newDatabaseDump, JSON.stringify(reportsFor(NEW_KEY, 20)));
+    run.cutoverDatabase(newDatabaseDump);
+    expect(readFileSync(paths.journalPath, "utf8")).toContain("state=database-restored\n");
+    expect(adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto)).toContain(NEW_KEY);
+
+    const result = run.dispose();
+
+    expect(result.outcome).toBe("rolled-back");
+    expect(() => readFileSync(paths.journalPath)).toThrow();
+    expect(adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto)).toContain(ORIGINAL_KEY);
+    expect(readFileSync(join(liveDocumentsRoot, "objects", ORIGINAL_KEY.slice(0, 2), ORIGINAL_KEY.slice(2, 4), `${ORIGINAL_KEY}.bin`))).toHaveLength(10);
+  });
+
+  it("interrupted after finalize's active-correspondence check fails: dispose() still rolls back and leaves the app healthy", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    run.createCheckpoint();
+
+    const newDocumentsRoot = join(sandbox, "new-documents");
+    buildDocumentTree(newDocumentsRoot, NEW_KEY, 20);
+    run.cutoverDocuments(tarOf(newDocumentsRoot, join(sandbox, "new-documents.tar")));
+    const newDatabaseDump = join(sandbox, "new-database.dump");
+    writeFileSync(newDatabaseDump, JSON.stringify(reportsFor(NEW_KEY, 20)));
+    run.cutoverDatabase(newDatabaseDump);
+
+    // Force a health-check failure so finalize() refuses.
+    adapter.healthOk = false;
+    expect(() => run.finalize()).toThrow(RestoreEngineRefusal);
+    expect(run.isCompleted()).toBe(false);
+
+    adapter.healthOk = true; // rollback's own health check must succeed for automatic recovery to work
+    const result = run.dispose();
+    expect(result.outcome).toBe("rolled-back");
+    expect(() => readFileSync(paths.journalPath)).toThrow();
+    expect(readFileSync(join(liveDocumentsRoot, "objects", ORIGINAL_KEY.slice(0, 2), ORIGINAL_KEY.slice(2, 4), `${ORIGINAL_KEY}.bin`))).toHaveLength(10);
+  });
+
+  it("O2-R8: a failed stop during rollback aborts before reapplying the checkpoint, instead of running pg_restore/document-replace under a still-running app", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    run.createCheckpoint();
+
+    const newDocumentsRoot = join(sandbox, "new-documents");
+    buildDocumentTree(newDocumentsRoot, NEW_KEY, 20);
+    run.cutoverDocuments(tarOf(newDocumentsRoot, join(sandbox, "new-documents.tar")));
+    const newDatabaseDump = join(sandbox, "new-database.dump");
+    writeFileSync(newDatabaseDump, JSON.stringify(reportsFor(NEW_KEY, 20)));
+    run.cutoverDatabase(newDatabaseDump);
+
+    // Simulated interruption right here (no finalize): dispose() attempts
+    // automatic rollback, and this time stopApp() itself fails.
+    adapter.stopOk = false;
+    const result = run.dispose();
+    expect(result.outcome).toBe("rollback-failed");
+    // The live document tree still holds the post-cutover (NEW_KEY) content
+    // — rollback() must never have reached applyCheckpointState's
+    // replaceDocumentsFromArchive/restoreActiveDatabase once stopApp()
+    // failed, which the old code ignored and proceeded regardless.
+    expect(
+      readFileSync(join(liveDocumentsRoot, "objects", NEW_KEY.slice(0, 2), NEW_KEY.slice(2, 4), `${NEW_KEY}.bin`)),
+    ).toHaveLength(20);
+  });
+
+  it("rollback itself failing (e.g. health never returns) durably records rollback-failed and leaves the checkpoint for --recover, without deleting it", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    run.createCheckpoint();
+
+    const newDocumentsRoot = join(sandbox, "new-documents");
+    buildDocumentTree(newDocumentsRoot, NEW_KEY, 20);
+    run.cutoverDocuments(tarOf(newDocumentsRoot, join(sandbox, "new-documents.tar")));
+
+    // Automatic rollback itself now permanently fails (health never comes
+    // back) — this is restore.sh's "automatic rollback failed" branch
+    // (guarantee #39): the checkpoint and a rollback-failed journal entry
+    // must be preserved for a manual `--recover`, never silently discarded.
+    adapter.healthOk = false;
+    const result = run.dispose();
+
+    expect(result.outcome).toBe("rollback-failed");
+    expect(result.checkpointDirectory).toBeTruthy();
+    expect(readFileSync(paths.journalPath, "utf8")).toContain("state=rollback-failed\n");
+    // The checkpoint directory itself is preserved, untouched, as recovery evidence.
+    expect(readFileSync(join(result.checkpointDirectory!, "database.dump"))).toBeTruthy();
+
+    // A fresh process can now recover from this exact evidence.
+    adapter.healthOk = true;
+    const recoverWorkDir = mkdtempSync(join(sandbox, "recover-work-"));
+    const recoverOutcome = recoverRestore({ adapter, paths, workDir: recoverWorkDir });
+    expect(recoverOutcome.outcome).toBe("completed");
+    expect(() => readFileSync(paths.journalPath)).toThrow();
+    expect(readFileSync(join(liveDocumentsRoot, "objects", ORIGINAL_KEY.slice(0, 2), ORIGINAL_KEY.slice(2, 4), `${ORIGINAL_KEY}.bin`))).toHaveLength(10);
+  });
+});
+
+describe("recoverRestore (`--recover` equivalent, restore.sh:798-831, guarantees #31-37)", () => {
+  it("refuses when there is no journal at all", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    expect(() => recoverRestore({ adapter, paths, workDir })).toThrow(RestoreEngineRefusal);
+  });
+
+  it("refuses when a durable checkpoint artifact was tampered with after the journal was written (#34)", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    run.createCheckpoint();
+    const { checkpointDirectory } = loadRestoreJournal(paths.journalPath, paths.restoreRoot);
+    writeFileSync(join(checkpointDirectory, "documents.tar"), "tampered", { mode: 0o600 });
+
+    const recoverWorkDir = mkdtempSync(join(sandbox, "recover-work-"));
+    expect(() => recoverRestore({ adapter, paths, workDir: recoverWorkDir })).toThrow(RestoreEngineRefusal);
+    // Tampered evidence must be preserved, not silently deleted.
+    expect(readFileSync(paths.journalPath, "utf8")).toContain("state=checkpointed\n");
+  });
+
+  it("preserves the checkpoint and journal, and never touches live state or the app, when this process's own re-verification fails after resuming (issue #383 finding 3)", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    run.createCheckpoint();
+    // Simulate a hard interruption right after the checkpoint is durably
+    // journaled: no dispose() call at all, journal + checkpoint simply left
+    // on disk, exactly as a SIGKILL would leave them (matches the sibling
+    // "is idempotent" test below).
+
+    const journalBefore = readFileSync(paths.journalPath, "utf8");
+    const stopCallsBefore = adapter.stopCalls;
+    const startCallsBefore = adapter.startCalls;
+
+    // A second process's --recover: the durable checkpoint's digests still
+    // match (validateCheckpointIntegrity passes, so RestoreRun.resume()
+    // proceeds), but this process's OWN re-verification of the checkpoint
+    // against a fresh stage database now fails (e.g. a leftover stage
+    // database from a prior aborted --recover collided with
+    // createStageDatabase's deterministic name — the real-adapter
+    // reproduction cited by issue #383's finding 3).
+    adapter.restoreDumpToDatabaseOk = false;
+    const recoverWorkDir = mkdtempSync(join(sandbox, "recover-work-"));
+    expect(() => recoverRestore({ adapter, paths, workDir: recoverWorkDir })).toThrow(RestoreEngineRefusal);
+
+    // Before the fix: RestoreRun.resume() set checkpointVerified=true
+    // eagerly, so dispose() took the "reapply the checkpoint, then delete
+    // the evidence on success" branch here even though re-verification had
+    // just failed. The evidence and live state must instead be untouched.
+    expect(readFileSync(paths.journalPath, "utf8")).toBe(journalBefore);
+    expect(readFileSync(join(run.checkpointDirectory, "database.dump"))).toBeTruthy();
+    expect(adapter.stopCalls).toBe(stopCallsBefore);
+    expect(adapter.startCalls).toBe(startCallsBefore);
+    expect(readFileSync(join(liveDocumentsRoot, "objects", ORIGINAL_KEY.slice(0, 2), ORIGINAL_KEY.slice(2, 4), `${ORIGINAL_KEY}.bin`))).toHaveLength(10);
+
+    // Once re-verification can succeed again, a subsequent --recover still
+    // finds the same preserved evidence and completes normally — recovery
+    // remains safely retriable.
+    adapter.restoreDumpToDatabaseOk = true;
+    const recoverWorkDir2 = mkdtempSync(join(sandbox, "recover-work-2-"));
+    expect(recoverRestore({ adapter, paths, workDir: recoverWorkDir2 }).outcome).toBe("completed");
+    expect(() => readFileSync(paths.journalPath)).toThrow();
+  });
+
+  it("is idempotent: recovering twice in a row (simulating a repeated manual --recover) succeeds both times", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    run.createCheckpoint();
+
+    const newDocumentsRoot = join(sandbox, "new-documents");
+    buildDocumentTree(newDocumentsRoot, NEW_KEY, 20);
+    run.cutoverDocuments(tarOf(newDocumentsRoot, join(sandbox, "new-documents.tar")));
+    // Simulate a hard interruption right here: no dispose() call at all,
+    // journal + checkpoint are simply left on disk, exactly as a SIGKILL
+    // would leave them (real-process proof in restore-engine.interruption.test.ts).
+
+    const recoverWorkDir1 = mkdtempSync(join(sandbox, "recover-work-1-"));
+    expect(recoverRestore({ adapter, paths, workDir: recoverWorkDir1 }).outcome).toBe("completed");
+    expect(readFileSync(join(liveDocumentsRoot, "objects", ORIGINAL_KEY.slice(0, 2), ORIGINAL_KEY.slice(2, 4), `${ORIGINAL_KEY}.bin`))).toHaveLength(10);
+    expect(() => readFileSync(paths.journalPath)).toThrow();
+  });
+
+  // O2-R10: a checkpoint directory createCheckpoint never finished
+  // journaling (crash, kill, or a capture-step refusal between prepare()
+  // and the first writeRestoreJournal call) used to be invisible to
+  // --recover — it only ever looks at the journal's own restoreId — and to
+  // every later restore's own fresh mkdtempSync, so it stayed on disk
+  // forever.
+  it("O2-R10: --recover finds and removes a checkpoint directory orphaned before its journal ever existed", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    // prepare() alone: creates the checkpoint directory and its marker,
+    // then simulate a crash before createCheckpoint() ever runs — exactly
+    // the window the marker exists to cover.
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    const orphanDirectory = run.checkpointDirectory;
+    expect(existsSync(join(orphanDirectory, ".preparing"))).toBe(true);
+    expect(existsSync(paths.journalPath)).toBe(false);
+
+    expect(listOrphanedCheckpoints(paths.restoreRoot)).toEqual([{ restoreId: run.restoreId, checkpointDirectory: orphanDirectory }]);
+
+    const recoverWorkDir = mkdtempSync(join(sandbox, "recover-work-"));
+    expect(recoverRestore({ adapter, paths, workDir: recoverWorkDir }).outcome).toBe("no-checkpoint");
+    expect(existsSync(orphanDirectory)).toBe(false);
+    expect(listOrphanedCheckpoints(paths.restoreRoot)).toEqual([]);
+  });
+
+  it("O2-R10: a checkpoint that does get journaled is never reported or removed as an orphan", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    expect(existsSync(join(run.checkpointDirectory, ".preparing"))).toBe(true);
+    run.createCheckpoint();
+    // Once journaled, the marker is gone and the checkpoint is no longer an orphan.
+    expect(existsSync(join(run.checkpointDirectory, ".preparing"))).toBe(false);
+    expect(listOrphanedCheckpoints(paths.restoreRoot)).toEqual([]);
+    run.dispose();
+  });
+});
+
+describe("document-KEK rotation guard on restore (SS1-S3)", () => {
+  it("refuses to prepare a restore while a rotation is open (DOCUMENT_KEK_NEXT_FILE's conventional sibling file exists)", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    writeFileSync(join(sandbox, "document-kek-next"), `${"b".repeat(64)}\n`, { mode: 0o600 });
+
+    expect(() => RestoreRun.prepare({ adapter, paths, workDir })).toThrow(RestoreEngineRefusal);
+    // Refused before any live mutation or even a restoreRoot/checkpoint directory.
+    expect(existsSync(paths.restoreRoot)).toBe(false);
+  });
+
+  it("proceeds normally once the rotation marker is gone", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    run.createCheckpoint();
+    run.dispose();
+  });
+
+  it("refuses --recover while a rotation is open, leaving the live key and the checkpoint untouched", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    run.createCheckpoint();
+    const newDocumentsRoot = join(sandbox, "new-documents");
+    buildDocumentTree(newDocumentsRoot, NEW_KEY, 20);
+    run.cutoverDocuments(tarOf(newDocumentsRoot, join(sandbox, "new-documents.tar")));
+    adapter.healthOk = false;
+    expect(run.dispose().outcome).toBe("rollback-failed");
+
+    // A rotation opens between the failed restore and the operator's --recover.
+    writeFileSync(join(sandbox, "document-kek-next"), `${"b".repeat(64)}\n`, { mode: 0o600 });
+    adapter.healthOk = true;
+    const liveKeyBefore = readFileSync(paths.documentKekFile, "utf8");
+    const recoverWorkDir = mkdtempSync(join(sandbox, "recover-work-"));
+
+    expect(() => recoverRestore({ adapter, paths, workDir: recoverWorkDir })).toThrow(RestoreEngineRefusal);
+    expect(readFileSync(paths.documentKekFile, "utf8")).toBe(liveKeyBefore);
+    expect(readFileSync(paths.journalPath, "utf8")).toContain("state=rollback-failed\n");
+  });
+});
+
+// --- (3) #383: a failed/refused createStageDatabase must still be dropped --
+//
+// restore.sh:545-546/811-812 assign `stage_database=...` *before* calling
+// create_stage_database, so its EXIT trap's unconditional (DROP-IF-EXISTS)
+// drop_stage_database always fires — even when CREATE itself refused or
+// only partially succeeded server-side. The TS port previously recorded
+// `this.stageDatabase`/the local `stage` only *after* createStageDatabase
+// returned (verifyCheckpointArtifactsCorrespond) or called it entirely
+// outside any try/finally (preflightValidateBundle), so a throwing
+// createStageDatabase left the stage database undropped forever — the next
+// attempt with the same restoreId/stagingId would then fail CREATE with a
+// "database already exists" the engine can never clean up on its own.
+
+describe("stage-database cleanup on a failing/refusing createStageDatabase (#383)", () => {
+  it("verifyCheckpointArtifactsCorrespond (via createCheckpoint) still drops the stage database when createStageDatabase throws", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+    const expectedStage = `orbit_restore_checkpoint_stage_${run.restoreId}`;
+    adapter.createStageDatabaseThrowsFor = expectedStage;
+
+    expect(() => run.createCheckpoint()).toThrow("simulated CREATE DATABASE failure");
+    // The whole point of the fix: even though createStageDatabase never
+    // succeeded, the (idempotent, DROP-IF-EXISTS) cleanup still ran for the
+    // exact stage name that would have been created — nothing is leaked for
+    // the next attempt to trip over.
+    expect(adapter.dropCalls).toContain(expectedStage);
+  });
+
+  it("preflightValidateBundle still drops the stage database when createStageDatabase throws", () => {
+    const stagedDocumentsRoot = join(sandbox, "staged-documents");
+    buildDocumentTree(stagedDocumentsRoot, ORIGINAL_KEY, 10);
+    const databaseDumpPath = join(sandbox, "staged-database.dump");
+    writeFileSync(databaseDumpPath, JSON.stringify(reportsFor(ORIGINAL_KEY, 10)));
+
+    const adapter = new FakeRestoreAdapter(join(sandbox, "unused-live-documents"), ORIGINAL_KEY, 10);
+    const stagingId = "preflight-stage-create-fails";
+    const expectedStage = `orbit_restore_stage_${stagingId}`;
+    adapter.createStageDatabaseThrowsFor = expectedStage;
+
+    expect(() => preflightValidateBundle({ adapter, databaseDumpPath, stagedDocumentsRoot, stagingId })).toThrow("simulated CREATE DATABASE failure");
+    expect(adapter.dropCalls).toContain(expectedStage);
+  });
+});
+
+describe("preflightValidateBundle (restore.sh:334-353, guarantees #7-10)", () => {
+  it("accepts a staged bundle whose database and documents correspond, touching no live state", () => {
+    const stagedDocumentsRoot = join(sandbox, "staged-documents");
+    buildDocumentTree(stagedDocumentsRoot, ORIGINAL_KEY, 10);
+    const databaseDumpPath = join(sandbox, "staged-database.dump");
+    writeFileSync(databaseDumpPath, JSON.stringify(reportsFor(ORIGINAL_KEY, 10)));
+
+    const adapter = new FakeRestoreAdapter(join(sandbox, "unused-live-documents"), ORIGINAL_KEY, 10);
+    expect(() => preflightValidateBundle({ adapter, databaseDumpPath, stagedDocumentsRoot, stagingId: "preflight-test" })).not.toThrow();
+  });
+
+  it("refuses when the staged database and document tree do not correspond, without ever touching live state", () => {
+    const stagedDocumentsRoot = join(sandbox, "staged-documents");
+    buildDocumentTree(stagedDocumentsRoot, ORIGINAL_KEY, 10);
+    const databaseDumpPath = join(sandbox, "staged-database.dump");
+    // Database claims a document that isn't actually present on disk.
+    writeFileSync(databaseDumpPath, JSON.stringify(reportsFor(NEW_KEY, 999)));
+
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    expect(() => preflightValidateBundle({ adapter, databaseDumpPath, stagedDocumentsRoot, stagingId: "preflight-test-2" })).toThrow(RestoreEngineRefusal);
+    // Live documents are completely untouched by a preflight-only check.
+    expect(readFileSync(join(liveDocumentsRoot, "objects", ORIGINAL_KEY.slice(0, 2), ORIGINAL_KEY.slice(2, 4), `${ORIGINAL_KEY}.bin`))).toHaveLength(10);
+  });
+});
+
+describe("createCheckpoint document-archive validation (O2-Q12)", () => {
+  beforeEach(() => {
+    spawnSyncMock.mockClear();
+  });
+
+  it("validates the checkpoint's documents.tar only once, not once directly and again inside self-verification", () => {
+    const liveDocumentsRoot = join(sandbox, "live-documents");
+    buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const adapter = new FakeRestoreAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10);
+    const workDir = mkdtempSync(join(sandbox, "work-"));
+    const run = RestoreRun.prepare({ adapter, paths, workDir });
+
+    run.createCheckpoint();
+    expect(run.isCheckpointVerified()).toBe(true);
+
+    const checkpointDocuments = join(run.checkpointDirectory, "documents.tar");
+    const verboseListingsOfCheckpointDocuments = spawnSyncMock.mock.calls.filter(
+      (call) => call[0] === "tar" && Array.isArray(call[1]) && call[1][0] === "-tvf" && call[1][1] === checkpointDocuments,
+    );
+    expect(verboseListingsOfCheckpointDocuments.length).toBe(1);
+  });
+});

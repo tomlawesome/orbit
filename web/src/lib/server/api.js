@@ -84,8 +84,15 @@ export function api(handler, { fixture, errorResponse = appErrorResponse } = {})
  * The handler receives the session it already had to establish, so no route
  * reads it twice.
  *
+ * A `fixture` answers before any of that, exactly as `read`'s does: the
+ * pre-attachment document routes (#1245) use it so the fixture harness's
+ * create form reads a file without an engine, or a session, behind it.
+ *
  * @param {(event: import("@sveltejs/kit").RequestEvent, session: import("orbit/lib/auth/session").AuthenticatedSession) => Promise<Response> | Response} handler
- * @param {{ errorResponse?: (error: unknown) => Response }} [options]
+ * @param {{
+ *   fixture?: (event: import("@sveltejs/kit").RequestEvent) => Response,
+ *   errorResponse?: (error: unknown) => Response,
+ * }} [options]
  * @returns {(event: import("@sveltejs/kit").RequestEvent) => Promise<Response>}
  */
 export function write(handler, options) {

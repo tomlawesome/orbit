@@ -337,3 +337,77 @@ describe("verifyDatabaseVolumeSafety fresh-check path (guarantees #15, #16, #18)
     expect(result.composeProjectName).toBe(PROJECT);
   });
 });
+
+describe("verifyDatabaseVolumeSafety on an update beside another stack's volume (#1261)", () => {
+  // An update keeps the host-wide search (#1239): a renamed project is only
+  // provable by the volume's labels. But a volume labelled with another
+  // Compose project, which the ownership proof does not tie to this
+  // deployment, is another stack's and must not block the update -- the
+  // 2026-10-06 lifecycle run refused on a leftover local e2e volume.
+  const OTHER_PROJECT = "orbit-e2e-local-4242";
+  const OTHER_VOLUME = `${OTHER_PROJECT}_orbit-db-data`;
+  const OTHER_IMAGE = "ghcr.io/tomlawesome/orbit@sha256:" + "f".repeat(64);
+  const OTHER_DB = "d".repeat(12);
+  const OTHER_APP = "e".repeat(12);
+  let targetDir: string;
+
+  beforeEach(() => {
+    targetDir = mkdtempSync(join(tmpdir(), "orbit-database-volume-safety-1261-"));
+    writeFileSync(join(targetDir, ".env-orbit"), `ORBIT_IMAGE=${EXPECTED_IMAGE}\nCOMPOSE_PROJECT_NAME=${PROJECT}\n`, { mode: 0o600 });
+  });
+
+  afterEach(() => {
+    rmSync(targetDir, { recursive: true, force: true });
+  });
+
+  /** Two stacks on one host: this deployment's, and another project's whose app runs `otherImage`. */
+  function twoStacks(otherImage: string, overrides: Partial<DatabaseVolumeSafetyAdapter> = {}): DatabaseVolumeSafetyAdapter {
+    return makeFullAdapter({
+      listVolumesByKeySubstring: () => `${OTHER_VOLUME}\n${CANDIDATE_VOLUME}`,
+      inspectVolumeLabels: (volume) => (volume === OTHER_VOLUME ? `${OTHER_PROJECT}|orbit-db-data` : `${PROJECT}|orbit-db-data`),
+      listContainersByVolume: (volume) =>
+        volume === OTHER_VOLUME ? `${OTHER_DB}|${OTHER_PROJECT}|orbit-db` : `${DB_CONTAINER_ID}|${PROJECT}|orbit-db`,
+      listContainersByProject: (project) =>
+        project === OTHER_PROJECT ? `${OTHER_APP}|${OTHER_PROJECT}|orbit-app` : `${APP_CONTAINER_ID}|${PROJECT}|orbit-app`,
+      inspectContainerImage: (container) => (container === OTHER_APP ? otherImage : EXPECTED_IMAGE),
+      inspectVolumeProjectLabel: (volume) => (volume === OTHER_VOLUME ? OTHER_PROJECT : PROJECT),
+      ...overrides,
+    });
+  }
+
+  it("skips another project's volume that the proof does not tie to this deployment, and attaches to its own", () => {
+    const result = verifyDatabaseVolumeSafety(targetDir, undefined, "fallback", freshState(), readyPassword, twoStacks(OTHER_IMAGE));
+    expect(result.databaseVolumeSeen).toBe(true);
+    expect(result.databaseVolumeName).toBe(CANDIDATE_VOLUME);
+    expect(result.composeProjectName).toBe(PROJECT);
+  });
+
+  it("proceeds with no volume when the only one on the host is another project's", () => {
+    const adapter = twoStacks(OTHER_IMAGE, { listVolumesByKeySubstring: () => OTHER_VOLUME });
+    const result = verifyDatabaseVolumeSafety(targetDir, undefined, "fallback", freshState(), readyPassword, adapter);
+    expect(result.databaseVolumeChecked).toBe(true);
+    expect(result.databaseVolumeSeen).toBe(false);
+  });
+
+  it("still refuses a genuinely ambiguous pair: the other project's app runs this deployment's own image", () => {
+    expect(() =>
+      verifyDatabaseVolumeSafety(targetDir, undefined, "fallback", freshState(), readyPassword, twoStacks(EXPECTED_IMAGE)),
+    ).toThrow(/Multiple Orbit database volumes/);
+  });
+
+  it("still counts a volume whose labels cannot be read", () => {
+    const adapter = twoStacks(OTHER_IMAGE, {
+      inspectVolumeLabels: (volume) => (volume === OTHER_VOLUME ? null : `${PROJECT}|orbit-db-data`),
+    });
+    expect(() => verifyDatabaseVolumeSafety(targetDir, undefined, "fallback", freshState(), readyPassword, adapter)).toThrow(
+      /Multiple Orbit database volumes/,
+    );
+  });
+
+  it("keeps the broad search when the deployment's project name is only a guess", () => {
+    writeFileSync(join(targetDir, ".env-orbit"), `ORBIT_IMAGE=${EXPECTED_IMAGE}\n`, { mode: 0o600 });
+    expect(() =>
+      verifyDatabaseVolumeSafety(targetDir, undefined, "fallback", freshState(), readyPassword, twoStacks(OTHER_IMAGE)),
+    ).toThrow(/Multiple Orbit database volumes/);
+  });
+});

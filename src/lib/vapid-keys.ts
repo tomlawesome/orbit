@@ -34,9 +34,12 @@ export interface VapidKeyPair {
 export function generateVapidKeyPair(): VapidKeyPair {
   const ecdh = createECDH("prime256v1");
   ecdh.generateKeys();
+  // getPrivateKey() drops leading zero bytes (about one key in 256), and
+  // web-push accepts only a 32-byte VAPID private key: left-pad it back.
+  const scalar = ecdh.getPrivateKey();
   return {
     publicKey: ecdh.getPublicKey().toString("base64url"),
-    privateKey: ecdh.getPrivateKey().toString("base64url"),
+    privateKey: Buffer.concat([Buffer.alloc(32 - scalar.length), scalar]).toString("base64url"),
   };
 }
 

@@ -1096,8 +1096,8 @@ export function createFilmContext({
   }
 
   /** An opaque ground to paint the typed line on, so the cover hides
-   *  whatever the real field is showing underneath (`#f-name` ships with
-   *  "New Entry" in it, a date input shows its own placeholder, every
+   *  whatever the real field is showing underneath (`#f-name` shows its
+   *  "Name this entry" placeholder, a date input shows its own, every
    *  pocket field its "e.g." suggestion).
    *
    *  #1174 round 4: the field's own background is not enough when it is

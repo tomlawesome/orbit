@@ -450,7 +450,7 @@ key-encryption key" is the master key that protects each document's own key.
 | `DOCUMENT_KEK` | Orbit | Direct 32-byte hexadecimal document key-encryption key. Leave empty when the file form is used. | `<64-character-random-hex>` |
 | `DOCUMENT_KEK_FILE` | Orbit | File containing the document key-encryption key. Compose mounts the generated file at `/run/orbit-secrets/orbit-document-kek`. | `.orbit-secrets/document-kek` |
 | `DOCUMENT_KEK_NEXT` / `DOCUMENT_KEK_NEXT_FILE` | Orbit | Second document key-encryption key, held alongside the first only while a key rotation is in progress (#954). Set only via the `docker-compose.kek-rotation.yml` overlay — see "Rotating the document key-encryption key" in `docs/administrator-operations.md`. | `<64-character-random-hex>` |
-| `DOCUMENT_MAX_BYTES` | Orbit | Largest upload accepted, in bytes. | `26214400` |
+| `DOCUMENT_MAX_BYTES` | Orbit | Largest upload accepted, in bytes, until an administrator sets their own limit under "Upload size limit" in Administration (1 to 100 MiB, no restart). "use the default" there goes back to this value. Allowed: 1048576 to 104857600. | `52428800` |
 | `DOCUMENT_HOUSEHOLD_QUOTA_BYTES` | Orbit | Most document storage one household may keep. | `5368709120` |
 | `DOCUMENT_INSTANCE_QUOTA_BYTES` | Orbit | Most document storage the whole instance may keep. | `21474836480` |
 | `DOCUMENT_RETENTION_DAYS` | Orbit | Days a deleted document can still be restored before it is purged for good. | `30` |
@@ -753,11 +753,17 @@ below). Making a bundle is a deliberate step, and one every deployment should
 take before it holds real data:
 
 ```sh
-orbit backup
-orbit export-recovery-bundle <backup.tar>
+bash scripts/backup.sh
+bash scripts/export-recovery-bundle.sh backups/orbit-<timestamp>.tar
 ```
 
-`orbit export-recovery-bundle` locks the live `DOCUMENT_KEK` under a
+Run them from the deployment directory. Each runs the Orbit engine's own
+command (`orbit backup`, then `orbit export-recovery-bundle <backup.tar>`)
+inside the deployment, as a one-off container on the app service, so the host
+needs Docker and nothing else.
+
+`export-recovery-bundle.sh` asks for the passphrase twice, then locks the live
+`DOCUMENT_KEK` under it
 passphrase you choose (the passphrase is stretched with scrypt and the key
 encrypted with AES-256-GCM) and packages it with the backup you just made into
 one file, `orbit-recovery-<timestamp>.tar`.
@@ -771,11 +777,13 @@ The administration screen shows a "No recovery bundle exported" card until a
 bundle has been recorded, and again after every `DOCUMENT_KEK` rotation,
 because a bundle wrapped under the previous key can no longer recover the
 current one. The card is a reminder, not a gate: it never blocks use of the
-instance, and it clears the moment `orbit export-recovery-bundle` completes.
+instance, and it clears the moment `export-recovery-bundle.sh` completes.
 
 ![The "No recovery bundle exported" card, persistent until a bundle is recorded](images/admin-no-recovery-bundle.png)
 
-To use a recovery bundle, see `orbit import-recovery-bundle` and "Restoring
+To use a recovery bundle, run `bash scripts/import-recovery-bundle.sh
+<recovery.tar>` (it asks for the passphrase, then for `IMPORT RECOVERY`, then
+for `RESTORE`) and see "Restoring
 the document key-encryption key" below.
 
 ## Restoring the document key-encryption key

@@ -485,7 +485,8 @@ test("create: fillable and submittable by keyboard alone", async ({ page }) => {
     expect(submit?.focusVisible, "create: the submit button has no visible focus indicator").toBe(true);
     await page.keyboard.press("Enter");
 
-    await expect(page).toHaveURL(/\/home$/, { timeout: 10_000 });
+    /* #1246: a save lands on home with the item it saved open. */
+    await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]+$/, { timeout: 10_000 });
     await expect(page.locator(".item", { hasText: name })).toBeVisible();
   } finally {
     await cleanup(page, household);

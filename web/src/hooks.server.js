@@ -2,6 +2,8 @@ import { building } from "$app/environment";
 import { env } from "$env/dynamic/private";
 import { redirect } from "@sveltejs/kit";
 
+import { bodyLimitFor, limitRequestBody } from "$lib/server/body-limit.js";
+
 /**
  * The screens a reader may open without a session (#789).
  *
@@ -104,6 +106,18 @@ export async function init() {
 }
 
 /**
+ * The administrator's upload size limit (#1285), read only for an upload
+ * route's request; imported on demand like the workspace read below, so a
+ * request with no body never loads the database client here.
+ *
+ * @returns {Promise<number>}
+ */
+async function readUploadLimit() {
+  const { readEffectiveUploadLimit } = await import("orbit/server/upload-limit");
+  return readEffectiveUploadLimit();
+}
+
+/**
  * Whether the instance is closed for maintenance, read once per request.
  *
  * A failed read answers "open". Maintenance is a state an operator declared,
@@ -175,6 +189,26 @@ function closedForMaintenance(page, maintenance) {
 }
 
 /**
+ * A gated screen's answer, marked never to be stored (#1264).
+ *
+ * Without it a browser may keep a signed-in page in its back/forward cache or
+ * HTTP cache, so Back after sign-out shows household content without asking
+ * the server. Set here, beside the gate, so a screen added tomorrow is
+ * uncached the day its folder exists. The ETag goes too: a copy cached before
+ * this header existed could otherwise be revalidated into a 304 and shown
+ * again. Same shape as `closedForMaintenance`; the response is rebuilt rather
+ * than mutated because a redirect or fetched response has immutable headers.
+ *
+ * @param {Response} page
+ */
+function neverStored(page) {
+  const headers = new Headers(page.headers);
+  headers.set("cache-control", "no-store");
+  headers.delete("etag");
+  return new Response(page.body, { status: page.status, statusText: page.statusText, headers });
+}
+
+/**
  * The gates for every screen: maintenance (#526), then authentication (#789).
  *
  * The cut deleted Next's AuthenticationGate along with the rest of `src/app/`
@@ -207,6 +241,17 @@ export async function handle({ event, resolve }) {
      adapter prerenders /login and /logout, where there is no session, no
      database, and no dynamic environment to read. */
   if (building) return resolve(event);
+
+  /* Per-route request body limits (#1285), ahead of every other step and for
+     every route, the API included: the image lets any body up to the largest
+     a route may take through (BODY_SIZE_LIMIT), and this holds each route to
+     its own. web/src/lib/server/body-limit.js has the routes and limits. */
+  if (event.request.body !== null) {
+    const rule = await bodyLimitFor(event.route.id, readUploadLimit);
+    const held = limitRequestBody(event.request, rule);
+    if (held instanceof Response) return held;
+    event.request = held;
+  }
 
   /* A null id is a path the router did not match, which belongs to the 404
      screen. Letting it through gates nothing new: route names already ship in
@@ -289,5 +334,5 @@ export async function handle({ event, resolve }) {
 
   /* Carried on locals so a server load never has to ask a second time. */
   event.locals.session = session;
-  return resolve(event);
+  return neverStored(await resolve(event));
 }

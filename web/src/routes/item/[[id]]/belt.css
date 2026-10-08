@@ -276,17 +276,29 @@
                         to{opacity:.17;transform:scale(1.14)}}
 
   /* ---- the card, seated at the apex ----------------------------------
-     item.css's glass card, unchanged in its parts, hung so that the band's
-     highest point crosses it a third of the way down: the band's thickness
+     item.css's glass card, unchanged in its parts, hung by its own middle
+     on the band's highest point, whatever height it takes (owner,
+     2026-10-06, #1247: "document cards should always be centralised on the
+     belt"; it hung a third of the way down before). The band's thickness
      (~430px at the apex) and the card's height are of an order, which is
      what makes it read as riding IN the belt rather than floating above it.
      The 16px backdrop blur is doing real work here — the rubble streaming
      behind the card is visible through it, smeared. */
-  .belt-page .cardwrap{position:fixed;left:50%;z-index:4;width:min(480px,calc(100vw - 56px));
+  .belt-page .cardwrap{position:fixed;left:50%;z-index:4;width:min(var(--cardw,480px),calc(100vw - 56px));
+    transition:width .75s cubic-bezier(.4,.5,.15,1);
     max-height:calc(100vh - 150px);overflow:auto;
     --cdx:0px; --cdy:0px; --csc:1;
-    transform:translate(calc(-50% + var(--cdx)),calc(-34% + var(--cdy))) scale(var(--csc));
-    transform-origin:50% 34%;}
+    transform:translate(calc(-50% + var(--cdx)),calc(var(--belt-card-lift) + var(--cdy))) scale(var(--csc));
+    transform-origin:50% 50%;}
+  /* #1302: hung by its middle, but never up into the top strip. -50% of its
+     own height centres the card on the apex (--apex-y, written inline by
+     belt.behaviour.js's layout() beside `top`); the strip's bottom edge less
+     the apex is how far up the card may reach at most. max() takes whichever
+     is lower, so a card short enough to clear the strip is exactly centred
+     and a card that would run under the search note -- the edit form on a
+     14" screen -- starts under the strip instead, 10-15px below the apex's
+     own centring and already as tall as it is allowed to be. */
+  .belt-page .cardwrap{--belt-card-lift:max(-50%, calc(var(--belt-strip) - var(--apex-y, 50vh)))}
   .belt-page .cardwrap.rollout{opacity:0;
     transition:transform 190ms cubic-bezier(.55,0,.85,.4),opacity 165ms linear}
   .belt-page .cardwrap.rollpre{transition:none;opacity:0}
@@ -371,6 +383,25 @@
      card. */
   .belt-page .find{position:fixed;left:50%;top:20px;transform:translateX(-50%);z-index:6;
         text-align:center;width:min(360px,calc(100vw - 48px))}
+  /* ---- THE TOP STRIP AND THE BERTH (#1302) ------------------------------
+     Two measures the rest of the desk sheet is laid out against.
+
+     --belt-strip is how deep the top strip is: the field's own bottom edge
+     (20 down, a 30px field, 7 of gap, a 13px note: 70) plus the same 20px
+     the field keeps from the top of the frame. Only the chrome and the
+     field live in it. The card may not rise into it (.cardwrap's
+     --belt-card-lift above) and the hit list hangs from its bottom edge.
+
+     --belt-berth is half the widest the card can be: 480px at rest, 720px
+     while the edit panel is open (#1248, `.lanes.editing`). Half, because
+     everything here is measured from the frame's centre line, which is
+     where the card and the field both hang. The hit list hangs outside it.
+     The card's resting width can come in under 480 on a narrow sky
+     (band.js's cardWidthOf), and the berth deliberately does not follow
+     it: the list keeps one place rather than stepping sideways with every
+     width the card takes. */
+  .belt-page{--belt-strip:90px;--belt-berth:240px}
+  .belt-page:has(.lanes.editing){--belt-berth:360px}
 
   /* ---- THE TOP STRIP ON A NARROW SKY (#1035) ---------------------------
      Three things are fixed into the same strip across the top: the shared
@@ -416,10 +447,29 @@
             white-space:nowrap;display:flex;justify-content:center}
   /* The hit list drops BESIDE the field, not beneath it: beneath it is where
      the card is, and the search must never cover the thing you are looking
-     at. It hangs in the empty quarter of the sky to the field's right, and
-     it is only a reach for the matches that are round the far side of the
-     ring — the ones on this sky you simply click. */
-  .belt-page .hits{position:absolute;left:calc(100% + 22px);top:0;width:296px;
+     at. It hangs in the empty sky to the field's right, and it is only a
+     reach for the matches that are round the far side of the ring — the
+     ones on this sky you simply click.
+
+     #1302: "beside the field" used to mean 22px off the field's own edge,
+     which is 202px from the centre line -- inside the card's berth (240,
+     or 360 while editing), so a card tall enough to reach up to the list
+     (any card on a 14" screen, every edit form) was under it. The list now
+     hangs 22px outside the berth and from the bottom of the top strip,
+     which is under the account orb's row as well. The sky it has is
+     whatever is left between the berth and the frame's 24px margin, and
+     the list takes up to its 296px of that: on a 1280-wide sky while
+     editing that is 234px, and the names cut a little shorter rather than
+     the list lying over the form.
+
+     The field is `position:fixed` and transformed, so a fixed child would
+     measure from the field, not the frame; absolute does the same with
+     the arithmetic said once: the field's left edge is 180px short of the
+     centre line (its width is 360 on every sky this rule reaches, see the
+     1140 rule below), so centre + berth + 22 is berth + 202 from here, and
+     the strip's bottom is 70 below the field's own top at 20. */
+  .belt-page .hits{position:absolute;left:calc(var(--belt-berth) + 202px);top:calc(var(--belt-strip) - 20px);
+        width:min(296px,calc(50vw - var(--belt-berth) - 46px));
         background:var(--panel-raised);backdrop-filter:blur(14px);
         border:1px solid var(--line);border-radius:12px;padding:6px;display:none;
         text-align:left;max-height:252px;overflow:auto}
@@ -450,6 +500,7 @@
        stay put, at rest), and the band's drift holds still. */
     .belt-page *{animation:none!important}
     .belt-page .cardwrap{transition:none!important}
+    .belt-page .lanes{transition:none!important}
   }
 
 /* ---- the command panels — item.css's vocabulary, scoped -----------------
@@ -532,7 +583,7 @@
    OWN -50% centring is handed to the grid, which centres the track itself
    now that the track's own width is the card's width (--cardw). */
 .belt-page .lanes .cardwrap{position:relative;left:auto;grid-row:1;grid-column:1;
-      transform:translate(var(--cdx),calc(-34% + var(--cdy))) scale(var(--csc))}
+      transform:translate(var(--cdx),calc(var(--belt-card-lift) + var(--cdy))) scale(var(--csc))}
 .belt-page .lanes.left .cardwrap{grid-column:2}
 
 /* the open paper keeps its rim lit while its reading card is out */
@@ -600,6 +651,10 @@
    what makes the page read as a document rather than a loose picture. */
 .belt-page .sheet::before{content:"";position:absolute;inset:0;background:#e7e3d8;border-radius:5px;
                transform:rotate(-1.1deg) translate(-4px,3px);z-index:-1}
+/* #1298: the sheet is the reader's button on the desk; it keeps the look. */
+.belt-page button.sheet{appearance:none;border:0;margin:0;font:inherit;color:inherit;display:block;cursor:zoom-in}
+.belt-page button.sheet:disabled{cursor:default}
+.belt-page button.sheet:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
 .belt-page .sheet img{display:block;border-radius:2px;background:#fff;width:auto;
              max-width:100%;height:auto;max-height:min(60vh,520px)}
 
@@ -652,6 +707,15 @@
  * belt.behaviour.js. Everything the desk unfolds in or beside the card is
  * a kit Sheet on a phone, styled by the .bp-* rules after this block.
  * ========================================================================== */
+/* #1248: while the edit panel is open on the desk the card widens to 720px
+   (each .row2 field gets room, the whole form fits under the card's own
+   max-height at 1280×720) and drops the detail rows the form repeats; the
+   width rides the lanes' own transition. belt.behaviour.js's layout() writes
+   the resting width inline, on both the card and --cardw, so these two win
+   with !important; closing the panel hands the inline values straight back. */
+.belt-page .lanes.editing{--cardw:720px!important}
+.belt-page .lanes.editing .cardwrap{width:min(var(--cardw),calc(100vw - 56px))!important}
+
 .belt-page .ip-find,.belt-page .ip-count{display:none}
 @media (max-width:900px), (max-height:600px){
   /* A page that scrolls, not a stage: the chrome retracts over it (§1.3). */

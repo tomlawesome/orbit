@@ -148,6 +148,9 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 
 .mission-page .card .count{margin-left:auto;font:10.5px var(--mono);color:var(--ink-quiet)}
 .mission-page .jobfoot{font:10.5px var(--mono);color:var(--ink-faint);padding:12px 2px 0}
+/* A link in a foot reads at the card's own control colour: ink-faint is too
+   faint for text you act on (WCAG AA contrast, #1285). */
+.mission-page .jobfoot a{color:var(--ink-mid)}
 /* the reason is the point of the subtext: it wraps rather than being cut */
 .mission-page #jobs-card .who span,.mission-page .machinery .who span{white-space:normal}
 .mission-page #jobs-card .place{flex-basis:100%;text-align:right}

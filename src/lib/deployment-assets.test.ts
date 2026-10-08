@@ -16,53 +16,71 @@ import {
   deriveAssetDirectories,
 } from "./deployment-assets";
 
-// Byte-for-byte parity between this module's constants and the array
-// literals in the real, unmodified scripts/install.sh (issue #295 slice 5,
-// guarantee #45) — install.sh declares deployment_assets/deployment_scripts
-// as inline array literals inside the main flow rather than inside a named
-// function, so this test awk-extracts the literal array bodies (never
-// hand-copied) instead of a function, the same "fails loudly if renamed"
-// discipline every parity test in this port uses.
+// The one asset list install uses since #1212 (guarantee #45), held equal
+// to the two other places that name the same files: what the Dockerfile
+// bundles into the image (ADR-0019) and repair.sh's restore-transaction
+// allowlist. Every bundled script must also pass `bash -n`.
 
-// This file spawns real awk to extract install.sh source; a spawn that
-// takes 0.7s quiet took 4.3s on a starved core (#698). Budget and reasoning:
+// This file spawns bash -n per script; budget and reasoning:
 // scripts/process-budget.mjs.
 vi.setConfig({ testTimeout: PROCESS_TEST_TIMEOUT_MS });
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const installScriptPath = join(repoRoot, "scripts", "install.sh");
 
-function extractArrayLiteral(name: string): string[] {
-  const script = `
-    $0 ~ "readonly ${name}=\\\\(" { found = 1; next }
-    found { if ($0 == ")") { found = 0; exit } print }
-  `;
-  const result = failOnProcessDeadline(spawnSync("awk", [script, installScriptPath], { encoding: "utf8", ...processGuard() }), { label: "extractArrayLiteral" });
-  if (result.status !== 0 || !result.stdout.trim()) {
-    throw new Error(`Could not extract ${name} array literal from install.sh; it may have been renamed.`);
+/** The files the Dockerfile copies into /opt/orbit/deploy, as deployment-relative paths. */
+function dockerfileBundle(): string[] {
+  const dockerfile = readFileSync(join(repoRoot, "Dockerfile"), "utf8").replace(/\\\n/g, " ");
+  const bundle: string[] = [];
+  for (const line of dockerfile.split("\n")) {
+    const match = /^COPY --chown=root:root (.+) \.\/deploy\/(\S*)$/.exec(line.trim());
+    if (!match) continue;
+    for (const source of match[1].trim().split(/\s+/)) {
+      const name = source.split("/").pop() as string;
+      bundle.push(match[2] === "" ? name : `${match[2]}${name}`);
+    }
   }
-  return result.stdout
-    .split("\n")
-    .filter((line) => line.trim().length > 0)
-    .map((line) => {
-      const match = /^\s*"([^"]*)"\s*$/.exec(line);
-      if (!match) throw new Error(`Unexpected array literal line: ${line}`);
-      return match[1];
-    });
+  return bundle;
 }
 
-describe("deployment_assets / deployment_scripts parity (install.sh:1313-1330, guarantee #45)", () => {
-  it("agrees byte-for-byte on the deployment_assets array", () => {
-    expect(DEPLOYMENT_ASSETS).toEqual(extractArrayLiteral("deployment_assets"));
+/** repair.sh's restore_transaction_paths, which add .env-orbit and .orbit-secrets to the assets. */
+function repairAllowlist(): string[] {
+  const repair = readFileSync(join(repoRoot, "scripts", "repair.sh"), "utf8");
+  const match = /^readonly -a restore_transaction_paths=\(\n([\s\S]*?)\n\)$/m.exec(repair);
+  if (!match) throw new Error("Could not find restore_transaction_paths in repair.sh; it may have been renamed.");
+  return match[1].split("\n").map((line) => line.trim()).filter(Boolean);
+}
+
+describe("the deployment asset list (guarantee #45)", () => {
+  it("is exactly what the Dockerfile bundles into the image", () => {
+    expect([...dockerfileBundle()].sort()).toEqual([...DEPLOYMENT_ASSETS].sort());
   });
 
-  it("agrees byte-for-byte on the deployment_scripts array", () => {
-    expect(DEPLOYMENT_SCRIPTS).toEqual(extractArrayLiteral("deployment_scripts"));
+  it("is repair.sh's restore-transaction allowlist, less the environment file and secrets directory", () => {
+    expect(repairAllowlist()).toEqual([...DEPLOYMENT_ASSETS, ENVIRONMENT_FILE, SECRETS_DIRECTORY]);
   });
 
-  it("deployment_scripts is a subset of deployment_assets", () => {
+  // The successful-rollback journey stages a backup of each managed path by
+  // hand, and repair's restore removes any managed path with no staged backup
+  // as one the transaction created. A path missing here is deleted from the
+  // live deployment by a correct rollback, and the journey then fails its
+  // manifest check for a reason in the fixture (#1212's recovery-bundle
+  // scripts, pipeline 2234).
+  it("is what the repair-journeys successful-rollback fixture stages, path for path", () => {
+    const harness = readFileSync(join(repoRoot, "scripts", "test-repair-journeys.sh"), "utf8");
+    const match = /^ {2}for managed in ([\s\S]*?); do$/m.exec(harness);
+    if (!match) throw new Error("Could not find the successful-rollback staging loop in test-repair-journeys.sh.");
+    const staged = match[1].split(/[\s\\]+/).filter(Boolean);
+    expect(staged).toEqual(repairAllowlist());
+  });
+
+  it("names every bundled shell script as a deployment script, and each passes bash -n", () => {
+    expect(DEPLOYMENT_SCRIPTS).toEqual(DEPLOYMENT_ASSETS.filter((asset) => asset.startsWith("scripts/")));
     for (const script of DEPLOYMENT_SCRIPTS) {
-      expect(DEPLOYMENT_ASSETS).toContain(script);
+      const result = failOnProcessDeadline(spawnSync("bash", ["-n", join(repoRoot, script)], { encoding: "utf8", ...processGuard() }), {
+        label: `bash -n ${script}`,
+      });
+      expect(result.status, script).toBe(0);
     }
   });
 });

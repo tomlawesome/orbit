@@ -1,33 +1,19 @@
-import { closeSync, constants, fchmodSync, fstatSync, openSync } from "node:fs";
-
 import { readEnvironmentValue } from "./target-identity";
 
-// OIDC discovery validation (issue #295 slice 3), ported from
-// scripts/install.sh's `verify_oidc_discovery` (install.sh:887-945).
-// Guarantee numbers below cite docs/installer-guarantees.md, Part 1 /
-// install.sh, and are re-asserted by name in src/lib/oidc-discovery.test.ts.
+// OIDC discovery validation, ported from scripts/install.sh's
+// `verify_oidc_discovery` (issue #295 slice 3) and, since #1212 (build note
+// F5), fetched and parsed in the engine process itself. Guarantee numbers
+// below cite docs/installer-guarantees.md, Part 1 / install.sh, and are
+// re-asserted by name in src/lib/oidc-discovery.test.ts.
 //
-// This is a two-boundary port, not a pure-filesystem one like slice 1/2:
-// fetching the discovery document is a network call (curl), and — unlike
-// every other guarantee ported so far — the document's own JSON is
-// deliberately *never* parsed by install.sh's own host process at all; it
-// is parsed only inside a throwaway, network-isolated, capability-dropped
-// Docker container (guarantee #27), specifically because it is untrusted
-// content from a remote OIDC provider. Both the curl call and the
-// sandboxed-container call are therefore injected adapters with no
-// production implementation shipped in this slice — the same "handoff, not
-// port" non-goal src/lib/database-volume-safety.ts's docker adapters
-// established for slice 2; see docs/adr-notes/295-install-port-plan.md.
-//
-// validateDiscoveryDocument below is a faithful TypeScript port of the
-// exact JS install.sh runs inside that sandboxed container
-// (`oidc_discovery_parser`, install.sh:23-47). It exists to prove semantic
-// parity against the real, unmodified script (oidc-discovery.parity.test.ts
-// awk-extracts the live source) and to give a real, adapter-independent
-// implementation ready for the sandboxed adapter slice 5 eventually ships —
-// but verifyOidcDiscovery itself never calls it directly against live
-// network content; it only ever trusts the injected sandbox adapter's own
-// decision, exactly as install.sh only trusts the container's exit code.
+// install.sh fetched the document with curl and parsed it only inside a
+// throwaway `docker run --network none --read-only` container, because bash
+// had to borrow the image's Node to parse untrusted JSON. The engine already
+// is a container from that image, with no Docker socket, so the sandbox has
+// nothing left to add. What keeps an untrusted provider bounded now is what
+// curl enforced -- https only, on every redirect too, a time limit and a byte
+// cap -- plus the shape rules of validateDiscoveryDocument (#27). The
+// document is held in memory and never written to disk.
 
 /** oidc_discovery_max_bytes (install.sh:21) — the curl --max-filesize cap and the on-disk size recheck bound. */
 export const OIDC_DISCOVERY_MAX_BYTES = 1_048_576;
@@ -57,9 +43,6 @@ export function buildDiscoveryUrl(issuer: string): string {
  * decision is byte-for-byte comparable to the real script's for identical
  * raw input — see the parity test for why the issuer is re-derived from
  * `input` rather than trusted from the `issuer` parameter directly.
- *
- * Not called from verifyOidcDiscovery's own shipped path — see the module
- * comment above for why.
  */
 export function validateDiscoveryDocument(issuer: string, documentContent: string): boolean {
   const input = `${issuer}\n${documentContent}`;
@@ -99,44 +82,6 @@ export interface OidcFetchResult {
   curlExitCode: number;
   /** The HTTP status text curl wrote via --write-out (e.g. "200", "404", "000" if no status line was ever read). */
   httpStatus: string;
-}
-
-export interface OidcDiscoveryFetchAdapter {
-  /**
-   * curl --silent --show-error --location --connect-timeout 5 --max-time 10
-   *   --max-filesize <OIDC_DISCOVERY_MAX_BYTES> --header 'Accept: application/json'
-   *   --proto '=https' --proto-redir '=https' --tlsv1.2
-   *   --output <destinationPath> --write-out '%{http_code}' <discoveryUrl>
-   * (install.sh:899-905, guarantee #25 — plaintext HTTP and
-   * protocol-downgrade-on-redirect are structurally impossible, and both
-   * time and response size are bounded).
-   */
-  fetch(discoveryUrl: string, destinationPath: string): OidcFetchResult;
-}
-
-export interface OidcDiscoverySandboxAdapter {
-  /**
-   * docker run --rm --interactive --entrypoint node --network none --read-only
-   *   --cap-drop ALL --security-opt no-new-privileges --user 1001:1001
-   *   --pids-limit 64 --memory 64m --cpus 0.5 <resolvedReference>
-   *   --input-type=commonjs -e <oidc_discovery_parser>, fed `${issuer}\n`
-   *   followed by the discovery document's own bytes on stdin
-   * (install.sh:927-944, guarantee #27). Returns whether the sandboxed
-   * process exited 0 (validated) or not.
-   *
-   * No production implementation ships in this slice — the real docker
-   * invocation belongs to the slice-5 orchestration work, exactly as
-   * src/lib/database-volume-safety.ts's docker adapters. `documentPath` is
-   * handed to the adapter (not pre-read content) so a real implementation
-   * can `cat` it fresh into the container, matching install.sh's own
-   * two-open sequence exactly.
-   */
-  validate(issuer: string, documentPath: string): boolean;
-}
-
-export interface OidcDiscoveryAdapters {
-  fetch: OidcDiscoveryFetchAdapter;
-  sandbox: OidcDiscoverySandboxAdapter;
 }
 
 export type OidcDiscoveryFailureReason = "configuration-failure" | "provider-unavailable";
@@ -183,71 +128,100 @@ export function classifyOidcFetchResult(result: OidcFetchResult): OidcDiscoveryF
   return configurationFailure();
 }
 
-/**
- * is_regular_non_symlink_file + chmod 600 + on-disk size recheck
- * (install.sh:919-925, guarantee #26): the downloaded discovery document is
- * only trusted after independently confirming it landed as a regular,
- * non-symlink file, forcing its permissions to 600, and re-checking its
- * on-disk size against the same byte cap curl itself already enforced.
- *
- * Ported through a single file descriptor (open with O_NOFOLLOW, then
- * fstat/fchmod/fstat on that descriptor) rather than install.sh's own three
- * separate path-based operations, so no step here can be raced by a symlink
- * swap between checks (no stat-then-use pattern) — a strict tightening of
- * install.sh's own literal sequence, not a behavioral difference for any
- * fixture where nothing races the installer. See docs/adr-notes/
- * 295-install-port-plan.md's Flags section.
- */
-function verifyDiscoveryFileSafety(discoveryFilePath: string): boolean {
-  let descriptor: number;
-  try {
-    descriptor = openSync(discoveryFilePath, constants.O_RDONLY | constants.O_NOFOLLOW);
-  } catch {
-    return false;
-  }
-  try {
-    const stat = fstatSync(descriptor);
-    if (!stat.isFile()) return false;
-    try {
-      fchmodSync(descriptor, 0o600);
-    } catch {
-      return false;
+/** curl's own --max-redirs default is 50; a discovery document needs far fewer. */
+const MAXIMUM_REDIRECTS = 10;
+
+/** curl --max-time 10 (install.sh). */
+const DISCOVERY_TIMEOUT_MS = 10_000;
+
+export interface VerifyOidcDiscoveryOptions {
+  /** The transport; the global fetch in production. Tests carry the request to a local fixture server. */
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}
+
+class BodyTooLarge extends Error {}
+
+/** Reads the body up to the cap and stops there (curl --max-filesize). */
+async function readCappedBody(response: Response): Promise<string> {
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > OIDC_DISCOVERY_MAX_BYTES) throw new BodyTooLarge();
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > OIDC_DISCOVERY_MAX_BYTES) {
+      await reader.cancel().catch(() => {});
+      throw new BodyTooLarge();
     }
-    const rechecked = fstatSync(descriptor);
-    return rechecked.size <= OIDC_DISCOVERY_MAX_BYTES;
-  } finally {
-    closeSync(descriptor);
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+/**
+ * The curl request install.sh made (guarantee #25), as an in-process fetch:
+ * `--proto '=https' --proto-redir '=https'` (an http URL, first or after a
+ * redirect, is never requested: curl's exit 1), `--location` (redirects
+ * followed by hand so each target is checked first), `--max-time 10` (exit
+ * 28), `--max-filesize` (exit 63). TLS 1.2 is Node's own minimum. Outcomes
+ * map onto curl's exit codes and `%{http_code}` so classifyOidcFetchResult
+ * decides exactly as install.sh did; the body comes back for a 2xx only.
+ */
+async function fetchDiscovery(discoveryUrl: string, options: VerifyOidcDiscoveryOptions): Promise<OidcFetchResult & { body?: string }> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  let current: URL;
+  try {
+    current = new URL(discoveryUrl);
+  } catch {
+    return { curlExitCode: 3, httpStatus: "000" };
+  }
+  const signal = AbortSignal.timeout(options.timeoutMs ?? DISCOVERY_TIMEOUT_MS);
+  try {
+    for (let redirects = 0; ; redirects += 1) {
+      if (current.protocol !== "https:") return { curlExitCode: 1, httpStatus: "000" };
+      const response = await fetchImpl(current.href, { redirect: "manual", headers: { Accept: "application/json" }, signal });
+      const location = response.headers.get("location");
+      if (response.status >= 300 && response.status < 400 && location !== null) {
+        await response.body?.cancel().catch(() => {});
+        // curl --max-redirs: exit 47.
+        if (redirects >= MAXIMUM_REDIRECTS) return { curlExitCode: 47, httpStatus: String(response.status) };
+        try {
+          current = new URL(location, current);
+        } catch {
+          return { curlExitCode: 3, httpStatus: String(response.status) };
+        }
+        continue;
+      }
+      const body = await readCappedBody(response);
+      return { curlExitCode: 0, httpStatus: String(response.status), body };
+    }
+  } catch (error) {
+    if (error instanceof BodyTooLarge) return { curlExitCode: 63, httpStatus: "000" };
+    // A timeout (curl 28), a refused or reset connection (7, 56), a TLS
+    // failure (35, 60): every one of them is the provider being unavailable.
+    return { curlExitCode: signal.aborted ? 28 : 7, httpStatus: "000" };
   }
 }
 
 /**
- * verify_oidc_discovery (install.sh:887-945): reads OIDC_ISSUER from the
- * deployment's `.env-orbit` (src/lib/target-identity.ts's
- * readEnvironmentValue — this is how this module "wires onto slice 2's
- * validated identity"), fetches the discovery document to
- * `discoveryFilePath` via the injected fetch adapter, verifies the on-disk
- * file's safety, and only trusts the document after the injected sandbox
- * adapter validates it. `discoveryFilePath` is the caller's responsibility
- * to place under a transaction's own staging area (src/lib/
- * install-transaction.ts's `stagingPathFor`) — this module wires onto
- * slice 1's transaction the same way, by accepting a caller-supplied path
- * rather than managing its own staging directory.
+ * verify_oidc_discovery (guarantees #25-27): reads OIDC_ISSUER from the
+ * deployment's `.env-orbit`, fetches the provider's discovery document under
+ * curl's old rules and checks its shape. Failures carry install.sh's own
+ * reason (`configuration-failure` or `provider-unavailable`), action and
+ * message.
  */
-export function verifyOidcDiscovery(
-  targetDir: string,
-  discoveryFilePath: string,
-  adapters: OidcDiscoveryAdapters,
-): OidcDiscoveryOutcome {
+export async function verifyOidcDiscovery(targetDir: string, options: VerifyOidcDiscoveryOptions = {}): Promise<OidcDiscoveryOutcome> {
   const issuer = readEnvironmentValue(targetDir, "OIDC_ISSUER");
   if (issuer === undefined) return configurationFailure(ISSUER_MISSING_MESSAGE);
 
-  const discoveryUrl = buildDiscoveryUrl(issuer);
-  const fetchFailure = classifyOidcFetchResult(adapters.fetch.fetch(discoveryUrl, discoveryFilePath));
+  const result = await fetchDiscovery(buildDiscoveryUrl(issuer), options);
+  const fetchFailure = classifyOidcFetchResult(result);
   if (fetchFailure) return fetchFailure;
-
-  if (!verifyDiscoveryFileSafety(discoveryFilePath)) return configurationFailure();
-
-  if (!adapters.sandbox.validate(issuer, discoveryFilePath)) return configurationFailure();
-
+  if (result.body === undefined || !validateDiscoveryDocument(issuer, result.body)) return configurationFailure();
   return { status: "ok" };
 }

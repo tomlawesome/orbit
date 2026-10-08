@@ -1,0 +1,28 @@
+{
+  "name": "preprovisioned exact contract",
+  "mode": "preprovisioned",
+  "setup": [
+    {
+      "path": ".env-orbit",
+      "file": "APP_URL=https://parity.invalid\n",
+      "mode": 384
+    },
+    {
+      "path": ".orbit-secrets",
+      "dir": true,
+      "mode": 448
+    },
+    {
+      "path": ".orbit-secrets/oidc-client-secret",
+      "file": "s3cr3t",
+      "mode": 384
+    }
+  ],
+  "requested": null,
+  "targetBasename": "_Parity.Target",
+  "bash": {
+    "status": 0,
+    "stdout": "true",
+    "stderr": ""
+  }
+}

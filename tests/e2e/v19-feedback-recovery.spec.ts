@@ -26,15 +26,14 @@ resetDatabaseBetweenSpecFiles();
  *   IMAP review              a mail suggestion whose approval fails, from the
  *                            item view and from /inbox
  *   signed-in lifecycle      a household deletion request that fails
- *   document-assisted item   a document picked on /create: v19 has no upload
- *                            yet, so the save says the file was not kept, and
- *                            that is the feedback to announce
  *
- * What did not come across, because v19 has no equivalent to drive: the old
- * document journey's upload conflict, scanner-unavailable retry and
- * inspection rejection (no v19 screen uploads a document), and the old
- * lifecycle's member-management toasts and disabled-account page
- * (auth-error.spec.ts covers the v19 error page itself).
+ * What did not come across: the old document journey's upload conflict,
+ * scanner-unavailable retry and inspection rejection (v19-create.spec.ts
+ * proves the create form's attach, #1245; its pocket "was not kept" check
+ * went when the pocket started keeping documents, owner's 11a), and,
+ * because v19 has no equivalent to drive, the old lifecycle's
+ * member-management toasts and disabled-account page (auth-error.spec.ts
+ * covers the v19 error page itself).
  *
  * Every failure journey is two tests, so one defect cannot hide the other
  * check behind it:
@@ -153,8 +152,9 @@ const createOffline: Journey = {
       await page.unroute("**/api/workspace/commands", failCommands);
       await reach(page, save, "create, retry");
       await page.keyboard.press("Enter");
-      /* Saved: the desk returns to the orbit, the pocket approaches the item. */
-      await expect(page).toHaveURL(isPocket() ? /\/item\/[0-9a-f-]{36}$/ : /\/home$/, { timeout: 30_000 });
+      /* Saved: the desk closes onto the main screen at the saved item's own
+         address (#1246), the pocket approaches the item. */
+      await expect(page).toHaveURL(isPocket() ? /\/item\/[0-9a-f-]{36}$/ : /\/home\?item=[0-9a-f-]{36}$/, { timeout: 30_000 });
     };
   },
   /* #1192: WebKit keeps focus on the pressed button while it is disabled
@@ -388,76 +388,3 @@ for (const journey of JOURNEYS) {
     }
   });
 }
-
-/* ── document-assisted item ────────────────────────────────────────────── */
-
-/* Desk: "Saved. renewal-letter.pdf was not attached …" in #save-note
-   (aria-live="polite"), and the page stays; pocket: "… was not kept" in the
-   wake's status region (lib/pocket/Wake.svelte) as the new item opens. */
-const DOCUMENT_NOT_KEPT = /renewal-letter\.pdf was not (attached|kept)/;
-
-/** Picks a document and saves an entry with it, by keyboard; returns its name. */
-async function saveWithDocument(page: Page): Promise<string> {
-  const name = `Document proving ${randomUUID().slice(0, 8)}`;
-  /* Listened for BEFORE the page loads: Playwright switches the browser's
-     file-chooser interception on when the first listener arrives, and a key
-     that lands before that switch has taken opens the native chooser, which
-     no event reports -- seen twice in five desk runs while this file was
-     written, as a 15s wait right after the Enter. */
-  const chooser = page.waitForEvent("filechooser", { timeout: 45_000 });
-  await gotoCreate(page);
-  const nameField = page.getByRole("textbox", { name: "name", exact: true }).filter({ visible: true });
-  await expect(nameField).toBeVisible({ timeout: 30_000 });
-
-  /* The picker, by keyboard: the desk's drop target is a role="button" that
-     opens the file chooser on Enter or Space; the pocket's is "add a
-     document". */
-  const picker = isPocket() ? "#pocket-entry .pc-doc" : "#dropzone";
-  await tabTo(page, { selector: picker }, { screen: "create, document" });
-  await page.keyboard.press("Enter");
-  await (await chooser).setFiles({ name: "renewal-letter.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%%EOF\n") });
-
-  await nameField.fill(name);
-  await page.getByRole("group", { name: /^section/ }).filter({ visible: true }).getByRole("button", { name: "Home" }).click();
-  await tabTo(page, { selector: isPocket() ? ".pk-save" : "#card .btn-primary" }, { screen: "create, document" });
-  await page.keyboard.press("Enter");
-  return name;
-}
-
-test("a document picked on /create is announced as not kept, and the entry still saves", async ({ page }) => {
-  test.setTimeout(90_000);
-  await signIn(page, "/home");
-  const household = await seedHousehold(page, "feedback-recovery");
-  try {
-    const name = await saveWithDocument(page);
-    await expect.poll(() => liveRegionFor(page, DOCUMENT_NOT_KEPT), { timeout: 15_000 }).not.toMatch(/^(none|absent)$/);
-
-    /* And the entry itself is in the orbit, whatever became of the file. */
-    const listed = await page.request.get("/api/workspace", { timeout: 15_000 });
-    expect(listed.ok()).toBe(true);
-    const { workspace } = (await listed.json()) as { workspace: { households: Array<{ id: string; items: Array<{ title: string }> }> } };
-    expect(workspace.households.find((one) => one.id === household.id)?.items.map((item) => item.title)).toContain(name);
-  } finally {
-    await cleanup(page, household);
-  }
-});
-
-test("a document picked on /create leaves focus where the reader was", async ({ page }) => {
-  /* The pocket saves by opening the new item: a navigation, where focus
-     starting over is SvelteKit's own reset, not a loss. The desk stays put. */
-  test.skip(isPocket(), "the pocket save navigates to the new item; focus starting over there is not a loss");
-  test.fixme(isFirefox(), FOCUS_DEFECT_RACES_ON_FIREFOX);
-  test.fixme(test.info().project.name === "desktop-webkit", FOCUS_DEFECT_RACES_ON_DESKTOP_WEBKIT);
-  const defect = FOCUS_LOST_TO_DISABLED_BUTTON("the desk create card (#card .btn-primary)");
-  test.fail(Boolean(defect), defect);
-  test.setTimeout(90_000);
-  await signIn(page, "/home");
-  const household = await seedHousehold(page, "feedback-recovery");
-  try {
-    await saveWithDocument(page);
-    await expect(shownText(page, DOCUMENT_NOT_KEPT)).toBeVisible({ timeout: 15_000 });
-    expect(await focusedElement(page), "create, document: focus is not dropped to the page").not.toBe("body");
-  } finally {
-    await cleanup(page, household);
-  }
-});

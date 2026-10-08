@@ -1,0 +1,10 @@
+{
+  "restoreIdPattern": "^[A-Za-z0-9_-]+$",
+  "states": [
+    "checkpointed",
+    "documents-replaced",
+    "database-restored",
+    "rollback-failed"
+  ],
+  "requiredMode": "600"
+}

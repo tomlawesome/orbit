@@ -18,6 +18,28 @@ what each script promises.
 - About 4 GiB of free memory for the malware scanner, on top of Orbit and
   its database.
 
+Your reverse proxy must accept uploads a little larger than Orbit's document
+limit. The limit is 50 MiB by default, and an administrator can change it
+(up to 100 MiB) with the upload size limit in Administration. Many proxies
+refuse much smaller requests unless told otherwise, and a document over the
+proxy's own limit fails with "413" before it reaches Orbit. Set the proxy a
+little above the limit your administrator chooses: 51 MiB for the default,
+or 101 MiB to cover every possible setting.
+
+Bringing a household in from an Orbit archive that includes documents sends
+a larger request, up to 172 MiB. If you will import archives, set the proxy
+to 172 MiB instead; it covers every document setting too.
+
+- nginx: `client_max_body_size 51m;` (or `101m;`, or `172m;`). Its default
+  is 1 MB, so this setting is needed.
+- Caddy: limits request bodies only if you set
+  `request_body { max_size 51MiB }` (or `101MiB`, or `172MiB`).
+- Traefik: limits request bodies only if the buffering middleware sets
+  `maxRequestBodyBytes` (53477376 is 51 MiB; 105906176 is 101 MiB;
+  180355072 is 172 MiB).
+
+If the document limit is raised later, raise the proxy setting to match.
+
 ## Install
 
 From an empty directory, run:
@@ -93,9 +115,16 @@ The Compose files and operator scripts come out of that same build, so they
 always match the version they came with. The directory ends up holding
 `docker-compose.yml`, `docker-compose.mail.yml`, `.env-orbit.example`,
 `config/tika-config.json`, the scripts `configure.sh`,
-`backup.sh`, `restore.sh`, `repair.sh` and
-`installer-ui.sh`, your settings in `.env-orbit`, and your secrets in
-`.orbit-secrets/`.
+`backup.sh`, `restore.sh`, `repair.sh`, `export-recovery-bundle.sh`,
+`import-recovery-bundle.sh` and `installer-ui.sh`, your settings in
+`.env-orbit`, and your secrets in `.orbit-secrets/`.
+
+The installer itself only fetches, checks and starts things. Everything that
+reads or writes the directory — checking it is safe to install into, asking
+your questions, writing the settings and secrets, and checking your sign-in
+provider — runs inside that same build, in a short-lived container that is
+removed when it finishes. If anything goes wrong before Orbit starts, it puts
+the directory back exactly as it was.
 
 The installer then generates four separate secrets: one for sign-in
 sessions, the database password, the document encryption key, and a key

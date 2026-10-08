@@ -29,8 +29,8 @@ import { CORRESPONDENCE_QUERIES, type CorrespondenceReports, type RestoreDockerA
 // (docs/adr-notes/296-backup-port-plan.md): every function in
 // backup-restore-cli.ts exercised end-to-end against a trivial in-memory
 // fake adapter (no process spawning, no Docker daemon — same "(1) in-memory
-// fake adapter" layer recovery-bundle.docker-adapter.test.ts and
-// restore-engine.docker-adapter.test.ts already established), proving the
+// fake adapter" layer recovery-bundle.backup.test.ts and
+// restore-engine.lifecycle.test.ts already established), proving the
 // pieces are actually wired together and that every live mutation still
 // goes through RestoreRun's journal/checkpoint machinery.
 
@@ -126,7 +126,13 @@ class FakeAdapter implements RestoreDockerAdapter {
     this.liveReports = reportsFor(initialStorageKey, initialContentLength);
   }
 
+  stopCalls = 0;
+  /** Stage databases created and not yet dropped. */
+  readonly openStageDatabases = new Set<string>();
+  stageDatabasesCreated = 0;
+
   stopApp(): boolean {
+    this.stopCalls += 1;
     if (!this.stopOk) return false;
     this.appRunning = false;
     return true;
@@ -155,10 +161,12 @@ class FakeAdapter implements RestoreDockerAdapter {
     this.recordExportedCalls += 1;
     if (!this.recordExportedOk) throw new RecoveryBundleRefusal("record failed", "recovery-bundle-record-failed");
   }
-  createStageDatabase(): void {
-    // no-op
+  createStageDatabase(name: string): void {
+    this.openStageDatabases.add(name);
+    this.stageDatabasesCreated += 1;
   }
   dropStageDatabase(name: string): void {
+    this.openStageDatabases.delete(name);
     this.stageContents.delete(name);
   }
   restoreDumpToDatabase(name: string, dumpPath: string): boolean {
@@ -481,6 +489,89 @@ describe("runRestore (restore.sh's main flow :897-933, including check_capacity 
     ).toThrow(BackupRestoreCliRefusal);
     expect(existsSync(restorePaths.journalPath)).toBe(false);
     expect(existsSync(restorePaths.restoreRoot)).toBe(false); // createCheckpoint (which mkdirs restoreRoot) was never reached
+  });
+
+  // Amendment E3a: restore.sh runs this while Orbit is still up, so it must
+  // change nothing live and leave nothing behind for the journal rule to read.
+  describe("preflightOnly (the shell's `restore --preflight`, amendment E3a)", () => {
+    it("passes a good bundle and returns before confirm(): no stop, no journal, no checkpoint, stage database dropped, lock released", () => {
+      const { backupDirectory, restorePaths, adapter } = setup();
+      const updateBundlePath = buildBundle(join(sandbox, "preflight-source"), UPDATED_KEY, 22, LIVE_KEK, join(sandbox, "preflight-backups"));
+      const workDir = mkdtempSync(join(sandbox, "restore-preflight-"));
+      let confirmCalled = false;
+
+      const result = runRestore({
+        backupTarPath: updateBundlePath,
+        documentKekHex: LIVE_KEK,
+        paths: restorePaths,
+        adapter,
+        workDir,
+        preflightOnly: true,
+        confirm: () => {
+          confirmCalled = true;
+          return true;
+        },
+      });
+
+      expect(result.outcome).toBe("preflight-passed");
+      expect(confirmCalled).toBe(false);
+      expect(adapter.stopCalls).toBe(0);
+      expect(adapter.appRunning).toBe(true);
+      expect(existsSync(restorePaths.journalPath)).toBe(false);
+      expect(existsSync(restorePaths.restoreRoot)).toBe(false);
+      expect(adapter.stageDatabasesCreated).toBeGreaterThan(0);
+      expect([...adapter.openStageDatabases]).toEqual([]);
+      expect(adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto)).toBe(reportsFor(ORIGINAL_KEY, 10).crypto); // live database untouched
+      expect(lockIsFree(join(backupDirectory, ".orbit-backup-restore.lock"))).toBe(true);
+    });
+
+    it("refuses a bundle sealed with another key with the full run's own message", () => {
+      const { restorePaths, adapter } = setup();
+      const otherKeyBundle = buildBundle(join(sandbox, "preflight-wrong-key-source"), UPDATED_KEY, 22, "b".repeat(64), join(sandbox, "preflight-wrong-key-backups"));
+      const attempt = (preflightOnly: boolean): Error => {
+        try {
+          runRestore({
+            backupTarPath: otherKeyBundle,
+            documentKekHex: LIVE_KEK,
+            paths: restorePaths,
+            adapter,
+            workDir: mkdtempSync(join(sandbox, "restore-preflight-wrong-key-")),
+            preflightOnly,
+            confirm: () => true,
+          });
+        } catch (error) {
+          return error as Error;
+        }
+        throw new Error(`a ${preflightOnly ? "preflight" : "full"} run accepted a bundle sealed with another key`);
+      };
+
+      const preflightRefusal = attempt(true);
+      expect(preflightRefusal.message).toBe(attempt(false).message);
+      expect(adapter.stopCalls).toBe(0);
+      expect([...adapter.openStageDatabases]).toEqual([]);
+    });
+
+    it("takes the same backup/restore lock as the full run", () => {
+      const { backupDirectory, restorePaths, adapter } = setup();
+      const updateBundlePath = buildBundle(join(sandbox, "preflight-lock-source"), UPDATED_KEY, 22, LIVE_KEK, join(sandbox, "preflight-lock-backups"));
+      const lockPath = join(backupDirectory, ".orbit-backup-restore.lock");
+      const holder = holdLockInAnotherProcess(lockPath);
+      try {
+        expect(() =>
+          runRestore({
+            backupTarPath: updateBundlePath,
+            documentKekHex: LIVE_KEK,
+            paths: restorePaths,
+            adapter,
+            workDir: mkdtempSync(join(sandbox, "restore-preflight-lock-")),
+            preflightOnly: true,
+            confirm: () => true,
+          }),
+        ).toThrow(expect.objectContaining({ code: "restore-locked" }));
+      } finally {
+        killLockHolder(holder, lockPath);
+      }
+    });
   });
 });
 
@@ -938,7 +1029,7 @@ describe("runImportRecoveryBundle (import-recovery-bundle.sh's orchestration, li
         importConfirmed: true,
         confirmRestore: () => true,
       }),
-    ).toThrow(RecoveryBundleRefusal);
+    ).toThrow("preflight/decryption failed; the recovery key could not be decrypted.");
     expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(LIVE_KEK);
   });
 
@@ -1057,6 +1148,102 @@ describe("runImportRecoveryBundle (import-recovery-bundle.sh's orchestration, li
       expect((caught as Error).message).toContain(previousKekPath);
       // The old key still exists, outside the (now-deleted) scratch workDir.
       expect(readFileSync(previousKekPath, "utf8").trim()).toBe(LIVE_KEK);
+    });
+  });
+
+  // Amendment E3a: import-recovery-bundle.sh runs this while Orbit is still
+  // up; the passphrase is asked once, in the full run that follows.
+  describe("preflightOnly (the shell's `import-recovery-bundle --preflight`, amendment E3a)", () => {
+    function importTarget(suffix: string): { liveDocumentKekFile: string; backupDirectory: string; adapter: FakeAdapter } {
+      const liveDocumentsRoot = join(sandbox, `live-docs-import-preflight-${suffix}`);
+      buildDocumentTree(liveDocumentsRoot, ORIGINAL_KEY, 10);
+      const liveDocumentKekFile = join(sandbox, `live-document-kek-preflight-${suffix}`);
+      writeFileSync(liveDocumentKekFile, `${LIVE_KEK}\n`, { mode: 0o600 });
+      const backupDirectory = join(sandbox, `import-preflight-backups-${suffix}`);
+      mkdirSync(backupDirectory, { recursive: true, mode: 0o700 });
+      return { liveDocumentKekFile, backupDirectory, adapter: new FakeAdapter(liveDocumentsRoot, ORIGINAL_KEY, 10) };
+    }
+
+    it("passes a good bundle without asking for the passphrase or either confirmation, and changes nothing", () => {
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, "correct horse battery staple");
+      const { liveDocumentKekFile, backupDirectory, adapter } = importTarget("pass");
+      const asked: string[] = [];
+
+      const result = runImportRecoveryBundle({
+        recoveryBundlePath,
+        passphrase: () => {
+          asked.push("passphrase");
+          return "correct horse battery staple";
+        },
+        liveDocumentKekFile,
+        backupDirectory,
+        adapter,
+        preflightOnly: true,
+        importConfirmed: () => {
+          asked.push("import");
+          return true;
+        },
+        confirmRestore: () => {
+          asked.push("restore");
+          return true;
+        },
+        beforeRestore: () => asked.push("beforeRestore"),
+      });
+
+      expect(result.outcome).toBe("preflight-passed");
+      expect(asked).toEqual([]);
+      expect(readFileSync(liveDocumentKekFile, "utf8").trim()).toBe(LIVE_KEK);
+      expect(existsSync(`${liveDocumentKekFile}.import-rollback`)).toBe(false);
+      expect(adapter.stopCalls).toBe(0);
+      const paths = deriveRestorePaths(backupDirectory, liveDocumentKekFile);
+      expect(existsSync(paths.journalPath)).toBe(false);
+      expect(existsSync(paths.restoreRoot)).toBe(false);
+      expect(lockIsFree(join(backupDirectory, ".orbit-backup-restore.lock"))).toBe(true);
+    });
+
+    it("refuses a corrupt bundle with the full run's message, before any callback", () => {
+      const corrupt = join(sandbox, "corrupt-recovery.tar");
+      writeFileSync(corrupt, "not a tar archive\n");
+      const { liveDocumentKekFile, backupDirectory, adapter } = importTarget("corrupt");
+      const never = (): never => {
+        throw new Error("a callback was invoked");
+      };
+      const attempt = (preflightOnly: boolean): Error => {
+        try {
+          runImportRecoveryBundle({ recoveryBundlePath: corrupt, passphrase: never, liveDocumentKekFile, backupDirectory, adapter, preflightOnly, importConfirmed: never, confirmRestore: never });
+        } catch (error) {
+          return error as Error;
+        }
+        throw new Error("a corrupt recovery bundle was accepted");
+      };
+      const preflightRefusal = attempt(true);
+      expect(preflightRefusal).toBeInstanceOf(BackupRestoreCliRefusal);
+      expect(preflightRefusal.message).toBe(attempt(false).message);
+    });
+
+    it("refuses an unfinished restore, as the full run does", () => {
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, "correct horse battery staple");
+      const { liveDocumentKekFile, backupDirectory, adapter } = importTarget("journal");
+      const paths = deriveRestorePaths(backupDirectory, liveDocumentKekFile);
+      mkdirSync(paths.restoreRoot, { recursive: true, mode: 0o700 });
+      writeFileSync(paths.journalPath, "format_version=1\n", { mode: 0o600 });
+      expect(() =>
+        runImportRecoveryBundle({ recoveryBundlePath, passphrase: "x", liveDocumentKekFile, backupDirectory, adapter, preflightOnly: true, importConfirmed: true, confirmRestore: () => true }),
+      ).toThrow(expect.objectContaining({ code: "restore-journal-exists" }));
+    });
+
+    it("takes the same backup/restore lock as the full run", () => {
+      const { recoveryBundlePath } = buildRecoveryBundle(UPDATED_KEY, 22, UPDATED_KEY, "correct horse battery staple");
+      const { liveDocumentKekFile, backupDirectory, adapter } = importTarget("lock");
+      const lockPath = join(backupDirectory, ".orbit-backup-restore.lock");
+      const holder = holdLockInAnotherProcess(lockPath);
+      try {
+        expect(() =>
+          runImportRecoveryBundle({ recoveryBundlePath, passphrase: "x", liveDocumentKekFile, backupDirectory, adapter, preflightOnly: true, importConfirmed: true, confirmRestore: () => true }),
+        ).toThrow(expect.objectContaining({ code: "restore-locked" }));
+      } finally {
+        killLockHolder(holder, lockPath);
+      }
     });
   });
 });

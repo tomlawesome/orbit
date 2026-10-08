@@ -63,8 +63,8 @@ export const operationalReasons = [
   "scanner_failed",
   "malware_detected",
   "supported_structure",
-  "prohibited_content",
   "unsupported_structure",
+  "password_required",
   "infected",
   "parser_disabled",
   "parser_output_invalid",
@@ -121,6 +121,15 @@ export const operationalReasons = [
      because a provider that ignores `max_age` blocks every sensitive action;
      the record names no person and no provider text. */
   "step_up_rejected",
+  /* A new provider identity refused because its email already belongs to an
+     Orbit account (ADR-0023 §3, #1242): Orbit's rule, not a provider fault,
+     and the person's remedy is to sign in to that account and link. */
+  "link_required",
+  /* The claim's two provider refusals (ADR-0022, ADR-0023 §8, #1242): a
+     provider sign-in before the instance is claimed, and one after a local
+     administrator holds it. Orbit's rule, not a provider fault. */
+  "bootstrap_required",
+  "bootstrap_claimed",
   /* Tier 1 metadata (ADR-0024 decision 5): one stored value would not
      authenticate. The record names the table, column and row so an
      administrator can find it; it never carries the value, the ciphertext or
@@ -320,6 +329,34 @@ export function operationalDetail(literals: TemplateStringsArray, ...values: unk
  */
 export function operationalDetailFromValidatorMessage(message: string): OperationalDetail {
   return boundedDetailText(message) as OperationalDetail;
+}
+
+/**
+ * The detail for a caught error (#1288): its class, an HTTP status where it
+ * has one, and a short code where it has one - `error_class=PostgresError
+ * code=ECONNREFUSED`. The message is deliberately never included: driver and
+ * provider messages carry connection strings, SQL and personal data, and
+ * there is no redaction helper that can promise otherwise. Class and code are
+ * held to the same bounded-token rule as `operationalDetail` interpolations;
+ * one that fails it (or a status outside 100-599) is left out rather than
+ * logged, so a hostile `name`, `code` or `status` cannot smuggle text in.
+ */
+export function operationalErrorDetail(error: unknown): OperationalDetail {
+  const fields = error !== null && typeof error === "object" ? (error as Record<string, unknown>) : {};
+  const rawClass = error === null
+    ? "null"
+    : typeof error === "object"
+      ? (error as object).constructor?.name
+      : typeof error;
+  const errorClass = typeof rawClass === "string" && detailTokenPattern.test(rawClass) ? rawClass : "unknown";
+  const status = fields.status ?? fields.statusCode;
+  const code = fields.code;
+  const parts = [`error_class=${errorClass}`];
+  if (typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599) {
+    parts.push(`status=${status}`);
+  }
+  if (typeof code === "string" && detailTokenPattern.test(code)) parts.push(`code=${code}`);
+  return boundedDetailText(parts.join(" ")) as OperationalDetail;
 }
 
 export type OperationalEvent = {

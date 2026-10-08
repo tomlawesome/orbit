@@ -653,13 +653,16 @@ else
 
   # --- Build the app image: configuration runs inside it (#1210) ------------
 
-  orbit_short_sha="$(git rev-parse --short=12 HEAD)"
   orbit_revision="$(git rev-parse HEAD)"
   orbit_version="$(node scripts/calculate-version.mjs --channel preview)"
   # Per-run tag (#1241): the image is this run's to remove at teardown, which
   # is only safe if no other run at the same commit shares the tag. Layers
-  # stay cached by the builder, so a rebuild costs nothing extra.
-  readonly orbit_image="orbit-local:${orbit_short_sha}-$$"
+  # stay cached by the builder, so a rebuild costs nothing extra. It must
+  # also have the installer's local-tag shape, orbit-local:<12 hex>, because
+  # configure now runs inside this image and refuses any other (#1210,
+  # isValidOrbitImage), so the run's uniqueness goes into the hex: a hash of
+  # the commit and this process.
+  readonly orbit_image="orbit-local:$(printf '%s-%s' "$(git rev-parse HEAD)" "$$" | sha256sum | cut -c1-12)"
   readonly orbit_revision
   readonly orbit_version
   readonly orbit_channel="dev"

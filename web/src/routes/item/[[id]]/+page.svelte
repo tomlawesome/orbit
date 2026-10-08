@@ -30,7 +30,7 @@
     COST_LOCKED, DAMAGED, DAMAGED_PLACEHOLDER, LOCKED, NOTES_WORDS, PANEL_LOCKED, REFERENCE_WORDS,
     evidenceReadable, fieldState, itemLocked, receiptWords, saveProblem,
   } from "$lib/data/metadata-status.js";
-  import { matchesOf, nearestMatchOf, reachableAt, stepFrom } from "./band.js";
+  import { litItemCountOf, matchesOf, nearestMatchOf, reachableAt, stepFrom } from "./band.js";
   import { searchBelt } from "./pocket-find.js";
   import { mountBelt } from "./belt.behaviour.js";
   import "./belt.css";
@@ -168,6 +168,10 @@
     query.addEventListener("change", follow);
     return () => query.removeEventListener("change", follow);
   });
+  /* #1248: editing on the desk widens the card to 720px and drops the detail
+     rows the form repeats. The phone also sets `panel` while its full-height
+     edit sheet is up, so the card there is left alone. */
+  const editingInCard = $derived(panel === "edit" && !pocket);
 
   /* ---- THE SUGGESTION IN THE BELT (#1145, owner 2026-09-27: "the same
      familiar item belt just with a similar card to the suggested item screen,
@@ -719,6 +723,11 @@
   function closePreview() {
     if (!previewDoc) return;
     previewOpen = false;
+    /* #1301: the reader goes with the card. It unmounts when previewDoc
+       clears, and an `open` left true would mount the next paper's reader
+       already open. Closing it here, while it is still mounted, also lets
+       it take its own history entry back off. */
+    readerOpen = false;
     clearTimeout(previewBeatTimer);
     clearTimeout(previewLoadTimer);
     previewAbort?.abort();
@@ -912,6 +921,12 @@
   function onFind(event) {
     query = event.currentTarget.value;
     matches = matchesOf(bodies, query);
+    /* #1302: a search closes an open paper on the desk, the way dead space
+       and Esc do. With the reader out, the card and the page together fill
+       the sky to within 24px of each side, so there is no sky left for the
+       hit list beside them; and the search ends by moving the apex or
+       opening another paper, either of which closes the reader anyway. */
+    if (query.trim() && previewDoc && !pocket) belt?.closeDoc();
     belt?.setQuery(query, matches);
   }
   const hitList = $derived(
@@ -939,7 +954,7 @@
        keys keep working as the shortcut they always were. */
     if (!query.trim()) return `${itemCount} items${suggestedNote} · ${noQuerySuffix}`;
     return hitList.length
-      ? `${hitList.length} of ${itemCount} lit · enter centres the nearest`
+      ? `${litItemCountOf(bodies, hitList)} of ${itemCount} lit · enter centres the nearest`
       : "nothing matches · the belt keeps its shape";
   }
   const findnote = $derived(findnoteFor("in date order, sooner to later"));
@@ -1162,6 +1177,9 @@
     if (!previewDoc || pocket) return;
     const target = /** @type {Element | null} */ (event.target instanceof Element ? event.target : null);
     if (target?.closest?.(".readcard, .cardwrap, .hit, .find, .back, .orb, .account")) return;
+    /* #1301: the reader is portalled out of everything above, so its own
+       controls and its page have to be named; its backdrop stays dead space. */
+    if (target?.closest?.(".rd-panel :is(button, a, output, img), .rd-zoom")) return;
     belt?.closeDoc();
   }
 
@@ -1253,7 +1271,7 @@
        pair together (owner-decisions.md §18, design/v19/create-v3.html). -->
   <div class="lanes" id="lanes"
        class:left={previewSide === "left"} class:right={previewSide === "right"}
-       class:open={previewOpen}>
+       class:open={previewOpen} class:editing={editingInCard}>
   <!-- the card, riding at the apex -->
   <div class="cardwrap" id="cardwrap">
     {#if !bodies.length && pocket}
@@ -1396,6 +1414,7 @@
       <article class="glass item-card" class:ip={pocket}>
         <h2>{row.title}</h2>
         <div class="sub">{[row.section, row.kind].filter(Boolean).join(" · ")}</div>
+        {#if !editingInCard}
         <!-- #1005: a one-off ends on its day; nothing is due on it. -->
         <div class="kv"><span>{row.kind === "expiry" ? "ends" : "due"}</span><b class={row.urg}>{row.t} · {row.longWhen}</b></div>
         {#if row.snoozedUntil}
@@ -1426,6 +1445,7 @@
         {/if}
         {#if row.remind.length}
           <div class="kv"><span>reminders</span><b>{remindOf(row.remind)}</b></div>
+        {/if}
         {/if}
 
         <h3>actions</h3>
@@ -1606,6 +1626,7 @@
           <div class="problem" role="alert">{problem}</div>
         {/if}
 
+        {#if !editingInCard}
         {#if row.notes}
           <h3>notes</h3>
           <p>{row.notes}</p>
@@ -1633,6 +1654,7 @@
         {:else}
           <div class="note">no documents yet — anything you attach, or mail in to your
             relay, takes a seat in the belt beside this item.</div>
+        {/if}
         {/if}
       </article>
     {/if}
@@ -1724,7 +1746,10 @@
 
         {#if state === "available"}
           <div class="topsheet">
-            <div class="sheet">
+            <!-- §18 on the desk too (#1298): the page is a button, and pressing
+                 it opens the reader over the belt, as the phone's does. -->
+            <button type="button" class="sheet" aria-label="Read {previewDoc.name}"
+                    disabled={!previewShowing || previewDoc.staged} onclick={() => { readerOpen = true; }}>
               <!-- previewSrc starts "" for a staged paper, while loadStagedPage's
                    fetch is still in flight (#1155's own build, fixed here): an
                    `<img src="">` is not "no image" to a browser, it is a request
@@ -1736,7 +1761,7 @@
                    so this changes nothing for it. -->
               <img src={previewSrc || undefined} alt="Page one of {previewDoc.name}"
                    onload={previewLoaded} onerror={previewFailed} />
-            </div>
+            </button>
           </div>
         {/if}
       </div>

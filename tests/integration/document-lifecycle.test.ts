@@ -310,7 +310,7 @@ describe("authenticated encrypted document lifecycle", () => {
     expect(job).toMatchObject({ status: "retry", lastError: "purge_failed" });
   });
 
-  it("rejects structurally invalid supported uploads before durable metadata or scanning", async () => {
+  it("rejects structurally invalid supported uploads after the scan and before durable metadata (ADR-0033)", async () => {
     const fixture = await createIntegrationFixture("document-invalid-structure");
     const session = await fixture.session("member");
     const beforeDocuments = await getDb().select({ id: documents.id })
@@ -339,7 +339,7 @@ describe("authenticated encrypted document lifecycle", () => {
       expect(await response.json()).toEqual({
         error: {
           code: "document_structure_invalid",
-          message: "Choose a structurally valid PDF, JPEG, or PNG document",
+          message: "Orbit could not open this document. Choose another PDF, JPEG, or PNG.",
         },
       });
     }
@@ -769,6 +769,29 @@ describe("authenticated encrypted document lifecycle", () => {
       const [job] = await getDb().select({ status: documentJobs.status, attempts: documentJobs.attempts })
         .from(documentJobs).where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
       expect(job).toEqual({ status: "completed", attempts: 1 });
+      const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
+      expect(await storage.listQuarantineFiles()).toHaveLength(0);
+    });
+  });
+
+  it("opens an outage-staged upload only after its recovery scan, and rejects one the renderer cannot open (ADR-0033)", async () => {
+    const fixture = await createIntegrationFixture("document-scan-recovery-structure");
+    const documentId = randomUUID();
+    const unopenable = Buffer.from("%PDF-1.7\ntruncated");
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "unavailable" });
+    await withRequiredScanMode(async () => {
+      // Nothing opens the file while the scanner is away, so it is held for
+      // recovery like any other upload rather than refused unscanned.
+      const first = await uploadWithFilename(fixture, "policy.pdf", documentId, unopenable);
+      expect(first.response.status).toBe(202);
+      await getDb().update(documentJobs).set({ nextAttemptAt: new Date(Date.now() - 1_000) })
+        .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+      vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "clean" });
+      await runDocumentMaintenanceCycle();
+      const [document] = await getDb().select({ lifecycle: documents.lifecycle, scanStatus: documents.scanStatus, failureCode: documents.failureCode })
+        .from(documents).where(eq(documents.id, documentId));
+      expect(document).toEqual({ lifecycle: "rejected", scanStatus: "clean", failureCode: "unsupported_structure" });
+      expect(await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto).where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
       const storage = new LocalDocumentStorage(getDocumentConfig().storageRoot, getDocumentConfig().quarantineRoot);
       expect(await storage.listQuarantineFiles()).toHaveLength(0);
     });

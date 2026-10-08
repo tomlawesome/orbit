@@ -197,6 +197,12 @@ case "\$url" in
 esac
 SHIM
   chmod 755 "$workdir/shim/curl"
+  # This image is built here and never signed, so a host cosign would refuse
+  # it (install.sh verifies only when cosign answers `cosign version`). CI's
+  # job image has no cosign; hide this host's so the install takes the same
+  # path, and leave signature checks to the harnesses that test them.
+  printf '#!/bin/sh\nexit 127\n' > "$workdir/shim/cosign"
+  chmod 755 "$workdir/shim/cosign"
 }
 
 make_target() {
@@ -558,6 +564,39 @@ deployment_manifest() {
     done)
 }
 
+# Say on stderr what differs between two manifests: each path added, removed,
+# re-moded or with new content, by path and mode only. Never the hashes:
+# .env-orbit and .orbit-secrets/* are secrets, and a CI log is no place for
+# even a digest of one. A plain `diff` of the manifests printed them.
+manifest_diff() {
+  awk '
+    NF < 3 { next }
+    {
+      hash = $NF; mode = $(NF - 1)
+      path = substr($0, 1, length($0) - length(hash) - length(mode) - 2)
+    }
+    FILENAME == ARGV[1] { was_mode[path] = mode; was_hash[path] = hash; next }
+    {
+      seen[path] = 1
+      if (!(path in was_mode)) { printf "  added    %s (mode %s)\n", path, mode; next }
+      if (was_mode[path] != mode) printf "  mode     %s %s -> %s\n", path, was_mode[path], mode
+      if (was_hash[path] != hash) printf "  content  %s (mode %s)\n", path, mode
+    }
+    END { for (path in was_mode) if (!(path in seen)) printf "  removed  %s (mode %s)\n", path, was_mode[path] }
+  ' <(printf '%s\n' "$1") <(printf '%s\n' "$2") >&2
+}
+
+# Fail with message $2 unless the live deployment still matches manifest $1,
+# naming what differs first.
+assert_manifest() {
+  local now
+  now="$(deployment_manifest)"
+  [[ "$now" == "$1" ]] && return 0
+  printf '[repair-journeys] the deployment differs from its earlier manifest:\n' >&2
+  manifest_diff "$1" "$now"
+  fail "$2"
+}
+
 # --- the drift every journey below is built on ----------------------------
 
 drift_the_credential() {
@@ -631,7 +670,7 @@ journey_cancelled_repair() {
 
   after="$(deployment_manifest)"
   [[ "$before" == "$after" ]] || {
-    diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") >&2 || true
+    manifest_diff "$before" "$after"
     fail 'a cancelled repair changed the deployment'
   }
   health_check && fail 'a cancelled repair silently fixed the drift'
@@ -817,7 +856,7 @@ SHIM
 
   after="$(deployment_manifest)"
   [[ "$before" == "$after" ]] || {
-    diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") >&2 || true
+    manifest_diff "$before" "$after"
     fail 'an interrupted repair left the deployment changed'
   }
 
@@ -982,8 +1021,7 @@ journey_retained_volume_new_target() {
   # a health check would make this journey pass or fail for reasons that have
   # nothing to do with what it tests. The manifest is the honest question --
   # did diagnosing a second directory alter the first one.
-  [[ "$(deployment_manifest)" == "$before" ]] ||
-    fail 'retained-volume-new-target: diagnosing a new target changed the live deployment'
+  assert_manifest "$before" 'retained-volume-new-target: diagnosing a new target changed the live deployment'
 
   rm -rf -- "$newtarget"
   result_line retained-volume-new-target pass
@@ -1137,8 +1175,7 @@ journey_interrupted_configuration_migration() {
     { printf '%s\n' "$output" >&2
       fail 'interrupted-configuration-migration: a configuration finding survived the restore'; }
 
-  [[ "$(deployment_manifest)" == "$before" ]] ||
-    fail 'interrupted-configuration-migration: repairing a copy changed the live deployment'
+  assert_manifest "$before" 'interrupted-configuration-migration: repairing a copy changed the live deployment'
 
   rm -rf -- "$newtarget"
   result_line interrupted-configuration-migration pass
@@ -1216,7 +1253,7 @@ journey_hostile_value_privacy_negatives() {
 
   after="$(deployment_manifest)"
   [[ "$before" == "$after" ]] || {
-    diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") >&2 || true
+    manifest_diff "$before" "$after"
     fail 'hostile-value: the journey did not restore the deployment it borrowed'
   }
   result_line hostile-value-privacy-negatives pass
@@ -1264,8 +1301,7 @@ journey_unsafe_permissions() {
   [[ "$(stat -c '%a' "$target/.orbit-secrets/postgres-password")" == 600 ]] ||
     fail 'unsafe-permissions: postgres-password was not restored to mode 600'
 
-  [[ "$(deployment_manifest)" == "$before" ]] ||
-    fail 'unsafe-permissions: the repaired deployment does not match its pre-breakage manifest'
+  assert_manifest "$before" 'unsafe-permissions: the repaired deployment does not match its pre-breakage manifest'
   health_check || fail 'unsafe-permissions: the deployment is unhealthy after a permissions repair'
   result_line unsafe-permissions pass
 }
@@ -1300,8 +1336,7 @@ journey_missing_files() {
   status=0
   repair --check >/dev/null 2>&1 || status=$?
   [[ "$status" == 0 ]] || fail "missing-files: --check after restoring the file exited $status, expected 0"
-  [[ "$(deployment_manifest)" == "$before" ]] ||
-    fail 'missing-files: the restored deployment does not match its pre-breakage manifest'
+  assert_manifest "$before" 'missing-files: the restored deployment does not match its pre-breakage manifest'
   result_line missing-files pass
 }
 
@@ -1349,8 +1384,7 @@ journey_failed_db_migration() {
   status=0
   repair --check >/dev/null 2>&1 || status=$?
   [[ "$status" == 0 ]] || fail "failed-db-migration: --check after cleanup exited $status, expected 0"
-  [[ "$(deployment_manifest)" == "$before" ]] ||
-    fail 'failed-db-migration: diagnosing a database state changed the deployment files'
+  assert_manifest "$before" 'failed-db-migration: diagnosing a database state changed the deployment files'
   result_line failed-db-migration pass
 }
 
@@ -1416,8 +1450,7 @@ journey_unhealthy_app() {
     { printf '%s\n' "$output" >&2; fail 'unhealthy-app: restart-services did not report done'; }
 
   wait_for_health
-  [[ "$(deployment_manifest)" == "$before" ]] ||
-    fail 'unhealthy-app: a service restart changed the deployment files'
+  assert_manifest "$before" 'unhealthy-app: a service restart changed the deployment files'
   [[ "$(household_name)" == 'repair-journeys-household' ]] ||
     fail 'unhealthy-app: the restart disturbed the fixture data'
   result_line unhealthy-app pass
@@ -1448,13 +1481,18 @@ journey_successful_rollback() {
   # rolled the deployment's own scripts out of existence (exit 127 on the
   # next repair invocation). The list mirrors repair.sh's
   # restore_transaction_paths, the same way interrupted-configuration-
-  # migration's whole-directory copy already leans on it.
+  # migration's whole-directory copy already leans on it, and
+  # src/lib/deployment-assets.test.ts holds the two equal: when #1212 added
+  # the recovery-bundle scripts there and not here, the rollback removed
+  # both from the deployment as paths the transaction had created.
   local managed
   for managed in docker-compose.yml docker-compose.mail.yml \
       .env-orbit.example \
       config/tika-config.json scripts/configure.sh scripts/installer-ui.sh \
       scripts/backup.sh scripts/restore.sh \
-      scripts/repair.sh .env-orbit .orbit-secrets; do
+      scripts/repair.sh \
+      scripts/export-recovery-bundle.sh scripts/import-recovery-bundle.sh \
+      .env-orbit .orbit-secrets; do
     [[ -e "$target/$managed" ]] || continue
     mkdir -p -- "$staging/rollback/original/$(dirname -- "$managed")"
     cp -a -- "$target/$managed" "$staging/rollback/original/$managed"
@@ -1530,8 +1568,13 @@ journey_successful_rollback() {
   status=0
   repair --check >/dev/null 2>&1 || status=$?
   [[ "$status" == 0 ]] || fail "successful-rollback: --check after the rollback exited $status, expected 0"
-  [[ "$(deployment_manifest | grep -vE '^\./\.(env-orbit|orbit-secrets)\.pre-restore\.')" == "$before" ]] ||
+  local after
+  after="$(deployment_manifest | grep -vE '^\./\.(env-orbit|orbit-secrets)\.pre-restore\.' || true)"
+  [[ "$after" == "$before" ]] || {
+    printf '[repair-journeys] the rolled-back deployment differs from its pre-drift manifest:\n' >&2
+    manifest_diff "$before" "$after"
     fail 'successful-rollback: the rolled-back deployment does not match its pre-drift manifest'
+  }
   health_check || fail 'successful-rollback: the deployment is unhealthy after the rollback'
   [[ "$(household_name)" == 'repair-journeys-household' ]] ||
     fail 'successful-rollback: the rollback disturbed the fixture data'

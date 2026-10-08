@@ -43,6 +43,9 @@ const PLATFORM_KEYS = new Set([
   // alongside `orbit restore --yes` for unattended restore (guarantee #46).
   "ORBIT_RECOVERY_PROMPTS",
   "ORBIT_NONINTERACTIVE_RESTORE",
+  // The recovery-bundle scripts' test mode (answers as plain lines on
+  // standard input), which the shells forward to the engine since #1211.
+  "ORBIT_RECOVERY_TEST_MODE",
   // orbit configure's own machine-prompt/scripted-guided-init toggles
   // (issue #294, src/cli/orbit.ts / src/lib/configure-engine.ts), mirroring
   // configure.sh's own identically-named, identically-scoped environment
@@ -60,6 +63,17 @@ const PLATFORM_KEYS = new Set([
   // persist_orbit_image, forwarded to the engine by run_engine): set by
   // install.sh alone, never by a person, never written to .env-orbit.
   "ORBIT_CONFIGURE_TRUST_ORBIT_IMAGE",
+  // What install.sh hands the install engine it runs as a one-off (#1212,
+  // src/cli/orbit.ts commandInstallOrUpdate): its Docker facts, its plain
+  // mode, whether it passed a terminal through, the seconds already spent,
+  // and (tests only) where the bundled assets are. Set by the shell alone,
+  // never by a person, never written to .env-orbit.
+  "ORBIT_INSTALL_HOST_FACTS",
+  "ORBIT_INSTALLER_PLAIN",
+  "ORBIT_INSTALL_INTERACTIVE",
+  "ORBIT_INSTALLER_ELAPSED",
+  "ORBIT_INSTALL_TEST_ASSETS_ROOT",
+  "ORBIT_INSTALL_TEST_HARD_INTERRUPT_STAGE",
   // ADR-0017 slice 2 (#743): inbound mail (IMAP) credentials moved out of
   // the environment entirely — every IMAP_* key was removed from
   // ALLOWED_KEYS and no longer appears in .env-orbit.example. These five

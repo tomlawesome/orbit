@@ -1,1304 +1,522 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { Clock } from "./health-wait";
+import { DEPLOYMENT_ASSETS } from "./deployment-assets";
 import type { EngineEvent } from "./engine-event";
-import type { ConfigurationScriptAdapter, ConfigurationScriptResult } from "./configuration-migration";
-import type { OidcDiscoveryFetchAdapter, OidcFetchResult } from "./oidc-discovery";
-import type { ConfigureScriptResult, GuidedConfigurationAdapter, MachinePromptAnswerProvider, MachinePromptSessionResult } from "./guided-configuration";
-import { DEPLOYMENT_ASSETS, DEPLOYMENT_ASSETS_ROOT } from "./deployment-assets";
-import { type InstallOrchestratorAdapters, type InstallOrchestratorContext, runInstall } from "./install-orchestrator";
+import { type HostFacts, parseHostFacts } from "./host-facts";
+import { type ConfigurationAnswers, type InstallContext, type InstallDependencies, runInstall } from "./install-orchestrator";
+import { InstallPromptStop } from "./install-terminal";
+import { scriptedTerminal } from "../../tests/support/scripted-terminal";
 
-// Driven-flow coverage for issue #295 slice 5's install/update orchestrator
-// (install.sh:1259-1556's main flow). Unlike every parity test in this port,
-// install.sh has no standalone entry point for its *main* flow at all (it is
-// the whole script), so there is nothing to awk-extract or spawn here —
-// slices 1-4's own modules and this slice's image-resolution.ts/
-// deployment-assets.ts/deployment-profile.ts/health-wait.ts already each
-// have their own parity coverage against the real script. This suite instead
-// proves runInstall *sequences and wires* those already-proven pieces
-// correctly: the happy path end-to-end against fake adapters standing in for
-// docker/curl/configure.sh/configuration.sh, and each stage's fail-closed
-// short-circuit. Every fake adapter method resolves synchronously/
-// immediately (no real subprocess, no real sleep — a fake Clock drives
-// health-wait deterministically, mirroring health-wait.test.ts's own
-// fakeClock) so this whole suite runs with no blocking I/O and no timeouts
-// of its own to configure.
+// The install/update engine (#1212), driven end to end against real
+// directories: the deployment assets come from a fixture copy of this
+// repository's own bundle, configuration is the real configure engine and
+// migration, and the only seams are the ones the engine itself has -- the
+// shell's Docker facts (F3), the operator's terminal (F4) and the OIDC
+// transport (F5). Nothing here runs Docker, bash or a network call.
 
-const IMAGE_REPOSITORY = "ghcr.io/tomlawesome/orbit";
-const RESOLVED_DIGEST = "sha256:" + "a".repeat(64);
-const RESOLVED_REFERENCE = `${IMAGE_REPOSITORY}@${RESOLVED_DIGEST}`;
-const REVISION = "b".repeat(40);
-const VERSION = "v1.2.3";
-const VALID_BASH_SCRIPT = "#!/usr/bin/env bash\ntrue\n";
+const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+const DIGEST = `sha256:${"a".repeat(64)}`;
+const REFERENCE = `ghcr.io/tomlawesome/orbit@${DIGEST}`;
+const OLD_REFERENCE = `ghcr.io/tomlawesome/orbit@sha256:${"9".repeat(64)}`;
+const VALID_DISCOVERY = JSON.stringify({
+  issuer: "https://issuer.example.invalid",
+  authorization_endpoint: "https://issuer.example.invalid/authorize",
+  token_endpoint: "https://issuer.example.invalid/token",
+  jwks_uri: "https://issuer.example.invalid/jwks",
+});
 
 const sandboxes: string[] = [];
 afterEach(() => {
   for (const sandbox of sandboxes.splice(0)) rmSync(sandbox, { recursive: true, force: true });
 });
 
-function newTarget(): string {
-  const dir = mkdtempSync(join(tmpdir(), "orbit-orchestrator-target-"));
+function sandbox(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
   sandboxes.push(dir);
   return dir;
 }
 
-function fakeClock(): Clock {
-  // Advances virtual time by exactly however long `sleep` was asked to
-  // wait — no real setTimeout, so a multi-round polling test still runs
-  // instantly, matching health-wait.test.ts's own fakeClock pattern.
-  let seconds = 0;
-  return {
-    nowSeconds: () => seconds,
-    sleep: async (duration) => {
-      seconds += duration;
-    },
-  };
-}
-
-/** Writes a strict guarantee-#6 pre-provisioned target: is_preprovisioned_input's exact shape, so validateTarget reports targetWasEmpty=true even though `.env-orbit`/`.orbit-secrets` already exist. */
-function writePreprovisionedTarget(
-  targetDir: string,
-  overrides: Partial<Record<"APP_URL" | "OIDC_ISSUER" | "OIDC_CLIENT_ID" | "OIDC_CALLBACK_URL" | "COMPOSE_PROFILES" | "TIKA_URL" | "OLLAMA_MODEL", string>> = {},
-): void {
-  const fields = {
-    APP_URL: "https://orbit.example",
-    OIDC_ISSUER: "https://issuer.example",
-    OIDC_CLIENT_ID: "orbit-client",
-    OIDC_CALLBACK_URL: "https://orbit.example/api/auth/callback",
-    ...overrides,
-  };
-  const lines = [
-    `APP_URL=${fields.APP_URL}`,
-    `OIDC_ISSUER=${fields.OIDC_ISSUER}`,
-    `OIDC_CLIENT_ID=${fields.OIDC_CLIENT_ID}`,
-    "OIDC_CLIENT_SECRET=",
-    "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret",
-    `OIDC_CALLBACK_URL=${fields.OIDC_CALLBACK_URL}`,
-  ];
-  if (overrides.COMPOSE_PROFILES !== undefined) lines.push(`COMPOSE_PROFILES=${overrides.COMPOSE_PROFILES}`);
-  if (overrides.TIKA_URL !== undefined) lines.push(`TIKA_URL=${overrides.TIKA_URL}`);
-  if (overrides.OLLAMA_MODEL !== undefined) lines.push(`OLLAMA_MODEL=${overrides.OLLAMA_MODEL}`);
-  writeFileSync(join(targetDir, ".env-orbit"), lines.join("\n") + "\n", { mode: 0o600 });
-  mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
-  writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "s3cr3t", { mode: 0o600 });
-}
-
-/** Writes a recognized-existing-deployment target (validate_target's other truthy branch): docker-compose.yml + .env-orbit + .orbit-secrets, none of them symlinks — targetWasEmpty=false, so only `update` accepts it. */
-function writeRecognizedDeploymentTarget(targetDir: string, profileFields: Record<string, string> = {}): void {
-  writeFileSync(join(targetDir, "docker-compose.yml"), "services: {}\n");
-  const lines = [
-    "APP_URL=https://orbit.example",
-    "OIDC_ISSUER=https://issuer.example",
-    "OIDC_CLIENT_ID=orbit-client",
-    "OIDC_CLIENT_SECRET=",
-    "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret",
-    "OIDC_CALLBACK_URL=https://orbit.example/api/auth/callback",
-    `ORBIT_IMAGE=${RESOLVED_REFERENCE}`,
-    ...Object.entries(profileFields).map(([key, value]) => `${key}=${value}`),
-  ];
-  writeFileSync(join(targetDir, ".env-orbit"), lines.join("\n") + "\n", { mode: 0o600 });
-  mkdirSync(join(targetDir, ".orbit-secrets"), { mode: 0o700 });
-  writeFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "s3cr3t", { mode: 0o600 });
-  writeFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), "pgpass", { mode: 0o600 });
-}
-
-interface FakeDockerCall {
-  method: string;
-  args: unknown[];
-}
-
-interface FakeDockerOptions {
-  pullOk?: boolean;
-  repoDigestsOutput?: string | null;
-  revisionLabel?: string | null;
-  versionLabel?: string | null;
-  bannerOk?: boolean;
-  volumesByKeySubstring?: string | null;
-  volumeLabels?: string | null;
-  containersByVolume?: string | null;
-  containersByProject?: string | null;
-  containerImage?: string | null;
-  volumeProjectLabel?: string | null;
-  volumesExactName?: string | null;
-  dockerAvailable?: boolean;
-  oidcSandboxOk?: boolean;
-  composePullOk?: boolean;
-  composeUpOk?: boolean;
-  composeConfigValidateOk?: boolean;
-  probeDatabaseOk?: boolean;
-  probeApplicationOk?: boolean;
-  probeApplicationLivenessOk?: boolean;
-  probeClamavOk?: boolean;
-  probeTikaOk?: boolean;
-  probeOllamaOk?: boolean;
-  pullOllamaModelOk?: boolean;
-  onCall?: (call: FakeDockerCall) => void;
-  throwOnListVolumesByKeySubstring?: Error;
-  /** The io.orbit.deployment-assets label the fake image carries: the empty string stands for an image built before ADR-0019, null for an inspect failure. */
-  deploymentAssetsLabel?: string | null;
-  /** `docker create` fails outright. */
-  createContainerOk?: boolean;
-  /** `docker create` exits 0 but prints something that is not a container id. */
-  createContainerId?: string;
-  /** `docker cp` fails outright. */
-  copyFromContainerOk?: boolean;
-  /** Shapes what the fake image actually carries under its assets root — see fakeImageBundle. */
-  bundle?: BundleOptions;
-}
-
-interface BundleOptions {
-  /** Assets the image simply does not carry — `docker cp` still succeeds, and the per-asset check is what refuses. */
-  missing?: string[];
-  /** Assets carried as zero-length files. */
-  empty?: string[];
-  /** Assets carried as symlinks rather than regular files. */
-  symlink?: string[];
-  /** Assets carried unreadable (mode 000), so copying them into the staging directory fails. */
-  unreadable?: string[];
-  /** Overrides an asset's content, e.g. to hand `bash -n` something that does not parse. */
-  contentFor?: Record<string, string>;
-}
-
-/**
- * What the fake image carries under its DEPLOYMENT_ASSETS_ROOT, written out
- * by the fake `docker cp` below — the fake's stand-in for the real bundle
- * baked in by the Dockerfile (ADR-0019).
- */
-// The real bundled compose file opens with its own project declaration
-// (docker-compose.yml:1, `name: orbit`), and since #999/#1043 both
-// implementations read exactly that line to name the Compose project, so
-// the fixture carries it rather than a content placeholder alone.
-const BUNDLED_COMPOSE_FILE = "name: orbit\ncontent-for-docker-compose.yml";
-
-function writeImageBundle(destination: string, options: BundleOptions = {}): void {
+/** A copy of the image's /opt/orbit/deploy: the nine assets, plus something outside the allowlist. */
+function assetsRoot(): string {
+  const root = sandbox("orbit-install-assets-");
   for (const asset of DEPLOYMENT_ASSETS) {
-    if (options.missing?.includes(asset)) continue;
-    const path = join(destination, asset);
-    mkdirSync(dirname(path), { recursive: true });
-    if (options.symlink?.includes(asset)) {
-      symlinkSync("/etc/hostname", path);
-      continue;
+    mkdirSync(dirname(join(root, asset)), { recursive: true });
+    copyFileSync(join(repoRoot, asset), join(root, asset));
+    chmodSync(join(root, asset), 0o755);
+  }
+  writeFileSync(join(root, "not-on-the-allowlist.txt"), "never installed\n");
+  return root;
+}
+
+const b64 = (value: string) => Buffer.from(value, "utf8").toString("base64");
+
+interface VolumeFacts {
+  name: string;
+  labels: string | null;
+  containers: string | null;
+}
+
+function facts(options: { basename?: string; volumes?: VolumeFacts[]; projects?: Array<[string, string | null]>; images?: Array<[string, string | null]> } = {}): HostFacts {
+  const volumes = options.volumes ?? [];
+  return parseHostFacts(
+    JSON.stringify({
+      targetBasename: b64(options.basename ?? "household"),
+      cosignUsable: false,
+      imageVersion: "v1.2.3",
+      imageRevision: "b".repeat(40),
+      appliedDigest: DIGEST,
+      volumeList: b64(volumes.map((volume) => volume.name).join("\n")),
+      volumes: volumes.map((volume) => ({
+        name: b64(volume.name),
+        labels: volume.labels === null ? null : b64(volume.labels),
+        containers: volume.containers === null ? null : b64(volume.containers),
+      })),
+      projects: (options.projects ?? []).map(([name, containers]) => ({ name: b64(name), containers: containers === null ? null : b64(containers) })),
+      images: (options.images ?? []).map(([container, image]) => ({ container: b64(container), image: image === null ? null : b64(image) })),
+    }),
+  );
+}
+
+/** The facts for an update whose own volume is proven: one orbit-db and one orbit-app container in its project, the app on the recorded image. */
+function provenVolumeFacts(project: string, recordedImage: string): HostFacts {
+  return facts({
+    volumes: [{ name: `${project}_orbit-db-data`, labels: `${project}|orbit-db-data`, containers: `${"c".repeat(12)}|${project}|orbit-db` }],
+    projects: [[project, `${"c".repeat(12)}|${project}|orbit-db\n${"d".repeat(12)}|${project}|orbit-app`]],
+    images: [["d".repeat(12), recordedImage]],
+  });
+}
+
+const ENV_LOCAL = ["APP_URL=https://orbit.example.invalid", "ORBIT_AUTH_OIDC=false", ""].join("\n");
+const ENV_OIDC = [
+  "APP_URL=https://orbit.example.invalid",
+  "ORBIT_AUTH_OIDC=true",
+  "OIDC_ISSUER=https://issuer.example.invalid",
+  "OIDC_CLIENT_ID=orbit-client",
+  "OIDC_CALLBACK_URL=https://orbit.example.invalid/api/auth/callback",
+  "OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret",
+  "",
+].join("\n");
+
+/** is_preprovisioned_input's exact shape (guarantee #6). */
+function preprovisioned(env: string = ENV_LOCAL): string {
+  const target = sandbox("orbit-install-target-");
+  writeFileSync(join(target, ".env-orbit"), env, { mode: 0o600 });
+  mkdirSync(join(target, ".orbit-secrets"), { mode: 0o700 });
+  writeFileSync(join(target, ".orbit-secrets", "oidc-client-secret"), "s3cr3t", { mode: 0o600 });
+  return target;
+}
+
+/** A recognised deployment that an earlier install left behind, on the old image. */
+function recognised(extraEnv: string[] = []): string {
+  const target = sandbox("orbit-install-target-");
+  writeFileSync(join(target, "docker-compose.yml"), readFileSync(join(repoRoot, "docker-compose.yml")));
+  writeFileSync(
+    join(target, ".env-orbit"),
+    [`ORBIT_IMAGE=${OLD_REFERENCE}`, "ORBIT_CONFIG_SCHEMA_VERSION=1", "COMPOSE_PROJECT_NAME=orbit", ...ENV_LOCAL.trim().split("\n"), ...extraEnv, ""].join("\n"),
+    { mode: 0o600 },
+  );
+  mkdirSync(join(target, ".orbit-secrets"), { mode: 0o700 });
+  for (const name of ["session-secret", "postgres-password", "document-kek"]) {
+    writeFileSync(join(target, ".orbit-secrets", name), `${"e".repeat(64)}\n`, { mode: 0o600 });
+  }
+  return target;
+}
+
+function snapshot(dir: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  const walk = (relative: string) => {
+    for (const entry of readdirSync(join(dir, relative)).sort()) {
+      const path = join(relative, entry);
+      const stat = lstatSync(join(dir, path));
+      if (stat.isDirectory()) {
+        result[`${path}/`] = (stat.mode & 0o777).toString(8);
+        walk(path);
+      } else {
+        result[path] = `${(stat.mode & 0o777).toString(8)}:${readFileSync(join(dir, path), "utf8")}`;
+      }
     }
-    let content = asset.startsWith("scripts/") ? VALID_BASH_SCRIPT : `content-for-${asset}`;
-    if (asset === "docker-compose.yml") content = BUNDLED_COMPOSE_FILE;
-    if (options.contentFor?.[asset] !== undefined) content = options.contentFor[asset];
-    if (options.empty?.includes(asset)) content = "";
-    writeFileSync(path, content);
-    if (options.unreadable?.includes(asset)) chmodSync(path, 0o000);
-  }
-}
-
-/** The id the fake `docker create` prints: 64 hex characters, the shape install.sh checks for (install.sh:1482). */
-const FAKE_CONTAINER_ID = "c".repeat(64);
-
-function createFakeDockerAdapter(options: FakeDockerOptions = {}) {
-  const calls: FakeDockerCall[] = [];
-  let composeProjectName = "";
-  // Only a container that was created and not yet removed can be copied
-  // out of, exactly as with the real `docker cp` (#616: a fake refuses
-  // whatever the real tool refuses).
-  let liveContainerId: string | null = null;
-  function record(method: string, ...args: unknown[]): void {
-    calls.push({ method, args });
-    options.onCall?.({ method, args });
-  }
-  return {
-    calls,
-    composeProjectNameAtCall(method: string): string | undefined {
-      // Snapshot approach: since composeProjectName is read live at call
-      // time by the real adapter, this fake records it alongside the call.
-      return calls.find((call) => call.method === method)?.args[0] as string | undefined;
-    },
-    adapter: {
-      pull: (...args: unknown[]) => {
-        record("pull", ...args);
-        return options.pullOk ?? true;
-      },
-      inspectRepoDigests: (...args: unknown[]) => {
-        record("inspectRepoDigests", ...args);
-        return options.repoDigestsOutput !== undefined ? options.repoDigestsOutput : RESOLVED_REFERENCE;
-      },
-      inspectRevisionLabel: (...args: unknown[]) => {
-        record("inspectRevisionLabel", ...args);
-        return options.revisionLabel !== undefined ? options.revisionLabel : REVISION;
-      },
-      inspectVersionLabel: (...args: unknown[]) => {
-        record("inspectVersionLabel", ...args);
-        return options.versionLabel !== undefined ? options.versionLabel : VERSION;
-      },
-      runBanner: (...args: unknown[]) => {
-        record("runBanner", ...args);
-        return options.bannerOk ?? true;
-      },
-      inspectDeploymentAssetsLabel: (...args: unknown[]) => {
-        record("inspectDeploymentAssetsLabel", ...args);
-        return options.deploymentAssetsLabel !== undefined ? options.deploymentAssetsLabel : DEPLOYMENT_ASSETS_ROOT;
-      },
-      createAssetContainer: (...args: unknown[]) => {
-        record("createAssetContainer", ...args);
-        if (options.createContainerOk === false) return null;
-        liveContainerId = options.createContainerId ?? FAKE_CONTAINER_ID;
-        return liveContainerId;
-      },
-      copyFromContainer: (containerId: string, sourcePath: string, destinationPath: string) => {
-        record("copyFromContainer", containerId, sourcePath, destinationPath);
-        // `docker cp` refuses an unknown/removed container and a source
-        // path the image does not have; so does this fake.
-        if (containerId !== liveContainerId) return false;
-        if (sourcePath !== `${DEPLOYMENT_ASSETS_ROOT}/.`) return false;
-        if (options.copyFromContainerOk === false) return false;
-        writeImageBundle(destinationPath, options.bundle);
-        return true;
-      },
-      removeAssetContainer: (containerId: string) => {
-        record("removeAssetContainer", containerId);
-        if (containerId === liveContainerId) liveContainerId = null;
-      },
-      inspectVolumeLabels: (...args: unknown[]) => {
-        record("inspectVolumeLabels", ...args);
-        return options.volumeLabels ?? null;
-      },
-      listContainersByVolume: (...args: unknown[]) => {
-        record("listContainersByVolume", ...args);
-        return options.containersByVolume ?? null;
-      },
-      listContainersByProject: (...args: unknown[]) => {
-        record("listContainersByProject", ...args);
-        return options.containersByProject ?? null;
-      },
-      inspectContainerImage: (...args: unknown[]) => {
-        record("inspectContainerImage", ...args);
-        return options.containerImage ?? null;
-      },
-      listVolumesExactName: (...args: unknown[]) => {
-        record("listVolumesExactName", ...args);
-        return options.volumesExactName ?? null;
-      },
-      listVolumesByKeySubstring: (...args: unknown[]) => {
-        record("listVolumesByKeySubstring", ...args);
-        if (options.throwOnListVolumesByKeySubstring) throw options.throwOnListVolumesByKeySubstring;
-        return options.volumesByKeySubstring !== undefined ? options.volumesByKeySubstring : "";
-      },
-      inspectVolumeProjectLabel: (...args: unknown[]) => {
-        record("inspectVolumeProjectLabel", ...args);
-        return options.volumeProjectLabel ?? null;
-      },
-      checkDockerAvailable: () => {
-        record("checkDockerAvailable");
-        return options.dockerAvailable ?? true;
-      },
-      validateOidcDiscoverySandbox: (...args: unknown[]) => {
-        record("validateOidcDiscoverySandbox", ...args);
-        return options.oidcSandboxOk ?? true;
-      },
-      composePull: (...args: unknown[]) => {
-        record("composePull", composeProjectName, ...args);
-        return options.composePullOk ?? true;
-      },
-      composeUp: (...args: unknown[]) => {
-        record("composeUp", composeProjectName, ...args);
-        return options.composeUpOk ?? true;
-      },
-      composeDown: (...args: unknown[]) => {
-        record("composeDown", composeProjectName, ...args);
-      },
-      removeLeftoverDatabaseVolume: (...args: unknown[]) => {
-        record("removeLeftoverDatabaseVolume", composeProjectName, ...args);
-      },
-      composeConfigValidate: (...args: unknown[]) => {
-        record("composeConfigValidate", composeProjectName, ...args);
-        return options.composeConfigValidateOk ?? true;
-      },
-      probeDatabaseHealth: () => {
-        record("probeDatabaseHealth");
-        return options.probeDatabaseOk ?? true;
-      },
-      probeApplicationHealth: () => {
-        record("probeApplicationHealth");
-        return options.probeApplicationOk ?? true;
-      },
-      probeClamavHealth: () => {
-        record("probeClamavHealth");
-        return options.probeClamavOk ?? true;
-      },
-      probeTikaHealth: () => {
-        record("probeTikaHealth");
-        return options.probeTikaOk ?? true;
-      },
-      probeOllamaHealth: () => {
-        record("probeOllamaHealth");
-        return options.probeOllamaOk ?? true;
-      },
-      probeApplicationLiveness: () => {
-        record("probeApplicationLiveness");
-        return options.probeApplicationLivenessOk ?? true;
-      },
-      pullOllamaModel: (...args: unknown[]) => {
-        record("pullOllamaModel", ...args);
-        return options.pullOllamaModelOk ?? true;
-      },
-      setComposeProjectName: (name: string) => {
-        composeProjectName = name;
-        record("setComposeProjectName", name);
-      },
-    },
   };
+  walk("");
+  return result;
 }
 
-function fakeOidcFetch(overrides: { httpStatus?: string; curlExitCode?: number; writeContent?: string } = {}): OidcDiscoveryFetchAdapter {
-  return {
-    fetch: (_discoveryUrl: string, destinationPath: string): OidcFetchResult => {
-      writeFileSync(destinationPath, overrides.writeContent ?? '{"issuer":"https://issuer.example"}');
-      return { curlExitCode: overrides.curlExitCode ?? 0, httpStatus: overrides.httpStatus ?? "200" };
-    },
-  };
-}
-
-function fakeConfigurationScript(overrides: { preflightOk?: boolean; migrateOk?: boolean; migrateOutput?: string } = {}): ConfigurationScriptAdapter {
-  return {
-    runPreflight: (): ConfigurationScriptResult => ({ status: overrides.preflightOk === false ? 1 : 0, stdout: "" }),
-    runMigrate: (): ConfigurationScriptResult => ({
-      status: overrides.migrateOk === false ? 1 : 0,
-      stdout: overrides.migrateOutput ?? "Orbit configuration: already current schema v1 version v1.2.3\n",
-    }),
-  };
-}
-
-interface FakeGuidedOptions {
-  runDefaultOk?: boolean;
-  runCheckOk?: boolean;
-  runCheckStdout?: string;
-  runInitOk?: boolean;
-  runSetOidcSecretOk?: boolean;
-  confirmApply?: "apply" | "cancel";
-  writeGuidedOutputs?: boolean;
-}
-
-/** Stands in for scripts/configure.sh: for the guided (stage_guided_install_configuration) path, writes a minimal valid .env-orbit/.orbit-secrets to the staged paths it is handed — the same real-filesystem side effects the real subprocess adapter (install-script-adapters.ts) has, driving guided-configuration.ts's own post-conditions instead of a hand-copied stand-in. */
-function createFakeGuidedConfigurationAdapter(options: FakeGuidedOptions = {}): GuidedConfigurationAdapter {
-  return {
-    runInit: async (configureScript: string): Promise<MachinePromptSessionResult> => {
-      if (options.runInitOk === false) return { ok: false, events: [] };
-      if (options.writeGuidedOutputs) {
-        const scratchRoot = join(configureScript, "..", "..");
-        writeFileSync(
-          join(scratchRoot, ".env-orbit"),
-          ["APP_URL=https://guided.example", "OIDC_ISSUER=https://issuer.example", "OIDC_CLIENT_ID=guided-client", "OIDC_CALLBACK_URL=https://guided.example/api/auth/callback", ""].join("\n"),
-          { mode: 0o600 },
-        );
-      }
-      return { ok: true, events: [] };
-    },
-    runDefault: (): ConfigureScriptResult => ({ status: options.runDefaultOk === false ? 1 : 0, stdout: "" }),
-    runSetOidcSecret: async (configureScript: string): Promise<MachinePromptSessionResult> => {
-      if (options.runSetOidcSecretOk === false) return { ok: false, events: [] };
-      if (options.writeGuidedOutputs) {
-        const scratchRoot = join(configureScript, "..", "..");
-        mkdirSync(join(scratchRoot, ".orbit-secrets"), { mode: 0o700, recursive: true });
-        writeFileSync(join(scratchRoot, ".orbit-secrets", "oidc-client-secret"), "s3cr3t-guided", { mode: 0o600 });
-      }
-      return { ok: true, events: [] };
-    },
-    runSetDeploymentProfile: (): ConfigureScriptResult => ({ status: 0, stdout: "" }),
-    // Defaults to non-empty stdout on success: stageGuidedInstallConfiguration
-    // (guarantee #32) treats an empty readiness summary as a failure in its
-    // own right, distinct from a non-zero exit status.
-    runCheck: (): ConfigureScriptResult => ({
-      status: options.runCheckOk === false ? 1 : 0,
-      stdout: options.runCheckStdout ?? (options.runCheckOk === false ? "" : "ready\n"),
-    }),
-    confirmApply: async () => options.confirmApply ?? "apply",
-  };
-}
-
-const throwingAnswers: MachinePromptAnswerProvider = {
-  answer: () => {
-    throw new Error("orbit-orchestrator-test: unreachable — hasControllingTerminal is always false in this scenario");
+const noAnswers: ConfigurationAnswers = {
+  guidedInit: () => {
+    throw new InstallPromptStop(1, "no terminal");
+  },
+  oidcSecret: () => {
+    throw new InstallPromptStop(1, "no terminal");
   },
 };
 
-interface ScenarioOptions {
-  docker?: FakeDockerOptions;
-  oidcFetch?: Parameters<typeof fakeOidcFetch>[0];
-  configurationScript?: Parameters<typeof fakeConfigurationScript>[0];
-  guided?: FakeGuidedOptions;
-  curlAvailable?: boolean;
-  answers?: MachinePromptAnswerProvider;
-  context?: Partial<InstallOrchestratorContext>;
+function discoveryFetch(body = VALID_DISCOVERY, status = 200): typeof fetch {
+  return async () => new Response(body, { status });
 }
 
-function buildScenario(targetDir: string, options: ScenarioOptions = {}) {
-  const docker = createFakeDockerAdapter(options.docker);
+async function run(target: string, overrides: Partial<InstallContext> = {}, dependencies: Partial<InstallDependencies> = {}) {
   const events: EngineEvent[] = [];
-  const adapters: InstallOrchestratorAdapters = {
-    docker: docker.adapter,
-    checkCurlAvailable: () => options.curlAvailable ?? true,
-    oidcFetch: fakeOidcFetch(options.oidcFetch),
-    configurationScript: fakeConfigurationScript(options.configurationScript),
-    guidedConfiguration: createFakeGuidedConfigurationAdapter(options.guided),
-    answers: options.answers ?? throwingAnswers,
-    clock: fakeClock(),
-  };
-  const context: InstallOrchestratorContext = {
-    targetDir,
-    requestedAction: "install",
-    repository: "tomlawesome/orbit",
-    registry: "ghcr.io",
+  const said: string[] = [];
+  const context: InstallContext = {
+    targetDir: target,
+    requestedAction: undefined,
+    plainMode: false,
+    interactive: false,
+    resolvedReference: REFERENCE,
     channel: "latest",
-    fallbackBasename: "orbit",
-    hasControllingTerminal: false,
-    readinessTimeoutSeconds: 5,
-    readinessPollSeconds: 1,
-    ...options.context,
+    facts: facts(),
+    assetsRoot: assetsRoot(),
+    ...overrides,
   };
-  return {
-    docker,
-    events,
-    run: () => runInstall(context, adapters, (event) => events.push(event)),
-  };
+  const outcome = await runInstall(
+    context,
+    { answers: noAnswers, fetchImpl: discoveryFetch(), capacity: () => "sufficient", say: (line) => said.push(line), ...dependencies },
+    (event) => events.push(event),
+  );
+  return { outcome, events, said, context };
 }
 
-describe("runInstall — success paths", () => {
-  it("installs against a fresh, pre-provisioned target end-to-end (guarantee #6's is_preprovisioned_input contract)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { context: { requestedAction: "install" } });
+const eventKey = (event: EngineEvent) => `${event.phase} ${event.component} ${event.state} ${event.reason} ${event.action}`;
 
-    const outcome = await scenario.run();
+describe("runInstall: success", () => {
+  it("installs a pre-provisioned target unattended: assets from the image, secrets, migration, digest (#6, #42, #45, #53)", async () => {
+    const target = preprovisioned();
+    const { outcome, events } = await run(target);
 
-    expect(outcome.status).toBe("ok");
-    if (outcome.status === "ok") {
-      expect(outcome.resolvedReference).toBe(RESOLVED_REFERENCE);
-      expect(outcome.revision).toBe(REVISION);
-      expect(outcome.imageVersion).toBe(VERSION);
-      expect(outcome.selectedProfile).toBe("standard");
-    }
-    // Nested nested-directory assets (config/, scripts/) actually landed —
-    // regression coverage for install-orchestrator.ts's own per-asset mkdir
-    // fix (install.sh:1406-1407): fakeFetchAsset never creates its
-    // destination's parent directory itself.
-    expect(existsSync(join(targetDir, "config", "tika-config.json"))).toBe(true);
-    expect(existsSync(join(targetDir, "scripts", "configure.sh"))).toBe(true);
-    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain(`ORBIT_IMAGE=${RESOLVED_REFERENCE}`);
-    // The .orbit-install-scratch.* working directory is always removed,
-    // success or failure.
-    expect(existsSync(targetDir)).toBe(true);
-    const leftovers = readdirSync(targetDir).filter((name: string) => name.startsWith(".orbit-install-scratch."));
-    expect(leftovers).toEqual([]);
-  });
-
-  it("updates an already-recognized deployment, preserving its existing profile (resolve_installer_action's non-interactive update branch)", async () => {
-    const targetDir = newTarget();
-    writeRecognizedDeploymentTarget(targetDir, { COMPOSE_PROFILES: "processing,ai", TIKA_URL: "http://orbit-tika:9998", OLLAMA_MODEL: "llama3" });
-    const scenario = buildScenario(targetDir, { context: { requestedAction: "update" } });
-
-    const outcome = await scenario.run();
-
-    expect(outcome.status).toBe("ok");
-    if (outcome.status === "ok") {
-      expect(outcome.selectedProfile).toBe("full");
-    }
-    // Profile preserved on update => tika and ollama images/health are both exercised.
-    const calledMethods = scenario.docker.calls.map((call) => call.method);
-    expect(calledMethods).toContain("probeTikaHealth");
-    expect(calledMethods).toContain("probeOllamaHealth");
-  });
-
-  // #999/#1043: the bundled docker-compose.yml declares `name: orbit`, and
-  // until this fix a fresh install through the CLI port never reached it.
-  // With no .env-orbit, no requested override and no pre-existing volume,
-  // deriveComposeProjectName ran once, before the compose file was in the
-  // target, and the working-directory basename won -- so installing into
-  // ~/apps/household created and addressed the Compose project "household".
-  // The orchestrator now derives again once the asset is in place, which is
-  // the only moment `name: orbit` can be read. Against the pre-fix
-  // orchestrator every assertion below reads "household".
-  it("names a fresh install's Compose project from the bundled docker-compose.yml, not the target directory (#999, #1043)", async () => {
-    const targetDir = newTarget();
-    // A pre-provisioned bootstrap is the sharper case: it arrives with its
-    // own .env-orbit carrying no COMPOSE_PROJECT_NAME, so the configuration
-    // migration for that existing file writes down whatever name the
-    // derivation has produced by then. Deriving after the assets are
-    // installed would read that value straight back as an explicit one and
-    // keep "household" for good, which is why the derivation reads the
-    // staged compose file before the migration runs.
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { context: { requestedAction: "install", fallbackBasename: "household" } });
-
-    const outcome = await scenario.run();
-
-    expect(outcome.status).toBe("ok");
-    if (outcome.status === "ok") expect(outcome.composeProjectName).toBe("orbit");
-    const composeCalls = scenario.docker.calls.filter((call) =>
-      ["composePull", "composeUp", "composeConfigValidate", "composeDown"].includes(call.method),
-    );
-    expect(composeCalls.length).toBeGreaterThan(0);
-    for (const call of composeCalls) {
-      expect(call.args[0]).toBe("orbit");
-    }
-    expect(readFileSync(join(targetDir, "docker-compose.yml"), "utf8")).toContain("name: orbit");
-  });
-
-  it("resolves the Docker Compose project name from a pre-existing volume's own label and uses it for every compose call, even though it differs from the fallback basename (install.sh:573)", async () => {
-    const targetDir = newTarget();
-    writeRecognizedDeploymentTarget(targetDir);
-    const scenario = buildScenario(targetDir, {
-      context: { requestedAction: "update", fallbackBasename: "wrong-fallback-name" },
-      docker: {
-        volumesByKeySubstring: "renamed-project_orbit-db-data",
-        volumeLabels: "renamed-project|orbit-db-data",
-        containersByVolume: "aaaaaaaaaaaa|renamed-project|orbit-db",
-        containersByProject: "bbbbbbbbbbbb|renamed-project|orbit-app",
-        containerImage: RESOLVED_REFERENCE,
-        volumeProjectLabel: "renamed-project",
-        volumesExactName: "renamed-project_orbit-db-data",
-      },
-    });
-
-    const outcome = await scenario.run();
-
-    expect(outcome.status).toBe("ok");
-    if (outcome.status === "ok") expect(outcome.composeProjectName).toBe("renamed-project");
-    const composePullCall = scenario.docker.calls.find((call) => call.method === "composePull");
-    expect(composePullCall?.args[0]).toBe("renamed-project");
-    const composeUpCall = scenario.docker.calls.find((call) => call.method === "composeUp");
-    expect(composeUpCall?.args[0]).toBe("renamed-project");
-  });
-
-  it("stages and applies a real guided install for a fresh, empty target with a controlling terminal", async () => {
-    const targetDir = newTarget();
-    const scenario = buildScenario(targetDir, {
-      context: { requestedAction: "install", hasControllingTerminal: true },
-      guided: { writeGuidedOutputs: true },
-    });
-
-    const outcome = await scenario.run();
-
-    expect(outcome.status).toBe("ok");
-    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain("APP_URL=https://guided.example");
-    expect(readFileSync(join(targetDir, ".orbit-secrets", "oidc-client-secret"), "utf8")).toBe("s3cr3t-guided");
-  });
-});
-
-describe("runInstall — target/action guards (guarantee #21)", () => {
-  it("refuses a non-empty, unrecognizable target before any docker/curl/network step", async () => {
-    const targetDir = newTarget();
-    writeFileSync(join(targetDir, "unexpected-file.txt"), "not an orbit deployment");
-    const scenario = buildScenario(targetDir);
-
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "host", component: "host" });
-    expect(scenario.docker.calls).toEqual([]);
-  });
-
-  it("refuses `install` against a non-empty, recognized-existing deployment", async () => {
-    const targetDir = newTarget();
-    writeRecognizedDeploymentTarget(targetDir);
-    const scenario = buildScenario(targetDir, { context: { requestedAction: "install" } });
-
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "host" });
-    if (outcome.status === "failed") expect(outcome.message).toContain("Install requires an empty target");
-  });
-
-  it("refuses `update` against an empty target", async () => {
-    const targetDir = newTarget();
-    const scenario = buildScenario(targetDir, { context: { requestedAction: "update" } });
-
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "host" });
-    if (outcome.status === "failed") expect(outcome.message).toContain("Update requires a recognized existing Orbit deployment");
-  });
-});
-
-describe("runInstall — host tool availability (guarantee #40)", () => {
-  it("fails closed when docker/compose is unavailable", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { dockerAvailable: false } });
-
-    const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "host", message: "Docker and Docker Compose v2 are required." });
-  });
-
-  it("fails closed when curl is unavailable", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { curlAvailable: false });
-
-    const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "host", message: "curl is required." });
-  });
-});
-
-describe("runInstall — database volume safety wiring (guarantees #13-18)", () => {
-  it("fails closed (not silently) when multiple candidate database volumes are found", async () => {
-    const targetDir = newTarget();
-    writeRecognizedDeploymentTarget(targetDir);
-    const scenario = buildScenario(targetDir, {
-      context: { requestedAction: "update" },
-      docker: { volumesByKeySubstring: "a_orbit-db-data\nb_orbit-db-data" },
-    });
-
-    const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "host" });
-    if (outcome.status === "failed") expect(outcome.message).toContain("Multiple Orbit database volumes were found");
-  });
-
-  it("propagates a genuine programming error rather than swallowing it into a 'failed' outcome (only DatabaseVolumeSafetyRefusal is caught)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, {
-      docker: { throwOnListVolumesByKeySubstring: new TypeError("simulated adapter bug, not a characterized refusal") },
-    });
-
-    await expect(scenario.run()).rejects.toThrow("simulated adapter bug");
-  });
-
-  it("fails closed gracefully (not an unhandled rejection) when derive_compose_project_name's own refusal fires from inside verify_database_volume_safety's first call (guarantee #12)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    // Not a safe Compose project name (uppercase, install.sh:443's own
-    // `^[a-z0-9][a-z0-9_-]*$` requirement) — deriveComposeProjectName
-    // throws ComposeProjectNameRefusal, which
-    // verifyDatabaseVolumeSafety's own first call does not wrap in a
-    // DatabaseVolumeSafetyRefusal of its own (database-volume-safety.ts:228).
-    const scenario = buildScenario(targetDir, { context: { requestedComposeProjectName: "Not-A-Safe-Name" } });
-
-    const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "host" });
-    if (outcome.status === "failed") expect(outcome.message).toContain("Could not determine a safe Docker Compose project name");
-  });
-
-  it("labels a second-call-site (post-configuration) database-volume-safety refusal as configuration/configuration-failure/retry, not database/database-auth-migration/repair (issue #383 addon finding 2c)", async () => {
-    const targetDir = newTarget();
-    writeRecognizedDeploymentTarget(targetDir);
-    const scenario = buildScenario(targetDir, {
-      context: { requestedAction: "update" },
-      docker: {
-        volumesByKeySubstring: "renamed-project_orbit-db-data",
-        volumeLabels: "renamed-project|orbit-db-data",
-        containersByVolume: "aaaaaaaaaaaa|renamed-project|orbit-db",
-        containersByProject: "bbbbbbbbbbbb|renamed-project|orbit-app",
-        containerImage: RESOLVED_REFERENCE,
-        volumeProjectLabel: "renamed-project",
-        // The first call (before configuration/prepareConfiguration) sees
-        // the volume under its original name; by the second call
-        // (install.sh:1481-1482's TOCTOU re-check) it has been renamed,
-        // so listVolumesExactName's own re-check throws
-        // DatabaseVolumeSafetyRefusal — install.sh's own installer_ui_phase
-        // is still "configuration" at this point (last set at :950-951,
-        // not reassigned to "database" until :1164-1166, much later).
-        volumesExactName: "a-different-volume-now",
-      },
-    });
-
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "configuration", component: "configuration", reason: "configuration-failure", action: "retry" });
-    if (outcome.status === "failed") expect(outcome.message).toContain("changed during installation");
-  });
-
-  it("labels a POSTGRES_PASSWORD_FILE-changed refusal as configuration/configuration-failure/retry too (issue #383 addon finding 2c)", async () => {
-    const targetDir = newTarget();
-    writeRecognizedDeploymentTarget(targetDir);
-    const scenario = buildScenario(targetDir, {
-      context: { requestedAction: "update" },
-      docker: {
-        volumesByKeySubstring: "renamed-project_orbit-db-data",
-        volumeLabels: "renamed-project|orbit-db-data",
-        containersByVolume: "aaaaaaaaaaaa|renamed-project|orbit-db",
-        containersByProject: "bbbbbbbbbbbb|renamed-project|orbit-app",
-        containerImage: RESOLVED_REFERENCE,
-        volumeProjectLabel: "renamed-project",
-        volumesExactName: "renamed-project_orbit-db-data",
-        onCall: (call) => {
-          // Tamper with the live secret right when the second
-          // verify_database_volume_safety call site's own re-check
-          // (listVolumesExactName) runs — after InstallTransaction.begin()
-          // already backed up the original content, and just before
-          // verifyDatabasePasswordPreserved compares live-vs-backup.
-          if (call.method === "listVolumesExactName") {
-            writeFileSync(join(targetDir, ".orbit-secrets", "postgres-password"), "tampered-password", { mode: 0o600 });
-          }
-        },
-      },
-    });
-
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "configuration", component: "configuration", reason: "configuration-failure", action: "retry" });
-    if (outcome.status === "failed") expect(outcome.message).toContain("POSTGRES_PASSWORD_FILE changed");
-  });
-});
-
-describe("runInstall — image identity resolution (guarantees #41-44)", () => {
-  it("fails closed when the channel cannot be pulled", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { pullOk: false } });
-
-    const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "identity", component: "image" });
-    if (outcome.status === "failed") expect(outcome.message).toContain("Could not pull");
-  });
-
-  it("fails closed when the resolved image cannot render its canonical banner (guarantee #44)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { bannerOk: false } });
-
-    const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "identity", component: "image" });
-    if (outcome.status === "failed") expect(outcome.message).toContain("canonical banner");
-  });
-
-  it("fails closed when the image carries no version label at all (install.sh:1346-1348)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { versionLabel: null } });
-
-    const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "identity", component: "image" });
-    if (outcome.status === "failed") expect(outcome.message).toBe("Could not inspect the published image for its semantic version.");
-  });
-
-  it("fails closed when the version label is not valid semver (install.sh:1349-1351)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { versionLabel: "not-semver" } });
-
-    const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "identity", component: "image" });
-    if (outcome.status === "failed") expect(outcome.message).toBe("The published image does not record a valid semantic version.");
-  });
-
-  it("fails closed, with install.sh's exact wording, when a pinned semver channel does not match the image's embedded version (ADR-0016, install.sh:1352-1358)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, {
-      docker: { versionLabel: "v1.2.3" },
-      context: { channel: "v1.2.4" },
-    });
-
-    const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "identity", component: "image" });
-    if (outcome.status === "failed") {
-      expect(outcome.message).toBe(
-        "The published image's embedded version (v1.2.3) does not match the requested version tag (v1.2.4).",
-      );
-    }
-  });
-
-  it("proceeds when the pinned semver channel matches the image's embedded version exactly", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, {
-      docker: { versionLabel: "v1.2.3" },
-      context: { channel: "v1.2.3" },
-    });
-
-    const outcome = await scenario.run();
-    expect(outcome.status).toBe("ok");
-  });
-
-  it("proceeds for a non-semver channel (e.g. a moving tag) regardless of the image's embedded version", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, {
-      docker: { versionLabel: "v9.9.9" },
-      context: { channel: "preview" },
-    });
-
-    const outcome = await scenario.run();
-    expect(outcome.status).toBe("ok");
-  });
-});
-
-describe("runInstall — deployment assets come out of the image (ADR-0019, guarantees #42/#45)", () => {
-  it("extracts the bundle from the resolved image and removes the container, without ever fetching over the network", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir);
-
-    const outcome = await scenario.run();
-
-    expect(outcome.status).toBe("ok");
-    const extraction = scenario.docker.calls.filter((call) =>
-      ["inspectDeploymentAssetsLabel", "createAssetContainer", "copyFromContainer", "removeAssetContainer"].includes(call.method),
-    );
-    expect(extraction.map((call) => call.method)).toEqual([
-      "inspectDeploymentAssetsLabel",
-      "createAssetContainer",
-      "copyFromContainer",
-      "removeAssetContainer",
-    ]);
-    expect(extraction[0].args[0]).toBe(RESOLVED_REFERENCE);
-    expect(extraction[1].args[0]).toBe(RESOLVED_REFERENCE);
-    // install.sh's own `<root>/.` source form — the directory's contents,
-    // not the directory itself (install.sh:1484).
-    expect(extraction[2].args[1]).toBe(`${DEPLOYMENT_ASSETS_ROOT}/.`);
-    expect(extraction[3].args[0]).toBe(FAKE_CONTAINER_ID);
-    // Every asset actually landed, nested ones included.
+    expect(outcome).toEqual({ status: "ok", fresh: true, selectedProfile: "standard", modelPullRequested: false, databaseVolume: undefined });
     for (const asset of DEPLOYMENT_ASSETS) {
-      expect(existsSync(join(targetDir, asset)), asset).toBe(true);
+      expect(readFileSync(join(target, asset))).toEqual(readFileSync(join(repoRoot, asset)));
+      expect(statSync(join(target, asset)).mode & 0o777).toBe(0o644);
     }
-    // The private extraction directory goes with the scratch directory.
-    expect(readdirSync(targetDir).filter((name: string) => name.startsWith(".orbit-install-scratch."))).toEqual([]);
-  });
-
-  it("refuses an image that carries no io.orbit.deployment-assets label, as built before ADR-0019 (install.sh:1375-1376)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { deploymentAssetsLabel: "" } });
-
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "identity", component: "image" });
-    if (outcome.status === "failed") {
-      expect(outcome.message).toBe(
-        "The published image was built before Orbit bundled its deployment assets and is not a supported install target (ADR-0016, ADR-0019).",
-      );
+    expect(existsSync(join(target, "not-on-the-allowlist.txt"))).toBe(false);
+    const env = readFileSync(join(target, ".env-orbit"), "utf8");
+    expect(env.match(/^ORBIT_IMAGE=.*$/gm)).toEqual([`ORBIT_IMAGE=${REFERENCE}`]);
+    expect(env).toContain("ORBIT_CONFIG_SCHEMA_VERSION=1\n");
+    expect(env).toContain("ORBIT_CONFIG_APPLIED_VERSION=v1.2.3\n");
+    expect(env).toContain(`ORBIT_CONFIG_APPLIED_DIGEST=${DIGEST}\n`);
+    for (const secret of ["session-secret", "postgres-password", "document-kek"]) {
+      expect(statSync(join(target, ".orbit-secrets", secret)).mode & 0o777).toBe(0o600);
     }
-    // Refused before anything is created, copied, or written.
-    expect(scenario.docker.calls.map((call) => call.method)).not.toContain("createAssetContainer");
-    expect(existsSync(join(targetDir, "docker-compose.yml"))).toBe(false);
-  });
-
-  it("refuses an image whose label names a path other than /opt/orbit/deploy (install.sh:1377-1378)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { deploymentAssetsLabel: "/somewhere/else" } });
-
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "identity", component: "image" });
-    if (outcome.status === "failed") {
-      expect(outcome.message).toBe(`The published image records deployment assets somewhere other than ${DEPLOYMENT_ASSETS_ROOT}.`);
-    }
-    expect(scenario.docker.calls.map((call) => call.method)).not.toContain("createAssetContainer");
-  });
-
-  it("fails closed when the label cannot be inspected at all (install.sh:1372-1374)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { deploymentAssetsLabel: null } });
-
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "identity", component: "image" });
-    if (outcome.status === "failed") expect(outcome.message).toContain("for its bundled deployment assets");
-  });
-
-  it("fails closed when the extraction container cannot be created (install.sh:1480-1481)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { createContainerOk: false } });
-
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
-    if (outcome.status === "failed") expect(outcome.message).toBe("Could not extract deployment assets from the published image.");
-  });
-
-  it("fails closed, without copying, when `docker create` prints something that is not a container id (install.sh:1482-1483)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { createContainerId: "Error response from daemon: no such image" } });
-
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
-    if (outcome.status === "failed") expect(outcome.message).toBe("Could not extract deployment assets from the published image.");
-    expect(scenario.docker.calls.map((call) => call.method)).not.toContain("copyFromContainer");
-  });
-
-  it("removes the extraction container even when the copy out of it fails (guarantee #42's every-path removal)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { copyFromContainerOk: false } });
-
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
-    if (outcome.status === "failed") expect(outcome.message).toBe("Could not extract deployment assets from the published image.");
-    const removal = scenario.docker.calls.find((call) => call.method === "removeAssetContainer");
-    expect(removal?.args[0]).toBe(FAKE_CONTAINER_ID);
-  });
-
-  it("refuses an image whose bundle is missing a nested asset (config/tika-config.json)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { bundle: { missing: ["config/tika-config.json"] } } });
-
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
-    if (outcome.status === "failed") expect(outcome.message).toBe("Bundled config/tika-config.json is not a regular file.");
-    // Nothing from a bundle that failed validation reaches the target.
-    expect(existsSync(join(targetDir, "docker-compose.yml"))).toBe(false);
-  });
-
-  it("refuses a bundled asset that is a symlink rather than a regular file", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { bundle: { symlink: ["docker-compose.yml"] } } });
-
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
-    if (outcome.status === "failed") expect(outcome.message).toBe("Bundled docker-compose.yml is not a regular file.");
-  });
-
-  it("refuses a bundled asset that is empty", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { bundle: { empty: ["docker-compose.yml"] } } });
-
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
-    if (outcome.status === "failed") expect(outcome.message).toBe("Bundled docker-compose.yml is empty.");
-  });
-
-  it("fails closed, with a terminal failed event rather than an escaped throw, when a bundled asset cannot be staged (install.sh:1501-1502)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    // Present, non-empty and a regular file, so it passes both bundle
-    // checks — and then cannot be read to copy into the staging directory.
-    const scenario = buildScenario(targetDir, { docker: { bundle: { unreadable: ["docker-compose.yml"] } } });
-
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
-    if (outcome.status === "failed") expect(outcome.message).toBe("Could not stage docker-compose.yml from the published image.");
-    expect(scenario.events.some((event) => event.state === "failed")).toBe(true);
-  });
-
-  it("fails closed when a bundled script fails `bash -n`", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, {
-      docker: { bundle: { contentFor: { "scripts/configure.sh": "if not valid bash then(" } } },
-    });
-
-    const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "assets", component: "assets" });
-    if (outcome.status === "failed") expect(outcome.message).toContain("failed a syntax check");
-  });
-
-  it("installs deployment assets at mode 0644, not the secret-file 0600 default (issue #383: Compose-mounted config/tika-config.json must stay readable by the non-root orbit-tika container)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir);
-
-    const outcome = await scenario.run();
-
-    expect(outcome.status).toBe("ok");
-    for (const asset of ["docker-compose.yml", "config/tika-config.json", "scripts/configure.sh", "scripts/backup.sh"]) {
-      const mode = statSync(join(targetDir, asset)).mode & 0o777;
-      expect(mode, `${asset} mode`).toBe(0o644);
-    }
-    // The secret-bearing environment file/secrets tree are unaffected.
-    expect(statSync(join(targetDir, ".env-orbit")).mode & 0o777).toBe(0o600);
-  });
-});
-
-describe("runInstall — terminal failed event coverage for transaction refusals (issue #383 addon finding 1)", () => {
-  it("emits a terminal failed event (not an escaped throw) when an asset directory is unsafe to create into", async () => {
-    const targetDir = newTarget();
-    writeRecognizedDeploymentTarget(targetDir);
-    // config/ already exists as a symlink — ensureManagedDirectory refuses
-    // (InstallTransactionRefusal) once the transaction is already open;
-    // buildManagedPaths never preflights asset directories the way
-    // install.sh's own preflight_final_paths does, so this is only
-    // reachable mid-transaction.
-    symlinkSync(newTarget(), join(targetDir, "config"));
-    const scenario = buildScenario(targetDir, { context: { requestedAction: "update" } });
-
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "compose", component: "compose" });
-    if (outcome.status === "failed") expect(outcome.message).toContain("Refusing to install into config");
-    expect(scenario.events.some((event) => event.state === "failed")).toBe(true);
-  });
-});
-
-describe("runInstall — guided configuration wiring (guarantees #30-32)", () => {
-  it("returns 'cancelled' (not 'failed') when the final apply/cancel review is declined", async () => {
-    const targetDir = newTarget();
-    const scenario = buildScenario(targetDir, {
-      context: { requestedAction: "install", hasControllingTerminal: true },
-      guided: { confirmApply: "cancel" },
-    });
-
-    const outcome = await scenario.run();
-    expect(outcome).toEqual({ status: "cancelled" });
-  });
-
-  it("fails closed when guided --init is cancelled or invalid, leaving the target untouched", async () => {
-    const targetDir = newTarget();
-    const scenario = buildScenario(targetDir, {
-      context: { requestedAction: "install", hasControllingTerminal: true },
-      guided: { runInitOk: false },
-    });
-
-    const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "configuration", component: "configuration" });
-    if (outcome.status === "failed") expect(outcome.message).toContain("target remains unchanged");
-    expect(existsSync(join(targetDir, ".env-orbit"))).toBe(false);
-  });
-});
-
-describe("runInstall — prepare_configuration wiring (guarantee #24)", () => {
-  it("fails closed with install.sh's exact remediation guidance when required fields are missing and there is no controlling terminal", async () => {
-    const targetDir = newTarget();
-    writeRecognizedDeploymentTarget(targetDir);
-    const scenario = buildScenario(targetDir, {
-      context: { requestedAction: "update", hasControllingTerminal: false },
-      guided: { runCheckOk: false, runCheckStdout: "missing OIDC_CLIENT_SECRET\n" },
-    });
-
-    const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "configuration", component: "configuration" });
-    if (outcome.status === "failed") {
-      expect(outcome.guidance).toBeDefined();
-      expect(outcome.guidance?.[0]).toContain("configuration fields requiring attention: OIDC_CLIENT_SECRET");
-      expect(outcome.guidance?.length).toBe(4);
-    }
-  });
-
-  it("emits configuration/configuration starting then running around prepareConfiguration, distinct from the later completed event (install.sh:952,1007, issue #383 addon finding 4)", async () => {
-    const targetDir = newTarget();
-    writeRecognizedDeploymentTarget(targetDir);
-    const scenario = buildScenario(targetDir, { context: { requestedAction: "update" } });
-
-    const outcome = await scenario.run();
-
-    expect(outcome.status).toBe("ok");
-    const configurationEvents = scenario.events.filter((event) => event.phase === "configuration" && event.component === "configuration");
-    expect(configurationEvents.map((event) => event.state)).toEqual(["starting", "running", "completed"]);
-    expect(configurationEvents[0]).toMatchObject({ reason: "configuration-migration", action: "configure" });
-    expect(configurationEvents[1]).toMatchObject({ reason: "configuration-migration", action: "verify" });
-  });
-});
-
-describe("runInstall — OIDC discovery wiring (guarantees #25-27)", () => {
-  it("fails closed on a non-2xx discovery response", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { oidcFetch: { httpStatus: "500" } });
-
-    const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "oidc", component: "oidc" });
-  });
-
-  it("fails closed when the sandboxed discovery-document validator rejects the response", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { oidcSandboxOk: false } });
-
-    const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "oidc", component: "oidc" });
-  });
-});
-
-describe("runInstall — transactional commit (guarantee #56) and rollback safety", () => {
-  it("rolls back every staged file change when Compose config validation fails after staging but before commit", async () => {
-    const targetDir = newTarget();
-    writeRecognizedDeploymentTarget(targetDir);
-    const before = readFileSync(join(targetDir, ".env-orbit"), "utf8");
-    const scenario = buildScenario(targetDir, {
-      context: { requestedAction: "update" },
-      docker: { composeConfigValidateOk: false },
-    });
-
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "compose", component: "compose" });
-    // Rolled back: the pre-run .env-orbit content is restored verbatim (no
-    // ORBIT_IMAGE line was left behind), and no deployment_assets were left
-    // installed in the target.
-    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toBe(before);
-    expect(existsSync(join(targetDir, "docker-compose.mail.yml"))).toBe(false);
-    // No leftover recovery-staging evidence: rollback succeeded.
-    const remaining = readdirSync(targetDir).filter(
-      (name: string) => name.startsWith(".orbit-install-staging.") || name.startsWith(".orbit-install-scratch."),
-    );
-    expect(remaining).toEqual([]);
-  });
-
-  it("does not roll back already-committed file changes when a later service-preparation step fails (guarantee #56: outside the file transaction's rollback scope)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { composePullOk: false } });
-
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "preparation", component: "database" });
-    expect(readFileSync(join(targetDir, ".env-orbit"), "utf8")).toContain(`ORBIT_IMAGE=${RESOLVED_REFERENCE}`);
-    expect(existsSync(join(targetDir, "docker-compose.yml"))).toBe(true);
-  });
-
-  it("surfaces the preserved staging directory in the failure guidance when rollback itself fails (install.sh:395, issue #383 addon finding 3)", async () => {
-    const targetDir = newTarget();
-    writeRecognizedDeploymentTarget(targetDir);
-    // config/ as a symlink both refuses ensureManagedDirectory (the original
-    // failure) and, because config/tika-config.json's managedWasPresent is
-    // false, makes rollback's own first pass find a symlinked parent for
-    // that same path — a genuine rollback failure, not just the initial
-    // refusal (install-transaction.ts:371-373's own "symlinked-parent").
-    symlinkSync(newTarget(), join(targetDir, "config"));
-    const scenario = buildScenario(targetDir, { context: { requestedAction: "update" } });
-
-    const outcome = await scenario.run();
-
-    expect(outcome).toMatchObject({ status: "failed", phase: "compose", component: "compose" });
-    if (outcome.status === "failed") {
-      expect(outcome.guidance).toBeDefined();
-      const preservedLine = outcome.guidance?.find((line) => line.includes("recovery staging preserved at"));
-      expect(preservedLine).toBeDefined();
-      expect(preservedLine).toMatch(/\.orbit-install-staging\./);
-      // The path it points to must actually exist as recovery evidence —
-      // rollback partially succeeded (every managed path other than
-      // config/tika-config.json was restored), but the one genuine failure
-      // is exactly why dispose() refused to delete the staging directory,
-      // so it must still be there for an operator to inspect.
-      const match = /recovery staging preserved at (.+)\.$/.exec(preservedLine!);
-      expect(match).toBeTruthy();
-      const stagingDir = match![1];
-      expect(existsSync(stagingDir)).toBe(true);
-      expect(existsSync(join(stagingDir, "rollback"))).toBe(true);
-    }
-    const blockedEvent = scenario.events.find((event) => event.phase === "rollback");
-    expect(blockedEvent).toMatchObject({ state: "blocked" });
-  });
-});
-
-describe("runInstall — service start and bounded health-wait wiring (guarantees #33-39)", () => {
-  it("tears down freshly-created services (only) when `compose up` fails on a fresh install", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { composeUpOk: false } });
-
-    const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "host" });
-    expect(scenario.docker.calls.some((call) => call.method === "composeDown")).toBe(true);
-    // ...and the database volume that attempt created, or the retry refuses on it.
-    expect(scenario.docker.calls.some((call) => call.method === "removeLeftoverDatabaseVolume")).toBe(true);
-  });
-
-  it("never tears down services when `compose up` fails on an update against a pre-existing deployment", async () => {
-    const targetDir = newTarget();
-    writeRecognizedDeploymentTarget(targetDir);
-    const scenario = buildScenario(targetDir, { context: { requestedAction: "update" }, docker: { composeUpOk: false } });
-
-    const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "host" });
-    expect(scenario.docker.calls.some((call) => call.method === "composeDown")).toBe(false);
-    expect(scenario.docker.calls.some((call) => call.method === "removeLeftoverDatabaseVolume")).toBe(false);
-  });
-
-  it("labels a `compose up` failure docker-host/repair, not the phase's default retry action (install.sh:1172's fail_with docker-host repair, issue #383 addon finding 2b)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { composeUpOk: false } });
-
-    const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "host", reason: "docker-host", action: "repair" });
-  });
-
-  it("fails closed when the database never becomes healthy within the bounded window", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { probeDatabaseOk: false } });
-
-    const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "database", component: "database" });
-  });
-
-  it("distinguishes 'stopped before ready' from 'timed out but still running' using the liveness probe (guarantee #38)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const stillRunning = buildScenario(targetDir, { docker: { probeApplicationOk: false, probeApplicationLivenessOk: true } });
-    const stillRunningOutcome = await stillRunning.run();
-    expect(stillRunningOutcome).toMatchObject({ status: "failed", phase: "application" });
-    if (stillRunningOutcome.status === "failed") expect(stillRunningOutcome.message).toContain("did not report ready");
-
-    const targetDir2 = newTarget();
-    writePreprovisionedTarget(targetDir2);
-    const stopped = buildScenario(targetDir2, { docker: { probeApplicationOk: false, probeApplicationLivenessOk: false } });
-    const stoppedOutcome = await stopped.run();
-    expect(stoppedOutcome).toMatchObject({ status: "failed", phase: "application" });
-    if (stoppedOutcome.status === "failed") expect(stoppedOutcome.message).toContain("stopped before it could report ready");
-  });
-
-  it("gives the alive-but-not-ready and dead-container branches distinct reason/action, matching install.sh's own two fail_with calls (install.sh:1177-1184, issue #383 addon finding 2a)", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const stillRunning = buildScenario(targetDir, { docker: { probeApplicationOk: false, probeApplicationLivenessOk: true } });
-    const stillRunningOutcome = await stillRunning.run();
-    expect(stillRunningOutcome).toMatchObject({ status: "failed", reason: "health-timeout", action: "repair" });
-
-    const targetDir2 = newTarget();
-    writePreprovisionedTarget(targetDir2);
-    const stopped = buildScenario(targetDir2, { docker: { probeApplicationOk: false, probeApplicationLivenessOk: false } });
-    const stoppedOutcome = await stopped.run();
-    // Before the fix: both branches called fail("application","application",msg)
-    // with no explicit reason/action, so defaultFailureReason("application")
-    // gave "health-timeout" here too — byte-identical to the alive branch,
-    // even though probeApplicationLiveness() exists specifically to tell
-    // the two apart.
-    expect(stoppedOutcome).toMatchObject({ status: "failed", reason: "application-startup", action: "repair" });
-    expect(stoppedOutcome).not.toMatchObject({ reason: "health-timeout" });
-  });
-
-  it("fails closed when the private scanner (clamav, always-on) never becomes healthy", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, { docker: { probeClamavOk: false } });
-
-    const outcome = await scenario.run();
-    expect(outcome).toMatchObject({ status: "failed", phase: "optional", component: "clamav" });
-  });
-
-  it("skips tika/ollama pull and health entirely for the standard profile, never calling their adapter methods", async () => {
-    const targetDir = newTarget();
-    writePreprovisionedTarget(targetDir);
-    const scenario = buildScenario(targetDir, {});
-
-    const outcome = await scenario.run();
-    expect(outcome.status).toBe("ok");
-    const calledMethods = scenario.docker.calls.map((call) => call.method);
-    expect(calledMethods).not.toContain("probeTikaHealth");
-    expect(calledMethods).not.toContain("probeOllamaHealth");
-    expect(calledMethods).not.toContain("pullOllamaModel");
-  });
-
-  it("emits a state=healthy event for every probed component the moment it becomes healthy (install.sh:1112, issue #383 addon finding 4)", async () => {
-    const targetDir = newTarget();
-    writeRecognizedDeploymentTarget(targetDir, { COMPOSE_PROFILES: "processing,ai", TIKA_URL: "http://orbit-tika:9998", OLLAMA_MODEL: "llama3" });
-    const scenario = buildScenario(targetDir, { context: { requestedAction: "update" } });
-
-    const outcome = await scenario.run();
-
-    expect(outcome.status).toBe("ok");
-    // Before the fix: grep -rn '"healthy"' src/ found the string only in
-    // engine-event.ts's own vocabulary list — the engine never actually
-    // emitted it, so a mission console could never flip a component green.
-    const healthyEvents = scenario.events.filter((event) => event.state === "healthy");
-    expect(healthyEvents).toEqual([
-      { phase: "database", component: "database", state: "healthy", reason: "database-health", action: "health" },
-      { phase: "application", component: "application", state: "healthy", reason: "application-health", action: "health" },
-      { phase: "optional", component: "clamav", state: "healthy", reason: "optional-status", action: "health" },
-      { phase: "optional", component: "tika", state: "healthy", reason: "optional-status", action: "health" },
-      { phase: "optional", component: "ollama", state: "healthy", reason: "optional-status", action: "health" },
+    expect(events.map(eventKey)).toEqual([
+      "assets assets starting assets-verified fetch",
+      "assets assets completed assets-verified fetch",
+      "configuration configuration starting configuration-migration configure",
+      "configuration configuration running configuration-migration verify",
+      "configuration configuration completed configuration-migration verify",
+      "oidc oidc skipped provider-discovery skip",
     ]);
+    // Nothing but the deployment is left in the target: no staging, scratch or lock.
+    expect(readdirSync(target).filter((entry) => entry.startsWith(".orbit-")).sort()).toEqual([".orbit-secrets"]);
+  });
+
+  it("names a fresh install's Compose project from the bundled docker-compose.yml, not the directory (#999)", async () => {
+    const target = preprovisioned();
+    await run(target, { facts: facts({ basename: "household" }) });
+    expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("COMPOSE_PROJECT_NAME=orbit\n");
+  });
+
+  it("verifies OIDC discovery in the engine when the deployment turned a provider on (#25-27, F5)", async () => {
+    const target = preprovisioned(ENV_OIDC);
+    const { outcome, events } = await run(target);
+    expect(outcome).toMatchObject({ status: "ok" });
+    expect(events.map(eventKey)).toContain("oidc oidc completed provider-discovery verify");
+  });
+
+  it("updates a recognised deployment on its proven volume, preserving the profile and every secret (#13, #19)", async () => {
+    const target = recognised(["COMPOSE_PROFILES=processing", "TIKA_URL=http://orbit-tika:9998"]);
+    const secretsBefore = snapshot(join(target, ".orbit-secrets"));
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+
+    expect(outcome).toEqual({ status: "ok", fresh: false, selectedProfile: "processing", modelPullRequested: false, databaseVolume: "orbit_orbit-db-data" });
+    const after = snapshot(join(target, ".orbit-secrets"));
+    for (const [path, value] of Object.entries(secretsBefore)) expect(after[path]).toBe(value);
+    expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain(`ORBIT_IMAGE=${REFERENCE}\n`);
+  });
+});
+
+describe("runInstall: target and action (guarantees #7, #21)", () => {
+  it("refuses an unrecognisable directory, changing nothing", async () => {
+    const target = sandbox("orbit-install-target-");
+    writeFileSync(join(target, "notes.txt"), "mine\n");
+    const { outcome } = await run(target);
+    expect(outcome).toMatchObject({ status: "failed", phase: "host", reason: "docker-host" });
+    expect(readdirSync(target)).toEqual(["notes.txt"]);
+  });
+
+  it("refuses an update whose optional-service configuration matches no supported profile (#23)", async () => {
+    const target = recognised(["COMPOSE_PROFILES=ai"]);
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "host", message: "The existing optional-service configuration is unsupported or ambiguous." });
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("refuses an explicit install over a recognised deployment, and an explicit update of an empty target", async () => {
+    expect((await run(recognised(), { requestedAction: "install" })).outcome).toMatchObject({
+      status: "failed",
+      message: "Install requires an empty target or safe pre-provisioned bootstrap; use Update for a recognized deployment.",
+    });
+    expect((await run(sandbox("orbit-install-target-"), { requestedAction: "update" })).outcome).toMatchObject({
+      status: "failed",
+      message: "Update requires a recognized existing Orbit deployment.",
+    });
+  });
+
+  it("signposts repair from the menu and changes nothing (#22)", async () => {
+    const target = sandbox("orbit-install-target-");
+    const { outcome, events } = await run(target, { interactive: true }, { terminal: scriptedTerminal(["repair"]) });
+    expect(outcome).toEqual({ status: "repair" });
+    expect(events.map(eventKey)).toEqual(["rollback installer blocked repair-unavailable repair"]);
+    expect(readdirSync(target)).toEqual([]);
+  });
+
+  it("treats Exit on the menu as the operator declining (130)", async () => {
+    const { outcome } = await run(sandbox("orbit-install-target-"), { interactive: true }, { terminal: scriptedTerminal(["exit"]) });
+    expect(outcome).toMatchObject({ status: "stopped", exitCode: 130 });
+  });
+
+  it("asks no question in plain mode, even at a terminal", async () => {
+    const terminal = scriptedTerminal([]);
+    const { outcome } = await run(preprovisioned(), { interactive: true, plainMode: true }, { terminal });
+    expect(outcome.status).toBe("ok");
+    expect(terminal.output()).toBe("");
+  });
+});
+
+describe("runInstall: database volume safety from the shell's facts (#13-18, F3)", () => {
+  it("refuses a fresh install whose own volume already exists, naming it and the removal command", async () => {
+    const { outcome } = await run(preprovisioned(), {
+      facts: facts({ volumes: [{ name: "orbit_orbit-db-data", labels: "orbit|orbit-db-data", containers: "" }] }),
+    });
+    expect(outcome).toMatchObject({ status: "failed", phase: "host" });
+    if (outcome.status === "failed") expect(outcome.message).toContain("docker volume rm -- orbit_orbit-db-data");
+  });
+
+  it("ignores another project's volume on a fresh install (#1239)", async () => {
+    const { outcome } = await run(preprovisioned(), {
+      facts: facts({ volumes: [{ name: "other_orbit-db-data", labels: "other|orbit-db-data", containers: "" }] }),
+    });
+    expect(outcome.status).toBe("ok");
+  });
+
+  it("fails closed when a fact the proof needs is missing, as a failed docker call did (#14)", async () => {
+    const target = recognised();
+    const before = snapshot(target);
+    const { outcome } = await run(target, {
+      facts: facts({ volumes: [{ name: "orbit_orbit-db-data", labels: "orbit|orbit-db-data", containers: null }] }),
+    });
+    expect(outcome).toMatchObject({ status: "failed", message: "Could not verify the existing Orbit database volume ownership; refusing to start Compose." });
+    expect(snapshot(target)).toEqual(before);
+  });
+});
+
+describe("runInstall: deployment assets from the image (F2, #42, #45)", () => {
+  it.each([
+    ["missing", (root: string) => rmSync(join(root, "config/tika-config.json")), "Bundled config/tika-config.json is not a regular file."],
+    ["a symlink", (root: string) => {
+      rmSync(join(root, "scripts/repair.sh"));
+      symlinkSync("/etc/passwd", join(root, "scripts/repair.sh"));
+    }, "Bundled scripts/repair.sh is not a regular file."],
+    ["empty", (root: string) => writeFileSync(join(root, "docker-compose.mail.yml"), ""), "Bundled docker-compose.mail.yml is empty."],
+    ["a directory", (root: string) => {
+      rmSync(join(root, "scripts/backup.sh"));
+      mkdirSync(join(root, "scripts/backup.sh"));
+    }, "Bundled scripts/backup.sh is not a regular file."],
+  ])("refuses a bundle whose asset is %s, before touching the target", async (_label, damage, message) => {
+    const target = preprovisioned();
+    const before = snapshot(target);
+    const root = assetsRoot();
+    damage(root);
+    const { outcome } = await run(target, { assetsRoot: root });
+    expect(outcome).toMatchObject({ status: "failed", phase: "assets", reason: "image-registry", message });
+    expect(snapshot(target)).toEqual(before);
+  });
+});
+
+describe("runInstall: refusals inside the transaction roll back (#11, #56)", () => {
+  it("refuses an unattended run with required fields missing, printing the remediation guidance (#24)", async () => {
+    const target = preprovisioned("ORBIT_AUTH_OIDC=false\n");
+    const before = snapshot(target);
+    const { outcome } = await run(target);
+    expect(outcome).toMatchObject({
+      status: "failed",
+      phase: "configuration",
+      reason: "configuration-failure",
+      action: "retry",
+      message: "Required configuration fields require attention; refusing to start Compose.",
+    });
+    if (outcome.status === "failed") expect(outcome.guidance?.[0]).toMatch(/^Orbit installer: configuration fields requiring attention: /);
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("rolls back on an unavailable provider, with its own reason (#25)", async () => {
+    const target = preprovisioned(ENV_OIDC);
+    const before = snapshot(target);
+    const { outcome } = await run(target, {}, { fetchImpl: async () => Promise.reject(new Error("offline")) });
+    expect(outcome).toMatchObject({ status: "failed", phase: "oidc", reason: "provider-unavailable", action: "retry" });
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("hands the launcher its tree once, before rolling back, on a configuration failure such as a non-2xx discovery answer (#1225)", async () => {
+    const target = preprovisioned(ENV_OIDC);
+    const before = snapshot(target);
+    let handedOver = 0;
+    let targetAtHandOver: Record<string, string> | undefined;
+    const { outcome } = await run(target, {}, {
+      fetchImpl: discoveryFetch("not here", 404),
+      onConfigurationFailure: () => {
+        handedOver += 1;
+        targetAtHandOver = snapshot(target);
+      },
+    });
+    expect(outcome).toMatchObject({ status: "failed", phase: "oidc", reason: "configuration-failure" });
+    expect(handedOver).toBe(1);
+    // Called while the transaction still held the run's changes: before the rollback.
+    expect(targetAtHandOver).not.toEqual(before);
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("never offers the launcher tree for a failure that is not a configuration failure", async () => {
+    let handedOver = 0;
+    const { outcome } = await run(preprovisioned(ENV_OIDC), {}, {
+      fetchImpl: async () => Promise.reject(new Error("offline")),
+      onConfigurationFailure: () => {
+        handedOver += 1;
+      },
+    });
+    expect(outcome).toMatchObject({ status: "failed", reason: "provider-unavailable" });
+    expect(handedOver).toBe(0);
+  });
+
+  it("rolls back a recognised update if configuration changed the preserved database password (#19)", async () => {
+    const target = recognised();
+    const before = snapshot(target);
+    const password = join(target, ".orbit-secrets", "postgres-password");
+    let tampered = false;
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) }, {
+      // Inside the transaction (after its backup), as a misbehaving configure step would.
+      say: () => {
+        if (tampered) return;
+        tampered = true;
+        writeFileSync(password, `${"f".repeat(64)}\n`, { mode: 0o600 });
+      },
+    });
+    expect(tampered).toBe(true);
+    expect(outcome).toMatchObject({
+      status: "failed",
+      message: "The existing POSTGRES_PASSWORD_FILE changed during configuration; refusing to start Compose.",
+    });
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("persists exactly one resolved image line on its own line, from a file with no final newline (#53)", async () => {
+    const target = recognised();
+    const environment = join(target, ".env-orbit");
+    writeFileSync(environment, readFileSync(environment, "utf8").replace(/\n$/, ""), { mode: 0o600 });
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "ok" });
+    const content = readFileSync(environment, "utf8");
+    expect(content.split("\n").filter((line) => line.startsWith("ORBIT_IMAGE"))).toEqual([`ORBIT_IMAGE=${REFERENCE}`]);
+    expect(content.endsWith("\n")).toBe(true);
+  });
+
+  it("refuses, and rolls back, a file that assigns the image twice: the preflight never lets a duplicated key through (#50, #53)", async () => {
+    const target = recognised();
+    const environment = join(target, ".env-orbit");
+    writeFileSync(environment, `${readFileSync(environment, "utf8")}ORBIT_IMAGE=${OLD_REFERENCE}\n`, { mode: 0o600 });
+    const before = snapshot(target);
+    const { outcome } = await run(target, { facts: provenVolumeFacts("orbit", OLD_REFERENCE) });
+    expect(outcome).toMatchObject({ status: "failed", message: "Configuration preflight failed; restoring the previous deployment." });
+    expect(snapshot(target)).toEqual(before);
+  });
+
+  it("rolls back an update whose configuration does not pass the preflight (#50)", async () => {
+    const target = recognised();
+    writeFileSync(join(target, ".env-orbit"), "not an assignment\n", { mode: 0o600 });
+    const before = snapshot(target);
+    const { outcome } = await run(target);
+    expect(outcome).toMatchObject({ status: "failed", message: "Configuration preflight failed; restoring the previous deployment." });
+    expect(snapshot(target)).toEqual(before);
+  });
+});
+
+describe("runInstall: at the operator's terminal (F4)", () => {
+  it("stages a guided fresh install and applies it only after the final review (#30-32)", async () => {
+    const target = sandbox("orbit-install-target-");
+    const terminal = scriptedTerminal(["install", "standard", "apply", "apply"]);
+    const answers: ConfigurationAnswers = {
+      guidedInit: (hint) => {
+        expect(hint).toBeUndefined();
+        return { appUrl: "https://guided.example.invalid", authMode: "local" };
+      },
+      oidcSecret: () => {
+        throw new Error("local-only: no secret is asked");
+      },
+    };
+    const { outcome } = await run(target, { interactive: true }, { terminal, answers });
+    expect(outcome).toMatchObject({ status: "ok", fresh: true, selectedProfile: "standard" });
+    expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("APP_URL=https://guided.example.invalid\n");
+    expect(terminal.output()).toContain("Final review: apply the collected core settings and selected standard profile.");
+    expect(terminal.remaining()).toBe(0);
+  });
+
+  it("asks for the OIDC client secret when the guided answers turned a provider on", async () => {
+    const target = sandbox("orbit-install-target-");
+    const answers: ConfigurationAnswers = {
+      guidedInit: () => ({ appUrl: "https://guided.example.invalid", authMode: "oidc", issuer: "https://issuer.example.invalid", clientId: "orbit-client" }),
+      oidcSecret: () => "s3cr3t-guided",
+    };
+    const { outcome } = await run(target, { interactive: true }, { terminal: scriptedTerminal(["install", "standard", "apply", "apply"]), answers });
+    expect(outcome.status).toBe("ok");
+    expect(readFileSync(join(target, ".orbit-secrets", "oidc-client-secret"), "utf8")).toBe("s3cr3t-guided");
+  });
+
+  it("changes nothing when the final review is cancelled (130)", async () => {
+    const target = sandbox("orbit-install-target-");
+    const answers: ConfigurationAnswers = { ...noAnswers, guidedInit: () => ({ appUrl: "https://guided.example.invalid", authMode: "local" }) };
+    const { outcome } = await run(target, { interactive: true }, { terminal: scriptedTerminal(["install", "standard", "apply", "cancel"]), answers });
+    expect(outcome).toMatchObject({ status: "stopped", exitCode: 130 });
+    expect(readdirSync(target)).toEqual([]);
+  });
+
+  it("fails as a configuration failure, target unchanged, when guided answers are cancelled", async () => {
+    const target = sandbox("orbit-install-target-");
+    const { outcome } = await run(target, { interactive: true }, { terminal: scriptedTerminal(["install", "standard", "apply"]) });
+    expect(outcome).toMatchObject({
+      status: "failed",
+      phase: "configuration",
+      reason: "configuration-failure",
+      message: "Guided configuration was cancelled or invalid; the target remains unchanged.",
+    });
+    expect(readdirSync(target)).toEqual([]);
+  });
+
+  it("asks an update's missing fields with the deployment's own sign-in mode (#918)", async () => {
+    const target = recognised();
+    writeFileSync(join(target, ".env-orbit"), readFileSync(join(target, ".env-orbit"), "utf8").replace("APP_URL=https://orbit.example.invalid\n", ""), { mode: 0o600 });
+    let hint: string | undefined = "unset";
+    const answers: ConfigurationAnswers = {
+      ...noAnswers,
+      guidedInit: (authModeHint) => {
+        hint = authModeHint;
+        return { appUrl: "https://asked.example.invalid", authMode: "local" };
+      },
+    };
+    const { outcome } = await run(target, { interactive: true, requestedAction: "update" }, { answers, terminal: scriptedTerminal([]) });
+    expect(outcome.status).toBe("ok");
+    expect(hint).toBe("local");
+    expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("APP_URL=https://asked.example.invalid\n");
+  });
+
+  it("records a confirmed model download for the shell, with the model in .env-orbit (#20)", async () => {
+    const target = recognised();
+    const terminal = scriptedTerminal(["update", "change", "full", "llama3.2:3b", "pull", "apply"]);
+    const { outcome } = await run(target, { interactive: true }, { terminal });
+    expect(outcome).toMatchObject({ status: "ok", selectedProfile: "full", modelPullRequested: true });
+    expect(readFileSync(join(target, ".env-orbit"), "utf8")).toContain("OLLAMA_MODEL=llama3.2:3b\n");
+    expect(terminal.output()).toContain("Current: schema=v1");
   });
 });

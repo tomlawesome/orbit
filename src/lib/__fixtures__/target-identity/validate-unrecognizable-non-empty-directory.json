@@ -1,0 +1,17 @@
+{
+  "name": "validate unrecognizable non-empty directory",
+  "mode": "validate",
+  "setup": [
+    {
+      "path": "README.md",
+      "file": "hello\n"
+    }
+  ],
+  "requested": null,
+  "targetBasename": "_Parity.Target",
+  "bash": {
+    "status": 1,
+    "stdout": "",
+    "stderr": "The installation directory is not empty and is not a recognizable Orbit deployment or safe pre-provisioned bootstrap. Refusing to install here."
+  }
+}

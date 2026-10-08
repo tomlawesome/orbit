@@ -68,6 +68,30 @@ services:
     container_name: orbit-clamav
     image: clamav/clamav:1.5.4-debian@sha256:38482a33c6791529d57ece99e5fda54ab94f85534d43306a0b37f5c5bd0aa498
     restart: unless-stopped
+    # The image starts freshclam and clamd side by side. On a volume that
+    # already holds an older database, freshclam downloads the newer one while
+    # clamd is still starting, cannot notify it, and clamd keeps the older set
+    # until a later download (#1295). So when a database is already there, run
+    # one blocking update first, then hand over to the image's own entrypoint:
+    # clamd then loads the newest database on disk, and freshclam's later
+    # updates reach it through NotifyClamd. NotifyClamd is left off for this
+    # run only, as the image does for its own first download. The update is
+    # bounded and never blocks startup: an offline host still starts the
+    # scanner on what it has. With no database yet (a fresh install) this is
+    # skipped: the image's entrypoint downloads one itself, with no time
+    # limit, before clamd starts, and a bounded run here would cut a slow
+    # download short and make the image start it over.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        chown -R clamav:clamav /var/lib/clamav
+        if find /var/lib/clamav -maxdepth 1 \( -name 'daily.c[vl]d' -o -name 'main.c[vl]d' \) | grep -q .; then
+          sed -e 's|^\(NotifyClamd \)|#\1|' /etc/clamav/freshclam.conf > /tmp/freshclam-first.conf
+          timeout 120 freshclam --foreground --stdout --user=clamav --config-file=/tmp/freshclam-first.conf || echo "First signature update did not finish; starting the scanner on the current database."
+          rm -f /tmp/freshclam-first.conf
+        fi
+        exec /init
     networks:
       # clamd shares only the hostile-document channel with Orbit. A separate
       # egress network lets FreshClam update signatures without a route to

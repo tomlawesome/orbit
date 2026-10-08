@@ -1,0 +1,12 @@
+{
+  "name": "ownership failed volume inspect",
+  "kind": "ownership",
+  "candidate": "orbit_orbit-db-data",
+  "expectedImage": "ghcr.io/tomlawesome/orbit@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "scenario": {},
+  "bash": {
+    "status": 2,
+    "stdout": "status=2",
+    "stderr": ""
+  }
+}

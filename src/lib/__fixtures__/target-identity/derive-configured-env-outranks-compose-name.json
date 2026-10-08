@@ -1,0 +1,22 @@
+{
+  "name": "derive configured env outranks compose name",
+  "mode": "derive",
+  "setup": [
+    {
+      "path": ".env-orbit",
+      "file": "COMPOSE_PROJECT_NAME=configured-project\n",
+      "mode": 384
+    },
+    {
+      "path": "docker-compose.yml",
+      "file": "name: orbit\n"
+    }
+  ],
+  "requested": null,
+  "targetBasename": "_Parity.Target",
+  "bash": {
+    "status": 0,
+    "stdout": "compose_project_name=configured-project explicit=1 provisional=0",
+    "stderr": ""
+  }
+}

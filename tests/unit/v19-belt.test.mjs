@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   BAND_MARGIN, BERTH_NARROW, BERTH_WIDE, DOC_OFF, J_H, J_PHI, J_RHO, MAX_GAP,
   MIN_GAP, RAD, bedOf, berthFor, bloomTargetsOf, bodiesOf, cardWidthOf, docSpread,
-  geometryOf, itemOffsetsOf, lehmer, matchesOf, nearestMatchOf, paperLines, reachableAt,
+  geometryOf, itemOffsetsOf, lehmer, litItemCountOf, matchesOf, nearestMatchOf, paperLines, reachableAt,
   rollRangeOf, seatOf, shortName, stepFrom, warpOf, AMBIENT_SEED,
 } from "../../web/src/routes/item/[[id]]/band.js";
 import { beltManifestOf, documentPreviewStateOf, sizeLabel } from "../../web/src/lib/data/belt.js";
@@ -330,7 +330,7 @@ describe("the jumble", () => {
     expect(Math.abs(seat.h)).toBe(0);
     const point = DESK.project(seat.phi, seat.rho, seat.h);
     expect(point.x).toBeCloseTo(800, 9);
-    expect(point.y).toBeCloseTo(350, 9);
+    expect(point.y).toBeCloseTo(500, 9);           // mid-page (#1247)
     // A neighbour, by contrast, is thrown off the ring.
     const neighbour = seatOf(BODIES, at("i-boiler"), {
       roll: BODIES[sel].off, berth: BERTH_WIDE, geom: DESK,
@@ -357,13 +357,14 @@ describe("the jumble", () => {
 });
 
 describe("the ring, seen at an angle", () => {
-  it("pins the apex to the middle of every sky, at 35% of its height", () => {
+  /* #1247 (owner, 2026-10-06): mid-page, not 35% of the height. */
+  it("pins the apex to the middle of every sky, at half its height", () => {
     for (const [w, h] of [[1600, 1000], [1280, 800], [1112, 1000], [900, 700], [400, 850]]) {
       const geom = geometryOf(w, h);
       const apex = geom.project(geom.PHI_APEX, geom.A, 0);
       expect(apex.x).toBeCloseTo(w / 2, 9);
-      expect(apex.y).toBeCloseTo(Math.round(h * 0.35), 9);
-      expect(geom.APEX_Y).toBe(Math.round(h * 0.35));
+      expect(apex.y).toBeCloseTo(Math.round(h * 0.5), 9);
+      expect(geom.APEX_Y).toBe(Math.round(h * 0.5));
     }
   });
 
@@ -469,6 +470,15 @@ describe("the search box", () => {
     // — and lights the paper too, because it is already out.
     expect(ids("service history")).toEqual(["i-mot", "d-mot-history"]);
     expect(ids("nothing by that name")).toEqual([]);
+  });
+
+  it("counts lit ITEMS for the note, so an item and its paper lit together count once (#1303)", () => {
+    // "service history" lights i-mot AND its paper d-mot-history: two seats,
+    // one item. Counting seats made the note say "2 of 1 lit".
+    expect(matchesOf(BODIES, "service history").size).toBe(2); // the old N
+    expect(litItemCountOf(BODIES, matchesOf(BODIES, "service history"))).toBe(1);
+    expect(litItemCountOf(BODIES, matchesOf(BODIES, "vehicles"))).toBe(2);
+    expect(litItemCountOf(BODIES, matchesOf(BODIES, "nothing by that name"))).toBe(0);
   });
 
   it("dims, it does not hide: the belt keeps its shape", () => {

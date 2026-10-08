@@ -3,12 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * A2-Q1: `uploadItemDocument` read the quarantine file twice on every upload
  * -- once to validate structure, once to encrypt -- where the inspection
- * endpoint (`item-document-inspection.ts`) reads once. With scanning
- * `disabled` there is no ClamAV wait between the two reads, so the second
- * read bought nothing; this proves it is gone for that path while the
- * `required` path still re-reads deliberately (it zeroes the buffer before
- * the scan runs, rather than holding plaintext in memory for the scan's
- * duration).
+ * endpoint (`item-document-inspection.ts`) reads once. Since ADR-0033 the
+ * scan runs before anything reads the file, so one read after the scan
+ * serves both the structure check and the encrypt stage on either scan mode,
+ * and no plaintext is held in memory for the scan's duration.
  */
 
 const mocks = vi.hoisted(() => ({
@@ -18,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   scanStatus: "clean" as "clean" | "infected",
   structureValid: true,
   lastQuarantineBuffer: null as Buffer | null,
+  order: [] as string[],
+  inserts: [] as string[],
 }));
 
 function queue(map: Map<string, unknown[][]>, table: string, rows: unknown[]) {
@@ -62,14 +62,15 @@ vi.mock("@/db", async () => {
     return chain;
   }
 
-  function insertBuilder() {
+  function insertBuilder(table: string) {
+    mocks.inserts.push(table);
     return { values: () => Promise.resolve() };
   }
 
   const fakeDb: Record<string, unknown> = {
     select: () => selectBuilder(),
     update: (t: unknown) => updateBuilder(getTableName(t as never)),
-    insert: () => insertBuilder(),
+    insert: (t: unknown) => insertBuilder(getTableName(t as never)),
     execute: async () => undefined,
     transaction: async (fn: (tx: unknown) => unknown) => fn(fakeDb),
   };
@@ -100,11 +101,19 @@ vi.mock("@/server/documents/config", () => ({
   wrappingKey: () => ({ keyEncryptionKey: Buffer.alloc(32, 1), keyId: "key-1" }),
   keyEncryptionKeyFor: () => Buffer.alloc(32, 1),
 }));
+// The administrator's upload limit (#1285) is proven in
+// src/server/upload-limit.test.ts; here it answers the configured default.
+vi.mock("@/server/upload-limit", () => ({
+  readEffectiveUploadLimit: async (config: { maxBytes: number }) => config.maxBytes,
+}));
 
 vi.mock("@/server/documents/validation", () => ({
   detectDocumentMediaType: () => "application/pdf",
   normalizedDocumentFilename: (name: string) => name,
-  validateSupportedDocumentStructure: async () => mocks.structureValid,
+  classifyDocumentStructure: async () => {
+    mocks.order.push("open");
+    return mocks.structureValid ? "supported_structure" : "unsupported_structure";
+  },
 }));
 
 vi.mock("@/server/documents/crypto", () => ({
@@ -123,7 +132,10 @@ vi.mock("@/server/documents/crypto", () => ({
 }));
 
 vi.mock("@/server/documents/scanner", () => ({
-  scanFileWithClamAv: async () => ({ status: mocks.scanStatus }),
+  scanFileWithClamAv: async () => {
+    mocks.order.push("scan");
+    return { status: mocks.scanStatus };
+  },
 }));
 
 vi.mock("@/server/documents/storage", () => ({
@@ -171,7 +183,47 @@ beforeEach(() => {
   mocks.scanStatus = "clean";
   mocks.structureValid = true;
   mocks.lastQuarantineBuffer = null;
+  mocks.order = [];
+  mocks.inserts = [];
   configState.scanMode = "disabled";
+});
+
+describe("uploadItemDocument scans before anything opens the file (ADR-0033)", () => {
+  it("scans, then lets the renderer open the file", async () => {
+    configState.scanMode = "required";
+    seedUploadHappyPath();
+
+    await uploadItemDocument({
+      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
+    });
+
+    expect(mocks.order).toEqual(["scan", "open"]);
+  });
+
+  it("never opens a file the scanner found malware in", async () => {
+    configState.scanMode = "required";
+    mocks.scanStatus = "infected";
+    seedUploadHappyPath();
+
+    await expect(uploadItemDocument({
+      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
+    })).rejects.toMatchObject({ code: "document_malware_detected" });
+
+    expect(mocks.order).toEqual(["scan"]);
+  });
+
+  it("refuses a file the renderer cannot open after its scan, before any metadata is written", async () => {
+    configState.scanMode = "required";
+    mocks.structureValid = false;
+    seedUploadHappyPath();
+
+    await expect(uploadItemDocument({
+      userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
+    })).rejects.toMatchObject({ code: "document_structure_invalid" });
+
+    expect(mocks.order).toEqual(["scan", "open"]);
+    expect(mocks.inserts).toEqual([]);
+  });
 });
 
 describe("uploadItemDocument quarantine reads (#1151 A2-Q1)", () => {
@@ -186,15 +238,22 @@ describe("uploadItemDocument quarantine reads (#1151 A2-Q1)", () => {
     expect(mocks.readQuarantineCalls).toBe(1);
   });
 
-  it("still reads twice when a scan runs, to avoid holding plaintext across it", async () => {
+  it("reads once when a scan runs too, and only after the scan, so no plaintext is held across it (ADR-0033)", async () => {
     configState.scanMode = "required";
     seedUploadHappyPath();
+    let readsWhenScanned = -1;
+    const scanned = mocks.order.push.bind(mocks.order);
+    mocks.order.push = (...entries: string[]) => {
+      if (entries.includes("scan")) readsWhenScanned = mocks.readQuarantineCalls;
+      return scanned(...entries);
+    };
 
     await uploadItemDocument({
       userId, householdId, itemId, filename: "bill.pdf", body: fakeBody(), declaredBytes: 5,
     });
 
-    expect(mocks.readQuarantineCalls).toBe(2);
+    expect(readsWhenScanned).toBe(0);
+    expect(mocks.readQuarantineCalls).toBe(1);
   });
 });
 

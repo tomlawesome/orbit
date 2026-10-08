@@ -1,0 +1,826 @@
+<!doctype html>
+<html lang="en" data-theme="afterdark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Orbit — the phone's create form reading a picked document (#1279)</title>
+<!-- The app ships Inter Variable, JetBrains Mono Variable and Space Grotesk
+     through @fontsource (web/src/routes/+layout.svelte). A mockup has no
+     bundle, so the same three faces come from Google Fonts here, and the
+     stacks below are packs.css's own, so the page renders in the faces the
+     app ships rather than whatever the reviewing machine happens to have. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  /* THE PHONE'S CREATE FORM READING A PICKED DOCUMENT (#1279).
+
+     What the desk does since #1245 (create.behaviour.js, create.css): pick a
+     file, the lanes split, "Focusing on the anomaly" breathes while the file
+     is on its way, page one lands on the top sheet within seconds, and what
+     the read found is typed into the empty fields marked "◆ from document".
+     The phone form (routes/create/pocket.svelte + EntryForm.svelte, #1120
+     proposal §2.5) saves the picked document with the item but draws neither
+     the page nor the read. This file draws them, in the pocket's own grammar.
+
+     Carried verbatim, not redrawn: the pocket tokens and kit (tokens.css,
+     kit.css), the shipped form (EntryForm.svelte's pc-* rules), the shipped
+     page idiom (StagedPage.svelte's bp-* rules: cream sheet, tilted second
+     sheet under it), the desk's reticle, its words for every state, and the
+     desk's accent rule down a field that was filled from the document.
+
+     The one design call: WHERE the reading card sits. §2.5's layout lists it
+     fourth, between the document row and the fields; its "carries / changes"
+     line says "below the fields", and the build put it there. Below the
+     fields it is off-screen at the moment that matters — the owner's whole
+     complaint on #1245 was that the page should land quickly so the eye can
+     confirm the file. So the card lands where the thumb just was: straight
+     under TYPE, in place of the row that picked the file. The fields keep
+     their place below it and carry the marks. */
+
+  :root{
+    --mono:'JetBrains Mono Variable','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --ui:'Inter Variable',Inter,system-ui,-apple-system,'Segoe UI',sans-serif;
+    --display:'Space Grotesk',var(--ui);
+  }
+  /* the five packs, token blocks verbatim from web/src/lib/packs.css (comments stripped) */
+  [data-theme=starchart]{
+    --bg:#060b1c; --panel:rgba(13,20,44,.55); --panel-raised:rgba(19,28,58,.75);
+    --line:#243259; --line-soft:#17203f;
+    --ink:#e9edf8; --ink-mid:#8791b3; --ink-faint:#737e9e;
+    --accent:#d8b45a; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#8fb8ff;
+    --degraded:#fb8b24;
+    --sun:#ffe9c4; --sun-core:#fff6e6; --stars:1; --celestial:block;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#243259; --chart-line-soft:#17203f; --chart-ink:#737e9e;
+    --ink-quiet:#8b95b6; --accent-text:var(--accent); --ok-text:var(--ok);
+    --overdue-text:var(--overdue); --degraded-text:var(--degraded);
+    --warm-text:var(--warm);
+    --upcoming-text:var(--upcoming);
+    --sec-sage:#8fbf9f; --sec-blue:#8fb8ff; --sec-sand:#d8b45a;
+    --sec-plum:#b79ae0; --sec-coral:#f0907a;
+  }
+  [data-theme=afterdark]{
+    --bg:#05070d; --panel:rgba(11,15,26,.6); --panel-raised:rgba(15,21,36,.8);
+    --line:#1c2434; --line-soft:#151b28;
+    --ink:#e7e9ee; --ink-mid:#9fa6b2; --ink-faint:#717c8e;
+    --accent:#7dd3fc; --ok:#4ade80; --warm:#f0b429; --overdue:#f87171; --upcoming:#7dd3fc;
+    --degraded:#fb8b24;
+    --sun:#dbe9ff; --sun-core:#ffffff; --stars:.6; --celestial:none;
+    --star-far:#e9edf8; --star-near:#f4f0ff;
+    --chart-line:#1c2434; --chart-line-soft:#151b28; --chart-ink:#717c8e;
+    --ink-quiet:#768295; --accent-text:var(--accent); --ok-text:var(--ok);
+    --overdue-text:var(--overdue); --degraded-text:var(--degraded);
+    --warm-text:var(--warm);
+    --upcoming-text:var(--upcoming);
+    --plane-warm:#ffcf94;
+    --plane-cool:#9fb0d6;
+    --plane-star:#cfd9ee;
+    --plane-star-warm:#ffdca6;
+    --plane-dust:#01020a;
+    --sec-sage:#7fb79a; --sec-blue:#7dd3fc; --sec-sand:#d9bd83;
+    --sec-plum:#a99ae0; --sec-coral:#ef9b86;
+  }
+  [data-theme=dawn]{
+    --sky-1:#b0bed6; --sky-2:#c2cad9; --sky-3:#d7d5cf; --sky-4:#eedfc8; --sky-5:#f8e9d2;
+    --bg:#d2d3d4;
+    --panel:rgba(233,239,249,.58); --panel-raised:rgba(241,245,252,.80);
+    --line:#a6b2c5; --line-soft:#c0c8d6;
+    --ink:#18202f; --ink-mid:#343d51; --ink-faint:#414d62;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#c06a12; --overdue:#c22a63; --upcoming:#1f7ac2;
+    --degraded:#c2570e;
+    --sun:#eda253; --sun-core:#9c4a10; --stars:1; --celestial:none;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+    --p-jade-1:#e8f6ec; --p-jade-2:#95cfab; --p-jade-3:#4f9070;
+    --p-amber-1:#fff0d8; --p-amber-2:#f0c076; --p-amber-3:#ad7830;
+    --p-ruby-1:#ffe2e1; --p-ruby-2:#ec949c; --p-ruby-3:#a9505f;
+    --p-sky-1:#e6eefc; --p-sky-2:#9dbce6; --p-sky-3:#5b80b8;
+    --night-far:#dbe3f6; --night-near:#f4f7ff;
+    --n-accent:#a9cdf2; --n-ink:#eef2fb; --n-line:#96a9c9;
+    --ink-quiet:var(--ink-faint); --accent-text:#134a72; --ok-text:#0d4e30;
+    --overdue-text:color-mix(in srgb, var(--overdue) 70%, black 30%);
+    --degraded-text:color-mix(in srgb, var(--degraded) 60%, black 40%);
+    --warm-text:color-mix(in srgb, var(--warm) 70%, black 30%);
+    --upcoming-text:var(--accent-text);
+    --sec-sage:#2f7d55; --sec-blue:#1f7ac2; --sec-sand:#8f6c00;
+    --sec-plum:#71499a; --sec-coral:#bd4f36;
+  }
+  [data-theme=clouds]{
+    --sky-1:#b0bed6; --sky-2:#c2cad9; --sky-3:#d7d5cf; --sky-4:#eedfc8; --sky-5:#f8e9d2;
+    --bg:#d2d3d4;
+    --panel:rgba(233,239,249,.58); --panel-raised:rgba(241,245,252,.80);
+    --line:#a6b2c5; --line-soft:#c0c8d6;
+    --ink:#18202f; --ink-mid:#343d51; --ink-faint:#414d62;
+    --accent:#1f7ac2; --ok:#178a4c; --warm:#c06a12; --overdue:#c22a63; --upcoming:#1f7ac2;
+    --degraded:#c2570e;
+    --sun:#eda253; --sun-core:#9c4a10; --stars:1; --celestial:none;
+    --star-far:var(--ink); --star-near:var(--ink);
+    --chart-line:rgba(26,34,51,.45); --chart-line-soft:rgba(26,34,51,.24); --chart-ink:#40506e;
+    --p-jade-1:#e8f6ec; --p-jade-2:#95cfab; --p-jade-3:#4f9070;
+    --p-amber-1:#fff0d8; --p-amber-2:#f0c076; --p-amber-3:#ad7830;
+    --p-ruby-1:#ffe2e1; --p-ruby-2:#ec949c; --p-ruby-3:#a9505f;
+    --p-sky-1:#e6eefc; --p-sky-2:#9dbce6; --p-sky-3:#5b80b8;
+    --ink-quiet:var(--ink-faint); --accent-text:#134a72; --ok-text:#0d4e30;
+    --overdue-text:color-mix(in srgb, var(--overdue) 70%, black 30%);
+    --degraded-text:color-mix(in srgb, var(--degraded) 60%, black 40%);
+    --warm-text:color-mix(in srgb, var(--warm) 70%, black 30%);
+    --upcoming-text:var(--accent-text);
+    --sec-sage:#2f7d55; --sec-blue:#1f7ac2; --sec-sand:#8f6c00;
+    --sec-plum:#71499a; --sec-coral:#bd4f36;
+  }
+  [data-theme=retrograde]{
+    --bg:#080a14; --panel:rgba(12,20,30,.62); --panel-raised:rgba(16,26,38,.86);
+    --line:#1d4a5a; --line-soft:#12303c;
+    --ink:#eef6ff; --ink-mid:#a9d8e6; --ink-faint:#6f9fb1;
+    --accent:#ff4fd8; --ok:#3ef2a0; --warm:#ffd23f; --overdue:#ff3864; --upcoming:#2de2e6;
+    --degraded:#ff9f1c;
+    --sun:#ff4fd8; --sun-core:#fff0fb; --stars:1; --celestial:block;
+    --star-far:#9fd6e6; --star-near:#ffffff;
+    --chart-line:#2a7f96; --chart-line-soft:#164b5c; --chart-ink:#6f9fb1;
+    --bloom:color-mix(in srgb,var(--accent) 45%,transparent);
+    --p-jade-1:#c4ffe4; --p-jade-2:#3ef2a0; --p-jade-3:#0e7a55;
+    --p-amber-1:#fff3b0; --p-amber-2:#ffd23f; --p-amber-3:#8a6b00;
+    --p-ruby-1:#ffb3c4; --p-ruby-2:#ff3864; --p-ruby-3:#8a0f2e;
+    --p-sky-1:#b6fbff; --p-sky-2:#2de2e6; --p-sky-3:#0d6b78;
+    --ink-quiet:#74a4b4; --accent-text:var(--accent); --ok-text:var(--ok);
+    --overdue-text:var(--overdue); --degraded-text:var(--degraded);
+    --warm-text:var(--warm);
+    --upcoming-text:var(--upcoming);
+    --sec-sage:#3ef2a0; --sec-blue:#2de2e6; --sec-sand:#ffd23f;
+    --sec-plum:#ff4fd8; --sec-coral:#ff9f1c;
+  }
+
+  /* ── the pocket's tokens, verbatim from web/src/lib/pocket/tokens.css ── */
+  :root{
+    --p-type-title:1.75rem; --p-type-title-lh:1.15; --p-type-card:1.3125rem; --p-type-body:1rem;
+    --p-type-sheet:1.125rem; --p-type-meta:.8125rem; --p-type-caps:.75rem; --p-type-caps-track:.18em;
+    --p-type-button:.9375rem;
+    --p-hit:44px; --p-gutter:16px; --p-card-pad:16px; --p-card-radius:16px; --p-card-gap:12px;
+    --p-group-above:24px; --p-group-below:8px; --p-pill-gap:8px; --p-pill-pad:16px; --p-column:480px;
+    --p-row-min:56px; --p-row-mark:24px; --p-row-gap:12px; --p-chrome:56px;
+    --p-pill-glow:0 0 0 transparent;
+    --p-ease:cubic-bezier(.3,.7,.3,1); --p-rise:300ms; --p-spring:200ms; --p-arm:150ms; --p-wake:250ms;
+  }
+  :root:not([data-theme=dawn]):not([data-theme=clouds]){
+    --p-pill-glow:0 0 28px -8px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  .phone.narrow{ --p-gutter:12px }
+
+  *{box-sizing:border-box;margin:0}
+  html,body{min-height:100%}
+  body{background:#0a0c12;color:var(--ink);font-family:var(--ui);-webkit-font-smoothing:antialiased}
+
+  /* ── the phone frame: 390x844 by default (?w=360&h=780 for the small one),
+        centred on a desk; on a real phone it is the viewport above the bar ── */
+  .stage{min-height:100vh;display:grid;place-items:center;padding:24px 16px calc(var(--bar-h, 96px) + 24px)}
+  .phone{position:relative;width:390px;height:844px;overflow:hidden;background:var(--bg);color:var(--ink);
+         border-radius:28px;box-shadow:0 0 0 1px rgba(255,255,255,.08),0 30px 80px rgba(0,0,0,.6)}
+  .screen{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:none}
+  .screen::-webkit-scrollbar{display:none}
+  @media (max-width:430px){
+    .stage{padding:0;display:block;min-height:0}
+    .phone{width:100vw;height:calc(100dvh - var(--bar-h, 96px));border-radius:0;box-shadow:none}
+  }
+
+  /* ── the pocket sky (Sky.svelte): the desk's star field, seeded, drifting ── */
+  .pk-sky{position:absolute;inset:-5%;pointer-events:none;z-index:0;opacity:var(--stars)}
+  .pk-sky svg{position:absolute;inset:0;width:100%;height:100%}
+  .pk-sky .far{animation:drift 400s linear infinite}
+  .pk-sky .near{animation:drift 195s linear infinite}
+  @keyframes drift{to{transform:translateX(-400px)}}
+  .pk-vignette{position:absolute;inset:0;z-index:1;pointer-events:none;
+    background:radial-gradient(ellipse at 50% 40%, transparent 55%, rgba(0,0,0,.35) 100%)}
+  :is([data-theme=dawn],[data-theme=clouds]) .pk-vignette{display:none}
+
+  /* ── the kit (kit.css), the pieces this screen reads ── */
+  .p-pill{appearance:none;display:inline-flex;align-items:center;justify-content:center;
+    min-height:var(--p-hit);min-width:var(--p-hit);padding:0 var(--p-pill-pad);flex:none;
+    border-radius:calc(var(--p-hit) / 2);
+    border:1px solid color-mix(in srgb, var(--act, var(--line)) 40%, transparent);
+    background:var(--panel);color:var(--act-text, var(--ink-mid));
+    font:var(--p-type-button)/1.2 var(--mono);cursor:pointer;
+    text-decoration:none;-webkit-tap-highlight-color:transparent;
+    transition:background-color 120ms,border-color 120ms}
+  .p-pill:not([class*=act-],.danger,[style*="--act"]){border-color:var(--line)}
+  .p-pill.act-ok{--act:var(--ok);--act-text:var(--ok-text)}
+  .p-pill.act-accent{--act:var(--accent);--act-text:var(--accent-text)}
+  .p-pill.danger{--act:var(--overdue);--act-text:var(--overdue-text)}
+  .p-pill:active{border-color:var(--act, var(--accent));
+    background:color-mix(in srgb, var(--act, var(--accent)) 14%, transparent)}
+  .p-pill.filled{background:var(--accent);border-color:var(--accent);color:var(--bg);
+    font:600 var(--p-type-button)/1.2 var(--display);letter-spacing:.01em;box-shadow:var(--p-pill-glow)}
+  :is([data-theme=dawn],[data-theme=clouds]) .p-pill.filled{color:#fff}
+  [data-theme=retrograde] .p-pill.filled{box-shadow:0 0 12px -2px var(--bloom), var(--p-pill-glow)}
+  .p-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .p-card{position:relative;background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line-soft);
+    border-radius:var(--p-card-radius);padding:var(--p-card-pad);margin-bottom:var(--p-card-gap);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.05), 0 10px 30px -18px rgba(0,0,0,.6);
+    animation:p-landed 600ms cubic-bezier(.3,.7,.2,1) backwards;animation-delay:calc(var(--i, 0) * 60ms)}
+  @keyframes p-landed{from{opacity:0;transform:translateY(8px) scale(.985)}}
+  :is([data-theme=dawn],[data-theme=clouds]) .p-card{
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.72), 0 8px 20px rgba(48,66,98,.07)}
+  .p-card.proposed{border-style:dashed;border-color:color-mix(in srgb, var(--accent) 45%, var(--line-soft))}
+  .p-caps{font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);
+    text-transform:uppercase;color:var(--ink-quiet);margin:var(--p-group-above) 0 var(--p-group-below)}
+  .p-card > .p-caps:first-child{margin:0 0 12px}
+  .p-title{font:600 var(--p-type-title)/var(--p-type-title-lh) var(--display);color:var(--ink);margin:0}
+  .p-body{display:inline-block;box-sizing:border-box;width:10px;height:10px;border-radius:50%;flex:none;
+    color:var(--ok);background:currentColor;box-shadow:0 0 0 2.5px var(--bg);vertical-align:middle}
+  .p-body.up{color:var(--upcoming)}
+  .p-body.breathing{animation:p-breathe 2.4s ease-in-out infinite}
+  @keyframes p-breathe{0%,100%{opacity:1}50%{opacity:.55}}
+  .p-paper{color:var(--paper, var(--accent-text));font-size:var(--p-type-meta);line-height:1}
+
+  /* ── the top chrome (TopChrome.svelte), fixed to the phone ── */
+  .p-chrome{position:absolute;top:0;left:0;right:0;z-index:20;height:var(--p-chrome);
+    padding:0 calc(var(--p-gutter) - 8px);display:flex;align-items:center;justify-content:space-between}
+  /* TopChrome.svelte: it leaves on a scroll down and comes back on any
+     scroll up, over a fade of the page's own ground. */
+  .p-chrome{transition:transform var(--p-spring) var(--p-ease)}
+  .p-chrome.hidden{transform:translateY(-100%)}
+  .p-chrome.scrolled{background:linear-gradient(var(--bg) 60%, transparent)}
+  .p-chrome .back{display:inline-flex;align-items:center;min-height:var(--p-hit);padding:0 8px;
+    font:var(--p-type-meta)/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;
+    color:var(--ink-mid);text-decoration:none;
+    text-shadow:0 0 2px var(--bg),0 0 5px var(--bg),0 0 11px var(--bg)}
+  .p-chrome .orb{width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--panel);
+    display:grid;place-items:center;font:600 .75rem/1 var(--mono);color:var(--ink-mid);margin-right:4px}
+
+  /* ── pocket.svelte: the column, the title, genesis, the save bar ── */
+  .pk-create{position:relative;min-height:100%}
+  .pk-column{position:relative;z-index:2;max-width:var(--p-column);margin:0 auto;
+    padding:calc(var(--p-chrome) + 8px) var(--p-gutter) calc(var(--pc-bar, 88px) + 24px)}
+  .pk-head{margin:0 0 20px;padding:0 2px}
+  .pc-sub{margin:6px 0 0;font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet);letter-spacing:.02em}
+  .pk-genesis{position:absolute;z-index:1;pointer-events:none;top:-90px;left:50%;width:520px;height:340px;
+    transform:translateX(-50%);
+    background:radial-gradient(ellipse at 50% 55%, color-mix(in srgb, var(--accent) 16%, transparent) 0%,
+      color-mix(in srgb, var(--accent) 6%, transparent) 38%, transparent 70%)}
+  [data-theme=retrograde] .pk-genesis{
+    background:radial-gradient(ellipse at 50% 55%, color-mix(in srgb, var(--bloom) 14%, transparent) 0%, transparent 65%)}
+  .pk-bar{position:absolute;z-index:15;left:0;right:0;bottom:0;
+    background:color-mix(in srgb, var(--panel-raised) 88%, transparent);backdrop-filter:blur(16px);
+    border-top:1px solid var(--line-soft);box-shadow:0 -12px 32px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.05);
+    padding:10px var(--p-gutter) calc(10px + 14px)}
+  :is([data-theme=dawn],[data-theme=clouds]) .pk-bar{
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.78), 0 -12px 28px rgba(48,66,98,.10)}
+  .pk-bar-in{max-width:var(--p-column);margin:0 auto}
+  .pk-bar-acts{display:flex;gap:var(--p-pill-gap)}
+  .pk-save{flex:1}
+  .pk-home{position:absolute;left:50%;bottom:6px;width:134px;height:5px;border-radius:3px;
+    transform:translateX(-50%);background:var(--ink);opacity:.5}
+
+  /* ── EntryForm.svelte, verbatim (the pc-* rules this screen shows) ── */
+  .pc-form{display:flex;flex-direction:column}
+  .pc-card{padding:var(--p-card-pad) var(--p-card-pad) 20px}
+  .pc-chip{appearance:none;display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    min-height:var(--p-hit);min-width:var(--p-hit);padding:0 14px;
+    border-radius:calc(var(--p-hit) / 2);border:1px solid var(--line);background:var(--panel);
+    color:var(--ink-mid);font:var(--p-type-button)/1.2 var(--ui);cursor:pointer;
+    -webkit-tap-highlight-color:transparent;transition:background-color 120ms,border-color 120ms,color 120ms}
+  .pc-chip[aria-pressed=true]{border-color:var(--accent);color:var(--ink);
+    background:color-mix(in srgb, var(--accent) 16%, var(--panel))}
+  [data-theme=retrograde] .pc-chip[aria-pressed=true]{box-shadow:0 0 10px -3px var(--bloom)}
+  .pc-chip:focus-visible,.pc-doc:focus-visible,.pc-remind:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .pc-kinds{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:var(--p-pill-gap)}
+  .pc-kinds .pc-chip{grid-column:span 2;padding:0 6px;gap:6px;font-size:.875rem}
+  .pc-kinds .pc-chip:nth-child(n+4){grid-column:span 3}
+  .pc-glyph{color:var(--accent-text);font-size:var(--p-type-body);line-height:1}
+
+  .pc-doc{appearance:none;display:flex;align-items:center;gap:var(--p-row-gap);width:100%;min-height:var(--p-row-min);
+    margin-top:12px;padding:8px 12px;border-radius:12px;text-align:left;cursor:pointer;
+    border:1.5px dashed color-mix(in srgb, var(--accent) 45%, var(--line-soft));background:none;color:var(--ink)}
+  .pc-doc:active{background:color-mix(in srgb, var(--accent) 10%, transparent)}
+  .pc-doc-mark{width:var(--p-row-mark);text-align:center;font-size:var(--p-type-body)}
+  .pc-doc-words{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .pc-doc-words b{font:500 var(--p-type-body)/1.3 var(--ui)}
+  .pc-doc-words span{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
+  /* Once a file is held, the row's job is done: the reading card takes its
+     place and carries the file's name, size and "not this one". */
+  .held .pc-doc{display:none}
+
+  .pc-field{margin:0 0 18px}
+  .pc-field:last-child{margin-bottom:0}
+  .pc-field > label,.pc-label{display:flex;justify-content:space-between;align-items:baseline;gap:8px;
+    margin:0 0 6px;font:var(--p-type-caps)/1.4 var(--mono);letter-spacing:var(--p-type-caps-track);
+    text-transform:uppercase;color:var(--ink-quiet)}
+  .pc-need{letter-spacing:.04em;text-transform:none;font-size:var(--p-type-caps);color:var(--accent-text)}
+  .pc-field input,.pc-field textarea{width:100%;min-height:48px;padding:0 14px;
+    border-radius:12px;border:1px solid var(--line);background:color-mix(in srgb, var(--bg) 55%, transparent);
+    color:var(--ink);font:var(--p-type-body)/1.4 var(--ui)}
+  .pc-field textarea{padding:12px 14px;resize:vertical;min-height:96px}
+  .pc-field input.mono{font-family:var(--mono)}
+  .pc-field input::placeholder,.pc-field textarea::placeholder{color:var(--ink-quiet);opacity:1}
+  .pc-field input:focus,.pc-field textarea:focus{outline:none;border-color:var(--accent);
+    box-shadow:0 0 0 1px var(--accent)}
+  .pc-hint{margin:6px 0 0;font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
+  .pc-strip{display:flex;gap:var(--p-pill-gap);overflow-x:auto;scrollbar-width:none;
+    margin:0 calc(var(--p-card-pad) * -1);padding:2px var(--p-card-pad);scroll-padding:0 var(--p-card-pad)}
+  .pc-strip::-webkit-scrollbar{display:none}
+  .pc-strip .pc-chip{flex:none}
+  .pc-mark{display:inline-flex;line-height:0}
+  .pc-mark svg{fill:none;stroke:var(--sec);stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}
+  .pc-mark circle{fill:var(--sec);stroke:none}
+  .pc-stepper{display:flex;align-items:center;gap:8px}
+  .pc-step{font:500 1.25rem/1 var(--mono);padding:0}
+  .pc-step:disabled{opacity:.4;cursor:default}
+  .pc-recur{flex:1;text-align:center;min-height:var(--p-hit);display:grid;place-items:center;
+    border-radius:12px;border:1px solid var(--line-soft);font:500 var(--p-type-body)/1.2 var(--mono);color:var(--ink)}
+  .pc-quick{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:8px}
+  .pc-quick .pc-mini{padding:0 2px;white-space:nowrap;letter-spacing:-.02em}
+  .pc-mini{padding:0 12px;font:var(--p-type-meta)/1.2 var(--mono)}
+  .pc-money{display:flex;align-items:center;position:relative}
+  .pc-sym{position:absolute;left:14px;font:var(--p-type-body)/1 var(--mono);color:var(--ink-quiet);pointer-events:none}
+  .pc-money input{padding-left:34px;padding-right:56px}
+  .pc-cur{position:absolute;right:14px;font:var(--p-type-meta)/1 var(--mono);color:var(--ink-quiet);pointer-events:none}
+  .pc-remind{appearance:none;display:flex;align-items:center;flex-wrap:wrap;gap:8px;width:100%;min-height:var(--p-hit);
+    padding:6px 14px 6px 8px;border-radius:12px;border:1px solid var(--line-soft);
+    background:none;color:var(--ink-mid);cursor:pointer;text-align:left}
+  .pc-tag{display:inline-flex;align-items:center;min-height:30px;padding:0 10px;border-radius:15px;
+    border:1px solid color-mix(in srgb, var(--upcoming) 40%, transparent);color:var(--upcoming-text);
+    font:var(--p-type-meta)/1 var(--mono)}
+  .pc-before{font:var(--p-type-meta)/1 var(--mono);color:var(--ink-quiet)}
+  .pc-change{margin-left:auto;font:var(--p-type-meta)/1 var(--mono);color:var(--accent-text)}
+
+  /* the shipped reading card's own rows */
+  .pc-paper{display:flex;align-items:center;gap:var(--p-row-gap);min-height:var(--p-row-min)}
+  .pc-paper-words{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .pc-paper-words b{font:500 var(--p-type-body)/1.3 var(--ui);color:var(--ink);overflow-wrap:anywhere}
+  .pc-paper-words span{font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet)}
+  .pc-paper-words .clean{color:var(--ok-text)}
+  .pc-drop{--act:var(--overdue);--act-text:var(--overdue-text)}
+
+  /* ── NEW (#1279): a field filled from the document ──
+     The desk's own mark (create.css .field.sugg): the accent rule down the
+     field's left edge, and "◆ from document" where the desk puts its tag.
+     On the phone the words take the label's right-hand slot — the slot
+     "required · choose one" already uses — so no field grows taller. There
+     is no accept pill: editing the field is accepting it, and the mark
+     clears as you type (EntryForm's accept() does the same copy today). */
+  .pc-from{display:none;letter-spacing:.04em;text-transform:none;font-size:var(--p-type-caps);color:var(--accent-text)}
+  .pc-field.sugg .pc-from{display:inline}
+  .pc-field.sugg input{border-left:3px solid var(--accent)}
+
+  /* ── NEW (#1279): the reading card, straight under TYPE ──
+     The proposed (dashed) card the form already draws, in the TYPE card's
+     wake rather than below the fields. Inside, in order: the paper's row,
+     then the desk's reading lane — the reticle and its breathing line
+     while the file is on its way; the top sheet once page one is drawn —
+     then the caption, then "not this one". */
+  .pc-reading{display:none}
+  :is(.held,.refused) .pc-reading{display:block}
+  :is(.held,.refused) .pc-reading.pc-landed{animation:p-landed 600ms cubic-bezier(.3,.7,.2,1) backwards}
+  .pc-paper-row{border-bottom:1px solid var(--line-soft);padding-bottom:4px;margin-bottom:8px}
+  .refused .pc-paper-words b{color:var(--ink-mid)}
+  .pc-paper-words .refusedword{color:var(--degraded-text)}
+
+  /* the focus block: the desk's reticle (create.css), the phone's line and
+     why (StagedPage's bp-line / bp-why) */
+  .pc-focus{display:flex;flex-direction:column;align-items:center;text-align:center;padding:14px 0 6px}
+  .snap .pc-focus{display:none}
+  .pc-reticle{width:96px;height:96px;margin-bottom:16px}
+  .pc-reticle .sweep{transform-origin:48px 48px;animation:sweep 9s linear infinite}
+  .pc-reticle .pull{transform-origin:48px 48px;animation:pull 3.6s ease-in-out infinite}
+  @keyframes sweep{to{transform:rotate(360deg)}}
+  @keyframes pull{0%,100%{transform:scale(1);opacity:.85}50%{transform:scale(.88);opacity:.5}}
+  .pc-focusline{font:600 var(--p-type-body)/1.35 var(--display);color:var(--ink);
+    animation:breathe 4.2s ease-in-out infinite}
+  @keyframes breathe{0%,100%{opacity:.96}50%{opacity:.42}}
+  .pc-why{font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet);margin-top:8px;text-wrap:balance}
+  .still .pc-focusline{animation:none}
+  .refused .pc-focusline{color:var(--degraded-text)}
+  .refused .pc-reticle{opacity:.35}
+
+  /* the top sheet: page one whole on the cream sheet, the tilted second
+     sheet under it (StagedPage's bp-page, create.css's .sheet — one idiom) */
+  .pc-topsheet{display:none;padding:8px 0 4px}
+  .snap .pc-topsheet{display:block;animation:landed .6s cubic-bezier(.3,.7,.2,1) backwards}
+  @keyframes landed{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
+  .pc-sheet{position:relative;width:max-content;max-width:100%;margin:0 auto;padding:8px;
+    background:#f6f4ee;border-radius:5px;
+    box-shadow:0 18px 44px rgba(0,0,0,.45),0 1px 0 rgba(255,255,255,.4) inset}
+  .pc-sheet::before{content:"";position:absolute;inset:0;background:#e7e3d8;border-radius:5px;
+    transform:rotate(-1.6deg) translate(-4px,4px);z-index:-1}
+  /* Page one at a glance, not the item card's near edge-to-edge preview:
+     the form is the job here, so the page stops at 40% of the screen (the
+     belt is one tap away for anyone who needs to read it). */
+  .pc-sheet svg{display:block;height:min(calc(var(--ph, 100dvh) * .4), 340px);width:auto;aspect-ratio:300 / 424;
+    border-radius:2px;background:#fff}
+  .pc-sheet img{display:block;max-width:100%;height:auto;max-height:min(calc(var(--ph, 100dvh) * .4), 340px);border-radius:2px;background:#fff}
+
+  /* the caption (the desk's .cap, in the phone's prose face) */
+  .pc-cap{margin:14px 0 0;text-align:center;font:var(--p-type-meta)/1.5 var(--ui);color:var(--ink-quiet);text-wrap:pretty}
+  .pc-cap b{display:block;font-weight:500;color:var(--ink)}
+  .pc-cap .p-body{margin:0 8px 2px 0}
+  .read .pc-cap .p-body{display:none}
+  .pc-honest{display:none}
+  .pc-reading .pc-drop{margin-top:14px}
+  .refused .pc-drop{display:none}
+
+  /* ── the review bar: scenes and packs, under the phone, never in it ── */
+  .demos{position:fixed;left:0;right:0;bottom:0;z-index:30;height:var(--bar-h, 96px);padding:8px 12px 6px;
+    background:#11141c;color:#c8cdd8;border-top:1px solid #262b38;font-family:var(--ui);
+    display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;column-gap:10px;row-gap:6px;align-items:center}
+  .demos .scenes{display:flex;gap:6px;flex-wrap:wrap}
+  .demos .scenes button{min-height:34px;padding:0 12px;font:12px var(--mono);color:#aeb5c4;background:none;
+    border:1px solid #2a3040;border-radius:8px;cursor:pointer}
+  .demos .scenes button[aria-pressed=true]{color:#7dd3fc;border-color:#7dd3fc}
+  .demos .packs{display:flex;gap:8px;align-items:center}
+  .demos .packs button{width:18px;height:18px;border-radius:50%;border:1px solid #3a4150;padding:0;cursor:pointer}
+  .demos .packs button[aria-pressed=true]{outline:2px solid #7dd3fc;outline-offset:2px}
+  .demos .cap{grid-column:1/3;font:11px/1.4 var(--mono);color:#8e96a8;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;letter-spacing:.02em}
+  .demos .cap b{color:#e7e9ee;font-weight:500}
+
+  @media (prefers-reduced-motion: reduce){
+    .pk-sky .far,.pk-sky .near,.p-card,.pc-reading,.pc-topsheet,.pc-reticle .sweep,.pc-reticle .pull,
+    .pc-focusline,.p-body.breathing{animation:none!important}
+    .pc-chip,.p-pill{transition:none}
+  }
+</style>
+</head>
+<body>
+
+<div class="stage">
+<div class="phone" id="phone">
+  <div class="screen" id="screen">
+    <div class="pk-create" id="create">
+      <div class="pk-sky" aria-hidden="true"><svg viewBox="0 0 400 850" preserveAspectRatio="xMidYMid slice" id="sky"></svg></div>
+      <div class="pk-genesis" aria-hidden="true"></div>
+
+      <main class="pk-column">
+        <header class="pk-head">
+          <h1 class="p-title">New entry</h1>
+          <p class="pc-sub">add something to your orbit</p>
+        </header>
+
+        <form aria-label="New entry" onsubmit="event.preventDefault()">
+        <div class="pc-form">
+          <section class="p-card pc-card" style="--i:0" aria-labelledby="h-type">
+            <h2 class="p-caps" id="h-type">type</h2>
+            <div class="pc-kinds" role="group" aria-labelledby="h-type">
+              <button type="button" class="pc-chip" aria-pressed="true"><span class="pc-glyph" aria-hidden="true">●</span>service</button>
+              <button type="button" class="pc-chip" aria-pressed="false"><span class="pc-glyph" aria-hidden="true">◉</span>renewal</button>
+              <button type="button" class="pc-chip" aria-pressed="false"><span class="pc-glyph" aria-hidden="true">◑</span>inspection</button>
+              <button type="button" class="pc-chip" aria-pressed="false"><span class="pc-glyph" aria-hidden="true">○</span>suggestion</button>
+              <button type="button" class="pc-chip" aria-pressed="false"><span class="pc-glyph" aria-hidden="true">◆</span>document</button>
+            </div>
+            <!-- The shipped row (EntryForm.svelte). Its second line is true
+                 once this is built: the document IS read for you. Until
+                 the read lands on the phone, the line must say less. -->
+            <button type="button" class="pc-doc" onclick="pick()">
+              <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
+              <span class="pc-doc-words">
+                <b>add a document</b>
+                <span>photo or file · read for you</span>
+              </span>
+            </button>
+          </section>
+
+          <!-- THE READING CARD (#1279): in the TYPE card's wake, where the
+               thumb just was. aria-live so the head's change ("Reading your
+               document" → "Page one") and the caption's are announced. -->
+          <section class="p-card proposed pc-card pc-reading pc-landed" id="readcard" style="--i:1"
+                   aria-labelledby="h-reading" aria-live="polite">
+            <h2 class="p-caps" id="h-reading">reading your document</h2>
+
+            <div class="pc-paper pc-paper-row">
+              <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
+              <span class="pc-paper-words"><b id="rc-file">homecare-renewal-2026.pdf</b>
+                <span>812 KB<span id="rc-scan" hidden> · <span class="clean">scanned clean</span></span><span id="rc-refused" hidden> · <span class="refusedword">refused</span></span></span></span>
+            </div>
+
+            <div class="pc-focus">
+              <svg class="pc-reticle" viewBox="0 0 96 96" aria-hidden="true">
+                <circle cx="48" cy="48" r="43" fill="none" stroke="var(--chart-line)" stroke-width="1"
+                        stroke-dasharray="3 7" opacity=".8"/>
+                <g class="sweep">
+                  <line x1="48" y1="5" x2="48" y2="14" stroke="var(--accent)" stroke-width="1.2" opacity=".8"/>
+                  <line x1="48" y1="82" x2="48" y2="91" stroke="var(--accent)" stroke-width="1.2" opacity=".35"/>
+                </g>
+                <g class="pull" fill="none" stroke="var(--accent)" stroke-width="1.1" opacity=".7">
+                  <path d="M 26 18 H 18 V 26"/><path d="M 70 18 H 78 V 26"/>
+                  <path d="M 26 78 H 18 V 70"/><path d="M 70 78 H 78 V 70"/>
+                </g>
+                <circle cx="48" cy="48" r="16" fill="none" stroke="var(--chart-line)" stroke-width="1" opacity=".9"/>
+                <circle cx="48" cy="48" r="1.8" fill="var(--accent)"/>
+              </svg>
+              <p class="pc-focusline" id="focusline">Focusing on the anomaly</p>
+              <p class="pc-why" id="focuswhy">orbit is reading the pages it was given<br>nothing is saved, and nothing is assumed</p>
+            </div>
+
+            <div class="pc-topsheet">
+              <div class="pc-sheet">
+                <!-- In the build this is <img>, the picture the household's
+                     pre-attachment preview route drew of the file just
+                     picked (#1245/#476), exactly as the desk's #sheet-page.
+                     The mockup has no server, so the page is the sketch
+                     create-v3/create-dragover drew for the same file. -->
+                <svg viewBox="0 0 300 424" role="img"
+                     aria-label="Page one of homecare-renewal-2026.pdf: a British Gas HomeCare annual service plan renewal">
+                  <rect width="300" height="424" fill="#fdfcf9"/>
+                  <g>
+                    <circle cx="30" cy="30" r="9.5" fill="none" stroke="#1f3c86" stroke-width="1.6"/>
+                    <path d="M 30 24.5 c 3.6 3 3.6 6.4 0 9.6 c -3.6 -3.2 -3.6 -6.6 0 -9.6 z" fill="#1f3c86"/>
+                    <text x="46" y="27" font-family="Inter,system-ui,sans-serif" font-size="9"
+                          font-weight="700" letter-spacing="1.1" fill="#1f3c86">BRITISH GAS</text>
+                    <text x="46" y="37" font-family="Inter,system-ui,sans-serif" font-size="6"
+                          letter-spacing=".7" fill="#7a8090">HOMECARE &#183; ANNUAL SERVICE PLAN</text>
+                    <text x="270" y="27" text-anchor="end" font-family="Inter,system-ui,sans-serif"
+                          font-size="6.4" fill="#7a8090">Issued 14 Aug 2026</text>
+                    <text x="270" y="37" text-anchor="end" font-family="ui-monospace,Menlo,monospace"
+                          font-size="6.4" fill="#7a8090">Account 8021 4417</text>
+                  </g>
+                  <line x1="20" y1="50" x2="280" y2="50" stroke="#d8d3c6" stroke-width="1"/>
+                  <g fill="#dcd8cc">
+                    <rect x="20" y="62" width="86" height="4.6" rx="2.3"/>
+                    <rect x="20" y="72" width="66" height="4.6" rx="2.3"/>
+                    <rect x="20" y="82" width="74" height="4.6" rx="2.3"/>
+                    <rect x="20" y="92" width="48" height="4.6" rx="2.3"/>
+                  </g>
+                  <text x="20" y="126" font-family="Inter,system-ui,sans-serif" font-size="11"
+                        font-weight="600" fill="#20293d">Your annual boiler service is due</text>
+                  <g fill="#dcd8cc">
+                    <rect x="20" y="138" width="260" height="4.6" rx="2.3"/>
+                    <rect x="20" y="148" width="244" height="4.6" rx="2.3"/>
+                    <rect x="20" y="158" width="176" height="4.6" rx="2.3"/>
+                  </g>
+                  <rect x="20" y="178" width="260" height="86" rx="3" fill="#f3f1ea" stroke="#ddd8ca"/>
+                  <g font-family="Inter,system-ui,sans-serif" font-size="7.4" fill="#77808f">
+                    <text x="32" y="199">Policy number</text>
+                    <text x="32" y="225">Service due</text>
+                    <text x="32" y="251">Annual charge</text>
+                  </g>
+                  <g font-size="8.6" fill="#20293d">
+                    <text x="268" y="199" text-anchor="end" font-family="ui-monospace,Menlo,monospace">BG-88214-HC</text>
+                    <text x="268" y="225" text-anchor="end" font-family="Inter,system-ui,sans-serif" font-weight="600">02 November 2026</text>
+                    <text x="268" y="251" text-anchor="end" font-family="Inter,system-ui,sans-serif" font-weight="600">&#163;144.00</text>
+                  </g>
+                  <line x1="20" y1="196" x2="280" y2="196" stroke="#e4e0d4" stroke-width=".8"/>
+                  <line x1="20" y1="222" x2="280" y2="222" stroke="#e4e0d4" stroke-width=".8"/>
+                  <line x1="20" y1="248" x2="280" y2="248" stroke="#e4e0d4" stroke-width=".8"/>
+                  <g fill="#dcd8cc">
+                    <rect x="20" y="282" width="260" height="4.6" rx="2.3"/>
+                    <rect x="20" y="292" width="252" height="4.6" rx="2.3"/>
+                    <rect x="20" y="302" width="238" height="4.6" rx="2.3"/>
+                    <rect x="20" y="312" width="196" height="4.6" rx="2.3"/>
+                    <rect x="20" y="330" width="150" height="4.6" rx="2.3"/>
+                    <rect x="20" y="340" width="164" height="4.6" rx="2.3"/>
+                  </g>
+                  <line x1="20" y1="384" x2="280" y2="384" stroke="#e4e0d4" stroke-width=".8"/>
+                  <text x="20" y="397" font-family="ui-monospace,Menlo,monospace" font-size="6"
+                        fill="#9aa0ad">Page 1 of 4</text>
+                  <text x="280" y="397" text-anchor="end" font-family="ui-monospace,Menlo,monospace"
+                        font-size="6" fill="#9aa0ad">homecare-renewal-2026.pdf</text>
+                  <path d="M 300 396 L 284 424 L 300 424 Z" fill="#e9e5d9"/>
+                </svg>
+              </div>
+              <p class="pc-cap"><b>Page one of the file you added</b>
+                <span class="p-body up breathing" aria-hidden="true"></span><span id="rc-capline">orbit is reading the pages it was given</span></p>
+              <p class="pc-honest" id="rc-honest"></p>
+            </div>
+
+            <button type="button" class="p-pill pc-drop" onclick="setScene('empty')">not this one</button>
+          </section>
+
+          <section class="p-card pc-card" id="details" style="--i:2" aria-labelledby="h-details">
+            <h2 class="p-caps" id="h-details">details</h2>
+
+            <div class="pc-field">
+              <label for="f-name">name</label>
+              <input id="f-name" maxlength="100" autocomplete="off" placeholder="e.g. Car MOT" value="homecare renewal 2026">
+            </div>
+
+            <div class="pc-field" role="group" aria-labelledby="l-section">
+              <div class="pc-label" id="l-section">section <span class="pc-need">tap to swap</span></div>
+              <div class="pc-strip">
+                <button type="button" class="pc-chip pc-sec" aria-pressed="true" style="--sec:var(--sec-sage)"><span class="pc-mark"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 12 L8 4 L13 11"/><circle cx="3" cy="12" r="1.6"/><circle cx="8" cy="4" r="1.6"/><circle cx="13" cy="11" r="1.6"/></svg></span>Home</button>
+                <button type="button" class="pc-chip pc-sec" aria-pressed="false" style="--sec:var(--sec-blue)"><span class="pc-mark"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M2 10 L7 6 L10 11 L14 4"/><circle cx="2" cy="10" r="1.6"/><circle cx="7" cy="6" r="1.6"/><circle cx="10" cy="11" r="1.6"/><circle cx="14" cy="4" r="1.6"/></svg></span>Vehicles</button>
+                <button type="button" class="pc-chip pc-sec" aria-pressed="false" style="--sec:var(--sec-sand)"><span class="pc-mark"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 4 L12 5 L8 13"/><circle cx="3" cy="4" r="1.6"/><circle cx="12" cy="5" r="1.6"/><circle cx="8" cy="13" r="1.6"/></svg></span>Devices</button>
+                <button type="button" class="pc-chip pc-sec" aria-pressed="false" style="--sec:var(--sec-plum)"><span class="pc-mark"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M2 12 L6 3 L10 9 L14 5"/><circle cx="2" cy="12" r="1.6"/><circle cx="6" cy="3" r="1.6"/><circle cx="10" cy="9" r="1.6"/><circle cx="14" cy="5" r="1.6"/></svg></span>Services</button>
+                <button type="button" class="pc-chip pc-sec" aria-pressed="false" style="--sec:var(--sec-coral)"><span class="pc-mark"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 3 L13 6 L5 13"/><circle cx="3" cy="3" r="1.6"/><circle cx="13" cy="6" r="1.6"/><circle cx="5" cy="13" r="1.6"/></svg></span>Dates &amp; renewals</button>
+              </div>
+            </div>
+
+            <div class="pc-field" id="field-provider">
+              <label for="f-provider">provider <span class="pc-from">◆ from document</span></label>
+              <input id="f-provider" maxlength="100" autocomplete="off" placeholder="optional · e.g. Kwik Fit" oninput="edited(this)">
+            </div>
+
+            <div class="pc-field" id="field-ref">
+              <label for="f-ref">reference <span class="pc-from">◆ from document</span></label>
+              <input id="f-ref" class="mono" maxlength="80" autocomplete="off" placeholder="optional · policy no." oninput="edited(this)">
+            </div>
+
+            <div class="pc-field" id="field-date">
+              <label for="f-date">due date <span class="pc-from">◆ from document</span></label>
+              <input id="f-date" type="date" class="mono" oninput="edited(this)">
+            </div>
+
+            <div class="pc-field" role="group" aria-labelledby="l-recur">
+              <div class="pc-label" id="l-recur">comes round</div>
+              <div class="pc-stepper">
+                <button type="button" class="p-pill pc-step" aria-label="Less often">−</button>
+                <output class="pc-recur" aria-live="polite">every 12 months</output>
+                <button type="button" class="p-pill pc-step" aria-label="More months between">+</button>
+              </div>
+              <div class="pc-quick" role="group" aria-label="Common periods">
+                <button type="button" class="pc-chip pc-mini" aria-pressed="false">once</button>
+                <button type="button" class="pc-chip pc-mini" aria-pressed="false">monthly</button>
+                <button type="button" class="pc-chip pc-mini" aria-pressed="false">6 months</button>
+                <button type="button" class="pc-chip pc-mini" aria-pressed="true">yearly</button>
+              </div>
+            </div>
+
+            <div class="pc-field" id="field-cost">
+              <label for="f-cost">cost <span class="pc-from">◆ from document</span></label>
+              <div class="pc-money">
+                <span class="pc-sym" aria-hidden="true">£</span>
+                <input id="f-cost" class="mono" inputmode="decimal" autocomplete="off" placeholder="0.00" aria-describedby="f-cur" oninput="edited(this)">
+                <span class="pc-cur" id="f-cur">GBP</span>
+              </div>
+            </div>
+
+            <div class="pc-field" role="group" aria-labelledby="l-remind">
+              <div class="pc-label" id="l-remind">reminders</div>
+              <button type="button" class="pc-remind" aria-expanded="false" aria-label="Reminders: 21 days, 7 days before. Change">
+                <span class="pc-tag">21d</span><span class="pc-tag">7d</span>
+                <span class="pc-before">before</span>
+                <span class="pc-change">change</span>
+              </button>
+            </div>
+
+            <div class="pc-field">
+              <label for="f-notes">notes</label>
+              <textarea id="f-notes" rows="3" maxlength="2000" placeholder="anything else worth keeping"></textarea>
+            </div>
+          </section>
+        </div>
+        </form>
+      </main>
+    </div>
+  </div>
+
+  <header class="p-chrome" aria-label="Top chrome">
+    <a class="back" href="#">← your sky</a>
+    <span class="orb" aria-hidden="true">TL</span>
+  </header>
+
+  <div class="pk-bar" id="bar">
+    <div class="pk-bar-in">
+      <div class="pk-bar-acts">
+        <a class="p-pill pk-never" href="#">never mind</a>
+        <button type="button" class="p-pill filled pk-save">Add to orbit</button>
+      </div>
+    </div>
+    <div class="pk-home" aria-hidden="true"></div>
+  </div>
+</div>
+</div>
+
+<nav class="demos" aria-label="Design review: scenes and packs">
+  <div class="scenes" role="group" aria-label="Scene">
+    <button data-scene="empty" aria-pressed="false">empty</button>
+    <button data-scene="picked" aria-pressed="false">picked</button>
+    <button data-scene="reading" aria-pressed="false">reading</button>
+    <button data-scene="read" aria-pressed="false">read</button>
+    <button data-scene="refused" aria-pressed="false">refused</button>
+  </div>
+  <div class="packs" role="group" aria-label="Theme">
+    <button data-pack="afterdark" style="background:#05070d" title="after dark" aria-pressed="true"></button>
+    <button data-pack="starchart" style="background:#070d1f" title="star-chart" aria-pressed="false"></button>
+    <button data-pack="clouds" style="background:#eef2f9" title="clouds" aria-pressed="false"></button>
+    <button data-pack="dawn" style="background:#d2d3d4" title="dawn" aria-pressed="false"></button>
+    <button data-pack="retrograde" style="background:#080a14;box-shadow:inset 0 0 0 1px #ff4fd8" title="retrograde" aria-pressed="false"></button>
+  </div>
+  <div class="cap" id="cap" aria-live="polite"></div>
+</nav>
+
+<script>
+/* ── the frame: ?w=360&h=780 for the small phone; the default is 390x844 ── */
+const q = new URLSearchParams(location.search);
+const phone = document.getElementById("phone");
+const w = +q.get("w") || 390, h = +q.get("h") || 844;
+if (matchMedia("(min-width:431px)").matches) { phone.style.width = w + "px"; phone.style.height = h + "px"; }
+phone.classList.toggle("narrow", w < 390);
+const sizePhone = () => phone.style.setProperty("--ph", phone.clientHeight + "px");
+sizePhone(); addEventListener("resize", sizePhone);
+/* the chrome goes on a scroll down and returns on a scroll up (TopChrome.svelte) */
+const chrome = document.querySelector(".p-chrome");
+let lastY = 0;
+
+/* ── the sky: Sky.svelte's recipe — a 400x850 tile, 60 far, 30 near, 5
+      bright, seeded, each layer over a copy of itself one tile to the right ── */
+function mkRng(s){ let x = s % 2147483647; if (x <= 0) x += 2147483646;
+  return () => (x = x * 16807 % 2147483647) / 2147483647; }
+const rng = mkRng(17170812);
+const LAYERS = [{ rMin:.4, rSpan:.5, oMin:.12, oSpan:.23 }, { rMin:.8, rSpan:.7, oMin:.3, oSpan:.4 }];
+function stars(layer, n){ const L = LAYERS[layer]; return Array.from({ length:n }, () => ({
+  cx:(rng()*400).toFixed(1), cy:(rng()*850).toFixed(1), r:(L.rMin + rng()*L.rSpan).toFixed(2), o:(L.oMin + rng()*L.oSpan).toFixed(2) })); }
+const far = stars(0, 60), near = stars(1, 30);
+const bright = Array.from({ length:5 }, () => ({ cx:(rng()*400).toFixed(1), cy:(rng()*850).toFixed(1), r:(1.8 + rng()*.6).toFixed(2), o:.95 }));
+function layer(cls, list, fill){
+  const dots = list.map(s => `<circle cx="${s.cx}" cy="${s.cy}" r="${s.r}" opacity="${s.o}"/>`).join("");
+  return `<g class="${cls}" fill="${fill}"><g>${dots}</g><g transform="translate(400 0)">${dots}</g></g>`;
+}
+document.getElementById("sky").innerHTML = layer("far", far, "var(--star-far)") + layer("near", near.concat(bright), "var(--star-near)");
+
+/* ── the data story: the desk mockup's own read of the same file ── */
+const READ = { "f-provider":"British Gas", "f-ref":"BG-88214-HC", "f-date":"2026-11-02", "f-cost":"144.00" };
+const SUGGESTED = ["field-provider", "field-ref", "field-date", "field-cost"];
+const create = document.getElementById("create");
+const readcard = document.getElementById("readcard");
+const head = document.getElementById("h-reading");
+const focusline = document.getElementById("focusline");
+const focuswhy = document.getElementById("focuswhy");
+const capline = document.getElementById("rc-capline");
+const rcFile = document.getElementById("rc-file");
+const rcScan = document.getElementById("rc-scan");
+const rcRefused = document.getElementById("rc-refused");
+const screen = document.getElementById("screen");
+screen.addEventListener("scroll", () => {
+  const y = screen.scrollTop;
+  chrome.classList.toggle("hidden", y > lastY && y > 56);
+  chrome.classList.toggle("scrolled", y > 0);
+  lastY = y;
+});
+
+/* the desk's words for every state, verbatim (create.behaviour.js) */
+const READING_HEAD = "reading your document", PAGE_HEAD = "page one";
+const FOCUS_READING = "Focusing on the anomaly";
+const WHY_READING = "orbit is reading the pages it was given<br>nothing is saved, and nothing is assumed";
+const FOCUS_REFUSED = "Orbit refused this file.";
+const WHY_REFUSED = "it did not pass what orbit checks before keeping a file<br>choose another document";
+const CAP_READING = "orbit is reading the pages it was given";
+const CAP_CARRIED = "the fields marked ◆ from document are what orbit read across into the form";
+
+function fill(){
+  for (const id in READ) document.getElementById(id).value = READ[id];
+  for (const id of SUGGESTED) document.getElementById(id).classList.add("sugg");
+}
+function clear(){
+  for (const id in READ) document.getElementById(id).value = "";
+  for (const id of SUGGESTED) document.getElementById(id).classList.remove("sugg");
+}
+/* typing is accepting: the mark leaves the field as the desk's accept does */
+function edited(input){ input.closest(".pc-field").classList.remove("sugg"); }
+
+const CAPS = {
+  empty:   "<b>empty</b> · the shipped form; the row's second line, <i>read for you</i>, is what this round makes true",
+  picked:  "<b>picked</b> · the file is on its way: the card lands where the row was, the reticle breathes",
+  reading: "<b>reading</b> · page one lands within seconds, head turns to PAGE ONE; the read carries on beside the breathing mark",
+  read:    "<b>read</b> · the empty fields fill, each marked ◆ from document with the accent rule; editing one clears its mark",
+  refused: "<b>refused</b> · the scanner would not keep the file: it leaves the entry, the lane says so, the row is back",
+};
+let timer = 0;
+function setScene(scene, scroll = true){
+  clearTimeout(timer);
+  const c = create.classList;
+  c.remove("held", "doc", "snap", "read", "still", "refused");
+  readcard.classList.remove("pc-landed");
+  clear();
+  head.textContent = READING_HEAD;
+  focusline.textContent = FOCUS_READING;
+  focuswhy.innerHTML = WHY_READING;
+  capline.textContent = CAP_READING;
+  rcFile.textContent = "homecare-renewal-2026.pdf";
+  rcScan.hidden = true;
+  rcRefused.hidden = true;
+  if (scene !== "empty") { c.add("held", "doc"); void readcard.offsetWidth; readcard.classList.add("pc-landed"); }
+  if (scene === "reading" || scene === "read") { c.add("snap"); head.textContent = PAGE_HEAD; rcScan.hidden = false; }
+  if (scene === "read") { c.add("read"); fill(); capline.textContent = CAP_CARRIED; }
+  if (scene === "refused") {
+    c.remove("held"); c.add("still", "refused");
+    rcRefused.hidden = false;
+    focusline.textContent = FOCUS_REFUSED; focuswhy.innerHTML = WHY_REFUSED;
+  }
+  for (const b of document.querySelectorAll(".demos [data-scene]")) b.setAttribute("aria-pressed", String(b.dataset.scene === scene));
+  document.getElementById("cap").innerHTML = CAPS[scene];
+  if (scroll) {
+    /* where the eye is in each scene: the card for the pick and the page,
+       the caption and the first marked fields once the read is through */
+    const at = (el) => el.getBoundingClientRect().top - screen.getBoundingClientRect().top + screen.scrollTop;
+    const top = scene === "read" ? at(readcard.querySelector(".pc-cap")) - 64
+              : scene === "reading" ? at(readcard) - 64
+              : scene === "refused" ? at(readcard) + readcard.offsetHeight - (phone.clientHeight - 100) : 0;
+    lastY = 0;
+    screen.scrollTo({ top:Math.max(0, top), behavior:"instant" });
+  }
+}
+/* the real walk: pick, the page lands, the read completes */
+function pick(){
+  setScene("picked", false);
+  timer = setTimeout(() => { setScene("reading", false); timer = setTimeout(() => setScene("read", false), 2200); }, 1800);
+}
+for (const b of document.querySelectorAll(".demos [data-scene]")) b.addEventListener("click", () => setScene(b.dataset.scene));
+for (const b of document.querySelectorAll(".demos [data-pack]")) b.addEventListener("click", () => {
+  document.documentElement.dataset.theme = b.dataset.pack;
+  for (const o of document.querySelectorAll(".demos [data-pack]")) o.setAttribute("aria-pressed", String(o === b));
+});
+if (q.get("theme")) document.querySelector(`.demos [data-pack="${q.get("theme")}"]`)?.click();
+setScene(q.get("scene") || "picked");
+</script>
+</body>
+</html>

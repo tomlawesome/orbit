@@ -65,6 +65,10 @@
 
   onMount(() => {
     form = mountCreate();
+    /* #1251: the desk's heading is the form's first control and ships empty,
+       so it takes the caret on arrival. Not on a phone: the keyboard must
+       not pop over the page. */
+    if (!isPocket()) document.getElementById("f-name")?.focus({ preventScroll: true });
     let disposed = false;
     let backdropTeardown = () => {};
     /* The backdrop's households come through the same seam home's sky does
@@ -119,7 +123,7 @@
   <div class="lanes">
 
   <form class="glass card" id="card">
-    <input id="f-name" class="name-title" value="New Entry" aria-label="name" autocomplete="off">
+    <input id="f-name" class="name-title" placeholder="Name this entry" aria-label="name" autocomplete="off">
     <div class="sub">add something to your orbit</div>
 
     <div class="field">
@@ -144,11 +148,26 @@
       <div class="sections" id="sections" role="group" aria-labelledby="sections-label"></div>
     </div>
 
+    <!-- #1244 (design/v19/create-dragover.html): the four brackets are the
+         reticle's corners, parked on the zone; the words carry one copy per
+         state, stacked in one cell so the zone never changes height. The
+         live region below speaks the state a sighted reader sees. -->
     <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="drop a document, or press enter to choose one">
-      <div class="dz-main">drop a document — we'll read what we can</div>
-      <div class="dz-hint mono">PDF, email or photo &middot; dates, amounts &amp; reference numbers extracted automatically</div>
+      <span class="dz-corner tl" aria-hidden="true"></span><span class="dz-corner tr" aria-hidden="true"></span>
+      <span class="dz-corner br" aria-hidden="true"></span><span class="dz-corner bl" aria-hidden="true"></span>
+      <div class="dz-main">
+        <span data-when="rest">drop a document — we'll read what we can</span>
+        <span data-when="lock">release to add it</span>
+        <span data-when="swap">release to swap the document</span>
+      </div>
+      <div class="dz-hint mono">
+        <span data-when="rest">PDF, email or photo &middot; dates, amounts &amp; reference numbers extracted automatically</span>
+        <span data-when="arm">bring it to this box &middot; PDF, email or photo</span>
+        <span data-when="lock">orbit will read what it can &middot; nothing is saved until you say</span>
+      </div>
       <div class="dz-held" id="dz-held">&#9670; <b id="dz-held-name"></b> &middot; <span id="dz-held-size"></span> &middot; held in the lane on the right</div>
     </div>
+    <div class="sr-only" id="dz-live" aria-live="polite"></div>
 
     <div class="disclose" id="disclose">
       <div class="disclose-inner"><div class="disclose-content">
@@ -225,11 +244,14 @@
     </div>
   </form>
 
-  <!-- ruling 3 (#474): the reading lane, hidden until a document splits the
-       screen. The top sheet stays the sheet's own honest placeholder — a
-       real page-one render needs a server side that does not exist yet
-       (#476) — so it is unreachable here; only "Focusing on the anomaly"
-       shows while a document is held. -->
+  <!-- ruling 3 (#474), §14: the reading lane, hidden until a document splits
+       the screen. create.behaviour.js drives the two ratified states from the
+       pick (#1245): "Reading your document" with the reticle breathing while
+       the file is on its way, then `body.snap` — the top sheet lands with the
+       real page one, drawn by the household's pre-attachment preview route
+       (#476's renderer), while the inspection carries on reading alongside.
+       The .cap's second line says which of those is still happening; the
+       .honest line carries the read's own honest message when it has one. -->
   <aside class="glass readcard" id="readcard" aria-live="polite">
     <h2 id="read-head">Reading your document</h2>
 
@@ -248,8 +270,8 @@
         <circle cx="48" cy="48" r="16" fill="none" stroke="var(--chart-line)" stroke-width="1" opacity=".9"/>
         <circle cx="48" cy="48" r="1.8" fill="var(--accent)"/>
       </svg>
-      <div class="focusline">Focusing on the anomaly</div>
-      <div class="why">
+      <div class="focusline" id="focusline">Focusing on the anomaly</div>
+      <div class="why" id="focuswhy">
         orbit is reading the pages it was given<br>
         nothing is saved, and nothing is assumed
       </div>
@@ -257,80 +279,20 @@
 
     <div class="topsheet">
       <div class="sheet">
-        <!-- Page one, sketched: a real render is not built yet (#476), so this
-             placeholder shows the SHAPE of the confirmation. Paper is paper in
-             every theme, so this frame does not take theme ink. -->
-        <svg viewBox="0 0 300 424" role="img"
-             aria-label="Snapshot of page one: a British Gas HomeCare annual service plan renewal">
-          <rect width="300" height="424" fill="#fdfcf9"/>
-          <g>
-            <circle cx="30" cy="30" r="9.5" fill="none" stroke="#1f3c86" stroke-width="1.6"/>
-            <path d="M 30 24.5 c 3.6 3 3.6 6.4 0 9.6 c -3.6 -3.2 -3.6 -6.6 0 -9.6 z" fill="#1f3c86"/>
-            <text x="46" y="27" font-family="Inter,system-ui,sans-serif" font-size="9"
-                  font-weight="700" letter-spacing="1.1" fill="#1f3c86">BRITISH GAS</text>
-            <text x="46" y="37" font-family="Inter,system-ui,sans-serif" font-size="6"
-                  letter-spacing=".7" fill="#7a8090">HOMECARE &#183; ANNUAL SERVICE PLAN</text>
-            <text x="270" y="27" text-anchor="end" font-family="Inter,system-ui,sans-serif"
-                  font-size="6.4" fill="#7a8090">Issued 14 Aug 2026</text>
-            <text x="270" y="37" text-anchor="end" font-family="ui-monospace,Menlo,monospace"
-                  font-size="6.4" fill="#7a8090">Account 8021 4417</text>
-          </g>
-          <line x1="20" y1="50" x2="280" y2="50" stroke="#d8d3c6" stroke-width="1"/>
-          <g fill="#dcd8cc">
-            <rect x="20" y="62" width="86" height="4.6" rx="2.3"/>
-            <rect x="20" y="72" width="66" height="4.6" rx="2.3"/>
-            <rect x="20" y="82" width="74" height="4.6" rx="2.3"/>
-            <rect x="20" y="92" width="48" height="4.6" rx="2.3"/>
-          </g>
-          <text x="20" y="126" font-family="Inter,system-ui,sans-serif" font-size="11"
-                font-weight="600" fill="#20293d">Your annual boiler service is due</text>
-          <g fill="#dcd8cc">
-            <rect x="20" y="138" width="260" height="4.6" rx="2.3"/>
-            <rect x="20" y="148" width="244" height="4.6" rx="2.3"/>
-            <rect x="20" y="158" width="176" height="4.6" rx="2.3"/>
-          </g>
-          <rect x="20" y="178" width="260" height="86" rx="3" fill="#f3f1ea" stroke="#ddd8ca"/>
-          <g font-family="Inter,system-ui,sans-serif" font-size="7.4" fill="#77808f">
-            <text x="32" y="199">Policy number</text>
-            <text x="32" y="225">Service due</text>
-            <text x="32" y="251">Annual charge</text>
-          </g>
-          <g font-size="8.6" fill="#20293d">
-            <text x="268" y="199" text-anchor="end" font-family="ui-monospace,Menlo,monospace">BG-88214-HC</text>
-            <text x="268" y="225" text-anchor="end" font-family="Inter,system-ui,sans-serif" font-weight="600">02 November 2026</text>
-            <text x="268" y="251" text-anchor="end" font-family="Inter,system-ui,sans-serif" font-weight="600">&#163;144.00</text>
-          </g>
-          <g fill="#c79a2f">
-            <rect class="lit" x="196" y="203" width="72" height="1.6" rx=".8"/>
-            <rect class="lit" x="182" y="229" width="86" height="1.6" rx=".8"/>
-            <rect class="lit" x="228" y="255" width="40" height="1.6" rx=".8"/>
-          </g>
-          <line x1="20" y1="196" x2="280" y2="196" stroke="#e4e0d4" stroke-width=".8"/>
-          <line x1="20" y1="222" x2="280" y2="222" stroke="#e4e0d4" stroke-width=".8"/>
-          <line x1="20" y1="248" x2="280" y2="248" stroke="#e4e0d4" stroke-width=".8"/>
-          <g fill="#dcd8cc">
-            <rect x="20" y="282" width="260" height="4.6" rx="2.3"/>
-            <rect x="20" y="292" width="252" height="4.6" rx="2.3"/>
-            <rect x="20" y="302" width="238" height="4.6" rx="2.3"/>
-            <rect x="20" y="312" width="196" height="4.6" rx="2.3"/>
-            <rect x="20" y="330" width="150" height="4.6" rx="2.3"/>
-            <rect x="20" y="340" width="164" height="4.6" rx="2.3"/>
-          </g>
-          <line x1="20" y1="384" x2="280" y2="384" stroke="#e4e0d4" stroke-width=".8"/>
-          <text x="20" y="397" font-family="ui-monospace,Menlo,monospace" font-size="6"
-                fill="#9aa0ad">Page 1 of 4</text>
-          <text x="280" y="397" text-anchor="end" font-family="ui-monospace,Menlo,monospace"
-                font-size="6" fill="#9aa0ad">homecare-renewal-2026.pdf</text>
-          <path d="M 300 396 L 284 424 L 300 424 Z" fill="#e9e5d9"/>
-        </svg>
+        <!-- Page one, for real: the picture the preview route drew of the file
+             just picked (#1245/#476), in the idiom document-card/round-6
+             ratified for a real page. Paper is paper in every theme, so this
+             frame does not take theme ink. The src is set, and the object URL
+             revoked, by create.behaviour.js; no src means no request. -->
+        <img id="sheet-page" alt="">
       </div>
       <div class="cap"><b>Page one of the file you added</b><br>
-        the three lit lines are what orbit read across into the form</div>
-      <div class="honest">sketched placeholder &mdash; page-one snapshots need a server render that does not exist yet (#476)</div>
+        <span id="rc-capline">orbit is reading the pages it was given</span></div>
+      <div class="honest" id="rc-honest"></div>
       <div class="attach">
-        <span class="file">&#9670; homecare-renewal-2026.pdf</span>
-        <span>812 KB &middot; <span class="clean">scanned clean</span></span>
-        <button type="button">not this one</button></div>
+        <span class="file" id="rc-file"></span>
+        <span><span id="rc-size"></span><span id="rc-scan" hidden> &middot; <span class="clean">scanned clean</span></span></span>
+        <button type="button" id="rc-drop">not this one</button></div>
     </div>
   </aside>
 

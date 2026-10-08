@@ -1201,6 +1201,11 @@ export function mountBelt(root, options) {
     buildClump();
     /* #1072: the pocket's card is in the page's flow, at the page's width. */
     wrap.style.top = geom.pocket ? "" : geom.APEX_Y + "px";
+    /* #1302: belt.css centres the card on this same point by its own height
+       and holds it out of the top strip; it reads the apex from here rather
+       than assuming band.js's APEX_FRAC. */
+    if (geom.pocket) wrap.style.removeProperty("--apex-y");
+    else wrap.style.setProperty("--apex-y", geom.APEX_Y + "px");
     const cardw = cardWidthOf(geom);
     wrap.style.width = geom.pocket ? "" : cardw + "px";
     /* #1088: the reading lane's own width is a CSS calc off this — the

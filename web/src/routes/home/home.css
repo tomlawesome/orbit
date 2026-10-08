@@ -476,7 +476,7 @@
   .crow{display:flex;gap:14px;align-items:stretch}
   .cdrop{flex:1;border:1.5px dashed var(--line);border-radius:14px;padding:16px 18px;
          font:12.5px var(--mono);color:var(--ink-quiet);text-align:center;cursor:pointer}
-  .cdrop:hover{border-color:var(--accent);color:var(--ink-mid)}
+  .cdrop:hover,.cdrop.over,.cdrop:focus-visible{border-color:var(--accent);color:var(--ink-mid)}
   .cfull{display:flex;align-items:center;font:12.5px var(--mono);color:var(--accent-text);
          text-decoration:none;border:1px solid var(--line);border-radius:14px;padding:0 18px}
   .cfull:hover{border-color:var(--accent)}

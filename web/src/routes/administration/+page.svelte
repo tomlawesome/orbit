@@ -3,6 +3,7 @@
   import {
     addMember,
     commandContact,
+    commandUploadLimit,
     commandMailbox,
     createLocalUser,
     createSystem,
@@ -26,8 +27,8 @@
   import { isPocket } from "$lib/pocket/media.js";
   import Pocket from "./pocket.svelte";
   import {
-    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, initialsOf, lapses, openFor, plainly,
-    sendWords, setupWords, stamp, testVerdict,
+    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, initialsOf, lapses, megabytes,
+    openFor, plainly, sendWords, setupWords, stamp, testVerdict,
   } from "./words.js";
   import "./administration.css";
 
@@ -719,6 +720,41 @@
     }
   }
 
+  /* The upload size limit (#1285): the configured default until an
+     administrator sets their own, in whole MB inside the hard bounds. The
+     server refuses anyone else and anything out of range; the field's own
+     min and max only save a round trip. */
+  let editingUploadLimit = $state(false);
+  /** @type {number | null} */
+  let uploadLimitDraft = $state(null);
+  /** @type {string | null} */
+  let uploadLimitProblem = $state(null);
+  let uploadLimitBusy = $state(false);
+
+  function openUploadLimitEditor() {
+    const current = need().uploadLimit;
+    uploadLimitDraft = current ? Math.round(current.maxBytes / 1048576) : null;
+    uploadLimitProblem = null;
+    editingUploadLimit = true;
+  }
+
+  /** @param {{ action: "set", megabytes: number } | { action: "default" }} partial */
+  async function uploadLimitAction(partial) {
+    const current = need().uploadLimit;
+    if (!current) return;
+    uploadLimitBusy = true;
+    uploadLimitProblem = null;
+    try {
+      await commandUploadLimit({ ...partial, expectedVersion: current.version });
+      view = await readAdminScreen();
+      editingUploadLimit = false;
+    } catch (error) {
+      uploadLimitProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+    } finally {
+      uploadLimitBusy = false;
+    }
+  }
+
   /** @type {Record<string, string>} */
   const TONE = { "--warm": "--warm", "--ok": "--ok", "--upcoming": "--upcoming", "--overdue": "--overdue" };
   /* The sheet's five hand-placed rings (design/v19/administration-iss.html,
@@ -914,8 +950,8 @@
           <p class="rotationwords">
             If the encryption key is ever lost with no recovery bundle to recover it, every
             document, all encrypted metadata, and — once account addresses are encrypted —
-            every stored address are gone for good. Run <code>orbit backup</code> then
-            <code>orbit export-recovery-bundle &lt;backup.tar&gt;</code> to make one. Keep its
+            every stored address are gone for good. Run <code>bash scripts/backup.sh</code> then
+            <code>bash scripts/export-recovery-bundle.sh &lt;backup.tar&gt;</code> to make one. Keep its
             two parts apart: the bundle file on storage separate from this instance, and its
             passphrase in a password manager or on paper — never both together, because that
             separation is what keeps anyone who gets hold of the file alone from being able to
@@ -1228,6 +1264,45 @@
         <div class="jobfoot">the 25 most recently touched jobs are kept; older ones are not</div>
         {#if jobsProblem}<div class="adminproblem">{jobsProblem}</div>{/if}
       </div>
+
+      <!-- #1285: the document upload size limit — the configured default
+           until an administrator sets their own. -->
+      {#if view.uploadLimit}
+        {@const limit = view.uploadLimit}
+        <div class="card" id="upload-limit-card">
+          <div class="cardhead"><h2>Upload size limit</h2>
+            {#if !editingUploadLimit}
+              <button onclick={openUploadLimitEditor}>change…</button>
+            {/if}
+          </div>
+          <div class="kv"><span>largest document</span><b>{megabytes(limit.maxBytes)}</b></div>
+          <div class="kv"><span>set by</span>
+            <b>{limit.overrideBytes === null ? "the configured default" : `an administrator · default ${megabytes(limit.defaultBytes)}`}</b></div>
+          {#if editingUploadLimit}
+            <form class="mailboxform" onsubmit={(event) => {
+              event.preventDefault();
+              if (uploadLimitDraft !== null) uploadLimitAction({ action: "set", megabytes: uploadLimitDraft });
+            }}>
+              <label>limit in MB <input type="number" inputmode="numeric" step="1"
+                min={Math.round(limit.minBytes / 1048576)} max={Math.round(limit.ceilingBytes / 1048576)}
+                bind:value={uploadLimitDraft} required /></label>
+              <p class="mailboxnote">From {megabytes(limit.minBytes)} to {megabytes(limit.ceilingBytes)}. It applies to the
+                next upload, from the create form, an item, or mail; documents already kept are unaffected.</p>
+              <div class="placerow mailboxrow">
+                <button type="submit" disabled={uploadLimitBusy}>save</button>
+                {#if limit.overrideBytes !== null}
+                  <button type="button" disabled={uploadLimitBusy}
+                          onclick={() => uploadLimitAction({ action: "default" })}>use the default ({megabytes(limit.defaultBytes)})</button>
+                {/if}
+                <button type="button" onclick={() => (editingUploadLimit = false)}>cancel</button>
+              </div>
+            </form>
+          {/if}
+          <p class="jobfoot">A reverse proxy in front of Orbit must allow uploads at least this large —
+            <a href="https://github.com/tomlawesome/orbit/blob/main/docs/installing.md#what-you-need" target="_blank" rel="noopener noreferrer">see the install guide</a>.</p>
+          {#if uploadLimitProblem}<div class="adminproblem">{uploadLimitProblem}</div>{/if}
+        </div>
+      {/if}
 
       <!-- §15: mail machinery sits WITH operations — one panel, two halves. -->
       <div class="card wide machinery" id="mail-card">

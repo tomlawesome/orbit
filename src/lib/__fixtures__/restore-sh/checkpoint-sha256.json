@@ -1,0 +1,11 @@
+{
+  "content": "some checkpoint artifact bytes\n",
+  "present": {
+    "status": 0,
+    "stdout": "4a003274d2168195f0b116b8fc90620e25a0b261b43867ab33feba9f60581722"
+  },
+  "missing": {
+    "status": 1,
+    "stdout": ""
+  }
+}

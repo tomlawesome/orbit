@@ -1,0 +1,16 @@
+{
+  "name": "recheck volume disappeared refuses",
+  "kind": "verify-recheck",
+  "databaseVolumeName": "orbit_orbit-db-data",
+  "databaseVolumeSeen": true,
+  "scenario": {
+    "volumeLsExact": {
+      "orbit_orbit-db-data": ""
+    }
+  },
+  "bash": {
+    "status": 1,
+    "stdout": "",
+    "stderr": "The existing Orbit database volume changed during installation; refusing to start Compose."
+  }
+}

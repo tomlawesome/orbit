@@ -1,0 +1,18 @@
+{
+  "name": "OIDC_ISSUER missing",
+  "envOrbit": "APP_URL=https://orbit.parity.invalid\n",
+  "issuer": null,
+  "curl": null,
+  "dockerExitCode": 0,
+  "bash": {
+    "status": 1,
+    "stdout": "",
+    "stderr": "reason=configuration-failure action=retry\nOIDC_ISSUER requires attention; run the guided configuration and rerun the installer.",
+    "requestedUrls": [],
+    "failure": {
+      "reason": "configuration-failure",
+      "action": "retry",
+      "message": "OIDC_ISSUER requires attention; run the guided configuration and rerun the installer."
+    }
+  }
+}

@@ -44,7 +44,11 @@ import { failOnProcessDeadline, processGuard } from "./process-budget.mjs";
 // #1210 removed two: engine-check.sh was deleted, and configure.sh no longer
 // addresses a Compose project at all (its engine one-off is a plain
 // `docker run`).
-const SCRIPTS = ["end-maintenance.sh", "repair.sh", "install.sh"];
+// #1212 removed a third: install.sh no longer derives a project name. The
+// install engine does (src/lib/target-identity.ts deriveComposeProjectName,
+// which reads the same top-level name:), and install.sh reads the name the
+// engine committed to .env-orbit.
+const SCRIPTS = ["end-maintenance.sh", "repair.sh"];
 
 function extractFunction(source, name) {
   const match = source.match(new RegExp(`^${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`, "mu"));
@@ -72,7 +76,7 @@ function scratchDir(prefix) {
 describe("read_compose_project_name is the same function in all five scripts", () => {
   const bodies = SCRIPTS.map((name) => extractFunction(readFileSync(join(import.meta.dirname, name), "utf8"), "read_compose_project_name"));
 
-  it("is present, identical, in end-maintenance.sh, repair.sh and install.sh", () => {
+  it("is present, identical, in end-maintenance.sh and repair.sh", () => {
     for (const [index, body] of bodies.entries()) {
       assert.equal(body, bodies[0], `${SCRIPTS[index]} carries a different read_compose_project_name`);
     }

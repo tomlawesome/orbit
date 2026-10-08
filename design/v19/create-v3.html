@@ -196,10 +196,16 @@
   .field.mono input{font-family:var(--mono)}
 
   /* The heading IS the name (owner, 2026-08-15): you edit the title of the
-     card itself, so there is no separate name box. Styled as the card's h2. */
+     card itself, so there is no separate name box. Styled as the card's h2.
+     It ships empty (#1251): a quiet placeholder at heading size and a resting
+     underline say "type here" where a pre-filled default read as named. */
   .name-title{display:block;width:100%;background:none;border:0;padding:0;
+    border-bottom:1px solid var(--line);
     font:600 22px var(--display);line-height:1.25;color:var(--ink)}
-  .name-title:focus{outline:none;border-bottom:1px solid var(--accent)}
+  .name-title::placeholder{color:var(--ink-quiet);opacity:1}
+  .name-title:focus{border-bottom:1px solid var(--accent)}
+  /* The app's keyboard focus ring (#848, web/src/app.css), which the focused-on-arrival title shows (#1251). */
+  .name-title:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
   .types{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
   .types button{font:11px var(--mono);color:var(--ink-mid);background:var(--panel);border:1px solid var(--line);
@@ -435,7 +441,7 @@
   <div class="lanes">
 
     <form class="glass card" id="card" onsubmit="return false">
-      <input id="f-name" class="name-title" value="New Entry" aria-label="name" autocomplete="off">
+      <input id="f-name" class="name-title" placeholder="Name this entry" aria-label="name" autocomplete="off" autofocus>
       <div class="sub">add something to your orbit</div>
 
       <div class="field">

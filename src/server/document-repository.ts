@@ -15,13 +15,15 @@ import {
 import { AppError } from "@/lib/app-error";
 import { log, operationalReasons, type OperationalReason } from "@/lib/logger";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
-import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
+import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
+import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import {
   detectDocumentMediaType,
   normalizedDocumentFilename,
-  validateSupportedDocumentStructure,
+  classifyDocumentStructure,
+  type DocumentStructureReason,
 } from "@/server/documents/validation";
 import { canAccessHouseholdDocuments, canManageDocumentDeletion } from "@/server/documents/authorization";
 import { retryableScannerFailureCode, scannerRecoveryDelayMs } from "@/server/documents/staging";
@@ -385,12 +387,17 @@ export async function uploadItemDocument(input: {
 }): Promise<DocumentSummary> {
   await requireHouseholdAndItemAccess(input.userId, input.householdId, input.itemId);
   const config = getDocumentConfig();
+  // The administrator's limit, read now so a change needs no restart (#1285).
+  // Held for the whole upload, so every read below agrees with the receive.
+  const maxBytes = await readEffectiveUploadLimit(config);
   const storage = documentStorage();
   const documentId = input.documentId ?? randomUUID();
-  const received = await storage.receive(input.body, documentId, config.maxBytes, input.declaredBytes);
+  const received = await storage.receive(input.body, documentId, maxBytes, input.declaredBytes);
   let storageKey: string | undefined;
   let stagingKey: string | undefined;
   let metadataReserved = false;
+  /** The scanned, structure-checked plaintext, held from the check to the encrypt stage; zeroed on every exit. */
+  let validatedBytes: Buffer | undefined;
   try {
     // Check idempotency scope and content before parsing the retry body. A
     // reused identity must deterministically return 409 even when the new
@@ -458,31 +465,46 @@ export async function uploadItemDocument(input: {
       }
     }
 
-    // A `required` scan reads the quarantine file again below only once the
-    // ClamAV scan (which can run for as long as CLAMAV_TIMEOUT_MS) has
-    // finished, so the validation buffer is zeroed immediately rather than
-    // held in memory for that whole wait (A2-Q1). With scanning `disabled`
-    // there is no such gap -- the second read bought nothing but duplicate
-    // I/O -- so that path reuses this buffer instead of reading again.
-    const reuseValidationBytesForEncrypt = config.scanMode === "disabled";
-    const validationBytes = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
-    // Reuse only covers a validated buffer handed on to the encrypt stage
-    // below, which is the only place that zeroes it on that path. A buffer
-    // this block is about to discard instead -- structure validation failed,
-    // or threw -- has nowhere else left to be wiped, so it must be zeroed
-    // here regardless of `reuseValidationBytesForEncrypt` (#1151 F13).
-    let structureValid = false;
-    try {
-      if (!await validateSupportedDocumentStructure(validationBytes, mediaType)) {
+    // ADR-0033: the scan comes before anything opens the file. ClamAV reads
+    // the quarantine copy over its own socket; only a clean file (or, with
+    // scanning `disabled`, any file) is read into memory and handed to the
+    // renderer's structure check. A file it refuses is refused before any
+    // durable metadata exists, as it always was. The one read here serves
+    // both that check and the encrypt stage, and happens after the scan, so
+    // no plaintext is held in memory across the scan's wait (A2-Q1).
+    let scan: Awaited<ReturnType<typeof scanFileWithClamAv>> | undefined;
+    let scanMs = 0;
+    if (config.scanMode === "required") {
+      log.info({ event: "document.scan", state: "starting", action: "check_scanner" });
+      const scanStartedAt = Date.now();
+      scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
+      scanMs = Math.max(0, Date.now() - scanStartedAt);
+    }
+    if (!scan || scan.status === "clean") {
+      const bytes = await storage.readQuarantine(received.quarantinePath, maxBytes);
+      let structure: DocumentStructureReason = "unsupported_structure";
+      try {
+        structure = await classifyDocumentStructure(bytes, mediaType);
+      } finally {
+        // A buffer this block is about to discard has nowhere else left to be
+        // wiped, so it is zeroed here (#1151 F13).
+        if (structure !== "supported_structure") bytes.fill(0);
+      }
+      if (structure === "password_required") {
         throw new AppError(
-          "document_structure_invalid",
-          "Choose a structurally valid PDF, JPEG, or PNG document",
+          "document_password_required",
+          "This document needs a password to open. Choose a copy without a password.",
           422,
         );
       }
-      structureValid = true;
-    } finally {
-      if (!reuseValidationBytesForEncrypt || !structureValid) validationBytes.fill(0);
+      if (structure !== "supported_structure") {
+        throw new AppError(
+          "document_structure_invalid",
+          "Orbit could not open this document. Choose another PDF, JPEG, or PNG.",
+          422,
+        );
+      }
+      validatedBytes = bytes;
     }
     await reserveDocumentMetadata({
       documentId,
@@ -499,14 +521,10 @@ export async function uploadItemDocument(input: {
 
     log.info({ event: "document.lifecycle", state: "starting", action: "none" });
 
-    if (config.scanMode === "required") {
+    if (scan) {
       await getDb().update(documents).set({ lifecycle: "scanning", updatedAt: new Date() })
         .where(and(eq(documents.id, documentId), eq(documents.lifecycle, "quarantined")));
       log.info({ event: "document.lifecycle", state: "starting", action: "check_scanner" });
-      log.info({ event: "document.scan", state: "starting", action: "check_scanner" });
-      const scanStartedAt = Date.now();
-      const scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
-      const scanMs = Math.max(0, Date.now() - scanStartedAt);
       if (scan.status !== "clean") {
         const infected = scan.status === "infected";
         // Distinguish "cannot reach the scanner" from "the scanner answered
@@ -526,7 +544,7 @@ export async function uploadItemDocument(input: {
           durationMs: scanMs,
         });
         if (retryableFailureCode) {
-          const plaintext = await storage.readQuarantine(received.quarantinePath, config.maxBytes);
+          const plaintext = await storage.readQuarantine(received.quarantinePath, maxBytes);
           try {
             // The next key while a rotation is in progress (#955).
             const stagingWrap = wrappingKey(config);
@@ -656,9 +674,8 @@ export async function uploadItemDocument(input: {
     }
     log.info({ event: "document.lifecycle", state: "starting", action: "none" });
 
-    const plaintext = reuseValidationBytesForEncrypt
-      ? validationBytes
-      : await storage.readQuarantine(received.quarantinePath, config.maxBytes);
+    const plaintext = validatedBytes!;
+    validatedBytes = undefined;
     let encrypted: ReturnType<typeof encryptDocument>;
     // The next key while a rotation is in progress (#955).
     const publishWrap = wrappingKey(config);
@@ -760,6 +777,7 @@ export async function uploadItemDocument(input: {
     }
     throw error;
   } finally {
+    validatedBytes?.fill(0);
     received.leadingBytes.fill(0);
     await storage.discardQuarantine(received.quarantinePath).catch(() => undefined);
   }
@@ -797,7 +815,10 @@ export async function readDocumentDownload(
   }
   let ciphertext: Buffer;
   try {
-    ciphertext = await documentStorage().readCiphertext(crypto.storageKey, config.maxBytes + 64);
+    // A stored document was accepted under whatever limit applied then, so it
+    // is read against the hard ceiling: lowering the limit (#1285) must never
+    // make an existing document unreadable.
+    ciphertext = await documentStorage().readCiphertext(crypto.storageKey, DOCUMENT_MAX_BYTES_CEILING + 64);
   } catch {
     throw new AppError("document_unavailable", "That document cannot currently be opened", 503);
   }

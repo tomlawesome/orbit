@@ -13,23 +13,38 @@ import { write } from "$lib/server/api.js";
  * declared size travel as headers, not JSON, because the body itself is the
  * raw file bytes.
  */
-export const POST = write(async (event, session) => {
-  const householdId = /** @type {string} */ (event.params.householdId);
-  const encodedFilename = event.request.headers.get("x-orbit-filename");
-  if (!encodedFilename) throw new AppError("document_filename_required", "The document filename is required", 422);
-  let filename;
-  try {
-    filename = decodeURIComponent(encodedFilename);
-  } catch {
-    throw new AppError("document_filename_invalid", "The document filename is invalid", 422);
-  }
-  const declaredHeader = event.request.headers.get("x-orbit-declared-bytes");
-  const declaredBytes = declaredHeader ? Number(declaredHeader) : undefined;
-  if (declaredBytes !== undefined && (!Number.isSafeInteger(declaredBytes) || declaredBytes < 0)) {
-    throw new AppError("document_size_invalid", "The document size is invalid", 422);
-  }
-  return json(
-    await inspectItemDocument({ userId: session.user.id, householdId, filename, body: event.request.body, declaredBytes }),
-    { headers: { "Cache-Control": "no-store" } },
-  );
-});
+export const POST = write(
+  async (event, session) => {
+    const householdId = /** @type {string} */ (event.params.householdId);
+    const encodedFilename = event.request.headers.get("x-orbit-filename");
+    if (!encodedFilename) throw new AppError("document_filename_required", "The document filename is required", 422);
+    let filename;
+    try {
+      filename = decodeURIComponent(encodedFilename);
+    } catch {
+      throw new AppError("document_filename_invalid", "The document filename is invalid", 422);
+    }
+    const declaredHeader = event.request.headers.get("x-orbit-declared-bytes");
+    const declaredBytes = declaredHeader ? Number(declaredHeader) : undefined;
+    if (declaredBytes !== undefined && (!Number.isSafeInteger(declaredBytes) || declaredBytes < 0)) {
+      throw new AppError("document_size_invalid", "The document size is invalid", 422);
+    }
+    return json(
+      await inspectItemDocument({ userId: session.user.id, householdId, filename, body: event.request.body, declaredBytes }),
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  },
+  {
+    /* No engine behind ORBIT_FIXTURES=1 (#1141's rule): the honest answer
+       the engine itself gives with no processor, so the create form's
+       reading lane (#1245) settles in the fixture harness rather than
+       bouncing a 401 into the login flow. */
+    fixture: () => json({
+      extracted: false,
+      suggestions: [],
+      message: "Automatic suggestions require the optional document processor. You can still attach this file.",
+      attachmentDisposition: "attachable",
+      reason: "supported_structure",
+    }, { headers: { "Cache-Control": "no-store" } }),
+  },
+);

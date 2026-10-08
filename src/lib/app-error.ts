@@ -1,13 +1,17 @@
 import { ZodError } from "zod";
 import { AppError, MaintenanceActiveError } from "@/lib/errors";
 import { AuthError } from "@/lib/auth/errors";
-import { log } from "@/lib/logger";
+import { log, operationalErrorDetail } from "@/lib/logger";
 
 /* The classes live in the framework-free `@/lib/errors` (ADR-0015 decision
    1) so operator artifacts can bundle domain code without linking Next.
    They are re-exported here because this is where the rest of the codebase
    already imports them from, and that should keep working. */
 export { AppError, MaintenanceActiveError };
+
+function isPayloadTooLarge(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { status?: unknown }).status === 413;
+}
 
 /** Converts expected API failures into a consistent, non-cacheable response. */
 export function appErrorResponse(error: unknown): Response {
@@ -31,12 +35,23 @@ export function appErrorResponse(error: unknown): Response {
       { status: 422, headers: { "Cache-Control": "no-store" } },
     );
   }
+  /* A body over a request size limit that is not an AppError: SvelteKit's
+     own 413 when a body runs past the server-wide BODY_SIZE_LIMIT (#1285).
+     It is the client's request at fault, not Orbit, so it answers 413 and
+     never the 500 below. */
+  if (isPayloadTooLarge(error)) {
+    return Response.json(
+      { error: { code: "request_too_large", message: "That request is too large" } },
+      { status: 413, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   log.error({
     event: "application.error",
     state: "degraded",
     reason: "unexpected_failure",
     action: "inspect_admin_diagnostics",
     impact: "application_degraded",
+    detail: operationalErrorDetail(error),
   });
   return Response.json(
     { error: { code: "internal_error", message: "Orbit could not complete the request" } },

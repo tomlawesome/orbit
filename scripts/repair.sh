@@ -1438,8 +1438,8 @@ readonly -a dangerous_action_classes=(rotate-database-credential regenerate-secr
 readonly -a rotate_database_credential_steps=(checkpoint rotate-credential update-config restart-services)
 
 # Fixed allowlist of paths restore-transaction may ever touch, mirroring
-# install.sh's own `managed_paths` (its `deployment_assets` plus
-# `$environment_file` and `$secrets_directory`). Restoring never enumerates
+# the install engine's managed paths (src/lib/deployment-assets.ts's
+# DEPLOYMENT_ASSETS plus .env-orbit and .orbit-secrets; #1212). Restoring never enumerates
 # the staging directory's own contents — only these fixed, literal paths
 # are ever considered.
 readonly -a restore_transaction_paths=(
@@ -1452,6 +1452,8 @@ readonly -a restore_transaction_paths=(
   scripts/backup.sh
   scripts/restore.sh
   scripts/repair.sh
+  scripts/export-recovery-bundle.sh
+  scripts/import-recovery-bundle.sh
   .env-orbit
   .orbit-secrets
 )

@@ -1,7 +1,13 @@
 import { goto } from "$app/navigation";
-import { WorkspaceError, activeHousehold, applyCommand } from "$lib/data/workspace.js";
+import { WorkspaceError, activeHousehold, applyCommand, attachItemDocument } from "$lib/data/workspace.js";
+import {
+  CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, PAGE_HEAD, READING_HEAD, WHY_READING, WHY_REFUSED,
+  WHY_UNDRAWABLE, captionOf, focusAfterScan, readPickedDocument, suggestionsToCarry,
+} from "$lib/data/document-read.js";
 import { saveProblem } from "$lib/data/metadata-status.js";
 import { screenScope } from "$lib/teardown.js";
+import { takeHeldDocument } from "$lib/data/held-document.js";
+import { wireDropFeedback } from "./drop-feedback.js";
 import { createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, refusalOf } from "./entry.js";
 
 /**
@@ -27,20 +33,24 @@ import { createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice, refusalOf
  *
  * Three deliberate departures from the mockup:
  *
- *   1. The mockup's drop target calls `simulateExtraction()`/`dropDocument()`,
- *      which types "British Gas / BG-88214-HC / 2026-11-02" into the form and
- *      (after a timer) shows the top-sheet snapshot, to demonstrate what
- *      extraction looks like. That is demonstration, not product, so it does
- *      not ship. The real path — upload, scan, read, suggest — runs over the
- *      reviewed-intake protocol (operation ids, 202-recoverable polling,
- *      malware states) and is a build of its own. Here the drop target does
- *      the part it can honestly do: it takes a real file, opens the form,
- *      splits the lanes (`body.doc`, §14 ruling 3) and names the entry after
- *      it. The `.sugg`/accept-suggestion markup and the reading lane's
- *      top-sheet snapshot stay, unused, waiting for that build and for a
- *      server-side page-one render (#476) respectively — `body.snap` is never
- *      added, so the sheet's own placeholder markup stays honestly
- *      unreachable rather than shown for a document never actually read.
+ *   1. The mockup's drop target calls `dropDocument()`, which after a 2.6s
+ *      timer types "British Gas / BG-88214-HC / 2026-11-02" into the form
+ *      and shows a sketched top sheet, to demonstrate what reading looks
+ *      like. Here the same walk is real (#1245, the §14 ruling the owner
+ *      restated 2026-10-07: "the front page gets scanned and turned into a
+ *      preview and then shows whilst orbit simultaneously runs the
+ *      extraction"): the drop target takes a real file, opens the form,
+ *      splits the lanes (`body.doc`, ruling 3), names the entry after it,
+ *      and `readDocument` below starts two requests from the pick at once —
+ *      the household's pre-attachment preview route draws page one, and
+ *      `body.snap` lands it on the top sheet the moment it arrives; the
+ *      inspection route scans and reads the same bytes alongside, and what
+ *      it read is typed into the empty fields marked `.sugg` ("◆ from
+ *      document"), which `.accept` clears, as the mockup drew. Neither
+ *      request keeps anything: the save attaches the file to the item it
+ *      creates through the item's own documents route. The mockup's lit
+ *      marks went with its sketched page — a real page has no marks to
+ *      light, so the fields carry that instead.
  *   2. The mockup's inline `onsubmit="return false"` is a listener here — a
  *      module has no globals for an inline handler to reach.
  *   3. `body.doc` is removed again in this module's teardown: the class lives
@@ -80,17 +90,16 @@ export function mountCreate() {
   /** Set the moment a save lands, so leaving for /home is never read as
       discarding what was typed. */
   let committed = false;
-  /* Only until the next edit: after a save that kept the form open (the
-     attachment branch of the submit handler) further typing is unsaved
-     work again, and leaving must ask about it (#1151 W1-S1). Bound on the
+  /* Only until the next edit: after a save that kept the form open
+     further typing is unsaved work again, and leaving must ask about it (#1151 W1-S1). Bound on the
      card, so every field's input or change bubbles to it; the type chips,
      the section buttons and a dropped file change the entry without either
      event, so their handlers call `edited` themselves. */
   const edited = () => { committed = false; };
   on(card, "input", edited);
   on(card, "change", edited);
-  /** A message from the last save attempt (a loud failure, or "saved, the
-      document was not attached"), held until the NEXT attempt — same as the
+  /** A message from the last save attempt (a loud failure), held until the
+      NEXT attempt — same as the
       pocket's own `problem`, which nothing typed clears early. */
   /** @type {string | null} */
   let sticky = null;
@@ -175,9 +184,6 @@ export function mountCreate() {
     if (nameInput.value.trim().length >= 3) reveal();
     updateRefusal();
   });
-  /* The heading arrives pre-filled ("New Entry", owner 2026-08-15): first
-     focus selects it whole, so typing replaces rather than appends. */
-  on(nameInput, "focus", () => nameInput.select());
 
   /* ---- section (#1058b): a row of buttons, none pre-selected; the entry
      cannot be saved until one is chosen. Populated once the household loads
@@ -238,18 +244,248 @@ export function mountCreate() {
 
   /** @type {File | null | undefined} */
   let attachment = null;
+  /** Minted once per file picked, the way `draftId` is per draft (#1245):
+      a retry after a lost answer re-sends the same id with the same bytes,
+      so the documents route hands back the copy it already holds. */
+  let attachmentId = "";
+  const sizeLabel = (/** @type {File} */ file) => `${Math.max(1, Math.round(file.size / 1024))} KB`;
   function takeFile(/** @type {File | null | undefined} */ file) {
     if (!file) return;
+    attachmentId = crypto.randomUUID();
     attachment = file;
     edited();
     reveal();
     document.body.classList.add("doc");
     if (heldName) heldName.textContent = file.name;
-    if (heldSize) heldSize.textContent = `${Math.max(1, Math.round(file.size / 1024))} KB`;
+    if (heldSize) heldSize.textContent = sizeLabel(file);
     if (!nameInput.value.trim()) {
       nameInput.value = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ");
     }
+    /* The §14 walk, for real (#1245): page one and the read start together
+       from the pick, and neither waits for the other. */
+    readDocument(file).catch(() => { /* every outcome is drawn in the lane */ });
   }
+
+  /* ---- the reading lane (§14 ruling 3; design/v19/create-v3.html's `doc`
+     and `snap` states) ---- */
+  const readcard = /** @type {HTMLElement} */ (document.getElementById("readcard"));
+  const readHead = /** @type {HTMLElement} */ (document.getElementById("read-head"));
+  const focusline = /** @type {HTMLElement} */ (document.getElementById("focusline"));
+  const focusWhy = /** @type {HTMLElement} */ (document.getElementById("focuswhy"));
+  const sheetPage = /** @type {HTMLImageElement} */ (document.getElementById("sheet-page"));
+  const capline = /** @type {HTMLElement} */ (document.getElementById("rc-capline"));
+  const honest = /** @type {HTMLElement} */ (document.getElementById("rc-honest"));
+  const rcFile = /** @type {HTMLElement} */ (document.getElementById("rc-file"));
+  const rcSize = /** @type {HTMLElement} */ (document.getElementById("rc-size"));
+  const rcScan = /** @type {HTMLElement} */ (document.getElementById("rc-scan"));
+  const dropFile = /** @type {HTMLButtonElement} */ (document.getElementById("rc-drop"));
+  const docnote = /** @type {HTMLElement} */ (document.getElementById("docnote"));
+
+  /* The words for each state (READING_HEAD, FOCUS_*, WHY_*, CAP_*) and the
+     two requests behind them live in $lib/data/document-read.js, shared
+     with the phone's form (#1279): the mockup's own words, carried
+     verbatim, and for the settled states create-v3 never drew (it ended on
+     the timer) the words document-card/round-6 ratified for the item page's
+     reading card. */
+
+  /** The suggestion fields the form has a slot (and a "◆ from document"
+      tag) for; the rest of the inspection's eight stay with the pocket's
+      own decisions (#1058c maps kind to schedule here). */
+  const SUGGESTION_SLOTS = /** @type {Record<string, { input: string, field: string }>} */ ({
+    provider: { input: "f-provider", field: "field-provider" },
+    reference: { input: "f-ref", field: "field-ref" },
+    dueDate: { input: "f-date", field: "field-date" },
+    cost: { input: "f-cost", field: "field-cost" },
+  });
+
+  /** One read in flight at a time: picking again, "not this one" or leaving
+      cancels the last. */
+  /** @type {AbortController | null} */
+  let reading = null;
+  /** The sheet's object URL, revoked when the sheet is cleared. */
+  let sheetUrl = "";
+  /** @type {"pending" | "up" | "failed"} */
+  let pageState = "pending";
+  let readDone = false;
+  /** How the lane is to settle once the read is done, if the page failed. */
+  /** @type {{ line: string, why: string, refused: boolean } | null} */
+  let pageProblem = null;
+
+  function clearSheet() {
+    if (sheetUrl) URL.revokeObjectURL(sheetUrl);
+    sheetUrl = "";
+    sheetPage.removeAttribute("src");
+    sheetPage.alt = "";
+    document.body.classList.remove("snap");
+  }
+
+  /** Back to the mockup's `doc` state: the reticle breathing, nothing settled. */
+  function resetLane(/** @type {File} */ file) {
+    clearSheet();
+    pageState = "pending";
+    readDone = false;
+    pageProblem = null;
+    readcard.classList.remove("still", "rc-refused");
+    delete readcard.dataset.page;
+    readcard.dataset.reading = "true";
+    readHead.textContent = READING_HEAD;
+    focusline.textContent = FOCUS_SCANNING;
+    focusWhy.innerHTML = WHY_READING;
+    capline.textContent = CAP_READING;
+    honest.textContent = "";
+    rcFile.textContent = `◆ ${file.name}`;
+    rcSize.textContent = sizeLabel(file);
+    rcScan.hidden = true;
+  }
+
+  /** The focus block's settled form (the item page's `still`/`rc-refused`).
+      Only this module's own two-line constants are written as markup; a
+      server's words are text, whatever they contain. */
+  function settleFocus(/** @type {{ line: string, why: string, refused: boolean }} */ state) {
+    readcard.classList.add("still");
+    readcard.classList.toggle("rc-refused", state.refused);
+    focusline.textContent = state.line;
+    if (state.why === WHY_UNDRAWABLE || state.why === WHY_REFUSED) focusWhy.innerHTML = state.why;
+    else focusWhy.textContent = state.why;
+  }
+
+  /** The server would not keep this file (malware, or a structure the
+      upload refuses), so it leaves the entry now rather than at the save,
+      and the lane says so in the item page's own words. */
+  function refuseDocument(/** @type {File} */ file, /** @type {string} */ why) {
+    dropDocument();
+    if (heldName) heldName.textContent = `${file.name} — refused`;
+    clearSheet();
+    pageState = "failed";
+    readcard.dataset.page = "failed";
+    readDone = true;
+    delete readcard.dataset.reading;
+    honest.textContent = "";
+    settleFocus({ line: FOCUS_REFUSED, why, refused: true });
+  }
+
+  /** Clears the suggested values nobody accepted, and their marks. */
+  function clearSuggestions() {
+    for (const slot of Object.values(SUGGESTION_SLOTS)) {
+      const field = document.getElementById(slot.field);
+      if (!field?.classList.contains("sugg")) continue;
+      field.classList.remove("sugg");
+      /** @type {HTMLInputElement} */ (document.getElementById(slot.input)).value = "";
+    }
+    docnote.classList.remove("show");
+  }
+
+  /** The file is out of the entry — refused by the server, or "not this one". */
+  function dropDocument() {
+    reading?.abort();
+    reading = null;
+    attachment = null;
+    attachmentId = "";
+    /* So the same file can be picked again: `change` only fires on a change. */
+    picker.value = "";
+    clearSuggestions();
+    edited();
+    updateRefusal();
+  }
+
+  /**
+   * The read itself. Two requests from one pick, independent of each other:
+   * the page lands the moment it is drawn (`body.snap`, head "Page one"),
+   * whether or not the read has finished; the read's outcome is written
+   * where the lane is by then — under the sheet if the page is up, in the
+   * focus block if it never came.
+   */
+  async function readDocument(/** @type {File} */ file) {
+    reading?.abort();
+    const controller = new AbortController();
+    reading = controller;
+    const current = () => reading === controller && attachment === file;
+    resetLane(file);
+    const householdId = (household ?? await activeHousehold()).id;
+    if (!current()) return;
+
+    /* ADR-0033 step 5: the focus line moves on from the virus check to the
+       preview the moment the scan has passed, before anything opens the file. */
+    const onScanned = (/** @type {boolean} */ scanned) => {
+      if (!current() || pageState !== "pending") return;
+      focusline.textContent = focusAfterScan(scanned);
+    };
+    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned });
+
+    const page = outcomes.page.then((outcome) => {
+      if (!current()) {
+        if (outcome.kind === "up") URL.revokeObjectURL(outcome.url);
+        return;
+      }
+      if (outcome.kind === "up") {
+        sheetUrl = outcome.url;
+        sheetPage.alt = `Page one of ${file.name}`;
+        sheetPage.src = outcome.url;
+        rcScan.hidden = !outcome.scanned;
+        pageState = "up";
+        readcard.dataset.page = "up";
+        readHead.textContent = PAGE_HEAD;
+        document.body.classList.add("snap");
+        return;
+      }
+      pageState = "failed";
+      readcard.dataset.page = "failed";
+      if (outcome.kind === "refused") {
+        refuseDocument(file, outcome.why);
+        return;
+      }
+      pageProblem = { line: FOCUS_UNDRAWABLE, why: outcome.why, refused: false };
+      if (readDone) settleFocus(pageProblem);
+    });
+
+    const read = outcomes.read
+      .then((outcome) => {
+        if (!current()) return;
+        if (outcome.kind === "refused") {
+          /* The upload would refuse it too, so it leaves the entry now. */
+          refuseDocument(file, outcome.why);
+          return;
+        }
+        if (outcome.kind === "unread") {
+          capline.textContent = captionOf(outcome, 0);
+          honest.textContent = outcome.message;
+          return;
+        }
+        const valueOf = (/** @type {string} */ field) =>
+          /** @type {HTMLInputElement} */ (document.getElementById(SUGGESTION_SLOTS[field].input)).value;
+        const carry = suggestionsToCarry(outcome.suggestions, valueOf);
+        for (const suggestion of carry) {
+          const slot = SUGGESTION_SLOTS[suggestion.field];
+          /** @type {HTMLInputElement} */ (document.getElementById(slot.input)).value = suggestion.value;
+          document.getElementById(slot.field)?.classList.add("sugg");
+        }
+        if (carry.length) {
+          docnote.classList.add("show");
+          edited();
+          updateRefusal();
+        }
+        capline.textContent = captionOf(outcome, carry.length);
+        honest.textContent = outcome.message;
+      })
+      .finally(() => {
+        if (!current()) return;
+        readDone = true;
+        delete readcard.dataset.reading;
+        if (pageState === "failed" && pageProblem) settleFocus(pageProblem);
+      });
+
+    await Promise.allSettled([page, read]);
+  }
+
+  /* "not this one": the file leaves the entry, with what it suggested, and
+     the drop target is a drop target again. */
+  on(dropFile, "click", () => {
+    dropDocument();
+    clearSheet();
+    document.body.classList.remove("doc");
+    if (heldName) heldName.textContent = "";
+    if (heldSize) heldSize.textContent = "";
+  });
 
   on(dropzone, "click", () => picker.click());
   on(dropzone, "keydown", (event) => {
@@ -259,11 +495,13 @@ export function mountCreate() {
     }
   });
   on(picker, "change", () => takeFile(picker.files?.[0]));
-  on(dropzone, "dragover", (event) => event.preventDefault());
-  on(dropzone, "drop", (event) => {
-    event.preventDefault();
-    takeFile(event.dataTransfer?.files?.[0]);
-  });
+  /* #1244: the zone answers a file in the air (armed over the page, locked
+     over the zone, a settle on the drop) and takes what is dropped on it;
+     drop-feedback.js holds the drag states and their flicker guard. */
+  const dropFeedback = wireDropFeedback({ on, dropzone, live: document.getElementById("dz-live"), takeFile });
+  /* #1243: a file the home drawer's quick add was given arrives here, and
+     is taken exactly as if it had been dropped on this zone. */
+  takeFile(takeHeldDocument());
 
   /* Accepting a suggestion clears the field's suggested marking. Nothing
      suggests anything yet — see the note above — but the grammar ships with
@@ -319,21 +557,19 @@ export function mountCreate() {
         throw error;
       });
 
-      /* Before either branch: the server holds the entry from here, so
-         leaving must not ask about discarding it (#1151 W1-S1). */
-      committed = true;
-      if (attachment) {
-        /* Deliberately not silent: the entry is saved, the document is not,
-           because that path is unbuilt. Saying so beats losing the file. */
-        sticky = `Saved. ${attachment.name} was not attached — documents are not wired up yet.`;
-        note.textContent = sticky;
-        save.textContent = label;
-        saving = false;
-        updateRefusal();
-        return;
-      }
+      /* #1245: the picked document goes onto the item just saved. A refusal
+         lands in the catch below like any failed save: the entry is kept,
+         and the next attempt re-sends both under the same ids, so neither
+         is stored twice. */
+      if (attachment) await attachItemDocument(active.id, draftId, attachment, attachmentId);
 
-      await goto("/home");
+      /* The server holds the entry, and its document, from here, so leaving
+         must not ask about discarding them (#1151 W1-S1). */
+      committed = true;
+      /* #1246: the form closes onto the main screen, landing on the item
+         just saved — home's own `?item=` address puts that row on screen
+         and opens it, as following a link to it would. */
+      await goto(`/home?item=${encodeURIComponent(draftId)}`);
     } catch (error) {
       /* #1058e: loud, not small print — the button goes back to "Add to
          orbit", the reason sits beside it, and nothing typed is lost. No
@@ -362,12 +598,10 @@ export function mountCreate() {
      keyboard as soon as the page loads. Two things follow.
 
      First, catch up on what was typed while nobody was listening (the name
-     prefill above included). The `value` ATTRIBUTE is the default the markup
-     ships ("New Entry"); `.value` is what is in the field now. They differ
-     only once something has written to it, so this reveals for a real edit
-     and never for the untouched default — progressive disclosure is
+     prefill above included). The heading ships empty (#1251), so anything
+     in it now was written by someone — progressive disclosure is
      unchanged. */
-  if (nameInput.value.trim().length >= 3 && nameInput.value !== nameInput.getAttribute("value")) reveal();
+  if (nameInput.value.trim().length >= 3) reveal();
 
   /* The section refusal (#1058b) holds the button disabled from the start,
      same as the pocket's own form does the moment it is ready. */
@@ -384,6 +618,14 @@ export function mountCreate() {
     teardown: () => {
       teardown();
       delete card.dataset.ready;
+      /* A read still in flight is nobody's once the screen has gone; the
+         sheet's object URL goes with it, and `body.snap`, like `body.doc`,
+         must not outlive the screen. */
+      reading?.abort();
+      reading = null;
+      clearSheet();
+      /* `dragging`, `over` and the zone's `landed` go with `doc` (#1244). */
+      dropFeedback.clear();
       document.body.classList.remove("doc");
     },
     /** Whether a misclick or a close would discard something typed
