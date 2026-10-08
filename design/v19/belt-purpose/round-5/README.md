@@ -39,6 +39,10 @@ Then:
 > The card itself is fine, it's the words in a list that doesn't look
 > good, as it's visually more taxing
 
+And on the type chooser's key marks (a filled, a ringed and a half dot):
+
+> Not sure I love these weird little symbols at all, anywhere tbh.
+
 Not approved. The chooser card itself stays as it is; the section, type and period
 choices need a more visual layout than a left-aligned list of words.
 Round 6 tries that. The calendar was not criticised.
