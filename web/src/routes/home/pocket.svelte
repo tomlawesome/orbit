@@ -684,7 +684,8 @@
     const snooze = modes.pick(value);
     if (!snooze || !view) return;
     const { item, until } = snooze;
-    if (until <= view.today) { rowProblem[item.id] = "not yet — snooze to a day after today"; return; }
+    /* Whether the day will do is the engine's (#1325): its refusal lands
+       in rowProblem, in its words. */
     runRowAct(item, "snooze", (one) => snoozeCommand(one, until), `${item.title} snoozed until ${short(until)}`);
   }
   /** @param {{ id: string, title: string }} one */

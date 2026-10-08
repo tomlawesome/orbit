@@ -19,7 +19,9 @@ import type { ScheduleKind } from "@/lib/domain";
 import { listVisibleHouseholds } from "@/server/join-requests";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { log } from "@/lib/logger";
+import { householdToday } from "@/lib/household-date";
 import { itemOfIntent } from "@/lib/item-kind";
+import { Refusal, snoozeRefusal } from "@/lib/refusals";
 import { nextDueDate } from "@/lib/next-due-date";
 import {
   completionActivity,
@@ -838,6 +840,11 @@ async function runWorkspaceCommand(
     }
 
     if (command.type === "item.snooze") {
+      /* ADR-0034, #1325: a snooze lands after the household's today. */
+      const [household] = await transaction.select({ timezone: households.timezone }).from(households)
+        .where(eq(households.id, householdId)).limit(1);
+      const refused = snoozeRefusal(command.snoozedUntil, householdToday(household?.timezone ?? "UTC"));
+      if (refused) throw new Refusal(refused);
       if (dryRun) return;
       await transaction.update(items).set({
         snoozedUntil: command.snoozedUntil,

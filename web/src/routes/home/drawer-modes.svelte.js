@@ -82,9 +82,10 @@ export class DrawerModes {
       return { key: "done", label: foot.label, heading: "completed on", today, choices: [],
         value: this.completing?.completedDate ?? today };
     }
-    const until = this.#item?.snoozedUntil;
+    /* The calendar opens on the item's current snooze; whether a day will
+       do is the engine's to say (#1325). */
     return { key: "snooze", label: foot.label, heading: "snooze until", today, choices: [],
-      value: until && until > today ? until : null };
+      value: this.#item?.snoozedUntil ?? null };
   }
 
   /** The pencil: the rows go live. @param {CommandItem} item */
