@@ -1591,10 +1591,24 @@ is simpler and easier to use."** Round 3 (F,
   the pills.
 - **No dropdowns and no typed date** (owner, on round 3): *"I don't like
   these as drop downs very much"*; *"typing the date isn't acceptable. We
-  need a beautiful calendar picker to use with a mouse. When you click the
-  date, the date line expands to show a picker"*; *"Similarly, the drop down
-  lines also expand when you click to edit them."* How the opened rows look
-  is round 4 (`round-4/`): the owner's version and an alternative.
+  need a beautiful calendar picker to use with a mouse."* Settled in rounds
+  4–8 (final: `round-8/m-colour-per-option.html`, "approved"):
+  - **The chooser beside.** Pressing the due date, section, type or orbital
+    period opens a chooser card beside the drawer, where a document's
+    preview stands, in the accent outline the open item card wears; the
+    drawer's rows never grow. On a phone it is the bottom sheet.
+  - **The date:** a month calendar in that card, the due day filled, today
+    ringed, the foot reading the day under the pointer with its T-minus.
+  - **Section and type:** tiles, each choice its own glass tile in a grid,
+    not a list of words (*"visually more taxing"*), with no marks and no
+    counts.
+  - **Orbital period:** the repeat band stood on end, six equal cells from
+    once to 2 years, the chosen one filled, its next date read beneath.
+  - **A colour per section and per type** (*"Over time users would
+    associate colours with specific type/sections"*): the tile is washed
+    and edged in it, filled when chosen, and the same colour marks the
+    section and type words in the drawer and the section word on manifest
+    rows. Never on the dial, whose colours mean urgency.
 - **`/item/<id>` retires**: mothballed, with its links redirected to
   `/home?item=<id>`. This supersedes §27's "`/item/<receiptId>` is the
   belt": a suggestion is reviewed in its home drawer.
