@@ -406,10 +406,11 @@
     /* #1253: the flight's world (voyage.js), readied now and hurried. If it
        is not ready yet the journey still starts at once, but its opening is
        the mark lifting to the centre (which needs nothing drawn), and the
-       clock holds just before the warp until the world is ready -- two
-       seconds at most (#1222; the arrival has been readying it since before
-       its answers came, so what is left to wait for is short), and then the
-       flight goes on its own canvas, as ever. The hold is on a lit frame: the
+       clock holds just before the warp until the world is ready -- for up
+       to eight seconds once it gets there (WORLD_WAIT: orbit-site's figure,
+       owner 2026-10-07, #1299, superseding #1222's two), and then the
+       flight goes on its own canvas, as ever. A machine refused the GPU
+       has `ready` at once, so it never waits. The hold is on a lit frame: the
        dawn is up (showdawn, set before the flight starts) and the mark is
        already at the centre, breathing. */
     let beats = newcomer ? newcomerAscentBeats() : ascentBeats();
