@@ -392,6 +392,12 @@
   /* TRACKED (round 3, F): in home's column beside the drawer, sticky at the
      page's 84px gutter, never taller than the window leaves. */
   :global(.pvtrack) .readcard{position:sticky;top:84px;margin:0;max-height:calc(100vh - 84px - 16px)}
+  /* ROUND 5's fit: once the page has landed the card shrink-wraps it,
+     whole, in its own proportions, as tall as the window leaves (the host
+     measures the width it settles on to centre the pair). */
+  @media (min-width:1200px){
+    .readcard.snap{width:max-content;min-width:220px;max-width:480px}
+  }
 
   .pagebox{position:relative;min-height:0;min-width:0;overflow:visible;display:grid;place-items:center}
   .readcard.snap .pagebox{display:block;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}
@@ -436,10 +442,12 @@
   /* create-v3's topsheet: the page, whole, on the cream sheet with the
      tilted second sheet under it */
   .topsheet{display:none}
-  .readcard.snap .topsheet{display:flex;justify-content:center;padding:6px 6px 4px;
+  .readcard.snap .topsheet{display:flex;justify-content:center;width:100%;
     animation:pv-landed .6s cubic-bezier(.3,.7,.2,1) backwards}
   @keyframes pv-landed{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}
-  .sheet{position:relative;display:block;width:max-content;max-width:100%;margin:0;padding:9px;
+  /* min-width:0, or the flex item keeps the page's own width and the card
+     scrolls sideways on a phone */
+  .sheet{position:relative;display:block;width:max-content;min-width:0;max-width:100%;margin:0;padding:9px;
     background:#f6f4ee;border:0;border-radius:5px;font:inherit;color:inherit;cursor:zoom-in;
     appearance:none;-webkit-appearance:none;
     box-shadow:0 18px 44px rgba(0,0,0,.45),0 1px 0 rgba(255,255,255,.4) inset}
