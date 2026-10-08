@@ -193,3 +193,12 @@ after the calendar — ≈ 8s more — or leave the tiles to be found?
 **2** The chapter's name on the transport: "The drawer", or "The item"?
 
 ## Verdicts (owner)
+
+Owner, 2026-10-08, verbatim:
+
+- Q1 (a tile chooser beat after the calendar): "No, leave them to find."
+- Q2 (the chapter's name): "The item"
+- Q3: "Make the changes above and it's otherwise fine."
+- On the copy: "The tour 'read the whole document here' is inaccurate it's preview the document there, and click to read it. 'A date is picked from the calendar, never typed' -- really?! Go over every sentence and make sure it reads as if a human wrote it."
+
+Applied in [round 2](../round-2/README.md).
