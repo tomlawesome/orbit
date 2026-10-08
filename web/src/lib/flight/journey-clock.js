@@ -17,12 +17,17 @@
  * A HOLD stops the clock at a point in the journey until something it needs
  * has come (Flight.svelte gives it the flight's world), so a journey can
  * start the moment it is asked for and still never draw before it is ready.
- * A hold lets go by itself after `cap` milliseconds.
+ * A hold lets go by itself once the clock has stood at it for `cap`
+ * milliseconds of real time: counted from when the journey reaches the hold,
+ * not from when the hold was set, so the wait is the same however late in
+ * the journey the hold stands (#1299).
  */
 
-/** How long a hold waits for the flight's world before letting the climb go on
- *  without it, in ms (#1222: two seconds, down from eight). */
-export const WORLD_WAIT = 2000;
+/** How long the climb's hold waits for the flight's world before going on
+ *  without it, in ms: eight seconds, orbit-site's figure (flight.js holdAt),
+ *  owner 2026-10-07 (#1299). It supersedes #1222's two seconds for the climb.
+ *  The descent never holds. */
+export const WORLD_WAIT = 8000;
 
 /**
  * @param {{ now?: () => number, frame?: (fn: () => void) => number, cancelFrame?: (id: number) => void }} [env]
@@ -32,14 +37,19 @@ export function journeyClock(env = {}) {
   const frame = env.frame ?? ((fn) => requestAnimationFrame(fn));
   const cancelFrame = env.cancelFrame ?? ((id) => cancelAnimationFrame(id));
   let t = 0, last = real(), raf = 0, cap = Infinity;
-  /** @type {{ at: number, done: boolean } | null} */
+  /** since: the real time the clock reached the hold, once it has
+   * @type {{ at: number, done: boolean, cap: number, since: number | null } | null} */
   let hold = null;
   /** @type {Map<number, { at: number, fn: () => void }>} */
   const pending = new Map();
   let ids = 0;
   const now = () => {
     const p = real(); t += Math.min(cap, Math.max(0, p - last)); last = p;
-    if (hold && !hold.done && t > hold.at) t = hold.at;
+    if (hold && !hold.done && t > hold.at) {
+      if (hold.since === null) hold.since = p;
+      if (p - hold.since >= hold.cap) hold.done = true;
+      else t = hold.at;
+    }
     return t;
   };
   /* #1262: each beat is its own, as each was its own timer before this
@@ -71,13 +81,15 @@ export function journeyClock(env = {}) {
     /** stop everything still pending (the component is going) */
     dispose() { pending.clear(); if (raf) cancelFrame(raf); raf = 0; },
     /**
-     * Hold the clock `ms` from now until `until` settles (or `cap` ms pass).
+     * Hold the clock `ms` from now until `until` settles, or until it has
+     * stood at the hold for `cap` ms.
      * @param {number} ms @param {Promise<unknown>} until @param {number} [cap]
      */
     holdAt(ms, until, cap = WORLD_WAIT) {
-      const h = { at: now() + ms, done: false }; hold = h;
+      /** @type {{ at: number, done: boolean, cap: number, since: number | null }} */
+      const h = { at: now() + ms, done: false, cap, since: null }; hold = h;
       const free = () => { h.done = true; };
-      until.then(free, free); setTimeout(free, cap);
+      until.then(free, free);
       return h;
     },
   };
