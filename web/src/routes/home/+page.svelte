@@ -731,7 +731,8 @@
     const snooze = modes.pick(value);
     if (!snooze || !detail) return;
     const { item, until } = snooze;
-    if (until <= detail.today) { footProblem = "not yet — snooze to a day after today"; return; }
+    /* Whether the day will do is the engine's (#1325): its refusal lands
+       in footProblem, in its words. */
     runFoot("snooze", () => snoozeCommand(item, until), `${item.title} snoozed until ${longDate(until)}`);
   }
 

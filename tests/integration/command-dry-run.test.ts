@@ -114,3 +114,25 @@ describe("an item's kind is the engine's to map", () => {
     expect(stored).toMatchObject({ costMinor: 5485, scheduleKind: "service", subtype: "inspection" });
   });
 });
+
+describe("the snooze floor (#1325)", () => {
+  it("refuses today or earlier in the member's words, and takes tomorrow", async () => {
+    const fixture = await createIntegrationFixture("snooze-floor");
+    const owner = await fixture.session("owner");
+    expect((await send(owner, upsert(fixture))).status).toBe(200);
+    const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+    const snooze = (snoozedUntil: string, expectedVersion: number) => ({
+      type: "item.snooze", householdId: fixture.household.id, itemId: fixture.item.id, expectedVersion, snoozedUntil,
+      activity: { id: randomUUID(), itemId: fixture.item.id, kind: "snoozed", occurredAt: new Date().toISOString() },
+    });
+    for (const until of [day(-1), day(-2)]) {
+      const refused = await send(owner, snooze(until, 2));
+      expect(refused.status).toBe(422);
+      expect((await refused.json()).error).toEqual({ code: "snooze_not_after_today", message: "not yet — snooze to a day after today" });
+    }
+    expect((await send(owner, { ...snooze(day(2), 2), dryRun: true })).status).toBe(200);
+    expect((await row(fixture.item.id))?.snoozedUntil).toBeNull();
+    expect((await send(owner, snooze(day(2), 2))).status).toBe(200);
+    expect((await row(fixture.item.id))?.snoozedUntil).toBe(day(2));
+  });
+});
