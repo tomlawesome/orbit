@@ -42,6 +42,8 @@ function eventFor(cookies = {}, id = "/") {
   return {
     route: { id },
     url: new URL(`http://orbit.invalid${id}`),
+    /* a GET, so the body-limit step (#1285) that runs first has nothing to hold */
+    request: new Request(`http://orbit.invalid${id}`),
     isDataRequest: false,
     locals: {},
     fetch: vi.fn(),
@@ -190,7 +192,8 @@ describe("hooks.server handle at `/` (#1252)", () => {
     const { response, resolve } = await handleRoot(event);
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("cache-control")).toBeNull();
+    /* never stored, as every gated screen is since #1264 (neverStored) */
+    expect(response.headers.get("cache-control")).toBe("no-store");
     expect(resolve).toHaveBeenCalledTimes(1);
     expect(event.locals.session).toBe(member);
   }, COLD_IMPORT_TIMEOUT_MS);
