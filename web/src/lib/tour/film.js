@@ -23,7 +23,6 @@
  */
 import { createClock } from "./clock.js";
 import { CHAPTERS } from "./chapters/index.js";
-import { householdCarriesPapers } from "./chapters/08-the-belt.js";
 import { createFilmPlayer } from "./player.js";
 import { mountTransport } from "./transport.js";
 import { createFilmContext } from "./vocabulary.js";
@@ -74,19 +73,17 @@ export function createFilm({
    * @param {{ from?: number }} [options]
    */
   async function start({ from = 0 } = {}) {
-    /* #1174 round 6: chapters 8 and 9 take another path when no body
-       carries a paper, and the measure has to know which before a frame
-       plays. Home's sky is server-drawn and then read again in the
-       browser; `body[data-home-ready]` is that read having landed, so the
-       sky is asked once it has (bounded: a home that never says so is
-       read as it stands). */
+    /* Home's sky is server-drawn and then read again in the browser;
+       `body[data-home-ready]` is that read having landed. The film opens
+       a body's drawer in chapter 8 (#1319), so it waits for the sky it
+       will point at (bounded: a home that never says so is played as it
+       stands). */
     await homeSettled();
     /* #1151 R10: a destroy() that landed while this was waiting on
        homeSettled() already tore the player down and is now a no-op
        (destroyed guard, below) — carrying on would measure and mount a
        transport nothing will ever destroy, leaking a second bar. */
     if (destroyed) return;
-    ctx.setCarriesPapers(householdCarriesPapers(doc, pocket));
     const { offsets, total } = await player.measure();
     /* transport.js decides its own dialect (isPocket(), at mount inside
        buildTicks) rather than being told: the pill's shape is CSS-driven

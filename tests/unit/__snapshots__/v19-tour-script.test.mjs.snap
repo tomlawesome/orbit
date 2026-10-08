@@ -28,9 +28,12 @@ exports[`the film's script (round 7, #1097) > #1083 §1: the desk script is byte
     "Nothing gets added without your review.",
   ],
   [
-    "Every body carries its documents in a belt around it.",
-    "The belt is what you have attached to it.",
-    "Read the full document, right here.",
+    "Open an item and everything about it is right here.",
+    "Your notes, then any paperwork you’ve added.",
+    "That’s a preview. Click it to read the whole thing.",
+    "Snooze it, mark it done, add a document or retire it — all from here.",
+    "Need to change something? Edit it right here.",
+    "Click the date and pick a new one from the calendar.",
   ],
   [
     "MOT passed — mark it done and it swings back out to next year.",
