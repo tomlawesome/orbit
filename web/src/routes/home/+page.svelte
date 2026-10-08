@@ -736,7 +736,11 @@
     const { item, until } = snooze;
     /* Whether the day will do is the engine's (#1325): its refusal lands
        in footProblem, in its words. */
-    runFoot("snooze", () => snoozeCommand(item, until), `${item.title} snoozed until ${longDate(until)}`);
+    /* #1319: every pill is disabled while the snooze is sent, which drops
+       the focus the calendar handed back to the snooze pill; put it back
+       once the pills are live again, as complete does. */
+    runFoot("snooze", () => snoozeCommand(item, until), `${item.title} snoozed until ${longDate(until)}`)
+      .then(() => { if (expanded === item.id) focusInDrawer('[aria-label^="Snooze "]'); });
   }
 
   async function saveEdit() {
