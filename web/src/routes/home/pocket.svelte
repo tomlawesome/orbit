@@ -469,7 +469,10 @@
   const starHidden = $derived(sheetOpen || hatchOpen || lit !== null);
   /** @param {string} id */
   const onRowToggle = (id) => /** @type {(open: boolean) => void} */ ((open) => {
-    if (open) { lit = id; loadSearchDocuments(); } else if (lit === id) lit = null;
+    /* #1319: an open row is the one asked for, so an edit that moves it out
+       of what the manifest lists (a new date past 30 days) keeps it drawn,
+       open, in its new place in date order, not folded away (the Q1 rule). */
+    if (open) { lit = id; asked = id; loadSearchDocuments(); } else if (lit === id) lit = null;
   });
 
   /**
