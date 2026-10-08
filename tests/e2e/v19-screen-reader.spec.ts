@@ -161,6 +161,7 @@ const households = householdRegister();
 let householdId: string;
 let householdName: string;
 let itemId: string;
+let itemTitle: string;
 
 /*
  * Deliberately NOT serial mode: this is a walkthrough of every core-journey
@@ -212,6 +213,7 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
       if (!createHousehold.ok()) throw new Error(`household.create failed: ${createHousehold.status()}`);
       households.track({ id: householdId, name: householdName });
 
+      itemTitle = `${NAME_PREFIX}item ${randomUUID().slice(0, 8)}`;
       const upsertItem = await page.request.post("/api/workspace/commands", {
         headers,
         data: {
@@ -221,7 +223,7 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
           item: {
             id: itemId,
             sectionId,
-            title: `${NAME_PREFIX}item ${randomUUID().slice(0, 8)}`,
+            title: itemTitle,
             currency: "GBP",
             costMinor: 4500,
             dueDate: new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10),
@@ -272,10 +274,38 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
     await assertLiveRegionIsSafe(drawer, "home", "#statusdrawer (system status)");
   });
 
-  test("/item/[id]", async ({ page }, testInfo) => {
+  /* #1319 (owner-decisions §34): was "/item/[id]", the belt. Its address
+     now lands on home with the item's drawer open, which holds everything
+     the belt did, so the drawer is what is read back: the screen with it
+     open, then with its rows in edit and the chooser up (the due date's
+     calendar), every control named and the landmarks and headings whole
+     in both states. The desk's drawer is a named region; the phone's is
+     the row's own panel. */
+  test("/home?item=<id>: the item drawer, read and edited", async ({ page, isMobile }, testInfo) => {
     await signIn(page);
-    await page.goto(`/item/${itemId}`);
-    await walkScreen(page, testInfo, "item-id");
+    await page.goto(`/home?item=${itemId}`);
+    const drawer = isMobile
+      ? page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`)
+      : page.getByRole("region", { name: `${itemTitle} — full detail` });
+    if (isMobile) await expect(drawer).toHaveAttribute("data-open", "", { timeout: 30_000 });
+    const acts = drawer.getByRole("group", { name: `Actions for ${itemTitle}` });
+    await expect(acts).toBeVisible({ timeout: 30_000 });
+    await walkScreen(page, testInfo, "home-item-drawer");
+    await expect(acts.getByRole("button")).toHaveText(["snooze", "complete", "attach a document", "retire"]);
+    await expect(drawer.getByRole("button", { name: "Edit this item" })).toBeVisible();
+    await expect(drawer.getByRole("button", { name: "Copy link" })).toBeVisible();
+
+    await drawer.getByRole("button", { name: "Edit this item" }).click();
+    await expect(drawer.getByRole("group", { name: `Editing ${itemTitle}` })).toBeVisible();
+    await drawer.getByRole("button", { name: /^due: / }).click();
+    const chooser = page.getByRole("dialog", { name: /due date/i });
+    await expect(chooser).toBeVisible();
+    await walkScreen(page, testInfo, "home-item-drawer-editing");
+    await expect(chooser.getByRole("grid")).toHaveAccessibleName(/\S/);
+    /* Put back as found: the chooser, then the unchanged edit. */
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    await expect(acts).toBeVisible();
   });
 
   test("/household/[id]", async ({ page }, testInfo) => {

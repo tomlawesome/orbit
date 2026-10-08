@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { settleArrival } from "./support/arrival";
 import { cleanupHousehold, sessionHeaders } from "./support/households";
 import {
@@ -57,15 +57,18 @@ resetDatabaseBetweenSpecFiles();
  *     of its own at all" beyond that: the account panel and the three home
  *     drawers this file's desktop twin light-dismiss-tests are `.desk`-only
  *     chrome (home.css) that pocket.css hides outright below 901px/600px.
- *   - /inbox, /create, /item/<id> and /household/<id> each draw their own
+ *   - /inbox, /create and /household/<id> each draw their own
  *     pocket beside the desk's markup since #1120/#1122 (inbox/pocket.svelte,
- *     create/pocket.svelte, the item page's pocket card and sheets,
- *     household/[id]/pocket.svelte), chosen by CSS, so the tests below walk
+ *     create/pocket.svelte, household/[id]/pocket.svelte), chosen by CSS,
+ *     so the tests below walk
  *     the pocket's own controls and wait on the pocket's own loaded state.
  *     /settings draws no second dialect of its own; only its shared chrome
  *     (Chrome.svelte) turns into the kit's top chrome and hatch, so the same
  *     controls the desktop file walks are walked again here, at the phone
  *     viewport, to prove they are still fully keyboard-reachable.
+ *   - #1319 (owner-decisions §34): the item page (the belt) retired; an
+ *     item is its manifest row's drawer on home (ItemDrawer.svelte, the
+ *     foot row FootRow.svelte), so the item tests below walk that drawer.
  *
  * #852 made the avatar a real `<button>`, reached by Tab and activated by
  * Enter/Space; since #1120 it keeps its id (`#morb`) and opens the kit's
@@ -77,6 +80,7 @@ resetDatabaseBetweenSpecFiles();
 
 /* #1080: this worker's own administrator, resolved lazily (worker env only). */
 const READER = () => workerAccount("administrator");
+const ITEM_TITLE = "Keyboard-reached boiler service";
 
 test.beforeEach(({ isMobile }) => {
   test.skip(!isMobile, "pocket screens only; the desktop walk is v19-keyboard.spec.ts");
@@ -161,7 +165,7 @@ async function seedHousehold(page: Page, options: { withItem?: boolean; secondSe
         item: {
           id: itemId,
           sectionId,
-          title: "Keyboard-reached boiler service",
+          title: ITEM_TITLE,
           currency: "GBP",
           dueDate,
           recurrenceMonths: 12,
@@ -193,6 +197,15 @@ const TOP_BACK = "header.p-chrome a.back";
    `data-open` (row.js), and the planet whose row is open wears `lit`. */
 const DIAL_PLANET = ".pocket .mdial .pk-body[data-body]:not([data-body-sugg])";
 const OPEN_ROW = ".pocket .pk-below [data-row][data-open]";
+
+/** The item as the server holds it now. */
+async function serverItem(page: Page, householdId: string, itemId: string) {
+  const response = await page.request.get("/api/workspace", { headers: await sessionHeaders(page) });
+  const body = (await response.json()) as {
+    workspace: { households: { id: string; items?: { id: string; dueDate?: string | null }[] }[] };
+  };
+  return body.workspace.households.find((one) => one.id === householdId)?.items?.find((one) => one.id === itemId) ?? null;
+}
 
 /** #730: every household this file makes is removed, even when the test fails. */
 async function cleanup(page: Page, household: { id: string; name: string }) {
@@ -376,9 +389,13 @@ test("create (pocket): fillable and submittable by keyboard alone", async ({ pag
     expect(submit?.focusVisible, "create (pocket): the submit button has no visible focus indicator").toBe(true);
     await page.keyboard.press("Enter");
 
-    /* Saved (§2.5): the new item is approached on its belt. */
-    await expect(page).toHaveURL(/\/item\/[0-9a-f-]{36}$/, { timeout: 10_000 });
-    await expect(page.getByRole("heading", { name })).toBeVisible();
+    /* Saved (#1319, §34): home, with the new item's drawer open, as the
+       desk's create lands; the belt it used to approach is gone. */
+    await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: 10_000 });
+    const id = new URL(page.url()).searchParams.get("item");
+    const row = page.locator(`.pocket .pk-below [data-row-key="${id}"]`);
+    await expect(row).toHaveAttribute("data-open", "", { timeout: 30_000 });
+    await expect(row).toContainText(name);
     /* And home's pocket lists it as a kit row (#1120), not the desk's
        `.item`, which pocket.svelte never renders. */
     await page.goto("/home");
@@ -389,56 +406,100 @@ test("create (pocket): fillable and submittable by keyboard alone", async ({ pag
 });
 
 /**
- * item/[id]/+page.svelte draws no second dialect (only column-reflow media
- * queries) and is reached from pocket home only through the bottom sheet's
- * dead "open" button (see the file header) — direct navigation is the real
- * way onto this screen in the pocket build today.
+ * #1319: opens the seeded item's manifest row the keyboard's way (Tab to its
+ * planet, Enter: owner's answer 6a), then waits for its drawer's foot row.
+ * Focus stays on the planet, so the drawer's controls are the Tabs after it.
  */
-test("item page (pocket): fully reachable by keyboard", async ({ page }) => {
+async function openRowFromDial(page: Page) {
+  await tabTo(page, { selector: DIAL_PLANET }, { screen: "home (pocket) dial" });
+  await page.keyboard.press("Enter");
+  const row = page.locator(OPEN_ROW);
+  await expect(row).toHaveCount(1);
+  await expect(row.getByRole("group", { name: `Actions for ${ITEM_TITLE}` })).toBeVisible({ timeout: 20_000 });
+  return row;
+}
+
+/** Waits for the chooser sheet's calendar to take focus, then steps (a
+ *  day with ArrowRight, a month with PageDown: calendar.js stepDay) and
+ *  picks that day with Enter. */
+async function pickByKeyboard(page: Page, chooser: Locator, step: "ArrowRight" | "PageDown") {
+  await expect(chooser).toBeVisible();
+  await expect.poll(() => chooser.evaluate((el) => el.contains(document.activeElement) && document.activeElement?.matches("button.day"))).toBe(true);
+  await page.keyboard.press(step);
+  await page.keyboard.press("Enter");
+  await expect(chooser).toHaveCount(0);
+}
+
+/* #1319: was "item page (pocket): fully reachable by keyboard", which
+   audited /item/<id> on a phone. The item is its row's drawer on pocket
+   home now, so the same audit runs over home with that drawer open. */
+test("item drawer (pocket): opened from the dial by keyboard, is fully reachable", async ({ page }) => {
   test.setTimeout(60_000);
-  await installKeyboardAudit(page);
-  await signIn(page, "/home");
-  const household = await seedHousehold(page, { withItem: true });
+  const household = await arriveAtHomePocket(page, { withItem: true });
   try {
-    await page.goto(`/item/${household.itemId}`);
-    await expect(page.locator(TOP_BACK)).toBeVisible({ timeout: 30_000 });
-    await auditTabOrder(page, "item page (pocket)");
+    await openRowFromDial(page);
+    await auditTabOrder(page, "home (pocket) with the item drawer open");
   } finally {
     await cleanup(page, household);
   }
 });
 
-test("item page (pocket): actions and the back link work by keyboard", async ({ page }) => {
+/* #1319: was "item page (pocket): actions and the back link work by
+   keyboard" (reschedule through the belt's Reschedule sheet, then the top
+   chrome's back link). The drawer's acts are snooze (the calendar sheet,
+   "snooze until") and the pencil, whose due date is the reschedule; the way
+   back is Escape on the row, which puts it away (row.js). */
+test("item drawer (pocket): rescheduling, snooze and the way back work by keyboard", async ({ page }) => {
   test.setTimeout(60_000);
-  await installKeyboardAudit(page);
-  await signIn(page, "/home");
-  const household = await seedHousehold(page, { withItem: true });
+  const household = await arriveAtHomePocket(page, { withItem: true });
   try {
-    await page.goto(`/item/${household.itemId}`);
-    await expect(page.locator(TOP_BACK)).toBeVisible({ timeout: 30_000 });
+    const row = await openRowFromDial(page);
+    const dueBefore = (await serverItem(page, household.id, household.itemId as string))?.dueDate;
 
-    await tabTo(page, { tag: "BUTTON", textIncludes: "reschedule" }, { screen: "item page (pocket) actions" });
+    /* Reschedule: the pencil puts the rows into edit, the due date opens
+       the calendar sheet, a day picked and save sends it. */
+    await tabTo(page, { selector: 'button[aria-label="Edit this item"]' }, { screen: "item drawer (pocket) foot row" });
+    const pencil = await currentFocus(page);
+    expect(pencil?.focusVisible, "item drawer (pocket): the pencil has no visible focus indicator").toBe(true);
     await page.keyboard.press("Enter");
-    /* On a phone reschedule is the kit Sheet's "Reschedule" face (#1072),
-       not the desk inline `.panel`; by role and name, since the closed hatch
-       is a `.panel` too. */
-    const reschedule = page.getByRole("dialog", { name: "Reschedule" });
-    await expect(reschedule).toBeVisible();
-    await tabTo(page, { selector: "#p-due" }, { screen: "item page (pocket) reschedule sheet" });
-    const dueField = await currentFocus(page);
-    expect(dueField?.focusVisible, "item page (pocket): the reschedule date field has no visible focus indicator").toBe(true);
-    const newDue = new Date(Date.now() + 40 * 86400000).toISOString().slice(0, 10);
-    await page.locator("#p-due").fill(newDue);
-    await tabTo(page, { selector: ".bp-go" }, { screen: "item page (pocket) reschedule sheet" });
+    await expect(row.getByRole("textbox", { name: "title" })).toBeFocused();
+    await tabTo(page, { selector: '[aria-label^="due: "]' }, { screen: "item drawer (pocket), editing" });
+    const due = await currentFocus(page);
+    expect(due?.focusVisible, "item drawer (pocket): the due date has no visible focus indicator").toBe(true);
     await page.keyboard.press("Enter");
-    await expect(reschedule).toBeHidden();
-    await expect(page.locator(".problem")).toBeHidden();
+    /* A day on, not a month: a month on carries the item out of "Needs
+       attention", and its row is then redrawn as "nothing needs you" and
+       shut (pocket.svelte's two manifest branches), which is not what
+       this test is about. */
+    await pickByKeyboard(page, page.getByRole("dialog", { name: /due date/i }), "ArrowRight");
+    /* save waits on the engine's dry run of the rows (edit-session.svelte.js
+       `refused`); a disabled button is out of the Tab order until then */
+    const save = row.getByRole("group", { name: `Editing ${ITEM_TITLE}` }).getByRole("button", { name: "save" });
+    await expect(save).toBeEnabled({ timeout: 10_000 }).catch(async () => {
+      throw new Error(`item drawer (pocket): save stayed disabled; the row read: ${await row.innerText()}`);
+    });
+    await tabTo(page, { tag: "BUTTON", textIncludes: "save" }, { screen: "item drawer (pocket), editing" });
+    await page.keyboard.press("Enter");
+    await expect(row.getByRole("group", { name: `Actions for ${ITEM_TITLE}` })).toBeVisible({ timeout: 10_000 });
+    await expect(row.getByRole("alert")).toHaveCount(0);
+    await expect.poll(async () => (await serverItem(page, household.id, household.itemId as string))?.dueDate).not.toBe(dueBefore);
 
-    await tabTo(page, { selector: TOP_BACK }, { screen: "item page (pocket)" });
-    const back = await currentFocus(page);
-    expect(back?.focusVisible, "item page (pocket): the back link has no visible focus indicator").toBe(true);
+    /* Snooze: the pill opens the calendar sheet; a day picked snoozes. */
+    await tabTo(page, { selector: `[aria-label="Snooze ${ITEM_TITLE}"]` }, { screen: "item drawer (pocket) foot row" });
+    const snooze = await currentFocus(page);
+    expect(snooze?.focusVisible, "item drawer (pocket): the snooze pill has no visible focus indicator").toBe(true);
     await page.keyboard.press("Enter");
-    await expect(page).toHaveURL(/\/home/);
+    await pickByKeyboard(page, page.getByRole("dialog", { name: /snooze until/i }), "ArrowRight");
+    await expect(row.getByText("snoozed until")).toBeVisible({ timeout: 10_000 });
+    /* The pick hands focus back to the snooze pill (drawer-modes.svelte.js
+       closeChooser); a keyboard reader carries on from there, so it must
+       still be in the row once the snooze has landed. */
+    await expect.poll(() => row.evaluate((el) => el.contains(document.activeElement)),
+      { message: "item drawer (pocket): focus left the row after the snooze" }).toBe(true);
+
+    /* The way back: Escape puts the row away. */
+    await page.keyboard.press("Escape");
+    await expect(page.locator(OPEN_ROW)).toHaveCount(0);
   } finally {
     await cleanup(page, household);
   }
