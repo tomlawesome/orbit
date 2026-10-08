@@ -44,6 +44,8 @@
      carries it instead, and the identity provider asks its question again. */
   /** @type {string | null} */
   let providerLogout = $state(null);
+  /* the farewell has landed: the goodbye is now the screen (Dusk gets the landmark) */
+  let farewelled = $state(false);
   const backIn = $derived(providerLogout ?? "/");
 
   /* #1253, #1262: the menu holds the sign-out, so when it opens the descent's
@@ -88,6 +90,7 @@
      * not walk into a signed-out page either.
      */
     try { history.replaceState(history.state, "", "/logout"); } catch { /* no history, no harm */ }
+    farewelled = true;
   }
 </script>
 
@@ -95,7 +98,7 @@
   <!-- the ground under the dusk, so a daylight theme's page background never
        shows beneath it (as the sign-in's own dawn has) -->
   <div class="signin-stage" aria-hidden="true"></div>
-  <Dusk>
+  <Dusk landmark={farewelled}>
     <!-- `backIn` is the identity provider's own end-session URL as often as
          it is "/": genuinely external, not a route this app can resolve(),
          which is what `rel="external"` tells the lint rule (and anyone

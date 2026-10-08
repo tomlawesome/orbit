@@ -39,7 +39,12 @@
    * `data-rasterised` is "pending" until every picture has loaded (or failed
    * to), then "ready", for the fidelity gate.
    */
-  let { children = undefined } = $props();
+  /* `landmark`: the goodbye played in place over another page (Leave.svelte,
+     #1253) is that page's last screen, and the page's own <main> and <h1>
+     have withdrawn by then. The dusk then carries the one landmark and the
+     one heading the screen-reader walk (#496, #843) expects of the sign-out
+     screen, exactly as /logout's own page does around it. */
+  let { children = undefined, landmark = false } = $props();
   /** @type {HTMLDivElement} */
   let world;
   /** @type {HTMLDivElement} */
@@ -94,7 +99,8 @@
   });
 </script>
 
-<div id="dusk">
+<div id="dusk" role={landmark ? "main" : undefined}>
+  {#if landmark}<h1 class="sr-only">Orbit — signed out</h1>{/if}
   <!-- #1299: each moving part of the sky is a picture of its own, moved whole
        (orbit-site's sky.js mountFlightSky): the still far stars, each
        twinkler, and the near stars. A layer that only slides or fades is the
