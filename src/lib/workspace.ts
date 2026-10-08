@@ -137,6 +137,10 @@ export const householdWorkspaceSchema = z.object({
   activities: z.array(itemActivitySchema).max(5_000).default([]),
   readNotificationIds: z.array(z.string().min(1).max(180)).max(2_000).default([]),
   dismissedNotificationIds: z.array(z.string().min(1).max(180)).max(2_000).default([]),
+  /** Read-only (ADR-0034, #1325): the household's calendar date where it
+   * lives, as the engine reckons it for its rules (household-date.ts), so a
+   * client's calendar greys exactly the days the engine refuses. */
+  today: calendarDate.optional(),
 });
 
 export const recoverableHouseholdSchema = z.object({
@@ -194,14 +198,14 @@ export type WorkspaceCommand =
       householdId: string;
       kind?: ItemKind;
       item: ItemIntent;
-      activity?: ItemActivity;
+      activity?: ItemActivityIntent;
       /** Engine-side callers only, never on the wire (the schema has no
        * such field): what a new item starts from when the engine has
        * already read it -- reviewed intake's relay reading. An edit's basis
        * is always the stored item. */
       basis?: StoredItemFacts;
     }
-  | { type: "item.archive"; householdId: string; itemId: string; expectedVersion: number; activity: ItemActivity }
+  | { type: "item.archive"; householdId: string; itemId: string; expectedVersion: number; activity: ItemActivityIntent }
   | {
       type: "item.complete";
       householdId: string;
@@ -212,8 +216,8 @@ export type WorkspaceCommand =
       notes?: string;
       activity: ItemActivityIntent;
     }
-  | { type: "item.reschedule"; householdId: string; itemId: string; expectedVersion: number; dueDate: string; activity: ItemActivity }
-  | { type: "item.snooze"; householdId: string; itemId: string; expectedVersion: number; snoozedUntil: string; activity: ItemActivity }
+  | { type: "item.reschedule"; householdId: string; itemId: string; expectedVersion: number; dueDate: string; activity: ItemActivityIntent }
+  | { type: "item.snooze"; householdId: string; itemId: string; expectedVersion: number; snoozedUntil: string; activity: ItemActivityIntent }
   | { type: "item.status"; householdId: string; itemId: string; expectedVersion: number; status: "active" | "cancelled"; activity: ItemActivityIntent }
   | { type: "notification.read"; householdId: string; notificationId: string }
   | { type: "notification.dismiss"; householdId: string; notificationId: string }
@@ -271,8 +275,9 @@ export const itemIntentSchema = workspaceItemShape
     status: z.never().optional(),
   });
 
-/** The activity of a command whose kind the engine names: the client's
- * activity without one (ADR-0034, #1325). */
+/** An item command's activity as a client sends it: the identity, the
+ * moment and the details, never the kind, which the engine names from what
+ * the command did (ADR-0034, #1325). */
 const activityIntentSchema = itemActivitySchema.extend({ kind: z.never().optional() });
 
 /** Runtime contract shared by the browser synchronizer and authenticated command API. */
@@ -304,14 +309,14 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     householdId: z.string().min(1).max(100),
     kind: z.enum(itemKinds).optional(),
     item: itemIntentSchema,
-    activity: itemActivitySchema.optional(),
+    activity: activityIntentSchema.optional(),
   }),
   z.object({
     type: z.literal("item.archive"),
     householdId: z.string().min(1).max(100),
     itemId: z.string().min(1).max(100),
     expectedVersion: z.number().int().positive(),
-    activity: itemActivitySchema,
+    activity: activityIntentSchema,
   }),
   z.object({
     type: z.literal("item.complete"),
@@ -332,7 +337,7 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     itemId: z.string().min(1).max(100),
     expectedVersion: z.number().int().positive(),
     dueDate: calendarDate,
-    activity: itemActivitySchema,
+    activity: activityIntentSchema,
   }),
   z.object({
     type: z.literal("item.snooze"),
@@ -340,7 +345,7 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     itemId: z.string().min(1).max(100),
     expectedVersion: z.number().int().positive(),
     snoozedUntil: calendarDate,
-    activity: itemActivitySchema,
+    activity: activityIntentSchema,
   }),
   z.object({
     type: z.literal("item.status"),
@@ -381,11 +386,11 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
  * (`cost: "£1,250"`), which the engine reads into `costMinor`.
  */
 export function parseWorkspaceCommand(input: unknown): WorkspaceCommand {
-  if (isRecord(input) && (input.type === "item.complete" || input.type === "item.status")
+  if (isRecord(input) && typeof input.type === "string" && input.type.startsWith("item.")
     && isRecord(input.activity) && input.activity.kind !== undefined) {
     throw new AppError(
       "invalid_command",
-      `A ${input.type === "item.complete" ? "completion" : "status change"} does not send its activity's kind; Orbit records it`,
+      `An ${input.type} command does not send its activity's kind; Orbit records what the command did`,
       400,
     );
   }
@@ -508,6 +513,11 @@ export function statusActivity(activity: ItemActivityIntent, status: "active" | 
   return { ...activity, kind: status === "active" ? "restored" : "cancelled" };
 }
 
+/** The activity of an item command whose kind follows from the command alone (#1325). */
+export function namedActivity(activity: ItemActivityIntent, kind: "created" | "updated" | "archived" | "rescheduled" | "snoozed"): ItemActivity {
+  return { ...activity, kind };
+}
+
 function appendActivity(household: HouseholdWorkspace, activity: ItemActivity | undefined): ItemActivity[] {
   if (!activity || household.activities.some((entry) => entry.id === activity.id)) return household.activities;
   return [itemActivitySchema.parse(activity), ...household.activities];
@@ -582,10 +592,11 @@ export function reduceWorkspace(state: WorkspaceState, command: WorkspaceCommand
       return updateHousehold(state, command.householdId, (household) => {
         const currentIndex = household.items.findIndex((entry) => entry.id === command.item.id);
         const item = workspaceItemSchema.parse(itemOfIntent(command.item, command.kind, household.items[currentIndex] ?? command.basis));
+        const activity = command.activity && namedActivity(command.activity, currentIndex < 0 ? "created" : "updated");
         const items = currentIndex < 0
           ? [item, ...household.items]
           : household.items.map((entry, index) => index === currentIndex ? item : entry);
-        return { ...household, items, activities: appendActivity(household, command.activity) };
+        return { ...household, items, activities: appendActivity(household, activity) };
       });
     }
     case "item.archive": {
@@ -594,7 +605,7 @@ export function reduceWorkspace(state: WorkspaceState, command: WorkspaceCommand
         items: household.items.map((item) => item.id === command.itemId
           ? updateItem(item, { status: "archived" }, command.activity.occurredAt)
           : item),
-        activities: appendActivity(household, command.activity),
+        activities: appendActivity(household, namedActivity(command.activity, "archived")),
       }));
     }
     case "item.complete": {
@@ -631,7 +642,7 @@ export function reduceWorkspace(state: WorkspaceState, command: WorkspaceCommand
               snoozedUntil: undefined,
             }, command.activity.occurredAt)
           : item),
-        activities: appendActivity(household, command.activity),
+        activities: appendActivity(household, namedActivity(command.activity, "rescheduled")),
       }));
     }
     case "item.snooze": {
@@ -640,7 +651,7 @@ export function reduceWorkspace(state: WorkspaceState, command: WorkspaceCommand
         items: household.items.map((item) => item.id === command.itemId
           ? updateItem(item, { snoozedUntil: command.snoozedUntil }, command.activity.occurredAt)
           : item),
-        activities: appendActivity(household, command.activity),
+        activities: appendActivity(household, namedActivity(command.activity, "snoozed")),
       }));
     }
     case "item.status": {

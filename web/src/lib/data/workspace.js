@@ -108,6 +108,8 @@
  * @property {ItemActivity[]} [activities]
  * @property {string[]} [readNotificationIds]
  * @property {string[]} [dismissedNotificationIds]
+ * @property {string} [today]  the household's calendar date where it lives, as
+ *   the engine reckons it for its rules (ADR-0034, #1325); YYYY-MM-DD
  */
 
 /**
@@ -783,15 +785,21 @@ export async function createSystem(draft) {
 }
 
 /**
- * "Today" for chart arithmetic. The workspace fixture pins it to the date the
- * designs were drawn against so the fidelity gate is deterministic; the real
- * API carries no such field, so live data uses the real clock.
+ * "Today": the household's calendar date as the engine reckons it (the
+ * workspace read's `today`, in the household's own time zone, ADR-0034,
+ * #1325), so a calendar greys exactly the days the engine refuses. The
+ * workspace fixture pins it to the date the designs were drawn against so the
+ * fidelity gate is deterministic; with neither, the clock's UTC date.
  *
  * @param {?Workspace} [workspace]
+ * @param {?string} [householdId]  whose today; the active household's when omitted
  * @returns {string} a calendar date, YYYY-MM-DD
  */
-function todayOf(workspace) {
-  return workspace?.fixtureToday ?? new Date().toISOString().slice(0, 10);
+function todayOf(workspace, householdId) {
+  const households = workspace?.households ?? [];
+  const id = householdId ?? workspace?.activeHouseholdId;
+  const household = households.find((one) => one.id === id) ?? households[0];
+  return workspace?.fixtureToday ?? household?.today ?? new Date().toISOString().slice(0, 10);
 }
 
 /**
@@ -860,7 +868,7 @@ export async function readHome(fetchImpl) {
     readInbox(fetchImpl).catch(() => /** @type {Inbox} */ ({ receipts: [] })),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
-  const today = todayOf(workspace);
+  const today = todayOf(workspace, primary);
   /* §11 (#453): no membership means the labelled sky — every visible
      household as a bearing and a name, nothing else. The dial, manifest and
      mail surfaces simply do not exist yet for this viewer. */
@@ -1581,7 +1589,7 @@ export async function readItem(id, workspace) {
     return {
       ...item,
       householdId: household.id,
-      today: todayOf(workspace),
+      today: todayOf(workspace, household.id),
       section: sections.get(item.sectionId) ?? null,
       documents: (body.documents ?? []).map(drawerDocumentOf),
     };
@@ -2517,7 +2525,7 @@ export async function readHouseholdScreen(householdId) {
     candidates: roster.candidates ?? [],
     joinRequests,
     invitations,
-    today: todayOf(workspace),
+    today: todayOf(workspace, householdId),
     /* Pinned "now" so "2d ago" on a waiting joiner holds still under the gate
        and stays live in production — readHome's rule. */
     now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),

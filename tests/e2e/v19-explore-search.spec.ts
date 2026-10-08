@@ -88,7 +88,7 @@ async function seedHouseholdWithTwoItems(page: Page): Promise<{
         id: matchId, sectionId, title: matchTitle, currency: "GBP",
         provider: "Kwik-Fit", dueDate: matchDue, recurrenceMonths: 12,
       },
-      activity: { id: crypto.randomUUID(), itemId: matchId, kind: "created", occurredAt: new Date().toISOString() },
+      activity: { id: crypto.randomUUID(), itemId: matchId, occurredAt: new Date().toISOString() },
     });
     const otherId = crypto.randomUUID();
     const otherTitle = "Boiler service proving";
@@ -101,7 +101,7 @@ async function seedHouseholdWithTwoItems(page: Page): Promise<{
         id: otherId, sectionId, title: otherTitle, currency: "GBP",
         dueDate: otherDue, recurrenceMonths: 12,
       },
-      activity: { id: crypto.randomUUID(), itemId: otherId, kind: "created", occurredAt: new Date().toISOString() },
+      activity: { id: crypto.randomUUID(), itemId: otherId, occurredAt: new Date().toISOString() },
     });
     return { householdId, matchId, matchTitle, otherId, otherTitle };
   }, name);
@@ -151,7 +151,7 @@ async function seedHouseholdWithSoonItem(page: Page): Promise<{ householdId: str
         id: itemId, sectionId, title, currency: "GBP",
         dueDate, recurrenceMonths: 12,
       },
-      activity: { id: crypto.randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+      activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
     });
     return { householdId, itemId, title };
   }, name);

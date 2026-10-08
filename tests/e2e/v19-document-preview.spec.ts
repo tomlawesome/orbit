@@ -89,7 +89,7 @@ async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; hous
         dueDate,
         recurrenceMonths: 12,
       },
-      activity: { id: crypto.randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+      activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
     });
     return { itemId, householdId };
   }, name);

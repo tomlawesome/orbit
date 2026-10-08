@@ -145,7 +145,7 @@ async function seedHousehold(page: Page, options: { withItem?: boolean } = {}) {
           dueDate,
           recurrenceMonths: 12,
         },
-        activity: { id: randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+        activity: { id: randomUUID(), itemId, occurredAt: new Date().toISOString() },
       },
     });
     if (!itemCreated.ok()) {

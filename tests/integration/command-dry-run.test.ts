@@ -3,6 +3,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { items } from "@/db/schema";
+import { householdToday } from "@/lib/household-date";
 import { cleanupIntegrationEnvironment, createIntegrationFixture } from "./support/fixtures";
 import { callRouteForSession, loadRoute } from "./support/request-event";
 
@@ -38,7 +39,7 @@ function upsert(fixture: Fixture, item: Record<string, unknown> = {}, extra: Rec
       id: fixture.item.id, sectionId: fixture.section.id, title: "MOT", currency: "GBP",
       dueDate: "2026-11-02", recurrenceMonths: 12, version: 2, ...item,
     },
-    activity: { id: randomUUID(), itemId: fixture.item.id, kind: "updated", occurredAt: new Date().toISOString() },
+    activity: { id: randomUUID(), itemId: fixture.item.id, occurredAt: new Date().toISOString() },
     ...extra,
   };
 }
@@ -112,6 +113,10 @@ describe("an item's kind is the engine's to map", () => {
     const body = await response.json() as { workspace: { households: Array<{ items: Array<Record<string, unknown>> }> } };
     const stored = body.workspace.households.flatMap((one) => one.items).find((one) => one.id === fixture.item.id);
     expect(stored).toMatchObject({ costMinor: 5485, scheduleKind: "service", subtype: "inspection" });
+    // The read carries each household's today, as the snooze floor reckons it (#1325).
+    for (const household of body.workspace.households as unknown as Array<{ timezone: string; today?: string }>) {
+      expect(household.today).toBe(householdToday(household.timezone));
+    }
   });
 });
 
@@ -123,7 +128,7 @@ describe("the snooze floor (#1325)", () => {
     const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
     const snooze = (snoozedUntil: string, expectedVersion: number) => ({
       type: "item.snooze", householdId: fixture.household.id, itemId: fixture.item.id, expectedVersion, snoozedUntil,
-      activity: { id: randomUUID(), itemId: fixture.item.id, kind: "snoozed", occurredAt: new Date().toISOString() },
+      activity: { id: randomUUID(), itemId: fixture.item.id, occurredAt: new Date().toISOString() },
     });
     for (const until of [day(-1), day(-2)]) {
       const refused = await send(owner, snooze(until, 2));

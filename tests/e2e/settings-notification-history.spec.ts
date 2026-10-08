@@ -125,7 +125,7 @@ async function seedHouseholdAndItem(page: Page, name: string, itemTitle: string)
         id: itemId, sectionId, title: itemTitle, currency: "GBP",
         dueDate: new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10),
       },
-      activity: { id: crypto.randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+      activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
     });
     return { userId: session.user.id };
   }, { householdId, sectionId, itemId, householdName: name, itemTitle });

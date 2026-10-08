@@ -125,7 +125,6 @@ describe("household workspace", () => {
       activity: {
         id: "activity-archive",
         itemId: item.id,
-        kind: "archived",
         occurredAt: "2026-07-25T10:00:00.000Z",
       },
     });
@@ -303,6 +302,41 @@ describe("household workspace", () => {
       expect(activeHousehold(complete(state, "boiler", "2026-07-25")).activities[0]).toMatchObject({ kind: "service_completed" });
     });
 
+    it("names created and updated for an upsert, and archived, rescheduled and snoozed for theirs", () => {
+      const at = "2026-07-25T10:00:00.000Z";
+      const upsert = (id: string, title: string, version?: number) => parseWorkspaceCommand({
+        type: "item.upsert", householdId: "our-home", kind: "service",
+        item: { id, sectionId: "home", title, currency: "GBP", ...(version ? { version } : {}) },
+        activity: { id: `upsert-${title}`, itemId: id, occurredAt: at },
+      });
+      let state = reduceWorkspace(createTestWorkspace(), upsert("boiler", "Boiler"));
+      expect(activeHousehold(state).activities[0]).toMatchObject({ id: "upsert-Boiler", kind: "created" });
+      state = reduceWorkspace(state, upsert("boiler", "Boiler service", 2));
+      expect(activeHousehold(state).activities[0]).toMatchObject({ id: "upsert-Boiler service", kind: "updated" });
+
+      const transition = (type: string, extra: Record<string, unknown>) => parseWorkspaceCommand({
+        type, householdId: "our-home", itemId: "car-insurance", expectedVersion: 1,
+        activity: { id: type, itemId: "car-insurance", occurredAt: at }, ...extra,
+      });
+      for (const [type, extra, kind] of [
+        ["item.reschedule", { dueDate: "2026-09-01" }, "rescheduled"],
+        ["item.snooze", { snoozedUntil: "2026-08-01" }, "snoozed"],
+        ["item.archive", {}, "archived"],
+      ] as const) {
+        const next = reduceWorkspace(createTestWorkspace(), transition(type, extra));
+        expect(activeHousehold(next).activities[0]).toMatchObject({ id: type, kind });
+      }
+    });
+
+    it.each(["item.upsert", "item.archive", "item.reschedule", "item.snooze"])("refuses a kind sent on %s", (type) => {
+      const activity = { id: "a", itemId: "car-insurance", kind: "updated", occurredAt: "2026-07-25T10:00:00.000Z" };
+      const command = type === "item.upsert"
+        ? { type, householdId: "our-home", item: { id: "car-insurance", sectionId: "home", title: "Car", currency: "GBP" }, activity }
+        : { type, householdId: "our-home", itemId: "car-insurance", expectedVersion: 1, dueDate: "2026-09-01", snoozedUntil: "2026-08-01", activity };
+      expect(() => parseWorkspaceCommand(command)).toThrow(/does not send its activity's kind/);
+      expect(workspaceCommandSchema.safeParse(command).success).toBe(false);
+    });
+
     it("refuses a kind sent on a completion or a status change", () => {
       expect(() => parseWorkspaceCommand(status("cancelled", { kind: "cancelled" }))).toThrow(/does not send its activity's kind/);
       expect(() => parseWorkspaceCommand({
@@ -347,7 +381,6 @@ describe("household workspace", () => {
       activity: {
         id: "activity",
         itemId: "item",
-        kind: "archived" as const,
         occurredAt: "2026-07-25T10:00:00.000Z",
       },
     };

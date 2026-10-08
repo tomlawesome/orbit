@@ -178,7 +178,7 @@ async function seedHousehold(page: Page, itemTitles: string[]) {
           id: itemId, sectionId, title, currency: "GBP",
           dueDate, recurrenceMonths: 12,
         },
-        activity: { id: randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+        activity: { id: randomUUID(), itemId, occurredAt: new Date().toISOString() },
       },
     });
     if (!itemCreated.ok()) throw new Error(`#1002: could not seed item "${title}" (${itemCreated.status()})`);
