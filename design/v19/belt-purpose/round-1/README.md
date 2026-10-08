@@ -38,6 +38,18 @@ markup and behaviour identical, so the owner sees it in both places.
 Scenes: `?scene=` per file, listed at the top of each. Desk and phone
 widths both proved; packs by `?theme=`.
 
+## Notes from the build
+
+- B and C: home's menu never had a belt entry (Inbox, Settings,
+  Administration), so C removes nothing there. The `attach a document`
+  pill has no belt twin; it uses the pill style in the upcoming colour.
+  The MOT item was given a provider, a reference, notes and a third,
+  still-scanning paper so every field shows. C's preview card sits
+  centred over the drawer, nothing dimmed beneath: there is no room
+  beside the drawer, and the dim stays the create drawer's.
+- The page cannot be forced narrow: `?scene=phone` is the `open` (B) or
+  `preview` (C) scene at a 390px viewport.
+
 ## Verdicts
 
 (none yet)
