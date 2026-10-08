@@ -165,7 +165,16 @@
      so its apex can BE the screen centre, and the card is hung on that
      point. The card scrolls inside itself if a viewport is too short for it
      rather than sliding the belt off the top of the sky. */
-  html:has(.belt-page) body{background:var(--bg);color:var(--ink);font-family:var(--ui);line-height:1.55;
+  /* The night and its ink are the body's from its first style, bare as every
+     other route's sheet has them: this route renders in the browser only
+     (+page.js ssr = false), so the body is drawn before .belt-page exists,
+     and behind :has() the background faded in from white over the .4s
+     below as the belt arrived -- a white flash, and the axe sweep measuring
+     the card's quiet text against the grey between (CI pipeline 2251). Home
+     and the other routes set the same two values, so nothing follows the
+     reader anywhere by it. */
+  html body{background:var(--bg);color:var(--ink)}
+  html:has(.belt-page) body{font-family:var(--ui);line-height:1.55;
        transition:background .4s,color .4s;overflow:hidden;margin:0}
   /* THE SCROLL LAW, said loudly enough to be heard. §15's universal descent
      is a law for screens that scroll, and this one does not: the sheet pins
