@@ -25,7 +25,9 @@ Both also carry the owner's note on B's foot row (2026-10-08, on the
 `edit` pill and `copy link` text: "This could be small icons placed
 somewhere better"): the two become a pencil and a chain-link icon in the
 drawer's head, top right beside the countdown, 32px round glass buttons
-with a 44px target; the foot keeps only the four action pills.
+with a 44px target; the foot keeps only the four action pills. And (owner, same day): "We
+also don't need an 'actions' section, and I think the buttons would be
+better centralised" — no heading, the four pills centred in one row.
 
 Scenes `?scene=` listed at the top of each file; packs by `?theme=`.
 
