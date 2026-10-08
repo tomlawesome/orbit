@@ -238,6 +238,15 @@ async function openItemPageFromHome(page: Page, itemId: string) {
   await tabTo(page, { selector: ".itemview .ivlink" }, { screen: "home expanded row" });
   await page.goto(`/item/${itemId}`);
   await expect(page).toHaveURL(/\/item\//);
+  /* The item route is client-rendered (ssr = false), so a hard goto's load
+     event fires before the belt has drawn anything, chrome included; the URL
+     alone proves nothing. Enter on the old `.ivfull` link was a client
+     navigation that only resolved once the page had rendered. Without this
+     wait auditTabOrder snapshotted an empty screen and reported every control
+     as "not visible" (WebKit, pipeline 2271). Wait for the card's heading and
+     the belt's own step control, which belt.behaviour.js draws on mount. */
+  await expect(page.getByRole("heading", { name: "Keyboard-reached boiler service" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Move one item later along the belt/ })).toBeVisible();
 }
 
 /** Reaches household management the way the sun's own door works (§15,
