@@ -19,10 +19,12 @@ import type { ScheduleKind } from "@/lib/domain";
 import { listVisibleHouseholds } from "@/server/join-requests";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { log } from "@/lib/logger";
+import { itemOfIntent } from "@/lib/item-kind";
 import { nextDueDate } from "@/lib/next-due-date";
 import {
   completionActivity,
   itemActivitySchema,
+  workspaceItemSchema,
   workspaceSchema,
   type ItemActivity,
   type WorkspaceCommand,
@@ -324,12 +326,42 @@ function itemDates(scheduleKind: ScheduleKind | undefined, dueDate: string | und
   };
 }
 
+/**
+ * The dry run (ADR-0034 decision 3, #1325): the same command through the same
+ * access check and the same pre-write checks as the real call, stopping at
+ * the first write. Resolves when the command would be accepted; throws the
+ * refusal the real call would throw. Writes nothing.
+ *
+ * What only the write itself can find is left to the real call: a version
+ * that moves between this check and the save, and a database constraint.
+ */
+export async function checkWorkspaceCommand(userId: string, sessionId: string, command: WorkspaceCommand): Promise<void> {
+  await runWorkspaceCommand(userId, sessionId, command, true);
+}
+
 /** Applies one validated, authorized command atomically, then returns canonical state. */
 export async function applyWorkspaceCommand(
   userId: string,
   sessionId: string,
   command: WorkspaceCommand,
 ): Promise<WorkspaceState> {
+  await runWorkspaceCommand(userId, sessionId, command, false);
+  if (command.type === "household.create") return readWorkspace(userId, sessionId, requireUuid(command.household.id, "Household"));
+  const nextActiveId = command.type === "household.activate" ? command.householdId : undefined;
+  return readWorkspace(userId, sessionId, nextActiveId);
+}
+
+/**
+ * One command's checks and, unless `dryRun`, its writes, in one transaction.
+ * Every branch makes its checks before its first write and returns there on a
+ * dry run, so the dry run and the real call cannot disagree about a check.
+ */
+async function runWorkspaceCommand(
+  userId: string,
+  sessionId: string,
+  command: WorkspaceCommand,
+  dryRun: boolean,
+): Promise<void> {
   if (command.type === "household.create") {
     const householdId = requireUuid(command.household.id, "Household");
     await getDb().transaction(async (transaction) => {
@@ -340,6 +372,7 @@ export async function applyWorkspaceCommand(
           sql`lower(${households.name}) = lower(${command.household.name.trim()})`,
         )).limit(1);
       if (recoverableName) throw new AppError("household_name_recoverable", "A removed household already uses this name. Restore it, or ask an instance administrator to permanently delete it first.", 409);
+      if (dryRun) return;
       await transaction.insert(households).values({
         id: householdId,
         name: command.household.name,
@@ -385,7 +418,7 @@ export async function applyWorkspaceCommand(
         },
       });
     });
-    return readWorkspace(userId, sessionId, householdId);
+    return;
   }
 
   await requireHouseholdAccess(
@@ -424,11 +457,13 @@ export async function applyWorkspaceCommand(
     };
 
     if (command.type === "household.activate") {
+      if (dryRun) return;
       await transaction.update(sessions).set({ activeHouseholdId: householdId }).where(eq(sessions.id, sessionId));
       return;
     }
 
     if (command.type === "household.setup") {
+      if (dryRun) return;
       await transaction.update(households).set({
         name: command.name,
         timezone: command.timezone,
@@ -466,6 +501,7 @@ export async function applyWorkspaceCommand(
     }
 
     if (command.type === "household.update") {
+      if (dryRun) return;
       await transaction.update(households).set({
         name: command.name,
         timezone: command.timezone,
@@ -476,6 +512,7 @@ export async function applyWorkspaceCommand(
     }
 
     if (command.type === "sections.replace") {
+      if (dryRun) return;
       const existing = await transaction.select({ id: sections.id }).from(sections).where(eq(sections.householdId, householdId));
       const existingIds = new Set(existing.map((section) => section.id));
       const retainedSectionIds: string[] = [];
@@ -525,13 +562,28 @@ export async function applyWorkspaceCommand(
       const [ownedSection] = await transaction.select({ id: sections.id }).from(sections)
         .where(and(eq(sections.id, sectionId), eq(sections.householdId, householdId))).limit(1);
       if (!ownedSection) throw new AppError("section_not_found", "Choose a section from this household", 422);
-      const [existing] = await transaction.select({ version: items.version }).from(items)
+      const [existing] = await transaction.select({
+        version: items.version,
+        subtype: items.subtype,
+        status: items.status,
+        renewalDate: items.renewalDate,
+        serviceDate: items.serviceDate,
+        expiryDate: items.expiryDate,
+      }).from(items)
         .where(and(eq(items.id, itemId), eq(items.householdId, householdId))).limit(1);
       // The schema tolerates an empty title only so a damaged one can be read
       // back (ADR-0024 decision 5); a write still has to carry a real one, and
       // a client that sends `metadataStatus` to slip past that check is
       // refused here rather than storing a nameless item.
       if (!command.item.title.trim()) throw new AppError("invalid_item", "Give this a name", 422);
+      /* ADR-0034, #1325: the schedule kind, subtype and status are the
+         engine's, from the kind the member chose and the item as stored --
+         the same rule the reducer applies. */
+      const item = workspaceItemSchema.parse(itemOfIntent(command.item, command.kind, existing ? {
+        subtype: existing.subtype,
+        status: existing.status,
+        scheduleKind: existing.serviceDate ? "service" : existing.renewalDate ? "renewal" : existing.expiryDate ? "expiry" : undefined,
+      } : command.basis));
       // #1151 A4-S4: `command.item.version` is optional in the wire schema,
       // but an update with none omitted used to fall back to "whatever the
       // row's current version already is" -- a check against the value it
@@ -541,9 +593,18 @@ export async function applyWorkspaceCommand(
       // ever reported. An existing row now always requires the version it is
       // meant to replace; only a brand new item, which has no version to
       // race against, may omit it.
-      if (existing && command.item.version === undefined) {
+      if (existing && item.version === undefined) {
         throw new AppError("version_required", "This item changed on another device; refresh and try again", 409);
       }
+      // `item.version` is the version the client wants this write to become;
+      // the row it replaces must be one less than that. The update's own
+      // WHERE below is what holds it against a race; this says so before
+      // anything is written, which is the check a dry run can make.
+      const expectedVersion = existing ? Math.max(1, item.version! - 1) : undefined;
+      if (existing && existing.version !== expectedVersion) {
+        throw new AppError("version_conflict", "This item changed on another device; refresh and try again", 409);
+      }
+      if (dryRun) return;
       // Tier 1 and Tier 2 (ADR-0024 decision 3): encrypt and clear the
       // plaintext in the same statement, so the row is never in both states at
       // once. Writing a damaged field is also the repair for it: the new value
@@ -552,38 +613,34 @@ export async function applyWorkspaceCommand(
       const values = {
         sectionId,
         title: null,
-        titleEnc: metadata.encryptText("items.title", itemId, command.item.title),
-        subtype: command.item.subtype ?? null,
+        titleEnc: metadata.encryptText("items.title", itemId, item.title),
+        subtype: item.subtype ?? null,
         provider: null,
-        providerEnc: metadata.encryptText("items.provider", itemId, command.item.provider),
+        providerEnc: metadata.encryptText("items.provider", itemId, item.provider),
         reference: null,
-        referenceEnc: metadata.encryptText("items.reference", itemId, command.item.reference),
-        referenceIndex: metadata.referenceIndex(command.item.reference),
+        referenceEnc: metadata.encryptText("items.reference", itemId, item.reference),
+        referenceIndex: metadata.referenceIndex(item.reference),
         costMinor: null,
-        costMinorEnc: metadata.encryptNumber("items.cost_minor", itemId, command.item.costMinor),
-        currency: command.item.currency,
+        costMinorEnc: metadata.encryptNumber("items.cost_minor", itemId, item.costMinor),
+        currency: item.currency,
         /* #1005: belt and braces with `workspaceItemSchema`, which refuses the
            pair outright -- nothing that reaches the row can claim a one-off
            comes round again. */
-        recurrenceMonths: command.item.scheduleKind === "expiry" ? null : command.item.recurrenceMonths ?? null,
-        snoozedUntil: command.item.snoozedUntil ?? null,
+        recurrenceMonths: item.scheduleKind === "expiry" ? null : item.recurrenceMonths ?? null,
+        snoozedUntil: item.snoozedUntil ?? null,
         notes: null,
-        notesEnc: metadata.encryptText("items.notes", itemId, command.item.notes),
-        status: command.item.status,
+        notesEnc: metadata.encryptText("items.notes", itemId, item.notes),
+        status: item.status,
         updatedAt: new Date(),
-        ...itemDates(command.item.scheduleKind, command.item.dueDate),
+        ...itemDates(item.scheduleKind, item.dueDate),
       };
       if (existing) {
-        // `command.item.version` is the version the client wants this write
-        // to become, guaranteed present by the guard above; the row it
-        // replaces must be one less than that.
-        const expectedVersion = Math.max(1, command.item.version! - 1);
         const [updated] = await transaction.update(items)
           .set({ ...values, version: sql`${items.version} + 1` })
           .where(and(
             eq(items.id, itemId),
             eq(items.householdId, householdId),
-            eq(items.version, expectedVersion),
+            eq(items.version, expectedVersion!),
           ))
           .returning({ id: items.id });
         if (!updated) throw new AppError("version_conflict", "This item changed on another device; refresh and try again", 409);
@@ -597,17 +654,17 @@ export async function applyWorkspaceCommand(
       // leave the administrator count claiming a repair that did not happen.
       await clearMetadataDamageForRow("items", itemId, transaction);
       await transaction.delete(dueEvents).where(and(eq(dueEvents.itemId, itemId), isNull(dueEvents.completedAt)));
-      if (command.item.dueDate && command.item.scheduleKind) {
+      if (item.dueDate && item.scheduleKind) {
         await transaction.insert(dueEvents).values({
           householdId,
           itemId,
-          kind: command.item.scheduleKind,
-          dueDate: command.item.dueDate,
+          kind: item.scheduleKind,
+          dueDate: item.dueDate,
         });
       }
       await transaction.delete(reminderRules).where(eq(reminderRules.itemId, itemId));
-      if (command.item.reminderDays?.length) {
-        await transaction.insert(reminderRules).values(command.item.reminderDays.map((daysBefore) => ({
+      if (item.reminderDays?.length) {
+        await transaction.insert(reminderRules).values(item.reminderDays.map((daysBefore) => ({
           itemId,
           daysBefore,
         })));
@@ -621,6 +678,7 @@ export async function applyWorkspaceCommand(
       || command.type === "notification.dismiss"
       || command.type === "notification.read-all"
     ) {
+      if (dryRun) return;
       // Deduplicated so the multi-row upsert below never targets the same
       // conflict key twice in one statement (Postgres rejects that with "ON
       // CONFLICT DO UPDATE command cannot affect row a second time").
@@ -665,7 +723,7 @@ export async function applyWorkspaceCommand(
         if (existingCompletion.householdId !== householdId || existingCompletion.itemId !== itemId) {
           throw new AppError("version_conflict", "This completion was already used for another item", 409);
         }
-        return;
+        return; // a replay: already recorded, nothing to write
       }
       if (validUuid(command.activity.id)) {
         const [existingAudit] = await transaction.select({ id: auditLog.id })
@@ -684,6 +742,7 @@ export async function applyWorkspaceCommand(
     }
 
     if (command.type === "item.archive") {
+      if (dryRun) return;
       await transaction.update(items).set({ status: "archived", version: sql`${items.version} + 1`, updatedAt: new Date() })
         .where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
       await recordActivity(itemId, command.activity);
@@ -703,6 +762,7 @@ export async function applyWorkspaceCommand(
       if (!currentEvent) {
         throw new AppError("version_conflict", "This item has no active scheduled event", 409);
       }
+      if (dryRun) return;
       /* ADR-0034, #1324: the next date is the engine's, from the stored
          period and the day it was done -- the same rule the reducer applies.
          An expiry is the one-off kind (#1005), and an item with no period
@@ -756,6 +816,7 @@ export async function applyWorkspaceCommand(
     }
 
     if (command.type === "item.reschedule") {
+      if (dryRun) return;
       const kind = current.serviceDate ? "service" : current.expiryDate ? "expiry" : "renewal";
       await transaction.update(items).set({
         status: "active",
@@ -776,6 +837,7 @@ export async function applyWorkspaceCommand(
     }
 
     if (command.type === "item.snooze") {
+      if (dryRun) return;
       await transaction.update(items).set({
         snoozedUntil: command.snoozedUntil,
         version: sql`${items.version} + 1`,
@@ -786,6 +848,7 @@ export async function applyWorkspaceCommand(
     }
 
     if (command.type === "item.status") {
+      if (dryRun) return;
       await transaction.update(items).set({
         status: command.status,
         version: sql`${items.version} + 1`,
@@ -796,9 +859,6 @@ export async function applyWorkspaceCommand(
     }
 
   });
-
-  const nextActiveId = command.type === "household.activate" ? command.householdId : undefined;
-  return readWorkspace(userId, sessionId, nextActiveId);
 }
 
 export interface HouseholdMember {

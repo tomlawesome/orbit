@@ -157,15 +157,14 @@ async function seedHousehold(page: Page, options: { withItem?: boolean; secondSe
       data: {
         type: "item.upsert",
         householdId,
+        kind: "service",
         item: {
           id: itemId,
           sectionId,
           title: "Keyboard-reached boiler service",
           currency: "GBP",
-          scheduleKind: "service",
           dueDate,
           recurrenceMonths: 12,
-          status: "active",
         },
         activity: { id: randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
       },

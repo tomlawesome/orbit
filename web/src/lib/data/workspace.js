@@ -564,6 +564,39 @@ export async function applyCommand(command, { retryCsrf = true } = {}) {
 }
 
 /**
+ * A dry run of a command (ADR-0034 decision 3, #1325): the engine runs the
+ * same parse and checks the real call runs and writes nothing. Null when it
+ * would be accepted; otherwise the engine's refusal, in the words the member
+ * reads (the browser never rewords it). A dry run that cannot be heard (the
+ * network, the session) refuses nothing: the real save says what went wrong.
+ *
+ * @param {object} command
+ * @param {{ retryCsrf?: boolean }} [options]
+ * @returns {Promise<string | null>}
+ */
+export async function checkCommand(command, { retryCsrf = true } = {}) {
+  try {
+    const { csrfToken } = await readSession();
+    const response = await fetch("/api/workspace/commands", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json", "x-csrf-token": csrfToken },
+      body: JSON.stringify({ ...command, dryRun: true }),
+    });
+    if (response.status === 403 && retryCsrf) {
+      await readSession({ refresh: true });
+      return checkCommand(command, { retryCsrf: false });
+    }
+    await json(response);
+    return null;
+  } catch (error) {
+    return error instanceof WorkspaceError && error.status !== undefined && error.status < 500 && error.status !== 401
+      ? error.message
+      : null;
+  }
+}
+
+/**
  * When an item is next due in a workspace the engine returned: after a
  * completion, the next date the engine worked out from its period (#1324);
  * null when the completion ended its schedule, or the item is not there.

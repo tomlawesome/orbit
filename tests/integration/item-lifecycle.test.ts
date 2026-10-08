@@ -72,17 +72,14 @@ function scheduledItem(fixture: Awaited<ReturnType<typeof createIntegrationFixtu
     id: fixture.item.id,
     sectionId: fixture.section.id,
     title: "Boiler cover",
-    subtype: "Insurance",
     provider: "Example Cover",
     reference: "POL-40",
     costMinor: 12500,
     currency: "GBP",
     dueDate: "2026-12-20",
-    scheduleKind: "renewal" as const,
     recurrenceMonths: 12,
     reminderDays: [30, 7],
     notes: "Keep the renewal confirmation.",
-    status: "active" as const,
     version,
     updatedAt: new Date().toISOString(),
   };
@@ -98,6 +95,7 @@ async function upsertScheduledItem(
     body: JSON.stringify({
       type: "item.upsert",
       householdId: fixture.household.id,
+      kind: "renewal",
       item: scheduledItem(fixture, 2),
       activity: activity(fixture.item.id, "created", { nextDate: "2026-12-20" }),
     }),
@@ -133,7 +131,7 @@ describe("conflict-safe item lifecycle", () => {
     const updateResponse = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ type: "item.upsert", householdId: fixture.household.id, item: updated, activity: updateActivity }),
+      body: JSON.stringify({ type: "item.upsert", householdId: fixture.household.id, kind: "renewal", item: updated, activity: updateActivity }),
     });
     expect(updateResponse.status).toBe(200);
 
@@ -431,6 +429,7 @@ describe("conflict-safe item lifecycle", () => {
       body: JSON.stringify({
         type: "item.upsert",
         householdId: fixture.household.id,
+        kind: "renewal",
         item: { ...scheduledItem(fixture, 1), id: otherItemId, title: "Second scheduled item", version: 1 },
         activity: otherActivity,
       }),

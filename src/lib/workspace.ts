@@ -10,7 +10,9 @@ import {
   type ScheduleKind,
 } from "@/lib/domain";
 import { AppError } from "@/lib/errors";
+import { itemKinds, itemOfIntent, type ItemIntent, type ItemKind, type StoredItemFacts } from "@/lib/item-kind";
 import { nextDueDate } from "@/lib/next-due-date";
+import { completionRefusal, costMinorOf, itemRefusal, Refusal } from "@/lib/refusals";
 
 export const WORKSPACE_VERSION = 1;
 
@@ -51,7 +53,7 @@ export const itemMetadataStatusSchema = z.object({
 });
 export type ItemMetadataStatus = z.infer<typeof itemMetadataStatusSchema>;
 
-export const workspaceItemSchema = z.object({
+const workspaceItemShape = z.object({
   id: z.string().min(1).max(100),
   sectionId: z.string().min(1).max(100),
   /* Empty only for a damaged or locked title (ADR-0024 decision 5), which the
@@ -76,7 +78,9 @@ export const workspaceItemSchema = z.object({
   status: z.enum(itemStatuses),
   version: z.number().int().positive().optional(),
   updatedAt: z.iso.datetime().optional(),
-}).superRefine((item, context) => {
+});
+
+export const workspaceItemSchema = workspaceItemShape.superRefine((item, context) => {
   if (!item.title && !item.metadataStatus?.title) {
     context.addIssue({ code: "custom", path: ["title"], message: "Give this a name" });
   }
@@ -183,7 +187,18 @@ export type WorkspaceCommand =
   | { type: "household.update"; householdId: string; name: string; timezone: string; currency: string }
   | { type: "household.activate"; householdId: string }
   | { type: "sections.replace"; householdId: string; sections: HouseholdSection[] }
-  | { type: "item.upsert"; householdId: string; item: HomeItem; activity?: ItemActivity }
+  | {
+      type: "item.upsert";
+      householdId: string;
+      kind?: ItemKind;
+      item: ItemIntent;
+      activity?: ItemActivity;
+      /** Engine-side callers only, never on the wire (the schema has no
+       * such field): what a new item starts from when the engine has
+       * already read it -- reviewed intake's relay reading. An edit's basis
+       * is always the stored item. */
+      basis?: StoredItemFacts;
+    }
   | { type: "item.archive"; householdId: string; itemId: string; expectedVersion: number; activity: ItemActivity }
   | {
       type: "item.complete";
@@ -238,6 +253,22 @@ export const householdCreateSchema = householdWorkspaceSchema
       ?? cloneSections().map((section) => ({ ...section, id: crypto.randomUUID() })),
   }));
 
+/**
+ * An item as a client sends it (ADR-0034, #1325): what the member typed and
+ * chose, beside the kind on the command. The schedule kind, subtype and
+ * status follow from the kind and the stored item (item-kind.ts), so a client
+ * never sends them; parseWorkspaceCommand refuses them. A repeat may be 0
+ * ("once"); the engine keeps it only where a schedule comes round.
+ */
+export const itemIntentSchema = workspaceItemShape
+  .omit({ scheduleKind: true, subtype: true, status: true, recurrenceMonths: true })
+  .extend({
+    recurrenceMonths: z.number().int().min(0).max(120).optional(),
+    scheduleKind: z.never().optional(),
+    subtype: z.never().optional(),
+    status: z.never().optional(),
+  });
+
 /** Runtime contract shared by the browser synchronizer and authenticated command API. */
 export const workspaceCommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("household.create"), household: householdCreateSchema }),
@@ -265,7 +296,8 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("item.upsert"),
     householdId: z.string().min(1).max(100),
-    item: workspaceItemSchema,
+    kind: z.enum(itemKinds).optional(),
+    item: itemIntentSchema,
     activity: itemActivitySchema.optional(),
   }),
   z.object({
@@ -330,11 +362,17 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
 ]);
 
 /**
- * Reads a command a client sent. A completion carries what happened -- the
- * day, the cost, the notes -- and never the next due date, which the engine
- * works out from the item's period (ADR-0034, #1324); one sent anyway is
- * refused rather than quietly dropped, so a client that still computes it
- * finds out.
+ * Reads a command a client sent. A command carries intent, never derived
+ * state (ADR-0034): a completion carries what happened -- the day, the cost,
+ * the notes -- and never the next due date, which the engine works out from
+ * the item's period (#1324); an item carries what the member typed and the
+ * kind they chose, never its schedule kind, subtype or status (#1325).
+ * Derived state sent anyway is refused rather than quietly dropped, so a
+ * client that still computes it finds out.
+ *
+ * The member-facing rules run first, so a member reads why in their own words
+ * (refusals.ts) rather than a schema message. A cost may come as typed
+ * (`cost: "£1,250"`), which the engine reads into `costMinor`.
  */
 export function parseWorkspaceCommand(input: unknown): WorkspaceCommand {
   if (isRecord(input) && input.type === "item.complete") {
@@ -346,8 +384,47 @@ export function parseWorkspaceCommand(input: unknown): WorkspaceCommand {
         400,
       );
     }
+    const refused = completionRefusal(input);
+    if (refused) throw new Refusal(refused);
+    return workspaceCommandSchema.parse(withTypedCost(input, (costMinor) => ({
+      activity: isRecord(input.activity) && input.activity.costMinor === undefined
+        ? { ...input.activity, costMinor }
+        : input.activity,
+    })));
+  }
+  if (isRecord(input) && input.type === "item.upsert" && isRecord(input.item)) {
+    const derived = (["scheduleKind", "subtype", "status"] as const).filter((key) => (input.item as Record<string, unknown>)[key] !== undefined);
+    if (derived.length) {
+      throw new AppError(
+        "invalid_command",
+        `An item does not send its ${derived.join(", ")}; Orbit works them out from the kind`,
+        400,
+      );
+    }
+    const kind = itemKinds.find((one) => one === input.kind);
+    const refused = itemRefusal(input.item, kind);
+    if (refused) throw new Refusal(refused);
+    return workspaceCommandSchema.parse({ ...input, item: withTypedCost(input.item) });
   }
   return workspaceCommandSchema.parse(input);
+}
+
+/**
+ * The command or item with its typed `cost` read into `costMinor`; a client
+ * sends one or the other. `alongside` adds what else follows from the cost.
+ */
+function withTypedCost(
+  record: Record<string, unknown>,
+  alongside: (costMinor: number) => Record<string, unknown> = () => ({}),
+): Record<string, unknown> {
+  if (record.cost === undefined) return record;
+  if (record.costMinor !== undefined) {
+    throw new AppError("invalid_command", "Send the cost as typed or in minor units, not both", 400);
+  }
+  const { cost, ...rest } = record;
+  if (typeof cost !== "string") throw new AppError("invalid_command", "A typed cost is text", 400);
+  const costMinor = costMinorOf(cost);
+  return costMinor === undefined ? rest : { ...rest, costMinor, ...alongside(costMinor) };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -477,9 +554,9 @@ export function reduceWorkspace(state: WorkspaceState, command: WorkspaceCommand
       }));
     }
     case "item.upsert": {
-      const item = workspaceItemSchema.parse(command.item);
       return updateHousehold(state, command.householdId, (household) => {
-        const currentIndex = household.items.findIndex((entry) => entry.id === item.id);
+        const currentIndex = household.items.findIndex((entry) => entry.id === command.item.id);
+        const item = workspaceItemSchema.parse(itemOfIntent(command.item, command.kind, household.items[currentIndex] ?? command.basis));
         const items = currentIndex < 0
           ? [item, ...household.items]
           : household.items.map((entry, index) => index === currentIndex ? item : entry);

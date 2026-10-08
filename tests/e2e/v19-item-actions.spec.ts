@@ -72,15 +72,14 @@ async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; hous
     await command({
       type: "item.upsert",
       householdId,
+      kind: "service",
       item: {
         id: itemId,
         sectionId,
         title: "Boiler service proving",
         currency: "GBP",
-        scheduleKind: "service",
         dueDate,
         recurrenceMonths: 12,
-        status: "active",
       },
       activity: { id: crypto.randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
     });
@@ -164,9 +163,10 @@ async function seedHouseholdWithTwoItems(
     await command({
       type: "item.upsert",
       householdId,
+      kind: "service",
       item: {
-        id: soonId, sectionId, title: soonTitle, currency: "GBP", scheduleKind: "service",
-        dueDate: soonDue, recurrenceMonths: 12, status: "active",
+        id: soonId, sectionId, title: soonTitle, currency: "GBP",
+        dueDate: soonDue, recurrenceMonths: 12,
       },
       activity: { id: crypto.randomUUID(), itemId: soonId, kind: "created", occurredAt: new Date().toISOString() },
     });
@@ -175,9 +175,10 @@ async function seedHouseholdWithTwoItems(
     await command({
       type: "item.upsert",
       householdId,
+      kind: "service",
       item: {
-        id: laterId, sectionId, title: "Later due proving", currency: "GBP", scheduleKind: "service",
-        dueDate: laterDue, recurrenceMonths: 12, status: "active",
+        id: laterId, sectionId, title: "Later due proving", currency: "GBP",
+        dueDate: laterDue, recurrenceMonths: 12,
       },
       activity: { id: crypto.randomUUID(), itemId: laterId, kind: "created", occurredAt: new Date().toISOString() },
     });

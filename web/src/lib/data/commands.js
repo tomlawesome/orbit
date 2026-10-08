@@ -37,6 +37,15 @@
  * @property {string} [updatedAt]
  */
 
+/**
+ * What an edit sends for an item (ADR-0034, #1325): any of its typed fields,
+ * the cost as typed (`cost`, which the engine reads into `costMinor`), and
+ * the kind the member chose. Never the schedule kind, subtype or status.
+ * @typedef {Partial<Omit<CommandItem, "scheduleKind" | "subtype" | "status">> & {
+ *   kind?: string, cost?: string,
+ * }} ItemEdits
+ */
+
 /** @typedef {{ uuid: () => string, now: () => string }} IdSource */
 
 /** @type {IdSource} */
@@ -75,20 +84,22 @@ function base(item) {
 }
 
 /**
- * What happened: the day it was done, the cost, the notes. Never the next
- * due date -- the engine works that out from the item's period and refuses
- * one sent (ADR-0034, #1324); read it back with dueDateIn.
+ * What happened: the day it was done, the cost (in minor units, or as typed
+ * for the engine to read), the notes. Never the next due date -- the engine
+ * works that out from the item's period and refuses one sent (ADR-0034,
+ * #1324); read it back with dueDateIn.
  * @param {CommandItem} item
- * @param {{ completedDate: string | undefined, costMinor?: number, notes?: string }} fields
+ * @param {{ completedDate: string | undefined, costMinor?: number, cost?: string, notes?: string }} fields
  * @param {IdSource} [ids]
  */
-export function completeCommand(item, { completedDate, costMinor, notes }, ids = DEFAULT_IDS) {
+export function completeCommand(item, { completedDate, costMinor, cost, notes }, ids = DEFAULT_IDS) {
   const kind = item.scheduleKind === "renewal" ? "renewal_completed" : "service_completed";
   return {
     type: "item.complete",
     ...base(item),
     completedDate,
     ...(costMinor !== undefined && costMinor !== null ? { costMinor } : {}),
+    ...(cost ? { cost } : {}),
     ...(notes ? { notes } : {}),
     activity: activityOf(item, kind, {
       effectiveDate: completedDate,
@@ -157,13 +168,15 @@ export function statusCommand(item, status, ids = DEFAULT_IDS) {
 }
 
 /**
- * The workspaceItemSchema fields — the view-model's joins must never travel.
+ * The fields an item's upsert carries — the view-model's joins must never
+ * travel, and neither may what the engine decides from the kind: the
+ * schedule kind, the subtype and the status (ADR-0034, #1325).
  * @type {(keyof CommandItem)[]}
  */
 const ITEM_FIELDS = [
-  "id", "sectionId", "title", "subtype", "provider", "reference", "costMinor",
-  "currency", "dueDate", "scheduleKind", "recurrenceMonths", "reminderDays",
-  "snoozedUntil", "notes", "status", "version", "updatedAt",
+  "id", "sectionId", "title", "provider", "reference", "costMinor",
+  "currency", "dueDate", "recurrenceMonths", "reminderDays",
+  "snoozedUntil", "notes", "version", "updatedAt",
 ];
 
 /**
@@ -181,19 +194,28 @@ function copyItemField(clean, merged, field) {
 }
 
 /**
+ * An item's edits as `item.upsert`: the item's own fields with the edits
+ * over them, the kind chosen beside them. A cost typed in the edits replaces
+ * the stored amount (empty clears it), for the engine to read.
  * @param {CommandItem} item
- * @param {Partial<CommandItem>} edits
+ * @param {ItemEdits} edits
  * @param {IdSource} [ids]
  */
 export function upsertCommand(item, edits, ids = DEFAULT_IDS) {
-  const merged = { ...item, ...edits };
-  const clean = /** @type {CommandItem} */ ({});
+  const { kind, cost, ...fields } = edits;
+  const merged = /** @type {CommandItem} */ ({ ...item, ...fields });
+  const clean = /** @type {Record<string, unknown>} */ ({});
   for (const field of ITEM_FIELDS) {
-    copyItemField(clean, merged, field);
+    copyItemField(/** @type {CommandItem} */ (clean), merged, field);
+  }
+  if ("cost" in edits) {
+    delete clean.costMinor;
+    if (cost !== undefined) clean.cost = cost;
   }
   return {
     type: "item.upsert",
     householdId: item.householdId,
+    ...(kind ? { kind } : {}),
     item: clean,
     activity: activityOf(item, "updated", {}, ids),
   };

@@ -36,6 +36,7 @@
    *   busy?: import('./drawer-acts.js').DrawerBusy,
    *   mode?: "read" | "edit" | "complete",
    *   snoozing?: boolean,
+   *   held?: boolean,
    *   onsnooze: (from: HTMLElement) => unknown,
    *   oncomplete: (from: HTMLElement) => unknown,
    *   onattach: (file: File) => unknown,
@@ -49,7 +50,7 @@
    */
   /** @type {Props} */
   let {
-    title, pocket = false, busy = null, mode = "read", snoozing = false,
+    title, pocket = false, busy = null, mode = "read", snoozing = false, held = false,
     onsnooze, oncomplete, onattach, onretire, oncopy, onedit, onsave, onrecord, oncancel,
   } = $props();
 
@@ -108,7 +109,7 @@
   {#if mode === "edit"}
     <div class="ivacts" class:p-pills={pocket} role="group" aria-label="Editing {title}">
       <button type="button" class:p-pill={pocket} class="act-accent" style="--act:var(--accent);--act-text:var(--accent-text)"
-              disabled={busy !== null} onclick={onsave}>{busy === "save" ? "saving…" : "save"}</button>
+              disabled={busy !== null || held} onclick={onsave}>{busy === "save" ? "saving…" : "save"}</button>
       <button type="button" class:p-pill={pocket} disabled={busy !== null} onclick={oncancel}>cancel</button>
     </div>
   {:else if mode === "complete"}

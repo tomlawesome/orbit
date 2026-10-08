@@ -4,14 +4,12 @@
  * choosers): what the rows hold while an item is being edited, the choices
  * each chooser offers, and the `item.upsert` edits a save sends.
  *
- * The belt's phone edit (item/[[id]]/+page.svelte saveEdit: create's form
- * in edit mode) is the rule this keeps: the same Entry (create/entry.js),
- * the same refusals (refusalOf, in the refusal vocabulary, before anything
- * is sent) and the same fields (fieldsOf). What the rows add is the type,
- * which that form never wrote: changing it writes the kind's subtype and its
- * schedule (scheduleOf), as create does for a new entry.
+ * The rows send what they hold as create does (create/entry.js intentOf):
+ * the typed values and the kind chosen. Whether they can be saved, and what
+ * the kind schedules, are the engine's (ADR-0034, #1325), asked through its
+ * dry run as the rows change (EditSession).
  */
-import { entryOf, fieldsOf, kindOf, refusalOf, REMINDER_DEFAULT, REMINDER_MAX, scheduleOf } from "../../routes/create/entry.js";
+import { entryOf, intentOf, REMINDER_DEFAULT } from "../../routes/create/entry.js";
 import { every, shortDate } from "$lib/format.js";
 import { addMonths } from "./calendar.js";
 import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
@@ -40,8 +38,6 @@ export const PERIODS = /** @type {const} */ ([
 ]);
 /** The three types round 8 colours, in its order. */
 export const TYPES = ["service", "renewal", "inspection"];
-/** The model's own ceiling on how far ahead a reminder may be. */
-export const REMINDER_DAYS_MAX = 365;
 
 const SYMBOLS = /** @type {Record<string, string>} */ ({ GBP: "£", EUR: "€", USD: "$" });
 
@@ -141,37 +137,28 @@ export function periodChoices(current, due) {
 }
 
 /**
- * Why the rows cannot be saved yet, or the edits they save. The refusals
- * are create's (refusalOf), plus the reminders' own ceiling.
+ * The edits a save of the rows sends: what they hold, as intent — the cost
+ * as typed, the reminders as the numbers typed, the repeat as chosen — and
+ * the kind chosen. The engine judges them and decides what the kind
+ * schedules (ADR-0034, #1325).
  * @param {Draft} draft
- * @param {import('$lib/data/commands.js').CommandItem} item
- * @returns {{ refusal: string } | { edits: Partial<import('$lib/data/commands.js').CommandItem> }}
+ * @returns {import('$lib/data/commands.js').ItemEdits}
  */
-export function editsOf(draft, item) {
-  const reminderDays = remindersOf(draft.reminders);
-  /** @type {import('../../routes/create/entry.js').Entry} */
-  const entry = {
+export function editsOf(draft) {
+  const fields = intentOf({
     kind: /** @type {any} */ (draft.kind),
     name: draft.title,
-    householdId: item.householdId,
+    householdId: null,
     sectionId: draft.sectionId,
     provider: draft.provider,
     reference: draft.reference,
     dueDate: draft.dueDate,
     recurrence: draft.recurrence,
     cost: draft.cost,
-    reminderDays,
+    reminderDays: remindersOf(draft.reminders),
     notes: draft.notes,
-  };
-  const refusal = refusalOf(entry)
-    ?? (reminderDays.length > REMINDER_MAX ? `not yet — at most ${REMINDER_MAX} reminders` : null)
-    ?? (reminderDays.some((d) => d > REMINDER_DAYS_MAX) ? `not yet — a reminder is at most ${REMINDER_DAYS_MAX} days before` : null);
-  if (refusal) return { refusal };
-  const retyped = draft.kind !== kindOf(item);
-  const edits = /** @type {Partial<import('$lib/data/commands.js').CommandItem>} */ (
-    fieldsOf(entry, { scheduleKind: retyped ? undefined : item.scheduleKind ?? undefined }));
-  if (retyped) edits.subtype = scheduleOf(/** @type {any} */ (draft.kind)).subtype;
-  return { edits };
+  });
+  return { ...fields, ...(draft.kind ? { kind: draft.kind } : {}) };
 }
 
 /**
@@ -208,19 +195,18 @@ export function proposedItemOf(suggestion, { householdId, sectionId }) {
 
 /**
  * The amended item approveReceipt sends, from the edits a save of
- * proposedItemOf's rows makes (editsOf): the fields as written, the relay's
- * own subtype kept unless the type was changed (the belt's desk card kept it
- * too), and the section the rows chose, which the approval takes apart.
+ * proposedItemOf's rows makes (editsOf): the fields as written, the kind
+ * chosen, and the relay's own reading of the subtype and schedule, which the
+ * engine keeps unless the kind was changed (ADR-0034, #1325); and the
+ * section the rows chose, which the approval takes apart.
  * @param {import('$lib/data/commands.js').CommandItem} item  proposedItemOf's
- * @param {Partial<import('$lib/data/commands.js').CommandItem>} edits
+ * @param {import('$lib/data/commands.js').ItemEdits} edits
  * @returns {{ item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null }}
  */
 export function amendedOf(item, edits) {
-  const { sectionId = null, subtype, ...fields } = edits;
+  const { sectionId = null, ...fields } = edits;
   /** @type {Record<string, unknown>} */
-  const out = { ...fields, currency: item.currency ?? "GBP" };
-  const kept = subtype ?? item.subtype;
-  if (kept) out.subtype = kept;
+  const out = { ...fields, subtype: item.subtype, scheduleKind: item.scheduleKind, currency: item.currency ?? "GBP" };
   for (const key of Object.keys(out)) if (out[key] === undefined || out[key] === null) delete out[key];
   return { item: /** @type {import('$lib/data/workspace.js').ItemProposal} */ (out), sectionId };
 }

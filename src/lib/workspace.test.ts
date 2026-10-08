@@ -114,11 +114,9 @@ describe("household workspace", () => {
       sectionId: "home",
       title: "Roof cover",
       currency: "GBP",
-      status: "active" as const,
       dueDate: "2026-12-01",
-      scheduleKind: "renewal" as const,
     };
-    const created = reduceWorkspace(initial, { type: "item.upsert", householdId: "local-home", item });
+    const created = reduceWorkspace(initial, { type: "item.upsert", householdId: "local-home", kind: "renewal", item });
     const archived = reduceWorkspace(created, {
       type: "item.archive",
       householdId: "local-home",
@@ -132,7 +130,7 @@ describe("household workspace", () => {
       },
     });
 
-    expect(activeHousehold(created).items[0]).toMatchObject(item);
+    expect(activeHousehold(created).items[0]).toMatchObject({ ...item, status: "active", scheduleKind: "renewal", subtype: "renewal" });
     expect(activeHousehold(archived).items.find((entry) => entry.id === item.id)).toMatchObject({
       status: "archived",
       version: 2,
@@ -225,6 +223,66 @@ describe("household workspace", () => {
       // The schema on its own refuses it too, rather than quietly dropping it.
       expect(workspaceCommandSchema.safeParse(sent).success).toBe(false);
     }
+  });
+
+  describe("an item carries intent, and the engine refuses in the member's words (#1325)", () => {
+    const upsert = (item: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) => ({
+      type: "item.upsert",
+      householdId: "our-home",
+      kind: "service",
+      item: { id: "mot", sectionId: "garage", title: "MOT", currency: "GBP", dueDate: "2026-11-02", recurrenceMonths: 12, ...item },
+      ...extra,
+    });
+    const refusalOf = (input: unknown) => {
+      try {
+        parseWorkspaceCommand(input);
+      } catch (error) {
+        return error as AppError;
+      }
+      return null;
+    };
+
+    it("parses the kind beside the item", () => {
+      expect(parseWorkspaceCommand(upsert())).toMatchObject({ type: "item.upsert", kind: "service", item: { title: "MOT" } });
+    });
+
+    it.each(["scheduleKind", "subtype", "status"])("refuses a client-sent %s", (field) => {
+      const sent = upsert({ [field]: field === "status" ? "active" : "service" });
+      expect(refusalOf(sent)).toMatchObject({ code: "invalid_command", status: 400 });
+      expect(refusalOf(sent)?.message).toMatch(/works them out from the kind/);
+      // The schema on its own refuses it too, rather than quietly dropping it.
+      expect(workspaceCommandSchema.safeParse(sent).success).toBe(false);
+    });
+
+    it("refuses a missing name, section, bad cost, dateless repeat and too many reminders in the member's words", () => {
+      expect(refusalOf(upsert({ title: " " }))).toMatchObject({ status: 422, code: "item_name_missing", message: "not yet — give it a name" });
+      expect(refusalOf(upsert({ sectionId: null }))).toMatchObject({ code: "item_section_missing", message: "not yet — choose a section" });
+      expect(refusalOf(upsert({ cost: "12,50" }))).toMatchObject({ code: "cost_format", message: "not yet — use a dot for pence, for example 12.50" });
+      expect(refusalOf(upsert({ dueDate: undefined }))).toMatchObject({ code: "repeat_needs_date" });
+      expect(refusalOf(upsert({ reminderDays: [1, 2, 3, 4, 5, 6, 7, 8, 9] }))).toMatchObject({ message: "not yet — at most 8 reminders" });
+      expect(refusalOf(upsert({ reminderDays: [366] }))).toMatchObject({ message: "not yet — a reminder is at most 365 days before" });
+    });
+
+    it("reads a typed cost into minor units, and refuses one sent both ways", () => {
+      expect(parseWorkspaceCommand(upsert({ cost: "£1,250.50" }))).toMatchObject({ item: { costMinor: 125050 } });
+      expect((parseWorkspaceCommand(upsert({ cost: "" })) as { item: object }).item).not.toHaveProperty("costMinor");
+      expect(refusalOf(upsert({ cost: "12", costMinor: 1200 }))).toMatchObject({ code: "invalid_command" });
+    });
+
+    it("maps the kind in the reducer: a new item is active with the kind's schedule", () => {
+      const state = reduceWorkspace(createTestWorkspace(), parseWorkspaceCommand(upsert({ sectionId: "home" }, { kind: "inspection" })));
+      expect(activeHousehold(state).items[0]).toMatchObject({ id: "mot", status: "active", scheduleKind: "service", subtype: "inspection" });
+    });
+
+    it("reads a completion's typed cost, onto its activity too, and asks for its day", () => {
+      const complete = {
+        type: "item.complete", householdId: "our-home", itemId: "car-insurance", expectedVersion: 1, completedDate: "2026-07-25",
+        activity: { id: "a", itemId: "car-insurance", kind: "renewal_completed", occurredAt: "2026-07-25T10:00:00.000Z" },
+      };
+      expect(parseWorkspaceCommand({ ...complete, cost: "£610" })).toMatchObject({ costMinor: 61000, activity: { costMinor: 61000 } });
+      expect(refusalOf({ ...complete, cost: "6,10" })).toMatchObject({ code: "cost_format" });
+      expect(refusalOf({ ...complete, completedDate: "" })).toMatchObject({ code: "completed_date_missing", message: "not yet — choose the day it was done" });
+    });
   });
 
   it("requires a date when a renewal or service schedule is selected", () => {

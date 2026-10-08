@@ -20,7 +20,8 @@
   import Pager from "$lib/reading/Pager.svelte";
   import StagedPage from "$lib/pocket/StagedPage.svelte";
   import EntryForm from "../../create/EntryForm.svelte";
-  import { COST_FORMAT_HINT, entryChanged, entryOf, fieldsOf, minorOf, refusalOf } from "../../create/entry.js";
+  import { entryChanged, entryOf, intentOf } from "../../create/entry.js";
+  import { COST_FORMAT_HINT, minorOf, refusalOf } from "./belt-rules.js";
   import { beltManifestOf, documentPreviewStateOf } from "$lib/data/belt.js";
   import { loadStagedPage, previewPageHref } from "$lib/data/staged-page.js";
   import { pageKeyTarget } from "$lib/data/page-turn.js";
@@ -1258,7 +1259,8 @@
   async function saveEdit() {
     if (!record || !editEntry || editRefusal) return;
     const item = record;
-    const edits = fieldsOf(editEntry, { scheduleKind: item.scheduleKind ?? undefined });
+    /* What the form holds and the kind chosen; the engine maps it (#1325). */
+    const edits = { ...intentOf(editEntry), ...(editEntry.kind ? { kind: editEntry.kind } : {}) };
     await run(() => upsertCommand(item, edits));
     if (problem) {
       /* Loud (#1058): the server's reason, in the refusal vocabulary. */
@@ -1266,7 +1268,7 @@
       return;
     }
     sheetOpen = false;
-    wake(`saved · ${edits.title}`);
+    wake(`saved · ${edits.title.trim()}`);
   }
 
   const editsOf = () => ({

@@ -34,9 +34,7 @@ function expiryItem(fixture: Fixture, version: number, over: Record<string, unkn
     currency: "GBP",
     costMinor: 14_900,
     dueDate: "2026-12-20",
-    scheduleKind: "expiry" as const,
     reminderDays: [30, 7],
-    status: "active" as const,
     version,
     updatedAt: new Date().toISOString(),
     ...over,
@@ -51,6 +49,7 @@ async function save(fixture: Fixture, session: Session, item: Record<string, unk
     body: JSON.stringify({
       type: "item.upsert",
       householdId: fixture.household.id,
+      kind: "document",
       item,
       activity: { id: randomUUID(), itemId: String(item.id), kind: "created", occurredAt: new Date().toISOString() },
     }),
@@ -85,11 +84,13 @@ describe("one-off expirations", () => {
     await fixture.cleanup();
   });
 
-  it("refuses a recurrence on something that happens once", async () => {
+  it("drops a recurrence on something that happens once", async () => {
     const fixture = await createIntegrationFixture("expiry-recurrence");
     const owner = await fixture.session("owner");
     const response = await save(fixture, owner, expiryItem(fixture, 2, { recurrenceMonths: 12 }));
-    expect(response.status).toBe(422);
+    expect(response.status).toBe(200);
+    const [row] = await getDb().select().from(items).where(eq(items.id, fixture.item.id));
+    expect(row.recurrenceMonths).toBe(null);
     await fixture.cleanup();
   });
 

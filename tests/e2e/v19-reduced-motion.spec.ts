@@ -90,7 +90,7 @@ async function seedHousehold(page: Page) {
   const overdueDue = new Date(Date.now() - 5 * 86_400_000).toISOString().slice(0, 10);
   const soonDue = new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10);
   const laterDue = new Date(Date.now() + 70 * 86_400_000).toISOString().slice(0, 10);
-  for (const [title, dueDate, scheduleKind] of [
+  for (const [title, dueDate, kind] of [
     [overdueItem, overdueDue, "renewal"],
     [soonItem, soonDue, "service"],
     [laterItem, laterDue, "renewal"],
@@ -100,16 +100,15 @@ async function seedHousehold(page: Page) {
       data: {
         type: "item.upsert",
         householdId,
+        kind,
         item: {
           id: randomUUID(),
           sectionId,
           title,
           currency: "GBP",
           costMinor: 4200,
-          scheduleKind,
           dueDate,
           recurrenceMonths: 12,
-          status: "active",
           version: 1,
           updatedAt: new Date().toISOString(),
         },

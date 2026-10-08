@@ -86,7 +86,7 @@ async function seedHousehold(page: Page): Promise<{ householdId: string; itemId:
     await command({
       type: "item.upsert",
       householdId,
-      item: { id: itemId, sectionId: homeSection, title: "Reviewed intake landing", currency: "GBP", status: "active" },
+      item: { id: itemId, sectionId: homeSection, title: "Reviewed intake landing", currency: "GBP" },
       activity: { id: crypto.randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
     });
     return { householdId, itemId };

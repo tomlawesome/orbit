@@ -807,7 +807,7 @@
   /** @type {import('./drawer-acts.js').DrawerActs} */
   const drawerActs = $derived({
     busy: footBusy ?? (modes.edit.busy ? "save" : null),
-    problem: modes.edit.problem ?? modes.completeProblem ?? footProblem,
+    problem: modes.edit.problem ?? modes.edit.refusal ?? modes.completeProblem ?? footProblem,
     modes,
     sections: detailSections,
     onsnooze: (from) => {
