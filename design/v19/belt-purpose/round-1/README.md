@@ -40,6 +40,16 @@ widths both proved; packs by `?theme=`.
 
 ## Notes from the build
 
+- A: the five new papers have no real page renders, so their pages are
+  drawn in the browser in the existing style. ← → walk paper to paper, so
+  the seated card's own pages turn by PageUp/PageDown (inside the reader
+  ← → still turn pages). On a phone the seated paper stays at the apex,
+  with neighbours peeking in at the edges, since there is no item card
+  for the ratified bottom sheet to sit beside. A caption the screen edge
+  or the card would cut is hidden. The search dropdown opens only once
+  there is text in the box (one line of home's script; markup and CSS
+  are home's). Extra scenes: `focusing`, `undrawable`, `zoom`.
+
 - B and C: home's menu never had a belt entry (Inbox, Settings,
   Administration), so C removes nothing there. The `attach a document`
   pill has no belt twin; it uses the pill style in the upcoming colour.
