@@ -33,6 +33,7 @@
   import { DrawerModes, pressKeepsChooser } from "./drawer-modes.svelte.js";
   import { amendedOf, proposedItemOf } from "$lib/editing/item-draft.js";
   import { WIDE_QUERY, cardWidthOf, pairOf, trackOf } from "./preview-pair.js";
+  import { isPocket } from "$lib/pocket/media.js";
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
   import { shortDate } from "$lib/data/belt.js";
   import NorthStarMark from "$lib/NorthStarMark.svelte";
@@ -876,6 +877,11 @@
   /** @param {MouseEvent} event */
   function onWindowClick(event) {
     if (!expanded) return;
+    /* #1319: the desk's rule only. Both dialects are on the page and CSS
+       picks one, so this handler also hears the phone's presses; there a
+       paper's tap would close the desk's row and rewrite the address to
+       bare /home, dropping `?item=`. The pocket's rows close themselves. */
+    if (isPocket()) return;
     if (swallowClick) { swallowClick = false; return; }
     /* #1319: while the rows are being edited or a completion asked for, a
        press elsewhere leaves the drawer as it is (round 8's own rule) */
