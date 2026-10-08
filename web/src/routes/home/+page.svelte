@@ -315,10 +315,8 @@
    * interface, only offered by the copy-link button on the open row. The
    * address is `/home?item=<id>`, and opening it directly loads home with
    * that row scrolled to and expanded, which is the ruling's own test of the
-   * address. (`/item/<id>` remains the item's full-command surface, #455; the
-   * open row links to it quietly. Whether the two addresses should become one
-   * is the open question in the report — the row's read view is what the
-   * owner ratified, and the commands have never been designed into it.)
+   * address. (#1319, §34: the two addresses became one. The drawer holds
+   * every command the belt had, and the belt's `/item/<id>` redirects here.)
    *
    * THE BACK BUTTON. Opening a row PUSHES, so Back closes it and lands you
    * exactly where you were reading. Swapping straight from one open row to

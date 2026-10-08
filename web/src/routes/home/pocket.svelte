@@ -1,7 +1,7 @@
 <script>
   import "./pocket.css";
   import { tick } from "svelte";
-  import { goto, onNavigate } from "$app/navigation";
+  import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
   import { WorkspaceError, applyCommand, attachItemDocument, dueDateIn, readItemDocuments, removeDocument, restoreDocument } from "$lib/data/workspace.js";
@@ -47,11 +47,12 @@
    * its notes and papers, and its foot row (#1319: snooze, complete, attach
    * a document, retire, the pencil and the chain link); the relay's
    * catch opens the same way with its readings and its two decisions. A
-   * search result closes the search and opens its row; one the manifest
-   * does not draw goes straight to the item (review round §6.e). A planet
+   * search result closes the search and opens its row. An item the manifest
+   * does not list (more than 30 days out, or undated) is drawn as one more
+   * row when it is asked for -- by its address, a search, a paper or its
+   * body -- since the belt it used to go to retired (#1319, §34). A planet
    * on the dial does what the desk's does (owner's answer 6a): it opens its
-   * row and wears the lit ring while the row is open, and a second tap on
-   * the lit body goes to the item.
+   * row and wears the lit ring while the row is open.
    *
    * Home's sheets are the search sheet (#1057), the hatch, opened from the
    * orb, and the review sheet (round 3 §4): a suggestion's `review & amend →`
@@ -232,33 +233,17 @@
     return () => media.removeEventListener("change", onchange);
   });
 
-  // The approach (§1.2, §1.9): `open →` goes to the item's own screen and the
-  // opened drawer lifts into it. The morph is a view transition; pocket.css
-  // names the open row's panel and says how it lifts. Reduced motion, or a browser without
-  // view transitions, simply navigates.
-  let morphing = false;
-  onNavigate((navigation) => {
-    if (!morphing) return;
-    morphing = false;
-    if (!document.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    return new Promise((ready) => {
-      document.startViewTransition(async () => {
-        ready(undefined);
-        await navigation.complete;
-      });
-    });
-  });
-
-  // A document has no address of its own yet (item/[[id]]/+page.svelte), so a
-  // paper opens its item's belt and says which paper it meant in the
-  // navigation's state, where the belt can pick it up (step 3).
-  /** @param {{ id: string, itemId: string }} doc */
-  function openPaper(doc) {
-    morphing = true;
-    goto(resolve("/item/[[id]]", { id: encodeURIComponent(doc.itemId) }), {
-      replaceState: true,
-      state: { pocketPaper: doc.id },
-    });
+  /* A paper found by the search: its item's row opens, and the paper's
+     preview stands as the bottom sheet, as a paper pressed in the drawer
+     does (#1319: the belt it used to go to retired). */
+  /** @param {any} doc */
+  async function openPaper(doc) {
+    sheetOpen = false;
+    if (!(await openRow(doc.itemId))) return;
+    await tick();
+    const from = /** @type {HTMLElement | null} */ (manifestRow(doc.itemId)?.querySelector(
+      `[data-doc-row][aria-label="Open ${CSS.escape(doc.name)}"]`) ?? null);
+    openPaperHere(doc, from ?? /** @type {HTMLElement} */ (document.activeElement));
   }
 
   // ---- the relay's catch (#466) ---------------------------------------------
@@ -374,6 +359,16 @@
   /** What went wrong acting from a row, by the row's id. @type {Record<string, string>} */
   const rowProblem = $state({});
 
+  /* #1319: the belt retired, so an active item the manifest does not list
+     (more than 30 days out, or undated) is drawn as one more row once it is
+     asked for -- its address, a search result, a paper, its body -- and
+     opens there like any other. One at a time: the latest ask. */
+  /** @type {string | null} */
+  let asked = $state(null);
+  const listed = $derived(groups ? (groups.attention.length ? groups.attention : groups.later.slice(0, 1)) : []);
+  const askedRow = $derived(asked && !listed.some((row) => row.id === asked)
+    ? rows.find((row) => row.id === asked) ?? null : null);
+
   /** The manifest's row for an item, if the manifest draws one. @param {string} id */
   const manifestRow = (id) => document.querySelector(`.pocket .pk-below [data-row-key="${CSS.escape(id)}"]`);
 
@@ -386,7 +381,12 @@
    */
   async function openRow(id, { focus = false } = {}) {
     await tick();
-    const el = manifestRow(id);
+    let el = manifestRow(id);
+    if (!el && rows.some((row) => row.id === id)) {
+      asked = id;
+      await tick();
+      el = manifestRow(id);
+    }
     const control = rowOf(el);
     if (!el || !control) return false;
     control.open();
@@ -397,39 +397,28 @@
   }
 
   /**
-   * A search result closes the search and opens its row (§2.1). An item the
-   * manifest does not draw (it lists what needs attention) has no row to
-   * open, so it goes straight to the item, as it does from the belt
-   * (review round §6.e), taking the search's history entry as a paper does.
+   * A search result closes the search and opens its row (§2.1), drawn for
+   * it if the manifest does not list it (openRow).
    * @param {string} id
    */
   async function openResult(id) {
-    if (!manifestRow(id)) {
-      goto(resolve("/item/[[id]]", { id: encodeURIComponent(id) }), { replaceState: true });
-      return;
-    }
     sheetOpen = false;
     await tick();
     await openRow(id, { focus: true });
   }
 
-  /* Arriving on an item's address (`copy link`, the desk's own): its row
-     opens, once, as soon as the manifest has drawn it. The manifest lists
-     what needs attention (or, with nothing there, the one next item), so an
-     item it draws no row for (more than 30 days out, or undated) goes
-     straight to the item, as a search result does, replacing the address's
-     history entry so Back still leaves the way you came. */
+  /* Arriving on an item's address (`copy link`, the desk's own, and the
+     retired belt's `/item/<id>`, which the server answers with it): its
+     row opens, once, as soon as the manifest has drawn it -- drawn for it if
+     the manifest does not list it (openRow). A suggestion's address opens
+     its row in the signals, where it is reviewed. An address home holds no
+     row for at all (an item since retired or completed) opens nothing. */
   let addressed = false;
   $effect(() => {
     const id = page.url.searchParams.get("item");
     if (addressed || !id || !groups || !isPocket()) return;
-    const listed = groups.attention.length ? groups.attention : groups.later.slice(0, 1);
-    /* #1319: a suggestion's address opens its row in the signals, where it
-       is reviewed — never the belt */
-    const signalled = view?.suggestions.some((one) => one.id === id);
-    if (!signalled && !listed.some((row) => row.id === id)) {
+    if (!rows.some((row) => row.id === id) && !view?.suggestions.some((one) => one.id === id)) {
       addressed = true;
-      goto(resolve("/item/[[id]]", { id: encodeURIComponent(id) }), { replaceState: true });
       return;
     }
     openRow(id).then((opened) => { addressed ||= opened; });
@@ -449,29 +438,24 @@
   });
 
   /**
-   * A planet on the dial (owner's answer 6a, the desk's `.body-link`): the
-   * first tap scrolls the manifest to its row and opens it, the body
-   * lighting while the row is open; a tap on the lit body goes to the item,
-   * the open drawer lifting into it, and Escape on the dial puts the row
-   * away (onKeyActivate). A body the manifest draws no row for
-   * goes straight to the item, as a search result does (§6.e). The relay's
-   * catch does what its row's `review & amend →` does: raises the review
-   * sheet in place (round 3 §4).
+   * A planet on the dial (owner's answer 6a, the desk's `.body-link`): a tap
+   * scrolls the manifest to its row and opens it, drawn for it if the
+   * manifest does not list it (openRow), the body lighting while the row is
+   * open; Escape on the dial puts the row away (onKeyActivate). A tap on the
+   * lit body brings its row back on screen (#1319: the belt it used to lift
+   * into retired). The relay's catch, tapped again, does what its row's
+   * `review & amend →` does (round 3 §4).
    * @param {DialBody} b
    */
   async function tapBody(b) {
-    if (lit !== b.id && (await openRow(b.id))) return;
-    if (b.suggestion) {
-      const suggested = view?.suggestions.find((one) => one.id === b.id);
-      if (suggested?.receiptId) openReview(suggested);
-      return;
-    }
-    morphing = lit === b.id;
-    goto(resolve("/item/[[id]]", { id: encodeURIComponent(b.id) }));
+    const again = lit === b.id;
+    if (!(await openRow(b.id)) || !again || !b.suggestion) return;
+    const suggested = view?.suggestions.find((one) => one.id === b.id);
+    if (suggested?.receiptId) openReview(suggested);
   }
   /* A press on the lit body must not close its row on the way down (row.js
-     closes an open row on any press outside it), or the drawer would be gone
-     before the tap could lift it into the item. Registered before any row
+     closes an open row on any press outside it), or the tap would close the
+     drawer it is about to bring back on screen. Registered before any row
      opens, so it hears the press first. */
   $effect(() => {
     /** @param {PointerEvent} event */
@@ -538,8 +522,8 @@
 
   /* A completion a previous visit held and never saw confirmed (#1151
      W1-S3): the belt and stage 1's drawer held a completion for the wake's
-     four seconds and stashed it first, under the same literal key as
-     item/[[id]]/+page.svelte's own (W1-R5). #1319 stage 2: the drawer now
+     four seconds and stashed it first, under the same literal key as the
+     belt's own (W1-R5; the belt retired with #1319). #1319 stage 2: the drawer now
      asks for the completion in its rows and records it at once, so nothing
      is held here any more; what an earlier visit stashed is still picked up
      on load and finished. */
@@ -1055,29 +1039,34 @@
        so iOS never scrolls to an input that is about to move into the sheet. -->
   <button class="msearch" onclick={openSearch}>explore your world</button>
   <div class="pk-below" class:pk-busy={busy}>
+  <!-- One item's row: the manifest's, or the one asked for (`asked`). -->
+  {#snippet itemRow(/** @type {any} */ one)}
+    <!-- #1319 stage 2 (round 8): while the item is edited, its title is
+         live in the row's head, as on the desk -->
+    {#snippet liveTitle()}{#if modes.edit.draft}<b class="ed" contenteditable="plaintext-only" spellcheck="false" role="textbox" tabindex="0"
+       aria-label="title" data-ed="title" bind:textContent={modes.edit.draft.title}></b>{/if}{/snippet}
+    <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")} key={one.id}
+         heading={modes.edit.id === one.id ? liveTitle : undefined}
+         trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
+         ontoggle={onRowToggle(one.id)}>
+      <!-- round 8 (#1319): the section word in its own colour -->
+      {#snippet metaline()}{#if one.section}<i class="opt" data-opt={sectionColourOf(sectionOf(one.id))}>{one.section}</i>{#if cost(one)}{SEP}{/if}{/if}{cost(one)}{/snippet}
+      {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
+      {#snippet detail()}
+        <ItemDrawer {one} raw={rawItems.get(one.id)} papers={papersOf(one.id)} problem={rowProblem[one.id] ?? null}
+                    showingPaper={previewPaper?.id ?? null} onopenpaper={openPaperHere}
+                    acts={drawerActsOf(one)}
+                    reading={!papersReady && (rawItems.get(one.id)?.documentCount ?? 0) > 0} />
+      {/snippet}
+    </Row>
+  {/snippet}
   {#if groups?.attention.length}
     <h2 class="p-caps">Needs attention</h2>
     <div class="pk-list" data-row-group data-row-cards>
       {#each groups.attention as one (one.id)}
-        <!-- #1319 stage 2 (round 8): while the item is edited, its title is
-             live in the row's head, as on the desk -->
-        {#snippet liveTitle()}{#if modes.edit.draft}<b class="ed" contenteditable="plaintext-only" spellcheck="false" role="textbox" tabindex="0"
-           aria-label="title" data-ed="title" bind:textContent={modes.edit.draft.title}></b>{/if}{/snippet}
-        <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")} key={one.id}
-             heading={modes.edit.id === one.id ? liveTitle : undefined}
-             trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
-             ontoggle={onRowToggle(one.id)}>
-          <!-- round 8 (#1319): the section word in its own colour -->
-          {#snippet metaline()}{#if one.section}<i class="opt" data-opt={sectionColourOf(sectionOf(one.id))}>{one.section}</i>{#if cost(one)}{SEP}{/if}{/if}{cost(one)}{/snippet}
-          {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
-          {#snippet detail()}
-            <ItemDrawer {one} raw={rawItems.get(one.id)} papers={papersOf(one.id)} problem={rowProblem[one.id] ?? null}
-                        showingPaper={previewPaper?.id ?? null} onopenpaper={openPaperHere}
-                        acts={drawerActsOf(one)}
-                        reading={!papersReady && (rawItems.get(one.id)?.documentCount ?? 0) > 0} />
-          {/snippet}
-        </Row>
+        {@render itemRow(one)}
       {/each}
+      {#if askedRow}{@render itemRow(askedRow)}{/if}
     </div>
   {:else if groups?.later.length}
     {@const next = groups.later[0]}
@@ -1097,6 +1086,7 @@
                       reading={!papersReady && (rawItems.get(next.id)?.documentCount ?? 0) > 0} />
         {/snippet}
       </Row>
+      {#if askedRow}{@render itemRow(askedRow)}{/if}
     </div>
   {/if}
   <!-- #466; round 3 §2 and owner-decisions §29 (#1142): 32px of clear sky
