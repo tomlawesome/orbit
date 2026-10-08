@@ -254,6 +254,28 @@ function licenceExpressionFromManifest(manifest) {
   return "";
 }
 
+/** "Jane Doe <jane@example.com> (https://…)" or { name } → "Jane Doe"; no address is kept. */
+function personName(person) {
+  const raw = typeof person === "string" ? person : person && typeof person.name === "string" ? person.name : "";
+  return raw.replace(/<[^>]*>/g, "").replace(/\([^)]*\)/g, "").trim();
+}
+
+/** "git+https://github.com/a/b.git", "github:a/b" or { url } → "https://github.com/a/b". */
+function webAddressOf(repository) {
+  let url = typeof repository === "string" ? repository : repository && typeof repository.url === "string" ? repository.url : "";
+  const shorthand = /^(?:github:)?([\w.-]+\/[\w.-]+)$/.exec(url);
+  if (shorthand) return `https://github.com/${shorthand[1]}`;
+  url = url.replace(/^git\+/, "").replace(/^git:\/\//, "https://").replace(/^ssh:\/\/git@/, "https://").replace(/\.git$/, "");
+  return /^https?:\/\//.test(url) ? url : "";
+}
+
+function detailsFromManifest(manifest) {
+  return {
+    author: personName(manifest.author),
+    homepage: webAddressOf(manifest.homepage) || webAddressOf(manifest.repository),
+  };
+}
+
 function readManifest(dir) {
   const manifestPath = join(dir, "package.json");
   if (!existsSync(manifestPath)) return null;
@@ -277,11 +299,15 @@ function recordPackageDir(dir, state) {
 
   const manifest = readManifest(realDir);
   if (manifest && typeof manifest.name === "string" && typeof manifest.version === "string") {
-    state.results.push({
+    const entry = {
       name: manifest.name,
       version: manifest.version,
       licence: licenceExpressionFromManifest(manifest),
-    });
+    };
+    // The About page's bill of materials (#1256) also wants who and where;
+    // the licence gate does not, so they are read only when asked for.
+    if (state.details) Object.assign(entry, detailsFromManifest(manifest));
+    state.results.push(entry);
   }
 
   // A package that vendors its own nested node_modules (npm/yarn hoisting
@@ -364,9 +390,10 @@ function readWorkspaceMemberDirs(rootDir) {
  * pnpm-workspace member's own `node_modules` (e.g. `web/`) -- and returns one
  * entry per distinct installed (name, version). The root package and every
  * workspace member's own package.json are excluded: Orbit is
- * AGPL-3.0-or-later and is not a dependency of itself.
+ * AGPL-3.0-or-later and is not a dependency of itself. `details` adds each
+ * package's author name and web address, for scripts/about-sbom.mjs.
  */
-export function discoverInstalledPackages(rootDir) {
+export function discoverInstalledPackages(rootDir, { details = false } = {}) {
   const skipRealPaths = new Set();
   if (existsSync(join(rootDir, "package.json"))) skipRealPaths.add(realpathSync(rootDir));
 
@@ -377,7 +404,7 @@ export function discoverInstalledPackages(rootDir) {
     nodeModulesRoots.push(join(memberDir, "node_modules"));
   }
 
-  const state = { visited: new Set(), skipRealPaths, results: [] };
+  const state = { visited: new Set(), skipRealPaths, results: [], details };
   for (const nodeModulesRoot of nodeModulesRoots) walkNodeModulesDir(nodeModulesRoot, state);
   return state.results;
 }

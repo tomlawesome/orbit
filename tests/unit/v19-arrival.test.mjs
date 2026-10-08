@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  ASKING, CREATE, DOOR, INVITED, NEWCOMER, ONWARD,
+  ASKING, DOOR, INVITED, NEWCOMER, ONWARD,
   CURRENCIES, DEFAULT_SECTIONS, NAME_LIMIT, TIME_ZONES,
   arrivalStageOf, belongRowsOf, collidingHouseholdOf,
   createSystemCommand, discoveredCountOf, isInvitedLanding, preferredCurrency, preferredTimeZone,
@@ -12,8 +12,9 @@ import {
 } from "$lib/flight/timeline.js";
 import { NEWCOMER_FAR, NEWCOMER_NEAR } from "$lib/flight/starfields.js";
 import { labelledSkyOf } from "$lib/data/chart.js";
+import * as STAGES from "$lib/arrival/stage.js";
 import {
-  CREATE_ARRIVAL_FIXTURE, NEWCOMER_ARRIVAL_FIXTURE,
+  ARRIVAL_FIXTURES, NEWCOMER_ARRIVAL_FIXTURE,
 } from "$lib/data/fixtures/arrival.js";
 
 /*
@@ -36,9 +37,15 @@ describe("which surface an arrival lands on", () => {
     })).toBe(ONWARD);
   });
 
-  it("gives the first admin the create card: no households anywhere", () => {
-    expect(arrivalStageOf({ households: [], visibleHouseholds: [] })).toBe(CREATE);
-    expect(arrivalStageOf(CREATE_ARRIVAL_FIXTURE)).toBe(CREATE);
+  it("gives the first admin the newcomer's arrival too: no households anywhere (#1263)", () => {
+    /* one flight per arrival: the create questions are the belong card's
+       drawer, so an empty instance lands on the same stage */
+    expect(arrivalStageOf({ households: [], visibleHouseholds: [] })).toBe(NEWCOMER);
+  });
+
+  it("has retired the create stage altogether (#1263)", () => {
+    expect("CREATE" in STAGES).toBe(false);
+    expect(Object.keys(ARRIVAL_FIXTURES)).toEqual(["newcomer"]);
   });
 
   it("gives a newcomer the newcomer's arrival: none of theirs, some out there", () => {
@@ -57,7 +64,7 @@ describe("which surface an arrival lands on", () => {
   });
 
   it("treats a workspace with the fields missing as the empty instance it is", () => {
-    expect(arrivalStageOf({})).toBe(CREATE);
+    expect(arrivalStageOf({})).toBe(NEWCOMER);
   });
 });
 
@@ -87,7 +94,7 @@ describe("the invited landing, told apart from an ordinary return (#871)", () =>
 
   it("is its own stage, not one arrivalStageOf's workspace read could ever answer", () => {
     expect(INVITED).toBe("invited");
-    expect(new Set([DOOR, ASKING, CREATE, NEWCOMER, ONWARD, INVITED]).size).toBe(6);
+    expect(new Set([DOOR, ASKING, NEWCOMER, ONWARD, INVITED]).size).toBe(5);
   });
 });
 
@@ -103,7 +110,7 @@ describe("the invited landing's climb is the newcomer's own, to the beat the cho
     expect(full.at(-1)).toEqual({ at: T.belongAt, act: "belong" });
 
     const reduced = newcomerAscentBeatsReduced();
-    expect(reduced.at(-1)).toEqual({ at: 700 + T.newDwell + 1900, act: "belong" });
+    expect(reduced.at(-1)).toEqual({ at: 700 + T.dwell + 1900, act: "belong" });
     /* the count still takes its turn before that last beat, ordering unchanged */
     expect(reduced.map((beat) => beat.act)).toEqual(["land", "instrument", "countOn", "countOff", "belong"]);
   });
@@ -257,18 +264,20 @@ describe("the waiting note (owner-decisions §23): the marker is not the explana
   });
 });
 
-describe("the newcomer's clock is the sealed one", () => {
-  it("keeps its own 3s dwell while the login landing keeps the trimmed 2s", () => {
-    expect(T.dwell).toBe(2000);
-    expect(T.newDwell).toBe(3000);
-    expect(T.instrumentAt).toBe(8400);
-    expect(T.newInstrumentAt).toBe(9400);
+describe("the newcomer's clock is the site's, with the count hung off its instrument beat (#1222)", () => {
+  it("takes the site's dwell and instrument beat, with no newcomer-only dwell", () => {
+    expect(T.dwell).toBe(600);
+    expect(T.instrumentAt).toBe(5900);
+    for (const gone of ["newDwell", "newInstrumentAt"]) {
+      expect(T, gone).not.toHaveProperty(gone);
+    }
   });
 
-  it("opens the count sooner and holds it longer (#870)", () => {
-    expect(T.countOn).toBe(9700);
-    expect(T.countOff).toBe(12900);
-    expect(T.belongAt).toBe(13800);
+  it("keeps the count's own offsets from the instrument beat (#870)", () => {
+    expect(T.countOn - T.instrumentAt).toBe(300);
+    expect(T.countOn).toBe(6200);
+    expect(T.countOff).toBe(9400);
+    expect(T.belongAt).toBe(10300);
     /* ~4.55s of screen time in all: 0.45s in, 3.2s held, 0.9s out */
     expect(T.countOff - T.countOn).toBe(3200);
     expect(T.belongAt - T.countOff).toBe(900);
@@ -288,7 +297,7 @@ describe("the newcomer's clock is the sealed one", () => {
     ]);
   });
 
-  it("lands, dwells, settles, counts and then asks — in that order", () => {
+  it("lands, settles, counts and then asks — in that order", () => {
     expect(newcomerAscentBeats().map((beat) => beat.act)).toEqual([
       "arming", "warp", "mark", "release", "markOut", "nameOn", "nameOff",
       "land", "instrument", "countOn", "countOff", "belong",
@@ -309,13 +318,13 @@ describe("the newcomer's clock is the sealed one", () => {
     const beats = newcomerAscentBeatsReduced();
     expect(beats).toEqual([
       { at: 0, act: "land" },
-      { at: 3700, act: "instrument" },
-      { at: 3700, act: "countOn" },
-      { at: 5600, act: "countOff" },
-      { at: 5600, act: "belong" },
+      { at: 1300, act: "instrument" },
+      { at: 1300, act: "countOn" },
+      { at: 3200, act: "countOff" },
+      { at: 3200, act: "belong" },
     ]);
-    /* the bare labelled sky, the ratified 3s dwell, then the instrument */
-    expect(beats[1].at).toBe(700 + T.newDwell);
+    /* the bare labelled sky, the site's own 600 dwell, then the instrument */
+    expect(beats[1].at).toBe(700 + T.dwell);
     /* the count still takes its turn, on the mockup's own 1900 hold */
     expect(beats[3].at - beats[1].at).toBe(1900);
   });
@@ -338,8 +347,8 @@ describe("the newcomer's starfield", () => {
 });
 
 describe("the arrival's fixtures are the states the workspace fixture cannot be in", () => {
-  it("has no households of its own on either", () => {
-    for (const fixture of [CREATE_ARRIVAL_FIXTURE, NEWCOMER_ARRIVAL_FIXTURE]) {
+  it("has no households of its own on any", () => {
+    for (const fixture of Object.values(ARRIVAL_FIXTURES)) {
       expect(fixture.households).toEqual([]);
       expect(fixture.householdLanding).toBe("choose");
       expect(fixture.activeHouseholdId).toBeNull();

@@ -11,6 +11,8 @@
   import ArmButton from "$lib/pocket/ArmButton.svelte";
   import Hatch from "$lib/pocket/Hatch.svelte";
   import NorthStar from "$lib/pocket/NorthStar.svelte";
+  import Sun from "$lib/sun/Sun.svelte";
+  import { POCKET_SUN_R } from "$lib/sun/furnace.js";
   import ReviewSheet from "$lib/pocket/ReviewSheet.svelte";
   import Row from "$lib/pocket/Row.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
@@ -58,11 +60,14 @@
    *   onamend?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion,
    *     item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null) => Promise<string | null>,
    *   onchanged?: () => Promise<unknown>,
+   *   onsignedout?: (redirectTo: string | null) => unknown,
+   *   onmenu?: () => unknown,
    * }} Props
    */
   /** @type {Props} */
   let {
     view = null, arrive = false, onapprove = undefined, ondismiss = undefined, onamend = undefined, onchanged = undefined,
+    onsignedout = undefined, onmenu = undefined,
   } = $props();
   let sheetOpen = $state(false);
   let hatchOpen = $state(false);
@@ -800,7 +805,6 @@
       <!-- The desk's spheres and danger wash (+page.svelte's dial defs),
            named for the pocket: the desk's own defs share this document. -->
       <defs aria-hidden="true">
-        <filter id="pk-sun" x="-200%" y="-200%" width="500%" height="500%"><feGaussianBlur stdDeviation="5"/></filter>
         <radialGradient id="pk-ruby" cx="34%" cy="30%" r="72%">
           <stop offset="0%" stop-color="var(--p-ruby-1, #ffb3ab)"/><stop offset="42%" stop-color="var(--p-ruby-2, #e0453e)"/>
           <stop offset="100%" stop-color="var(--p-ruby-3, #7e1a1f)"/>
@@ -833,10 +837,10 @@
       <g font-size="15" fill="var(--ink-quiet)" text-anchor="middle" font-family="JetBrains Mono,monospace">
         {#each quarters as q, k (k)}<text x={q.x} y={q.y}>{q.label}</text>{/each}</g>
       <path d="M190 38 l6 10 h-12 Z" style="fill:var(--accent)"/>
-      <!-- The sun (the desk's #sun, scaled): a soft glow that breathes under
-           the core, and the household's name beneath it. -->
-      <circle class="pk-glow" cx="190" cy="190" r="16" style="fill:#fff6e6" fill-opacity=".28" filter="url(#pk-sun)"/>
-      <circle class="pk-sun" cx="190" cy="190" r="8" style="fill:#fff6e6"/>
+      <!-- The sun (#1250): drawn by the layer over the dial (Sun.svelte, the
+           Furnace, in the pack's own colours, #1259); this is its disc, which
+           the tour marks, and the household's name beneath it. -->
+      <circle class="pk-sun" cx="190" cy="190" r={POCKET_SUN_R} fill="transparent"/>
       <text x="190" y="218" font-size="15" text-anchor="middle" style="fill:var(--ink-mid);font-family:var(--ui)">{view?.household?.name ?? ""}</text>
       {#if pinging}
         <circle class="pk-ping" cx={pinging.placement.x} cy={pinging.placement.y} r={bodyR(pinging) + 3} fill="none"
@@ -875,6 +879,7 @@
         {/if}
       {/each}
     </svg>
+    <Sun r={POCKET_SUN_R} />
   </div>
   <NorthStar docked anchor={dialBox} hidden={starHidden} />
   </div>
@@ -1031,7 +1036,7 @@
 </Sheet>
 
 <Hatch bind:open={hatchOpen} name={view?.user?.displayName ?? ""} {roleLine} {isAdmin}
-       inboxCount={waiting || null} />
+       inboxCount={waiting || null} {onsignedout} onopened={onmenu} />
 
 <ReviewSheet bind:open={reviewOpen} title={reviewing?.title ?? ""} proposal={reviewing?.proposal}
              householdId={reviewing ? (reviewing.householdId ?? view?.primary ?? null) : null}

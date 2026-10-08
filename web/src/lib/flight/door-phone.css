@@ -6,11 +6,12 @@
    390 or 360, and no card fits inside a ring that fits the phone, so on a
    phone the ring cannot be the card. It is still the door:
 
-     · the ring STANDS AT THE UPPER-MIDDLE (review round §2.7, #1127) -- the
-       login ring at its own size (302.4px, a 4.2px line, the 29.4px orb),
-       its centre at 40% of the visible height on the bare door, the held
-       dawn and the goodbye; at 30% over a card, where it closes to 240px
-       under 760px of visible height so the card below it fits;
+     · the ring STANDS AT THE UPPER-MIDDLE (review round §2.7, #1127) -- over
+       a card its centre is at 30% of the visible height, where it closes to
+       240px under 760px of visible height so the card below it fits. The
+       bare door, the held dawn and the goodbye stand as orbit-site's centred
+       lockup instead (#1253, flight.css), and a card's ring travels from that
+       ring's own place (SignIn.svelte seeds --door-from-*);
      · the ring HOLDS THE QUESTION -- where `orbit` stands on the door, a card
        puts its own heading, 22px in the display face; the answers stand in
        the column beneath and the act is the pill;
@@ -39,17 +40,16 @@
 :where(.ringcard) .bigring .pocketstroke{display:none}
 
 @media (max-width: 900px), (max-height: 600px){
-  /* THE STATION (review round §2.7). The ring's top edge is placed so its
-     centre sits at a share of the visible height (dvh, so the browser's
-     own bars are already taken off), held between 28px and 200px under
-     the safe area. At 844 the bare door's top is 187px, at 664 it is 115px. */
+  /* THE CARD'S STATIONS (review round §2.7). A card's ring has its top edge
+     placed so its centre sits at a share of the visible height (dvh, so the
+     browser's own bars are already taken off), held between 28px and 200px
+     under the safe area. (The bare door has no station of its own since
+     #1253: it is orbit-site's centred lockup, flight.css.) */
   :root{
     --door-ring:302.4px;
     --door-top:clamp(calc(env(safe-area-inset-top, 0px) + 28px),
                      calc(40dvh - var(--door-ring) / 2),
                      calc(env(safe-area-inset-top, 0px) + 200px));
-    /* the login glyph is a 420px box around its 302.4px ring */
-    --door-glyph-inset:58.8px;
     --door-gap:28px;
   }
   /* A short phone (360x780 and the like) stands the card a little closer
@@ -62,68 +62,53 @@
      760px of visible height): see THE CARD'S STATION, below the card. */
 
   /* ══ THE BARE DOOR, THE HELD DAWN, THE GOODBYE ═══════════════════════════
-     The lockup the desk centres, stood at the ring's station instead. The
-     glyph and its word are not redrawn: the same 420px box is simply placed
-     so that the ring inside it has its top edge at --door-top. */
-  #dawn .loginchrome,#dusk .loginchrome{place-items:start center;
-        overflow-x:hidden;overflow-y:auto}
-  /* The lockup is as wide as the screen and the 420px glyph box centres
-     inside it: centred directly in the scrolling chrome, a box wider than
-     the screen would be pushed to the start edge instead. */
-  #dawn .loginchrome .lockup,#dusk .loginchrome .lockup{width:100%;grid-template-columns:minmax(0,1fr);
-        margin-top:calc(var(--door-top) - var(--door-glyph-inset))}
+     No station of their own any more (#1253): the door is orbit-site's
+     lockup (flight.css: the glyph --R wide, centred as a whole, the way in in
+     the row under it), on a phone as on the desk. The 40% station, the held
+     dawn's and the goodbye's own column are gone; what the phone adds to the
+     door is below. */
 
-  /* THE GATE, at a thumb's size: the ratified pill, 44px tall and 15px, in
-     the ratified slot inside the ring under the word. */
-  #dawn .gate{display:inline-flex;align-items:center;justify-content:center;
-        min-height:var(--p-hit);padding:0 34px;font-size:var(--p-type-button)}
-  /* `local login` leaves the ring: at a 44px hit it would cross the stroke,
-     so it stands under the ring, on the axis, where round 1 drew it. */
-  #dawn .localopen{margin-top:calc(var(--door-ring) / 2 - 74px - var(--p-hit) / 2 + 26px)}
+  /* THE GATE on a phone (owner, 2026-10-07, question 10, option b): the
+     site's glass pill keeps its look, but at the pocket's floors, a 44px hit
+     and 15px type (--p-hit, --p-type-button), the label centred, and the
+     site's horizontal proportion (2.3em) kept. Dawn's pill and the goodbye's
+     "Sign back in" alike. */
+  #dawn .gate,#dusk .gate-wrap a{display:inline-flex;align-items:center;justify-content:center;
+        min-height:44px;font-size:15px;padding-block:0;padding-inline:2.3em}
+  /* `incomplete` keeps the pill, so its words stand under the taller one */
+  body[data-state="incomplete"] #dawn .state{margin-top:calc(var(--R) * .03 + 44px + 18px)}
+
+  /* `local login` stands under the gate, inside `.gate-wrap` (flight.css):
+     at a 44px hit, 13px mono. */
   #dawn .localopen .quietline{min-height:var(--p-hit);display:inline-flex;align-items:center;
         padding:0 14px;font-size:var(--p-type-meta);
         text-shadow:0 1px 5px rgba(4,6,14,.9);border-radius:99px;
         background:radial-gradient(ellipse at center,rgba(4,6,14,.72) 30%,rgba(4,6,14,0) 72%)}
 
-  /* THE HELD DAWN (#788 C): the primary line in the pill's slot, lifted to
-     body size; the subline under the ring at 13px and the column's width. */
+  /* THE HELD DAWN (#788 C): the primary line in the gate's row, lifted to
+     body size; the subline 26px under it at 13px and the column's width. */
   #dawn .state-primary{font-size:var(--p-type-body);max-width:236px;line-height:1.35}
-  #dawn .state-sub{top:calc(50% + var(--door-ring) / 2 + 26px);
-        width:calc(100vw - 2 * var(--p-gutter));max-width:376px;
+  #dawn .state-sub{width:calc(100vw - 2 * var(--p-gutter));max-width:376px;
         font-size:var(--p-type-meta);line-height:1.7;letter-spacing:.03em;
         text-shadow:0 1px 5px rgba(4,6,14,.9)}
 
-  /* THE GOODBYE (§2.18): the ring holds the farewell where it held the
+  /* THE GOODBYE (§2.18, §5.1): the ring holds the farewell where it held the
      word, and the second line and `Sign back in` stand in ONE COLUMN under
-     the ring, on the axis (review round §5.1): the line 26px under the
-     ring, the pill in the lower third at 68% where there is room and 24px
-     under the line where there is not (70px is the line's 26px gap and its
-     two 13px/1.7 lines). In flow, so a line that wraps to three on a large
-     text setting pushes the pill down rather than running into it.
-     The lockup steps out of the way (`display:contents`) so its glyph, the
-     farewell and the gate are one grid's rows; the farewell keeps its own
-     box, and with it the entrance it makes with the farewell beat. */
-  #dusk .loginchrome{grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto auto;
-        align-content:start;justify-items:center;
-        padding-bottom:calc(env(safe-area-inset-bottom, 0px) + 24px)}
-  #dusk .loginchrome .lockup{display:contents}
-  #dusk .lockup .glyph{grid-area:1/1;justify-self:unsafe center;
-        margin-top:calc(var(--door-top) - var(--door-glyph-inset))}
-  #dusk .lockup .name{grid-area:1/1;visibility:hidden}
-  #dusk .farewell{grid-area:2/1;position:relative;top:auto;bottom:auto;left:auto;right:auto;
-        width:100%;box-sizing:border-box;padding:0 var(--p-gutter);
-        margin-top:calc(0px - var(--door-glyph-inset))}
-  #dusk .farewell .said{position:absolute;left:50%;top:calc(0px - var(--door-ring) / 2);
-        transform:translate(-50%,-50%);width:236px;
-        font:600 22px/1.2 var(--display);letter-spacing:.005em;color:#e9edf8}
-  #dusk .farewell .sub{margin:26px 0 0;
+     the ring, on the axis: the line 26px under the ring, the pill 24px under
+     the line (two lines of 13px/1.7, 44.2px, is what the line takes at 360
+     and 390 wide). The ring stands exactly where the door's does: the line is
+     out of flow and the pill is moved by `top`, not by a margin. Its box is
+     the wrapper's top, which is .03R under the glyph, so the ring's centre is
+     .53R above it and the ring's foot .17R above it. */
+  #dusk .lockup .name{visibility:hidden}
+  #dusk .farewell{top:0;margin-top:0;width:min(calc(100vw - 2 * var(--p-gutter)),376px)}
+  #dusk .farewell .said{position:absolute;left:50%;top:calc(var(--R) * -.53);
+        transform:translate(-50%,-50%);width:calc(var(--R) * .6);
+        font:600 min(22px,calc(var(--R) * .078))/1.2 var(--display);letter-spacing:.005em;background:linear-gradient(180deg,#fdfbf7 12%,#f2e7d3 60%,#dcbd80 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 11px rgba(255,206,140,.2))}
+  #dusk .farewell .sub{position:absolute;left:0;right:0;top:calc(26px - var(--R) * .17);margin:0;
         font-size:var(--p-type-meta);line-height:1.7;letter-spacing:.04em;color:#9aa0b8;
         text-shadow:0 1px 5px rgba(4,6,14,.9)}
-  #dusk .loginchrome .gate-wrap{grid-area:3/1;align-self:start;justify-self:center;transform:none;
-        width:calc(100vw - 2 * var(--p-gutter));max-width:376px;
-        margin-top:max(24px, calc(68dvh - var(--door-top) - var(--door-ring) - 70px))}
-  #dusk .gate-wrap a{display:flex;align-items:center;justify-content:center;width:100%;box-sizing:border-box;
-        min-height:var(--p-hit);padding:0 24px;font-size:var(--p-type-button)}
+  #dusk .gate-wrap a{position:relative;top:calc(26px + 2 * 13px * 1.7 + 24px - var(--R) * .17)}
 
   /* ══ A CARD ON THE DOOR (claim, sign in, first administrator, waiting,
      setup, approve) ══════════════════════════════════════════════════════
@@ -150,14 +135,15 @@
   .ringcard .bigring .ringglass{display:none}
   .ringcard .bigring .ringstroke,.ringcard .bigring .pocketstroke,
   .ringcard .bigring .ringorbit{width:100%;height:100%}
-  .ringcard .bigring .pocketstroke{display:block;border-radius:50%;border:4.2px solid #8791b3;
+  .ringcard .bigring .pocketstroke{display:block;border-radius:50%;--stroke:3.4px;
+        filter:drop-shadow(0 0 4px rgba(234,210,164,.16));
         position:relative;z-index:1}
-  .ringcard .bigring .ringstroke,.ringcard .bigring .pocketstroke{transition:border-width .5s ease}
+  .ringcard .bigring .ringstroke,.ringcard .bigring .pocketstroke{transition:--stroke .5s ease}
   .ringcard .bigring .ringorbit i{transition:width .5s ease,height .5s ease,margin .5s ease}
   /* the claim card has no heading, and an empty ring is a hole: the ring
      keeps the word (round 1) */
   .ringcard .bigring .ringword{display:block;position:relative;z-index:1;
-        font:600 72px var(--display);letter-spacing:.015em;line-height:1;color:#e9edf8;
+        font:600 72px var(--display);letter-spacing:.01em;line-height:1;background:linear-gradient(180deg,#fdfbf7 12%,#f2e7d3 60%,#dcbd80 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 18.9px rgba(255,206,140,.2));
         transition:font-size .5s ease}
 
   .ringcard #formlayer{position:relative;inset:auto;z-index:4;flex:none;
@@ -171,7 +157,7 @@
   .ringcard #formlayer .card .ask{position:absolute;left:50%;
         top:calc(0px - var(--door-gap) - var(--door-ring) / 2);transform:translate(-50%,-50%);
         width:236px;height:auto;margin:0;padding:0;overflow:visible;clip:auto;white-space:normal;
-        font:600 22px/1.2 var(--display);letter-spacing:.005em;color:#e9edf8;text-align:center;
+        font:600 22px/1.2 var(--display);letter-spacing:.005em;background:linear-gradient(180deg,#fdfbf7 12%,#f2e7d3 60%,#dcbd80 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 11px rgba(255,206,140,.2));text-align:center;
         transition:top .5s cubic-bezier(.55,0,.2,1),font-size .5s ease,width .5s ease}
 
   /* THE FIELDS: full width in the column, 48px, 16px so iOS never zooms,
@@ -246,7 +232,7 @@
   @media (height < 760px){
     :where(body.showform:not(.launching)) .ringcard{--door-ring:240px}
     :where(body.showform:not(.launching)) .ringcard .bigring .ringstroke,
-    :where(body.showform:not(.launching)) .ringcard .bigring .pocketstroke{border-width:3.4px}
+    :where(body.showform:not(.launching)) .ringcard .bigring .pocketstroke{--stroke:2.7px}
     :where(body.showform:not(.launching)) .ringcard .bigring .ringorbit i{
           width:23.4px;height:23.4px;margin:-11.7px 0 0 -11.7px}
     :where(body.showform:not(.launching)) .ringcard #formlayer .card .ask{width:200px;font-size:20px}
@@ -262,17 +248,24 @@
                    width .5s cubic-bezier(.55,0,.2,1),height .5s cubic-bezier(.55,0,.2,1),
                    margin-top .5s cubic-bezier(.55,0,.2,1)}
   /* A card raised in the same moment as its column (the door's `local
-     login`, a claim or local-only door answering) still starts from the
-     bare door's station, so the ring travels to the card's from where the
-     door's ring stood. */
+     login`, a claim or local-only door answering) starts from the bare
+     ring: SignIn.svelte reads `#login-glyph svg`'s rect as the card opens and
+     seeds --door-from-ring (the ring's diameter, .72R) and --door-from-top
+     (its top edge), so the ring travels from where the site-sized ring
+     stands (#1253, review round §5.4). The line, the orb and the question
+     start in the mark's own proportion at that size (3.4px and 29.4px at
+     302.4px). Where nothing was seeded (setup, approve) it starts from the
+     old station, 302.4px at 40%. */
   @starting-style{
-    .ringcard .bigring{width:302.4px;height:302.4px;
-          margin-top:clamp(calc(env(safe-area-inset-top, 0px) + 28px),
+    .ringcard .bigring{width:var(--door-from-ring, 302.4px);height:var(--door-from-ring, 302.4px);
+          margin-top:var(--door-from-top, clamp(calc(env(safe-area-inset-top, 0px) + 28px),
                            calc(40dvh - 151.2px),
-                           calc(env(safe-area-inset-top, 0px) + 200px))}
-    .ringcard .bigring .ringstroke,.ringcard .bigring .pocketstroke{border-width:4.2px}
-    .ringcard .bigring .ringorbit i{width:29.4px;height:29.4px;margin:-14.7px 0 0 -14.7px}
-    .ringcard #formlayer .card .ask{top:calc(0px - var(--door-gap) - 151.2px);width:236px;font-size:22px}
+                           calc(env(safe-area-inset-top, 0px) + 200px)))}
+    .ringcard .bigring .ringstroke,.ringcard .bigring .pocketstroke{--stroke:calc(var(--door-from-ring, 302.4px) * .01124)}
+    .ringcard .bigring .ringorbit i{width:calc(var(--door-from-ring, 302.4px) * .09722);
+          height:calc(var(--door-from-ring, 302.4px) * .09722);
+          margin:calc(var(--door-from-ring, 302.4px) * -.04861) 0 0 calc(var(--door-from-ring, 302.4px) * -.04861)}
+    .ringcard #formlayer .card .ask{top:calc(0px - var(--door-gap) - var(--door-from-ring, 302.4px) / 2);width:236px;font-size:22px}
   }
 
   /* ══ THE RING CLOSES WHILE YOU TYPE ════════════════════════════════════
@@ -283,12 +276,12 @@
   body.typing .ringcard .bigring{width:96px;height:96px;
         margin-top:calc(env(safe-area-inset-top, 0px) + 12px)}
   body.typing .ringcard .bigring .ringstroke,
-  body.typing .ringcard .bigring .pocketstroke{border-width:1.5px}
+  body.typing .ringcard .bigring .pocketstroke{--stroke:1.5px}
   body.typing .ringcard .bigring .ringorbit i{width:9.4px;height:9.4px;margin:-4.7px 0 0 -4.7px}
-  body.typing .ringcard .bigring .ringword{font-size:22px}
+  body.typing .ringcard .bigring .ringword{font-size:22px;filter:drop-shadow(0 0 4px rgba(255,206,140,.2))}
   body.typing .ringcard #formlayer{margin-top:46px}
   body.typing .ringcard #formlayer .card .ask{top:-34px;transform:translate(-50%,0);
-        font-size:15px;width:100%}
+        font-size:15px;width:100%;filter:drop-shadow(0 0 4px rgba(255,206,140,.2))}
   body.typing .ringcard #formlayer .card .field{margin-bottom:10px}
   body.typing .ringcard #formlayer .card .act{margin-top:14px}
 }

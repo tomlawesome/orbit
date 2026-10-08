@@ -17,9 +17,7 @@
    * still serves all five and the dark packs are untouched. Drift stays — it
    * is POL-11's owner rule and a moving sky is not a luminous device.
    */
-  [data-theme=dawn] .dial circle[filter="url(#sun)"],
-  [data-theme=clouds] .dial circle[filter="url(#sun)"]{
-    filter:none}
+  /* (The sun's own paper treatment is the Furnace's dawn sun, lib/sun.) */
   /* Paper has no specular. */
   [data-theme=dawn] .dial [fill^="rgba(255,255,255"],
   [data-theme=clouds] .dial [fill^="rgba(255,255,255"]{
@@ -195,8 +193,9 @@
      the first viewport is the approved one to the pixel. The name lifts with
      it because the name is inside the same target. */
   .sun-link{cursor:pointer}
-  .sun-link circle[filter="url(#sun)"]{transition:opacity .3s}
-  .sun-link:is(:hover,:focus-visible) circle[filter="url(#sun)"]{opacity:1}
+  /* #1250: the sun is drawn by the layer over the dial (lib/sun/Sun.svelte);
+     its still brightens as the round-2 sample's does */
+  .dialwrap:has(.sun-link:is(:hover,:focus-visible)) .sunpic:not(.live){filter:brightness(1.12)}
   .sun-link:is(:hover,:focus-visible) #dial-name{fill:var(--ink)}
   /* Keyboard only, and in the app's own focus ink (the accent, as everywhere
      a field or a swatch says "you are here"). */
@@ -505,10 +504,12 @@
   /* POL-1: arrival — the mark expands into the dial once per ARRIVAL.
      Coming back through history is not arriving (owner, 2026-08-15), so the
      fanfare keys off .arrive, which a popstate return never sets. */
+  /* the sun's layer (lib/sun/Sun.svelte) lies over the dial's own square
+     and moves with it, so every motion of the dial below names both */
   .dial{transform-origin:50% 50%}
-  .desk.arrive .dial{animation:arrive 1s cubic-bezier(.2,.7,.2,1) 1}
+  .desk.arrive :is(.dial,.dialwrap>.sunlayer){animation:arrive 1s cubic-bezier(.2,.7,.2,1) 1}
   @keyframes arrive{from{transform:scale(.16);opacity:0}60%{opacity:1}to{transform:scale(1)}}
-  @media (prefers-reduced-motion: reduce){.dial{animation:none}}
+  @media (prefers-reduced-motion: reduce){:is(.dial,.dialwrap>.sunlayer){animation:none}}
   /* /POL-1 */
   /* POL-2: perihelion ping */
   .ping{animation:ping 3.4s ease-out infinite;transform-origin:center;transform-box:fill-box}
@@ -576,8 +577,8 @@
   body.storm .sky .near{animation-duration:34s;animation-name:driftjitter}
   @keyframes driftjitter{0%{transform:translate(0,0)}25%{transform:translate(-18px,2px)}
     50%{transform:translate(-32px,-2px)}75%{transform:translate(-46px,1px)}100%{transform:translate(-60px,0)}}
-  .dial{transition:transform 2s cubic-bezier(.3,.6,.2,1)}
-  body.storm .dial{transform:scale(1.26)}
+  :is(.dial,.dialwrap>.sunlayer){transition:transform 2s cubic-bezier(.3,.6,.2,1)}
+  body.storm :is(.dial,.dialwrap>.sunlayer){transform:scale(1.26)}
   /* The `circle[fill="url(#p-jade)"]` term that used to sit in both lists is
      deliberately gone (owner, 2026-08-14). POL-4 gives every dial body
      transform-box:fill-box so a hover grows it in place; this rule's
@@ -608,7 +609,6 @@
   body.storm [data-body="i-gutter"] circle{filter:saturate(1.5) brightness(1.12) drop-shadow(0 0 7px var(--overdue))}
   body.storm [data-body="i-mot"] circle,body.storm [data-body="i-boiler"] circle{
     filter:saturate(1.45) brightness(1.1) drop-shadow(0 0 6px var(--warm))}
-  body.storm circle[filter="url(#sun)"]{opacity:.5}
   body.storm .meteor{animation:meteor 5.5s linear infinite;
     background:linear-gradient(90deg,transparent,#ff8a4d)}
   body.storm .meteor.m2{background:linear-gradient(90deg,transparent,#f87171)}
@@ -1161,13 +1161,9 @@
 [data-theme=dawn] .dial .body-link :is(circle,path),
 [data-theme=clouds] .dial .body-link :is(circle,path){
   filter:drop-shadow(0 0 3px rgba(255,240,220,.85))}
-/* The sun gets its bloom back — it is the reason the sky is warming, and it is
-   the ONE thing in these packs allowed to glow. Later than the engraved
-   `filter:none` at the head of this file, deliberately: that rule flattens the
-   sun for every light pack, and this one hands the bloom back to these two.
-   The sheets keep the pair in exactly this order. */
-[data-theme=dawn] .dial circle[filter="url(#sun)"],
-[data-theme=clouds] .dial circle[filter="url(#sun)"]{filter:url(#sun);opacity:.85}
+/* The sun keeps its glow here — it is the reason the sky is warming, and it
+   is the ONE thing in these packs allowed to glow: the Furnace's dawn sun
+   carries its own warm haze (#1250, lib/sun). */
 
 /* ── 2. CLOUDS' OWN SYMBOL — the sounding balloon ──────────────────────────
    §15: every theme earns its own symbols; only star chart and after dark share
@@ -1610,7 +1606,7 @@ body.bare .desk .hero-foot{opacity:0;pointer-events:none}
    final frame deliberately does NOT pin opacity: the backdrop constellations
    carry their own distance dimming inline, and the animation must hand them
    back to it rather than flatten every household to full. */
-body.bare .desk .dial,
+body.bare .desk :is(.dial,.sunlayer),
 body.bare .desk .minisys{animation:condense 1.3s cubic-bezier(.2,.75,.25,1) both}
 @keyframes condense{
   from{transform:scale(1.72);opacity:0;filter:blur(11px)}
@@ -1655,7 +1651,7 @@ body.withdrawing .desk .hero-foot{animation:chromeout .45s ease both}
    backdrop-filter leak cannot outlive the surface it belongs to */
 body.dispersing .desk,body.dispersing .pocket{opacity:0;visibility:hidden;pointer-events:none;
   transition:opacity .7s ease .15s,visibility 0s linear .85s}
-body.dispersing .desk .dial,
+body.dispersing .desk :is(.dial,.sunlayer),
 body.dispersing .desk .minisys{animation:disperse .8s cubic-bezier(.5,0,.9,.45) both}
 @keyframes disperse{
   from{transform:scale(1);opacity:1;filter:blur(0)}
@@ -1669,13 +1665,13 @@ body.pinned .desk,body.pinned .pocket{transition:none!important}
    the three seconds still pass, the instrument still arrives after them —
    and only the movement goes. */
 @media (prefers-reduced-motion: reduce){
-  body.bare .desk .dial,body.bare .desk .minisys,
+  body.bare .desk :is(.dial,.sunlayer),body.bare .desk .minisys,
   body.instrument .desk .dial .chrome,
   body.instrument .desk .orb,body.instrument .desk .nstar,body.instrument .desk .hero-foot,
   body.withdrawing .desk .dial .chrome,
   body.withdrawing .desk .orb,body.withdrawing .desk .nstar,body.withdrawing .desk .hero-foot,
   body.withdrawing .desk .drawer,body.instrument .desk .drawer,
-  body.dispersing .desk .dial,body.dispersing .desk .minisys{animation:none!important}
+  body.dispersing .desk :is(.dial,.sunlayer),body.dispersing .desk .minisys{animation:none!important}
   body.dispersing .desk,body.dispersing .pocket{transition:none}
 }
 

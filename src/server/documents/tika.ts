@@ -187,3 +187,33 @@ export async function getTikaHealth(): Promise<TikaHealth> {
     clearTimeout(timer);
   }
 }
+
+/**
+ * Tika's own answer to `/version` (e.g. "Apache Tika 4.1.0"), for the About
+ * page (#1256). Null when the parser is switched off, does not answer, or
+ * answers with anything longer than a version line: the URL it was asked at
+ * never leaves this function.
+ */
+export async function readTikaVersion(): Promise<string | null> {
+  const config = getDocumentConfig();
+  if (!config.tika.url) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.min(config.tika.timeoutMs, 2_000));
+  try {
+    const response = await fetch(new URL("/version", config.tika.url), {
+      signal: controller.signal,
+      cache: "no-store",
+      redirect: "error",
+    });
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      return null;
+    }
+    const text = (await response.text()).trim();
+    return text.length > 0 && text.length <= 80 ? text : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}

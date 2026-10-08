@@ -127,6 +127,29 @@ stay green throughout.
 > The rest of this decision stands: SvelteKit, mechanical fidelity, and the old
 > front end not being an input to any decision.
 
+> **Amended 2026-10-06 (#1252).** "The sign-in is prerendered static and
+> reaches no database and no session" no longer describes `/`. The front door
+> now decides on the server: `handle` in `web/src/hooks.server.js` reads the
+> session once, and a reader whose session already belongs to a household
+> (`activeHouseholdId`, or `hasOnwardHousehold`) is answered 303 to `/home`
+> before any HTML is sent. Every other reader gets the door exactly as before.
+> Both answers are `cache-control: no-store`.
+>
+> Why: deciding in the browser meant a signed-in member who refreshed `/` saw
+> the sign-in door until GET /api/auth/session came back. Both reasons for
+> deciding in the browser are gone. `/` has not been prerendered since #410
+> made it the arrival. And the server already reads the session on every
+> request: the hook's gate since #789, with the layout load reading it off
+> `locals` since #1120.
+>
+> What does not change: the door's HTML is the same with or without a cookie,
+> because the hook puts nothing about the reader on `locals` at `/`, and its
+> load still returns only `fixtures`. A reader carrying the invited-landing
+> cookie is served the door, so the arrival still plays once. The hook only
+> checks that cookie is there and leaves clearing it to the session route.
+> Arrival.svelte's `decide()` stays as the fallback. `/login` and `/logout`
+> are still prerendered and still read no session.
+
 ## Alternatives considered
 
 - **Try again on React, more carefully.** Rejected: the failure mode was

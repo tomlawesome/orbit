@@ -99,9 +99,10 @@
 #     wildcard profile is the fix, not a COMPOSE_PROFILES the caller must
 #     remember), its volumes, its networks (orbit-document-processing and
 #     the rest are project-scoped) and the sidecar images Compose built for it;
-#   - the application image this run built, tagged orbit-local:<sha>-<pid> so
-#     the tag is this run's alone and removing it can never pull the rug from a
-#     concurrent run at the same commit;
+#   - the application image this run built, tagged orbit-local:<12 hex> from
+#     the commit and this run's pid, so the tag is this run's alone and
+#     removing it can never pull the rug from a concurrent run at the same
+#     commit;
 #   - the Playwright container of a WebKit run, found by the label this run
 #     gave it;
 #   - a final sweep of anything still carrying this project's Compose label.

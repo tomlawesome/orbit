@@ -23,9 +23,12 @@ const ITEM_PAGE = readFileSync(
 );
 
 describe("#1151 W1-R10: a non-staged preview gets a load deadline", () => {
-  it("openPreview starts the deadline only for a non-staged doc with a src", () => {
+  it("openPreview starts the deadline only for a non-staged doc with a page to draw", () => {
     const fn = ITEM_PAGE.slice(ITEM_PAGE.indexOf("function openPreview(doc, side)"), ITEM_PAGE.indexOf("function closePreview"));
-    expect(fn).toMatch(/if \(!doc\.staged && previewSrc\) \{\s*\n\s*previewLoadTimer = setTimeout\(\(\) => \{\s*\n\s*if \(token === previewToken\) previewFailed\(\);/u);
+    /* #1300: every drawable paper's page now comes through loadPreviewPage,
+       so "has a src" became "is available and names a preview" -- the line
+       before the deadline returns for every other paper. */
+    expect(fn).toMatch(/if \(documentPreviewStateOf\(doc\) !== "available" \|\| !doc\.previewHref\) return;\s*\n\s*if \(!doc\.staged\) \{\s*\n\s*previewLoadTimer = setTimeout\(\(\) => \{\s*\n\s*if \(token === previewToken\) previewFailed\(\);/u);
   });
 
   it("previewLoaded/previewFailed both clear the deadline timer", () => {

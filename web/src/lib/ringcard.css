@@ -131,15 +131,34 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
    closes, and a transformed sibling paints above plain in-flow boxes — without
    this the glass would slide over the line for the length of the close. */
 /* #1151 W3-Q2: static/screens/notfound.css's .errring carries this exact
-   4.2px/#8791b3 stroke, independently — the 404 page never loads this file
+   stroke, independently — the 404 page never loads this file
    (+error.svelte links plain CSS only, deliberately, see its own header),
    so there is no shared variable to tie the two to. A retune here needs the
    same numbers carried over there by hand. */
+/* The ring's line is a length the mask reads (`--stroke`), so it can be moved
+   and transitioned (door-phone.css) as the border's width was. */
+@property --stroke{syntax:"<length>";inherits:false;initial-value:3.4px}
 :where(.arrival, .ringcard) .bigring .ringstroke{width:500px;height:500px;border-radius:50%;
-      border:4.2px solid #8791b3;
+      --stroke:3.4px;
+      filter:drop-shadow(0 0 4px rgba(234,210,164,.16));
       position:relative;z-index:1;
       transition:width .5s cubic-bezier(.55,0,.2,1),
                  height .5s cubic-bezier(.55,0,.2,1)}
+/* The line itself, drawn as the site draws its ring (#1253): the cool-to-gold
+   lit gradient through three bands on one centre line, the line and two soft
+   halos 2.25 and 5.6 times its width at .12 and .05 (the mask layers add, as
+   the site's stacked strokes do). It is a pseudo-element, laid 2.5 strokes
+   out past the box so the halos have room, and the box itself carries no mask
+   that would clip it. The 404's .errring draws the same by hand. */
+:where(.arrival, .ringcard) .bigring :is(.ringstroke, .pocketstroke)::before{content:"";position:absolute;
+      inset:calc(var(--stroke) * -2.5);border-radius:50%;
+      background:linear-gradient(180deg,rgba(108,118,160,.6) 0%,rgba(170,178,207,.85) 50%,#ead2a4 86%,#ffe2a8 100%);
+      -webkit-mask:radial-gradient(closest-side,transparent calc(100% - var(--stroke) * 3.5 - .5px),#000 calc(100% - var(--stroke) * 3.5),#000 calc(100% - var(--stroke) * 2.5),transparent calc(100% - var(--stroke) * 2.5 + .5px)),
+         radial-gradient(closest-side,transparent calc(100% - var(--stroke) * 4.125 - .5px),rgba(0,0,0,0.12) calc(100% - var(--stroke) * 4.125),rgba(0,0,0,0.12) calc(100% - var(--stroke) * 1.875),transparent calc(100% - var(--stroke) * 1.875 + .5px)),
+         radial-gradient(closest-side,transparent calc(100% - var(--stroke) * 5.8 - .5px),rgba(0,0,0,0.05) calc(100% - var(--stroke) * 5.8),rgba(0,0,0,0.05) calc(100% - var(--stroke) * 0.2),transparent calc(100% - var(--stroke) * 0.2 + .5px));
+      mask:radial-gradient(closest-side,transparent calc(100% - var(--stroke) * 3.5 - .5px),#000 calc(100% - var(--stroke) * 3.5),#000 calc(100% - var(--stroke) * 2.5),transparent calc(100% - var(--stroke) * 2.5 + .5px)),
+         radial-gradient(closest-side,transparent calc(100% - var(--stroke) * 4.125 - .5px),rgba(0,0,0,0.12) calc(100% - var(--stroke) * 4.125),rgba(0,0,0,0.12) calc(100% - var(--stroke) * 1.875),transparent calc(100% - var(--stroke) * 1.875 + .5px)),
+         radial-gradient(closest-side,transparent calc(100% - var(--stroke) * 5.8 - .5px),rgba(0,0,0,0.05) calc(100% - var(--stroke) * 5.8),rgba(0,0,0,0.05) calc(100% - var(--stroke) * 0.2),transparent calc(100% - var(--stroke) * 0.2 + .5px))}
 
 /* The orb keeps its 29.4px and its station: the login orb's own angle held
    as a percentage, so it keeps its place on the ring at any size — one turn
@@ -151,12 +170,26 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
        animation:spinback 40s linear infinite;
        transition:width .5s cubic-bezier(.55,0,.2,1),
                   height .5s cubic-bezier(.55,0,.2,1)}
-/* #1151 W3-Q2: notfound.css's .errring i carries this exact
-   left/top/size/margin/colour recipe, independently — see the note on
-   .ringstroke above for why there is no shared variable. */
+/* #1151 W3-Q2: notfound.css's .errring i carries the orb's
+   left/top/size/margin recipe, independently — the 404 page never loads this
+   file (+error.svelte links plain CSS only, deliberately, see its own header),
+   so a retune here needs the same numbers carried over there by hand. */
 :where(.arrival, .ringcard) .bigring .ringorbit i{position:absolute;left:93.26%;top:24.94%;
          width:29.4px;height:29.4px;margin:-14.7px 0 0 -14.7px;
-         border-radius:50%;background:#d8b45a}
+         border-radius:50%;background:none;overflow:visible}
+/* the gold world, as the site draws it: a picture on the orb's station, held
+   upright against the ring's own turn (the site's rich finish, #1253) */
+:where(.arrival, .ringcard) .bigring .ringorbit i::before{content:"";position:absolute;inset:-78.6%;
+         background:url(/flight/door/planet-gold.webp) center/100% no-repeat;
+         animation:spinback 40s linear infinite reverse}
+/* its wake: an arc of the ring lit behind it, fading back the way it came
+   (orbit-site's .trdot .trail). The box is the ring's 150/144, so it rides
+   the ring's own size through every close and move. */
+:where(.arrival, .ringcard) .bigring .ringorbit b.trail{display:block;position:absolute;
+         left:-2.0833%;top:-2.0833%;width:104.1667%;height:104.1667%;border-radius:50%;
+         background:conic-gradient(from -50deg,rgba(255,214,140,0) 0deg,rgba(255,214,140,.08) 50deg,rgba(255,222,160,.75) 108deg,rgba(255,222,160,0) 109deg);
+         -webkit-mask:radial-gradient(closest-side,transparent 92.4%,#000 95.4%,#000 96.6%,transparent 99.6%);
+         mask:radial-gradient(closest-side,transparent 92.4%,#000 95.4%,#000 96.6%,transparent 99.6%)}
 
 /* No card of its own any more: the ring is the card, so the panel, the
    blur, the border and the shadow all go. Ink is the sky's and fixed, not
@@ -310,6 +343,7 @@ body.showform:not(.reclaimed):not(.shownew):not(.counting):not(.instrument)
   :where(.ringcard) .bigring .ringorbit{
     transition-duration:.7s!important;transition-timing-function:ease!important}
   :where(.ringcard) .bigring .ringorbit{animation:none!important}
+  :where(.ringcard) .bigring .ringorbit i::before{animation:none!important}
   .err.shown{animation:none!important}
 }
 

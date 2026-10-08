@@ -5,16 +5,18 @@ import { createCanvas, loadImage, DOMMatrix, Path2D, type Canvas, type SKRSConte
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { AppError } from "@/lib/app-error";
 import { log, type OperationalReason } from "@/lib/logger";
+import { documentPreviewPageInvalid, documentPreviewPageNotFound } from "@/server/documents/preview-page";
 import {
   classifyDocumentStructure,
   detectDocumentMediaType,
+  PDF_STRUCTURE_MAX_PAGES,
   PDF_STRUCTURE_PARSER_OPTIONS,
   type PdfDocumentParameters,
   type SupportedDocumentMediaType,
 } from "@/server/documents/validation";
 
 /**
- * Page-one raster previews (#476).
+ * Raster page previews (#476; any page since #1300).
  *
  * Rendering happens entirely in memory with the two runtime packages Orbit
  * already ships — PDF.js (Apache-2.0) and `@napi-rs/canvas` (MIT), which is
@@ -42,6 +44,8 @@ export interface DocumentPagePreview {
   mediaType: DocumentPreviewMediaType;
   width: number;
   height: number;
+  /** pdf.js's `numPages`, read after the structure check passed; 1 for an image (#1300). */
+  pageCount: number;
 }
 
 /**
@@ -218,7 +222,7 @@ async function withRenderBudget<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-async function renderPdfPageOne(bytes: Buffer): Promise<DocumentPagePreview> {
+async function renderPdfPage(bytes: Buffer, pageNumber: number): Promise<DocumentPagePreview> {
   let loadingTask: ReturnType<typeof getDocument> | undefined;
   try {
     pinRenderingGlobals();
@@ -229,8 +233,11 @@ async function renderPdfPageOne(bytes: Buffer): Promise<DocumentPagePreview> {
       standardFontDataUrl: standardFontDirectory(),
     } satisfies PdfDocumentParameters);
     const pdf = await loadingTask.promise;
-    if (pdf.numPages < 1) throw failedPreview();
-    const page = await pdf.getPage(1);
+    // The structure check already held the count to 1..cap; this is the
+    // same bound read again from the copy that draws, not a second policy.
+    if (pdf.numPages < 1 || pdf.numPages > PDF_STRUCTURE_MAX_PAGES) throw failedPreview();
+    if (pageNumber > pdf.numPages) throw documentPreviewPageNotFound();
+    const page = await pdf.getPage(pageNumber);
     const unscaled = page.getViewport({ scale: 1 });
     const size = boundedCanvasSize(unscaled.width, unscaled.height, true);
     const viewport = page.getViewport({ scale: size.width / unscaled.width });
@@ -249,7 +256,13 @@ async function renderPdfPageOne(bytes: Buffer): Promise<DocumentPagePreview> {
       viewport,
     }).promise;
     page.cleanup();
-    return { bytes: canvas.toBuffer("image/png"), mediaType: "image/png", width: size.width, height: size.height };
+    return {
+      bytes: canvas.toBuffer("image/png"),
+      mediaType: "image/png",
+      width: size.width,
+      height: size.height,
+      pageCount: pdf.numPages,
+    };
   } finally {
     if (loadingTask) await loadingTask.destroy().catch(() => undefined);
   }
@@ -266,22 +279,30 @@ async function renderRasterPage(bytes: Buffer, mediaType: "image/jpeg" | "image/
   }
   context.drawImage(image, 0, 0, size.width, size.height);
   return mediaType === "image/jpeg"
-    ? { bytes: canvas.toBuffer("image/jpeg", JPEG_QUALITY), mediaType, width: size.width, height: size.height }
-    : { bytes: canvas.toBuffer("image/png"), mediaType, width: size.width, height: size.height };
+    ? { bytes: canvas.toBuffer("image/jpeg", JPEG_QUALITY), mediaType, width: size.width, height: size.height, pageCount: 1 }
+    : { bytes: canvas.toBuffer("image/png"), mediaType, width: size.width, height: size.height, pageCount: 1 };
 }
 
 /**
- * Renders page one of already-decrypted document bytes.
+ * Renders one page of already-decrypted document bytes: page one unless the
+ * caller asks for another (#1300), with the document's page count.
  *
  * The bytes are re-identified and re-inspected here rather than trusted from
  * the stored media type: a preview must refuse exactly what upload refused,
  * and both failure modes are bounded codes a screen can word rather than a
- * 500.
+ * 500. The page number changes none of that: identification, the structure
+ * check and the render budget run first and unchanged, and only then is the
+ * requested page looked for. A page past the end is a 404 in its own words;
+ * an image has exactly one page. `pageNumber` arrives already bounded by
+ * `parseDocumentPreviewPage`; the integer check here only keeps a direct
+ * caller from reaching pdf.js with anything else, and draws nothing.
  */
 export async function renderDocumentPagePreview(
   bytes: Buffer,
   storedMediaType: string,
+  pageNumber = 1,
 ): Promise<DocumentPagePreview> {
+  if (!Number.isSafeInteger(pageNumber) || pageNumber < 1) throw documentPreviewPageInvalid();
   let detected: SupportedDocumentMediaType;
   try {
     detected = detectDocumentMediaType(bytes);
@@ -294,9 +315,9 @@ export async function renderDocumentPagePreview(
 
   return withRenderBudget(async () => {
     try {
-      return detected === "application/pdf"
-        ? await renderPdfPageOne(bytes)
-        : await renderRasterPage(bytes, detected);
+      if (detected === "application/pdf") return await renderPdfPage(bytes, pageNumber);
+      if (pageNumber !== 1) throw documentPreviewPageNotFound();
+      return await renderRasterPage(bytes, detected);
     } catch (error) {
       if (error instanceof AppError) throw error;
       throw failedPreview();

@@ -320,6 +320,33 @@ export function syntheticPdfWithPages(pages: number): Buffer {
   return buildClassicPdf(objects).bytes;
 }
 
+/**
+ * A PDF whose pages can be told apart once drawn (#1300): page k reads
+ * "Synthetic page k of n" and is `pageWidth(k)` points wide, so a preview of
+ * it has its own width. Synthetic only.
+ */
+export function syntheticPdfWithNumberedPages(pages: number): Buffer {
+  const kids = Array.from({ length: pages }, (_, index) => `${5 + index * 2} 0 R`).join(" ");
+  const objects = [
+    object(1, "<< /Type /Catalog /Pages 2 0 R >>"),
+    object(2, `<< /Type /Pages /Kids [${kids}] /Count ${pages} >>`),
+    object(3, "<< /Producer (page turning fixture) >>"),
+    object(4, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"),
+  ];
+  for (let index = 0; index < pages; index += 1) {
+    const page = index + 1;
+    const content = pageContent(`Synthetic page ${page} of ${pages}`);
+    objects.push(object(5 + index * 2, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${syntheticNumberedPageWidth(page)} 792] /Resources << /Font << /F1 4 0 R >> >> /Contents ${6 + index * 2} 0 R >>`));
+    objects.push(object(6 + index * 2, streamObject(`/Length ${content.length}`, content)));
+  }
+  return buildClassicPdf(objects).bytes;
+}
+
+/** Page k's width in points in `syntheticPdfWithNumberedPages`: 400, 440, 480, ... */
+export function syntheticNumberedPageWidth(page: number): number {
+  return 360 + page * 40;
+}
+
 export const syntheticStructurePdfFixtures = [
   { name: "classic compressed stream with indirect length and filter array", bytes: classicCompressedPdf() },
   { name: "compressed cross-reference stream", bytes: xrefStreamPdf() },

@@ -17,6 +17,7 @@ import {
 } from "./support/fixtures";
 import { callRoute, callRouteForSession, loadRoute } from "./support/request-event";
 import { syntheticPdf as createSyntheticPdf } from "../support/synthetic-documents";
+import { syntheticNumberedPageWidth, syntheticPdfWithNumberedPages } from "../support/generated-pdf-documents";
 
 const { GET: downloadDocument } = await loadRoute("documents/[documentId]/download");
 const { DELETE: deleteDocument } = await loadRoute("documents/[documentId]");
@@ -116,18 +117,21 @@ function draftContext(draftId: string) {
   return { draftId };
 }
 
-async function uploadSyntheticDocument(fixture: Awaited<ReturnType<typeof createIntegrationFixture>>) {
+async function uploadSyntheticDocument(
+  fixture: Awaited<ReturnType<typeof createIntegrationFixture>>,
+  bytes: Buffer = syntheticPdf,
+) {
   const session = await fixture.session("member");
   const url = `http://127.0.0.1:3000/api/households/${fixture.household.id}/items/${fixture.item.id}/documents`;
   const response = await callRouteForSession(uploadDocument, session, {
     url,
     method: "POST",
     headers: {
-      "content-length": String(syntheticPdf.length),
+      "content-length": String(bytes.length),
       "content-type": "application/pdf",
       "x-orbit-filename": encodeURIComponent("synthetic-policy.pdf"),
     },
-    body: syntheticPdf,
+    body: new Uint8Array(bytes),
     params: itemDocumentsContext(fixture.household.id, fixture.item.id),
   });
   expect(response.status).toBe(201);
@@ -1465,6 +1469,52 @@ describe("document page-one preview over HTTP", () => {
     expect(await response.json()).toEqual({
       error: { code: "document_not_found", message: "That document is not available" },
     });
+  });
+
+  /* #1300: page turning. The same route, the same checks, any page. */
+  it("draws the page asked for and carries the page count, page one when none is asked for", async () => {
+    const fixture = await createIntegrationFixture("document-preview-pages");
+    const { session, documentId } = await uploadSyntheticDocument(fixture, syntheticPdfWithNumberedPages(3));
+    const ask = (query: string) => callRouteForSession(previewDocument, session, {
+      url: `http://127.0.0.1:3000/api/documents/${documentId}/preview${query}`,
+      params: documentContext(documentId),
+    });
+    /* Each page of the fixture is its own width, so the PNG's own header
+       says which page was drawn: 1200px tall, width scaled to match. */
+    const drawnWidth = async (response: Response) => Buffer.from(await response.arrayBuffer()).readUInt32BE(16);
+    const expectedWidth = (page: number) => Math.round(syntheticNumberedPageWidth(page) * (1_200 / 792));
+
+    const first = await ask("");
+    expect(first.status).toBe(200);
+    expect(first.headers.get("x-orbit-page-count")).toBe("3");
+    expect(await drawnWidth(first)).toBe(expectedWidth(1));
+
+    const last = await ask("?page=3");
+    expect(last.status).toBe(200);
+    expect(last.headers.get("x-orbit-page-count")).toBe("3");
+    expect(last.headers.get("cache-control")).toBe("private, no-store");
+    expect(await drawnWidth(last)).toBe(expectedWidth(3));
+  });
+
+  it("refuses a page past the end, page 0 and a non-number in words, never as a picture", async () => {
+    const fixture = await createIntegrationFixture("document-preview-bad-pages");
+    const { session, documentId } = await uploadSyntheticDocument(fixture, syntheticPdfWithNumberedPages(3));
+    const ask = (query: string) => callRouteForSession(previewDocument, session, {
+      url: `http://127.0.0.1:3000/api/documents/${documentId}/preview${query}`,
+      params: documentContext(documentId),
+    });
+
+    const pastEnd = await ask("?page=4");
+    expect(pastEnd.status).toBe(404);
+    expect(await pastEnd.json()).toEqual({
+      error: { code: "document_preview_page_not_found", message: "That page is past the end of this document" },
+    });
+    for (const query of ["?page=0", "?page=-2", "?page=two", "?page=1.5"]) {
+      const refused = await ask(query);
+      expect(refused.status).toBe(400);
+      expect(refused.headers.get("cache-control")).toContain("no-store");
+      expect((await refused.json()).error.code).toBe("document_preview_page_invalid");
+    }
   });
 
   it("answers nothing without a session", async () => {

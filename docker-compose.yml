@@ -30,6 +30,9 @@ services:
     restart: unless-stopped
     env_file: .env-orbit
     environment:
+      # The image reference itself, so the About page can say which image
+      # this is (#1256): a container cannot read its own digest.
+      ORBIT_IMAGE: "${ORBIT_IMAGE}"
       POSTGRES_HOST: orbit-db
       POSTGRES_PASSWORD_FILE: /run/orbit-secrets/orbit-postgres-password
       SESSION_SECRET_FILE: /run/orbit-secrets/orbit-session-secret

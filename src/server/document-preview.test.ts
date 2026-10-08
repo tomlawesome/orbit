@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useScratchTemporaryDirectory, type ScratchDirectory } from "../../tests/support/scratch-directory";
 import { syntheticPdf } from "../../tests/support/synthetic-documents";
+import { syntheticPdfWithNumberedPages } from "../../tests/support/generated-pdf-documents";
 
 /**
  * The page-one preview's authorization and plaintext boundary (#476).
@@ -234,6 +235,19 @@ describe("readDocumentPagePreview", () => {
 
     expect(plaintext.every((byte) => byte === 0)).toBe(true);
     expect(scratch.entries()).toEqual([]);
+  });
+
+  it("draws the page asked for and says how many there are; past the end is refused, and still zeroed (#1300)", async () => {
+    arrangeReadable(syntheticPdfWithNumberedPages(3));
+    const second = await readDocumentPagePreview(READER, DOCUMENT, 2);
+    expect(second).toMatchObject({ mediaType: "image/png", pageCount: 3 });
+
+    const plaintext = arrangeReadable(syntheticPdfWithNumberedPages(3));
+    await expect(readDocumentPagePreview(READER, DOCUMENT, 4)).rejects.toMatchObject({
+      code: "document_preview_page_not_found",
+      status: 404,
+    });
+    expect(plaintext.every((byte) => byte === 0)).toBe(true);
   });
 
   it("zeroes the decrypted plaintext even when the document cannot be previewed", async () => {

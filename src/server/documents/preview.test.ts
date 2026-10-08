@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { log } from "@/lib/logger";
 import { useScratchTemporaryDirectory, type ScratchDirectory } from "../../../tests/support/scratch-directory";
 import { syntheticPdf } from "../../../tests/support/synthetic-documents";
+import { syntheticNumberedPageWidth, syntheticPdfWithNumberedPages } from "../../../tests/support/generated-pdf-documents";
 import {
   DOCUMENT_PREVIEW_MAX_EDGE,
   renderDocumentPagePreview,
@@ -145,6 +146,66 @@ describe("renderDocumentPagePreview", () => {
     await expect(renderDocumentPagePreview(Buffer.alloc(64), "application/pdf")).rejects.toThrow();
 
     expect(scratch.entries()).toEqual([]);
+  });
+
+  describe("any page, not only page one (#1300)", () => {
+    /** The preview width a page of the numbered fixture draws at: its own points, scaled to the 792pt height's bound. */
+    const drawnWidth = (page: number) => Math.round(syntheticNumberedPageWidth(page) * (DOCUMENT_PREVIEW_MAX_EDGE / 792));
+
+    it("draws page one when no page is asked for, and says how many pages there are", async () => {
+      const preview = await renderDocumentPagePreview(syntheticPdfWithNumberedPages(3), "application/pdf");
+
+      expect(preview).toMatchObject({ pageCount: 3, width: drawnWidth(1), height: DOCUMENT_PREVIEW_MAX_EDGE });
+    });
+
+    it("draws the page asked for, every one of them, to the last", async () => {
+      const bytes = syntheticPdfWithNumberedPages(3);
+
+      for (const page of [1, 2, 3]) {
+        const preview = await renderDocumentPagePreview(bytes, "application/pdf", page);
+        expect(preview).toMatchObject({ mediaType: "image/png", pageCount: 3, width: drawnWidth(page) });
+        expect(pngDimensions(preview.bytes)).toEqual({ width: drawnWidth(page), height: DOCUMENT_PREVIEW_MAX_EDGE });
+      }
+      expect(scratch.entries()).toEqual([]);
+    });
+
+    it("refuses a page past the end in its own words, once the document has passed every check", async () => {
+      await expect(renderDocumentPagePreview(syntheticPdfWithNumberedPages(3), "application/pdf", 4))
+        .rejects.toMatchObject({ code: "document_preview_page_not_found", status: 404 });
+    });
+
+    it("still refuses what upload refused before it looks for any page", async () => {
+      const truncated = syntheticPdf("Preview fixture").subarray(0, 120);
+
+      await expect(renderDocumentPagePreview(truncated, "application/pdf", 2))
+        .rejects.toMatchObject({ code: "document_preview_unsupported", status: 415 });
+    });
+
+    it("still keeps to the render budget for a later page", async () => {
+      setDocumentPreviewRenderBudgetForTests(0);
+      try {
+        await expect(renderDocumentPagePreview(syntheticPdfWithNumberedPages(3), "application/pdf", 3))
+          .rejects.toMatchObject({ code: "document_preview_failed", status: 422 });
+      } finally {
+        setDocumentPreviewRenderBudgetForTests(undefined);
+      }
+    });
+
+    it("refuses page 0, a negative page and a fraction from a direct caller, drawing nothing", async () => {
+      for (const page of [0, -1, 1.5, Number.NaN]) {
+        await expect(renderDocumentPagePreview(syntheticPdfWithNumberedPages(3), "application/pdf", page))
+          .rejects.toMatchObject({ code: "document_preview_page_invalid", status: 400 });
+      }
+    });
+
+    it("counts an image as one page, and refuses a second", async () => {
+      const png = rasterFixture("image/png", 320, 200);
+
+      await expect(renderDocumentPagePreview(png, "image/png")).resolves.toMatchObject({ pageCount: 1 });
+      await expect(renderDocumentPagePreview(png, "image/png", 1)).resolves.toMatchObject({ pageCount: 1 });
+      await expect(renderDocumentPagePreview(png, "image/png", 2))
+        .rejects.toMatchObject({ code: "document_preview_page_not_found", status: 404 });
+    });
   });
 
   describe("document.preview logging (#494)", () => {

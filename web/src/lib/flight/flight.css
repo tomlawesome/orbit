@@ -9,16 +9,36 @@
  * descending / farewell), because the staging is class-driven, which is
  * exactly what lets reduced motion keep the whole story and drop only the
  * movement.
+ *
+ * The dawn's first light and its lockup are orbit-site's own since #1253
+ * (c189d38): after `lit` the ring is drawn by 1.75 s, the word by 1.8 s, the
+ * button is ready at 2.45 s, the gold world at 2.9 s, the rays at 4.4 s and the
+ * Earth's day side at 4.8 s. WHEN `lit` happens is the site's too (owner,
+ * 2026-10-07): it waits for the fonts, the Earth's first picture and a lap of
+ * the runner (first-light.js), so the 2026-10-06 limits (button by 2 s,
+ * sunrise by 3-3.5 s from navigation) are withdrawn;
+ * door-reveal-timing.spec.js checks the offsets after `lit` instead.
  */
 
 /* ══ THE DAWN AND THE DUSK ═══════════════════════════════════════════════ */
 /* the sign-in's own ground, under its dawn */
 .signin-stage{position:fixed;inset:0;z-index:0;background:#04060e}
+/* the page's own chrome leaving, one frame set for every page that signs out
+   (home.css names the same frames for the desk's) */
+@keyframes chromeout{from{opacity:1}to{opacity:0}}
 
 #dawn,#dusk{position:fixed;inset:0;z-index:1;opacity:0;
             transition:opacity .7s ease}
 /* `shown` is a surface standing on its own (the sign-in); the body classes are
    the FLIGHT holding it up and then letting it go. */
+/* THE LOCKUP'S MEASURE (#1253, orbit-site's site.css:173-175, 202-203): the
+   ring's width sets where everything under it goes, so the word, the way in
+   and the gap between them are fractions of it and keep their proportions on
+   every screen. The glyph is --R wide; the ring inside it is .72R. */
+#dawn,#dusk{--R:min(400px,80vw,46svh);--lift:4svh}
+@media (max-width:560px){
+  #dawn,#dusk{--R:min(420px,68vw,46svh);--lift:2svh}
+}
 #dawn.shown{opacity:1}
 body.showdawn #dawn{opacity:1}
 body.showdusk #dusk{opacity:1}
@@ -26,6 +46,8 @@ body.showdusk #dusk{opacity:1}
 #dawn .sky svg,#dusk .sky svg,#dawn .world svg,#dusk .world svg{
     position:absolute;inset:0;width:100%;height:100%}
 #dawn .world,#dusk .world{position:absolute;inset:0}
+/* the dusk's gradients, kept in a drawing of their own with no size (#1299) */
+#dusk .world svg.defs{width:0;height:0}
 /* Mobile-Safari squeeze (#503): the far/near star groups were the OTHER
    candidate for will-change:transform below — they too run a `transform`
    forever (360s/180s linear, never settling). Tried and measured against the
@@ -39,7 +61,17 @@ body.showdusk #dusk{opacity:1}
    so it stays off: the two rows below are exactly HEAD's, unpromoted. The
    sway rasters (#502) took the same measurement and came back clean (0 px),
    which is the one difference: a still picture rotating loses nothing to
-   layer promotion; many 1-2px circles repainted at a new layer boundary do. */
+   layer promotion; many 1-2px circles repainted at a new layer boundary do.
+   THE DUSK'S SKY IS LAID OUT DIFFERENTLY SINCE #1299 (orbit-site's sky.js and
+   site.css:133-144): each drift and each twinkle moves a whole <svg> of its
+   own, so the browser slides or fades a layer instead of repainting every
+   star of one shared picture on every frame, which on Firefox was the
+   descent's lag. Still no will-change: a running animation is its own layer
+   anyway, and a frame held still is drawn exactly as before. The layers
+   drift a measured tile (--tile, Dusk.svelte) and show what lies past their
+   own box, so the sky clips them where each svg used to clip itself. */
+#dusk .sky{overflow:hidden}
+#dusk .sky svg{overflow:visible}
 /* the approach is POL-11's ordinary drift, at the flight's own periods, so it
    names $lib/atmosphere.css's driftf/driftn rather than a seventh copy (#445) */
 #dawn .sky .far{animation:driftf 360s linear infinite}
@@ -49,25 +81,32 @@ body.showdusk #dusk{opacity:1}
    genuinely not POL-11's, so it is the one that keeps its own keyframes. */
 #dusk .sky .far{animation:recede 360s linear infinite}
 #dusk .sky .near{animation:recede 180s linear infinite}
-@keyframes recede{from{transform:translateX(-1600px)}to{transform:translateX(0)}}
-/* the shared twinkle curve's default range IS this pair (atmosphere.css) */
-#dawn .sky .tw,#dusk .sky .tw{animation:twinkle 4.5s ease-in-out infinite alternate}
-/* first light: dawn breaks once on load, exactly as the login does it */
+@keyframes recede{from{transform:translateX(calc(-1 * var(--tile, 1600px)))}to{transform:translateX(0)}}
+/* the shared twinkle curve's default range IS this pair (atmosphere.css); a
+   dusk twinkler is a far layer of its own, so it drifts and twinkles at once
+   (its delay is the star's own, inline: Dusk.svelte) */
+#dawn .sky .tw{animation:twinkle 4.5s ease-in-out infinite alternate}
+#dusk .sky .tw{opacity:var(--o);animation:recede 360s linear infinite,twinkle 4.5s ease-in-out infinite alternate}
+/* first light: dawn breaks once on load, exactly as the login does it. The
+   timings, curves and the 9s breath are orbit-site's own (assets/site.css
+   145-172, c189d38): after `lit` the sky is up at about 3s, the sun point at
+   3.7s, the rays last at 4.4s, the Earth's day side at 4.8s. */
 .dawnlayer{opacity:0;transition:opacity 3s ease}
 body.lit .dawnlayer{opacity:1}
 .rim{opacity:0;transition:opacity 2.2s ease .3s}
 body.lit .rim{opacity:1}
 .shimmer{stroke-dasharray:3 97;animation:sweep 22s linear infinite;opacity:0;
-         transition:opacity 1.8s ease 1.2s}
+         transition:opacity 2s ease 1.5s}
 body.lit .shimmer{opacity:.9}
 @keyframes sweep{to{stroke-dashoffset:-100}}
 .sunpt{opacity:0;transition:opacity 3.2s ease .5s}
 body.lit .sunpt{opacity:1}
-.sunpt-breathe{animation:breathe-sun 7s ease-in-out infinite alternate}
-@keyframes breathe-sun{from{opacity:.8}to{opacity:1}}
+/* the glows that breathe, breathing together as one layer: the zodiacal cone,
+   the sun's three discs and its picture (site.css:161-162), no blend mode */
+.sunpt-breathe{animation:breathe-world 9s ease-in-out infinite alternate;will-change:opacity}
+@keyframes breathe-world{from{opacity:.84}to{opacity:1}}
 .rays{transform-origin:800px 920px;opacity:0;transform:scale(1,.55);
-      transition:opacity 3.6s ease .9s,transform 4.2s cubic-bezier(.22,.6,.25,1) .9s;
-      mix-blend-mode:screen}
+      transition:opacity 3.4s ease .4s,transform 4s cubic-bezier(.2,.7,.2,1) .4s}
 body.lit .rays{opacity:1;transform:scale(1,1)}
 .rays .sway1{transform-origin:800px 920px;will-change:transform;
              animation:sway1 41s ease-in-out infinite alternate}
@@ -75,9 +114,23 @@ body.lit .rays{opacity:1;transform:scale(1,1)}
              animation:sway2 63s ease-in-out infinite alternate}
 @keyframes sway1{from{transform:rotate(-1.8deg)}to{transform:rotate(2.1deg)}}
 @keyframes sway2{from{transform:rotate(1.5deg)}to{transform:rotate(-1.3deg)}}
-.scatter{animation:breathe-band 9s ease-in-out infinite alternate}
-@keyframes breathe-band{from{opacity:.8}to{opacity:1}}
-.zodiacal{animation:zbreathe 13s ease-in-out infinite alternate;mix-blend-mode:screen}
+/* under the flight, the dawn's slow loops wait (site.css:1201): the stars'
+   drift, the rays' sway and the sun's breath */
+body.showwarp #dawn .sky *,body.showwarp #dawn .rays image,body.showwarp #dawn .sunpt-breathe{
+      animation-play-state:paused}
+/* THE EARTH (#1253, Dawn.svelte): each picture fades in as it arrives; the
+   one with the sunrise on it waits for first light and comes up slowly with
+   it (4.5s after .3s, site.css:156), and the crisp rim gives way once the
+   picture carries the limb */
+#dawn .earth image{opacity:0;transition:opacity 1.2s ease}
+#dawn .earth image.in{opacity:1}
+#dusk .earth image{opacity:0;transition:opacity 1.2s ease}
+#dusk .earth image.in{opacity:1}
+#dusk .crisp{transition:opacity 1s ease}
+#dusk .world.earthy .crisp{opacity:0}
+#dawn .earth .up.in{opacity:0;transition:opacity 4.5s cubic-bezier(.4,0,.3,1) .3s}
+body.lit #dawn .earth .up.in{opacity:1}
+#dawn .world.earthy .rim{opacity:0}
 @keyframes zbreathe{from{opacity:.55}to{opacity:.95}}
 
 /* ══ THE LOCKUP AND THE GATE ═════════════════════════════════════════════
@@ -94,11 +147,13 @@ body.lit .rays{opacity:1;transform:scale(1,1)}
    of it (web/src/routes/login at 0ff28da/cfa8388, and the sunset baseline
    that was reworded to match it), restored here verbatim:
 
-     · the lockup is CENTRED in the viewport;
-     · the mark is much larger — the ring at 420px with `orbit` set plain
-       INSIDE it and no filled centre, the word occupying that space (CON-19's
-       sign-in exception, amended 2026-08-14);
-     · the ask sits inside the ring directly beneath the word. §10 also
+     · the lockup is CENTRED in the viewport (as orbit-site centres it, #1253:
+       the glyph is --R wide, the way in in the row under it);
+     · the mark is much larger, with `orbit` set plain INSIDE the ring and no
+       filled centre, the word occupying that space (CON-19's sign-in
+       exception, amended 2026-08-14);
+     · the ask stood inside the ring directly beneath the word; it now stands
+       just under the ring, as the site has it. §10 also
        records `Authenticate` in a thin white outline pill; that lost the same
        day, because white on the accent fails contrast in every pack (worst
        case 1.66:1). The pill came back in dark ink, sized down, reading
@@ -112,45 +167,93 @@ body.lit .rays{opacity:1;transform:scale(1,1)}
    session show one face, and the descent's mark sets down on the shape the
    climb lifted off. */
 .loginchrome{position:absolute;inset:0;z-index:3;display:grid;place-items:center;
+             padding-bottom:calc(var(--lift) * 2);
              transition:opacity .8s ease,transform 1s cubic-bezier(.3,.7,.3,1),filter .8s ease}
-/* Glyph, word and ask share ONE grid cell, so the word is centred on the
-   ring's own centre (cx=100 cy=100 of the 200 viewBox) at any size. */
+/* The glyph and the word share ONE grid cell, so the word is centred on the
+   ring's own centre (cx=100 cy=100 of the 200 viewBox) at any size; the way
+   in stands in the row under them (site.css:206-218). The lockup is centred
+   as a whole, which lifts the ring a little. */
 .loginchrome .lockup{position:relative;display:inline-grid;place-items:center;
         text-align:center;transition:transform 1s cubic-bezier(.3,.7,.3,1)}
 .loginchrome .lockup .glyph{grid-area:1/1;line-height:0}
+.loginchrome .lockup .glyph svg{width:var(--R);height:auto;overflow:visible}
+#login-glyph{position:relative}
 /* The one motion CON-19 permits the mark anywhere: the planet drifts the
    ring, once per 40s. The dusk unwinds it — see THE GOODBYE'S SKY. */
 .loginchrome .lockup .glyph .tr{animation:spinback 40s linear infinite;
         transform-origin:100px 100px}
 @keyframes spinback{to{transform:rotate(360deg)}}
-.loginchrome .lockup .name{grid-area:1/1;font:600 72px var(--display);
-        letter-spacing:.015em;line-height:1;color:#e9edf8}
-/* Dropped clear of the word inside the ring: 36px is half the name's line
-   box, 20px the gap, 18px half the button. The offset lives on the wrapper
-   and the entrance on .gate, so two transforms never fight over one element. */
-.gate-wrap{grid-area:1/1;align-self:center;justify-self:center;
-           transform:translateY(74px)}
-/* THE RATIFIED GATE, and the only pill in the family: the goodbye's
-   "Sign back in" is this same rule with one word changed (§15, 2026-08-17 —
-   "the SIGN-IN BUTTON must be IDENTICAL on both surfaces"). The delayed
-   entrance is 08-14's own: the mark holds the screen alone first. */
-/* `#dusk .gate-wrap a` rides in the SAME selector list rather than in a rule
-   of its own: /home renders the goodbye's way back in as <a class="again">
-   and that file is being ported by another hand right now, so the button gets
-   the ratified treatment from one declaration block either way. When that
-   anchor becomes class="gate" the selector can go, and nothing else changes.
-   `line-height:1` is here for the same reason: a <button> and an <a> would
-   otherwise be different heights wearing the same rule. */
-.gate,#dusk .gate-wrap a{font:600 12px var(--display);color:#04060e;background:#d8b45a;
-      border:0;border-radius:99px;padding:11px 30px;cursor:pointer;
-      letter-spacing:.04em;text-decoration:none;display:inline-block;line-height:normal;
-      box-shadow:0 0 28px rgba(216,180,90,.22);
+/* the gold world keeps upright as its group turns: the same turn the other way
+   round its own centre (the site's rich finish, #1253) */
+.loginchrome .lockup .glyph .world{transform-origin:163px 63.5px;animation:spinback 40s linear infinite reverse}
+.loginchrome .lockup .name{grid-area:1/1;font:600 calc(var(--R) * .145) var(--display);
+        letter-spacing:.01em;line-height:1;background:linear-gradient(180deg,#fdfbf7 12%,#f2e7d3 60%,#dcbd80 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 calc(var(--R) * .045) rgba(255,206,140,.2))}
+
+/* FIRST LIGHT ON THE LOCKUP, staged (site.css:177-199, from the Earth and the
+   type being in): the ring is drawn as one dash, the name comes up through it
+   blurred and then clear, and the gold world and the way in follow. Nothing is
+   shown before it is ready, so nothing changes its face as it arrives. Only
+   where the door is first light's own: home's launch surface (body.launching)
+   has no first light to wait for and keeps the lockup the climb lifts off.
+   Once the ring is round the dash is dropped (draw-ring), so the circle closes
+   on itself rather than leaving a hairline gap at three o'clock. */
+body:not(.launching) #dawn .lockup .ring{stroke-dasharray:100 100;stroke-dashoffset:100}
+body.lit:not(.launching) #dawn .lockup .ring{animation:draw-ring 1.6s .15s both}
+@keyframes draw-ring{from{stroke-dasharray:100 100;stroke-dashoffset:100;animation-timing-function:cubic-bezier(.45,0,.2,1)}99.9%{stroke-dasharray:100 100;stroke-dashoffset:0}to{stroke-dasharray:none;stroke-dashoffset:0}}
+body:not(.launching) #dawn .lockup .name{opacity:0;transform:translateY(8px);filter:blur(6px) drop-shadow(0 0 0 rgba(255,206,140,0));
+        transition:opacity 1.1s ease .7s,transform 1.3s cubic-bezier(.2,.7,.2,1) .7s,filter 1.1s ease .7s}
+body.lit:not(.launching) #dawn .lockup .name{opacity:1;transform:none;filter:blur(0) drop-shadow(0 0 calc(var(--R) * .045) rgba(255,206,140,.2))}
+#dawn .lockup .glyph .tr{opacity:0;transition:opacity 1.3s ease 1.6s}
+body.lit #dawn .lockup .glyph .tr{opacity:1}
+
+/* WHILE THE DAWN'S FIRST PIECES ARE STILL COMING (SignIn.svelte holds
+   body.loading from mount until `lit`) the ring is a light running its circle
+   (site.css:187-193): a comet on the ring's line, its tail fading behind it,
+   each lap easing out to three o'clock where the drawing begins. It is only
+   turned, never redrawn, so the compositor keeps it going while the page is
+   busy. */
+#dawn .lockup .glyph .runner{position:absolute;left:13.5%;top:13.5%;width:73%;height:73%;border-radius:50%;pointer-events:none;opacity:0;
+  background:conic-gradient(from 90deg,rgba(135,145,179,0) 0turn,rgba(135,145,179,0) .45turn,rgba(170,178,207,.5) .85turn,rgba(233,237,248,.95) .995turn,rgba(233,237,248,0) 1turn);
+  -webkit-mask:radial-gradient(closest-side,transparent 96.9%,#000 97.4%,#000 99.5%,transparent 100%);mask:radial-gradient(closest-side,transparent 96.9%,#000 97.4%,#000 99.5%,transparent 100%);
+  filter:drop-shadow(0 0 3px rgba(200,210,240,.35));transition:opacity .4s ease;will-change:transform,opacity}
+body.loading #dawn .lockup .glyph .runner{opacity:1;animation:runner 1.8s cubic-bezier(.45,.05,.55,.95) infinite}
+@keyframes runner{to{transform:rotate(1turn)}}
+
+/* The way in stands in the row under the ring, a little way off it
+   (site.css:222-223), and under the flight's launch its box does not move. */
+.gate-wrap{grid-area:2/1;position:relative;justify-self:center;margin-top:calc(var(--R) * .03)}
+/* THE GATE (site.css:224-230, 1255-1271, "html.rich #door .gate"), the only
+   pill in the family: a dark glass pill ringed like the logo, its edge cool at
+   the top and lit gold from the dawn below, a spark of the gold world running
+   round it the way the gold world runs round the ring; reached, it fills with
+   warm light. The goodbye's "Sign back in" is this same rule with one word
+   changed (§15, 2026-08-17: "the SIGN-IN BUTTON must be IDENTICAL on both
+   surfaces"); only its entrance differs (THE DUSK GOODBYE, below).
+   `#dusk .gate-wrap a` rides in the SAME selector list: /home renders the
+   goodbye's way back in as <a class="again"> and /logout as <a class="gate">.
+   `line-height:normal` keeps a <button> and an <a> one height. Sized as the
+   site sizes it: 12px to 16px by the ring, .86em by 2.3em of padding. */
+@property --ga{syntax:"<angle>";inherits:false;initial-value:0deg}
+#dawn .gate,#dusk .gate-wrap a{font:600 clamp(12px,calc(var(--R) * .04),16px) var(--display);
+      color:#f3e5c4;border:1.5px solid transparent;border-radius:99px;padding:.86em 2.3em;cursor:pointer;
+      letter-spacing:.07em;text-decoration:none;display:inline-block;line-height:normal;
+      background:linear-gradient(180deg,#0d0d13,#19130e) padding-box,
+        conic-gradient(from var(--ga),rgba(255,214,140,0) 0deg 230deg,rgba(255,218,150,.9) 340deg,#fff4dc 356deg,rgba(255,214,140,0) 360deg) border-box,
+        linear-gradient(180deg,rgba(150,160,198,.45),rgba(240,212,160,.85)) border-box;
+      box-shadow:0 14px 34px -16px rgba(255,186,100,.6),inset 0 -12px 20px -14px rgba(255,196,120,.35);
+      animation:gate-orbit 7s linear infinite;
       opacity:0;transform:translateY(10px);
-      transition:opacity 1.6s ease 3.6s,transform 1.6s ease 3.6s,
+      transition:opacity 1.2s ease 1.25s,transform 1.2s cubic-bezier(.2,.7,.2,1) 1.25s,
                  filter .35s ease,box-shadow .3s ease}
-body.lit .gate{opacity:1;transform:none}
-.gate:hover,#dusk .gate-wrap a:hover{filter:brightness(1.08)}
-.gate.flash{filter:brightness(1.25);box-shadow:0 0 0 6px rgba(216,180,90,.22),0 0 60px rgba(216,180,90,.6)}
+#dawn .gate:hover,#dawn .gate:focus-visible,#dusk .gate-wrap a:hover,#dusk .gate-wrap a:focus-visible{
+      filter:none;color:#fffaf0;outline:0;
+      background:linear-gradient(180deg,#3d2d16,#6e4f22) padding-box,
+        conic-gradient(from var(--ga),rgba(255,214,140,0) 0deg 230deg,rgba(255,218,150,.9) 340deg,#fff4dc 356deg,rgba(255,214,140,0) 360deg) border-box,
+        linear-gradient(180deg,rgba(255,228,180,.7),#f3d39a) border-box;
+      box-shadow:0 16px 40px -14px rgba(255,186,100,.75),0 0 36px rgba(255,200,120,.25)}
+@keyframes gate-orbit{to{--ga:360deg}}
+body.lit #dawn .gate{opacity:1;transform:none}
+#dawn .gate.flash{filter:brightness(1.25)}
 
 /* ══ THE LOCAL LOGIN LINE (#914, plan §2.7) ══════════════════════════════
    Mixed mode only — an instance with an identity provider AND at least one
@@ -158,17 +261,17 @@ body.lit .gate{opacity:1;transform:none}
    is UNCHANGED and this is the one thing added to it, so the line is placed
    out of the flow: `.gate-wrap` is centred in its grid cell, and a second
    element laid out under the button would lift the button by half its own
-   height. Absolutely positioned off the wrapper's own bottom edge, it cannot
-   move anything. (No `position:relative` is needed for that: the wrapper's
-   `translateY(74px)` already makes it the containing block.)
+   height. Absolutely positioned off the wrapper's own bottom edge (the
+   wrapper is `position:relative`, #1253), it cannot move anything: the ring
+   stands where it stands with or without the line.
 
    It rides in on the gate's own delayed entrance, a beat later, so the mark
    still holds the screen alone first and the line arrives as an afterthought
    rather than as a rival to the pill. The word is the owner's, lower case:
    `local login`. */
 .localopen{position:absolute;top:100%;left:50%;transform:translateX(-50%);
-      margin-top:18px;white-space:nowrap;text-align:center;
-      opacity:0;transition:opacity 1.6s ease 4.1s}
+      margin-top:14px;white-space:nowrap;text-align:center;
+      opacity:0;transition:opacity 1.2s ease 1.75s}
 body.lit .localopen{opacity:1}
 
 /* ══ THE THREE STATES WHERE THE DOOR CANNOT OPEN (#788), AND THE CALLBACK'S
@@ -202,15 +305,18 @@ body.lit .localopen{opacity:1}
    added (#1056 shipped that way; caught in the m14 batch's own e2e run). */
 body[data-state]:not([data-state="door"]):not([data-state="incomplete"]) #dawn .gate-wrap{display:none}
 
-#dawn .state{grid-area:1/1;width:100%;height:100%;position:relative;pointer-events:none}
-#dawn .state-primary{position:absolute;left:50%;top:calc(50% + 64px);transform:translateX(-50%);
-      width:max-content;max-width:250px;text-align:center;
+/* The held words stand in row 2 of the lockup, where the gate stands (#1253),
+   the primary line in flow and the sub 26px under it, out of flow so a longer
+   sub never moves the ring. */
+#dawn .state{grid-area:2/1;justify-self:center;position:relative;margin-top:calc(var(--R) * .03);
+      pointer-events:none;text-align:center}
+#dawn .state-primary{width:max-content;max-width:250px;
       font:600 14px var(--display);letter-spacing:.01em;color:#cfd3e4;
-      opacity:0;transition:opacity 1.4s ease 3.6s}
-#dawn .state-sub{position:absolute;left:50%;top:calc(50% + 174px);transform:translateX(-50%);
+      opacity:0;transition:opacity .8s ease .25s}
+#dawn .state-sub{position:absolute;left:50%;top:100%;margin-top:26px;transform:translateX(-50%);
       width:340px;max-width:78vw;text-align:center;
       font:10.5px var(--mono);color:#8791b3;line-height:1.75;letter-spacing:.04em;
-      opacity:0;transition:opacity 1.4s ease 3.9s}
+      opacity:0;transition:opacity .8s ease .5s}
 body.lit #dawn .state-primary,body.lit #dawn .state-sub{opacity:1}
 /* A state reached after the door already loaded (the ordinary path: default
    optimistic, corrected once a check answers) fades its words in on its own
@@ -252,6 +358,15 @@ body.lit[data-state="starting"] #dawn .dawnlayer{opacity:.45;
       animation:dawnswell 6s ease-in-out infinite alternate}
 body.lit[data-state="starting"] #dawn .sunpt{opacity:.6}
 @keyframes dawnswell{from{opacity:.32}to{opacity:.62}}
+/* the Earth's sunrise is lit by `body.lit` too, so it is held with the sky
+   (#1253 ruling 2); release rides its own 2.3s transition, so recovery is
+   still a sunrise. The night side (`.pre`) stays fully in. */
+body.lit[data-state="unconfigured"] #dawn .earth .up.in,
+body.lit[data-state="failed"] #dawn .earth .up.in,
+body.lit[data-state="incomplete"] #dawn .earth .up.in,
+body.lit[data-state="refused"] #dawn .earth .up.in{opacity:.35}
+body.lit[data-state="starting"] #dawn .earth .up.in{opacity:.45;
+      animation:dawnswell 6s ease-in-out infinite alternate}
 /* ready: no override left standing — the sky simply continues on toward
    `body.lit .dawnlayer{opacity:1}` etc. above, so recovery is the ordinary
    first-light transition finishing what it started. */
@@ -265,24 +380,26 @@ body.lit[data-state="starting"] #dawn .sunpt{opacity:.6}
    the pill plays the door's own sunrise, so the retry IS the recovery,
    exactly as round-1 ratifies. */
 body[data-state="incomplete"] #dawn .gate-wrap{display:block}
-/* the pill's own entrance (opacity/transform on `.lit`, the delayed
-   1.6s-ease-3.6s transition) is the shared `.gate` rule above, unscoped by
-   state — this needs nothing of its own once the wrapper is visible. */
+/* the pill's own entrance (opacity/transform on `.lit`) is the shared gate
+   rule above, unscoped by state — this needs nothing of its own once the
+   wrapper is visible. */
 
-/* the words, `incomplete` only: a 14px display line does not fit between
-   the pill (still in its ratified slot) and the ring's line — tried at
-   +111px first (round-1 README) — so on this state alone the primary line
-   takes the ratified subline's own slot and the subline follows 32px below
-   it. `refused` needs no override: it has no pill to clear, so it keeps
-   this section's own default slots above — the primary in the ring where
-   the handle stood. */
-body[data-state="incomplete"] #dawn .state-primary{top:calc(50% + 172px)}
-body[data-state="incomplete"] #dawn .state-sub{top:calc(50% + 204px)}
+/* the words, `incomplete` only: the pill keeps row 2, so the primary line
+   stands in the same row under it (the pill's 39px and a gap) and the sub
+   follows 26px below it as everywhere. `refused` needs no override: it has no
+   pill to clear, so it keeps the row. */
+body[data-state="incomplete"] #dawn .state{margin-top:calc(var(--R) * .03 + 39px + 18px)}
 
 /* ══ THE FLIGHT ══════════════════════════════════════════════════════════ */
-#warp{position:fixed;inset:0;z-index:5;opacity:0;pointer-events:none;
+/* #warpgl is the flight's WebGL2 world (voyage.js), set just beneath #warp
+   when it can be had; the two come and go together */
+#warp,#warpgl{position:fixed;inset:0;z-index:5;opacity:0;pointer-events:none;
       transition:opacity 1.7s cubic-bezier(.45,.05,.55,.95)}
-body.showwarp #warp{opacity:1;transition:opacity .45s ease}
+body.showwarp #warp,body.showwarp #warpgl{opacity:1;transition:opacity .45s ease}
+/* holding (#1253, Flight.svelte): the climb started before its world was
+   ready waits on its opening, the mark at the centre breathing (orbit-site) */
+body.holding #flightmark.on .fm-line{animation:holding 1.1s ease-in-out infinite alternate}
+@keyframes holding{from{opacity:1}to{opacity:.4}}
 /* §15 second pass, ruling 2: the canvas does NOT cut out under the bloom. It
    dissolves over 1.7 near-linear seconds, so the glow it is holding is still
    on the screen while the planets condense out of it. */
@@ -292,7 +409,11 @@ body.showwarp #warp{opacity:1;transition:opacity .45s ease}
 #flightmark.collapse{opacity:0;transform:scale(.05);
             transition:opacity .55s ease .1s,transform .7s cubic-bezier(.6,0,.9,.4)}
 #flightmark svg{width:100%;height:100%;display:block}
-#flightmark .core{fill:#fff6e6}
+/* the mark tilts into the direction of travel while the flight is at speed, and
+   levels to land (orbit-site assets/site.css:599-609) */
+#flightmark{perspective:600px}
+#flightmark svg{overflow:visible}
+#flightmark .core{fill:#fff6e6;display:none}
 /* the household's name written on the void, once, at the top of the climb */
 #launchname{position:fixed;left:0;right:0;top:26%;z-index:7;text-align:center;
             pointer-events:none;opacity:0;transition:opacity .55s ease;
@@ -305,29 +426,28 @@ body.showwarp #warp{opacity:1;transition:opacity .45s ease}
 /* ══ THE DUSK GOODBYE (where the descent lands, and what /logout means) ══
    §15, owner 2026-08-17: the descent is the default logout, re-confirmed, and
    the old /logout sunset retires into it. */
-/* the login's ink exactly — the approved goodbye wore the same lockup as the
-   approved sign-in, and the descent's mark sets down on it (2026-08-17) */
-#dusk .lockup .name{color:#e9edf8}
-/* THE SAME BUTTON, not a lookalike: the .gate rule above, one word changed.
+/* the word is the login's, gold-lit (.loginchrome .lockup .name) — the approved
+   goodbye wore the same lockup as the approved sign-in (2026-08-17) */
+/* THE SAME BUTTON, not a lookalike: the gate rule above, one word changed.
    Only the ENTRANCE differs — on the login the pill arrives with first light,
-   here it arrives with the farewell. */
-#dusk .gate-wrap>*{opacity:0;transform:translateY(10px);
-      transition:opacity .9s ease,transform .9s ease,filter .35s ease,box-shadow .3s ease}
-body.farewell #dusk .gate-wrap>*{opacity:1;transform:none}
-/* THE FAREWELL RIDES WITH THE RING (#1011). `bottom:26vh` measured the
-   farewell from the VIEWPORT'S bottom edge while the ring is centred on the
-   viewport's height, so on a short window the two drifted together and under
-   about 800px tall collided, catching the "Sign back in" button between them
-   (~60px of overlap at 670px). Measuring from the centre instead ties the
-   farewell to the ring: `.loginchrome` fills the viewport, so 50% is the
-   ring's centre line, and 240px below it is exactly where 26vh put the
-   farewell's bottom edge on the 1000px-tall window the mockup and the
-   fidelity gate use — the ratified screen is pixel-identical there, and a
-   short window now gets the same gap a tall one always had. The ring itself
-   stays centred, as the mockup draws it. */
-#dusk .farewell{position:absolute;left:0;right:0;bottom:calc(50% - 240px);text-align:center;
-      opacity:0;transform:translateY(9px);transition:opacity .9s ease,transform .9s ease}
-body.farewell #dusk .farewell{opacity:1;transform:none}
+   here it arrives with the farewell, .6s after it (site.css:244). */
+#dusk .gate-wrap a{transition:opacity .9s ease .6s,transform .9s ease .6s,filter .35s ease,box-shadow .3s ease}
+body.farewell #dusk .gate-wrap a{opacity:1;transform:none}
+/* THE FAREWELL RIDES WITH THE WAY BACK IN (#1011, #1253). It was measured from
+   the viewport's bottom edge, then from the ring's centre line, and either
+   way it could drift into the pill on a short window. It now hangs off the
+   pill's own box (the wrapper is `position:relative`, the farewell is the
+   wrapper's last child and out of flow), so it is the same gap under the pill
+   at any height and the lockup, centred as the door's is, never moves for it.
+   It comes in .3s after the beat (site.css:251). */
+#dusk .farewell{position:absolute;top:100%;left:50%;margin-top:22px;
+      width:max-content;max-width:92vw;text-align:center;
+      opacity:0;transform:translate(-50%,9px);transition:opacity .9s ease .3s,transform .9s ease .3s}
+body.farewell #dusk .farewell{opacity:1;transform:translateX(-50%)}
+/* The centring is in `transform`, not in the `translate` property: the build's
+   CSS lowering drops a lone `translate` from a rule that also sets `transform`
+   (the dev server keeps it), so the box sat with its left edge on the axis and
+   a phone's words ran off the right of the screen. Do not move it back. */
 #dusk .farewell .said{font:600 15px var(--display);color:#cfd3e4;letter-spacing:.01em}
 #dusk .farewell .sub{font:11px var(--mono);color:#7e819a;margin-top:9px;letter-spacing:.06em}
 
@@ -342,10 +462,17 @@ body.farewell #dusk .farewell{opacity:1;transform:none}
    Venus breathes on the zodiacal cone's own period, and an ember shimmer
    travels the limb the other way round. */
 #dusk .lockup .glyph .tr{animation:spinforth 40s linear infinite}
+#dusk .lockup .glyph .world{animation:spinforth 40s linear infinite reverse}
+/* the glyph's planet (with its wake) is not on the screen while the flight
+   draws its own: the dawn's while the climb launches, the dusk's until the
+   farewell has set down (#1253) */
+body.launching #dawn .lockup .glyph .tr{opacity:0;transition:opacity .3s ease}
+#dusk .lockup .glyph .tr{transition:opacity .4s ease}
+body.showdusk:not(.farewell) #dusk .lockup .glyph .tr{opacity:0}
 @keyframes spinforth{to{transform:rotate(-360deg)}}
 #dusk .afterglow{animation:breathe-ember 12s ease-in-out infinite alternate}
 @keyframes breathe-ember{from{opacity:.85}to{opacity:1}}
-#dusk .belt{animation:zbreathe 13s ease-in-out infinite alternate;mix-blend-mode:screen}
+#dusk .belt{animation:zbreathe 13s ease-in-out infinite alternate;will-change:opacity}
 #dusk .shimmer{stroke-dasharray:3 97;animation:sweepback 34s linear infinite;
       opacity:.7;transition:none}
 @keyframes sweepback{to{stroke-dashoffset:100}}
@@ -359,8 +486,9 @@ body.showwarp .grain{opacity:.26}
    not then play out from where they were — they are the journey, and the
    journey is already over. Fixture-only: nothing sets `pinned` in the
    product. */
-body.pinned #dawn,body.pinned #dusk,body.pinned #warp,body.pinned #flightmark,
-body.pinned #launchname,body.pinned .loginchrome,body.pinned .gate{
+body.pinned #dawn,body.pinned #dusk,body.pinned #warp,body.pinned #warpgl,body.pinned #flightmark,
+body.pinned #launchname,body.pinned .loginchrome,body.pinned .gate,body.pinned #dusk .gate-wrap a,
+body.pinned .farewell,body.pinned #dawn .lockup .name,body.pinned #dawn .lockup .glyph .tr{
   transition:none!important}
 
 /* ══ REDUCED MOTION ══════════════════════════════════════════════════════
@@ -371,7 +499,11 @@ body.pinned #launchname,body.pinned .loginchrome,body.pinned .gate{
    tells the same story without any motion. */
 @media (prefers-reduced-motion: reduce){
   #dawn *,#dusk *{animation:none!important}
-  #flightmark,#launchname,#warp{display:none!important}
+  /* with nothing to twinkle, a dusk twinkler's resting opacity goes back on
+     the star itself, so the still sky is drawn exactly as it was (#1299) */
+  #dusk .sky .tw{opacity:1}
+  #dusk .sky .tw circle{opacity:var(--o)}
+  #flightmark,#launchname,#warp,#warpgl{display:none!important}
   #dawn,#dusk,.loginchrome,.loginchrome .lockup{
     transition-duration:.7s!important;transition-timing-function:ease!important}
   /* .gate, not .gate-wrap: the wrapper's transform is the layout that drops
@@ -379,6 +511,16 @@ body.pinned #launchname,body.pinned .loginchrome,body.pinned .gate{
      would land the button on top of the name (08-14's own note). */
   .dawnlayer,.rim,#dawn .shimmer,.sunpt,.rays,.gate{
     opacity:1!important;transform:none!important;transition:none}
+  /* the ring stands whole (its draw-in is the movement that `animation:none`
+     takes away, and without this it would stay undrawn), and the name and the
+     gold world arrive at once (site.css:194, 587-593) */
+  #dawn .lockup .ring{stroke-dasharray:none!important;stroke-dashoffset:0!important}
+  #dawn .lockup .name,#dawn .lockup .glyph .tr{transition:none!important}
+  /* the Earth arrives at once; the crisp rim still gives way to it */
+  #dawn .earth image,#dusk .earth image{transition:none!important}
+  #dawn .earth image.in,#dusk .earth image.in{opacity:1!important}
+  #dawn .world.earthy .rim{opacity:0!important}
+  #dusk .world.earthy .crisp{opacity:0!important;transition:none!important}
   /* The held-dawn dimming above is motion-adjacent mood, not the state's
      accessible channel — that is the text and the button's presence, both
      unaffected by this block — so reduced motion keeps the sky at rest
@@ -392,5 +534,5 @@ body.pinned #launchname,body.pinned .loginchrome,body.pinned .gate{
      to animate is pure standing cost (GPU memory for a compositing layer no
      frame will move), so the hint is withdrawn in lockstep with the motion
      it was promoted for. */
-  .rays .sway1,.rays .sway2{will-change:auto}
+  .rays .sway1,.rays .sway2,.sunpt-breathe{will-change:auto}
 }
