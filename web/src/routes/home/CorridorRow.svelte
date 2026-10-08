@@ -41,10 +41,11 @@
    *   onCopyAddress: () => void,
    *   showingDoc: string | null,
    *   onOpenDoc: (doc: import('$lib/data/workspace.js').DrawerDocument, from: HTMLElement) => void,
+   *   acts: import('./drawer-acts.js').DrawerActs,
    * }} */
   let {
     row, suggestions, busyReceipt, armed, mailProblem, today, expanded,
-    onReceiptTap, onRowClick, detail, detailBusy, detailProblem, copied, onCopyAddress, showingDoc, onOpenDoc,
+    onReceiptTap, onRowClick, detail, detailBusy, detailProblem, copied, onCopyAddress, showingDoc, onOpenDoc, acts,
   } = $props();
 
   /* $derived, not const: a prop read at the top level of a component's
@@ -134,6 +135,6 @@
     {/if}
   </a>
   {#if expanded === row.id}
-    <ItemView {row} {detail} {detailBusy} {detailProblem} {copied} {onCopyAddress} {showingDoc} {onOpenDoc} />
+    <ItemView {row} {detail} {detailBusy} {detailProblem} {showingDoc} {onOpenDoc} {acts} />
   {/if}
 {/if}

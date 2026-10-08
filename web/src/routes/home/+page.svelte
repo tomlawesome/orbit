@@ -1,7 +1,7 @@
 <script>
   import { onMount, tick } from "svelte";
   import { browser } from "$app/environment";
-  import { afterNavigate, goto, pushState, replaceState } from "$app/navigation";
+  import { afterNavigate, beforeNavigate, goto, pushState, replaceState } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
   import { mountAccount, mountEmptySky, mountHome } from "./home.behaviour.js";
@@ -15,11 +15,12 @@
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { applyCommand, approveReceipt, dismissReceipt, readHome, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut } from "$lib/data/workspace.js";
-  import { completeCommand, nextDateAfter } from "$lib/data/commands.js";
+  import { WorkspaceError, applyCommand, approveReceipt, attachItemDocument, dismissReceipt, readHome, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut } from "$lib/data/workspace.js";
+  import { archiveCommand, completeCommand, nextDateAfter, snoozeCommand } from "$lib/data/commands.js";
+  import { createHeldCompletion } from "$lib/data/held-completion.js";
   import { createArm } from "$lib/pocket/arm.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
-  import { ago, agoLong, money } from "$lib/format.js";
+  import { ago, agoLong, longDate, money } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
   import { readSearchDocuments, searchPocket } from "./pocket-search.js";
@@ -29,7 +30,8 @@
   import CorridorRow from "./CorridorRow.svelte";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import { WIDE_QUERY, cardWidthOf, pairOf, trackOf } from "./preview-pair.js";
-  import { wake } from "$lib/pocket/wake.js";
+  import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
+  import { shortDate } from "$lib/data/belt.js";
   import NorthStarMark from "$lib/NorthStarMark.svelte";
   import { watchTour } from "$lib/tour/watch.js";
   import "./home.css";
@@ -358,6 +360,7 @@
     }
     if (detailFor === id) return;
     previewDoc = null;
+    footProblem = null;
     /* Everything Orbit holds, read through the same seam the item view reads
        (#446) — documents included, so "everything" is not a euphemism. */
     detailFor = id;
@@ -417,6 +420,8 @@
   let swallowClick = false;
   /** @type {HTMLElement | undefined} */
   let manifestEl = $state();
+  /** @type {HTMLElement | undefined} */
+  let trackEl = $state();
   let track = $state({ top: 0, height: 0 });
   let readw = $state(480);
   /** @type {{ maxWidth: number, shift: number } | null} */
@@ -477,7 +482,9 @@
         viewportWidth: document.documentElement.clientWidth,
         hostLeft: box.left + padL,
         hostWidth: box.width - padL - padR,
-        cardWidth: readw,
+        /* the width the card settled on once its page landed, else the
+           A4 width it opens at */
+        cardWidth: trackEl?.offsetWidth || readw,
       });
     };
     const watch = new ResizeObserver(() => measure());
@@ -487,6 +494,7 @@
       const view = document.getElementById(`${id}-view`);
       if (row) watch.observe(row);
       if (view) watch.observe(view);
+      if (trackEl) watch.observe(trackEl);
     });
     window.addEventListener("resize", measure);
     media.addEventListener("change", measure);
@@ -549,6 +557,7 @@
     }
   }
 
+  /** @returns {Promise<boolean>} whether the address reached the clipboard */
   async function copyAddress() {
     try {
       await navigator.clipboard.writeText(new URL(addressOf(expanded), location.origin).href);
@@ -558,7 +567,109 @@
          already in the browser's own bar, which is where it lives. */
       copied = false;
     }
+    return copied;
   }
+
+  /* ---- #1319: THE DRAWER'S FOOT ROW (FootRow.svelte) ----------------------
+     Every act the belt had, from the open drawer, through the belt's own
+     commands (commands.js): snooze, complete, attach a document, retire, and
+     copy link. Complete is held for the wake's four seconds so `undo` is
+     real, as the belt and the pocket hold it (held-completion.js). */
+  /** @type {"snooze" | "complete" | "attach" | "retire" | null} */
+  let footBusy = $state(null);
+  /** @type {string | null} */
+  let footProblem = $state(null);
+  /** The open item as a command addresses it. @returns {any} */
+  const commandItem = () => (detail?.householdId && !detail.suggestion ? detail : null);
+  async function rereadAll() {
+    view = await readHome();
+    await rereadDetail();
+  }
+  const held = createHeldCompletion({
+    apply: applyCommand,
+    holdMs: WAKE_HOLD_MS,
+    onsent: () => rereadAll().catch(() => {}),
+    onfailed: (error) => {
+      wake(/** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again", { failure: true });
+    },
+  });
+  beforeNavigate(() => { held.flush(); });
+  $effect(() => {
+    const flush = () => held.flush();
+    addEventListener("pagehide", flush);
+    return () => removeEventListener("pagehide", flush);
+  });
+  /* A completion a previous visit held and never saw confirmed (#1151
+     W1-S3). The pocket picks it up itself when it is the dialect showing. */
+  onMount(() => {
+    if (!matchMedia(DESK).matches) return;
+    held.retryStashed((error) => error instanceof WorkspaceError && error.code === "version_conflict");
+  });
+
+  /**
+   * One act that changes the item and then reads it again.
+   * @param {"snooze" | "retire"} kind
+   * @param {() => object} build
+   * @param {string} words  what the wake says once it has landed
+   * @param {{ leave?: boolean }} [options]  the item leaves the manifest: put the drawer away
+   */
+  async function runFoot(kind, build, words, { leave = false } = {}) {
+    if (footBusy) return;
+    footBusy = kind;
+    footProblem = null;
+    try {
+      await applyCommand(build());
+      if (leave) collapseRow();
+      view = await readHome();
+      if (!leave) await rereadDetail();
+      wake(words);
+    } catch (error) {
+      footProblem = /** @type {{ message?: string }} */ (error)?.message ?? `couldn't ${kind} it — try again`;
+    } finally {
+      footBusy = null;
+    }
+  }
+
+  /** @type {import('./drawer-acts.js').DrawerActs} */
+  const drawerActs = $derived({
+    busy: footBusy,
+    problem: footProblem,
+    onsnooze: (until) => {
+      const item = commandItem();
+      if (item) runFoot("snooze", () => snoozeCommand(item, until), `${item.title} snoozed until ${longDate(until)}`);
+    },
+    oncomplete: () => {
+      const item = commandItem();
+      if (!item) return;
+      footProblem = null;
+      const completedDate = item.today;
+      const nextDate = nextDateAfter(completedDate, item.recurrenceMonths) ?? undefined;
+      const job = held.hold(completeCommand(item, { completedDate, nextDate }));
+      wake(`Completed${nextDate ? ` · next due ${shortDate(nextDate)}` : ""} · ${item.title}`, {
+        undo: () => held.undo(job),
+      });
+    },
+    onattach: async (file) => {
+      const item = commandItem();
+      if (!item || footBusy) return;
+      footBusy = "attach";
+      footProblem = null;
+      try {
+        await attachItemDocument(item.householdId, item.id, file, crypto.randomUUID());
+        await rereadAll();
+        wake(`${file.name} attached to ${item.title}`);
+      } catch (error) {
+        footProblem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't attach it — try again";
+      } finally {
+        footBusy = null;
+      }
+    },
+    onretire: () => {
+      const item = commandItem();
+      if (item) runFoot("retire", () => archiveCommand(item), `${item.title} retired`, { leave: true });
+    },
+    oncopy: copyAddress,
+  });
 
   /** @param {KeyboardEvent} event */
   function onWindowKeydown(event) {
@@ -568,11 +679,15 @@
   function onWindowClick(event) {
     if (!expanded) return;
     if (swallowClick) { swallowClick = false; return; }
-    const target = event.target instanceof Element ? event.target : null;
     /* Inside the open row or its panel: stay. On another expandable row: that
        row's own handler is switching to it. On the preview card beside the
-       drawer, or the reader over home (#1319): stay. Anywhere else: close. */
-    if (target?.closest("a.item, .itemview, [data-preview-card], .rd-layer")) return;
+       drawer, or the reader over home (#1319): stay. Anywhere else: close.
+       Read off the event's path, not the target's ancestors: a press that
+       replaces its own button (the foot row's snooze) has left the target
+       detached by the time the click reaches the window. */
+    const inside = event.composedPath().some((node) =>
+      node instanceof Element && node.matches("a.item, .itemview, [data-preview-card], .rd-layer"));
+    if (inside) return;
     collapseRow();
   }
 
@@ -1762,7 +1877,7 @@
             {#each corridor.overdue as row (row.id)}
               <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
                 onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-                onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} />
+                onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} acts={drawerActs} />
             {/each}
           </div>
         {/if}
@@ -1770,14 +1885,14 @@
         {#each corridor.current as row (row.id)}
           <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
             onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-            onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} />
+            onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} acts={drawerActs} />
         {/each}
         {#each corridor.months as month (month.key)}
           <div class="month"><span>{month.label}</span><div class="rule"></div><small>{month.rows.length} approaching</small></div>
           {#each month.rows as row (row.id)}
             <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
               onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-              onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} />
+              onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} acts={drawerActs} />
           {/each}
         {/each}
         <!-- #1281: what is kept without a date rides at the foot under its
@@ -1788,7 +1903,7 @@
         {#each corridor.undated as row (row.id)}
           <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
             onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-            onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} />
+            onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} acts={drawerActs} />
         {/each}
       </div>
       {#if corridor.total === 0}
@@ -1798,7 +1913,7 @@
       {/if}
     {/if}
     <!-- #1319, round 3 (F): the preview's column beside the open drawer. -->
-    <div class="pvtrack" style:--pv-y="{track.top}px" style:--pv-h="{track.height}px" style:--readw="{readw}px">
+    <div class="pvtrack" bind:this={trackEl} style:--pv-y="{track.top}px" style:--pv-h="{track.height}px" style:--readw="{readw}px">
       <PreviewCard doc={previewDoc} itemTitle={detail?.title ?? ""} onclose={closeDoc}
                    onremove={removeDoc} onrestore={restoreDoc} />
     </div>

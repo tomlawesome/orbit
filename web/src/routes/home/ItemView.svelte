@@ -10,7 +10,7 @@
    * annotation CorridorRow.svelte and due-next/EntryRow.svelte already rely
    * on.
    */
-  import { resolve } from "$app/paths";
+  import FootRow from "./FootRow.svelte";
   import { every, longDate, money, tminus } from "$lib/format.js";
   import { DAMAGED, LOCKED, NOTES_WORDS, REFERENCE_WORDS, fieldState } from "$lib/data/metadata-status.js";
 
@@ -18,18 +18,18 @@
    * @typedef {import('$lib/data/chart.js').CorridorRow} CorridorRowData
    * @typedef {import('$lib/data/workspace.js').ItemView} ItemViewData
    * @typedef {import('$lib/data/workspace.js').DrawerDocument} DrawerDocument
+   * @typedef {import('./drawer-acts.js').DrawerActs} DrawerActs
    */
   /** @type {{
    *   row: CorridorRowData,
    *   detail: ItemViewData | null,
    *   detailBusy: boolean,
    *   detailProblem: string | null,
-   *   copied: boolean,
-   *   onCopyAddress: () => void,
    *   showingDoc: string | null,
    *   onOpenDoc: (doc: DrawerDocument, from: HTMLElement) => void,
+   *   acts: DrawerActs,
    * }} */
-  let { row, detail, detailBusy, detailProblem, copied, onCopyAddress, showingDoc, onOpenDoc } = $props();
+  let { row, detail, detailBusy, detailProblem, showingDoc, onOpenDoc, acts } = $props();
 
   /* The directive expression below (class:over={...}) does not carry an
      inline @type cast comment through to the type checker the way a plain
@@ -115,9 +115,11 @@
         </button>
       {/each}
     {/if}
-    <div class="ivfoot">
-      <button class="ivcopy" onclick={onCopyAddress}>{copied ? "link copied" : "copy link"}</button>
-      <a class="ivfull" href={resolve("/item/[[id]]", { id: row.id })}>manage this item →</a>
-    </div>
+    <!-- #1319 (owner-decisions §34): the foot row holds every act the belt
+         had; `manage this item →` is gone, the drawer is the item now. -->
+    <FootRow title={row.title} today={detail.today} busy={acts.busy}
+             onsnooze={acts.onsnooze} oncomplete={acts.oncomplete} onattach={acts.onattach}
+             onretire={acts.onretire} oncopy={acts.oncopy} />
+    {#if acts.problem}<div class="ivproblem" role="alert">{acts.problem}</div>{/if}
   {/if}
 </div>
