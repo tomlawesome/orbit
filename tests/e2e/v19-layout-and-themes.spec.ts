@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
+import { homeIsLive } from "./support/keyboard";
 import { entrancesSettled } from "./support/motion";
 import {
   axeViolations,
@@ -30,7 +31,8 @@ if (THEME_PACKS.length < 2 || !DEFAULT_THEME) throw new Error("#1178: could not 
  * and themes before the Next.js removal (8a315e18), ported to the v19
  * screens.
  *
- * 1. THE VIEWPORT MATRIX. Every signed-in v19 screen at the three sizes the
+ * 1. THE VIEWPORT MATRIX. Every signed-in v19 screen (the item's own
+ *    screen being home with its drawer open since #1319) at the three sizes the
  *    old spec used -- 1440×900, 820×1180 and 412×915 -- with no
  *    document-level sideways scroll, every visible control inside the
  *    viewport and not cut off by a box that hides its overflow, and no axe
@@ -117,11 +119,22 @@ const SCREENS: Screen[] = [
       await entrancesSettled(page.locator(".hh-pocket"));
     },
   },
+  /* #1319 (owner-decisions §34): was "/item/[id]", the belt. The item is
+     home's drawer now, so the item screen is home with it open: the desk's
+     drawer under its row, or (under the 900px switch, so the tablet too)
+     the pocket row's own panel, with its foot row of pills and icons. */
   {
-    name: "/item/[id]",
+    name: "/home?item=<id>",
     seed: "item",
-    path: (household) => `/item/${household?.itemId}`,
-    ready: (page, household) => expect(page.getByRole("heading", { name: household?.itemTitle })).toBeVisible(),
+    path: (household) => `/home?item=${household?.itemId}`,
+    ready: async (page, household) => {
+      const id = household?.itemId ?? "";
+      const drawer = page.locator(`[id="${id}-view"], .pocket .pk-below [data-row-key="${id}"][data-open]`).filter({ visible: true });
+      await expect(drawer.getByRole("group", { name: `Actions for ${household?.itemTitle}` })).toBeVisible({ timeout: 30_000 });
+      await homeIsLive(page);
+      /* a phone's row unfolds; measure it drawn */
+      await entrancesSettled(drawer);
+    },
   },
 ];
 
