@@ -223,17 +223,20 @@ async function arriveAtHome(page: Page, options: { withItem?: boolean } = {}) {
 }
 
 /** #424: the manifest row expands in place on Enter (it is not a plain
- *  navigation — onRowClick calls preventDefault), and its "manage this item"
- *  link is the real way onto /item/[id] by keyboard. Shared by the two item
- *  tests below so each gets this same real path on its own fresh page. */
+ *  navigation — onRowClick calls preventDefault). #1319: the expanded row
+ *  no longer links to /item/[id] (the drawer holds everything, and the item
+ *  screen retires in a later step), so after proving the row opens by
+ *  keyboard and its foot row is reachable, the item screen is reached at
+ *  its own address. Shared by the two item tests below so each gets this
+ *  same path on its own fresh page. */
 async function openItemPageFromHome(page: Page, itemId: string) {
   await page.goto("/home");
   await settled(page);
   await tabTo(page, { selector: `a.item[id="${itemId}"]` }, { screen: "home corridor row" });
   await page.keyboard.press("Enter");
   await expect(page.locator(`a.item[id="${itemId}"]`)).toHaveClass(/open/);
-  await tabTo(page, { selector: ".ivfull" }, { screen: "home expanded row" });
-  await page.keyboard.press("Enter");
+  await tabTo(page, { selector: ".itemview .ivlink" }, { screen: "home expanded row" });
+  await page.goto(`/item/${itemId}`);
   await expect(page).toHaveURL(/\/item\//);
 }
 

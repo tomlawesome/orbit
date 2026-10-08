@@ -6,7 +6,8 @@
    * snoozed until, section, type, orbital period, cost, provider,
    * reference, reminders -- then the notes, then the papers (#1319: notes
    * above documents), each `name · size · added <date>` (review round
-   * §6.f) and each opening the preview sheet.
+   * §6.f) and each opening the preview sheet; then the foot row
+   * (FootRow.svelte), as the desk's.
    *
    * A component rather than a snippet in pocket.svelte, for the reason
    * ItemView.svelte gives: a snippet's parameter has nowhere to carry its
@@ -14,6 +15,7 @@
    */
   import { every, longDate, money } from "$lib/format.js";
   import { DAMAGED, LOCKED, NOTES_WORDS, REFERENCE_WORDS, fieldState } from "$lib/data/metadata-status.js";
+  import FootRow from "./FootRow.svelte";
 
   /** A paper as the search reads it (pocket-search.js), carrying the belt's
       own row since #1319, so it opens the preview sheet.
@@ -28,9 +30,12 @@
    *   problem?: string | null,
    *   showingPaper?: string | null,
    *   onopenpaper?: (paper: Paper, from: HTMLElement) => void,
+   *   today?: string,
+   *   acts?: import('./drawer-acts.js').DrawerActs,
    * }} */
   let {
     one, raw = undefined, papers, reading = false, problem = null, showingPaper = null, onopenpaper = undefined,
+    today = "", acts = undefined,
   } = $props();
 
   /** @type {Record<string, string>} */
@@ -78,6 +83,12 @@
   {:else}
     <div class="p-unlit"></div>
   {/each}
+{/if}
+{#if acts}
+  <!-- #1319: the desk's foot row, at the pocket's scale. -->
+  <FootRow title={one.title} {today} pocket busy={acts.busy}
+           onsnooze={acts.onsnooze} oncomplete={acts.oncomplete} onattach={acts.onattach}
+           onretire={acts.onretire} oncopy={acts.oncopy} />
 {/if}
 {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
 

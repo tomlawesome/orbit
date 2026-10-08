@@ -185,9 +185,8 @@
 .pocket .pk-pen .p-row[data-open]{border-style:solid}
 /* An opened manifest row (review round §2.1, the desk's .item.open): its
    own outline turns accent, the kit's rule (Row.svelte, owner-decisions
-   §29), its bottom corners handed to the panel. The drawer's `copy link`
-   is the desk's quiet .ivcopy. */
-.pocket .pk-copy{color:var(--ink-quiet)}
+   §29), its bottom corners handed to the panel. Its `copy link` is the
+   chain-link icon in the drawer's foot row now (#1319, FootRow.svelte). */
 
 /* ---- §11 (#453): the labelled sky, at the same scale ------------------- */
 .pocket .adrift{margin-top:8px}

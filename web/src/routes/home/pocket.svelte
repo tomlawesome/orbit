@@ -4,9 +4,9 @@
   import { beforeNavigate, goto, onNavigate } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { WorkspaceError, applyCommand, readItemDocuments, removeDocument, restoreDocument } from "$lib/data/workspace.js";
+  import { WorkspaceError, applyCommand, attachItemDocument, readItemDocuments, removeDocument, restoreDocument } from "$lib/data/workspace.js";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
-  import { completeCommand, nextDateAfter } from "$lib/data/commands.js";
+  import { archiveCommand, completeCommand, nextDateAfter, snoozeCommand } from "$lib/data/commands.js";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf } from "$lib/data/chart.js";
   import { money } from "$lib/format.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
@@ -41,7 +41,8 @@
    *
    * THE ROW IS THE ITEM (review round §2.1, the desk's own grammar, #424):
    * a manifest row opens in place into a drawer holding the item's detail,
-   * `open →` onward to its belt, `complete`, and `copy link`; the relay's
+   * its notes and papers, and its foot row (#1319: snooze, complete, attach
+   * a document, retire, the pencil and the chain link); the relay's
    * catch opens the same way with its readings and its two decisions. A
    * search result closes the search and opens its row; one the manifest
    * does not draw goes straight to the item (review round §6.e). A planet
@@ -527,10 +528,10 @@
   });
 
   /* `complete` from a drawer, as the belt does it (item/[[id]]/+page.svelte,
-     tapComplete): an item with a cost to confirm goes to its belt with the
-     record sheet up; one with nothing to record completes on the tap, held
-     for the wake's four seconds so `undo` is a real undo, and sent at once
-     if the page is left first. */
+     tapComplete) for an item with nothing to record: it completes on the
+     tap, held for the wake's four seconds so `undo` is a real undo, and sent
+     at once if the page is left first. #1319: every item, now the drawer is
+     the item -- the desk's drawer completes the same way (home/+page.svelte). */
   /** @typedef {{ command: object, timer: ReturnType<typeof setTimeout> | undefined, done: boolean }} HeldCompletion */
   /** @type {HeldCompletion | null} */
   let held = null;
@@ -576,11 +577,6 @@
     const raw = rawItems.get(one.id);
     const householdId = view?.primary;
     if (!raw || !householdId || !view) return;
-    if (raw.costMinor !== null && raw.costMinor !== undefined) {
-      morphing = true;
-      goto(resolve("/item/[[id]]", { id: encodeURIComponent(one.id) }), { state: { pocketAct: "complete" } });
-      return;
-    }
     sendHeld();
     const completedDate = view.today;
     const nextDate = nextDateAfter(completedDate, raw.recurrenceMonths) ?? undefined;
@@ -652,26 +648,73 @@
   });
 
   /* `copy link`: the item's address, the desk's (+page.svelte addressOf),
-     the one place the pocket offers it. */
-  /** @type {string | null} */
-  let copied = $state(null);
-  /** @param {string} id */
+     the chain-link icon at the drawer's foot (#1319). */
+  /** @param {string} id @returns {Promise<boolean>} */
   async function copyLink(id) {
     try {
       await navigator.clipboard.writeText(new URL(`/home?item=${encodeURIComponent(id)}`, location.origin).href);
-      copied = id;
+      return true;
     } catch {
       /* A refused clipboard is no error worth a word: the address still works. */
-      copied = null;
+      return false;
     }
   }
 
-  /** The acts in a manifest item's drawer. @param {{ id: string, title: string }} one @returns {import('$lib/pocket/row.js').RowAct[]} */
-  const itemActs = (one) => [
-    { label: "open →", name: `Open ${one.title}`, tone: "accent", onact: () => { morphing = true; },
-      href: resolve("/item/[[id]]", { id: encodeURIComponent(one.id) }) },
-    { label: "complete", name: `Complete ${one.title}`, tone: "ok", onact: () => completeRow(one) },
-  ];
+  /* ---- #1319: THE DRAWER'S FOOT ROW (FootRow.svelte), as the desk's ----
+     The row's own acts (`open →`, `complete`) and its `copy link` line are
+     gone: the drawer is the item, and its foot holds every act the belt had
+     -- snooze, complete, attach a document, retire -- with the pencil and
+     the chain link at its right end. */
+  /** @type {{ id: string, kind: "snooze" | "attach" | "retire" } | null} */
+  let footBusy = $state(null);
+  /**
+   * @param {{ id: string, title: string }} one
+   * @param {"snooze" | "retire"} kind
+   * @param {(item: any) => object} build
+   * @param {string} words
+   */
+  async function runRowAct(one, kind, build, words) {
+    const raw = rawItems.get(one.id);
+    const householdId = view?.primary;
+    if (!raw || !householdId || footBusy) return;
+    footBusy = { id: one.id, kind };
+    delete rowProblem[one.id];
+    try {
+      await applyCommand(build({ ...raw, householdId }));
+      wake(words);
+      await onchanged?.();
+    } catch (error) {
+      rowProblem[one.id] = /** @type {{ message?: string }} */ (error)?.message ?? `couldn't ${kind} it — try again`;
+    } finally {
+      footBusy = null;
+    }
+  }
+  /** @param {{ id: string, title: string }} one @param {File} file */
+  async function attachTo(one, file) {
+    const householdId = view?.primary;
+    if (!householdId || footBusy) return;
+    footBusy = { id: one.id, kind: "attach" };
+    delete rowProblem[one.id];
+    try {
+      await attachItemDocument(householdId, one.id, file, crypto.randomUUID());
+      wake(`${file.name} attached`);
+      await Promise.all([rereadPapers(), onchanged?.()]);
+    } catch (error) {
+      rowProblem[one.id] = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't attach it — try again";
+    } finally {
+      footBusy = null;
+    }
+  }
+  /** @param {{ id: string, title: string }} one @returns {import('./drawer-acts.js').DrawerActs} */
+  const drawerActsOf = (one) => ({
+    busy: footBusy?.id === one.id ? footBusy.kind : null,
+    problem: null,
+    onsnooze: (until) => runRowAct(one, "snooze", (item) => snoozeCommand(item, until), `${one.title} snoozed until ${short(until)}`),
+    oncomplete: () => completeRow(one),
+    onattach: (file) => attachTo(one, file),
+    onretire: () => runRowAct(one, "retire", (item) => archiveCommand(item), `${one.title} retired`),
+    oncopy: () => copyLink(one.id),
+  });
   /** The relay's catch, decided from its row. @param {import('$lib/data/workspace.js').ReceiptSuggestion} s @returns {import('$lib/pocket/row.js').RowAct[]} */
   const suggestionActs = (s) => [
     { label: "Add to orbit", name: `Add ${s.title} to your orbit`, tone: "filled", arms: true, onact: () => decide("approve", s) },
@@ -952,15 +995,13 @@
       {#each groups.attention as one (one.id)}
         <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")} key={one.id}
              trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
-             acts={itemActs(one)} ontoggle={onRowToggle(one.id)}>
+             ontoggle={onRowToggle(one.id)}>
           {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
           {#snippet detail()}
             <ItemDrawer {one} raw={rawItems.get(one.id)} papers={papersOf(one.id)} problem={rowProblem[one.id] ?? null}
                         showingPaper={previewPaper?.id ?? null} onopenpaper={openPaperHere}
+                        today={view?.today ?? ""} acts={drawerActsOf(one)}
                         reading={!papersReady && (rawItems.get(one.id)?.documentCount ?? 0) > 0} />
-          {/snippet}
-          {#snippet after()}
-            <button class="p-quiet pk-copy" onclick={() => copyLink(one.id)}>{copied === one.id ? "link copied" : "copy link"}</button>
           {/snippet}
         </Row>
       {/each}
@@ -971,15 +1012,13 @@
     <!-- Nothing needs you: the one row is the next item up, and opens as it. -->
     <div class="pk-list" data-row-group data-row-cards>
       <Row title="nothing needs you" meta={`next up ${next.title}${next.days !== null ? `, ${tlabel(next)}` : ""}`} key={next.id}
-           acts={itemActs(next)} ontoggle={onRowToggle(next.id)}>
+           ontoggle={onRowToggle(next.id)}>
         {#snippet mark()}<span class="pk-dot quiet"></span>{/snippet}
         {#snippet detail()}
           <ItemDrawer one={next} raw={rawItems.get(next.id)} papers={papersOf(next.id)} problem={rowProblem[next.id] ?? null}
-                        showingPaper={previewPaper?.id ?? null} onopenpaper={openPaperHere}
+                      showingPaper={previewPaper?.id ?? null} onopenpaper={openPaperHere}
+                      today={view?.today ?? ""} acts={drawerActsOf(next)}
                       reading={!papersReady && (rawItems.get(next.id)?.documentCount ?? 0) > 0} />
-        {/snippet}
-        {#snippet after()}
-          <button class="p-quiet pk-copy" onclick={() => copyLink(next.id)}>{copied === next.id ? "link copied" : "copy link"}</button>
         {/snippet}
       </Row>
     </div>
