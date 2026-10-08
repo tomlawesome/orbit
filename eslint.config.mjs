@@ -35,6 +35,30 @@ export default defineConfig([
     },
   },
   ...svelteRecommended,
+  /* ADR-0034 decision 5 (#1325): the seam between the engine and the front
+     end is enforced, not promised. Browser code under web/src talks to the
+     engine only over the JSON API, so it may not import `orbit/*`; the
+     server side of the front end (the API routes, lib/server, *.server
+     modules and hooks.server) is where the engine is called. Types may
+     still cross, since they leave nothing behind at run time. */
+  {
+    files: ["web/src/**/*.{js,ts,svelte}"],
+    ignores: [
+      "web/src/routes/api/**",
+      "web/src/lib/server/**",
+      "web/src/**/*.server.{js,ts}",
+      "web/src/hooks.server.{js,ts}",
+    ],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": ["error", {
+        patterns: [{
+          group: ["orbit", "orbit/*"],
+          allowTypeImports: true,
+          message: "Browser code reaches the engine over the API, never by import (ADR-0034); move the call to a server route.",
+        }],
+      }],
+    },
+  },
   globalIgnores([
   // Sibling worktrees: a second checkout of this codebase, plus its build
   // output. Linting it reports another branch's errors as this one's (#769)
