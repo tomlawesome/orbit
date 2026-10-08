@@ -11,10 +11,12 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
  * when it burns up, the paper it came in, the two decisions that used to sit
  * on the row at rest, `copy link` and `review & amend →`.
  *
- * #1319 (owner-decisions §34): a suggestion is reviewed in its home drawer,
- * not on the belt. What belt-suggestion.spec.js proved of the belt's card is
- * proved here of the drawer: the staged paper opens the preview beside it,
- * and the proposal is amended in the drawer's own rows and accepted.
+ * #1319 (owner-decisions §34): a suggestion is reviewed in its home drawer;
+ * the belt that seated it at `/item/<receiptId>` (#1145) retired in stage
+ * 3b. What the belt's card was proved to do is proved here of the drawer:
+ * its old address lands here, the staged paper opens the preview beside
+ * it, the proposal is amended in the drawer's own rows and accepted, and
+ * dismiss takes two presses.
  *
  * What is proved here is what the drawer does, not how it looks
  * (screens.spec.js holds the manifest's own baseline). The fixture API
@@ -94,7 +96,7 @@ test("the row at rest carries no decisions; it opens in place into the drawer, a
   await expect(drawer.getByRole("button", { name: "Dismiss" })).toBeVisible();
   await expect(drawer.getByRole("button", { name: "copy link" })).toBeVisible();
   await expect(drawer.getByRole("button", { name: "review & amend →" })).toBeVisible();
-  /* Nothing about a suggestion goes to the belt any more. */
+  /* Nothing about a suggestion links to the retired item screen. */
   await expect(drawer.locator('a[href^="/item"]')).toHaveCount(0);
   /* Nothing here promises anything (owner's 10b); the acts are the promise. */
   await expect(drawer.getByText("nothing is created")).toHaveCount(0);
@@ -134,7 +136,10 @@ test("Dismiss arms on the first click and discards on the second, from the drawe
 });
 
 test("the drawer opens from its own address, like a filed row's", async ({ page }) => {
-  await page.goto(`${APP}/home?item=r-insurance`, { waitUntil: "networkidle" });
+  /* The retired belt's address for it lands here first (#1319: the server
+     answers `/item/<id>` with a 308 to `/home?item=<id>`). */
+  await page.goto(`${APP}/item/r-insurance`, { waitUntil: "networkidle" });
+  await expect(page).toHaveURL(/\/home\?item=r-insurance$/);
   const drawer = page.locator(DRAWER);
   await expect(drawer).toBeVisible();
   await expect(page.locator(ROW, { hasText: "Home insurance renewal" })).toHaveAttribute("aria-expanded", "true");
@@ -210,14 +215,16 @@ test("review & amend edits the proposal in the rows, and add to orbit approves i
     .toHaveText("added to your orbit · Home insurance, corrected");
 });
 
-test("cancel puts the readings back and sends nothing", async ({ page }) => {
+test("cancel, asked twice over a change, puts the readings back and sends nothing", async ({ page }) => {
   const seen = await answerApproval(page);
   await openHome(page);
   await page.locator(ROW, { hasText: "Home insurance renewal" }).click();
   const drawer = page.locator(DRAWER);
   await drawer.getByRole("button", { name: "review & amend →" }).click();
   await drawer.locator('[data-ed="cost"]').fill("1.00");
+  /* The rows hold a change, so the first press only asks (84b21c82). */
   await drawer.getByRole("button", { name: "cancel" }).click();
+  await drawer.getByRole("button", { name: "discard changes?" }).click();
   await expect(drawer.getByRole("button", { name: "Add to orbit", exact: true })).toBeVisible();
   await expect(drawer.locator(".kv", { has: page.locator('span:text-is("cost")') }).locator("b")).toContainText("~£400.00");
   await expect(drawer.getByRole("button", { name: "review & amend →" })).toBeFocused();
