@@ -1601,3 +1601,18 @@ is simpler and easier to use."** Round 3 (F,
 - **One search, one code path**, shown the same on home and wherever
   documents are (#1318).
 - Scope: v0.3, after the door batch lands.
+
+## 35. The dial drops its type marks; only the suggestion keeps one (owner, 2026-10-08)
+
+On round 5's type chooser (#1304): **"Not sure I love these weird little
+symbols at all, anywhere tbh."** — **"It makes the dial overly complex and
+adds little value."** — **"The only useful one is the suggestion."**
+
+- The dial's bodies lose their type faces: no crescent (inspection), no
+  core (renewal), no dashed ring (expiry). Every filed item's body is
+  plain, as a service's is now.
+- The chart key loses its four type rows. It keeps the suggestion row
+  ("suggestion — not yet accepted"), and the suggestion keeps its hollow
+  accent body on the dial.
+- Nowhere else draws these marks, the item chooser included (round 6).
+- Type stays an item field; only its picture goes.
