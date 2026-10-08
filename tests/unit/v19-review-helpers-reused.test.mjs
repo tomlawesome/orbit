@@ -34,8 +34,23 @@ const read = (p) => readFileSync(resolve(root, p), "utf8");
 describe("#1151 W1-Q11: SuggestionDrawer imports the real review helpers", () => {
   const source = read("web/src/routes/home/SuggestionDrawer.svelte");
 
-  it("imports readingsOf and papersOf from review.js", () => {
-    expect(source).toMatch(/import \{ papersOf, readingsOf \} from "\$lib\/pocket\/review\.js";/u);
+  it("imports readingsOf from review.js", () => {
+    expect(source).toMatch(/import \{ readingsOf \} from "\$lib\/pocket\/review\.js";/u);
+  });
+
+  /* #1319: the papers open the preview sheet now, so they are the belt's
+     staged rows (belt.js suggestionPapersOf), which carry the same count
+     guard: no named paper and no count is no row, never a blank one. */
+  it("takes its papers from the shared staged rows, never a copy", () => {
+    expect(source).toMatch(/import \{ suggestionPapersOf \} from "\$lib\/data\/belt\.js";/u);
+  });
+
+  it("the shared rows draw no blank paper when nothing is named or counted", async () => {
+    const { suggestionPapersOf } = await import("../../web/src/lib/data/belt.js");
+    const bare = { id: "r-1", receiptId: "r-1", householdId: null, title: "x", currency: "GBP", sourceDocument: undefined };
+    expect(suggestionPapersOf(/** @type {any} */ (bare))).toEqual([]);
+    expect(suggestionPapersOf(/** @type {any} */ ({ ...bare, attachmentCount: 2 })).map((p) => p.name))
+      .toEqual(["forwarded document 1", "forwarded document 2"]);
   });
 
   it("no longer carries its own confidence or attachment-listing copy", () => {

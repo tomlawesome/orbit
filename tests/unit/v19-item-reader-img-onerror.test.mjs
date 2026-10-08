@@ -17,7 +17,7 @@ import { describe, expect, it } from "vitest";
  */
 
 const READER = readFileSync(
-  resolve(import.meta.dirname, "../../web/src/routes/item/[[id]]/Reader.svelte"),
+  resolve(import.meta.dirname, "../../web/src/lib/reading/Reader.svelte"),
   "utf8",
 );
 

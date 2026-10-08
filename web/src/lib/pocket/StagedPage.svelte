@@ -1,7 +1,7 @@
 <script>
   import { loadStagedPage } from "$lib/data/staged-page.js";
   import { plateOfName } from "$lib/data/belt.js";
-  import Reader from "../../routes/item/[[id]]/Reader.svelte";
+  import Reader from "$lib/reading/Reader.svelte";
 
   /**
    * ONE DRAWING OF A WAITING PAGE (#1155): the phone's own copy of the

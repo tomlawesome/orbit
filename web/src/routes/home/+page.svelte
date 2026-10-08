@@ -1,7 +1,7 @@
 <script>
   import { onMount, tick } from "svelte";
   import { browser } from "$app/environment";
-  import { afterNavigate, goto, pushState, replaceState } from "$app/navigation";
+  import { afterNavigate, beforeNavigate, goto, pushState, replaceState } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
   import { mountAccount, mountEmptySky, mountHome } from "./home.behaviour.js";
@@ -15,11 +15,12 @@
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { applyCommand, approveReceipt, dismissReceipt, readHome, readItem, readItemDocuments, requestToJoin, signOut } from "$lib/data/workspace.js";
-  import { completeCommand, nextDateAfter } from "$lib/data/commands.js";
+  import { WorkspaceError, applyCommand, approveReceipt, attachItemDocument, dismissReceipt, readHome, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut } from "$lib/data/workspace.js";
+  import { archiveCommand, completeCommand, nextDateAfter, snoozeCommand, upsertCommand } from "$lib/data/commands.js";
+  import { createHeldCompletion } from "$lib/data/held-completion.js";
   import { createArm } from "$lib/pocket/arm.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
-  import { ago, agoLong, money } from "$lib/format.js";
+  import { ago, agoLong, longDate, money } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
   import { readSearchDocuments, searchPocket } from "./pocket-search.js";
@@ -27,6 +28,13 @@
   import { tlabel } from "./bands.js";
   import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
   import CorridorRow from "./CorridorRow.svelte";
+  import PreviewCard from "$lib/reading/PreviewCard.svelte";
+  import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import { DrawerModes, pressKeepsChooser } from "./drawer-modes.svelte.js";
+  import { amendedOf, proposedItemOf } from "$lib/editing/item-draft.js";
+  import { WIDE_QUERY, cardWidthOf, pairOf, trackOf } from "./preview-pair.js";
+  import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
+  import { shortDate } from "$lib/data/belt.js";
   import NorthStarMark from "$lib/NorthStarMark.svelte";
   import { watchTour } from "$lib/tour/watch.js";
   import "./home.css";
@@ -350,9 +358,14 @@
       detailFor = null;
       detail = null;
       detailProblem = null;
+      previewDoc = null;
+      modes.end();
       return;
     }
     if (detailFor === id) return;
+    previewDoc = null;
+    modes.end();
+    footProblem = null;
     /* Everything Orbit holds, read through the same seam the item view reads
        (#446) — documents included, so "everything" is not a euphemism. */
     detailFor = id;
@@ -365,6 +378,13 @@
         if (detailFor !== id) return;
         if (!found) detailProblem = "Orbit no longer holds this item.";
         detail = found;
+        if (docsTarget === id) {
+          revealTarget = null;
+          await tick();
+          document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "auto" });
+          await focusFirstDocument(id);
+          return;
+        }
         /* A row opened FROM the address is put on screen twice: once as soon
            as it opens, and again once the detail has given it its full height
            — otherwise the record you asked for settles half off the bottom. */
@@ -379,6 +399,130 @@
       .finally(() => {
         if (detailFor === id) detailBusy = false;
       });
+  });
+
+  /** Reads the open row's record again after something changed it from the
+      drawer (#1319): a paper attached, removed or restored, a snooze. */
+  async function rereadDetail() {
+    const id = detailFor;
+    if (!id) return;
+    try {
+      const found = await readItem(id);
+      if (detailFor === id && found) detail = found;
+    } catch (error) {
+      if (detailFor === id) detailProblem = /** @type {any} */ (error)?.message ?? String(error);
+    }
+  }
+
+  /* ---- #1319: a document's preview, from the open drawer -----------------
+     design/v19/belt-purpose/round-3/f-preview-beside-tracked.html (F),
+     owner-decisions §34. A row in the drawer's documents opens the preview
+     card (PreviewCard.svelte): on a wide screen beside the drawer, its top
+     level with the item card's, riding the page with it and sticky beside a
+     card taller than the window; under 1200px the phone's bottom sheet. A
+     press anywhere off it, or Escape, removes it at once and leaves the
+     drawer open: that press is swallowed by the drawer once. */
+  /** @type {import('$lib/data/workspace.js').DrawerDocument | null} */
+  let previewDoc = $state(null);
+  /** The document row that opened the card, for focus to return to. @type {HTMLElement | null} */
+  let previewFrom = null;
+  /* A press that only closed the card must not also close the drawer. Every
+     press starts with it down (the capture listener below), so it swallows
+     one click, never a later one. */
+  let swallowClick = false;
+  /** @type {HTMLElement | undefined} */
+  let manifestEl = $state();
+  /** @type {HTMLElement | undefined} */
+  let trackEl = $state();
+  let track = $state({ top: 0, height: 0 });
+  let readw = $state(480);
+  /** @type {{ maxWidth: number, shift: number } | null} */
+  let pair = $state(null);
+
+  /** @param {import('$lib/data/workspace.js').DrawerDocument} doc @param {HTMLElement} from */
+  function openDoc(doc, from) {
+    /* one card beside at a time: a document's preview puts a chooser away */
+    modes.closeChooser(false);
+    previewFrom = from;
+    if (previewDoc?.id !== doc.id) previewDoc = doc;
+  }
+  /** @param {{ refocus: boolean, press: boolean }} how */
+  function closeDoc({ refocus, press }) {
+    previewDoc = null;
+    if (press) swallowClick = true;
+    if (refocus && previewFrom?.isConnected) previewFrom.focus({ preventScroll: true });
+  }
+  /* The reader's remove (#1054): the paper goes, the card and the reader
+     close onto the drawer, and the wake offers it back. */
+  /** @param {import('$lib/data/belt.js').BeltDocumentRow} doc */
+  async function removeDoc(doc) {
+    await removeDocument(doc.id);
+    previewDoc = null;
+    await rereadDetail();
+    wake(`${doc.name} removed`, {
+      undo: () => { restoreDocument(doc.id).then(rereadDetail).catch(() => {}); },
+    });
+  }
+  /** @param {import('$lib/data/belt.js').BeltDocumentRow} doc */
+  async function restoreDoc(doc) {
+    await restoreDocument(doc.id);
+    previewDoc = null;
+    await rereadDetail();
+  }
+
+  /* The column beside the open drawer, and the pair centred together, kept
+     in step with the drawer's height and the window (preview-pair.js). */
+  $effect(() => {
+    const id = expanded;
+    /* the preview, or the chooser card: whichever stands beside (#1319) */
+    const paper = previewDoc ?? chooserAsk;
+    const manifest = manifestEl;
+    if (!id || !paper || !manifest) { pair = null; return; }
+    const media = matchMedia(WIDE_QUERY);
+    const measure = () => {
+      readw = cardWidthOf(window.innerHeight);
+      const row = document.getElementById(id);
+      const view = document.getElementById(`${id}-view`);
+      if (!media.matches || !row || !view) { pair = null; return; }
+      let rowTop = 0;
+      for (let el = /** @type {HTMLElement | null} */ (row); el && el !== manifest;
+        el = /** @type {HTMLElement | null} */ (el.offsetParent)) rowTop += el.offsetTop;
+      track = trackOf({ rowTop, rowOffsetTop: row.offsetTop, viewOffsetTop: view.offsetTop, viewHeight: view.offsetHeight });
+      const host = /** @type {HTMLElement} */ (manifest.parentElement);
+      const hs = getComputedStyle(host);
+      const box = host.getBoundingClientRect();
+      const padL = parseFloat(hs.paddingLeft) || 0;
+      const padR = parseFloat(hs.paddingRight) || 0;
+      pair = pairOf({
+        viewportWidth: document.documentElement.clientWidth,
+        hostLeft: box.left + padL,
+        hostWidth: box.width - padL - padR,
+        /* the width the card settled on once its page landed, else the
+           A4 width it opens at */
+        cardWidth: trackEl?.offsetWidth || readw,
+      });
+    };
+    const watch = new ResizeObserver(() => measure());
+    tick().then(() => {
+      measure();
+      const row = document.getElementById(id);
+      const view = document.getElementById(`${id}-view`);
+      if (row) watch.observe(row);
+      if (view) watch.observe(view);
+      if (trackEl) watch.observe(trackEl);
+    });
+    window.addEventListener("resize", measure);
+    media.addEventListener("change", measure);
+    return () => {
+      watch.disconnect();
+      window.removeEventListener("resize", measure);
+      media.removeEventListener("change", measure);
+    };
+  });
+  $effect(() => {
+    const down = () => { swallowClick = false; };
+    window.addEventListener("pointerdown", down, true);
+    return () => window.removeEventListener("pointerdown", down, true);
   });
 
   /**
@@ -428,6 +572,32 @@
     }
   }
 
+  /* #1305: the dial callout's documents chip opens the item's drawer with
+     its documents -- the real ones, read with the record -- in place of the
+     old documents dialog, which showed the mockup's two made-up papers under
+     any item's name. Once the record lands, the first document row is
+     brought into view and focused. */
+  /** @type {string | null} */
+  let docsTarget = null;
+  /** @param {string} id */
+  function openItemDocuments(id) {
+    docsTarget = id;
+    if (expanded === id && detail) { focusFirstDocument(id); return; }
+    openSearchResult(id);
+  }
+  /** @param {string} id */
+  async function focusFirstDocument(id) {
+    if (docsTarget !== id) return;
+    docsTarget = null;
+    await tick();
+    const first = /** @type {HTMLElement | null} */ (
+      document.getElementById(`${id}-view`)?.querySelector("[data-doc-row]") ?? null);
+    if (!first) return;
+    first.scrollIntoView({ block: "nearest", behavior: "auto" });
+    first.focus({ preventScroll: true });
+  }
+
+  /** @returns {Promise<boolean>} whether the address reached the clipboard */
   async function copyAddress() {
     try {
       await navigator.clipboard.writeText(new URL(addressOf(expanded), location.origin).href);
@@ -437,7 +607,258 @@
          already in the browser's own bar, which is where it lives. */
       copied = false;
     }
+    return copied;
   }
+
+  /* ---- #1319: THE DRAWER'S FOOT ROW (FootRow.svelte) ----------------------
+     Every act the belt had, from the open drawer, through the belt's own
+     commands (commands.js): snooze, complete, attach a document, retire, and
+     copy link. Since stage 2, complete asks for its date, cost and notes in
+     the rows and records them at once (recordCompletion, below); `held`
+     still sends what an earlier visit held and never saw confirmed
+     (held-completion.js). */
+  /** @type {"snooze" | "complete" | "attach" | "retire" | null} */
+  let footBusy = $state(null);
+  /** @type {string | null} */
+  let footProblem = $state(null);
+  /** The open item as a command addresses it. @returns {any} */
+  const commandItem = () => (detail?.householdId && !detail.suggestion ? detail : null);
+  async function rereadAll() {
+    view = await readHome();
+    await rereadDetail();
+  }
+  const held = createHeldCompletion({
+    apply: applyCommand,
+    holdMs: WAKE_HOLD_MS,
+    onsent: () => rereadAll().catch(() => {}),
+    onfailed: (error) => {
+      wake(/** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again", { failure: true });
+    },
+  });
+  beforeNavigate(() => { held.flush(); });
+  $effect(() => {
+    const flush = () => held.flush();
+    addEventListener("pagehide", flush);
+    return () => removeEventListener("pagehide", flush);
+  });
+  /* A completion a previous visit held and never saw confirmed (#1151
+     W1-S3). The pocket picks it up itself when it is the dialect showing. */
+  onMount(() => {
+    if (!matchMedia(DESK).matches) return;
+    held.retryStashed((error) => error instanceof WorkspaceError && error.code === "version_conflict");
+  });
+
+  /**
+   * One act that changes the item and then reads it again.
+   * @param {"snooze" | "retire"} kind
+   * @param {() => object} build
+   * @param {string} words  what the wake says once it has landed
+   * @param {{ leave?: boolean }} [options]  the item leaves the manifest: put the drawer away
+   */
+  async function runFoot(kind, build, words, { leave = false } = {}) {
+    if (footBusy) return;
+    footBusy = kind;
+    footProblem = null;
+    try {
+      await applyCommand(build());
+      if (leave) collapseRow();
+      view = await readHome();
+      if (!leave) await rereadDetail();
+      wake(words);
+    } catch (error) {
+      footProblem = /** @type {{ message?: string }} */ (error)?.message ?? `couldn't ${kind} it — try again`;
+    } finally {
+      footBusy = null;
+    }
+  }
+
+  /* ---- #1319 stage 2: EDITING IN THE ROWS, AND THE CHOOSER BESIDE --------
+     design/v19/belt-purpose/round-8/m-colour-per-option.html (approved
+     2026-10-08). The pencil puts the drawer's own rows into edit mode; due
+     date, section, type and orbital period open the chooser card beside the
+     drawer, in the preview's column (one card beside at a time), or as the
+     bottom sheet under 1200px. Snooze opens the same calendar ("snooze
+     until"); complete asks for its date, cost and notes in the rows
+     (owner, 2026-10-08). Escape takes the chooser, then the edit. */
+  const modes = new DrawerModes({
+    save: async (item, edits) => {
+      if (item.status === "suggested") { await addSuggestion(item, edits); return; }
+      await applyCommand(upsertCommand(item, edits));
+      await rereadAll();
+    },
+    onchoose: () => { previewDoc = null; },
+  });
+  /** The open item's household's sections, for the section's name, colour and tiles.
+      A suggestion not yet given a household files into the account's primary one. */
+  const detailSections = $derived.by(() => {
+    if (!view) return [];
+    const { households, primary, suggestions } = asView(view);
+    const suggested = suggestions.find((one) => one.id === expanded);
+    const householdId = suggested ? (suggested.householdId ?? primary) : detail?.householdId;
+    return households.find((one) => one.id === householdId)?.sections ?? [];
+  });
+  /* .by, not a bare expression: read at the top level, `detail` would be
+     narrowed to its initial null. */
+  const chooserAsk = $derived.by(() => {
+    const today = detail?.today ?? (view ? asView(view).today : null);
+    return today ? modes.askOf(detailSections, today) : null;
+  });
+  let wide = $state(false);
+  $effect(() => {
+    const media = matchMedia(WIDE_QUERY);
+    const set = () => { wide = media.matches; };
+    set();
+    media.addEventListener("change", set);
+    return () => media.removeEventListener("change", set);
+  });
+
+  /* Where focus goes back to when the rows stop editing: the pencil, or a
+     suggestion's `review & amend →`. */
+  const EDIT_HOME = ".ivedit, .ivamend";
+  /** Focus a control in the open drawer (or its head), once it is drawn. @param {string} selector */
+  async function focusInDrawer(selector) {
+    await tick();
+    const id = expanded;
+    if (!id) return;
+    const el = /** @type {HTMLElement | null} */ (
+      document.getElementById(`${id}-view`)?.querySelector(selector) ?? document.getElementById(id)?.querySelector(selector));
+    el?.focus({ preventScroll: true });
+    if (el?.isContentEditable) getSelection()?.collapse(el, el.childNodes.length);
+  }
+
+  /** The chooser card's pick: the row takes it, or the snooze is sent. @param {string} value */
+  function pickChoice(value) {
+    const snooze = modes.pick(value);
+    if (!snooze || !detail) return;
+    const { item, until } = snooze;
+    if (until <= detail.today) { footProblem = "not yet — snooze to a day after today"; return; }
+    runFoot("snooze", () => snoozeCommand(item, until), `${item.title} snoozed until ${longDate(until)}`);
+  }
+
+  async function saveEdit() {
+    const title = modes.edit.draft?.title.trim() ?? "";
+    if (await modes.edit.commit()) {
+      wake(`saved · ${title}`);
+      focusInDrawer(".ivedit");
+    }
+  }
+
+  /* Complete records what the rows hold, as the belt's complete panel sent
+     it (item/[[id]]/+page.svelte): the date, the next date the belt
+     computes, the cost, the notes. Sent on `record`, not held for an undo:
+     the rows were the chance to change it. */
+  async function recordCompletion() {
+    const out = modes.completion();
+    if ("refusal" in out) { modes.completeProblem = out.refusal; return; }
+    if (footBusy) return;
+    const { item, fields } = out;
+    footBusy = "complete";
+    modes.completeProblem = null;
+    try {
+      await applyCommand(completeCommand(item, fields));
+      modes.cancelComplete();
+      if (!fields.nextDate) collapseRow();
+      view = await readHome();
+      if (fields.nextDate) await rereadDetail();
+      wake(`Completed${fields.nextDate ? ` · next due ${shortDate(fields.nextDate)}` : ""} · ${item.title}`);
+      if (fields.nextDate) focusInDrawer('[aria-label^="Complete "]');
+    } catch (error) {
+      modes.completeProblem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again";
+    } finally {
+      footBusy = null;
+    }
+  }
+
+  /* Escape: the chooser first (focus back to its value; the card hears it
+     itself too, and whichever hears it first marks it handled), then the
+     edit or the completion (focus back to the pencil or the pill). Ahead of
+     home's own Escape, which puts the drawer away; the preview's Escape is
+     the preview's. */
+  $effect(() => {
+    if (!modes.id) return;
+    /** @param {KeyboardEvent} event */
+    const onKey = (event) => {
+      if (event.key !== "Escape" || event.defaultPrevented || previewDoc) return;
+      const chooser = modes.choosing;
+      const editing = Boolean(modes.edit.id);
+      if (!modes.escape()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!chooser) focusInDrawer(editing ? EDIT_HOME : '[aria-label^="Complete "]');
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  });
+  /* A press off the chooser card puts it away at once; a press on another
+     value switches it, on its own value closes it (EditSession.choose).
+     That press is swallowed by the drawer once, as the preview's is. */
+  $effect(() => {
+    if (!modes.choosing) return;
+    /** @param {PointerEvent} event */
+    const onPress = (event) => {
+      if (pressKeepsChooser(event.target)) return;
+      modes.closeChooser(false);
+      swallowClick = true;
+    };
+    window.addEventListener("pointerdown", onPress, true);
+    return () => window.removeEventListener("pointerdown", onPress, true);
+  });
+
+  /** @type {import('./drawer-acts.js').DrawerActs} */
+  const drawerActs = $derived({
+    busy: footBusy ?? (modes.edit.busy ? "save" : null),
+    problem: modes.edit.problem ?? modes.completeProblem ?? footProblem,
+    modes,
+    sections: detailSections,
+    onsnooze: (from) => {
+      const item = commandItem();
+      footProblem = null;
+      if (item) modes.snooze(item, from);
+    },
+    oncomplete: () => {
+      const item = commandItem();
+      if (!item) return;
+      footProblem = null;
+      modes.startComplete(item, item.today);
+      focusInDrawer("[data-pick]");
+    },
+    onedit: () => {
+      const item = commandItem();
+      if (!item) return;
+      footProblem = null;
+      modes.startEdit(item);
+      focusInDrawer('[data-ed="title"]');
+    },
+    onsave: saveEdit,
+    onrecord: recordCompletion,
+    oncancel: () => {
+      const editing = Boolean(modes.edit.id);
+      modes.end();
+      focusInDrawer(editing ? EDIT_HOME : '[aria-label^="Complete "]');
+    },
+    onamend: startAmend,
+    onaccept: addAmended,
+    onattach: async (file) => {
+      const item = commandItem();
+      if (!item || footBusy) return;
+      footBusy = "attach";
+      footProblem = null;
+      try {
+        await attachItemDocument(item.householdId, item.id, file, crypto.randomUUID());
+        await rereadAll();
+        wake(`${file.name} attached to ${item.title}`);
+      } catch (error) {
+        footProblem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't attach it — try again";
+      } finally {
+        footBusy = null;
+      }
+    },
+    onretire: () => {
+      const item = commandItem();
+      if (item) runFoot("retire", () => archiveCommand(item), `${item.title} retired`, { leave: true });
+    },
+    oncopy: copyAddress,
+  });
 
   /** @param {KeyboardEvent} event */
   function onWindowKeydown(event) {
@@ -446,10 +867,19 @@
   /** @param {MouseEvent} event */
   function onWindowClick(event) {
     if (!expanded) return;
-    const target = event.target instanceof Element ? event.target : null;
+    if (swallowClick) { swallowClick = false; return; }
+    /* #1319: while the rows are being edited or a completion asked for, a
+       press elsewhere leaves the drawer as it is (round 8's own rule) */
+    if (modes.id === expanded && (modes.edit.id || modes.completing)) return;
     /* Inside the open row or its panel: stay. On another expandable row: that
-       row's own handler is switching to it. Anywhere else: close. */
-    if (target?.closest("a.item, .itemview")) return;
+       row's own handler is switching to it. On the preview card beside the
+       drawer, or the reader over home (#1319): stay. Anywhere else: close.
+       Read off the event's path, not the target's ancestors: a press that
+       replaces its own button (the foot row's snooze) has left the target
+       detached by the time the click reaches the window. */
+    const inside = event.composedPath().some((node) =>
+      node instanceof Element && node.matches("a.item, .itemview, [data-preview-card], [data-chooser-card], .rd-layer"));
+    if (inside) return;
     collapseRow();
   }
 
@@ -463,6 +893,55 @@
     replaceState(resolve(`/home?item=${encodeURIComponent(id)}`), { orbitItem: id });
     await tick();
     document.getElementById(id)?.scrollIntoView({ block: "center", behavior: "auto" });
+  }
+
+  /* ---- #1319: A SUGGESTION REVIEWED IN ITS DRAWER -----------------------
+     owner-decisions §34 ("suggestions are reviewed in their home drawer",
+     superseding §27's belt card). `review & amend →` puts the suggestion's
+     drawer into the rows' own editing (EditRows.svelte), the relay's
+     proposal standing in for the item it would become (proposedItemOf); the
+     choosers stand beside it as a filed item's do. `add to orbit` sends the
+     rows as the amended item on the two-tap decision's own operation id
+     (amendReceipt), into the section the rows chose. */
+  function startAmend() {
+    const suggestion = asView(view).suggestions.find((one) => one.id === expanded);
+    if (!suggestion?.receiptId) return;
+    const householdId = suggestion.householdId ?? asView(view).primary;
+    if (!householdId) {
+      armed = { id: suggestion.id, act: null };
+      mailProblem = "This account has no household yet";
+      return;
+    }
+    const sections = asView(view).households.find((one) => one.id === householdId)?.sections ?? [];
+    const sectionId = (sections.find((one) => one.visible !== false) ?? sections[0])?.id ?? null;
+    mailProblem = null;
+    armed = { id: null, act: null };
+    previewDoc = null;
+    modes.startEdit(proposedItemOf(suggestion, { householdId, sectionId }));
+    focusInDrawer('[data-ed="title"]');
+  }
+  /**
+   * The rows' save for a suggestion: approved as amended, or refused in the
+   * rows' own words (EditSession says it under the rows).
+   * @param {import('$lib/data/commands.js').CommandItem} item
+   * @param {Partial<import('$lib/data/commands.js').CommandItem>} edits
+   */
+  async function addSuggestion(item, edits) {
+    const suggestion = asView(view).suggestions.find((one) => one.id === item.id);
+    if (!suggestion) throw new Error("not added — this suggestion has gone");
+    const { item: amended, sectionId } = amendedOf(item, edits);
+    const problem = await amendReceipt(suggestion, amended, sectionId);
+    if (problem?.startsWith("The item is recorded")) {
+      throw new Error("not finished — the item is recorded, but its documents need another try: add it again");
+    }
+    if (problem) throw new Error(`not added — ${problem}`);
+  }
+  async function addAmended() {
+    const title = modes.edit.draft?.title.trim() ?? "";
+    if (await modes.edit.commit()) {
+      collapseRow();
+      wake(`added to your orbit · ${title}`);
+    }
   }
 
   const operationIds = new SvelteMap();
@@ -1005,7 +1484,8 @@
            to the workspace under ORBIT_FIXTURES, which is what lets the gate
            photograph the same sky twice. */
         ? mountHome({ galaxy: asView(view).galaxy, primary: asView(view).primary,
-                      fixtures: Boolean(data?.fixtures), workspace: asView(view).primary ?? "" })
+                      fixtures: Boolean(data?.fixtures), workspace: asView(view).primary ?? "",
+                      onopendocs: openItemDocuments })
         /* #1120: the pocket binds its own controls (pocket.svelte, the kit's
            sheets and rows); its approve, dismiss and refresh are handed to it
            as props below. */
@@ -1629,7 +2109,9 @@
     <!-- §14 (#469): ONE schedule surface. The manifest IS the corridor — a
          full scrollback through events, nearest at the top down to the
          furthest away, suggestions riding the same line in date order. -->
-    <div class="manifest" id="manifest-top">
+    <div class="manifest" id="manifest-top" bind:this={manifestEl}
+         style:max-width={pair ? `${pair.maxWidth}px` : undefined}
+         style:transform={pair ? `translateX(${pair.shift}px)` : undefined}>
     {#if corridor && !view?.emptySky}
       <div class="corridor">
         {#if corridor.overdue.length}
@@ -1637,7 +2119,7 @@
             {#each corridor.overdue as row (row.id)}
               <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
                 onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-                onCopyAddress={copyAddress} />
+                onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} acts={drawerActs} />
             {/each}
           </div>
         {/if}
@@ -1645,14 +2127,14 @@
         {#each corridor.current as row (row.id)}
           <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
             onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-            onCopyAddress={copyAddress} />
+            onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} acts={drawerActs} />
         {/each}
         {#each corridor.months as month (month.key)}
           <div class="month"><span>{month.label}</span><div class="rule"></div><small>{month.rows.length} approaching</small></div>
           {#each month.rows as row (row.id)}
             <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
               onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-              onCopyAddress={copyAddress} />
+              onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} acts={drawerActs} />
           {/each}
         {/each}
         <!-- #1281: what is kept without a date rides at the foot under its
@@ -1663,7 +2145,7 @@
         {#each corridor.undated as row (row.id)}
           <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
             onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-            onCopyAddress={copyAddress} />
+            onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} acts={drawerActs} />
         {/each}
       </div>
       {#if corridor.total === 0}
@@ -1672,6 +2154,19 @@
         <div class="horizon">— beyond the horizon: nothing scheduled past {corridor.horizon} —</div>
       {/if}
     {/if}
+    <!-- #1319, round 3 (F): the preview's column beside the open drawer. -->
+    <div class="pvtrack" bind:this={trackEl} style:--pv-y="{track.top}px" style:--pv-h="{track.height}px" style:--readw="{readw}px">
+      <PreviewCard doc={previewDoc} itemTitle={detail?.title ?? ""} onclose={closeDoc}
+                   onremove={removeDoc} onrestore={restoreDoc} />
+      <!-- #1319 stage 2 (round 8): the chooser card, in the preview's seat;
+           under 1200px it is the bottom sheet -->
+      {#if chooserAsk}
+        <div class="chseat" class:sheet={!wide} data-chooser-card>
+          <ChooserCard ask={chooserAsk} layout={wide ? "beside" : "sheet"} onpick={pickChoice}
+                       onclose={() => modes.closeChooser(true)} />
+        </div>
+      {/if}
+    </div>
   </div>
 </div>
 
@@ -1711,13 +2206,6 @@
   <div class="keyrow">belt = documents attached</div>
   <div class="keyrow">the sky&rsquo;s weather = your workload</div>
 </aside>
-<div class="docview" id="docview" role="dialog" aria-label="Documents">
-  <button class="close">×</button>
-  <h2 id="docview-title">Car full service</h2>
-  <div class="sub">2 documents · encrypted · scanned clean</div>
-  <div class="doc">◆<span>service-invoice-2026.pdf<small>added 12 Jun · 240 KB</small></span></div>
-  <div class="doc">◆<span>service-checklist.pdf<small>added 12 Jun · 88 KB</small></span></div>
-</div>
 {/if}
 {#if askTarget}
 <!-- §11 (#453): the question IS the dialogue — one ask, two honest answers. -->

@@ -94,10 +94,13 @@ test("after a save, the sky scrolls down to the manifest", async ({ page }) => {
 test("after a save, the item's way back returns to a sky that scrolls", async ({ page }) => {
   await signIn(page);
   await addItem(page, "Scroll via item");
-  /* the save lands with the new row already open (`/home?item=`), so its
-     link to the item is there without a press on the row (a press would
-     close it) */
-  await page.getByRole("link", { name: "manage this item →" }).click();
+  /* the save lands with the new row already open (`/home?item=`). #1319:
+     the drawer no longer links to the item screen (it holds everything
+     itself), so the item's own address is walked to directly, as a
+     bookmark would; the item screen retires in a later step. */
+  const id = new URL(page.url()).searchParams.get("item");
+  expect(id, "the save did not land on the new item's address").toBeTruthy();
+  await page.goto(`/item/${id}`);
   await expect(page).toHaveURL(/\/item\/[0-9a-f-]{36}$/);
   await page.getByRole("link", { name: "← YOUR SKY" }).click();
   await expect(page).toHaveURL(/\/home$/);

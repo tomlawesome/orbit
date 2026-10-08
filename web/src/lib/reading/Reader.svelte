@@ -12,7 +12,9 @@
   /**
    * THE READER, on the desk and the phone alike (#1059, owner-decisions.md
    * §18; proposal §2.3; design/v19/item-phone/round-1 scene `reader`).
-   * Round 1's reading room as a window over the belt, never a separate page:
+   * Round 1's reading room as a window over the belt, never a separate page.
+   * Since #1319 it opens over home too, from the preview card beside the
+   * item drawer (PreviewCard.svelte), which is why it lives in $lib now:
    * the belt dims and blurs beneath. The head names the file and its item and holds `close`; under
    * it `fit − % +`. The page as large as the window allows; past fit it
    * scrolls inside the window. The foot holds the page number and the two

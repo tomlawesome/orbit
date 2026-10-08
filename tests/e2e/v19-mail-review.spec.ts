@@ -317,6 +317,64 @@ test("amend then accept from the item view", async ({ page }) => {
   }
 });
 
+/* #1319 (owner-decisions §34): a suggestion is reviewed in its home drawer,
+   not on the belt. The same amend-then-accept as above, from home: on the
+   desk the drawer's own rows go live (`review & amend →`) and `add to orbit`
+   approves what they hold; on a phone the signals row's `review & amend →`
+   raises the review sheet in place. */
+test("amend then accept from home's drawer", async ({ page }) => {
+  test.fail(test.info().project.name === "mobile-webkit", "#1196: mobile WebKit skips interceptMail's route after goto, so this hits the real (empty) inbox");
+  await signInToHome(page);
+  const { householdId } = await seedHousehold(page);
+
+  try {
+    const approvals: Record<string, unknown>[] = [];
+    await interceptMail(page, householdId, approvals);
+    await page.goto("/home");
+    if (test.info().project.name.startsWith("mobile")) {
+      const row = page.locator(".pocket .pk-signals [data-row]", { hasText: "Reviewed intake 1786823446152" }).first();
+      await expect(row).toBeVisible({ timeout: 30_000 });
+      await row.locator("[data-row-face]").first().click();
+      await row.getByRole("button", { name: "review & amend →" }).click();
+      const form = page.getByRole("form", { name: "Review Reviewed intake 1786823446152" });
+      const name = form.locator('input[id$="-name"]');
+      await expect(name).toHaveValue("Reviewed intake 1786823446152");
+      await name.fill("Home insurance, corrected");
+      await form.locator('input[id$="-cost"]').fill("199.99");
+      await form.getByRole("button", { name: "Home", exact: true }).click();
+      await page.getByRole("button", { name: "add to orbit", exact: true }).click();
+    } else {
+      const row = page.locator(".item.suggest", { hasText: "Reviewed intake 1786823446152" }).first();
+      await expect(row).toBeVisible();
+      await row.click();
+      const drawer = page.locator(`[id="${receiptId}-view"]`);
+      await drawer.getByRole("button", { name: "review & amend →" }).click();
+      /* the title edits in the row's head, the rest in the drawer's rows */
+      const title = page.locator(`[id="${receiptId}"] [data-ed="title"]`);
+      await expect(title).toHaveText("Reviewed intake 1786823446152");
+      await expect(drawer.locator('[data-ed="provider"]')).toHaveText("Reviewed Cover");
+      await title.fill("Home insurance, corrected");
+      await drawer.locator('[data-ed="cost"]').fill("199.99");
+      await drawer.getByRole("button", { name: "add to orbit", exact: true }).click();
+    }
+
+    await expect.poll(() => approvals.length).toBe(1);
+    expect(approvals[0]).toMatchObject({
+      source: { kind: "mailbox_draft", receiptId, draftVersion: 3 },
+      householdId,
+      sectionId,
+      action: "create_separate",
+      item: { title: "Home insurance, corrected", provider: "Reviewed Cover", costMinor: 19999, currency: "GBP",
+        dueDate: "2031-01-10", scheduleKind: "renewal", recurrenceMonths: 12 },
+      attachmentIds: [attachmentId],
+    });
+    // Nothing about it went to the belt.
+    await expect(page).toHaveURL(/\/home/);
+  } finally {
+    await unrouteAndSweep(page, households);
+  }
+});
+
 test("a dismissal takes two taps and mail that failed is visible on the relay", async ({ page }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the pocket dialect has no suggestion rows yet (#434 follow-up)");
   await signInToHome(page);

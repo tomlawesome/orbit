@@ -185,9 +185,8 @@
 .pocket .pk-pen .p-row[data-open]{border-style:solid}
 /* An opened manifest row (review round §2.1, the desk's .item.open): its
    own outline turns accent, the kit's rule (Row.svelte, owner-decisions
-   §29), its bottom corners handed to the panel. The drawer's `copy link`
-   is the desk's quiet .ivcopy. */
-.pocket .pk-copy{color:var(--ink-quiet)}
+   §29), its bottom corners handed to the panel. Its `copy link` is the
+   chain-link icon in the drawer's foot row now (#1319, FootRow.svelte). */
 
 /* ---- §11 (#453): the labelled sky, at the same scale ------------------- */
 .pocket .adrift{margin-top:8px}
@@ -247,3 +246,16 @@ body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
   .pocket .pk-body:active > circle:first-of-type{transform:none}
   .pocket .mdial,.pocket .msearch,.pocket .pk-below{transition:none}
 }
+
+/* #1319 stage 2 (round 8, `narrow-editing-*`): the chooser card's seat, the
+   preview's own bottom sheet: fixed to the foot (ChooserCard.svelte leaves
+   where it stands to the screen). */
+.pk-chseat{position:fixed;left:0;right:0;bottom:0;z-index:45}
+/* the section word on a manifest row, in its own colour (packs.css maps
+   data-opt onto --opt-text); never on the dial */
+.pocket .p-row .opt{font-style:normal;color:var(--opt-text, inherit)}
+/* #1319 stage 2 (round 8): the title live in the row's head while its item
+   is edited — a 1px accent line under it and the caret, in its own type */
+.pocket .p-row .ed{display:inline-block;max-width:100%;min-width:6ch;outline:none;caret-color:var(--accent);
+  box-shadow:0 1px 0 var(--accent);cursor:text;font:inherit;color:inherit;overflow-wrap:anywhere}
+.pocket .p-row .ed:focus{box-shadow:0 1.5px 0 var(--accent)}

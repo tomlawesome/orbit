@@ -12,7 +12,10 @@
    * arrows; until a response has said how many pages there are, the row
    * says nothing.
    *
-   * `onturn` is handed the page asked for; the item screen fetches it and
+   * Since #1319 home's preview card (PreviewCard.svelte) stands it under
+   * its page too, which is why it lives in $lib now.
+   *
+   * `onturn` is handed the page asked for; the host fetches it and
    * hands back `page`. When an arrow goes at an end and had focus, focus
    * moves to the other, as the reader's do.
    *
