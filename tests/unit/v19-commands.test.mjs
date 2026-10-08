@@ -50,7 +50,6 @@ describe("command builders", () => {
     expect(command.activity).toMatchObject({
       id: "a-1",
       itemId: "i-mot",
-      kind: "service_completed",
       occurredAt: "2026-08-15T12:00:00.000Z",
       effectiveDate: "2026-08-15",
       previousDate: "2026-08-29",
@@ -63,9 +62,13 @@ describe("command builders", () => {
     expect(command.activity).not.toHaveProperty("nextDate");
   });
 
-  it("a renewal completes with the renewal kind", () => {
+  it("complete names no activity kind: the engine records it from the schedule (#1325)", () => {
     const command = completeCommand({ ...ITEM, scheduleKind: "renewal" }, { completedDate: "2026-08-15" }, IDS);
-    expect(command.activity.kind).toBe("renewal_completed");
+    expect(command.activity).not.toHaveProperty("kind");
+  });
+
+  it("complete can carry the cost as typed, for the engine to read", () => {
+    expect(completeCommand(ITEM, { completedDate: "2026-08-15", cost: "£54.85" }, IDS)).toMatchObject({ cost: "£54.85" });
   });
 
   it("reschedule and snooze record where the date moved from", () => {
@@ -77,11 +80,11 @@ describe("command builders", () => {
     expect(snoozed.activity.kind).toBe("snoozed");
   });
 
-  it("archive, cancel and restore carry their kinds", () => {
+  it("archive carries its kind; cancel and restore leave theirs to the engine (#1325)", () => {
     expect(archiveCommand(ITEM, IDS).activity.kind).toBe("archived");
     expect(statusCommand(ITEM, "cancelled", IDS)).toMatchObject({ type: "item.status", status: "cancelled" });
-    expect(statusCommand(ITEM, "cancelled", IDS).activity.kind).toBe("cancelled");
-    expect(statusCommand(ITEM, "active", IDS).activity.kind).toBe("restored");
+    expect(statusCommand(ITEM, "cancelled", IDS).activity).not.toHaveProperty("kind");
+    expect(statusCommand(ITEM, "active", IDS).activity).not.toHaveProperty("kind");
   });
 
   it("upsert sends the schema's item only — no view-model extras", () => {
@@ -94,6 +97,8 @@ describe("command builders", () => {
     expect(command.item.section).toBeUndefined();
     expect(command.item.documents).toBeUndefined();
     expect(command.activity.kind).toBe("updated");
+    // ADR-0034 (#1325): what the engine derives from the kind never travels.
+    for (const field of ["scheduleKind", "subtype", "status"]) expect(command.item).not.toHaveProperty(field);
   });
 
   it("a versionless item defaults expectedVersion to 1 like the shipped app", () => {

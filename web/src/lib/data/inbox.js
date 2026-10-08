@@ -90,9 +90,10 @@ function copyProposalField(item, proposal, field) {
 }
 
 /**
- * The final values an as-is approval sends: the sanitized proposal, with the
- * schema's own consistency rules honoured client-side too — a schedule needs
- * a date, recurrence needs a schedule.
+ * The final values an as-is approval sends: the sanitized proposal as the
+ * relay read it, unjudged. Whether a schedule stands without a date, or a
+ * repeat without a schedule, is the engine's to decide (ADR-0034, #1325):
+ * it keeps the relay's reading only where it holds.
  * @param {import('./workspace.js').ItemProposal} [proposal]
  * @param {string} [fallbackCurrency]
  * @returns {import('./workspace.js').ItemProposal}
@@ -101,16 +102,11 @@ export function approvalItemOf(proposal = {}, fallbackCurrency = "GBP") {
   /** @type {import('./workspace.js').ItemProposal} */
   const item = { title: proposal.title ?? "Forwarded email", currency: proposal.currency ?? fallbackCurrency };
   /** @type {(keyof import('./workspace.js').ItemProposal)[]} */
-  const passthroughFields = ["subtype", "provider", "reference", "costMinor", "notes"];
+  const passthroughFields = [
+    "subtype", "provider", "reference", "costMinor", "notes", "dueDate", "scheduleKind", "recurrenceMonths",
+  ];
   for (const field of passthroughFields) {
     copyProposalField(item, proposal, field);
-  }
-  if (proposal.dueDate) {
-    item.dueDate = proposal.dueDate;
-    if (proposal.scheduleKind) {
-      item.scheduleKind = proposal.scheduleKind;
-      if (proposal.recurrenceMonths) item.recurrenceMonths = proposal.recurrenceMonths;
-    }
   }
   return item;
 }

@@ -109,7 +109,6 @@ describe("one-off expirations", () => {
       activity: {
         id: randomUUID(),
         itemId: fixture.item.id,
-        kind: "renewal_completed",
         occurredAt: new Date().toISOString(),
         effectiveDate: "2026-12-20",
         nextDate: "2027-12-20",
