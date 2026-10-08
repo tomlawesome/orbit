@@ -60,6 +60,17 @@ widths both proved; packs by `?theme=`.
 - The page cannot be forced narrow: `?scene=phone` is the `open` (B) or
   `preview` (C) scene at a 390px viewport.
 
-## Verdicts
+## Verdicts (owner, 2026-10-08)
 
-(none yet)
+> It makes me sad but objectively I think the no belt at all version is
+> simpler and easier to use.
+
+> C does need work though, I'd rather the previews opened on the right in
+> larger screens, or that the preview was in a drawer itself or something,
+> click the item, drawer opens, you see the preview, click it to read it
+> properly. Click anywhere to cancel, fall back to the manifest with the
+> drawer still open.
+
+A (the papers belt) is dropped. B's drawer stands and carries forward.
+C is the direction; round 2 (`../round-2/`) proves the two shapes of its
+preview the owner named.
