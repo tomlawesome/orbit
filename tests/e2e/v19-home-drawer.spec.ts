@@ -138,6 +138,36 @@ test.afterEach(async ({ page }) => {
   await households.sweep(page);
 });
 
+/* #1319 stage 3b: the belt retired, and its address with it. `/item/<id>`
+   is answered on the server with `/home?item=<id>`, so an old link, a
+   reminder or a bookmark lands in that item's drawer; bare `/item` lands on
+   home. */
+test.describe("the belt's old address", () => {
+  test("/item/<id> lands on /home?item=<id> with that drawer open", async ({ page, isMobile }) => {
+    test.setTimeout(90_000);
+    await signIn(page);
+    const { itemId } = await seedHouseholdWithItem(page);
+
+    const response = await page.request.get(`/item/${itemId}`, { maxRedirects: 0 });
+    expect(response.status()).toBe(308);
+    expect(response.headers().location).toBe(`/home?item=${itemId}`);
+
+    await page.goto(`/item/${itemId}`);
+    await expect(page).toHaveURL(new RegExp(`/home\\?item=${itemId}$`));
+    if (isMobile) {
+      await expect(page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`))
+        .toHaveAttribute("data-open", "", { timeout: 20_000 });
+    } else {
+      const drawer = page.locator(`[id="${itemId}-view"]`);
+      await expect(drawer).toBeVisible({ timeout: 20_000 });
+      await expect(drawer.getByText(NOTE)).toBeVisible();
+    }
+
+    await page.goto("/item");
+    await expect(page).toHaveURL(/\/home$/);
+  });
+});
+
 test.describe("on the desk", () => {
   test.skip(({ isMobile }) => isMobile, "the desk's drawer; the phone's is below");
 
