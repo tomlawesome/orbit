@@ -21,9 +21,14 @@
  *     (src/lib/domain.ts sectionIcons) cycle the four colours, so the four
  *     shipped marks keep theirs, and calendar, hook, kite, ladle, cross,
  *     bow, wedge and belt run orange, teal, violet, magenta twice over;
- *   · a section with no mark Orbit knows takes one by its id's hash.
+ *   · a section with no mark Orbit knows has none (the server only
+ *     stores the vocabulary's marks, so this is a section not yet loaded).
  *
- * A household with more than four sections shares colours; round 8 has four.
+ * Re-marking a section moves its colour with the mark, as its ink already
+ * does (#867, marks.js inkOf); renaming, reordering or hiding it never
+ * does. A household with more than four sections shares colours: new hues
+ * would crowd the urgency and type colours, and an uncoloured tile reads
+ * as disabled among coloured ones.
  */
 
 /** The four section colours, in the vocabulary's order. */
@@ -41,16 +46,6 @@ const MARK_ORDER = [
   "hook", "kite", "ladle", "cross", "bow", "wedge", "belt",
 ];
 
-/** FNV-1a, as chart.js hashId: a stable number from a string. @param {string} text */
-function hashOf(text) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 0x01000193) >>> 0;
-  }
-  return h;
-}
-
 /**
  * The colour a section wears, by the rule above; null without a section.
  * @param {{ id?: string | null, icon?: string | null } | null | undefined} section
@@ -60,8 +55,7 @@ export function sectionColourOf(section) {
   if (!section || (!section.id && !section.icon)) return null;
   if (section.id && SHIPPED[section.id]) return SHIPPED[section.id];
   const mark = MARK_ORDER.indexOf(section.icon ?? "");
-  if (mark >= 0) return SECTION_COLOURS[mark % SECTION_COLOURS.length];
-  return SECTION_COLOURS[hashOf(String(section.id)) % SECTION_COLOURS.length];
+  return mark >= 0 ? SECTION_COLOURS[mark % SECTION_COLOURS.length] : null;
 }
 
 /**
