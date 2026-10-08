@@ -23,6 +23,7 @@ import { itemOfIntent } from "@/lib/item-kind";
 import { nextDueDate } from "@/lib/next-due-date";
 import {
   completionActivity,
+  statusActivity,
   itemActivitySchema,
   workspaceItemSchema,
   workspaceSchema,
@@ -811,7 +812,7 @@ async function runWorkspaceCommand(
         updatedAt: new Date(),
       }).where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
       if (!nextDate) await transaction.delete(reminderRules).where(eq(reminderRules.itemId, itemId));
-      await recordActivity(itemId, completionActivity(command.activity, nextDate), true);
+      await recordActivity(itemId, completionActivity(command.activity, currentEvent.kind, nextDate), true);
       return;
     }
 
@@ -854,7 +855,7 @@ async function runWorkspaceCommand(
         version: sql`${items.version} + 1`,
         updatedAt: new Date(),
       }).where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
-      await recordActivity(itemId, command.activity);
+      await recordActivity(itemId, statusActivity(command.activity, command.status));
       return;
     }
 

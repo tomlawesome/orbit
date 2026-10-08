@@ -55,17 +55,19 @@ const DEFAULT_IDS = {
 };
 
 /**
+ * The activity a command records. `kind` is left out where the engine names
+ * it from what happened -- a completion, a status change (ADR-0034, #1325).
  * @param {CommandItem} item
- * @param {string} kind
+ * @param {string | null} kind
  * @param {Partial<import('./workspace.js').ItemActivity>} details
  * @param {IdSource} ids
- * @returns {import('./workspace.js').ItemActivity}
+ * @returns {Omit<import('./workspace.js').ItemActivity, "kind"> & { kind?: string }}
  */
 function activityOf(item, kind, details, ids) {
   return {
     id: ids.uuid(),
     itemId: item.id,
-    kind,
+    ...(kind ? { kind } : {}),
     occurredAt: ids.now(),
     ...details,
   };
@@ -93,7 +95,6 @@ function base(item) {
  * @param {IdSource} [ids]
  */
 export function completeCommand(item, { completedDate, costMinor, cost, notes }, ids = DEFAULT_IDS) {
-  const kind = item.scheduleKind === "renewal" ? "renewal_completed" : "service_completed";
   return {
     type: "item.complete",
     ...base(item),
@@ -101,7 +102,7 @@ export function completeCommand(item, { completedDate, costMinor, cost, notes },
     ...(costMinor !== undefined && costMinor !== null ? { costMinor } : {}),
     ...(cost ? { cost } : {}),
     ...(notes ? { notes } : {}),
-    activity: activityOf(item, kind, {
+    activity: activityOf(item, null, {
       effectiveDate: completedDate,
       ...(item.dueDate ? { previousDate: item.dueDate } : {}),
       ...(costMinor !== undefined && costMinor !== null ? { costMinor } : {}),
@@ -154,6 +155,8 @@ export function archiveCommand(item, ids = DEFAULT_IDS) {
 }
 
 /**
+ * A status change: the status asked for; the engine records whether that
+ * restored or cancelled the item (#1325).
  * @param {CommandItem} item
  * @param {string} status
  * @param {IdSource} [ids]
@@ -163,7 +166,7 @@ export function statusCommand(item, status, ids = DEFAULT_IDS) {
     type: "item.status",
     ...base(item),
     status,
-    activity: activityOf(item, status === "active" ? "restored" : "cancelled", {}, ids),
+    activity: activityOf(item, null, {}, ids),
   };
 }
 
