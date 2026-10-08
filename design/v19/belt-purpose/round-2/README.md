@@ -49,6 +49,14 @@ Scenes `?scene=` listed at the top of each file; packs by `?theme=`.
   that the next round should close.
 - Both: Playwright was taken from the main checkout's node_modules.
 
-## Verdicts
+## Verdicts (owner, 2026-10-08)
 
-(none yet)
+> I think I prefer beside, but the document should always be in line with
+> the card, and scrolling up/down should track the preview window with the
+> card. Clicking off, the card instantly disappears.
+
+And, drawn on E's drawer: the pencil and link icons move from the head to
+the drawer's foot, at the right of the action pills.
+
+D is the direction; E's paper grid is dropped. Round 3 (`../round-3/`)
+builds D with those changes.
