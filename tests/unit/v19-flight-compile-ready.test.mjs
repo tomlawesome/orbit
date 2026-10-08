@@ -90,6 +90,7 @@ function fakeGl(log) {
       if (src && src.picture) { pictures.set(src.picture, bound); log.push(`upload ${src.picture}`); }
     },
     readPixels: () => log.push("readPixels"),
+    createFramebuffer: () => (log.push("target"), {}),
     drawArrays: () => log.push(`draw (moon unit: ${pictureOn(5)})`),
   };
   const pictureOn = (u) => [...pictures].find(([, t]) => t === units.get(u))?.[0] ?? "blank";
@@ -103,7 +104,7 @@ function fakeGl(log) {
   return { gl, pictures };
 }
 
-function stubWorld({ storage = memoryStorage(), build = "b1", renderer = "ANGLE (NVIDIA)" } = {}) {
+function stubWorld({ storage = memoryStorage(), build = "b1", renderer = "ANGLE (NVIDIA)", dpr = 1, width = 800, height = 600 } = {}) {
   const log = [];
   const { gl, pictures } = fakeGl(log);
   const canvas = { id: "", style: {}, width: 0, height: 0, setAttribute() {}, addEventListener() {} };
@@ -121,9 +122,9 @@ function stubWorld({ storage = memoryStorage(), build = "b1", renderer = "ANGLE 
     sayVerdict: (v) => log.push(`verdict ${v}`),
   }));
   vi.stubGlobal("document", { hidden: true });
-  vi.stubGlobal("window", { devicePixelRatio: 1 });
-  vi.stubGlobal("innerWidth", 800);
-  vi.stubGlobal("innerHeight", 600);
+  vi.stubGlobal("window", { devicePixelRatio: dpr });
+  vi.stubGlobal("innerWidth", width);
+  vi.stubGlobal("innerHeight", height);
   vi.stubGlobal("localStorage", storage);
   vi.stubGlobal("createImageBitmap", (blob) => Promise.resolve({ picture: blob.url.split("/").pop(), close() {} }));
   /** run every chore queued, and those they queue, until none is left (or `until` is logged) */
@@ -256,5 +257,31 @@ describe("the moon goes on the GPU after ready (#1310)", () => {
     const w = /** @type {any} */ (voyageOnce());
     await Promise.all([w.warm(), settle()]);
     expect(log).not.toContain("upload moon.webp");
+  });
+});
+
+describe("the fitness test remakes the render targets only when their size changes (#1310)", () => {
+  /** the render targets (framebuffers) made while the world is readied, measured or not */
+  async function targetsMade(how) {
+    const remembered = { [FIT_KEY]: JSON.stringify({ renderer: "ANGLE (NVIDIA)", build: "b1", fit: true, ms: 7 }) };
+    const { log, settle } = stubWorld({ ...how, storage: memoryStorage(how.remembered ? remembered : {}) });
+    const { voyageOnce } = await import("$lib/flight/voyage.js");
+    const w = /** @type {any} */ (voyageOnce());
+    await Promise.all([w.warm(), settle()]);
+    vi.unstubAllGlobals(); vi.resetModules();
+    return log.filter((l) => l === "target").length;
+  }
+
+  it("on a large dense screen, where the pixel cap sets the size at both scales, the test remakes none", async () => {
+    const screen = { dpr: 2, width: 2560, height: 1440 };
+    const skipped = await targetsMade({ ...screen, remembered: true });
+    expect(await targetsMade(screen)).toBe(skipped);
+  });
+
+  it("where the test's smaller scale is a smaller drawing, it still draws at it and goes back", async () => {
+    const screen = { dpr: 1, width: 800, height: 600 };
+    const skipped = await targetsMade({ ...screen, remembered: true });
+    /* the HDR target and five bloom halvings, made twice */
+    expect(await targetsMade(screen)).toBe(skipped + 12);
   });
 });

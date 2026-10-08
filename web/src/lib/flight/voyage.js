@@ -768,12 +768,15 @@ function createVoyage() {
     if (!ok) return { fit: false, ms: Infinity };
     if (W < 2) resize(innerWidth, innerHeight);
     const was = part;
-    part = 0.4; CW = 0; resize(W, H);
+    /* resize remakes the targets only when the drawing's size changes: where
+       the 1.6-million-pixel cap sets the size at both scales (a large, dense
+       screen), nothing is remade, either way (#1310) */
+    part = 0.4; resize(W, H);
     /** @type {VoyageFrame} */
     const st = { t: 1900, v: 1, K: 7.4, vp: [W / 2, -0.55 * H], rmax: Math.hypot(W, H) * 1.55, tint: [1, 0.8, 0.4],
       progress: 0.4, world: null, bloom: 0, tu: 1900, star: true, dt: 0 };
     const { fit: fits, ms } = frameCost(gl, () => draw(st));
-    part = was; CW = 0; resize(W, H); lastDraw = 0;
+    part = was; resize(W, H); lastDraw = 0;
     sayVerdict(fits ? `on (frame ${Math.round(ms)} ms)` : `off: frame ${Number.isFinite(ms) ? Math.round(ms) : "failed to draw"}${Number.isFinite(ms) ? " ms" : ""}`);
     return { fit: fits, ms };
   }
