@@ -49,6 +49,11 @@ And on the type chooser's key marks (a filled, a ringed and a half dot):
 type rows: crescent = inspection, cored = renewal, dashed ring = expiry,
 plain = service; `web/src/lib/data/chart.js` `dialBodiesOf`.)
 
+> The only useful one is the suggestion
+
+So the type marks go from the dial and its key; the suggestion's hollow
+accent body stays (`design/owner-decisions.md` §35).
+
 Not approved. The chooser card itself stays as it is; the section, type and period
 choices need a more visual layout than a left-aligned list of words.
 Round 6 tries that. The calendar was not criticised.
