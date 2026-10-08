@@ -25,9 +25,10 @@
   import { loadStagedPage, previewPageHref } from "$lib/data/staged-page.js";
   import { pageKeyTarget } from "$lib/data/page-turn.js";
   import {
-    archiveCommand, completeCommand, nextDateAfter, rescheduleCommand,
+    archiveCommand, completeCommand, rescheduleCommand,
     snoozeCommand, statusCommand, upsertCommand,
   } from "$lib/data/commands.js";
+  import { addMonths } from "$lib/editing/calendar.js";
   import {
     COST_LOCKED, DAMAGED, DAMAGED_PLACEHOLDER, LOCKED, NOTES_WORDS, PANEL_LOCKED, REFERENCE_WORDS,
     evidenceReadable, fieldState, itemLocked, receiptWords, saveProblem,
@@ -80,7 +81,6 @@
    *
    * @typedef  {object} PanelForm
    * @property {string} [completedDate]
-   * @property {string} [nextDate]
    * @property {string} [cost]
    * @property {string} [notes]
    * @property {string} [dueDate]
@@ -444,12 +444,11 @@
   /** @param {ItemRecord} item */
   function tapComplete(item) {
     if (item.costMinor !== null && item.costMinor !== undefined) { act("complete", item); return; }
-    const done = todayISO();
-    holdCompletion(item, { completedDate: done, nextDate: nextDateAfter(done, item.recurrenceMonths) ?? undefined });
+    holdCompletion(item, { completedDate: todayISO() });
   }
   /**
    * @param {ItemRecord} item
-   * @param {{ completedDate: string, nextDate?: string, costMinor?: number, notes?: string }} fields
+   * @param {{ completedDate: string, costMinor?: number, notes?: string }} fields
    */
   function holdCompletion(item, fields) {
     sendPending();
@@ -459,13 +458,16 @@
        resent. */
     const command = completeCommand(item, fields);
     stashHeldCompletion(command);
+    /* The next due date is the engine's (#1324) and is not sent; the wake
+       only previews it, as the period chooser's "then" note does. */
+    const shownNext = nextOrbitShown(item, fields.completedDate);
     /** @type {HeldCompletion} */
-    const job = { command, leave: !fields.nextDate, timer: undefined, done: false };
+    const job = { command, leave: !shownNext, timer: undefined, done: false };
     job.timer = setTimeout(() => firePending(job), WAKE_HOLD_MS);
     pending = job;
     /* The date first: the wake is one line and ellipsises, and the card above
        already names the item; the live region still reads the whole line. */
-    wake(`Completed${fields.nextDate ? ` · next due ${shortDate(fields.nextDate)}` : ""} · ${item.title}`, {
+    wake(`Completed${shownNext ? ` · next due ${shortDate(shownNext)}` : ""} · ${item.title}`, {
       undo: () => {
         clearTimeout(job.timer);
         job.done = true;
@@ -593,7 +595,10 @@
     return "Find an item";
   });
   /** A date `months` on from `from`, for the quick pills. @param {string} from @param {number} months */
-  const monthsOn = (from, months) => nextDateAfter(from, months) ?? from;
+  const monthsOn = (from, months) => addMonths(from, months);
+  /** The next orbit as shown, not sent: the engine sets it (#1324).
+      @param {{ recurrenceMonths?: ?number }} item @param {string | undefined} done */
+  const nextOrbitShown = (item, done) => (done && item.recurrenceMonths ? addMonths(done, item.recurrenceMonths) : "");
   /** @param {string} from @param {number} days */
   const daysOn = (from, days) =>
     new Date(Date.parse(`${from}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
@@ -1133,10 +1138,8 @@
     armed = null;
     panel = panel === name ? null : name;
     if (panel === "complete") {
-      const done = todayISO();
       form = {
-        completedDate: done,
-        nextDate: nextDateAfter(done, item.recurrenceMonths) ?? "",
+        completedDate: todayISO(),
         cost: pounds(item.costMinor),
         notes: "",
       };
@@ -1571,7 +1574,7 @@
                 <input id="a-done" type="date" bind:value={form.completedDate}></div>
               {#if record.recurrenceMonths}
                 <div class="field"><label for="a-next">next orbit</label>
-                  <input id="a-next" type="date" bind:value={form.nextDate}></div>
+                  <input id="a-next" type="date" readonly value={nextOrbitShown(record, form.completedDate)}></div>
               {/if}
             </div>
             <div class="row2">
@@ -1590,10 +1593,9 @@
               <button class="btn-primary" disabled={busy || !form.completedDate || formCostInvalid}
                 onclick={() => run(() => completeCommand(record, {
                   completedDate: form.completedDate,
-                  nextDate: form.nextDate || undefined,
                   costMinor: minorOf(form.cost),
                   notes: (form.notes ?? "").trim() || undefined,
-                }), { leave: !form.nextDate })}>complete</button>
+                }), { leave: !nextOrbitShown(record, form.completedDate) })}>complete</button>
               <button class="cancel-link" onclick={closePanel}>never mind</button>
             </div>
           </div>
@@ -1921,7 +1923,7 @@
         <input id="p-done" type="date" bind:value={form.completedDate}></div>
       {#if record.recurrenceMonths}
         <div class="bp-field"><label for="p-next">next orbit</label>
-          <input id="p-next" type="date" bind:value={form.nextDate}></div>
+          <input id="p-next" type="date" readonly value={nextOrbitShown(record, form.completedDate)}></div>
       {/if}
     </div>
     <div class="bp-field"><label for="p-cost">actual cost</label>
@@ -2050,7 +2052,6 @@
               onclick={() => {
                 const fields = {
                   completedDate: /** @type {string} */ (form.completedDate),
-                  nextDate: form.nextDate || undefined,
                   costMinor: minorOf(form.cost),
                   notes: (form.notes ?? "").trim() || undefined,
                 };
