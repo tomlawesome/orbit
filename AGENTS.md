@@ -425,6 +425,10 @@ warning on `:3443` and `:4443`. A screenshot or fidelity baseline is
 supporting evidence, not the review: sign-off is on the running code
 (owner, 2026-09-05, #474).
 
+Mockups open in the app's default theme, after dark (`DEFAULT_THEME` in
+`web/src/lib/theme.js`), never star chart, and review screenshots use it too:
+the owner reviews what households first see (owner, 2026-10-08).
+
 ## An issue naming `src/app/` may describe a deleted surface
 
 The v19 rebuild (#411) replaces `src/app/` with `web/` and carries nothing

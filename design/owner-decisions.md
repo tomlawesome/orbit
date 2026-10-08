@@ -1568,3 +1568,65 @@ and ended state keeps the 16% ghost" (§32's round-5 text above): the ghost is
 retired, because "Watch the tour" (#1189) now does its one job. Round 5's and
 round 8's own READMEs (`design/v19/tour/round-5/`, `design/1083-tour-pocket/`)
 are left as written; this entry is the record of what changed since.
+
+## 34. The belt retires: home's drawer holds everything (owner, 2026-10-08)
+
+Rounds 1–3 under `design/v19/belt-purpose/` (#1304), each README holding the
+verdicts verbatim. Round 1: **"objectively I think the no belt at all version
+is simpler and easier to use."** Round 3 (F,
+`round-3/f-preview-beside-tracked.html`): **"approved. Very good."**
+
+- **Home's item drawer holds everything** an item has: its fields, notes,
+  documents and actions, on desk and phone alike. Notes sit above documents.
+- **The preview opens beside the drawer** on a wide screen, its top level
+  with the item card's top, moving with it on scroll and staying in view
+  beside a card taller than the window. A press anywhere off it removes it at
+  once, no fade. Under 1200px it is the phone's bottom sheet. Pressing the
+  page opens the reader over home.
+- **The foot row:** the four pills (snooze, complete, attach a document,
+  retire) centred, no "actions" heading; the pencil (edit) and chain link
+  (copy link) as 32px round glass icons at the row's right end.
+- **Editing happens in the read view's own rows**, no form: same labels,
+  right-aligned mono values, only the value live; save and cancel replace
+  the pills.
+- **No dropdowns and no typed date** (owner, on round 3): *"I don't like
+  these as drop downs very much"*; *"typing the date isn't acceptable. We
+  need a beautiful calendar picker to use with a mouse."* Settled in rounds
+  4–8 (final: `round-8/m-colour-per-option.html`, "approved"):
+  - **The chooser beside.** Pressing the due date, section, type or orbital
+    period opens a chooser card beside the drawer, where a document's
+    preview stands, in the accent outline the open item card wears; the
+    drawer's rows never grow. On a phone it is the bottom sheet.
+  - **The date:** a month calendar in that card, the due day filled, today
+    ringed, the foot reading the day under the pointer with its T-minus.
+  - **Section and type:** tiles, each choice its own glass tile in a grid,
+    not a list of words (*"visually more taxing"*), with no marks and no
+    counts.
+  - **Orbital period:** the repeat band stood on end, six equal cells from
+    once to 2 years, the chosen one filled, its next date read beneath.
+  - **A colour per section and per type** (*"Over time users would
+    associate colours with specific type/sections"*): the tile is washed
+    and edged in it, filled when chosen, and the same colour marks the
+    section and type words in the drawer and the section word on manifest
+    rows. Never on the dial, whose colours mean urgency.
+- **`/item/<id>` retires**: mothballed, with its links redirected to
+  `/home?item=<id>`. This supersedes §27's "`/item/<receiptId>` is the
+  belt": a suggestion is reviewed in its home drawer.
+- **One search, one code path**, shown the same on home and wherever
+  documents are (#1318).
+- Scope: v0.3, after the door batch lands.
+
+## 35. The dial drops its type marks; only the suggestion keeps one (owner, 2026-10-08)
+
+On round 5's type chooser (#1304): **"Not sure I love these weird little
+symbols at all, anywhere tbh."** — **"It makes the dial overly complex and
+adds little value."** — **"The only useful one is the suggestion."**
+
+- The dial's bodies lose their type faces: no crescent (inspection), no
+  core (renewal), no dashed ring (expiry). Every filed item's body is
+  plain, as a service's is now.
+- The chart key loses its four type rows. It keeps the suggestion row
+  ("suggestion — not yet accepted"), and the suggestion keeps its hollow
+  accent body on the dial.
+- Nowhere else draws these marks, the item chooser included (round 6).
+- Type stays an item field; only its picture goes.

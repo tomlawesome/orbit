@@ -1,0 +1,62 @@
+# What the belt is for — round 2 (#1304): the preview, two shapes
+
+Round 1's verdict: no belt; home's drawer (B) holds everything; C needs
+work on where the preview goes. Two directions, both from round 1's
+`c-home-no-belt.html`, same data story, B's drawer carried forward
+verbatim. In both: the item row opens the drawer; the reader opens over
+home from the preview's page; a press anywhere outside closes the reader,
+then the preview, back to the manifest with the drawer still open.
+
+- `d-preview-beside.html` — direction D: on a wide screen (1200px and
+  up) pressing a document row slides round 6's preview card in at the
+  right of the drawer, the drawer and the card centred together as a
+  pair (round 6's own widening). The pressed row is marked. Esc or a
+  press outside the card closes it; the drawer stays. Under 1200px the
+  card is the phone's bottom sheet.
+- `e-preview-in-drawer.html` — direction E: the drawer shows the
+  previews already. Each readable paper in the documents section is its
+  page on the cream sheet (about 120px wide on the desk, two or three
+  across; the phone the same at its width) with the name and meta under
+  it; the honest states are the same small sheet (scanning sweep,
+  removed, cannot draw). Pressing a page opens the reader; closing the
+  reader lands back on the drawer. No separate preview card.
+
+Both also carry the owner's note on B's foot row (2026-10-08, on the
+`edit` pill and `copy link` text: "This could be small icons placed
+somewhere better"): the two become a pencil and a chain-link icon in the
+drawer's head, top right beside the countdown, 32px round glass buttons
+with a 44px target; the foot keeps only the four action pills. And (owner, same day): "We
+also don't need an 'actions' section, and I think the buttons would be
+better centralised" — no heading, the four pills centred in one row. And on B's edit mode
+(owner, same day): "Can we not just edit literally in the manifest, why
+does it have to look different?" — editing keeps the read view's exact
+look: the same rows, labels and right-aligned mono values, only the value
+live, with an accent underline and the caret; no boxed inputs.
+
+Scenes `?scene=` listed at the top of each file; packs by `?theme=`.
+
+## Notes from the build
+
+- D: the manifest column slides left on round 6's curve and the card
+  fades in at its right; the pair fits at 1280. The scanning row opens
+  the card too, in its "Still scanning this file" state. Under 560px the
+  head icons drop to their own line under the countdown (a DOES NOT FIT
+  comment marks it).
+- E: a fourth paper (the tyre receipt) is added for the cannot-draw
+  state; the `states` scene shows the 2025 certificate as removed. The
+  due date edits as text with no native picker. On the phone the icons
+  take their own line under the countdown, with a tall gap above them
+  that the next round should close.
+- Both: Playwright was taken from the main checkout's node_modules.
+
+## Verdicts (owner, 2026-10-08)
+
+> I think I prefer beside, but the document should always be in line with
+> the card, and scrolling up/down should track the preview window with the
+> card. Clicking off, the card instantly disappears.
+
+And, drawn on E's drawer: the pencil and link icons move from the head to
+the drawer's foot, at the right of the action pills.
+
+D is the direction; E's paper grid is dropped. Round 3 (`../round-3/`)
+builds D with those changes.
