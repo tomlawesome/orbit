@@ -14,9 +14,15 @@
  *   snoozing    the calendar beside the drawer, "snooze until" (owner,
  *               2026-10-08: "pick a date should not be removed")
  * and at most one chooser card open for any of them.
+ *
+ * Rows holding changes are guarded (#1319 stage 3b; the coordinator's
+ * ruling, 2026-10-08): `cancel()` -- the cancel pill, Escape, and anything
+ * that would close the row or drawer -- arms "discard changes?" first and
+ * discards on a second press inside the hold (discard-guard.js).
  */
 import { EditSession } from "$lib/editing/edit-session.svelte.js";
 import { chooserAskOf, draftOf } from "$lib/editing/item-draft.js";
+import { createDiscardGuard, rowsChanged } from "./discard-guard.js";
 
 /**
  * @typedef {import('$lib/data/commands.js').CommandItem} CommandItem
@@ -37,8 +43,13 @@ export class DrawerModes {
   completeProblem = $state(null);
   /** The snooze or completion calendar, when it is the one open. @type {FootChoosing | null} */
   foot = $state.raw(null);
+  /** Whether the cancel pill reads "discard changes?" (discard-guard.js). */
+  discardArmed = $state(false);
   /** The item snoozing or completing. @type {CommandItem | null} */
   #item = null;
+  /** The rows as they opened, to tell a change. @type {unknown} */
+  #opened = null;
+  #guard = createDiscardGuard({ onchange: (armed) => { this.discardArmed = armed; } });
   /** @type {() => void} */
   #onchoose;
 
@@ -93,6 +104,29 @@ export class DrawerModes {
     this.cancelComplete();
     this.foot = null;
     this.edit.start(item);
+    this.#guard.disarm();
+    this.#opened = $state.snapshot(this.edit.draft);
+  }
+
+  /** Whether the rows hold changes since they opened. */
+  get changed() {
+    if (this.edit.id && this.edit.draft) return rowsChanged(this.#opened, $state.snapshot(this.edit.draft));
+    if (this.completing) return rowsChanged(this.#opened, $state.snapshot(this.completing));
+    return false;
+  }
+
+  /**
+   * Cancel the edit or the completion, guarded: true when it ended (nothing
+   * had changed, or this is the second press), false when it only armed
+   * "discard changes?" and the rows stay open. True when nothing was open.
+   */
+  cancel() {
+    if (!this.edit.id && !this.completing) return true;
+    if (!this.#guard.ask(this.changed)) return false;
+    this.closeChooser(false);
+    this.edit.cancel();
+    this.cancelComplete();
+    return true;
   }
 
   /**
@@ -107,6 +141,8 @@ export class DrawerModes {
     const { cost, notes } = draftOf(item);
     this.completing = { id: item.id, completedDate: today, cost, notes };
     this.completeProblem = null;
+    this.#guard.disarm();
+    this.#opened = $state.snapshot(this.completing);
   }
 
   /**
@@ -182,18 +218,19 @@ export class DrawerModes {
   }
 
   /**
-   * Escape: the chooser first, then the edit or the completion. True when
-   * it took the key.
+   * Escape: the chooser first, then the edit or the completion (guarded,
+   * as cancel). True when it took the key.
    */
   escape() {
     if (this.choosing) { this.closeChooser(true); return true; }
-    if (this.edit.id) { this.edit.cancel(); return true; }
-    if (this.completing) { this.cancelComplete(); return true; }
+    if (this.edit.id || this.completing) { this.cancel(); return true; }
     return false;
   }
 
-  /** The drawer closed, or another opened: everything ends. */
+  /** The drawer closed, or another opened: everything ends, unguarded --
+      the screen asks `cancel()` first wherever a close can wait. */
   end() {
+    this.#guard.disarm();
     this.edit.cancel();
     this.cancelComplete();
     this.foot = null;

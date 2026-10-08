@@ -69,7 +69,8 @@
   <div class="p-pills amend" role="group" aria-label="Amending {suggestion.title}">
     <button type="button" class="p-pill filled" disabled={adding || acts.modes.edit.refused}
             onclick={acts.onaccept}>{adding ? "adding…" : "add to orbit"}</button>
-    <button type="button" class="p-pill" disabled={adding} onclick={acts.oncancel}>cancel</button>
+    <button type="button" class="p-pill" class:danger={acts.modes.discardArmed} class:armed={acts.modes.discardArmed}
+            disabled={adding} onclick={acts.oncancel}>{acts.modes.discardArmed ? "discard changes?" : "cancel"}</button>
   </div>
   {#if acts.modes.edit.problem ?? acts.modes.edit.refusal}
     <p class="p-error" role="alert">{acts.modes.edit.problem ?? acts.modes.edit.refusal}</p>

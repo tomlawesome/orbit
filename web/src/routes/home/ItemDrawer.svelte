@@ -103,7 +103,7 @@
 {#if acts}
   <!-- #1319: the desk's foot row, at the pocket's scale. -->
   <FootRow title={one.title} pocket busy={acts.busy} {mode} {snoozing} onrestore={acts.onrestore}
-           standing={one.restorable ? "ended" : one.state ? "done" : null}
+           discarding={acts.modes.discardArmed} standing={one.restorable ? "ended" : one.state ? "done" : null}
            onsnooze={acts.onsnooze} oncomplete={acts.oncomplete} onattach={acts.onattach}
            onretire={acts.onretire} oncopy={acts.oncopy} onedit={acts.onedit}
            onsave={acts.onsave} onrecord={acts.onrecord} oncancel={acts.oncancel}
