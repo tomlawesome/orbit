@@ -30,7 +30,9 @@ export function addDays(iso, days) {
 
 /**
  * `n` calendar months on, the day held to the end of a shorter month
- * (31 Jan + 1 is 28 Feb), as commands.js nextDateAfter does.
+ * (31 Jan + 1 is 28 Feb): for what a screen shows -- the calendar's month
+ * paging, a chooser's "then <date>" preview. The next due date a completion
+ * sets is the engine's (src/lib/next-due-date.ts, #1324), never this.
  * @param {string} iso @param {number} n
  */
 export function addMonths(iso, n) {

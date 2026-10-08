@@ -564,6 +564,21 @@ export async function applyCommand(command, { retryCsrf = true } = {}) {
 }
 
 /**
+ * When an item is next due in a workspace the engine returned: after a
+ * completion, the next date the engine worked out from its period (#1324);
+ * null when the completion ended its schedule, or the item is not there.
+ *
+ * @param {Workspace} workspace
+ * @param {string} householdId
+ * @param {string} itemId
+ * @returns {?string}
+ */
+export function dueDateIn(workspace, householdId, itemId) {
+  const household = workspace.households.find((one) => one.id === householdId);
+  return household?.items.find((one) => one.id === itemId)?.dueDate ?? null;
+}
+
+/**
  * The household the session is currently pointed at, with its sections.
  *
  * @returns {Promise<Household>}

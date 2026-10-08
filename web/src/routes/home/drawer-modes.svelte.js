@@ -17,7 +17,6 @@
  */
 import { EditSession } from "$lib/editing/edit-session.svelte.js";
 import { chooserAskOf, draftOf } from "$lib/editing/item-draft.js";
-import { nextDateAfter } from "$lib/data/commands.js";
 import { COST_FORMAT_HINT, minorOf } from "../create/entry.js";
 
 /**
@@ -163,9 +162,10 @@ export class DrawerModes {
   }
 
   /**
-   * The completion as completeCommand takes it, the next date computed as
-   * the belt computes it (nextDateAfter); or why it cannot be recorded yet.
-   * @returns {{ refusal: string } | { item: CommandItem, fields: { completedDate: string, nextDate?: string, costMinor?: number, notes?: string } }}
+   * The completion as completeCommand takes it -- what happened, never the
+   * next date, which the engine works out (#1324); or why it cannot be
+   * recorded yet.
+   * @returns {{ refusal: string } | { item: CommandItem, fields: { completedDate: string, costMinor?: number, notes?: string } }}
    */
   completion() {
     const draft = this.completing;
@@ -174,8 +174,7 @@ export class DrawerModes {
     const costMinor = minorOf(draft.cost);
     if (costMinor !== undefined && Number.isNaN(costMinor)) return { refusal: `not yet — ${COST_FORMAT_HINT.toLowerCase()}` };
     if (!draft.completedDate) return { refusal: "not yet — choose the day it was done" };
-    const nextDate = nextDateAfter(draft.completedDate, item.recurrenceMonths) ?? undefined;
-    return { item, fields: { completedDate: draft.completedDate, nextDate, costMinor, notes: draft.notes.trim() || undefined } };
+    return { item, fields: { completedDate: draft.completedDate, costMinor, notes: draft.notes.trim() || undefined } };
   }
 
   cancelComplete() {

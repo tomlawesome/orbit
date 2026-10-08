@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   archiveCommand,
   completeCommand,
-  nextDateAfter,
   rescheduleCommand,
   snoozeCommand,
   statusCommand,
@@ -29,25 +28,14 @@ const ITEM = {
   version: 5,
 };
 
-describe("nextDateAfter", () => {
-  it("adds the orbital period in calendar months", () => {
-    expect(nextDateAfter("2026-08-15", 12)).toBe("2027-08-15");
-    expect(nextDateAfter("2026-08-15", 6)).toBe("2027-02-15");
-  });
-  it("clamps to the end of a shorter month instead of overflowing", () => {
-    expect(nextDateAfter("2026-01-31", 1)).toBe("2026-02-28");
-    expect(nextDateAfter("2027-12-31", 2)).toBe("2028-02-29");
-  });
-  it("answers null without a period", () => {
-    expect(nextDateAfter("2026-08-15", undefined)).toBe(null);
-  });
-});
+// The next due date after a completion is the engine's (ADR-0034, #1324):
+// the month-end clamp and leap years that nextDateAfter's tests pinned here
+// are pinned in src/lib/next-due-date.test.ts.
 
 describe("command builders", () => {
   it("complete threads version, dates and a kind-correct activity", () => {
     const command = completeCommand(ITEM, {
       completedDate: "2026-08-15",
-      nextDate: "2027-08-15",
       costMinor: 5485,
       notes: "passed first time",
     }, IDS);
@@ -57,7 +45,6 @@ describe("command builders", () => {
       itemId: "i-mot",
       expectedVersion: 5,
       completedDate: "2026-08-15",
-      nextDate: "2027-08-15",
       costMinor: 5485,
     });
     expect(command.activity).toMatchObject({
@@ -67,8 +54,13 @@ describe("command builders", () => {
       occurredAt: "2026-08-15T12:00:00.000Z",
       effectiveDate: "2026-08-15",
       previousDate: "2026-08-29",
-      nextDate: "2027-08-15",
     });
+  });
+
+  it("complete never sends a next due date: the engine works it out (#1324)", () => {
+    const command = completeCommand(ITEM, /** @type {any} */ ({ completedDate: "2026-08-15", nextDate: "2027-08-15" }), IDS);
+    expect(command).not.toHaveProperty("nextDate");
+    expect(command.activity).not.toHaveProperty("nextDate");
   });
 
   it("a renewal completes with the renewal kind", () => {

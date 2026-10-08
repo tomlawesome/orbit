@@ -46,23 +46,6 @@ const DEFAULT_IDS = {
 };
 
 /**
- * The item's next orbit: the completion date plus its period in calendar
- * months, clamped to the end of a shorter month rather than overflowing into
- * the one after (31 Jan + 1 month is 28 Feb, not 3 Mar).
- * @param {string} completedDate
- * @param {?number} [recurrenceMonths]
- * @returns {?string}
- */
-export function nextDateAfter(completedDate, recurrenceMonths) {
-  if (!recurrenceMonths) return null;
-  const [year, month, day] = completedDate.split("-").map(Number);
-  const target = new Date(Date.UTC(year, month - 1 + recurrenceMonths, 1));
-  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
-  target.setUTCDate(Math.min(day, lastDay));
-  return target.toISOString().slice(0, 10);
-}
-
-/**
  * @param {CommandItem} item
  * @param {string} kind
  * @param {Partial<import('./workspace.js').ItemActivity>} details
@@ -92,23 +75,24 @@ function base(item) {
 }
 
 /**
+ * What happened: the day it was done, the cost, the notes. Never the next
+ * due date -- the engine works that out from the item's period and refuses
+ * one sent (ADR-0034, #1324); read it back with dueDateIn.
  * @param {CommandItem} item
- * @param {{ completedDate: string | undefined, nextDate?: string, costMinor?: number, notes?: string }} fields
+ * @param {{ completedDate: string | undefined, costMinor?: number, notes?: string }} fields
  * @param {IdSource} [ids]
  */
-export function completeCommand(item, { completedDate, nextDate, costMinor, notes }, ids = DEFAULT_IDS) {
+export function completeCommand(item, { completedDate, costMinor, notes }, ids = DEFAULT_IDS) {
   const kind = item.scheduleKind === "renewal" ? "renewal_completed" : "service_completed";
   return {
     type: "item.complete",
     ...base(item),
     completedDate,
-    ...(nextDate ? { nextDate } : {}),
     ...(costMinor !== undefined && costMinor !== null ? { costMinor } : {}),
     ...(notes ? { notes } : {}),
     activity: activityOf(item, kind, {
       effectiveDate: completedDate,
       ...(item.dueDate ? { previousDate: item.dueDate } : {}),
-      ...(nextDate ? { nextDate } : {}),
       ...(costMinor !== undefined && costMinor !== null ? { costMinor } : {}),
       ...(notes ? { notes } : {}),
     }, ids),
