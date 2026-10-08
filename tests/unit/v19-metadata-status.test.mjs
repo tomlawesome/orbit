@@ -11,22 +11,23 @@ import { describe, expect, it } from "vitest";
  *
  * The second reads the screens' own source. A Svelte component has no runner
  * in this suite -- web/'s own tests are Playwright -- so the wiring is proved
- * the way v19-belt.test.mjs proves the belt's: against the file that ships.
+ * the way v19-belt.test.mjs proves home's belt data: against the file that ships.
  * These are not decorative assertions. "The panel shows the damaged state
  * before a save can clear it" is the entire justification for letting a
  * full-row upsert overwrite a field nobody touched, so if the placeholder ever
  * stops being wired the licence to overwrite goes with it.
  */
 import {
-  COST_LOCKED, DAMAGED, DAMAGED_PLACEHOLDER, LOCKED, NOTES_WORDS, PANEL_LOCKED, REFERENCE_WORDS, SAVE_REFUSED,
+  COST_LOCKED, DAMAGED, LOCKED, NOTES_WORDS, PANEL_LOCKED, REFERENCE_WORDS, SAVE_REFUSED,
   evidenceReadable, fieldState, itemLocked, receiptWords, saveProblem,
 } from "../../web/src/lib/data/metadata-status.js";
 
 const read = (path) => readFileSync(new URL(`../../web/src/${path}`, import.meta.url), "utf8");
-const ITEM_PAGE = read("routes/item/[[id]]/+page.svelte");
-/* #1145: the suggestion's card rides in the belt now, so its amend-then-accept
-   rules are the item page's own (the separate Suggestion.svelte retired). */
-const SUGGESTION = ITEM_PAGE;
+/* #1319: the belt's item page is gone; home's item drawer carries the item. */
+const ITEM_DRAWER = read("routes/home/ItemDrawer.svelte");
+const EDIT_ROWS = read("routes/home/EditRows.svelte");
+const EDIT_SESSION = read("lib/editing/edit-session.svelte.js");
+const SUGGESTION = read("routes/home/SuggestionView.svelte");
 const INBOX = read("routes/inbox/+page.svelte");
 /* #1151 W1-Q11/W1-Q14: the inbox's own READ-mark confidence logic (its old
    local mark()) was retired in favour of review.js's shared readingsOf(),
@@ -95,87 +96,55 @@ describe("the two states a member learns once", () => {
   });
 });
 
-describe("the item screen wires both states where they have to be seen", () => {
-  it("renders the reference row on the marker as well as on the value", () => {
-    // The failure this replaces: `{#if row.reference}` alone, which showed a
-    // field Orbit could not read as one nobody had filled in.
-    expect(ITEM_PAGE).toContain("{:else if referenceState === DAMAGED}");
-    expect(ITEM_PAGE).toContain("{:else if referenceState === LOCKED}");
-    expect(ITEM_PAGE).toContain("REFERENCE_WORDS[DAMAGED]");
-    expect(ITEM_PAGE).toContain("REFERENCE_WORDS[LOCKED]");
-    // The damaged mark is inbox.css's .failed dot; locked carries no degraded
-    // colour, because waiting is not failure.
-    expect(ITEM_PAGE).toContain('<b class="failed"><i aria-hidden="true"></i>');
-    expect(ITEM_PAGE).toContain('<b class="locked">');
-  });
-
-  it("replaces the notes paragraph rather than leaving it blank", () => {
-    expect(ITEM_PAGE).toContain("{:else if notesState}");
-    expect(ITEM_PAGE).toContain("NOTES_WORDS[notesState]");
-  });
-
+describe("the item drawer wires both states where they have to be seen", () => {
   it("says the same two things in home's expanded detail, which shows the same two fields", () => {
     // Not a second vocabulary: the same module, so a member who learns the
-    // words on one screen has learned them on the other.
+    // words on one screen has learned them on the other. The reference row
+    // renders on the marker as well as on the value (the failure this
+    // replaces: `{#if row.reference}` alone, which showed a field Orbit could
+    // not read as one nobody had filled in). The damaged mark is inbox.css's
+    // .failed dot; locked carries no degraded colour, because waiting is not
+    // failure.
     expect(HOME_DETAIL).toContain('from "$lib/data/metadata-status.js"');
     expect(HOME_DETAIL).toContain("{:else if referenceState === DAMAGED}");
     expect(HOME_DETAIL).toContain("{:else if referenceState === LOCKED}");
+    expect(HOME_DETAIL).toContain("REFERENCE_WORDS[DAMAGED]");
+    expect(HOME_DETAIL).toContain("REFERENCE_WORDS[LOCKED]");
+    expect(HOME_DETAIL).toContain('<b class="failed"><i aria-hidden="true"></i>');
+    expect(HOME_DETAIL).toContain('<b class="locked">');
+    // The notes paragraph is replaced by the words, not left blank.
     expect(HOME_DETAIL).toContain("{:else if notesState}");
+    expect(HOME_DETAIL).toContain("NOTES_WORDS[notesState]");
   });
 
-  it("shows a damaged field's state IN the edit panel, before a save can clear it", () => {
-    /* The build rule this pins (ruling, 2026-09-10): a panel whose damaged
-       field was not touched still writes it, seeded empty, because item.upsert
-       is a full-row write. That is acceptable ONLY because the panel shows the
-       damaged state first -- a member saving past a visible placeholder has
-       decided. Visibility is the guard, so it is asserted, not assumed. */
-    const editPanel = ITEM_PAGE.slice(ITEM_PAGE.indexOf('{#if panel === "edit"}'), ITEM_PAGE.indexOf('{#if panel === "retire"}'));
-    expect(editPanel).toContain('placeholder={referenceState === DAMAGED ? DAMAGED_PLACEHOLDER : "optional"}');
-    expect(editPanel).toContain('placeholder={notesState === DAMAGED ? DAMAGED_PLACEHOLDER : "optional"}');
-    expect(DAMAGED_PLACEHOLDER).toBe("damaged — whatever you save replaces it");
-    // Damaged never disables anything: overwriting is the repair.
-    expect(editPanel).not.toContain("disabled={busy || referenceState");
-    expect(editPanel).not.toContain("disabled={notesState");
+  it("says them on the phone's drawer too, from the same module", () => {
+    expect(ITEM_DRAWER).toContain('from "$lib/data/metadata-status.js"');
+    expect(ITEM_DRAWER).toContain("REFERENCE_WORDS[referenceState]");
+    expect(ITEM_DRAWER).toContain("NOTES_WORDS[notesState]");
   });
 
-  it("pauses the whole edit panel while the item is locked, not only its encrypted fields", () => {
-    const editPanel = ITEM_PAGE.slice(ITEM_PAGE.indexOf('{#if panel === "edit"}'), ITEM_PAGE.indexOf('{#if panel === "retire"}'));
-    // Every input, because the refused write is the whole row: item.upsert.
-    for (const field of ["e-title", "e-provider", "e-reference", "e-cost", "e-due", "e-recur", "e-notes"]) {
-      const input = editPanel.slice(editPanel.indexOf(`id="${field}"`));
-      expect(input.slice(0, input.indexOf("</div>"))).toContain("disabled={locked}");
-    }
-    // #1151 W1-F1/W1-S4 added formCostInvalid as a further, independent gate
-    // (a malformed cost blocks save on its own) — locked still fully gates
-    // the button either way, which is what this test gets to prove.
-    expect(editPanel).toContain("disabled={busy || locked || !form.title?.trim() || formCostInvalid}");
-    expect(editPanel).toContain("{PANEL_LOCKED}");
-  });
-
-  it("locks only the cost figure in the complete panel, because a no-cost completion needs no key (#972)", () => {
+  it("locks only the cost figure in the complete rows, because a no-cost completion needs no key (#972)", () => {
     // item.complete only reaches for the metadata writer when a cost is
     // supplied, so a locked household can still complete without one: the
-    // date, next-orbit and notes inputs stay live, and only the cost input
-    // and its explanation are gated on `locked`.
-    const completePanel = ITEM_PAGE.slice(ITEM_PAGE.indexOf('{#if panel === "complete"}'), ITEM_PAGE.indexOf('{#if panel === "reschedule"}'));
-    for (const field of ["a-done", "a-next", "a-cnotes"]) {
-      const input = completePanel.slice(completePanel.indexOf(`id="${field}"`));
-      expect(input.slice(0, input.indexOf("</div>"))).not.toContain("disabled={locked}");
-    }
-    const costInput = completePanel.slice(completePanel.indexOf('id="a-cost"'));
-    expect(costInput.slice(0, costInput.indexOf("</div>"))).toContain("disabled={locked}");
-    // The save button is never gated on `locked`: a no-cost completion stays
-    // available, exactly as the server accepts it. #1151 W1-F1/W1-S4 added
-    // formCostInvalid alongside it — an independent gate, not `locked`.
-    expect(completePanel).toContain("disabled={busy || !form.completedDate || formCostInvalid}");
-    expect(completePanel).not.toMatch(/disabled=\{busy \|\| locked/);
-    expect(completePanel).toContain("{COST_LOCKED}");
-    expect(completePanel).not.toContain("{PANEL_LOCKED}");
+    // date and notes stay live, and only the cost value and its explanation
+    // are gated on `costLocked`. (The belt's edit panel, which also paused
+    // every input while locked and showed a damaged placeholder, retired with
+    // the belt in #1319; the drawer edits in place with no such panel.)
+    const completing = EDIT_ROWS.slice(EDIT_ROWS.indexOf("{:else if completing}"), EDIT_ROWS.indexOf("</div>\n\n<style>"));
+    expect(completing).toContain("{#if costLocked}");
+    expect(completing).toContain("{COST_LOCKED}");
+    expect(completing.match(/costLocked/g)).toHaveLength(2);
+    expect(completing).toContain('data-ed="notes"');
+    expect(completing).toContain("chooseDone(");
+    expect(completing).not.toContain("{PANEL_LOCKED}");
+    expect(HOME_DETAIL).toContain("costLocked={itemLocked(detail.metadataStatus)}");
+    expect(ITEM_DRAWER).toContain("costLocked={itemLocked(raw?.metadataStatus)}");
   });
 
-  it("surfaces a stale submit in the alert slot the panel already has", () => {
-    expect(ITEM_PAGE).toContain('<div class="problem" role="alert">{problem}</div>');
-    expect(ITEM_PAGE).toContain("problem = saveProblem(");
+  it("surfaces a stale submit in the alert slot the drawer already has", () => {
+    expect(HOME_DETAIL).toContain('<div class="ivproblem" role="alert">{acts.problem}</div>');
+    expect(ITEM_DRAWER).toContain('role="alert">{problem ?? acts?.problem}</p>');
+    expect(EDIT_SESSION).toContain("saveProblem(");
   });
 });
 
@@ -192,7 +161,8 @@ describe("the mail-in review surfaces", () => {
   it("leaves a damaged message every action, because re-forwarding is a real repair", () => {
     // `locked()` alone gates the two removals above, so damaged keeps them.
     expect(INBOX).toContain('fieldState(receipt.metadataStatus, "proposal") === LOCKED');
-    expect(SUGGESTION).toContain("disabled={acceptBusy || proposalLocked || !sform.title.trim()}");
+    expect(SUGGESTION).toContain("const locked = $derived(reviewLockedOf(suggestion));");
+    expect(SUGGESTION).toContain("disabled={busy || locked}");
   });
 
   it("suppresses the READ marks when their evidence is damaged", () => {
@@ -203,7 +173,6 @@ describe("the mail-in review surfaces", () => {
     expect(INBOX).toContain('import { papersOf, readingsOf } from "$lib/pocket/review.js";');
     expect(INBOX).toContain("readingsOf(receipt)");
     expect(REVIEW).toContain("if (!evidenceReadable(mail.metadataStatus)) return null;");
-    expect(SUGGESTION).toContain("const marked = (field) => evidenceShown && Boolean(seatedSuggestion?.fieldEvidence?.[field]);");
   });
 });
 
@@ -228,7 +197,7 @@ describe("the administrator's aggregate", () => {
   });
 
   it("shows a member no count and no key mechanic", () => {
-    for (const screen of [ITEM_PAGE, SUGGESTION, INBOX, HOME_DETAIL]) {
+    for (const screen of [ITEM_DRAWER, SUGGESTION, INBOX, HOME_DETAIL]) {
       expect(screen).not.toContain("damagedValues");
       expect(screen).not.toContain("lockedItems");
       expect(screen).not.toMatch(/KEK|key-encryption key/);
