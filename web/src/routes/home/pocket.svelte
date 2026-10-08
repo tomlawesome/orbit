@@ -4,7 +4,8 @@
   import { beforeNavigate, goto, onNavigate } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { WorkspaceError, applyCommand, readItemDocuments } from "$lib/data/workspace.js";
+  import { WorkspaceError, applyCommand, readItemDocuments, removeDocument, restoreDocument } from "$lib/data/workspace.js";
+  import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import { completeCommand, nextDateAfter } from "$lib/data/commands.js";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf } from "$lib/data/chart.js";
   import { money } from "$lib/format.js";
@@ -480,6 +481,51 @@
   /** @type {(id: string) => typeof searchDocuments} */
   const papersOf = (id) => searchDocuments.filter((doc) => doc.itemId === id);
 
+  /* ---- #1319: a paper in a drawer opens the preview as the bottom sheet ----
+     design/v19/belt-purpose/round-3 (F), scene `narrow`: the desk's preview
+     card (PreviewCard.svelte), which under 1200px is the phone's bottom
+     sheet; its page opens the reader over home. Escape or a press off it
+     puts it away and leaves the row open. */
+  /** @type {any} */
+  let previewPaper = $state(null);
+  /** @type {HTMLElement | null} */
+  let previewFrom = null;
+  /** @param {any} paper @param {HTMLElement} from */
+  function openPaperHere(paper, from) {
+    previewFrom = from;
+    if (previewPaper?.id !== paper.id) previewPaper = paper;
+  }
+  /** @param {{ refocus: boolean }} how */
+  function closePaper({ refocus }) {
+    previewPaper = null;
+    if (refocus && previewFrom?.isConnected) previewFrom.focus({ preventScroll: true });
+  }
+  /** The papers again, after one was removed or restored from the sheet. */
+  async function rereadPapers() {
+    searchDocumentsFor = null;
+    papersReady = false;
+    await loadSearchDocuments();
+  }
+  /** @param {{ id: string, name: string }} paper */
+  async function removePaper(paper) {
+    await removeDocument(paper.id);
+    previewPaper = null;
+    await rereadPapers();
+    wake(`${paper.name} removed`, {
+      undo: () => { restoreDocument(paper.id).then(rereadPapers).catch(() => {}); },
+    });
+  }
+  /** @param {{ id: string }} paper */
+  async function restorePaper(paper) {
+    await restoreDocument(paper.id);
+    previewPaper = null;
+    await rereadPapers();
+  }
+  /* A row closing takes its paper's sheet with it. */
+  $effect(() => {
+    if (previewPaper && lit !== previewPaper.itemId) previewPaper = null;
+  });
+
   /* `complete` from a drawer, as the belt does it (item/[[id]]/+page.svelte,
      tapComplete): an item with a cost to confirm goes to its belt with the
      record sheet up; one with nothing to record completes on the tap, held
@@ -910,6 +956,7 @@
           {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
           {#snippet detail()}
             <ItemDrawer {one} raw={rawItems.get(one.id)} papers={papersOf(one.id)} problem={rowProblem[one.id] ?? null}
+                        showingPaper={previewPaper?.id ?? null} onopenpaper={openPaperHere}
                         reading={!papersReady && (rawItems.get(one.id)?.documentCount ?? 0) > 0} />
           {/snippet}
           {#snippet after()}
@@ -928,6 +975,7 @@
         {#snippet mark()}<span class="pk-dot quiet"></span>{/snippet}
         {#snippet detail()}
           <ItemDrawer one={next} raw={rawItems.get(next.id)} papers={papersOf(next.id)} problem={rowProblem[next.id] ?? null}
+                        showingPaper={previewPaper?.id ?? null} onopenpaper={openPaperHere}
                       reading={!papersReady && (rawItems.get(next.id)?.documentCount ?? 0) > 0} />
         {/snippet}
         {#snippet after()}
@@ -1037,6 +1085,9 @@
 
 <Hatch bind:open={hatchOpen} name={view?.user?.displayName ?? ""} {roleLine} {isAdmin}
        inboxCount={waiting || null} {onsignedout} onopened={onmenu} />
+
+<PreviewCard doc={previewPaper} itemTitle={previewPaper?.itemTitle ?? ""} onclose={closePaper}
+             onremove={removePaper} onrestore={restorePaper} />
 
 <ReviewSheet bind:open={reviewOpen} title={reviewing?.title ?? ""} proposal={reviewing?.proposal}
              householdId={reviewing ? (reviewing.householdId ?? view?.primary ?? null) : null}

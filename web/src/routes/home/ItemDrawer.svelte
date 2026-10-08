@@ -4,9 +4,9 @@
    * the desk's ItemView (ItemView.svelte) at the pocket's scale, as the
    * `detail` of the kit's Row. Key/value lines in the desk's order -- due,
    * snoozed until, section, type, orbital period, cost, provider,
-   * reference, reminders -- then the papers, each `name · size · added
- * <date>` (review round §6.f), then the notes. The acts and
-   * `copy link` are the row's own (pocket.svelte).
+   * reference, reminders -- then the notes, then the papers (#1319: notes
+   * above documents), each `name · size · added <date>` (review round
+   * §6.f) and each opening the preview sheet.
    *
    * A component rather than a snippet in pocket.svelte, for the reason
    * ItemView.svelte gives: a snippet's parameter has nowhere to carry its
@@ -15,15 +15,23 @@
   import { every, longDate, money } from "$lib/format.js";
   import { DAMAGED, LOCKED, NOTES_WORDS, REFERENCE_WORDS, fieldState } from "$lib/data/metadata-status.js";
 
+  /** A paper as the search reads it (pocket-search.js), carrying the belt's
+      own row since #1319, so it opens the preview sheet.
+      @typedef {import('./pocket-search.js').SearchDocument & Partial<import('$lib/data/belt.js').BeltDocumentRow>} Paper */
+
   /** @type {{
    *   one: { id: string, title: string, band: string, dueDate: string | null, days: number | null, section: string | null,
    *          recurrenceMonths: number | null, costMinor: number | null, currency: string, costIsEstimate: boolean },
    *   raw?: import('$lib/data/workspace.js').WorkspaceItem,
-   *   papers: { id: string, name: string, meta?: string }[],
+   *   papers: Paper[],
    *   reading?: boolean,
    *   problem?: string | null,
+   *   showingPaper?: string | null,
+   *   onopenpaper?: (paper: Paper, from: HTMLElement) => void,
    * }} */
-  let { one, raw = undefined, papers, reading = false, problem = null } = $props();
+  let {
+    one, raw = undefined, papers, reading = false, problem = null, showingPaper = null, onopenpaper = undefined,
+  } = $props();
 
   /** @type {Record<string, string>} */
   const TONE = { overdue: "over", "due-soon": "soon", upcoming: "up", ok: "ok", ended: "ended" };
@@ -48,21 +56,28 @@
 {#if raw?.reminderDays?.length}
   <div class="p-kv"><span>reminders</span><b>{raw.reminderDays.map((d) => `${d}d before`).join(" · ")}</b></div>
 {/if}
-{#if papers.length || reading}
-  <h3 class="p-caps">Documents</h3>
-  {#each papers as paper (paper.id)}
-    <!-- Not tappable here, as on the desk: the belt is where a paper opens. -->
-    <p class="paper"><span class="p-paper" aria-hidden="true">◆</span><span class="name">{paper.name}</span>{#if paper.meta}<span class="meta">{paper.meta}</span>{/if}</p>
-  {:else}
-    <div class="p-unlit"></div>
-  {/each}
-{/if}
+<!-- #1319 (owner, 2026-10-08): notes above documents, as on the desk. -->
 {#if raw?.notes}
   <h3 class="p-caps">Notes</h3>
   <p class="p-prose note">{raw.notes}</p>
 {:else if notesState === DAMAGED || notesState === LOCKED}
   <h3 class="p-caps">Notes</h3>
   <p class="p-prose note quiet">{NOTES_WORDS[notesState]}</p>
+{/if}
+{#if papers.length || reading}
+  <h3 class="p-caps">Documents</h3>
+  {#each papers as paper (paper.id)}
+    {@const on = showingPaper === paper.id}
+    <!-- #1319: a paper opens the preview as the phone's bottom sheet, here
+         rather than on the belt; the page in it opens the reader. -->
+    <button type="button" class="paper" class:showing={on} data-doc-row aria-haspopup="dialog"
+            aria-current={on ? "true" : undefined} aria-label="Open {paper.name}"
+            onclick={(event) => onopenpaper?.(paper, event.currentTarget)}>
+      <span class="p-paper" aria-hidden="true">◆</span><span class="name">{paper.name}</span>{#if paper.meta}<span class="meta">{paper.meta}</span>{/if}
+    </button>
+  {:else}
+    <div class="p-unlit"></div>
+  {/each}
 {/if}
 {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
 
@@ -71,8 +86,14 @@
   .p-kv span{flex:none}
   .p-kv b{min-width:0;text-align:right;overflow-wrap:anywhere}
   .p-caps{margin:16px 0 4px}
-  .paper{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 8px;margin:0;padding:6px 0;
-    font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink)}
+  .paper{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 8px;margin:0;padding:10px 0;
+    width:100%;min-height:var(--p-hit);box-sizing:border-box;text-align:left;cursor:pointer;
+    background:none;border:0;border-bottom:1px solid var(--line-soft);-webkit-appearance:none;appearance:none;
+    font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink);-webkit-tap-highlight-color:transparent}
+  .paper:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+  /* the open one wears the accent at its left edge and on its name (round 3) */
+  .paper.showing{border-left:3px solid var(--accent);padding-left:8px}
+  .paper.showing .name{color:var(--accent-text)}
   .paper .name{min-width:0;overflow-wrap:anywhere}
   .paper .meta{color:var(--ink-quiet)}
   /* name · size · added <date> (review round §6.f): what the data holds, no
