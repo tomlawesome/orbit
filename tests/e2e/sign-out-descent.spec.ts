@@ -9,6 +9,18 @@ import { answerPushWithoutAService } from "./support/webkit-push";
 
 resetDatabaseBetweenSpecFiles();
 
+/* On WebKit the spec's goto to /settings cancels the worker fetch SvelteKit's
+   page script started on /home's load, and its register() promise has no
+   catch, so the old page's "Script service-worker.js load failed" rejection
+   lands in this spec's pageerror list two seconds before the descent begins
+   (trace, 2026-10-08). Nothing here is about the worker, so on WebKit it is
+   kept out, as v19-keyboard.spec.ts does. */
+test.use({
+  serviceWorkers: async ({}, use, testInfo) => {
+    await use(testInfo.project.use.defaultBrowserType === "webkit" ? "block" : "allow");
+  },
+});
+
 /**
  * #1262: signing out from home's own menu, with the motion on, all the way
  * to the dusk.
