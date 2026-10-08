@@ -179,6 +179,7 @@ timeout on this one case rather than a global raise.
 - 2026-09-23 · 079bd351 (#1080, rebased onto dev's 1e2883ae; carries the count fix) · local `scripts/test-e2e-local.sh --ci-cap`, `ORBIT_E2E_WORKERS=4`, desktop-chromium · the sign-in symptom again, not the count one: `signInThroughTheDoor` (`tests/e2e/v19-arrival.spec.ts:79`) exhausted the test's whole 180000ms budget waiting for `getByRole('link', { name: 'Orbit W0 Newcomer' })`, and the `page.waitForResponse` set up before it timed out with it. The same commit ran the full suite green at `ORBIT_E2E_WORKERS=2` immediately before (204 passed, 79 skipped, 9.2m), so the count race the fix addressed is gone and this half is not. Two other specs failed in the same four-worker run, one of them a chromium page crash, which is why this is being read as the capped app and the loaded host rather than as one spec reading another's data. Four workers is above the count the suite ships on (two).
 - 2026-09-23 · 42271b4f · local `scripts/test-e2e-local.sh --ci-cap --spec tests/e2e/v19-arrival.spec.ts --project desktop-chromium`, `ORBIT_E2E_WORKERS=4` · did not reproduce: "Running 9 tests using 1 worker", green in 58.9s. Naming one spec file leaves Playwright only that file plus its own required setup/claim files to schedule, so `ORBIT_E2E_WORKERS` never gets a second file to hand to a second worker — the isolated run cannot exercise the cross-worker contention the four sightings above were taken under, whatever the env var says. Read this as ruling out nothing about the earlier sightings, only as ruling out single-spec isolation as a way to reproduce them.
   Code read alongside it found a candidate mechanism for the earlier sightings that single-spec isolation structurally cannot exercise: `createSession` (`src/lib/auth/session.ts:58`) takes `pg_advisory_xact_lock` on `ACCOUNT_LIFECYCLE_LOCK_KEY` (`src/lib/auth/authority-locks.ts:2`, `"orbit:account-lifecycle"`) — one key, not scoped to the signing-in user — and holds it for the whole transaction. `provisionIdentity`'s sign-in branch (`src/lib/auth/provision.ts:200`) takes the same key. Every sign-in on the instance, across every worker, therefore queues on one Postgres lock while `orbit-app` grinds through each transaction at 0.6 cpu; that is a real serialisation point, not a deadlock (the queue drains, FIFO-ish, on commit), but it turns concurrent sign-in load from several workers' specs into one queue with no bound tied to the 180s test timeout. Not confirmed against a hang — the single-file run above could not put load behind the lock — so this is the next thing to check with `pg_stat_activity`/`pg_locks` filtered to `hashtextextended('orbit:account-lifecycle', 0)` during a real multi-file four-worker run, not an established cause.
+- 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_webkit`, desktop-webkit (the test now sits at line 159) · failed once, passed on retry.
 
 ## v19-create.spec.ts:50 "the create form saves a real item into the orbit"
 
@@ -343,6 +344,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 ## v19-archive.spec.ts:262 "a wrong passphrase is refused, and nothing is read" on desktop-webkit (#1233)
 
 - 2026-10-06 · 4bb20449 (dev, !1035 merged) · local full suite, both WebKit projects, inside CI's Playwright image (#1235), local worker count · `page.waitForResponse: Timeout 30000ms exceeded` on the slow POST; the same test passed in a five-file targeted run minutes earlier and in a second full desktop-webkit run an hour later. Error context lost to a later run clearing `test-results/`.
+- 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_firefox`, desktop-firefox · failed once, passed on retry: the same test on a second browser.
 
 ## v19-mail-collection.spec.ts:288 "a spoofed PDF travels the real pipe" on desktop-webkit
 
@@ -356,3 +358,11 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 
 - 2026-10-06 · 2221237a (#1262, no change near this route) · local `scripts/test-backend.sh`, worktree `flight-door-port`, an e2e image build and other agents' headless browsers on the host (load 9-14) · timed out at the 5s default; green on an immediate rerun of the file alone. First sighting.
 - 2026-10-07 · 2a076315 (+ #1279's uncommitted phone create reading card, none of it near this fixture) · local `scripts/test-backend.sh`, worktree `fix-create-form`, other sessions using the host · timed out at the 5s default; it passed in the run before on the same code, and green on an immediate rerun of the file alone. Second sighting.
+
+## v19-archive.spec.ts:192 "write an archive, then bring it into a second household — a clash stays out" on desktop-webkit
+
+- 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_webkit` · failed once (49.6s), passed on retry. First sighting.
+
+## sign-out-descent.spec.ts:175 "sign out from home's menu reaches the dusk (phone-narrow, as the browser is)" on desktop-webkit
+
+- 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_webkit` · failed once (10.4s), passed on retry. First sighting.
