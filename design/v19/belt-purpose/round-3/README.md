@@ -14,6 +14,9 @@ verbatim.
   and link icons sit at the drawer's foot, at the right end of the action
   pills' row, the pills still centred.
 
+And (owner, same day): "Notes go before the documents." The notes section
+sits above the documents section in every scene.
+
 Scenes `?scene=` listed at the top of the file; packs by `?theme=`.
 
 ## Verdicts
