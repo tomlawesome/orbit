@@ -15,7 +15,7 @@
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { applyCommand, approveReceipt, dismissReceipt, readHome, readItem, readItemDocuments, requestToJoin, signOut } from "$lib/data/workspace.js";
+  import { applyCommand, approveReceipt, dismissReceipt, readHome, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut } from "$lib/data/workspace.js";
   import { completeCommand, nextDateAfter } from "$lib/data/commands.js";
   import { createArm } from "$lib/pocket/arm.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
@@ -27,6 +27,9 @@
   import { tlabel } from "./bands.js";
   import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
   import CorridorRow from "./CorridorRow.svelte";
+  import PreviewCard from "$lib/reading/PreviewCard.svelte";
+  import { WIDE_QUERY, cardWidthOf, pairOf, trackOf } from "./preview-pair.js";
+  import { wake } from "$lib/pocket/wake.js";
   import NorthStarMark from "$lib/NorthStarMark.svelte";
   import { watchTour } from "$lib/tour/watch.js";
   import "./home.css";
@@ -350,9 +353,11 @@
       detailFor = null;
       detail = null;
       detailProblem = null;
+      previewDoc = null;
       return;
     }
     if (detailFor === id) return;
+    previewDoc = null;
     /* Everything Orbit holds, read through the same seam the item view reads
        (#446) — documents included, so "everything" is not a euphemism. */
     detailFor = id;
@@ -379,6 +384,122 @@
       .finally(() => {
         if (detailFor === id) detailBusy = false;
       });
+  });
+
+  /** Reads the open row's record again after something changed it from the
+      drawer (#1319): a paper attached, removed or restored, a snooze. */
+  async function rereadDetail() {
+    const id = detailFor;
+    if (!id) return;
+    try {
+      const found = await readItem(id);
+      if (detailFor === id && found) detail = found;
+    } catch (error) {
+      if (detailFor === id) detailProblem = /** @type {any} */ (error)?.message ?? String(error);
+    }
+  }
+
+  /* ---- #1319: a document's preview, from the open drawer -----------------
+     design/v19/belt-purpose/round-3/f-preview-beside-tracked.html (F),
+     owner-decisions §34. A row in the drawer's documents opens the preview
+     card (PreviewCard.svelte): on a wide screen beside the drawer, its top
+     level with the item card's, riding the page with it and sticky beside a
+     card taller than the window; under 1200px the phone's bottom sheet. A
+     press anywhere off it, or Escape, removes it at once and leaves the
+     drawer open: that press is swallowed by the drawer once. */
+  /** @type {import('$lib/data/workspace.js').DrawerDocument | null} */
+  let previewDoc = $state(null);
+  /** The document row that opened the card, for focus to return to. @type {HTMLElement | null} */
+  let previewFrom = null;
+  /* A press that only closed the card must not also close the drawer. Every
+     press starts with it down (the capture listener below), so it swallows
+     one click, never a later one. */
+  let swallowClick = false;
+  /** @type {HTMLElement | undefined} */
+  let manifestEl = $state();
+  let track = $state({ top: 0, height: 0 });
+  let readw = $state(480);
+  /** @type {{ maxWidth: number, shift: number } | null} */
+  let pair = $state(null);
+
+  /** @param {import('$lib/data/workspace.js').DrawerDocument} doc @param {HTMLElement} from */
+  function openDoc(doc, from) {
+    previewFrom = from;
+    if (previewDoc?.id !== doc.id) previewDoc = doc;
+  }
+  /** @param {{ refocus: boolean, press: boolean }} how */
+  function closeDoc({ refocus, press }) {
+    previewDoc = null;
+    if (press) swallowClick = true;
+    if (refocus && previewFrom?.isConnected) previewFrom.focus({ preventScroll: true });
+  }
+  /* The reader's remove (#1054): the paper goes, the card and the reader
+     close onto the drawer, and the wake offers it back. */
+  /** @param {import('$lib/data/belt.js').BeltDocumentRow} doc */
+  async function removeDoc(doc) {
+    await removeDocument(doc.id);
+    previewDoc = null;
+    await rereadDetail();
+    wake(`${doc.name} removed`, {
+      undo: () => { restoreDocument(doc.id).then(rereadDetail).catch(() => {}); },
+    });
+  }
+  /** @param {import('$lib/data/belt.js').BeltDocumentRow} doc */
+  async function restoreDoc(doc) {
+    await restoreDocument(doc.id);
+    previewDoc = null;
+    await rereadDetail();
+  }
+
+  /* The column beside the open drawer, and the pair centred together, kept
+     in step with the drawer's height and the window (preview-pair.js). */
+  $effect(() => {
+    const id = expanded;
+    const paper = previewDoc;
+    const manifest = manifestEl;
+    if (!id || !paper || !manifest) { pair = null; return; }
+    const media = matchMedia(WIDE_QUERY);
+    const measure = () => {
+      readw = cardWidthOf(window.innerHeight);
+      const row = document.getElementById(id);
+      const view = document.getElementById(`${id}-view`);
+      if (!media.matches || !row || !view) { pair = null; return; }
+      let rowTop = 0;
+      for (let el = /** @type {HTMLElement | null} */ (row); el && el !== manifest;
+        el = /** @type {HTMLElement | null} */ (el.offsetParent)) rowTop += el.offsetTop;
+      track = trackOf({ rowTop, rowOffsetTop: row.offsetTop, viewOffsetTop: view.offsetTop, viewHeight: view.offsetHeight });
+      const host = /** @type {HTMLElement} */ (manifest.parentElement);
+      const hs = getComputedStyle(host);
+      const box = host.getBoundingClientRect();
+      const padL = parseFloat(hs.paddingLeft) || 0;
+      const padR = parseFloat(hs.paddingRight) || 0;
+      pair = pairOf({
+        viewportWidth: document.documentElement.clientWidth,
+        hostLeft: box.left + padL,
+        hostWidth: box.width - padL - padR,
+        cardWidth: readw,
+      });
+    };
+    const watch = new ResizeObserver(() => measure());
+    tick().then(() => {
+      measure();
+      const row = document.getElementById(id);
+      const view = document.getElementById(`${id}-view`);
+      if (row) watch.observe(row);
+      if (view) watch.observe(view);
+    });
+    window.addEventListener("resize", measure);
+    media.addEventListener("change", measure);
+    return () => {
+      watch.disconnect();
+      window.removeEventListener("resize", measure);
+      media.removeEventListener("change", measure);
+    };
+  });
+  $effect(() => {
+    const down = () => { swallowClick = false; };
+    window.addEventListener("pointerdown", down, true);
+    return () => window.removeEventListener("pointerdown", down, true);
   });
 
   /**
@@ -446,10 +567,12 @@
   /** @param {MouseEvent} event */
   function onWindowClick(event) {
     if (!expanded) return;
+    if (swallowClick) { swallowClick = false; return; }
     const target = event.target instanceof Element ? event.target : null;
     /* Inside the open row or its panel: stay. On another expandable row: that
-       row's own handler is switching to it. Anywhere else: close. */
-    if (target?.closest("a.item, .itemview")) return;
+       row's own handler is switching to it. On the preview card beside the
+       drawer, or the reader over home (#1319): stay. Anywhere else: close. */
+    if (target?.closest("a.item, .itemview, [data-preview-card], .rd-layer")) return;
     collapseRow();
   }
 
@@ -1629,7 +1752,9 @@
     <!-- §14 (#469): ONE schedule surface. The manifest IS the corridor — a
          full scrollback through events, nearest at the top down to the
          furthest away, suggestions riding the same line in date order. -->
-    <div class="manifest" id="manifest-top">
+    <div class="manifest" id="manifest-top" bind:this={manifestEl}
+         style:max-width={pair ? `${pair.maxWidth}px` : undefined}
+         style:transform={pair ? `translateX(${pair.shift}px)` : undefined}>
     {#if corridor && !view?.emptySky}
       <div class="corridor">
         {#if corridor.overdue.length}
@@ -1637,7 +1762,7 @@
             {#each corridor.overdue as row (row.id)}
               <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
                 onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-                onCopyAddress={copyAddress} />
+                onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} />
             {/each}
           </div>
         {/if}
@@ -1645,14 +1770,14 @@
         {#each corridor.current as row (row.id)}
           <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
             onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-            onCopyAddress={copyAddress} />
+            onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} />
         {/each}
         {#each corridor.months as month (month.key)}
           <div class="month"><span>{month.label}</span><div class="rule"></div><small>{month.rows.length} approaching</small></div>
           {#each month.rows as row (row.id)}
             <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
               onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-              onCopyAddress={copyAddress} />
+              onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} />
           {/each}
         {/each}
         <!-- #1281: what is kept without a date rides at the foot under its
@@ -1663,7 +1788,7 @@
         {#each corridor.undated as row (row.id)}
           <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
             onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}
-            onCopyAddress={copyAddress} />
+            onCopyAddress={copyAddress} showingDoc={previewDoc?.id ?? null} onOpenDoc={openDoc} />
         {/each}
       </div>
       {#if corridor.total === 0}
@@ -1672,6 +1797,11 @@
         <div class="horizon">— beyond the horizon: nothing scheduled past {corridor.horizon} —</div>
       {/if}
     {/if}
+    <!-- #1319, round 3 (F): the preview's column beside the open drawer. -->
+    <div class="pvtrack" style:--pv-y="{track.top}px" style:--pv-h="{track.height}px" style:--readw="{readw}px">
+      <PreviewCard doc={previewDoc} itemTitle={detail?.title ?? ""} onclose={closeDoc}
+                   onremove={removeDoc} onrestore={restoreDoc} />
+    </div>
   </div>
 </div>
 

@@ -267,6 +267,17 @@
   .signout-problem{font:10.5px var(--mono);color:var(--overdue-text);margin-top:7px;line-height:1.7}
 
   .manifest{max-width:820px;margin:34px auto 0}
+  /* #1319, round 3 (F): while a document's preview stands beside the open
+     drawer on a wide screen, the manifest narrows only as far as it must
+     and slides left so the pair is centred (preview-pair.js), on round 6's
+     lane curve; the card's column rides the slide. */
+  .desk .manifest{position:relative;
+    transition:transform .75s cubic-bezier(.4,.5,.15,1),max-width .75s cubic-bezier(.4,.5,.15,1)}
+  @media (prefers-reduced-motion: reduce){.desk .manifest{transition:none}}
+  /* THE COLUMN: at the manifest's right, from the item card's top to the
+     drawer's foot; the card is sticky inside it (PreviewCard.svelte). */
+  .desk .pvtrack{position:absolute;left:calc(100% + 28px);top:var(--pv-y,0px);height:var(--pv-h,0px);
+    width:max-content;pointer-events:none;z-index:2}
   /* #1050: same scoping as the .group fade-in above, and for the same
      reason - this is the same class name, so the leftover chunk would keep
      adding a stray 30px margin under inbox's lane groups too. */
@@ -376,6 +387,29 @@
   .itemview .doc{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;
                  border:1px solid var(--line-soft);margin-bottom:7px;font-size:13px}
   .itemview .doc small{display:block;font:10.5px var(--mono);color:var(--ink-mid)}
+  /* #1319 (design/v19/belt-purpose/round-3): THE DOCUMENT ROW OPENS THE
+     PREVIEW. Home's own .doc row, whole-row, a button now; the words at its
+     right are the register `manage this item →` had. While its preview is
+     up it wears the accent at its left edge and on its name, and says so;
+     the 3px edge comes out of the left padding so the name does not move. */
+  .itemview button.doc{width:100%;text-align:left;font-family:inherit;line-height:inherit;color:var(--ink);
+    background:none;cursor:pointer;-webkit-appearance:none;appearance:none}
+  .itemview button.doc:hover{border-color:var(--accent)}
+  .itemview button.doc:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .itemview .doc>.mark{flex:none;color:var(--ink-mid)}
+  .itemview .doc>.name{flex:1;min-width:0;overflow-wrap:anywhere}
+  .itemview .doc .go{flex:none;font:11.5px var(--mono);font-style:normal;color:var(--ink-mid);white-space:nowrap}
+  .itemview button.doc:hover .go{color:var(--accent-text)}
+  .itemview .doc.showing{border-color:var(--line-soft);border-left:3px solid var(--accent);padding-left:8px}
+  .itemview .doc.showing>.name,.itemview .doc.showing .go{color:var(--accent-text)}
+  @media (max-width:560px){
+    .itemview .doc{flex-wrap:wrap;row-gap:4px}
+    .itemview .doc>.name{flex:1 1 calc(100% - 30px)}
+    .itemview .doc .go{margin-left:auto}
+  }
+  .itemview p.ivnotes{font-size:13px;line-height:1.6;color:var(--ink-mid);margin:0}
+  .itemview p.ivnotes.failed{color:var(--degraded)}
+  .itemview p.ivnotes.locked{color:var(--ink-quiet)}
   .itemview p{font-size:13px;color:var(--ink-mid);line-height:1.65}
   .itemview .ivnote{font:10.5px var(--mono);color:var(--ink-quiet);padding:12px 2px;line-height:1.8}
   .itemview .ivproblem{font:10.5px var(--mono);color:var(--overdue-text);padding:12px 2px;line-height:1.6}

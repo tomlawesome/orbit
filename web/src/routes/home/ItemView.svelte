@@ -17,6 +17,7 @@
   /**
    * @typedef {import('$lib/data/chart.js').CorridorRow} CorridorRowData
    * @typedef {import('$lib/data/workspace.js').ItemView} ItemViewData
+   * @typedef {import('$lib/data/workspace.js').DrawerDocument} DrawerDocument
    */
   /** @type {{
    *   row: CorridorRowData,
@@ -25,8 +26,10 @@
    *   detailProblem: string | null,
    *   copied: boolean,
    *   onCopyAddress: () => void,
+   *   showingDoc: string | null,
+   *   onOpenDoc: (doc: DrawerDocument, from: HTMLElement) => void,
    * }} */
-  let { row, detail, detailBusy, detailProblem, copied, onCopyAddress } = $props();
+  let { row, detail, detailBusy, detailProblem, copied, onCopyAddress, showingDoc, onOpenDoc } = $props();
 
   /* The directive expression below (class:over={...}) does not carry an
      inline @type cast comment through to the type checker the way a plain
@@ -88,18 +91,29 @@
       <div class="kv"><span>reminders</span>
         <b>{detail.reminderDays.map((d) => `${d}d before`).join(" · ")}</b></div>
     {/if}
-    {#if detail.documents?.length}
-      <h4>documents</h4>
-      {#each detail.documents as document (document.name)}
-        <div class="doc">◆<span>{document.name}<small>{document.meta}</small></span></div>
-      {/each}
-    {/if}
+    <!-- #1319 (owner, 2026-10-08): notes above documents. -->
     {#if detail.notes}
       <h4>notes</h4>
-      <p>{detail.notes}</p>
+      <p class="ivnotes">{detail.notes}</p>
     {:else if notesState}
       <h4>notes</h4>
-      <p class={notesState === DAMAGED ? "failed" : "locked"}>{NOTES_WORDS[notesState]}</p>
+      <p class="ivnotes {notesState === DAMAGED ? 'failed' : 'locked'}">{NOTES_WORDS[notesState]}</p>
+    {/if}
+    {#if detail.documents?.length}
+      <h4>documents</h4>
+      <!-- #1319, round 3: every row opens the preview card, the honest
+           states too -- the card says "still scanning" or "removed" itself.
+           The open one wears the accent at its left edge and says so. -->
+      {#each detail.documents as document (document.id)}
+        {@const on = showingDoc === document.id}
+        <button type="button" class="doc" class:showing={on} data-doc-row aria-haspopup="dialog"
+                aria-current={on ? "true" : undefined} aria-label="Open {document.name}"
+                onclick={(event) => onOpenDoc(document, event.currentTarget)}>
+          <span class="mark" aria-hidden="true">◆</span>
+          <span class="name">{document.name}<small>{document.meta}</small></span>
+          <em class="go" aria-hidden="true">{on ? "showing" : "open →"}</em>
+        </button>
+      {/each}
     {/if}
     <div class="ivfoot">
       <button class="ivcopy" onclick={onCopyAddress}>{copied ? "link copied" : "copy link"}</button>
