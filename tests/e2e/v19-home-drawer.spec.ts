@@ -346,6 +346,18 @@ test.describe("on the desk", () => {
     await editing.getByRole("button", { name: "save" }).click();
     await expect(drawer.getByText("Northgate Services")).toBeVisible({ timeout: 10_000 });
     await expect.poll(async () => (await itemOf(page, householdId, itemId))?.provider ?? null).toBe("Northgate Services");
+
+    /* and edited again: the second save lands too (#1319: an upsert sends
+       the version it becomes, so a second edit is not refused as "changed on
+       another device") */
+    await pencil.click();
+    await drawer.getByRole("textbox", { name: "provider" }).click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" Ltd");
+    await drawer.getByRole("group", { name: `Editing ${TITLE}` }).getByRole("button", { name: "save" }).click();
+    await expect(drawer.getByText("Northgate Services Ltd")).toBeVisible({ timeout: 10_000 });
+    await expect(drawer.getByRole("alert")).toHaveCount(0);
+    await expect.poll(async () => (await itemOf(page, householdId, itemId))?.provider ?? null).toBe("Northgate Services Ltd");
   });
 });
 

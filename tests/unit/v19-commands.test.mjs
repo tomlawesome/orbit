@@ -94,7 +94,8 @@ describe("command builders", () => {
     expect(command).toMatchObject({ type: "item.upsert", householdId: "hh-1" });
     expect(command.item.title).toBe("Car MOT");
     expect(command.item.costMinor).toBe(6000);
-    expect(command.item.version).toBe(5);
+    /* the version this write becomes: one past the version read (#1319) */
+    expect(command.item.version).toBe(6);
     expect(command.item.householdId).toBeUndefined();
     expect(command.item.section).toBeUndefined();
     expect(command.item.documents).toBeUndefined();

@@ -120,7 +120,7 @@ describe("the entry's fields", () => {
     expect(entryChanged(entry, entryOf(item))).toBe(false);
     const edits = { ...intentOf({ ...entry, provider: "", recurrence: 24 }), kind: entry.kind };
     const command = upsertCommand(/** @type {any} */ (item), edits, { uuid: () => "op", now: () => "2026-09-25T12:00:00.000Z" });
-    expect(command).toMatchObject({ kind: "inspection", item: { title: "Car MOT", recurrenceMonths: 24, cost: "54.85", version: 5 } });
+    expect(command).toMatchObject({ kind: "inspection", item: { title: "Car MOT", recurrenceMonths: 24, cost: "54.85", version: 6 } });
     expect(command.item).not.toHaveProperty("provider");
     expect(command.item).not.toHaveProperty("costMinor");
     expect(command.item).not.toHaveProperty("scheduleKind");
