@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 // #1319 — a colour per section and per type (round 8). Only the shipped
-// sections' fixed colours and the types' are pinned here: the rule for any
-// other section is being decided again, so it is deliberately not tested.
+// sections' own colours, a household's own sections by their mark, and the
+// types'.
 import { SECTION_COLOURS, TYPE_COLOURS, sectionColourOf, typeColourOf } from "../../web/src/lib/option-colour.js";
 import { SHIPPED_SECTION_IDS } from "../../web/src/lib/marks.js";
 
@@ -39,6 +39,27 @@ describe("sectionColourOf, for the shipped sections", () => {
     expect(sectionColourOf({})).toBeNull();
     expect(sectionColourOf({ id: null, icon: null })).toBeNull();
     expect(sectionColourOf({ id: "", icon: "" })).toBeNull();
+  });
+});
+
+describe("sectionColourOf, for a household's own sections", () => {
+  it("takes the colour of its mark, the vocabulary's order cycling the four", () => {
+    const marks = ["calendar", "hook", "kite", "ladle", "cross", "bow", "wedge", "belt"];
+    const want = ["home", "vehicles", "devices", "services", "home", "vehicles", "devices", "services"];
+    expect(marks.map((icon) => sectionColourOf({ id: "s-garden", icon }))).toEqual(want);
+  });
+
+  it("wears a shipped mark's colour on a new section", () => {
+    expect(sectionColourOf({ id: "s-boat", icon: "vehicle" })).toBe("vehicles");
+  });
+
+  it("has none with no mark, or a mark Orbit does not know", () => {
+    expect(sectionColourOf({ id: "s-garden" })).toBeNull();
+    expect(sectionColourOf({ id: "s-garden", icon: "anchor" })).toBeNull();
+  });
+
+  it("follows the mark alone: the same mark on two sections, the same colour", () => {
+    expect(sectionColourOf({ id: "s-a", icon: "kite" })).toBe(sectionColourOf({ id: "s-b", icon: "kite" }));
   });
 });
 
