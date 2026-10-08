@@ -29,6 +29,8 @@ Scenes `?scene=`: `editing-section`, `editing-type`, `open`,
 - 130 rendered contrast checks, all coloured text and chosen tiles at
   4.5:1 or better, in all five packs.
 
-## Verdicts
+## Verdicts (owner, 2026-10-08)
 
-(none yet)
+> approved.
+
+M is ratified: the editing choosers are settled (owner-decisions §34).
