@@ -427,7 +427,10 @@
     const id = page.url.searchParams.get("item");
     if (addressed || !id || !groups || !isPocket()) return;
     const listed = groups.attention.length ? groups.attention : groups.later.slice(0, 1);
-    if (!listed.some((row) => row.id === id)) {
+    /* #1319: a suggestion's address opens its row in the signals, where it
+       is reviewed — never the belt */
+    const signalled = view?.suggestions.some((one) => one.id === id);
+    if (!signalled && !listed.some((row) => row.id === id)) {
       addressed = true;
       goto(resolve("/item/[[id]]", { id: encodeURIComponent(id) }), { replaceState: true });
       return;
@@ -1116,7 +1119,8 @@
                trailSub={s.renewsOn ? `${dateWord(s)} ${short(s.renewsOn)}` : ""} trailTone="var(--accent-text)"
                acts={suggestionActs(s)} ontoggle={onRowToggle(s.id)}>
             {#snippet mark()}<span class="pk-dot hollow"></span>{/snippet}
-            {#snippet detail()}<SuggestionDrawer suggestion={s} problem={rowProblem[s.id] ?? null} />{/snippet}
+            {#snippet detail()}<SuggestionDrawer suggestion={s} problem={rowProblem[s.id] ?? null}
+                                                  showingPaper={previewPaper?.id ?? null} onopenpaper={openPaperHere} />{/snippet}
             {#snippet after()}
               {#if s.receiptId}
                 <button class="p-quiet" aria-haspopup="dialog" onclick={() => openReview(s)}>review &amp; amend →</button>

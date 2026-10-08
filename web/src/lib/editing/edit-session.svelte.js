@@ -122,7 +122,9 @@ export class EditSession {
       return true;
     } catch (error) {
       const words = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
-      this.problem = /^not saved/i.test(words) ? words : `not saved — ${words}`;
+      /* already in the refusal vocabulary ("not saved — …", or a
+         suggestion's "not added — …") — said as it is */
+      this.problem = /^not [a-z]+ —/i.test(words) ? words : `not saved — ${words}`;
       return false;
     } finally {
       this.busy = false;

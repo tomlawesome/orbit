@@ -110,17 +110,29 @@
        as a filed row does (#424's shallow address, Back, Escape, click-off),
        into SuggestionView: the relay's readings and how sure it was, the
        paper it came in, when it burns up, and the two decisions, which used
-       to sit on the row. `review in the belt →` is `manage this item →`'s
-       twin: the belt is where the fields are amended. -->
+       to sit on the row. #1319: it is reviewed there too -- `review & amend
+       →` puts the drawer's rows into editing, and the title edits here in
+       the head, as a filed row's does. -->
+  {#if draft && expanded === row.id}
+    <div class="item suggest open editing" id={row.id}>
+      <span class="planet sug" aria-hidden="true"><i></i></span>
+      <div class="body">
+        <b class="ed" contenteditable="plaintext-only" spellcheck="false" role="textbox" tabindex="0"
+           aria-label="title" data-ed="title" bind:textContent={draft.title}></b>
+        <span>{suggestionMeta.join(" · ")}</span>
+      </div>
+    </div>
+  {:else}
   <a class="item suggest" class:open={expanded === row.id} id={row.id}
      href={resolve(`/home?item=${encodeURIComponent(row.id)}`)} aria-expanded={expanded === row.id}
      aria-controls="{row.id}-view" onclick={(event) => onRowClick(event, row.id)}>
     <span class="planet sug" aria-hidden="true"><i></i></span>
     <div class="body"><b>{row.title}</b><span>{suggestionMeta.join(" · ")}</span></div>
   </a>
+  {/if}
   {#if expanded === row.id}
     <SuggestionView {row} suggestion={asSuggestion(suggestionMatch)} {busyReceipt} {armed} {mailProblem}
-                    {today} {onReceiptTap} {copied} {onCopyAddress} />
+                    {today} {onReceiptTap} {copied} {onCopyAddress} {showingDoc} {onOpenDoc} {acts} />
   {/if}
 {:else}
   <!-- #424: the row is the item. The href is the row's real address —

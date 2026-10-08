@@ -92,6 +92,31 @@ test("a paper opens the preview as the bottom sheet; Escape puts it away and lea
   await expect(mot).toHaveAttribute("data-open", "");
   await expect(mot.getByRole("button", { name: "Open Service history" })).toBeFocused();
 });
+/* #1319 (owner-decisions §34): a suggestion is reviewed in its home drawer,
+   never on the belt -- its address opens its row in the signals, and the
+   paper it came in opens the preview sheet with the belt's staged note. */
+test("a suggestion's address opens its row in the signals, not the belt", async ({ page }) => {
+  await page.goto(`${APP}/home?item=r-insurance`, { waitUntil: "load" });
+  await settle(page);
+  const catch_ = page.locator(".pocket .pk-signals [data-row]", { hasText: "Home insurance" }).first();
+  await expect(catch_).toHaveAttribute("data-open", "");
+  await expect(page).toHaveURL(/\/home\?item=r-insurance$/);
+});
+test("a suggestion's paper opens the preview as the bottom sheet, attached on acceptance", async ({ page }) => {
+  await page.goto(`${APP}/home`, { waitUntil: "load" });
+  await settle(page);
+  const catch_ = page.locator(".pocket .pk-signals [data-row]", { hasText: "Home insurance" }).first();
+  await openRow(page, catch_);
+  await catch_.getByRole("button", { name: "Open policy-schedule.pdf" }).tap();
+  const sheet = page.getByRole("dialog", { name: /^policy-schedule\.pdf/ });
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Read policy-schedule.pdf" })).toBeEnabled({ timeout: 10_000 });
+  await expect(sheet.locator(".rcnote")).toHaveText("not yet in orbit · attached on acceptance");
+  await expect(sheet.getByRole("link", { name: /download/i })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
+  await expect(catch_).toHaveAttribute("data-open", "");
+});
 test("a search result with no row goes straight to the item", async ({ page }) => {
   await page.goto(`${APP}/home`, { waitUntil: "load" });
   await settle(page);
