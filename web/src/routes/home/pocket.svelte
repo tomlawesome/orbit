@@ -262,7 +262,8 @@
     delete rowProblem[target.id];
     try {
       const failed = await handler(target);
-      if (failed) { rowProblem[target.id] = failed; return; }
+      /* false: the row stays open with the refusal under it (Row.svelte run) */
+      if (failed) { rowProblem[target.id] = failed; return false; }
       wake(act === "approve" ? `${target.title} added to your orbit` : `${target.title} dismissed`);
     } finally {
       busy = false;

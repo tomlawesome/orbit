@@ -1,4 +1,5 @@
 <script>
+  import { tick } from "svelte";
   import { dev } from "$app/environment";
   import ArmButton from "./ArmButton.svelte";
   import { mountRow } from "./row.js";
@@ -135,9 +136,25 @@
     return () => control?.destroy();
   });
 
-  /** @param {import("./row.js").RowAct} act */
+  /**
+   * An act ran: the row folds away -- unless the act failed (#1319). An act
+   * that answers `false`, or leaves an alert in the row's panel (the
+   * screen's own refusal, said under the row's detail), keeps the row open
+   * and puts focus on the alert, so the reason is seen and read out rather
+   * than folded out of sight.
+   * @param {import("./row.js").RowAct} act
+   */
   async function run(act) {
-    await act.onact?.();
+    const result = await act.onact?.();
+    await tick();
+    const alert = /** @type {HTMLElement | null} */ (row?.querySelector("[data-row-panel] [role=alert]") ?? null);
+    if (result === false || alert) {
+      if (alert) {
+        if (!alert.hasAttribute("tabindex")) alert.setAttribute("tabindex", "-1");
+        alert.focus({ preventScroll: true });
+      }
+      return;
+    }
     control?.close(true);
   }
 
