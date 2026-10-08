@@ -113,7 +113,8 @@
          item's drawer. -->
     <div class="actions" role="group" aria-label="Amending {row.title}">
       <button class="yes" disabled={adding || acts.modes.edit.refused} onclick={acts.onaccept}>{adding ? "adding…" : "add to orbit"}</button>
-      <button disabled={adding} onclick={acts.oncancel}>cancel</button>
+      <button disabled={adding} class:armed={acts.modes.discardArmed} onclick={acts.oncancel}
+              >{acts.modes.discardArmed ? "discard changes?" : "cancel"}</button>
     </div>
     {#if acts.modes.edit.problem ?? acts.modes.edit.refusal}
       <div class="mail-problem" role="alert">{acts.modes.edit.problem ?? acts.modes.edit.refusal}</div>

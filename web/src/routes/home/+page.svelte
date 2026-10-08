@@ -533,6 +533,7 @@
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
     event.preventDefault();
     if (expanded === id) return collapseRow();
+    if (expanded !== null && modes.id === expanded && !modes.cancel()) return;
     if (expanded === null) {
       pushedEntry = true;
       pushState(resolve(`/home?item=${encodeURIComponent(id)}`), { orbitItem: id });
@@ -543,6 +544,9 @@
 
   function collapseRow() {
     if (expanded === null) return;
+    /* #1319: rows holding changes are not thrown away by a close; the first
+       try arms the cancel pill's "discard changes?" (DrawerModes.cancel) */
+    if (modes.id === expanded && !modes.cancel()) return;
     if (pushedEntry) {
       pushedEntry = false;
       history.back();
@@ -783,7 +787,8 @@
       if (!modes.escape()) return;
       event.preventDefault();
       event.stopPropagation();
-      if (!chooser) focusInDrawer(editing ? EDIT_HOME : '[aria-label^="Complete "]');
+      /* a guarded cancel that only armed "discard changes?" leaves focus be */
+      if (!chooser && !modes.id) focusInDrawer(editing ? EDIT_HOME : '[aria-label^="Complete "]');
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
@@ -832,7 +837,8 @@
     onrecord: recordCompletion,
     oncancel: () => {
       const editing = Boolean(modes.edit.id);
-      modes.end();
+      /* rows holding changes: the first press arms "discard changes?" */
+      if (!modes.cancel()) return;
       focusInDrawer(editing ? EDIT_HOME : '[aria-label^="Complete "]');
     },
     onamend: startAmend,

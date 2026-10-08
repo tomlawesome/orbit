@@ -1,6 +1,6 @@
 <script>
   import "./pocket.css";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
@@ -321,7 +321,7 @@
     sections,
     onaccept: addAmended,
     oncancel: () => {
-      modes.end();
+      if (!modes.cancel()) return;
       focusInRow(s.id, "[data-amend]");
     },
   });
@@ -691,7 +691,13 @@
   const chooserAsk = $derived.by(() => (view ? modes.askOf(sections, view.today) : null));
   /* A row closing, or another opening, ends whatever its drawer was doing. */
   $effect(() => {
-    if (modes.id && lit !== modes.id) modes.end();
+    const id = modes.id;
+    if (!id || lit === id) return;
+    /* #1319: a row closing with changes in its rows opens again, the cancel
+       pill armed ("discard changes?"); closed again inside the hold, or
+       with nothing changed, it ends. */
+    if (untrack(() => modes.cancel())) modes.end();
+    else untrack(() => openRow(id));
   });
   /** The item as a command addresses it. @param {string} id @returns {any} */
   const commandItemOf = (id) => {
@@ -756,7 +762,7 @@
       if (!modes.escape()) return;
       event.preventDefault();
       event.stopPropagation();
-      if (!chooser) focusInRow(id, editing ? ".ivedit, [data-amend]" : '[aria-label^="Complete "]');
+      if (!chooser && !modes.id) focusInRow(id, editing ? ".ivedit, [data-amend]" : '[aria-label^="Complete "]');
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
@@ -800,7 +806,8 @@
     onrecord: () => recordRow(one),
     oncancel: () => {
       const editing = Boolean(modes.edit.id);
-      modes.end();
+      /* rows holding changes: the first press arms "discard changes?" */
+      if (!modes.cancel()) return;
       focusInRow(one.id, editing ? ".ivedit" : '[aria-label^="Complete "]');
     },
     onattach: (file) => attachTo(one, file),

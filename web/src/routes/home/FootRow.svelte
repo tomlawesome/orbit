@@ -34,6 +34,12 @@
    * "done"`) offers nothing that would undo or end it: attach a document,
    * the pencil and the chain link.
    *
+   * DISCARD (#1319 stage 3b; the coordinator's ruling, 2026-10-08): rows
+   * holding changes are not thrown away by the first cancel, Escape or
+   * close; the cancel pill arms as retire does and reads "discard
+   * changes?" (`discarding`), and a second press discards
+   * (discard-guard.js).
+   *
    * ATTACH opens the file picker; the file goes up through the per-item
    * documents route (workspace.js attachItemDocument) and its scan.
    *
@@ -45,6 +51,7 @@
    *   snoozing?: boolean,
    *   held?: boolean,
    *   standing?: "ended" | "done" | null,
+   *   discarding?: boolean,
    *   onrestore?: () => unknown,
    *   onsnooze: (from: HTMLElement) => unknown,
    *   oncomplete: (from: HTMLElement) => unknown,
@@ -60,7 +67,7 @@
   /** @type {Props} */
   let {
     title, pocket = false, busy = null, mode = "read", snoozing = false, held = false,
-    standing = null, onrestore = undefined, onsnooze, oncomplete, onattach, onretire, oncopy, onedit, onsave, onrecord, oncancel,
+    standing = null, discarding = false, onrestore = undefined, onsnooze, oncomplete, onattach, onretire, oncopy, onedit, onsave, onrecord, oncancel,
   } = $props();
 
   let armed = $state(false);
@@ -119,13 +126,17 @@
     <div class="ivacts" class:p-pills={pocket} role="group" aria-label="Editing {title}">
       <button type="button" class:p-pill={pocket} class="act-accent" style="--act:var(--accent);--act-text:var(--accent-text)"
               disabled={busy !== null || held} onclick={onsave}>{busy === "save" ? "saving…" : "save"}</button>
-      <button type="button" class:p-pill={pocket} disabled={busy !== null} onclick={oncancel}>cancel</button>
+      <button type="button" class:p-pill={pocket} class="discard" class:danger={pocket && discarding} class:armed={discarding}
+              style={discarding ? "--act:var(--overdue);--act-text:var(--overdue-text)" : undefined}
+              disabled={busy !== null} onclick={oncancel}>{discarding ? "discard changes?" : "cancel"}</button>
     </div>
   {:else if mode === "complete"}
     <div class="ivacts" class:p-pills={pocket} role="group" aria-label="Completing {title}">
       <button type="button" class:p-pill={pocket} class="act-ok" style="--act:var(--ok);--act-text:var(--ok-text)"
               disabled={busy !== null} onclick={onrecord}>{busy === "complete" ? "recording…" : "record"}</button>
-      <button type="button" class:p-pill={pocket} disabled={busy !== null} onclick={oncancel}>cancel</button>
+      <button type="button" class:p-pill={pocket} class="discard" class:danger={pocket && discarding} class:armed={discarding}
+              style={discarding ? "--act:var(--overdue);--act-text:var(--overdue-text)" : undefined}
+              disabled={busy !== null} onclick={oncancel}>{discarding ? "discard changes?" : "cancel"}</button>
     </div>
   {:else if standing === "ended"}
     <div class="ivacts" class:p-pills={pocket} role="group" aria-label="Actions for {title}">
