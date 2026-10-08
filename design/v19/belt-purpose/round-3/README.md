@@ -19,6 +19,17 @@ sits above the documents section in every scene.
 
 Scenes `?scene=` listed at the top of the file; packs by `?theme=`.
 
+## Notes from the build
+
+- The preview is sticky at an 84px top gutter, not 24: at 24 the
+  top-right buttons covered the page. Desk scenes scroll the drawer to
+  84px too, so the two tops stay level.
+- Closing is instant on the desk; the phone bottom sheet keeps D's slide.
+- Under 560px the icons take their own line below the pills.
+- The MOT drawer is about the window's height, so the stickiness only
+  shows at 1280x800 (about 54px); at 1440x900 the preview is 13px taller
+  than the drawer and never sticks. A longer item would prove it better.
+
 ## Verdicts
 
 (none yet)
