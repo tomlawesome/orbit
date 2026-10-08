@@ -10,12 +10,11 @@ import { describe, expect, it } from "vitest";
  * browser used to carry -- whether a change is allowed, what state it
  * produces -- are gone from web/src, so a copy cannot quietly come back.
  *
- * The belt page (routes/item/) keeps its own refusals until it retires with
- * #1319 (decision 6); this test retires its exemption with it.
+ * The belt page (routes/item/) kept its own refusals until it retired with
+ * #1319 (decision 6); its exemption retired with it.
  */
 
 const WEB_SRC = resolve(import.meta.dirname, "../../web/src");
-const EXEMPT = ["routes/item/"];
 
 /** @param {string} dir @returns {string[]} */
 function sources(dir) {
@@ -27,10 +26,9 @@ function sources(dir) {
 }
 
 const files = sources(WEB_SRC)
-  .map((path) => ({ path: relative(WEB_SRC, path), text: readFileSync(path, "utf8") }))
-  .filter(({ path }) => !EXEMPT.some((prefix) => path.startsWith(prefix)));
+  .map((path) => ({ path: relative(WEB_SRC, path), text: readFileSync(path, "utf8") }));
 
-/** Every file under web/src (outside the exemptions) where `pattern` matches. @param {RegExp} pattern */
+/** Every file under web/src where `pattern` matches. @param {RegExp} pattern */
 const where = (pattern) => files.filter(({ text }) => pattern.test(text)).map(({ path }) => path);
 
 describe("the browser carries no rules (ADR-0034, #1325)", () => {
