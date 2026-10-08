@@ -3,8 +3,10 @@ import { APP, openRow, settle } from "./pocket-states.js";
 
 /*
  * HOME'S DRAWERS ON A PHONE (#1120, review round §2.1): a manifest row
- * opens in place, its `complete` goes to the belt's record sheet for an
- * item with a cost to confirm, `open →` goes to the belt, a search result
+ * opens in place, its foot row's `complete` completes it there with an
+ * undo (#1319: the drawer is the item, so no `open →` and no trip to the
+ * belt's record sheet), a paper opens the preview as the bottom sheet
+ * (#1319), a search result
  * closes the search and opens its row (or, with no row, goes to the item:
  * round 2, e), and the item's own address opens it on arrival. A planet on
  * the dial opens its row and a second tap on the lit body goes to the item
@@ -27,14 +29,20 @@ const wearsAccentOutline = (row) => row.evaluate((el) => {
   probe.remove();
   return getComputedStyle(el).borderTopColor === accent;
 });
-test("complete goes to the record sheet", async ({ page }) => {
+/* #1319 stage 2 (owner, 2026-10-08): complete asks for the date, the cost
+   and the notes in the rows before it records; cancel sends nothing. */
+test("complete asks in the rows, in place", async ({ page }) => {
   await page.goto(`${APP}/home`, { waitUntil: "load" });
   await settle(page);
   const gutter = page.locator(".pocket .pk-below [data-row]", { hasText: "Gutter clearing" }).first();
   await openRow(page, gutter);
   await gutter.getByRole("button", { name: "Complete Gutter clearing" }).tap();
-  await expect(page).toHaveURL(/\/item\/i-gutter/);
-  await expect(page.getByRole("dialog", { name: "Record a completion" })).toBeVisible();
+  await expect(page).toHaveURL(/\/home/);
+  const completing = gutter.getByRole("group", { name: "Completing Gutter clearing" });
+  await expect(completing.getByRole("button")).toHaveText(["record", "cancel"]);
+  await expect(gutter.getByRole("button", { name: /^completed on: / })).toBeVisible();
+  await completing.getByRole("button", { name: "cancel" }).tap();
+  await expect(gutter.getByRole("group", { name: "Actions for Gutter clearing" })).toBeVisible();
 });
 test("search result opens the row", async ({ page }) => {
   await page.goto(`${APP}/home`, { waitUntil: "load" });
@@ -68,13 +76,46 @@ test("the address of an item the manifest does not list opens the item", async (
   await expect(page).toHaveURL(/\/item\/i-chimney$/);
   await expect(page.locator(".item-card h2")).toHaveText("Chimney sweep");
 });
-test("open → morphs to the belt", async ({ page }) => {
+test("a paper opens the preview as the bottom sheet; Escape puts it away and leaves the row open", async ({ page }) => {
   await page.goto(`${APP}/home`, { waitUntil: "load" });
   await settle(page);
   const mot = page.locator(".pocket .pk-below [data-row]", { hasText: "Car MOT" }).first();
   await openRow(page, mot);
-  await mot.getByRole("link", { name: "Open Car MOT — Volvo V60" }).tap();
-  await expect(page).toHaveURL(/\/item\/i-mot/);
+  /* #1319, round 3's `narrow`: the drawer has no way to the belt any more */
+  await expect(mot.getByRole("link", { name: /^Open / })).toHaveCount(0);
+  await mot.getByRole("button", { name: "Open Service history" }).tap();
+  const sheet = page.getByRole("dialog", { name: /^Service history/ });
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Read Service history" })).toBeEnabled({ timeout: 10_000 });
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
+  await expect(mot).toHaveAttribute("data-open", "");
+  await expect(mot.getByRole("button", { name: "Open Service history" })).toBeFocused();
+});
+/* #1319 (owner-decisions §34): a suggestion is reviewed in its home drawer,
+   never on the belt -- its address opens its row in the signals, and the
+   paper it came in opens the preview sheet with the belt's staged note. */
+test("a suggestion's address opens its row in the signals, not the belt", async ({ page }) => {
+  await page.goto(`${APP}/home?item=r-insurance`, { waitUntil: "load" });
+  await settle(page);
+  const catch_ = page.locator(".pocket .pk-signals [data-row]", { hasText: "Home insurance" }).first();
+  await expect(catch_).toHaveAttribute("data-open", "");
+  await expect(page).toHaveURL(/\/home\?item=r-insurance$/);
+});
+test("a suggestion's paper opens the preview as the bottom sheet, attached on acceptance", async ({ page }) => {
+  await page.goto(`${APP}/home`, { waitUntil: "load" });
+  await settle(page);
+  const catch_ = page.locator(".pocket .pk-signals [data-row]", { hasText: "Home insurance" }).first();
+  await openRow(page, catch_);
+  await catch_.getByRole("button", { name: "Open policy-schedule.pdf" }).tap();
+  const sheet = page.getByRole("dialog", { name: /^policy-schedule\.pdf/ });
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByRole("button", { name: "Read policy-schedule.pdf" })).toBeEnabled({ timeout: 10_000 });
+  await expect(sheet.locator(".rcnote")).toHaveText("not yet in orbit · attached on acceptance");
+  await expect(sheet.getByRole("link", { name: /download/i })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
+  await expect(catch_).toHaveAttribute("data-open", "");
 });
 test("a search result with no row goes straight to the item", async ({ page }) => {
   await page.goto(`${APP}/home`, { waitUntil: "load" });
@@ -106,20 +147,23 @@ test("the dial arrives on a forward arrival, never on Back", async ({ page }) =>
   await page.goto(`${APP}/home`, { waitUntil: "load" });
   await expect(dial).toHaveClass(/arrive/);
   await settle(page);
-  const mot = page.locator(".pocket .pk-below [data-row]", { hasText: "Car MOT" }).first();
-  await openRow(page, mot);
-  await mot.getByRole("link", { name: "Open Car MOT — Volvo V60" }).tap();
-  await expect(page).toHaveURL(/\/item\/i-mot/);
+  /* #1319: the drawer has no `open →`; the lit body's second tap is the
+     way onto the item screen from here. */
+  const body = page.locator(".mdial .pk-body[aria-label='Gutter clearing']");
+  await body.click();
+  await body.scrollIntoViewIfNeeded();
+  await body.click();
+  await expect(page).toHaveURL(/\/item\/i-gutter/);
   /* Back is pressed only once the item screen is on the page, as a person would (#1164);
      pressed before then, the item screen can stay under /home, which is #1217. */
-  await expect(page.locator(".item-card h2", { hasText: "Car MOT" })).toBeVisible();
+  await expect(page.locator(".item-card h2", { hasText: "Gutter clearing" })).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/home/);
   await expect(dial).toBeAttached({ timeout: 30000 });
   expect(await dial.getAttribute("class"), "Back replayed the arrival").not.toMatch(/\barrive\b/);
   expect(await arriving(), "Back replayed the arrival").toBe(false);
   await page.goForward();
-  await expect(page).toHaveURL(/\/item\/i-mot/);
+  await expect(page).toHaveURL(/\/item\/i-gutter/);
   /* A forward arrival again, as a link on any screen makes it. */
   await page.evaluate(() => {
     const a = document.createElement("a");

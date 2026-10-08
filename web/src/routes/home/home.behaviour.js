@@ -70,8 +70,10 @@ function markerVeer(width, away) {
  * @param {string | null} [options.primary]
  * @param {boolean} [options.fixtures]
  * @param {string} [options.workspace]
+ * @param {(id: string) => void} [options.onopendocs]  the dial callout's
+ *   documents chip: opens that item's drawer with its documents (#1305)
  */
-export function mountHome({ galaxy, primary, fixtures = false, workspace = "" }) {
+export function mountHome({ galaxy, primary, fixtures = false, workspace = "", onopendocs = () => {} }) {
   /*
    * The binder, the timer set and the teardown are $lib/teardown.js's (#445):
    * create and the pocket had each written their own near-copy of this, and
@@ -305,7 +307,14 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
       if (docs) {
         const chip = /** @type {HTMLElement} */ (callout.querySelector(".chip"));
         chip.textContent = "◆ " + docs + (docs === "1" ? " document" : " documents");
-        chip.onclick = () => openDocsByTitle(/** @type {string} */ (link.dataset.title));
+        /* #1305: the item's own drawer, its real documents -- never a
+           dialog of made-up ones. The click stops here, or home's own
+           click-off rule would put away the drawer it has just opened. */
+        chip.onclick = (event) => {
+          event.stopPropagation();
+          callout.classList.remove("show");
+          onopendocs(/** @type {string} */ (link.dataset.body));
+        };
       }
       callout.classList.add("show");
       document.querySelector("#" + link.dataset.body)?.classList.add("lit");
@@ -341,12 +350,6 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
       event.preventDefault(); /** @type {HTMLElement} */ (document.getElementById("explore")).focus();
     }
   });
-  /** @param {string} title */
-  function openDocsByTitle(title){
-    callout.classList.remove("show");
-    /** @type {HTMLElement} */ (document.getElementById("docview-title")).textContent = title;
-    /** @type {HTMLElement} */ (document.getElementById("docview")).classList.add("open");
-  }
   callout.addEventListener("mouseleave", () => callout.classList.remove("show"));
   /* The status-drawer handle's `health-degraded` body class is now owned by
      +page.svelte's own `$effect`, reactive to the real `systemStatus` read
@@ -392,7 +395,6 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
     ["#createdrawer", "create"],
     ["#statusdrawer", "statusdrawer"],
     ["#keydrawer", "keydrawer"],
-    ["#docview", "docview"],
     ["#account", "account"],
     ["button.orb", "account"],
   ];
@@ -409,7 +411,6 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
         drawer.querySelector("[aria-expanded]")?.setAttribute("aria-expanded", "false");
       }
     }
-    if (keep !== "docview") document.getElementById("docview")?.classList.remove("open");
     if (keep !== "account") {
       const account = document.getElementById("account");
       if (account?.classList.contains("open")) {
@@ -630,9 +631,6 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
       handOver(event.dataTransfer?.files?.[0]);
     });
   }
-
-  on(document.querySelector("#docview .close"), "click", () =>
-    /** @type {HTMLElement} */ (document.getElementById("docview")).classList.remove("open"));
 
   /*
    * Hand the document back exactly as home found it. Everything below lives

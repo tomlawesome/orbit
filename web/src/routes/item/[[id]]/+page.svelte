@@ -16,8 +16,8 @@
   import { burnsInOf, formReadingsOf, papersOf, readingsOf } from "$lib/pocket/review.js";
   import { POCKET_QUERY, isPocket } from "$lib/pocket/media.js";
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
-  import Reader from "./Reader.svelte";
-  import Pager from "./Pager.svelte";
+  import Reader from "$lib/reading/Reader.svelte";
+  import Pager from "$lib/reading/Pager.svelte";
   import StagedPage from "$lib/pocket/StagedPage.svelte";
   import EntryForm from "../../create/EntryForm.svelte";
   import { COST_FORMAT_HINT, entryChanged, entryOf, fieldsOf, minorOf, refusalOf } from "../../create/entry.js";

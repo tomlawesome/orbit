@@ -259,6 +259,11 @@ export default {
       open(body);
       await w(T.scroll);
       await mark("belt-arrive");
+      /* #1319: the drawer no longer carries `open →` (its foot row holds
+         the item's acts), so the pressed body's own `data-body` id names
+         the item, as on the desk; the act's href still wins where it is. */
+      const bodyId = body.els[0]?.getAttribute("data-body") ?? "";
+      if (bodyId) itemRoute = `/item/${encodeURIComponent(bodyId)}`;
       const openAct = ctl({ sel: SELECTORS.POCKET.openAct, radius: 22, optional: true });
       const href = openAct.els[0]?.getAttribute("href") ?? "";
       if (/^\/item\/[^/?#]+$/u.test(href)) itemRoute = href;

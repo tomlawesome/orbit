@@ -223,18 +223,30 @@ async function arriveAtHome(page: Page, options: { withItem?: boolean } = {}) {
 }
 
 /** #424: the manifest row expands in place on Enter (it is not a plain
- *  navigation — onRowClick calls preventDefault), and its "manage this item"
- *  link is the real way onto /item/[id] by keyboard. Shared by the two item
- *  tests below so each gets this same real path on its own fresh page. */
+ *  navigation — onRowClick calls preventDefault). #1319: the expanded row
+ *  no longer links to /item/[id] (the drawer holds everything, and the item
+ *  screen retires in a later step), so after proving the row opens by
+ *  keyboard and its foot row is reachable, the item screen is reached at
+ *  its own address. Shared by the two item tests below so each gets this
+ *  same path on its own fresh page. */
 async function openItemPageFromHome(page: Page, itemId: string) {
   await page.goto("/home");
   await settled(page);
   await tabTo(page, { selector: `a.item[id="${itemId}"]` }, { screen: "home corridor row" });
   await page.keyboard.press("Enter");
   await expect(page.locator(`a.item[id="${itemId}"]`)).toHaveClass(/open/);
-  await tabTo(page, { selector: ".ivfull" }, { screen: "home expanded row" });
-  await page.keyboard.press("Enter");
+  await tabTo(page, { selector: ".itemview .ivlink" }, { screen: "home expanded row" });
+  await page.goto(`/item/${itemId}`);
   await expect(page).toHaveURL(/\/item\//);
+  /* The item route is client-rendered (ssr = false), so a hard goto's load
+     event fires before the belt has drawn anything, chrome included; the URL
+     alone proves nothing. Enter on the old `.ivfull` link was a client
+     navigation that only resolved once the page had rendered. Without this
+     wait auditTabOrder snapshotted an empty screen and reported every control
+     as "not visible" (WebKit, pipeline 2271). Wait for the card's heading and
+     the belt's own step control, which belt.behaviour.js draws on mount. */
+  await expect(page.getByRole("heading", { name: "Keyboard-reached boiler service" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Move one item later along the belt/ })).toBeVisible();
 }
 
 /** Reaches household management the way the sun's own door works (§15,
