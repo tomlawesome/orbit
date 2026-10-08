@@ -176,7 +176,7 @@ export function editsOf(draft, item) {
 
 /**
  * @typedef {{
- *   key: "due" | "snooze" | "section" | "type" | "months",
+ *   key: "due" | "snooze" | "done" | "section" | "type" | "months",
  *   label: string,
  *   heading: string,
  *   value: string | null,
