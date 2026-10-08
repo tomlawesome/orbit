@@ -16,7 +16,7 @@
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
   import { WorkspaceError, applyCommand, approveReceipt, attachItemDocument, dismissReceipt, readHome, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut } from "$lib/data/workspace.js";
-  import { archiveCommand, completeCommand, nextDateAfter, snoozeCommand } from "$lib/data/commands.js";
+  import { archiveCommand, completeCommand, nextDateAfter, snoozeCommand, upsertCommand } from "$lib/data/commands.js";
   import { createHeldCompletion } from "$lib/data/held-completion.js";
   import { createArm } from "$lib/pocket/arm.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
@@ -29,6 +29,8 @@
   import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
   import CorridorRow from "./CorridorRow.svelte";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
+  import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import { DrawerModes, pressKeepsChooser } from "./drawer-modes.svelte.js";
   import { WIDE_QUERY, cardWidthOf, pairOf, trackOf } from "./preview-pair.js";
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
   import { shortDate } from "$lib/data/belt.js";
@@ -356,10 +358,12 @@
       detail = null;
       detailProblem = null;
       previewDoc = null;
+      modes.end();
       return;
     }
     if (detailFor === id) return;
     previewDoc = null;
+    modes.end();
     footProblem = null;
     /* Everything Orbit holds, read through the same seam the item view reads
        (#446) — documents included, so "everything" is not a euphemism. */
@@ -429,6 +433,8 @@
 
   /** @param {import('$lib/data/workspace.js').DrawerDocument} doc @param {HTMLElement} from */
   function openDoc(doc, from) {
+    /* one card beside at a time: a document's preview puts a chooser away */
+    modes.closeChooser(false);
     previewFrom = from;
     if (previewDoc?.id !== doc.id) previewDoc = doc;
   }
@@ -460,7 +466,8 @@
      in step with the drawer's height and the window (preview-pair.js). */
   $effect(() => {
     const id = expanded;
-    const paper = previewDoc;
+    /* the preview, or the chooser card: whichever stands beside (#1319) */
+    const paper = previewDoc ?? chooserAsk;
     const manifest = manifestEl;
     if (!id || !paper || !manifest) { pair = null; return; }
     const media = matchMedia(WIDE_QUERY);
@@ -573,8 +580,10 @@
   /* ---- #1319: THE DRAWER'S FOOT ROW (FootRow.svelte) ----------------------
      Every act the belt had, from the open drawer, through the belt's own
      commands (commands.js): snooze, complete, attach a document, retire, and
-     copy link. Complete is held for the wake's four seconds so `undo` is
-     real, as the belt and the pocket hold it (held-completion.js). */
+     copy link. Since stage 2, complete asks for its date, cost and notes in
+     the rows and records them at once (recordCompletion, below); `held`
+     still sends what an earlier visit held and never saw confirmed
+     (held-completion.js). */
   /** @type {"snooze" | "complete" | "attach" | "retire" | null} */
   let footBusy = $state(null);
   /** @type {string | null} */
@@ -630,24 +639,156 @@
     }
   }
 
+  /* ---- #1319 stage 2: EDITING IN THE ROWS, AND THE CHOOSER BESIDE --------
+     design/v19/belt-purpose/round-8/m-colour-per-option.html (approved
+     2026-10-08). The pencil puts the drawer's own rows into edit mode; due
+     date, section, type and orbital period open the chooser card beside the
+     drawer, in the preview's column (one card beside at a time), or as the
+     bottom sheet under 1200px. Snooze opens the same calendar ("snooze
+     until"); complete asks for its date, cost and notes in the rows
+     (owner, 2026-10-08). Escape takes the chooser, then the edit. */
+  const modes = new DrawerModes({
+    save: async (item, edits) => {
+      await applyCommand(upsertCommand(item, edits));
+      await rereadAll();
+    },
+    onchoose: () => { previewDoc = null; },
+  });
+  /** The open item's household's sections, for the section's name, colour and tiles. */
+  const detailSections = $derived(
+    (view ? asView(view).households : []).find((one) => one.id === detail?.householdId)?.sections ?? []);
+  /* .by, not a bare expression: read at the top level, `detail` would be
+     narrowed to its initial null. */
+  const chooserAsk = $derived.by(() => (detail ? modes.askOf(detailSections, detail.today) : null));
+  let wide = $state(false);
+  $effect(() => {
+    const media = matchMedia(WIDE_QUERY);
+    const set = () => { wide = media.matches; };
+    set();
+    media.addEventListener("change", set);
+    return () => media.removeEventListener("change", set);
+  });
+
+  /** Focus a control in the open drawer (or its head), once it is drawn. @param {string} selector */
+  async function focusInDrawer(selector) {
+    await tick();
+    const id = expanded;
+    if (!id) return;
+    const el = /** @type {HTMLElement | null} */ (
+      document.getElementById(`${id}-view`)?.querySelector(selector) ?? document.getElementById(id)?.querySelector(selector));
+    el?.focus({ preventScroll: true });
+    if (el?.isContentEditable) getSelection()?.collapse(el, el.childNodes.length);
+  }
+
+  /** The chooser card's pick: the row takes it, or the snooze is sent. @param {string} value */
+  function pickChoice(value) {
+    const snooze = modes.pick(value);
+    if (!snooze || !detail) return;
+    const { item, until } = snooze;
+    if (until <= detail.today) { footProblem = "not yet — snooze to a day after today"; return; }
+    runFoot("snooze", () => snoozeCommand(item, until), `${item.title} snoozed until ${longDate(until)}`);
+  }
+
+  async function saveEdit() {
+    const title = modes.edit.draft?.title.trim() ?? "";
+    if (await modes.edit.commit()) {
+      wake(`saved · ${title}`);
+      focusInDrawer(".ivedit");
+    }
+  }
+
+  /* Complete records what the rows hold, as the belt's complete panel sent
+     it (item/[[id]]/+page.svelte): the date, the next date the belt
+     computes, the cost, the notes. Sent on `record`, not held for an undo:
+     the rows were the chance to change it. */
+  async function recordCompletion() {
+    const out = modes.completion();
+    if ("refusal" in out) { modes.completeProblem = out.refusal; return; }
+    if (footBusy) return;
+    const { item, fields } = out;
+    footBusy = "complete";
+    modes.completeProblem = null;
+    try {
+      await applyCommand(completeCommand(item, fields));
+      modes.cancelComplete();
+      if (!fields.nextDate) collapseRow();
+      view = await readHome();
+      if (fields.nextDate) await rereadDetail();
+      wake(`Completed${fields.nextDate ? ` · next due ${shortDate(fields.nextDate)}` : ""} · ${item.title}`);
+      if (fields.nextDate) focusInDrawer('[aria-label^="Complete "]');
+    } catch (error) {
+      modes.completeProblem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again";
+    } finally {
+      footBusy = null;
+    }
+  }
+
+  /* Escape: the chooser first (focus back to its value; the card hears it
+     itself too, and whichever hears it first marks it handled), then the
+     edit or the completion (focus back to the pencil or the pill). Ahead of
+     home's own Escape, which puts the drawer away; the preview's Escape is
+     the preview's. */
+  $effect(() => {
+    if (!modes.id) return;
+    /** @param {KeyboardEvent} event */
+    const onKey = (event) => {
+      if (event.key !== "Escape" || event.defaultPrevented || previewDoc) return;
+      const chooser = modes.choosing;
+      const editing = Boolean(modes.edit.id);
+      if (!modes.escape()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!chooser) focusInDrawer(editing ? ".ivedit" : '[aria-label^="Complete "]');
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  });
+  /* A press off the chooser card puts it away at once; a press on another
+     value switches it, on its own value closes it (EditSession.choose).
+     That press is swallowed by the drawer once, as the preview's is. */
+  $effect(() => {
+    if (!modes.choosing) return;
+    /** @param {PointerEvent} event */
+    const onPress = (event) => {
+      if (pressKeepsChooser(event.target)) return;
+      modes.closeChooser(false);
+      swallowClick = true;
+    };
+    window.addEventListener("pointerdown", onPress, true);
+    return () => window.removeEventListener("pointerdown", onPress, true);
+  });
+
   /** @type {import('./drawer-acts.js').DrawerActs} */
   const drawerActs = $derived({
-    busy: footBusy,
-    problem: footProblem,
-    onsnooze: (until) => {
+    busy: footBusy ?? (modes.edit.busy ? "save" : null),
+    problem: modes.edit.problem ?? modes.completeProblem ?? footProblem,
+    modes,
+    sections: detailSections,
+    onsnooze: (from) => {
       const item = commandItem();
-      if (item) runFoot("snooze", () => snoozeCommand(item, until), `${item.title} snoozed until ${longDate(until)}`);
+      footProblem = null;
+      if (item) modes.snooze(item, from);
     },
     oncomplete: () => {
       const item = commandItem();
       if (!item) return;
       footProblem = null;
-      const completedDate = item.today;
-      const nextDate = nextDateAfter(completedDate, item.recurrenceMonths) ?? undefined;
-      const job = held.hold(completeCommand(item, { completedDate, nextDate }));
-      wake(`Completed${nextDate ? ` · next due ${shortDate(nextDate)}` : ""} · ${item.title}`, {
-        undo: () => held.undo(job),
-      });
+      modes.startComplete(item, item.today);
+      focusInDrawer("[data-pick]");
+    },
+    onedit: () => {
+      const item = commandItem();
+      if (!item) return;
+      footProblem = null;
+      modes.startEdit(item);
+      focusInDrawer('[data-ed="title"]');
+    },
+    onsave: saveEdit,
+    onrecord: recordCompletion,
+    oncancel: () => {
+      const editing = Boolean(modes.edit.id);
+      modes.end();
+      focusInDrawer(editing ? ".ivedit" : '[aria-label^="Complete "]');
     },
     onattach: async (file) => {
       const item = commandItem();
@@ -679,6 +820,9 @@
   function onWindowClick(event) {
     if (!expanded) return;
     if (swallowClick) { swallowClick = false; return; }
+    /* #1319: while the rows are being edited or a completion asked for, a
+       press elsewhere leaves the drawer as it is (round 8's own rule) */
+    if (modes.id === expanded && (modes.edit.id || modes.completing)) return;
     /* Inside the open row or its panel: stay. On another expandable row: that
        row's own handler is switching to it. On the preview card beside the
        drawer, or the reader over home (#1319): stay. Anywhere else: close.
@@ -686,7 +830,7 @@
        replaces its own button (the foot row's snooze) has left the target
        detached by the time the click reaches the window. */
     const inside = event.composedPath().some((node) =>
-      node instanceof Element && node.matches("a.item, .itemview, [data-preview-card], .rd-layer"));
+      node instanceof Element && node.matches("a.item, .itemview, [data-preview-card], [data-chooser-card], .rd-layer"));
     if (inside) return;
     collapseRow();
   }
@@ -1916,6 +2060,14 @@
     <div class="pvtrack" bind:this={trackEl} style:--pv-y="{track.top}px" style:--pv-h="{track.height}px" style:--readw="{readw}px">
       <PreviewCard doc={previewDoc} itemTitle={detail?.title ?? ""} onclose={closeDoc}
                    onremove={removeDoc} onrestore={restoreDoc} />
+      <!-- #1319 stage 2 (round 8): the chooser card, in the preview's seat;
+           under 1200px it is the bottom sheet -->
+      {#if chooserAsk}
+        <div class="chseat" class:sheet={!wide} data-chooser-card>
+          <ChooserCard ask={chooserAsk} layout={wide ? "beside" : "sheet"} onpick={pickChoice}
+                       onclose={() => modes.closeChooser(true)} />
+        </div>
+      {/if}
     </div>
   </div>
 </div>

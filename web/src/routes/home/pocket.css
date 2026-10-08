@@ -246,3 +246,11 @@ body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
   .pocket .pk-body:active > circle:first-of-type{transform:none}
   .pocket .mdial,.pocket .msearch,.pocket .pk-below{transition:none}
 }
+
+/* #1319 stage 2 (round 8, `narrow-editing-*`): the chooser card's seat, the
+   preview's own bottom sheet: fixed to the foot (ChooserCard.svelte leaves
+   where it stands to the screen). */
+.pk-chseat{position:fixed;left:0;right:0;bottom:0;z-index:45}
+/* the section word on a manifest row, in its own colour (packs.css maps
+   data-opt onto --opt-text); never on the dial */
+.pocket .p-row .opt{font-style:normal;color:var(--opt-text, inherit)}

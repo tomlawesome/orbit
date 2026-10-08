@@ -11,8 +11,10 @@
    * on.
    */
   import FootRow from "./FootRow.svelte";
+  import EditRows from "./EditRows.svelte";
+  import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
   import { every, longDate, money, tminus } from "$lib/format.js";
-  import { DAMAGED, LOCKED, NOTES_WORDS, REFERENCE_WORDS, fieldState } from "$lib/data/metadata-status.js";
+  import { DAMAGED, LOCKED, NOTES_WORDS, REFERENCE_WORDS, fieldState, itemLocked } from "$lib/data/metadata-status.js";
 
   /**
    * @typedef {import('$lib/data/chart.js').CorridorRow} CorridorRowData
@@ -49,6 +51,14 @@
      one they never wrote on whichever screen they happened to open. */
   const referenceState = $derived(fieldState(detail?.metadataStatus, "reference"));
   const notesState = $derived(fieldState(detail?.metadataStatus, "notes"));
+
+  /* #1319 stage 2: what the drawer is doing besides reading — editing in
+     the rows, or asking for a completion (drawer-modes.svelte.js). */
+  const modes = $derived(acts.modes);
+  const mode = $derived(modes.edit.id === row.id ? "edit" : modes.completing?.id === row.id ? "complete" : "read");
+  const snoozing = $derived(modes.foot?.key === "snooze" && modes.id === row.id);
+  /* round 8: the section and type words wear their own colour */
+  const sectionOpt = $derived(sectionColourOf(acts.sections.find((one) => one.id === detail?.sectionId)));
 </script>
 
 <div class="itemview" id="{row.id}-view" role="region" aria-label="{row.title} — full detail">
@@ -57,6 +67,10 @@
   {:else if !detail}
     <div class="ivnote">{detailBusy ? "reading…" : ""}</div>
   {:else}
+    {#if mode !== "read"}
+      <EditRows {modes} sections={acts.sections} snoozedUntil={detail.snoozedUntil} status={detail.status}
+                costLocked={itemLocked(detail.metadataStatus)} />
+    {:else}
     <div class="kv"><span>due</span>
       <b class:over={asAny(detail).band === "overdue" || row.band === "overdue"}>{detailDue(detail)}</b></div>
     {#if detail.snoozedUntil}
@@ -66,10 +80,10 @@
       <div class="kv"><span>status</span><b>{detail.status}</b></div>
     {/if}
     {#if detail.section}
-      <div class="kv"><span>section</span><b>{detail.section}</b></div>
+      <div class="kv"><span>section</span><b class="opt" data-opt={sectionOpt}>{detail.section}</b></div>
     {/if}
     {#if detail.subtype}
-      <div class="kv"><span>type</span><b>{detail.subtype}</b></div>
+      <div class="kv"><span>type</span><b class="opt" data-opt={typeColourOf(detail.subtype)}>{detail.subtype}</b></div>
     {/if}
     {#if detail.recurrenceMonths}
       <div class="kv"><span>orbital period</span><b>{every(detail.recurrenceMonths)}</b></div>
@@ -99,6 +113,7 @@
       <h4>notes</h4>
       <p class="ivnotes {notesState === DAMAGED ? 'failed' : 'locked'}">{NOTES_WORDS[notesState]}</p>
     {/if}
+    {/if}
     {#if detail.documents?.length}
       <h4>documents</h4>
       <!-- #1319, round 3: every row opens the preview card, the honest
@@ -117,9 +132,16 @@
     {/if}
     <!-- #1319 (owner-decisions §34): the foot row holds every act the belt
          had; `manage this item →` is gone, the drawer is the item now. -->
-    <FootRow title={row.title} today={detail.today} busy={acts.busy}
+    <FootRow title={row.title} busy={acts.busy} {mode} {snoozing}
              onsnooze={acts.onsnooze} oncomplete={acts.oncomplete} onattach={acts.onattach}
-             onretire={acts.onretire} oncopy={acts.oncopy} />
+             onretire={acts.onretire} oncopy={acts.oncopy} onedit={acts.onedit}
+             onsave={acts.onsave} onrecord={acts.onrecord} oncancel={acts.oncancel} />
     {#if acts.problem}<div class="ivproblem" role="alert">{acts.problem}</div>{/if}
   {/if}
 </div>
+
+<style>
+  /* round 8: a section or type value in its own colour (packs.css maps
+     data-opt onto --opt-text) */
+  .opt{color:var(--opt-text, inherit)}
+</style>

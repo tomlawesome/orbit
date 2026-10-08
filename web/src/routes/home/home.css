@@ -278,6 +278,12 @@
      drawer's foot; the card is sticky inside it (PreviewCard.svelte). */
   .desk .pvtrack{position:absolute;left:calc(100% + 28px);top:var(--pv-y,0px);height:var(--pv-h,0px);
     width:max-content;pointer-events:none;z-index:2}
+  /* #1319 stage 2 (round 8): the chooser card's seat, the preview's own —
+     sticky at the page's gutter in the column beside the drawer; under
+     1200px fixed to the foot as the bottom sheet (ChooserCard.svelte leaves
+     where it stands to the screen). */
+  .desk .chseat{position:sticky;top:84px;pointer-events:auto}
+  .desk .chseat.sheet{position:fixed;left:0;right:0;bottom:0;top:auto;z-index:45}
   /* #1050: same scoping as the .group fade-in above, and for the same
      reason - this is the same class name, so the leftover chunk would keep
      adding a stray 30px margin under inbox's lane groups too. */
