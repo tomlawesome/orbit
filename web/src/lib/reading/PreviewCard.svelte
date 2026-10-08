@@ -261,8 +261,18 @@
     };
     /** @param {PointerEvent} event */
     const onPress = (event) => {
-      if (readerOpen) return;
       const target = event.target instanceof Element ? event.target : null;
+      if (readerOpen) {
+        /* #1301, carried from the belt onto home (#1319): on a wide screen a
+           press on the reader's dead space -- its backdrop, the stage beside
+           the page -- closes the reader and the card with it, back to the
+           drawer. Its own controls and its page keep it open. On a phone
+           the reader is closed by its own close. */
+        if (!wide() || target?.closest(".rd-panel :is(button, a, output, img), .rd-zoom")) return;
+        readerOpen = false;
+        close(true);
+        return;
+      }
       if (target?.closest("[data-preview-card], [data-doc-row], .rd-layer")) return;
       close(true);
     };
