@@ -624,20 +624,40 @@ function createVoyage() {
   const maps = {};
   /** @param {() => void} fn */
   const inTurn = (fn) => chore(fn, 60, "flight");
+  /** @param {keyof typeof TEX} key @returns {Promise<ImageBitmap>} */
+  const decode = (key) => (TEX[key] ? fetchOnce(/** @type {string} */ (TEX[key])) : Promise.reject(new Error("no picture")))
+    .then((b) => createImageBitmap(b, { colorSpaceConversion: "none", premultiplyAlpha: "none" }));
+  /** @param {keyof typeof TEX} key @param {ImageBitmap} bm */
+  const upload = (key, bm) => {
+    if (dead) { bm.close?.(); return; }
+    const t = /** @type {WebGLTexture} */ (gl.createTexture()); gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, bm);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, key === "euro" ? gl.CLAMP_TO_EDGE : gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    bm.close?.();
+    maps[key] = t;
+  };
   /** @param {keyof typeof TEX} key @returns {Promise<boolean>} */
-  const load = (key) => (TEX[key] ? fetchOnce(/** @type {string} */ (TEX[key])) : Promise.reject(new Error("no picture")))
-    .then((b) => createImageBitmap(b, { colorSpaceConversion: "none", premultiplyAlpha: "none" }))
-    .then((bm) => inTurn(() => {
-      if (dead) return;
-      const t = /** @type {WebGLTexture} */ (gl.createTexture()); gl.bindTexture(gl.TEXTURE_2D, t);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, bm);
-      gl.generateMipmap(gl.TEXTURE_2D);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, key === "euro" ? gl.CLAMP_TO_EDGE : gl.REPEAT);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      bm.close?.();
-      maps[key] = t;
-    })).then(() => true, () => false);
+  const load = (key) => decode(key).then((bm) => inTurn(() => upload(key, bm))).then(() => true, () => false);
+
+  /* THE MOON AFTER READY (#1310). The moon shows only from 700 ms into the
+     climb (draw, below: mt) and near the end of the descent, never in a
+     world's first frame, so its upload (a texture and its mipmaps, on the
+     page's thread) is the one that need not hold the world up. Its picture
+     is still fetched and decoded before ready, as before, so it is in hand;
+     it goes on the GPU as a chore straight after ready, and should a frame
+     that shows the moon come first, that frame puts it there itself. Either
+     way no frame that drew the moon before is drawn without it. */
+  /** @type {ImageBitmap | null} */
+  let moonBm = null;
+  function putMoon() {
+    const bm = moonBm;
+    if (!bm) return;
+    moonBm = null; upload("moon", bm);
+    if (!dead) note("flight: moon on the GPU", since);
+  }
 
   /* without the Milky Way's picture: the galaxy drawn (SKYPAINT), a strip at a
      time, each strip a chore, into the frame the picture would have filled */
@@ -675,13 +695,15 @@ function createVoyage() {
    * `prove: false` (the door, #1253) makes the programs and puts the maps on
    * the GPU and stops there: the drawn warm-up and the fitness test below
    * (a resize and a read back each) wait for a call that proves, which is
-   * the flight's own when it starts.
+   * the flight's own when it starts. The moon's map is only decoded until
+   * then: it goes on the GPU once the world is ready (#1310, putMoon).
    * @param {{ prove?: boolean }} [how]
    */
   function warm({ prove = true } = {}) {
     if (!loading) {
       const sky = load("sky").then((had) => (had ? undefined : paintSky().catch((e) => console.warn("orbit: the galaxy could not be drawn", e))));
-      loading = Promise.all([made, sky, ...(/** @type {(keyof typeof TEX)[]} */ (["lights", "euro", "clouds", "day", "moon"])).map(load)]);
+      const moon = decode("moon").then((bm) => { moonBm = bm; }, () => {});
+      loading = Promise.all([made, sky, moon, ...(/** @type {(keyof typeof TEX)[]} */ (["lights", "euro", "clouds", "day"])).map(load)]);
     }
     if (!prove) return loading.then(() => {});
     if (!warming) {
@@ -714,18 +736,26 @@ function createVoyage() {
             if (ok && !dead) rememberFit(storage(), renderer, version, measured);
           }, 60, "flight");
         })
-        .then(() => { ready = ok && !dead && fit; note(`flight: ${ready ? "ready" : fit ? "not made" : "too slow here, drawn without it"}`, since); });
+        .then(() => {
+          ready = ok && !dead && fit; note(`flight: ${ready ? "ready" : fit ? "not made" : "too slow here, drawn without it"}`, since);
+          /* the moon, now that the world is ready (above) */
+          if (ready) chore(putMoon, 60, "flight");
+        });
       /* the measure is never hurried, and nothing waits on it */
       warming.then(() => chore(calibrate, 200, "measure"));
     }
     return warming;
   }
+  /* a warm-up draw is unseen, and never puts the moon on the GPU itself
+     (putMoon, above) */
+  let rehearsing = false;
   /** @param {VoyageFrame} st */
   function touch(st) {
     if (!ok) return;
     if (W < 2) resize(innerWidth, innerHeight);
     gl.enable(gl.SCISSOR_TEST); gl.scissor(0, 0, 4, 4);
-    try { draw(st); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4)); } catch { /* fine */ }
+    rehearsing = true;
+    try { draw(st); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4)); } catch { /* fine */ } finally { rehearsing = false; }
     gl.disable(gl.SCISSOR_TEST); lastDraw = 0;
   }
   /* the fitness test: whole frames at the heaviest point of the flight, at
@@ -814,6 +844,8 @@ function createVoyage() {
   /** @param {VoyageFrame} s */
   function draw(s) {
     if (!ok) return;
+    /* a frame that shows the moon before its chore has run puts it on the GPU first (putMoon) */
+    if (moonBm && !rehearsing && s.moon !== false) { const mt = ((s.tu ?? s.t) - 700) / 800; if (mt > 0 && mt < 1) putMoon(); }
     if (!hdr) resize(W, H);
     const H0 = /** @type {Target} */ (hdr);
     /* the size is never changed mid-flight (a change reallocates every

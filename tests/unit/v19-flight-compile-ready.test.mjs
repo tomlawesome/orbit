@@ -194,3 +194,67 @@ describe("readying the flight's world (#1310)", () => {
     expect(JSON.parse(storage.m.get(FIT_KEY))).toMatchObject({ build: "b2", fit: true });
   });
 });
+
+/** a frame of the climb at ascent time `tu` */
+const frameAt = (tu) => ({ t: tu, v: 1, K: 7.4, vp: [400, -330], rmax: 1500, tint: [1, 0.8, 0.4],
+  progress: 0.4, world: null, bloom: 0, tu, star: true, dt: 16 });
+
+describe("the moon goes on the GPU after ready (#1310)", () => {
+  it("every other map is uploaded before ready, the moon after it", async () => {
+    const { log, settle } = stubWorld();
+    const { voyageOnce } = await import("$lib/flight/voyage.js");
+    const w = /** @type {any} */ (voyageOnce());
+    const warmed = w.warm();
+    await settle();
+    await warmed;
+    const ready = log.indexOf("flight: ready");
+    expect(ready).toBeGreaterThan(-1);
+    for (const p of ["earth-lights.webp", "europe-lights.webp", "earth-clouds.webp", "earth-day.webp", "galaxy-2k.webp"]) {
+      expect(log.indexOf(`upload ${p}`)).toBeGreaterThan(-1);
+      expect(log.indexOf(`upload ${p}`)).toBeLessThan(ready);
+    }
+    expect(log.indexOf("upload moon.webp")).toBeGreaterThan(ready);
+    expect(log.indexOf("flight: moon on the GPU")).toBeGreaterThan(ready);
+    /* the warm-up draws never put it there themselves */
+    expect(log.slice(0, ready).filter((l) => l.startsWith("draw")).every((l) => l.endsWith("moon unit: blank)"))).toBe(true);
+  });
+
+  it("ready does not wait for the moon's upload", async () => {
+    const { log, settle } = stubWorld();
+    const { voyageOnce } = await import("$lib/flight/voyage.js");
+    const w = /** @type {any} */ (voyageOnce());
+    w.warm();
+    await settle("flight: ready");
+    expect(w.ready).toBe(true);
+    expect(log).not.toContain("upload moon.webp");
+  });
+
+  it("a frame that shows the moon before its chore has run uploads it first, and draws it", async () => {
+    const { log, settle } = stubWorld();
+    const { voyageOnce } = await import("$lib/flight/voyage.js");
+    const w = /** @type {any} */ (voyageOnce());
+    w.warm();
+    await settle("flight: ready");
+    const before = log.length;
+    w.draw(frameAt(100));
+    /* no moon yet at 100 ms: nothing uploaded */
+    expect(log.slice(before)).not.toContain("upload moon.webp");
+    const mid = log.length;
+    w.draw(frameAt(900));
+    const after = log.slice(mid);
+    expect(after[0]).toBe("upload moon.webp");
+    expect(after.filter((l) => l.startsWith("draw"))[0]).toBe("draw (moon unit: moon.webp)");
+    /* the chore then finds it done, and uploads nothing more */
+    await settle();
+    expect(log.filter((l) => l === "upload moon.webp")).toHaveLength(1);
+  });
+
+  it("a world that is not ready never puts the moon on the GPU", async () => {
+    const storage = memoryStorage({ [FIT_KEY]: JSON.stringify({ renderer: "ANGLE (NVIDIA)", build: "b1", fit: false, ms: 48 }) });
+    const { log, settle } = stubWorld({ storage });
+    const { voyageOnce } = await import("$lib/flight/voyage.js");
+    const w = /** @type {any} */ (voyageOnce());
+    await Promise.all([w.warm(), settle()]);
+    expect(log).not.toContain("upload moon.webp");
+  });
+});
