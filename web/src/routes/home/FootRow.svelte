@@ -1,7 +1,5 @@
 <script>
-  import { tick } from "svelte";
   import { createArm } from "$lib/pocket/arm.js";
-  import { nextDateAfter } from "$lib/data/commands.js";
 
   /**
    * THE DRAWER'S FOOT ROW (#1319; owner-decisions §34; design/v19/
@@ -20,32 +18,41 @@
    * the pill and says "press again to retire"; the second retires; four
    * seconds or Escape disarm it.
    *
-   * SNOOZE asks for how long in the pills' own place, as save and cancel
-   * take it while editing: a week or a month, the belt's own quick choices
-   * on a phone, and cancel. No typed date (owner, on round 3).
+   * SNOOZE opens the calendar beside the drawer (the phone's bottom sheet),
+   * "snooze until"; the screen sends the day picked (owner, 2026-10-08:
+   * "pick a date should not be removed"). Pressed again, the calendar goes.
+   *
+   * COMPLETE puts the rows into their completing mode (EditRows.svelte):
+   * the date, the cost and the notes, then record or cancel in the pills'
+   * place. EDIT, the pencil, puts them into editing: save and cancel in the
+   * pills' place, the pencil lit while it lasts (round 8, `editing`).
    *
    * ATTACH opens the file picker; the file goes up through the per-item
    * documents route (workspace.js attachItemDocument) and its scan.
    *
-   * The pencil is here and inert in this stage: editing in the rows is
-   * #1319's next step.
-   *
    * @typedef {{
    *   title: string,
-   *   today: string,
    *   pocket?: boolean,
-   *   busy?: "snooze" | "complete" | "attach" | "retire" | null,
-   *   onsnooze: (until: string) => unknown,
-   *   oncomplete: () => unknown,
+   *   busy?: import('./drawer-acts.js').DrawerBusy,
+   *   mode?: "read" | "edit" | "complete",
+   *   snoozing?: boolean,
+   *   onsnooze: (from: HTMLElement) => unknown,
+   *   oncomplete: (from: HTMLElement) => unknown,
    *   onattach: (file: File) => unknown,
    *   onretire: () => unknown,
    *   oncopy: () => Promise<boolean>,
+   *   onedit: () => unknown,
+   *   onsave: () => unknown,
+   *   onrecord: () => unknown,
+   *   oncancel: () => unknown,
    * }} Props
    */
   /** @type {Props} */
-  let { title, today, pocket = false, busy = null, onsnooze, oncomplete, onattach, onretire, oncopy } = $props();
+  let {
+    title, pocket = false, busy = null, mode = "read", snoozing = false,
+    onsnooze, oncomplete, onattach, onretire, oncopy, onedit, onsave, onrecord, oncancel,
+  } = $props();
 
-  let snoozing = $state(false);
   let armed = $state(false);
   let copiedShown = $state(false);
   const arm = createArm({ onchange: (next) => { armed = next; } });
@@ -54,50 +61,23 @@
 
   /** @type {HTMLInputElement | undefined} */
   let picker = $state();
-  /** @type {HTMLButtonElement | undefined} */
-  let snoozePill = $state();
-  /** @type {HTMLElement | undefined} */
-  let choices = $state();
-
-  /** @param {string} from @param {number} days */
-  const daysOn = (from, days) =>
-    new Date(Date.parse(`${from}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
-
   const again = $derived(pocket ? "tap again to retire" : "press again to retire");
 
-  /* Escape takes an armed retire, or the snooze choices, before anything
-     else does (home's own Escape puts the drawer away). */
+  /* Escape takes an armed retire before anything else does (home's own
+     Escape puts the drawer away). */
   $effect(() => {
-    if (!armed && !snoozing) return;
+    if (!armed) return;
     /** @param {KeyboardEvent} event */
     const onKey = (event) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
-      if (armed) arm.disarm();
-      else cancelSnooze();
+      arm.disarm();
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   });
   $effect(() => () => { arm.disarm(); clearTimeout(copiedTimer); });
-
-  async function startSnooze() {
-    arm.disarm();
-    snoozing = true;
-    await tick();
-    /** @type {HTMLElement | null | undefined} */ (choices?.querySelector("button"))?.focus();
-  }
-  async function cancelSnooze() {
-    snoozing = false;
-    await tick();
-    snoozePill?.focus();
-  }
-  /** @param {string} until */
-  function snoozeUntil(until) {
-    snoozing = false;
-    onsnooze(until);
-  }
 
   function retire() {
     if (arm.tap()) onretire();
@@ -125,22 +105,28 @@
 
 <div class="ivfootrow" class:pocket>
   <span class="spacer" aria-hidden="true"></span>
-  {#if snoozing}
-    <div class="ivacts" class:p-pills={pocket} role="group" aria-label="Snooze {title} for" bind:this={choices}>
-      <button type="button" class:p-pill={pocket} class="act-warm" style="--act:var(--warm);--act-text:var(--warm-text)"
-              onclick={() => snoozeUntil(daysOn(today, 7))}>1 week</button>
-      <button type="button" class:p-pill={pocket} class="act-warm" style="--act:var(--warm);--act-text:var(--warm-text)"
-              onclick={() => snoozeUntil(nextDateAfter(today, 1) ?? daysOn(today, 30))}>1 month</button>
-      <button type="button" class:p-pill={pocket} onclick={cancelSnooze}>cancel</button>
+  {#if mode === "edit"}
+    <div class="ivacts" class:p-pills={pocket} role="group" aria-label="Editing {title}">
+      <button type="button" class:p-pill={pocket} class="act-accent" style="--act:var(--accent);--act-text:var(--accent-text)"
+              disabled={busy !== null} onclick={onsave}>{busy === "save" ? "saving…" : "save"}</button>
+      <button type="button" class:p-pill={pocket} disabled={busy !== null} onclick={oncancel}>cancel</button>
+    </div>
+  {:else if mode === "complete"}
+    <div class="ivacts" class:p-pills={pocket} role="group" aria-label="Completing {title}">
+      <button type="button" class:p-pill={pocket} class="act-ok" style="--act:var(--ok);--act-text:var(--ok-text)"
+              disabled={busy !== null} onclick={onrecord}>{busy === "complete" ? "recording…" : "record"}</button>
+      <button type="button" class:p-pill={pocket} disabled={busy !== null} onclick={oncancel}>cancel</button>
     </div>
   {:else}
     <div class="ivacts" class:p-pills={pocket} role="group" aria-label="Actions for {title}">
-      <button type="button" class:p-pill={pocket} class="act-warm" bind:this={snoozePill}
+      <button type="button" class:p-pill={pocket} class="act-warm" class:lit={snoozing} data-pick
               style="--act:var(--warm);--act-text:var(--warm-text)" disabled={busy !== null}
-              aria-label="Snooze {title}" onclick={startSnooze}>{busy === "snooze" ? "snoozing…" : "snooze"}</button>
+              aria-haspopup="dialog" aria-expanded={snoozing}
+              aria-label="Snooze {title}" onclick={(event) => { arm.disarm(); onsnooze(event.currentTarget); }}
+              >{busy === "snooze" ? "snoozing…" : "snooze"}</button>
       <button type="button" class:p-pill={pocket} class="act-ok"
               style="--act:var(--ok);--act-text:var(--ok-text)" disabled={busy !== null}
-              aria-label="Complete {title}" onclick={() => { arm.disarm(); oncomplete(); }}>complete</button>
+              aria-label="Complete {title}" onclick={(event) => { arm.disarm(); oncomplete(event.currentTarget); }}>complete</button>
       <span class="brk" aria-hidden="true"></span>
       <button type="button" class:p-pill={pocket} class="act-up"
               style="--act:var(--upcoming);--act-text:var(--upcoming-text)" disabled={busy !== null}
@@ -153,9 +139,10 @@
   {/if}
   <span class="ivtools">
     <span class="copied" class:show={copiedShown} role="status" aria-live="polite">{copiedShown ? "link copied" : ""}</span>
-    <!-- Editing in the rows is #1319's next step: the pencil stands here
-         now so the row is the ratified one, and does nothing yet. -->
-    <button type="button" class="ivicon ivedit" aria-label="Edit this item" aria-disabled="true" title="edit">
+    <!-- the pencil: lit while the rows are being edited (round 8) -->
+    <button type="button" class="ivicon ivedit" class:on={mode === "edit"} aria-label="Edit this item"
+            aria-pressed={mode === "edit"} title="edit" disabled={busy !== null && mode !== "edit"}
+            onclick={() => { arm.disarm(); if (mode !== "edit") onedit(); }}>
       <i><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.6 2.6 13.4 5.4 5.6 13.2 2.4 13.6 2.8 10.4Z"/><path d="M9.2 4 12 6.8"/></svg></i>
     </button>
     <button type="button" class="ivicon ivlink" aria-label="Copy link" title="copy link" onclick={copy}>
@@ -183,6 +170,7 @@
   .ivfootrow:not(.pocket) .ivacts button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .ivacts button:disabled{opacity:.5;cursor:default}
   .ivacts button.armed{background:var(--act);color:var(--bg);border-color:var(--act)}
+  .ivfootrow:not(.pocket) .ivacts button.lit{border-color:var(--act)}
   .ivacts .brk{display:none}
 
   /* THE TWO ICONS: 32px round glass in the muted ink, accent on hover and
@@ -199,6 +187,10 @@
   .ivicon:hover i,.ivicon:focus-visible i{border-color:var(--accent)}
   .ivicon:focus-visible{outline:none}
   .ivicon:focus-visible i{box-shadow:0 0 0 2px var(--accent)}
+  /* editing: the pencil is lit, as round 8 draws it */
+  .ivicon.on{color:var(--accent-text)}
+  .ivicon.on i{border-color:var(--accent)}
+  .ivicon:disabled{opacity:.5;cursor:default}
   /* "link copied", said beside the icon for two seconds */
   .copied{font:11px var(--mono);color:var(--accent-text);letter-spacing:.04em;white-space:nowrap;
     opacity:0;transition:opacity .2s;pointer-events:none;margin-right:2px}

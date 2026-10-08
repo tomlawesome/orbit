@@ -19,6 +19,13 @@ resetDatabaseBetweenSpecFiles();
  * and leaves the drawer open, and pressing the page opens the reader over
  * home. The foot row's snooze and complete act from the drawer itself.
  *
+ * Stage 2 (design/v19/belt-purpose/round-8/m-colour-per-option.html):
+ * the pencil puts the drawer's own rows into edit mode, a chosen value
+ * opens the chooser card beside the drawer (the bottom sheet on a phone),
+ * Escape takes the chooser and then the edit; snooze opens the calendar
+ * ("snooze until"); complete asks for its date, cost and notes in the rows
+ * and records them.
+ *
  * A real upload through the real pipeline, as v19-document-preview.spec.ts
  * does, so the page drawn is a real render, not a placeholder.
  */
@@ -109,12 +116,20 @@ async function uploadDocument(page: Page, householdId: string, itemId: string, f
   return body.document;
 }
 
+/** The calendar's day 15 of next month: always ahead of today. */
+function dayNextMonth(): RegExp {
+  const now = new Date();
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 15));
+  const month = next.toLocaleString("en-GB", { month: "long", timeZone: "UTC" });
+  return new RegExp(`^\\w+ 15 ${month} ${next.getUTCFullYear()}`);
+}
+
 /** The item as the server holds it now. */
 async function itemOf(page: Page, householdId: string, itemId: string) {
   return page.evaluate(async ({ householdId, itemId }) => {
     const response = await fetch("/api/workspace", { credentials: "same-origin", cache: "no-store" });
     const body = (await response.json()) as {
-      workspace: { households: { id: string; items?: { id: string; dueDate?: string | null; snoozedUntil?: string | null }[] }[] };
+      workspace: { households: { id: string; items?: { id: string; dueDate?: string | null; snoozedUntil?: string | null; provider?: string | null }[] }[] };
     };
     return body.workspace.households.find((one) => one.id === householdId)?.items?.find((one) => one.id === itemId) ?? null;
   }, { householdId, itemId });
@@ -202,20 +217,67 @@ test.describe("on the desk", () => {
     await expect(drawer.getByRole("button", { name: "Edit this item" })).toBeVisible();
     await expect(drawer.getByRole("button", { name: "Copy link" })).toBeVisible();
 
-    /* snooze asks how long in the pills' place, then snoozes */
+    /* snooze opens the calendar beside the drawer; a day picked snoozes */
     await acts.getByRole("button", { name: `Snooze ${TITLE}` }).click();
-    const choices = drawer.getByRole("group", { name: `Snooze ${TITLE} for` });
-    await expect(choices.getByRole("button", { name: "1 week" })).toBeFocused();
-    await choices.getByRole("button", { name: "1 week" }).click();
+    const calendar = page.getByRole("dialog", { name: /snooze until/i });
+    await expect(calendar).toBeVisible();
+    await calendar.getByRole("button", { name: "Next month" }).click();
+    await calendar.getByRole("button", { name: dayNextMonth() }).click();
+    await expect(calendar).toHaveCount(0);
     await expect(drawer.getByText("snoozed until")).toBeVisible({ timeout: 10_000 });
     await expect.poll(async () => (await itemOf(page, householdId, itemId))?.snoozedUntil ?? null).not.toBeNull();
 
-    /* complete is held for its undo, then sent: the next orbit comes round */
+    /* complete asks in the rows: the date (today), the cost, the notes as
+       they were; record sends it and the next orbit comes round */
     await drawer.getByRole("group", { name: `Actions for ${TITLE}` })
       .getByRole("button", { name: `Complete ${TITLE}` }).click();
+    const completing = drawer.getByRole("group", { name: `Completing ${TITLE}` });
+    await expect(completing.getByRole("button")).toHaveText(["record", "cancel"]);
+    await expect(drawer.getByRole("button", { name: /^completed on: / })).toBeFocused();
+    await expect(drawer.getByRole("textbox", { name: "notes" })).toHaveText(NOTE);
+    await completing.getByRole("button", { name: "record" }).click();
     await expect(page.getByText(/^Completed · next due/).first()).toBeAttached();
     await expect.poll(async () => (await itemOf(page, householdId, itemId))?.dueDate, { timeout: 15_000 })
       .not.toBe(dueDate);
+  });
+
+  test("the pencil edits the drawer's own rows; Escape takes the chooser, then the edit", async ({ page }) => {
+    test.setTimeout(60_000);
+    await signIn(page);
+    const { itemId, householdId } = await seedHouseholdWithItem(page);
+
+    await page.goto(`/home?item=${itemId}`);
+    const drawer = page.locator(`[id="${itemId}-view"]`);
+    await expect(drawer).toBeVisible({ timeout: 20_000 });
+    const pencil = drawer.getByRole("button", { name: "Edit this item" });
+    await pencil.click();
+    await expect(pencil).toHaveAttribute("aria-pressed", "true");
+    /* the title edits in the row's head; save and cancel stand in the pills' place */
+    await expect(page.locator(`[id="${itemId}"]`).getByRole("textbox", { name: "title" })).toBeFocused();
+    await expect(drawer.getByRole("group", { name: `Editing ${TITLE}` }).getByRole("button")).toHaveText(["save", "cancel"]);
+
+    /* the due date opens the calendar beside the drawer; Escape takes it
+       away and hands focus back to the value */
+    const due = drawer.getByRole("button", { name: /^due: / });
+    await due.click();
+    const calendar = page.getByRole("dialog", { name: /due date/i });
+    await expect(calendar).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(calendar).toHaveCount(0);
+    await expect(due).toBeFocused();
+    /* the second Escape cancels the edit and leaves the drawer open */
+    await page.keyboard.press("Escape");
+    await expect(drawer.getByRole("group", { name: `Actions for ${TITLE}` })).toBeVisible();
+    await expect(pencil).toBeFocused();
+
+    /* typed in place, saved through the item */
+    await pencil.click();
+    const provider = drawer.getByRole("textbox", { name: "provider" });
+    await provider.click();
+    await page.keyboard.type("Northgate Services");
+    await drawer.getByRole("group", { name: `Editing ${TITLE}` }).getByRole("button", { name: "save" }).click();
+    await expect(drawer.getByText("Northgate Services")).toBeVisible({ timeout: 10_000 });
+    await expect.poll(async () => (await itemOf(page, householdId, itemId))?.provider ?? null).toBe("Northgate Services");
   });
 });
 
@@ -249,6 +311,21 @@ test.describe("on the phone", () => {
 
     await page.keyboard.press("Escape");
     await expect(sheet).toBeHidden();
+    await expect(row).toHaveAttribute("data-open", "");
+
+    /* stage 2: the pencil edits the rows, the title a row of its own; the
+       due date's calendar is the bottom sheet; Escape takes it, then the edit */
+    await row.getByRole("button", { name: "Edit this item" }).tap();
+    await expect(row.getByRole("textbox", { name: "title" })).toBeFocused();
+    await row.getByRole("button", { name: /^due: / }).tap();
+    const calendar = page.getByRole("dialog", { name: /due date/i });
+    await expect(calendar).toBeVisible();
+    const sheetBox = await calendar.boundingBox();
+    expect(Math.abs((sheetBox?.y ?? 0) + (sheetBox?.height ?? 0) - height)).toBeLessThan(2);
+    await page.keyboard.press("Escape");
+    await expect(calendar).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(row.getByRole("group", { name: `Actions for ${TITLE}` })).toBeVisible();
     await expect(row).toHaveAttribute("data-open", "");
   });
 });

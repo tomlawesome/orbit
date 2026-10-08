@@ -14,8 +14,10 @@
    * type that both the type checker and the production bundler accept.
    */
   import { every, longDate, money } from "$lib/format.js";
-  import { DAMAGED, LOCKED, NOTES_WORDS, REFERENCE_WORDS, fieldState } from "$lib/data/metadata-status.js";
+  import { DAMAGED, LOCKED, NOTES_WORDS, REFERENCE_WORDS, fieldState, itemLocked } from "$lib/data/metadata-status.js";
+  import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
   import FootRow from "./FootRow.svelte";
+  import EditRows from "./EditRows.svelte";
 
   /** A paper as the search reads it (pocket-search.js), carrying the belt's
       own row since #1319, so it opens the preview sheet.
@@ -30,12 +32,11 @@
    *   problem?: string | null,
    *   showingPaper?: string | null,
    *   onopenpaper?: (paper: Paper, from: HTMLElement) => void,
-   *   today?: string,
    *   acts?: import('./drawer-acts.js').DrawerActs,
    * }} */
   let {
     one, raw = undefined, papers, reading = false, problem = null, showingPaper = null, onopenpaper = undefined,
-    today = "", acts = undefined,
+    acts = undefined,
   } = $props();
 
   /** @type {Record<string, string>} */
@@ -43,13 +44,26 @@
   const tlabel = $derived(one.days === null ? "" : one.days < 0 ? `T+${-one.days}d` : `T−${one.days}d`);
   const referenceState = $derived(fieldState(raw?.metadataStatus, "reference"));
   const notesState = $derived(fieldState(raw?.metadataStatus, "notes"));
+
+  /* #1319 stage 2: editing in the rows, or asking for a completion
+     (drawer-modes.svelte.js), as on the desk. The phone's row head is the
+     kit Row's button, so the title edits as a row of its own here. */
+  const mode = $derived(!acts ? "read" : acts.modes.edit.id === one.id ? "edit"
+    : acts.modes.completing?.id === one.id ? "complete" : "read");
+  const snoozing = $derived(Boolean(acts && acts.modes.foot?.key === "snooze" && acts.modes.id === one.id));
+  /* round 8: the section and type words wear their own colour */
+  const sectionOpt = $derived(sectionColourOf(acts?.sections.find((s) => s.id === raw?.sectionId)));
 </script>
 
+{#if acts && mode !== "read"}
+  <EditRows modes={acts.modes} sections={acts.sections} pocket titleRow snoozedUntil={raw?.snoozedUntil ?? null}
+            costLocked={itemLocked(raw?.metadataStatus)} />
+{:else}
 <div class="p-kv"><span>due</span>
   <b class={TONE[one.band] ?? ""}>{one.dueDate ? `${tlabel} · ${longDate(one.dueDate)}` : "unscheduled"}</b></div>
 {#if raw?.snoozedUntil}<div class="p-kv"><span>snoozed until</span><b>{longDate(raw.snoozedUntil)}</b></div>{/if}
-{#if one.section}<div class="p-kv"><span>section</span><b>{one.section}</b></div>{/if}
-{#if raw?.subtype}<div class="p-kv"><span>type</span><b>{raw.subtype}</b></div>{/if}
+{#if one.section}<div class="p-kv"><span>section</span><b class="opt" data-opt={sectionOpt}>{one.section}</b></div>{/if}
+{#if raw?.subtype}<div class="p-kv"><span>type</span><b class="opt" data-opt={typeColourOf(raw.subtype)}>{raw.subtype}</b></div>{/if}
 {#if one.recurrenceMonths}<div class="p-kv"><span>orbital period</span><b>{every(one.recurrenceMonths)}</b></div>{/if}
 <div class="p-kv"><span>cost</span><b>{money(one.costMinor, one.currency, one.costIsEstimate)}</b></div>
 {#if raw?.provider}<div class="p-kv"><span>provider</span><b>{raw.provider}</b></div>{/if}
@@ -69,6 +83,7 @@
   <h3 class="p-caps">Notes</h3>
   <p class="p-prose note quiet">{NOTES_WORDS[notesState]}</p>
 {/if}
+{/if}
 {#if papers.length || reading}
   <h3 class="p-caps">Documents</h3>
   {#each papers as paper (paper.id)}
@@ -86,11 +101,12 @@
 {/if}
 {#if acts}
   <!-- #1319: the desk's foot row, at the pocket's scale. -->
-  <FootRow title={one.title} {today} pocket busy={acts.busy}
+  <FootRow title={one.title} pocket busy={acts.busy} {mode} {snoozing}
            onsnooze={acts.onsnooze} oncomplete={acts.oncomplete} onattach={acts.onattach}
-           onretire={acts.onretire} oncopy={acts.oncopy} />
+           onretire={acts.onretire} oncopy={acts.oncopy} onedit={acts.onedit}
+           onsave={acts.onsave} onrecord={acts.onrecord} oncancel={acts.oncancel} />
 {/if}
-{#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
+{#if problem || acts?.problem}<p class="p-error" role="alert">{problem ?? acts?.problem}</p>{/if}
 
 <style>
   .p-kv{align-items:baseline}
@@ -112,4 +128,6 @@
   .paper .meta::before{content:"· "}
   .note{margin:0;color:var(--ink-mid)}
   .note.quiet{color:var(--ink-quiet)}
+  /* round 8: a section or type value in its own colour */
+  .opt{color:var(--opt-text, inherit)}
 </style>

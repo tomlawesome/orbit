@@ -29,16 +29,20 @@ const wearsAccentOutline = (row) => row.evaluate((el) => {
   probe.remove();
   return getComputedStyle(el).borderTopColor === accent;
 });
-test("complete completes in place, held for its undo", async ({ page }) => {
+/* #1319 stage 2 (owner, 2026-10-08): complete asks for the date, the cost
+   and the notes in the rows before it records; cancel sends nothing. */
+test("complete asks in the rows, in place", async ({ page }) => {
   await page.goto(`${APP}/home`, { waitUntil: "load" });
   await settle(page);
   const gutter = page.locator(".pocket .pk-below [data-row]", { hasText: "Gutter clearing" }).first();
   await openRow(page, gutter);
   await gutter.getByRole("button", { name: "Complete Gutter clearing" }).tap();
   await expect(page).toHaveURL(/\/home/);
-  await expect(page.locator(".p-wake-host").getByText(/Completed .*Gutter clearing/).first()).toBeVisible();
-  /* undo inside the hold: nothing is sent */
-  await page.getByRole("button", { name: "undo" }).tap();
+  const completing = gutter.getByRole("group", { name: "Completing Gutter clearing" });
+  await expect(completing.getByRole("button")).toHaveText(["record", "cancel"]);
+  await expect(gutter.getByRole("button", { name: /^completed on: / })).toBeVisible();
+  await completing.getByRole("button", { name: "cancel" }).tap();
+  await expect(gutter.getByRole("group", { name: "Actions for Gutter clearing" })).toBeVisible();
 });
 test("search result opens the row", async ({ page }) => {
   await page.goto(`${APP}/home`, { waitUntil: "load" });

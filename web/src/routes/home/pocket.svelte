@@ -1,12 +1,15 @@
 <script>
   import "./pocket.css";
   import { tick } from "svelte";
-  import { beforeNavigate, goto, onNavigate } from "$app/navigation";
+  import { goto, onNavigate } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
   import { WorkspaceError, applyCommand, attachItemDocument, readItemDocuments, removeDocument, restoreDocument } from "$lib/data/workspace.js";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
-  import { archiveCommand, completeCommand, nextDateAfter, snoozeCommand } from "$lib/data/commands.js";
+  import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import { sectionColourOf } from "$lib/option-colour.js";
+  import { DrawerModes, pressKeepsChooser } from "./drawer-modes.svelte.js";
+  import { archiveCommand, completeCommand, nextDateAfter, snoozeCommand, upsertCommand } from "$lib/data/commands.js";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf } from "$lib/data/chart.js";
   import { money } from "$lib/format.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
@@ -21,7 +24,7 @@
   import { POCKET_QUERY, isPocket } from "$lib/pocket/media.js";
   import { formReadingsOf, papersOf as reviewPapersOf } from "$lib/pocket/review.js";
   import { rowOf } from "$lib/pocket/row.js";
-  import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
+  import { wake } from "$lib/pocket/wake.js";
   import { markDoor } from "../household/[id]/door.js";
   import { HIT_R, spacedBodies } from "./pocket-dial.js";
   import { readSearchDocuments, searchPocket } from "./pocket-search.js";
@@ -479,6 +482,10 @@
     addEventListener("pointerdown", onpress, true);
     return () => removeEventListener("pointerdown", onpress, true);
   });
+  /** Between the meta line's parts. */
+  const SEP = " · ";
+  /** A row's section, for its colour (option-colour.js). @param {string} id */
+  const sectionOf = (id) => sections.find((one) => one.id === rawItems.get(id)?.sectionId) ?? null;
   /** @type {(id: string) => typeof searchDocuments} */
   const papersOf = (id) => searchDocuments.filter((doc) => doc.itemId === id);
 
@@ -493,6 +500,8 @@
   let previewFrom = null;
   /** @param {any} paper @param {HTMLElement} from */
   function openPaperHere(paper, from) {
+    /* one sheet at a time: a paper's preview puts a chooser away */
+    modes.closeChooser(false);
     previewFrom = from;
     if (previewPaper?.id !== paper.id) previewPaper = paper;
   }
@@ -527,15 +536,12 @@
     if (previewPaper && lit !== previewPaper.itemId) previewPaper = null;
   });
 
-  /* `complete` from a drawer, as the belt does it (item/[[id]]/+page.svelte,
-     tapComplete) for an item with nothing to record: it completes on the
-     tap, held for the wake's four seconds so `undo` is a real undo, and sent
-     at once if the page is left first. #1319: every item, now the drawer is
-     the item -- the desk's drawer completes the same way (home/+page.svelte). */
-  /** @typedef {{ command: object, timer: ReturnType<typeof setTimeout> | undefined, done: boolean }} HeldCompletion */
-  /** @type {HeldCompletion | null} */
-  let held = null;
-  /** The key a held completion is stashed under (#1151 W1-S3), the same
+  /* A completion a previous visit held and never saw confirmed (#1151
+     W1-S3): the belt and stage 1's drawer held a completion for the wake's
+     four seconds and stashed it first. #1319 stage 2: the drawer now asks
+     for the completion in its rows and records it at once (below), so
+     nothing is held here any more; what an earlier visit stashed is still
+     picked up. The key a held completion is stashed under (#1151 W1-S3), the same
       reasoning and the same literal key as item/[[id]]/+page.svelte's own
       (W1-R5): a flush cut off by the page actually unloading — not merely
       refused — is picked up on the next load instead of silently failing.
@@ -564,69 +570,10 @@
     } catch { /* best effort */ }
   }
   /** @param {object} command */
-  function stashHeldCompletion(command) {
-    writeHeldCompletionStash([...readHeldCompletionStash(), command]);
-  }
-  /** @param {object} command */
   function clearHeldCompletionStash(command) {
     const key = JSON.stringify(command);
     writeHeldCompletionStash(readHeldCompletionStash().filter((one) => JSON.stringify(one) !== key));
   }
-  /** @param {{ id: string, title: string }} one */
-  function completeRow(one) {
-    const raw = rawItems.get(one.id);
-    const householdId = view?.primary;
-    if (!raw || !householdId || !view) return;
-    sendHeld();
-    const completedDate = view.today;
-    const nextDate = nextDateAfter(completedDate, raw.recurrenceMonths) ?? undefined;
-    /* Built once, not per send (#1151 W1-R2/W1-R3's own reasoning): a retry
-       reuses the exact command, version guard included. */
-    const command = completeCommand(/** @type {any} */ ({ ...raw, householdId }), { completedDate, nextDate });
-    stashHeldCompletion(command);
-    /** @type {HeldCompletion} */
-    const job = { command, done: false, timer: undefined };
-    job.timer = setTimeout(() => fireHeld(job), WAKE_HOLD_MS);
-    held = job;
-    wake(`Completed${nextDate ? ` · next due ${short(nextDate)}` : ""} · ${one.title}`, {
-      undo: () => {
-        clearTimeout(job.timer);
-        job.done = true;
-        if (held === job) held = null;
-        clearHeldCompletionStash(job.command);
-      },
-    });
-  }
-  /** @param {HeldCompletion} job */
-  async function fireHeld(job) {
-    if (job.done) return;
-    job.done = true;
-    if (held === job) held = null;
-    try {
-      await applyCommand(job.command);
-      clearHeldCompletionStash(job.command);
-      await onchanged?.();
-    } catch (error) {
-      wake(/** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again", { failure: true });
-    }
-  }
-  /* Leaving before the wake has gone: the completion is sent now, not lost
-     — and stashed before it is sent (above), so even a send this screen
-     never lives to see the answer to is picked up on the next load
-     (#1151 W1-S3). */
-  function sendHeld() {
-    const job = held;
-    if (!job || job.done) return;
-    clearTimeout(job.timer);
-    job.done = true;
-    held = null;
-    applyCommand(job.command).then(() => clearHeldCompletionStash(job.command)).catch(() => {});
-  }
-  beforeNavigate(() => { sendHeld(); });
-  $effect(() => {
-    addEventListener("pagehide", sendHeld);
-    return () => { removeEventListener("pagehide", sendHeld); };
-  });
   /** A completion stashed by a previous visit that never confirmed it sent
       (#1151 W1-S3): picked up here instead of staying lost with nothing
       said. A version conflict means somebody already holds this change —
@@ -665,7 +612,7 @@
      gone: the drawer is the item, and its foot holds every act the belt had
      -- snooze, complete, attach a document, retire -- with the pencil and
      the chain link at its right end. */
-  /** @type {{ id: string, kind: "snooze" | "attach" | "retire" } | null} */
+  /** @type {{ id: string, kind: "snooze" | "attach" | "retire" | "complete" } | null} */
   let footBusy = $state(null);
   /**
    * @param {{ id: string, title: string }} one
@@ -705,12 +652,133 @@
       footBusy = null;
     }
   }
+  /* ---- #1319 stage 2: EDITING IN THE ROWS, AND THE CHOOSER SHEET --------
+     design/v19/belt-purpose/round-8/m-colour-per-option.html, the `narrow-`
+     scenes: as the desk's drawer (home/+page.svelte), with the chooser card
+     as the bottom sheet, where the preview's sheet stands. */
+  const modes = new DrawerModes({
+    save: async (item, edits) => {
+      await applyCommand(upsertCommand(item, edits));
+      await onchanged?.();
+    },
+    onchoose: () => { previewPaper = null; },
+  });
+  const sections = $derived(view?.household?.sections ?? []);
+  /* .by: read at the top level, `view` would be narrowed to its default. */
+  const chooserAsk = $derived.by(() => (view ? modes.askOf(sections, view.today) : null));
+  /* A row closing, or another opening, ends whatever its drawer was doing. */
+  $effect(() => {
+    if (modes.id && lit !== modes.id) modes.end();
+  });
+  /** The item as a command addresses it. @param {string} id @returns {any} */
+  const commandItemOf = (id) => {
+    const raw = rawItems.get(id);
+    return raw && view?.primary ? { ...raw, householdId: view.primary } : null;
+  };
+  /** Focus a control in a row's drawer, once it is drawn. @param {string} id @param {string} selector */
+  async function focusInRow(id, selector) {
+    await tick();
+    const el = /** @type {HTMLElement | null} */ (manifestRow(id)?.querySelector(selector) ?? null);
+    el?.focus({ preventScroll: true });
+    if (el?.isContentEditable) getSelection()?.collapse(el, el.childNodes.length);
+  }
+  /** The chooser's pick: the row takes it, or the snooze is sent. @param {string} value */
+  function pickChoice(value) {
+    const snooze = modes.pick(value);
+    if (!snooze || !view) return;
+    const { item, until } = snooze;
+    if (until <= view.today) { rowProblem[item.id] = "not yet — snooze to a day after today"; return; }
+    runRowAct(item, "snooze", (one) => snoozeCommand(one, until), `${item.title} snoozed until ${short(until)}`);
+  }
+  /** @param {{ id: string, title: string }} one */
+  async function saveRow(one) {
+    const title = modes.edit.draft?.title.trim() ?? one.title;
+    if (await modes.edit.commit()) {
+      wake(`saved · ${title}`);
+      focusInRow(one.id, ".ivedit");
+    }
+  }
+  /* Complete records what the rows hold, as the belt's complete panel sent
+     it: the date, the next date the belt computes, the cost and the notes. */
+  /** @param {{ id: string, title: string }} one */
+  async function recordRow(one) {
+    const out = modes.completion();
+    if ("refusal" in out) { modes.completeProblem = out.refusal; return; }
+    if (footBusy) return;
+    const { item, fields } = out;
+    footBusy = { id: one.id, kind: "complete" };
+    modes.completeProblem = null;
+    try {
+      await applyCommand(completeCommand(item, fields));
+      modes.cancelComplete();
+      wake(`Completed${fields.nextDate ? ` · next due ${short(fields.nextDate)}` : ""} · ${one.title}`);
+      await onchanged?.();
+    } catch (error) {
+      modes.completeProblem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again";
+    } finally {
+      footBusy = null;
+    }
+  }
+  /* Escape: the chooser first, then the edit or the completion, ahead of
+     the row's own Escape (row.js), which closes the row. */
+  $effect(() => {
+    const id = modes.id;
+    if (!id) return;
+    /** @param {KeyboardEvent} event */
+    const onKey = (event) => {
+      if (event.key !== "Escape" || event.defaultPrevented || previewPaper) return;
+      const chooser = modes.choosing;
+      const editing = Boolean(modes.edit.id);
+      if (!modes.escape()) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!chooser) focusInRow(id, editing ? ".ivedit" : '[aria-label^="Complete "]');
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  });
+  /* A press off the chooser sheet puts it away; a press on another value
+     switches it. */
+  $effect(() => {
+    if (!modes.choosing) return;
+    /** @param {PointerEvent} event */
+    const onPress = (event) => { if (!pressKeepsChooser(event.target)) modes.closeChooser(false); };
+    window.addEventListener("pointerdown", onPress, true);
+    return () => window.removeEventListener("pointerdown", onPress, true);
+  });
+
   /** @param {{ id: string, title: string }} one @returns {import('./drawer-acts.js').DrawerActs} */
   const drawerActsOf = (one) => ({
-    busy: footBusy?.id === one.id ? footBusy.kind : null,
-    problem: null,
-    onsnooze: (until) => runRowAct(one, "snooze", (item) => snoozeCommand(item, until), `${one.title} snoozed until ${short(until)}`),
-    oncomplete: () => completeRow(one),
+    busy: footBusy?.id === one.id ? footBusy.kind : modes.edit.busy && modes.edit.id === one.id ? "save" : null,
+    problem: modes.id === one.id ? modes.edit.problem ?? modes.completeProblem : null,
+    modes,
+    sections,
+    onsnooze: (from) => {
+      const item = commandItemOf(one.id);
+      delete rowProblem[one.id];
+      if (item) modes.snooze(item, from);
+    },
+    oncomplete: () => {
+      const item = commandItemOf(one.id);
+      if (!item || !view) return;
+      delete rowProblem[one.id];
+      modes.startComplete(item, view.today);
+      focusInRow(one.id, "[data-pick]");
+    },
+    onedit: () => {
+      const item = commandItemOf(one.id);
+      if (!item) return;
+      delete rowProblem[one.id];
+      modes.startEdit(item);
+      focusInRow(one.id, '[data-ed="title"]');
+    },
+    onsave: () => saveRow(one),
+    onrecord: () => recordRow(one),
+    oncancel: () => {
+      const editing = Boolean(modes.edit.id);
+      modes.end();
+      focusInRow(one.id, editing ? ".ivedit" : '[aria-label^="Complete "]');
+    },
     onattach: (file) => attachTo(one, file),
     onretire: () => runRowAct(one, "retire", (item) => archiveCommand(item), `${one.title} retired`),
     oncopy: () => copyLink(one.id),
@@ -996,11 +1064,13 @@
         <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")} key={one.id}
              trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
              ontoggle={onRowToggle(one.id)}>
+          <!-- round 8 (#1319): the section word in its own colour -->
+          {#snippet metaline()}{#if one.section}<i class="opt" data-opt={sectionColourOf(sectionOf(one.id))}>{one.section}</i>{#if cost(one)}{SEP}{/if}{/if}{cost(one)}{/snippet}
           {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
           {#snippet detail()}
             <ItemDrawer {one} raw={rawItems.get(one.id)} papers={papersOf(one.id)} problem={rowProblem[one.id] ?? null}
                         showingPaper={previewPaper?.id ?? null} onopenpaper={openPaperHere}
-                        today={view?.today ?? ""} acts={drawerActsOf(one)}
+                        acts={drawerActsOf(one)}
                         reading={!papersReady && (rawItems.get(one.id)?.documentCount ?? 0) > 0} />
           {/snippet}
         </Row>
@@ -1017,7 +1087,7 @@
         {#snippet detail()}
           <ItemDrawer one={next} raw={rawItems.get(next.id)} papers={papersOf(next.id)} problem={rowProblem[next.id] ?? null}
                       showingPaper={previewPaper?.id ?? null} onopenpaper={openPaperHere}
-                      today={view?.today ?? ""} acts={drawerActsOf(next)}
+                      acts={drawerActsOf(next)}
                       reading={!papersReady && (rawItems.get(next.id)?.documentCount ?? 0) > 0} />
         {/snippet}
       </Row>
@@ -1127,6 +1197,14 @@
 
 <PreviewCard doc={previewPaper} itemTitle={previewPaper?.itemTitle ?? ""} onclose={closePaper}
              onremove={removePaper} onrestore={restorePaper} />
+
+<!-- #1319 stage 2 (round 8, `narrow-editing-*`): the chooser card as the
+     bottom sheet, where the preview's sheet stands -->
+{#if chooserAsk}
+  <div class="pk-chseat" data-chooser-card>
+    <ChooserCard ask={chooserAsk} layout="sheet" onpick={pickChoice} onclose={() => modes.closeChooser(true)} />
+  </div>
+{/if}
 
 <ReviewSheet bind:open={reviewOpen} title={reviewing?.title ?? ""} proposal={reviewing?.proposal}
              householdId={reviewing ? (reviewing.householdId ?? view?.primary ?? null) : null}
