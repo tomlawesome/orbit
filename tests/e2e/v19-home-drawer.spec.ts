@@ -218,7 +218,7 @@ test.describe("on the desk", () => {
     /* the drawer is the item now: no way onward to the belt */
     await expect(drawer.getByRole("link", { name: "manage this item →" })).toHaveCount(0);
     /* notes above documents (owner, 2026-10-08) */
-    await expect(drawer.locator("h4")).toHaveText(["notes", "documents"]);
+    await expect(drawer.locator("h2")).toHaveText(["notes", "documents"]);
     await expect(drawer.getByText(NOTE)).toBeVisible();
 
     /* level the row a little below the page's 84px gutter, so the card's

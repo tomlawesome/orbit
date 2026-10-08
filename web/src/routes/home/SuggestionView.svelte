@@ -89,7 +89,7 @@
     {/if}
   {/if}
   {#if papers.length}
-    <h4>documents</h4>
+    <h2>documents</h2>
     <!-- #1319: the paper it came in opens the preview card beside the
          drawer, as a filed item's documents do; the card says itself when
          Orbit has no page for it. -->
