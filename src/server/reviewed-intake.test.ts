@@ -81,6 +81,39 @@ describe("reviewed intake contract", () => {
     );
   });
 
+  describe("an approval's item is intent, judged and mapped by the engine (ADR-0034, #1325)", () => {
+    const approval = (item: Record<string, unknown>) => reviewedIntakeApprovalSchema.parse({
+      operationId: "11111111-1111-4111-8111-111111111111",
+      source: { kind: "direct_upload", expectedDocument: false },
+      householdId: "33333333-3333-4333-8333-333333333333",
+      sectionId: "44444444-4444-4444-8444-444444444444",
+      action: "create_separate",
+      item: { title: "Home insurance", currency: "GBP", dueDate: "2031-01-10", ...item },
+      attachmentIds: [],
+    });
+    const hash = (item: Record<string, unknown>) => canonicalReviewedIntakeHash(approval(item));
+
+    it("reads a typed cost as the amount it names", () => {
+      expect(hash({ cost: "£199.99" })).toBe(hash({ costMinor: 19999 }));
+    });
+
+    it("refuses a cost that is not a sum, and a missing name, in the member's words", () => {
+      expect(() => hash({ cost: "199,99" })).toThrow("not yet — use a dot for pence, for example 12.50");
+      expect(() => hash({ title: " " })).toThrow("not yet — give it a name");
+    });
+
+    it("keeps the relay's subtype and schedule unless the kind changes them", () => {
+      const relay = { subtype: "insurance", scheduleKind: "renewal", recurrenceMonths: 12 };
+      expect(hash({ ...relay, kind: "renewal" })).toBe(hash(relay));
+      expect(hash({ ...relay, kind: "service" })).toBe(hash({ subtype: "service", scheduleKind: "service", recurrenceMonths: 12 }));
+      expect(hash({ ...relay, kind: "service" })).not.toBe(hash(relay));
+    });
+
+    it("drops a schedule with no date, as the engine does for any item", () => {
+      expect(hash({ dueDate: undefined, scheduleKind: "renewal", recurrenceMonths: 12 })).toBe(hash({ dueDate: undefined }));
+    });
+  });
+
   it("keeps a bounded rejected-reading alternative and drops an oversized or markup-bearing one (#959, ADR-0025 section 4)", () => {
     expect(sanitizeReviewDraftMetadata({
       proposal: { provider: "Larkfield Mutual" },
