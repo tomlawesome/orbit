@@ -9,6 +9,8 @@ import {
   type HouseholdSection,
   type ScheduleKind,
 } from "@/lib/domain";
+import { AppError } from "@/lib/errors";
+import { nextDueDate } from "@/lib/next-due-date";
 
 export const WORKSPACE_VERSION = 1;
 
@@ -189,7 +191,6 @@ export type WorkspaceCommand =
       itemId: string;
       expectedVersion: number;
       completedDate: string;
-      nextDate?: string;
       costMinor?: number;
       notes?: string;
       activity: ItemActivity;
@@ -280,10 +281,12 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     itemId: z.string().min(1).max(100),
     expectedVersion: z.number().int().positive(),
     completedDate: calendarDate,
-    nextDate: calendarDate.optional(),
+    /* ADR-0034, #1324: the engine works the next date out from the item's
+       period; parseWorkspaceCommand refuses one sent by a client. */
+    nextDate: z.never().optional(),
     costMinor: z.number().int().min(0).max(100_000_000).optional(),
     notes: optionalText(1_000),
-    activity: itemActivitySchema,
+    activity: itemActivitySchema.extend({ nextDate: z.never().optional() }),
   }),
   z.object({
     type: z.literal("item.reschedule"),
@@ -325,6 +328,31 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     notificationIds: z.array(z.string().min(1).max(180)).max(2_000),
   }),
 ]);
+
+/**
+ * Reads a command a client sent. A completion carries what happened -- the
+ * day, the cost, the notes -- and never the next due date, which the engine
+ * works out from the item's period (ADR-0034, #1324); one sent anyway is
+ * refused rather than quietly dropped, so a client that still computes it
+ * finds out.
+ */
+export function parseWorkspaceCommand(input: unknown): WorkspaceCommand {
+  if (isRecord(input) && input.type === "item.complete") {
+    const activity = isRecord(input.activity) ? input.activity : {};
+    if (input.nextDate !== undefined || activity.nextDate !== undefined) {
+      throw new AppError(
+        "invalid_command",
+        "A completion does not send the next due date; Orbit works it out from the item's period",
+        400,
+      );
+    }
+  }
+  return workspaceCommandSchema.parse(input);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 export function cloneSections(): HouseholdSection[] {
   return defaultSections.map((section) => ({ ...section }));
@@ -369,6 +397,13 @@ export function createEmptyWorkspace(sections = cloneSections()): WorkspaceState
       activities: [],
     }],
   });
+}
+
+/** The completion's activity as the engine records it: the next date is
+ * the one the engine worked out, never the client's (#1324). */
+export function completionActivity(activity: ItemActivity, nextDate: string | undefined): ItemActivity {
+  const { nextDate: _sent, ...rest } = activity;
+  return nextDate ? { ...rest, nextDate } : rest;
 }
 
 function appendActivity(household: HouseholdWorkspace, activity: ItemActivity | undefined): ItemActivity[] {
@@ -461,23 +496,27 @@ export function reduceWorkspace(state: WorkspaceState, command: WorkspaceCommand
       }));
     }
     case "item.complete": {
-      return updateHousehold(state, command.householdId, (household) => ({
-        ...household,
-        items: household.items.map((item) => {
-          if (item.id !== command.itemId) return item;
-          const hasNextSchedule = Boolean(command.nextDate);
-          return updateItem(item, {
-            status: "active",
-            costMinor: command.costMinor ?? item.costMinor,
-            dueDate: command.nextDate,
-            scheduleKind: hasNextSchedule ? item.scheduleKind : undefined,
-            recurrenceMonths: hasNextSchedule ? item.recurrenceMonths : undefined,
-            reminderDays: hasNextSchedule ? item.reminderDays : undefined,
-            snoozedUntil: undefined,
-          }, command.activity.occurredAt);
-        }),
-        activities: appendActivity(household, command.activity),
-      }));
+      return updateHousehold(state, command.householdId, (household) => {
+        const completed = household.items.find((item) => item.id === command.itemId);
+        const nextDate = completed ? nextDueDate(completed, command.completedDate) : undefined;
+        return {
+          ...household,
+          items: household.items.map((item) => {
+            if (item.id !== command.itemId) return item;
+            const hasNextSchedule = Boolean(nextDate);
+            return updateItem(item, {
+              status: "active",
+              costMinor: command.costMinor ?? item.costMinor,
+              dueDate: nextDate,
+              scheduleKind: hasNextSchedule ? item.scheduleKind : undefined,
+              recurrenceMonths: hasNextSchedule ? item.recurrenceMonths : undefined,
+              reminderDays: hasNextSchedule ? item.reminderDays : undefined,
+              snoozedUntil: undefined,
+            }, command.activity.occurredAt);
+          }),
+          activities: appendActivity(household, completionActivity(command.activity, nextDate)),
+        };
+      });
     }
     case "item.reschedule": {
       return updateHousehold(state, command.householdId, (household) => ({
