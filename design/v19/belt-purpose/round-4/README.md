@@ -46,6 +46,12 @@ Scenes `?scene=`: `editing-date`, `editing-section`, `editing-period`,
   reviewed.
 - Screenshots of every new scene in starchart and clouds, checked by eye.
 
-## Verdicts
+## Verdicts (owner, 2026-10-08)
 
-(none yet)
+> chooser beside, but I don't like the radio dials and the N in orbit is
+> useless information. The box should also have the proper outline
+> colour, as it looks odd without it
+
+H is the direction, with three changes: no ring marks before the
+choices, no "N in orbit" count on the sections, and the chooser card
+takes the outline the other cards beside the drawer carry. G is dropped.
