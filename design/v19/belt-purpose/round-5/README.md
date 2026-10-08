@@ -43,6 +43,12 @@ And on the type chooser's key marks (a filled, a ringed and a half dot):
 
 > Not sure I love these weird little symbols at all, anywhere tbh.
 
+> It makes the dial overly complex and adds little value.
+
+(The same marks are the faces of the dial's bodies and the chart key's
+type rows: crescent = inspection, cored = renewal, dashed ring = expiry,
+plain = service; `web/src/lib/data/chart.js` `dialBodiesOf`.)
+
 Not approved. The chooser card itself stays as it is; the section, type and period
 choices need a more visual layout than a left-aligned list of words.
 Round 6 tries that. The calendar was not criticised.
