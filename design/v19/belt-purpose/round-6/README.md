@@ -38,5 +38,7 @@ On the band's period chooser (K, `editing-period`):
 > Love this, but would like to see it vertically. For the others, I
 > prefer the tile style.
 
+> When I say this, I mean the repeat band
+
 Periods: K's band, turned vertical. Section and type: J's tiles. Round 7
 puts the two together.
