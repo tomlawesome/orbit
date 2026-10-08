@@ -346,6 +346,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 
 - 2026-10-06 · 4bb20449 (dev, !1035 merged) · local full suite, both WebKit projects, inside CI's Playwright image (#1235), local worker count · `page.waitForResponse: Timeout 30000ms exceeded` on the slow POST; the same test passed in a five-file targeted run minutes earlier and in a second full desktop-webkit run an hour later. Error context lost to a later run clearing `test-results/`.
 - 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_firefox`, desktop-firefox · failed once, passed on retry: the same test on a second browser.
+- 2026-10-08 · 91df467a (door batch, !1044) · CI pipeline 2254 `smoke_webkit` · failed once, passed on retry.
 
 ## v19-mail-collection.spec.ts:288 "a spoofed PDF travels the real pipe" on desktop-webkit, desktop-firefox
 
@@ -372,3 +373,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 ## sign-out-descent.spec.ts:175 "sign out from home's menu reaches the dusk (phone-narrow, world forced)" on mobile-webkit
 
 - 2026-10-08 · 687cb0f4 (door batch, !1044; the hatch's descent and this spec are new in it) · pipeline 2251 / smoke_webkit_mobile (job 33372) · `#1262: the menu is still open after sign-out started` at line 198, on the first attempt and the in-job retry. The menu lost its `open` class, but its layer kept `visibility: visible` past the 2 s check: the layer hides 300 ms after closing (Sheet.svelte), and the retry's screencast has no frame from 0.2 s to 2.1 s after the press, so the page drew nothing in that time. The forced world was on in this run ("flight world: on", "moon on the GPU" in the console); pipeline 2248's pass on the same code flew "on the canvas". Suspected, not established: drawing the forced world without a GPU stalls WebKit's rendering as the descent starts. First sighting.
+
+## sign-out-descent.spec.ts:252 "sign out from another page's menu plays the descent (phone-narrow)" on desktop-webkit
+
+- 2026-10-08 · 91df467a (door batch, !1044) · CI pipeline 2254 `smoke_webkit` · failed once, passed on retry. First sighting since the spec counts page errors from /settings once it is the document (ddab9b62).
