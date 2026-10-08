@@ -103,6 +103,55 @@ test("a paper opens the preview as the bottom sheet; Escape puts it away and lea
   await expect(mot).toHaveAttribute("data-open", "");
   await expect(mot.getByRole("button", { name: "Open Service history" })).toBeFocused();
 });
+/** Whether `el` sits inside something inert. @param {import("@playwright/test").Locator} el */
+const inert = (el) => el.evaluate((one) => Boolean(one.closest("[inert]")));
+/* #1319: a bottom sheet is modal. While the preview or a chooser stands,
+   what is behind it is inert, nothing it covers takes a tap; Escape or a
+   press on the page behind puts it away and gives the page back, focus
+   on what opened it. */
+test("the preview sheet holds the page behind it inert until a press off it puts it away", async ({ page }) => {
+  await page.goto(`${APP}/home`, { waitUntil: "load" });
+  await settle(page);
+  const mot = page.locator(".pocket .pk-below [data-row]", { hasText: "Car MOT" }).first();
+  await openRow(page, mot);
+  const complete = mot.getByRole("button", { name: "Complete Car MOT" });
+  await mot.getByRole("button", { name: "Open Service history" }).tap();
+  const sheet = page.getByRole("dialog", { name: /^Service history/ });
+  await expect(sheet).toBeVisible();
+  await expect(sheet).toHaveAttribute("aria-modal", "true");
+  expect(await inert(complete)).toBe(true);
+  expect(await inert(sheet)).toBe(false);
+  await page.touchscreen.tap(195, 80);
+  await expect(sheet).toBeHidden();
+  /* the scrim took the tap: nothing behind it opened as well */
+  await expect(page.locator(".p-sheet-layer.open")).toHaveCount(0);
+  expect(await inert(complete)).toBe(false);
+  await expect(mot).toHaveAttribute("data-open", "");
+});
+test("a chooser sheet holds the page behind it inert; Escape or a press off it puts it away", async ({ page }) => {
+  await page.goto(`${APP}/home`, { waitUntil: "load" });
+  await settle(page);
+  const mot = page.locator(".pocket .pk-below [data-row]", { hasText: "Car MOT" }).first();
+  await openRow(page, mot);
+  await mot.getByRole("button", { name: "Edit this item" }).tap();
+  const section = mot.getByRole("button", { name: /^section: / });
+  const seat = page.locator("[data-chooser-card]");
+  await section.tap();
+  await expect(seat.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
+  expect(await inert(section)).toBe(true);
+  expect(await inert(seat)).toBe(false);
+  await page.keyboard.press("Escape");
+  await expect(seat).toHaveCount(0);
+  expect(await inert(section)).toBe(false);
+  await expect(section).toBeFocused();
+  await section.tap();
+  await expect(seat).toBeVisible();
+  await page.touchscreen.tap(195, 80);
+  await expect(seat).toHaveCount(0);
+  await expect(page.locator(".p-sheet-layer.open")).toHaveCount(0);
+  expect(await inert(section)).toBe(false);
+  await expect(mot.getByRole("group", { name: "Editing Car MOT" })).toBeVisible();
+});
 /* #1319 (owner-decisions §34): a suggestion is reviewed in its home drawer
    -- its address opens its row in the signals, and the paper it came in
    opens the preview sheet with the staged note. */

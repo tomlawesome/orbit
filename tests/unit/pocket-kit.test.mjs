@@ -356,6 +356,19 @@ describe("the sheet as a dialog", () => {
     restore();
     expect($("app").hasAttribute("inert")).toBe(true);
   });
+  it("inerts around a sheet seated inside the page, and gives it all back (#1319)", () => {
+    document.body.innerHTML = `
+      <div id="app"><header id="top"><button>orb</button></header>
+        <main id="main"><button id="row">row</button><div id="seat"><button id="day">1</button></div></main></div>
+      <div id="wake" data-pocket-above></div><div id="other"></div>`;
+    const $ = (/** @type {string} */ id) => /** @type {HTMLElement} */ (document.getElementById(id));
+    const restore = inertPage($("seat"));
+    expect(["top", "row", "other"].map((id) => $(id).hasAttribute("inert"))).toEqual([true, true, true]);
+    expect(["app", "main", "seat", "day", "wake"].map((id) => $(id).hasAttribute("inert")))
+      .toEqual([false, false, false, false, false]);
+    restore();
+    expect(document.querySelectorAll("[inert]")).toHaveLength(0);
+  });
   it("trapTab with nothing to focus keeps focus on the panel", () => {
     document.body.innerHTML = `<div id="p" tabindex="-1"></div>`;
     const panel = /** @type {HTMLElement} */ (document.getElementById("p"));

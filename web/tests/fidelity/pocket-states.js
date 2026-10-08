@@ -269,9 +269,7 @@ export const SIGNED_IN = [
     await catch_.getByRole("button", { name: "review & amend →" }).click();
     await catch_.locator('[data-ed="title"]').waitFor();
   } },
-  { route: "/home", state: "suggestion-amending-section",
-    defect: { "*": "#1319: the chooser card's seat (.pk-chseat) leaves the controls behind it live but covered" },
-    reach: async (page) => {
+  { route: "/home", state: "suggestion-amending-section", reach: async (page) => {
     await go(page, "/home");
     const catch_ = row(page, ".pk-signals", "Home insurance");
     await openRow(page, catch_);
@@ -329,9 +327,7 @@ export const SIGNED_IN = [
      armed retire, and a paper's preview sheet. The belt's hatch and find
      are home's own (`hatch`, `search`, `search-results` above). An item the
      manifest does not list opens as one more row on its address. */
-  { route: "/home", state: "row-snooze",
-    defect: { "*": "#1319: the snooze calendar's seat (.pk-chseat) leaves the row's controls behind it live but covered" },
-    reach: async (page) => {
+  { route: "/home", state: "row-snooze", reach: async (page) => {
     await go(page, "/home");
     const mot = row(page, ".pk-below", "Car MOT");
     await openRow(page, mot);
@@ -352,9 +348,7 @@ export const SIGNED_IN = [
     await mot.getByRole("button", { name: "Edit this item" }).click();
     await mot.getByRole("group", { name: "Editing Car MOT" }).waitFor();
   } },
-  { route: "/home", state: "row-edit-section",
-    defect: { "*": "#1319: the chooser card's seat (.pk-chseat) leaves the controls behind it live but covered" },
-    reach: async (page) => {
+  { route: "/home", state: "row-edit-section", reach: async (page) => {
     await go(page, "/home");
     const mot = row(page, ".pk-below", "Car MOT");
     await openRow(page, mot);
@@ -370,7 +364,7 @@ export const SIGNED_IN = [
     await mot.getByRole("button", { name: /tap again to confirm$/ }).waitFor();
   } },
   { route: "/home", state: "document-preview",
-    defect: { "*": "#1319: the preview bottom sheet (PreviewCard.svelte) leaves the controls behind it live but covered, and its .why line is 10.5px, under the 13px floor" },
+    defect: { "*": "#1319: the preview's .why line (PreviewCard.svelte) is 10.5px, under the 13px floor" },
     reach: async (page) => {
     await go(page, "/home");
     const mot = row(page, ".pk-below", "Car MOT");

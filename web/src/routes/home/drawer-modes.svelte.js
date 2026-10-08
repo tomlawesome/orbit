@@ -73,6 +73,10 @@ export class DrawerModes {
   get choosing() {
     return Boolean(this.edit.choosing || this.foot);
   }
+  /** The value pressed for the open chooser, for focus to go back to. @returns {HTMLElement | null} */
+  get choosingFrom() {
+    return this.edit.choosing?.from ?? this.foot?.from ?? null;
+  }
   /** The open chooser's key, for the row that is lit. */
   get choosingKey() {
     return this.edit.choosing?.key ?? this.foot?.key ?? null;
