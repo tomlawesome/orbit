@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { householdRegister, sessionHeaders } from "./support/households";
 import { settleArrival } from "./support/arrival";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
@@ -118,6 +118,16 @@ async function uploadDocument(
   return body.document;
 }
 
+/** #1300: the words a page-turner's number shows, without the screen
+ *  reader's own "page " (an .sr-only span) in front of them. */
+async function shownText(locator: Locator): Promise<string> {
+  return locator.evaluate((el) => {
+    const copy = el.cloneNode(true) as HTMLElement;
+    for (const hidden of copy.querySelectorAll(".sr-only")) hidden.remove();
+    return (copy.textContent ?? "").trim();
+  });
+}
+
 test("pressing a paper opens the preview, and Esc closes it", async ({ page }) => {
   test.setTimeout(60_000);
   await signInAsAdmin(page);
@@ -142,7 +152,8 @@ test("pressing a paper opens the preview, and Esc closes it", async ({ page }) =
       // The real page, rendered by the real endpoint — not a placeholder.
       await expect(sheet.locator(".bp-page")).toHaveClass(/shown/, { timeout: 20_000 });
       await expect(sheet.getByRole("img", { name: "Page one of preview-proving.pdf" })).toBeVisible();
-      // #1088: no page counter and no arrows — Orbit records no page count.
+      // #1300: the fixture is one page -- the pager says so, with no arrows.
+      await expect(sheet.locator(".pager .pgn")).toHaveText("one page");
       await expect(sheet.getByRole("button", { name: /next|previous|page \d/i })).toHaveCount(0);
       await expect(sheet.getByText(/\b\d+\s*(of|\/)\s*\d+\b/)).toHaveCount(0);
 
@@ -156,8 +167,10 @@ test("pressing a paper opens the preview, and Esc closes it", async ({ page }) =
     // The real page, rendered by the real endpoint — not a placeholder.
     await expect(readcard).toHaveClass(/snap/, { timeout: 20_000 });
     await expect(readcard.locator(".sheet img")).toBeVisible();
-    // #1088: no page counter and no arrows — Orbit records no page count,
-    // so the foot holds nothing while the page is showing normally.
+    // #1300: the fixture is one page -- the pager says so, with no arrows,
+    // and no honest state's foot word.
+    await expect(readcard.locator(".pager .pgn")).toHaveText("one page");
+    await expect(readcard.getByRole("button", { name: /next page|previous page/i })).toHaveCount(0);
     await expect(readcard.locator(".rcfoot")).toHaveCount(0);
 
     await page.keyboard.press("Escape");
@@ -287,8 +300,9 @@ test("a removed document shows its own line, honestly, and no page", async ({ pa
 
 /* #1300: page turning, as design/v19/document-card/round-2 and round-6 have
    it -- a round arrow either side of the page, only where there is a page
-   that way; ← → PageUp PageDown Home End; the foot "page N of M" on a polite
-   live region; a one-page file says "one page" and has no arrows. Desk and
+   that way; ← → PageUp PageDown Home End; "page N of M" in the reader's
+   head and "N of M" in its foot, the foot a polite live region heard as
+   "page N of M"; a one-page file says "one page" and has no arrows. Desk and
    phone share the reader. The three-page file is synthetic and made here;
    each of its pages is its own width, so the drawn picture's own width says
    which page the server actually drew, not only what the foot claims. */
@@ -308,12 +322,15 @@ test("the reader turns a multi-page document to its last page and back, by arrow
 
     const reader = page.getByRole("dialog", { name: "pages-proving.pdf, Preview proving item" });
     await expect(reader).toBeVisible();
+    const head = reader.locator(".rd-name .rd-of");
     const foot = reader.locator(".rd-page");
     const previous = reader.getByRole("button", { name: "Previous page" });
     const next = reader.getByRole("button", { name: "Next page" });
     const picture = reader.getByRole("img", { name: /pages-proving\.pdf/ });
     /** The page the reader says it is on, and the one the server drew. */
     const onPage = async (n: number) => {
+      await expect(head).toHaveText(`· page ${n} of 3`);
+      await expect.poll(() => shownText(foot)).toBe(`${n} of 3`);
       await expect(foot).toHaveText(`page ${n} of 3`);
       await expect(foot).toHaveAttribute("aria-live", "polite");
       await expect(picture).toHaveAccessibleName(`Page ${n} of pages-proving.pdf`, { timeout: 20_000 });
@@ -376,10 +393,112 @@ test("a one-page document's reader says \"one page\" and has no arrows", async (
     await expect(reader).toBeVisible();
     await expect(reader.getByRole("img", { name: "Page 1 of one-page-proving.pdf" })).toBeVisible({ timeout: 20_000 });
     await expect(reader.locator(".rd-page")).toHaveText("one page");
+    await expect(reader.locator(".rd-name .rd-of")).toHaveText("· one page");
     await expect(reader.getByRole("button", { name: /previous page|next page/i })).toHaveCount(0);
     // The keys turn nothing either.
     await page.keyboard.press("End");
     await expect(reader.locator(".rd-page")).toHaveText("one page");
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+/* #1300, round 6: under the preview's page, before the reader opens, a small
+   pager -- "1 of 3", an arrow each way only where there is a page that way --
+   turns the page in place, by press and (on the desk) by key. The reader
+   opens on the preview's page, and a turn in the reader turns the preview
+   too. */
+test("the preview's pager turns a multi-page document in place, and the reader opens on its page", async ({ page }) => {
+  test.setTimeout(90_000);
+  const mobile = test.info().project.name.startsWith("mobile");
+  await signInAsAdmin(page);
+  const { itemId, householdId } = await seedHouseholdWithItem(page);
+
+  try {
+    await uploadDocument(page, householdId, itemId, "pager-proving.pdf", syntheticPdfWithNumberedPages(3));
+    await page.goto(`/item/${itemId}`);
+    await expect(page.getByRole("heading", { name: "Preview proving item" })).toBeVisible();
+    await page.getByRole("button", { name: /pager-proving\.pdf/ }).first().click();
+    const pageButton = page.getByRole("button", { name: "Read pager-proving.pdf" });
+    await expect(pageButton).toBeEnabled({ timeout: 20_000 });
+
+    const card = mobile ? page.getByRole("dialog", { name: "pager-proving.pdf" }) : page.locator("#readcard");
+    const number = card.locator(".pager .pgn");
+    const previous = card.getByRole("button", { name: "Previous page" });
+    const next = card.getByRole("button", { name: "Next page" });
+    const picture = pageButton.locator("img");
+    /** The page the pager says, and the one the server drew under it. */
+    const onPage = async (n: number) => {
+      await expect.poll(() => shownText(number)).toBe(`${n} of 3`);
+      await expect(number).toHaveText(`page ${n} of 3`);
+      await expect(number).toHaveAttribute("aria-live", "polite");
+      await expect(picture).toHaveAttribute("alt", `Page ${n === 1 ? "one" : n} of pager-proving.pdf`, { timeout: 20_000 });
+      await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0), { timeout: 20_000 })
+        .toBe(Math.round(syntheticNumberedPageWidth(n) * (1_200 / 792)));
+      await expect(previous).toHaveCount(n > 1 ? 1 : 0);
+      await expect(next).toHaveCount(n < 3 ? 1 : 0);
+    };
+
+    await onPage(1);
+    await next.click();
+    await onPage(2);
+    // By keyboard, so the arrow has focus on every engine (WebKit does not
+    // focus a pressed button): when it goes, focus moves to the one left.
+    await next.focus();
+    await page.keyboard.press("Enter");
+    await onPage(3);
+    await expect(previous).toBeFocused();
+    await previous.click();
+    await onPage(2);
+
+    if (!mobile) {
+      // The desk's keys turn the preview, never the belt under it.
+      await page.keyboard.press("End");
+      await onPage(3);
+      await page.keyboard.press("Home");
+      await onPage(1);
+      await page.keyboard.press("ArrowRight");
+      await onPage(2);
+      await expect(page.getByRole("heading", { name: "Preview proving item" })).toBeVisible();
+    }
+
+    // The reader opens on the preview's page...
+    await pageButton.click();
+    const reader = page.getByRole("dialog", { name: "pager-proving.pdf, Preview proving item" });
+    await expect(reader).toBeVisible();
+    await expect(reader.locator(".rd-name .rd-of")).toHaveText("· page 2 of 3");
+    await expect(reader.getByRole("img", { name: "Page 2 of pager-proving.pdf" })).toBeVisible({ timeout: 20_000 });
+    // ...and a turn there turns the preview too.
+    await reader.getByRole("button", { name: "Next page" }).click();
+    await expect(reader.locator(".rd-name .rd-of")).toHaveText("· page 3 of 3");
+    await page.keyboard.press("Escape");
+    await expect(reader).toBeHidden({ timeout: 2_000 });
+    await onPage(3);
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+test("a one-page document's preview pager says \"one page\" and has no arrows", async ({ page }) => {
+  test.setTimeout(60_000);
+  const mobile = test.info().project.name.startsWith("mobile");
+  await signInAsAdmin(page);
+  const { itemId, householdId } = await seedHouseholdWithItem(page);
+
+  try {
+    await uploadDocument(page, householdId, itemId, "one-pager-proving.pdf");
+    await page.goto(`/item/${itemId}`);
+    await expect(page.getByRole("heading", { name: "Preview proving item" })).toBeVisible();
+    await page.getByRole("button", { name: /one-pager-proving\.pdf/ }).first().click();
+    await expect(page.getByRole("button", { name: "Read one-pager-proving.pdf" })).toBeEnabled({ timeout: 20_000 });
+
+    const card = mobile ? page.getByRole("dialog", { name: "one-pager-proving.pdf" }) : page.locator("#readcard");
+    await expect(card.locator(".pager .pgn")).toHaveText("one page");
+    await expect(card.locator(".pager button")).toHaveCount(0);
+    if (!mobile) {
+      await page.keyboard.press("End");
+      await expect(card.locator(".pager .pgn")).toHaveText("one page");
+    }
   } finally {
     await households.sweep(page);
   }
