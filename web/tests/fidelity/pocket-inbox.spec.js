@@ -39,6 +39,18 @@ async function answerApproval(page, itemId = "i-new") {
     seen.approvals.push(route.request().postDataJSON());
     await route.fulfill({ json: { outcome: "approved", itemId } });
   });
+  /* The review sheet holds its button to the engine's dry run (ADR-0034,
+     #1325), which the fixture app accepts whatever it is asked; answered
+     here with the engine's own refusal for the one rule this spec reads. */
+  await page.route("**/api/workspace/commands", async (route) => {
+    const body = route.request().postDataJSON();
+    if (!body?.dryRun) return route.fallback();
+    if (!body.item?.sectionId) {
+      return route.fulfill({ status: 422,
+        json: { error: { code: "item_section_missing", message: "not yet — choose a section" } } });
+    }
+    return route.fulfill({ json: {} });
+  });
   return seen;
 }
 
@@ -112,46 +124,8 @@ test("a failed arrival the server lets go opens on a tap to remove; one it keeps
   await expect.poll(() => seen.discards).toEqual(["r-gone"]);
 });
 
-/* THE SUGGESTION IN THE BELT ON A PHONE (#1145; round 3 §4's receipt page
-   merged into the belt): `/item/<receiptId>` is the belt under the top
-   chrome, the suggestion seated at the apex as its card, with the two
-   decisions and `review & amend →`. The desk half is belt-suggestion.spec.js. */
-test("the receipt address is the belt, wearing the top chrome, with the suggestion's card at the apex", async ({ page }) => {
-  await page.goto(`${APP}/item/r-insurance`, { waitUntil: "networkidle" });
-  const chrome = page.locator(".p-chrome:visible");
-  await expect(chrome.locator(".back")).toHaveAttribute("href", "/home");
-  await expect(chrome.locator(".porb")).toBeVisible();
-  const card = page.locator(".item-card.sug-card");
-  await expect(card.getByRole("heading", { level: 2 })).toHaveText("Home insurance renewal");
-  await expect(card.locator(".sub")).toContainText("1 forwarded document · burns up in 43d");
-  await expect(card.getByRole("button", { name: "Add Home insurance renewal to your orbit" })).toBeVisible();
-  await expect(card.getByRole("button", { name: "Dismiss Home insurance renewal" })).toBeVisible();
-  await expect(card.locator(".ip-docs")).toContainText("1 forwarded document");
-  /* The old page's own lines are gone with it (round 3 §4, owner's 10b). */
-  await expect(page.getByText("back to your orbit")).toHaveCount(0);
-  await expect(page.getByText("nothing is created without your acceptance")).toHaveCount(0);
-  /* The belt is real: the seat list holds the household and the visitor. */
-  await expect(page.locator(".ip-count")).toHaveText("6 items · 1 suggested · sooner to later");
-});
-
-test("the suggestion adds to orbit from the belt and becomes the new item's seat", async ({ page }) => {
-  const seen = await answerApproval(page, "i-chimney");
-  await page.goto(`${APP}/item/r-insurance`, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "Add Home insurance renewal to your orbit" }).click();
-  await page.getByRole("button", { name: "tap again to add Home insurance renewal to your orbit" }).click();
-  await expect.poll(() => seen.approvals.length).toBe(1);
-  expect(seen.approvals[0]).toMatchObject({ source: { kind: "mailbox_draft", receiptId: "r-insurance" } });
-  /* Accepted, it is an item with a seat of its own: the belt re-reads with
-     that item at the apex (the fixture stands in with a real item's id). */
-  await expect(page).toHaveURL(/\/item\/i-chimney$/);
-  await expect(page.locator(".item-card h2")).toHaveText("Chimney sweep");
-  await expect(page.locator(".item-card.sug-card")).toHaveCount(0);
-});
-
-test("the receipt page raises the same review sheet", async ({ page }) => {
-  await page.goto(`${APP}/item/r-insurance`, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "review & amend →" }).click();
-  const sheet = page.getByRole("dialog", { name: "Review & amend" });
-  await expect(sheet).toBeVisible();
-  await expect(sheet.getByRole("textbox", { name: "provider", exact: true })).toHaveValue("Harbour Mutual");
-});
+/* The suggestion's own address (`/item/<receiptId>`) was the belt on a
+   phone (#1145) until #1319 stage 3b retired it: the address now opens the
+   suggestion's row in home's signals, where it is decided and amended in
+   its own lines. Those checks are in pocket-home-drawers.spec.js; the
+   inbox keeps its review sheet, proved above. */
