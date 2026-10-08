@@ -260,8 +260,13 @@ for (const size of WIDTHS.filter((s) => s.label !== "narrow desk")) {
     await signIn(page);
     const household = await seedHousehold(page);
     try {
+      /* Counted from /settings, once it is the document, as arriveWithAscent
+         counts from home: this goto cuts the /home that signIn left loading,
+         and WebKit reports each cut load as a page error however it is
+         caught (CI pipeline 2248). */
+      await page.goto("/settings", { waitUntil: "commit" });
       page.on("pageerror", (e) => errors.push(String(e)));
-      await page.goto("/settings");
+      await page.waitForLoadState("load");
       if (desk) {
         await page.locator("button.orb").click();
       } else {
