@@ -719,7 +719,11 @@
     const { item, until } = snooze;
     /* Whether the day will do is the engine's (#1325): its refusal lands
        in rowProblem, in its words. */
-    runRowAct(item, "snooze", (one) => snoozeCommand(one, until), `${item.title} snoozed until ${short(until)}`);
+    /* #1319: the pills are disabled while it is sent, which drops the focus
+       the sheet handed back; put it back on the pill once they are live,
+       inside the row, so the row's own Escape still closes it. */
+    runRowAct(item, "snooze", (one) => snoozeCommand(one, until), `${item.title} snoozed until ${short(until)}`)
+      .then(() => { if (lit === item.id) focusInRow(item.id, '[aria-label^="Snooze "]'); });
   }
   /** @param {{ id: string, title: string }} one */
   async function saveRow(one) {
