@@ -30,16 +30,21 @@ const ITEM_PAGE = read("web/src/routes/item/[[id]]/+page.svelte");
 const HOME_POCKET = read("web/src/routes/home/pocket.svelte");
 
 describe("#1151 W1-R5/W1-S3: a held completion is stashed before it is sent", () => {
-  for (const [name, source] of [["item/[[id]]/+page.svelte", ITEM_PAGE], ["home/pocket.svelte", HOME_POCKET]]) {
-    it(`${name}: the leave-time flush is stashed first and cleared only on success`, () => {
-      // a bare `.catch(() => {})` on the leave-time send is no longer the
-      // whole story: it is harmless now, because the stash set below
-      // already covers the failure case, and is cleared only once the send
-      // actually confirms.
-      expect(source).toMatch(/localStorage\.setItem\(HELD_COMPLETION_KEY/u);
-      expect(source).toMatch(/applyCommand\(job\.command\)\.then\((\(\) => )?clearHeldCompletionStash(\(job\.command\))?\)\.catch/u);
-    });
+  it("home/pocket.svelte holds no completion since #1319 stage 2: complete asks first, then records at once", () => {
+    expect(HOME_POCKET).not.toMatch(/stashHeldCompletion|WAKE_HOLD_MS/u);
+  });
 
+  it("item/[[id]]/+page.svelte: the leave-time flush is stashed first and cleared only on success", () => {
+    const source = ITEM_PAGE;
+    // a bare `.catch(() => {})` on the leave-time send is no longer the
+    // whole story: it is harmless now, because the stash set below
+    // already covers the failure case, and is cleared only once the send
+    // actually confirms.
+    expect(source).toMatch(/localStorage\.setItem\(HELD_COMPLETION_KEY/u);
+    expect(source).toMatch(/applyCommand\(job\.command\)\.then\((\(\) => )?clearHeldCompletionStash(\(job\.command\))?\)\.catch/u);
+  });
+
+  for (const [name, source] of [["item/[[id]]/+page.svelte", ITEM_PAGE], ["home/pocket.svelte", HOME_POCKET]]) {
     it(`${name}: a leftover stash is retried and a version conflict counts as success`, () => {
       expect(source).toMatch(/readHeldCompletionStash\(\)/u);
       expect(source).toMatch(/error\.code === "version_conflict"/u);
