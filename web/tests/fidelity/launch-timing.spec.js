@@ -7,6 +7,16 @@ import { expect, test } from "@playwright/test";
 /*
  * #873 step 1: measure the launch hand-off before anything about it changes.
  *
+ * #1263 CHANGED WHAT THE HAND-OFF IS. The arrival now flies once, on `/`,
+ * before anything is asked, and the create questions stand in the belong
+ * card's drawer: Create goes to /home with no launch marker, no reclaim and no
+ * second climb. So the "create" phase below is now the drawer's Create to the
+ * navigation, and the "home" phase is home's ordinary arrival (POL-1's dial
+ * coming in), not an ascent. The two phases and the report's shape are kept
+ * so the `launch_timing` job keeps running; the numbers on either side of
+ * #1263 are not like for like. The text below describes the hand-off as it
+ * was until then.
+ *
  * "The launch" is the create card's hand-off into the flight (Arrival.svelte,
  * `submit()`): on success the login ring shrinks from the card's 500px to the
  * login ring's own 302.4px in place while the login chrome (hidden while the
@@ -148,14 +158,13 @@ for (const pack of THEME_PACKS) {
       }
     }, pack);
 
-    await page.goto(`${APP}/?arrival=create`, { waitUntil: "load" });
-    /* Same settle condition screens.spec.js's "first-run" entry uses: first
-       light, the card showing, the card actually in the document. */
+    await page.goto(`${APP}/?arrival=newcomer&drawer=1`, { waitUntil: "load" });
+    /* Same settle condition screens.spec.js's "newcomer-drawer" entry uses:
+       the question arrived at, with the drawer's fields in the card. */
     await page.waitForFunction(
       () =>
-        document.body.classList.contains("lit") &&
-        document.body.classList.contains("showform") &&
-        Boolean(document.querySelector(".card")),
+        document.body.classList.contains("belong") &&
+        Boolean(document.querySelector(".nf .belong #hhname")),
     );
 
     await page.fill("#hhname", "Measured Household");
@@ -167,7 +176,7 @@ for (const pack of THEME_PACKS) {
     });
     await page.click("#gobtn");
 
-    /* The reclaim (620ms) plays, then Arrival.svelte's submit() navigates. */
+    /* Arrival.svelte's submit() navigates (#1263: no reclaim any more). */
     await page.waitForURL(/\/home(?:$|[/?#])/, { timeout: 5000 });
     await page.waitForLoadState("load");
     /* Lets the ascent's opening beats run live: warp (200ms), the mark's ride
@@ -183,8 +192,8 @@ for (const pack of THEME_PACKS) {
 
     const createPhase = report.find((/** @type {any} */ r) => r.phase === "create");
     const homePhase = report.find((/** @type {any} */ r) => r.phase === "home");
-    expect(createPhase?.samples?.length ?? 0, "expected frames captured on the create page (the 620ms reclaim)").toBeGreaterThan(0);
-    expect(homePhase?.samples?.length ?? 0, "expected frames captured on /home (the ascent's opening beats)").toBeGreaterThan(0);
+    expect(createPhase?.samples?.length ?? 0, "expected frames captured on the arrival (Create to the navigation)").toBeGreaterThan(0);
+    expect(homePhase?.samples?.length ?? 0, "expected frames captured on /home (its ordinary arrival)").toBeGreaterThan(0);
     expect(createPhase?.submitAt, "expected the click timestamp to have been recorded").not.toBeNull();
 
     /* Only frames from the click onward are the hand-off; everything before

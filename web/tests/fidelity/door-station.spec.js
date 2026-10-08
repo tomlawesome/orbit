@@ -7,10 +7,15 @@ import { APP, DOOR_STATES } from "./pocket-states.js";
  *
  * The owner, on a real phone: the door's ring sat too high. It now stands at
  * the upper-middle, measured as its centre's share of the visible height:
- * 40% where the ring has nothing but the gate or a line under it (the bare
- * door, the held dawn, the goodbye, the invite's outcome, another status),
- * 30% where a card stands under it. Over a card the ring is 240px under
- * 760px of visible height and 302.4px from there up.
+ * 40% on the invite's outcome and other status pages, 30% where a card
+ * stands under it. Over a card the ring is 240px under 760px of visible
+ * height and 302.4px from there up.
+ *
+ * The bare door, the held dawn and the goodbye are orbit-site's lockup since
+ * #1253, so they no longer have a share: the glyph is --R wide (68vw, 420px
+ * and 46svh at most) with the ring .72R across inside it, and the lockup is
+ * centred in the height less twice the lift (2svh), so it stands a little
+ * above the middle. That is what they are measured against.
  *
  * The 404's well is fitted by its own box (the two 4s, x 440-1160 in scene
  * units, and the glow, y 130-770) rather than the whole 1600x1000 scene, so
@@ -28,17 +33,24 @@ const SIZES = [
   { width: 390, height: 844 },
 ];
 
+/** The site's lockup on a phone (flight.css): the glyph's width and the lift, from the visible height. */
+const lockupMeasure = (/** @type {number} */ width, /** @type {number} */ visible) => ({
+  R: Math.min(420, 0.68 * width, 0.46 * visible),
+  lift: 0.02 * visible,
+});
+
 /** How near the measured centre must be to its station, in px. */
 const TOLERANCE = 2;
 
 /**
  * Each state names what draws its ring and where the ring's centre belongs.
- * @type {{ slug: string, state: string, ring: string, share: number, card?: boolean }[]}
+ * `lockup` names the box the site centres, for the states that stand as its lockup.
+ * @type {{ slug: string, state: string, ring: string, share?: number, lockup?: string, card?: boolean }[]}
  */
 const STATIONS = [
-  { slug: "door", state: "rest", ring: "#dawn .glyph svg", share: 0.4 },
-  { slug: "login", state: "starting", ring: "#dawn .glyph svg", share: 0.4 },
-  { slug: "logout", state: "rest", ring: "#dusk .glyph svg", share: 0.4 },
+  { slug: "door", state: "rest", ring: "#dawn .glyph svg", lockup: "#dawn .lockup" },
+  { slug: "login", state: "starting", ring: "#dawn .glyph svg", lockup: "#dawn .lockup" },
+  { slug: "logout", state: "rest", ring: "#dusk .glyph svg", lockup: "#dusk .lockup" },
   { slug: "invite", state: "used", ring: ".invite-card .invite-ring", share: 0.4 },
   { slug: "login", state: "local-card", ring: ".ringcard .bigring", share: 0.3, card: true },
   { slug: "login", state: "first-administrator", ring: ".ringcard .bigring", share: 0.3, card: true },
@@ -54,7 +66,9 @@ for (const size of SIZES) {
       const door = DOOR_STATES.find((s) => s.slug === station.slug && s.state === station.state);
       if (!door) throw new Error(`no door state ${station.slug} · ${station.state} in pocket-states.js`);
 
-      test(`${door.name}: the ring's centre at ${station.share * 100}% of the visible height`, async ({ page }) => {
+      test(station.lockup
+        ? `${door.name}: the ring .72R across, the lockup centred in the height less the lift`
+        : `${door.name}: the ring's centre at ${(station.share ?? 0) * 100}% of the visible height`, async ({ page }) => {
         await door.reach(page);
         await page.evaluate(() => document.fonts.ready);
         /* reduced motion still crossfades the card in over .7s (ringcard.css) */
@@ -67,8 +81,21 @@ for (const size of SIZES) {
         const centre = r.y + r.height / 2;
         console.log(`${size.width}x${size.height} ${door.name}: ring centre ${centre.toFixed(1)}px = ${(centre / visible * 100).toFixed(1)}% of ${visible}, ${r.width.toFixed(1)}px across`);
 
-        expect(Math.abs(centre - station.share * visible), `centre ${centre.toFixed(1)}px, wanted ${(station.share * visible).toFixed(1)}px`)
-          .toBeLessThanOrEqual(TOLERANCE);
+        if (station.lockup) {
+          const { R, lift } = lockupMeasure(size.width, visible);
+          expect(r.width, "the glyph is --R wide").toBeCloseTo(R, 0);
+          const box = await page.locator(station.lockup).first().boundingBox();
+          expect(box, `${station.lockup} has no box`).toBeTruthy();
+          const l = /** @type {{y:number,height:number}} */ (box);
+          const want = (visible - 2 * lift) / 2;
+          console.log(`${size.width}x${size.height} ${door.name}: R ${R.toFixed(1)}, lockup centre ${(l.y + l.height / 2).toFixed(1)}px, wanted ${want.toFixed(1)}px`);
+          expect(Math.abs(l.y + l.height / 2 - want), `lockup centre ${(l.y + l.height / 2).toFixed(1)}px, wanted ${want.toFixed(1)}px`)
+            .toBeLessThanOrEqual(TOLERANCE);
+        } else {
+          const share = /** @type {number} */ (station.share);
+          expect(Math.abs(centre - share * visible), `centre ${centre.toFixed(1)}px, wanted ${(share * visible).toFixed(1)}px`)
+            .toBeLessThanOrEqual(TOLERANCE);
+        }
         if (station.card) {
           expect(r.width, "the ring over a card").toBeCloseTo(visible < 760 ? 240 : 302.4, 0);
         }

@@ -121,17 +121,17 @@ await waitForServer(`${APP}/login`);
 const browser = await chromium.launch();
 
 try {
-  // README: first-run setup wizard — the arrival card that asks for name,
-  // time zone and currency and admits to the four default sections in its
-  // one closing note line (CreateSystem.svelte).
+  // README: first-run setup — the belong card's "name your own system"
+  // drawer that asks for name, time zone and currency and admits to the four
+  // default sections in its one closing note line (CreateSystem.svelte, in
+  // Newcomer.svelte's drawer since #1263).
   await withPage(browser, {}, async (page) => {
-    await page.goto(`${APP}/?arrival=create`, { waitUntil: "load" });
+    await page.goto(`${APP}/?arrival=newcomer&drawer=1`, { waitUntil: "load" });
     await page.waitForFunction(() =>
-      document.body.classList.contains("lit")
-      && document.body.classList.contains("showform")
-      && Boolean(document.querySelector(".card")));
+      document.body.classList.contains("belong")
+      && Boolean(document.querySelector(".nf .belong #hhname")));
     await finishLoad(page);
-    await shoot(page, page.locator(".card"), "first-run-sections-step.png");
+    await shoot(page, page.locator(".nf .belong .create"), "first-run-sections-step.png");
   });
 
   // Administration screens, all at rest (#472/#475's ISS backdrop drifts on

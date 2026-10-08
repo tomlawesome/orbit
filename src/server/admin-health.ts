@@ -24,7 +24,7 @@ const PROBE_TIMEOUT_MS = 2_000;
 const SIGNATURES_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1_000;
 
 /** Races a probe against a hard timeout; the timeout side never rejects. */
-function withTimeout<T>(promise: Promise<T>, fallback: T, timeoutMs = PROBE_TIMEOUT_MS): Promise<T> {
+export function withTimeout<T>(promise: Promise<T>, fallback: T, timeoutMs = PROBE_TIMEOUT_MS): Promise<T> {
   return new Promise((resolve) => {
     let settled = false;
     const timer = setTimeout(() => {
@@ -79,7 +79,7 @@ export interface AdministratorHealth {
 }
 
 /** `process.env.ORBIT_VERSION`/`ORBIT_CHANNEL`/`ORBIT_REVISION`, each null when unset or empty. */
-function readBuildInfo(): AdministratorBuildInfo {
+export function readBuildInfo(): AdministratorBuildInfo {
   return {
     version: process.env.ORBIT_VERSION || null,
     channel: process.env.ORBIT_CHANNEL || null,

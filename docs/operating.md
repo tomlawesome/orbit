@@ -36,12 +36,16 @@ That person becomes the first instance administrator.
 [Claiming a fresh install](authentication.md#claiming-a-fresh-install) has
 the detail, including who else could read that link.
 
-Next, Orbit asks for three things to create the first household: its name,
-its time zone and its currency. It starts every household with four
-sections, Home, Vehicles, Devices and Services, which you can rename,
-reorder, recolour or add to later on the household screen.
+Next, Orbit shows the "where do you belong?" card. On a new install there is
+nothing to ask to join, so the card's "name your own system" drawer is already
+open. (If other households exist, they are listed with "ask to join", and you
+open the drawer with "name your own system".) The drawer asks for three things
+to create the first household: its name, its time zone and its currency. It
+starts every household with four sections, Home, Vehicles, Devices and
+Services, which you can rename, reorder, recolour or add to later on the
+household screen.
 
-![Creating the first household: a name, a time zone and a currency, with a note that four sections come to start](images/first-run-sections-step.png)
+![The create form in the belong card's drawer: a name, a time zone and a currency, with a note that four sections come to start](images/first-run-sections-step.png)
 
 Instance administrators can manage every household and can give or take
 away administrator access for other people. Orbit will not let the last

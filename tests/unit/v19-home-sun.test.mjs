@@ -1,52 +1,38 @@
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
-/*
- * §15, the 08-17 morning batch (owner): "we should be able to click the sun in
- * the center of the dial and go to the given household's view." The sun's
- * address is the one piece of that wiring that is not DOM — home.behaviour.js
- * is imperative DOM by design and this suite runs in node — so the seam the
- * markup and the flight BOTH write through is what gets pinned here.
- *
- * Importing a module from web/ is fine: root vitest excludes web/ from test
- * COLLECTION, not from resolution (see v19-placement.test.mjs).
- */
-import { sunHref } from "../../web/src/routes/home/home.behaviour.js";
-import { galaxyOf } from "../../web/src/lib/data/chart.js";
-import { WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
+import { FURNACE, POCKET_SUN_R, SUN_R, UNIT, sideOf, sunOf } from "$lib/sun/furnace.js";
+import { DEFAULT_THEME, THEME_PACKS } from "$lib/theme.js";
 
-const TODAY = "2026-08-13"; // DESIGN_TODAY: the date every mockup was drawn against
-const GALAXY = galaxyOf(WORKSPACE_FIXTURE, TODAY);
-const PRIMARY = WORKSPACE_FIXTURE.activeHouseholdId;
+const WEB = resolve(import.meta.dirname, "../../web");
 
-describe("the sun's address", () => {
-  it("is the household's own screen", () => {
-    expect(sunHref("hh-lawson-1")).toBe("/household/hh-lawson-1");
+describe("the dial's sun is the Furnace (#1250)", () => {
+  it("keeps today's size, from one constant", () => {
+    expect(SUN_R).toBe(7);
+    expect(POCKET_SUN_R).toBeCloseTo(8);
+    expect(sideOf(SUN_R) * UNIT).toBeCloseTo(SUN_R);
   });
 
-  it("encodes an id rather than trusting it into the path", () => {
-    expect(sunHref("a b/c")).toBe("/household/a%20b%2Fc");
+  it("gives every pack a sun: after dark follows star chart, clouds follows dawn", () => {
+    expect(THEME_PACKS.map((p) => [p, sunOf(p)])).toEqual([
+      ["starchart", "starchart"], ["afterdark", "starchart"], ["clouds", "dawn"],
+      ["dawn", "dawn"], ["retrograde", "retrograde"],
+    ]);
+    expect(sunOf(DEFAULT_THEME)).toBe("starchart");
+    expect(sunOf(undefined)).toBe("starchart");
   });
 
-  it("points the fixture's active household at the household route the gate loads", () => {
-    /* Requirement 4 of the ruling: under ORBIT_FIXTURES the active household
-       id exists, so the click lands on a real screen in fixture mode — the
-       same path the fidelity gate reads the household screen at. */
-    expect(PRIMARY).toBeTruthy();
-    expect(WORKSPACE_FIXTURE.households.some((one) => one.id === PRIMARY)).toBe(true);
-    expect(sunHref(PRIMARY)).toBe("/household/hh-lawson-1");
-  });
-
-  it("has a real destination for every household a flight can land on", () => {
-    /* A flight re-letters the name under the sun and re-points the sun with
-       it, keyed by the galaxy key. So every key in the galaxy must be a
-       household id this workspace actually holds, or a flight would hand the
-       sun an address that 404s. */
-    const ids = new Set(WORKSPACE_FIXTURE.households.map((one) => one.id));
-    const keys = Object.keys(GALAXY);
-    expect(keys.length).toBeGreaterThan(1);
-    for (const key of keys) {
-      expect(ids.has(key)).toBe(true);
-      expect(sunHref(key)).toBe(`/household/${key}`);
+  it("ships a still for each sun, and only those", () => {
+    for (const key of Object.keys(FURNACE)) {
+      expect(existsSync(resolve(WEB, `static/sun/furnace-${key}.webp`)), key).toBe(true);
     }
+  });
+
+  it("the phone's sun is no longer hard-coded #fff6e6 (#1259)", () => {
+    const pocket = readFileSync(resolve(WEB, "src/routes/home/pocket.svelte"), "utf8");
+    expect(pocket).not.toMatch(/#fff6e6/iu);
+    expect(pocket).toMatch(/<Sun r=\{POCKET_SUN_R\}/u);
   });
 });

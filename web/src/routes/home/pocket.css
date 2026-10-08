@@ -92,9 +92,7 @@
    forward arrival only, the desk's own flag (pocket.svelte). */
 .pocket .mdial.arrive{animation:pocket-arrive 1s cubic-bezier(.2,.7,.2,1) 1}
 @keyframes pocket-arrive{from{transform:scale(.16);opacity:0}60%{opacity:1}to{transform:scale(1)}}
-/* The sun breathes; the body due soonest pings (home.css .breathe, .ping). */
-.pocket .pk-glow{animation:pocket-sun 4.2s ease-in-out infinite}
-@keyframes pocket-sun{0%,100%{opacity:1}50%{opacity:.55}}
+/* The body due soonest pings (home.css .ping). The sun is lib/sun's. */
 .pocket .pk-ping{pointer-events:none;transform-origin:center;transform-box:fill-box;
   animation:pocket-ping 3.4s ease-out infinite}
 @keyframes pocket-ping{0%{transform:scale(.6);opacity:1}70%{transform:scale(3.2);opacity:0}100%{opacity:0}}
@@ -243,7 +241,7 @@ body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
   animation-duration:var(--p-rise);animation-timing-function:var(--p-ease)}
 
 @media (prefers-reduced-motion:reduce){
-  .pocket .sky g,.pk-dot.breathing,.pocket .mdial.arrive,.pocket .pk-glow{animation:none}
+  .pocket .sky g,.pk-dot.breathing,.pocket .mdial.arrive{animation:none}
   .pocket .pk-ping{display:none}
   .pocket .pk-body > circle:first-of-type{transition:none}
   .pocket .pk-body:active > circle:first-of-type{transform:none}

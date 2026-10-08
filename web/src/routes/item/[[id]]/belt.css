@@ -155,12 +155,26 @@
   [data-theme=retrograde]{--rubble:#6ea6b8; --rubble-gain:1; --paper:#2de2e6}
 
   .belt-page *{box-sizing:border-box;margin:0}
-  html,body{height:100%}
+  /* #1249: every rule here that reaches past .belt-page names the page in
+     its selector. SvelteKit keeps a route's stylesheet loaded after a
+     client-side navigation away, so a bare `html body{overflow:hidden}`
+     followed the reader back to /home through "← YOUR SKY" and outranked
+     home's own `body`: the sky would no longer scroll down to the manifest. */
+  html:has(.belt-page),html:has(.belt-page) body{height:100%}
   /* The belt is a stage, not a document: the band is pinned to the viewport
      so its apex can BE the screen centre, and the card is hung on that
      point. The card scrolls inside itself if a viewport is too short for it
      rather than sliding the belt off the top of the sky. */
-  html body{background:var(--bg);color:var(--ink);font-family:var(--ui);line-height:1.55;
+  /* The night and its ink are the body's from its first style, bare as every
+     other route's sheet has them: this route renders in the browser only
+     (+page.js ssr = false), so the body is drawn before .belt-page exists,
+     and behind :has() the background faded in from white over the .4s
+     below as the belt arrived -- a white flash, and the axe sweep measuring
+     the card's quiet text against the grey between (CI pipeline 2251). Home
+     and the other routes set the same two values, so nothing follows the
+     reader anywhere by it. */
+  html body{background:var(--bg);color:var(--ink)}
+  html:has(.belt-page) body{font-family:var(--ui);line-height:1.55;
        transition:background .4s,color .4s;overflow:hidden;margin:0}
   /* THE SCROLL LAW, said loudly enough to be heard. §15's universal descent
      is a law for screens that scroll, and this one does not: the sheet pins
@@ -658,9 +672,9 @@
 .belt-page .sheet img{display:block;border-radius:2px;background:#fff;width:auto;
              max-width:100%;height:auto;max-height:min(60vh,520px)}
 
-/* THE FOOT. Nothing else lives here — no page counter, no arrows (#1088):
-   the honest states' one word instead, restore or download, nothing while
-   scanning or refused. */
+/* THE FOOT. A drawn page's foot is the pager (#1300, Pager.svelte); the
+   honest states' is their one word instead, restore or download, nothing
+   while scanning or refused. */
 .belt-page .rcfoot{display:flex;justify-content:center;align-items:center;min-height:38px;
         font:11px var(--mono);color:var(--ink-mid)}
 .belt-page .rcfoot .quiet{display:inline-flex;align-items:center;font:11px var(--mono);

@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Orbit #1250 · Weighted — the family name carries the weight</title>
+<style>
+@font-face{font-family:'Inter Variable';font-weight:100 900;font-display:block;src:url(fonts/inter-latin-wght-normal.woff2) format('woff2')}
+@font-face{font-family:'Inter Display';font-weight:100 900;font-display:block;src:url(fonts/inter-latin-opsz-normal.woff2) format('woff2')}
+@font-face{font-family:'JetBrains Mono Variable';font-weight:100 800;font-display:block;src:url(fonts/jetbrains-mono-latin-wght-normal.woff2) format('woff2')}
+@font-face{font-family:'Space Grotesk';font-weight:500;font-display:block;src:url(fonts/space-grotesk-latin-500-normal.woff2) format('woff2')}
+@font-face{font-family:'Space Grotesk';font-weight:600;font-display:block;src:url(fonts/space-grotesk-latin-600-normal.woff2) format('woff2')}
+*{box-sizing:border-box}
+:root{--mono:'JetBrains Mono Variable',ui-monospace,Menlo,monospace;--ui:'Inter Variable',Inter,system-ui,sans-serif;--display:'Space Grotesk',var(--ui)}
+html,body{margin:0;background:#0c1020;color:#dfe3ee;font:14px/1.5 var(--ui)}
+header{padding:18px 24px 8px;max-width:1240px;margin:0 auto}
+header h1{font:600 20px var(--display);margin:0 0 2px;letter-spacing:.01em}
+header p{margin:0 0 6px;color:#9aa3bd;max-width:78ch}
+header p b{color:#dfe3ee;font-weight:600}
+main{max-width:1240px;margin:0 auto;padding:8px 24px 40px;display:grid;gap:18px}
+.pack>h2{margin:6px 0 10px;font:500 11px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:#9aa3bd}
+.cells{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end}
+figure{margin:0}
+figcaption{font:11px var(--mono);letter-spacing:.08em;color:#7d879f;margin-top:5px;text-transform:uppercase}
+.stage{position:relative;border-radius:10px;background:var(--ground);overflow:hidden}
+.stage svg{display:block}
+.stage canvas{position:absolute;pointer-events:none;display:none}
+/* The dial's own grammar (home.css): rings thicken on paper, no specular, and only the sun glows there. */
+.light .r106{stroke-width:1.1}
+.light .r62{stroke-width:1.4}
+.light .spec{fill:transparent}
+.sun-link{cursor:pointer}
+.sun-link:is(:hover,:focus-visible) image{filter:brightness(1.12)}
+.sun-link image{transition:filter .3s}
+.sun image{transform-box:fill-box;transform-origin:50% 50%}
+.stage.live .still{visibility:hidden}.stage.live canvas{display:block}
+.sun-link text{font-family:var(--ui);fill:var(--ink)}
+.sun-link .hv{font-weight:650;letter-spacing:-.01em}
+.sun-link .lt{font-weight:400;fill:var(--ink-mid);transition:fill .3s}
+.sun-link:is(:hover,:focus-visible) .lt{fill:var(--ink)}
+.sun-link .m{visibility:hidden}
+@media (prefers-reduced-motion:reduce){.sun *{animation:none!important}.sun-link *{transition:none!important}}
+@media (max-width:900px){.desk{display:none}header,main{padding-left:16px;padding-right:16px}}
+
+/* Tokens copied from web/src/lib/packs.css — only what the crop paints. */
+[data-theme=starchart]{--bg:#060b1c;--ink:#e9edf8;--ink-mid:#8791b3;--overdue:#f87171;--chart-line-soft:#17203f;--sun:#ffe9c4;--sun-core:#fff6e6;--sun-text:var(--sun);--ground:var(--bg);--star:#e9edf8}
+[data-theme=dawn]{--sky-2:#c2cad9;--sky-3:#d7d5cf;--ink:#18202f;--ink-mid:#343d51;--overdue:#c22a63;--chart-line-soft:rgba(26,34,51,.24);--sun:#eda253;--sun-core:#9c4a10;--sun-text:#73400b;--ground:linear-gradient(180deg,var(--sky-2),var(--sky-3));--star:#18202f}
+[data-theme=retrograde]{--bg:#080a14;--ink:#eef6ff;--ink-mid:#a9d8e6;--overdue:#ff3864;--chart-line-soft:#164b5c;--sun:#ff4fd8;--sun-core:#fff0fb;--sun-text:var(--sun);--ground:var(--bg);--star:#eef6ff}
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <radialGradient id="danger4" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#f87171" stop-opacity=".16"/><stop offset="85%" stop-color="#f87171" stop-opacity="0"/></radialGradient>
+  <radialGradient id="p-ruby" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#ffb3ab"/><stop offset="42%" stop-color="#e0453e"/><stop offset="100%" stop-color="#7e1a1f"/></radialGradient>
+  <radialGradient id="p-jade" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#b8f5cf"/><stop offset="45%" stop-color="#2fae6a"/><stop offset="100%" stop-color="#12603a"/></radialGradient>
+  <radialGradient id="p-amber" cx="34%" cy="30%" r="72%"><stop offset="0%" stop-color="#ffe1a0"/><stop offset="45%" stop-color="#f0a52b"/><stop offset="100%" stop-color="#8a5a10"/></radialGradient>
+</defs></svg>
+<header><h1>Weighted — the family name carries the weight</h1><p><b>#1250, round 3.</b> One line, one face, one size, two weights: the family's name is set heavy (Inter 650) in <code>--ink</code>, and the words round it — a leading 'The', a trailing 'Household' — light (Inter 400) in <code>--ink-mid</code>, the way a book's spine gives the author's surname the weight and lets 'the' recede. The reader finds the name itself at a glance; nothing is demoted to a label or a second line. Desk 11 units (18.5 px), phone 15 units (14 px); a long name wraps at spaces and hyphens, the weight running across the break. Hover lifts the light words to <code>--ink</code>, so the whole name wakes.</p><p>Life: none at rest. Hover: the light words' fill eases over .3 s. Reduced motion: no transition. Cost: nothing — Inter's weight axis is already loaded. The rule for which words are light: exactly a leading 'The' and a trailing 'Household', 'Family', 'House' or 'Home'; any name without them is all heavy.</p></header>
+<main><section class="pack" data-theme="starchart"><h2>Star chart (dark, default)</h2><div class="cells"><figure class="desk">
+<div class="stage" style="width:320.0px;height:279.6px" data-sun="starchart">
+<svg viewBox="95 112 190 166" width="320.0" height="279.6" role="img" aria-label="The Lawsons under the sun, desk scale">
+  <g aria-hidden="true"><circle cx="104" cy="120" r="0.5" fill="var(--star)" opacity="0.22"/><circle cx="131" cy="247" r="0.7" fill="var(--star)" opacity="0.3"/><circle cx="276" cy="131" r="0.6" fill="var(--star)" opacity="0.28"/><circle cx="238" cy="258" r="0.45" fill="var(--star)" opacity="0.2"/><circle cx="99" cy="190" r="0.8" fill="var(--star)" opacity="0.33"/><circle cx="262" cy="120" r="0.5" fill="var(--star)" opacity="0.25"/><circle cx="150" cy="125" r="0.55" fill="var(--star)" opacity="0.2"/><circle cx="281" cy="215" r="0.7" fill="var(--star)" opacity="0.31"/></g>
+  <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
+  <circle class="r62" cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3" stroke-width="1" stroke-dasharray="3 5"/>
+  <circle class="r106" cx="190" cy="190" r="106" fill="none" stroke="var(--chart-line-soft)" stroke-width=".75"/>
+  <g class="body-link" aria-hidden="true">
+    <circle cx="152" cy="166" r="4.5" fill="url(#p-ruby)"/><circle class="spec" cx="151.1" cy="167.1" r="1.5" fill="rgba(255,255,255,.38)"/>
+    <circle cx="248" cy="148" r="6" fill="url(#p-jade)"/><circle class="spec" cx="246.8" cy="149.5" r="2" fill="rgba(255,255,255,.38)"/>
+    <circle cx="266" cy="238" r="5" fill="url(#p-amber)"/><circle class="spec" cx="265" cy="239.2" r="1.65" fill="rgba(255,255,255,.38)"/>
+  </g>
+  <a class="sun-link" id="starchart-desk-short" href="#" aria-label="Open The Lawsons" data-name="The Lawsons">
+    <defs></defs>
+    <circle cx="190" cy="190" r="60" fill="transparent"/>
+    <g class="sun"><image class="still" href="img/furnace-starchart.webp" x="158.89" y="158.89" width="62.22" height="62.22"/></g>
+    <text class="m" x="190" y="-100" style="font-family:var(--ui)" aria-hidden="true"></text>
+    <text class="name" x="190" text-anchor="middle">The Lawsons</text>
+  </a>
+</svg><canvas style="left:107.60px;top:78.97px;width:104.80px;height:104.80px" aria-hidden="true"></canvas>
+</div>
+<figcaption>desk 640px dial · short</figcaption>
+</figure>
+<figure class="desk">
+<div class="stage" style="width:320.0px;height:279.6px" data-sun="starchart">
+<svg viewBox="95 112 190 166" width="320.0" height="279.6" role="img" aria-label="The Fitzwilliam-Hargreaves Household under the sun, desk scale">
+  <g aria-hidden="true"><circle cx="104" cy="120" r="0.5" fill="var(--star)" opacity="0.22"/><circle cx="131" cy="247" r="0.7" fill="var(--star)" opacity="0.3"/><circle cx="276" cy="131" r="0.6" fill="var(--star)" opacity="0.28"/><circle cx="238" cy="258" r="0.45" fill="var(--star)" opacity="0.2"/><circle cx="99" cy="190" r="0.8" fill="var(--star)" opacity="0.33"/><circle cx="262" cy="120" r="0.5" fill="var(--star)" opacity="0.25"/><circle cx="150" cy="125" r="0.55" fill="var(--star)" opacity="0.2"/><circle cx="281" cy="215" r="0.7" fill="var(--star)" opacity="0.31"/></g>
+  <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
+  <circle class="r62" cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3" stroke-width="1" stroke-dasharray="3 5"/>
+  <circle class="r106" cx="190" cy="190" r="106" fill="none" stroke="var(--chart-line-soft)" stroke-width=".75"/>
+  <g class="body-link" aria-hidden="true">
+    <circle cx="152" cy="166" r="4.5" fill="url(#p-ruby)"/><circle class="spec" cx="151.1" cy="167.1" r="1.5" fill="rgba(255,255,255,.38)"/>
+    <circle cx="248" cy="148" r="6" fill="url(#p-jade)"/><circle class="spec" cx="246.8" cy="149.5" r="2" fill="rgba(255,255,255,.38)"/>
+    <circle cx="266" cy="238" r="5" fill="url(#p-amber)"/><circle class="spec" cx="265" cy="239.2" r="1.65" fill="rgba(255,255,255,.38)"/>
+  </g>
+  <a class="sun-link" id="starchart-desk-long" href="#" aria-label="Open The Fitzwilliam-Hargreaves Household" data-name="The Fitzwilliam-Hargreaves Household">
+    <defs></defs>
+    <circle cx="190" cy="190" r="60" fill="transparent"/>
+    <g class="sun"><image class="still" href="img/furnace-starchart.webp" x="158.89" y="158.89" width="62.22" height="62.22"/></g>
+    <text class="m" x="190" y="-100" style="font-family:var(--ui)" aria-hidden="true"></text>
+    <text class="name" x="190" text-anchor="middle">The Fitzwilliam-Hargreaves Household</text>
+  </a>
+</svg><canvas style="left:107.60px;top:78.97px;width:104.80px;height:104.80px" aria-hidden="true"></canvas>
+</div>
+<figcaption>desk 640px dial · long</figcaption>
+</figure>
+<figure class="pocket">
+<div class="stage" style="width:179.0px;height:156.4px" data-sun="starchart">
+<svg viewBox="95 112 190 166" width="179.0" height="156.4" role="img" aria-label="The Lawsons under the sun, phone scale">
+  <g aria-hidden="true"><circle cx="104" cy="120" r="0.5" fill="var(--star)" opacity="0.22"/><circle cx="131" cy="247" r="0.7" fill="var(--star)" opacity="0.3"/><circle cx="276" cy="131" r="0.6" fill="var(--star)" opacity="0.28"/><circle cx="238" cy="258" r="0.45" fill="var(--star)" opacity="0.2"/><circle cx="99" cy="190" r="0.8" fill="var(--star)" opacity="0.33"/><circle cx="262" cy="120" r="0.5" fill="var(--star)" opacity="0.25"/><circle cx="150" cy="125" r="0.55" fill="var(--star)" opacity="0.2"/><circle cx="281" cy="215" r="0.7" fill="var(--star)" opacity="0.31"/></g>
+  <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
+  <circle class="r62" cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3" stroke-width="1" stroke-dasharray="3 5"/>
+  <circle class="r106" cx="190" cy="190" r="106" fill="none" stroke="var(--chart-line-soft)" stroke-width=".75"/>
+  <g class="body-link" aria-hidden="true">
+    <circle cx="152" cy="166" r="4.5" fill="url(#p-ruby)"/><circle class="spec" cx="151.1" cy="167.1" r="1.5" fill="rgba(255,255,255,.38)"/>
+    <circle cx="248" cy="148" r="6" fill="url(#p-jade)"/><circle class="spec" cx="246.8" cy="149.5" r="2" fill="rgba(255,255,255,.38)"/>
+    <circle cx="266" cy="238" r="5" fill="url(#p-amber)"/><circle class="spec" cx="265" cy="239.2" r="1.65" fill="rgba(255,255,255,.38)"/>
+  </g>
+  <a class="sun-link" id="starchart-phone-short" href="#" aria-label="Open The Lawsons" data-name="The Lawsons">
+    <defs></defs>
+    <circle cx="190" cy="190" r="60" fill="transparent"/>
+    <g class="sun"><image class="still" href="img/furnace-starchart.webp" x="154.44" y="154.44" width="71.11" height="71.11"/></g>
+    <text class="m" x="190" y="-100" style="font-family:var(--ui)" aria-hidden="true"></text>
+    <text class="name" x="190" text-anchor="middle">The Lawsons</text>
+  </a>
+</svg><canvas style="left:56.00px;top:39.99px;width:66.99px;height:66.99px" aria-hidden="true"></canvas>
+</div>
+<figcaption>phone 358px dial · short</figcaption>
+</figure>
+<figure class="pocket">
+<div class="stage" style="width:179.0px;height:156.4px" data-sun="starchart">
+<svg viewBox="95 112 190 166" width="179.0" height="156.4" role="img" aria-label="The Fitzwilliam-Hargreaves Household under the sun, phone scale">
+  <g aria-hidden="true"><circle cx="104" cy="120" r="0.5" fill="var(--star)" opacity="0.22"/><circle cx="131" cy="247" r="0.7" fill="var(--star)" opacity="0.3"/><circle cx="276" cy="131" r="0.6" fill="var(--star)" opacity="0.28"/><circle cx="238" cy="258" r="0.45" fill="var(--star)" opacity="0.2"/><circle cx="99" cy="190" r="0.8" fill="var(--star)" opacity="0.33"/><circle cx="262" cy="120" r="0.5" fill="var(--star)" opacity="0.25"/><circle cx="150" cy="125" r="0.55" fill="var(--star)" opacity="0.2"/><circle cx="281" cy="215" r="0.7" fill="var(--star)" opacity="0.31"/></g>
+  <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
+  <circle class="r62" cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3" stroke-width="1" stroke-dasharray="3 5"/>
+  <circle class="r106" cx="190" cy="190" r="106" fill="none" stroke="var(--chart-line-soft)" stroke-width=".75"/>
+  <g class="body-link" aria-hidden="true">
+    <circle cx="152" cy="166" r="4.5" fill="url(#p-ruby)"/><circle class="spec" cx="151.1" cy="167.1" r="1.5" fill="rgba(255,255,255,.38)"/>
+    <circle cx="248" cy="148" r="6" fill="url(#p-jade)"/><circle class="spec" cx="246.8" cy="149.5" r="2" fill="rgba(255,255,255,.38)"/>
+    <circle cx="266" cy="238" r="5" fill="url(#p-amber)"/><circle class="spec" cx="265" cy="239.2" r="1.65" fill="rgba(255,255,255,.38)"/>
+  </g>
+  <a class="sun-link" id="starchart-phone-long" href="#" aria-label="Open The Fitzwilliam-Hargreaves Household" data-name="The Fitzwilliam-Hargreaves Household">
+    <defs></defs>
+    <circle cx="190" cy="190" r="60" fill="transparent"/>
+    <g class="sun"><image class="still" href="img/furnace-starchart.webp" x="154.44" y="154.44" width="71.11" height="71.11"/></g>
+    <text class="m" x="190" y="-100" style="font-family:var(--ui)" aria-hidden="true"></text>
+    <text class="name" x="190" text-anchor="middle">The Fitzwilliam-Hargreaves Household</text>
+  </a>
+</svg><canvas style="left:56.00px;top:39.99px;width:66.99px;height:66.99px" aria-hidden="true"></canvas>
+</div>
+<figcaption>phone 358px dial · long</figcaption>
+</figure>
+</div></section><section class="pack" data-theme="dawn"><h2>Dawn (light)</h2><div class="cells"><figure class="desk">
+<div class="stage light" style="width:320.0px;height:279.6px" data-sun="dawn">
+<svg viewBox="95 112 190 166" width="320.0" height="279.6" role="img" aria-label="The Lawsons under the sun, desk scale">
+  <g aria-hidden="true"><circle cx="104" cy="120" r="0.5" fill="var(--star)" opacity="0.22"/><circle cx="131" cy="247" r="0.7" fill="var(--star)" opacity="0.3"/><circle cx="276" cy="131" r="0.6" fill="var(--star)" opacity="0.28"/><circle cx="238" cy="258" r="0.45" fill="var(--star)" opacity="0.2"/><circle cx="99" cy="190" r="0.8" fill="var(--star)" opacity="0.33"/><circle cx="262" cy="120" r="0.5" fill="var(--star)" opacity="0.25"/><circle cx="150" cy="125" r="0.55" fill="var(--star)" opacity="0.2"/><circle cx="281" cy="215" r="0.7" fill="var(--star)" opacity="0.31"/></g>
+  <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
+  <circle class="r62" cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3" stroke-width="1" stroke-dasharray="3 5"/>
+  <circle class="r106" cx="190" cy="190" r="106" fill="none" stroke="var(--chart-line-soft)" stroke-width=".75"/>
+  <g class="body-link" aria-hidden="true">
+    <circle cx="152" cy="166" r="4.5" fill="url(#p-ruby)"/><circle class="spec" cx="151.1" cy="167.1" r="1.5" fill="rgba(255,255,255,.38)"/>
+    <circle cx="248" cy="148" r="6" fill="url(#p-jade)"/><circle class="spec" cx="246.8" cy="149.5" r="2" fill="rgba(255,255,255,.38)"/>
+    <circle cx="266" cy="238" r="5" fill="url(#p-amber)"/><circle class="spec" cx="265" cy="239.2" r="1.65" fill="rgba(255,255,255,.38)"/>
+  </g>
+  <a class="sun-link" id="dawn-desk-short" href="#" aria-label="Open The Lawsons" data-name="The Lawsons">
+    <defs></defs>
+    <circle cx="190" cy="190" r="60" fill="transparent"/>
+    <g class="sun"><image class="still" href="img/furnace-dawn.webp" x="158.89" y="158.89" width="62.22" height="62.22"/></g>
+    <text class="m" x="190" y="-100" style="font-family:var(--ui)" aria-hidden="true"></text>
+    <text class="name" x="190" text-anchor="middle">The Lawsons</text>
+  </a>
+</svg><canvas style="left:107.60px;top:78.97px;width:104.80px;height:104.80px" aria-hidden="true"></canvas>
+</div>
+<figcaption>desk 640px dial · short</figcaption>
+</figure>
+<figure class="desk">
+<div class="stage light" style="width:320.0px;height:279.6px" data-sun="dawn">
+<svg viewBox="95 112 190 166" width="320.0" height="279.6" role="img" aria-label="The Fitzwilliam-Hargreaves Household under the sun, desk scale">
+  <g aria-hidden="true"><circle cx="104" cy="120" r="0.5" fill="var(--star)" opacity="0.22"/><circle cx="131" cy="247" r="0.7" fill="var(--star)" opacity="0.3"/><circle cx="276" cy="131" r="0.6" fill="var(--star)" opacity="0.28"/><circle cx="238" cy="258" r="0.45" fill="var(--star)" opacity="0.2"/><circle cx="99" cy="190" r="0.8" fill="var(--star)" opacity="0.33"/><circle cx="262" cy="120" r="0.5" fill="var(--star)" opacity="0.25"/><circle cx="150" cy="125" r="0.55" fill="var(--star)" opacity="0.2"/><circle cx="281" cy="215" r="0.7" fill="var(--star)" opacity="0.31"/></g>
+  <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
+  <circle class="r62" cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3" stroke-width="1" stroke-dasharray="3 5"/>
+  <circle class="r106" cx="190" cy="190" r="106" fill="none" stroke="var(--chart-line-soft)" stroke-width=".75"/>
+  <g class="body-link" aria-hidden="true">
+    <circle cx="152" cy="166" r="4.5" fill="url(#p-ruby)"/><circle class="spec" cx="151.1" cy="167.1" r="1.5" fill="rgba(255,255,255,.38)"/>
+    <circle cx="248" cy="148" r="6" fill="url(#p-jade)"/><circle class="spec" cx="246.8" cy="149.5" r="2" fill="rgba(255,255,255,.38)"/>
+    <circle cx="266" cy="238" r="5" fill="url(#p-amber)"/><circle class="spec" cx="265" cy="239.2" r="1.65" fill="rgba(255,255,255,.38)"/>
+  </g>
+  <a class="sun-link" id="dawn-desk-long" href="#" aria-label="Open The Fitzwilliam-Hargreaves Household" data-name="The Fitzwilliam-Hargreaves Household">
+    <defs></defs>
+    <circle cx="190" cy="190" r="60" fill="transparent"/>
+    <g class="sun"><image class="still" href="img/furnace-dawn.webp" x="158.89" y="158.89" width="62.22" height="62.22"/></g>
+    <text class="m" x="190" y="-100" style="font-family:var(--ui)" aria-hidden="true"></text>
+    <text class="name" x="190" text-anchor="middle">The Fitzwilliam-Hargreaves Household</text>
+  </a>
+</svg><canvas style="left:107.60px;top:78.97px;width:104.80px;height:104.80px" aria-hidden="true"></canvas>
+</div>
+<figcaption>desk 640px dial · long</figcaption>
+</figure>
+<figure class="pocket">
+<div class="stage light" style="width:179.0px;height:156.4px" data-sun="dawn">
+<svg viewBox="95 112 190 166" width="179.0" height="156.4" role="img" aria-label="The Lawsons under the sun, phone scale">
+  <g aria-hidden="true"><circle cx="104" cy="120" r="0.5" fill="var(--star)" opacity="0.22"/><circle cx="131" cy="247" r="0.7" fill="var(--star)" opacity="0.3"/><circle cx="276" cy="131" r="0.6" fill="var(--star)" opacity="0.28"/><circle cx="238" cy="258" r="0.45" fill="var(--star)" opacity="0.2"/><circle cx="99" cy="190" r="0.8" fill="var(--star)" opacity="0.33"/><circle cx="262" cy="120" r="0.5" fill="var(--star)" opacity="0.25"/><circle cx="150" cy="125" r="0.55" fill="var(--star)" opacity="0.2"/><circle cx="281" cy="215" r="0.7" fill="var(--star)" opacity="0.31"/></g>
+  <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
+  <circle class="r62" cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3" stroke-width="1" stroke-dasharray="3 5"/>
+  <circle class="r106" cx="190" cy="190" r="106" fill="none" stroke="var(--chart-line-soft)" stroke-width=".75"/>
+  <g class="body-link" aria-hidden="true">
+    <circle cx="152" cy="166" r="4.5" fill="url(#p-ruby)"/><circle class="spec" cx="151.1" cy="167.1" r="1.5" fill="rgba(255,255,255,.38)"/>
+    <circle cx="248" cy="148" r="6" fill="url(#p-jade)"/><circle class="spec" cx="246.8" cy="149.5" r="2" fill="rgba(255,255,255,.38)"/>
+    <circle cx="266" cy="238" r="5" fill="url(#p-amber)"/><circle class="spec" cx="265" cy="239.2" r="1.65" fill="rgba(255,255,255,.38)"/>
+  </g>
+  <a class="sun-link" id="dawn-phone-short" href="#" aria-label="Open The Lawsons" data-name="The Lawsons">
+    <defs></defs>
+    <circle cx="190" cy="190" r="60" fill="transparent"/>
+    <g class="sun"><image class="still" href="img/furnace-dawn.webp" x="154.44" y="154.44" width="71.11" height="71.11"/></g>
+    <text class="m" x="190" y="-100" style="font-family:var(--ui)" aria-hidden="true"></text>
+    <text class="name" x="190" text-anchor="middle">The Lawsons</text>
+  </a>
+</svg><canvas style="left:56.00px;top:39.99px;width:66.99px;height:66.99px" aria-hidden="true"></canvas>
+</div>
+<figcaption>phone 358px dial · short</figcaption>
+</figure>
+<figure class="pocket">
+<div class="stage light" style="width:179.0px;height:156.4px" data-sun="dawn">
+<svg viewBox="95 112 190 166" width="179.0" height="156.4" role="img" aria-label="The Fitzwilliam-Hargreaves Household under the sun, phone scale">
+  <g aria-hidden="true"><circle cx="104" cy="120" r="0.5" fill="var(--star)" opacity="0.22"/><circle cx="131" cy="247" r="0.7" fill="var(--star)" opacity="0.3"/><circle cx="276" cy="131" r="0.6" fill="var(--star)" opacity="0.28"/><circle cx="238" cy="258" r="0.45" fill="var(--star)" opacity="0.2"/><circle cx="99" cy="190" r="0.8" fill="var(--star)" opacity="0.33"/><circle cx="262" cy="120" r="0.5" fill="var(--star)" opacity="0.25"/><circle cx="150" cy="125" r="0.55" fill="var(--star)" opacity="0.2"/><circle cx="281" cy="215" r="0.7" fill="var(--star)" opacity="0.31"/></g>
+  <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
+  <circle class="r62" cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3" stroke-width="1" stroke-dasharray="3 5"/>
+  <circle class="r106" cx="190" cy="190" r="106" fill="none" stroke="var(--chart-line-soft)" stroke-width=".75"/>
+  <g class="body-link" aria-hidden="true">
+    <circle cx="152" cy="166" r="4.5" fill="url(#p-ruby)"/><circle class="spec" cx="151.1" cy="167.1" r="1.5" fill="rgba(255,255,255,.38)"/>
+    <circle cx="248" cy="148" r="6" fill="url(#p-jade)"/><circle class="spec" cx="246.8" cy="149.5" r="2" fill="rgba(255,255,255,.38)"/>
+    <circle cx="266" cy="238" r="5" fill="url(#p-amber)"/><circle class="spec" cx="265" cy="239.2" r="1.65" fill="rgba(255,255,255,.38)"/>
+  </g>
+  <a class="sun-link" id="dawn-phone-long" href="#" aria-label="Open The Fitzwilliam-Hargreaves Household" data-name="The Fitzwilliam-Hargreaves Household">
+    <defs></defs>
+    <circle cx="190" cy="190" r="60" fill="transparent"/>
+    <g class="sun"><image class="still" href="img/furnace-dawn.webp" x="154.44" y="154.44" width="71.11" height="71.11"/></g>
+    <text class="m" x="190" y="-100" style="font-family:var(--ui)" aria-hidden="true"></text>
+    <text class="name" x="190" text-anchor="middle">The Fitzwilliam-Hargreaves Household</text>
+  </a>
+</svg><canvas style="left:56.00px;top:39.99px;width:66.99px;height:66.99px" aria-hidden="true"></canvas>
+</div>
+<figcaption>phone 358px dial · long</figcaption>
+</figure>
+</div></section><section class="pack" data-theme="retrograde"><h2>Retrograde (dark)</h2><div class="cells"><figure class="desk">
+<div class="stage" style="width:320.0px;height:279.6px" data-sun="retrograde">
+<svg viewBox="95 112 190 166" width="320.0" height="279.6" role="img" aria-label="The Lawsons under the sun, desk scale">
+  <g aria-hidden="true"><circle cx="104" cy="120" r="0.5" fill="var(--star)" opacity="0.22"/><circle cx="131" cy="247" r="0.7" fill="var(--star)" opacity="0.3"/><circle cx="276" cy="131" r="0.6" fill="var(--star)" opacity="0.28"/><circle cx="238" cy="258" r="0.45" fill="var(--star)" opacity="0.2"/><circle cx="99" cy="190" r="0.8" fill="var(--star)" opacity="0.33"/><circle cx="262" cy="120" r="0.5" fill="var(--star)" opacity="0.25"/><circle cx="150" cy="125" r="0.55" fill="var(--star)" opacity="0.2"/><circle cx="281" cy="215" r="0.7" fill="var(--star)" opacity="0.31"/></g>
+  <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
+  <circle class="r62" cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3" stroke-width="1" stroke-dasharray="3 5"/>
+  <circle class="r106" cx="190" cy="190" r="106" fill="none" stroke="var(--chart-line-soft)" stroke-width=".75"/>
+  <g class="body-link" aria-hidden="true">
+    <circle cx="152" cy="166" r="4.5" fill="url(#p-ruby)"/><circle class="spec" cx="151.1" cy="167.1" r="1.5" fill="rgba(255,255,255,.38)"/>
+    <circle cx="248" cy="148" r="6" fill="url(#p-jade)"/><circle class="spec" cx="246.8" cy="149.5" r="2" fill="rgba(255,255,255,.38)"/>
+    <circle cx="266" cy="238" r="5" fill="url(#p-amber)"/><circle class="spec" cx="265" cy="239.2" r="1.65" fill="rgba(255,255,255,.38)"/>
+  </g>
+  <a class="sun-link" id="retrograde-desk-short" href="#" aria-label="Open The Lawsons" data-name="The Lawsons">
+    <defs></defs>
+    <circle cx="190" cy="190" r="60" fill="transparent"/>
+    <g class="sun"><image class="still" href="img/furnace-retrograde.webp" x="158.89" y="158.89" width="62.22" height="62.22"/></g>
+    <text class="m" x="190" y="-100" style="font-family:var(--ui)" aria-hidden="true"></text>
+    <text class="name" x="190" text-anchor="middle">The Lawsons</text>
+  </a>
+</svg><canvas style="left:107.60px;top:78.97px;width:104.80px;height:104.80px" aria-hidden="true"></canvas>
+</div>
+<figcaption>desk 640px dial · short</figcaption>
+</figure>
+<figure class="desk">
+<div class="stage" style="width:320.0px;height:279.6px" data-sun="retrograde">
+<svg viewBox="95 112 190 166" width="320.0" height="279.6" role="img" aria-label="The Fitzwilliam-Hargreaves Household under the sun, desk scale">
+  <g aria-hidden="true"><circle cx="104" cy="120" r="0.5" fill="var(--star)" opacity="0.22"/><circle cx="131" cy="247" r="0.7" fill="var(--star)" opacity="0.3"/><circle cx="276" cy="131" r="0.6" fill="var(--star)" opacity="0.28"/><circle cx="238" cy="258" r="0.45" fill="var(--star)" opacity="0.2"/><circle cx="99" cy="190" r="0.8" fill="var(--star)" opacity="0.33"/><circle cx="262" cy="120" r="0.5" fill="var(--star)" opacity="0.25"/><circle cx="150" cy="125" r="0.55" fill="var(--star)" opacity="0.2"/><circle cx="281" cy="215" r="0.7" fill="var(--star)" opacity="0.31"/></g>
+  <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
+  <circle class="r62" cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3" stroke-width="1" stroke-dasharray="3 5"/>
+  <circle class="r106" cx="190" cy="190" r="106" fill="none" stroke="var(--chart-line-soft)" stroke-width=".75"/>
+  <g class="body-link" aria-hidden="true">
+    <circle cx="152" cy="166" r="4.5" fill="url(#p-ruby)"/><circle class="spec" cx="151.1" cy="167.1" r="1.5" fill="rgba(255,255,255,.38)"/>
+    <circle cx="248" cy="148" r="6" fill="url(#p-jade)"/><circle class="spec" cx="246.8" cy="149.5" r="2" fill="rgba(255,255,255,.38)"/>
+    <circle cx="266" cy="238" r="5" fill="url(#p-amber)"/><circle class="spec" cx="265" cy="239.2" r="1.65" fill="rgba(255,255,255,.38)"/>
+  </g>
+  <a class="sun-link" id="retrograde-desk-long" href="#" aria-label="Open The Fitzwilliam-Hargreaves Household" data-name="The Fitzwilliam-Hargreaves Household">
+    <defs></defs>
+    <circle cx="190" cy="190" r="60" fill="transparent"/>
+    <g class="sun"><image class="still" href="img/furnace-retrograde.webp" x="158.89" y="158.89" width="62.22" height="62.22"/></g>
+    <text class="m" x="190" y="-100" style="font-family:var(--ui)" aria-hidden="true"></text>
+    <text class="name" x="190" text-anchor="middle">The Fitzwilliam-Hargreaves Household</text>
+  </a>
+</svg><canvas style="left:107.60px;top:78.97px;width:104.80px;height:104.80px" aria-hidden="true"></canvas>
+</div>
+<figcaption>desk 640px dial · long</figcaption>
+</figure>
+<figure class="pocket">
+<div class="stage" style="width:179.0px;height:156.4px" data-sun="retrograde">
+<svg viewBox="95 112 190 166" width="179.0" height="156.4" role="img" aria-label="The Lawsons under the sun, phone scale">
+  <g aria-hidden="true"><circle cx="104" cy="120" r="0.5" fill="var(--star)" opacity="0.22"/><circle cx="131" cy="247" r="0.7" fill="var(--star)" opacity="0.3"/><circle cx="276" cy="131" r="0.6" fill="var(--star)" opacity="0.28"/><circle cx="238" cy="258" r="0.45" fill="var(--star)" opacity="0.2"/><circle cx="99" cy="190" r="0.8" fill="var(--star)" opacity="0.33"/><circle cx="262" cy="120" r="0.5" fill="var(--star)" opacity="0.25"/><circle cx="150" cy="125" r="0.55" fill="var(--star)" opacity="0.2"/><circle cx="281" cy="215" r="0.7" fill="var(--star)" opacity="0.31"/></g>
+  <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
+  <circle class="r62" cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3" stroke-width="1" stroke-dasharray="3 5"/>
+  <circle class="r106" cx="190" cy="190" r="106" fill="none" stroke="var(--chart-line-soft)" stroke-width=".75"/>
+  <g class="body-link" aria-hidden="true">
+    <circle cx="152" cy="166" r="4.5" fill="url(#p-ruby)"/><circle class="spec" cx="151.1" cy="167.1" r="1.5" fill="rgba(255,255,255,.38)"/>
+    <circle cx="248" cy="148" r="6" fill="url(#p-jade)"/><circle class="spec" cx="246.8" cy="149.5" r="2" fill="rgba(255,255,255,.38)"/>
+    <circle cx="266" cy="238" r="5" fill="url(#p-amber)"/><circle class="spec" cx="265" cy="239.2" r="1.65" fill="rgba(255,255,255,.38)"/>
+  </g>
+  <a class="sun-link" id="retrograde-phone-short" href="#" aria-label="Open The Lawsons" data-name="The Lawsons">
+    <defs></defs>
+    <circle cx="190" cy="190" r="60" fill="transparent"/>
+    <g class="sun"><image class="still" href="img/furnace-retrograde.webp" x="154.44" y="154.44" width="71.11" height="71.11"/></g>
+    <text class="m" x="190" y="-100" style="font-family:var(--ui)" aria-hidden="true"></text>
+    <text class="name" x="190" text-anchor="middle">The Lawsons</text>
+  </a>
+</svg><canvas style="left:56.00px;top:39.99px;width:66.99px;height:66.99px" aria-hidden="true"></canvas>
+</div>
+<figcaption>phone 358px dial · short</figcaption>
+</figure>
+<figure class="pocket">
+<div class="stage" style="width:179.0px;height:156.4px" data-sun="retrograde">
+<svg viewBox="95 112 190 166" width="179.0" height="156.4" role="img" aria-label="The Fitzwilliam-Hargreaves Household under the sun, phone scale">
+  <g aria-hidden="true"><circle cx="104" cy="120" r="0.5" fill="var(--star)" opacity="0.22"/><circle cx="131" cy="247" r="0.7" fill="var(--star)" opacity="0.3"/><circle cx="276" cy="131" r="0.6" fill="var(--star)" opacity="0.28"/><circle cx="238" cy="258" r="0.45" fill="var(--star)" opacity="0.2"/><circle cx="99" cy="190" r="0.8" fill="var(--star)" opacity="0.33"/><circle cx="262" cy="120" r="0.5" fill="var(--star)" opacity="0.25"/><circle cx="150" cy="125" r="0.55" fill="var(--star)" opacity="0.2"/><circle cx="281" cy="215" r="0.7" fill="var(--star)" opacity="0.31"/></g>
+  <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
+  <circle class="r62" cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)" stroke-opacity=".3" stroke-width="1" stroke-dasharray="3 5"/>
+  <circle class="r106" cx="190" cy="190" r="106" fill="none" stroke="var(--chart-line-soft)" stroke-width=".75"/>
+  <g class="body-link" aria-hidden="true">
+    <circle cx="152" cy="166" r="4.5" fill="url(#p-ruby)"/><circle class="spec" cx="151.1" cy="167.1" r="1.5" fill="rgba(255,255,255,.38)"/>
+    <circle cx="248" cy="148" r="6" fill="url(#p-jade)"/><circle class="spec" cx="246.8" cy="149.5" r="2" fill="rgba(255,255,255,.38)"/>
+    <circle cx="266" cy="238" r="5" fill="url(#p-amber)"/><circle class="spec" cx="265" cy="239.2" r="1.65" fill="rgba(255,255,255,.38)"/>
+  </g>
+  <a class="sun-link" id="retrograde-phone-long" href="#" aria-label="Open The Fitzwilliam-Hargreaves Household" data-name="The Fitzwilliam-Hargreaves Household">
+    <defs></defs>
+    <circle cx="190" cy="190" r="60" fill="transparent"/>
+    <g class="sun"><image class="still" href="img/furnace-retrograde.webp" x="154.44" y="154.44" width="71.11" height="71.11"/></g>
+    <text class="m" x="190" y="-100" style="font-family:var(--ui)" aria-hidden="true"></text>
+    <text class="name" x="190" text-anchor="middle">The Fitzwilliam-Hargreaves Household</text>
+  </a>
+</svg><canvas style="left:56.00px;top:39.99px;width:66.99px;height:66.99px" aria-hidden="true"></canvas>
+</div>
+<figcaption>phone 358px dial · long</figcaption>
+</figure>
+</div></section></main>
+<script>
+(() => {
+  const CAP = 0.727, RING = 60, LIGHT_TAIL = new Set(['Household', 'Family', 'House', 'Home']);
+  const chord = y => { const d = y - 190; return d >= 62 ? 0 : 2 * Math.sqrt(62 * 62 - d * d) - 8; };
+  const fit = () => {
+    for (const a of document.querySelectorAll('a.sun-link')) {
+      const svg = a.ownerSVGElement, pocket = svg.closest('figure').classList.contains('pocket');
+      const name = a.dataset.name, m = a.querySelector('text.m'), out = a.querySelector('text.name');
+      const s0 = pocket ? 15 : 11, sMin = pocket ? 13.5 : 9.5, top = pocket ? 207 : 205;
+      const words = name.split(' ');
+      const light = words.map(() => false);
+      if (words.length > 1 && /^the$/i.test(words[0])) light[0] = true;
+      if (words.length > 1 && LIGHT_TAIL.has(words[words.length - 1])) light[words.length - 1] = true;
+      if (light.every(Boolean)) light.fill(false);
+      const toks = words.flatMap((w, i) => w.split(/(?<=-)/).map(t => ({ t, lt: light[i] })));
+      const spans = ts => { // tspans for a line's tokens, runs of one weight merged
+        const runs = []; let prev = null;
+        for (const { t, lt } of ts) { const last = runs[runs.length - 1];
+          const text = (prev && !prev.endsWith('-') ? ' ' : '') + t; prev = t;
+          if (last && last.lt === lt) last.t += text; else runs.push({ t: text, lt }); }
+        return runs.map(r => { const el = document.createElementNS(svg.namespaceURI, 'tspan'); el.setAttribute('class', r.lt ? 'lt' : 'hv'); el.textContent = r.t; return el; });
+      };
+      const width = (ts, s) => { m.setAttribute('font-size', s); m.textContent = ''; m.append(...spans(ts)); return m.getComputedTextLength(); };
+      let best = null;
+      for (const [box, ring, from, step] of [[0, RING, s0, -0.5], [118, 72, sMin, 0.5]]) for (let s = from; s >= sMin - 1e-6 && s <= s0 + 1e-6 && !best; s += step) {
+        const limit = y => Math.max(chord(y), box);
+        const lh = s * 1.15, y0 = top + CAP * s;
+        const lines = []; let cur = [];
+        for (const t of toks) {
+          const y = y0 + lines.length * lh;
+          if (cur.length && width([...cur, t], s) > limit(y)) { lines.push(cur); cur = [t]; } else cur.push(t);
+        }
+        if (cur.length) lines.push(cur);
+        const yLast = y0 + (lines.length - 1) * lh;
+        const fits = lines.length <= 3 && lines.every((l, i) => width(l, s) <= limit(y0 + i * lh)) && yLast - 190 + s * 0.25 <= ring;
+        if (fits) best = { s, lines, y0, lh, box };
+      }
+      if (!best) { const s = sMin; best = { s, lines: [toks], y0: top + CAP * s, lh: s * 1.15 }; }
+      out.setAttribute('font-size', best.s); out.textContent = '';
+      best.lines.forEach((l, i) => { const t = document.createElementNS(svg.namespaceURI, 'tspan'); t.setAttribute('x', 190); t.setAttribute('y', (best.y0 + i * best.lh).toFixed(1)); t.append(...spans(l)); out.append(t); });
+      a.dataset.fit = `${best.s}${best.box ? ' (relaxed)' : ''}`;
+    }
+  };
+  Promise.all([document.fonts.load('400 10px "Inter Variable"'), document.fonts.load('650 10px "Inter Variable"')]).then(fit, fit);
+})();
+</script>
+<script>
+(() => {
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce) return;
+  const lin = h => [1, 3, 5].map(i => { const c = parseInt(h.slice(i, i + 2), 16) / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+  const PACKS = {
+    starchart: { light: 0, expo: 1.05, limb: '#f2b64a', mid: '#ffe9c4', core: '#fff6e6', rim: '#ff6e3a', c0: '#fff3dc', c1: '#d8b45a', c2: '#8a6cc0', haze: '#000000' },
+    dawn: { light: 1, expo: 1.0, limb: '#a8420c', mid: '#e18a34', core: '#f3b060', rim: '#7e2c0a', c0: '#000000', c1: '#000000', c2: '#000000', haze: '#eda253' },
+    retrograde: { light: 0, expo: 1.05, limb: '#c81e96', mid: '#ff4fd8', core: '#fff0fb', rim: '#4fe3ff', c0: '#ffd9f5', c1: '#ff4fd8', c2: '#6a3cff', haze: '#000000' },
+  };
+  const FS = `
+precision highp float;
+uniform vec2 uRes; uniform float uT, uPx, uExpo, uLight;
+uniform vec3 uLimb, uMid, uCore, uRim, uC0, uC1, uC2, uHaze;
+float hash3(vec3 i){ return fract(sin(dot(i, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+float vnoise(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  float x0 = mix(hash3(i), hash3(i + vec3(1,0,0)), f.x), x1 = mix(hash3(i + vec3(0,1,0)), hash3(i + vec3(1,1,0)), f.x);
+  float x2 = mix(hash3(i + vec3(0,0,1)), hash3(i + vec3(1,0,1)), f.x), x3 = mix(hash3(i + vec3(0,1,1)), hash3(i + vec3(1,1,1)), f.x);
+  return mix(mix(x0, x1, f.y), mix(x2, x3, f.y), f.z); }
+vec3 tint(float I){ return mix(mix(uLimb, uMid, smoothstep(0.15, 0.85, I)), uCore, smoothstep(0.7, 1.15, I)); }
+vec3 toSrgb(vec3 c){ return mix(c * 12.92, 1.055 * pow(max(c, 0.0), vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
+void main(){
+  vec2 p = (gl_FragCoord.xy - uRes * 0.5) / (uRes.x * UNIT); p.y = -p.y;
+  float r2 = dot(p, p), r = sqrt(r2), mu = sqrt(max(0.0, 1.0 - r2));
+  float cover = clamp((1.0 - r) / uPx + 0.5, 0.0, 1.0);
+  float t = uT;
+  /* the photosphere: Pierce & Slaughter at 5500 Å; granules in two octaves; spots; faculae */
+  float ld = 1.0 - 0.66 * (1.0 - mu) - 0.10 * (1.0 - mu * mu);
+  vec2 q = p / 0.11; vec2 dir = p / max(r, 1e-3);
+  q += dir * dot(dir, q) * (1.0 / max(mu, 0.25) - 1.0) * 0.5;
+  float g1 = 1.0 - abs(vnoise(vec3(q, t * 0.5)) * 2.0 - 1.0), g2 = 1.0 - abs(vnoise(vec3(q * 2.7 + 7.0, t * 0.9)) * 2.0 - 1.0);
+  float gran = smoothstep(0.25, 0.95, g1 * 0.7 + g2 * 0.3);
+  float dark = 1.0;
+  vec3 sp[3]; sp[0] = vec3(-0.42, 0.28, 0.11); sp[1] = vec3(-0.22, 0.33, 0.07); sp[2] = vec3(0.38, -0.47, 0.045);
+  for (int k = 0; k < 3; k++){ float d = length(p - sp[k].xy), sr = sp[k].z;
+    dark *= 0.12 + 0.88 * smoothstep(sr * 0.45, sr * 0.6, d); dark *= 0.72 + 0.28 * smoothstep(sr * 0.9, sr * 1.25, d); }
+  float fac = smoothstep(0.55, 0.9, vnoise(vec3(q * 0.35 + 11.0, 2.0))) * pow(1.0 - mu, 1.5) * 0.5;
+  float I = ld * (0.8 + 0.32 * gran) * dark * (1.0 + fac) * step(r2, 1.0);
+  float h = max(r - 1.0, 0.0);
+  if (uLight > 0.5){
+    /* paper: the sunrise sun, a warm haze; no corona */
+    vec3 col = tint(I * 0.95);
+    float rimk = exp(-pow((r - 1.0) / 0.035, 2.0)) * (1.0 - cover) * 0.9;
+    float ha = (0.62 * exp(-h / 0.32) + 0.30 * exp(-h / 1.4)) * (1.0 - cover) * smoothstep(4.4, 2.8, r);
+    vec3 rgb = col * cover + uRim * rimk + uHaze * (1.0 - rimk) * ha;
+    float a = clamp(cover + rimk + (1.0 - rimk) * ha, 0.0, 1.0);
+    gl_FragColor = vec4(toSrgb(rgb / max(a, 1e-4)) * a, a); return;
+  }
+  vec3 disc = tint(I) * I * uExpo * cover;
+  vec3 hdr = disc + uRim * exp(-pow((r - 1.0) / 0.02, 2.0)) * 0.9 * (1.0 - cover);
+  /* the corona: Baumbach's fall-off, streamers in two scales, drifting */
+  float rr = max(r, 1.0), lr = log(rr), a = atan(p.y, p.x) + t * 0.02;
+  float n1 = vnoise(vec3(cos(a) * 4.0, sin(a) * 4.0, lr * 1.4 + t * 0.1)), n2 = vnoise(vec3(cos(a) * 11.0, sin(a) * 11.0, lr * 2.6 + 3.0 + t * 0.1));
+  float stream = 0.62 + 0.55 * n1 * n1 + 0.22 * n2 * n2 * n2;
+  float fall = 0.45 * pow(rr, -2.5) + 0.35 * pow(rr, -7.0);
+  vec3 ccol = mix(mix(uC0, uC1, smoothstep(0.0, 1.6, lr)), uC2, smoothstep(1.8, 3.6, lr));
+  float edge = smoothstep(4.4, 2.6, r);
+  hdr += ccol * stream * fall * 0.9 * smoothstep(0.98, 1.05, r) * edge;
+  /* the bloom, as the still has it (two gaussians of the disc), in closed form */
+  vec3 bl = tint(0.8) * uExpo * 0.72;
+  hdr += bl * (0.09 * exp(-h * h / 0.1) + 0.07 * exp(-h * h / 1.45) * 0.55) * edge;
+  vec3 rgb = 1.0 - exp(-hdr * 1.6);
+  float lum = max(rgb.r, max(rgb.g, rgb.b));
+  float aOut = max(cover, clamp(lum, 0.0, 1.0));
+  gl_FragColor = vec4(toSrgb(clamp(rgb / max(aOut, 1e-4), 0.0, 1.0)) * aOut, aOut);
+}`.replace('UNIT', String(0.112500));
+  const VS = 'attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}';
+  const live = [];
+  for (const stage of document.querySelectorAll('.stage[data-sun]')) {
+    const cv = stage.querySelector('canvas'); const P = PACKS[stage.dataset.sun];
+    const gl = cv.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: false });
+    if (!gl) continue;
+    const dpr = Math.min(devicePixelRatio || 1, 2); const w = Math.round(parseFloat(cv.style.width) * dpr);
+    cv.width = w; cv.height = w;
+    const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
+    const pr = gl.createProgram(); gl.attachShader(pr, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(pr); gl.useProgram(pr);
+    const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(pr, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    const u = n => gl.getUniformLocation(pr, n);
+    gl.uniform2f(u('uRes'), w, w); gl.uniform1f(u('uPx'), 1 / (w * 0.112500)); gl.uniform1f(u('uExpo'), P.expo); gl.uniform1f(u('uLight'), P.light);
+    for (const k of ['limb', 'mid', 'core', 'rim', 'c0', 'c1', 'c2', 'haze']) gl.uniform3fv(u('u' + k[0].toUpperCase() + k.slice(1)), lin(P[k]));
+    gl.viewport(0, 0, w, w);
+    live.push({ gl, uT: u('uT') }); stage.classList.add('live');
+  }
+  const t0 = performance.now();
+  const frame = () => { const t = (performance.now() - t0) / 1000; for (const { gl, uT } of live) { gl.uniform1f(uT, t); gl.drawArrays(gl.TRIANGLES, 0, 3); } requestAnimationFrame(frame); };
+  if (live.length) requestAnimationFrame(frame);
+})();
+</script></body></html>

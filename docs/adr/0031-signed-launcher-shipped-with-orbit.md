@@ -234,6 +234,14 @@ the `ORBIT_LAUNCHER_INSTALL_SCRIPT_PATH` variable in §6, are changes in the
 orbit-launcher project and need their own issue there; nothing in Orbit
 makes them.
 
+> **Note, 2026-10-07 (#1224):** the developer route in this section is
+> retired. `ORBIT_LAUNCHER_DEVELOPER=1` no longer does anything: there are no
+> launcher releases left to download, so it could not work. The owner decided
+> this on 2026-10-05; the change is orbit-launcher `a6b2d41d` (#188), merged
+> to its `dev`. `get-orbit-launcher.sh` now only points old links at
+> `get-orbit.sh`. Developers build the launcher from source. The text above
+> is left as written.
+
 ## Consequences
 
 - Trust chain for a user: HTTPS → `get-orbit.sh` (embedded key) → signed

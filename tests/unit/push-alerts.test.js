@@ -10,6 +10,7 @@ import {
   currentSubscription,
   disableAlerts,
   enableAlerts,
+  syncAlerts,
 } from "../../web/src/lib/push/alerts.js";
 import { showUrgentCount } from "../../web/src/lib/urgent-badge.js";
 
@@ -69,6 +70,52 @@ describe("currentSubscription", () => {
       navigator: { serviceWorker: { getRegistration: vi.fn(async () => registration) } },
     };
     expect(await currentSubscription(scope)).toBe(subscription);
+  });
+
+  /* Firefox rejects the lookup with AbortError ("Error retrieving push
+     subscription.") when it has no push service to ask or the page is
+     leaving. Nobody is waiting on that answer to show an error: a lookup that
+     could not be had is no subscription, not an unhandled rejection. */
+  it("is null, not a rejection, when the browser cannot answer the lookup", async () => {
+    const registration = fakeRegistration(null);
+    registration.pushManager.getSubscription = vi.fn(async () => {
+      throw new DOMException("Error retrieving push subscription.", "AbortError");
+    });
+    const scope = {
+      ...SUPPORTED_SCOPE,
+      navigator: { serviceWorker: { getRegistration: vi.fn(async () => registration) } },
+    };
+    expect(await currentSubscription(scope)).toBeNull();
+  });
+
+  it("is null when the registration itself cannot be read", async () => {
+    const scope = {
+      ...SUPPORTED_SCOPE,
+      navigator: {
+        serviceWorker: {
+          getRegistration: vi.fn(async () => {
+            throw new DOMException("The operation was aborted.", "AbortError");
+          }),
+        },
+      },
+    };
+    expect(await currentSubscription(scope)).toBeNull();
+  });
+});
+
+describe("syncAlerts — the lookup cannot be had", () => {
+  it("reads as off and sends nothing, rather than rejecting", async () => {
+    const registration = fakeRegistration(null);
+    registration.pushManager.getSubscription = vi.fn(async () => {
+      throw new DOMException("Error retrieving push subscription.", "AbortError");
+    });
+    const scope = {
+      ...SUPPORTED_SCOPE,
+      navigator: { serviceWorker: { getRegistration: vi.fn(async () => registration) } },
+    };
+    const writePushSubscription = vi.fn();
+    await expect(syncAlerts({ scope, writePushSubscription })).resolves.toBeNull();
+    expect(writePushSubscription).not.toHaveBeenCalled();
   });
 });
 

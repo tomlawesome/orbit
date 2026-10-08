@@ -1,11 +1,13 @@
 <script>
   import { onMount } from "svelte";
-  import { createFlight, UP, DOWN } from "./engine.js";
+  import { createFlight, UP, DOWN, PROPS_UP, PROPS_DOWN, homeProps, mirrored } from "./engine.js";
   import {
     ascentBeats, ascentBeatsReduced, descentBeats, descentBeatsReduced,
     newcomerAscentBeats, newcomerAscentBeatsReduced,
     runTimeline, MARK_ARRIVE, MARK_RIDE_UP, MARK_RIDE_DOWN, D,
   } from "./timeline.js";
+  import { journeyClock, WORLD_WAIT } from "./journey-clock.js";
+  import { readyFlight } from "./warm.js";
   import "./flight.css";
 
   /**
@@ -37,7 +39,7 @@
      * WHERE THE CLIMB SETS DOWN (§15 second pass, ruling 4): "home" is the
      * landing every member gets, and "newcomer" is the one a reader who
      * belongs to nothing yet gets — the same flight to the millisecond, the
-     * ratified 3s dwell instead of the trimmed 2s, and the count's own three
+     * site's own dwell and instrument beat (#1222), and the count's own three
      * beats after it. The host draws both; this only says when.
      *
      * "invited" (#871) flies the identical newcomer beats — the host's own
@@ -61,6 +63,15 @@
     onbelong = () => {},
     /* the descent has finished: the reader is on the dusk */
     onfarewell = () => {},
+    /*
+     * THE OTHER HOUSEHOLDS (#1253 ruling 3): the reader's real other
+     * households, passed on the climb and met again on the descent, as
+     * engine.js `othersOf` reads them from the galaxy. Body tones may be CSS
+     * custom property names; they are read as colours when the flight starts.
+     * Empty for a reader with one household: nothing made up passes instead.
+     * Each is { name, bodies: [[x, y, tone, r]] }.
+     */
+    homes = [],
   } = $props();
 
   /** @type {HTMLCanvasElement} */
@@ -86,15 +97,22 @@
   const reduced = () =>
     typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+  /* #1253: the journey keeps its own time (journey-clock.js), so a stall
+     while the flight's world is readied pauses the journey rather than
+     skipping it ahead; the engine and the live beats both read it */
+  const clock = journeyClock();
+
   onMount(() => {
-    const flightEngine = createFlight(canvas);
+    const flightEngine = createFlight(canvas, { now: clock.now });
     engine = flightEngine;
     const onResize = () => flightEngine.resize();
     addEventListener("resize", onResize);
     return () => {
       removeEventListener("resize", onResize);
       cancelTimeline();
+      clock.dispose();
       flightEngine.clear();
+      flightEngine.release();
       reset();
     };
   });
@@ -181,6 +199,51 @@
     markEl.classList.add("collapse");
     restoreGlyphVisibility();
   }
+  /* THE MARK IS FLOWN THROUGH (#1253 ruling 4, orbit-site flight.js
+     flyThroughMark): as the climb comes up to speed the ring opens past the
+     edges of the screen, a thin hoop the camera goes through, tipping a
+     little as the climb steepens, and the gold planet sweeps by close and is
+     gone; the dawn's mark is set back behind it, unseen. Reduced motion, a
+     mark with no circles, and a pinned fixture (whose frame must hold still)
+     drop it as before. */
+  /** @type {Animation[]} */
+  let flyThrough = [];
+  /** @param {boolean} instant */
+  function flyThroughMark(instant) {
+    restoreGlyphVisibility();
+    const svg = markEl.querySelector("svg"), circles = svg ? [...svg.querySelectorAll("circle")] : [];
+    if (!svg || !circles.length || instant || reduced()) { dropMark(); return; }
+    const timing = { duration: 760, easing: "cubic-bezier(.5,0,.9,.5)", fill: /** @type {const} */ ("forwards") };
+    /* the ring's line and halos keep the width they were drawn at (the glyph's
+       200-unit box on screen) while they grow: non-scaling-stroke measures in
+       screen pixels, so the width is handed over in them */
+    const k = svg.getBoundingClientRect().width / 200;
+    for (const c of /** @type {SVGElement[]} */ ([...svg.querySelectorAll("[data-w]")])) {
+      c.style.vectorEffect = "non-scaling-stroke";
+      c.style.strokeWidth = Number(c.dataset.w) * k + "px";
+    }
+    /* everything but the core grows from the ring's centre: the discs, halos
+       and line, and the planet with its wake (the group), which sweeps by */
+    const grow = [...circles, .../** @type {SVGElement[]} */ ([...svg.querySelectorAll(".tr")])];
+    const anims = grow.map((c) => {
+      Object.assign(c.style, { transformOrigin: "100px 100px", transformBox: "view-box" });
+      return c.animate([{ transform: "scale(1)", opacity: 1 }, { transform: "scale(2.4)", opacity: 1, offset: 0.5 }, { transform: "scale(9)", opacity: 0 }], timing);
+    });
+    anims.push(svg.animate([{ transform: "none" }, { transform: "rotateX(-16deg)" }], timing));
+    flyThrough = anims;
+    anims[0].finished.then(() => {
+      markEl.style.transition = "none"; markEl.classList.remove("on");
+      setTimeout(() => { if (flyThrough === anims) settleFlyThrough(); markEl.style.transition = ""; }, 120);
+    }).catch(() => {});
+  }
+  /** Put the mark's ring and planet back as they were drawn. */
+  function settleFlyThrough() {
+    for (const a of flyThrough) a.cancel();
+    flyThrough = [];
+    for (const el of /** @type {SVGElement[]} */ ([...(markEl?.querySelectorAll("[data-w]") ?? [])])) {
+      el.style.vectorEffect = ""; el.style.strokeWidth = "";
+    }
+  }
   /* the way down: the mark appears at centre and rides to the lockup's glyph.
      Same FLIP treatment as liftMark above, mirrored: the box goes straight to
      its resting geometry (the glyph's own rect) and the visual start (centre
@@ -201,6 +264,23 @@
     if (!instant) flip(from, g.left, g.top, g.width, g.height, MARK_RIDE_DOWN);
   }
 
+  /** @typedef {{ name: string, bodies: Array<[number, number, string, number]> }} PassingHome */
+  /** The other households with their tones read as colours, now. */
+  function paintedHomes() {
+    const style = getComputedStyle(document.body);
+    /** @param {string} tone */
+    const colour = (tone) => (tone.startsWith("--") ? style.getPropertyValue(tone).trim() : tone) || "#8fb8ff";
+    return /** @type {PassingHome[]} */ (homes).map((h) => ({ name: h.name, bodies: h.bodies.map((b) => /** @type {[number, number, string, number]} */ ([b[0], b[1], colour(b[2]), b[3]])) }));
+  }
+  /** The climb, carrying the other households past. */
+  function upProfile() {
+    return { ...UP, props: [...PROPS_UP, ...homeProps(paintedHomes())] };
+  }
+  /** The descent, meeting them the other way. */
+  function downProfile() {
+    return { ...DOWN, props: [...PROPS_DOWN, ...mirrored(homeProps(paintedHomes()))] };
+  }
+
   /** @param {number | undefined} pinned */
   function ascentStep(pinned) {
     /** @param {string} act */
@@ -210,7 +290,8 @@
         case "arming": b.classList.add("arming"); break;
         case "warp":
           b.classList.add("showwarp");
-          activeEngine().start(UP, pinned === undefined ? {} : { at: Math.min(pinned, UP.dur) });
+          activeEngine().start(upProfile(), pinned === undefined ? {} : { at: Math.min(pinned, UP.dur) });
+          clock.stalls(activeEngine().drawingWorld);
           break;
         case "mark":
           b.classList.remove("arming");
@@ -218,7 +299,7 @@
                    MARK_ARRIVE, MARK_RIDE_UP, pinned !== undefined);
           break;
         case "release": b.classList.remove("showdawn"); break;
-        case "markOut": dropMark(); break;
+        case "markOut": flyThroughMark(pinned !== undefined); break;
         case "nameOn": nameEl.classList.add("on"); break;
         case "nameOff": nameEl.classList.remove("on"); break;
         case "land":
@@ -254,8 +335,12 @@
         case "disperse": b.classList.add("dispersing"); break;
         case "warp":
           b.classList.add("showwarp");
-          activeEngine().start(DOWN, pinned === undefined
+          activeEngine().start(downProfile(), pinned === undefined
             ? {} : { at: Math.min(Math.max(0, pinned - D.warp), DOWN.dur) });
+          /* #1262: no stall cap here. The reader is already signed out and
+             the dusk is owed on time, so the descent keeps real time as it
+             did on dev, and a slow frame is a dropped frame, never a later
+             farewell (descend() clears the climb's cap). */
           break;
         /* The mockup drops `descending` here because its home frame has a
            hidden base state to fall back to; a real screen does not, so the
@@ -287,9 +372,12 @@
     body().classList.remove("arming", "showdawn", "showwarp", "launching", "bare",
                             "instrument", "withdrawing", "dispersing", "showdusk",
                             "farewell", "pinned", "counting", "belong");
+    body().classList.remove("holding");
+    clock.stalls(false);
     markEl?.classList.remove("on", "collapse");
     nameEl?.classList.remove("on");
     restoreGlyphVisibility();
+    if (markEl) settleFlyThrough();
   }
 
   /**
@@ -311,9 +399,31 @@
         ascentStep(pinned ? at : undefined), pinned ? { at } : {});
       return;
     }
-    cancelTimeline = runTimeline(
-      newcomer ? newcomerAscentBeats() : ascentBeats(),
-      ascentStep(pinned ? at : undefined), pinned ? { at } : {});
+    if (pinned) {
+      cancelTimeline = runTimeline(newcomer ? newcomerAscentBeats() : ascentBeats(), ascentStep(at), { at });
+      return;
+    }
+    /* #1253: the flight's world (voyage.js), readied now and hurried. If it
+       is not ready yet the journey still starts at once, but its opening is
+       the mark lifting to the centre (which needs nothing drawn), and the
+       clock holds just before the warp until the world is ready -- for up
+       to eight seconds once it gets there (WORLD_WAIT: orbit-site's figure,
+       owner 2026-10-07, #1299, superseding #1222's two), and then the
+       flight goes on its own canvas, as ever. A machine refused the GPU
+       has `ready` at once, so it never waits. The hold is on a lit frame: the
+       dawn is up (showdawn, set before the flight starts) and the mark is
+       already at the centre, breathing. */
+    let beats = newcomer ? newcomerAscentBeats() : ascentBeats();
+    const engine = activeEngine();
+    readyFlight({ hurry: true });
+    const ready = engine.warm();
+    if (!engine.world) {
+      const warp = beats.find((b) => b.act === "warp")?.at ?? 0;
+      beats = beats.map((b) => (b.act === "mark" ? { ...b, at: Math.min(b.at, Math.max(0, warp - 80)) } : b));
+      body().classList.add("holding");
+      clock.holdAt(Math.max(0, warp - 10), ready.finally(() => body().classList.remove("holding")), WORLD_WAIT);
+    }
+    cancelTimeline = runTimeline(beats, ascentStep(undefined), clock);
   }
 
   /**
@@ -322,6 +432,9 @@
    */
   export function descend({ at } = {}) {
     cancelTimeline();
+    /* #1262: the climb's warp left the stall cap on (ascentStep); the descent
+       keeps real time, or a slowly drawn world stretches it out of reach */
+    clock.stalls(false);
     subtitleText = "signing out";
     const pinned = typeof at === "number";
     if (pinned) body().classList.add("pinned");
@@ -330,22 +443,42 @@
                                    pinned ? { at } : {});
       return;
     }
+    /* the descent never waits: home readied its world when the sign-out was
+       armed, and if it is not ready by the warp the descent flies on its own
+       canvas, as ever (engine.js decides at the warp) */
+    if (!pinned) {
+      const engine = activeEngine();
+      readyFlight({ hurry: true, gentle: true }).then(() => engine.warm({ make: false }));
+    }
     cancelTimeline = runTimeline(descentBeats(), descentStep(pinned ? at : undefined),
-                                 pinned ? { at } : {});
+                                 pinned ? { at } : clock);
   }
 </script>
 
 <canvas id="warp" aria-hidden="true" bind:this={canvas}></canvas>
 <div id="flightmark" aria-hidden="true" bind:this={markEl}>
-  <!-- Drawn to the HERO's proportions (ring stroke 2, planet r7 of the
-       200-unit box), because that is the mark it takes over from: the swap at
-       260ms happens at the hero's own 420px rect, and anything heavier would
-       pop. The white core is the one thing the hero does not have — it is the
+  <!-- Drawn as the door's own glyph (Dawn.svelte / Dusk.svelte, which are
+       identical here): the lit gradient line with its two halos, the dark and
+       warm discs, the gold planet picture and its wake, all on the glyph's
+       200-unit box with the ring at r72 and the planet at (163, 63.5), because
+       that is the mark the swap takes over from — a flatter ring here would
+       be the ring turning plain the moment the journey starts. The gradient
+       ids carry an fm- prefix so they never meet the glyphs' own on one page.
+       The white core is the one thing the glyph does not have — it is the
        heart lighting as the ring leaves, and the point the sun blooms from. -->
   <svg viewBox="0 0 200 200">
-    <circle cx="100" cy="100" r="72" fill="none" stroke="#e9edf8" stroke-width="2" opacity=".85"/>
+    <defs>
+      <linearGradient id="fm-ringlit" gradientUnits="userSpaceOnUse" x1="0" y1="26" x2="0" y2="174"><stop offset="0" stop-color="#6c76a0" stop-opacity=".6"/><stop offset=".5" stop-color="#aab2cf" stop-opacity=".85"/><stop offset=".86" stop-color="#ead2a4"/><stop offset="1" stop-color="#ffe2a8"/></linearGradient>
+      <radialGradient id="fm-disclit" cx="100" cy="100" r="72" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#03040a" stop-opacity=".55"/><stop offset=".8" stop-color="#05070f" stop-opacity=".35"/><stop offset="1" stop-color="#05070f" stop-opacity="0"/></radialGradient>
+      <radialGradient id="fm-discwarm" cx="100" cy="182" r="70" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ffcf8a" stop-opacity=".16"/><stop offset="1" stop-color="#ffcf8a" stop-opacity="0"/></radialGradient>
+      <linearGradient id="fm-trail" gradientUnits="userSpaceOnUse" x1="46.5" y1="51.8" x2="163" y2="63.5"><stop offset="0" stop-color="#ffd68c" stop-opacity="0"/><stop offset=".46" stop-color="#ffd68c" stop-opacity=".08"/><stop offset="1" stop-color="#ffdea0" stop-opacity=".75"/></linearGradient>
+    </defs>
+    <g class="lux"><circle class="fm-disc" cx="100" cy="100" r="71" fill="url(#fm-disclit)"/><circle class="fm-disc" cx="100" cy="100" r="71" fill="url(#fm-discwarm)"/></g>
+    <g class="lux"><circle class="fm-halo" data-w="9" cx="100" cy="100" r="72" fill="none" stroke="url(#fm-ringlit)" stroke-width="9" stroke-opacity=".05"/>
+    <circle class="fm-halo" data-w="3.6" cx="100" cy="100" r="72" fill="none" stroke="url(#fm-ringlit)" stroke-width="3.6" stroke-opacity=".12"/></g>
+    <circle class="fm-line" data-w="1.6" cx="100" cy="100" r="72" fill="none" stroke="url(#fm-ringlit)" stroke-width="1.6"/>
     <circle class="core" cx="100" cy="100" r="7"/>
-    <circle cx="163" cy="63.5" r="7" fill="#d8b45a"/>
+    <g class="tr"><path d="M46.5 51.8 A72 72 0 0 1 163 63.5" fill="none" stroke="url(#fm-trail)" stroke-width="3.2" stroke-linecap="round"/><image class="fm-planet" href="/flight/door/planet-gold.webp" x="145" y="45.5" width="36" height="36"/></g>
   </svg>
 </div>
 <div id="launchname" aria-hidden="true" bind:this={nameEl}>{name}<i>{subtitleText}</i></div>

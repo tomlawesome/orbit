@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   BLOOM_T0, BLOOM_DUR, DOWN, DOWNDUR, PROPS_DOWN, PROPS_UP, REV, SWEEP, UP, UPDUR,
-  bloomAt, hexa, mirror,
+  bloomAt, hexa, homeProps, mirror, mirrored, othersOf,
 } from "$lib/flight/engine.js";
 import {
   D, MARK_ARRIVE, MARK_RIDE_DOWN, MARK_RIDE_UP, T,
@@ -150,11 +150,13 @@ describe("the wall clock", () => {
        slowed the draw-in; v5 (design/v19/first-run.html at 9476480) landed
        with different figures for the draw-in and wins, per the amendment's
        own rule. Everything either side of it is still the sheet's own. */
-    expect(T.dwell).toBe(2000);
+    expect(T.dwell).toBe(600);
     expect(T.instrument).toBe(1800);
-    /* the dwell comes BEFORE the instrument (§15 second pass, ruling 3) */
-    expect(T.instrumentAt).toBe(8400);
-    expect(T.instrumentAt - T.condensed).toBe(T.dwell);
+    /* THE SITE'S OWN AMENDMENT (orbit-site timeline.js:58-62, #1253): the
+       instrument arrives as the dial finishes settling, 1.1s after the
+       landing, not after the bare sky's dwell */
+    expect(T.instrumentAt).toBe(5900);
+    expect(T.instrumentAt - T.land).toBe(1100);
   });
 
   it("mirrors the name's window on the way down", () => {
@@ -229,13 +231,14 @@ describe("running the timeline", () => {
     const up = ascentBeatsReduced().map((beat) => beat.act);
     /* the sky still lands bare, the three seconds still pass, the instrument
        still arrives after them — and nothing ever asks the canvas to run */
-    expect(up).toEqual(["land", "instrument"]);
-    expect(ascentBeatsReduced()[1].at).toBe(700 + T.dwell);   /* 2700 */
+    /* the release lets the surface it left go (orbit-site timeline.js:53, 57) */
+    expect(up).toEqual(["release", "land", "instrument"]);
+    expect(ascentBeatsReduced()[2].at).toBe(700 + T.dwell);   /* 1300 */
     expect(up).not.toContain("warp");
     const down = descentBeatsReduced().map((beat) => beat.act);
     /* `disperse` takes the landing off the screen — without it the dusk
        arrives on top of a home that is still there. */
-    expect(down).toEqual(["withdraw", "disperse", "dusk", "farewell"]);
+    expect(down).toEqual(["withdraw", "disperse", "release", "dusk", "farewell"]);
     expect(down).not.toContain("warp");
   });
 });
@@ -298,5 +301,34 @@ describe("the flight's skies are seeded, never rolled", () => {
       expect(Boolean(star.delay)).toBe(index % 6 === 0);
     }
     for (const star of DAWN_NEAR) expect(star.delay).toBeNull();
+  });
+});
+
+describe("the climb passes the reader's real other households (#1253 ruling 3)", () => {
+  const galaxy = {
+    mine: { name: "Mine", role: "owner", pos: [0, 0], planets: [[18, 0, 2, "--ok"]] },
+    near: { name: "Near", role: "member", pos: [40, 90], planets: [[0, 30, 2, "--warm"], [-18, 0, 2.5, "--ok"]] },
+  };
+  it("passes everyone but the household in the middle, each planet on its own bearing", () => {
+    const others = othersOf(galaxy, "mine");
+    expect(others.map((h) => h.name)).toEqual(["Near"]);
+    const [[x0, y0, t0, r0], [x1, y1]] = others[0].bodies;
+    expect([Math.round(x0), Math.round(y0), t0, r0]).toEqual([0, 80, "--warm", 3.2]);
+    expect([Math.round(x1), Math.round(y1)]).toEqual([-22, 0]);
+  });
+  it("passes nothing for a reader with one household", () => {
+    expect(othersOf({ mine: galaxy.mine }, "mine")).toEqual([]);
+    expect(homeProps([])).toEqual([]);
+  });
+  it("schedules them as the site's demo flight does, and mirrors them on the way down", () => {
+    const up = homeProps([{ name: "A", bodies: [] }, { name: "B", bodies: [] }]);
+    expect(up.map(({ kind, t0, dur, ang, z }) => ({ kind, t0, dur, ang, z }))).toEqual([
+      { kind: "home", t0: 760, dur: 2000, ang: 44, z: 0.5 },
+      { kind: "home", t0: 1140, dur: 2350, ang: 136, z: 0.42 },
+    ]);
+    const down = mirrored(up);
+    expect(down[0].dur).toBeCloseTo(2000 * REV * SWEEP);
+    expect(down[0].t0).toBeCloseTo((UPDUR - 2760) * REV);
+    expect(down[0].name).toBe("A");
   });
 });

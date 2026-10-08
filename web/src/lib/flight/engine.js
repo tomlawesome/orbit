@@ -22,6 +22,8 @@
  * the reader's pack, PACK is the only object that changes.
  */
 import { seededRng } from "$lib/sky.js";
+import { voyageIfMade, voyageOnce } from "./voyage.js";
+import { chore } from "./chores.js";
 
 /**
  * @typedef {object} Atmosphere
@@ -43,7 +45,7 @@ import { seededRng } from "$lib/sky.js";
  * "con" kind's shape (`pts`) is a fixed, cached Path2D keyed by `shape`
  * instead (#873) — it never varied per run, only per constellation shape.
  * @typedef {object} Prop
- * @property {"grat" | "con" | "sys" | "craft" | "comet"} kind
+ * @property {"grat" | "con" | "sys" | "craft" | "comet" | "home"} kind
  * @property {number} t0
  * @property {number} dur
  * @property {number} ang
@@ -55,6 +57,7 @@ import { seededRng } from "$lib/sky.js";
  * @property {number} [rad]
  * @property {number} [rot0]
  * @property {Array<[number, number, string, number]>} [bodies]
+ * @property {string} [name]                    the "home" kind's household name
  * @property {number} [al]
  * @property {number} [hair]
  */
@@ -194,6 +197,36 @@ export const PROPS_UP = [
   { kind: "sys", t0: 2120, dur: 1350, ang: 108, z: 0.62, k: 5, spin: -0.16 },
 ];
 
+/* THE OTHER HOUSEHOLDS (#1253 ruling 3, orbit-site flight.js demoFlight): the
+   reader's real other households pass on the climb, each with its items as
+   bodies where its dial has them. A reader with one household passes
+   nothing. `homes` is [{ name, bodies:[[x,y,colour,r]] }]. */
+/**
+ * @param {Array<{ name: string, bodies: Array<[number, number, string, number]> }>} homes
+ * @returns {Prop[]}
+ */
+export function homeProps(homes) {
+  const BEAR = [44, 136, 74, 106, 58, 122], ZED = [0.5, 0.42, 0.62, 0.46, 0.56, 0.4];
+  return homes.map((h, i) => ({ kind: "home", name: h.name, bodies: h.bodies, t0: 760 + i * 380, dur: 2000 + (i % 3) * 350, ang: BEAR[i % BEAR.length], z: ZED[i % ZED.length], spin: 0 }));
+}
+/**
+ * The other households as the galaxy holds them (chart.js galaxyOf): each
+ * planet at its own bearing, at the radius the dial would put it. Tones are
+ * left as the galaxy names them; the caller resolves them to colours.
+ * @param {Record<string, { name: string, planets: Array<[number, number, number, string]> }> | null | undefined} galaxy
+ * @param {string | null | undefined} primary
+ * @returns {Array<{ name: string, bodies: Array<[number, number, string, number]> }>}
+ */
+export function othersOf(galaxy, primary) {
+  return Object.entries(galaxy ?? {}).filter(([id]) => id !== primary).map(([, h]) => ({
+    name: h.name,
+    bodies: (h.planets ?? []).map(([dx, dy, , tone]) => {
+      const a = Math.atan2(dy, dx), r = 22 + ((Math.hypot(dx, dy) - 18) / 12) * 58;
+      return /** @type {[number, number, string, number]} */ ([Math.cos(a) * r, Math.sin(a) * r, tone, 3.2]);
+    }),
+  }));
+}
+
 /* ── the two profiles ─────────────────────────────────────────────────────
    UP · 4800ms.  0–300 ignition (the ship is barely moving; the mark flares
    and the card dissolves) · 300–1350 hard acceleration out of the dawn ·
@@ -236,6 +269,10 @@ export const PROPS_DOWN = PROPS_UP.map((g) => ({
   dur: g.dur * REV * SWEEP,
   t0: Math.max(0, (UPDUR - (g.t0 + g.dur)) * REV),
 }));
+/* the descent meets the other households the same way (orbit-site's
+   `mirrored`, flight.js) */
+/** @param {Prop[]} props @returns {Prop[]} */
+export const mirrored = (props) => props.map((g) => ({ ...g, spin: -(g.spin || 0), dur: g.dur * REV * SWEEP, t0: Math.max(0, (UPDUR - (g.t0 + g.dur)) * REV) }));
 
 /** @type {Profile} */
 export const DOWN = {
@@ -296,6 +333,42 @@ export function createFlight(canvas, options = {}) {
   const raf = options.requestFrame ?? ((fn) => requestAnimationFrame(fn));
   const cancel = options.cancelFrame ?? ((id) => cancelAnimationFrame(id));
   const clock = options.now ?? (() => performance.now());
+  /* THE DOOR'S EARTH (#1253): the flight starts on the very picture the dawn
+     shows (static/flight/door/dawn.webp) and lets it go into its own world as
+     the climb gets under way. Asked for by warm(), below. */
+  const earth = typeof Image === "undefined" ? null : new Image();
+  const earthReady = earth
+    ? new Promise((r) => { earth.addEventListener("load", r, { once: true }); earth.addEventListener("error", r, { once: true }); })
+    : Promise.resolve();
+  /* … and a copy of it whose left and right edges fade, so that as the world
+     shrinks the picture's sides never show (made as a chore: it is a large
+     picture to draw on the page's own thread) */
+  /** @type {HTMLCanvasElement | null} */
+  let earthF = null;
+  if (earth) earth.addEventListener("load", () => chore(() => {
+    try {
+      const c = document.createElement("canvas"); c.width = earth.naturalWidth; c.height = earth.naturalHeight;
+      const x = /** @type {CanvasRenderingContext2D} */ (c.getContext("2d"));
+      x.drawImage(earth, 0, 0); x.globalCompositeOperation = "destination-in";
+      const g = x.createLinearGradient(0, 0, c.width, 0);
+      g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(0.025, "#000"); g.addColorStop(0.975, "#000"); g.addColorStop(1, "rgba(0,0,0,0)");
+      x.fillStyle = g; x.fillRect(0, 0, c.width, c.height); earthF = c;
+    } catch { /* the plain picture, then */ }
+  }, 60, "flight"), { once: true });
+  /* THE FLIGHT'S WORLD IN WEBGL2 beneath this canvas (voyage.js): the Earth
+     as a globe, the Milky Way, the streaks as light. Chosen at each flight's
+     start, and only if it is wholly ready then: otherwise (no WebGL2, not
+     ready yet, failed, a pinned fixture) this canvas draws all of it, exactly
+     as it always has. Made when the flight is first readied (warm), never
+     when the page starts. */
+  /** @type {import("./voyage.js").Voyage | null} */
+  let world3d = null;
+  /** @type {import("./voyage.js").Voyage | null} */
+  let voyage = null;
+  /** @type {{ cx: number, cy: number, R: number, alpha: number, c: number } | null} */
+  let worldGL = null;
+  /* the flight's accent among the streaks, as the voyage takes it */
+  const TINT = PACK.accent;
 
   /*
    * #873: every prop pen below used to build a fresh CanvasGradient or trace
@@ -371,6 +444,12 @@ export function createFlight(canvas, options = {}) {
   let rnd = seededRng(FLIGHT_SEED);
   /** @type {Star[]} */
   const STARS = [];
+  /* the celestial sphere (orbit-site engine.js:430-435): the chart's ruling as
+     the sky you move through: its parallels are rings about the way ahead that
+     sweep past with the speed of the flight, its meridians the lines they cross */
+  /** @type {{ r: number, z: number }[]} */
+  const SPHERE = [];
+  const SPHERE_N = 9, MERIDIANS = 15;
   const NEB = NEB_SPEC.map((n) => ({ ...n }));
   /** @type {FlightState | null} */
   let flight = null;
@@ -382,6 +461,7 @@ export function createFlight(canvas, options = {}) {
     canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
     canvas.style.width = W + "px"; canvas.style.height = H + "px";
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    voyage?.resize(W, H);
     return dpr;
   }
 
@@ -406,6 +486,11 @@ export function createFlight(canvas, options = {}) {
         z: 0.28 + rnd() * 0.72, c: starColour(),
       });
     }
+  }
+  /* orbit-site engine.js:468-471 */
+  function seedSphere() {
+    SPHERE.length = 0;
+    for (let i = 0; i < SPHERE_N; i++) SPHERE.push({ r: ((i + 0.5) / SPHERE_N) * RMAX * 0.85, z: 0.14 + (i % 3) * 0.03 });
   }
   /* Running the flight backwards, stars shrink toward the vanishing point
      instead of streaming away from it — so a spent star has to be reborn at
@@ -519,9 +604,26 @@ export function createFlight(canvas, options = {}) {
     ctx.fillStyle = "#fff6e6";
     ctx.beginPath(); ctx.arc(0, 0, 5, 0, 6.284); ctx.fill();
   }
+  /* another household in the galaxy, passing (orbit-site engine.js penHome):
+     its sun, its year as the rings the app draws, its items as bodies where
+     its dial has them, and its name beneath */
+  /** @param {HydratedProp} g @param {number} [_t] */
+  function penHome(g, _t) {
+    ctx.lineWidth = g.hair; ctx.globalAlpha = g.al * 0.9;
+    ctx.strokeStyle = PACK.pen; ctx.stroke(systemRing78);
+    ctx.strokeStyle = PACK.penLo; ctx.stroke(systemRing52);
+    ctx.globalAlpha = g.al;
+    ctx.fillStyle = PACK.sun; ctx.fill(systemSunDot);
+    for (const b of g.bodies ?? []) { ctx.fillStyle = b[2]; ctx.beginPath(); ctx.arc(b[0], b[1], b[3], 0, 6.284); ctx.fill(); }
+    ctx.font = "500 13px 'JetBrains Mono Variable', 'JetBrains Mono', monospace"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    try { ctx.letterSpacing = "2.5px"; } catch { /* fine */ }
+    ctx.fillStyle = PACK.penHi; ctx.globalAlpha = g.al * 0.85;
+    ctx.fillText((g.name ?? "").toUpperCase(), 0, 96);
+    try { ctx.letterSpacing = "0px"; } catch { /* fine */ }
+  }
   const PEN = {
     con: penConstellation, sys: penSystem, grat: penGraticule,
-    craft: penCraft, comet: penComet,
+    craft: penCraft, comet: penComet, home: penHome,
   };
 
   /** @param {number} b */
@@ -546,7 +648,9 @@ export function createFlight(canvas, options = {}) {
     g.addColorStop(0.70, hexa(PACK.accent, peak * 0.15));
     g.addColorStop(1, hexa(PACK.accent, 0));
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    /* two hairline shockwaves, and no more than two */
+    /* two hairline shockwaves, and no more than two (the voyage draws its
+       own, bending the light it crosses) */
+    if (voyage) return;
     ctx.lineWidth = 1.3;
     for (const [off, mul] of [[0, 0.48], [0.26, 0.22]]) {
       const q = Math.max(0, b - off);
@@ -567,7 +671,9 @@ export function createFlight(canvas, options = {}) {
     if (alpha <= 0.002) return;
     const s = Math.max(W / 1600, H / 1000);
     /** @param {number} y */
-    const my = (y) => H / 2 + (y - 500) * s;
+    /* #1253: the frame is laid bottom-up, as the dawn now lays it (xMidYMax
+       slice): on a wide screen the crop comes off the top, never the Earth */
+    const my = (y) => H - (1000 - y) * s;
     const R0 = 3000 * s, top0 = my(920);
     /* the camera holds the world in frame for a beat (it rises), then lets go */
     const topY = top0 - Math.sin(Math.min(c, 1) * Math.PI) * 0.17 * H
@@ -610,11 +716,31 @@ export function createFlight(canvas, options = {}) {
       ctx.arc(cx, topY + 30 * s, 620 * s * (1 - c * 0.5), 0, 6.284); ctx.fill();
     }
 
+    /* how much of the door's own Earth is still in the picture: all of it at
+       the start, gone before the world has shrunk enough to show its edges */
+    const ea = pal.hasSun && earth && earth.complete && earth.naturalWidth ? Math.max(0, Math.min(1, (R / R0 - 0.93) / 0.07)) : 0;
+    /** the picture: the frame's rows 640..1000, scaled about the world's centre as the world falls away */
+    const picture = () => {
+      if (ea <= 0.002 || !earth) return;
+      const u = s * (R / R0);
+      ctx.save(); ctx.globalAlpha = alpha * ea;
+      ctx.drawImage(earthF || earth, cx - 800 * u, cy + (640 - 3920) * u, 1600 * u, 360 * u);
+      ctx.restore();
+    };
+    /* with the voyage, the Earth, its air and its limb are drawn there, on
+       this same circle; only the door's picture is laid over it here, while
+       it lasts */
+    if (voyage && pal.hasSun) {
+      worldGL = { cx, cy, R, alpha, c };
+      picture();
+      return;
+    }
+
     /* atmospheric scattering hugging the limb, outside in */
     ctx.save();
     ctx.lineCap = "butt";
     for (const [w, col, al] of pal.bands) {
-      ctx.strokeStyle = hexa(col, al * fade);
+      ctx.strokeStyle = hexa(col, al * fade * (1 - ea));
       ctx.lineWidth = w * s * (0.35 + 0.65 * R / R0) + 2;
       ctx.filter = "blur(" + (w > 40 ? 16 : w > 15 ? 8 : 3) + "px)";
       ctx.beginPath(); ctx.arc(cx, cy, R + ctx.lineWidth * 0.35, 0, 6.284); ctx.stroke();
@@ -628,13 +754,14 @@ export function createFlight(canvas, options = {}) {
     ctx.fillStyle = pal.ground;
     ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.284); ctx.fill();
     const rimg = ctx.createLinearGradient(0, topY - 10, 0, topY + 80);
-    rimg.addColorStop(0, hexa(pal.rim1, 0.9)); rimg.addColorStop(1, hexa(pal.rim2, 0.5));
+    rimg.addColorStop(0, hexa(pal.rim1, 0.9 * (1 - ea))); rimg.addColorStop(1, hexa(pal.rim2, 0.5 * (1 - ea)));
     ctx.strokeStyle = rimg; ctx.lineWidth = Math.max(1.4, 2.6 * s);
     ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.284); ctx.stroke();
-    ctx.filter = "blur(7px)"; ctx.globalAlpha = 0.55 * alpha;
+    ctx.filter = "blur(7px)"; ctx.globalAlpha = 0.55 * alpha * (1 - ea);
     ctx.lineWidth = Math.max(3, 6 * s);
     ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.284); ctx.stroke();
     ctx.restore();
+    picture();
   }
 
   /* ── one frame, at flight time `t` with step `dt` seconds ──────────────── */
@@ -654,10 +781,12 @@ export function createFlight(canvas, options = {}) {
 
     ctx.setTransform(active.dpr, 0, 0, active.dpr, 0, 0);
     ctx.globalAlpha = 1;
-    ctx.fillStyle = PACK.bg;
-    ctx.fillRect(0, 0, W, H);
+    worldGL = null;
+    /* with the voyage beneath, this canvas carries only what lies over it */
+    if (voyage) ctx.clearRect(0, 0, W, H);
+    else { ctx.fillStyle = PACK.bg; ctx.fillRect(0, 0, W, H); }
 
-    for (const n of NEB) {
+    if (!voyage) for (const n of NEB) {
       n.p += v * dt * 0.085;
       if (n.p > 1.25) n.p -= 1.45;
       else if (n.p < -0.20) n.p += 1.45;   /* dust falls the other way, reversed */
@@ -682,7 +811,7 @@ export function createFlight(canvas, options = {}) {
     }
     /* the way ahead: a faint bloom on the vanishing point, brighter the faster
        you go — the only thing on this canvas that says "forward" by itself */
-    if (av > 0.05) {
+    if (av > 0.05 && !voyage) {
       const g = ctx.createRadialGradient(VPX, VPY, 0, VPX, VPY, DIAG * 1.05);
       g.addColorStop(0, hexa("#7f93c8", 0.16 * av));
       g.addColorStop(0.34, hexa("#3d4f86", 0.07 * av));
@@ -690,17 +819,46 @@ export function createFlight(canvas, options = {}) {
       ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
     }
 
+    /* the sphere, ruled faint beneath the stars (orbit-site engine.js:834-857): its
+       rings ride the same law as the streaks, only slower, so they read as the
+       far sky */
+    if (av > 0.02 && !voyage) {
+      const lift = Math.min(1, (av - 0.02) / 0.3);
+      ctx.strokeStyle = PACK.pen; ctx.lineWidth = 1.1;
+      for (const ring of SPHERE) {
+        ring.r *= (1 + v * dt * P.K * ring.z);
+        if (ring.r > RMAX * 0.98 || ring.r < 24) { ring.r = active.rev ? RMAX * 0.9 : 24 + rnd() * 40; }
+        const a = 0.26 * lift * Math.min(1, ring.r / 260) * Math.min(1, (RMAX - ring.r) / (RMAX * 0.35));
+        if (a <= 0.004) continue;
+        ctx.globalAlpha = a;
+        ctx.beginPath(); ctx.arc(VPX, VPY, ring.r, A0 - 0.2, A1 + 0.2); ctx.stroke();
+      }
+      ctx.globalAlpha = 0.10 * lift;
+      ctx.beginPath();
+      for (let k = 0; k < MERIDIANS; k++) {
+        const a = A0 + (k + 0.5) / MERIDIANS * (A1 - A0);
+        ctx.moveTo(VPX + Math.cos(a) * 180, VPY + Math.sin(a) * 180);
+        ctx.lineTo(VPX + Math.cos(a) * RMAX, VPY + Math.sin(a) * RMAX);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
     /* stars — additive, so the dense lanes bloom where they cross */
     ctx.lineCap = "round";
     ctx.globalCompositeOperation = "lighter";
-    for (const st of STARS) {
+    if (voyage) voyage.advance(v, dt, P.K);
+    else for (const st of STARS) {
       st.r *= (1 + v * dt * P.K * st.z);
       if (st.r > RMAX || st.r < 1) { respawn(st, active.rev); continue; }
       const x1 = VPX + Math.cos(st.a) * st.r, y1 = VPY + Math.sin(st.a) * st.r;
       if (x1 < -420 || x1 > W + 420 || y1 < -520 || y1 > H + 520) continue;
       const near = Math.min(1, st.r / RMAX);
       const al = Math.min(1, (0.10 + 0.95 * near) * (0.35 + 0.65 * st.z));
-      const r0 = st.r / (1 + v * SHUTTER * P.K * st.z);
+      /* at speed the exposure lengthens and the streak thins: the feel of pace,
+         not just its measure (orbit-site engine.js:867-870, 879) */
+      const rush = av * av;
+      const r0 = st.r / (1 + v * SHUTTER * (1 + 0.9 * rush) * P.K * st.z);
       const x0 = VPX + Math.cos(st.a) * r0, y0 = VPY + Math.sin(st.a) * r0;
       const len = Math.hypot(x1 - x0, y1 - y0);
       ctx.globalAlpha = al;
@@ -709,12 +867,24 @@ export function createFlight(canvas, options = {}) {
         ctx.beginPath(); ctx.arc(x1, y1, 0.55 + 1.15 * near * st.z, 0, 6.284); ctx.fill();
       } else {
         ctx.strokeStyle = st.c;
-        ctx.lineWidth = 0.55 + 1.9 * near * st.z;
+        ctx.lineWidth = (0.55 + 1.9 * near * st.z) * (1 - 0.32 * rush);
         ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
       }
     }
     ctx.globalCompositeOperation = "source-over";
     ctx.globalAlpha = 1;
+    /* the doppler wash (orbit-site engine.js:885-897): the sky ahead shifts cool
+       and the edges warm, rising with the square of the speed so it lives only
+       at the fastest point and is gone before the landing */
+    if (av > 0.55 && !voyage) {
+      const d = Math.pow((av - 0.55) / 0.45, 2) * 0.16;
+      const g = ctx.createRadialGradient(VPX, VPY, 0, VPX, VPY, DIAG * 0.9);
+      g.addColorStop(0, hexa("#8fb8ff", d));
+      g.addColorStop(0.42, hexa("#8fb8ff", 0));
+      g.addColorStop(0.78, hexa("#e2772b", 0));
+      g.addColorStop(1, hexa("#e2772b", d * 0.55));
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    }
 
     /* props: relative motion does not stop when the engine does — a prop that
        is still on screen when you brake keeps sailing out of frame. Reversed,
@@ -722,6 +892,10 @@ export function createFlight(canvas, options = {}) {
        vanishing point: p runs 1 → 0 instead of 0 → 1. */
     for (const g of active.props) {
       if (t < g.t0) continue;
+      /* over the voyage's sky only the traffic that is real passes: the
+         other households. The made-up craft, systems, comets and rulings are
+         left out, as the site's own flight leaves them out (#1253 ruling 3) */
+      if (voyage && g.kind !== "home") continue;
       const advance = Math.max(av, 0.50) * (dt * 1000) / g.dur;
       /* prime() has already set every prop's `p` before step() ever runs. */
       g.p = /** @type {number} */ (g.p) + (active.rev ? -advance : advance);
@@ -750,12 +924,31 @@ export function createFlight(canvas, options = {}) {
 
     /* THE REVEAL, read forwards on the climb and backwards on the descent —
        so the arrival's slow bloom is also the departure's slow contraction. */
-    drawBloom(bloomAt(active.rev ? mirror(tc) : tc));
+    const q = bloomAt(active.rev ? mirror(tc) : tc);
+    /* with the voyage, its star carries the first of the bloom; this canvas's
+       own takes over only for the last of it, so the landing is handed the
+       same full light as ever */
+    drawBloom(voyage ? Math.max(0, (q - 0.45) / 0.55) : q);
+
+    /* and the world beneath, in the same frame */
+    if (voyage) {
+      const n = parseInt(TINT.slice(1), 16);
+      /** @param {number} x */
+      const lin = (x) => Math.pow(x / 255, 2.2) * 2.5;
+      voyage.draw({
+        t, v, K: P.K, vp: [VPX, VPY], rmax: RMAX, tint: [lin((n >> 16) & 255), lin((n >> 8) & 255), lin(n & 255)],
+        progress: active.rev ? 1 - tc / P.dur : tc / P.dur, world: worldGL, bloom: q,
+        tu: active.rev ? mirror(tc) : tc, star: true,
+        bloomPt: [W / 2, H * 0.5], dt: dt * 1000,
+      });
+    }
   }
 
-  /** @param {number} now */
-  function frame(now) {
+  function frame() {
     if (!flight) return;
+    /* the flight's own clock (options.now): Flight.svelte gives it the
+       journey's, which a stall pauses rather than skips */
+    const now = clock();
     const active = flight;
     const t = now - active.start;
     const dt = Math.min(48, now - active.last) / 1000;
@@ -765,11 +958,18 @@ export function createFlight(canvas, options = {}) {
     else { flightRaf = 0; flight = null; }
   }
 
-  /** @param {Profile} P */
-  function prime(P) {
+  /** @param {Profile} P @param {boolean} [pinned] */
+  function prime(P, pinned = false) {
     rnd = seededRng(FLIGHT_SEED);
+    /* the world beneath, for this flight only if it is wholly ready now; a
+       pinned fixture always draws as it always has, so its frame is the same
+       every time */
+    voyage = !pinned && world3d?.ready ? world3d : null;
+    /* visibility, not display: the canvas stays rendered (at opacity 0 until
+       the warp), so its fade in with #warp is a transition, never a cut */
+    if (world3d) world3d.canvas.style.visibility = voyage ? "" : "hidden";
     const dpr = sizeCanvas();
-    setCamera(P); seedStars();
+    setCamera(P); seedStars(); seedSphere();
     for (const g of P.props) {
       g.p = P.rev ? 1 : 0;             /* reversed, the traffic starts at the edge */
       g.rad = g.ang * Math.PI / 180;
@@ -782,9 +982,41 @@ export function createFlight(canvas, options = {}) {
       n.p = n.p0;                      /* every run starts from the same dust */
     }
     flight = { P, rev: !!P.rev, start: clock(), last: clock(), props: P.props, dpr };
+    voyage?.reset();
   }
 
   return {
+    /**
+     * Everything the flight draws, fetched and made ready before it is
+     * wanted; resolves when it is (or when it is clear it never will be: the
+     * flight then draws on this canvas alone). The pictures start down the
+     * wire at once; what goes on the GPU waits its turn as chores
+     * (chores.js), so the caller decides when that may begin. `make: false`
+     * adopts the page's world only if something has already made it, and
+     * never starts its compile.
+     * @param {{ make?: boolean }} [how]
+     * @returns {Promise<void>}
+     */
+    warm({ make = true } = {}) {
+      if (earth && !earth.src) earth.src = "/flight/door/dawn.webp";
+      if (!world3d) {
+        world3d = make ? voyageOnce() : voyageIfMade();
+        if (world3d) { world3d.attach(canvas); world3d.canvas.style.visibility = "hidden"; }
+      }
+      const w3 = world3d;
+      return Promise.all([earthReady, w3 ? w3.warm() : null]).then(() => {}, () => {});
+    },
+    /** the flight's canvas is going: take the world's out of the page too
+        (it stays made, for the next flight on this page to adopt) */
+    release() {
+      this.stop();
+      world3d?.canvas.remove();
+      world3d = null; voyage = null;
+    },
+    /** whether the flight under way is drawn over the WebGL2 world */
+    get drawingWorld() { return flight !== null && voyage !== null; },
+    /** whether the next flight will be drawn over the WebGL2 world */
+    get world() { return !!world3d?.ready; },
     /**
      * Fly. `at` pins the flight to one beat instead of running it: the
      * simulation is stepped at a fixed 60fps up to that millisecond and the
@@ -795,7 +1027,7 @@ export function createFlight(canvas, options = {}) {
      */
     start(P, { at } = {}) {
       this.stop();
-      prime(P);
+      prime(P, typeof at === "number");
       if (typeof at === "number") {
         for (let t = 0; t <= at; t += PINNED_STEP) step(t, PINNED_STEP / 1000);
         flight = null;
@@ -811,6 +1043,7 @@ export function createFlight(canvas, options = {}) {
       this.stop();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      world3d?.clear();
     },
     /* a resize mid-flight re-seeds the field, as the mockup does */
     resize() {

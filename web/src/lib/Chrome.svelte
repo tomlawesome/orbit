@@ -1,6 +1,7 @@
 <script>
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
+  import { tick } from "svelte";
   import { signOut } from "$lib/data/workspace.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
   import { SWATCHES, applyTheme } from "$lib/theme-swatches.js";
@@ -37,6 +38,9 @@
     ["inbox", "Inbox", "/inbox"],
     ["settings", "Settings", "/settings"],
     ["administration", "Administration", "/administration"],
+    /* #1256: last in every menu, for every member -- the credits reach
+       everyone who uses what they credit. */
+    ["about", "About", "/about"],
   ];
   /* The five swatches and the act of choosing one: $lib/theme-swatches.js,
      shared with the pocket hatch (#1120). */
@@ -80,34 +84,75 @@
   const isAdmin = $derived(Boolean(page.data?.isAdmin));
 
   /*
-   * Signing out from a sub-screen (#410, §15).
+   * Signing out from any page (#410, §15, #1253).
    *
-   * Two taps, and the second one REVOKES before it navigates: this control
-   * used to walk to /logout without ending anything, which meant the goodbye
-   * screen was a picture of a sign-out rather than a sign-out. The session is
-   * gone before the reader leaves this page.
+   * One press (owner, 2026-10-06), and it REVOKES before anything is shown:
+   * the session is gone before the descent begins, so a lid closed mid-flight
+   * can never leave a live session behind.
    *
-   * The ratified DESCENT — instrument withdrawing, bodies dispersing, the
-   * bloom read backwards — belongs to home, because home is the surface that
-   * has an instrument and bodies to take away. From a sub-screen there is
-   * nothing to withdraw, so the reader is handed to the dusk directly.
-   * Carrying the full flight onto every sub-screen is a follow-up, not a
-   * silent invention.
+   * Then the reader gets the ratified DESCENT, the same one home plays
+   * (owner, 2026-10-07: "signing out should always play the reverse flight.
+   * No matter where you are."). It is $lib/flight/Leave.svelte, shared with
+   * home, and it is imported only when the menu is opened or a sign-out is
+   * pressed, so a page that is never signed out from does not carry the
+   * flight. The hatch below hands its sign-out to it as well.
    */
-  let armedOut = $state(false);
+  /** @type {import('svelte').Component<any> | null} */
+  let LeaveView = $state(null);
+  /** @type {{ ready: () => void, descendFrom: (redirectTo: string | null) => Promise<void> } | null} */
+  let leave = $state(null);
+  /** @type {Promise<void> | null} */
+  let loading = null;
+  /** Fetches the flight code once; false if it could not be had. */
+  function loadLeave() {
+    loading ??= import("$lib/flight/Leave.svelte").then((m) => { LeaveView = m.default; });
+    return loading;
+  }
+  /* the menu opened: fetch the flight and ready its world, so both are there
+     by the time the press has revoked the session */
+  async function wake() {
+    try { await loadLeave(); } catch { loading = null; return; }
+    await tick();
+    leave?.ready();
+  }
+  /** @param {string | null} redirectTo the provider's own logout URL, if any */
+  async function descend(redirectTo) {
+    try {
+      await loadLeave();
+      await tick();
+      if (!leave) throw new Error("no flight");
+    } catch {
+      /* the flight cannot be had: the reader is signed out all the same, and
+         the dusk is at /logout */
+      loading = null;
+      location.href = "/logout";
+      return;
+    }
+    await leave.descendFrom(redirectTo);
+  }
+
+  /* set while the request is in flight, so a second press never fires a
+     second, concurrent signOut() (#1151 W1-R7, as home has it) */
+  let signingOut = $state(false);
   /** @type {string | null} */
   let signOutProblem = $state(null);
   async function tapSignOut() {
-    if (!armedOut) { armedOut = true; return; }
+    if (signingOut) return;
+    signingOut = true;
     signOutProblem = null;
+    /** @type {string | null} */
+    let redirectTo = null;
     try {
-      await signOut();
+      redirectTo = await signOut();
     } catch (error) {
-      armedOut = false;
+      signingOut = false;
       signOutProblem = /** @type {{ message?: string }} */ (error)?.message ?? "still signed in — try again";
       return;
     }
-    location.href = "/logout";
+    /* #1262: the menu closes as the sign-out goes ahead, never left standing
+       over the descent */
+    open = false;
+    await descend(redirectTo);
   }
 
   /*
@@ -136,7 +181,7 @@
      straight through as an opaque string. -->
 <a class="back" href={back === "/settings" ? resolve("/settings") : resolve("/home")}>{backLabel}</a>
 <button class="orb" aria-expanded={open} aria-controls="account" title="Menu"
-        onclick={() => (open = !open)}>{initials}</button>
+        onclick={() => { open = !open; if (open) void wake(); }}>{initials}</button>
 <div class="account" class:open id="account" role="region" aria-label="Account and menu">
   <div class="who"><b>{user?.displayName ?? ""}</b><span>{role}</span></div>
   <nav>
@@ -144,6 +189,7 @@
       <a href={href === "/item" ? resolve("/item")
           : href === "/inbox" ? resolve("/inbox")
           : href === "/settings" ? resolve("/settings")
+          : href === "/about" ? resolve("/about")
           : resolve("/administration")} aria-current={key === current ? "page" : undefined}>{label}</a>
     {/each}
   </nav>
@@ -156,7 +202,7 @@
   </div>
   <!-- Beside the theme, as on the phone (#1189). -->
   <button class="watch" onclick={() => { open = false; void watchTour(); }}>↻ watch the tour</button>
-  <button class="signout" onclick={tapSignOut}>{armedOut ? "tap again to sign out" : "sign out →"}</button>
+  <button class="signout" onclick={tapSignOut} disabled={signingOut}>sign out →</button>
   {#if signOutProblem}<div class="signout-problem">{signOutProblem}</div>{/if}
 </div>
 
@@ -168,7 +214,12 @@
     {/snippet}
   </TopChrome>
 </div>
-<Hatch bind:open={hatchOpen} name={user?.displayName ?? ""} roleLine={role} {current} {isAdmin} />
+<Hatch bind:open={hatchOpen} name={user?.displayName ?? ""} roleLine={role} {current} {isAdmin}
+       onopened={wake} onsignedout={descend} />
+{#if LeaveView}
+  <!-- no household name to hand on a page that is not home's: the void's name line is empty -->
+  <LeaveView bind:this={leave} />
+{/if}
 
 <style>
   /*
@@ -238,6 +289,42 @@
   .signout{font:12px var(--mono);color:var(--ink-quiet);background:none;border:0;cursor:pointer;padding:0}
   .signout:hover{color:var(--overdue-text)}
   .signout-problem{font:10.5px var(--mono);color:var(--overdue-text);margin-top:7px;line-height:1.7}
+
+  /*
+   * LEAVING, in home's own beats (#1253; owner ruling 2026-10-07): when the
+   * descent plays over one of these pages, the page's header, nav and hatch
+   * go first (chromeout, beat 0, home's `withdrawing`), then the page fades
+   * as home's own `.desk` does (beat 620, `dispersing`), so nothing of it
+   * stands over the dusk. The body classes are Flight.svelte's.
+   *
+   * The pages share no one wrapper, and each draws its desk and its phone
+   * (pocket) markup as separate roots, so the roots are listed here rather
+   * than every page re-marked: `.page` is the settings, inbox, about,
+   * household and administration desks'; `.belt-page`, `.stage` and
+   * `main.kit` are the belt, create/mail and kit ones; the `*-pocket` and
+   * `pk-*` classes are the phone dialects'. A new page that renders Chrome
+   * adds its root here, never a root that contains Chrome itself (the
+   * dusk is drawn inside it, and would go too: settings' `.helm-page`).
+   * The chrome itself
+   * (way back, orb, the pocket's top bar) goes with the page: `withdrawing`
+   * ends at the next beat, so `dispersing` keeps it gone.
+   */
+  :global(body.withdrawing .page > :is(header,nav,.hatch)){animation:chromeout .45s ease both}
+  :global(body.withdrawing :is(.back,.orb,.p-chrome)){animation:chromeout .45s ease both}
+  :global(body.dispersing :is(.page,.belt-page,.stage,main.kit,
+      .st-pocket,.pk-inbox,.ad-pocket,.pk-create,.hh-pocket,.rl-pocket,
+      .back,.orb,.account,.p-chrome)){
+    opacity:0;visibility:hidden;pointer-events:none;
+    transition:opacity .7s ease .15s,visibility 0s linear .85s}
+  :global(body.pinned :is(.page,.belt-page,.stage,main.kit,
+      .st-pocket,.pk-inbox,.ad-pocket,.pk-create,.hh-pocket,.rl-pocket,
+      .back,.orb,.account,.p-chrome)){transition:none!important}
+  @media (prefers-reduced-motion:reduce){
+    :global(body.withdrawing .page > *),:global(body.withdrawing :is(.back,.orb,.p-chrome)){animation:none!important}
+    :global(body.dispersing :is(.page,.belt-page,.stage,main.kit,
+        .st-pocket,.pk-inbox,.ad-pocket,.pk-create,.hh-pocket,.rl-pocket,
+        .back,.orb,.account,.p-chrome)){transition:none}
+  }
 
   /* The dialect switch (CON-10), the same query as home's pocket.css and
      $lib/pocket/media.js. Above it nothing here changes the desk. */

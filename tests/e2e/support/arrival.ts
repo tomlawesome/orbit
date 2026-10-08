@@ -16,9 +16,9 @@ import type { Page } from "@playwright/test";
  * navigation rather than the redirect that cancelled it.
  *
  * Waiting for the decision to land first removes the race: either the
- * arrival has already left for /home, or it is showing one of its two stages
- * -- CREATE (`#gobtn`) or NEWCOMER ("where do you belong?") -- and from
- * there it never navigates again without the reader.
+ * arrival has already left for /home, or it is showing the newcomer's
+ * question ("where do you belong?", whose drawer holds `#gobtn` since #1263)
+ * -- and from there it never navigates again without the reader.
  *
  * Sign-in that lands somewhere else entirely is left alone: a spec whose
  * account already has a household never meets the arrival, and this returns
@@ -50,8 +50,23 @@ export async function settleArrival(page: Page, timeout = 20_000, returnTo?: str
 export async function witnessBodyClasses(page: Page) {
   await page.addInitScript(() => {
     const seen = new Set<string>();
+    /* #1263: how many times each class was put ON, so "the climb flew once"
+       is a number and not just a sighting. */
+    const added = new Map<string, number>();
+    const order: string[] = [];
+    let wearing = new Set<string>();
+    (window as unknown as { __orbitBodyClassOrder: string[] }).__orbitBodyClassOrder = order;
     (window as unknown as { __orbitBodyClasses: Set<string> }).__orbitBodyClasses = seen;
-    const note = () => document.body?.classList.forEach((name) => seen.add(name));
+    (window as unknown as { __orbitBodyClassAdds: Map<string, number> }).__orbitBodyClassAdds = added;
+    const note = () => {
+      const now = new Set<string>(document.body ? [...document.body.classList] : []);
+      now.forEach((name) => {
+        if (!seen.has(name)) order.push(name);
+        seen.add(name);
+        if (!wearing.has(name)) added.set(name, (added.get(name) ?? 0) + 1);
+      });
+      wearing = now;
+    };
     const start = () => {
       note();
       new MutationObserver(note).observe(document.body, { attributes: true, attributeFilter: ["class"] });
@@ -67,4 +82,17 @@ export async function bodyClassSeen(page: Page, name: string) {
     (wanted) => Boolean((window as unknown as { __orbitBodyClasses?: Set<string> }).__orbitBodyClasses?.has(wanted)),
     name,
   );
+}
+
+/** #1263: how many times `witnessBodyClasses` saw <body> put `name` on in this document. */
+export async function bodyClassAdds(page: Page, name: string) {
+  return page.evaluate(
+    (wanted) => (window as unknown as { __orbitBodyClassAdds?: Map<string, number> }).__orbitBodyClassAdds?.get(wanted) ?? 0,
+    name,
+  );
+}
+
+/** #1263: every class <body> has worn in this document, in the order each was first seen. */
+export async function bodyClassOrder(page: Page) {
+  return page.evaluate(() => [...((window as unknown as { __orbitBodyClassOrder?: string[] }).__orbitBodyClassOrder ?? [])]);
 }

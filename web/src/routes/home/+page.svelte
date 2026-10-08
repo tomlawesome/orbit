@@ -5,9 +5,12 @@
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
   import { mountAccount, mountEmptySky, mountHome } from "./home.behaviour.js";
-  import Flight from "$lib/flight/Flight.svelte";
+  import Leave from "$lib/flight/Leave.svelte";
+  import { readyFlightAtLeisure } from "$lib/flight/warm.js";
+  import Sun from "$lib/sun/Sun.svelte";
+  import { SUN_R } from "$lib/sun/furnace.js";
+  import { othersOf } from "$lib/flight/engine.js";
   import Dawn from "$lib/flight/Dawn.svelte";
-  import Dusk from "$lib/flight/Dusk.svelte";
   import { consumeLaunch } from "$lib/flight/arrival.js";
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
@@ -145,7 +148,7 @@
        coming back from the identity provider and the dawn must already be
        over home. A fixture waits for the household to arrive first, so the
        beats after the landing have a dial to land on. */
-    if (launching && !fixtureFlight) flight?.ascend();
+    if (launching && !fixtureFlight) leave?.ascend();
   });
 
   /* ---- A REFUSED SIGN-IN, SAID ONCE (#1033, ADR-0027 consequences) -------
@@ -177,12 +180,12 @@
   async function driveFixture() {
     if (!fixtureFlight) return;
     await tick();
-    if (fixtureFlight === "up") flight?.ascend({ at: fixtureAt });
+    if (fixtureFlight === "up") leave?.ascend({ at: fixtureAt });
     else if (fixtureFlight === "down") {
       /* the descent leaves from a settled arrival, so it starts from one */
       document.body.classList.add("instrument");
       await tick();
-      flight?.descend({ at: fixtureAt });
+      leave?.descend({ at: fixtureAt });
     }
   }
 
@@ -203,22 +206,27 @@
    * backwards, the name is written on the void with "signing out" under it,
    * and the mark sets down on the dusk's own lockup.
    */
-  /** @type {import('$lib/flight/Flight.svelte').default | null} */
-  let flight = $state(null);
-  let leaving = $state(fixtureFlight === "down");
-  let armedOut = $state(false);
-  /** Set for the span of the actual signOut() request (#1151 W1-R7):
-      armedOut alone stays true for that whole span too, so a third rapid
-      tap — while the second tap's request is still in flight — fell
-      through the `if (!armedOut)` guard and fired a second, concurrent
-      signOut() call. */
+  /* The descent, its dusk and the farewell are $lib/flight/Leave.svelte,
+     shared with every other page's menu (#1253). */
+  /** @type {import('$lib/flight/Leave.svelte').default | null} */
+  let leave = $state(null);
+  /** Set for the span of the actual signOut() request (#1151 W1-R7), so a
+      second press while it is still in flight never fires a second,
+      concurrent signOut() call. */
   let signingOut = $state(false);
   /** @type {string | null} */
   let signOutProblem = $state(null);
 
+  const readyDescent = () => leave?.ready();
+
+  /* #1299: the descent never waits for its world, so it is readied well before
+     the sign-out, a few seconds after home has arrived and its painted
+     animations are done, as orbit-site does on any page but the door. The
+     climb (a launch) readies its own world as it starts. */
+  onMount(() => (launching ? undefined : readyFlightAtLeisure()));
+
   async function tapSignOut() {
-    /* Two taps, as every destructive control in this app arms and fires. */
-    if (!armedOut) { armedOut = true; return; }
+    /* One press (owner, 2026-10-06): the plain sign-out does not arm first. */
     if (signingOut) return;
     signingOut = true;
     signOutProblem = null;
@@ -234,32 +242,21 @@
     try {
       redirectTo = await signOut();
     } catch (error) {
-      armedOut = false;
       signingOut = false;
       signOutProblem = /** @type {any} */ (error)?.message ?? "still signed in — try again";
       return;
     }
-    providerLogout = redirectTo;
-    leaving = true;
-    await tick();
-    flight?.descend();
+    /* #1262: the menu goes as the descent begins, never left open over it
+       (it stands above the flight's canvas). Closed the way "watch the
+       tour" closes it; kept open on a refusal above, so its line is read. */
+    closeAccount();
+    await leave?.descendFrom(redirectTo);
   }
-  /* The provider's own end-session URL, kept for the way back: following it
-     now would yank the reader off the ratified goodbye, so "sign back in"
-     carries it instead, and the identity provider asks its question again. */
-  /** @type {string | null} */
-  let providerLogout = $state(null);
-  const backIn = $derived(providerLogout ?? "/");
-
-  function onFarewell() {
-    /*
-     * The address catches up with the state. The descent plays over home, but
-     * the reader is signed out when it ends, and /home is no longer theirs: a
-     * refresh here would bounce them at the identity provider instead of
-     * showing them the goodbye. Replace, never push — Back must not walk into
-     * a signed-out /home either.
-     */
-    try { history.replaceState(history.state, "", "/logout"); } catch { /* no history, no harm */ }
+  /* The account card closes the way home.behaviour.js's closeOverlays
+     closes it. */
+  function closeAccount() {
+    document.getElementById("account")?.classList.remove("open");
+    document.querySelector("button.orb")?.setAttribute("aria-expanded", "false");
   }
   export const snapshot = {
     capture: () => window.scrollY,
@@ -1087,7 +1084,7 @@
 <!-- #466/#1120: the pocket's two-tap decisions land on the same idempotent
      approve protocol the desk rows use (one operation id per receipt), and
      answer with the problem, if any, for the sheet to show. -->
-<Pocket {view} {arrive}
+<Pocket {view} {arrive} onsignedout={(redirectTo) => leave?.descendFrom(redirectTo)} onmenu={readyDescent}
         onapprove={async (suggestion) => { armed = { id: suggestion.id, act: "approve" }; await tapReceipt(suggestion, "approve"); return mailProblem; }}
         ondismiss={async (suggestion) => { armed = { id: suggestion.id, act: "dismiss" }; await tapReceipt(suggestion, "dismiss"); return mailProblem; }}
         onamend={amendReceipt}
@@ -1109,18 +1106,8 @@
      descent lands on, and the canvas, mark and void-name between them. Each
      is here only for the journey that needs it. -->
 {#if launching}<Dawn />{/if}
-{#if leaving}
-  <Dusk>
-    <!-- `backIn` is the identity provider's own end-session URL as often as
-         it is "/": genuinely external, not a route this app can resolve(),
-         which is what `rel="external"` tells the lint rule (and anyone
-         reading the markup) rather than a suppression. -->
-    <a class="again" rel="external" href={backIn}>Sign back in</a>
-  </Dusk>
-{/if}
-{#if launching || leaving}
-  <Flight bind:this={flight} name={view?.household?.name ?? ""} onfarewell={onFarewell} />
-{/if}
+<Leave bind:this={leave} {launching} leaving={fixtureFlight === "down"} name={view?.household?.name ?? ""}
+       homes={view && !view.emptySky ? othersOf(view.galaxy, view.primary) : []} />
 
 <div class="desk" class:arrive role="main">
 <!-- #843: sr-only, since the wordmark and dial carry the title visually. -->
@@ -1291,7 +1278,7 @@
   </svg>
   {#if mailWaiting > 0}<i class="count">{mailWaiting}</i>{/if}
 </a>
-<button class="orb" aria-expanded="false" aria-controls="account" title="Menu">{initials}</button>
+<button class="orb" aria-expanded="false" aria-controls="account" title="Menu" onclick={readyDescent}>{initials}</button>
 <div class="account" id="account" role="region" aria-label="Account and menu">
   <div class="who"><b>{view?.user?.displayName ?? ""}</b><span id="who-role"
     >{view ? `${view.household?.name ?? ""} · ${view.galaxy[/** @type {string} */ (view.primary)]?.role ?? "member"}` : ""}</span></div>
@@ -1299,6 +1286,7 @@
     <a href={resolve("/inbox")}>Inbox</a>
     <a href={resolve("/settings")}>Settings</a>
     <a href={resolve("/administration")}>Administration</a>
+    <a href={resolve("/about")}>About</a>
   </nav>
   <div class="swatches" role="group" aria-label="Theme">
     <span>THEME</span>
@@ -1318,16 +1306,12 @@
   <!-- "Watch the tour" (#1189), beside the theme as in every account menu.
        The card closes the way home.behaviour.js's closeOverlays closes it,
        so the film opens over the sky rather than under the card. -->
-  <button class="watch" onclick={() => {
-    document.getElementById("account")?.classList.remove("open");
-    document.querySelector("button.orb")?.setAttribute("aria-expanded", "false");
-    void watchTour();
-  }}>↻ watch the tour</button>
-  <!-- Two taps to leave, and the second one revokes the session before a
+  <button class="watch" onclick={() => { closeAccount(); void watchTour(); }}>↻ watch the tour</button>
+  <!-- One press to leave, and it revokes the session before a
        single frame of the descent is drawn (§15: logout is the login played
        backwards, and it is a real sign-out, not an animation about one). -->
   <button class="signout" onclick={tapSignOut} disabled={signingOut}>
-    {armedOut ? "tap again to sign out" : "sign out →"}
+    sign out →
   </button>
   {#if signOutProblem}<div class="signout-problem">{signOutProblem}</div>{/if}
 </div>
@@ -1409,9 +1393,6 @@
       <defs aria-hidden="true">
         <filter id="soft" x="-60%" y="-60%" width="220%" height="220%">
           <feGaussianBlur stdDeviation="4"/>
-        </filter>
-        <filter id="sun" x="-200%" y="-200%" width="500%" height="500%">
-          <feGaussianBlur stdDeviation="9"/>
         </filter>
         <radialGradient id="p-ruby" cx="34%" cy="30%" r="72%">
           <stop offset="0%" stop-color="var(--p-ruby-1, #ffb3ab)"/><stop offset="42%" stop-color="var(--p-ruby-2, #e0453e)"/>
@@ -1513,8 +1494,9 @@
       <a class="sun-link" href={view?.primary ? resolve("/household/[id]", { id: encodeURIComponent(view.primary) }) : undefined}
          onclick={() => markDoor("sky")}
          aria-label={view?.household?.name ? `Open ${view.household.name}` : undefined}>
-        <circle cx="190" cy="190" r="13" style="fill:var(--sun)" filter="url(#sun)" opacity=".8"/>
-        <circle cx="190" cy="190" r="7" style="fill:var(--sun-core)"/>
+        <!-- #1250: the sun itself is drawn by the layer over the dial (Sun.svelte,
+             Furnace); this is its disc, kept in the link as what a pointer lands on -->
+        <circle class="sun-disc" cx="190" cy="190" r={SUN_R} fill="transparent"/>
         <text id="dial-name" x="190" y="212" font-size="10" fill="var(--ink-mid)" text-anchor="middle" style="font-family:var(--ui)">{view?.household?.name ?? ""}</text>
       </a>
 
@@ -1550,6 +1532,7 @@
         </g>
       {/each}
     </svg>
+    <Sun r={SUN_R} />
     </div>
     <div class="hero-foot">
       <div class="splash-search" style="position:relative">

@@ -115,7 +115,7 @@
          closes on the compositor, this closes by width/height so the
          4.2px stroke never thins. See ringcard.css. -->
     <div class="ringstroke"></div>
-    <div class="ringorbit"><i></i></div>
+    <div class="ringorbit"><b class="trail"></b><i></i></div>
   </div>
   <Identity mode="setup" bind:password bind:again {busy} {message} signInLine={spent} onsubmit={submit} />
 </main>

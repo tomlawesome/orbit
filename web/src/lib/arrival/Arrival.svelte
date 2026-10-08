@@ -5,19 +5,20 @@
   import SignIn from "$lib/flight/SignIn.svelte";
   import Flight from "$lib/flight/Flight.svelte";
   import { consumeLaunch, markLaunch } from "$lib/flight/arrival.js";
+  import { readyFlight } from "$lib/flight/warm.js";
   import { applyCommand, readWorkspace, requestToJoin } from "$lib/data/workspace.js";
   import { labelledSkyOf } from "$lib/data/chart.js";
   import { ARRIVAL_FIXTURES } from "$lib/data/fixtures/arrival.js";
-  import CreateSystem from "./CreateSystem.svelte";
   import Newcomer from "./Newcomer.svelte";
   import {
-    ASKING, CREATE, DOOR, INVITED, NEWCOMER, ONWARD,
+    ASKING, DOOR, INVITED, NEWCOMER, ONWARD,
     arrivalStageOf, collidingHouseholdOf, createSystemCommand, isInvitedLanding,
     preferredCurrency, preferredTimeZone,
   } from "./stage.js";
   /* The ring and the card themselves (#914): shared with the sign-in door's
-     four cards since the owner's 2026-09-09 composition ruling. arrival.css
-     keeps only what belongs to the create path's own journey. */
+     four cards since the owner's 2026-09-09 composition ruling, and drawn
+     here by SignIn's own door. arrival.css keeps only the newcomer's landing
+     and its create drawer (#1263). */
   import "$lib/ringcard.css";
   import "./arrival.css";
 
@@ -33,12 +34,12 @@
    *               untouched — and the honest thing to draw while the server is
    *               still being asked, because it is the one surface on this page
    *               that needs no answer.
-   *   create    · signed in, no households, and none out there either: the
-   *               first admin names the first system. The sealed card, alone on
-   *               the dawn, with the login screen taken off it entirely.
-   *   newcomer  · signed in, no households, on an instance that has some: the
-   *               same ratified climb, the labelled sky, the boxless count and
-   *               the question.
+   *   newcomer  · signed in, no households: the same ratified climb, the
+   *               labelled sky, the boxless count and the question, whose
+   *               "name your own system" drawer holds the three create
+   *               questions. On an empty instance the count is skipped and
+   *               the card lands with the drawer already open (#1263, owner
+   *               2026-10-06).
    *   onward    · a member. Home is theirs, and the door hands them on to it.
    *   invited   · #871: a reader whose FIRST look at the session follows
    *               redeeming an invitation (`isInvitedLanding`). The same
@@ -48,24 +49,13 @@
    *               the sky moves to the household the invitation named
    *               instead, by the same road ONWARD already takes there.
    *
-   * THE TWO HONEST DEVIATIONS, both stated where they happen:
-   *
-   *   1. The reader reaches this surface by coming back from the identity
-   *      provider, so the create card is reached AFTER authenticating — which
-   *      is exactly what the fourth-pass ruling describes ("we must have
-   *      already logged in to see this screen"). The login chrome is therefore
-   *      GONE while the card shows, and RECLAIMED on submit. It steps aside as
-   *      the card arrives rather than never having been there, because the
-   *      ruling's own word for what happens on submit is that the logo and text
-   *      "REAPPEAR" — which presupposes the reader saw them and they left.
-   *   2. On submit, the ascent plays on /home rather than on this document.
-   *      The mockup runs reclaim → climb → landing unbroken; the product's
-   *      landing is a different route with the household's real data on it, so
-   *      the journey is cut at the same joint the login journey is already cut
-   *      at — after the hand-over beat, before the climb — and the climb then
-   *      plays whole, all 4.8 seconds of it plus the dwell and the instrument,
-   *      over the populated home. Nothing in the flight changes; a one-shot
-   *      marker carries the "a launch is owed" claim across (arrival.js).
+   * ONE FLIGHT PER ARRIVAL (#1263, ruling revised 2026-10-06). Every arrival
+   * flies the climb exactly once, before anything is asked. The door is never
+   * drawn again after the flight leaves it, and /home never flies a second
+   * time: Create and the invited landing both go to /home WITHOUT a launch
+   * marker, so home's `consumeLaunch()` is false there and it arrives the
+   * ordinary way. This supersedes the create card's reclaim and second climb
+   * (owner-decisions.md:684, #862 round 3) for the arrival only.
    */
   /** @typedef {import("./stage.js").VisibleHousehold} VisibleHousehold */
   /** @typedef {{ name: string, reason: string, householdId: string | null }} Rejected */
@@ -79,12 +69,10 @@
    * `?flight=up&at=` names a beat of the flight. Inert in production: without
    * the flag the query string is not read at all.
    *
-   *   ?arrival=create              the card, at rest
-   *   ?arrival=create&reject=NAME  the sealed one-line refusal, at rest
-   *   ?arrival=create&handover=1   the reclaim held: the lockup back, the card
-   *                                gone — the frame the flight lifts from
-   *   ?arrival=newcomer            the question, arrived at
-   *   ?arrival=newcomer&at=<ms>    one millisecond of the newcomer's climb
+   *   ?arrival=newcomer                     the question, arrived at
+   *   ?arrival=newcomer&drawer=1            the same, its create drawer open
+   *   ?arrival=newcomer&drawer=1&reject=N   the one-line refusal, at rest
+   *   ?arrival=newcomer&at=<ms>             one millisecond of the climb
    */
   /* $derived, not a plain const: `data` is a prop, and reading it through a
      bare const only ever captures its value at this component's first run
@@ -96,7 +84,7 @@
      from inside onMount's decide(). */
   const fixture = $derived(browser && data?.fixtures ? page.url.searchParams.get("arrival") : null);
   const fixtureReject = $derived(fixture ? page.url.searchParams.get("reject") : null);
-  const fixtureHandover = $derived(fixture ? page.url.searchParams.get("handover") === "1" : false);
+  const fixtureDrawer = $derived(fixture ? page.url.searchParams.get("drawer") === "1" : false);
   const fixtureAt = $derived(fixture && page.url.searchParams.has("at")
     ? (Number(page.url.searchParams.get("at")) || 0)
     : null);
@@ -111,6 +99,9 @@
   let busy = $state(false);
   /** @type {Rejected | null} */
   let rejected = $state(null);
+  /* #1263: the belong card's "name your own system" drawer. Open from the
+     start on an empty instance, where there is nothing to ask to join. */
+  let drawerOpen = $state(false);
 
   let name = $state("");
   let timezone = $state(preferredTimeZone(detectedZone()));
@@ -124,8 +115,8 @@
    * than here would already be gone.
    *
    * Whichever stage wins then gets it: the member's climb is re-armed for
-   * /home, the newcomer's plays right here, and the create card writes a fresh
-   * one on submit. The marker is a claim being carried, not a flag being read.
+   * /home and the newcomer's plays right here. Nothing on this page ever
+   * writes a fresh one (#1263): an arrival flies once.
    */
   const launchOwed = browser && consumeLaunch();
 
@@ -142,11 +133,19 @@
   let disposed = false;
 
   onMount(() => {
+    /* #1222: a launch is owed, so a flight is coming whichever way the answers
+       fall (the climb here, or /home's after the hand-on). Ready its world NOW,
+       hurried, while the session and workspace are still being asked, instead
+       of when the climb starts and has to hold for it. Gentle, as the door's
+       own ask is: never under save-data, never a compile that would stop the
+       page; and without the test frames, which wait until this reader is known
+       to fly here (decide(), below). */
+    if (launchOwed) readyFlight({ hurry: true, gentle: true, prove: false });
     decide();
     return () => {
       disposed = true;
-      body().classList.remove("showform", "showdawn", "reclaimed", "rejected",
-                              "grounded", "shownew", "instrument", "belong",
+      body().classList.remove("showform", "showdawn", "rejected",
+                              "shownew", "instrument", "belong",
                               "counting", "bare", "launching", "pinned");
     };
   });
@@ -214,6 +213,10 @@
         return;
       }
       if (session?.activeHouseholdId) { handOn(); return; }
+      /* a session pointing nowhere flies here (the newcomer's climb, or the
+         invited one): have the world's test frames run while the workspace is
+         read, so the climb finds the verdict made (#1222) */
+      if (launchOwed) readyFlight({ hurry: true, gentle: true });
       workspace = await readWorkspace();
       if (disposed) return;
     } catch {
@@ -232,7 +235,7 @@
     }
     visibleHouseholds = workspace.visibleHouseholds ?? [];
     galaxy = labelledSkyOf(visibleHouseholds);
-    if (next === CREATE) { enterCreate(); return; }
+    drawerOpen = visibleHouseholds.length === 0;
     stage = NEWCOMER;
     await enterNewcomer(launchOwed);
   }
@@ -250,16 +253,13 @@
   /**
    * WHERE THE CHOOSER WOULD STAND (#871): the invited landing's own road out,
    * fired by Flight's `onbelong` at the exact beat that draws `belong` for an
-   * ordinary newcomer. No new camera move — this is the same hand-off ONWARD
-   * takes with a launch owed (`handOn`, above) and the create card takes on
-   * success: a launch marker, then the navigation `/home` itself reads it
-   * back on (`consumeLaunch`, `$lib/flight/arrival.js`), so the dial and the
-   * rest of the instrument arrive exactly as they do for anyone. Nothing here
-   * names the household — the navigation is bare, and `/home` resolves it
-   * from the session the same way it always does.
+   * ordinary newcomer. No new camera move, and NO launch marker (#1263): the
+   * climb already flew here, so /home's `consumeLaunch()` is false and it
+   * arrives the ordinary way. ADR-0012:147 is upheld. Nothing here names the
+   * household — the navigation is bare, and `/home` resolves it from the
+   * session the same way it always does.
    */
   function toHousehold() {
-    markLaunch();
     location.assign("/home");
   }
 
@@ -273,38 +273,26 @@
     if (!workspace) return;
     visibleHouseholds = workspace.visibleHouseholds;
     galaxy = labelledSkyOf(workspace.visibleHouseholds);
-    if (arrivalStageOf(workspace) === CREATE) {
-      /*
-       * The card is photographed, so its two "read off your browser" answers
-       * are pinned to the mockup's own first options instead of the machine
-       * the gate happens to be running on. Everything else on this surface is
-       * already deterministic.
-       */
-      timezone = preferredTimeZone("Europe/London");
-      currency = preferredCurrency("GBP");
-      if (fixtureReject) {
-        name = fixtureReject;
-        rejected = { name: fixtureReject, reason: "already exists here", householdId: "fixture" };
-        setTimeout(() => body().classList.add("rejected"), 0);
-      }
-      if (fixtureHandover) {
-        name = name || "Lawson Home";
-        body().classList.add("pinned", "reclaimed");
-      }
-      enterCreate();
-      return;
+    drawerOpen = fixtureDrawer || visibleHouseholds.length === 0;
+    /*
+     * The drawer is photographed, so its two "read off your browser" answers
+     * are pinned to the card's own first options instead of the machine the
+     * gate happens to be running on. Everything else on this surface is
+     * already deterministic.
+     */
+    timezone = preferredTimeZone("Europe/London");
+    currency = preferredCurrency("GBP");
+    if (fixtureReject) {
+      const clash = collidingHouseholdOf(fixtureReject, visibleHouseholds);
+      name = fixtureReject;
+      rejected = { name: fixtureReject, reason: "already exists here", householdId: clash?.id ?? "fixture" };
+      setTimeout(() => body().classList.add("rejected"), 0);
     }
     stage = NEWCOMER;
     /* The fixture replaces the DATA, never the trigger: a fixture run with the
        one-shot marker in its tab flies the whole climb exactly as a real
        arrival does, and one without it gets the question arrived at. */
     enterNewcomer(launchOwed);
-  }
-
-  /** The card takes the screen, and the login chrome steps aside for it. */
-  function enterCreate() {
-    body().classList.add("showform");
-    stage = CREATE;
   }
 
   /**
@@ -331,16 +319,34 @@
     body().classList.add("shownew", "instrument", "belong");
   }
 
-  /* ── THE CREATE PATH'S LAUNCH ────────────────────────────────────────────
-   * §15, fourth pass, owner verbatim: "the orbit logo and text reappear and we
-   * run the login intro, the only tweak being this time there's no login
-   * button as we already passed it, otherwise exactly the same."
-   *
-   * So on success the lockup is RECLAIMED over 620ms — the wordmark and glyph
-   * fade back onto the sky (0.5s) while the card dissolves off it (0.6s), both
-   * finished before anything else happens, so the frame the flight lifts from
-   * IS the ratified login screen with the button absent. Then the climb, whole
-   * and unaltered, on the landing it belongs to.
+  /**
+   * THE EMPTY INSTANCE SKIPS THE COUNT (#1263, owner 2026-10-06): "skip the
+   * count beat: land straight on the belong card with the drawer down." There
+   * is nothing to count, so the card arrives with the labelled sky's chrome
+   * (Flight's `instrument` beat, its `onsettled`) rather than after the count's
+   * hold; Newcomer draws no count at all for zero systems, so the flight's own
+   * later `countOn`/`belong` beats find nothing left to change.
+   */
+  function settled() {
+    if (stage === NEWCOMER && visibleHouseholds.length === 0) body().classList.add("belong");
+  }
+
+  /**
+   * The north star's "create" (and any other road to the drawer) while the
+   * question has not arrived yet: bring the card in now rather than open a
+   * drawer nobody can see.
+   */
+  function toDrawer() {
+    if (stage !== NEWCOMER) return;
+    body().classList.remove("counting");
+    body().classList.add("belong");
+  }
+
+  /* ── CREATE, FROM THE DRAWER (#1263) ────────────────────────────────────
+   * The climb already flew on this document, so Create goes to /home with no
+   * launch marker and no reclaim: home's `consumeLaunch()` is false, there is
+   * no dawn and no second climb, and the POL-1 arrival brings the dial in with
+   * the new name, the first-run tour after it as for anyone.
    */
   async function submit() {
     if (busy) return;
@@ -365,16 +371,9 @@
       reject(wanted, /** @type {{ message?: string }} */ (error)?.message ?? "could not be created", null);
       return;
     }
-    /* A launch is owed on the landing, whether or not one was owed here. */
-    markLaunch();
-    body().classList.add("reclaimed");
-    setTimeout(() => location.assign("/home"), reduced() ? 200 : 620);
+    location.assign("/home");
   }
 
-  /**
-   * The rejection keeps the reader grounded: the climb starts, catches, and
-   * sets back down (the mockup's own `settleback`, 950ms).
-   */
   /**
    * @param {string} refused
    * @param {string} reason
@@ -382,8 +381,7 @@
    */
   function reject(refused, reason, householdId) {
     rejected = { name: refused, reason, householdId };
-    setTimeout(() => body().classList.add("rejected", "grounded"), 30);
-    setTimeout(() => body().classList.remove("grounded"), 950);
+    setTimeout(() => body().classList.add("rejected"), 30);
   }
 
   /* Typing disarms the rejection, because the rejection was about the NAME: a
@@ -413,44 +411,22 @@
     galaxy = labelledSkyOf(visibleHouseholds);
   }
 
-  /**
-   * "or name your own system →" — the newcomer's other road, and the same three
-   * questions (the sealed sheet: the card is the admin's card). The labelled
-   * sky steps aside for it, and the collision check still holds: the name they
-   * choose cannot be one of the systems they were just offered.
-   */
-  function toCreate() {
-    flight?.reset();
-    climbing = false;
-    body().classList.remove("shownew", "instrument", "belong", "counting", "bare", "launching");
-    enterCreate();
-  }
-
-  /**
-   * The refusal's own road out. The sheet's link goes to the newcomer's
-   * arrival, and that is where this goes: the question, with the system that
-   * holds the name among the rows waiting to be pressed. The request itself is
-   * NOT filed on the reader's behalf — asking to join is theirs to do.
-   */
-  async function askFromCard() {
-    body().classList.remove("showform", "rejected");
-    rejected = null;
-    stage = NEWCOMER;
-    await enterNewcomer(false);
-  }
-
   const title = $derived(
-    stage === CREATE ? "Orbit — name your first system"
-      : stage === NEWCOMER || stage === INVITED ? "Orbit — arrival"
+    stage === NEWCOMER || stage === INVITED ? "Orbit — arrival"
       : "Orbit — sign in");
 </script>
 
 <!-- #843: one landmark and one heading for whichever stage is standing, since
-     the door/create/newcomer stages never render at once. The visible title
+     the door/newcomer stages never render at once. The visible title
      is carried entirely by the mockups' own art (the lockup, the card, the
      climb), so the heading names the stage for a reader who cannot see it,
      rather than duplicating text already on screen. -->
-<main class="arrival">
+<!-- `past-door` (#1263): once the arrival has decided, the door's own card
+     (SignIn's `.ringcard`, which a local-only instance raises from the public
+     availability answer whoever is signed in) is not drawn again — the door
+     is never redrawn after the flight leaves it, and that layer would
+     otherwise stand over the belong card and its drawer. -->
+<main class="arrival" class:past-door={stage !== DOOR}>
   <h1 class="sr-only">{title}</h1>
 
   <!-- THE LOGIN SCREEN IS THE BASE LAYER, exactly as the sheet builds it: the
@@ -459,42 +435,16 @@
        they do — no wordmark, no glyph, no button, no footer. -->
   <SignIn gate={stage === DOOR} dawnShown={!climbing} {title} />
 
-  {#if stage === CREATE}
-    <!-- #862 round 3: the login ring, enlarged, holding the questions. A
-         sibling of the dawn and of the card rather than a child of either,
-         because it has to outlive the card on the way into the launch (the
-         hand-over shrinks it to the login ring's own 302.4px in place,
-         `body.reclaimed` below) — see arrival.css for the ring itself.
-
-         THE SAME COLUMN AS THE DOOR'S CARDS (#1175). On the desk `.ringcard`
-         changes nothing: every rule that reads it is `:where(.arrival,
-         .ringcard)` and already applied here. On a phone it is the column
-         door-phone.css lays every card on the door in — the ring at its
-         station at the login ring's own size, the card's heading standing
-         inside it, the fields in the column beneath, the ring closing while
-         you type — because a 500px ring cannot hold a 300px card on a 390px
-         screen, and did not: it stood at the left edge with 110px off the
-         right. Same wrapper SignIn.svelte draws. -->
-    <div class="ringcard">
-      <div class="bigring" aria-hidden="true">
-        <div class="ringglass"></div>
-        <!-- the ring's line, on its own unblurred box (#873): the glass
-             closes on the compositor, this closes by width/height so the
-             4.2px stroke never thins. See ringcard.css. -->
-        <div class="ringstroke"></div>
-        <div class="ringorbit"><i></i></div>
-      </div>
-      <CreateSystem bind:name bind:timezone bind:currency {rejected} {busy}
-                    onsubmit={submit} onnaming={naming} onask={askFromCard} />
-    </div>
-  {/if}
-
   {#if stage === NEWCOMER || stage === INVITED}
     <!-- #871: `showChooser` is false only for INVITED — no chooser drawn at
          any frame, not even one CSS hides, for a reader whose household is
          not theirs to pick. -->
-    <Newcomer {galaxy} {visibleHouseholds} onask={ask} oncreate={toCreate}
-              showChooser={stage !== INVITED} />
+    <!-- #1263: the create drawer lives in the belong card, and its three
+         answers, its refusal and its submit stay here with the host. -->
+    <Newcomer {galaxy} {visibleHouseholds} onask={ask} oncreate={toDrawer}
+              showChooser={stage !== INVITED}
+              bind:drawerOpen bind:name bind:timezone bind:currency {rejected} {busy}
+              onsubmit={submit} onnaming={naming} />
     {#if climbing}
       <!-- The landing is the host's, as it is on home: the flight says WHEN and
            this reveals the labelled sky at that exact beat. landing="invited"
@@ -503,6 +453,7 @@
       <Flight bind:this={flight} landing={stage === INVITED ? "invited" : "newcomer"}
               name="" subtitle="you are new here"
               onland={() => body().classList.add("shownew")}
+              onsettled={settled}
               onbelong={stage === INVITED ? toHousehold : undefined} />
     {/if}
   {/if}

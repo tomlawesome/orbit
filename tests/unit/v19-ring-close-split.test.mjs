@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 /*
  * #873: the create/sign-in ring used to close from 500px to 302.4px as ONE
- * box — the 4.2px stroke, the translucent fill and a `backdrop-filter` blur
+ * box — the stroke, the translucent fill and a `backdrop-filter` blur
  * all on `.ringglass` — animating `width`/`height`. Every frame of the
  * hand-over therefore re-laid-out and re-blurred the glass: worst-case paint
  * 7.06ms against a 16ms budget.
@@ -65,21 +65,13 @@ const decl = (body, prop) => {
 };
 
 describe("#873: the ring closes as a compensated split", () => {
-  it("closes the blurred glass with transform, never width/height", () => {
-    const closed = closedRule(".ringglass");
-    expect(closed).toHaveLength(1);
-    const [{ body }] = closed;
-
-    // 302.4 / 500 — the landing diameter is unchanged, it is just reached on
-    // the compositor now.
-    expect(decl(body, "transform")).toMatch(/scale\(\s*\.?0?\.6048\s*\)/u);
-    // Layout is what cost 7.06ms a frame. Neither property may come back.
-    expect(decl(body, "width")).toBe("");
-    expect(decl(body, "height")).toBe("");
-    // The clearing beat is unchanged: the glass still goes to transparent and
-    // to blur(0) over the same 500ms.
-    expect(decl(body, "background")).toBe("rgba(7,11,24,0)");
-    expect(decl(body, "backdrop-filter")).toBe("blur(0px)");
+  it("is no longer closed by the arrival: #1263 retired the create card's hand-over", () => {
+    // One flight per arrival: the create questions moved into the belong
+    // card's drawer, so nothing on the arrival closes the ring any more. The
+    // open-state split below still draws the door's own cards.
+    for (const part of [".ringglass", ".ringstroke", ".ringorbit"]) {
+      expect(closedRule(part), part).toHaveLength(0);
+    }
   });
 
   it("gives the glass a transform transition and no border", () => {
@@ -97,34 +89,25 @@ describe("#873: the ring closes as a compensated split", () => {
     expect(decl(body, "border")).toBe("");
   });
 
-  it("keeps the 4.2px stroke on its own unblurred box that still resizes", () => {
+  it("keeps the stroke on its own unblurred box that still resizes", () => {
     const open = openRule(".ringstroke");
     expect(open).toHaveLength(1);
     const [{ body }] = open;
 
     expect(decl(body, "width")).toBe("500px");
     expect(decl(body, "height")).toBe("500px");
-    expect(decl(body, "border")).toBe("4.2px solid #8791b3");
+    // The line is orbit-site's lit ring (#1253): a width the mask reads,
+    // registered so the close can still animate it.
+    expect(decl(body, "--stroke")).toBe("3.4px");
     // Cheap to redraw is the whole point: nothing blurred on this box.
     expect(body).not.toMatch(/backdrop-filter/u);
     // A transformed sibling paints above plain in-flow boxes, so the stroke
     // must be positioned and lifted or the glass covers it mid-close.
     expect(decl(body, "position")).toBe("relative");
     expect(decl(body, "z-index")).toBe("1");
-
-    const closed = closedRule(".ringstroke");
-    expect(closed).toHaveLength(1);
-    expect(decl(closed[0].body, "width")).toBe("302.4px");
-    expect(decl(closed[0].body, "height")).toBe("302.4px");
-    expect(closed[0].body).not.toMatch(/backdrop-filter/u);
   });
 
-  it("leaves the orb closing exactly as it did, and lifted alongside", () => {
-    const closed = closedRule(".ringorbit");
-    expect(closed).toHaveLength(1);
-    expect(decl(closed[0].body, "width")).toBe("302.4px");
-    expect(decl(closed[0].body, "height")).toBe("302.4px");
-
+  it("lifts the orb alongside the stroke", () => {
     const open = openRule(".ringorbit");
     expect(open).toHaveLength(1);
     expect(decl(open[0].body, "position")).toBe("relative");
@@ -132,10 +115,9 @@ describe("#873: the ring closes as a compensated split", () => {
   });
 
   it("draws the stroke box everywhere the glass is drawn", () => {
-    // All four ring surfaces are the same card (#914), so none of them may
-    // render the glass without its stroke.
+    // The ring surfaces are the same card (#914), so none of them may render
+    // the glass without its stroke. (The arrival's own ring went with #1263.)
     for (const file of [
-      "web/src/lib/arrival/Arrival.svelte",
       "web/src/lib/flight/SignIn.svelte",
       "web/src/routes/setup/[token]/+page.svelte",
     ]) {

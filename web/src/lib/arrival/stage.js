@@ -3,7 +3,7 @@
  *
  * Everything the arrival decides, decided in one pure file so it can be read
  * and tested without a browser: WHICH surface an authenticated reader lands
- * on, what the create card may ask, what the create command looks like, and
+ * on, what the create drawer may ask, what the create command looks like, and
  * how the newcomer's count reads.
  *
  * THE LAW THIS FILE SERVES (owner, 2026-08-16, sealed): "the first-run screen
@@ -31,10 +31,11 @@ export const DOOR = "door";
 /** Asked, not answered. The dawn is up and the login chrome is held back, so
  *  a reader who is already through the door never sees it flash past. */
 export const ASKING = "asking";
-/** Zero households, and none out there either: the first admin names the
- *  first system (design/v19/first-run.html's create card). */
-export const CREATE = "create";
-/** Zero households on an instance that has some: the newcomer's arrival. */
+/** Zero households: the newcomer's arrival — one climb, the labelled sky and
+ *  the question, whose "name your own system" drawer holds the three create
+ *  questions (#1263). An empty instance lands here too, on a sky with nothing
+ *  in it, and gets the card with the drawer already open. There is no create
+ *  stage any more: the arrival flies once, and never again on /home. */
 export const NEWCOMER = "newcomer";
 /** A member. Home is theirs; the door hands them on to it. */
 export const ONWARD = "onward";
@@ -58,7 +59,9 @@ export const INVITED = "invited";
 export function arrivalStageOf(workspace) {
   if (!workspace) return ASKING;
   if ((workspace.households ?? []).length > 0) return ONWARD;
-  return (workspace.visibleHouseholds ?? []).length > 0 ? NEWCOMER : CREATE;
+  /* #1263: an empty instance is a newcomer's arrival too, on an empty sky —
+     the first administrator names their system in the belong card's drawer. */
+  return NEWCOMER;
 }
 
 /**

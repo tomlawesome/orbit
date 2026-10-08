@@ -10,14 +10,16 @@
    *
    * Signed in, it decides what they are looking at — and that decision is the
    * sealed law that first-run "doesn't get its own page — it sits ON TOP of the
-   * login screen". A member is handed on to /home exactly as this route already
-   * did. A reader with no household stays here: the create card if the instance
-   * is empty, the newcomer's climb and its question if it is not.
+   * login screen". A member never reaches this file: since #1252 the server
+   * hook (web/src/hooks.server.js, `frontDoor`) answers them 303 to /home
+   * before any of this HTML is sent, so a refresh no longer shows them the
+   * door. A reader with no household stays here: the create card if the
+   * instance is empty, the newcomer's climb and its question if it is not.
    *
-   * The decision happens in the browser against GET /api/auth/session and GET
-   * /api/workspace, because this front end has no server-side session of its
-   * own to read (there are no SvelteKit hooks here by design: the engine owns
-   * auth, on the same origin).
+   * That rest of the decision happens in the browser against GET
+   * /api/auth/session and GET /api/workspace (Arrival.svelte's decide()),
+   * which still also hands a member on if one ever gets this far — the
+   * invited reader's first landing does, on purpose, so the arrival plays.
    */
   let { data } = $props();
 </script>

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { loadStagedPage } from "../../web/src/lib/data/staged-page.js";
+import { loadStagedPage, previewPageHref } from "../../web/src/lib/data/staged-page.js";
 
 /*
  * #1155: loadStagedPage is what tells apart "gone" (404/410 -- the mail was
@@ -39,7 +39,23 @@ describe("loadStagedPage", () => {
       "/api/imap-inbox/r/attachments/a/preview",
       expect.objectContaining({ credentials: "same-origin" }),
     );
-    expect(result).toEqual({ kind: "page", url: "blob:mock/42" });
+    expect(result).toEqual({ kind: "page", url: "blob:mock/42", pageCount: null });
+  });
+
+  it("hands back the page count the response carries, and null for one that is not a count (#1300)", async () => {
+    const withCount = (value) => ({ ...okResponse({ size: 1 }), headers: new Headers({ "x-orbit-page-count": value }) });
+    fetched.mockResolvedValueOnce(withCount("3"));
+    expect(await loadStagedPage("href")).toMatchObject({ kind: "page", pageCount: 3 });
+    for (const bad of ["0", "-1", "2.5", "three", ""]) {
+      fetched.mockResolvedValueOnce(withCount(bad));
+      expect(await loadStagedPage("href")).toMatchObject({ kind: "page", pageCount: null });
+    }
+  });
+
+  it("addresses page one as the endpoint itself and page N with ?page=N (#1300)", () => {
+    expect(previewPageHref("/api/documents/d/preview", 1)).toBe("/api/documents/d/preview");
+    expect(previewPageHref("/api/documents/d/preview", 3)).toBe("/api/documents/d/preview?page=3");
+    expect(previewPageHref("/api/x/preview?a=b", 2)).toBe("/api/x/preview?a=b&page=2");
   });
 
   it("404 and 410 both answer gone -- the mail was decided or burned up", async () => {
