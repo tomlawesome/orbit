@@ -332,6 +332,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 ## v19-administration.spec.ts:76 "household recovery on the clock (#1001) › restores a household within its window, then hard-deletes another by the two-tap protocol" — desktop-webkit
 
 - 2026-10-05 · dac67650 (!1017) · pipeline 2131 / smoke_webkit (job 31782) · `page.evaluate: TypeError: Load failed` (WebKit's words for a fetch that did not complete) inside `createHousehold`'s in-page `fetch` at line 35, 7.2s in, straight after sign-in; the in-job retry passed (11.8s). Only the passing retry was traced, so the failing attempt's network is not recorded. Suspected, not established: the arrival at `/` navigating on to `/home` while the in-page fetch was out (support/arrival.ts describes that #840 race; this file's sign-in does not wait for it), made likelier on WebKit by the multi-second sky rasterising stall measured on #1219. First sighting; an issue on the third.
+- 2026-10-08 · 89ca8357 (`fix/door-site-whole`, the door batch; nothing in it touches administration) · local `scripts/test-e2e-local.sh --project desktop-webkit`, the whole suite inside the CI Playwright image, with other sessions using the host · `page.evaluate: TypeError: Load failed` in the spec's seeding fetch; green on the rerun of the file alone against a fresh stack on 64a4ad67 (same administration code). Second sighting (the first is above, same words, in CI).
 
 ## v19-feedback-recovery.spec.ts:362 "a save on /create that cannot reach Orbit leaves focus where the reader was" — mobile-webkit, desktop-webkit, desktop-chromium, mobile-chromium — #1313
 
@@ -355,7 +356,3 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 
 - 2026-10-06 · 2221237a (#1262, no change near this route) · local `scripts/test-backend.sh`, worktree `flight-door-port`, an e2e image build and other agents' headless browsers on the host (load 9-14) · timed out at the 5s default; green on an immediate rerun of the file alone. First sighting.
 - 2026-10-07 · 2a076315 (+ #1279's uncommitted phone create reading card, none of it near this fixture) · local `scripts/test-backend.sh`, worktree `fix-create-form`, other sessions using the host · timed out at the 5s default; it passed in the run before on the same code, and green on an immediate rerun of the file alone. Second sighting.
-
-## v19-administration.spec.ts:76 "household recovery on the clock (#1001) › restores a household within its window, then hard-deletes another by the two-tap protocol"
-
-- 2026-10-08 · 89ca8357 (`fix/door-site-whole`, the door batch; nothing in it touches administration) · local `scripts/test-e2e-local.sh --project desktop-webkit`, the whole suite inside the CI Playwright image, with other sessions using the host · `page.evaluate: TypeError: Load failed` in the spec's seeding fetch; green on the rerun of the file alone against a fresh stack on 64a4ad67 (same administration code). First sighting.
