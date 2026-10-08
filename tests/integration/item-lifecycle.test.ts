@@ -291,7 +291,7 @@ describe("conflict-safe item lifecycle", () => {
     const stale = 1;
     const commands = [
       { type: "item.archive", activity: activity(fixture.item.id, "archived") },
-      { type: "item.complete", completedDate: "2026-12-20", nextDate: "2027-12-20", activity: activity(fixture.item.id, "renewal_completed") },
+      { type: "item.complete", completedDate: "2026-12-20", activity: activity(fixture.item.id, "renewal_completed") },
       { type: "item.reschedule", dueDate: "2027-01-10", activity: activity(fixture.item.id, "rescheduled") },
       { type: "item.snooze", snoozedUntil: "2026-12-01", activity: activity(fixture.item.id, "snoozed") },
       { type: "item.status", status: "cancelled", activity: activity(fixture.item.id, "cancelled") },
@@ -335,14 +335,21 @@ describe("conflict-safe item lifecycle", () => {
       itemId: fixture.item.id,
       expectedVersion: 2,
       completedDate: "2026-12-20",
-      nextDate: "2027-12-20",
-      activity: activity(fixture.item.id, "renewal_completed", { effectiveDate: "2026-12-20", nextDate: "2027-12-20" }),
+      activity: activity(fixture.item.id, "renewal_completed", { effectiveDate: "2026-12-20" }),
     } as const;
 
     const first = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(completion),
     });
     expect(first.status).toBe(200);
+    /* #1324: no next date was sent; the engine took it from the item's
+       12-month period and recorded it on the completion's activity. */
+    const scheduled = await itemSnapshot(fixture);
+    expect(scheduled.events.find((event) => event.completedAt == null)?.dueDate).toBe("2027-12-20");
+    expect(scheduled.item?.renewalDate).toBe("2027-12-20");
+    const firstWorkspace = (await json(first)).workspace as { households: Array<{ activities: Array<{ id: string, nextDate?: string }> }> };
+    expect(firstWorkspace.households.flatMap((household) => household.activities)
+      .find((entry) => entry.id === completion.activity.id)?.nextDate).toBe("2027-12-20");
     const replay = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(completion),
     });
@@ -355,7 +362,7 @@ describe("conflict-safe item lifecycle", () => {
       ...completion,
       householdId: concurrentFixture.household.id,
       itemId: concurrentFixture.item.id,
-      activity: activity(concurrentFixture.item.id, "renewal_completed", { effectiveDate: "2026-12-20", nextDate: "2027-12-20" }),
+      activity: activity(concurrentFixture.item.id, "renewal_completed", { effectiveDate: "2026-12-20" }),
     };
     expect(concurrent.activity.id).not.toBe(completion.activity.id);
     const responses = await Promise.all([
@@ -374,6 +381,31 @@ describe("conflict-safe item lifecycle", () => {
     }
   });
 
+  it("refuses a next due date sent with a completion, without side effects (#1324)", async () => {
+    const fixture = await createIntegrationFixture("item-completion-next-date");
+    const owner = await fixture.session("owner");
+    await upsertScheduledItem(fixture, owner);
+    const before = await itemSnapshot(fixture);
+    const completion = {
+      type: "item.complete",
+      householdId: fixture.household.id,
+      itemId: fixture.item.id,
+      expectedVersion: 2,
+      completedDate: "2026-12-20",
+      activity: activity(fixture.item.id, "renewal_completed"),
+    };
+    for (const sent of [
+      { ...completion, nextDate: "2030-01-01" },
+      { ...completion, activity: { ...completion.activity, nextDate: "2030-01-01" } },
+    ]) {
+      const refused = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(sent),
+      });
+      await expectError(refused, 400, "invalid_command");
+    }
+    expect(await itemSnapshot(fixture)).toEqual(before);
+  });
+
   it("rejects a completion key reused for another item without side effects", async () => {
     const fixture = await createIntegrationFixture("item-completion-key-reuse");
     const owner = await fixture.session("owner");
@@ -384,8 +416,7 @@ describe("conflict-safe item lifecycle", () => {
       itemId: fixture.item.id,
       expectedVersion: 2,
       completedDate: "2026-12-20",
-      nextDate: "2027-12-20",
-      activity: activity(fixture.item.id, "renewal_completed", { nextDate: "2027-12-20" }),
+      activity: activity(fixture.item.id, "renewal_completed", {}),
     } as const;
     const completed = await callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(completion),
@@ -436,8 +467,7 @@ describe("conflict-safe item lifecycle", () => {
       itemId: firstFixture.item.id,
       expectedVersion: 2,
       completedDate: "2026-12-20",
-      nextDate: "2027-12-20",
-      activity: activity(firstFixture.item.id, "renewal_completed", { nextDate: "2027-12-20" }),
+      activity: activity(firstFixture.item.id, "renewal_completed", {}),
     } as const;
     const firstResponse = await callRouteForSession(applyWorkspaceCommand, firstOwner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(completion),
@@ -476,8 +506,7 @@ describe("conflict-safe item lifecycle", () => {
       itemId: fixture.item.id,
       expectedVersion: 2,
       completedDate: "2026-12-20",
-      nextDate: "2027-12-20",
-      activity: activity(fixture.item.id, "renewal_completed", { nextDate: "2027-12-20" }),
+      activity: activity(fixture.item.id, "renewal_completed", {}),
     } as const;
     await getDb().insert(auditLog).values({
       id: completion.activity.id,
@@ -515,8 +544,7 @@ describe("conflict-safe item lifecycle", () => {
       itemId: completionFixture.item.id,
       expectedVersion: 2,
       completedDate: "2026-12-20",
-      nextDate: "2027-12-20",
-      activity: activity(completionFixture.item.id, "renewal_completed", { nextDate: "2027-12-20" }),
+      activity: activity(completionFixture.item.id, "renewal_completed", {}),
     } as const;
     const competing = {
       type: "item.archive",
@@ -574,8 +602,8 @@ describe("conflict-safe item lifecycle", () => {
     const fixture = await createIntegrationFixture("item-completion-conflict");
     const owner = await fixture.session("owner");
     await upsertScheduledItem(fixture, owner);
-    const common = { type: "item.complete", householdId: fixture.household.id, itemId: fixture.item.id, expectedVersion: 2, completedDate: "2026-12-20", nextDate: "2027-12-20" } as const;
-    const completions = ["renewal_completed", "renewal_completed"].map((kind) => ({ ...common, activity: activity(fixture.item.id, kind as "renewal_completed", { nextDate: "2027-12-20" }) }));
+    const common = { type: "item.complete", householdId: fixture.household.id, itemId: fixture.item.id, expectedVersion: 2, completedDate: "2026-12-20" } as const;
+    const completions = ["renewal_completed", "renewal_completed"].map((kind) => ({ ...common, activity: activity(fixture.item.id, kind as "renewal_completed", {}) }));
     const responses = await Promise.all(completions.map((command) => callRouteForSession(applyWorkspaceCommand, owner, { url: commandUrl,
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(command),
     })));

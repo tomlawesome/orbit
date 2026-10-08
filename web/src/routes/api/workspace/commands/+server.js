@@ -1,6 +1,6 @@
 import { json } from "@sveltejs/kit";
 
-import { workspaceCommandSchema } from "orbit/lib/workspace";
+import { parseWorkspaceCommand } from "orbit/lib/workspace";
 import { applyWorkspaceCommand } from "orbit/server/workspace-repository";
 
 import { WORKSPACE_FIXTURE } from "$lib/data/fixtures/workspace.js";
@@ -21,7 +21,7 @@ export const POST = write(async (event, session) => {
     await event.request.json().catch(() => null);
     return json({ workspace: WORKSPACE_FIXTURE }, { headers: { "cache-control": "no-store" } });
   }
-  const command = workspaceCommandSchema.parse(await event.request.json());
+  const command = parseWorkspaceCommand(await event.request.json());
   const workspace = await applyWorkspaceCommand(session.user.id, session.id, command);
   return json({ workspace }, { headers: { "cache-control": "no-store" } });
 });

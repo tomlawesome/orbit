@@ -19,7 +19,9 @@ import type { ScheduleKind } from "@/lib/domain";
 import { listVisibleHouseholds } from "@/server/join-requests";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY } from "@/lib/auth/authority-locks";
 import { log } from "@/lib/logger";
+import { nextDueDate } from "@/lib/next-due-date";
 import {
+  completionActivity,
   itemActivitySchema,
   workspaceSchema,
   type ItemActivity,
@@ -701,20 +703,23 @@ export async function applyWorkspaceCommand(
       if (!currentEvent) {
         throw new AppError("version_conflict", "This item has no active scheduled event", 409);
       }
-      /* #1005: an expiry is the one-off kind -- completing one records that it
-         ended, and there is no next date to take. */
-      if (currentEvent.kind === "expiry" && command.nextDate) {
-        throw new AppError("invalid_command", "An expiry happens once; it has no next date", 400);
-      }
+      /* ADR-0034, #1324: the next date is the engine's, from the stored
+         period and the day it was done -- the same rule the reducer applies.
+         An expiry is the one-off kind (#1005), and an item with no period
+         does not come round: completing either ends its schedule. */
+      const nextDate = nextDueDate(
+        { scheduleKind: currentEvent.kind, recurrenceMonths: current.recurrenceMonths },
+        command.completedDate,
+      );
       let nextEventId: string | undefined;
-      if (command.nextDate) {
+      if (nextDate) {
         nextEventId = randomUUID();
         await transaction.insert(dueEvents).values({
           id: nextEventId,
           householdId,
           itemId,
           kind: currentEvent.kind,
-          dueDate: command.nextDate,
+          dueDate: nextDate,
         });
       }
       if (currentEvent) {
@@ -740,13 +745,13 @@ export async function applyWorkspaceCommand(
         ...completionCost,
         status: "active",
         snoozedUntil: null,
-        recurrenceMonths: command.nextDate ? current.recurrenceMonths : null,
-        ...itemDates(command.nextDate ? currentEvent.kind : undefined, command.nextDate),
+        recurrenceMonths: nextDate ? current.recurrenceMonths : null,
+        ...itemDates(nextDate ? currentEvent.kind : undefined, nextDate),
         version: sql`${items.version} + 1`,
         updatedAt: new Date(),
       }).where(and(eq(items.id, itemId), eq(items.householdId, householdId), eq(items.version, command.expectedVersion)));
-      if (!command.nextDate) await transaction.delete(reminderRules).where(eq(reminderRules.itemId, itemId));
-      await recordActivity(itemId, command.activity, true);
+      if (!nextDate) await transaction.delete(reminderRules).where(eq(reminderRules.itemId, itemId));
+      await recordActivity(itemId, completionActivity(command.activity, nextDate), true);
       return;
     }
 
