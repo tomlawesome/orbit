@@ -339,7 +339,7 @@ export const plateOfName = (name) => {
  * reading card an accepted document opens, just answered from the mail's own
  * staging rather than a stored document.
  *
- * @param {import('./workspace.js').ItemView} suggestion
+ * @param {import('./workspace.js').ItemView | import('./workspace.js').ReceiptSuggestion} suggestion
  * @returns {BeltDocumentRow[]}
  */
 function stagedDocsOf(suggestion) {
@@ -379,6 +379,18 @@ function stagedDocsOf(suggestion) {
     attachmentId: paper.attachmentId,
   }));
 }
+
+/**
+ * A suggestion's papers as its home drawer lists them (#1319: a suggestion
+ * is reviewed in its home drawer, owner-decisions §34): the staged rows the
+ * belt rode beside it, each with the drawer's one-line `meta`. Every one
+ * opens the preview card, which says itself whether it has a page.
+ *
+ * @param {import('./workspace.js').ItemView | import('./workspace.js').ReceiptSuggestion} suggestion
+ * @returns {import('./workspace.js').DrawerDocument[]}
+ */
+export const suggestionPapersOf = (suggestion) =>
+  stagedDocsOf(suggestion).map((doc) => ({ ...doc, meta: "attached on acceptance" }));
 
 /**
  * The suggestion's own seat (#1145): the receipt in the row shape, at the

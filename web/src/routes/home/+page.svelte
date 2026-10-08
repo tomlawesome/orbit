@@ -31,6 +31,7 @@
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import { DrawerModes, pressKeepsChooser } from "./drawer-modes.svelte.js";
+  import { amendedOf, proposedItemOf } from "$lib/editing/item-draft.js";
   import { WIDE_QUERY, cardWidthOf, pairOf, trackOf } from "./preview-pair.js";
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
   import { shortDate } from "$lib/data/belt.js";
@@ -649,17 +650,27 @@
      (owner, 2026-10-08). Escape takes the chooser, then the edit. */
   const modes = new DrawerModes({
     save: async (item, edits) => {
+      if (item.status === "suggested") { await addSuggestion(item, edits); return; }
       await applyCommand(upsertCommand(item, edits));
       await rereadAll();
     },
     onchoose: () => { previewDoc = null; },
   });
-  /** The open item's household's sections, for the section's name, colour and tiles. */
-  const detailSections = $derived(
-    (view ? asView(view).households : []).find((one) => one.id === detail?.householdId)?.sections ?? []);
+  /** The open item's household's sections, for the section's name, colour and tiles.
+      A suggestion not yet given a household files into the account's primary one. */
+  const detailSections = $derived.by(() => {
+    if (!view) return [];
+    const { households, primary, suggestions } = asView(view);
+    const suggested = suggestions.find((one) => one.id === expanded);
+    const householdId = suggested ? (suggested.householdId ?? primary) : detail?.householdId;
+    return households.find((one) => one.id === householdId)?.sections ?? [];
+  });
   /* .by, not a bare expression: read at the top level, `detail` would be
      narrowed to its initial null. */
-  const chooserAsk = $derived.by(() => (detail ? modes.askOf(detailSections, detail.today) : null));
+  const chooserAsk = $derived.by(() => {
+    const today = detail?.today ?? (view ? asView(view).today : null);
+    return today ? modes.askOf(detailSections, today) : null;
+  });
   let wide = $state(false);
   $effect(() => {
     const media = matchMedia(WIDE_QUERY);
@@ -669,6 +680,9 @@
     return () => media.removeEventListener("change", set);
   });
 
+  /* Where focus goes back to when the rows stop editing: the pencil, or a
+     suggestion's `review & amend →`. */
+  const EDIT_HOME = ".ivedit, .ivamend";
   /** Focus a control in the open drawer (or its head), once it is drawn. @param {string} selector */
   async function focusInDrawer(selector) {
     await tick();
@@ -738,7 +752,7 @@
       if (!modes.escape()) return;
       event.preventDefault();
       event.stopPropagation();
-      if (!chooser) focusInDrawer(editing ? ".ivedit" : '[aria-label^="Complete "]');
+      if (!chooser) focusInDrawer(editing ? EDIT_HOME : '[aria-label^="Complete "]');
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
@@ -788,8 +802,10 @@
     oncancel: () => {
       const editing = Boolean(modes.edit.id);
       modes.end();
-      focusInDrawer(editing ? ".ivedit" : '[aria-label^="Complete "]');
+      focusInDrawer(editing ? EDIT_HOME : '[aria-label^="Complete "]');
     },
+    onamend: startAmend,
+    onaccept: addAmended,
     onattach: async (file) => {
       const item = commandItem();
       if (!item || footBusy) return;
@@ -845,6 +861,55 @@
     replaceState(resolve(`/home?item=${encodeURIComponent(id)}`), { orbitItem: id });
     await tick();
     document.getElementById(id)?.scrollIntoView({ block: "center", behavior: "auto" });
+  }
+
+  /* ---- #1319: A SUGGESTION REVIEWED IN ITS DRAWER -----------------------
+     owner-decisions §34 ("suggestions are reviewed in their home drawer",
+     superseding §27's belt card). `review & amend →` puts the suggestion's
+     drawer into the rows' own editing (EditRows.svelte), the relay's
+     proposal standing in for the item it would become (proposedItemOf); the
+     choosers stand beside it as a filed item's do. `add to orbit` sends the
+     rows as the amended item on the two-tap decision's own operation id
+     (amendReceipt), into the section the rows chose. */
+  function startAmend() {
+    const suggestion = asView(view).suggestions.find((one) => one.id === expanded);
+    if (!suggestion?.receiptId) return;
+    const householdId = suggestion.householdId ?? asView(view).primary;
+    if (!householdId) {
+      armed = { id: suggestion.id, act: null };
+      mailProblem = "This account has no household yet";
+      return;
+    }
+    const sections = asView(view).households.find((one) => one.id === householdId)?.sections ?? [];
+    const sectionId = (sections.find((one) => one.visible !== false) ?? sections[0])?.id ?? null;
+    mailProblem = null;
+    armed = { id: null, act: null };
+    previewDoc = null;
+    modes.startEdit(proposedItemOf(suggestion, { householdId, sectionId }));
+    focusInDrawer('[data-ed="title"]');
+  }
+  /**
+   * The rows' save for a suggestion: approved as amended, or refused in the
+   * rows' own words (EditSession says it under the rows).
+   * @param {import('$lib/data/commands.js').CommandItem} item
+   * @param {Partial<import('$lib/data/commands.js').CommandItem>} edits
+   */
+  async function addSuggestion(item, edits) {
+    const suggestion = asView(view).suggestions.find((one) => one.id === item.id);
+    if (!suggestion) throw new Error("not added — this suggestion has gone");
+    const { item: amended, sectionId } = amendedOf(item, edits);
+    const problem = await amendReceipt(suggestion, amended, sectionId);
+    if (problem?.startsWith("The item is recorded")) {
+      throw new Error("not finished — the item is recorded, but its documents need another try: add it again");
+    }
+    if (problem) throw new Error(`not added — ${problem}`);
+  }
+  async function addAmended() {
+    const title = modes.edit.draft?.title.trim() ?? "";
+    if (await modes.edit.commit()) {
+      collapseRow();
+      wake(`added to your orbit · ${title}`);
+    }
   }
 
   const operationIds = new SvelteMap();

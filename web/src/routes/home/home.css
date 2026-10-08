@@ -429,6 +429,9 @@
   .itemview .ivfull{font:11.5px var(--mono);color:var(--ink-mid);text-decoration:none;
                     margin-left:auto}
   .itemview .ivfull:hover{color:var(--accent-text)}
+  /* #1319: a suggestion's `review & amend →` is a button, in the link's register */
+  .itemview button.ivfull{background:none;border:0;padding:0;cursor:pointer}
+  .itemview button.ivfull:disabled{opacity:.5;cursor:default}
   svg text{font-family:var(--mono)}
 
   /* overscroll-behavior goes with the light-dismiss rule (owner, 2026-08-14):

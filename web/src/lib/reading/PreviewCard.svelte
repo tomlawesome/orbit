@@ -18,6 +18,14 @@
    * honest states — still scanning, removed (restore), refused, could not
    * draw (download) — with their plate held still.
    *
+   * A SUGGESTION'S PAPER (#1319: a suggestion is reviewed in its home
+   * drawer, owner-decisions §34) is staged with the mail, not stored
+   * (`doc.staged`, belt.js stagedDocsOf): its page draws the same way where
+   * the mail named a PDF, and the belt's own extra states come with it —
+   * `Not yet in orbit.` for a paper Orbit has no page for, `This mail has
+   * gone.` when it was decided or burned up meanwhile — with no download,
+   * restore or remove, the foot saying why in one line instead (#1155).
+   *
    * WHERE IT STANDS is the host's: on a wide screen home seats it in a
    * column beside the open drawer (home/+page.svelte's `.pvtrack`), sticky
    * at the page's 84px gutter; under 1200px it is the phone's bottom sheet,
@@ -58,6 +66,8 @@
   let instant = $state(false);
   let imgLoaded = $state(false);
   let imgFailed = $state(false);
+  /* #1155: a staged paper whose mail went between the list and the page */
+  let gone = $state(false);
   let beatDone = $state(false);
   let src = $state("");
   let pageNo = $state(1);
@@ -89,7 +99,7 @@
   const docState = $derived.by(() => (shown ? documentPreviewStateOf(shown) : null));
   /* A page Orbit believed it could draw but whose request failed reads as
      "could not draw", the belt's own rule — never a stuck loading state. */
-  const paperState = $derived(imgFailed ? "undrawable" : docState);
+  const paperState = $derived(gone ? "gone" : imgFailed ? "undrawable" : docState);
   const showing = $derived(docState === "available" && imgLoaded && beatDone && !imgFailed);
   const paged = $derived(showing && pageCount !== null);
   const alt = $derived.by(() => (shown ? `Page ${shownPage === 1 ? "one" : shownPage} of ${shown.name}` : ""));
@@ -116,6 +126,7 @@
     instant = false;
     imgLoaded = false;
     imgFailed = false;
+    gone = false;
     restoring = false;
     problem = null;
     src = "";
@@ -154,6 +165,9 @@
         src = result.url;
         shownPage = n;
         if (result.pageCount !== null) pageCount = result.pageCount;
+      } else if (result.kind === "gone" && paper.staged) {
+        clearTimeout(loadTimer);
+        gone = true;
       } else if (n > 1) problem = UNDRAWN_PAGE;
       else failed();
     }).catch((error) => {
@@ -333,7 +347,25 @@
         <div class="focus">
           <div class="plate" aria-hidden="true">{shown.plate}</div>
           <div class="focusline">Orbit could not draw a picture of this document.</div>
-          <div class="why">the file is fine — scanned clean, and yours to download<br>orbit just could not turn it into a page to read here</div>
+          {#if shown.staged}
+            <div class="why">it scanned clean, and is still attached on acceptance<br>orbit just could not turn it into a page to read here</div>
+          {:else}
+            <div class="why">the file is fine — scanned clean, and yours to download<br>orbit just could not turn it into a page to read here</div>
+          {/if}
+        </div>
+      {:else if st === "staged"}
+        <!-- #1155: the one staged paper Orbit cannot draw a page for. The
+             foot holds nothing: nothing can be done with it here. -->
+        <div class="focus">
+          <div class="plate" aria-hidden="true">{shown.plate}</div>
+          <div class="focusline">Not yet in orbit.</div>
+          <div class="why">this paper came with the mail and is attached on acceptance<br>orbit has no page to show for it</div>
+        </div>
+      {:else if st === "gone"}
+        <div class="focus">
+          <div class="plate" aria-hidden="true">{shown.plate}</div>
+          <div class="focusline">This mail has gone.</div>
+          <div class="why">it burned up, or was decided from another screen<br>orbit keeps nothing of it</div>
         </div>
       {/if}
 
@@ -353,13 +385,17 @@
     {#if paged}
       <Pager page={pageNo} count={pageCount} onturn={turn} />
       {#if problem}<div class="problem" role="alert">{problem}</div>{/if}
+      {#if shown.staged}<div class="rcfoot"><span class="rcnote">not yet in orbit · attached on acceptance</span></div>{/if}
+    {:else if st === "available" && shown.staged}
+      <!-- #1155: nothing can be done with a staged paper here; the foot says why -->
+      <div class="rcfoot"><span class="rcnote">not yet in orbit · attached on acceptance</span></div>
     {:else if st === "removed"}
       <div class="rcfoot">
         <button type="button" class="quiet" disabled={restoring} onclick={restore}
                 aria-label="Restore {shown.name}">restore</button>
       </div>
       {#if problem}<div class="problem" role="alert">{problem}</div>{/if}
-    {:else if st === "undrawable"}
+    {:else if st === "undrawable" && !shown.staged}
       <div class="rcfoot">
         <!-- the download endpoint, outside resolve()'s typed routes: the
              same cast the belt's reading card uses. -->
@@ -372,6 +408,7 @@
 
 {#if shown && showing}
   <Reader bind:open={readerOpen} doc={shown} {itemTitle} onremove={remove}
+          staged={Boolean(shown.staged)} pageHref={shown.staged ? shown.previewHref : ""}
           bind:pageNo={() => pageNo, turn} />
 {/if}
 
@@ -460,6 +497,7 @@
     max-height:calc(100vh - 84px - 16px - 62px - 18px)}
 
   /* the foot: the pager (Pager.svelte), or an honest state's one word */
+  .rcnote{font:10.5px var(--mono);color:var(--ink-quiet);letter-spacing:.02em;margin:0}
   .rcfoot{display:flex;justify-content:center;align-items:center;min-height:44px;
     font:11px var(--mono);color:var(--ink-mid)}
   .quiet{display:inline-flex;align-items:center;font:10.5px var(--mono);color:var(--ink-quiet);

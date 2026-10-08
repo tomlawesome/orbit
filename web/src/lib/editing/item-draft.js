@@ -11,7 +11,7 @@
  * which that form never wrote: changing it writes the kind's subtype and its
  * schedule (scheduleOf), as create does for a new entry.
  */
-import { entryOf, fieldsOf, kindOf, refusalOf, REMINDER_MAX, scheduleOf } from "../../routes/create/entry.js";
+import { entryOf, fieldsOf, kindOf, refusalOf, REMINDER_DEFAULT, REMINDER_MAX, scheduleOf } from "../../routes/create/entry.js";
 import { every, shortDate } from "$lib/format.js";
 import { addMonths } from "./calendar.js";
 import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
@@ -172,6 +172,57 @@ export function editsOf(draft, item) {
     fieldsOf(entry, { scheduleKind: retyped ? undefined : item.scheduleKind ?? undefined }));
   if (retyped) edits.subtype = scheduleOf(/** @type {any} */ (draft.kind)).subtype;
   return { edits };
+}
+
+/**
+ * A SUGGESTION AMENDED IN ITS DRAWER (#1319: "a suggestion is reviewed in its
+ * home drawer", owner-decisions §34, superseding §27's belt card). What the
+ * relay read, as the item it would become, so the drawer's own rows edit it
+ * exactly as they edit a filed item: the reminders a new entry starts with
+ * (create's, as the review sheet's form starts them), the section the
+ * approval would file it into unless another is chosen.
+ * @param {import('$lib/data/workspace.js').ReceiptSuggestion} suggestion
+ * @param {{ householdId: string, sectionId: string | null }} where
+ * @returns {import('$lib/data/commands.js').CommandItem}
+ */
+export function proposedItemOf(suggestion, { householdId, sectionId }) {
+  const p = suggestion.proposal ?? {};
+  return {
+    id: suggestion.id,
+    householdId,
+    sectionId,
+    status: "suggested",
+    title: p.title ?? suggestion.title ?? "",
+    subtype: p.subtype ?? null,
+    scheduleKind: p.scheduleKind ?? suggestion.scheduleKind ?? null,
+    provider: p.provider ?? suggestion.provider ?? null,
+    reference: p.reference ?? null,
+    dueDate: p.dueDate ?? suggestion.renewsOn ?? null,
+    recurrenceMonths: p.recurrenceMonths ?? null,
+    costMinor: p.costMinor ?? suggestion.costMinor ?? null,
+    currency: p.currency ?? suggestion.currency ?? "GBP",
+    reminderDays: [...REMINDER_DEFAULT],
+    notes: p.notes ?? null,
+  };
+}
+
+/**
+ * The amended item approveReceipt sends, from the edits a save of
+ * proposedItemOf's rows makes (editsOf): the fields as written, the relay's
+ * own subtype kept unless the type was changed (the belt's desk card kept it
+ * too), and the section the rows chose, which the approval takes apart.
+ * @param {import('$lib/data/commands.js').CommandItem} item  proposedItemOf's
+ * @param {Partial<import('$lib/data/commands.js').CommandItem>} edits
+ * @returns {{ item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null }}
+ */
+export function amendedOf(item, edits) {
+  const { sectionId = null, subtype, ...fields } = edits;
+  /** @type {Record<string, unknown>} */
+  const out = { ...fields, currency: item.currency ?? "GBP" };
+  const kept = subtype ?? item.subtype;
+  if (kept) out.subtype = kept;
+  for (const key of Object.keys(out)) if (out[key] === undefined || out[key] === null) delete out[key];
+  return { item: /** @type {import('$lib/data/workspace.js').ItemProposal} */ (out), sectionId };
 }
 
 /**

@@ -23,7 +23,13 @@
  *   onsave: () => unknown,
  *   onrecord: () => unknown,
  *   oncancel: () => unknown,
+ *   onamend?: () => unknown,
+ *   onaccept?: () => unknown,
  * }} DrawerActs
+ *
+ * `onamend` and `onaccept` are a suggestion's (SuggestionView.svelte, #1319):
+ * `review & amend →` puts its rows into editing, and `add to orbit` approves
+ * what they hold.
  */
 
 export {};

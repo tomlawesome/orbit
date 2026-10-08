@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 // a typed reminders row reads (remindersOf), what a save sends or refuses
 // (editsOf) and the choices the choosers offer. Pure, no DOM.
 import {
-  PERIODS, REMINDER_DAYS_MAX, TYPES, chooserAskOf, draftOf, editsOf, periodChoices, periodWords,
-  remindersOf, remindersWords, sectionChoices, typeChoices,
+  PERIODS, REMINDER_DAYS_MAX, TYPES, amendedOf, chooserAskOf, draftOf, editsOf, periodChoices, periodWords,
+  proposedItemOf, remindersOf, remindersWords, sectionChoices, typeChoices,
 } from "../../web/src/lib/editing/item-draft.js";
 
 /** A stored item, as the workspace holds it. */
@@ -283,5 +283,61 @@ describe("sectionChoices and chooserAskOf", () => {
   it("asks the calendar for no day when the draft has none", () => {
     const ask = chooserAskOf({ key: "due", label: "next due" }, { ...draftOf(item()), dueDate: "" }, sections, "2026-10-08");
     expect(ask.value).toBeNull();
+  });
+});
+
+// #1319 — a suggestion is reviewed in its home drawer: the relay's proposal as
+// the item the rows edit, and the rows' save as the amended item approval sends.
+describe("a suggestion amended in its drawer", () => {
+  const suggestion = (over = {}) => ({
+    id: "r-insurance", receiptId: "r-insurance", householdId: null, title: "Home insurance renewal",
+    currency: "GBP", sourceDocument: "policy-schedule.pdf", renewsOn: "2026-10-03", costMinor: 40000,
+    proposal: {
+      title: "Home insurance renewal", provider: "Harbour Mutual", subtype: "insurance",
+      scheduleKind: "renewal", dueDate: "2026-10-03", recurrenceMonths: 12, costMinor: 40000, currency: "GBP",
+    },
+    ...over,
+  });
+  const where = { householdId: "h1", sectionId: "s-home" };
+
+  it("holds what the relay read, with a new entry's reminders and the section it would file into", () => {
+    const item = proposedItemOf(/** @type {any} */ (suggestion()), where);
+    expect(item).toMatchObject({
+      id: "r-insurance", householdId: "h1", sectionId: "s-home", status: "suggested", title: "Home insurance renewal",
+      provider: "Harbour Mutual", dueDate: "2026-10-03", recurrenceMonths: 12, costMinor: 40000, reminderDays: [21, 7],
+    });
+    const draft = draftOf(item);
+    expect(draft).toMatchObject({ title: "Home insurance renewal", kind: "renewal", cost: "£400.00", recurrence: 12 });
+  });
+
+  it("falls back to the row's own readings where the proposal is silent", () => {
+    const item = proposedItemOf(/** @type {any} */ (suggestion({ proposal: undefined, provider: "Harbour" })), where);
+    expect(item).toMatchObject({ title: "Home insurance renewal", provider: "Harbour", dueDate: "2026-10-03", costMinor: 40000 });
+  });
+
+  it("sends the amended fields, keeps the relay's own subtype, and hands the section apart", () => {
+    const item = proposedItemOf(/** @type {any} */ (suggestion()), where);
+    const draft = { ...draftOf(item), cost: "£420.00", reference: "HM-7", sectionId: "s-dates" };
+    const out = editsOf(draft, item);
+    if ("refusal" in out) throw new Error(out.refusal);
+    const { item: amended, sectionId } = amendedOf(item, out.edits);
+    expect(sectionId).toBe("s-dates");
+    expect(amended).toMatchObject({
+      title: "Home insurance renewal", provider: "Harbour Mutual", reference: "HM-7", costMinor: 42000,
+      dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12, subtype: "insurance", currency: "GBP",
+    });
+    expect(amended).not.toHaveProperty("sectionId");
+  });
+
+  it("writes the new type's subtype when the type was changed", () => {
+    const item = proposedItemOf(/** @type {any} */ (suggestion()), where);
+    const out = editsOf({ ...draftOf(item), kind: "service" }, item);
+    if ("refusal" in out) throw new Error(out.refusal);
+    expect(amendedOf(item, out.edits).item).toMatchObject({ subtype: "service", scheduleKind: "service" });
+  });
+
+  it("refuses before anything is sent, as a filed item's rows do", () => {
+    const item = proposedItemOf(/** @type {any} */ (suggestion()), { householdId: "h1", sectionId: null });
+    expect(editsOf(draftOf(item), item)).toEqual({ refusal: "not yet — choose a section" });
   });
 });
