@@ -65,4 +65,9 @@
   .pg:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
   .pgn{color:var(--ink);font-variant-numeric:tabular-nums;min-width:52px;text-align:center}
   .pg.none{visibility:hidden}
+  /* on a phone the count meets the pocket's text floor, at its meta size
+     like the band's captions (belt.css; the query is media.js's POCKET_QUERY) */
+  @media (max-width:900px), (max-height:600px){
+    .pager{font-size:var(--p-type-meta)}
+  }
 </style>
