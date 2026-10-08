@@ -226,19 +226,6 @@ body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
 .pk-act.p-pill{color:var(--accent-text);border-color:var(--accent);min-height:var(--p-hit);padding-block:10px;
   text-align:left;justify-items:start}
 
-/* ---- the approach: the drawer lifts into the item (§1.9, #1119) -------
- * `open →` runs a view transition (pocket.svelte, onNavigate). The opened
- * manifest row's panel and the belt's card (item/[[id]]/belt.css, #1072)
- * carry the same name, so the one morphs into the other (review round
- * §2.1): the drawer rises to the card's seat and grows into it along the
- * sheet's own curve, the two faces crossfading on the way, while the dial
- * fades and the band draws. A second tap on a lit dial body (owner's
- * answer 6a) makes the same approach from the same open row. */
-.pocket .pk-list > .p-row[data-open] .p-row-open{view-transition-name:pocket-item}
-::view-transition-group(pocket-item){animation-duration:var(--p-rise);animation-timing-function:var(--p-ease)}
-::view-transition-old(pocket-item),::view-transition-new(pocket-item){
-  animation-duration:var(--p-rise);animation-timing-function:var(--p-ease)}
-
 @media (prefers-reduced-motion:reduce){
   .pocket .sky g,.pk-dot.breathing,.pocket .mdial.arrive{animation:none}
   .pocket .pk-ping{display:none}

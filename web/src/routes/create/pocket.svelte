@@ -269,8 +269,9 @@
       if (attachment) await attachItemDocument(household.id, draftId, attachment, documentIdOf(attachment));
       saved = true;
       wake(`added to your orbit · ${entry.name.trim()}`);
-      /* The approach (§2.5): the new item, seated on its belt. */
-      await goto(resolve("/item/[[id]]", { id: draftId }));
+      /* #1319 (§34): the new item, its drawer open on home, as the desk's
+         create lands (create.behaviour.js). */
+      await goto(resolve(`/home?item=${encodeURIComponent(draftId)}`));
     } catch (error) {
       /* Loud (#1058): the reason stays above the bar until the next attempt,
          the button comes back, and nothing typed is lost. No wake. */

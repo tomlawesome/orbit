@@ -28,13 +28,11 @@
     backLabel = "← YOUR SKY",
   } = $props();
 
-  /* §14: due-next and documents retired — the manifest is the corridor and
-     the belt is the document surface.
-     #1014: the belt (/item/[[id]]) has no front door of its own elsewhere in
-     the chrome, so it gets one here, above Inbox; since #1010 the belt renders
-     Chrome too, so "item" is a `current` that lights up. */
+  /* §14: due-next and documents retired — the manifest is the corridor.
+     #1319 (§34): the belt retired too, and with it the "Items" front door
+     #1014 gave it here; an item is managed in its drawer on home, which the
+     back link already reaches. */
   const NAV = [
-    ["item", "Items", "/item"],
     ["inbox", "Inbox", "/inbox"],
     ["settings", "Settings", "/settings"],
     ["administration", "Administration", "/administration"],
@@ -186,8 +184,7 @@
   <div class="who"><b>{user?.displayName ?? ""}</b><span>{role}</span></div>
   <nav>
     {#each NAV as [key, label, href] (key)}
-      <a href={href === "/item" ? resolve("/item")
-          : href === "/inbox" ? resolve("/inbox")
+      <a href={href === "/inbox" ? resolve("/inbox")
           : href === "/settings" ? resolve("/settings")
           : href === "/about" ? resolve("/about")
           : resolve("/administration")} aria-current={key === current ? "page" : undefined}>{label}</a>

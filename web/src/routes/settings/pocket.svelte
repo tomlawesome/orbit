@@ -529,7 +529,7 @@
           <div class="st-rows st-sent">
             {#each sent as row (row.id)}
               <Row title={row.itemName} meta={sentMeta(row)} trail={when(row.at).slice(0, 6)} trailSub={when(row.at).slice(7)}
-                   href={resolve("/item/[[id]]", { id: row.itemId })}>
+                   href={resolve(`/home?item=${encodeURIComponent(row.itemId)}`)}>
                 {#snippet mark()}
                   <span class="st-sentmark" class:failed={row.status === "failed"} class:retry={row.status === "retry"}>
                     {#if row.channel === "email"}

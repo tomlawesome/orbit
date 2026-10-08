@@ -11,7 +11,7 @@
    * A DOCUMENT'S PREVIEW, FROM HOME'S ITEM DRAWER (#1319; owner-decisions
    * §34; design/v19/belt-purpose/round-3/f-preview-beside-tracked.html).
    *
-   * The belt's reading card (item/[[id]]/+page.svelte, #1088, #1300),
+   * The retired belt's reading card (#1088, #1300; the belt went with #1319),
    * carried over in markup, states and loading: the reticle while the page
    * is on its way, the page nearly edge to edge once it has landed (a button
    * that opens the reader over home), the pager under it, and the four

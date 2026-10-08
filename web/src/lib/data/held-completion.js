@@ -1,6 +1,6 @@
 /**
- * A COMPLETION HELD FOR ITS UNDO (§1.13; the belt's tapComplete and the
- * pocket's completeRow, item/[[id]]/+page.svelte and home/pocket.svelte):
+ * A COMPLETION HELD FOR ITS UNDO (§1.13; first the belt's tapComplete and the
+ * pocket's completeRow -- the belt retired with #1319):
  * there is no command that takes a completion back, so `complete` builds its
  * command, holds it for the wake's four seconds and only then sends it.
  * `undo` inside the hold is a real undo. Leaving the page sends it at once.
