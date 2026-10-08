@@ -10,8 +10,9 @@ import { fileURLToPath } from "node:url";
  * deployment directory bind-mounted at /orbit-deploy. This shim runs the same
  * orbit CLI from this checkout (src/cli/orbit.ts through tsx) with the mount
  * path translated back to the host directory and only the `-e` variables the
- * real run would forward, so a suite exercises configure.sh, its argv and the
- * engine together without a daemon or an image. Everything else it is asked
+ * real run would forward (plus the image's own ORBIT_ENGINE_CONTEXT), so a
+ * suite exercises configure.sh or install.sh, its argv and the engine
+ * together without a daemon or an image. Everything else it is asked
  * answers like a present image on a rootful daemon, or as configured.
  *
  * Every invocation's argv is appended, one JSON array per line, to
@@ -36,7 +37,8 @@ if (command === "image" && sub === "inspect") process.exit(${imagePresent ? 0 : 
 if (command === "pull") process.exit(${pullSucceeds ? 0 : 1});
 if (command === "info") { process.stdout.write(${JSON.stringify(rootless ? "[name=seccomp,profile=builtin name=rootless name=cgroupns]" : "[name=seccomp,profile=builtin name=cgroupns]")} + "\\n"); process.exit(0); }
 if (command !== "run") { process.stderr.write("fake docker: unsupported " + argv.join(" ") + "\\n"); process.exit(1); }
-const env = { PATH: process.env.PATH, HOME: process.env.HOME, TERM: process.env.TERM };
+// The image's own ENV (Dockerfile): every engine one-off runs with it.
+const env = { PATH: process.env.PATH, HOME: process.env.HOME, TERM: process.env.TERM, ORBIT_ENGINE_CONTEXT: "container" };
 const mounts = [];
 let index = 1;
 const flagsWithValue = new Set(["-e", "--env", "-v", "--volume", "--entrypoint", "--network", "--user", "--name"]);

@@ -55,6 +55,24 @@ export function reportAuthCallbackFailure(code: AuthErrorCode, tokenReason?: Tok
     reportAuthTokenExchangeFailure(tokenReason ?? "provider_rejected");
     return;
   }
+  /* A new provider identity whose email already belongs to an Orbit account
+     (ADR-0023 §3, #1242). Orbit's own rule refused it, so the record says so:
+     filed under `unexpected_failure` with `check_provider` it sent the reader
+     of the log to a provider that had done nothing wrong. Never the address,
+     the subject or the account. The claim's two refusals get the same
+     treatment: a provider sign-in before the instance is claimed
+     (`bootstrap_required`), or one arriving after a local administrator holds
+     it (`bootstrap_claimed`), is Orbit's rule working, not a provider fault. */
+  if (code === "link_required" || code === "bootstrap_required" || code === "bootstrap_claimed") {
+    log.warn({
+      event: "auth.provider",
+      state: "invalid",
+      reason: code,
+      action: "none",
+      impact: "sign_in_blocked",
+    });
+    return;
+  }
 
   const reason = code === "invalid_request" || code === "invalid_state" || code === "account_disabled"
     ? code

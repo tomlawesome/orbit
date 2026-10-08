@@ -80,4 +80,33 @@ describe("acquireDeployLock", () => {
       }
     }
   });
+
+  it("lets work done on the holder's behalf inside share() take the same lock without refusing (#1212)", async () => {
+    const release = acquireDeployLock(dir, "install", makeError);
+    const owner = readFileSync(lockPath, "utf8");
+    const nested = release.share(() => {
+      const inner = acquireDeployLock(dir, "orbit configure", makeError);
+      inner();
+      return readFileSync(lockPath, "utf8");
+    });
+    // The nested release left the holder's lock in place.
+    expect(nested).toBe(owner);
+    expect(readFileSync(lockPath, "utf8")).toBe(owner);
+    await release.share(async () => {
+      await Promise.resolve();
+      acquireDeployLock(dir, "configuration migration", makeError)();
+    });
+    expect(readFileSync(lockPath, "utf8")).toBe(owner);
+    release();
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it("shares nothing outside share(), and nothing once the lock is no longer the holder's", () => {
+    const release = acquireDeployLock(dir, "install", makeError);
+    expect(() => acquireDeployLock(dir, "orbit configure", makeError)).toThrow(TestLockRefusal);
+    writeFileSync(lockPath, "reclaimed-by-another-run\n");
+    expect(() => release.share(() => acquireDeployLock(dir, "orbit configure", makeError))).toThrow(TestLockRefusal);
+    release();
+  });
 });
+

@@ -24,12 +24,12 @@
   },
   "customManagers": [
     {
-      "description": "The pipeline pins its job images in the top-level variables block -- NODE_IMAGE, PLAYWRIGHT_IMAGE, POSTGRES_IMAGE -- and the jobs reference them as $NODE_IMAGE. The gitlabci manager reads image: and services: keys, so it sees the references and never the pins. This reads the pins. TRIVY_IMAGE is out of reach on purpose: it is pinned by digest with no tag, so there is no version to compare against, and .github/supply-chain-policy.json's scanner entry carries its review date instead. Most of these pins go through the group dependency proxy (${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/<image>), which is not a real registry path, so the first matchString strips that variable and the fixed library/ prefix off before they ever reach depName; the second matchString is for a pin like PLAYWRIGHT_IMAGE that already names its real registry directly and must not be mistaken for a proxied one (the leading-$ exclusion is what tells the two apart).",
+      "description": "The pipeline pins its job images in the top-level variables block -- NODE_IMAGE, PLAYWRIGHT_IMAGE, POSTGRES_IMAGE -- and the jobs reference them as $NODE_IMAGE. The gitlabci manager reads image: and services: keys, so it sees the references and never the pins. This reads the pins. TRIVY_IMAGE is out of reach on purpose: it is pinned by digest with no tag, so there is no version to compare against, and .github/supply-chain-policy.json's scanner entry carries its review date instead. Most of these pins go through the group dependency proxy (${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/<image>), which is not a real registry path, so the first matchString strips that variable and the fixed library/ prefix off before they ever reach depName; the second matchString is for a pin like PLAYWRIGHT_IMAGE that already names its real registry directly and must not be mistaken for a proxied one (its first character may not be $, which is what tells the two apart; RE2, which Renovate uses, has no lookahead, #1218).",
       "customType": "regex",
       "managerFilePatterns": ["/^\\.gitlab-ci\\.yml$/"],
       "matchStrings": [
         "_IMAGE:\\s+\\$\\{CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX\\}/(?<depName>[^\\s:@]+):(?<currentValue>[^\\s@]+)@(?<currentDigest>sha256:[a-f0-9]{64})",
-        "_IMAGE:\\s+(?<depName>(?!\\$)[^\\s:@]+):(?<currentValue>[^\\s@]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+        "_IMAGE:\\s+(?<depName>[^\\s:@$][^\\s:@]*):(?<currentValue>[^\\s@]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
       ],
       "datasourceTemplate": "docker"
     },

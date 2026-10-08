@@ -23,16 +23,17 @@
 #
 # Deliberately the inverse of the acceptance harness's shim policy: there,
 # every network fetch is intercepted so no external state can influence the
-# result; here the network path *is* the subject, so fetches are real and only
-# the OIDC discovery URL is redirected — to the disposable sidecar in
-# tests/oidc, over TLS the shim actually verifies. No provider credential is
-# involved, and none is needed: install.sh validates discovery for shape.
-#
-# The sidecar is reached through the shim rather than a hosts entry because
-# configure.sh's validate_oidc_issuer refuses a loopback issuer, and adding a
-# name to /etc/hosts needs root this host does not grant. The shim performs
-# only the name and port translation a hosts entry would; the request, the
-# response and the certificate check are real.
+# result; here the network path *is* the subject, so fetches are real. The
+# one stand-in is the identity provider: the disposable sidecar in tests/oidc,
+# issuing as https://orbit-oidc.invalid:4443/ (the dotted alias its
+# certificate names: the configuration contract refuses a bare single-label
+# issuer host). OIDC discovery runs inside the install
+# engine's container (#1212 note 30988), so a PATH docker shim gives that one
+# engine run the host entry for that name (the sidecar's bridge address)
+# and the sidecar's CA, as scripts/test-e2e-local.sh does for its own
+# containers; every other call reaches the real docker unchanged. The
+# request, the response and the certificate check are real. No provider
+# credential is involved, and none is needed: discovery is checked for shape.
 #
 # What this does NOT cover: the interactive command centre. This is the piped
 # bootstrap, which by construction has no controlling terminal, so install.sh
@@ -69,7 +70,7 @@ done
 
 repository="tomlawesome/orbit"
 registry="ghcr.io"
-issuer="https://orbit-oidc.bootstrap.invalid/application/o/orbit/"
+issuer="https://orbit-oidc.invalid:4443/"
 
 note() { printf 'test-install-bootstrap: %s\n' "$1"; }
 fail() { printf 'test-install-bootstrap: %s\n' "$1" >&2; exit 1; }
@@ -160,30 +161,29 @@ start_oidc() {
   note "disposable OIDC provider on 127.0.0.1:${oidc_port} issuing as $issuer"
 }
 
-# --- the one redirected URL ------------------------------------------------
+# --- the one engine run that needs the provider ----------------------------
 
 make_shim() {
+  local real_docker oidc_address
+  real_docker="$(command -v docker)" || fail "docker is required"
+  oidc_address="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$oidc_container")"
+  [[ "$oidc_address" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "could not read the OIDC sidecar's bridge address"
+  chmod 644 "$workdir/oidc-ca.pem"
   mkdir -p "$workdir/shim"
-  cat > "$workdir/shim/curl" <<SHIM
+  cat > "$workdir/shim/docker" <<SHIM
 #!/usr/bin/env bash
-# Pass-through curl. Every URL reaches the network unchanged except the OIDC
-# discovery document, which is served by this run's own sidecar over verified
-# TLS. Unlike the acceptance harness's shim this does not fail closed: the
-# real fetches are what issue #590 exists to exercise.
+# Every call reaches the real docker unchanged, except the install engine run,
+# which also gets the provider's host entry and CA. The published install.sh
+# passes neither.
 set -Eeuo pipefail
-discovery_url="${issuer}.well-known/openid-configuration"
-rewritten="https://127.0.0.1:${oidc_port}/.well-known/openid-configuration"
-args=()
-for arg in "\$@"; do
-  if [[ "\$arg" == "\$discovery_url" ]]; then
-    args+=(--cacert "$workdir/oidc-ca.pem" "\$rewritten")
-  else
-    args+=("\$arg")
-  fi
-done
-exec /usr/bin/curl "\${args[@]}"
+if [[ "\${1:-}" == "run" && " \$* " == *" /opt/orbit/cli/orbit.js install "* ]]; then
+  exec "$real_docker" run --add-host "orbit-oidc.invalid:${oidc_address}" \\
+    -v "$workdir/oidc-ca.pem:/orbit-test-oidc-ca.pem:ro" \\
+    -e NODE_EXTRA_CA_CERTS=/orbit-test-oidc-ca.pem "\${@:2}"
+fi
+exec "$real_docker" "\$@"
 SHIM
-  chmod 755 "$workdir/shim/curl"
+  chmod 755 "$workdir/shim/docker"
 }
 
 # --- what the registry says today ------------------------------------------
@@ -217,6 +217,9 @@ make_target() {
     printf 'APP_URL=https://orbit.bootstrap.invalid\n'
     printf 'ORBIT_PORT=%s\n' "$orbit_port"
     printf 'ORBIT_BIND_ADDRESS=127.0.0.1\n'
+    # ADR-0023 section 1: named explicitly, or the OIDC fields below are read
+    # as a local-only deployment's and discovery is never exercised.
+    printf 'ORBIT_AUTH_OIDC=true\n'
     printf 'OIDC_ISSUER=%s\n' "$issuer"
     printf 'OIDC_CLIENT_ID=orbit-bootstrap\n'
     printf 'OIDC_CLIENT_SECRET_FILE=/run/orbit-secrets/orbit-oidc-client-secret\n'

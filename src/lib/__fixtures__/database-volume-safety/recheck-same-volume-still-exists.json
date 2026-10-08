@@ -1,0 +1,16 @@
+{
+  "name": "recheck same volume still exists",
+  "kind": "verify-recheck",
+  "databaseVolumeName": "orbit_orbit-db-data",
+  "databaseVolumeSeen": true,
+  "scenario": {
+    "volumeLsExact": {
+      "orbit_orbit-db-data": "orbit_orbit-db-data"
+    }
+  },
+  "bash": {
+    "status": 0,
+    "stdout": "database_volume_checked=1\ndatabase_volume_seen=1\ndatabase_volume_name=orbit_orbit-db-data",
+    "stderr": ""
+  }
+}

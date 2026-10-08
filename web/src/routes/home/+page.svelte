@@ -927,6 +927,12 @@
      * keystroke was lost the same way, and it takes the same two answers —
      * catch up on the press nobody was listening for, and say out loud when
      * the screen went live.
+     *
+     * #1243: the north star is the same kind of press. It opens the quick add
+     * (or, on the empty sky, sends the reader to "/"), and it was left out of
+     * the catch-up, so a reader who pressed it while readHome() was still out
+     * saw nothing happen and had to press again. CI caught it as the quick
+     * add test's drawer never opening (pipeline 2236).
      */
     /** @type {HTMLElement | null} */
     let missedPress = null;
@@ -934,7 +940,7 @@
     const rememberPress = (event) => {
       const target = event.target;
       if (target instanceof Element)
-        missedPress = /** @type {HTMLElement | null} */ (target.closest("button.orb, #morb"));
+        missedPress = /** @type {HTMLElement | null} */ (target.closest("button.orb, #morb, #nstar"));
     };
     /* Capture phase, so the press is recorded before anything else can stop
        it. A keyboard reader is recorded here too: both dialects' toggles are
@@ -1344,7 +1350,9 @@
       <button class="ctype"><span class="dot" style="background:none;border:1.6px solid currentColor"></span>something else</button>
     </div>
     <div class="crow">
-      <div class="cdrop">drop a document here — we'll read what we can</div>
+      <!-- #1243: a real drop target, and a button that opens the file
+           picker; either way the file goes to the full form, which reads it. -->
+      <div class="cdrop" id="cdrop" role="button" tabindex="0" aria-label="drop a document, or press enter to choose one">drop a document here — we'll read what we can</div>
       <a class="cfull" href={resolve("/create")}>open the full form →</a>
     </div>
   </div>
@@ -1664,6 +1672,11 @@
               onCopyAddress={copyAddress} />
           {/each}
         {/each}
+        <!-- #1281: what is kept without a date rides at the foot under its
+             own quiet rule, after the last month — never on the dial. -->
+        {#if corridor.undated.length}
+          <div class="month undated"><span>no date</span><div class="rule"></div><small>{corridor.undated.length} kept without a date</small></div>
+        {/if}
         {#each corridor.undated as row (row.id)}
           <CorridorRow {row} {suggestions} {busyReceipt} {armed} {mailProblem} {today} {expanded}
             onReceiptTap={tapReceipt} {onRowClick} {detail} {detailBusy} {detailProblem} {copied}

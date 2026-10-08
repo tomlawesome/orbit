@@ -19,9 +19,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { applyHostOwnership } from "./host-ownership";
 import {
   type BackupDockerAdapter,
   type BackupManifestFields,
+  RecoveryBundleRefusal,
   type CreateBackupBundleResult,
   RECOVERY_BUNDLE_MEMBERS,
   SECURE_DIRECTORY_MODE,
@@ -53,8 +55,13 @@ import {
   checkRestoreCapacity,
   deriveRestorePaths,
   directoryUsageKib,
+  type RecoverRestoreOptions,
   filesystemAvailableKib,
+  listOrphanedCheckpoints,
   preflightValidateBundle,
+  recoverRestore,
+  refuseIfDocumentKekRotationOpen,
+  removeOrphanedCheckpoint,
 } from "./restore-engine";
 
 // Orchestration tying slices 1-3 (src/lib/recovery-bundle.ts's bundle-format
@@ -79,7 +86,9 @@ export type BackupRestoreCliRefusalCode =
   | "backup-directory-unsafe"
   | "restore-locked"
   | "app-stop-failed"
-  | "rollback-conflict";
+  | "rollback-conflict"
+  | "test-failure-requested"
+  | "import-preflight-failed";
 
 /**
  * Thrown for every fail-closed refusal this orchestration layer itself
@@ -150,18 +159,28 @@ function isSymlinkPath(path: string): boolean {
 // outlives the child. The kernel drops it on close, exit or crash, so there
 // is no stale state to reclaim. The file is never removed: a Bash run
 // blocked in `flock` on the old inode would wake holding a lock nobody else
-// can see. The TS CLI runs on the host (src/cli/orbit.ts refuses backup and
-// restore in the container), where the Bash scripts already require flock.
+// can see. Since #1211 the CLI runs inside the deployment (a compose one-off
+// on orbit-app) with the backups directory bind-mounted from the host: same
+// kernel, so the flock still excludes a second run, and BusyBox in the
+// image provides the `flock` command.
 const BACKUP_RESTORE_LOCK_FILE_NAME = ".orbit-backup-restore.lock";
 
-function acquireBackupRestoreLock(backupDirectory: string): () => void {
+function ensurePrivateBackupDirectory(backupDirectory: string): void {
   mkdirSync(backupDirectory, { recursive: true });
   chmodSync(backupDirectory, SECURE_DIRECTORY_MODE);
+  // #1211 E6: the engine runs as root inside the deployment; what it creates
+  // on the host belongs to the operator.
+  applyHostOwnership(backupDirectory);
+}
+
+function acquireBackupRestoreLock(backupDirectory: string): () => void {
+  ensurePrivateBackupDirectory(backupDirectory);
   const lockPath = join(backupDirectory, BACKUP_RESTORE_LOCK_FILE_NAME);
 
   let fd: number;
   try {
     fd = openSync(lockPath, constants.O_CREAT | constants.O_WRONLY, 0o600);
+    applyHostOwnership(lockPath);
   } catch {
     refuse("restore-locked", `Could not open the orbit backup/restore lock at ${lockPath}.`);
   }
@@ -240,8 +259,7 @@ function ensureBackupDirectorySafe(paths: RestorePaths): void {
   if (isSymlinkPath(paths.backupDirectory)) {
     refuse("backup-directory-unsafe", "preflight/configuration failed; the private backup directory must not be a symbolic link.");
   }
-  mkdirSync(paths.backupDirectory, { recursive: true });
-  chmodSync(paths.backupDirectory, SECURE_DIRECTORY_MODE);
+  ensurePrivateBackupDirectory(paths.backupDirectory);
   if (isSymlinkPath(paths.restoreRoot)) {
     refuse("backup-directory-unsafe", "preflight/configuration failed; the restore evidence directory must not be a symbolic link.");
   }
@@ -296,7 +314,8 @@ export function verifyBackupBundle(
 
 export interface RunBackupOptions {
   backupDirectory: string;
-  documentKekHex: string;
+  /** The live key, or how to read it: a reader is called only once the lock is held (#1151 RANGE-R7, backup.sh's lock-then-read order). */
+  documentKekHex: string | (() => string);
   adapter: BackupDockerAdapter;
   now: Date;
 }
@@ -307,10 +326,12 @@ export function runBackup(options: RunBackupOptions): CreateBackupBundleResult {
   // can race a concurrent restore's document-tree/database cutover.
   const releaseLock = acquireBackupRestoreLock(options.backupDirectory);
   try {
-    mkdirSync(options.backupDirectory, { recursive: true });
-    chmodSync(options.backupDirectory, SECURE_DIRECTORY_MODE);
+    // #1151 RANGE-R7: read only now, under the lock — an import's two-rename
+    // key swap (taken under the same lock) can leave the live key file
+    // briefly absent.
+    const documentKekHex = typeof options.documentKekHex === "function" ? options.documentKekHex() : options.documentKekHex;
     const finalTarPath = join(options.backupDirectory, `orbit-${formatBundleTimestamp(options.now)}.tar`);
-    return createBackupBundle(options.backupDirectory, finalTarPath, options.documentKekHex, options.adapter, formatManifestTimestamp(options.now));
+    return createBackupBundle(options.backupDirectory, finalTarPath, documentKekHex, options.adapter, formatManifestTimestamp(options.now));
   } finally {
     releaseLock();
   }
@@ -384,14 +405,27 @@ export interface RunRestoreOptions {
   rollbackDocumentKekFile?: string;
   hooks?: RestoreDurabilityHooks;
   testHooks?: RestoreOrchestrationTestHooks;
+  /** The caller already holds the backup/restore lock (runImportRecoveryBundle takes it before swapping the key, as import-recovery-bundle.sh did). */
+  lockHeld?: boolean;
+  /**
+   * `orbit restore --preflight` (#1211 amendment E3a): stage, validate and
+   * capacity-check the bundle, then return before confirm(). restore.sh runs
+   * this while Orbit is still up, so it stops nothing and leaves no journal
+   * or checkpoint; its stage database is dropped and its scratch lives in
+   * the caller's workDir. The full run repeats every check: this is a gate,
+   * never an input.
+   */
+  preflightOnly?: boolean;
 }
 
-export function runRestore(options: RunRestoreOptions): RestoreDisposeResult | { outcome: "completed" } {
+export type RunRestoreResult = RestoreDisposeResult | { outcome: "completed" } | { outcome: "preflight-passed" };
+
+export function runRestore(options: RunRestoreOptions): RunRestoreResult {
   // O2-R7: taken before anything else, including the journal-exists check
   // below — the journal written at the end of checkpointing was the only
   // thing stopping two concurrent restores, and both could pass that check
   // before either got far enough to write it.
-  const releaseLock = acquireBackupRestoreLock(options.paths.backupDirectory);
+  const releaseLock = options.lockHeld ? () => undefined : acquireBackupRestoreLock(options.paths.backupDirectory);
   try {
     return withScratchCleanupOnSignal(options.workDir, () => runRestoreLocked(options));
   } finally {
@@ -399,11 +433,21 @@ export function runRestore(options: RunRestoreOptions): RestoreDisposeResult | {
   }
 }
 
-function runRestoreLocked(options: RunRestoreOptions): RestoreDisposeResult | { outcome: "completed" } {
+function runRestoreLocked(options: RunRestoreOptions): RunRestoreResult {
   ensureBackupDirectorySafe(options.paths);
-  if (existsSync(options.paths.journalPath)) {
-    refuse("restore-journal-exists", "preflight/journal failed; an unfinished restore exists; run restore --recover before starting a new restore.");
+  // A link at the journal's path counts as an unfinished restore too, as it
+  // did for restore.sh: only nothing at all means no restore is open.
+  if (existsSync(options.paths.journalPath) || isSymlinkPath(options.paths.journalPath)) {
+    refuse("restore-journal-exists", "preflight/journal failed; an unfinished restore exists; run bash scripts/restore.sh --recover before starting a new restore.");
   }
+  // restore.sh checked for an open document-KEK rotation before reading the
+  // key or staging anything; RestoreRun.prepare() checks again, after the
+  // confirmation, before the checkpoint.
+  refuseIfDocumentKekRotationOpen(options.paths.documentKekFile);
+  // #1151 O2-R6/O2-R10: with the lock held and no journal, a checkpoint
+  // directory still marked as being prepared can only be a killed run's
+  // leftover; remove it rather than leave a full dump on disk forever.
+  for (const orphan of listOrphanedCheckpoints(options.paths.restoreRoot)) removeOrphanedCheckpoint(options.paths.restoreRoot, orphan);
 
   const stagingWorkDir = join(options.workDir, "staging");
   mkdirSync(stagingWorkDir, { recursive: true });
@@ -419,6 +463,7 @@ function runRestoreLocked(options: RunRestoreOptions): RestoreDisposeResult | { 
     tempAvailableKib: filesystemAvailableKib(stagingWorkDir),
     volumeAvailableKib: options.adapter.measureDocumentVolumeAvailableKib(),
   });
+  if (options.preflightOnly) return { outcome: "preflight-passed" };
 
   if (!options.confirm()) {
     refuse("restore-not-confirmed", "confirmation failed; restore cancelled.");
@@ -455,6 +500,20 @@ function runRestoreLocked(options: RunRestoreOptions): RestoreDisposeResult | { 
   }
 }
 
+/**
+ * `restore --recover` under the same backup/restore lock as every other run,
+ * as restore.sh held it for both paths (#1151 O2-R3): a backup must not stop
+ * and start orbit-app while a recovery is reapplying a checkpoint.
+ */
+export function runRecoverRestore(options: RecoverRestoreOptions): RestoreDisposeResult {
+  const releaseLock = acquireBackupRestoreLock(options.paths.backupDirectory);
+  try {
+    return recoverRestore(options);
+  } finally {
+    releaseLock();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // orbit export-recovery-bundle — export-recovery-bundle.sh's orchestration
 // (:1-70): verify the source bundle passes full backup.sh --verify
@@ -465,8 +524,11 @@ function runRestoreLocked(options: RunRestoreOptions): RestoreDisposeResult | { 
 export interface RunExportRecoveryBundleOptions {
   sourceBundlePath: string;
   documentKekHex: string;
-  passphrase: string;
-  passphraseConfirmation: string;
+  /** Both entries, already collected; or `collectPassphrase` instead, called only once the source bundle has passed verification (export-recovery-bundle.sh's order). */
+  passphrase?: string;
+  passphraseConfirmation?: string;
+  /** Returns a passphrase it has already had confirmed. */
+  collectPassphrase?: () => string;
   backupDirectory: string;
   adapter: Pick<BackupDockerAdapter, "pgRestoreListOk" | "recordRecoveryBundleExported">;
   now: Date;
@@ -474,22 +536,23 @@ export interface RunExportRecoveryBundleOptions {
 
 export function runExportRecoveryBundle(options: RunExportRecoveryBundleOptions): { finalPath: string } {
   requireRegularNonSymlinkFile(options.sourceBundlePath, "Usage: orbit export-recovery-bundle <backup.tar>");
-  mkdirSync(options.backupDirectory, { recursive: true });
-  chmodSync(options.backupDirectory, SECURE_DIRECTORY_MODE);
+  ensurePrivateBackupDirectory(options.backupDirectory);
   const workDir = mkdtempSync(join(options.backupDirectory, ".orbit-recovery."));
+  applyHostOwnership(workDir);
   try {
     return withScratchCleanupOnSignal(workDir, () => {
       // guarantee #4: the source backup bundle must pass full verification
       // before a recovery bundle is produced from it.
       verifyBackupBundle(options.sourceBundlePath, options.documentKekHex, join(workDir, "verify"), options.adapter);
 
-      requireValidPassphrase(options.passphrase);
-      requireMatchingPassphrase(options.passphrase, options.passphraseConfirmation);
+      const passphrase = options.collectPassphrase ? options.collectPassphrase() : (options.passphrase ?? "");
+      requireValidPassphrase(passphrase);
+      requireMatchingPassphrase(passphrase, options.collectPassphrase ? passphrase : (options.passphraseConfirmation ?? ""));
 
       const innerBundlePath = join(workDir, "orbit-backup.tar");
       copyFileSync(options.sourceBundlePath, innerBundlePath);
 
-      const envelope = encryptDocumentKek(options.documentKekHex, options.passphrase);
+      const envelope = encryptDocumentKek(options.documentKekHex, passphrase);
       const envelopePath = join(workDir, "document-kek.enc");
       writeSecretFile(envelopePath, envelope, SECURE_FILE_MODE);
 
@@ -527,16 +590,27 @@ export function runExportRecoveryBundle(options: RunExportRecoveryBundleOptions)
 
 export interface RunImportRecoveryBundleOptions {
   recoveryBundlePath: string;
-  passphrase: string;
+  /** The passphrase, or how to ask for it: a collector is called only once the archive, manifest and checksums have passed (import-recovery-bundle.sh's order). */
+  passphrase: string | (() => string);
   liveDocumentKekFile: string;
   backupDirectory: string;
   adapter: RestoreDockerAdapter;
-  /** import-recovery-bundle.sh guarantee #19: "Type IMPORT RECOVERY to continue". */
-  importConfirmed: boolean;
+  /** import-recovery-bundle.sh guarantee #19: "Type IMPORT RECOVERY to continue". A callback is asked only once the recovered key has decrypted. */
+  importConfirmed: boolean | (() => boolean);
+  /** Runs once confirmed, before anything is changed (the CLI's PostgreSQL client check). */
+  beforeRestore?: () => void;
   /** restore.sh guarantee #46, re-prompted by the inner restore.sh invocation (import-recovery-bundle.sh:105 passes neither `--yes` nor `ORBIT_NONINTERACTIVE_RESTORE`, so the inner script always re-confirms interactively) — a genuinely separate gate from `importConfirmed`, not a duplicate of it; see runRestore's `confirm` for why this is a callback, not a precomputed boolean. */
   confirmRestore: () => boolean;
   hooks?: RestoreDurabilityHooks;
   testHooks?: RestoreOrchestrationTestHooks;
+  /**
+   * `orbit import-recovery-bundle --preflight` (#1211 amendment E3a): the
+   * journal, rotation and rollback-file checks and the archive preflight,
+   * under the backup/restore lock, then return before the passphrase is
+   * asked for. import-recovery-bundle.sh runs this while Orbit is still up;
+   * it asks nothing and changes nothing.
+   */
+  preflightOnly?: boolean;
 }
 
 /**
@@ -585,15 +659,33 @@ function renameSecretFileAcrossDevices(sourcePath: string, destinationPath: stri
  * vs. manual-recovery-required are RestoreRun.dispose()'s internal
  * distinctions, already fully handled inside runRestore()).
  */
-export function runImportRecoveryBundle(options: RunImportRecoveryBundleOptions): { outcome: "completed" } {
-  requireRegularNonSymlinkFile(options.recoveryBundlePath, "Usage: orbit import-recovery-bundle <recovery.tar>");
+export function runImportRecoveryBundle(options: RunImportRecoveryBundleOptions): { outcome: "completed" } | { outcome: "preflight-passed" } {
+  if (options.preflightOnly) {
+    // The same lock as the full run, so a preflight that meets a running
+    // backup or restore exits 75 and the shell touches nothing (E3a).
+    const releaseLock = acquireBackupRestoreLock(options.backupDirectory);
+    try {
+      return importRecoveryBundleUnlocked(options);
+    } finally {
+      releaseLock();
+    }
+  }
+  return importRecoveryBundleUnlocked(options);
+}
+
+function importRecoveryBundleUnlocked(options: RunImportRecoveryBundleOptions): { outcome: "completed" } | { outcome: "preflight-passed" } {
+  requireRegularNonSymlinkFile(options.recoveryBundlePath, "Usage: bash scripts/import-recovery-bundle.sh <recovery.tar>");
   const paths = deriveRestorePaths(options.backupDirectory, options.liveDocumentKekFile);
   if (existsSync(paths.journalPath)) {
     refuse(
       "restore-journal-exists",
-      "preflight/journal failed; an unfinished restore exists; run restore --recover before importing another recovery bundle.",
+      "preflight/journal failed; an unfinished restore exists; run bash scripts/restore.sh --recover before importing another recovery bundle.",
     );
   }
+  // SS1-S3: never swap DOCUMENT_KEK under an open rotation. Checked here,
+  // again after the prompts (which can sit open for as long as the operator
+  // takes) and once more with the lock held, as import-recovery-bundle.sh did.
+  refuseIfDocumentKekRotationOpen(options.liveDocumentKekFile);
 
   // O2-S3: staged inside the install's own directory (a sibling of the live
   // document KEK file itself), not under workDir/tmpdir() — guaranteed same
@@ -614,83 +706,144 @@ export function runImportRecoveryBundle(options: RunImportRecoveryBundleOptions)
   const workDir = mkdtempSync(join(tmpdir(), "orbit-recovery-import-"));
   try {
     return withScratchCleanupOnSignal(workDir, () => {
-      validateRecoveryBundleLayout(options.recoveryBundlePath);
       const extractedDir = join(workDir, "extracted");
-      mkdirSync(extractedDir, { recursive: true });
-      extractTar(options.recoveryBundlePath, extractedDir);
-      validateRecoveryManifestFormatVersion(extractedDir);
-      verifyRecoveryBundleChecksums(extractedDir);
+      preflightRecoveryBundle(options.recoveryBundlePath, extractedDir);
+      if (options.preflightOnly) return { outcome: "preflight-passed" as const };
 
+      const passphrase = typeof options.passphrase === "function" ? options.passphrase() : options.passphrase;
       const envelope = readFileSync(join(extractedDir, "document-kek.enc"));
       // decryptDocumentKek already refuses (invalid-recovered-key) a plaintext
       // that isn't a well-formed 64-hex document key, so no separate re-check
       // is needed here.
-      const recoveredKekHex = decryptDocumentKek(envelope, options.passphrase)
-        .toString("utf8")
-        .replace(/[\r\n]+$/, "");
+      let recoveredKekHex: string;
+      try {
+        recoveredKekHex = decryptDocumentKek(envelope, passphrase)
+          .toString("utf8")
+          .replace(/[\r\n]+$/, "");
+      } catch (error) {
+        if (error instanceof RecoveryBundleRefusal && error.code === "invalid-recovered-key") {
+          refuse("import-preflight-failed", "Recovery passphrase did not decrypt a valid document KEK.");
+        }
+        refuse("import-preflight-failed", "preflight/decryption failed; the recovery key could not be decrypted.");
+      }
 
-      if (!options.importConfirmed) {
+      const confirmed = typeof options.importConfirmed === "function" ? options.importConfirmed() : options.importConfirmed;
+      if (!confirmed) {
         refuse("import-not-confirmed", "Recovery import cancelled.");
       }
-      requireRegularNonSymlinkFile(options.liveDocumentKekFile, "The current document KEK must be a regular file.");
-
-      // O2-F3: a failed stop must abort before the key swap. Proceeding
-      // would swap the live document KEK while the app may still be
-      // reading documents under the old one.
-      if (!options.adapter.stopApp()) {
-        refuse("app-stop-failed", "The Orbit application could not be stopped; the document KEK was not changed.");
-      }
-      const restoreWorkDir = mkdtempSync(join(workDir, "restore-"));
+      refuseIfDocumentKekRotationOpen(options.liveDocumentKekFile);
+      // Taken here, before the app stop and key swap, not left to the inner
+      // restore: a backup landing in that gap would otherwise encrypt a
+      // bundle with the swapped key (import-recovery-bundle.sh's own lock).
+      const releaseLock = acquireBackupRestoreLock(options.backupDirectory);
       try {
-        renameSecretFileAcrossDevices(options.liveDocumentKekFile, previousKekPath);
-        writeSecretFile(options.liveDocumentKekFile, `${recoveredKekHex}\n`, SECURE_FILE_MODE);
-
-        runRestore({
-          backupTarPath: join(extractedDir, "orbit-backup.tar"),
-          documentKekHex: recoveredKekHex,
-          paths,
-          adapter: options.adapter,
-          workDir: restoreWorkDir,
-          confirm: options.confirmRestore,
-          rollbackDocumentKekFile: previousKekPath,
-          hooks: options.hooks,
-          testHooks: options.testHooks,
-        });
-        // Success: the previous key is no longer needed.
-        rmSafely(previousKekPath);
-        return { outcome: "completed" };
-      } catch (error) {
-        if (existsSync(paths.journalPath)) {
-          // The inner restore left durable recovery evidence (a verified
-          // checkpoint survived, per RestoreRun.dispose()'s own
-          // manual-recovery-required/rollback-failed branches) — do not touch
-          // the key further; the operator must run `orbit restore --recover`.
-          refuse("restore-unfinished", "Inner backup restore left durable recovery evidence; run restore --recover.");
-        }
-        // No journal: the inner restore never got far enough to leave
-        // evidence (e.g. capacity/correspondence preflight failed) — revert
-        // the key swap and restart the app, keeping the prior deployment usable.
-        let revertFailed = false;
-        try {
-          renameSecretFileAcrossDevices(previousKekPath, options.liveDocumentKekFile);
-        } catch {
-          revertFailed = true;
-        }
-        options.adapter.startApp();
-        if (revertFailed) {
-          // O2-S3: never silently lose the old key — it is still sitting at
-          // previousKekPath (outside workDir, so the `finally` below never
-          // touches it), and the operator is told exactly where.
-          const originalMessage = error instanceof Error ? error.message : String(error);
-          refuse(
-            "live-key-invalid",
-            `Import failed (${originalMessage}) and the previous document KEK could not be restored to ${options.liveDocumentKekFile}; it is preserved at ${previousKekPath}. Restore it by hand before using Orbit again.`,
-          );
-        }
-        throw error;
+        refuseIfDocumentKekRotationOpen(options.liveDocumentKekFile);
+        requireRegularNonSymlinkFile(options.liveDocumentKekFile, "The current document KEK must be a regular file.");
+        options.beforeRestore?.();
+        return swapKeyAndRestore(options, paths, previousKekPath, recoveredKekHex, join(extractedDir, "orbit-backup.tar"), workDir);
+      } finally {
+        releaseLock();
       }
     });
   } finally {
     rmSync(workDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * import-recovery-bundle.sh's archive preflight (guarantees #5-9), with its
+ * stable categories: nothing from tar or the checksum file, and no member
+ * name, reaches the operator (test_recovery_bundle_diagnostics).
+ */
+function preflightRecoveryBundle(recoveryBundlePath: string, extractedDir: string): void {
+  const archiveMessages: Partial<Record<string, string>> = {
+    "archive-invalid": "preflight/archive failed; the recovery bundle archive is invalid.",
+    "unexpected-members": "preflight/archive failed; the recovery bundle does not contain the expected files.",
+    "link-or-special-entry": "preflight/archive failed; the recovery bundle contains a link or special file.",
+  };
+  const asImportRefusal = (step: () => void, messages: Partial<Record<string, string>>, fallback: string): void => {
+    try {
+      step();
+    } catch (error) {
+      const code = error instanceof RecoveryBundleRefusal ? error.code : "";
+      refuse("import-preflight-failed", messages[code] ?? fallback);
+    }
+  };
+  asImportRefusal(() => validateRecoveryBundleLayout(recoveryBundlePath), archiveMessages, "preflight/archive failed; the recovery bundle archive is invalid.");
+  asImportRefusal(
+    () => {
+      mkdirSync(extractedDir, { recursive: true });
+      extractTar(recoveryBundlePath, extractedDir);
+    },
+    {},
+    "preflight/archive failed; the recovery bundle could not be extracted.",
+  );
+  asImportRefusal(() => validateRecoveryManifestFormatVersion(extractedDir), {}, "preflight/manifest failed; the recovery bundle format is unsupported.");
+  asImportRefusal(() => verifyRecoveryBundleChecksums(extractedDir), {}, "preflight/checksum failed; a recovery bundle member is corrupt.");
+}
+
+function swapKeyAndRestore(
+  options: RunImportRecoveryBundleOptions,
+  paths: RestorePaths,
+  previousKekPath: string,
+  recoveredKekHex: string,
+  innerBundlePath: string,
+  workDir: string,
+): { outcome: "completed" } {
+  // O2-F3: a failed stop must abort before the key swap. Proceeding
+  // would swap the live document KEK while the app may still be
+  // reading documents under the old one.
+  if (!options.adapter.stopApp()) {
+    refuse("app-stop-failed", "The Orbit application could not be stopped; the document KEK was not changed.");
+  }
+  const restoreWorkDir = mkdtempSync(join(workDir, "restore-"));
+  try {
+    renameSecretFileAcrossDevices(options.liveDocumentKekFile, previousKekPath);
+    writeSecretFile(options.liveDocumentKekFile, `${recoveredKekHex}\n`, SECURE_FILE_MODE);
+
+    runRestore({
+      backupTarPath: innerBundlePath,
+      documentKekHex: recoveredKekHex,
+      paths,
+      adapter: options.adapter,
+      workDir: restoreWorkDir,
+      confirm: options.confirmRestore,
+      rollbackDocumentKekFile: previousKekPath,
+      hooks: options.hooks,
+      testHooks: options.testHooks,
+      lockHeld: true,
+    });
+    // Success: the previous key is no longer needed.
+    rmSafely(previousKekPath);
+    return { outcome: "completed" };
+  } catch (error) {
+    if (existsSync(paths.journalPath)) {
+      // The inner restore left durable recovery evidence (a verified
+      // checkpoint survived, per RestoreRun.dispose()'s own
+      // manual-recovery-required/rollback-failed branches) — do not touch
+      // the key further; the operator must run `restore.sh --recover`.
+      refuse("restore-unfinished", "Inner backup restore left durable recovery evidence; run bash scripts/restore.sh --recover.");
+    }
+    // No journal: the inner restore never got far enough to leave
+    // evidence (e.g. capacity/correspondence preflight failed) — revert
+    // the key swap and restart the app, keeping the prior deployment usable.
+    let revertFailed = false;
+    try {
+      renameSecretFileAcrossDevices(previousKekPath, options.liveDocumentKekFile);
+    } catch {
+      revertFailed = true;
+    }
+    options.adapter.startApp();
+    if (revertFailed) {
+      // O2-S3: never silently lose the old key — it is still sitting at
+      // previousKekPath (outside workDir, so the `finally` below never
+      // touches it), and the operator is told exactly where.
+      const originalMessage = error instanceof Error ? error.message : String(error);
+      refuse(
+        "live-key-invalid",
+        `Import failed (${originalMessage}) and the previous document KEK could not be restored to ${options.liveDocumentKekFile}; it is preserved at ${previousKekPath}. Restore it by hand before using Orbit again.`,
+      );
+    }
+    throw error;
   }
 }

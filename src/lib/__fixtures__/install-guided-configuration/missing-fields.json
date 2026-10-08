@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "readiness": "ready APP_URL\nready ORBIT_IMAGE\nready OIDC_ISSUER\nready OIDC_CLIENT_ID\nready OIDC_CLIENT_SECRET\nready OIDC_CALLBACK_URL\noptional processing\noptional ai\noptional mail\noptional imap\noptional push\n",
+      "bash": {
+        "required": {
+          "stdout": "",
+          "stderr": ""
+        },
+        "guided": {
+          "stdout": "",
+          "stderr": ""
+        },
+        "configuration": {
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "readiness": "missing APP_URL\nmissing ORBIT_IMAGE\nmissing OIDC_ISSUER\nmissing OIDC_CLIENT_ID\nmissing OIDC_CLIENT_SECRET\nmissing OIDC_CALLBACK_URL\noptional processing\noptional ai\noptional mail\noptional imap\noptional push\n",
+      "bash": {
+        "required": {
+          "stdout": "APP_URL ORBIT_IMAGE OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CALLBACK_URL",
+          "stderr": ""
+        },
+        "guided": {
+          "stdout": "APP_URL OIDC_ISSUER OIDC_CLIENT_ID OIDC_CALLBACK_URL",
+          "stderr": ""
+        },
+        "configuration": {
+          "stdout": "APP_URL ORBIT_IMAGE OIDC_ISSUER OIDC_CLIENT_ID OIDC_CLIENT_SECRET OIDC_CALLBACK_URL",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "readiness": "ready APP_URL\nready ORBIT_IMAGE\nmissing OIDC_ISSUER\nready OIDC_CLIENT_ID\nmissing OIDC_CLIENT_SECRET\nready OIDC_CALLBACK_URL\nmissing processing\nmissing ai\noptional mail\noptional imap\noptional push\n",
+      "bash": {
+        "required": {
+          "stdout": "OIDC_ISSUER OIDC_CLIENT_SECRET",
+          "stderr": ""
+        },
+        "guided": {
+          "stdout": "OIDC_ISSUER",
+          "stderr": ""
+        },
+        "configuration": {
+          "stdout": "OIDC_ISSUER OIDC_CLIENT_SECRET processing ai",
+          "stderr": ""
+        }
+      }
+    },
+    {
+      "readiness": "",
+      "bash": {
+        "required": {
+          "stdout": "",
+          "stderr": ""
+        },
+        "guided": {
+          "stdout": "",
+          "stderr": ""
+        },
+        "configuration": {
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    }
+  ]
+}

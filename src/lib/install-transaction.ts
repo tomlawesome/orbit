@@ -17,7 +17,8 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { acquireDeployLock as acquireSharedDeployLock } from "./deploy-lock";
+import { type DeployLockRelease, acquireDeployLock as acquireSharedDeployLock } from "./deploy-lock";
+import { applyHostOwnership } from "./host-ownership";
 
 // The staged, atomic .env-orbit + secrets-directory commit/rollback
 // transaction (issue #295 slice 1), ported from scripts/install.sh's
@@ -85,7 +86,7 @@ export class InstallTransactionRefusal extends Error {
 // `orbit configure` and the configuration migration: a concurrent
 // install/update must fail fast rather than revert another writer's
 // committed changes.
-function acquireDeployLock(targetDir: string, operationLabel: string): () => void {
+function acquireDeployLock(targetDir: string, operationLabel: string): DeployLockRelease {
   return acquireSharedDeployLock(targetDir, operationLabel, (message) => new InstallTransactionRefusal(message, "locked"));
 }
 
@@ -181,6 +182,7 @@ function copyPreservingMode(sourceAbsolute: string, destinationAbsolute: string)
   }
   if (stat.isDirectory()) {
     mkdirSync(destinationAbsolute);
+    applyHostOwnership(destinationAbsolute);
     chmodSync(destinationAbsolute, stat.mode & 0o777);
     for (const entry of readdirSync(sourceAbsolute)) {
       copyPreservingMode(join(sourceAbsolute, entry), join(destinationAbsolute, entry));
@@ -189,6 +191,7 @@ function copyPreservingMode(sourceAbsolute: string, destinationAbsolute: string)
   }
   if (stat.isFile()) {
     copyFileSync(sourceAbsolute, destinationAbsolute);
+    applyHostOwnership(destinationAbsolute);
     chmodSync(destinationAbsolute, stat.mode & 0o777);
     return;
   }
@@ -197,6 +200,14 @@ function copyPreservingMode(sourceAbsolute: string, destinationAbsolute: string)
     "unsafe-backup-source",
     sourceAbsolute,
   );
+}
+
+/** mkdir -p below `root`, handing each directory it creates to the host operator. */
+function makeParentDirectories(root: string, directory: string): void {
+  if (directory === root || existsAsAnyType(directory)) return;
+  makeParentDirectories(root, dirname(directory));
+  mkdirSync(directory);
+  applyHostOwnership(directory);
 }
 
 /**
@@ -230,7 +241,7 @@ export class InstallTransaction {
   private active = false;
   private committed = false;
   private disposed = false;
-  private releaseLock: () => void = () => {};
+  private releaseLock: DeployLockRelease = Object.assign(() => {}, { share: <T>(work: () => T): T => work() });
 
   private constructor(targetDir: string, stagingDir: string, managedPaths: readonly ManagedPath[]) {
     this.targetDir = targetDir;
@@ -263,6 +274,7 @@ export class InstallTransaction {
           "staging-directory-unavailable",
         );
       }
+      applyHostOwnership(stagingDir);
       chmodSync(stagingDir, SECURE_DIRECTORY_MODE);
 
       const transaction = new InstallTransaction(targetDir, stagingDir, managedPaths);
@@ -279,8 +291,10 @@ export class InstallTransaction {
   // prepare_rollback_area (install.sh:1372-1393).
   private prepareRollbackArea(): void {
     mkdirSync(this.rollbackDir);
+    applyHostOwnership(this.rollbackDir);
     chmodSync(this.rollbackDir, SECURE_DIRECTORY_MODE);
     mkdirSync(this.originalDir);
+    applyHostOwnership(this.originalDir);
     chmodSync(this.originalDir, SECURE_DIRECTORY_MODE);
 
     for (const managed of this.managedPaths) {
@@ -291,7 +305,7 @@ export class InstallTransaction {
 
       const backupPath = join(this.originalDir, managed.path);
       const backupParent = dirname(backupPath);
-      mkdirSync(backupParent, { recursive: true });
+      makeParentDirectories(this.originalDir, backupParent);
       chmodSync(backupParent, SECURE_DIRECTORY_MODE);
       copyPreservingMode(absolute, backupPath);
     }
@@ -306,8 +320,18 @@ export class InstallTransaction {
   /** Absolute path for staged content, creating parent directories as needed. */
   stagingPathFor(relativePath: string): string {
     const absolute = join(this.stagingDir, relativePath);
-    mkdirSync(dirname(absolute), { recursive: true });
+    makeParentDirectories(this.stagingDir, dirname(absolute));
     return absolute;
+  }
+
+  /**
+   * Runs work done on this transaction's own behalf -- the configure engine
+   * and the configuration migration, in this process (#1212) -- under the
+   * deploy lock this transaction already holds, so their own acquire of it
+   * does not refuse.
+   */
+  shareLock<T>(work: () => T): T {
+    return this.releaseLock.share(work);
   }
 
   /**
@@ -321,6 +345,7 @@ export class InstallTransaction {
     const absolute = this.stagingPathFor(relativePath);
     const descriptor = openSync(absolute, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC, mode);
     try {
+      applyHostOwnership(absolute);
       fchmodSync(descriptor, mode);
       writeSync(descriptor, typeof content === "string" ? Buffer.from(content, "utf8") : content);
     } finally {
@@ -369,6 +394,7 @@ export class InstallTransaction {
     }
     mkdirSync(absolute);
     this.createdDirectories.push(relativePath);
+    applyHostOwnership(absolute);
   }
 
   /**
@@ -382,7 +408,9 @@ export class InstallTransaction {
    */
   commit(): void {
     this.requireActive();
-    writeFileSync(join(this.stagingDir, "committed"), "");
+    const marker = join(this.stagingDir, "committed");
+    writeFileSync(marker, "");
+    applyHostOwnership(marker);
     this.committed = true;
   }
 

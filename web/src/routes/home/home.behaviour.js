@@ -14,6 +14,9 @@
  *   2. The mockup's inline on* attributes are wired here as listeners instead.
  *      Inline handlers need their functions to be globals; a module has none.
  */
+import { goto } from "$app/navigation";
+import { resolve } from "$app/paths";
+import { holdDocument } from "$lib/data/held-document.js";
 import { fillStarTiles } from "$lib/sky.js";
 import { screenScope } from "$lib/teardown.js";
 import { placeGalaxy } from "./placement.js";
@@ -591,6 +594,40 @@ export function mountHome({ galaxy, primary, fixtures = false, workspace = "" })
       const drawer = /** @type {HTMLElement} */ (currentTarget.parentElement);
       const open = drawer.classList.toggle("open");
       currentTarget.setAttribute("aria-expanded", String(open));
+    });
+  }
+
+  /* #1243: the quick add's drop box. It takes a dropped file, or opens the
+     system file picker on a click or Enter, and hands the file to the full
+     form, which reads, previews and attaches it. */
+  const quickDrop = document.getElementById("cdrop");
+  if (quickDrop) {
+    const picker = document.createElement("input");
+    picker.type = "file";
+    picker.hidden = true;
+    picker.accept = ".pdf,.eml,image/*";
+    quickDrop.after(picker);
+    const handOver = (/** @type {File | null | undefined} */ file) => {
+      if (!file) return;
+      holdDocument(file);
+      void goto(resolve("/create"));
+    };
+    on(quickDrop, "click", () => picker.click());
+    on(quickDrop, "keydown", (/** @type {KeyboardEvent} */ event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      picker.click();
+    });
+    on(picker, "change", () => handOver(picker.files?.[0]));
+    on(quickDrop, "dragover", (/** @type {DragEvent} */ event) => {
+      event.preventDefault();
+      quickDrop.classList.add("over");
+    });
+    on(quickDrop, "dragleave", () => quickDrop.classList.remove("over"));
+    on(quickDrop, "drop", (/** @type {DragEvent} */ event) => {
+      event.preventDefault();
+      quickDrop.classList.remove("over");
+      handOver(event.dataTransfer?.files?.[0]);
     });
   }
 

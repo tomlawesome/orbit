@@ -184,7 +184,13 @@ bash scripts/restore.sh backups/orbit-YYYYMMDD-HHMMSS.tar
 ```
 
 The restore asks you to type `RESTORE`, stops Orbit itself, and either
-completes fully or puts everything back as it was.
+completes fully or puts everything back as it was. Orbit stays stopped for
+the whole restore, including the checks on the backup before anything is
+replaced, and starts again once it is done. If a restore is interrupted
+part-way, Orbit stays stopped and `bash scripts/restore.sh --recover` puts
+the previous state back. Both scripts run the Orbit engine inside the
+deployment, so the host needs Docker and nothing else; keep `backups/` on a
+local disk (a backups directory on NFS is not supported).
 
 A backup deliberately leaves out the document encryption key, so it is only
 useful on a machine that still has that key. To survive losing the machine,

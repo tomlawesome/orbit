@@ -109,11 +109,16 @@ vi.mock("@/server/documents/config", () => ({
   wrappingKey: () => ({ keyEncryptionKey: Buffer.alloc(32, 1), keyId: "key-1" }),
   keyEncryptionKeyFor: () => Buffer.alloc(32, 1),
 }));
+// The administrator's upload limit (#1285) is proven in
+// src/server/upload-limit.test.ts; here it answers the configured default.
+vi.mock("@/server/upload-limit", () => ({
+  readEffectiveUploadLimit: async (config: { maxBytes: number }) => config.maxBytes,
+}));
 
 vi.mock("@/server/documents/validation", () => ({
   detectDocumentMediaType: () => "application/pdf",
   normalizedDocumentFilename: (name: string) => name,
-  validateSupportedDocumentStructure: async () => true,
+  classifyDocumentStructure: async () => "supported_structure",
 }));
 
 vi.mock("@/server/documents/crypto", () => ({

@@ -1,0 +1,36 @@
+{
+  "managedPaths": [
+    {
+      "path": "config/tika-config.json",
+      "type": "file"
+    }
+  ],
+  "bash": {
+    "originalSnapshot": {
+      "config": {
+        "mode": 448,
+        "type": "directory",
+        "entries": {
+          "tika-config.json": {
+            "mode": 420,
+            "type": "file",
+            "content": "{}"
+          }
+        }
+      }
+    },
+    "rollbackStatus": 1,
+    "final": {
+      "config": {
+        "mode": 511,
+        "type": "symlink",
+        "linkTarget": "<target>/elsewhere"
+      },
+      "elsewhere": {
+        "mode": 509,
+        "type": "directory",
+        "entries": {}
+      }
+    }
+  }
+}

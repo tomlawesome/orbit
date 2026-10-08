@@ -14,10 +14,10 @@ import { PortableArchiveStorage } from "@/server/portable-archive-storage";
 import { normalizeComparableMetadata } from "@/server/metadata/crypto";
 import { MetadataCipher, openMetadataReader, requireMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
 import { loadMetadataKey, metadataCryptoAvailable, MetadataKeyLockedError, receiptKeyScope } from "@/server/metadata/keys";
+import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
 import { acquireActiveHouseholdLock } from "@/server/workspace-access";
 
 const ARCHIVE_TTL_MS = 24 * 60 * 60 * 1_000;
-const MAX_ARCHIVE_BYTES = 128 * 1024 * 1024;
 
 const importedSectionSchema = z.object({ id: z.string().uuid(), slug: z.string().trim().min(1).max(100), name: z.string().trim().min(1).max(100), icon: z.string().trim().min(1).max(50), accent: z.string().trim().min(1).max(50), position: z.number().int().min(0).max(10_000), visible: z.boolean(), archivedAt: z.string().nullable().optional() });
 // Field caps deliberately mirror `workspaceItemSchema` (src/lib/workspace.ts):
@@ -73,14 +73,6 @@ function jsonBuffer(value: unknown): Buffer {
   return Buffer.from(JSON.stringify(value));
 }
 
-// Base64url has no padding, so this is the exact maximum encoded length for
-// a ciphertext that could decode to at most MAX_ARCHIVE_BYTES (AES-256-GCM
-// ciphertext is the same length as its plaintext; the auth tag is carried
-// separately). Checking this before any crypto work means an oversized
-// archive is rejected before scryptSync or the cipher ever runs, instead of
-// only after `decryptPortableArchive` has already materialised the full
-// plaintext into memory (#383 finding 3).
-const MAX_ARCHIVE_CIPHERTEXT_CHARACTERS = Math.ceil(MAX_ARCHIVE_BYTES / 3) * 4;
 
 function rejectOversizedCiphertext(archive: EncryptedPortableArchive): void {
   if (archive.ciphertext.length > MAX_ARCHIVE_CIPHERTEXT_CHARACTERS) {

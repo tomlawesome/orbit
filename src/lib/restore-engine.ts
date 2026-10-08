@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   closeSync,
@@ -20,12 +19,11 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { applyHostOwnership } from "./host-ownership";
 import {
   type BackupDockerAdapter,
-  type DockerComposeAdapterOptions,
   SECURE_DIRECTORY_MODE,
   SECURE_FILE_MODE,
-  createDockerComposeBackupAdapter,
   extractTar,
   isRegularNonSymlinkFile,
   isValidDocumentKekHex,
@@ -93,7 +91,10 @@ export type RestoreEngineRefusalCode =
   | "capacity-measurement-invalid"
   | "capacity-insufficient"
   | "kek-rotation-open"
-  | "checkpoint-orphan-mismatch";
+  | "checkpoint-orphan-mismatch"
+  | "correspondence-incomplete"
+  | "postgres-client-mismatch"
+  | "database-connection-failed";
 
 /**
  * Thrown for every fail-closed refusal this module makes. Never carries
@@ -245,7 +246,7 @@ function documentKekNextFilePath(documentKekFile: string): string {
  * open rotation would leave the rotation's own audit trail and bookkeeping
  * permanently out of sync with the data it is supposed to be migrating.
  */
-function refuseIfDocumentKekRotationOpen(documentKekFile: string): void {
+export function refuseIfDocumentKekRotationOpen(documentKekFile: string): void {
   const nextKeyPath = documentKekNextFilePath(documentKekFile);
   if (isRegularNonSymlinkFile(nextKeyPath)) {
     refuse(
@@ -277,6 +278,14 @@ export interface RestoreDurabilityHooks {
   beforeJournalDirectorySync?: (state: RestoreJournalState) => void;
   beforeCheckpointArtifactSync?: () => void;
   beforeCheckpointDirectorySync?: () => void;
+  /**
+   * Called before a verified checkpoint is reapplied onto live state (a
+   * rollback, or `--recover`); throwing makes that reapplication fail. The
+   * analogue of restore.sh's `ORBIT_RESTORE_TEST_FAILURE_STAGE=checkpoint-restore`
+   * / `ORBIT_RESTORE_TEST_CHECKPOINT_FAILURE=true`, which the real-stack drill
+   * still drives through `orbit restore` (#1211).
+   */
+  beforeCheckpointRestore?: () => void;
 }
 
 /**
@@ -325,6 +334,7 @@ export function writeRestoreJournal(
     try {
       copyFileSync(paths.journalPath, previousJournal);
       chmodSync(previousJournal, SECURE_FILE_MODE);
+      applyHostOwnership(previousJournal);
     } catch {
       rmSafely(journalTemp);
       refuse("journal-durability-failed", "checkpoint/journal failed; the recovery journal could not be durably published.");
@@ -348,6 +358,7 @@ export function writeRestoreJournal(
       } catch {
         try {
           copyFileSync(previousJournal, paths.journalPath);
+          applyHostOwnership(paths.journalPath);
         } catch {
           // Best-effort restoration, matches restore.sh:497-498's own `|| true` fallback chain.
         }
@@ -509,9 +520,9 @@ export const CORRESPONDENCE_QUERIES = {
     "SELECT count(*)::text FROM documents d WHERE d.lifecycle IN ('receiving', 'validating', 'quarantined', 'encrypting') OR (d.lifecycle = 'scanning' AND NOT EXISTS (SELECT 1 FROM document_staging_objects s WHERE s.document_id = d.id));",
 } as const;
 
-/** reset_scan_recovery_leases's literal SQL (restore.sh:587), unmodified. */
-export const SCAN_RECOVERY_LEASES_SQL =
-  'exec psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --set=ON_ERROR_STOP=1 --command="BEGIN; UPDATE document_jobs AS job SET status = \'failed\', completed_at = NULL, locked_at = NULL, lease_expires_at = NULL, lease_token = NULL, last_error = COALESCE(job.last_error, \'scanner_failed\'), updated_at = now() FROM documents document WHERE job.document_id = document.id AND job.kind = \'scan\' AND job.status IN (\'pending\', \'retry\', \'processing\') AND job.attempts >= 5 AND document.lifecycle = \'scanning\' AND EXISTS (SELECT 1 FROM document_staging_objects stage WHERE stage.document_id = document.id AND stage.status = \'pending\'); UPDATE document_jobs AS job SET status = \'pending\', next_attempt_at = now(), locked_at = NULL, lease_expires_at = NULL, lease_token = NULL, completed_at = NULL, updated_at = now() FROM documents document WHERE job.document_id = document.id AND job.kind = \'scan\' AND job.status IN (\'pending\', \'retry\', \'processing\') AND job.attempts < 5 AND document.lifecycle = \'scanning\' AND EXISTS (SELECT 1 FROM document_staging_objects stage WHERE stage.document_id = document.id AND stage.status = \'pending\'); COMMIT;"';
+/** reset_scan_recovery_leases's literal SQL (restore.sh:587), unmodified: the statement psql runs, without the `sh -c` wrapper bash needed to reach orbit-db. */
+export const SCAN_RECOVERY_LEASES_STATEMENT =
+  "BEGIN; UPDATE document_jobs AS job SET status = 'failed', completed_at = NULL, locked_at = NULL, lease_expires_at = NULL, lease_token = NULL, last_error = COALESCE(job.last_error, 'scanner_failed'), updated_at = now() FROM documents document WHERE job.document_id = document.id AND job.kind = 'scan' AND job.status IN ('pending', 'retry', 'processing') AND job.attempts >= 5 AND document.lifecycle = 'scanning' AND EXISTS (SELECT 1 FROM document_staging_objects stage WHERE stage.document_id = document.id AND stage.status = 'pending'); UPDATE document_jobs AS job SET status = 'pending', next_attempt_at = now(), locked_at = NULL, lease_expires_at = NULL, lease_token = NULL, completed_at = NULL, updated_at = now() FROM documents document WHERE job.document_id = document.id AND job.kind = 'scan' AND job.status IN ('pending', 'retry', 'processing') AND job.attempts < 5 AND document.lifecycle = 'scanning' AND EXISTS (SELECT 1 FROM document_staging_objects stage WHERE stage.document_id = document.id AND stage.status = 'pending'); COMMIT;";
 
 export interface CorrespondenceReports {
   crypto: string;
@@ -704,26 +715,54 @@ export interface RestoreDockerAdapter extends Pick<BackupDockerAdapter, "dumpDat
   measureDocumentVolumeAvailableKib(): number;
 }
 
-function fetchCorrespondenceReports(adapter: Pick<RestoreDockerAdapter, "queryReport">, databaseName: string): CorrespondenceReports {
-  return {
-    crypto: adapter.queryReport(databaseName, CORRESPONDENCE_QUERIES.crypto),
-    visible: adapter.queryReport(databaseName, CORRESPONDENCE_QUERIES.visible),
-    attachments: adapter.queryReport(databaseName, CORRESPONDENCE_QUERIES.attachments),
-    staging: adapter.queryReport(databaseName, CORRESPONDENCE_QUERIES.staging),
-    documentStaging: adapter.queryReport(databaseName, CORRESPONDENCE_QUERIES.documentStaging),
-    transientCount: adapter.queryReport(databaseName, CORRESPONDENCE_QUERIES.transientCount),
-  };
+/** The name each report goes by in an operator message, as restore.sh's query_report call sites named them (#678). */
+const CORRESPONDENCE_CHECK_NAMES: Record<keyof CorrespondenceReports, string> = {
+  crypto: "crypto",
+  visible: "visible",
+  attachments: "attachments",
+  staging: "staging",
+  documentStaging: "document-stage",
+  transientCount: "transient",
+};
+
+/** Where in a restore a correspondence check runs; the prefix of its refusal. */
+export type CorrespondenceStage = "preflight" | "checkpoint" | "recovery" | "cutover";
+
+/**
+ * fail_correspondence's status 2 (restore.sh, #678): a report that could not
+ * be run to completion says nothing about the operator's bundle, so it is
+ * refused as an incomplete check naming itself, never as a correspondence
+ * violation ("use a complete backup and retry").
+ */
+function refuseIncompleteCorrespondence(stage: CorrespondenceStage, report: keyof CorrespondenceReports): never {
+  refuse(
+    "correspondence-incomplete",
+    `${stage}/correspondence-incomplete failed; the ${CORRESPONDENCE_CHECK_NAMES[report]} check did not run to completion, so correspondence could not be verified. This is not a verdict on the backup; retry, and capture the restore output if it recurs.`,
+  );
 }
 
-function fetchActiveCorrespondenceReports(adapter: Pick<RestoreDockerAdapter, "queryActiveReport">): CorrespondenceReports {
-  return {
-    crypto: adapter.queryActiveReport(CORRESPONDENCE_QUERIES.crypto),
-    visible: adapter.queryActiveReport(CORRESPONDENCE_QUERIES.visible),
-    attachments: adapter.queryActiveReport(CORRESPONDENCE_QUERIES.attachments),
-    staging: adapter.queryActiveReport(CORRESPONDENCE_QUERIES.staging),
-    documentStaging: adapter.queryActiveReport(CORRESPONDENCE_QUERIES.documentStaging),
-    transientCount: adapter.queryActiveReport(CORRESPONDENCE_QUERIES.transientCount),
-  };
+function isIncompleteCorrespondence(error: unknown): boolean {
+  return error instanceof RestoreEngineRefusal && error.code === "correspondence-incomplete";
+}
+
+function fetchReports(stage: CorrespondenceStage, query: (sql: string) => string): CorrespondenceReports {
+  const reports = {} as CorrespondenceReports;
+  for (const report of Object.keys(CORRESPONDENCE_QUERIES) as (keyof CorrespondenceReports)[]) {
+    try {
+      reports[report] = query(CORRESPONDENCE_QUERIES[report]);
+    } catch {
+      refuseIncompleteCorrespondence(stage, report);
+    }
+  }
+  return reports;
+}
+
+function fetchCorrespondenceReports(adapter: Pick<RestoreDockerAdapter, "queryReport">, databaseName: string, stage: CorrespondenceStage): CorrespondenceReports {
+  return fetchReports(stage, (query) => adapter.queryReport(databaseName, query));
+}
+
+function fetchActiveCorrespondenceReports(adapter: Pick<RestoreDockerAdapter, "queryActiveReport">, stage: CorrespondenceStage): CorrespondenceReports {
+  return fetchReports(stage, (query) => adapter.queryActiveReport(query));
 }
 
 function installCheckpointKey(checkpointDirectory: string, documentKekFile: string): boolean {
@@ -741,17 +780,22 @@ function installCheckpointKey(checkpointDirectory: string, documentKekFile: stri
   }
 }
 
+/** Throws on a capture failure or an incomplete report; returns the correspondence verdict otherwise. */
+function checkActiveCorrespondence(adapter: RestoreDockerAdapter, workDir: string, stage: CorrespondenceStage): boolean {
+  const archivePath = join(workDir, "active-documents.tar");
+  adapter.collectDocumentsArchive(archivePath);
+  validateDocumentArchiveEntries(listTarEntriesVerbose(archivePath));
+  const extractedDir = join(workDir, "active-documents");
+  rmSync(extractedDir, { recursive: true, force: true });
+  mkdirSync(extractedDir, { recursive: true });
+  extractTar(archivePath, extractedDir);
+  const reports = fetchActiveCorrespondenceReports(adapter, stage);
+  return checkCorrespondence(reports, extractedDir);
+}
+
 function captureAndCheckActiveCorrespondence(adapter: RestoreDockerAdapter, workDir: string): boolean {
   try {
-    const archivePath = join(workDir, "active-documents.tar");
-    adapter.collectDocumentsArchive(archivePath);
-    validateDocumentArchiveEntries(listTarEntriesVerbose(archivePath));
-    const extractedDir = join(workDir, "active-documents");
-    rmSync(extractedDir, { recursive: true, force: true });
-    mkdirSync(extractedDir, { recursive: true });
-    extractTar(archivePath, extractedDir);
-    const reports = fetchActiveCorrespondenceReports(adapter);
-    return checkCorrespondence(reports, extractedDir);
+    return checkActiveCorrespondence(adapter, workDir, "cutover");
   } catch {
     return false;
   }
@@ -763,7 +807,18 @@ function captureAndCheckActiveCorrespondence(adapter: RestoreDockerAdapter, work
  * re-validates correspondence — used identically by both rollback_checkpoint
  * (automatic, mid-run) and recover_restore (`--recover`, a fresh process).
  */
-function applyCheckpointState(adapter: RestoreDockerAdapter, checkpointDirectory: string, documentKekFile: string, workDir: string): boolean {
+function applyCheckpointState(
+  adapter: RestoreDockerAdapter,
+  checkpointDirectory: string,
+  documentKekFile: string,
+  workDir: string,
+  hooks: RestoreDurabilityHooks = {},
+): boolean {
+  try {
+    hooks.beforeCheckpointRestore?.();
+  } catch {
+    return false;
+  }
   if (!adapter.restoreActiveDatabase(join(checkpointDirectory, "database.dump"))) return false;
   if (!adapter.replaceDocumentsFromArchive(join(checkpointDirectory, "documents.tar"))) return false;
   if (!installCheckpointKey(checkpointDirectory, documentKekFile)) return false;
@@ -932,7 +987,7 @@ export function preflightValidateBundle(options: PreflightValidateBundleOptions)
     if (!options.adapter.restoreDumpToDatabase(stage, options.databaseDumpPath)) {
       refuse("checkpoint-verification-failed", "preflight/database-stage failed; the PostgreSQL archive could not be restored transactionally.");
     }
-    const reports = fetchCorrespondenceReports(options.adapter, stage);
+    const reports = fetchCorrespondenceReports(options.adapter, stage, "preflight");
     if (!checkCorrespondence(reports, options.stagedDocumentsRoot)) {
       refuse("preflight-correspondence-failed", "preflight/correspondence failed; the staged database and document tree do not correspond; use a complete backup and retry.");
     }
@@ -1048,8 +1103,12 @@ export class RestoreRun {
 
     mkdirSync(options.paths.restoreRoot, { recursive: true });
     chmodSync(options.paths.restoreRoot, SECURE_DIRECTORY_MODE);
+    // #1211 E6: the restore evidence belongs to the operator on the host, so
+    // they can read the journal and act on it without root.
+    applyHostOwnership(options.paths.restoreRoot);
     const checkpointDirectory = mkdtempSync(join(options.paths.restoreRoot, "checkpoint-"));
     chmodSync(checkpointDirectory, SECURE_DIRECTORY_MODE);
+    applyHostOwnership(checkpointDirectory);
     // O2-R10: this directory (and the dump/tar/key-copy createCheckpoint is
     // about to put in it) exists before any journal references it. Without
     // this marker, a crash before writeRestoreJournal's first call leaves it
@@ -1058,6 +1117,7 @@ export class RestoreRun {
     // mkdtempSync ever finds or removes it. createCheckpoint() removes the
     // marker the moment the checkpoint is durably journaled.
     writeFileSync(join(checkpointDirectory, CHECKPOINT_PREPARING_MARKER), "");
+    applyHostOwnership(join(checkpointDirectory, CHECKPOINT_PREPARING_MARKER));
     const marker = "checkpoint-";
     const restoreId = checkpointDirectory.slice(checkpointDirectory.lastIndexOf(marker) + marker.length);
     return new RestoreRun(
@@ -1147,7 +1207,7 @@ export class RestoreRun {
     // pass here would read the whole archive twice for nothing.
 
     this.copyCheckpointKey();
-    this.verifyCheckpointArtifactsCorrespond("orbit_restore_checkpoint_stage_");
+    this.verifyCheckpointArtifactsCorrespond("orbit_restore_checkpoint_stage_", "checkpoint");
 
     this.checkpointDigests = computeCheckpointDigests(this.checkpointDirectory);
     syncCheckpointArtifacts(this.checkpointDirectory, this.hooks);
@@ -1186,8 +1246,8 @@ export class RestoreRun {
    * differ only in the stage-database name prefix Bash uses for operator log
    * clarity.
    */
-  private verifyCheckpointArtifactsCorrespond(stageNamePrefix: string): void {
-    const stage = `${stageNamePrefix}${this.restoreId}`;
+  private verifyCheckpointArtifactsCorrespond(stageNamePrefix: string, stage: CorrespondenceStage): void {
+    const stageDatabase = `${stageNamePrefix}${this.restoreId}`;
     const databaseDumpPath = join(this.checkpointDirectory, "database.dump");
     const documentsTarPath = join(this.checkpointDirectory, "documents.tar");
     try {
@@ -1198,9 +1258,9 @@ export class RestoreRun {
       // still leaves this.stageDatabase set, and the finally below (and
       // dispose()'s cleanup) always attempts the (idempotent, DROP-IF-
       // EXISTS) drop instead of leaking the stage database forever.
-      this.stageDatabase = stage;
-      this.adapter.createStageDatabase(stage);
-      if (!this.adapter.restoreDumpToDatabase(stage, databaseDumpPath)) {
+      this.stageDatabase = stageDatabase;
+      this.adapter.createStageDatabase(stageDatabase);
+      if (!this.adapter.restoreDumpToDatabase(stageDatabase, databaseDumpPath)) {
         refuse("checkpoint-verification-failed", "checkpoint/verification failed; the durable database checkpoint is invalid.");
       }
       const extractedDocuments = join(this.workDir, "checkpoint-documents");
@@ -1208,7 +1268,7 @@ export class RestoreRun {
       mkdirSync(extractedDocuments, { recursive: true });
       validateDocumentArchiveEntries(listTarEntriesVerbose(documentsTarPath));
       extractTar(documentsTarPath, extractedDocuments);
-      const reports = fetchCorrespondenceReports(this.adapter, stage);
+      const reports = fetchCorrespondenceReports(this.adapter, stageDatabase, stage);
       if (!checkCorrespondence(reports, extractedDocuments)) {
         refuse("checkpoint-verification-failed", "checkpoint/verification failed; the durable rollback database and document tree do not correspond.");
       }
@@ -1241,7 +1301,14 @@ export class RestoreRun {
 
   /** restore.sh:927-932: re-validates active correspondence, waits for health, and only then marks the restore complete and purges the journal/checkpoint. */
   finalize(): void {
-    if (!captureAndCheckActiveCorrespondence(this.adapter, this.workDir)) {
+    let corresponds: boolean;
+    try {
+      corresponds = checkActiveCorrespondence(this.adapter, this.workDir, "cutover");
+    } catch (error) {
+      if (isIncompleteCorrespondence(error)) throw error;
+      corresponds = false;
+    }
+    if (!corresponds) {
       refuse("active-correspondence-failed", "cutover/correspondence failed; active database and documents do not correspond.");
     }
     if (!this.adapter.startApp() || !this.adapter.waitForHealth()) {
@@ -1265,7 +1332,7 @@ export class RestoreRun {
       return false;
     }
     this.appStopped = true;
-    if (!applyCheckpointState(this.adapter, this.checkpointDirectory, this.paths.documentKekFile, this.workDir)) {
+    if (!applyCheckpointState(this.adapter, this.checkpointDirectory, this.paths.documentKekFile, this.workDir, this.hooks)) {
       return false;
     }
     if (!this.adapter.startApp() || !this.adapter.waitForHealth()) {
@@ -1277,7 +1344,7 @@ export class RestoreRun {
 
   /** recover_restore's own re-verification of the checkpoint before trusting it (restore.sh:802-820). */
   reverifyCheckpointForRecovery(): void {
-    this.verifyCheckpointArtifactsCorrespond("orbit_recover_checkpoint_stage_");
+    this.verifyCheckpointArtifactsCorrespond("orbit_recover_checkpoint_stage_", "recovery");
   }
 
   /** recover_restore's application step (restore.sh:822-826), once re-verification has already passed. */
@@ -1286,7 +1353,7 @@ export class RestoreRun {
       refuse("app-stop-failed", "recovery/stop failed; keep Orbit stopped and retry recovery.");
     }
     this.appStopped = true;
-    if (!applyCheckpointState(this.adapter, this.checkpointDirectory, this.paths.documentKekFile, this.workDir)) {
+    if (!applyCheckpointState(this.adapter, this.checkpointDirectory, this.paths.documentKekFile, this.workDir, this.hooks)) {
       refuse("recovery-restore-failed", "recovery/restore failed; Orbit remains stopped and the checkpoint is preserved for another explicit recovery attempt.");
     }
     if (!this.adapter.startApp() || !this.adapter.waitForHealth()) {
@@ -1463,296 +1530,6 @@ export function recoverRestore(options: RecoverRestoreOptions): RestoreDisposeRe
     run.dispose();
   }
   return { outcome: "completed" };
-}
-
-// ---------------------------------------------------------------------------
-// createDockerComposeRestoreAdapter — the real RestoreDockerAdapter,
-// spawning the exact `docker compose ...` argument lists restore.sh uses.
-// PATH-shim-testable with no live daemon required, mirroring
-// createDockerComposeBackupAdapter.
-// ---------------------------------------------------------------------------
-
-export interface RestoreDockerComposeAdapterOptions extends DockerComposeAdapterOptions {
-  healthUrl?: string;
-  curlBinary?: string;
-}
-
-function sleepSync(milliseconds: number): void {
-  const signal = new Int32Array(new SharedArrayBuffer(4));
-  Atomics.wait(signal, 0, 0, milliseconds);
-}
-
-/**
- * Derives the local health-probe URL from ORBIT_BIND_ADDRESS/ORBIT_PORT in
- * the deployment's .env-orbit, mirroring exactly how docker-compose.yml
- * defaults the orbit-app port mapping (`${ORBIT_BIND_ADDRESS:-0.0.0.0}:
- * ${ORBIT_PORT:-3000}:3000`, docker-compose.yml:53) — not a hardcoded
- * `http://127.0.0.1:3000/api/health` (#383), which can never pass on a
- * deployment configured with a non-default ORBIT_BIND_ADDRESS or ORBIT_PORT.
- *
- * A bind address of "0.0.0.0" (Compose's own default, "listen on every
- * interface") is not itself a valid address to connect *to*; the same
- * convention operators already rely on when reaching their own deployment
- * applies here too: probe via the loopback address instead. Any other bind
- * address is probed directly, exactly as configured. A missing, unreadable,
- * or empty-valued line falls back to Compose's own defaults, the same as an
- * unset `${VAR:-default}` substitution would.
- */
-export function deriveHealthProbeUrl(envFile: string): string {
-  let bindAddress = "";
-  let port = "";
-  let content: string;
-  try {
-    content = readFileSync(envFile, "utf8");
-  } catch {
-    content = "";
-  }
-  for (const rawLine of content.split("\n")) {
-    const line = rawLine.replace(/\r$/, "");
-    const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
-    if (!match) continue;
-    if (match[1] === "ORBIT_BIND_ADDRESS") bindAddress = match[2];
-    else if (match[1] === "ORBIT_PORT") port = match[2];
-  }
-  const probeHost = bindAddress === "" || bindAddress === "0.0.0.0" ? "127.0.0.1" : bindAddress;
-  const probePort = port === "" ? "3000" : port;
-  return `http://${probeHost}:${probePort}/api/health`;
-}
-
-/**
- * queryReport/queryActiveReport's psql maxBuffer (#383): a correspondence
- * report is one `<uuid>|<64-hex>|<size>|<lifecycle>`-shaped line per row
- * (~120 bytes), so Node's 1 MiB spawnSync default caps a restore at roughly
- * 8,700 documents before psql is SIGTERMed and refused as a query failure.
- * 1 GiB matches recovery-bundle.ts's runTar's own maxBuffer for the same
- * class of "external process, unbounded but not attacker-controlled output"
- * call.
- */
-const PSQL_REPORT_MAX_BUFFER = 1024 * 1024 * 1024;
-
-export function createDockerComposeRestoreAdapter(options: RestoreDockerComposeAdapterOptions): RestoreDockerAdapter {
-  const dockerBinary = options.dockerBinary ?? "docker";
-  const cwd = options.cwd;
-  const env = options.env ?? process.env;
-  const composeArgs = (...args: string[]): string[] => ["compose", "--env-file", options.envFile, ...args];
-  const backupOps = createDockerComposeBackupAdapter(options);
-
-  return {
-    dumpDatabase: backupOps.dumpDatabase,
-    pgRestoreListOk: backupOps.pgRestoreListOk,
-    collectDocumentsArchive: backupOps.collectDocumentsArchive,
-
-    stopApp(): boolean {
-      const result = spawnSync(dockerBinary, composeArgs("stop", "orbit-app"), { cwd, env, stdio: ["ignore", "ignore", "inherit"] });
-      return result.status === 0;
-    },
-    startApp(): boolean {
-      const result = spawnSync(dockerBinary, composeArgs("start", "orbit-app"), { cwd, env, stdio: ["ignore", "ignore", "inherit"] });
-      return result.status === 0;
-    },
-    createStageDatabase(name: string): void {
-      const result = spawnSync(
-        dockerBinary,
-        composeArgs(
-          "exec",
-          "-T",
-          "orbit-db",
-          "sh",
-          "-c",
-          'exec psql --username="$POSTGRES_USER" --dbname=postgres --set=ON_ERROR_STOP=1 --command="CREATE DATABASE \\"$1\\";"',
-          "sh",
-          name,
-        ),
-        { cwd, env, stdio: ["ignore", "ignore", "inherit"] },
-      );
-      if (result.status !== 0) refuse("stage-database-failed", "preflight/database-stage failed; a private staging database could not be created.");
-    },
-    dropStageDatabase(name: string): void {
-      spawnSync(
-        dockerBinary,
-        composeArgs(
-          "exec",
-          "-T",
-          "orbit-db",
-          "sh",
-          "-c",
-          'psql --username="$POSTGRES_USER" --dbname=postgres --set=ON_ERROR_STOP=1 --command="DROP DATABASE IF EXISTS \\"$1\\";"',
-          "sh",
-          name,
-        ),
-        { cwd, env, stdio: ["ignore", "ignore", "ignore"] },
-      );
-    },
-    restoreDumpToDatabase(name: string, dumpPath: string): boolean {
-      const descriptor = openSync(dumpPath, constants.O_RDONLY | constants.O_NOFOLLOW);
-      try {
-        const result = spawnSync(
-          dockerBinary,
-          composeArgs(
-            "exec",
-            "-T",
-            "orbit-db",
-            "sh",
-            "-c",
-            'exec pg_restore --single-transaction --exit-on-error --no-owner --no-acl --username="$POSTGRES_USER" --dbname="$1"',
-            "sh",
-            name,
-          ),
-          { cwd, env, stdio: [descriptor, "ignore", "inherit"] },
-        );
-        return result.status === 0;
-      } finally {
-        closeSync(descriptor);
-      }
-    },
-    restoreActiveDatabase(dumpPath: string): boolean {
-      const descriptor = openSync(dumpPath, constants.O_RDONLY | constants.O_NOFOLLOW);
-      try {
-        const result = spawnSync(
-          dockerBinary,
-          composeArgs(
-            "exec",
-            "-T",
-            "orbit-db",
-            "sh",
-            "-c",
-            'exec pg_restore --single-transaction --clean --if-exists --no-owner --no-acl --exit-on-error --username="$POSTGRES_USER" --dbname="$POSTGRES_DB"',
-          ),
-          { cwd, env, stdio: [descriptor, "ignore", "inherit"] },
-        );
-        return result.status === 0;
-      } finally {
-        closeSync(descriptor);
-      }
-    },
-    replaceDocumentsFromArchive(archivePath: string): boolean {
-      const descriptor = openSync(archivePath, constants.O_RDONLY | constants.O_NOFOLLOW);
-      try {
-        const result = spawnSync(
-          dockerBinary,
-          composeArgs(
-            "run",
-            "--rm",
-            "--no-deps",
-            "--entrypoint",
-            "sh",
-            "orbit-app",
-            "-c",
-            "set -eu; find /var/lib/orbit/documents -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; exec tar -C /var/lib/orbit/documents -xf -",
-          ),
-          { cwd, env, stdio: [descriptor, "ignore", "inherit"] },
-        );
-        return result.status === 0;
-      } finally {
-        closeSync(descriptor);
-      }
-    },
-    resetScanRecoveryLeases(): boolean {
-      const result = spawnSync(dockerBinary, composeArgs("exec", "-T", "orbit-db", "sh", "-c", SCAN_RECOVERY_LEASES_SQL, "sh"), {
-        cwd,
-        env,
-        stdio: ["ignore", "ignore", "inherit"],
-      });
-      return result.status === 0;
-    },
-    queryReport(name: string, query: string): string {
-      const result = spawnSync(
-        dockerBinary,
-        composeArgs(
-          "exec",
-          "-T",
-          "orbit-db",
-          "sh",
-          "-c",
-          'exec psql --username="$POSTGRES_USER" --dbname="$1" --tuples-only --no-align --field-separator="|" --command="$2"',
-          "sh",
-          name,
-          query,
-        ),
-        // #383: explicit generous maxBuffer, matching runTar's own
-        // (recovery-bundle.ts) — without it, Node's 1 MiB default silently
-        // SIGTERMs psql once a correspondence report exceeds ~8,700 rows
-        // (result.status becomes null, not a clean nonzero exit), which
-        // query-report-failed then misreports as a query failure rather
-        // than an output-size ceiling.
-        { cwd, env, encoding: "utf8", maxBuffer: PSQL_REPORT_MAX_BUFFER, stdio: ["ignore", "pipe", "inherit"] },
-      );
-      if (result.status !== 0) refuse("query-report-failed", "The staged database could not be queried for correspondence checking.");
-      return result.stdout ?? "";
-    },
-    queryActiveReport(query: string): string {
-      const result = spawnSync(
-        dockerBinary,
-        composeArgs(
-          "exec",
-          "-T",
-          "orbit-db",
-          "sh",
-          "-c",
-          'exec psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --field-separator="|" --command="$1"',
-          "sh",
-          query,
-        ),
-        { cwd, env, encoding: "utf8", maxBuffer: PSQL_REPORT_MAX_BUFFER, stdio: ["ignore", "pipe", "inherit"] },
-      );
-      if (result.status !== 0) refuse("query-report-failed", "The active database could not be queried for correspondence checking.");
-      return result.stdout ?? "";
-    },
-    waitForHealth(): boolean {
-      const url = options.healthUrl ?? deriveHealthProbeUrl(options.envFile);
-      const curlBinary = options.curlBinary ?? "curl";
-      const deadline = Date.now() + 45_000;
-      for (;;) {
-        const result = spawnSync(curlBinary, ["--fail", "--silent", "--max-time", "2", url], { cwd, env, stdio: "ignore" });
-        if (result.status === 0) return true;
-        if (Date.now() >= deadline) return false;
-        sleepSync(1000);
-      }
-    },
-    measureLiveDatabaseSizeBytes(): number {
-      const result = spawnSync(
-        dockerBinary,
-        composeArgs(
-          "exec",
-          "-T",
-          "orbit-db",
-          "sh",
-          "-c",
-          'exec psql --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" --tuples-only --no-align --command="select pg_database_size(current_database());"',
-        ),
-        { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
-      );
-      const value = (result.stdout ?? "").trim();
-      if (result.status !== 0 || !/^[0-9]+$/.test(value)) {
-        refuse("capacity-measurement-invalid", "preflight/capacity failed; current database size could not be measured.");
-      }
-      return Number(value);
-    },
-    measureLiveDocumentTreeKib(): number {
-      const result = spawnSync(
-        dockerBinary,
-        composeArgs("run", "--rm", "--no-deps", "--entrypoint", "sh", "orbit-app", "-c", "du -sk /var/lib/orbit/documents | awk 'NR == 1 { print $1 }'"),
-        { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
-      );
-      const value = (result.stdout ?? "").trim();
-      if (result.status !== 0 || !/^[0-9]+$/.test(value)) {
-        refuse("capacity-measurement-invalid", "preflight/capacity failed; current document usage could not be measured.");
-      }
-      return Number(value);
-    },
-    measureDocumentVolumeAvailableKib(): number {
-      const result = spawnSync(
-        dockerBinary,
-        composeArgs("run", "--rm", "--no-deps", "--entrypoint", "sh", "orbit-app", "-c", "df -Pk /var/lib/orbit/documents | awk 'NR == 2 { print $4 }'"),
-        { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
-      );
-      const value = (result.stdout ?? "").trim();
-      if (result.status !== 0 || !/^[0-9]+$/.test(value)) {
-        refuse("capacity-measurement-invalid", "preflight/capacity failed; document-volume capacity could not be checked.");
-      }
-      return Number(value);
-    },
-  };
 }
 
 // Re-exported for tests that need to assert on raw filesystem/predicate

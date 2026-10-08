@@ -407,11 +407,21 @@
   }
 
   /* Arriving on an item's address (`copy link`, the desk's own): its row
-     opens, once, as soon as the manifest has drawn it. */
+     opens, once, as soon as the manifest has drawn it. The manifest lists
+     what needs attention (or, with nothing there, the one next item), so an
+     item it draws no row for (more than 30 days out, or undated) goes
+     straight to the item, as a search result does, replacing the address's
+     history entry so Back still leaves the way you came. */
   let addressed = false;
   $effect(() => {
     const id = page.url.searchParams.get("item");
-    if (addressed || !id || !rows.length || !isPocket()) return;
+    if (addressed || !id || !groups || !isPocket()) return;
+    const listed = groups.attention.length ? groups.attention : groups.later.slice(0, 1);
+    if (!listed.some((row) => row.id === id)) {
+      addressed = true;
+      goto(resolve("/item/[[id]]", { id: encodeURIComponent(id) }), { replaceState: true });
+      return;
+    }
     openRow(id).then((opened) => { addressed ||= opened; });
   });
 

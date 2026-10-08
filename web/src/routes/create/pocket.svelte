@@ -1,9 +1,14 @@
 <script>
+  import { onDestroy } from "svelte";
   import { beforeNavigate, goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { WorkspaceError, applyCommand, readWorkspace } from "$lib/data/workspace.js";
+  import { WorkspaceError, applyCommand, attachItemDocument, readWorkspace } from "$lib/data/workspace.js";
   import { saveProblem } from "$lib/data/metadata-status.js";
+  import {
+    CAP_READING, FOCUS_REFUSED, FOCUS_SCANNING, FOCUS_UNDRAWABLE, WHY_READING, captionOf, focusAfterScan, readPickedDocument,
+    suggestionsToCarry,
+  } from "$lib/data/document-read.js";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
   import { standOnKeyboard } from "$lib/pocket/sheet.js";
@@ -22,8 +27,11 @@
    * the refusal beside save while something is missing (#1058: no section
    * is chosen for you); saving; a failure that is loud and stays until the
    * next attempt, with nothing typed lost (#1058); saved, which raises the
-   * wake and approaches the new item on its belt. Leaving with something
-   * typed asks first.
+   * wake and approaches the new item on its belt. A document picked goes
+   * onto the saved item, as the desk's does (#1245, owner's 11a), and is read
+   * the moment it is picked, as the desk reads it (#1279, owner's 14a): page
+   * one lands in the reading card and the read fills the empty fields.
+   * Leaving with something typed asks first.
    *
    * `?name=` prefills the name (search's `add "x" as an item`, §2.4).
    */
@@ -46,6 +54,154 @@
       after a dropped response reuses it, so the server's upsert-by-id
       idempotency absorbs the retry instead of creating a second item. */
   const draftId = crypto.randomUUID();
+  /** Minted once per file picked, the way `draftId` is per draft (#1245),
+      as the desk's takeFile does: a retry after a lost answer re-sends the
+      same id with the same bytes, so the documents route hands back the copy
+      it already holds instead of storing a second. */
+  /** @type {WeakMap<File, string>} */
+  const documentIds = new WeakMap();
+  /** @param {File} file */
+  function documentIdOf(file) {
+    let id = documentIds.get(file);
+    if (!id) {
+      id = crypto.randomUUID();
+      documentIds.set(file, id);
+    }
+    return id;
+  }
+
+  /* ---- reading the picked document (#1279) ----------------------------
+     The desk's read ($lib/data/document-read.js, shared with
+     create.behaviour.js): two requests from one pick, neither waiting for
+     the other. Page one lands the moment it is drawn; the read fills the
+     empty fields, never over what someone typed, and names them in `marked`
+     for EntryForm's "◆ from document". A refused file leaves the entry at
+     once, so the save does not send it. Picking again, "not this one" and
+     leaving each abort the read in flight and revoke the page's object URL. */
+  /** @type {import('$lib/data/document-read.js').PickedRead | null} */
+  let picked = $state(null);
+  /** @type {import('$lib/data/document-read.js').SuggestionField[]} */
+  let marked = $state([]);
+  /** @type {AbortController | null} */
+  let reading = null;
+  let picks = 0;
+
+  function stopReading() {
+    reading?.abort();
+    reading = null;
+    if (picked?.page) URL.revokeObjectURL(picked.page);
+    if (picked) picked.page = null;
+  }
+
+  /** Clears the suggested values nobody accepted, and their marks. */
+  function clearSuggestions() {
+    for (const field of marked) entry[field] = "";
+    marked = [];
+  }
+
+  /** @param {string} line @param {string} why */
+  function settle(line, why) {
+    if (!picked) return;
+    picked.settled = true;
+    picked.line = line;
+    picked.why = why;
+  }
+
+  /** The server would not keep this file, so it leaves the entry now
+      rather than at the save, and the card says so in the desk's words. */
+  /** @param {string} why */
+  function refuse(why) {
+    stopReading();
+    attachment = null;
+    clearSuggestions();
+    if (!picked) return;
+    picked.scanned = false;
+    picked.refused = true;
+    picked.read = true;
+    settle(FOCUS_REFUSED, why);
+  }
+
+  /** @param {File} file */
+  async function readDocument(file) {
+    stopReading();
+    clearSuggestions();
+    const controller = new AbortController();
+    reading = controller;
+    const current = () => reading === controller && attachment === file;
+    picks += 1;
+    picked = {
+      key: picks, name: file.name, size: file.size, page: null, scanned: false, refused: false,
+      settled: false, line: FOCUS_SCANNING, why: WHY_READING, read: false, caption: CAP_READING,
+    };
+    const householdId = entry.householdId;
+    if (!householdId) return;
+    /* ADR-0033 step 5: the focus line moves on from the virus check to the
+       preview the moment the scan has passed, before anything opens the file. */
+    /** @type {(scanned: boolean) => void} */
+    const onScanned = (scanned) => {
+      if (!current() || !picked || picked.page || picked.settled) return;
+      picked.line = focusAfterScan(scanned);
+    };
+    const outcomes = readPickedDocument(householdId, file, { signal: controller.signal, onScanned });
+    /** @type {string | null} */
+    let undrawable = null;
+
+    const page = outcomes.page.then((outcome) => {
+      if (!current() || !picked) {
+        if (outcome.kind === "up") URL.revokeObjectURL(outcome.url);
+        return;
+      }
+      if (outcome.kind === "up") {
+        picked.page = outcome.url;
+        picked.scanned = outcome.scanned;
+      } else if (outcome.kind === "refused") {
+        refuse(outcome.why);
+      } else {
+        undrawable = outcome.why;
+        if (picked.read) settle(FOCUS_UNDRAWABLE, undrawable);
+      }
+    });
+
+    const read = outcomes.read.then((outcome) => {
+      if (!current() || !picked) return;
+      if (outcome.kind === "refused") {
+        refuse(outcome.why);
+        return;
+      }
+      let carried = 0;
+      if (outcome.kind === "read") {
+        const carry = suggestionsToCarry(outcome.suggestions, (field) => entry[field]);
+        for (const one of carry) {
+          /* The cost field holds a bare amount, as the review's accept()
+             copies it in. */
+          entry[one.field] = one.field === "cost" ? one.value.replace(/[^\d.]/g, "") : one.value;
+        }
+        marked = [...marked, ...carry.map((one) => one.field)];
+        carried = carry.length;
+      }
+      picked.caption = captionOf(outcome, carried);
+      picked.read = true;
+      if (undrawable) settle(FOCUS_UNDRAWABLE, undrawable);
+    });
+
+    await Promise.allSettled([page, read]);
+  }
+
+  /* "not this one": the file has already left the entry (EntryForm), and
+     what it suggested goes with it. */
+  function dropDocument() {
+    stopReading();
+    clearSuggestions();
+    picked = null;
+  }
+
+  /* Leaving: a read still in flight is nobody's once the screen has gone,
+     and the page's object URL goes with it. */
+  onDestroy(() => {
+    reading?.abort();
+    reading = null;
+    if (picked?.page) URL.revokeObjectURL(picked.page);
+  });
 
   const refusal = $derived(phase === "ready" ? refusalOf(entry) : null);
   const dirty = $derived(!saved && (entryChanged(entry, start) || attachment !== null));
@@ -83,8 +239,13 @@
         if (error instanceof WorkspaceError && error.code === "version_required") return;
         throw error;
       });
+      /* #1245 (11a): the picked document goes onto the item just saved,
+         through the same route the desk's form uses. A refusal lands in the
+         catch below like any failed save: the entry is kept, and the next
+         attempt re-sends both under the same ids, so neither is stored twice. */
+      if (attachment) await attachItemDocument(household.id, draftId, attachment, documentIdOf(attachment));
       saved = true;
-      wake(attachment ? `added to your orbit · ${attachment.name} was not kept` : `added to your orbit · ${entry.name.trim()}`);
+      wake(`added to your orbit · ${entry.name.trim()}`);
       /* The approach (§2.5): the new item, seated on its belt. */
       await goto(resolve("/item/[[id]]", { id: draftId }));
     } catch (error) {
@@ -175,7 +336,9 @@
       </div>
     {:else}
       <form id="pocket-entry" aria-label="New entry" onsubmit={(event) => { event.preventDefault(); save(); }}>
-        <EntryForm bind:entry bind:attachment {households} disabled={saving || saved} />
+        <EntryForm bind:entry bind:attachment bind:marked {households} {picked} disabled={saving || saved}
+                   onpick={(file) => { readDocument(file).catch(() => { /* every outcome is drawn in the card */ }); }}
+                   ondrop={dropDocument} />
       </form>
     {/if}
   </main>

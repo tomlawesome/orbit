@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "name": "well-formed matching document",
+      "issuer": "https://idp.parity.invalid",
+      "document": "{\"issuer\":\"https://idp.parity.invalid\",\"authorization_endpoint\":\"https://idp.parity.invalid/authorize\",\"token_endpoint\":\"https://idp.parity.invalid/token\",\"jwks_uri\":\"https://idp.parity.invalid/jwks\"}",
+      "bash": {
+        "exitCode": 0
+      }
+    },
+    {
+      "name": "issuer mismatch",
+      "issuer": "https://idp.parity.invalid",
+      "document": "{\"issuer\":\"https://other.invalid\",\"authorization_endpoint\":\"https://idp.parity.invalid/authorize\",\"token_endpoint\":\"https://idp.parity.invalid/token\",\"jwks_uri\":\"https://idp.parity.invalid/jwks\"}",
+      "bash": {
+        "exitCode": 1
+      }
+    },
+    {
+      "name": "malformed JSON",
+      "issuer": "https://idp.parity.invalid",
+      "document": "{not json",
+      "bash": {
+        "exitCode": 1
+      }
+    },
+    {
+      "name": "document is an array",
+      "issuer": "https://idp.parity.invalid",
+      "document": "[]",
+      "bash": {
+        "exitCode": 1
+      }
+    },
+    {
+      "name": "document is null",
+      "issuer": "https://idp.parity.invalid",
+      "document": "null",
+      "bash": {
+        "exitCode": 1
+      }
+    },
+    {
+      "name": "missing jwks_uri",
+      "issuer": "https://idp.parity.invalid",
+      "document": "{\"issuer\":\"https://idp.parity.invalid\",\"authorization_endpoint\":\"https://idp.parity.invalid/authorize\",\"token_endpoint\":\"https://idp.parity.invalid/token\"}",
+      "bash": {
+        "exitCode": 1
+      }
+    },
+    {
+      "name": "plain http endpoint",
+      "issuer": "https://idp.parity.invalid",
+      "document": "{\"issuer\":\"https://idp.parity.invalid\",\"authorization_endpoint\":\"https://idp.parity.invalid/authorize\",\"token_endpoint\":\"http://idp.parity.invalid/token\",\"jwks_uri\":\"https://idp.parity.invalid/jwks\"}",
+      "bash": {
+        "exitCode": 1
+      }
+    },
+    {
+      "name": "endpoint with embedded credentials",
+      "issuer": "https://idp.parity.invalid",
+      "document": "{\"issuer\":\"https://idp.parity.invalid\",\"authorization_endpoint\":\"https://user:pass@idp.parity.invalid/authorize\",\"token_endpoint\":\"https://idp.parity.invalid/token\",\"jwks_uri\":\"https://idp.parity.invalid/jwks\"}",
+      "bash": {
+        "exitCode": 1
+      }
+    },
+    {
+      "name": "endpoint with a fragment",
+      "issuer": "https://idp.parity.invalid",
+      "document": "{\"issuer\":\"https://idp.parity.invalid\",\"authorization_endpoint\":\"https://idp.parity.invalid/authorize\",\"token_endpoint\":\"https://idp.parity.invalid/token\",\"jwks_uri\":\"https://idp.parity.invalid/jwks#x\"}",
+      "bash": {
+        "exitCode": 1
+      }
+    },
+    {
+      "name": "input exceeding the byte cap",
+      "issuer": "https://idp.parity.invalid",
+      "oversizedLength": 1056769,
+      "bash": {
+        "exitCode": 1
+      }
+    }
+  ]
+}

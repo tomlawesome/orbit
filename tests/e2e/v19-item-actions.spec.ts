@@ -333,3 +333,86 @@ test("/item on an empty household shows the empty state, not a 404", async ({ pa
     await households.sweep(page);
   }
 });
+
+/**
+ * #1248: on the desk, editing widens the card from 480px to 720px and drops
+ * the detail rows the form repeats; closing the panel brings both back. A
+ * phone's edit is already a full-height sheet, so this is desk-only.
+ */
+test("editing on the desk widens the card and drops the repeated rows", async ({ page }) => {
+  test.skip(test.info().project.name.startsWith("mobile"), "a phone edits in a full-height sheet");
+  await signInAsAdmin(page);
+
+  const { itemId } = await seedHouseholdWithItem(page);
+
+  try {
+    await page.goto(`/item/${itemId}`);
+    await expect(page.getByRole("heading", { name: "Boiler service proving" })).toBeVisible();
+    const card = page.locator("#cardwrap");
+    const width = async () => (await card.boundingBox())?.width ?? 0;
+    expect(await width()).toBeLessThanOrEqual(480);
+
+    await page.locator(".acts button", { hasText: /^edit$/ }).click();
+    await expect.poll(width).toBeGreaterThanOrEqual(700);
+    await expect(page.locator("#e-title")).toBeVisible();
+    await expect(page.locator(".item-card .kv")).toHaveCount(0);
+
+    await page.keyboard.press("Escape");
+    await expect.poll(width).toBeLessThanOrEqual(480);
+    await expect(page.locator(".item-card .kv", { hasText: /^due/ })).toBeVisible();
+  } finally {
+    await households.sweep(page);
+  }
+});
+
+/**
+ * #1247 (owner, 2026-10-06): the card is always centred on the belt, and the
+ * apex of the belt's centreline is mid-page. The card is hung by its own
+ * middle on the apex, so the edit panel (#1248) growing it keeps it centred
+ * rather than leaving the belt behind. The phone's card sits beneath its
+ * band plate in the page's flow, so this is desk-only.
+ *
+ * #1302/#1315 (owner, 2026-10-08): the card never rises into the desk's top
+ * strip (belt.css --belt-strip), which the search field keeps. A card tall
+ * enough to meet it -- the edit form on a 14" screen -- starts under the
+ * strip instead, up to 15px below centre. So the card is where centring puts
+ * it, or under the strip, whichever is lower.
+ */
+test("on the desk the card is centred on the belt's apex, at mid-page, even while editing", async ({ page }) => {
+  test.skip(test.info().project.name.startsWith("mobile"), "a phone's card sits beneath its band plate");
+  await signInAsAdmin(page);
+
+  const { itemId } = await seedHouseholdWithItem(page);
+
+  try {
+    await page.goto(`/item/${itemId}`);
+    await expect(page.getByRole("heading", { name: "Boiler service proving" })).toBeVisible();
+    const card = page.locator("#cardwrap");
+    const offCentre = async () => {
+      const box = await card.boundingBox();
+      const { sky, strip } = await page.evaluate(() => ({
+        sky: window.innerHeight,
+        strip: parseFloat(getComputedStyle(document.querySelector(".belt-page") as Element).getPropertyValue("--belt-strip")),
+      }));
+      return box ? Math.abs(box.y - Math.max(sky / 2 - box.height / 2, strip)) : Infinity;
+    };
+    const height = async () => (await card.boundingBox())?.height ?? 0;
+
+    /* The apex is pinned inline by the belt's layout: mid-page. */
+    const sky = await page.evaluate(() => window.innerHeight);
+    await expect(card).toHaveCSS("top", `${Math.round(sky / 2)}px`);
+    await expect.poll(offCentre).toBeLessThanOrEqual(1.5);
+    const resting = await height();
+
+    await page.locator(".acts button", { hasText: /^edit$/ }).click();
+    await expect(page.locator("#e-title")).toBeVisible();
+    await expect.poll(height).not.toBe(resting);
+    await expect.poll(offCentre).toBeLessThanOrEqual(1.5);
+
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#e-title")).toHaveCount(0);
+    await expect.poll(offCentre).toBeLessThanOrEqual(1.5);
+  } finally {
+    await households.sweep(page);
+  }
+});

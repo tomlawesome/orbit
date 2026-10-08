@@ -27,6 +27,27 @@ export const DEPLOY_LOCK_STALE_MS = 10 * 60 * 1000;
 export type DeployLockErrorFactory = (message: string) => Error;
 
 /**
+ * Releases the lock. `share(fn)` runs work done on the holder's own behalf
+ * -- the install transaction calling the configure engine and the
+ * configuration migration in the same process (#1212) -- during which a
+ * nested acquire of this same lock succeeds without taking it again, and
+ * its release leaves the holder's lock alone. Explicit and scoped, not a
+ * reentrant lock: outside share() a second acquire still refuses.
+ */
+export type DeployLockRelease = (() => void) & { share<T>(work: () => T): T };
+
+/** Lock path -> owner token, while a holder's share() is running. */
+const sharedLocks = new Map<string, string>();
+
+function isStillHeldBy(lockPath: string, owner: string): boolean {
+  try {
+    return readFileSync(lockPath, "utf8") === owner;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Acquires the deployment-directory lock, or throws the caller's refusal if
  * another run holds it. Returns a release function the caller must call
  * exactly once, success or failure (a second call is a no-op).
@@ -35,8 +56,13 @@ export function acquireDeployLock(
   deployDir: string,
   operationLabel: string,
   makeError: DeployLockErrorFactory,
-): () => void {
+): DeployLockRelease {
   const lockPath = join(deployDir, DEPLOY_LOCK_FILE_NAME);
+
+  const sharedOwner = sharedLocks.get(lockPath);
+  if (sharedOwner !== undefined && isStillHeldBy(lockPath, sharedOwner)) {
+    return Object.assign(() => {}, { share: <T>(work: () => T): T => work() });
+  }
 
   const takeLock = (): number => openSync(lockPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
 
@@ -87,13 +113,30 @@ export function acquireDeployLock(
   }
 
   let released = false;
-  return () => {
+  const release = () => {
     if (released) return;
     released = true;
+    sharedLocks.delete(lockPath);
     try {
       if (readFileSync(lockPath, "utf8") === owner) rmSync(lockPath, { force: true });
     } catch {
       /* best effort */
     }
   };
+  const share = <T>(work: () => T): T => {
+    sharedLocks.set(lockPath, owner);
+    let result: T;
+    try {
+      result = work();
+    } catch (error) {
+      sharedLocks.delete(lockPath);
+      throw error;
+    }
+    if (result instanceof Promise) {
+      return result.finally(() => sharedLocks.delete(lockPath)) as T;
+    }
+    sharedLocks.delete(lockPath);
+    return result;
+  };
+  return Object.assign(release, { share });
 }

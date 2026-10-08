@@ -6,12 +6,13 @@ import { afterAll, describe, expect, it } from "vitest";
 import { readGolden } from "./__fixtures__/golden";
 import {
   CONFIGURATION_ROLLBACK_SUFFIX,
+  installMigrateCommand,
+  installPreflightCommand,
   runConfigurationCommand,
   runConfigurationMigration,
   runConfigurationPreflight,
   type ConfigurationMigrationTarget,
 } from "./configuration-migration";
-import { createInstallConfigurationScriptAdapter } from "./install-script-adapters";
 
 // The configuration contract port (#1210 D8) against what the retired
 // scripts/configuration.sh produced for the same inputs, captured from
@@ -113,15 +114,16 @@ describe("configuration contract port: every captured configuration.sh case", ()
 });
 
 // install's hand-off (runConfigurationPreflight / runConfigurationMigration,
-// install.sh:1405-1424 and 2040) through the shipped adapter, against the
-// bash results the old reference adapter recorded.
+// install.sh:1405-1424 and 2040), called in-process as the install engine
+// does since #1212, against the bash results the old reference adapter
+// recorded.
 
 const IMAGE = "ghcr.io/tomlawesome/orbit@sha256:" + "b".repeat(64);
 const DIGEST = "sha256:" + "b".repeat(64);
 
-function targetFor(overrides: Partial<ConfigurationMigrationTarget> = {}): ConfigurationMigrationTarget {
+function targetFor(dir: string, overrides: Partial<ConfigurationMigrationTarget> = {}): ConfigurationMigrationTarget {
   return {
-    environmentFile: ".env-orbit",
+    environmentFile: join(dir, ".env-orbit"),
     orbitImage: IMAGE,
     appliedVersion: "v1.0.0",
     appliedDigest: DIGEST,
@@ -166,13 +168,12 @@ describe("install's preflight / migrate --transaction hand-off", () => {
     const dir = handOffSandbox(
       [`ORBIT_IMAGE=${IMAGE}`, "ORBIT_CONFIG_SCHEMA_VERSION=1", "ORBIT_CONFIG_APPLIED_VERSION=v1.0.0", `ORBIT_CONFIG_APPLIED_DIGEST=${DIGEST}`, "COMPOSE_PROJECT_NAME=orbit", ""].join("\n"),
     );
-    const adapter = createInstallConfigurationScriptAdapter({ cwd: dir });
     expectSteps(dir, golden, [
-      () => adapter.runPreflight("unused", ".env-orbit"),
-      () => adapter.runMigrate("unused", targetFor()),
+      () => installPreflightCommand(join(dir, ".env-orbit")),
+      () => installMigrateCommand(targetFor(dir)),
     ]);
-    expect(runConfigurationPreflight("unused", ".env-orbit", adapter)).toEqual({ ok: true });
-    const migration = runConfigurationMigration("unused", targetFor(), adapter);
+    expect(runConfigurationPreflight(join(dir, ".env-orbit"))).toEqual({ ok: true });
+    const migration = runConfigurationMigration(targetFor(dir));
     expect(migration.ok).toBe(true);
     expect(migration.message).toContain("already current schema v1 version v1.0.0");
   });
@@ -183,10 +184,9 @@ describe("install's preflight / migrate --transaction hand-off", () => {
       "agrees: a legacy unversioned file migrates and preflight still passes (#configuration.sh #25 — schema-2 outcome)",
     );
     const dir = handOffSandbox(`ORBIT_IMAGE=${IMAGE}\n`);
-    const adapter = createInstallConfigurationScriptAdapter({ cwd: dir });
     expectSteps(dir, golden, [
-      () => adapter.runPreflight("unused", ".env-orbit"),
-      () => adapter.runMigrate("unused", targetFor()),
+      () => installPreflightCommand(join(dir, ".env-orbit")),
+      () => installMigrateCommand(targetFor(dir)),
     ]);
   });
 
@@ -196,9 +196,8 @@ describe("install's preflight / migrate --transaction hand-off", () => {
       "agrees: a structurally invalid file fails preflight closed (install.sh:1444-1445)",
     );
     const dir = handOffSandbox("this is not a valid assignment line\n");
-    const adapter = createInstallConfigurationScriptAdapter({ cwd: dir });
-    expectSteps(dir, golden, [() => adapter.runPreflight("unused", ".env-orbit")]);
-    expect(runConfigurationPreflight("unused", ".env-orbit", adapter)).toEqual({
+    expectSteps(dir, golden, [() => installPreflightCommand(join(dir, ".env-orbit"))]);
+    expect(runConfigurationPreflight(join(dir, ".env-orbit"))).toEqual({
       ok: false,
       message: "Configuration preflight failed; restoring the previous deployment.",
     });
@@ -210,9 +209,8 @@ describe("install's preflight / migrate --transaction hand-off", () => {
       "agrees: a compose project mismatch fails the migration closed (configuration.sh #17)",
     );
     const dir = handOffSandbox([`ORBIT_IMAGE=${IMAGE}`, "ORBIT_CONFIG_SCHEMA_VERSION=1", "COMPOSE_PROJECT_NAME=some-other-project", ""].join("\n"));
-    const adapter = createInstallConfigurationScriptAdapter({ cwd: dir });
-    expectSteps(dir, golden, [() => adapter.runMigrate("unused", targetFor({ composeProjectName: "orbit" }))]);
-    expect(runConfigurationMigration("unused", targetFor({ composeProjectName: "orbit" }), adapter)).toEqual({
+    expectSteps(dir, golden, [() => installMigrateCommand(targetFor(dir, { composeProjectName: "orbit" }))]);
+    expect(runConfigurationMigration(targetFor(dir, { composeProjectName: "orbit" }))).toEqual({
       ok: false,
       message: "Configuration migration failed; restoring the previous deployment.",
     });

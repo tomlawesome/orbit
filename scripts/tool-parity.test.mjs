@@ -76,8 +76,7 @@ describe.runIf(selected.includes("docker"))("docker", () => {
 
   // The #607 defect itself: `-T` is a `docker compose exec` flag and has never
   // been a plain `docker exec` one. Modelled by the shims in
-  // scripts/repair.test.mjs, scripts/install.test.mjs and
-  // src/lib/install-docker-adapter.docker-adapter.test.ts.
+  // scripts/repair.test.mjs and scripts/install.test.mjs.
   it("refuses `exec -T` with 125 and names the shorthand", () => {
     const result = run("docker", ["exec", "-T", absentName("orbit-parity"), "true"]);
     expect(result.status).toBe(125);
@@ -218,8 +217,8 @@ describe.runIf(selected.includes("curl"))("curl", () => {
   });
 
   // Every fake curl refuses an unrecognised option with this status and
-  // message: scripts/install.test.mjs, scripts/test-install-acceptance.sh,
-  // scripts/test-repair-journeys.sh and src/lib/install-curl-adapter.test.ts.
+  // message: scripts/install.test.mjs, scripts/test-install-acceptance.sh
+  // and scripts/test-repair-journeys.sh.
   it("refuses an option it does not know with 2", () => {
     const result = run("curl", ["--orbit-parity-not-an-option", `${base}/ok`]);
     expect(result.status).toBe(2);

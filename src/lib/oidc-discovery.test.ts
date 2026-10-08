@@ -1,4 +1,6 @@
-import { mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { type IncomingMessage, type Server, type ServerResponse, createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,7 +11,6 @@ import {
   classifyOidcFetchResult,
   validateDiscoveryDocument,
   verifyOidcDiscovery,
-  type OidcDiscoveryAdapters,
   type OidcFetchResult,
 } from "./oidc-discovery";
 
@@ -161,27 +162,50 @@ function makeSandbox(): string {
   return dir;
 }
 
-afterEach(() => {
+const servers: Server[] = [];
+afterEach(async () => {
   for (const dir of sandboxes.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const server of servers.splice(0)) {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 function seedIssuer(dir: string, issuer: string): void {
   writeFileSync(join(dir, ".env-orbit"), `OIDC_ISSUER=${issuer}\n`, { mode: 0o600 });
 }
 
-function fakeAdapters(overrides: Partial<OidcDiscoveryAdapters> = {}): OidcDiscoveryAdapters {
-  return {
-    fetch: { fetch: () => ({ curlExitCode: 0, httpStatus: "200" }) },
-    sandbox: { validate: () => true },
-    ...overrides,
+const ISSUER = "https://idp.example.invalid";
+
+/**
+ * A local HTTP fixture server standing in for the provider. The engine only
+ * ever asks for https:// URLs; the injected transport carries each request to
+ * this server over plain HTTP, so everything but the socket -- protocol
+ * rules, redirects, the byte cap, the time limit, the document checks -- is
+ * the code under test.
+ */
+async function fixtureProvider(handler: (request: IncomingMessage, response: ServerResponse) => void): Promise<{ fetchImpl: typeof fetch; requests: string[] }> {
+  const requests: string[] = [];
+  const server = createServer((request, response) => {
+    requests.push(request.url ?? "");
+    handler(request, response);
+  });
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  const fetchImpl: typeof fetch = (input, init) => {
+    const url = new URL(String(input));
+    if (url.protocol !== "https:") throw new Error(`test transport only carries https URLs, got ${url.protocol}`);
+    return fetch(`http://127.0.0.1:${port}${url.pathname}${url.search}`, init);
   };
+  return { fetchImpl, requests };
 }
 
-describe("verifyOidcDiscovery orchestration", () => {
-  it("fails closed with install.sh's exact message when OIDC_ISSUER is missing", () => {
+describe("verifyOidcDiscovery, fetched in the engine (#1212 F5)", () => {
+  it("fails closed with install.sh's exact message when OIDC_ISSUER is missing", async () => {
     const dir = makeSandbox();
     writeFileSync(join(dir, ".env-orbit"), "APP_URL=https://orbit.example.invalid\n", { mode: 0o600 });
-    const result = verifyOidcDiscovery(dir, join(dir, "oidc-discovery.json"), fakeAdapters());
+    const result = await verifyOidcDiscovery(dir);
     expect(result).toEqual({
       status: "failed",
       reason: "configuration-failure",
@@ -190,109 +214,139 @@ describe("verifyOidcDiscovery orchestration", () => {
     });
   });
 
-  it("propagates a provider-unavailable fetch classification (#25)", () => {
+  it("succeeds on a valid document, asking for JSON at the issuer's discovery URL", async () => {
     const dir = makeSandbox();
-    seedIssuer(dir, "https://idp.example.invalid");
-    const result = verifyOidcDiscovery(
-      dir,
-      join(dir, "oidc-discovery.json"),
-      fakeAdapters({ fetch: { fetch: () => ({ curlExitCode: 7, httpStatus: "000" }) } }),
-    );
+    seedIssuer(dir, ISSUER);
+    let accept = "";
+    const provider = await fixtureProvider((request, response) => {
+      accept = String(request.headers.accept);
+      response.writeHead(200, { "content-type": "application/json" }).end(VALID_DOCUMENT);
+    });
+    expect(await verifyOidcDiscovery(dir, { fetchImpl: provider.fetchImpl })).toEqual({ status: "ok" });
+    expect(provider.requests).toEqual(["/.well-known/openid-configuration"]);
+    expect(accept).toBe("application/json");
+  });
+
+  it("refuses a document that fails the shape rules (#27)", async () => {
+    const dir = makeSandbox();
+    seedIssuer(dir, ISSUER);
+    const provider = await fixtureProvider((_request, response) => {
+      response.writeHead(200).end(JSON.stringify({ issuer: "https://someone-else.invalid" }));
+    });
+    expect(await verifyOidcDiscovery(dir, { fetchImpl: provider.fetchImpl })).toMatchObject({ status: "failed", reason: "configuration-failure" });
+  });
+
+  it("treats a non-2xx response as a configuration problem (#25)", async () => {
+    const dir = makeSandbox();
+    seedIssuer(dir, ISSUER);
+    const provider = await fixtureProvider((_request, response) => {
+      response.writeHead(404).end("not here");
+    });
+    expect(await verifyOidcDiscovery(dir, { fetchImpl: provider.fetchImpl })).toMatchObject({ status: "failed", reason: "configuration-failure" });
+  });
+
+  it("refuses a response larger than the byte cap without reading it all (#25, #26)", async () => {
+    const dir = makeSandbox();
+    seedIssuer(dir, ISSUER);
+    const provider = await fixtureProvider((_request, response) => {
+      response.writeHead(200);
+      const chunk = "x".repeat(64 * 1024);
+      for (let written = 0; written <= OIDC_DISCOVERY_MAX_BYTES; written += chunk.length) response.write(chunk);
+      response.end();
+    });
+    expect(await verifyOidcDiscovery(dir, { fetchImpl: provider.fetchImpl })).toMatchObject({ status: "failed", reason: "configuration-failure" });
+  });
+
+  it("refuses a declared length over the cap before the body arrives (#25)", async () => {
+    const dir = makeSandbox();
+    seedIssuer(dir, ISSUER);
+    const provider = await fixtureProvider((_request, response) => {
+      response.writeHead(200, { "content-length": String(OIDC_DISCOVERY_MAX_BYTES + 1) });
+      response.write("{");
+    });
+    expect(await verifyOidcDiscovery(dir, { fetchImpl: provider.fetchImpl })).toMatchObject({ status: "failed", reason: "configuration-failure" });
+  });
+
+  it("follows an https redirect", async () => {
+    const dir = makeSandbox();
+    seedIssuer(dir, ISSUER);
+    const provider = await fixtureProvider((request, response) => {
+      if (request.url === "/.well-known/openid-configuration") {
+        response.writeHead(302, { location: "https://idp.example.invalid/moved" }).end();
+      } else {
+        response.writeHead(200).end(VALID_DOCUMENT);
+      }
+    });
+    expect(await verifyOidcDiscovery(dir, { fetchImpl: provider.fetchImpl })).toEqual({ status: "ok" });
+    expect(provider.requests).toEqual(["/.well-known/openid-configuration", "/moved"]);
+  });
+
+  it("never follows a redirect to plain http (curl's --proto-redir =https, #25)", async () => {
+    const dir = makeSandbox();
+    seedIssuer(dir, ISSUER);
+    const provider = await fixtureProvider((_request, response) => {
+      response.writeHead(302, { location: "http://idp.example.invalid/plain" }).end();
+    });
+    expect(await verifyOidcDiscovery(dir, { fetchImpl: provider.fetchImpl })).toMatchObject({ status: "failed", reason: "provider-unavailable" });
+    expect(provider.requests).toEqual(["/.well-known/openid-configuration"]);
+  });
+
+  it("gives up on a redirect loop", async () => {
+    const dir = makeSandbox();
+    seedIssuer(dir, ISSUER);
+    const provider = await fixtureProvider((_request, response) => {
+      response.writeHead(302, { location: "https://idp.example.invalid/.well-known/openid-configuration" }).end();
+    });
+    expect(await verifyOidcDiscovery(dir, { fetchImpl: provider.fetchImpl })).toMatchObject({ status: "failed", reason: "provider-unavailable" });
+  });
+
+  it("never fetches an issuer that is not https at all", async () => {
+    const dir = makeSandbox();
+    seedIssuer(dir, "http://idp.example.invalid");
+    let called = false;
+    const result = await verifyOidcDiscovery(dir, {
+      fetchImpl: () => {
+        called = true;
+        throw new Error("must not fetch");
+      },
+    });
+    expect(result).toMatchObject({ status: "failed", reason: "provider-unavailable" });
+    expect(called).toBe(false);
+  });
+
+  it("reports a provider that does not answer within the time limit as unavailable (#25)", async () => {
+    const dir = makeSandbox();
+    seedIssuer(dir, ISSUER);
+    const provider = await fixtureProvider(() => {
+      /* never answers */
+    });
+    const result = await verifyOidcDiscovery(dir, { fetchImpl: provider.fetchImpl, timeoutMs: 200 });
     expect(result).toMatchObject({ status: "failed", reason: "provider-unavailable" });
   });
 
-  it("refuses a symlinked discovery file even after a successful fetch (#26)", () => {
+  it.each([
+    ["unavailable", (_request: IncomingMessage, response: ServerResponse) => response.destroy()],
+    ["answering with a rejected document", (_request: IncomingMessage, response: ServerResponse) => {
+      response.writeHead(200, { "content-type": "application/json" }).end('{"issuer":"https://evil.example.invalid/","secret":"BODY-MARKER"}');
+    }],
+  ])("never repeats the provider's address or its response when it is %s", async (_label, handler) => {
     const dir = makeSandbox();
-    seedIssuer(dir, "https://idp.example.invalid");
-    const discoveryPath = join(dir, "oidc-discovery.json");
-    const elsewhere = join(dir, "elsewhere.json");
-    writeFileSync(elsewhere, VALID_DOCUMENT);
-    symlinkSync(elsewhere, discoveryPath);
-
-    const result = verifyOidcDiscovery(
-      dir,
-      discoveryPath,
-      fakeAdapters({
-        fetch: {
-          fetch: () => ({ curlExitCode: 0, httpStatus: "200" }),
-        },
-      }),
-    );
-    expect(result).toMatchObject({ status: "failed", reason: "configuration-failure" });
+    seedIssuer(dir, ISSUER);
+    const provider = await fixtureProvider(handler);
+    const result = await verifyOidcDiscovery(dir, { fetchImpl: provider.fetchImpl });
+    expect(result.status).toBe("failed");
+    const text = JSON.stringify(result);
+    expect(text).not.toContain("BODY-MARKER");
+    expect(text).not.toContain("evil.example");
+    expect(text).not.toContain(new URL(ISSUER).host);
   });
 
-  it("refuses an on-disk file exceeding the byte cap even after curl's own limit (#26)", () => {
+  it("reports a refused connection as unavailable", async () => {
     const dir = makeSandbox();
-    seedIssuer(dir, "https://idp.example.invalid");
-    const discoveryPath = join(dir, "oidc-discovery.json");
-    const result = verifyOidcDiscovery(dir, discoveryPath, {
-      fetch: {
-        fetch: (_url, destination) => {
-          writeFileSync(destination, "x".repeat(OIDC_DISCOVERY_MAX_BYTES + 1));
-          return { curlExitCode: 0, httpStatus: "200" };
-        },
-      },
-      sandbox: { validate: () => true },
+    seedIssuer(dir, ISSUER);
+    const result = await verifyOidcDiscovery(dir, {
+      fetchImpl: () => fetch("http://127.0.0.1:1/.well-known/openid-configuration"),
     });
-    expect(result).toMatchObject({ status: "failed", reason: "configuration-failure" });
-  });
-
-  it("forces the discovery file to mode 600 on success (#26)", () => {
-    const dir = makeSandbox();
-    seedIssuer(dir, "https://idp.example.invalid");
-    const discoveryPath = join(dir, "oidc-discovery.json");
-    const result = verifyOidcDiscovery(dir, discoveryPath, {
-      fetch: {
-        fetch: (_url, destination) => {
-          writeFileSync(destination, VALID_DOCUMENT, { mode: 0o644 });
-          return { curlExitCode: 0, httpStatus: "200" };
-        },
-      },
-      sandbox: { validate: () => true },
-    });
-    expect(result).toEqual({ status: "ok" });
-    expect(statSync(discoveryPath).mode & 0o777).toBe(0o600);
-  });
-
-  it("refuses when the sandbox adapter rejects the document (#27)", () => {
-    const dir = makeSandbox();
-    seedIssuer(dir, "https://idp.example.invalid");
-    const discoveryPath = join(dir, "oidc-discovery.json");
-    const result = verifyOidcDiscovery(dir, discoveryPath, {
-      fetch: {
-        fetch: (_url, destination) => {
-          writeFileSync(destination, VALID_DOCUMENT);
-          return { curlExitCode: 0, httpStatus: "200" };
-        },
-      },
-      sandbox: { validate: () => false },
-    });
-    expect(result).toMatchObject({ status: "failed", reason: "configuration-failure" });
-  });
-
-  it("succeeds end to end when every stage agrees", () => {
-    const dir = makeSandbox();
-    seedIssuer(dir, "https://idp.example.invalid");
-    const discoveryPath = join(dir, "oidc-discovery.json");
-    let calledUrl = "";
-    let sandboxIssuer = "";
-    const result = verifyOidcDiscovery(dir, discoveryPath, {
-      fetch: {
-        fetch: (url, destination) => {
-          calledUrl = url;
-          writeFileSync(destination, VALID_DOCUMENT);
-          return { curlExitCode: 0, httpStatus: "200" };
-        },
-      },
-      sandbox: {
-        validate: (issuer) => {
-          sandboxIssuer = issuer;
-          return true;
-        },
-      },
-    });
-    expect(result).toEqual({ status: "ok" });
-    expect(calledUrl).toBe("https://idp.example.invalid/.well-known/openid-configuration");
-    expect(sandboxIssuer).toBe("https://idp.example.invalid");
+    expect(result).toMatchObject({ status: "failed", reason: "provider-unavailable" });
   });
 });

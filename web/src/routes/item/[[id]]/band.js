@@ -34,7 +34,9 @@ import { seededRng } from "$lib/sky.js";
  *
  * The apex — the highest point of the projected ellipse, found analytically,
  * not assumed — is then translated to the horizontal centre of the viewport
- * at 35% of its height. Everything else follows from that one pin.
+ * at half its height — mid-page (owner, 2026-10-06, #1247: "the apex of the
+ * centreline of the belt semi circle should be mid-page"; it hung at 35%
+ * before). Everything else follows from that one pin.
  *
  * Ring angle phi runs anticlockwise; on screen INCREASING PHI MOVES LEFT.
  * Since the manifest runs sooner-left to later-right, a body's angular
@@ -223,7 +225,7 @@ export const NODE = -12 * RAD;
 export const COS_I = Math.cos(INC), SIN_I = Math.sin(INC);
 const COS_N = Math.cos(NODE), SIN_N = Math.sin(NODE);
 export const A_FRAC = 0.74, A_MIN = 1150;   /* ring radius against the viewport */
-export const APEX_FRAC = 0.35;              /* where the apex hangs in the sky   */
+export const APEX_FRAC = 0.5;               /* where the apex hangs: mid-page    */
 export const R_ITEM = 25;                   /* an item's radius                  */
 export const R_DOC = 17;                    /* a document's — smaller, on purpose */
 export const RADIAL = 0.19;                 /* the band's radial half-spread     */
@@ -908,6 +910,24 @@ export function matchesOf(bodies, query) {
   const found = new Set();
   if (q) bodies.forEach((b, i) => { if (haystackOf(b).includes(q)) found.add(i); });
   return found;
+}
+
+/** How many ITEMS a search lit (#1303), for the note's "N of M lit", whose M
+ *  counts items. A paper's name lights its item and the paper itself, so
+ *  counting seats said "2 of 1 lit"; an item lit either way counts once. A
+ *  seated suggestion is not in M (#1145), so it is not in N either.
+ *
+ * @param   {Body[]}           bodies
+ * @param   {Iterable<number>} hits  lit seats
+ * @returns {number} */
+export function litItemCountOf(bodies, hits) {
+  /** @type {Set<number>} */
+  const items = new Set();
+  for (const i of hits) {
+    const b = bodies[i];
+    if (b && !b.item.suggestion) items.add(b.itemIdx);
+  }
+  return items.size;
 }
 
 /* A paper still folded inside its item is not somewhere you can be sent —

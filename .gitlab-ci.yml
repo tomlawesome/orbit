@@ -1037,10 +1037,9 @@ fast:
 # than two partial ones with no merge step. Neither src/lib file's own coverage
 # contribution is currently double-counted or dropped in a way verified
 # against a live pipeline -- watch the first real run after this split for a
-# `src/lib/**` floor regression before assuming it is clear (most of
-# install-script-adapters.ts is also reached through install-orchestrator.ts
-# and its own test, and recovery-bundle.ts's exported functions are also
-# called directly from recovery-bundle.test.ts, both of which stay in `fast`).
+# `src/lib/**` floor regression before assuming it is clear (recovery-bundle.ts's
+# exported functions are also called directly from recovery-bundle.test.ts,
+# which stays in `fast`).
 fast_docker:
   stage: fast
   extends:

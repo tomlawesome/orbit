@@ -7,9 +7,11 @@
 > (`configure.sh --preflight`/`--migrate`). The note below is the plan as it
 > stood.
 
-Status: proposed (slices 1-5 implemented; the bootstrap flip itself — issue
-#295's own release decision to switch `install.sh`'s dispatch or
-`orbit-launcher`'s fetch target to the CLI path — has not happened). This is
+Status: bootstrap flip landed (#1212): `install.sh` is the bootstrap shell
+and runs the install engine as a one-off of the image it verified; the
+engine's Docker adapters, image resolution and health waits were deleted
+rather than kept as twins. The build notes and their amendment are on
+#1212; slices 1-5 below are history. This is
 a working note, not an ADR —
 it records the decomposition of issue #295 so each slice lands as an
 independently reviewable pull request. Update it as slices land or the plan

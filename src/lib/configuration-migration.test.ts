@@ -1,70 +1,54 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  buildMigrateArgv,
-  buildPreflightArgv,
+  classifyMigrationResult,
   runConfigurationMigration,
   runConfigurationPreflight,
   type ConfigurationMigrationTarget,
-  type ConfigurationScriptAdapter,
 } from "./configuration-migration";
 
-// Ported from scripts/install.sh's run_configuration_migration and its
-// --preflight companion call (docs/installer-guarantees.md, Part 1 /
-// install.sh, guarantee #29 — cited by number in test names below). See
-// docs/adr-notes/295-install-port-plan.md for the slice this belongs to,
-// and configuration-migration.parity.test.ts for whole-script parity
-// against the real, unmodified scripts/configuration.sh.
+// install's hand-off to the configuration migration: run_configuration_migration
+// and its --preflight companion (docs/installer-guarantees.md, Part 1 /
+// install.sh, guarantee #29 — cited by number in test names below). Since
+// #1212 the install engine calls the port in-process; the bash results are
+// still compared in configuration-migration.parity.test.ts.
 
-const TARGET: ConfigurationMigrationTarget = {
-  environmentFile: ".env-orbit",
-  orbitImage: "ghcr.io/tomlawesome/orbit@sha256:" + "a".repeat(64),
-  appliedVersion: "v1.2.3",
-  appliedDigest: "sha256:" + "a".repeat(64),
-  composeProjectName: "orbit",
-};
+const IMAGE = "ghcr.io/tomlawesome/orbit@sha256:" + "a".repeat(64);
 
-describe("buildPreflightArgv", () => {
-  it("matches install.sh's exact invocation (install.sh:1444)", () => {
-    expect(buildPreflightArgv(".env-orbit")).toEqual(["--preflight", "--file", ".env-orbit"]);
-  });
+const dirs: string[] = [];
+afterEach(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-describe("buildMigrateArgv", () => {
-  it("matches install.sh's exact invocation and argument order (install.sh:1013-1018)", () => {
-    expect(buildMigrateArgv(TARGET)).toEqual([
-      "--migrate",
-      "--transaction",
-      "--file",
-      ".env-orbit",
-      "--orbit-image",
-      TARGET.orbitImage,
-      "--applied-version",
-      "v1.2.3",
-      "--compose-project-name",
-      "orbit",
-      "--applied-digest",
-      TARGET.appliedDigest,
-    ]);
-  });
-});
+function deployment(content: string): string {
+  const dir = mkdtempSync(join(tmpdir(), "orbit-migration-handoff-"));
+  dirs.push(dir);
+  writeFileSync(join(dir, ".env-orbit"), content, { mode: 0o600 });
+  return dir;
+}
 
-function adapterReturning(preflight: { status: number; stdout: string }, migrate?: { status: number; stdout: string }): ConfigurationScriptAdapter {
+function targetFor(dir: string): ConfigurationMigrationTarget {
   return {
-    runPreflight: () => preflight,
-    runMigrate: () => migrate ?? preflight,
+    environmentFile: join(dir, ".env-orbit"),
+    orbitImage: IMAGE,
+    appliedVersion: "v1.2.3",
+    appliedDigest: "sha256:" + "a".repeat(64),
+    composeProjectName: "orbit",
   };
 }
 
 describe("runConfigurationPreflight", () => {
-  it("passes on exit 0, whether the file is current or a legacy schema needing migration", () => {
-    const adapter = adapterReturning({ status: 0, stdout: "current ORBIT_IMAGE\n" });
-    expect(runConfigurationPreflight("scripts/configuration.sh", ".env-orbit", adapter)).toEqual({ ok: true });
+  it("passes a legacy file that only needs the migration", () => {
+    const dir = deployment(`ORBIT_IMAGE=${IMAGE}\n`);
+    expect(runConfigurationPreflight(join(dir, ".env-orbit"))).toEqual({ ok: true });
   });
 
-  it("fails closed with install.sh's exact message on any non-zero exit", () => {
-    const adapter = adapterReturning({ status: 1, stdout: "" });
-    expect(runConfigurationPreflight("scripts/configuration.sh", ".env-orbit", adapter)).toEqual({
+  it("fails closed with install.sh's exact message on a file that does not parse", () => {
+    const dir = deployment("not an assignment\n");
+    expect(runConfigurationPreflight(join(dir, ".env-orbit"))).toEqual({
       ok: false,
       message: "Configuration preflight failed; restoring the previous deployment.",
     });
@@ -72,43 +56,54 @@ describe("runConfigurationPreflight", () => {
 });
 
 describe("runConfigurationMigration (#29)", () => {
+  it("stamps a legacy file in the install's transaction mode, leaving no rollback copy beside it", () => {
+    const dir = deployment(`ORBIT_IMAGE=${IMAGE}\n`);
+    const outcome = runConfigurationMigration(targetFor(dir));
+    expect(outcome.ok).toBe(true);
+    expect(outcome.message).toMatch(/^Orbit configuration: migrated from schema /);
+    expect(readFileSync(join(dir, ".env-orbit"), "utf8")).toContain("COMPOSE_PROJECT_NAME=orbit\n");
+    expect(() => readFileSync(join(dir, ".env-orbit.orbit-config.rollback"))).toThrow();
+  });
+
+  it("fails closed when the recorded project disagrees", () => {
+    const dir = deployment(`ORBIT_IMAGE=${IMAGE}\nORBIT_CONFIG_SCHEMA_VERSION=1\nCOMPOSE_PROJECT_NAME=another\n`);
+    expect(runConfigurationMigration(targetFor(dir))).toEqual({
+      ok: false,
+      message: "Configuration migration failed; restoring the previous deployment.",
+    });
+  });
+});
+
+describe("classifyMigrationResult (#29)", () => {
+  const ok = (stdout: string) => ({ status: 0, stdout, stderr: "" });
+
   it("accepts the idempotent 'already current' message", () => {
     const message = "Orbit configuration: already current schema v1 version v1.2.3 digest sha256:abc\n";
-    const adapter = adapterReturning({ status: 0, stdout: "" }, { status: 0, stdout: message });
-    const outcome = runConfigurationMigration("scripts/configuration.sh", TARGET, adapter);
-    expect(outcome).toEqual({ ok: true, message: message.replace(/\n+$/, "") });
+    expect(classifyMigrationResult(ok(message))).toEqual({ ok: true, message: message.replace(/\n+$/, "") });
   });
 
   it("accepts the successful-migration message", () => {
     const message =
       "Orbit configuration: migrated from schema v0 version legacy/unknown digest legacy/unknown to schema v1 version v1.2.3 digest sha256:abc\n";
-    const adapter = adapterReturning({ status: 0, stdout: "" }, { status: 0, stdout: message });
-    const outcome = runConfigurationMigration("scripts/configuration.sh", TARGET, adapter);
-    expect(outcome).toEqual({ ok: true, message: message.replace(/\n+$/, "") });
+    expect(classifyMigrationResult(ok(message))).toEqual({ ok: true, message: message.replace(/\n+$/, "") });
   });
 
   it("fails closed with install.sh's exact message on any non-zero exit", () => {
-    const adapter = adapterReturning({ status: 0, stdout: "" }, { status: 1, stdout: "" });
-    expect(runConfigurationMigration("scripts/configuration.sh", TARGET, adapter)).toEqual({
+    expect(classifyMigrationResult({ status: 1, stdout: "", stderr: "configuration_migration\n" })).toEqual({
       ok: false,
       message: "Configuration migration failed; restoring the previous deployment.",
     });
   });
 
   it("treats a plausible-looking but unexpected output string as failure, not success", () => {
-    const adapter = adapterReturning(
-      { status: 0, stdout: "" },
-      { status: 0, stdout: "Orbit configuration: something else entirely\n" },
-    );
-    expect(runConfigurationMigration("scripts/configuration.sh", TARGET, adapter)).toEqual({
+    expect(classifyMigrationResult(ok("Orbit configuration: something else entirely\n"))).toEqual({
       ok: false,
       message: "Configuration migration returned an unexpected result; restoring the previous deployment.",
     });
   });
 
   it("treats empty output on exit 0 as failure", () => {
-    const adapter = adapterReturning({ status: 0, stdout: "" }, { status: 0, stdout: "" });
-    expect(runConfigurationMigration("scripts/configuration.sh", TARGET, adapter)).toEqual({
+    expect(classifyMigrationResult(ok(""))).toEqual({
       ok: false,
       message: "Configuration migration returned an unexpected result; restoring the previous deployment.",
     });

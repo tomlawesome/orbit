@@ -36,7 +36,8 @@ describe("#1151 W1-R10: a non-staged preview gets a load deadline", () => {
   });
 
   it("closePreview also clears it, so a closed-and-reopened preview starts clean", () => {
-    const fn = ITEM_PAGE.slice(ITEM_PAGE.indexOf("function closePreview()"), ITEM_PAGE.indexOf("function closePreview()") + 200);
+    const start = ITEM_PAGE.indexOf("function closePreview()");
+    const fn = ITEM_PAGE.slice(start, ITEM_PAGE.indexOf("\n  function ", start + 1));
     expect(fn).toMatch(/clearTimeout\(previewLoadTimer\);/u);
   });
 

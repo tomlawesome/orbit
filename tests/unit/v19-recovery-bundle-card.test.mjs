@@ -40,8 +40,10 @@ describe("the administration screen's recovery-bundle card", () => {
     const prose = block.replace(/\s+/g, " ");
     expect(prose).toContain("every document, all encrypted metadata");
     expect(prose).toContain("every stored address");
-    expect(block).toContain("orbit backup");
-    expect(block).toContain("orbit export-recovery-bundle");
+    // #1211: the engine's commands run only inside the deployment, so the
+    // card names the shells an operator actually runs.
+    expect(block).toContain("bash scripts/backup.sh");
+    expect(block).toContain("bash scripts/export-recovery-bundle.sh");
     expect(prose).toContain("Exporting a recovery bundle");
     // No key or database mechanic reaches this member-facing-adjacent card either.
     expect(block).not.toMatch(/DOCUMENT_KEK|key-encryption key/);
@@ -68,7 +70,7 @@ describe("the administration screen's recovery-bundle card", () => {
 
   it("adds a guide section the installer's completion instruction can actually point at", () => {
     expect(ADMIN_GUIDE).toContain("## Exporting a recovery bundle");
-    expect(ADMIN_GUIDE).toContain("orbit backup");
-    expect(ADMIN_GUIDE).toContain("orbit export-recovery-bundle <backup.tar>");
+    expect(ADMIN_GUIDE).toContain("bash scripts/backup.sh");
+    expect(ADMIN_GUIDE).toContain("bash scripts/export-recovery-bundle.sh");
   });
 });

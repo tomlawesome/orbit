@@ -5,45 +5,14 @@ per flake, one line per sighting: `date · commit · pipeline/job · symptom`.
 The third sighting under a heading gets an issue, linked from the heading;
 fixing the cause deletes the heading in the same commit.
 
-## check-base-image-current.test.mjs "tells the reader to merge dev when dev already pins the tag's current digest" (#1134)
-
-- 2026-09-19 · 3e855e2 (+ #1052's uncommitted administration work, none of it near this script) · local `scripts/test-backend.sh` · timed out at the 5s default. The whole file passed on a rerun immediately after on the same code, taking 1.9s for this test and 7.5s for the file — so it is the wall-clock budget under a loaded host, not the script. Every test here spawns real `git` subprocesses against temporary repositories.
-- 2026-09-24 · 8f05e163 (#1107, no change near this script) · local `./node_modules/.bin/vitest run` (full suite) · timed out at the 5s default alongside "falls back to fetching dev when it is not already present locally" below, both in the same file, both green on an immediate rerun of the file alone. Same wall-clock-under-load shape as the first sighting.
-- 2026-09-26 · a7dcd3d1 (#1125's phone settings, no change near this script) · local `scripts/test-backend.sh` · timed out at the 5s default; green on an immediate rerun of the file alone. Third sighting: #1134.
-- 2026-09-27 · 6420d955 (+ #1057's uncommitted desk search wiring, none of it near this script) · local `scripts/test-backend.sh` (worktree, seven parallel builds sharing the host) · timed out at the 5s default alongside the other two tests in this file's describe block, below and in the new heading below. All three green on an immediate rerun of the file alone (12.3s total, ~3s each). Still #1134.
-- 2026-09-27 · 6420d955 (+ #1003's uncommitted notification-history work, none of it near this script) · local `scripts/test-backend.sh`, worktree `1003-notification-history`, seven agents building in parallel on the same shared host · timed out at the 5s default; a solo rerun of just this file moments later still missed the 5s budget (5.3-6.2s each) while the other six agents' builds were still running, consistent with the wall-clock-under-load shape rather than a new cause.
-
-## check-base-image-current.test.mjs "falls back to fetching dev when it is not already present locally" (#1134)
-
-- 2026-09-24 · 8f05e163 (#1107, no change near this script) · local `./node_modules/.bin/vitest run` (full suite) · timed out at the 5s default; green on an immediate rerun of the file alone. Same file and run as the sighting above; first sighting for this test.
-- 2026-09-27 · 6420d955 (+ #1057's uncommitted desk search wiring, none of it near this script) · local `scripts/test-backend.sh` (worktree, seven parallel builds sharing the host) · timed out at the 5s default in the same run as the heading above. Green on an immediate rerun of the file alone. Second sighting.
-- 2026-09-27 · 6420d955 (+ #1003's uncommitted notification-history work, none of it near this script) · local `scripts/test-backend.sh`, worktree `1003-notification-history`, seven agents building in parallel on the same shared host · timed out at the 5s default alongside "tells the reader…" and "keeps the re-pin advice…" above/below, all three in the same file, same run. Second sighting.
-- 2026-09-27 · 6420d955 (+ #1002's uncommitted desk archive card, none of it near this script; six other worktrees building in parallel on this host) · local `scripts/test-backend.sh` · timed out at the 5s default alongside "keeps the re-pin advice when dev has not re-pinned either" below, both in the same file, both green on an immediate rerun of the file alone. Same wall-clock-under-load shape.
-- 2026-09-27 · 6420d955 (+ #1002's uncommitted desk archive card, same worktree, same host load as the sighting above) · local `scripts/test-backend.sh` · timed out at the 5s default again on a second full run, green on an immediate rerun of the file alone. Third sighting: covered by #1134, which already names this whole file rather than one test in it.
-
-## check-base-image-current.test.mjs "keeps the re-pin advice when dev has not re-pinned either"
-
-- 2026-09-27 · 6420d955 (+ #1057's uncommitted desk search wiring, none of it near this script) · local `scripts/test-backend.sh` (worktree, seven parallel builds sharing the host) · timed out at the 5s default in the same run as the two headings above. Green on an immediate rerun of the file alone. First sighting for this test; same wall-clock-under-load shape as #1134.
-- 2026-09-27 · 6420d955 (+ #1003's uncommitted notification-history work, none of it near this script) · local `scripts/test-backend.sh`, worktree `1003-notification-history`, seven agents building in parallel on the same shared host · timed out at the 5s default alongside the other two tests in this file, same run. First sighting for this test.
-- 2026-09-27 · 6420d955 (same uncommitted work) · local `scripts/test-backend.sh`, same worktree, immediate rerun, same seven-agent host load · timed out again at the 5s default. Second sighting.
-- 2026-09-27 · 6420d955 (+ #1002's uncommitted desk archive card, none of it near this script; six other worktrees building in parallel on this host) · local `scripts/test-backend.sh` · timed out at the 5s default; green on an immediate rerun of the file alone. Same run as the sighting above; first sighting for this test.
-
-## check-base-image-current.test.mjs "falls back to the tag-moved advice when dev has no remote to resolve it from"
-
-- 2026-09-27 · 6420d955 (+ #1003's uncommitted notification-history work, none of it near this script) · local `scripts/test-backend.sh`, worktree `1003-notification-history`, seven agents building in parallel on the same shared host · timed out at the 5s default; this test had been green in the same file's own first, less-loaded run minutes earlier — the fourth and last git-spawning test in this file to fall, as load climbed further. First sighting.
-
 ## availability-route.test.mjs "GET /api/auth/availability carries phase: starting straight from getBootPhase" (#869)
 
 - 2026-09-27 · 6420d955 (+ #1003's uncommitted notification-history work, nowhere near auth/availability) · local `scripts/test-backend.sh`, worktree `1003-notification-history`, seven agents building in parallel on the same shared host · timed out at the 5s default in a run that took 393s overall against 232s for the same file set minutes before, with unrelated files failing alongside it — wall-clock-under-load, not this test. First sighting.
-- 2026-09-27 · 6420d955 (+ #1002's uncommitted desk archive card, none of it near this route; six other worktrees building in parallel on this host) · local `scripts/test-backend.sh` · timed out at the 5s default; green on an immediate rerun of the file alone (2.1s for all 6 tests). Same wall-clock-under-load shape as the check-base-image-current.test.mjs headings above; first sighting for this test.
+- 2026-09-27 · 6420d955 (+ #1002's uncommitted desk archive card, none of it near this route; six other worktrees building in parallel on this host) · local `scripts/test-backend.sh` · timed out at the 5s default; green on an immediate rerun of the file alone (2.1s for all 6 tests). Same wall-clock-under-load shape as the check-base-image-current.test.mjs flake (#1134, since fixed); first sighting for this test.
 
 ## extraction-shortlist-recall.test.ts "countShortlistRecall over real corpus pages adds to the tallies it is given rather than replacing them"
 
 - 2026-09-27 · 6420d955 (+ #1003's uncommitted notification-history work, nowhere near document extraction) · local `scripts/test-backend.sh`, worktree `1003-notification-history`, seven agents building in parallel on the same shared host · timed out at the 5s default in the same heavily-loaded run as the sighting above. First sighting.
-
-## check-base-image-current.test.mjs "keeps the re-pin advice when dev has not re-pinned either"
-
-- 2026-09-27 · 6420d955 (+ #1142's uncommitted pocket CSS and design notes, none of it near this script) · local `scripts/test-backend.sh`, with seven other agents building on the host · timed out at the 5s default, as did two more tests in the same file whose names scrolled past the captured tail; the file alone was green on an immediate rerun (8 of 8, 9.8s). Same wall-clock-under-load shape as the two headings above; first sighting for this test.
 
 ## document-lifecycle.test.ts:1335 "emits a bounded rejected lifecycle record when reconciliation finds an available document's ciphertext missing"
 
@@ -315,10 +284,11 @@ page's URL at failure, which this one has to infer.
 
 - 2026-09-30 · 0135f516 (!1006, the batch that built this film chapter) · pipeline 1855 / fidelity (job 27168) · `page.waitForFunction` hit the 60000ms test timeout. The same test passed on pipeline 1836 (same film code), and the job retried as 27270 on the same commit was green. First sighting; an issue on the third.
 
-## fidelity: door-station.spec.js:103 "the ring's hand-over to a card at 390x664, motion no-preference › the ring travels from the door's station to the card's"
+## fidelity: door-station.spec.js:103 "the ring's hand-over to a card at 390x664, motion no-preference › the ring travels from the door's station to the card's" — #1306
 
 - 2026-10-01 · d3141346 (!1013, #1183's Firefox projects for tests/e2e; nothing under web/ or tests/fidelity) · pipeline 1926 / fidelity (job 28697) · "a jump between frames at 317ms": 38.9 against the < 20 bound. The full fidelity runs on !1010 and !1012 just before it passed, and the same pipeline's smoke ran about eleven minutes longer than usual alongside it on the shared runner. First sighting; an issue on the third.
 - 2026-10-04 · bc9ba29e (!1021, #1151's audit fixes; the only door-side change since the green run on bcaf64e0 is a waiting-card timeout constant, nothing in the ring's motion) · pipeline 2064 / fidelity (job 31041) · "a jump between frames at 280ms": 25.5 against the < 20 bound, same shape as the first sighting. The same test passed on pipeline 2054 ten commits earlier. Second sighting; an issue on the third.
+- 2026-10-07 · 5a12b2bd (!1043, the create-form batch; nothing in the ring's motion) · pipeline 2233 / fidelity (job 33106) · "a jump between frames at 328ms": 20.008 against the < 20 bound. Third sighting: filed as #1306.
 
 ## tour-pocket-webkit.spec.js "plays end to end at 430x932 under normal motion" — pill moving between places (#1174)
 
@@ -348,9 +318,12 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-04 · harness change on `fix/1208-webkit-fidelity-wait` (0098575b): each typed-over field is judged from a settled frame (shot until two in a row match, at most 20) instead of 350ms after the hold. Ten isolated runs in the pinned image could not reproduce the fault before or after the change, so CI is the proof.
 - 2026-10-05 · cause found, on the pre-preview batch (`217496af`, `b9a84c57`): once the second picture was itself a settled frame, the 430x932 case failed 3 of 3 on `#c8-name`, and a probe showed why: removing the placeholder of a field half off the top of the screen makes WebKit scroll the page 10 px (scroll anchoring; scrollY 475 to 485), so the second picture was of a different strip (5.92% of pixels differing; 0.0% scrolled back; the film's cover box equals the input's). The old check sometimes shot before the scroll, hence the flake. The check now restores the scroll position before each picture: 9 of 9 across the three sizes and the whole file 24 of 24 in the pinned image. Not a product fault; #1208 closes with the batch.
 
-## v19-layout-and-themes.spec.ts:282, /household/[id] axe check — desktop-firefox
+## v19-layout-and-themes.spec.ts:282, /household/[id] axe check — desktop-firefox, desktop-chromium — #1307
 
 - 2026-10-03 · 594b745a (!1017) · pipeline 1999 / smoke_firefox (job 30199) · two theme packs in one run, each a real axe violation rather than a timeout: "/household/[id] in the clouds pack has no WCAG A/AA violations" reported one violation, `color-contrast` on `.zero`; "/household/[id] in the dawn pack has no WCAG A/AA violations" reported the same, `color-contrast` on `.zero`. The merged report's own outcome field marks both "expected" (its usual sign that a later attempt passed), but that later attempt's own result is not present in this job's artifact, so this entry records only the one failing attempt actually captured — not why or how it later passed, and not whether other packs or screens share the same `.zero` contrast gap without being caught. First sighting; an issue on the third.
+- 2026-10-07 · 5a12b2bd (!1043; nothing on /household) · pipeline 2233 / smoke (job 33111, desktop-chromium) · "/household/[id] in the clouds pack" and "… in the dawn pack" each failed once and passed on the in-job retry. The rule is not in the output, because a passing retry prints no detail. Second sighting.
+- 2026-10-07 · the same batch plus its pipeline fixes, uncommitted · local `test-e2e-local.sh`, desktop-chromium · the same two tests, the same shape: failed once, passed on retry. Third sighting: filed as #1307.
+- 2026-10-07 · 68040844 (!1043; the repair-journeys fixture only) · pipeline 2236 / smoke (job 33177, desktop-chromium) · "/household/[id] in the clouds pack" and "… in the dawn pack" failed once each and passed on retry, as before. Still #1307.
 
 ## v19-arrival.spec.ts:290 — the newcomer never reaches /home — desktop-webkit
 
@@ -360,10 +333,11 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 
 - 2026-10-05 · dac67650 (!1017) · pipeline 2131 / smoke_webkit (job 31782) · `page.evaluate: TypeError: Load failed` (WebKit's words for a fetch that did not complete) inside `createHousehold`'s in-page `fetch` at line 35, 7.2s in, straight after sign-in; the in-job retry passed (11.8s). Only the passing retry was traced, so the failing attempt's network is not recorded. Suspected, not established: the arrival at `/` navigating on to `/home` while the in-page fetch was out (support/arrival.ts describes that #840 race; this file's sign-in does not wait for it), made likelier on WebKit by the multi-second sky rasterising stall measured on #1219. First sighting; an issue on the third.
 
-## v19-feedback-recovery.spec.ts:362 "a save on /create that cannot reach Orbit leaves focus where the reader was" — mobile-webkit
+## v19-feedback-recovery.spec.ts:362 "a save on /create that cannot reach Orbit leaves focus where the reader was" — mobile-webkit, desktop-webkit, desktop-chromium, mobile-chromium — #1313
 
 - 2026-10-05 · c352cf77 (same run and same unchanged web tree as the heading above) · pipeline 2188 / smoke_webkit_mobile (job 32287) · `focus is not dropped to the page` at line 373: `focusedElement` was `body` after the staged failure was shown, 5.9 s in; the in-job retry passed (6.5 s), so Playwright counted it flaky. First sighting; an issue on the third.
-
+- 2026-10-07 · f6939a21 (create-form batch with ADR-0033 merged; nothing in it touches the save path this journey stages) · local targeted run, desktop-webkit, inside CI's Playwright image (#1235), no retries · `focus is not dropped to the page` at line 384: `focusedElement` was `body`. Same race on the other WebKit project; #1233 (v0.4) owns the fix. Second sighting.
+- 2026-10-07 · 68040844 (!1043; the repair-journeys fixture only) · pipeline 2236 / smoke (job 33177), desktop-chromium and mobile-chromium · the :373 focus check for /create, the item view and /inbox, and the :356 announcement check for /inbox and household deletion, each failed once and passed on the in-job retry. Third sighting, and now on Chromium too: filed as #1313.
 
 ## v19-archive.spec.ts:262 "a wrong passphrase is refused, and nothing is read" on desktop-webkit (#1233)
 
@@ -372,3 +346,11 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 ## v19-mail-collection.spec.ts:288 "a spoofed PDF travels the real pipe" on desktop-webkit
 
 - 2026-10-06 · 4bb20449 (dev, !1035 merged) · local full desktop-webkit suite inside CI's Playwright image (#1235), four workers · the pipe worked (mail collected, suggestion row shown, drawer opened, "Add to orbit" tapped), then the test spent its 240 s budget waiting for "tap again to approve": the page snapshot at timeout has neither the drawer nor the suggestion row. The app log shows no receipt approval, dismissal or error in that window. Passed in a targeted run 3 minutes later (56 s). Not the scanner (ready in 15 ms at every check) and not the certificate (#1236, fixed before this run). Candidates: the cross-file database reset gate wiping the receipt under a parallel worker, or a WebKit race on the first tap; a trace is needed to tell, and local runs keep none.
+
+## web/tests/fidelity screens.spec.js "household"
+
+- 2026-10-06 · f3e61aeb (#1248, #1251; neither touches the household screen) · local `pnpm --filter orbit-web fidelity` · drifted 0.1109% once, passed on the next run on the same code. First sighting.
+
+## mail-relay-senders-fixture.test.js "answers a seeded, unverified address instead of an empty list"
+
+- 2026-10-07 · 2a076315 (+ #1279's uncommitted phone create reading card, none of it near this fixture) · local `scripts/test-backend.sh`, worktree `fix-create-form`, other sessions using the host · timed out at the 5s default; it passed in the run before on the same code, and green on an immediate rerun of the file alone. First sighting.

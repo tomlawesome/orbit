@@ -1,0 +1,23 @@
+{
+  "name": "curl exit 63 max filesize exceeded",
+  "envOrbit": "OIDC_ISSUER=https://idp.parity.invalid\n",
+  "issuer": "https://idp.parity.invalid",
+  "curl": {
+    "curlExitCode": 63,
+    "httpStatus": "000"
+  },
+  "dockerExitCode": 0,
+  "bash": {
+    "status": 1,
+    "stdout": "",
+    "stderr": "reason=configuration-failure action=retry\nOIDC provider configuration could not be validated; review the OIDC discovery response.",
+    "requestedUrls": [
+      "https://idp.parity.invalid/.well-known/openid-configuration"
+    ],
+    "failure": {
+      "reason": "configuration-failure",
+      "action": "retry",
+      "message": "OIDC provider configuration could not be validated; review the OIDC discovery response."
+    }
+  }
+}

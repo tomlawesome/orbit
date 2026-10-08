@@ -161,6 +161,12 @@ group token or a second project token were not adopted.
   #1151 (audit, a Fable session), #1152 (`dev` to `preview`), #1153
   (acceptance), #1154 (signed-release trial) -- then #885 (promote to
   `main`). Each promotion merge still needs the owner's go-ahead.
+- Every feature and every fix is built for both the desk and the phone
+  (pocket) layouts, or the issue says why one is left out. Before closing an
+  issue, check both: the code for each layout, and a browser test on a
+  desktop and a mobile project. Halves kept going missing -- the reader was
+  built for the phone only (#1059, #1298), the quick-add drop box for
+  neither (#1243) (owner, 2026-10-07).
 - `main` stays at the retracted v1.2.0 until v0.3.0 ships, and is expected
   to be far behind. A Renovate-flagged stale pin on `main` is not work: check
   `dev` first; if `dev` is already fixed it clears when v0.3.0 ships.
@@ -213,7 +219,12 @@ Check the list before building a test rig or handing a check to the owner.
   `verify_bootstrap` in `.github/workflows/publish-from-gitlab.yml`, right
   after that workflow's `publish` job moves GHCR's `preview` tag — the
   publication path that can actually invalidate what the harness asserts
-- `scripts/test-backup-restore.sh` — backup and restore acceptance drill
+- `scripts/test-backup-restore.sh` — backup and restore acceptance drill.
+  Locally run it with `--own-stack`: it builds the working tree, installs a
+  throwaway deployment (Compose project `orbit-backup-drill`) and removes it
+  on every exit (#1273). Needs a host with no Orbit stack and no
+  `*orbit-db-data` volume. Without the flag it borrows the deployment
+  `.env-orbit` names and never removes it — CI's path (#1241)
 - `scripts/test-repair-journeys.sh` — live repair journeys: installs a real
   stack, breaks it, and proves `repair.sh` recovers it (`--list` shows which
   journeys are live and which are still absent)
@@ -349,22 +360,25 @@ explicitly instead, as `isApplicationRelative` in
 `web/src/routes/login/+page.svelte` does, and give it cases for the empty
 string, a protocol-relative `//` and a backslash.
 
-**`scripts/test-install-acceptance.sh` refuses while any Orbit database
-volume exists on the host — the demo stack's `orbit-demo_orbit-db-data`
-included.** `install.sh`'s fresh-install guard (#13, #21) matches every
-volume ending `orbit-db-data`, whatever Compose project owns it, so with a
-demo or review stack up the harness fails one second into the positive
-scenario with "An existing Orbit database volume requires a recognized
-deployment". CI does not run this harness (deferred, see the top of
-`.gitlab-ci.yml`), so take the demo stack down first or run it elsewhere.
+**Another stack's database volume no longer blocks an install run —
+closed (#1239, #1261).** A fresh install is blocked only by the volume it
+would itself attach to, and an update whose project name is known skips a
+volume labelled with another project that is not provably its own. Two
+volumes that could both be this deployment's still refuse, so a leftover
+volume of the *same* Compose project does too: `scripts/cleanup-stacks.sh`
+lists them.
 
-**A lockfile diff adding an `@pnpm/exe` block is pnpm 11 talking, not your
-change.** The host's PATH `pnpm` is 11.9.0 and writes that block while
-handing over to the pinned 12.3.4, which no longer pins it (the `pnpm`
-package is the native executable from v12): a correct 12.3.4 lockfile has no
-such block. Run `node --test scripts/lockfile-no-pnpm-exe.test.mjs` before
-committing a lockfile change — discard the diff if it fails, never commit it.
-CI activates 12.3.4 through corepack, so it never sees this (#884, #901).
+**A lockfile diff adding an `@pnpm/exe` block means the host's pnpm is
+older than the pin (#884, #901, #1185).** An older pnpm reads `packageManager`
+and hands over to the pinned version, but first writes `@pnpm/exe` into
+`pnpm-lock.yaml`, even with `--frozen-lockfile`. A correct 12.x lockfile has
+no such block. The owner upgraded `/usr/local/bin/pnpm` to the pin (12.4.1)
+on 2026-10-07, after which `CI=true pnpm install --frozen-lockfile` leaves
+`git status` clean. If the block reappears, the pin has moved ahead of the
+host: discard the lockfile diff, run `node --test
+scripts/lockfile-no-pnpm-exe.test.mjs` before committing a lockfile change,
+and ask the owner to upgrade the host pnpm (`sudo npm install -g
+pnpm@<pin>`). CI activates the pin through corepack, so it never sees this.
 
 ## Only ten fonts exist on this host, and the rest fail silently
 
