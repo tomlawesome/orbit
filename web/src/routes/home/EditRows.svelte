@@ -92,7 +92,7 @@
     <div class={kv}><span>reminders</span>
       <b class="ed" contenteditable="plaintext-only" spellcheck="false" role="textbox" tabindex="0"
          aria-label="reminders" data-ed="reminders" bind:textContent={draft.reminders}></b></div>
-    {#if pocket}<h3 class="p-caps">Notes</h3>{:else}<h4>notes</h4>{/if}
+    {#if pocket}<h3 class="p-caps">Notes</h3>{:else}<h2>notes</h2>{/if}
     <div class="notes ed" class:ivnotes={!pocket} class:p-prose={pocket} contenteditable="plaintext-only" spellcheck="true"
        role="textbox" tabindex="0" aria-multiline="true" aria-label="notes" data-ed="notes"
        bind:textContent={draft.notes}></div>
@@ -110,7 +110,7 @@
            aria-label="cost" data-ed="cost" bind:textContent={completing.cost}></b>
       {/if}</div>
     {#if costLocked}<p class="lockednote">{COST_LOCKED}</p>{/if}
-    {#if pocket}<h3 class="p-caps">Notes</h3>{:else}<h4>notes</h4>{/if}
+    {#if pocket}<h3 class="p-caps">Notes</h3>{:else}<h2>notes</h2>{/if}
     <div class="notes ed" class:ivnotes={!pocket} class:p-prose={pocket} contenteditable="plaintext-only" spellcheck="true"
        role="textbox" tabindex="0" aria-multiline="true" aria-label="notes" data-ed="notes"
        bind:textContent={completing.notes}></div>

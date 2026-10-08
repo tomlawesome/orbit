@@ -107,15 +107,15 @@
     {/if}
     <!-- #1319 (owner, 2026-10-08): notes above documents. -->
     {#if detail.notes}
-      <h4>notes</h4>
+      <h2>notes</h2>
       <p class="ivnotes">{detail.notes}</p>
     {:else if notesState}
-      <h4>notes</h4>
+      <h2>notes</h2>
       <p class="ivnotes {notesState === DAMAGED ? 'failed' : 'locked'}">{NOTES_WORDS[notesState]}</p>
     {/if}
     {/if}
     {#if detail.documents?.length}
-      <h4>documents</h4>
+      <h2>documents</h2>
       <!-- #1319, round 3: every row opens the preview card, the honest
            states too -- the card says "still scanning" or "removed" itself.
            The open one wears the accent at its left edge and says so. -->
