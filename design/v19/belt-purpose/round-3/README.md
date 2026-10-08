@@ -30,6 +30,27 @@ Scenes `?scene=` listed at the top of the file; packs by `?theme=`.
   shows at 1280x800 (about 54px); at 1440x900 the preview is 13px taller
   than the drawer and never sticks. A longer item would prove it better.
 
-## Verdicts
+## Verdicts (owner, 2026-10-08)
 
-(none yet)
+> approved. Very good.
+
+Then, on the editing scene's section, type and period values (shown with
+a chevron under an accent underline):
+
+> I don't like these as drop downs very much.
+
+And on the date:
+
+> And typing the date isn't acceptable. We need a beautiful calendar
+> picker to use with a mouse. When you click the date, the date line
+> expands to show a picker.
+
+And on the pickers:
+
+> Similarly, the drop down lines also expand when you click to edit them
+
+F is ratified as the direction. Settled for the date and the three
+pickers: no dropdowns and no typed date. Pressing the row expands that
+row in place: the date into a calendar picker made for the mouse,
+section, type and period into their choices. How the expanded rows look
+is still to be designed.
