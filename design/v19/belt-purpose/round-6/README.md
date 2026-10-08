@@ -31,6 +31,12 @@ narrow ones at 390x844), plus round 3's. Packs by `?theme=`.
   as the app's `home.behaviour.js` already does. Added to both files;
   earlier rounds are left as reviewed.
 
-## Verdicts
+## Verdicts (owner, 2026-10-08)
 
-(none yet)
+On the band's period chooser (K, `editing-period`):
+
+> Love this, but would like to see it vertically. For the others, I
+> prefer the tile style.
+
+Periods: K's band, turned vertical. Section and type: J's tiles. Round 7
+puts the two together.
