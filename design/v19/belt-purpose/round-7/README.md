@@ -26,6 +26,11 @@ rest. Packs by `?theme=`.
   and dawn the faded unit fell below 4.5:1 on the dark accent).
 - Click off still closes the key, the status drawer and the menu.
 
-## Verdicts
+## Verdicts (owner, 2026-10-08)
 
-(none yet)
+> I think we could make better use of colour to differentiate between
+> options. Over time users would associate colours with specific
+> type/sections.
+
+Not yet approved. Round 8 gives each section and each type a colour of
+its own. The repeat band was not criticised.
