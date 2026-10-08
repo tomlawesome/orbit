@@ -244,5 +244,12 @@ body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
 /* #1319 stage 2 (round 8): the title live in the row's head while its item
    is edited — a 1px accent line under it and the caret, in its own type */
 .pocket .p-row .ed{display:inline-block;max-width:100%;min-width:6ch;outline:none;caret-color:var(--accent);
-  box-shadow:0 1px 0 var(--accent);cursor:text;font:inherit;color:inherit;overflow-wrap:anywhere}
-.pocket .p-row .ed:focus{box-shadow:0 1.5px 0 var(--accent)}
+  cursor:text;font:inherit;color:inherit;overflow-wrap:anywhere;
+  /* the 44px floor (#1319): the box padded to a 44px target and the padding
+     taken back, so the line stays put; the accent line drawn at the words'
+     foot, not the padding's */
+  box-sizing:border-box;min-height:44px;padding:7px 0 16px;margin:-7px 0 -16px;
+  background:linear-gradient(var(--accent),var(--accent)) left 0 bottom 15px/100% 1px no-repeat}
+.pocket .p-row .ed:focus{background-position:left 0 bottom 14.5px;background-size:100% 1.5px}
+/* ...reaching down over the meta line, which lets a press through to it */
+.pocket .p-row .live .meta{pointer-events:none}

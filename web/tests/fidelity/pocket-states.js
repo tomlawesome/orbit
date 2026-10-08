@@ -262,9 +262,7 @@ export const SIGNED_IN = [
   /* #1319 stage 3b: `review & amend →` puts the suggestion row's own lines
      into editing (the review sheet that rose here is gone from home), and
      a chooser stands as the bottom sheet, as a filed item's does. */
-  { route: "/home", state: "suggestion-amending",
-    defect: { "*": "#1319: the rows' editable values (EditRows.svelte, pocket) are 18-42px tall, under the 44px tap floor" },
-    reach: async (page) => {
+  { route: "/home", state: "suggestion-amending", reach: async (page) => {
     await go(page, "/home");
     const catch_ = row(page, ".pk-signals", "Home insurance");
     await openRow(page, catch_);
@@ -272,7 +270,7 @@ export const SIGNED_IN = [
     await catch_.locator('[data-ed="title"]').waitFor();
   } },
   { route: "/home", state: "suggestion-amending-section",
-    defect: { "*": "#1319: the rows' editable values (EditRows.svelte, pocket) are 18-42px tall, under the 44px tap floor; the chooser card's seat (.pk-chseat) leaves the controls behind it live but covered" },
+    defect: { "*": "#1319: the chooser card's seat (.pk-chseat) leaves the controls behind it live but covered" },
     reach: async (page) => {
     await go(page, "/home");
     const catch_ = row(page, ".pk-signals", "Home insurance");
@@ -340,18 +338,14 @@ export const SIGNED_IN = [
     await mot.getByRole("button", { name: "Snooze Car MOT" }).click();
     await page.locator("[data-chooser-card]").waitFor();
   } },
-  { route: "/home", state: "row-complete",
-    defect: { "*": "#1319: the rows' editable values (EditRows.svelte, pocket) are 18-42px tall, under the 44px tap floor" },
-    reach: async (page) => {
+  { route: "/home", state: "row-complete", reach: async (page) => {
     await go(page, "/home");
     const mot = row(page, ".pk-below", "Car MOT");
     await openRow(page, mot);
     await mot.getByRole("button", { name: "Complete Car MOT" }).click();
     await mot.getByRole("group", { name: "Completing Car MOT" }).waitFor();
   } },
-  { route: "/home", state: "row-edit",
-    defect: { "*": "#1319: the rows' editable values (EditRows.svelte, pocket) are 18-42px tall, under the 44px tap floor" },
-    reach: async (page) => {
+  { route: "/home", state: "row-edit", reach: async (page) => {
     await go(page, "/home");
     const mot = row(page, ".pk-below", "Car MOT");
     await openRow(page, mot);
@@ -359,7 +353,7 @@ export const SIGNED_IN = [
     await mot.getByRole("group", { name: "Editing Car MOT" }).waitFor();
   } },
   { route: "/home", state: "row-edit-section",
-    defect: { "*": "#1319: the rows' editable values (EditRows.svelte, pocket) are 18-42px tall, under the 44px tap floor; the chooser card's seat (.pk-chseat) leaves the controls behind it live but covered" },
+    defect: { "*": "#1319: the chooser card's seat (.pk-chseat) leaves the controls behind it live but covered" },
     reach: async (page) => {
     await go(page, "/home");
     const mot = row(page, ".pk-below", "Car MOT");
