@@ -23,7 +23,7 @@ const DUSK = readFileSync(resolve(FLIGHT, "Dusk.svelte"), "utf8");
 const CSS = readFileSync(resolve(FLIGHT, "flight.css"), "utf8");
 const ATMOSPHERE = readFileSync(resolve(import.meta.dirname, "../../web/src/lib/atmosphere.css"), "utf8");
 
-const markup = DUSK.slice(DUSK.indexOf('<div id="dusk">'));
+const markup = DUSK.slice(DUSK.indexOf('<div id="dusk"'));
 const sky = markup.slice(markup.indexOf('<div class="sky"'), markup.indexOf('<div class="world"'));
 const world = markup.slice(markup.indexOf('<div class="world"'), markup.indexOf('<div class="loginchrome">'));
 
