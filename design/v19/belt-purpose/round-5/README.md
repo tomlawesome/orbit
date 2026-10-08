@@ -27,6 +27,13 @@ Scenes `?scene=`: `editing-date`, `editing-section`, `editing-period`,
   level with its heading.
 - Screenshots of every new scene in starchart and clouds, checked by eye.
 
-## Verdicts
+## Verdicts (owner, 2026-10-08)
 
-(none yet)
+On the section chooser (starchart, Devices chosen):
+
+> This looks rubbish and it could be visually easier to see the choices
+> rather than left align words in a list.
+
+Not approved. The chooser beside stays; the section, type and period
+choices need a more visual layout than a left-aligned list of words.
+Round 6 tries that. The calendar was not criticised.
