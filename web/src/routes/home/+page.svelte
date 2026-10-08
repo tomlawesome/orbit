@@ -16,7 +16,7 @@
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
   import { WorkspaceError, applyCommand, approveReceipt, dueDateIn, attachItemDocument, dismissReceipt, readHome, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut } from "$lib/data/workspace.js";
-  import { archiveCommand, completeCommand, snoozeCommand, upsertCommand } from "$lib/data/commands.js";
+  import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
   import { createHeldCompletion } from "$lib/data/held-completion.js";
   import { createArm } from "$lib/pocket/arm.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
@@ -615,7 +615,7 @@
      the rows and records them at once (recordCompletion, below); `held`
      still sends what an earlier visit held and never saw confirmed
      (held-completion.js). */
-  /** @type {"snooze" | "complete" | "attach" | "retire" | null} */
+  /** @type {"snooze" | "complete" | "attach" | "retire" | "restore" | null} */
   let footBusy = $state(null);
   /** @type {string | null} */
   let footProblem = $state(null);
@@ -648,7 +648,7 @@
 
   /**
    * One act that changes the item and then reads it again.
-   * @param {"snooze" | "retire"} kind
+   * @param {"snooze" | "retire" | "restore"} kind
    * @param {() => object} build
    * @param {string} words  what the wake says once it has landed
    * @param {{ leave?: boolean }} [options]  the item leaves the manifest: put the drawer away
@@ -856,6 +856,10 @@
       const item = commandItem();
       if (item) runFoot("retire", () => archiveCommand(item), `${item.title} retired`, { leave: true });
     },
+    onrestore: () => {
+      const item = commandItem();
+      if (item) runFoot("restore", () => statusCommand(item, "active"), `${item.title} restored`);
+    },
     oncopy: copyAddress,
   });
 
@@ -1019,7 +1023,9 @@
     view ? manifestGroupsOf(asView(view).household, { suggestions: /** @type {any} */ (asView(view).suggestions), today: asView(view).today }) : null,
   );
   /* §14 (#469): the manifest rendered as the corridor — this household's
-     full scrollback, suggestions merged in date order. */
+     full scrollback, suggestions merged in date order. #1319: the open item
+     is put on the line whatever its status (retired, cancelled, expired),
+     at its own date, so its drawer can open: the drawer opens any item. */
   const corridor = $derived(
     (() => {
       const current = view ? asView(view) : null;
@@ -1027,7 +1033,7 @@
         ? corridorOf(
             { households: [current.household], activeHouseholdId: current.primary },
             current.today,
-            { suggestions: /** @type {any} */ (current.suggestions) },
+            { suggestions: /** @type {any} */ (current.suggestions), include: expanded },
           )
         : null;
     })(),
