@@ -331,7 +331,7 @@
     <footer class="rd-foot">
       <!-- #1300, round 6: the foot's "2 of 3", centred; a screen reader hears
            "page 2 of 3". -->
-      <p class="rd-page pgn" aria-live="polite">{#if turn.arrows}<span class="sr-only">page </span>{/if}{turn.of}</p>
+      <p class="rd-page pgn" aria-live="polite">{#if turn.arrows}<span class="sr-only">page</span>{/if}{turn.arrows ? " " : ""}{turn.of}</p>
       {#if staged}
         <p class="rcnote">not yet in orbit · attached on acceptance</p>
       {:else}
