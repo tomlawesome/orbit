@@ -32,8 +32,10 @@
  * licence asks for it, is in $lib/about/credits.js.
  */
 
+import { version } from "$app/environment";
+
 import { chore, fetchOnce, note } from "./chores.js";
-import { frameCost, gpu, sayVerdict } from "./fitness.js";
+import { frameCost, gpu, rememberedFit, rememberFit, sayVerdict } from "./fitness.js";
 
 const TEX = {
   lights: "/flight/world/earth-lights.webp",
@@ -544,10 +546,12 @@ function createVoyage() {
   const g = gpu();
   if (!g || g.gl.isContextLost()) return null;
   if (!g.gl.getExtension("EXT_color_buffer_float")) { sayVerdict("off: no float colour buffers (EXT_color_buffer_float)"); return null; }
-  const { canvas, gl } = g;
+  const { canvas, gl, renderer } = g;
   canvas.id = "warpgl"; canvas.setAttribute("aria-hidden", "true");
   gl.getExtension("OES_texture_float_linear");
   const since = performance.now();
+  /* this browser's localStorage, where it will give it */
+  const storage = () => { try { return globalThis.localStorage ?? undefined; } catch { return undefined; } };
 
   let ok = false, dead = false, ready = false;
   /* a lost context is a world that can no longer be drawn: the flight goes on without it */
@@ -694,8 +698,22 @@ function createVoyage() {
            cannot (software rendering, a remote desktop) would make every
            frame a long stall, and the journey's clock would stretch the climb
            to many times its length. Such a world is never ready, and the
-           flight draws on its own canvas, as it always could */
-        .then(() => chore(() => { fit = fitness(); }, 60, "flight"))
+           flight draws on its own canvas, as it always could. Asked once per
+           GPU and build (#1310, fitness.js rememberedFit): a verdict already
+           measured here is taken as it was, and the test's frames are skipped */
+        .then(() => {
+          const known = ok ? rememberedFit(storage(), renderer, version) : null;
+          if (known) {
+            fit = known.fit;
+            sayVerdict(`${known.fit ? "on" : "off"}: frame ${Math.round(known.ms)} ms, remembered for this GPU and build`);
+            return;
+          }
+          return chore(() => {
+            const measured = fitness();
+            fit = measured.fit;
+            if (ok && !dead) rememberFit(storage(), renderer, version, measured);
+          }, 60, "flight");
+        })
         .then(() => { ready = ok && !dead && fit; note(`flight: ${ready ? "ready" : fit ? "not made" : "too slow here, drawn without it"}`, since); });
       /* the measure is never hurried, and nothing waits on it */
       warming.then(() => chore(calibrate, 200, "measure"));
@@ -715,8 +733,9 @@ function createVoyage() {
      judged on their median (fitness.js frameCost); fit if that leaves room
      for about 30 frames a second. Says its verdict in the console. */
   let fit = false;
+  /** @returns {{ fit: boolean, ms: number }} */
   function fitness() {
-    if (!ok) return false;
+    if (!ok) return { fit: false, ms: Infinity };
     if (W < 2) resize(innerWidth, innerHeight);
     const was = part;
     part = 0.4; CW = 0; resize(W, H);
@@ -726,7 +745,7 @@ function createVoyage() {
     const { fit: fits, ms } = frameCost(gl, () => draw(st));
     part = was; CW = 0; resize(W, H); lastDraw = 0;
     sayVerdict(fits ? `on (frame ${Math.round(ms)} ms)` : `off: frame ${Number.isFinite(ms) ? Math.round(ms) : "failed to draw"}${Number.isFinite(ms) ? " ms" : ""}`);
-    return fits;
+    return { fit: fits, ms };
   }
   /* the measure: a few whole frames at the heaviest point of the flight (the
      nebula, the streaks at full speed), timed, and the drawing's size chosen

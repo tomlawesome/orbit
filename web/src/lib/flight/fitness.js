@@ -70,7 +70,7 @@ export function sayVerdict(verdict) {
  * starts.
  */
 const SOFTWARE = /llvmpipe|softpipe|swiftshader|microsoft basic render/i;
-/** @typedef {{ canvas: HTMLCanvasElement, gl: WebGL2RenderingContext, parallel: boolean }} Gpu */
+/** @typedef {{ canvas: HTMLCanvasElement, gl: WebGL2RenderingContext, parallel: boolean, renderer: string }} Gpu */
 /** @type {Gpu | null | undefined} */
 let verdict;
 
@@ -93,7 +93,7 @@ export function gpu() {
       }
       /* asked of this same context: whether shaders are made off the page's
          thread (KHR_parallel_shader_compile) */
-      else verdict = { canvas, gl, parallel: !!gl.getExtension("KHR_parallel_shader_compile") };
+      else verdict = { canvas, gl, parallel: !!gl.getExtension("KHR_parallel_shader_compile"), renderer };
     } else sayVerdict("off: no WebGL2 here, or the browser calls it a major performance caveat");
   } catch { sayVerdict("off: WebGL2 refused"); }
   return verdict;
@@ -117,3 +117,46 @@ function rendererOf(gl) {
 
 /** the renderer names that are refused, for tests @param {string} renderer */
 export const isSoftware = (renderer) => SOFTWARE.test(renderer);
+
+/*
+ * THE VERDICT, REMEMBERED (#1310). The timed frames above cost the climb a
+ * few hundred milliseconds on a browser that makes its shaders on the page's
+ * own thread (Firefox), and they come after the compile, just before the
+ * world is ready. The same GPU running the same build draws the same frame
+ * in the same time, so the verdict is kept in localStorage under the
+ * renderer's name and the build, and a later flight on both skips the test.
+ * A new build asks again, so no verdict, failing or passing, outlives the
+ * build it was measured on; nor does one from a frame that failed to draw
+ * at all (no time measured), which says nothing about the GPU.
+ */
+/** localStorage key: the last fitness verdict, with the GPU and build it was measured on */
+export const FIT_KEY = "orbit-flight-fitness";
+
+/**
+ * The verdict remembered for this GPU and build, or null when there is none.
+ * @param {Pick<Storage, "getItem"> | undefined} storage
+ * @param {string} renderer @param {string} build
+ * @returns {{ fit: boolean, ms: number } | null}
+ */
+export function rememberedFit(storage, renderer, build) {
+  try {
+    if (!storage || !renderer || !build) return null;
+    const got = JSON.parse(storage.getItem(FIT_KEY) || "null");
+    if (!got || got.renderer !== renderer || got.build !== build) return null;
+    if (typeof got.fit !== "boolean" || !Number.isFinite(got.ms)) return null;
+    return { fit: got.fit, ms: got.ms };
+  } catch { return null; }
+}
+
+/**
+ * Keep a measured verdict for this GPU and build (one entry: a new GPU or
+ * build replaces it).
+ * @param {Pick<Storage, "setItem"> | undefined} storage
+ * @param {string} renderer @param {string} build @param {{ fit: boolean, ms: number }} verdict
+ */
+export function rememberFit(storage, renderer, build, { fit, ms }) {
+  try {
+    if (!storage || !renderer || !build || !Number.isFinite(ms)) return;
+    storage.setItem(FIT_KEY, JSON.stringify({ renderer, build, fit, ms: Math.round(ms * 10) / 10 }));
+  } catch { /* not remembered: the next flight measures again */ }
+}
