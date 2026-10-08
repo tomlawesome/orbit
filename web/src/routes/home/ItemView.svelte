@@ -144,6 +144,9 @@
 
 <style>
   /* round 8: a section or type value in its own colour (packs.css maps
-     data-opt onto --opt-text) */
-  .opt{color:var(--opt-text, inherit)}
+     data-opt onto --opt-text). Written as `.kv b.opt`, not `.opt`: a bare
+     `.opt` lost to home.css's `.itemview .kv b{color:var(--ink)}`, so the
+     desk drawer's values stayed ink while the row's section word wore its
+     colour. */
+  .kv b.opt{color:var(--opt-text, var(--ink))}
 </style>
