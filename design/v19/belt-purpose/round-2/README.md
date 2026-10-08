@@ -27,7 +27,11 @@ somewhere better"): the two become a pencil and a chain-link icon in the
 drawer's head, top right beside the countdown, 32px round glass buttons
 with a 44px target; the foot keeps only the four action pills. And (owner, same day): "We
 also don't need an 'actions' section, and I think the buttons would be
-better centralised" — no heading, the four pills centred in one row.
+better centralised" — no heading, the four pills centred in one row. And on B's edit mode
+(owner, same day): "Can we not just edit literally in the manifest, why
+does it have to look different?" — editing keeps the read view's exact
+look: the same rows, labels and right-aligned mono values, only the value
+live, with an accent underline and the caret; no boxed inputs.
 
 Scenes `?scene=` listed at the top of each file; packs by `?theme=`.
 
