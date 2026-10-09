@@ -131,7 +131,7 @@
   .notes.ed{display:block;text-align:left;min-height:1.6em;margin:0}
   .pocket .notes{color:var(--ink)}
   .locked{color:var(--ink-quiet);font-weight:450}
-  .lockednote{font:10.5px var(--mono);color:var(--ink-quiet);line-height:1.6;margin:6px 2px 0}
+  .lockednote{font:13px var(--mono);color:var(--ink-quiet);line-height:1.6;margin:6px 2px 0}
 
   /* THE CHOSEN VALUES (round 4, H): the value as it reads, a small chevron
      after it; pressed, the row is lit in the accent. The 44px target comes

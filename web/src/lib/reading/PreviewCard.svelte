@@ -559,7 +559,7 @@
   .quiet:hover{color:var(--ink)}
   .quiet:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:999px}
   .quiet:disabled{opacity:.4;cursor:default}
-  .problem{font:10.5px var(--mono);color:var(--overdue-text);text-align:center;padding:0 8px 8px;line-height:1.6}
+  .problem{font:13px var(--mono);color:var(--overdue-text);text-align:center;padding:0 8px 8px;line-height:1.6}
 
   /* UNDER 1200px there is no room beside the drawer: the card is the phone's
      bottom sheet (round 6, CON-10), on the desk and in the pocket alike —
