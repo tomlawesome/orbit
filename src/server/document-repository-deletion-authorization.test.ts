@@ -130,7 +130,7 @@ function seedDocumentRecord(opts: {
   scanStatus?: string;
   deleteAfter?: Date | null;
 }) {
-  queue(mocks.selectQueues, "users", [{
+  queue(mocks.selectQueues, "documents", [{
     id: documentId,
     householdId,
     itemId,
@@ -143,10 +143,9 @@ function seedDocumentRecord(opts: {
     deleteAfter: opts.deleteAfter ?? null,
     availableAt: new Date(),
     uploadedByUserId: uploaderUserId,
-    administrator: opts.callerIsAdministrator,
-    membershipUserId: opts.callerMembershipRole ? "self" : "self",
-    membershipRole: opts.callerMembershipRole,
   }]);
+  // The household gate (workspace-access.ts) answers from the users table.
+  queue(mocks.selectQueues, "users", [{ administrator: opts.callerIsAdministrator, role: opts.callerMembershipRole }]);
 }
 
 beforeEach(() => {

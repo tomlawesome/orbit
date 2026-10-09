@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLog,
@@ -7,10 +7,7 @@ import {
   documentJobs,
   documentStagingObjects,
   documents,
-  households,
   items,
-  memberships,
-  users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { log, operationalReasons, type OperationalReason } from "@/lib/logger";
@@ -28,6 +25,7 @@ import {
 import { canAccessHouseholdDocuments, canManageDocumentDeletion } from "@/server/documents/authorization";
 import { retryableScannerFailureCode, scannerRecoveryDelayMs } from "@/server/documents/staging";
 import { validUuid } from "@/lib/uuid";
+import { findHouseholdAccess } from "@/server/workspace-access";
 
 function operationalDocumentReason(value: string): OperationalReason {
   return (operationalReasons as readonly string[]).includes(value)
@@ -119,25 +117,16 @@ async function requireHouseholdAndItemAccess(
   householdId: string,
   itemId: string,
 ): Promise<void> {
-  const [access] = await getDb()
-    .select({
-      itemId: items.id,
-      administrator: users.isInstanceAdmin,
-      membershipUserId: memberships.userId,
-    })
-    .from(users)
-    .innerJoin(items, and(eq(items.id, itemId), eq(items.householdId, householdId)))
-    .innerJoin(households, eq(households.id, items.householdId))
-    .leftJoin(
-      memberships,
-      and(eq(memberships.userId, users.id), eq(memberships.householdId, householdId)),
-    )
-    .where(and(
-      eq(users.id, userId),
-      isNull(households.deletionRequestedAt),
-    ))
-    .limit(1);
-  if (!access || !canAccessHouseholdDocuments(access.administrator, access.membershipUserId)) {
+  // A malformed id fails the way an unknown one does, not as a driver error.
+  if (!validUuid(householdId) || !validUuid(itemId)) {
+    throw new AppError("item_not_found", "That item is not available", 404);
+  }
+  const access = await findHouseholdAccess(userId, householdId);
+  const [item] = access
+    ? await getDb().select({ id: items.id }).from(items)
+      .where(and(eq(items.id, itemId), eq(items.householdId, householdId))).limit(1)
+    : [];
+  if (!access || !item || !canAccessHouseholdDocuments(access.administrator, access.role ? userId : null)) {
     throw new AppError("item_not_found", "That item is not available", 404);
   }
 }
@@ -164,30 +153,20 @@ async function requireDocumentAccess(userId: string, documentId: string) {
       deleteAfter: documents.deleteAfter,
       availableAt: documents.availableAt,
       uploadedByUserId: documents.uploadedByUserId,
-      administrator: users.isInstanceAdmin,
-      membershipUserId: memberships.userId,
-      membershipRole: memberships.role,
     })
-    .from(users)
-    .innerJoin(documents, eq(documents.id, documentId))
-    .innerJoin(households, eq(households.id, documents.householdId))
-    .leftJoin(
-      memberships,
-      and(eq(memberships.userId, users.id), eq(memberships.householdId, documents.householdId)),
-    )
-    .where(and(
-      eq(users.id, userId),
-      isNull(households.deletionRequestedAt),
-    ))
+    .from(documents)
+    .where(eq(documents.id, documentId))
     .limit(1);
+  const access = record ? await findHouseholdAccess(userId, record.householdId) : undefined;
   if (
     !record
-    || !canAccessHouseholdDocuments(record.administrator, record.membershipUserId)
+    || !access
+    || !canAccessHouseholdDocuments(access.administrator, access.role ? userId : null)
     || unavailableDocumentConditions.includes(record.lifecycle as typeof unavailableDocumentConditions[number])
   ) {
     throw new AppError("document_not_found", "That document is not available", 404);
   }
-  return record;
+  return { ...record, administrator: access.administrator, membershipRole: access.role };
 }
 
 /**
