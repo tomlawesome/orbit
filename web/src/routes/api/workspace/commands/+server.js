@@ -4,7 +4,7 @@ import { parseWorkspaceCommand } from "orbit/lib/workspace";
 import { applyWorkspaceCommand, checkWorkspaceCommand } from "orbit/server/workspace-repository";
 
 import { WORKSPACE_FIXTURE } from "$lib/data/fixtures/workspace.js";
-import { fixturesRequested, write } from "$lib/server/api.js";
+import { write } from "$lib/server/api.js";
 
 const NO_STORE = { "cache-control": "no-store" };
 
@@ -19,17 +19,14 @@ const NO_STORE = { "cache-control": "no-store" };
  * The browser sends one as the member types, so it shows the engine's rules
  * rather than a copy of them.
  *
- * Fixture mode still runs through `write()`'s real session and CSRF check —
- * proving the seam the arrival card depends on — and only substitutes the
- * engine call. That is different from a read fixture, which bypasses auth
- * entirely: this route validates nothing and persists nothing when fixtures
- * are requested, but the POST itself must still carry a real CSRF token.
+ * Fixture mode answers before the maintenance, session and CSRF checks, which
+ * all need a database the fidelity gate does not have (as the pre-attachment
+ * document routes do, #1245). A real command persists nothing and returns the
+ * fixture workspace. A dry run still parses the command, so the gate sees the
+ * engine's own refusals; what only a stored household can say (a snooze
+ * against its today, a version) is left to the live engine.
  */
 export const POST = write(async (event, session) => {
-  if (fixturesRequested()) {
-    const body = await event.request.json().catch(() => null);
-    return json(dryRunOf(body) ? {} : { workspace: WORKSPACE_FIXTURE }, { headers: NO_STORE });
-  }
   const body = await event.request.json();
   const dryRun = dryRunOf(body);
   const command = parseWorkspaceCommand(dryRun ? withoutDryRun(body) : body);
@@ -39,6 +36,13 @@ export const POST = write(async (event, session) => {
   }
   const workspace = await applyWorkspaceCommand(session.user.id, session.id, command);
   return json({ workspace }, { headers: NO_STORE });
+}, {
+  fixture: async (event) => {
+    const body = await event.request.json().catch(() => null);
+    if (!dryRunOf(body)) return json({ workspace: WORKSPACE_FIXTURE }, { headers: NO_STORE });
+    parseWorkspaceCommand(withoutDryRun(body));
+    return json({}, { headers: NO_STORE });
+  },
 });
 
 /** @param {unknown} body */
