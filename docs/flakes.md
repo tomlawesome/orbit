@@ -357,6 +357,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 
 - 2026-10-06 · 4bb20449 (dev, !1035 merged) · local full desktop-webkit suite inside CI's Playwright image (#1235), four workers · the pipe worked (mail collected, suggestion row shown, drawer opened, "Add to orbit" tapped), then the test spent its 240 s budget waiting for "tap again to approve": the page snapshot at timeout has neither the drawer nor the suggestion row. The app log shows no receipt approval, dismissal or error in that window. Passed in a targeted run 3 minutes later (56 s). Not the scanner (ready in 15 ms at every check) and not the certificate (#1236, fixed before this run). Candidates: the cross-file database reset gate wiping the receipt under a parallel worker, or a WebKit race on the first tap; a trace is needed to tell, and local runs keep none.
 - 2026-10-08 · 687cb0f4 (door batch, !1044; its home changes are the flight and the menu, not the suggestion rows or their drawer) · pipeline 2251 / smoke_firefox (job 33370), desktop-firefox · first attempt: the row was shown and clicked, and the drawer (`.itemview.suggestview`) never appeared in 5 s; the snapshot still says "Inbox — 1 waiting". In-job retry: the drawer opened and the approval was sent (`POST /api/reviewed-intake/approve` 200, then home re-read the workspace and the inbox), yet `.item.suggest` stayed at 1 for 30 s; the retry's mail was a second one, so the first attempt's unapproved receipt may be the row that stayed (the trace keeps no response bodies to tell). Passed in pipeline 2248 on the same home code, and in dev pipelines 2244, 2235 and 2230. Second sighting.
+- 2026-10-09 · 40850119 · dev push pipeline 2297 / smoke_firefox (job 33780) · `.itemview.suggestview` not visible after the row click (line 352), on the first attempt and the retry, so the job failed. Passed on desktop-firefox in pipelines 2290 and 2313.
 
 ## web/tests/fidelity screens.spec.js "household"
 
@@ -439,3 +440,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 
 - 2026-10-09 · 3d6d7c20 (#1349) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
 - Third sighting: filed as #1365 (unattended-install case times out under host load).
+
+## v19-keyboard-pocket.spec.ts:411 "item page (pocket): actions and the back link work by keyboard" — mobile-webkit
+
+- 2026-10-09 · 1e0299ab (!1050) · pipeline 2313 / smoke_webkit_mobile (job 33924) · `Tab never reached the requested control within 60 presses`; after the reschedule save, focus went to `body` past the pills. Failed on both attempts. Passed in jobs 33895 and 33901 on the same commit, in 33925, and locally. The /item page is retired by #1319 (merged in 51d9a8ef), so this spec goes with it. First sighting.
