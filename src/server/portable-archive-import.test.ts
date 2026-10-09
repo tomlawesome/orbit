@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "@/lib/app-error";
+import { COST_MINOR_MAX } from "@/lib/domain";
 import { encryptPortableArchive } from "@/server/portable-archive";
 import { KDF_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
 
@@ -280,6 +281,65 @@ describe("portable archive import error (#1151 A2-F2)", () => {
     }
     expect(caught).toBeInstanceOf(AppError);
     expect((caught as AppError).code).toBe("archive_invalid");
+  });
+});
+
+describe("portable archive import refuses what the engine would not store (#1333)", () => {
+  const archiveWith = (item: Record<string, unknown>) => encrypted({
+    format: "orbit-portable-archive",
+    version: 1,
+    household: { name: "Home" },
+    sections: [{ id: sectionId, slug: "home", name: "Home", icon: "home", accent: "sage", position: 0, visible: true, archivedAt: null }],
+    items: [{ id: item1Id, sectionId, title: "Boiler", subtype: null, provider: null, reference: null, currency: "GBP", status: "active", ...item }],
+    documents: [],
+  });
+  const caught = async (run: () => Promise<unknown>) => {
+    try {
+      await run();
+    } catch (error) {
+      return error;
+    }
+    return undefined;
+  };
+
+  it.each(["startDate", "expiryDate", "renewalDate", "serviceDate", "snoozedUntil"])(
+    "refuses a %s that is not a real day, in words that name the problem",
+    async (field) => {
+      seedHouseholdAccess();
+      const error = await caught(() => previewPortableImport(userId, householdId, archiveWith({ [field]: "2026-02-31" }), passphrase));
+      expect(error).toBeInstanceOf(AppError);
+      expect(error).toMatchObject({ code: "archive_date_invalid", status: 422 });
+      expect((error as AppError).message).toMatch(/not a real calendar day/u);
+    },
+  );
+
+  it("refuses the same on the import itself, before anything is written", async () => {
+    seedHouseholdAccess();
+    const error = await caught(() => importPortableArchive({
+      userId, householdId, archive: archiveWith({ renewalDate: "2026-13-45" }), passphrase, conflictItemIds: [],
+    }));
+    expect(error).toMatchObject({ code: "archive_date_invalid", status: 422 });
+    expect(mocks.insertCalls).toEqual([]);
+  });
+
+  it("refuses a currency the platform does not list as an unsupported archive", async () => {
+    seedHouseholdAccess();
+    const error = await caught(() => previewPortableImport(userId, householdId, archiveWith({ currency: "ZZZ" }), passphrase));
+    expect(error).toMatchObject({ code: "archive_invalid", status: 422 });
+  });
+
+  it("refuses a field over a bound the item schema keeps", async () => {
+    seedHouseholdAccess();
+    const error = await caught(() => previewPortableImport(userId, householdId, archiveWith({ costMinor: COST_MINOR_MAX + 1 }), passphrase));
+    expect(error).toMatchObject({ code: "archive_invalid", status: 422 });
+  });
+
+  it("takes an archive Orbit wrote: real days, leap day included, nulls and absences", async () => {
+    seedHouseholdAccess();
+    const preview = await previewPortableImport(userId, householdId, archiveWith({
+      startDate: "2024-02-29", expiryDate: "2026-12-31", renewalDate: null, serviceDate: undefined, snoozedUntil: "2026-07-01", costMinor: COST_MINOR_MAX,
+    }), passphrase);
+    expect(preview).toBeDefined();
   });
 });
 

@@ -4,7 +4,10 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documents, dueEvents, households, items, memberships, portableArchiveImports, portableArchives, reminderRules, sections, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
+import { CALENDAR_DATE_MESSAGE, calendarDate } from "@/lib/calendar-date";
+import { COST_MINOR_MAX, NOTES_MAX, PROVIDER_MAX, RECURRENCE_MAX, REFERENCE_MAX, SUBTYPE_MAX, TITLE_MAX } from "@/lib/domain";
 import { log, operationalDetail } from "@/lib/logger";
+import { currencyCode } from "@/lib/platform-lists";
 import { optionalText } from "@/lib/workspace";
 import { getDocumentConfig } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
@@ -25,7 +28,26 @@ const importedSectionSchema = z.object({ id: z.string().uuid(), slug: z.string()
 // imported field this schema accepts but the reader rejects would insert a
 // row that 422s `readWorkspace` forever afterwards, with no in-product
 // recovery (#383 finding 2).
-const importedItemSchema = z.object({ id: z.string().uuid(), sectionId: z.string().uuid(), title: z.string().trim().min(1).max(100), subtype: optionalText(80).nullable(), provider: optionalText(100).nullable(), reference: optionalText(80).nullable(), costMinor: z.number().int().min(0).max(100_000_000).nullable().optional(), currency: z.string().length(3), startDate: z.string().nullable().optional(), expiryDate: z.string().nullable().optional(), renewalDate: z.string().nullable().optional(), serviceDate: z.string().nullable().optional(), recurrenceMonths: z.number().int().min(1).max(120).nullable().optional(), snoozedUntil: z.string().nullable().optional(), notes: optionalText(2_000).nullable(), externalDocumentUrl: z.string().nullable().optional(), status: z.enum(["active", "expired", "cancelled", "archived"]) });
+const importedItemSchema = z.object({
+  id: z.string().uuid(),
+  sectionId: z.string().uuid(),
+  title: z.string().trim().min(1).max(TITLE_MAX),
+  subtype: optionalText(SUBTYPE_MAX).nullable(),
+  provider: optionalText(PROVIDER_MAX).nullable(),
+  reference: optionalText(REFERENCE_MAX).nullable(),
+  costMinor: z.number().int().min(0).max(COST_MINOR_MAX).nullable().optional(),
+  currency: currencyCode,
+  // A date an archive carries is a real day (#1333); one Orbit wrote always is.
+  startDate: calendarDate.nullable().optional(),
+  expiryDate: calendarDate.nullable().optional(),
+  renewalDate: calendarDate.nullable().optional(),
+  serviceDate: calendarDate.nullable().optional(),
+  recurrenceMonths: z.number().int().min(1).max(RECURRENCE_MAX).nullable().optional(),
+  snoozedUntil: calendarDate.nullable().optional(),
+  notes: optionalText(NOTES_MAX).nullable(),
+  externalDocumentUrl: z.string().nullable().optional(),
+  status: z.enum(["active", "expired", "cancelled", "archived"]),
+});
 // Only the fields the import path cross-references (which item a document
 // belongs to, its lifecycle, and what to call it on re-upload); every other
 // exported document field is carried for round-tripping and left untyped.
@@ -300,6 +322,13 @@ function isEmptyRequiredFieldsFailure(error: unknown): boolean {
     && error.issues.every((issue) => issue.code === "too_small" && issue.origin === "string" && issue.minimum === 1);
 }
 
+// A date that is not a real day is told apart from a file that is not this
+// format (#1333): the person is pointed at the file having been edited, rather
+// than at the archive being unsupported.
+function isBadDateFailure(error: unknown): boolean {
+  return error instanceof z.ZodError && error.issues.some((issue) => issue.code === "custom" && issue.message === CALENDAR_DATE_MESSAGE);
+}
+
 function decodeImportArchive(serialized: unknown, passphrase: string) {
   if (!isEncryptedPortableArchive(serialized)) throw new AppError("archive_invalid", "That export has an invalid format", 422);
   rejectOversizedCiphertext(serialized);
@@ -314,6 +343,13 @@ function decodeImportArchive(serialized: unknown, passphrase: string) {
       throw new AppError(
         "archive_fields_empty",
         "That export has empty required fields, most likely because the encryption key was locked when it was made. Unlock the key and export again.",
+        422,
+      );
+    }
+    if (isBadDateFailure(error)) {
+      throw new AppError(
+        "archive_date_invalid",
+        "That export has a date that is not a real calendar day, so Orbit will not import it. An export Orbit made never has one; check the file has not been edited.",
         422,
       );
     }
