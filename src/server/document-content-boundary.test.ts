@@ -120,6 +120,12 @@ function accessRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** The document row, plus the household gate's answer from the users table. */
+function seedAccess(row: { administrator: boolean; membershipRole?: unknown; member?: unknown }): void {
+  mocks.rows.documents = [row];
+  mocks.rows.users = [{ administrator: row.administrator, role: row.membershipRole ?? "member" }];
+}
+
 function draftMemberRow(overrides: Record<string, unknown> = {}) {
   return {
     id: "11111111-1111-4111-8111-111111111111",
@@ -147,7 +153,7 @@ describe("readDocumentDownload boundary", () => {
   it.each(unsafeScanStatuses)(
     "rejects an authorized available document with a %s scan status before any crypto, storage, decryption or audit access",
     async (scanStatus) => {
-      mocks.rows.users = [accessRow({ scanStatus })];
+      seedAccess(accessRow({ scanStatus }));
 
       await expect(readDocumentDownload("user-id", "11111111-1111-4111-8111-111111111111")).rejects.toMatchObject({
         code: "document_not_found",
@@ -155,9 +161,10 @@ describe("readDocumentDownload boundary", () => {
         message: "That document is not available",
       });
 
-      // Only the authorization/lifecycle lookup (`users`) ran; the crypto row
-      // query (`document_crypto`) never happened.
-      expect(mocks.fromNames).toEqual(["users"]);
+      // Only the authorization/lifecycle lookup (`documents`, then the
+      // household gate's `users`) ran; the crypto row query
+      // (`document_crypto`) never happened.
+      expect(mocks.fromNames).toEqual(["documents", "users"]);
       expect(mocks.readCiphertext).not.toHaveBeenCalled();
       expect(mocks.decryptDocument).not.toHaveBeenCalled();
       expect(mocks.insertNames).not.toContain("audit_log");
@@ -165,13 +172,13 @@ describe("readDocumentDownload boundary", () => {
   );
 
   it("does not treat a skipped scan as ready even when scan mode is required for an otherwise valid document", async () => {
-    mocks.rows.users = [accessRow({ scanStatus: "skipped" })];
+    seedAccess(accessRow({ scanStatus: "skipped" }));
 
     await expect(readDocumentDownload("user-id", "11111111-1111-4111-8111-111111111111")).rejects.toMatchObject({
       code: "document_not_found",
       status: 404,
     });
-    expect(mocks.fromNames).toEqual(["users"]);
+    expect(mocks.fromNames).toEqual(["documents", "users"]);
   });
 });
 
@@ -179,7 +186,7 @@ describe("createDocumentDraft boundary", () => {
   it.each(unsafeScanStatuses)(
     "rejects an authorized available document with a %s scan status before readDocumentDownload, Tika extraction, proposal parsing or draft insertion",
     async (scanStatus) => {
-      mocks.rows.documents = [draftMemberRow({ scanStatus })];
+      seedAccess(draftMemberRow({ scanStatus }));
 
       await expect(createDocumentDraft("user-id", "11111111-1111-4111-8111-111111111111")).rejects.toMatchObject({
         code: "document_not_found",
@@ -187,10 +194,12 @@ describe("createDocumentDraft boundary", () => {
         message: "That document is not available",
       });
 
-      // Only the membership/lifecycle lookup (`documents`) ran. `readDocumentDownload`
-      // begins with a `users` lookup, so its absence proves it was never called;
-      // no `document_drafts` select/insert (existing-draft check or creation) ran either.
-      expect(mocks.fromNames).toEqual(["documents"]);
+      // Only the membership/lifecycle lookup (`documents`, then the household
+      // gate's `users`) ran, once. `readDocumentDownload` repeats that pair
+      // and then reads the crypto row, so a longer list would mean it was
+      // called; no
+      // `document_drafts` select/insert (existing-draft check or creation) ran either.
+      expect(mocks.fromNames).toEqual(["documents", "users"]);
       expect(mocks.insertNames).toEqual([]);
       expect(mocks.extractTextWithTika).not.toHaveBeenCalled();
       expect(mocks.proposalFromText).not.toHaveBeenCalled();
@@ -204,11 +213,11 @@ describe("restoreDocument boundary", () => {
   it.each(unsafeScanStatuses)(
     "rejects an authorized pending_deletion document with a %s scan status before opening a transaction, checking ciphertext, updating lifecycle or writing audit",
     async (scanStatus) => {
-      mocks.rows.users = [accessRow({
+      seedAccess(accessRow({
         lifecycle: "pending_deletion",
         scanStatus,
         deleteAfter: new Date(Date.now() + 86_400_000),
-      })];
+      }));
 
       await expect(restoreDocument("user-id", "11111111-1111-4111-8111-111111111111")).rejects.toMatchObject({
         code: "document_not_found",
@@ -216,7 +225,7 @@ describe("restoreDocument boundary", () => {
         message: "That document is not available",
       });
 
-      expect(mocks.fromNames).toEqual(["users"]);
+      expect(mocks.fromNames).toEqual(["documents", "users"]);
       expect(mocks.transactionCalls).toBe(0);
       expect(mocks.ciphertextExists).not.toHaveBeenCalled();
       expect(mocks.insertNames).not.toContain("audit_log");

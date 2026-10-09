@@ -38,12 +38,11 @@ import { listableDocumentLifecycles } from "@/server/document-repository";
 import { planOwnershipTransfer } from "@/server/household-ownership";
 import { clearMetadataDamageForRow } from "@/server/metadata/damage-sightings";
 import { openMetadataReaders, requireMetadataWriter } from "@/server/metadata/fields";
+import { requireUuid, validUuid } from "@/lib/uuid";
 import {
   acquireActiveHouseholdLock,
   requireHouseholdAccess,
-  requireUuid,
   sectionSlug,
-  validUuid,
 } from "@/server/workspace-access";
 import { isInstanceAdministrator } from "@/server/authorization";
 

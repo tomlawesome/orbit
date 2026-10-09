@@ -14,7 +14,7 @@ import {
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
-import { requireUuid } from "@/server/workspace-access";
+import { requireUuid } from "@/lib/uuid";
 import { getDocumentConfig } from "@/server/documents/config";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";

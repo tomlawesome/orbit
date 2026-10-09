@@ -29,7 +29,12 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const requireInstanceAdministrator = vi.hoisted(() => vi.fn(async () => undefined));
-vi.mock("@/server/authorization", () => ({ requireInstanceAdministrator }));
+// Only the list guard is stubbed: the in-transaction actor check
+// (requireActiveAdministrator) runs for real against the fake database below.
+vi.mock("@/server/authorization", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/server/authorization")>(),
+  requireInstanceAdministrator,
+}));
 
 vi.mock("@/server/local-credentials", () => ({
   identitiesAreUsable: () => mocks.identitiesUsable,

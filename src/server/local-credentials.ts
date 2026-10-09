@@ -51,6 +51,7 @@ import { VerificationGateRefusedError } from "@/lib/auth/verification-gate";
 import { getAuthConfig } from "@/lib/env";
 import { AppError } from "@/lib/errors";
 import { log } from "@/lib/logger";
+import { validUuid } from "@/lib/uuid";
 import {
   MetadataCipher,
   openInstanceMetadataReader,
@@ -857,7 +858,6 @@ export interface SignInMethods {
   oidc: LinkedIdentity[];
 }
 
-const uuidSchema = z.uuid();
 
 /**
  * True when the instance would accept a provider identity as a way in
@@ -1040,7 +1040,7 @@ export async function unlinkIdentity(
   recentAuthentication: RecentAuthentication,
 ): Promise<{ removed: boolean }> {
   assertUnlinkChallenge(recentAuthentication, userId);
-  if (!uuidSchema.safeParse(identityId).success) {
+  if (!validUuid(identityId)) {
     throw new AppError("identity_not_found", "That sign-in method is not available", 404);
   }
   const identitiesUsable = identitiesAreUsable();
