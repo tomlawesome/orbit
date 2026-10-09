@@ -39,6 +39,29 @@ export type ItemStatus = (typeof itemStatuses)[number];
 export const scheduleKinds = ["renewal", "service", "expiry"] as const;
 export type ScheduleKind = (typeof scheduleKinds)[number];
 
+/**
+ * The bounds on what an item may hold (#1333), named once. The command
+ * schema, the archive import, reviewed intake and the document suggestions
+ * all build from these, so an item one door lets in is never one another
+ * refuses on the way out.
+ */
+export const TITLE_MAX = 100;
+export const SUBTYPE_MAX = 80;
+export const PROVIDER_MAX = 100;
+export const REFERENCE_MAX = 80;
+/** An item's notes. */
+export const NOTES_MAX = 2_000;
+/** The notes on one entry of an item's history, or on a completion. */
+export const ACTIVITY_NOTES_MAX = 1_000;
+/** A cost in pence: a million pounds. */
+export const COST_MINOR_MAX = 100_000_000;
+/** A repeat is "every N months", at most ten years. */
+export const RECURRENCE_MAX = 120;
+/** The model's own ceiling on reminders per item. */
+export const REMINDER_MAX = 8;
+/** The model's own ceiling on how far ahead a reminder may be. */
+export const REMINDER_DAYS_MAX = 365;
+
 export type DueState = "overdue" | "due-soon" | "upcoming" | "unscheduled";
 export type DueBand = "overdue" | "week" | "quarter" | "later" | "unscheduled";
 

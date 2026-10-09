@@ -27,7 +27,7 @@ import {
   completionActivity,
   namedActivity,
   statusActivity,
-  itemActivitySchema,
+  storedActivitySchema,
   workspaceItemSchema,
   workspaceSchema,
   type ItemActivity,
@@ -143,7 +143,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
     // Only recordActivity's inserts (entityType "item", changes: { activity })
     // feed the item history timeline; every other audit_log write (document
     // lifecycle, membership, household lifecycle, ...) is filtered out by the
-    // itemActivitySchema.safeParse below. Filtering entityType in SQL keeps
+    // storedActivitySchema.safeParse below. Filtering entityType in SQL keeps
     // the 5000-row window from being consumed by rows this read discards
     // anyway (#383).
     getDb().select({ householdId: auditLog.householdId, changes: auditLog.changes, createdAt: auditLog.createdAt })
@@ -192,7 +192,7 @@ export async function readWorkspace(userId: string, sessionId: string, preferred
   for (const entry of activityRows) {
     // Instance-wide audit records have no household and never appear here.
     if (!entry.householdId) continue;
-    const candidate = itemActivitySchema.safeParse((entry.changes as { activity?: unknown })?.activity);
+    const candidate = storedActivitySchema.safeParse((entry.changes as { activity?: unknown })?.activity);
     if (!candidate.success) continue;
     const current = activitiesByHousehold.get(entry.householdId) ?? [];
     current.push(candidate.data);

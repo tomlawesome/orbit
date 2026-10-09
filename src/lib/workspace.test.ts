@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createTestWorkspace } from "./test-workspace";
 import { AppError } from "./errors";
-import { activeHousehold, createEmptyWorkspace, createHousehold, initialScheduleKind, parseWorkspaceCommand, reduceWorkspace, workspaceCommandSchema, workspaceItemSchema, type WorkspaceState } from "./workspace";
-import type { HomeItem } from "./domain";
+import { activeHousehold, createEmptyWorkspace, createHousehold, initialScheduleKind, parseWorkspaceCommand, reduceWorkspace, workspaceCommandSchema, workspaceItemSchema, workspaceSchema, type WorkspaceState } from "./workspace";
+import { COST_MINOR_MAX, NOTES_MAX, RECURRENCE_MAX, REMINDER_DAYS_MAX, REMINDER_MAX, TITLE_MAX, defaultSections, type HomeItem } from "./domain";
+
+const defaultSectionsForTest = () => defaultSections.map((section) => ({ ...section }));
 
 /** The test workspace with one more renewal item, shaped by `changes`. */
 function withItem(state: WorkspaceState, changes: Partial<HomeItem> & { id: string }): WorkspaceState {
@@ -456,6 +458,119 @@ describe("household workspace", () => {
       expect(next.activeHouseholdId).toBe(threeAnswers.household.id);
       expect(activeHousehold(next).sections.map((section) => section.name))
         .toEqual(["Home", "Vehicles", "Devices", "Services"]);
+    });
+  });
+
+  describe("the engine validates what it stores (#1333)", () => {
+    const base = { householdId: "our-home", itemId: "mot", expectedVersion: 1 };
+    const activity = { id: "a-1", itemId: "mot", occurredAt: "2026-07-01T10:00:00.000Z" };
+    const refused = (input: unknown) => {
+      let failure: unknown = null;
+      try {
+        parseWorkspaceCommand(input);
+      } catch (error) {
+        failure = error;
+      }
+      return failure !== null;
+    };
+    const upsertWith = (item: Record<string, unknown>) => ({
+      type: "item.upsert",
+      householdId: "our-home",
+      kind: "service",
+      item: { id: "mot", sectionId: "garage", title: "MOT", currency: "GBP", dueDate: "2026-11-02", ...item },
+    });
+    const setupWith = (changes: Record<string, unknown>) => ({
+      type: "household.update",
+      householdId: "our-home",
+      name: "Home",
+      timezone: "Europe/London",
+      currency: "GBP",
+      ...changes,
+    });
+
+    it.each(["2026-02-31", "2026-13-45", "2027-02-29", "2026-04-31", "2026-00-10", "2026-01-00"])(
+      "refuses %s as a due, snooze or completed date",
+      (date) => {
+        expect(refused({ type: "item.reschedule", ...base, dueDate: date, activity })).toBe(true);
+        expect(refused({ type: "item.snooze", ...base, snoozedUntil: date, activity })).toBe(true);
+        expect(refused({ type: "item.complete", ...base, completedDate: date, activity })).toBe(true);
+        expect(refused(upsertWith({ dueDate: date }))).toBe(true);
+        expect(refused(upsertWith({ snoozedUntil: date }))).toBe(true);
+      },
+    );
+
+    it.each(["2028-02-29", "2026-12-31", "2000-02-29"])("accepts the real day %s", (date) => {
+      expect(refused({ type: "item.reschedule", ...base, dueDate: date, activity })).toBe(false);
+      expect(refused(upsertWith({ dueDate: date }))).toBe(false);
+    });
+
+    it.each(["1900-02-29", "2100-02-29"])("applies the century rule: %s is not a day", (date) => {
+      expect(refused({ type: "item.reschedule", ...base, dueDate: date, activity })).toBe(true);
+    });
+
+    it.each(["ZZZ", "gbp", "GB", "£££", "GBPP", "XXX"])("refuses %s as a currency everywhere one is stored", (currency) => {
+      expect(refused(upsertWith({ currency }))).toBe(true);
+      expect(refused(setupWith({ currency }))).toBe(true);
+      expect(refused({ ...setupWith({ currency }), type: "household.setup", sections: defaultSectionsForTest() })).toBe(true);
+      expect(refused({ type: "household.create", household: { id: "h-1", name: "Home", timezone: "Europe/London", currency } })).toBe(true);
+    });
+
+    it.each(["GBP", "EUR", "USD", "JPY"])("accepts the currency %s", (currency) => {
+      expect(refused(upsertWith({ currency }))).toBe(false);
+      expect(refused(setupWith({ currency }))).toBe(false);
+    });
+
+    it.each(["Not/AZone", "America/New York", "Mars/Olympus", "Europe/London ", "GMT+1"])("refuses %s as a time zone", (timezone) => {
+      expect(refused(setupWith({ timezone }))).toBe(true);
+      expect(refused({ ...setupWith({ timezone }), type: "household.setup", sections: defaultSectionsForTest() })).toBe(true);
+      expect(refused({ type: "household.create", household: { id: "h-1", name: "Home", timezone, currency: "GBP" } })).toBe(true);
+    });
+
+    it.each(["Europe/London", "America/New_York", "Asia/Kolkata", "Asia/Calcutta", "UTC"])(
+      "accepts %s as a time zone, UTC and the zones the platform names under another spelling included",
+      (timezone) => {
+        expect(refused(setupWith({ timezone }))).toBe(false);
+      },
+    );
+
+    it("reads what is already stored: a zone, currency or activity date the write path would refuse still parses (#1333)", () => {
+      const stored = {
+        version: 1,
+        householdLanding: "active",
+        activeHouseholdId: "our-home",
+        households: [{
+          id: "our-home", name: "Home", timezone: "America/New York", currency: "ZZZ", memberCount: 1,
+          sections: defaultSectionsForTest().map((section) => ({ ...section, id: section.name })),
+          items: [{ id: "mot", sectionId: "Home", title: "MOT", currency: "XXX", status: "active" }],
+          activities: [{ id: "a-1", itemId: "mot", kind: "updated", occurredAt: "2026-07-01T10:00:00.000Z", effectiveDate: "2026-02-31" }],
+        }],
+      };
+      const parsed = workspaceSchema.parse(stored);
+      expect(parsed.households[0]).toMatchObject({ timezone: "America/New York", currency: "ZZZ" });
+      expect(parsed.households[0].items[0].currency).toBe("XXX");
+      expect(parsed.households[0].activities[0].effectiveDate).toBe("2026-02-31");
+      // ...while the same values are refused as a write.
+      expect(workspaceItemSchema.safeParse({ ...stored.households[0].items[0] }).success).toBe(false);
+      expect(refused(setupWith({ timezone: "America/New York" }))).toBe(true);
+    });
+
+    it("builds the item bounds from the numbers domain.ts exports", () => {
+      expect(refused(upsertWith({ title: "x".repeat(TITLE_MAX) }))).toBe(false);
+      expect(refused(upsertWith({ title: "x".repeat(TITLE_MAX + 1) }))).toBe(true);
+      expect(refused(upsertWith({ notes: "x".repeat(NOTES_MAX + 1) }))).toBe(true);
+      expect(refused(upsertWith({ costMinor: COST_MINOR_MAX }))).toBe(false);
+      expect(refused(upsertWith({ costMinor: COST_MINOR_MAX + 1 }))).toBe(true);
+      expect(refused(upsertWith({ recurrenceMonths: RECURRENCE_MAX }))).toBe(false);
+      expect(refused(upsertWith({ recurrenceMonths: RECURRENCE_MAX + 1 }))).toBe(true);
+      // The intent schema reads 0 as "once": the member clearing a repeat.
+      expect(refused(upsertWith({ recurrenceMonths: 0 }))).toBe(false);
+      expect(refused(upsertWith({ reminderDays: Array.from({ length: REMINDER_MAX }, (_, day) => day) }))).toBe(false);
+      expect(refused(upsertWith({ reminderDays: [REMINDER_DAYS_MAX] }))).toBe(false);
+    });
+
+    it("pins the numbers themselves, so a change to one is a decision", () => {
+      expect([TITLE_MAX, NOTES_MAX, COST_MINOR_MAX, RECURRENCE_MAX, REMINDER_MAX, REMINDER_DAYS_MAX])
+        .toEqual([100, 2_000, 100_000_000, 120, 8, 365]);
     });
   });
 });

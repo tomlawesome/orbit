@@ -74,6 +74,23 @@ intent and shows refusals.**
    that the named rule functions no longer exist in the browser.
 6. The belt page (`item/[[id]]`) is not ported; it retires with #1319.
 
+7. **What the engine stores, it validates, once** (#1333, #1328 macro M1).
+   A date is a day that exists (`src/lib/calendar-date.ts`), a currency is a
+   code in `Intl.supportedValuesOf("currency")` and a time zone one in its
+   `"timeZone"` list plus `UTC`, which the runtime leaves off it
+   (`src/lib/platform-lists.ts`): the standard "validate against the list the
+   platform ships". The item bounds are named once in `src/lib/domain.ts`
+   and every schema (command, archive import, reviewed intake, document
+   suggestions) is built from them. A password or passphrase is counted one
+   way, NFC code points (`src/lib/password-length.ts`), and its floor is held
+   when one is made, never when one is opened. `tests/unit/engine-owns-every-rule.bounds.test.mjs`
+   fails if a second copy of any of these comes back. Validation is on write
+   only: the schemas that read stored rows (`storedHouseholdSchema`,
+   `storedItemSchema`, `storedActivitySchema`) take a time zone, currency or
+   date by shape, so a row the engine once accepted never stops reading. The
+   one stored value known to be a mistake, "America/New York", is repaired by
+   migration 0050.
+
 ## Consequences
 
 - Every refusal costs a round trip. Same origin, one process, debounced: a
