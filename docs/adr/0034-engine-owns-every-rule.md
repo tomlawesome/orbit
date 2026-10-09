@@ -52,6 +52,20 @@ intent and shows refusals.**
    command through the same schema and checks, returns the refusal or an
    empty success, and writes nothing. The browser sends a debounced dry run
    as the member types and shows the answer where it shows refusals today.
+
+   *Amended 2026-10-09 (#1325, MR !1047):* a dry run is a question, so its
+   HTTP status says whether the question was answered and the body carries
+   the answer: `200 {}` when the save would go through, `200 {"refusal":
+   {"code","message"}}` when the engine would refuse it — the same code and
+   words the real call puts in its `error` envelope, whose 4xx is unchanged.
+   Only a dry run that could not be heard (maintenance, no session, a stale
+   CSRF token, a fault) answers with a status. This is the validate-as-a-query
+   pattern (a form's `checkValidity()`, a linter's report: the verdict is a
+   successful answer). The alternative — Kubernetes-style `dryRun`, answering
+   with the real call's status — suits a tool rehearsing one save; asked at
+   every pause while a member types, it has every browser log each expected
+   "not yet" as a failed request, so the console stops being a signal and the
+   fidelity gate's "no console errors" check cannot hold.
 4. **Refusals are worded once, in the engine**, in the member's words the
    front end uses now ("not yet — give it a name"). The API returns the
    words with the code; the browser never rewrites them.
