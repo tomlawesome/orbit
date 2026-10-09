@@ -97,6 +97,8 @@ async function playOut(clock, promise, step = 100, cap = 400000) {
 
 beforeEach(() => {
   document.body.innerHTML = "";
+  /* home's own read has landed, as +page.svelte's sync() says it */
+  document.body.dataset.homeReady = "true";
   setReducedMotion(false);
   patchRects();
   window.innerWidth = 1280;

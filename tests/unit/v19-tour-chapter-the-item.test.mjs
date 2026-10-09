@@ -238,19 +238,19 @@ describe("the beats, against a recorder", () => {
     expect(log.find(([word]) => word === "open")).toEqual(["open", SELECTORS.POCKET.body]);
   });
 
-  it("waits for the drawer's record, and for the papers the body says it carries", async () => {
+  it("waits for home's own read before choosing a body, then for the drawer's record and the papers the body says it carries", async () => {
     const { log, ctx } = recorder();
     await item.play(ctx);
     const waits = log.filter(([word]) => word === "waitForReal").map(([, sel]) => sel);
-    expect(waits.slice(0, 2)).toEqual([SELECTORS.DESK.foot, SELECTORS.DESK.docs]);
+    expect(waits.slice(0, 3)).toEqual(["body[data-home-ready]", SELECTORS.DESK.foot, SELECTORS.DESK.docs]);
   });
 
-  it("opens nothing, and waits for nothing, when the body has no row to open", async () => {
+  it("opens nothing, and waits for nothing but home's own read, when the body has no row to open", async () => {
     const { log, ctx } = recorder(true);
     document.querySelector(".p-row")?.remove();
     await item.play(ctx);
     expect(log.filter(([word]) => word === "open").map(([, sel]) => sel)).toEqual([SELECTORS.POCKET.pencil, SELECTORS.POCKET.due]);
-    expect(log.filter(([word]) => word === "waitForReal")).toEqual([]);
+    expect(log.filter(([word]) => word === "waitForReal")).toEqual([["waitForReal", "body[data-home-ready]"]]);
   });
 });
 
@@ -282,6 +282,8 @@ function liveFilm() {
 
 beforeEach(() => {
   document.body.innerHTML = "";
+  /* home's own read has landed, as +page.svelte's sync() says it */
+  document.body.dataset.homeReady = "true";
   setReducedMotion(false);
   window.innerWidth = 1440;
   window.innerHeight = 900;
