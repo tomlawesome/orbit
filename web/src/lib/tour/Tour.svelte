@@ -21,8 +21,8 @@
    * skips it, or "take it again" — that is this file's job (via trigger.js),
    * same as it was the old engine's.
    *
-   * WHY THIS LIVES IN THE LAYOUT. The film crosses /home, /inbox, /create,
-   * /item and /settings/mail (chapters/index.js), so it outlives any one page
+   * WHY THIS LIVES IN THE LAYOUT. The film crosses /home, /inbox, /create
+   * and /settings/mail (chapters/index.js), so it outlives any one page
    * component: mounted here it survives the navigation between them instead
    * of being unmounted mid-chapter. It stays inert everywhere else — the film
    * only ever STARTS on the reader's first landing on /home, and only when
@@ -53,12 +53,6 @@
   function walkTo(route) {
     if (route === "/inbox") return goto(resolve("/inbox"));
     if (route === "/create") return goto(resolve("/create"));
-    if (route === "/item") return goto(resolve("/item"));
-    /* #1174: the pocket's belt chapter walks the row's own `open →` act to a
-       named item — one that carries documents — rather than whichever rides
-       at the apex. The id is the act's own href's, never typed here. */
-    const item = /^\/item\/([^/?#]+)$/u.exec(route);
-    if (item) return goto(resolve("/item/[[id]]", { id: item[1] }));
     if (route === "/settings/mail") return goto(resolve("/settings/mail"));
     return goto(resolve("/home"));
   }

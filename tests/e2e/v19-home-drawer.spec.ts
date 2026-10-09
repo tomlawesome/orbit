@@ -138,6 +138,70 @@ test.afterEach(async ({ page }) => {
   await households.sweep(page);
 });
 
+/* #1319 stage 3b: the belt retired, and its address with it. `/item/<id>`
+   is answered on the server with `/home?item=<id>`, so an old link, a
+   reminder or a bookmark lands in that item's drawer; bare `/item` lands on
+   home. */
+test.describe("the belt's old address", () => {
+  test("/item/<id> lands on /home?item=<id> with that drawer open", async ({ page, isMobile }) => {
+    test.setTimeout(90_000);
+    await signIn(page);
+    const { itemId } = await seedHouseholdWithItem(page);
+
+    const response = await page.request.get(`/item/${itemId}`, { maxRedirects: 0 });
+    expect(response.status()).toBe(308);
+    expect(response.headers().location).toBe(`/home?item=${itemId}`);
+
+    await page.goto(`/item/${itemId}`);
+    await expect(page).toHaveURL(new RegExp(`/home\\?item=${itemId}$`));
+    if (isMobile) {
+      await expect(page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`))
+        .toHaveAttribute("data-open", "", { timeout: 20_000 });
+    } else {
+      const drawer = page.locator(`[id="${itemId}-view"]`);
+      await expect(drawer).toBeVisible({ timeout: 20_000 });
+      await expect(drawer.getByText(NOTE)).toBeVisible();
+    }
+
+    await page.goto("/item");
+    await expect(page).toHaveURL(/\/home$/);
+  });
+});
+
+/* #1319 (decision 2026-10-09): `/home?item=<id>` for an item in another of
+   the reader's households switches home to that household and opens the
+   drawer there, on the desk and on the phone. */
+test.describe("an item in another of the reader's households", () => {
+  test("its address switches home to that household and opens its drawer", async ({ page, isMobile }) => {
+    test.setTimeout(90_000);
+    await signIn(page);
+    const first = await seedHouseholdWithItem(page);
+    /* the second household.create makes the second the one home shows */
+    const second = await seedHouseholdWithItem(page);
+    const activeHousehold = () => page.evaluate(async () => {
+      const response = await fetch("/api/workspace", { credentials: "same-origin", cache: "no-store" });
+      return ((await response.json()) as { workspace: { activeHouseholdId: string | null } }).workspace.activeHouseholdId;
+    });
+    expect(await activeHousehold()).toBe(second.householdId);
+
+    await page.goto(`/home?item=${first.itemId}`);
+    if (isMobile) {
+      await expect(page.locator(`.pocket .pk-below [data-row-key="${first.itemId}"]`))
+        .toHaveAttribute("data-open", "", { timeout: 20_000 });
+      await expect(page.locator(`.pocket .pk-below [data-row-key="${second.itemId}"]`)).toHaveCount(0);
+    } else {
+      const drawer = page.locator(`[id="${first.itemId}-view"]`);
+      await expect(drawer).toBeVisible({ timeout: 20_000 });
+      await expect(drawer.getByText(NOTE)).toBeVisible();
+      /* the manifest is the first household's now: its row, not the second's */
+      await expect(page.locator(`[id="${first.itemId}"]`)).toBeVisible();
+      await expect(page.locator(`[id="${second.itemId}"]`)).toHaveCount(0);
+    }
+    expect(await activeHousehold()).toBe(first.householdId);
+    await expect(page).toHaveURL(new RegExp(`/home\\?item=${first.itemId}$`));
+  });
+});
+
 test.describe("on the desk", () => {
   test.skip(({ isMobile }) => isMobile, "the desk's drawer; the phone's is below");
 
@@ -188,7 +252,7 @@ test.describe("on the desk", () => {
     /* the drawer is the item now: no way onward to the belt */
     await expect(drawer.getByRole("link", { name: "manage this item →" })).toHaveCount(0);
     /* notes above documents (owner, 2026-10-08) */
-    await expect(drawer.locator("h4")).toHaveText(["notes", "documents"]);
+    await expect(drawer.locator("h2")).toHaveText(["notes", "documents"]);
     await expect(drawer.getByText(NOTE)).toBeVisible();
 
     /* level the row a little below the page's 84px gutter, so the card's
@@ -307,9 +371,27 @@ test.describe("on the desk", () => {
     const provider = drawer.getByRole("textbox", { name: "provider" });
     await provider.click();
     await page.keyboard.type("Northgate Services");
-    await drawer.getByRole("group", { name: `Editing ${TITLE}` }).getByRole("button", { name: "save" }).click();
+    /* rows holding changes ask first (the coordinator's ruling, 2026-10-08):
+       Escape arms the cancel pill as "discard changes?" and the edit stays */
+    const editing = drawer.getByRole("group", { name: `Editing ${TITLE}` });
+    await page.keyboard.press("Escape");
+    await expect(editing.getByRole("button", { name: "discard changes?" })).toBeVisible();
+    await expect(provider).toHaveText("Northgate Services");
+    await editing.getByRole("button", { name: "save" }).click();
     await expect(drawer.getByText("Northgate Services")).toBeVisible({ timeout: 10_000 });
     await expect.poll(async () => (await itemOf(page, householdId, itemId))?.provider ?? null).toBe("Northgate Services");
+
+    /* and edited again: the second save lands too (#1319: an upsert sends
+       the version it becomes, so a second edit is not refused as "changed on
+       another device") */
+    await pencil.click();
+    await drawer.getByRole("textbox", { name: "provider" }).click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" Ltd");
+    await drawer.getByRole("group", { name: `Editing ${TITLE}` }).getByRole("button", { name: "save" }).click();
+    await expect(drawer.getByText("Northgate Services Ltd")).toBeVisible({ timeout: 10_000 });
+    await expect(drawer.getByRole("alert")).toHaveCount(0);
+    await expect.poll(async () => (await itemOf(page, householdId, itemId))?.provider ?? null).toBe("Northgate Services Ltd");
   });
 });
 

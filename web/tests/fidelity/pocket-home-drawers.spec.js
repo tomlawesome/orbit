@@ -3,15 +3,18 @@ import { APP, openRow, settle } from "./pocket-states.js";
 
 /*
  * HOME'S DRAWERS ON A PHONE (#1120, review round §2.1): a manifest row
- * opens in place, its foot row's `complete` completes it there with an
- * undo (#1319: the drawer is the item, so no `open →` and no trip to the
- * belt's record sheet), a paper opens the preview as the bottom sheet
- * (#1319), a search result
- * closes the search and opens its row (or, with no row, goes to the item:
- * round 2, e), and the item's own address opens it on arrival. A planet on
- * the dial opens its row and a second tap on the lit body goes to the item
+ * opens in place, its foot row's `complete` asks in the rows there
+ * (#1319: the drawer is the item, so no `open →`), a paper opens the
+ * preview as the bottom sheet (#1319), a search result closes the search
+ * and opens its row, and the item's own address opens it on arrival. An
+ * item the manifest does not list is drawn as one more row when it is
+ * asked for (#1319 stage 3b: the belt it used to go to retired, and
+ * `/item/<id>` answers with this address). A planet on the dial opens its
+ * row and a second tap on the lit body brings the row back on screen
  * (owner's answer 6a); the dial arrives on every forward arrival, never on
- * Back (round 2, g). Fixture data, at the height a phone browser leaves.
+ * Back (round 2, g). A suggestion's row is reviewed in place: its two
+ * decisions, and `review & amend →` putting its own lines into editing.
+ * Fixture data, at the height a phone browser leaves.
  */
 test.use({ viewport: { width: 390, height: 664 }, hasTouch: true, isMobile: true });
 
@@ -69,19 +72,27 @@ test("the address opens the row", async ({ page }) => {
   await expect(boiler.locator(":scope > .face")).toHaveCSS("box-shadow", "none");
   await expect(boiler.locator(".p-row-open")).toHaveCSS("box-shadow", "none");
 });
-test("the address of an item the manifest does not list opens the item", async ({ page }) => {
+test("the address of an item the manifest does not list draws its row and opens it", async ({ page }) => {
   /* Chimney sweep is 61 days out, so the manifest draws no row for it (#1282):
-     the address must not be left opening nothing. */
+     the address must not be left opening nothing. Since #1319 it is drawn
+     as one more row, on home, rather than sent to the belt. */
+  await page.goto(`${APP}/home`, { waitUntil: "load" });
+  await settle(page);
+  await expect(page.locator(".pocket .pk-below [data-row]", { hasText: "Chimney sweep" })).toHaveCount(0);
   await page.goto(`${APP}/home?item=i-chimney`, { waitUntil: "load" });
-  await expect(page).toHaveURL(/\/item\/i-chimney$/);
-  await expect(page.locator(".item-card h2")).toHaveText("Chimney sweep");
+  await settle(page);
+  await expect(page).toHaveURL(/\/home\?item=i-chimney$/);
+  const chimney = page.locator(".pocket .pk-below [data-row]", { hasText: "Chimney sweep" }).first();
+  await expect(chimney).toHaveAttribute("data-open", "");
+  await expect(chimney).toBeInViewport();
+  await expect(chimney.getByRole("group", { name: "Actions for Chimney sweep" })).toBeVisible();
 });
 test("a paper opens the preview as the bottom sheet; Escape puts it away and leaves the row open", async ({ page }) => {
   await page.goto(`${APP}/home`, { waitUntil: "load" });
   await settle(page);
   const mot = page.locator(".pocket .pk-below [data-row]", { hasText: "Car MOT" }).first();
   await openRow(page, mot);
-  /* #1319, round 3's `narrow`: the drawer has no way to the belt any more */
+  /* #1319, round 3's `narrow`: the drawer is the item; no link onward */
   await expect(mot.getByRole("link", { name: /^Open / })).toHaveCount(0);
   await mot.getByRole("button", { name: "Open Service history" }).tap();
   const sheet = page.getByRole("dialog", { name: /^Service history/ });
@@ -92,10 +103,59 @@ test("a paper opens the preview as the bottom sheet; Escape puts it away and lea
   await expect(mot).toHaveAttribute("data-open", "");
   await expect(mot.getByRole("button", { name: "Open Service history" })).toBeFocused();
 });
-/* #1319 (owner-decisions §34): a suggestion is reviewed in its home drawer,
-   never on the belt -- its address opens its row in the signals, and the
-   paper it came in opens the preview sheet with the belt's staged note. */
-test("a suggestion's address opens its row in the signals, not the belt", async ({ page }) => {
+/** Whether `el` sits inside something inert. @param {import("@playwright/test").Locator} el */
+const inert = (el) => el.evaluate((one) => Boolean(one.closest("[inert]")));
+/* #1319: a bottom sheet is modal. While the preview or a chooser stands,
+   what is behind it is inert, nothing it covers takes a tap; Escape or a
+   press on the page behind puts it away and gives the page back, focus
+   on what opened it. */
+test("the preview sheet holds the page behind it inert until a press off it puts it away", async ({ page }) => {
+  await page.goto(`${APP}/home`, { waitUntil: "load" });
+  await settle(page);
+  const mot = page.locator(".pocket .pk-below [data-row]", { hasText: "Car MOT" }).first();
+  await openRow(page, mot);
+  const complete = mot.getByRole("button", { name: "Complete Car MOT" });
+  await mot.getByRole("button", { name: "Open Service history" }).tap();
+  const sheet = page.getByRole("dialog", { name: /^Service history/ });
+  await expect(sheet).toBeVisible();
+  await expect(sheet).toHaveAttribute("aria-modal", "true");
+  expect(await inert(complete)).toBe(true);
+  expect(await inert(sheet)).toBe(false);
+  await page.touchscreen.tap(195, 80);
+  await expect(sheet).toBeHidden();
+  /* the scrim took the tap: nothing behind it opened as well */
+  await expect(page.locator(".p-sheet-layer.open")).toHaveCount(0);
+  expect(await inert(complete)).toBe(false);
+  await expect(mot).toHaveAttribute("data-open", "");
+});
+test("a chooser sheet holds the page behind it inert; Escape or a press off it puts it away", async ({ page }) => {
+  await page.goto(`${APP}/home`, { waitUntil: "load" });
+  await settle(page);
+  const mot = page.locator(".pocket .pk-below [data-row]", { hasText: "Car MOT" }).first();
+  await openRow(page, mot);
+  await mot.getByRole("button", { name: "Edit this item" }).tap();
+  const section = mot.getByRole("button", { name: /^section: / });
+  const seat = page.locator("[data-chooser-card]");
+  await section.tap();
+  await expect(seat.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
+  expect(await inert(section)).toBe(true);
+  expect(await inert(seat)).toBe(false);
+  await page.keyboard.press("Escape");
+  await expect(seat).toHaveCount(0);
+  expect(await inert(section)).toBe(false);
+  await expect(section).toBeFocused();
+  await section.tap();
+  await expect(seat).toBeVisible();
+  await page.touchscreen.tap(195, 80);
+  await expect(seat).toHaveCount(0);
+  await expect(page.locator(".p-sheet-layer.open")).toHaveCount(0);
+  expect(await inert(section)).toBe(false);
+  await expect(mot.getByRole("group", { name: "Editing Car MOT" })).toBeVisible();
+});
+/* #1319 (owner-decisions §34): a suggestion is reviewed in its home drawer
+   -- its address opens its row in the signals, and the paper it came in
+   opens the preview sheet with the staged note. */
+test("a suggestion's address opens its row in the signals", async ({ page }) => {
   await page.goto(`${APP}/home?item=r-insurance`, { waitUntil: "load" });
   await settle(page);
   const catch_ = page.locator(".pocket .pk-signals [data-row]", { hasText: "Home insurance" }).first();
@@ -117,16 +177,19 @@ test("a suggestion's paper opens the preview as the bottom sheet, attached on ac
   await expect(sheet).toBeHidden();
   await expect(catch_).toHaveAttribute("data-open", "");
 });
-test("a search result with no row goes straight to the item", async ({ page }) => {
+test("a search result with no row draws one and opens it", async ({ page }) => {
   await page.goto(`${APP}/home`, { waitUntil: "load" });
   await settle(page);
   await expect(page.locator(".pocket .pk-below [data-row]", { hasText: "Chimney sweep" })).toHaveCount(0);
   await page.locator(".msearch").click();
   await page.locator(".pk-field").fill("Chimney");
   await page.locator(".pk-results [data-row-face]", { hasText: "Chimney sweep" }).first().click();
-  await expect(page).toHaveURL(/\/item\/i-chimney/);
+  const chimney = page.locator(".pocket .pk-below [data-row]", { hasText: "Chimney sweep" }).first();
+  await expect(chimney).toHaveAttribute("data-open", "");
+  await expect(page.locator(".p-sheet-layer.open")).toHaveCount(0);
+  await expect(page).toHaveURL(/\/home/);
 });
-test("a planet opens its row; a second tap on the lit body goes to the item", async ({ page }) => {
+test("a planet opens its row; a second tap on the lit body brings the row back on screen", async ({ page }) => {
   await page.goto(`${APP}/home`, { waitUntil: "load" });
   await settle(page);
   const body = page.locator(".mdial .pk-body[aria-label='Gutter clearing']");
@@ -136,9 +199,17 @@ test("a planet opens its row; a second tap on the lit body goes to the item", as
   await expect(page.locator(".p-sheet-layer.open")).toHaveCount(0);
   await expect(gutter).toBeInViewport();
   await expect(body).toHaveClass(/lit/);
+  /* Back up to the body, the row mostly scrolled away below: the second
+     tap scrolls the row back on screen, still open, and goes nowhere
+     (#1319). */
+  await page.evaluate(() => window.scrollTo(0, 0));
   await body.scrollIntoViewIfNeeded();
+  const before = await page.evaluate(() => window.scrollY);
   await body.click();
-  await expect(page).toHaveURL(/\/item\/i-gutter/);
+  await expect(gutter).toHaveAttribute("data-open", "");
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(before);
+  await expect(gutter).toBeInViewport();
+  await expect(page).toHaveURL(/\/home/);
 });
 test("the dial arrives on a forward arrival, never on Back", async ({ page }) => {
   const dial = page.locator(".pocket .mdial");
@@ -147,23 +218,21 @@ test("the dial arrives on a forward arrival, never on Back", async ({ page }) =>
   await page.goto(`${APP}/home`, { waitUntil: "load" });
   await expect(dial).toHaveClass(/arrive/);
   await settle(page);
-  /* #1319: the drawer has no `open →`; the lit body's second tap is the
-     way onto the item screen from here. */
-  const body = page.locator(".mdial .pk-body[aria-label='Gutter clearing']");
-  await body.click();
-  await body.scrollIntoViewIfNeeded();
-  await body.click();
-  await expect(page).toHaveURL(/\/item\/i-gutter/);
-  /* Back is pressed only once the item screen is on the page, as a person would (#1164);
-     pressed before then, the item screen can stay under /home, which is #1217. */
-  await expect(page.locator(".item-card h2", { hasText: "Gutter clearing" })).toBeVisible();
+  /* #1319: the item screen this used to leave for retired with the belt;
+     the inbox, through the signals' mail row, is a forward way off home. */
+  await page.locator(".pocket .pk-signals a[data-row-face][href='/inbox']").click();
+  await expect(page).toHaveURL(/\/inbox$/);
+  /* Back is pressed only once the other screen is on the page, as a person
+     would (#1164); pressed before then, it can stay under /home (#1217). */
+  await expect(dial).toHaveCount(0);
+  await settle(page);
   await page.goBack();
   await expect(page).toHaveURL(/\/home/);
   await expect(dial).toBeAttached({ timeout: 30000 });
   expect(await dial.getAttribute("class"), "Back replayed the arrival").not.toMatch(/\barrive\b/);
   expect(await arriving(), "Back replayed the arrival").toBe(false);
   await page.goForward();
-  await expect(page).toHaveURL(/\/item\/i-gutter/);
+  await expect(page).toHaveURL(/\/inbox$/);
   /* A forward arrival again, as a link on any screen makes it. */
   await page.evaluate(() => {
     const a = document.createElement("a");
@@ -271,21 +340,121 @@ test("the north star hides while a row is open", async ({ page }) => {
   await expect(star).toBeVisible();
 });
 
-/* ROUND 3 §4 (#1140): home raises the review sheet in place, from a
-   suggestion's `review & amend →` and from a second tap on its hollow body
-   on the dial, rather than going to the receipt page. */
-test("review & amend raises the review sheet on home", async ({ page }) => {
+/* THE RELAY'S CATCH, DECIDED AND AMENDED IN ITS ROW (#1319 stage 3b;
+   owner, 2026-10-08, on the phone amending as the desk does: "Yeah,
+   ideally"). What the belt's phone card did (`/item/<receiptId>`, retired)
+   and the review sheet home used to raise (round 3 §4, #1140): the two
+   decisions on the row, and `review & amend →` -- or a second tap on its
+   hollow body on the dial -- putting the row's own lines into editing,
+   `add to orbit` approving what they hold. The fixture API answers reads
+   only, so the writes are answered here and read back. */
+
+/**
+ * Answers the three calls approveReceipt makes and records the approval.
+ * @param {import("@playwright/test").Page} page
+ */
+async function answerApproval(page) {
+  /** @type {{ approvals: any[], discards: string[] }} */
+  const seen = { approvals: [], discards: [] };
+  await page.route("**/api/imap-inbox/r-*", async (route) => {
+    const request = route.request();
+    const id = new URL(request.url()).pathname.split("/").pop() ?? "";
+    if (request.method() === "DELETE") {
+      seen.discards.push(id);
+      return route.fulfill({ json: { ok: true } });
+    }
+    if (request.method() === "PUT") return route.fulfill({ json: { ok: true } });
+    return route.fulfill({
+      json: {
+        receipt: { id, draftVersion: 3, proposal: { title: "Home insurance renewal" } },
+        sections: [{ id: "s-home" }, { id: "s-dates" }],
+        attachments: [{ id: "a-1" }],
+      },
+    });
+  });
+  await page.route("**/api/reviewed-intake/approve", async (route) => {
+    seen.approvals.push(route.request().postDataJSON());
+    await route.fulfill({ json: { outcome: "approved", itemId: "i-new" } });
+  });
+  return seen;
+}
+
+/** @param {import("@playwright/test").Page} page */
+async function openCatch(page) {
   await page.goto(`${APP}/home`, { waitUntil: "load" });
   await settle(page);
   const catch_ = page.locator(".pocket .pk-signals [data-row]", { hasText: "Home insurance" }).first();
   await openRow(page, catch_);
-  await catch_.getByRole("button", { name: "review & amend →" }).click();
-  const sheet = page.getByRole("dialog", { name: "Review & amend" });
-  await expect(sheet).toBeVisible();
-  await expect(sheet.getByRole("textbox", { name: "name", exact: true })).toHaveValue("Home insurance renewal");
-  await expect(page).toHaveURL(/\/home$/);
+  return catch_;
+}
+
+test("Add to orbit arms on the first tap and approves as proposed on the second, from the row", async ({ page }) => {
+  const seen = await answerApproval(page);
+  const catch_ = await openCatch(page);
+  await catch_.getByRole("button", { name: "Add Home insurance renewal to your orbit" }).tap();
+  const again = catch_.getByRole("button", { name: "tap again to add Home insurance renewal to your orbit" });
+  await expect(again).toBeVisible();
+  expect(seen.approvals).toHaveLength(0);
+  await again.tap();
+  await expect.poll(() => seen.approvals.length).toBe(1);
+  expect(seen.approvals[0]).toMatchObject({
+    sectionId: "s-home", action: "create_separate", attachmentIds: ["a-1"],
+    source: { kind: "mailbox_draft", receiptId: "r-insurance", draftVersion: 3 },
+  });
+  await expect(page).toHaveURL(/\/home/);
 });
-test("a second tap on the relay's catch raises the review sheet on home", async ({ page }) => {
+
+test("review & amend puts the row's lines into editing, and add to orbit approves them amended", async ({ page }) => {
+  const seen = await answerApproval(page);
+  const catch_ = await openCatch(page);
+  await catch_.getByRole("button", { name: "review & amend →" }).click();
+  /* No sheet rises: the lines are live in the row, the title in its head. */
+  await expect(page.getByRole("dialog", { name: "Review & amend" })).toHaveCount(0);
+  const title = catch_.locator('[data-ed="title"]');
+  await expect(title).toBeFocused();
+  await expect(title).toHaveText("Home insurance renewal");
+  await expect(catch_.locator('[data-ed="provider"]')).toHaveText("Harbour Mutual");
+  /* The two decisions give way to add and cancel; review & amend goes. */
+  await expect(catch_.getByRole("button", { name: "Add Home insurance renewal to your orbit" })).toHaveCount(0);
+  await expect(catch_.getByRole("button", { name: "review & amend →" })).toHaveCount(0);
+  const amending = catch_.getByRole("group", { name: "Amending Home insurance renewal" });
+  await expect(amending.getByRole("button")).toHaveText(["add to orbit", "cancel"]);
+  /* A chooser stands as the bottom sheet, as a filed item's does. */
+  await catch_.getByRole("button", { name: /^section: / }).click();
+  await expect(page.locator("[data-chooser-card]")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("[data-chooser-card]")).toHaveCount(0);
+  await title.fill("Home insurance, corrected");
+  await catch_.locator('[data-ed="provider"]').fill("Harbour Mutual plc");
+  await amending.getByRole("button", { name: "add to orbit" }).click();
+  await expect.poll(() => seen.approvals.length).toBe(1);
+  expect(seen.approvals[0]).toMatchObject({
+    action: "create_separate", attachmentIds: ["a-1"],
+    source: { kind: "mailbox_draft", receiptId: "r-insurance", draftVersion: 3 },
+    /* the cost as the rows hold it, for the engine to read (ADR-0034, #1325) */
+    item: { title: "Home insurance, corrected", provider: "Harbour Mutual plc", cost: "£400.00", currency: "GBP",
+      dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12 },
+  });
+  await expect(page.locator(".p-wake", { hasText: "added to your orbit · Home insurance, corrected" })).toBeVisible();
+  await expect(page).toHaveURL(/\/home/);
+});
+
+test("cancel, asked twice over a change, puts the readings back and sends nothing", async ({ page }) => {
+  const seen = await answerApproval(page);
+  const catch_ = await openCatch(page);
+  await catch_.getByRole("button", { name: "review & amend →" }).click();
+  await catch_.locator('[data-ed="provider"]').fill("Someone else");
+  /* The rows hold a change, so the first tap only asks (84b21c82). */
+  const amending = catch_.getByRole("group", { name: "Amending Home insurance renewal" });
+  await amending.getByRole("button", { name: "cancel" }).click();
+  await amending.getByRole("button", { name: "discard changes?" }).click();
+  await expect(catch_.locator('[data-ed="provider"]')).toHaveCount(0);
+  await expect(catch_.locator(".p-kv", { hasText: "provider" })).toContainText("Harbour Mutual");
+  await expect(catch_.getByRole("button", { name: "review & amend →" })).toBeFocused();
+  expect(seen.approvals).toHaveLength(0);
+});
+
+test("a second tap on the relay's catch puts its row into editing, on home", async ({ page }) => {
   await page.goto(`${APP}/home`, { waitUntil: "load" });
   await settle(page);
   const body = page.locator(".mdial .pk-body[data-body-sugg]").first();
@@ -294,6 +463,7 @@ test("a second tap on the relay's catch raises the review sheet on home", async 
   await expect(catch_).toHaveAttribute("data-open", "");
   await body.scrollIntoViewIfNeeded();
   await body.click();
-  await expect(page.getByRole("dialog", { name: "Review & amend" })).toBeVisible();
-  await expect(page).toHaveURL(/\/home$/);
+  await expect(catch_.locator('[data-ed="title"]')).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Review & amend" })).toHaveCount(0);
+  await expect(page).toHaveURL(/\/home/);
 });

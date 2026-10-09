@@ -1,6 +1,5 @@
 <script>
   import { onMount } from "svelte";
-  import { goto } from "$app/navigation";
   import { readInboxScreen, approveReceipt, dismissReceipt } from "$lib/data/workspace.js";
   import { ago, agoLong } from "$lib/format.js";
   import { LOCKED, fieldState, receiptWords } from "$lib/data/metadata-status.js";
@@ -148,7 +147,7 @@
       <div class="group">
         <h2>Filed{view.filed.length ? ` · ${view.filed.length}` : ""}</h2>
         {#each view.filed as entry (entry.itemId)}
-          <a class="item" href={resolve("/item/[[id]]", { id: entry.itemId })}>
+          <a class="item" href={resolve(`/home?item=${encodeURIComponent(entry.itemId)}`)}>
             <span class="dot" style="background:var({TONES[entry.band]})" aria-hidden="true"></span>
             <div class="flex"><b>{entry.title}</b><span>from {entry.sourceDocument} · added {filedDate(/** @type {string} */ (entry.filedAt))}</span></div>
           </a>
@@ -180,10 +179,9 @@
               {/each}
             </div>
             {#each papersOf(receipt) as paper (paper.id ?? paper.name)}
-              {@const itemHref = resolve("/item/[[id]]", { id: receipt.id })}
               {#if paper.drawable}
-                <a class="attach" href={itemHref}
-                   onclick={(event) => { event.preventDefault(); goto(itemHref, { state: { pocketPaper: paper.id } }); }}>
+                <!-- #1319: the suggestion's home drawer, where its paper opens the preview -->
+                <a class="attach" href={resolve(`/home?item=${encodeURIComponent(receipt.id)}`)}>
                   ◆ <span class="name">{paper.name}</span>{#if paper.meta} · {paper.meta}{/if}{#if paper.clean} · <span class="clean">scanned clean</span>{/if} · <span class="view">view →</span>
                 </a>
               {:else}
@@ -205,7 +203,7 @@
               </button>
               <span class="twotap">— both ask twice</span>
               {#if !locked(receipt)}
-                <a href={resolve("/item/[[id]]", { id: receipt.id })}>review &amp; amend →</a>
+                <a href={resolve(`/home?item=${encodeURIComponent(receipt.id)}`)}>review &amp; amend →</a>
               {/if}
             </div>
             {#if problem && armed.id === receipt.id}

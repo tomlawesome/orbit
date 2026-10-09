@@ -68,13 +68,10 @@ const MARKS = [
   ["time", ["time-warmed", "time-toast"]],
   ["relay", ["relay-addr"]],
   ["inbox", ["inbox-orb", "inbox-lane-review", "inbox-lane-reading", "inbox-lane-filed", "inbox-lanes", "inbox-add", "inbox-sayso"]],
-  /* belt-later/belt-sooner retired with the step beat itself (#1174 round
-     10, the owner, 2026-10-02: the film never rings, names or presses
-     either end-cap any more) — 2e8eb0ba dropped them from the chapter but
-     missed this file, so every run paid two full 45s `never reached`
-     waits chasing marks the film no longer sets, on top of the budget
-     everything else here already needs: the 420s stall above. */
-  ["belt", ["belt-arrive", "belt-cert", "belt-svc", "belt-doc", "belt-read"]],
+  /* #1319: "The item" replaced "The belt" (design/v19/tour-drawer/round-2).
+     Keep this list to the marks the chapter sets: a mark it never sets
+     costs a full 45s `never reached` wait. */
+  ["item", ["item-row", "item-docs", "item-bring", "item-read", "item-acts", "item-editing", "item-edit", "item-calendar"]],
   ["done", ["done-complete", "done-swung", "done-round"]],
   ["others", ["others-gran", "others-ask"]],
   ["sky", ["sky-orb", "sky-settings", "sky-swatches", "sky-dawn", "sky-back"]],
@@ -1245,6 +1242,9 @@ test.describe("the danger-zone ring pulses red while chapter 5 shows it (#1174 r
 });
 
 /* ---- round 6 (#1174, the owner's iPhone, 2026-10-01) -------------------
+   (#1319: chapter 8 is now "The item", set in home's drawer; it no longer
+   walks to /item, and opens nothing where no body has a row. The plays
+   below still hold it to the same rules.)
    The film stood still at 1:56 of the owner's 3:22: chapter 8, "The belt",
    between its start and its first line, on the walk to /item. On a
    household with nothing in it the phone has no body to open, so the film
@@ -1338,15 +1338,13 @@ test.describe("chapter 8 plays through on a new household (#1174 round 6)", () =
   }
 });
 
-/* ---- round 6, Fable's call (#1174, 2026-10-01) -------------------------
-   On a household with no papers (nothing in it, or items that carry none)
-   chapters 8 and 9 open no item and point at nothing: chapter 8 stays on
-   the sky and reads its two lines over the dial with the sun ringed;
-   chapter 9 reads "MOT passed" there too, with no press, then plays its
-   second line as before. So, on an empty household at 390x844: every line
-   either chapter shows is anchored to an element on the screen, with its
-   stem on it, and the film never walks to /item. */
-test.describe("chapters 8 and 9 stay on the sky when nothing carries a paper (#1174 round 6)", () => {
+/* ---- round 6, Fable's call (#1174, 2026-10-01; #1319) -----------------
+   On a household with nothing in it there is no drawer to open: chapter 8
+   says every line at the sun, and chapter 9 says "MOT passed" there too,
+   then plays its second line as before. So, on an empty household at
+   390x844: every line either chapter shows is anchored to an element on
+   the screen, with its stem on it, and the film never walks to /item. */
+test.describe("chapters 8 and 9 stay on the sky when the household has nothing in it (#1174 round 6, #1319)", () => {
   test("at 390x844 on a household with nothing in it, every line of chapters 8 and 9 points at something on the screen, and no item is opened", async ({ browser }) => {
     test.setTimeout(150_000);
     const context = await browser.newContext({
@@ -1359,7 +1357,7 @@ test.describe("chapters 8 and 9 stay on the sky when nothing carries a paper (#1
     await page.waitForFunction(() => document.querySelector(".pocket .mdial") && !document.querySelector(".pocket .pk-below .pk-list"),
       null, { timeout: 30_000 });
     const ids = await page.evaluate(() => /** @type {any} */ (window).__chapters.map((/** @type {any} */ c) => c.id));
-    const from = ids.indexOf("belt");
+    const from = ids.indexOf("item");
     const until = ids.indexOf("others");
     await page.evaluate((k) => /** @type {any} */ (window).__jump(k), from);
     /** @type {Record<string, number>} */

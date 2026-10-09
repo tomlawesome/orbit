@@ -107,15 +107,15 @@
     {/if}
     <!-- #1319 (owner, 2026-10-08): notes above documents. -->
     {#if detail.notes}
-      <h4>notes</h4>
+      <h2>notes</h2>
       <p class="ivnotes">{detail.notes}</p>
     {:else if notesState}
-      <h4>notes</h4>
+      <h2>notes</h2>
       <p class="ivnotes {notesState === DAMAGED ? 'failed' : 'locked'}">{NOTES_WORDS[notesState]}</p>
     {/if}
     {/if}
     {#if detail.documents?.length}
-      <h4>documents</h4>
+      <h2>documents</h2>
       <!-- #1319, round 3: every row opens the preview card, the honest
            states too -- the card says "still scanning" or "removed" itself.
            The open one wears the accent at its left edge and says so. -->
@@ -132,7 +132,8 @@
     {/if}
     <!-- #1319 (owner-decisions §34): the foot row holds every act the belt
          had; `manage this item →` is gone, the drawer is the item now. -->
-    <FootRow title={row.title} busy={acts.busy} {mode} {snoozing}
+    <FootRow title={row.title} busy={acts.busy} {mode} {snoozing} onrestore={acts.onrestore}
+             discarding={acts.modes.discardArmed} standing={row.restorable ? "ended" : row.state ? "done" : null}
              onsnooze={acts.onsnooze} oncomplete={acts.oncomplete} onattach={acts.onattach}
              onretire={acts.onretire} oncopy={acts.oncopy} onedit={acts.onedit}
              onsave={acts.onsave} onrecord={acts.onrecord} oncancel={acts.oncancel}
@@ -143,6 +144,9 @@
 
 <style>
   /* round 8: a section or type value in its own colour (packs.css maps
-     data-opt onto --opt-text) */
-  .opt{color:var(--opt-text, inherit)}
+     data-opt onto --opt-text). Written as `.kv b.opt`, not `.opt`: a bare
+     `.opt` lost to home.css's `.itemview .kv b{color:var(--ink)}`, so the
+     desk drawer's values stayed ink while the row's section word wore its
+     colour. */
+  .kv b.opt{color:var(--opt-text, var(--ink))}
 </style>

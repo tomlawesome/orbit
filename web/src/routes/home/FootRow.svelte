@@ -27,6 +27,19 @@
    * place. EDIT, the pencil, puts them into editing: save and cancel in the
    * pills' place, the pencil lit while it lasts (round 8, `editing`).
    *
+   * WHAT FITS THE ITEM'S STATE (#1319; the coordinator's ruling,
+   * 2026-10-08: the drawer opens any item). A retired, cancelled or expired
+   * item (`standing: "ended"`) offers only RESTORE, the reverse of retire (the
+   * status command), and the chain link. A one-off already done (`standing:
+   * "done"`) offers nothing that would undo or end it: attach a document,
+   * the pencil and the chain link.
+   *
+   * DISCARD (#1319 stage 3b; the coordinator's ruling, 2026-10-08): rows
+   * holding changes are not thrown away by the first cancel, Escape or
+   * close; the cancel pill arms as retire does and reads "discard
+   * changes?" (`discarding`), and a second press discards
+   * (discard-guard.js).
+   *
    * ATTACH opens the file picker; the file goes up through the per-item
    * documents route (workspace.js attachItemDocument) and its scan.
    *
@@ -37,6 +50,9 @@
    *   mode?: "read" | "edit" | "complete",
    *   snoozing?: boolean,
    *   held?: boolean,
+   *   standing?: "ended" | "done" | null,
+   *   discarding?: boolean,
+   *   onrestore?: () => unknown,
    *   onsnooze: (from: HTMLElement) => unknown,
    *   oncomplete: (from: HTMLElement) => unknown,
    *   onattach: (file: File) => unknown,
@@ -51,7 +67,7 @@
   /** @type {Props} */
   let {
     title, pocket = false, busy = null, mode = "read", snoozing = false, held = false,
-    onsnooze, oncomplete, onattach, onretire, oncopy, onedit, onsave, onrecord, oncancel,
+    standing = null, discarding = false, onrestore = undefined, onsnooze, oncomplete, onattach, onretire, oncopy, onedit, onsave, onrecord, oncancel,
   } = $props();
 
   let armed = $state(false);
@@ -109,14 +125,31 @@
   {#if mode === "edit"}
     <div class="ivacts" class:p-pills={pocket} role="group" aria-label="Editing {title}">
       <button type="button" class:p-pill={pocket} class="act-accent" style="--act:var(--accent);--act-text:var(--accent-text)"
-              disabled={busy !== null || held} onclick={onsave}>{busy === "save" ? "saving…" : "save"}</button>
-      <button type="button" class:p-pill={pocket} disabled={busy !== null} onclick={oncancel}>cancel</button>
+              disabled={busy !== null} aria-disabled={held ? "true" : undefined}
+              onclick={() => { if (!held) onsave(); }}>{busy === "save" ? "saving…" : "save"}</button>
+      <button type="button" class:p-pill={pocket} class="discard" class:danger={pocket && discarding} class:armed={discarding}
+              style={discarding ? "--act:var(--overdue);--act-text:var(--overdue-text)" : undefined}
+              disabled={busy !== null} onclick={oncancel}>{discarding ? "discard changes?" : "cancel"}</button>
     </div>
   {:else if mode === "complete"}
     <div class="ivacts" class:p-pills={pocket} role="group" aria-label="Completing {title}">
       <button type="button" class:p-pill={pocket} class="act-ok" style="--act:var(--ok);--act-text:var(--ok-text)"
               disabled={busy !== null} onclick={onrecord}>{busy === "complete" ? "recording…" : "record"}</button>
-      <button type="button" class:p-pill={pocket} disabled={busy !== null} onclick={oncancel}>cancel</button>
+      <button type="button" class:p-pill={pocket} class="discard" class:danger={pocket && discarding} class:armed={discarding}
+              style={discarding ? "--act:var(--overdue);--act-text:var(--overdue-text)" : undefined}
+              disabled={busy !== null} onclick={oncancel}>{discarding ? "discard changes?" : "cancel"}</button>
+    </div>
+  {:else if standing === "ended"}
+    <div class="ivacts" class:p-pills={pocket} role="group" aria-label="Actions for {title}">
+      <button type="button" class:p-pill={pocket} class="act-ok"
+              style="--act:var(--ok);--act-text:var(--ok-text)" disabled={busy !== null}
+              aria-label="Restore {title}" onclick={() => onrestore?.()}>{busy === "restore" ? "restoring…" : "restore"}</button>
+    </div>
+  {:else if standing === "done"}
+    <div class="ivacts" class:p-pills={pocket} role="group" aria-label="Actions for {title}">
+      <button type="button" class:p-pill={pocket} class="act-up"
+              style="--act:var(--upcoming);--act-text:var(--upcoming-text)" disabled={busy !== null}
+              aria-label="Attach a document to {title}" onclick={pick}>{busy === "attach" ? "attaching…" : "attach a document"}</button>
     </div>
   {:else}
     <div class="ivacts" class:p-pills={pocket} role="group" aria-label="Actions for {title}">
@@ -140,12 +173,15 @@
   {/if}
   <span class="ivtools">
     <span class="copied" class:show={copiedShown} role="status" aria-live="polite">{copiedShown ? "link copied" : ""}</span>
-    <!-- the pencil: lit while the rows are being edited (round 8) -->
+    <!-- the pencil: lit while the rows are being edited (round 8); an
+         ended item is restored before it is edited -->
+    {#if standing !== "ended"}
     <button type="button" class="ivicon ivedit" class:on={mode === "edit"} aria-label="Edit this item"
             aria-pressed={mode === "edit"} title="edit" disabled={busy !== null && mode !== "edit"}
             onclick={() => { arm.disarm(); if (mode !== "edit") onedit(); }}>
       <i><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.6 2.6 13.4 5.4 5.6 13.2 2.4 13.6 2.8 10.4Z"/><path d="M9.2 4 12 6.8"/></svg></i>
     </button>
+    {/if}
     <button type="button" class="ivicon ivlink" aria-label="Copy link" title="copy link" onclick={copy}>
       <i><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.8 9.2a2.6 2.6 0 0 0 3.7 0l2.4-2.4a2.6 2.6 0 0 0-3.7-3.7l-1 1"/><path d="M9.2 6.8a2.6 2.6 0 0 0-3.7 0L3.1 9.2a2.6 2.6 0 0 0 3.7 3.7l1-1"/></svg></i>
     </button>
@@ -169,7 +205,7 @@
     border-radius:999px;padding:6px 13px;cursor:pointer;line-height:1.55}
   .ivfootrow:not(.pocket) .ivacts button:hover{border-color:var(--act,var(--ink))}
   .ivfootrow:not(.pocket) .ivacts button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  .ivacts button:disabled{opacity:.5;cursor:default}
+  .ivacts button:disabled,.ivacts button[aria-disabled="true"]{opacity:.5;cursor:default}
   .ivacts button.armed{background:var(--act);color:var(--bg);border-color:var(--act)}
   .ivfootrow:not(.pocket) .ivacts button.lit{border-color:var(--act)}
   .ivacts .brk{display:none}

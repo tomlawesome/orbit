@@ -6,12 +6,13 @@
   import { pageKeyTarget } from "$lib/data/page-turn.js";
   import Pager from "./Pager.svelte";
   import Reader from "./Reader.svelte";
+  import { inertPage } from "$lib/pocket/focus.js";
 
   /**
    * A DOCUMENT'S PREVIEW, FROM HOME'S ITEM DRAWER (#1319; owner-decisions
    * §34; design/v19/belt-purpose/round-3/f-preview-beside-tracked.html).
    *
-   * The belt's reading card (item/[[id]]/+page.svelte, #1088, #1300),
+   * The retired belt's reading card (#1088, #1300; the belt went with #1319),
    * carried over in markup, states and loading: the reticle while the page
    * is on its way, the page nearly edge to edge once it has landed (a button
    * that opens the reader over home), the pager under it, and the four
@@ -231,6 +232,32 @@
   });
   $effect(() => () => { stopLoading(); clearTimeout(hideTimer); revoke(); });
 
+  /* #1319: AS THE BOTTOM SHEET IT IS MODAL. Under 1200px the card covers
+     the drawer's foot, so while it is up everything behind it is inert
+     (the kit's pattern, focus.js) and it says so (aria-modal); beside the
+     drawer on a wide screen it stays a non-modal dialog. A close the card
+     asks for gives the page back first, so the host's refocus can land. */
+  /** @type {(() => void) | null} */
+  let release = null;
+  /** The card and its scrim's box-less holder, what stays live. @type {HTMLElement | undefined} */
+  let seat = $state();
+  /** The sheet is up as a modal, so its scrim stands behind it. */
+  let modal = $state(false);
+  $effect(() => {
+    if (!doc || !card || wide()) return;
+    const sheet = card;
+    const restore = inertPage(/** @type {HTMLElement} */ (seat));
+    sheet.setAttribute("aria-modal", "true");
+    modal = true;
+    release = () => {
+      release = null;
+      modal = false;
+      restore();
+      sheet.removeAttribute("aria-modal");
+    };
+    return () => release?.();
+  });
+
   /* Escape, the page keys, and a press off the card, while it is up. Held
      on the window ahead of home's own (its Escape puts the drawer away, its
      click off the drawer closes the row), so a press or an Escape that only
@@ -240,6 +267,7 @@
     /** @param {boolean} press */
     const close = (press) => {
       const refocus = !press || Boolean(card?.contains(document.activeElement));
+      release?.();
       onclose({ refocus, press });
     };
     /** @param {KeyboardEvent} event */
@@ -261,9 +289,20 @@
     };
     /** @param {PointerEvent} event */
     const onPress = (event) => {
-      if (readerOpen) return;
       const target = event.target instanceof Element ? event.target : null;
-      if (target?.closest("[data-preview-card], [data-doc-row], .rd-layer")) return;
+      if (readerOpen) {
+        /* #1301, carried from the belt onto home (#1319): on a wide screen a
+           press on the reader's dead space -- its backdrop, the stage beside
+           the page -- closes the reader and the card with it, back to the
+           drawer. Its own controls and its page keep it open. On a phone
+           the reader is closed by its own close. */
+        if (!wide() || target?.closest(".rd-panel :is(button, a, output, img), .rd-zoom")) return;
+        readerOpen = false;
+        close(true);
+        return;
+      }
+      /* the scrim's own click closes it, so the tap ends there (#1319) */
+      if (target?.closest("[data-preview-card], [data-doc-row], .rd-layer, [data-preview-scrim]")) return;
       close(true);
     };
     window.addEventListener("keydown", onKey, true);
@@ -295,10 +334,20 @@
   }
 </script>
 
+<div class="pvseat" bind:this={seat}>
+{#if modal}
+  <!-- #1319: the bottom sheet's scrim, a pointer's dismiss, clear so the
+       drawer reads through it; it takes the press, so the tap that puts the
+       sheet away never lands on the page behind as well. Escape is the
+       keyboard's, so it needs no key handler of its own. -->
+  <div class="pvscrim" data-preview-scrim aria-hidden="true"
+       onclick={() => { release?.(); onclose({ refocus: Boolean(card?.contains(document.activeElement)), press: true }); }}></div>
+{/if}
 {#if shown}
   {@const st = paperState}
-  <!-- role=dialog, not modal: the drawer beside it stays live, and a press
-       on it (or Escape) puts the card away. -->
+  <!-- role=dialog: beside the drawer not modal, the drawer stays live and
+       a press on it (or Escape) puts the card away; as the bottom sheet
+       modal, the page behind inert (the effect above). -->
   <div class="glass readcard" data-preview-card bind:this={card}
          class:open class:instant class:snap={showing} class:still={st !== "available"}
          class:rc-refused={st === "refused"}
@@ -406,6 +455,8 @@
   </div>
 {/if}
 
+</div>
+
 {#if shown && showing}
   <Reader bind:open={readerOpen} doc={shown} {itemTitle} onremove={remove}
           staged={Boolean(shown.staged)} pageHref={shown.staged ? shown.previewHref : ""}
@@ -413,6 +464,8 @@
 {/if}
 
 <style>
+  /* no box of its own: the card stands in the host's column as before */
+  .pvseat{display:contents}
   /* round 6's glass and reading card, as round 3 carries them */
   .readcard{--paper:var(--upcoming);
     width:var(--readw,480px);min-width:0;box-sizing:border-box;overflow:hidden;padding:10px 10px 4px;
@@ -450,7 +503,8 @@
   .focusline{font:600 15.5px var(--display);letter-spacing:.01em;color:var(--ink);
     animation:pv-breathe 4.2s ease-in-out infinite}
   @keyframes pv-breathe{0%,100%{opacity:.96}50%{opacity:.42}}
-  .why{font:10.5px var(--mono);color:var(--ink-quiet);line-height:1.9;margin-top:12px}
+  /* 13px, the floor (#1319): it was 10.5px */
+  .why{font:13px var(--mono);color:var(--ink-quiet);line-height:1.7;margin-top:12px}
   /* the honest states hold still: the line said once, only the plate drawn */
   .readcard.still .focusline{animation:none}
   .readcard.still .why{color:var(--ink-mid)}
@@ -505,12 +559,13 @@
   .quiet:hover{color:var(--ink)}
   .quiet:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:999px}
   .quiet:disabled{opacity:.4;cursor:default}
-  .problem{font:10.5px var(--mono);color:var(--overdue-text);text-align:center;padding:0 8px 8px;line-height:1.6}
+  .problem{font:13px var(--mono);color:var(--overdue-text);text-align:center;padding:0 8px 8px;line-height:1.6}
 
   /* UNDER 1200px there is no room beside the drawer: the card is the phone's
      bottom sheet (round 6, CON-10), on the desk and in the pocket alike —
      fixed to the foot, 18px shoulders, the grab, up from below in .3s. */
   @media (max-width:1199.98px){
+    .pvscrim{position:fixed;inset:0;z-index:44}
     .readcard,:global(.pvtrack) .readcard{position:fixed;left:0;right:0;bottom:0;top:auto;z-index:45;
       width:auto;max-height:88vh;margin:0;border-radius:18px 18px 0 0;
       border-left:0;border-right:0;border-bottom:0;backdrop-filter:blur(18px);

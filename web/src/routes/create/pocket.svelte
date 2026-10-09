@@ -269,8 +269,9 @@
       if (attachment) await attachItemDocument(household.id, draftId, attachment, documentIdOf(attachment));
       saved = true;
       wake(`added to your orbit · ${entry.name.trim()}`);
-      /* The approach (§2.5): the new item, seated on its belt. */
-      await goto(resolve("/item/[[id]]", { id: draftId }));
+      /* #1319 (§34): the new item, its drawer open on home, as the desk's
+         create lands (create.behaviour.js). */
+      await goto(resolve(`/home?item=${encodeURIComponent(draftId)}`));
     } catch (error) {
       /* Loud (#1058): the reason stays above the bar until the next attempt,
          the button comes back, and nothing typed is lost. No wake. */
@@ -376,7 +377,7 @@
       <div class="pk-bar-acts">
         <a class="p-pill pk-never" href={resolve("/home")}>never mind</a>
         <button type="submit" form="pocket-entry" class="p-pill filled pk-save"
-                disabled={phase !== "ready" || refusal !== null || saving || saved}
+                aria-disabled={phase !== "ready" || refusal !== null || saving || saved ? "true" : undefined}
                 aria-describedby={refusal ? "pk-refusal" : undefined}>
           {saved ? "Added" : saving ? "Adding…" : "Add to orbit"}
         </button>
@@ -440,7 +441,7 @@
   .pk-bar-in{max-width:var(--p-column);margin:0 auto}
   .pk-bar-acts{display:flex;gap:var(--p-pill-gap)}
   .pk-save{flex:1}
-  .pk-save:disabled{opacity:.5;cursor:default;box-shadow:none}
+  .pk-save[aria-disabled="true"]{opacity:.5;cursor:default;box-shadow:none}
   .pk-refusal,.pk-problem{margin:0 0 8px;font:var(--p-type-meta)/1.4 var(--mono)}
   .pk-refusal{color:var(--ink-mid)}
   .pk-problem{color:var(--overdue-text);animation:p-errin 200ms var(--p-ease) both}

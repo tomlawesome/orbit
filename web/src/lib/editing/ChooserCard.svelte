@@ -33,8 +33,10 @@
    * the pressed value (EditSession.closeChooser). Focus lands on the chosen
    * value as the card opens, or on today's date when none is chosen.
    *
-   * Not a modal: the drawer stays live beside it, so the card is a
+   * Beside, not a modal: the drawer stays live beside it, so the card is a
    * non-modal dialog (the pressed value carries aria-haspopup="dialog").
+   * As the sheet it is modal (#1319): the screen makes the page behind it
+   * inert while it stands, so it says so (aria-modal).
    *
    * @typedef {{
    *   ask: import('./item-draft.js').ChooserAsk,
@@ -77,7 +79,8 @@
 
 <svelte:window onkeydowncapture={escape} />
 
-<div class="chooser" class:sheet={layout === "sheet"} role="dialog" aria-label={`Choose ${ask.heading}`}>
+<div class="chooser" class:sheet={layout === "sheet"} role="dialog" aria-modal={layout === "sheet" ? "true" : undefined}
+     aria-label={`Choose ${ask.heading}`}>
   <div class="head">
     <h3>{ask.heading}</h3>
     <button type="button" class="close" onclick={onclose}>close<span class="kb">&nbsp;· esc</span></button>
@@ -119,7 +122,9 @@
          padding:10px 14px max(12px, env(safe-area-inset-bottom));backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
          animation:rise .3s cubic-bezier(.3,.7,.3,1) both}
   .sheet::before{content:"";display:block;width:36px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 4px}
-  .sheet .head{margin:-6px -6px -6px}
+  /* the head stops at its own foot: pulled 6px into the body, the
+     calendar's next-month arrow lay over the close's lower edge (#1319) */
+  .sheet .head{margin:-6px -6px 0}
   .sheet .kb{display:none}
 
   @keyframes beside{from{opacity:0;transform:translateX(-16px)}}

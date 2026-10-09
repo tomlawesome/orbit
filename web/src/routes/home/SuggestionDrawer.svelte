@@ -10,7 +10,16 @@
    * not on the belt): the paper opens the preview as the bottom sheet, as a
    * filed item's papers do (ItemDrawer.svelte), with the belt's own staged
    * states — attached on acceptance, nothing to download or remove.
+   *
+   * AMENDED IN THE ROWS (#1319 stage 3b; owner, 2026-10-08: the phone should
+   * amend the way the desk does, "Yeah, ideally"): `review & amend →` puts
+   * these rows into editing (EditRows.svelte, as SuggestionView.svelte does
+   * on the desk), the title live in the row's head, the choosers in the
+   * bottom sheet; `add to orbit` and `cancel` take the two decisions' place,
+   * and the relay's sure/unsure marks are hidden meanwhile. The review sheet
+   * it replaces is gone from home.
    */
+  import EditRows from "./EditRows.svelte";
   import { readingsOf } from "$lib/pocket/review.js";
   import { suggestionPapersOf } from "$lib/data/belt.js";
 
@@ -20,8 +29,9 @@
    *   problem?: string | null,
    *   showingPaper?: string | null,
    *   onopenpaper?: (paper: StagedPaper, from: HTMLElement) => void,
+   *   acts?: Pick<import('./drawer-acts.js').DrawerActs, "modes" | "sections" | "onaccept" | "oncancel">,
    * }} */
-  let { suggestion, problem = null, showingPaper = null, onopenpaper = undefined } = $props();
+  let { suggestion, problem = null, showingPaper = null, onopenpaper = undefined, acts = undefined } = $props();
 
   /* The real readings and papers (#1151 W1-Q11), not a second copy of
      review.js's own confidence logic: that copy dropped the lock check
@@ -33,12 +43,18 @@
   const readings = $derived(readingsOf(suggestion));
   const papers = $derived(suggestionPapersOf(suggestion)
     .map((paper) => ({ ...paper, itemId: suggestion.id, itemTitle: suggestion.title })));
+  const amending = $derived(Boolean(acts && acts.modes.edit.id === suggestion.id));
+  const adding = $derived(amending && Boolean(acts?.modes.edit.busy));
 </script>
 
-{#each readings as reading (reading.field)}
-  <div class="p-kv"><span>{reading.label}</span>
-    <b>{reading.value}{#if reading.sure !== null}<i>{reading.sure ? "sure" : "unsure"}</i>{/if}</b></div>
-{/each}
+{#if acts && amending}
+  <EditRows modes={acts.modes} sections={acts.sections} pocket />
+{:else}
+  {#each readings as reading (reading.field)}
+    <div class="p-kv"><span>{reading.label}</span>
+      <b>{reading.value}{#if reading.sure !== null}<i>{reading.sure ? "sure" : "unsure"}</i>{/if}</b></div>
+  {/each}
+{/if}
 <!-- The paper's name where the data holds one (review round §6.f, round 3
      §2), no size; else the count the list gives. -->
 {#each papers as paper (paper.id)}
@@ -49,9 +65,22 @@
     <span class="p-paper" aria-hidden="true">◆</span><span class="name">{paper.name}</span>{#if paper.clean}<span class="clean">scanned clean</span>{/if}
   </button>
 {/each}
+{#if acts && amending}
+  <div class="p-pills amend" role="group" aria-label="Amending {suggestion.title}">
+    <button type="button" class="p-pill filled" disabled={adding} aria-disabled={acts.modes.edit.refused ? "true" : undefined}
+            onclick={() => { if (!acts.modes.edit.refused) acts.onaccept?.(); }}>{adding ? "adding…" : "add to orbit"}</button>
+    <button type="button" class="p-pill" class:danger={acts.modes.discardArmed} class:armed={acts.modes.discardArmed}
+            disabled={adding} onclick={acts.oncancel}>{acts.modes.discardArmed ? "discard changes?" : "cancel"}</button>
+  </div>
+  {#if acts.modes.edit.problem ?? acts.modes.edit.refusal}
+    <p class="p-error" role="alert">{acts.modes.edit.problem ?? acts.modes.edit.refusal}</p>
+  {/if}
+{/if}
 {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
 
 <style>
+  /* #1327: held by aria-disabled so it stays focusable; dimmed as `disabled` was */
+  .amend .p-pill[aria-disabled="true"]{opacity:.5;cursor:default}
   .p-kv{align-items:baseline}
   .p-kv span{flex:none}
   .p-kv b{min-width:0;text-align:right;overflow-wrap:anywhere}
@@ -69,4 +98,5 @@
   .attached .name{min-width:0;overflow-wrap:anywhere}
   .clean{color:var(--ok-text)}
   .clean::before{content:"· ";color:var(--ink-quiet)}
+  .amend{margin-top:12px}
 </style>

@@ -8,7 +8,7 @@
  * drawer is doing besides reading, for whichever item it is. `sections` are
  * the item's household's, for the section's name and colour.
  *
- * @typedef {"snooze" | "complete" | "attach" | "retire" | "save" | null} DrawerBusy
+ * @typedef {"snooze" | "complete" | "attach" | "retire" | "restore" | "save" | null} DrawerBusy
  * @typedef {{
  *   busy: DrawerBusy,
  *   problem: string | null,
@@ -25,7 +25,11 @@
  *   oncancel: () => unknown,
  *   onamend?: () => unknown,
  *   onaccept?: () => unknown,
+ *   onrestore?: () => unknown,
  * }} DrawerActs
+ *
+ * `onrestore` brings a retired, cancelled or expired item back (#1319:
+ * the drawer opens any item, and offers what fits its state).
  *
  * `onamend` and `onaccept` are a suggestion's (SuggestionView.svelte, #1319):
  * `review & amend →` puts its rows into editing, and `add to orbit` approves

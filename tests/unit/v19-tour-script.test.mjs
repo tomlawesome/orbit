@@ -139,15 +139,24 @@ describe("the film's script (round 7, #1097)", () => {
     const pocket = await stage({ pocket: true }).player.measure();
     /* chapter 3 (index 2) carries the owner's two first lines (#1174,
        2026-10-01): the desk sizes a body by its cost and says so, the
-       pocket does not. Chapter 8's own dialect difference (the belt's step)
-       is gone from the film entirely (#1174 round 10), so it no longer
-       needs an exception here — every other chapter, including it, is
-       byte-identical between dialects. */
+       pocket does not. Chapter 8, "The item" (index 7, #1319 round 2),
+       says "Click" on the desk and "Tap" on the pocket in two of its
+       lines. Every other chapter is byte-identical between dialects. */
     desk.script.forEach((lines, k) => {
-      if (k === 2) return;
+      if (k === 2 || k === 7) return;
       expect(pocket.script[k], `chapter ${k + 1}`).toEqual(lines);
     });
     expect(desk.script[2]).toEqual(["Bodies orbit by when they're due, higher value events are larger."]);
     expect(pocket.script[2]).toEqual(["Bodies orbit by when they're due."]);
+    const item = (verb) => [
+      "Open an item and everything about it is right here.",
+      "Your notes, then any paperwork you’ve added.",
+      `That’s a preview. ${verb} it to read the whole thing.`,
+      "Snooze it, mark it done, add a document or retire it — all from here.",
+      "Need to change something? Edit it right here.",
+      `${verb} the date and pick a new one from the calendar.`,
+    ];
+    expect(desk.script[7]).toEqual(item("Click"));
+    expect(pocket.script[7]).toEqual(item("Tap"));
   });
 });

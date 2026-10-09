@@ -304,9 +304,6 @@
         background:var(--panel);backdrop-filter:blur(8px)}
   .desk .item:hover{background:var(--panel-raised);border-color:var(--line)}
   .desk .dot{width:8px;height:8px;border-radius:50%;flex:none}
-  .desk .dot.ter{background:linear-gradient(90deg,currentColor 50%,rgba(0,0,0,.5) 50%)!important;
-           background-color:currentColor!important}
-  .desk .dot.con{background:radial-gradient(circle,currentColor 24%,var(--panel-raised) 34%,currentColor 52%)!important}
   .desk .dot.sug{background:none!important;border:1.6px solid currentColor}
   .desk .item .body{flex:1;min-width:0}
   .desk .item .body b{display:block;font-size:14.5px;font-weight:520}
@@ -336,7 +333,9 @@
   .suggestview .actions button{font-size:12.5px;border-radius:9px;padding:6px 13px;cursor:pointer;
                   border:1px solid var(--line);background:none;color:var(--ink-mid);font-family:var(--ui)}
   .suggestview .actions button.yes{border-color:var(--accent);color:var(--accent-text)}
-  .suggestview .actions button:disabled{opacity:.5;cursor:default}
+  .suggestview .actions button:disabled,.suggestview .actions button[aria-disabled="true"]{opacity:.5;cursor:default}
+  /* #1319: cancel armed as "discard changes?" (discard-guard.js), as retire arms */
+  .suggestview .actions button.armed{border-color:var(--overdue);color:var(--overdue-text)}
   /* The open suggestion row keeps its dashed pen, and hands it to the drawer. */
   .desk .item.suggest.open,.suggestview{border-style:dashed}
   /* How sure the relay was: 10.5px caps after the value, ok for sure, warm
@@ -360,7 +359,9 @@
    * one piece. Inside, the vocabulary is the item view's, which is itself
    * composed from ratified sources:
    *   .kv    settings-mail.html's read-only label/value row (via item.css)
-   *   h4     the drawer's quiet label above a group
+   *   h2     the drawer's quiet label above a group (#1319: h2, not h4, as
+   *          the documents drawer's #843 -- the open drawer's headings
+   *          follow the page's own h1, so the level must not skip)
    *   .doc   home's own document row (the old documents dialog's, #1305)
    *   the small print and the way onward: item.css's .note and .back
    * Scoped under .itemview so home borrows the grammar without inheriting
@@ -388,7 +389,7 @@
   .itemview .kv b.locked{color:var(--ink-quiet);font-weight:450}
   .itemview p.failed{color:var(--degraded)}
   .itemview p.locked{color:var(--ink-quiet)}
-  .itemview h4{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
+  .itemview h2{font:10.5px var(--mono);letter-spacing:.16em;text-transform:uppercase;
                color:var(--ink-quiet);margin:18px 0 8px}
   .itemview .doc{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:9px;
                  border:1px solid var(--line-soft);margin-bottom:7px;font-size:13px}
@@ -542,8 +543,6 @@
   .body-link.lit :is(circle,path){transform:scale(1.6)}
   .desk .item.lit{border-color:var(--accent)}
   /* POL-5: constellations light on section hover */
-  .celestial polyline{transition:stroke-opacity .3s}
-  .constellation-lit .celestial polyline{stroke-opacity:.85}
   /* POL-6: chart callout — legible, quadrant-aware */
   .callout{position:fixed;z-index:8;pointer-events:none;opacity:0;transition:opacity .12s;
            background:var(--panel-raised);backdrop-filter:blur(12px);
@@ -812,11 +811,6 @@
 .manifest .corridor .planet{position:absolute;left:-37px;width:13px;height:13px;display:grid;place-items:center}
 .manifest .corridor .planet i{display:block;width:9px;height:9px;border-radius:50%;background:currentColor;
                 box-shadow:0 0 0 2.5px var(--bg)}
-.manifest .corridor .planet.ter i{background:linear-gradient(90deg,currentColor 50%,rgba(0,0,0,.5) 50%)}
-.manifest .corridor .planet.con i{background:radial-gradient(circle,currentColor 24%,var(--panel-raised) 34%,currentColor 52%)}
-/* #1005: a one-off is the dashed ring the sky draws it as -- an outline with
-   nothing inside, because nothing is coming round. */
-.manifest .corridor .planet.exp i{background:none;border:1.6px dashed currentColor}
 .manifest .corridor .planet.sug i{background:none;border:1.6px solid var(--accent)}
 .manifest .horizon{margin-top:34px;text-align:center;font:11px var(--mono);color:var(--ink-quiet);letter-spacing:.08em}
 
@@ -900,7 +894,6 @@
   .strip-note .act,.callout .chip,.drawer-top.open .nstar span,.nstar:hover span){
   text-shadow:0 0 9px var(--bloom)}
 [data-theme=retrograde] :is(.dial,.minisys,.strip) [style*="--accent"],
-[data-theme=retrograde] .celestial polyline,
 [data-theme=retrograde] .now-month{filter:drop-shadow(0 0 2.5px var(--bloom))}
 [data-theme=retrograde] :is(.inbox-orb.waiting,.suggestview .actions button.yes){
   box-shadow:0 0 12px -2px var(--bloom)}

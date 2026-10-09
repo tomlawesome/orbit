@@ -85,6 +85,10 @@ async function drag(page, el, dy) {
 /** @param {Page} page @param {string} path */
 async function go(page, path) {
   await page.goto(`${APP}${path}`, { waitUntil: "load" });
+  /* Home's markup arrives before its listeners: a tap in that gap is lost
+     (CI pipeline 2298, "/home · row-open" at 360x640). Wait for the moment
+     home says it can answer (#1064), as the e2e specs do. */
+  if (path.startsWith("/home")) await page.locator("body[data-home-ready]").waitFor({ state: "attached" });
   await settle(page);
 }
 
@@ -259,12 +263,23 @@ export const SIGNED_IN = [
     await openRow(page, catch_);
     await catch_.getByRole("button", { name: /^Add .* to your orbit$/ }).click();
   } },
-  { route: "/home", state: "review-sheet", reach: async (page) => {
+  /* #1319 stage 3b: `review & amend →` puts the suggestion row's own lines
+     into editing (the review sheet that rose here is gone from home), and
+     a chooser stands as the bottom sheet, as a filed item's does. */
+  { route: "/home", state: "suggestion-amending", reach: async (page) => {
     await go(page, "/home");
     const catch_ = row(page, ".pk-signals", "Home insurance");
     await openRow(page, catch_);
     await catch_.getByRole("button", { name: "review & amend →" }).click();
-    await sheetUp(page);
+    await catch_.locator('[data-ed="title"]').waitFor();
+  } },
+  { route: "/home", state: "suggestion-amending-section", reach: async (page) => {
+    await go(page, "/home");
+    const catch_ = row(page, ".pk-signals", "Home insurance");
+    await openRow(page, catch_);
+    await catch_.getByRole("button", { name: "review & amend →" }).click();
+    await catch_.getByRole("button", { name: /^section: / }).click();
+    await page.locator("[data-chooser-card]").waitFor();
   } },
   { route: "/home", state: "manifest-bottom", reach: async (page) => {
     await go(page, "/home");
@@ -308,54 +323,60 @@ export const SIGNED_IN = [
     await settle(page);
   } },
 
-  /* /item/<receiptId>: the suggestion seated in the belt (#1145; round 3 §4's
-     receipt page merged into it) -- its card holds the decisions and
-     `review & amend →` raises the review sheet. */
-  { route: "/item/r-insurance", state: "rest", reach: (page) => go(page, "/item/r-insurance") },
-  { route: "/item/r-insurance", state: "review-sheet", reach: async (page) => {
-    await go(page, "/item/r-insurance");
-    await page.locator(".ip-amend").first().click();
-    await sheetUp(page);
+  /* #1319 stage 3b (owner-decisions §34): the belt and its sheets retired,
+     and `/item/<id>` answers with home's drawer. What a phone did on the
+     belt it does in the MOT's row on home: the foot row's snooze (the
+     calendar as the bottom sheet), complete and the pencil (the rows in
+     their completing and editing modes, a chooser as the bottom sheet), an
+     armed retire, and a paper's preview sheet. The belt's hatch and find
+     are home's own (`hatch`, `search`, `search-results` above). An item the
+     manifest does not list opens as one more row on its address. */
+  { route: "/home", state: "row-snooze", reach: async (page) => {
+    await go(page, "/home");
+    const mot = row(page, ".pk-below", "Car MOT");
+    await openRow(page, mot);
+    await mot.getByRole("button", { name: "Snooze Car MOT" }).click();
+    await page.locator("[data-chooser-card]").waitFor();
   } },
-  /* /item: the belt and its sheets */
-  { route: "/item", state: "rest", reach: (page) => go(page, "/item") },
-  { route: "/item/i-mot", state: "rest", reach: (page) => go(page, "/item/i-mot") },
-  { route: "/item/i-mot", state: "hatch", reach: async (page) => { await go(page, "/item/i-mot"); await hatch(page); } },
-  { route: "/item/i-mot", state: "find", reach: async (page) => {
-    await go(page, "/item/i-mot");
-    await page.locator(".ip-find").click();
-    await sheetUp(page);
+  { route: "/home", state: "row-complete", reach: async (page) => {
+    await go(page, "/home");
+    const mot = row(page, ".pk-below", "Car MOT");
+    await openRow(page, mot);
+    await mot.getByRole("button", { name: "Complete Car MOT" }).click();
+    await mot.getByRole("group", { name: "Completing Car MOT" }).waitFor();
   } },
-  { route: "/item/i-mot", state: "find-results", reach: async (page) => {
-    await go(page, "/item/i-mot");
-    await page.locator(".ip-find").click();
-    await sheetUp(page);
-    await sheet(page).locator(".bp-field-find").fill("service");
+  { route: "/home", state: "row-edit", reach: async (page) => {
+    await go(page, "/home");
+    const mot = row(page, ".pk-below", "Car MOT");
+    await openRow(page, mot);
+    await mot.getByRole("button", { name: "Edit this item" }).click();
+    await mot.getByRole("group", { name: "Editing Car MOT" }).waitFor();
   } },
-  ...["complete", "reschedule", "snooze", "edit"].map((act) => ({
-    route: "/item/i-mot", state: act,
-    reach: async (/** @type {Page} */ page) => {
-      await go(page, "/item/i-mot");
-      await page.locator(".ip-acts button:visible", { hasText: act }).first().click();
-      await sheetUp(page);
-    },
-  })),
-  { route: "/item/i-mot", state: "retire", reach: async (page) => {
-    await go(page, "/item/i-mot");
-    await page.locator(".ip-acts button:visible", { hasText: /retire/i }).first().click();
+  { route: "/home", state: "row-edit-section", reach: async (page) => {
+    await go(page, "/home");
+    const mot = row(page, ".pk-below", "Car MOT");
+    await openRow(page, mot);
+    await mot.getByRole("button", { name: "Edit this item" }).click();
+    await mot.getByRole("button", { name: /^section: / }).click();
+    await page.locator("[data-chooser-card]").waitFor();
   } },
-  { route: "/item/i-mot", state: "documents", reach: async (page) => {
-    await go(page, "/item/i-mot");
-    await page.locator(".ip-docs").click();
-    await sheetUp(page);
+  { route: "/home", state: "row-retire-armed", reach: async (page) => {
+    await go(page, "/home");
+    const mot = row(page, ".pk-below", "Car MOT");
+    await openRow(page, mot);
+    await mot.getByRole("button", { name: "Retire Car MOT" }).click();
+    await mot.getByRole("button", { name: /tap again to confirm$/ }).waitFor();
   } },
-  { route: "/item/i-mot", state: "document-preview", reach: async (page) => {
-    await go(page, "/item/i-mot");
-    await page.locator(".ip-docs").click();
-    await sheetUp(page);
-    await settle(page);
-    await sheet(page).locator("[data-row-face]").first().click();
-    await sheet(page).locator(".bp-page.shown, .bp-honest").first().waitFor();
+  { route: "/home", state: "document-preview", reach: async (page) => {
+    await go(page, "/home");
+    const mot = row(page, ".pk-below", "Car MOT");
+    await openRow(page, mot);
+    await mot.locator("[data-doc-row]").first().click();
+    await page.locator("[data-preview-card]").waitFor();
+  } },
+  { route: "/home", state: "row-unlisted", reach: async (page) => {
+    await go(page, "/home?item=i-chimney");
+    await row(page, ".pk-below", "Chimney sweep").locator("[data-row-panel]:not([hidden])").waitFor();
   } },
 
   /* /create: the form, its expanded reminders, a refusal, and leaving it */

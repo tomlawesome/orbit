@@ -15,8 +15,8 @@
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { WorkspaceError, applyCommand, approveReceipt, dueDateIn, attachItemDocument, dismissReceipt, readHome, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut } from "$lib/data/workspace.js";
-  import { archiveCommand, completeCommand, snoozeCommand, upsertCommand } from "$lib/data/commands.js";
+  import { WorkspaceError, applyCommand, approveReceipt, dueDateIn, attachItemDocument, dismissReceipt, householdElsewhereFor, readHome, readHomeIn, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut } from "$lib/data/workspace.js";
+  import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
   import { createHeldCompletion } from "$lib/data/held-completion.js";
   import { createArm } from "$lib/pocket/arm.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
@@ -33,6 +33,7 @@
   import { DrawerModes, pressKeepsChooser } from "./drawer-modes.svelte.js";
   import { amendedOf, proposedItemOf } from "$lib/editing/item-draft.js";
   import { WIDE_QUERY, cardWidthOf, pairOf, trackOf } from "./preview-pair.js";
+  import { isPocket } from "$lib/pocket/media.js";
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
   import { shortDate } from "$lib/data/belt.js";
   import NorthStarMark from "$lib/NorthStarMark.svelte";
@@ -315,10 +316,8 @@
    * interface, only offered by the copy-link button on the open row. The
    * address is `/home?item=<id>`, and opening it directly loads home with
    * that row scrolled to and expanded, which is the ruling's own test of the
-   * address. (`/item/<id>` remains the item's full-command surface, #455; the
-   * open row links to it quietly. Whether the two addresses should become one
-   * is the open question in the report — the row's read view is what the
-   * owner ratified, and the commands have never been designed into it.)
+   * address. (#1319, §34: the two addresses became one. The drawer holds
+   * every command the belt had, and the belt's `/item/<id>` redirects here.)
    *
    * THE BACK BUTTON. Opening a row PUSHES, so Back closes it and lands you
    * exactly where you were reading. Swapping straight from one open row to
@@ -535,6 +534,7 @@
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
     event.preventDefault();
     if (expanded === id) return collapseRow();
+    if (expanded !== null && modes.id === expanded && !modes.cancel()) return;
     if (expanded === null) {
       pushedEntry = true;
       pushState(resolve(`/home?item=${encodeURIComponent(id)}`), { orbitItem: id });
@@ -545,6 +545,9 @@
 
   function collapseRow() {
     if (expanded === null) return;
+    /* #1319: rows holding changes are not thrown away by a close; the first
+       try arms the cancel pill's "discard changes?" (DrawerModes.cancel) */
+    if (modes.id === expanded && !modes.cancel()) return;
     if (pushedEntry) {
       pushedEntry = false;
       history.back();
@@ -617,7 +620,7 @@
      the rows and records them at once (recordCompletion, below); `held`
      still sends what an earlier visit held and never saw confirmed
      (held-completion.js). */
-  /** @type {"snooze" | "complete" | "attach" | "retire" | null} */
+  /** @type {"snooze" | "complete" | "attach" | "retire" | "restore" | null} */
   let footBusy = $state(null);
   /** @type {string | null} */
   let footProblem = $state(null);
@@ -650,7 +653,7 @@
 
   /**
    * One act that changes the item and then reads it again.
-   * @param {"snooze" | "retire"} kind
+   * @param {"snooze" | "retire" | "restore"} kind
    * @param {() => object} build
    * @param {string} words  what the wake says once it has landed
    * @param {{ leave?: boolean }} [options]  the item leaves the manifest: put the drawer away
@@ -733,7 +736,11 @@
     const { item, until } = snooze;
     /* Whether the day will do is the engine's (#1325): its refusal lands
        in footProblem, in its words. */
-    runFoot("snooze", () => snoozeCommand(item, until), `${item.title} snoozed until ${longDate(until)}`);
+    /* #1319: every pill is disabled while the snooze is sent, which drops
+       the focus the calendar handed back to the snooze pill; put it back
+       once the pills are live again, as complete does. */
+    runFoot("snooze", () => snoozeCommand(item, until), `${item.title} snoozed until ${longDate(until)}`)
+      .then(() => { if (expanded === item.id) focusInDrawer('[aria-label^="Snooze "]'); });
   }
 
   async function saveEdit() {
@@ -785,7 +792,8 @@
       if (!modes.escape()) return;
       event.preventDefault();
       event.stopPropagation();
-      if (!chooser) focusInDrawer(editing ? EDIT_HOME : '[aria-label^="Complete "]');
+      /* a guarded cancel that only armed "discard changes?" leaves focus be */
+      if (!chooser && !modes.id) focusInDrawer(editing ? EDIT_HOME : '[aria-label^="Complete "]');
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
@@ -834,7 +842,8 @@
     onrecord: recordCompletion,
     oncancel: () => {
       const editing = Boolean(modes.edit.id);
-      modes.end();
+      /* rows holding changes: the first press arms "discard changes?" */
+      if (!modes.cancel()) return;
       focusInDrawer(editing ? EDIT_HOME : '[aria-label^="Complete "]');
     },
     onamend: startAmend,
@@ -858,6 +867,10 @@
       const item = commandItem();
       if (item) runFoot("retire", () => archiveCommand(item), `${item.title} retired`, { leave: true });
     },
+    onrestore: () => {
+      const item = commandItem();
+      if (item) runFoot("restore", () => statusCommand(item, "active"), `${item.title} restored`);
+    },
     oncopy: copyAddress,
   });
 
@@ -868,6 +881,11 @@
   /** @param {MouseEvent} event */
   function onWindowClick(event) {
     if (!expanded) return;
+    /* #1319: the desk's rule only. Both dialects are on the page and CSS
+       picks one, so this handler also hears the phone's presses; there a
+       paper's tap would close the desk's row and rewrite the address to
+       bare /home, dropping `?item=`. The pocket's rows close themselves. */
+    if (isPocket()) return;
     if (swallowClick) { swallowClick = false; return; }
     /* #1319: while the rows are being edited or a completion asked for, a
        press elsewhere leaves the drawer as it is (round 8's own rule) */
@@ -1021,7 +1039,9 @@
     view ? manifestGroupsOf(asView(view).household, { suggestions: /** @type {any} */ (asView(view).suggestions), today: asView(view).today }) : null,
   );
   /* §14 (#469): the manifest rendered as the corridor — this household's
-     full scrollback, suggestions merged in date order. */
+     full scrollback, suggestions merged in date order. #1319: the open item
+     is put on the line whatever its status (retired, cancelled, expired),
+     at its own date, so its drawer can open: the drawer opens any item. */
   const corridor = $derived(
     (() => {
       const current = view ? asView(view) : null;
@@ -1029,7 +1049,7 @@
         ? corridorOf(
             { households: [current.household], activeHouseholdId: current.primary },
             current.today,
-            { suggestions: /** @type {any} */ (current.suggestions) },
+            { suggestions: /** @type {any} */ (current.suggestions), include: expanded },
           )
         : null;
     })(),
@@ -1364,27 +1384,8 @@
   const trailed = $derived(
     bodies.filter((b) => (b.suggestion ? b.trail : b.trail && (b.overdue || b.paint === "amber"))),
   );
-  /* The dotted accent line strings the next three routine services together. */
-  const constellationPoints = $derived(
-    bodies
-      .filter((b) => !b.suggestion && b.kind === "service")
-      .slice(0, 3)
-      .map((b) => `${b.placement.x},${b.placement.y}`)
-      .join(" "),
-  );
   const closest = $derived(bodies.find((b) => b.closest) ?? null);
   const firstOverdue = $derived(bodies.find((b) => b.overdue) ?? null);
-  /* #1005: a one-off is a dashed ring in its own band's colour -- an outline
-     with nothing inside it, because there is nothing coming round. Past its
-     date it wears the quiet ink tone: ended, not owed. */
-  /** @type {(b: any) => string} */
-  const expiryStroke = (b) =>
-    b.paint === "ended" ? "var(--ink-mid)"
-      : b.paint === "amber" ? "var(--warm)"
-        : b.paint === "sky" ? "var(--upcoming)"
-          : "var(--ok)";
-
-
   onMount(() => {
     const query = window.matchMedia(DESK);
     /** @type {(() => void) | null} */
@@ -1505,8 +1506,16 @@
        resolves into a closure and mounting follows it, after tick() has put
        the data-driven markup in the document for the behaviour to bind. */
     readHome().then(async (data) => {
+      /* #1319 (2026-10-09): an address naming an item in another of the
+         reader's households switches home to that household first, so the
+         drawer opens there, on the desk and the phone alike. Done here, on
+         arriving, and never in the server's load: a GET that switched the
+         household would let a preloaded link switch it. If the switch is
+         refused, home stays where it was and the address opens nothing. */
+      const away = householdElsewhereFor(data, page.url.searchParams.get("item"));
+      const read = away ? await readHomeIn(away).catch(() => data) : data;
       if (disposed) return;
-      view = data;
+      view = read;
       /* #1151 F8: a later successful read must clear an earlier failure's
          banner — it never did, so the page kept claiming it could not
          reach the home even once it plainly could again. */
@@ -1806,9 +1815,9 @@
   <div class="inner">
     <h2>Add to your orbit</h2>
     <div class="ctypes">
-      <button class="ctype"><span class="dot con"></span>renewal</button>
+      <button class="ctype"><span class="dot"></span>renewal</button>
       <button class="ctype"><span class="dot"></span>service</button>
-      <button class="ctype"><span class="dot ter"></span>inspection</button>
+      <button class="ctype"><span class="dot"></span>inspection</button>
       <button class="ctype"><span class="dot" style="background:none;border:1.6px solid currentColor"></span>something else</button>
     </div>
     <div class="crow">
@@ -1841,9 +1850,10 @@
     {#snippet bodyMark(b = EMPTY_BODY, cx = 0, cy = 0, r = 0)}
       {#if b.suggestion}
         <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--accent)" stroke-width="1.6"/>
-      {:else if b.kind === "expiry"}
-        <!-- #1005: no fill, no core, no highlight -- the ring IS the body. -->
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke={expiryStroke(b)} stroke-width="2" stroke-dasharray="2.6 2.2"/>
+      {:else if b.paint === "ended"}
+        <!-- #1005: a one-off past its date is ended, not owed -- the same plain
+             body in the quiet ink tone (#1322: no type marks, only paint). -->
+        <circle cx={cx} cy={cy} r={r} style="stroke:var(--bg);stroke-width:2;fill:var(--ink-mid)"/>
       {:else if b.paint === "ruby" || b.paint === "amber"}
         <circle cx={cx} cy={cy} r={r} style="stroke:var(--bg);stroke-width:2" fill="url(#p-{b.paint})"/>
       {:else if b.paint === "sky"}
@@ -1853,14 +1863,7 @@
       {:else}
         <circle cx={cx} cy={cy} r={r} fill="url(#p-jade)"/>
       {/if}
-      {#if !b.suggestion && b.kind === "inspection"}
-        <path d="M {cx} {cy - r} A {r} {r} 0 0 1 {cx} {cy + r} Z" fill="rgba(0,0,0,.42)"/>
-      {/if}
-      {#if !b.suggestion && b.kind === "renewal"}
-        <circle cx={cx} cy={cy} r={r * 0.57} style="fill:var(--bg)"/>
-        <circle cx={cx} cy={cy} r={r * 0.28} fill="url(#p-{b.paint})"/>
-      {/if}
-      {#if !b.suggestion && b.kind !== "expiry" && r >= 4}
+      {#if !b.suggestion && r >= 4}
         <circle cx={cx - 0.2 * r} cy={cy + 0.25 * r} r={0.33 * r} fill="rgba(255,255,255,.38)"/>
       {/if}
     {/snippet}
@@ -1904,11 +1907,6 @@
           <line x1="14" y1="190" x2="34" y2="190"/><line x1="65.5" y1="65.5" x2="80" y2="80"/>
         </g>
         <circle cx="190" cy="190" r="168" fill="none" stroke="var(--chart-line-soft)" stroke-width=".5"/>
-      </g>
-      <g class="celestial">
-        <polyline points={constellationPoints} fill="none"
-                  stroke="var(--accent)" stroke-opacity=".38" stroke-width="1"
-                  stroke-dasharray="1 5" stroke-linecap="round"/>
       </g>
 
       <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
@@ -2192,11 +2190,6 @@
   <div class="keyrow"><span class="sw" style="background:var(--warm)"></span>due soon</div>
   <div class="keyrow"><span class="sw" style="background:var(--upcoming)"></span>upcoming</div>
   <div class="keyrow"><span class="sw" style="background:var(--ok)"></span>on track &mdash; wide orbit</div>
-  <h2>Types</h2>
-  <div class="keyrow"><span class="sw" style="background:var(--ink-mid)"></span>routine service</div>
-  <div class="keyrow"><span class="sw" style="background:radial-gradient(circle,var(--ink-mid) 24%,var(--panel-raised) 34%,var(--ink-mid) 52%)"></span>renewal / contract</div>
-  <div class="keyrow"><span class="sw" style="background:none;border:2px dashed var(--ink-mid)"></span>expiry &mdash; ends, does not come round</div>
-  <div class="keyrow"><span class="sw" style="background:linear-gradient(90deg,var(--ink-mid) 50%,rgba(0,0,0,.55) 50%)"></span>inspection / certification</div>
   <div class="keyrow"><span class="sw" style="background:none;border:1.6px solid var(--accent)"></span>suggestion &mdash; not yet accepted</div>
   <h2>Physics</h2>
   <div class="keyrow">closer = sooner</div>

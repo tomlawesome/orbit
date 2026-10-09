@@ -4,9 +4,9 @@
 
   /**
    * A PIECE OF MAIL FOR YOUR REVIEW (#1120, proposal §2.6; round 3 §4,
-   * #1140): the inbox's review card, now one shared piece that the inbox
-   * and the receipt page (`/item/<receiptId>`) both mount, beside the
-   * review sheet (ReviewSheet.svelte) that home raises in place too.
+   * #1140): the inbox's review card, beside the review sheet
+   * (ReviewSheet.svelte) the inbox raises in place. (The receipt page,
+   * `/item/<receiptId>`, retired with the belt, #1319.)
    *
    * The dashed pen of "not yet in orbit", then: the title (18px), `caught
    * 11 Aug · burns up in 43d`, the readings as `.p-kv` lines with `sure` or

@@ -63,22 +63,28 @@ export function trapTab(event, root) {
 }
 
 /**
- * Makes everything in <body> except `keep` inert, and returns the undo.
- * Elements that were already inert are left alone on restore. Anything
- * marked `data-pocket-above` (the wake, §1.13, which sits above any sheet)
- * stays live too.
- * @param {HTMLElement} keep - a direct child of <body>
+ * Makes everything on the page except `keep` inert, and returns the undo:
+ * at every level from `keep` up to <body>, the siblings of `keep` and of
+ * each element holding it go inert (the standard modal pattern, as the
+ * `aria-hidden` "hide others" helpers do it), so a sheet seated inside the
+ * page (home's chooser and preview sheets) is modal as surely as one
+ * portalled to <body> (sheet.js). Elements that were already inert are left
+ * alone on restore. Anything marked `data-pocket-above` (the wake, §1.13,
+ * which sits above any sheet) stays live too.
+ * @param {HTMLElement} keep
  * @returns {() => void}
  */
 export function inertPage(keep) {
   const body = keep.ownerDocument.body;
   /** @type {HTMLElement[]} */
   const changed = [];
-  for (const child of /** @type {HTMLElement[]} */ (Array.from(body.children))) {
-    if (child === keep || child.hasAttribute("inert") || child.hasAttribute("data-pocket-above")) continue;
-    if (["SCRIPT", "STYLE", "TEMPLATE"].includes(child.tagName)) continue;
-    child.setAttribute("inert", "");
-    changed.push(child);
+  for (let node = keep; node !== body && node.parentElement; node = node.parentElement) {
+    for (const sibling of /** @type {HTMLElement[]} */ (Array.from(node.parentElement.children))) {
+      if (sibling === node || sibling.hasAttribute("inert") || sibling.hasAttribute("data-pocket-above")) continue;
+      if (["SCRIPT", "STYLE", "TEMPLATE"].includes(sibling.tagName)) continue;
+      sibling.setAttribute("inert", "");
+      changed.push(sibling);
+    }
   }
   return () => {
     for (const el of changed) el.removeAttribute("inert");

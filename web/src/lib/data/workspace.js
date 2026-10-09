@@ -911,6 +911,36 @@ export async function readHome(fetchImpl) {
 }
 
 /**
+ * AN ITEM IN ANOTHER OF THE READER'S HOUSEHOLDS (#1319, decision
+ * 2026-10-09): `/home?item=<id>` for an item that lives in another household
+ * the reader belongs to switches home to that household and opens the drawer
+ * there. This names that household: null when home already stands in the
+ * item's own, or when no household of the reader's holds it (a suggestion,
+ * or an id Orbit does not hold, which opens nothing as before).
+ *
+ * @param {HomeView | null | undefined} view
+ * @param {string | null | undefined} itemId
+ * @returns {string | null}
+ */
+export function householdElsewhereFor(view, itemId) {
+  if (!itemId || !view?.household || (view.household.items ?? []).some((one) => one.id === itemId)) return null;
+  return view.households.find((one) => one.id !== view.primary && (one.items ?? []).some((item) => item.id === itemId))?.id ?? null;
+}
+
+/**
+ * Switches home to one of the reader's households and reads home again:
+ * the engine's own `household.activate` (the session's active household,
+ * which every screen reads), the command a household switch is.
+ *
+ * @param {string} householdId
+ * @returns {Promise<HomeView>}
+ */
+export async function readHomeIn(householdId) {
+  await applyCommand({ type: "household.activate", householdId });
+  return readHome();
+}
+
+/**
  * Everything the inbox screen renders (#463): the raw receipts in their
  * bounded groups, the approvable ones ALSO in suggestion shape (the approve
  * protocol's input), the relay summary, and a pinned "now" so elapsed-time
