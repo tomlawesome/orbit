@@ -412,3 +412,11 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## belt-endcap-controls.spec.js:68 "an end-cap press is the arrow key's press at 1600x1000"
 
 - 2026-10-09 · dad77c25 (#1325 rebased onto dev; the tree differs from pipeline 2287's green 8170fecb only in design files, an ADR, this log and one e2e spec) · pipeline 2290 / fidelity (job 33718) · `ArrowRight did not come back`; the same test passed at 390x844 in the same run. 45/45 locally with `--repeat-each=5` on the same commit; job retried as 33765. First sighting.
+
+## pocket-measure.spec.js:544 "/home · row-retire-armed meets the pocket floors" — pocket-measure, 390x664
+
+- 2026-10-09 · abcb06f1 · pipeline 2301 / fidelity (job 33822) · `openRow`'s tap on Car MOT's face never opened its panel (`locator.waitFor` ran to the 60 s test timeout), after `go()` had already waited for `body[data-home-ready]`; 487 others passed. Locally in the pinned image on 6afb412e: 20 repeats alone, then every `/home · row-` state 15 times over 4 workers (420 runs), all green. First sighting.
+
+## tour-pocket-webkit.spec.js:539 "plays through chapter 3 at 360x780 under normal motion" — chapters skipped
+
+- 2026-10-09 · abcb06f1 · pipeline 2301 / fidelity_webkit (job 33823) · the film reached only chapters 1 and 2 (`done` false, chapters `[0, 1]`) in 3.4 min. Neither of the next commits (63354fb6, 6afb412e) touches chapters 1–3; on 6afb412e, locally in the pinned image, it passed. First sighting.
