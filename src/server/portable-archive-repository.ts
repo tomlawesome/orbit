@@ -7,6 +7,7 @@ import { AppError } from "@/lib/app-error";
 import { CALENDAR_DATE_MESSAGE, calendarDate } from "@/lib/calendar-date";
 import { COST_MINOR_MAX, NOTES_MAX, PROVIDER_MAX, RECURRENCE_MAX, REFERENCE_MAX, SUBTYPE_MAX, TITLE_MAX } from "@/lib/domain";
 import { log, operationalDetail } from "@/lib/logger";
+import { MIN_PASSWORD_LENGTH, passwordLength } from "@/lib/password-length";
 import { currencyCode } from "@/lib/platform-lists";
 import { optionalText } from "@/lib/workspace";
 import { getDocumentConfig } from "@/server/documents/config";
@@ -144,6 +145,12 @@ export async function createPortableArchive(input: {
   includeDocuments: boolean;
 }): Promise<{ id: string; expiresAt: string; includesDocuments: boolean }> {
   await requireHouseholdAccess(input.userId, input.householdId, true);
+  // The floor is held when an archive is made (#1333), counted as a person
+  // counts, so a passphrase the route's own length check let through is still
+  // refused in words rather than failing as a fault inside the cipher.
+  if (passwordLength(input.passphrase) < MIN_PASSWORD_LENGTH) {
+    throw new AppError("archive_passphrase_too_short", `Use an export passphrase of at least ${MIN_PASSWORD_LENGTH} characters`, 422);
+  }
   const db = getDb();
   const [[household], householdSections, householdItems, events, reminders, documentRows] = await Promise.all([
     db.select().from(households).where(eq(households.id, input.householdId)).limit(1),

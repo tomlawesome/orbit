@@ -83,3 +83,16 @@ describe("currency and time zone are checked in one place (#1333)", () => {
     expect(where(/timezone[^\n]*z\.string\(\)\.min\(1\)\.max\(80\)/u)).toEqual([]);
   });
 });
+
+describe("one passwordLength counts a password or passphrase (#1333)", () => {
+  it.each(["lib/auth/password.ts", "lib/recovery-bundle.ts", "server/portable-archive.ts"])(
+    "%s measures through it",
+    (name) => {
+      expect(file(name)).toMatch(/\bpasswordLength\b/u);
+    },
+  );
+
+  it.each(["lib/recovery-bundle.ts", "server/portable-archive.ts"])("%s does not count a passphrase's UTF-16 units", (name) => {
+    expect(lines(name, /passphrase\.length|value\.length\s*>=\s*MIN_/u)).toEqual([]);
+  });
+});
