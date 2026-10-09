@@ -9,7 +9,7 @@ import { requireUuid } from "@/lib/uuid";
 import { cloneSections } from "@/lib/workspace";
 import { identitiesAreUsable } from "@/server/local-credentials";
 import { openInstanceMetadataReader, type MetadataCipher, type MetadataFieldState } from "@/server/metadata/fields";
-import { requireInstanceAdministrator } from "@/server/authorization";
+import { requireActiveAdministrator, requireInstanceAdministrator } from "@/server/authorization";
 import { sectionSlug } from "@/server/workspace-access";
 
 export interface InstanceUser {
@@ -178,11 +178,7 @@ export async function setInstanceAdministrator(
 
   await getDb().transaction(async (transaction) => {
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ADMINISTRATOR_LOCK_KEY}, 0))`);
-    const [actor] = await transaction.select({ administrator: users.isInstanceAdmin, disabledAt: users.disabledAt }).from(users)
-      .where(eq(users.id, actorUserId)).limit(1);
-    if (!actor?.administrator || actor.disabledAt) {
-      throw new AppError("administrator_required", "Orbit administrator access is required", 403);
-    }
+    await requireActiveAdministrator(actorUserId, transaction);
 
     const [target] = await transaction.select({ administrator: users.isInstanceAdmin, disabledAt: users.disabledAt }).from(users)
       .where(eq(users.id, targetUserId)).limit(1);
@@ -251,11 +247,7 @@ export async function setInstanceUserDisabled(
   await getDb().transaction(async (transaction) => {
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ADMINISTRATOR_LOCK_KEY}, 0))`);
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ACCOUNT_LIFECYCLE_LOCK_KEY}, 0))`);
-    const [actor] = await transaction.select({ administrator: users.isInstanceAdmin, disabledAt: users.disabledAt }).from(users)
-      .where(eq(users.id, actorUserId)).limit(1);
-    if (!actor?.administrator || actor.disabledAt) {
-      throw new AppError("administrator_required", "Orbit administrator access is required", 403);
-    }
+    await requireActiveAdministrator(actorUserId, transaction);
 
     const [target] = await transaction.select({ administrator: users.isInstanceAdmin, disabledAt: users.disabledAt }).from(users)
       .where(eq(users.id, targetUserId)).limit(1);
@@ -362,12 +354,7 @@ export async function transferPrimaryAdministrator(
   await getDb().transaction(async (transaction) => {
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ADMINISTRATOR_LOCK_KEY}, 0))`);
 
-    const [actor] = await transaction
-      .select({ administrator: users.isInstanceAdmin, disabledAt: users.disabledAt })
-      .from(users).where(eq(users.id, actorUserId)).limit(1);
-    if (!actor?.administrator || actor.disabledAt) {
-      throw new AppError("administrator_required", "Orbit administrator access is required", 403);
-    }
+    await requireActiveAdministrator(actorUserId, transaction);
 
     const primary = await primaryAdministratorId(transaction);
     if (primary !== actorUserId) {
