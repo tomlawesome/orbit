@@ -2,13 +2,14 @@ import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 import type { CookieReader } from "@/lib/http";
 import { getDb } from "@/db";
-import { auditLog, instanceMaintenance, maintenanceUpdates, maintenanceWindows, users } from "@/db/schema";
+import { auditLog, instanceMaintenance, maintenanceUpdates, maintenanceWindows } from "@/db/schema";
 // Direct from the framework-free module, not the re-export: this module is
 // bundled into the operator CLI, which must not link Next (ADR-0015).
 import { AppError, MaintenanceActiveError } from "@/lib/errors";
 import { readSession } from "@/lib/auth/session";
 import { getAuthConfig } from "@/lib/env";
 import { requireUuid } from "@/lib/uuid";
+import { requireActiveAdministrator } from "@/server/authorization";
 
 /**
  * Application-level bounds on published text (#522, ADR-0013 decision 1). The
@@ -115,18 +116,6 @@ function requireVersion(expectedVersion: number): number {
 function laterExpectedEnd(first: Date | null, second: Date | null): Date | null {
   if (first === null || second === null) return null;
   return first.getTime() >= second.getTime() ? first : second;
-}
-
-/** Mirrors admin-repository.ts's inline actor checks: administrator, and not disabled. */
-async function requireActiveAdministrator(transaction: Transaction, actorUserId: string): Promise<void> {
-  const [actor] = await transaction
-    .select({ administrator: users.isInstanceAdmin, disabledAt: users.disabledAt })
-    .from(users)
-    .where(eq(users.id, actorUserId))
-    .limit(1);
-  if (!actor?.administrator || actor.disabledAt) {
-    throw new AppError("administrator_required", "Orbit administrator access is required", 403);
-  }
 }
 
 interface LockedSingleton {
@@ -420,7 +409,7 @@ export async function openMaintenanceWindow(
   const body = requireMaintenanceBody(params.body);
 
   await getDb().transaction(async (transaction) => {
-    await requireActiveAdministrator(transaction, actorUserId);
+    await requireActiveAdministrator(actorUserId, transaction);
     await lockSingleton(transaction);
     if (await readOpenWindow(transaction)) {
       throw new AppError("maintenance_already_open", "A maintenance window is already open", 409);
@@ -467,7 +456,7 @@ export async function publishMaintenanceUpdate(
   const body = requireMaintenanceBody(rawBody);
 
   await getDb().transaction(async (transaction) => {
-    await requireActiveAdministrator(transaction, actorUserId);
+    await requireActiveAdministrator(actorUserId, transaction);
     await lockSingleton(transaction);
     const open = await requireOpenWindow(transaction);
     const now = new Date();
@@ -507,7 +496,7 @@ export async function editMaintenanceUpdate(
   const body = requireMaintenanceBody(rawBody);
 
   await getDb().transaction(async (transaction) => {
-    await requireActiveAdministrator(transaction, actorUserId);
+    await requireActiveAdministrator(actorUserId, transaction);
     await lockSingleton(transaction);
     const [existing] = await transaction
       .select({ id: maintenanceUpdates.id, windowId: maintenanceUpdates.windowId, body: maintenanceUpdates.body })
@@ -550,7 +539,7 @@ export async function reviseMaintenanceExpectedEnd(
   requireVersion(expectedVersion);
 
   await getDb().transaction(async (transaction) => {
-    await requireActiveAdministrator(transaction, actorUserId);
+    await requireActiveAdministrator(actorUserId, transaction);
     await lockSingleton(transaction);
     const open = await requireOpenWindow(transaction);
     const now = new Date();
@@ -599,7 +588,7 @@ export async function endMaintenance(
     : requireMaintenanceBody(params.body);
 
   await getDb().transaction(async (transaction) => {
-    await requireActiveAdministrator(transaction, actorUserId);
+    await requireActiveAdministrator(actorUserId, transaction);
     const singleton = await lockSingleton(transaction);
     const now = new Date();
     const open = await readOpenWindow(transaction);
@@ -747,7 +736,7 @@ export async function scheduleMaintenanceWindow(
   const body = requireMaintenanceBody(params.body);
 
   await getDb().transaction(async (transaction) => {
-    await requireActiveAdministrator(transaction, actorUserId);
+    await requireActiveAdministrator(actorUserId, transaction);
     await lockSingleton(transaction);
     const now = new Date();
     const windowId = randomUUID();
@@ -788,7 +777,7 @@ export async function rescheduleMaintenanceWindow(
   requireVersion(expectedVersion);
 
   await getDb().transaction(async (transaction) => {
-    await requireActiveAdministrator(transaction, actorUserId);
+    await requireActiveAdministrator(actorUserId, transaction);
     await lockSingleton(transaction);
     const now = new Date();
     await bumpSingleton(transaction, expectedVersion, {}, now);
@@ -831,7 +820,7 @@ export async function cancelMaintenanceWindow(
   requireVersion(expectedVersion);
 
   await getDb().transaction(async (transaction) => {
-    await requireActiveAdministrator(transaction, actorUserId);
+    await requireActiveAdministrator(actorUserId, transaction);
     await lockSingleton(transaction);
     const now = new Date();
     await bumpSingleton(transaction, expectedVersion, {}, now);
