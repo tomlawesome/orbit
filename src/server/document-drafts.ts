@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLog, documentDrafts, documents, households, items, memberships, sections, users } from "@/db/schema";
+import { auditLog, documentDrafts, documents, households, items, sections } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import {
   proposalFromText,
@@ -14,7 +14,8 @@ import { detectDocumentMediaType, validateSupportedDocumentStructure } from "@/s
 import { isDocumentContentReady, readDocumentDownload } from "@/server/document-repository";
 import { getDocumentConfig } from "@/server/documents/config";
 import { openMetadataReader, requireMetadataWriter } from "@/server/metadata/fields";
-import { acquireActiveHouseholdLock, validUuid } from "@/server/workspace-access";
+import { validUuid } from "@/lib/uuid";
+import { acquireActiveHouseholdLock, findHouseholdAccess } from "@/server/workspace-access";
 
 export { proposalFromText } from "@/server/documents/suggestions";
 
@@ -81,14 +82,12 @@ async function requireDocumentMember(userId: string, documentId: string) {
   // A malformed id must fail the same bounded way an unknown one does,
   // rather than reach the uuid column as text and 500 (#383).
   if (!validUuid(documentId)) throw new AppError("document_not_found", "That document is not available", 404);
-  const [record] = await getDb().select({ id: documents.id, householdId: documents.householdId, displayName: documents.displayName, mediaType: documents.mediaType, lifecycle: documents.lifecycle, scanStatus: documents.scanStatus, administrator: users.isInstanceAdmin, member: memberships.userId })
+  const [record] = await getDb().select({ id: documents.id, householdId: documents.householdId, displayName: documents.displayName, mediaType: documents.mediaType, lifecycle: documents.lifecycle, scanStatus: documents.scanStatus })
     .from(documents)
-    .innerJoin(households, eq(households.id, documents.householdId))
-    .innerJoin(users, eq(users.id, userId))
-    .leftJoin(memberships, and(eq(memberships.userId, users.id), eq(memberships.householdId, documents.householdId)))
-    .where(and(eq(documents.id, documentId), isNull(households.deletionRequestedAt)))
+    .where(eq(documents.id, documentId))
     .limit(1);
-  if (!record || (!record.administrator && !record.member)) throw new AppError("document_not_found", "That document is not available", 404);
+  const access = record ? await findHouseholdAccess(userId, record.householdId) : undefined;
+  if (!record || !access) throw new AppError("document_not_found", "That document is not available", 404);
   if (!isDocumentContentReady(record, getDocumentConfig().scanMode, "draft")) {
     throw new AppError("document_not_found", "That document is not available", 404);
   }

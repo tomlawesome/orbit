@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
+import { MIN_PASSWORD_LENGTH, passwordLength } from "@/lib/password-length";
 
 const ARCHIVE_VERSION = 1;
 const SALT_BYTES = 16;
@@ -15,12 +16,17 @@ export interface EncryptedPortableArchive {
 }
 
 function keyFor(passphrase: string, salt: Buffer): Buffer {
-  if (passphrase.length < 12) throw new Error("Export passphrase must contain at least 12 characters");
   return scryptSync(passphrase, salt, 32, { N: 16_384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
 }
 
 /** Encrypts a portable archive with a user-supplied passphrase that is never persisted. */
 export function encryptPortableArchive(plaintext: Buffer, passphrase: string): EncryptedPortableArchive {
+  // The floor is held here, where a passphrase is made, and not in `keyFor`,
+  // which opening an archive shares: an archive sealed under a shorter
+  // passphrase than today's floor must still open (#1333).
+  if (passwordLength(passphrase) < MIN_PASSWORD_LENGTH) {
+    throw new Error(`Export passphrase must contain at least ${MIN_PASSWORD_LENGTH} characters`);
+  }
   const salt = randomBytes(SALT_BYTES);
   const iv = randomBytes(IV_BYTES);
   const key = keyFor(passphrase, salt);

@@ -28,6 +28,7 @@ import {
 } from "node:crypto";
 
 import { applyHostOwnership } from "./host-ownership";
+import { MIN_PASSWORD_LENGTH, passwordLength } from "./password-length";
 
 // The backup-bundle and recovery-bundle *format* core (issue #296 slice 1),
 // ported from:
@@ -151,7 +152,7 @@ const ORBKEK_KEY_BYTES = 32;
 const ORBKEK_SCRYPT = { N: 131_072, r: 8, p: 1, maxmem: 256 * 1024 * 1024 };
 
 /** recovery-crypto.mjs guarantee #1: enforced independently of every caller's own check. */
-export const MIN_RECOVERY_PASSPHRASE_LENGTH = 12;
+export const MIN_RECOVERY_PASSPHRASE_LENGTH = MIN_PASSWORD_LENGTH;
 
 /** The exact algorithm identifier the recovery-bundle manifest records (export-recovery-bundle.sh #14). */
 export const RECOVERY_KEY_ENCRYPTION_ALGORITHM = "aes-256-gcm-scrypt-n131072-r8-p1";
@@ -166,7 +167,7 @@ export function isValidDocumentKekHex(value: string): boolean {
 
 /** recovery-crypto.mjs guarantee #1 / export-recovery-bundle.sh #6. */
 export function isValidPassphrase(value: string): boolean {
-  return value.length >= MIN_RECOVERY_PASSPHRASE_LENGTH;
+  return passwordLength(value) >= MIN_RECOVERY_PASSPHRASE_LENGTH;
 }
 
 function deriveRecoveryKey(passphrase: string, salt: Buffer): Buffer {

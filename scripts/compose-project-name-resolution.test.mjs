@@ -48,7 +48,14 @@ import { failOnProcessDeadline, processGuard } from "./process-budget.mjs";
 // install engine does (src/lib/target-identity.ts deriveComposeProjectName,
 // which reads the same top-level name:), and install.sh reads the name the
 // engine committed to .env-orbit.
-const SCRIPTS = ["end-maintenance.sh", "repair.sh"];
+// #1345: the four operator scripts (backup, restore and the two recovery-bundle
+// shells) used to run `docker compose` with no --project-name at all, so a
+// COMPOSE_PROJECT_NAME in the caller's environment beat the one install had
+// written to .env-orbit and they addressed a different project (the proof is
+// on the issue). They derive the name exactly as repair.sh does, with the same
+// text, and join the pinned set.
+const OPERATOR_SCRIPTS = ["backup.sh", "restore.sh", "export-recovery-bundle.sh", "import-recovery-bundle.sh"];
+const SCRIPTS = ["end-maintenance.sh", "repair.sh", ...OPERATOR_SCRIPTS];
 
 function extractFunction(source, name) {
   const match = source.match(new RegExp(`^${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`, "mu"));
@@ -73,10 +80,17 @@ function scratchDir(prefix) {
   return dir;
 }
 
-describe("read_compose_project_name is the same function in all five scripts", () => {
-  const bodies = SCRIPTS.map((name) => extractFunction(readFileSync(join(import.meta.dirname, name), "utf8"), "read_compose_project_name"));
+function sourceOf(name) {
+  return readFileSync(join(import.meta.dirname, name), "utf8");
+}
 
-  it("is present, identical, in end-maintenance.sh and repair.sh", () => {
+describe("read_compose_project_name is the same function in all six scripts", () => {
+  // Extracted inside each test, so a script that lacks the function fails its
+  // own test by name instead of the whole file at collection.
+  const bodiesOf = () => SCRIPTS.map((name) => extractFunction(sourceOf(name), "read_compose_project_name"));
+
+  it("is present, identical, in end-maintenance.sh, repair.sh and the four operator scripts", () => {
+    const bodies = bodiesOf();
     for (const [index, body] of bodies.entries()) {
       assert.equal(body, bodies[0], `${SCRIPTS[index]} carries a different read_compose_project_name`);
     }
@@ -87,7 +101,7 @@ describe("read_compose_project_name is the same function in all five scripts", (
     writeFileSync(join(dir, "docker-compose.yml"), "name: orbit\n\nservices:\n  orbit-app:\n    image: busybox\n");
     assert.notEqual(dir.split("/").pop(), "orbit");
 
-    const script = `${bodies[0]}\nread_compose_project_name "$1"\n`;
+    const script = `${bodiesOf()[0]}\nread_compose_project_name "$1"\n`;
     const result = failOnProcessDeadline(
       spawnSync("bash", ["-c", script, "bash", join(dir, "docker-compose.yml")], { encoding: "utf8", ...processGuard() }),
       { label: "read_compose_project_name" },
@@ -101,7 +115,7 @@ describe("read_compose_project_name is the same function in all five scripts", (
     const dir = scratchDir("orbit-compose-name-fn-none-");
     writeFileSync(join(dir, "docker-compose.yml"), "services:\n  orbit-app:\n    image: busybox\n");
 
-    const script = `${bodies[0]}\nread_compose_project_name "$1"\n`;
+    const script = `${bodiesOf()[0]}\nread_compose_project_name "$1"\n`;
     const result = spawnSync("bash", ["-c", script, "bash", join(dir, "docker-compose.yml")], { encoding: "utf8", ...processGuard() });
 
     assert.equal(result.status, 1);
@@ -166,3 +180,54 @@ describe("end-maintenance.sh resolves the project from docker-compose.yml's name
   });
 });
 
+
+// #1345 (M8, #1328): backup.sh, restore.sh, export-recovery-bundle.sh and
+// import-recovery-bundle.sh carry the same text for the functions below. They
+// are deliberately standalone (no sourced library, so each stays a single file
+// an operator can read and copy), which makes "shared" mean "the same text",
+// proved here rather than assumed. restore.sh's wording is the reference for
+// the messages (a test pins "preflight/tools failed"); health_probe_url is the
+// text scripts/test-backup-restore.test.mjs already pins equal to the drill's.
+const SHARED_OPERATOR_FUNCTIONS = [
+  "compose",
+  "require_deployment",
+  "run_engine",
+  "health_probe_url",
+  "wait_for_health",
+  "engine_host_identity",
+  "read_environment_value",
+  "read_compose_project_name",
+  "derive_compose_project_name",
+];
+
+describe("the operator scripts carry byte-identical shared functions (#1345)", () => {
+  for (const name of SHARED_OPERATOR_FUNCTIONS) {
+    it(`${name}() is the same text in ${OPERATOR_SCRIPTS.join(", ")}`, () => {
+      const bodies = OPERATOR_SCRIPTS.map((script) => extractFunction(sourceOf(script), name));
+      for (const [index, body] of bodies.entries()) {
+        assert.equal(body, bodies[0], `${OPERATOR_SCRIPTS[index]} carries a different ${name}() from ${OPERATOR_SCRIPTS[0]}`);
+      }
+    });
+  }
+
+  it("read_environment_value() is also the text end-maintenance.sh and repair.sh carry", () => {
+    const reference = extractFunction(sourceOf("end-maintenance.sh"), "read_environment_value");
+    for (const script of ["repair.sh", ...OPERATOR_SCRIPTS]) {
+      assert.equal(extractFunction(sourceOf(script), "read_environment_value"), reference, `${script} carries a different read_environment_value()`);
+    }
+  });
+
+  it("require_deployment() keeps restore.sh's \"preflight/tools failed\" wording in all four", () => {
+    for (const script of OPERATOR_SCRIPTS) {
+      const body = extractFunction(sourceOf(script), "require_deployment");
+      assert.ok(body.includes("preflight/tools failed; Docker is required."), `${script} lost the pinned wording`);
+      assert.ok(body.includes("preflight/tools failed; curl is required."), `${script} lost the curl check`);
+    }
+  });
+
+  it("compose() names the project, so the caller's COMPOSE_PROJECT_NAME cannot pick another", () => {
+    for (const script of OPERATOR_SCRIPTS) {
+      assert.match(extractFunction(sourceOf(script), "compose"), /--project-name/u, `${script} runs compose without --project-name`);
+    }
+  });
+});

@@ -45,6 +45,7 @@ import {
   imapProviderConnectionOptions,
   imapRecipientAlias,
   matchesImapRecipientAlias,
+  safeAttachmentFailure,
 } from "@/server/imap-ingestion";
 import { getNotificationWorkerConfig } from "@/server/notification-worker";
 import { failureReasonOf, findReviewedIntakeCandidateReason, reviewInboxState } from "@/server/imap-inbox";
@@ -468,6 +469,16 @@ describe("reviewInboxState — status/failure to UI classification mapping", () 
     expect(failureReasonOf("some_unmapped_code")).toBe("unknown");
   });
 
+  it("keeps every scanner outcome a member can meet as 'scanner unavailable', not 'not kept' (engine-7)", () => {
+    for (const code of ["scanner_unavailable", "scanner_timeout", "scanner_protocol", "scanner_failed"]) {
+      expect(failureReasonOf(code)).toBe("scanner_off");
+      // The code the holding step throws must survive to the stored receipt,
+      // or the member is told the attachment was not kept instead.
+      expect(safeAttachmentFailure(new Error(code))).toBe(code);
+    }
+    expect(safeAttachmentFailure(new Error("some_unlisted_code"))).toBe("attachment_processing_failed");
+  });
+
   it("carries the derived reason on reviewInboxState's return alongside message", () => {
     expect(reviewInboxState("failed", "message_too_large")).toMatchObject({ classification: "unavailable", reason: "too_large" });
     expect(reviewInboxState("failed", "legacy_review_item")).toMatchObject({ classification: "cleanup", reason: "older_review" });
@@ -504,17 +515,18 @@ describe("findReviewedIntakeCandidateReason — comparableText normalization and
 });
 
 describe("sanitizeReviewDraftMetadata — bounded field mapping from a proposal blob", () => {
-  it("keeps a syntactically valid currency/date/scheduleKind and drops the invalid variants of each", () => {
+  it("keeps a valid currency/date/scheduleKind and drops the invalid variants of each", () => {
     expect(sanitizeReviewDraftMetadata({ proposal: { currency: "gbp" } }).proposal.currency).toBeUndefined();
     expect(sanitizeReviewDraftMetadata({ proposal: { currency: "GB" } }).proposal.currency).toBeUndefined();
     expect(sanitizeReviewDraftMetadata({ proposal: { currency: "GBP" } }).proposal.currency).toBe("GBP");
     expect(sanitizeReviewDraftMetadata({ proposal: { scheduleKind: "monthly" } }).proposal.scheduleKind).toBeUndefined();
     expect(sanitizeReviewDraftMetadata({ proposal: { scheduleKind: "renewal" } }).proposal.scheduleKind).toBe("renewal");
-    // NOTE (flagged, not fixed): dueDate is only checked against the
-    // \d{4}-\d{2}-\d{2} shape — it is never parsed as a real calendar date,
-    // so a syntactically-shaped but impossible date currently survives
-    // sanitization unchanged.
-    expect(sanitizeReviewDraftMetadata({ proposal: { dueDate: "2026-13-40" } }).proposal.dueDate).toBe("2026-13-40");
+    // Fixed in #1333: this pinned a flaw (a date of the right shape but not a
+    // real day, such as month 13, survived sanitisation). A due date is now a
+    // day that exists.
+    expect(sanitizeReviewDraftMetadata({ proposal: { dueDate: "2026-13-40" } }).proposal.dueDate).toBeUndefined();
+    expect(sanitizeReviewDraftMetadata({ proposal: { dueDate: "2026-02-30" } }).proposal.dueDate).toBeUndefined();
+    expect(sanitizeReviewDraftMetadata({ proposal: { dueDate: "2026-08-13" } }).proposal.dueDate).toBe("2026-08-13");
     expect(sanitizeReviewDraftMetadata({ proposal: { dueDate: "13 Aug 2026" } }).proposal.dueDate).toBeUndefined();
   });
 

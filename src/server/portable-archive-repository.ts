@@ -2,12 +2,16 @@ import { createHash, randomUUID } from "node:crypto";
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lt } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { auditLog, documentCrypto, documents, dueEvents, households, items, memberships, portableArchiveImports, portableArchives, reminderRules, sections, users } from "@/db/schema";
+import { auditLog, documentCrypto, documents, dueEvents, households, items, portableArchiveImports, portableArchives, reminderRules, sections, } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
+import { CALENDAR_DATE_MESSAGE, calendarDate } from "@/lib/calendar-date";
+import { COST_MINOR_MAX, NOTES_MAX, PROVIDER_MAX, RECURRENCE_MAX, REFERENCE_MAX, SUBTYPE_MAX, TITLE_MAX } from "@/lib/domain";
 import { log, operationalDetail } from "@/lib/logger";
+import { MIN_PASSWORD_LENGTH, passwordLength } from "@/lib/password-length";
+import { currencyCode } from "@/lib/platform-lists";
 import { optionalText } from "@/lib/workspace";
 import { getDocumentConfig } from "@/server/documents/config";
-import { LocalDocumentStorage } from "@/server/documents/storage";
+import { openDocumentStorage } from "@/server/documents/storage";
 import { readDocumentDownload, uploadItemDocument } from "@/server/document-repository";
 import { decryptPortableArchive, encryptPortableArchive, isEncryptedPortableArchive, type EncryptedPortableArchive } from "@/server/portable-archive";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
@@ -15,7 +19,7 @@ import { normalizeComparableMetadata } from "@/server/metadata/crypto";
 import { MetadataCipher, openMetadataReader, requireMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
 import { loadMetadataKey, metadataCryptoAvailable, MetadataKeyLockedError, receiptKeyScope } from "@/server/metadata/keys";
 import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
-import { acquireActiveHouseholdLock } from "@/server/workspace-access";
+import { acquireActiveHouseholdLock, requireHouseholdAccess } from "@/server/workspace-access";
 
 const ARCHIVE_TTL_MS = 24 * 60 * 60 * 1_000;
 
@@ -25,7 +29,26 @@ const importedSectionSchema = z.object({ id: z.string().uuid(), slug: z.string()
 // imported field this schema accepts but the reader rejects would insert a
 // row that 422s `readWorkspace` forever afterwards, with no in-product
 // recovery (#383 finding 2).
-const importedItemSchema = z.object({ id: z.string().uuid(), sectionId: z.string().uuid(), title: z.string().trim().min(1).max(100), subtype: optionalText(80).nullable(), provider: optionalText(100).nullable(), reference: optionalText(80).nullable(), costMinor: z.number().int().min(0).max(100_000_000).nullable().optional(), currency: z.string().length(3), startDate: z.string().nullable().optional(), expiryDate: z.string().nullable().optional(), renewalDate: z.string().nullable().optional(), serviceDate: z.string().nullable().optional(), recurrenceMonths: z.number().int().min(1).max(120).nullable().optional(), snoozedUntil: z.string().nullable().optional(), notes: optionalText(2_000).nullable(), externalDocumentUrl: z.string().nullable().optional(), status: z.enum(["active", "expired", "cancelled", "archived"]) });
+const importedItemSchema = z.object({
+  id: z.string().uuid(),
+  sectionId: z.string().uuid(),
+  title: z.string().trim().min(1).max(TITLE_MAX),
+  subtype: optionalText(SUBTYPE_MAX).nullable(),
+  provider: optionalText(PROVIDER_MAX).nullable(),
+  reference: optionalText(REFERENCE_MAX).nullable(),
+  costMinor: z.number().int().min(0).max(COST_MINOR_MAX).nullable().optional(),
+  currency: currencyCode,
+  // A date an archive carries is a real day (#1333); one Orbit wrote always is.
+  startDate: calendarDate.nullable().optional(),
+  expiryDate: calendarDate.nullable().optional(),
+  renewalDate: calendarDate.nullable().optional(),
+  serviceDate: calendarDate.nullable().optional(),
+  recurrenceMonths: z.number().int().min(1).max(RECURRENCE_MAX).nullable().optional(),
+  snoozedUntil: calendarDate.nullable().optional(),
+  notes: optionalText(NOTES_MAX).nullable(),
+  externalDocumentUrl: z.string().nullable().optional(),
+  status: z.enum(["active", "expired", "cancelled", "archived"]),
+});
 // Only the fields the import path cross-references (which item a document
 // belongs to, its lifecycle, and what to call it on re-upload); every other
 // exported document field is carried for round-tripping and left untyped.
@@ -37,20 +60,6 @@ const importedArchiveSchema = z.object({ format: z.literal("orbit-portable-archi
 
 function storage(): PortableArchiveStorage {
   return new PortableArchiveStorage(`${getDocumentConfig().storageRoot}/portable-archives`);
-}
-
-async function requireHouseholdAccess(userId: string, householdId: string, ownerOnly = false) {
-  const [access] = await getDb().select({ id: households.id, administrator: users.isInstanceAdmin, membershipUserId: memberships.userId, role: memberships.role })
-    .from(households).innerJoin(users, eq(users.id, userId))
-    .leftJoin(memberships, and(eq(memberships.userId, users.id), eq(memberships.householdId, households.id)))
-    .where(and(eq(households.id, householdId), isNull(households.deletionRequestedAt))).limit(1);
-  if (!access || (!access.administrator && !access.membershipUserId)) {
-    throw new AppError("household_not_found", "That household is not available", 404);
-  }
-  if (ownerOnly && !access.administrator && access.role !== "owner") {
-    throw new AppError("owner_required", "Only a household owner can make this change", 403);
-  }
-  return access;
 }
 
 /**
@@ -122,6 +131,12 @@ export async function createPortableArchive(input: {
   includeDocuments: boolean;
 }): Promise<{ id: string; expiresAt: string; includesDocuments: boolean }> {
   await requireHouseholdAccess(input.userId, input.householdId, true);
+  // The floor is held when an archive is made (#1333), counted as a person
+  // counts, so a passphrase the route's own length check let through is still
+  // refused in words rather than failing as a fault inside the cipher.
+  if (passwordLength(input.passphrase) < MIN_PASSWORD_LENGTH) {
+    throw new AppError("archive_passphrase_too_short", `Use an export passphrase of at least ${MIN_PASSWORD_LENGTH} characters`, 422);
+  }
   const db = getDb();
   const [[household], householdSections, householdItems, events, reminders, documentRows] = await Promise.all([
     db.select().from(households).where(eq(households.id, input.householdId)).limit(1),
@@ -300,6 +315,13 @@ function isEmptyRequiredFieldsFailure(error: unknown): boolean {
     && error.issues.every((issue) => issue.code === "too_small" && issue.origin === "string" && issue.minimum === 1);
 }
 
+// A date that is not a real day is told apart from a file that is not this
+// format (#1333): the person is pointed at the file having been edited, rather
+// than at the archive being unsupported.
+function isBadDateFailure(error: unknown): boolean {
+  return error instanceof z.ZodError && error.issues.some((issue) => issue.code === "custom" && issue.message === CALENDAR_DATE_MESSAGE);
+}
+
 function decodeImportArchive(serialized: unknown, passphrase: string) {
   if (!isEncryptedPortableArchive(serialized)) throw new AppError("archive_invalid", "That export has an invalid format", 422);
   rejectOversizedCiphertext(serialized);
@@ -314,6 +336,13 @@ function decodeImportArchive(serialized: unknown, passphrase: string) {
       throw new AppError(
         "archive_fields_empty",
         "That export has empty required fields, most likely because the encryption key was locked when it was made. Unlock the key and export again.",
+        422,
+      );
+    }
+    if (isBadDateFailure(error)) {
+      throw new AppError(
+        "archive_date_invalid",
+        "That export has a date that is not a real calendar day, so Orbit will not import it. An export Orbit made never has one; check the file has not been edited.",
         422,
       );
     }
@@ -431,11 +460,6 @@ export async function previewPortableImport(userId: string, householdId: string,
  */
 const STALE_UNFINISHED_IMPORT_MS = 60 * 60 * 1_000;
 
-function documentStorage(): LocalDocumentStorage {
-  const config = getDocumentConfig();
-  return new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
-}
-
 /** Why a document restore failed, in words the admin can act on without a stack trace. */
 function documentFailureReason(error: unknown): string {
   if (error instanceof AppError && error.code === "document_malware_detected") return "malware was detected in that file";
@@ -503,7 +527,7 @@ export async function rollBackPortableImport(importId: string): Promise<void> {
 
   // Database access to these documents is already gone; a failed local
   // delete here leaves an orphan blob, never a row pointing at missing bytes.
-  const storage = documentStorage();
+  const storage = openDocumentStorage();
   const results = await Promise.allSettled(outcome.documentStorageKeys.map((storageKey) => storage.deleteCiphertext(storageKey)));
   const failed = results.filter((result) => result.status === "rejected");
   if (failed.length > 0) {

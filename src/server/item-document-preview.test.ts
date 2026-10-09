@@ -31,13 +31,17 @@ vi.mock("@/server/upload-limit", () => ({
 }));
 vi.mock("@/server/documents/scanner", () => ({ scanFileWithClamAv: mocks.scan }));
 vi.mock("@/server/documents/preview", () => ({ renderDocumentPagePreview: mocks.render }));
-vi.mock("@/server/documents/storage", () => ({
-  LocalDocumentStorage: class {
+vi.mock("@/server/documents/storage", () => {
+  class LocalDocumentStorage {
     receive = mocks.receive;
     readQuarantine = mocks.readQuarantine;
     discardQuarantine = mocks.discardQuarantine;
-  },
-}));
+  }
+  return {
+    LocalDocumentStorage,
+    openDocumentStorage: () => new LocalDocumentStorage(),
+  };
+});
 
 import { previewItemDocument } from "./item-document-preview";
 
@@ -134,6 +138,30 @@ describe("item document preview (pre-attachment page one)", () => {
     mocks.scan.mockResolvedValue({ status: "error", reason: "protocol" });
     await expect(previewItemDocument(input())).rejects.toMatchObject({ code: "document_scanner_failed", status: 503 });
     expect(mocks.render).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["unavailable", { status: "error", reason: "unavailable" }],
+    ["timed out", { status: "error", reason: "timeout" }],
+    ["protocol error", { status: "error", reason: "protocol" }],
+    ["scanner-reported error", { status: "error", reason: "scanner" }],
+    ["error with no reason", { status: "error" }],
+    ["unknown status", { status: "quarantined" }],
+  ])("never opens or draws a file whose scan outcome was a %s", async (_label, outcome) => {
+    mocks.scan.mockResolvedValue(outcome);
+    await expect(previewItemDocument(input())).rejects.toMatchObject({ status: 503 });
+    expect(mocks.readQuarantine).not.toHaveBeenCalled();
+    expect(mocks.render).not.toHaveBeenCalled();
+    expect(mocks.discardQuarantine).toHaveBeenCalledTimes(1);
+  });
+
+  it("says 'preview', not 'inspection', when the scanner blocks a preview", async () => {
+    for (const reason of ["unavailable", "protocol"] as const) {
+      mocks.scan.mockResolvedValue({ status: "error", reason });
+      const refusal = await previewItemDocument(input()).then(() => undefined, (error: unknown) => error as Error);
+      expect(refusal?.message).toContain("preview");
+      expect(refusal?.message).not.toContain("inspection");
+    }
   });
 
   it("draws the page without a scan where scanning is disabled, and says it did not scan", async () => {

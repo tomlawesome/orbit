@@ -16,6 +16,7 @@
 //
 // `--misses` names documents, so it is for the owner, not for whoever is
 // tuning: see the note at the top of `holdout-score-cli.ts`.
+import { percent } from "./eval-format";
 import { chooseSubtypeByRules } from "./extraction-choose-meaning";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
 import { EXTRACTION_HOLDOUT3_FULLPAGE } from "./extraction-holdout3-fullpage";
@@ -45,10 +46,6 @@ interface Scored {
   right: number;
   of: number;
   misses: string[];
-}
-
-function percent(right: number, of: number): string {
-  return of === 0 ? "0.0%" : `${((right / of) * 100).toFixed(1)}%`;
 }
 
 function line(label: string, scored: Scored): string {

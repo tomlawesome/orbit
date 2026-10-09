@@ -53,7 +53,9 @@ appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(argv) + "\\n");
 if (argv[0] === "info") { process.stdout.write("[name=seccomp,profile=builtin name=cgroupns]\\n"); process.exit(0); }
 if (argv[0] !== "compose") process.exit(1);
 if (argv[1] === "version") process.exit(0);
-const verb = argv[3];
+let verbIndex = 1;
+while (argv[verbIndex] === "--project-name" || argv[verbIndex] === "--env-file") verbIndex += 2;
+const verb = argv[verbIndex];
 if (verb === "stop") process.exit(Number(process.env.FAKE_STOP_STATUS || 0));
 if (verb === "start") process.exit(Number(process.env.FAKE_START_STATUS || 0));
 if (verb === "run") {
@@ -126,14 +128,34 @@ function run(deployment, script, args, { env = {}, input = "" } = {}) {
   return { ...result, calls, probes };
 }
 
+/**
+ * One `docker compose` call split into its global options (--project-name,
+ * --env-file, in either order), its verb and the rest. The scripts name the
+ * Compose project explicitly (#1345), so the verb's position is not fixed.
+ */
+function composeCall(call) {
+  const options = {};
+  let index = 1;
+  while (call[index] === "--project-name" || call[index] === "--env-file") {
+    options[call[index]] = call[index + 1];
+    index += 2;
+  }
+  return { project: options["--project-name"], envFile: options["--env-file"], verb: call[index], rest: call.slice(index + 1) };
+}
+
+/** Every docker call that went through the script's compose() wrapper. */
+function composeCalls(calls) {
+  return calls.filter((call) => call[0] === "compose" && call.includes("--env-file")).map(composeCall);
+}
+
 /** The compose verbs in call order: "stop", "run", "start". */
 function verbs(calls) {
-  return calls.filter((call) => call[0] === "compose" && call[1] === "--env-file").map((call) => call[3]);
+  return composeCalls(calls).map((call) => call.verb);
 }
 
 /** Every `compose run` in call order, parsed by parseRun. */
 function engineRuns(calls) {
-  return calls.filter((entry) => entry[0] === "compose" && entry[3] === "run").map(parseRun);
+  return composeCalls(calls).filter((call) => call.verb === "run").map(parseRun);
 }
 
 /** The engine run that does the work: the last one (a restore or import first runs a --preflight). */
@@ -142,8 +164,9 @@ function engineRun(calls) {
 }
 
 /** The pieces of a `compose run` argv these tests assert on. */
-function parseRun(call) {
-  const flags = call.slice(4, call.indexOf("--entrypoint"));
+function parseRun(composed) {
+  const call = composed.rest;
+  const flags = call.slice(0, call.indexOf("--entrypoint"));
   const env = {};
   const volumes = [];
   for (let index = 0; index < flags.length; index += 1) {
@@ -154,7 +177,8 @@ function parseRun(call) {
   }
   const entrypointIndex = call.indexOf("--entrypoint");
   return {
-    envFile: call[2],
+    envFile: composed.envFile,
+    project: composed.project,
     flags: flags.filter((flag) => flag.startsWith("-") && flag !== "-e" && flag !== "-v"),
     env,
     volumes,
@@ -218,7 +242,8 @@ describe("the one-off each script becomes (E1/E5)", () => {
     const deployment = makeDeployment();
     writeFileSync(join(deployment.deployDir, "other.env"), "ORBIT_IMAGE=orbit-local:abcdef123456\n");
     const result = run(deployment, "backup.sh", [], { env: { ORBIT_ENV_FILE: "other.env" } });
-    expect(result.calls.filter((call) => call[0] === "compose" && call[1] === "--env-file").every((call) => call[2] === "other.env")).toBe(true);
+    expect(composeCalls(result.calls).length).toBeGreaterThan(0);
+    expect(composeCalls(result.calls).every((call) => call.envFile === "other.env")).toBe(true);
   });
 
   it("forwards restore.sh's test switches and ORBIT_NONINTERACTIVE_RESTORE, and nothing unset", () => {
@@ -306,6 +331,45 @@ describe("refusals that never reach docker", () => {
     const result = run(deployment, script, script === "backup.sh" ? [] : [bundle]);
     expect(result.status).toBe(1);
     expect(verbs(result.calls)).toEqual([]);
+  });
+});
+
+// #1345: the scripts must address the Compose project the install created.
+// Compose's own order is caller environment, then --env-file, then the compose
+// file's name:, so with no --project-name an exported COMPOSE_PROJECT_NAME beat
+// the one install wrote to .env-orbit. They derive the name as repair.sh does:
+// .env-orbit, then the caller's environment, then docker-compose.yml's name:,
+// then the directory.
+describe("every compose call names the project (#1345)", () => {
+  const composeFile = "name: orbit\n\nservices:\n  orbit-app:\n    image: busybox\n";
+  const argsFor = (script, deployment) => {
+    const bundle = join(deployment.deployDir, "b.tar");
+    writeFileSync(bundle, "bundle");
+    return script === "backup.sh" ? [] : [bundle];
+  };
+
+  it.each(SCRIPTS)("%s uses .env-orbit's COMPOSE_PROJECT_NAME over the caller's", (script) => {
+    const deployment = makeDeployment({ envFile: "COMPOSE_PROJECT_NAME=hz1345-from-file\n" });
+    const result = run(deployment, script, argsFor(script, deployment), { env: { COMPOSE_PROJECT_NAME: "hz1345-from-caller" } });
+    expect(result.status).toBe(0);
+    const projects = composeCalls(result.calls).map((call) => call.project);
+    expect(projects.length).toBeGreaterThan(0);
+    expect(new Set(projects)).toEqual(new Set(["hz1345-from-file"]));
+  });
+
+  it.each(SCRIPTS)("%s uses the caller's COMPOSE_PROJECT_NAME when .env-orbit names none", (script) => {
+    const deployment = makeDeployment();
+    writeFileSync(join(deployment.deployDir, "docker-compose.yml"), composeFile);
+    const result = run(deployment, script, argsFor(script, deployment), { env: { COMPOSE_PROJECT_NAME: "hz1345-from-caller" } });
+    expect(new Set(composeCalls(result.calls).map((call) => call.project))).toEqual(new Set(["hz1345-from-caller"]));
+  });
+
+  it.each(SCRIPTS)("%s falls back to docker-compose.yml's name:, not the directory, from a directory not called orbit", (script) => {
+    const deployment = makeDeployment();
+    writeFileSync(join(deployment.deployDir, "docker-compose.yml"), composeFile);
+    expect(deployment.deployDir.split("/").pop()).not.toBe("orbit");
+    const result = run(deployment, script, argsFor(script, deployment));
+    expect(new Set(composeCalls(result.calls).map((call) => call.project))).toEqual(new Set(["orbit"]));
   });
 });
 
@@ -519,8 +583,18 @@ describe("shared shapes", () => {
     expect(functionText(source, "engine_host_identity")).toBe(functionText(configure, "engine_host_identity"));
   });
 
-  it.each(SCRIPTS)("%s stays a thin shell (at most 120 lines)", (script) => {
-    expect(readFileSync(join(scriptsDir, script), "utf8").split("\n").length).toBeLessThanOrEqual(121);
+  // The functions every one of the four carries verbatim (#1345) sit between
+  // two marker lines and are pinned identical by
+  // compose-project-name-resolution.test.mjs; the cap is on what is each
+  // script's own, which is what "thin" has always been about.
+  it.each(SCRIPTS)("%s stays a thin shell (at most 120 lines of its own, outside the shared functions)", (script) => {
+    const source = readFileSync(join(scriptsDir, script), "utf8");
+    const start = source.indexOf("# --- Shared by ");
+    const end = source.indexOf("# --- End of the shared functions.");
+    expect(start, "the shared-functions start marker").toBeGreaterThanOrEqual(0);
+    expect(end, "the shared-functions end marker").toBeGreaterThan(start);
+    const own = source.slice(0, start) + source.slice(source.indexOf("\n", end) + 1);
+    expect(own.split("\n").length).toBeLessThanOrEqual(121);
   });
 
   it("under rootless Docker the engine is told 0:0, since container root is the operator", () => {

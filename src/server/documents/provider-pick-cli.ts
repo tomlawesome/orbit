@@ -29,6 +29,7 @@
 //
 // Asks the model, so it must run in a container on
 // `orbit_orbit-document-processing` (AGENTS.md, "stages-rerun" pattern).
+import { percent } from "./eval-format";
 import {
   assertChooserReachable,
   chooseProviderWithModel,
@@ -187,13 +188,13 @@ async function main(): Promise<void> {
   }
 
   for (const { name, tally } of routes) {
-    const percent = tally.of === 0 ? "0" : ((tally.hits / tally.of) * 100).toFixed(0);
+    const accuracy = percent(tally.hits, tally.of, 0);
     const perEntry = tally.windowEntries === 0
       ? "0"
       : (tally.windowChars / tally.windowEntries).toFixed(0);
     console.log(`window ${windowNamed}, ${entriesOffered} entries offered: ${perEntry} characters an entry; list cut by the excerpt limit on ${tally.truncated}/${tally.of}`);
     console.log(`right answer on the ${name} list: ${tally.onList}/${tally.of}; model answered none: ${tally.saidNone}/${tally.of}; model named something off the list: ${tally.offList}/${tally.of}`);
-    console.log(`${prefix}provider by model pick from ${name} (${model}): ${percent}% (${tally.hits}/${tally.of}) [provider ${tally.hits}/${tally.of}]`);
+    console.log(`${prefix}provider by model pick from ${name} (${model}): ${accuracy} (${tally.hits}/${tally.of}) [provider ${tally.hits}/${tally.of}]`);
   }
 }
 

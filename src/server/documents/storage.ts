@@ -9,12 +9,13 @@ import {
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { AppError } from "@/lib/app-error";
+import { validUuid } from "@/lib/uuid";
+import { getDocumentConfig, type DocumentConfig } from "@/server/documents/config";
 
 /** A storage key's own shape: 32 bytes of hex. Exported so any caller that
  * must validate a storage key outside this module (purge-jobs.ts's claim
  * query, A2-Q4) checks the one pattern rather than restating it. */
 export const STORAGE_KEY_PATTERN = /^[a-f0-9]{64}$/;
-const DOCUMENT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 export interface ReceivedDocument {
   quarantinePath: string;
@@ -29,7 +30,7 @@ export interface StoredCiphertextObject {
 }
 
 function requireDocumentId(documentId: string): void {
-  if (!DOCUMENT_ID_PATTERN.test(documentId)) throw new Error("Invalid document identifier");
+  if (!validUuid(documentId)) throw new Error("Invalid document identifier");
 }
 
 function requireStorageKey(storageKey: string): void {
@@ -267,4 +268,15 @@ export class LocalDocumentStorage {
   async deleteStagingCiphertext(storageKey: string): Promise<void> {
     await rm(this.stagingPath(storageKey), { force: true });
   }
+}
+
+/**
+ * The document store for this instance's configuration. The one place the
+ * roots are read from the config, so a caller does not restate the pairing
+ * and a test has one function to replace (#1349, engine-27).
+ */
+export function openDocumentStorage(
+  config: Pick<DocumentConfig, "storageRoot" | "quarantineRoot"> = getDocumentConfig(),
+): LocalDocumentStorage {
+  return new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
 }

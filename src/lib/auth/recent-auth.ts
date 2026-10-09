@@ -36,6 +36,7 @@ import type { VerifiedIdentity } from "@/lib/auth/oidc";
 import { getAuthConfig, type AuthConfig } from "@/lib/env";
 import type { CookieSink } from "@/lib/http";
 import { log } from "@/lib/logger";
+import { validUuid } from "@/lib/uuid";
 import { verifyCredential } from "@/server/local-credentials";
 
 /** Keeps a step-up proof from opening as a claim cookie or a transaction. */
@@ -142,9 +143,6 @@ function stepUpRejected(): void {
 export function stepUpProofCookieName(config: AuthConfig): string {
   return config.secureCookies ? "__Secure-orbit-step-up" : "orbit-step-up";
 }
-
-/** A `jti` Orbit minted: anything else never reaches the uuid column. */
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 /**
  * Mints the proof the callback hands back to the browser. It carries no
@@ -328,7 +326,7 @@ async function verifyStepUpProof(
      afterwards would leave the replay window open for as long as the action
      takes. */
   const jti = payload.jti;
-  if (typeof jti !== "string" || !UUID_PATTERN.test(jti)) throw unproven();
+  if (typeof jti !== "string" || !validUuid(jti)) throw unproven();
   const spent = await getDb()
     .update(stepUpProofs)
     .set({ consumedAt: sql`now()` })

@@ -4,10 +4,10 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documents, households, mailInSecrets, metadataKeys } from "@/db/schema";
 import { deriveDocumentKeyId, getDocumentConfig, keyEncryptionKeyFor, resetDocumentConfigForTests, wrappingKey, type DocumentConfig } from "@/server/documents/config";
-import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope, type DocumentEncryptionContext } from "@/server/documents/crypto";
+import { decryptDocument, encryptDocument, type CryptoEnvelope, type DocumentEncryptionContext } from "@/server/documents/crypto";
 import { createWrappedMetadataKey, unwrapMetadataKey, type MetadataKeyContext } from "@/server/metadata/crypto";
 import { loadMetadataKey, resolveMetadataKey, resetMetadataKeyCacheForTests } from "@/server/metadata/keys";
-import { decryptMailInSecret, encryptMailInSecret, type MailInSecretContext, type MailInSecretEnvelope } from "@/server/mail-in/core/secret-crypto";
+import { decryptMailInSecret, encryptMailInSecret, type MailInSecretContext } from "@/server/mail-in/core/secret-crypto";
 import {
   findOpenRotationStart,
   recordRotationCompleted,
@@ -87,7 +87,7 @@ async function plantDocument(householdId: string, keyEncryptionKey: Buffer, keyI
   return { documentId, context, ciphertext: encrypted.ciphertext, plaintext };
 }
 
-async function readDocumentEnvelope(documentId: string): Promise<DocumentCryptoEnvelope> {
+async function readDocumentEnvelope(documentId: string): Promise<CryptoEnvelope> {
   const [row] = await getDb().select().from(documentCrypto).where(eq(documentCrypto.documentId, documentId));
   return {
     envelopeVersion: row.envelopeVersion as 1,
@@ -157,7 +157,7 @@ async function readSecretRow(secretId: string) {
   return row;
 }
 
-function secretEnvelopeFromRow(row: { envelopeVersion: number; keyId: string; contentIv: string; contentAuthTag: string; wrappedDek: string; wrapIv: string; wrapAuthTag: string }): MailInSecretEnvelope {
+function secretEnvelopeFromRow(row: { envelopeVersion: number; keyId: string; contentIv: string; contentAuthTag: string; wrappedDek: string; wrapIv: string; wrapAuthTag: string }): CryptoEnvelope {
   return {
     envelopeVersion: row.envelopeVersion as 1,
     algorithm: "aes-256-gcm",

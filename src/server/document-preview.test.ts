@@ -61,16 +61,21 @@ vi.mock("@/server/documents/config", async (importActual) => ({
   ...await importActual<typeof import("@/server/documents/config")>(),
   getDocumentConfig: mocks.config,
 }));
-vi.mock("@/server/documents/crypto", () => ({
+vi.mock("@/server/documents/crypto", async (importActual) => ({
+  envelopeOf: (await importActual<typeof import("@/server/documents/crypto")>()).envelopeOf,
   decryptDocument: mocks.decryptDocument,
   encryptDocument: vi.fn(),
 }));
-vi.mock("@/server/documents/storage", () => ({
-  LocalDocumentStorage: class {
+vi.mock("@/server/documents/storage", () => {
+  class LocalDocumentStorage {
     readCiphertext = mocks.readCiphertext;
     ciphertextExists = vi.fn();
-  },
-}));
+  }
+  return {
+    LocalDocumentStorage,
+    openDocumentStorage: () => new LocalDocumentStorage(),
+  };
+});
 
 import { readDocumentPagePreview } from "./document-preview";
 
@@ -129,9 +134,15 @@ function cryptoRow() {
   };
 }
 
+/** The document row, plus the household gate's answer from the users table. */
+function seedAccess(row: { administrator: boolean; membershipUserId: unknown }): void {
+  mocks.rows.documents = [row];
+  mocks.rows.users = [{ administrator: row.administrator, role: row.membershipUserId ? "member" : null }];
+}
+
 /** Arranges a readable document whose plaintext is the supplied bytes. */
 function arrangeReadable(plaintext: Buffer, rowOverrides: Record<string, unknown> = {}): Buffer {
-  mocks.rows.users = [accessRow(rowOverrides)];
+  seedAccess(accessRow(rowOverrides));
   mocks.rows.document_crypto = [cryptoRow()];
   mocks.readCiphertext.mockResolvedValue(Buffer.alloc(plaintext.length + 64));
   mocks.decryptDocument.mockReturnValue(plaintext);
@@ -165,7 +176,7 @@ describe("readDocumentPagePreview", () => {
   });
 
   it("refuses a document in a household the reader does not belong to, before any decryption", async () => {
-    mocks.rows.users = [accessRow({ administrator: false, membershipUserId: null })];
+    seedAccess(accessRow({ administrator: false, membershipUserId: null }));
     mocks.rows.document_crypto = [cryptoRow()];
 
     await expect(readDocumentPagePreview(READER, DOCUMENT)).rejects.toMatchObject({
@@ -174,22 +185,24 @@ describe("readDocumentPagePreview", () => {
       message: "That document is not available",
     });
 
-    // Only the authorization lookup ran: the crypto row was never read, so
-    // nothing reached storage, decryption or the renderer.
-    expect(mocks.fromNames).toEqual(["users"]);
+    // Only the authorization lookups ran (the document, then the household
+    // gate): the crypto row was never read, so nothing reached storage,
+    // decryption or the renderer.
+    expect(mocks.fromNames).toEqual(["documents", "users"]);
     expect(mocks.readCiphertext).not.toHaveBeenCalled();
     expect(mocks.decryptDocument).not.toHaveBeenCalled();
     expect(mocks.audits).toEqual([]);
   });
 
-  it("refuses a document that no household row matched at all", async () => {
+  it("refuses a document that no household access row matched at all", async () => {
+    mocks.rows.documents = [accessRow()];
     mocks.rows.users = [];
 
     await expect(readDocumentPagePreview(READER, DOCUMENT)).rejects.toMatchObject({
       code: "document_not_found",
       status: 404,
     });
-    expect(mocks.fromNames).toEqual(["users"]);
+    expect(mocks.fromNames).toEqual(["documents", "users"]);
   });
 
   it("refuses a malformed document identifier the same bounded way as an unknown one", async () => {

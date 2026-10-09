@@ -11,8 +11,7 @@ import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentStagingObjects, documents } from "@/db/schema";
 import { log } from "@/lib/logger";
-import { getDocumentConfig } from "@/server/documents/config";
-import { LocalDocumentStorage } from "@/server/documents/storage";
+import { openDocumentStorage } from "@/server/documents/storage";
 import { reconcileMissingDocument } from "@/server/documents/reconciliation";
 import { workerState } from "@/server/document-maintenance/worker-state";
 
@@ -40,8 +39,7 @@ export async function rejectInterruptedDocuments(): Promise<void> {
 }
 
 export async function reconcileDocumentStorage(): Promise<void> {
-  const config = getDocumentConfig();
-  const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+  const storage = openDocumentStorage();
   const staleBoundary = new Date(Date.now() - 60 * 60 * 1_000);
   await getDb().update(documents).set({ lifecycle: "rejected", failureCode: "processing_interrupted", updatedAt: new Date() }).where(and(
     eq(documents.lifecycle, "scanning"),

@@ -26,10 +26,12 @@
 // every corpus (tuning, hold-out, private) is measured by the same rule;
 // it does not touch that file.
 
+import { percent, percentOfRatio } from "../eval-format";
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { isCalendarDate } from "../../../lib/calendar-date";
 import type { CorpusDocument, CorpusExpectation } from "../extraction-corpus";
 import { type CorpusExtractor, type ExtractedFields, scoreCorpus } from "../extraction-scoring";
 import { proposalFromText } from "../suggestions";
@@ -106,12 +108,6 @@ export function resolveEvalDirectory(inputPath: string, repoRootOverride?: strin
   return real;
 }
 
-function isIsoCalendarDate(value: unknown): value is string {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
-  const date = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
-}
-
 /** Parse and validate one ground-truth file's already-read text. Never
  * echoes the offending content back in an error: a malformed file gets the
  * same fixed message as every other one. */
@@ -127,7 +123,7 @@ function parseGroundTruth(raw: string): CorpusExpectation {
   }
   const record = value as Record<string, unknown>;
   const rawDates = record.dates ?? [];
-  if (!Array.isArray(rawDates) || !rawDates.every(isIsoCalendarDate)) {
+  if (!Array.isArray(rawDates) || !rawDates.every(isCalendarDate)) {
     throw new PrivateEvalRefusal(
       "invalid_ground_truth",
       'A ground-truth file\'s "dates" must be an array of YYYY-MM-DD strings.',
@@ -264,8 +260,7 @@ export async function runPrivateEvaluation(
 }
 
 function formatField(label: string, tally: FieldTally): string {
-  const pct = tally.possible === 0 ? "n/a" : `${((tally.earned / tally.possible) * 100).toFixed(1)}%`;
-  return `  ${label}: ${pct} (${tally.earned}/${tally.possible})`;
+  return `  ${label}: ${percent(tally.earned, tally.possible)} (${tally.earned}/${tally.possible})`;
 }
 
 /** Renders only counts and percentages: no document text, matched value,
@@ -276,6 +271,6 @@ export function formatReport(report: PrivateEvalReport): string {
     formatField("dates    ", report.fields.dates),
     formatField("provider ", report.fields.provider),
     formatField("reference", report.fields.reference),
-    `  overall  : ${(report.overall.accuracy * 100).toFixed(1)}% (${report.overall.earned}/${report.overall.possible})`,
+    `  overall  : ${percentOfRatio(report.overall.accuracy)} (${report.overall.earned}/${report.overall.possible})`,
   ].join("\n");
 }

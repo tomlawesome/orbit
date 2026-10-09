@@ -1330,10 +1330,14 @@ describe("install.sh: what it holds by its source", () => {
     expect(source).not.toMatch(/--format '[^']*\\t/u);
   });
 
+  // #1345: they now pass the project explicitly -- derived, .env-orbit's own
+  // COMPOSE_PROJECT_NAME first -- because without --project-name an exported
+  // COMPOSE_PROJECT_NAME beat the persisted one. Never a hard-coded name.
   it("keeps backup and restore commands on the persisted env-file project", () => {
     for (const script of ["backup.sh", "restore.sh"]) {
       const source = readFileSync(join(repositoryRoot, "scripts", script), "utf8");
-      expect(source).toContain('docker compose --env-file "$environment_file"');
+      expect(source).toContain('docker compose --project-name "$project" --env-file "$environment_file"');
+      expect(source).toContain("read_environment_value COMPOSE_PROJECT_NAME");
       expect(source).not.toContain("--project-name orbit");
     }
   });

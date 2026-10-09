@@ -357,6 +357,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 
 - 2026-10-06 · 4bb20449 (dev, !1035 merged) · local full desktop-webkit suite inside CI's Playwright image (#1235), four workers · the pipe worked (mail collected, suggestion row shown, drawer opened, "Add to orbit" tapped), then the test spent its 240 s budget waiting for "tap again to approve": the page snapshot at timeout has neither the drawer nor the suggestion row. The app log shows no receipt approval, dismissal or error in that window. Passed in a targeted run 3 minutes later (56 s). Not the scanner (ready in 15 ms at every check) and not the certificate (#1236, fixed before this run). Candidates: the cross-file database reset gate wiping the receipt under a parallel worker, or a WebKit race on the first tap; a trace is needed to tell, and local runs keep none.
 - 2026-10-08 · 687cb0f4 (door batch, !1044; its home changes are the flight and the menu, not the suggestion rows or their drawer) · pipeline 2251 / smoke_firefox (job 33370), desktop-firefox · first attempt: the row was shown and clicked, and the drawer (`.itemview.suggestview`) never appeared in 5 s; the snapshot still says "Inbox — 1 waiting". In-job retry: the drawer opened and the approval was sent (`POST /api/reviewed-intake/approve` 200, then home re-read the workspace and the inbox), yet `.item.suggest` stayed at 1 for 30 s; the retry's mail was a second one, so the first attempt's unapproved receipt may be the row that stayed (the trace keeps no response bodies to tell). Passed in pipeline 2248 on the same home code, and in dev pipelines 2244, 2235 and 2230. Second sighting.
+- 2026-10-09 · 40850119 · dev push pipeline 2297 / smoke_firefox (job 33780) · `.itemview.suggestview` not visible after the row click (line 352), on the first attempt and the retry, so the job failed. Passed on desktop-firefox in pipelines 2290 and 2313.
 
 ## web/tests/fidelity screens.spec.js "household"
 
@@ -366,6 +367,8 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 
 - 2026-10-06 · 2221237a (#1262, no change near this route) · local `scripts/test-backend.sh`, worktree `flight-door-port`, an e2e image build and other agents' headless browsers on the host (load 9-14) · timed out at the 5s default; green on an immediate rerun of the file alone. First sighting.
 - 2026-10-07 · 2a076315 (+ #1279's uncommitted phone create reading card, none of it near this fixture) · local `scripts/test-backend.sh`, worktree `fix-create-form`, other sessions using the host · timed out at the 5s default; it passed in the run before on the same code, and green on an immediate rerun of the file alone. Second sighting.
+- 2026-10-09 · 3d6d7c20 (#1349) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
+- Third sighting: filed as #1365 (unattended-install case times out under host load).
 
 ## v19-archive.spec.ts:192 "write an archive, then bring it into a second household — a clash stays out" on desktop-webkit
 
@@ -421,3 +424,23 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## tour-pocket-webkit.spec.js:539 "plays through chapter 3 at 360x780 under normal motion" — chapters skipped
 
 - 2026-10-09 · abcb06f1 · pipeline 2301 / fidelity_webkit (job 33823) · the film reached only chapters 1 and 2 (`done` false, chapters `[0, 1]`) in 3.4 min. Neither of the next commits (63354fb6, 6afb412e) touches chapters 1–3; on 6afb412e, locally in the pinned image, it passed. First sighting.
+
+## install-orchestrator.test.ts "runInstall: success > installs a pre-provisioned target unattended: assets from the image, secrets, migration, digest (#6, #42, #45, #53)"
+
+- 2026-10-09 · 40850119 (+ #1333's uncommitted validation work, none of it near install) · local `scripts/test-backend.sh`, worktree `1333`, with a PostgreSQL integration run going on the same shared host · failed after 7.3s (the only failure besides one test #1333 itself changed); the assertion text was not captured. Passed when the file was run alone straight after, and in a full `scripts/test-backend.sh` rerun on the same code. First sighting.
+- 2026-10-09 · 73481e5e (#1345) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
+- 2026-10-09 · 3d6d7c20 (#1349) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
+- Third sighting: filed as #1365 (unattended-install case times out under host load).
+
+## v19-tour-chapter-add.test.mjs
+
+- 2026-10-09 · 73481e5e (#1345) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
+
+## notification-worker-health.test.ts
+
+- 2026-10-09 · 3d6d7c20 (#1349) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
+- Third sighting: filed as #1365 (unattended-install case times out under host load).
+
+## v19-keyboard-pocket.spec.ts:411 "item page (pocket): actions and the back link work by keyboard" — mobile-webkit
+
+- 2026-10-09 · 1e0299ab (!1050) · pipeline 2313 / smoke_webkit_mobile (job 33924) · `Tab never reached the requested control within 60 presses`; after the reschedule save, focus went to `body` past the pills. Failed on both attempts. Passed in jobs 33895 and 33901 on the same commit, in 33925, and locally. The /item page is retired by #1319 (merged in 51d9a8ef), so this spec goes with it. First sighting.
