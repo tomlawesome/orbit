@@ -20,6 +20,7 @@
 //                                              # sieve first (owner: "what if
 //                                              # the sieve only looked for
 //                                              # those in the first place")
+import { percent } from "./eval-format";
 import { providerTaggedOrganisations, providerWordRuns, type ProviderMention } from "./extraction-provider-runs";
 import type { Candidate } from "./extraction-sieve";
 import { tagCandidates } from "./extraction-tags";
@@ -109,8 +110,8 @@ function main(): void {
   }
 
   console.log(`mentions per page ${(mentions / of).toFixed(1)}; provider among them ${mentioned}/${of}; top-2 ${top2}/${of}; on list ${onList}/${of}`);
-  const percent = of === 0 ? "0" : ((top1 / of) * 100).toFixed(0);
-  console.log(`${prefix}provider by capitalisation${tagged ? ", tagged" : ""}${boost > 1 ? `, odd shapes x${boost}` : ""}${dictMode === "off" ? "" : `, ordinary words (${dictMode}) dropped`}${thenVotes ? ", then own stage 2 votes" : ""}${thenDeals ? ", then who-acts cues" : ""}: ${percent}% (${top1}/${of}) [provider ${percent}% (${top1}/${of})]`);
+  const accuracy = percent(top1, of, 0);
+  console.log(`${prefix}provider by capitalisation${tagged ? ", tagged" : ""}${boost > 1 ? `, odd shapes x${boost}` : ""}${dictMode === "off" ? "" : `, ordinary words (${dictMode}) dropped`}${thenVotes ? ", then own stage 2 votes" : ""}${thenDeals ? ", then who-acts cues" : ""}: ${accuracy} (${top1}/${of}) [provider ${accuracy} (${top1}/${of})]`);
 }
 
 main();

@@ -19,6 +19,7 @@
 // which counts a short form of the right name. The owner's verdict on the
 // first, 2026-09-12: "classifyProvider is far too strict." Until that is
 // settled, read both.
+import { percent } from "./eval-format";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
 import { EXTRACTION_HOLDOUT3_FULLPAGE } from "./extraction-holdout3-fullpage";
 import { providerTaggedOrganisations, providerWordRuns } from "./extraction-provider-runs";
@@ -41,12 +42,11 @@ const byEye = looseProviderNameMatch;
 interface Tally { hits: number; of: number; candidates: number }
 const empty = (): Tally => ({ hits: 0, of: 0, candidates: 0 });
 
-const percent = (tally: Tally): string =>
-  `${tally.of === 0 ? "0.0" : ((tally.hits / tally.of) * 100).toFixed(1)}%`;
+const tallyPercent = (tally: Tally): string => percent(tally.hits, tally.of);
 
 const scoreLine = (label: string, tally: Tally): string =>
-  `${prefix}${label}: ${percent(tally)} (${tally.hits}/${tally.of})` +
-  ` [provider ${percent(tally)} (${tally.hits}/${tally.of})]`;
+  `${prefix}${label}: ${tallyPercent(tally)} (${tally.hits}/${tally.of})` +
+  ` [provider ${tallyPercent(tally)} (${tally.hits}/${tally.of})]`;
 
 function main(): void {
   const sharedRecall = empty();
@@ -93,16 +93,16 @@ function main(): void {
 
   const perPage = (tally: Tally): string => (tally.candidates / tally.of).toFixed(0);
   console.log(`${prefix || "tuning: "}stage 1 recall, the number stage 1 is judged on`);
-  console.log(`  shared sieve          ${percent(sharedRecall)} (${sharedRecall.hits}/${sharedRecall.of})` +
-    `   by eye ${percent(sharedRecallEye)}   ${perPage(sharedRecall)} candidates a page`);
-  console.log(`  provider's own sieve  ${percent(ownRecall)} (${ownRecall.hits}/${ownRecall.of})` +
-    `   by eye ${percent(ownRecallEye)}   ${perPage(ownRecall)} candidates a page`);
+  console.log(`  shared sieve          ${tallyPercent(sharedRecall)} (${sharedRecall.hits}/${sharedRecall.of})` +
+    `   by eye ${tallyPercent(sharedRecallEye)}   ${perPage(sharedRecall)} candidates a page`);
+  console.log(`  provider's own sieve  ${tallyPercent(ownRecall)} (${ownRecall.hits}/${ownRecall.of})` +
+    `   by eye ${tallyPercent(ownRecallEye)}   ${perPage(ownRecall)} candidates a page`);
   console.log("");
   console.log(scoreLine("provider by its own stage 1", ownAnswer));
   console.log(scoreLine("provider by the shared stage 1", sharedAnswer));
   console.log(`${prefix}provider by its own stage 1, marked by eye: ` +
-    `${percent(ownAnswerEye)} (${ownAnswerEye.hits}/${ownAnswerEye.of})` +
-    ` [provider ${percent(ownAnswerEye)} (${ownAnswerEye.hits}/${ownAnswerEye.of})]`);
+    `${tallyPercent(ownAnswerEye)} (${ownAnswerEye.hits}/${ownAnswerEye.of})` +
+    ` [provider ${tallyPercent(ownAnswerEye)} (${ownAnswerEye.hits}/${ownAnswerEye.of})]`);
 }
 
 main();

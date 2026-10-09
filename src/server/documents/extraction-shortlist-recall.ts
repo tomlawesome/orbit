@@ -8,6 +8,7 @@
 // the bundle hands over the page after letter-spacing repair, which is what
 // its own chooser read.
 
+import { percent } from "./eval-format";
 import {
   costShortlistEntries,
   dateShortlistEntries,
@@ -62,8 +63,6 @@ export function emptyRecallTallies(): RecallTallies {
   return tallies;
 }
 
-const percent = (part: number, whole: number): string =>
-  whole === 0 ? "n/a" : `${((part / whole) * 100).toFixed(1)}%`;
 
 /** One document's page text and what a careful reader says is on it. */
 export interface RecallDocument {
