@@ -7,7 +7,10 @@ import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { validateSupportedDocumentStructure } from "@/server/documents/validation";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { syntheticPdf } from "../../../tests/support/synthetic-documents";
-import { readHeldImapAttachment, holdImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
+import { PgDialect } from "drizzle-orm/pg-core";
+import { eq } from "drizzle-orm";
+import { imapIngestionAttachments } from "@/db/schema";
+import { flagStagingPurgeFailed, readHeldImapAttachment, holdImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
 
 // #726: this is the only place that proves the mailbox path calls the real
 // ClamAV client (scanner.ts's live TCP scanner) at all, rather than a stub or
@@ -165,10 +168,15 @@ describe("private IMAP attachment holding", () => {
   it.each([
     ["infected", { status: "infected", signature: "Eicar-Test-Signature" }, "malware_detected"],
     ["unreachable", { status: "error", reason: "unavailable" }, "scanner_unavailable"],
+    ["timed out", { status: "error", reason: "timeout" }, "scanner_timeout"],
+    ["a protocol error", { status: "error", reason: "protocol" }, "scanner_protocol"],
+    ["a scanner-reported error", { status: "error", reason: "scanner" }, "scanner_failed"],
+    ["an error with no reason", { status: "error" }, "scanner_failed"],
+    ["an unknown status", { status: "quarantined" }, "scanner_failed"],
   ] as const)("required mode: never opens a mailed attachment whose scan was %s (ADR-0033)", async (_label, outcome, message) => {
     root = await mkdtemp(join(tmpdir(), "orbit-imap-scan-stops-"));
     configure("required");
-    vi.mocked(scanFileWithClamAv).mockResolvedValue(outcome);
+    vi.mocked(scanFileWithClamAv).mockResolvedValue(outcome as never);
     await expect(scanAndHoldImapAttachment({
       bytes: syntheticPdf("scan stops"),
       filename: "scan-stops.pdf",
@@ -201,5 +209,27 @@ describe("private IMAP attachment holding", () => {
       onCiphertextAllocated: async ({ storageKey }) => { allocatedKey = storageKey; throw new Error("registration failed"); },
     })).rejects.toThrow("registration failed");
     expect(await storage.ciphertextExists(allocatedKey)).toBe(false);
+  });
+});
+
+describe("flagStagingPurgeFailed (engine-18)", () => {
+  it("re-flags exactly the rows the caller's own predicate names, counting one attempt", async () => {
+    const writes: { values?: Record<string, unknown>; where?: unknown } = {};
+    const executor = {
+      update: () => ({
+        set: (values: Record<string, unknown>) => {
+          writes.values = values;
+          return { where: async (where: unknown) => { writes.where = where; } };
+        },
+      }),
+    };
+    const at = new Date("2030-01-02T03:04:05.000Z");
+    const where = eq(imapIngestionAttachments.id, "30000000-0000-4000-8000-000000000003");
+    await flagStagingPurgeFailed(executor as never, where, at);
+
+    expect(writes.where).toBe(where);
+    expect(writes.values).toMatchObject({ purgePending: true, purgeFailureCode: "staging_purge_failed", updatedAt: at });
+    const attempts = new PgDialect().sqlToQuery(writes.values!.purgeAttempts as never);
+    expect(attempts.sql).toBe('"imap_ingestion_attachments"."purge_attempts" + 1');
   });
 });

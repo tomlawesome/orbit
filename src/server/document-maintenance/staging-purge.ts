@@ -10,9 +10,8 @@
 import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentJobs, documentStagingObjects, documents, reviewedIntakeOperations } from "@/db/schema";
-import { getDocumentConfig } from "@/server/documents/config";
-import { LocalDocumentStorage } from "@/server/documents/storage";
-import type { ClaimedScanJob, ScanRecoveryRecord } from "@/server/document-maintenance/claims";
+import { openDocumentStorage } from "@/server/documents/storage";
+import { completeJob, holdsJobLease, type ClaimedScanJob, type ScanRecoveryRecord } from "@/server/document-maintenance/claims";
 
 export async function completeStagingPurge(
   documentId: string,
@@ -40,27 +39,12 @@ export async function completeStagingPurge(
       eq(documentStagingObjects.storageKey, storageKey),
       eq(documentStagingObjects.status, "purge_pending"),
     ));
-    if (job) {
-      await transaction.update(documentJobs).set({
-        status: "completed",
-        completedAt: new Date(),
-        lockedAt: null,
-        leaseExpiresAt: null,
-        leaseToken: null,
-        lastError: null,
-        updatedAt: new Date(),
-      }).where(and(eq(documentJobs.id, job.id), eq(documentJobs.status, "processing"), eq(documentJobs.leaseToken, job.leaseToken)));
-    } else {
-      await transaction.update(documentJobs).set({
-        status: "completed",
-        completedAt: new Date(),
-        lockedAt: null,
-        leaseExpiresAt: null,
-        leaseToken: null,
-        lastError: null,
-        updatedAt: new Date(),
-      }).where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan"), inArray(documentJobs.status, ["pending", "retry", "processing", "failed"])));
-    }
+    const scanJobsOfDocument = and(
+      eq(documentJobs.documentId, documentId),
+      eq(documentJobs.kind, "scan"),
+      inArray(documentJobs.status, ["pending", "retry", "processing", "failed"]),
+    );
+    await completeJob(transaction, job ? holdsJobLease(job) : scanJobsOfDocument);
     return true;
   });
 }
@@ -74,24 +58,13 @@ export async function markStagingPurgeFailure(documentId: string, storageKey: st
       purgeFailureCode: "stage_purge_failed",
       updatedAt: now,
     }).where(and(eq(documentStagingObjects.documentId, documentId), eq(documentStagingObjects.storageKey, storageKey), eq(documentStagingObjects.status, "purge_pending")));
-    if (job) {
-      await transaction.update(documentJobs).set({
-        status: "failed",
-        completedAt: null,
-        lockedAt: null,
-        leaseExpiresAt: null,
-        leaseToken: null,
-        lastError: "stage_purge_failed",
-        updatedAt: now,
-      }).where(and(eq(documentJobs.id, job.id), eq(documentJobs.status, "processing"), eq(documentJobs.leaseToken, job.leaseToken)));
-    }
+    if (job) await completeJob(transaction, holdsJobLease(job), { status: "failed", lastError: "stage_purge_failed", now });
   });
 }
 
 /** Transitions terminal recovery to purge_pending under the live lease before touching ciphertext. */
 export async function purgeScannerStage(job: ClaimedScanJob, record: ScanRecoveryRecord, failureCode: string): Promise<boolean> {
-  const config = getDocumentConfig();
-  const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+  const storage = openDocumentStorage();
   const transitioned = await getDb().transaction(async (transaction) => {
     const now = new Date();
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${job.documentId}`}, 0))`);
@@ -150,8 +123,7 @@ export async function purgeScannerStage(job: ClaimedScanJob, record: ScanRecover
 }
 
 export async function expireScannerRecoveryStages(): Promise<void> {
-  const config = getDocumentConfig();
-  const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+  const storage = openDocumentStorage();
   for (let count = 0; count < 25; count += 1) {
     const row = await getDb().transaction(async (transaction) => {
       const now = new Date();
@@ -184,8 +156,8 @@ export async function expireScannerRecoveryStages(): Promise<void> {
       await transaction.update(documents).set({ lifecycle: "rejected", scanStatus: "error", failureCode: "scan_recovery_expired", updatedAt: now })
         .where(and(eq(documents.id, candidate.documentId), eq(documents.lifecycle, "scanning")));
       if (job) {
-        await transaction.update(documentJobs).set({ status: "cancelled", completedAt: now, lockedAt: null, leaseExpiresAt: null, leaseToken: null, lastError: "scan_recovery_expired", updatedAt: now })
-          .where(and(eq(documentJobs.id, job.id), inArray(documentJobs.status, ["pending", "retry", "processing", "failed"])));
+        await completeJob(transaction, and(eq(documentJobs.id, job.id), inArray(documentJobs.status, ["pending", "retry", "processing", "failed"])),
+          { status: "cancelled", lastError: "scan_recovery_expired", now });
       }
       await transaction.update(reviewedIntakeOperations).set({ status: "failed", attachmentState: "pending", failureCode: "scan_recovery_expired", updatedAt: now })
         .where(and(eq(reviewedIntakeOperations.documentId, candidate.documentId), inArray(reviewedIntakeOperations.status, ["pending_attachment", "recoverable"])));
@@ -206,8 +178,8 @@ export async function expireScannerRecoveryStages(): Promise<void> {
       await completeStagingPurge(row.documentId, row.storageKey);
     } catch {
       await markStagingPurgeFailure(row.documentId, row.storageKey);
-      await getDb().update(documentJobs).set({ status: "failed", completedAt: null, lockedAt: null, leaseExpiresAt: null, leaseToken: null, lastError: "stage_purge_failed", updatedAt: new Date() })
-        .where(and(eq(documentJobs.documentId, row.documentId), eq(documentJobs.kind, "scan"), eq(documentJobs.status, "cancelled")));
+      await completeJob(getDb(), and(eq(documentJobs.documentId, row.documentId), eq(documentJobs.kind, "scan"), eq(documentJobs.status, "cancelled")),
+        { status: "failed", lastError: "stage_purge_failed" });
     }
   }
 }
@@ -218,8 +190,7 @@ export async function purgePendingScannerStages(): Promise<void> {
     documentId: documentStagingObjects.documentId,
     storageKey: documentStagingObjects.storageKey,
   }).from(documentStagingObjects).where(eq(documentStagingObjects.status, "purge_pending")).limit(25);
-  const config = getDocumentConfig();
-  const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+  const storage = openDocumentStorage();
   for (const row of rows) {
     try {
       await storage.deleteStagingCiphertext(row.storageKey);

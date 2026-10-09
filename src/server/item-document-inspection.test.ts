@@ -48,13 +48,17 @@ vi.mock("@/server/documents/adjudication", async () => ({
   ...await vi.importActual<typeof import("@/server/documents/adjudication")>("@/server/documents/adjudication"),
   adjudicateProposal: mocks.adjudicate,
 }));
-vi.mock("@/server/documents/storage", () => ({
-  LocalDocumentStorage: class {
+vi.mock("@/server/documents/storage", () => {
+  class LocalDocumentStorage {
     receive = mocks.receive;
     readQuarantine = mocks.readQuarantine;
     discardQuarantine = mocks.discardQuarantine;
-  },
-}));
+  }
+  return {
+    LocalDocumentStorage,
+    openDocumentStorage: () => new LocalDocumentStorage(),
+  };
+});
 
 import { inspectItemDocument } from "./item-document-inspection";
 
@@ -196,6 +200,32 @@ describe("item document inspection", () => {
     expect(Number.isInteger(fields.durationMs)).toBe(true);
     expect(fields).not.toHaveProperty("host");
     expect(fields).not.toHaveProperty("port");
+  });
+
+  it.each([
+    ["unavailable", { status: "error", reason: "unavailable" }, "scanner_unavailable", "document_scanner_unreachable"],
+    ["timed out", { status: "error", reason: "timeout" }, "scanner_timeout", "document_scanner_unreachable"],
+    ["protocol error", { status: "error", reason: "protocol" }, "scanner_protocol", "document_scanner_failed"],
+    ["scanner-reported error", { status: "error", reason: "scanner" }, "scanner_failed", "document_scanner_failed"],
+    ["error with no reason", { status: "error" }, "scanner_failed", "document_scanner_failed"],
+    ["unknown status", { status: "quarantined" }, "scanner_failed", "document_scanner_failed"],
+  ])("never opens a file whose scan outcome was a %s, and logs only the fixed reason", async (_label, outcome, logged, code) => {
+    const warnSpy = vi.spyOn(log, "warn");
+    mocks.scan.mockResolvedValue(outcome);
+
+    await expect(inspectItemDocument({
+      userId: "member-user",
+      householdId: "household-id",
+      filename: "policy.pdf",
+      body: new ReadableStream<Uint8Array>(),
+    })).rejects.toMatchObject({ code, status: 503 });
+
+    expect(mocks.readQuarantine).not.toHaveBeenCalled();
+    expect(mocks.classifyStructure).not.toHaveBeenCalled();
+    expect(mocks.extract).not.toHaveBeenCalled();
+    const scanCalls = warnSpy.mock.calls.filter(([event]) => event.event === "document.scan");
+    expect(scanCalls).toHaveLength(1);
+    expect(scanCalls[0][0]).toMatchObject({ state: "degraded", reason: logged });
   });
 
   it("logs an infected scan outcome without exposing the scanner's signature", async () => {

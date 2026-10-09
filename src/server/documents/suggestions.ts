@@ -1,5 +1,16 @@
 import { basename } from "node:path";
-import { scheduleKinds, type ScheduleKind } from "@/lib/domain";
+import { isCalendarDate } from "@/lib/calendar-date";
+import {
+  COST_MINOR_MAX,
+  PROVIDER_MAX,
+  RECURRENCE_MAX,
+  REFERENCE_MAX,
+  SUBTYPE_MAX,
+  TITLE_MAX,
+  scheduleKinds,
+  type ScheduleKind,
+} from "@/lib/domain";
+import { isCurrencyCode } from "@/lib/platform-lists";
 
 // Re-exported so every reader of a proposal's scheduleKind field, in
 // whichever server module, checks against the one list (A3-Q1): a copy
@@ -55,10 +66,10 @@ const SCHEDULE_KIND_BY_ROLE: Partial<Record<DocumentDateRole, ScheduleKind>> = {
  * bounds `src/lib/workspace.ts` already enforces on an item, so a proposal
  * can never offer a reviewer a value the item schema would then refuse.
  */
-export const MAX_SUBTYPE_CHARACTERS = 80;
-export const MAX_COST_MINOR = 100_000_000;
+export const MAX_SUBTYPE_CHARACTERS = SUBTYPE_MAX;
+export const MAX_COST_MINOR = COST_MINOR_MAX;
 export const MIN_RECURRENCE_MONTHS = 1;
-export const MAX_RECURRENCE_MONTHS = 120;
+export const MAX_RECURRENCE_MONTHS = RECURRENCE_MAX;
 
 /**
  * What one document proposes, whatever produced it: the heuristics, a
@@ -119,14 +130,11 @@ export function safeDocumentEvidence(text: unknown, maximum = 2_000): string {
 
 export function safeDocumentFilenameTitle(filename: string): string {
   const leaf = basename(filename.replaceAll("\\", "/")).replace(/\.[^.]+$/u, "");
-  return safeDocumentPlainText(leaf, 100) ?? "Document";
+  return safeDocumentPlainText(leaf, TITLE_MAX) ?? "Document";
 }
 
 function validCalendarDate(value: unknown): string | undefined {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) return undefined;
-  const date = new Date(`${value}T00:00:00Z`);
-  if (Number.isNaN(date.getTime())) return undefined;
-  return date.toISOString().slice(0, 10) === value ? value : undefined;
+  return isCalendarDate(value) ? value : undefined;
 }
 
 const MONTH_NAMES: Record<string, number> = {
@@ -284,7 +292,7 @@ function referenceFromLine(rest: string): string | undefined {
   }
   while (tokens.length > 0 && !/\d/u.test(tokens[tokens.length - 1])) tokens.pop();
   const reference = tokens.join(" ");
-  return reference.length >= 5 && reference.length <= 80 ? reference : undefined;
+  return reference.length >= 5 && reference.length <= REFERENCE_MAX ? reference : undefined;
 }
 
 function extractReference(bounded: string): string | undefined {
@@ -385,7 +393,7 @@ function extractProvider(bounded: string): string | undefined {
     ? [providerFromLetterhead(bounded), providerFromProse(bounded)]
     : [withoutAside(labelled)];
   for (const candidate of candidates) {
-    const provider = safeDocumentPlainText(candidate, 100);
+    const provider = safeDocumentPlainText(candidate, PROVIDER_MAX);
     if (provider) return provider;
   }
   return undefined;
@@ -402,12 +410,10 @@ export function proposalFromText(text: string, filename: string): DocumentPropos
   return {
     title: safeDocumentFilenameTitle(filename),
     provider: extractProvider(bounded),
-    reference: safeDocumentPlainText(extractReference(bounded), 80),
+    reference: safeDocumentPlainText(extractReference(bounded), REFERENCE_MAX),
     dates: extractDates(bounded),
   };
 }
-
-const CURRENCY_CODE = /^[A-Z]{3}$/u;
 
 function boundedInteger(value: unknown, minimum: number, maximum: number): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= minimum && value <= maximum
@@ -450,7 +456,7 @@ function safeDateRoles(value: unknown, dates: string[]): DocumentDateRoleLabel[]
  */
 function safeCost(candidate: Record<string, unknown>): { costMinor: number; currency: string } | undefined {
   const costMinor = boundedInteger(candidate.costMinor, 0, MAX_COST_MINOR);
-  const currency = typeof candidate.currency === "string" && CURRENCY_CODE.test(candidate.currency.trim())
+  const currency = typeof candidate.currency === "string" && isCurrencyCode(candidate.currency.trim())
     ? candidate.currency.trim()
     : undefined;
   return costMinor !== undefined && currency !== undefined ? { costMinor, currency } : undefined;
@@ -480,9 +486,9 @@ export function safeStoredDocumentProposal(value: unknown, filename: string): Do
   const scheduleKind = scheduled ? SCHEDULE_KIND_BY_ROLE[scheduled.role] : undefined;
   const cost = safeCost(candidate);
   return {
-    title: safeDocumentPlainText(candidate.title, 100) ?? safeDocumentFilenameTitle(filename),
-    provider: safeDocumentPlainText(candidate.provider, 100),
-    reference: safeDocumentPlainText(candidate.reference, 80),
+    title: safeDocumentPlainText(candidate.title, TITLE_MAX) ?? safeDocumentFilenameTitle(filename),
+    provider: safeDocumentPlainText(candidate.provider, PROVIDER_MAX),
+    reference: safeDocumentPlainText(candidate.reference, REFERENCE_MAX),
     dates,
     subtype: safeDocumentPlainText(candidate.subtype, MAX_SUBTYPE_CHARACTERS),
     costMinor: cost?.costMinor,

@@ -13,6 +13,7 @@
  */
 import { randomBytes } from "node:crypto";
 import {
+  type CryptoEnvelope,
   decryptWithAad,
   encryptWithAad,
   ENVELOPE_ALGORITHM,
@@ -38,20 +39,9 @@ export interface MailInSecretContext {
   user: string;
 }
 
-export interface MailInSecretEnvelope {
-  envelopeVersion: 1;
-  algorithm: "aes-256-gcm";
-  keyId: string;
-  contentIv: string;
-  contentAuthTag: string;
-  wrappedDek: string;
-  wrapIv: string;
-  wrapAuthTag: string;
-}
-
 export interface EncryptedMailInSecret {
   ciphertext: Buffer;
-  envelope: MailInSecretEnvelope;
+  envelope: CryptoEnvelope;
 }
 
 function keyAdditionalData(secretId: string, keyId: string): Buffer {
@@ -111,7 +101,7 @@ export function encryptMailInSecret(
 export function decryptMailInSecret(
   ciphertext: Buffer,
   context: MailInSecretContext,
-  envelope: MailInSecretEnvelope,
+  envelope: CryptoEnvelope,
   keyEncryptionKey: Buffer,
 ): Buffer {
   if (envelope.envelopeVersion !== ENVELOPE_VERSION || envelope.algorithm !== ENVELOPE_ALGORITHM) {
@@ -133,11 +123,11 @@ export function decryptMailInSecret(
  */
 export function rewrapMailInSecret(
   secretId: string,
-  envelope: Pick<MailInSecretEnvelope, "keyId" | "wrappedDek" | "wrapIv" | "wrapAuthTag">,
+  envelope: Pick<CryptoEnvelope, "keyId" | "wrappedDek" | "wrapIv" | "wrapAuthTag">,
   currentKeyEncryptionKey: Buffer,
   nextKeyEncryptionKey: Buffer,
   nextKeyId: string,
-): Pick<MailInSecretEnvelope, "keyId" | "wrappedDek" | "wrapIv" | "wrapAuthTag"> {
+): Pick<CryptoEnvelope, "keyId" | "wrappedDek" | "wrapIv" | "wrapAuthTag"> {
   const dek = unwrapKeyWithAad(envelope, currentKeyEncryptionKey, keyAdditionalData(secretId, envelope.keyId));
   try {
     return { keyId: nextKeyId, ...wrapKeyWithAad(dek, nextKeyEncryptionKey, keyAdditionalData(secretId, nextKeyId)) };

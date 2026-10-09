@@ -29,9 +29,9 @@ import {
   MailInCredentialLockedError,
   verifyImapIngestionProviders,
 } from "@/server/imap-ingestion";
+import { validUuid } from "@/lib/uuid";
 import { requireInstanceAdministrator } from "@/server/authorization";
 
-const uuidSchema = z.uuid();
 const auditCursorSchema = z.object({
   createdAt: z.iso.datetime(),
   id: z.uuid(),
@@ -332,7 +332,7 @@ export async function updateNotificationDelivery(
   action: DeliveryAction,
   expectedStatus: DeliveryStatus,
 ): Promise<void> {
-  if (!uuidSchema.safeParse(deliveryId).success) {
+  if (!validUuid(deliveryId)) {
     throw new AppError("operation_conflict", "That operation is no longer available", 409);
   }
   await requireInstanceAdministrator(actorUserId);
@@ -393,7 +393,7 @@ export async function updateDocumentJob(
   action: DocumentJobAction,
   expectedStatus: DocumentJobStatus,
 ): Promise<void> {
-  if (!uuidSchema.safeParse(jobId).success) {
+  if (!validUuid(jobId)) {
     throw new AppError("operation_conflict", "That operation is no longer available", 409);
   }
   await requireInstanceAdministrator(actorUserId);

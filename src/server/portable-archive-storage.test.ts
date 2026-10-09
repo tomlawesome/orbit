@@ -23,6 +23,16 @@ describe("portable archive storage", () => {
     await expect(storage.read(key, 64)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("accepts any well-formed UUID as a storage key, including version 7", async () => {
+    const root = await mkdtemp(join(tmpdir(), "orbit-portable-archive-"));
+    roots.push(root);
+    const storage = new PortableArchiveStorage(root);
+    const versionSeven = "01890a5d-ac96-774b-bcce-b302099a8057";
+    await storage.write(versionSeven, Buffer.from("encrypted-content"));
+    await expect(storage.read(versionSeven, 64)).resolves.toEqual(Buffer.from("encrypted-content"));
+    await expect(storage.list()).resolves.toEqual([expect.objectContaining({ storageKey: versionSeven })]);
+  });
+
   it("rejects traversal-like storage keys", async () => {
     const root = await mkdtemp(join(tmpdir(), "orbit-portable-archive-"));
     roots.push(root);

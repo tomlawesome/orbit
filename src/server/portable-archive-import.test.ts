@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "@/lib/app-error";
+import { COST_MINOR_MAX } from "@/lib/domain";
 import { encryptPortableArchive } from "@/server/portable-archive";
 import { KDF_TEST_TIMEOUT_MS } from "../../scripts/process-budget.mjs";
 
@@ -111,15 +112,15 @@ vi.mock("@/server/documents/config", () => ({
 }));
 
 vi.mock("@/server/documents/storage", () => ({
-  LocalDocumentStorage: class {
-    constructor(_storageRoot: string, _quarantineRoot: string) {}
-    deleteCiphertext(storageKey: string) {
-      return mocks.deleteCiphertext(storageKey);
-    }
-  },
+  openDocumentStorage: () => ({
+    deleteCiphertext: (storageKey: string) => mocks.deleteCiphertext(storageKey),
+  }),
 }));
 
-vi.mock("@/server/workspace-access", () => ({
+// The real household gate runs against the fake database (its answer is the
+// `users` rows queued below); only the advisory-lock transaction step is stubbed.
+vi.mock("@/server/workspace-access", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/server/workspace-access")>(),
   acquireActiveHouseholdLock: vi.fn(async () => undefined),
 }));
 
@@ -170,7 +171,7 @@ function encrypted(payload: unknown) {
 }
 
 function seedHouseholdAccess() {
-  queue(mocks.selectQueues, "households", [{ id: householdId, administrator: true, membershipUserId: null, role: null }]);
+  queue(mocks.selectQueues, "users", [{ administrator: true, role: null }]);
 }
 
 beforeEach(() => {
@@ -195,7 +196,7 @@ beforeEach(() => {
 
 describe("portable archive export refusal (#1151 A2-F2)", () => {
   it("refuses to export while the metadata key is locked, rather than writing blank titles", async () => {
-    queue(mocks.selectQueues, "households", [{ id: householdId, administrator: true, membershipUserId: null, role: "owner" }]);
+    queue(mocks.selectQueues, "users", [{ administrator: true, role: "owner" }]);
     queue(mocks.selectQueues, "households", [{ id: householdId, name: "Home", timezone: "Europe/London", defaultCurrency: "GBP" }]);
     queue(mocks.selectQueues, "sections", []);
     queue(mocks.selectQueues, "items", []);
@@ -215,7 +216,7 @@ describe("portable archive export refusal (#1151 A2-F2)", () => {
   });
 
   it("refuses when no key row exists but a row still carries ciphertext", async () => {
-    queue(mocks.selectQueues, "households", [{ id: householdId, administrator: true, membershipUserId: null, role: "owner" }]);
+    queue(mocks.selectQueues, "users", [{ administrator: true, role: "owner" }]);
     queue(mocks.selectQueues, "households", [{ id: householdId, name: "Home", timezone: "Europe/London", defaultCurrency: "GBP" }]);
     queue(mocks.selectQueues, "sections", []);
     queue(mocks.selectQueues, "items", [{ id: "item-1", sectionId: "section-1", title: null, titleEnc: Buffer.from("enc"), provider: null, providerEnc: null, reference: null, referenceEnc: null, notes: null, notesEnc: null, costMinor: null, costMinorEnc: null }]);
@@ -228,7 +229,7 @@ describe("portable archive export refusal (#1151 A2-F2)", () => {
   });
 
   it("refuses when the household's key exists but will not unwrap", async () => {
-    queue(mocks.selectQueues, "households", [{ id: householdId, administrator: true, membershipUserId: null, role: "owner" }]);
+    queue(mocks.selectQueues, "users", [{ administrator: true, role: "owner" }]);
     queue(mocks.selectQueues, "households", [{ id: householdId, name: "Home", timezone: "Europe/London", defaultCurrency: "GBP" }]);
     queue(mocks.selectQueues, "sections", []);
     queue(mocks.selectQueues, "items", []);
@@ -280,6 +281,73 @@ describe("portable archive import error (#1151 A2-F2)", () => {
     }
     expect(caught).toBeInstanceOf(AppError);
     expect((caught as AppError).code).toBe("archive_invalid");
+  });
+});
+
+describe("portable archive export holds the passphrase floor (#1333)", () => {
+  it("refuses a passphrase of twelve UTF-16 units but six characters, in words, before reading the household", async () => {
+    seedHouseholdAccess();
+    await expect(createPortableArchive({ userId, householdId, passphrase: "\u{1F44D}".repeat(6), includeDocuments: false }))
+      .rejects.toMatchObject({ code: "archive_passphrase_too_short", status: 422 });
+  });
+});
+
+describe("portable archive import refuses what the engine would not store (#1333)", () => {
+  const archiveWith = (item: Record<string, unknown>) => encrypted({
+    format: "orbit-portable-archive",
+    version: 1,
+    household: { name: "Home" },
+    sections: [{ id: sectionId, slug: "home", name: "Home", icon: "home", accent: "sage", position: 0, visible: true, archivedAt: null }],
+    items: [{ id: item1Id, sectionId, title: "Boiler", subtype: null, provider: null, reference: null, currency: "GBP", status: "active", ...item }],
+    documents: [],
+  });
+  const caught = async (run: () => Promise<unknown>) => {
+    try {
+      await run();
+    } catch (error) {
+      return error;
+    }
+    return undefined;
+  };
+
+  it.each(["startDate", "expiryDate", "renewalDate", "serviceDate", "snoozedUntil"])(
+    "refuses a %s that is not a real day, in words that name the problem",
+    async (field) => {
+      seedHouseholdAccess();
+      const error = await caught(() => previewPortableImport(userId, householdId, archiveWith({ [field]: "2026-02-31" }), passphrase));
+      expect(error).toBeInstanceOf(AppError);
+      expect(error).toMatchObject({ code: "archive_date_invalid", status: 422 });
+      expect((error as AppError).message).toMatch(/not a real calendar day/u);
+    },
+  );
+
+  it("refuses the same on the import itself, before anything is written", async () => {
+    seedHouseholdAccess();
+    const error = await caught(() => importPortableArchive({
+      userId, householdId, archive: archiveWith({ renewalDate: "2026-13-45" }), passphrase, conflictItemIds: [],
+    }));
+    expect(error).toMatchObject({ code: "archive_date_invalid", status: 422 });
+    expect(mocks.insertCalls).toEqual([]);
+  });
+
+  it("refuses a currency the platform does not list as an unsupported archive", async () => {
+    seedHouseholdAccess();
+    const error = await caught(() => previewPortableImport(userId, householdId, archiveWith({ currency: "ZZZ" }), passphrase));
+    expect(error).toMatchObject({ code: "archive_invalid", status: 422 });
+  });
+
+  it("refuses a field over a bound the item schema keeps", async () => {
+    seedHouseholdAccess();
+    const error = await caught(() => previewPortableImport(userId, householdId, archiveWith({ costMinor: COST_MINOR_MAX + 1 }), passphrase));
+    expect(error).toMatchObject({ code: "archive_invalid", status: 422 });
+  });
+
+  it("takes an archive Orbit wrote: real days, leap day included, nulls and absences", async () => {
+    seedHouseholdAccess();
+    const preview = await previewPortableImport(userId, householdId, archiveWith({
+      startDate: "2024-02-29", expiryDate: "2026-12-31", renewalDate: null, serviceDate: undefined, snoozedUntil: "2026-07-01", costMinor: COST_MINOR_MAX,
+    }), passphrase);
+    expect(preview).toBeDefined();
   });
 });
 

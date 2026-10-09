@@ -138,6 +138,18 @@ export const operationalReasons = [
 ] as const;
 export type OperationalReason = typeof operationalReasons[number];
 
+/**
+ * A free-form failure code as a loggable reason: a listed reason passes
+ * through, anything else is `unexpected_failure` rather than a dropped field.
+ * The one place a stored code is narrowed to the schema, so a caller does not
+ * hand-write the membership test.
+ */
+export function asOperationalReason(value: string): OperationalReason {
+  return (operationalReasons as readonly string[]).includes(value)
+    ? value as OperationalReason
+    : "unexpected_failure";
+}
+
 export const operationalActions = [
   "none",
   "check_configuration",

@@ -17,13 +17,25 @@ import {
   users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
-import { type HomeItem, type ScheduleKind } from "@/lib/domain";
+import { isCalendarDate } from "@/lib/calendar-date";
+import {
+  COST_MINOR_MAX,
+  PROVIDER_MAX,
+  RECURRENCE_MAX,
+  REFERENCE_MAX,
+  SUBTYPE_MAX,
+  TITLE_MAX,
+  type HomeItem,
+  type ScheduleKind,
+} from "@/lib/domain";
 import { itemKinds, itemOfIntent, type ItemIntent } from "@/lib/item-kind";
+import { isCurrencyCode } from "@/lib/platform-lists";
 import { costMinorOf, itemRefusal, Refusal } from "@/lib/refusals";
 import { workspaceItemSchema } from "@/lib/workspace";
 import type { AdjudicatedField } from "@/server/documents/adjudication";
 import { safeDocumentPlainText, scheduleKinds, type DocumentProposal } from "@/server/documents/suggestions";
-import { readHeldImapAttachment, purgeHeldImapAttachment } from "@/server/imap-attachment-holding";
+import { envelopeOf } from "@/server/documents/crypto";
+import { flagStagingPurgeFailed, readHeldImapAttachment, purgeHeldImapAttachment } from "@/server/imap-attachment-holding";
 import { isDocumentAvailable, uploadItemDocument } from "@/server/document-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { applyWorkspaceCommand } from "@/server/workspace-repository";
@@ -44,10 +56,10 @@ type ProposalField = typeof proposalFields[number];
 const evidenceSource = z.enum(["filename", "document_text", "parser", "attachment"]);
 const evidenceConfidence = z.enum(["high", "medium", "low"]);
 const proposalTextMaximum: Record<string, number> = {
-  title: 100,
-  subtype: 80,
-  provider: 100,
-  reference: 80,
+  title: TITLE_MAX,
+  subtype: SUBTYPE_MAX,
+  provider: PROVIDER_MAX,
+  reference: REFERENCE_MAX,
   currency: 3,
   dueDate: 10,
   scheduleKind: 8,
@@ -100,16 +112,16 @@ function boundedProposalField(field: ProposalField, value: unknown): unknown {
     // and zero-width characters.
     const text = safeDocumentPlainText(value, proposalTextMaximum[field]);
     if (!text) return undefined;
-    if (field === "currency" && !/^[A-Z]{3}$/u.test(text)) return undefined;
-    if (field === "dueDate" && !/^\d{4}-\d{2}-\d{2}$/u.test(text)) return undefined;
+    if (field === "currency" && !isCurrencyCode(text)) return undefined;
+    if (field === "dueDate" && !isCalendarDate(text)) return undefined;
     // A3-Q1: the shared list (suggestions.ts, from src/lib/domain.ts)
     // includes "expiry"; a local copy missing it let an expiry document
     // reach review with its date but no schedule type.
     if (field === "scheduleKind" && !(scheduleKinds as readonly string[]).includes(text)) return undefined;
     return text;
   }
-  if (field === "costMinor" && typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 100_000_000) return value;
-  if (field === "recurrenceMonths" && typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= 120) return value;
+  if (field === "costMinor" && typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= COST_MINOR_MAX) return value;
+  if (field === "recurrenceMonths" && typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= RECURRENCE_MAX) return value;
   return undefined;
 }
 
@@ -435,8 +447,7 @@ async function purgeReceiptStaging(receiptId: string): Promise<void> {
         .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, attachment.status)));
     } catch {
       failed = true;
-      await getDb().update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
-        .where(eq(imapIngestionAttachments.id, attachment.id));
+      await flagStagingPurgeFailed(getDb(), eq(imapIngestionAttachments.id, attachment.id));
     }
   }
   if (failed) throw new AppError("staging_purge_failed", "The private staged file could not be purged; retry later", 503);
@@ -480,14 +491,8 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
       } catch {
         pending.push(attachment.id);
         failureCode ??= "staging_purge_failed";
-        // Only re-flag a purge that is still outstanding (#722). A
-        // concurrent caller may have purged the private copy and cleared the
-        // flag while this attempt was in flight, in which case this failure
-        // is of a delete with nothing left to delete: stamping purgePending
-        // and a failure code here would advertise work already done, and
-        // count an attempt against it.
-        await getDb().update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
-          .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, attachment.assignedDocumentId), eq(imapIngestionAttachments.purgePending, true)));
+        // Only a purge still outstanding (#722): see flagStagingPurgeFailed.
+        await flagStagingPurgeFailed(getDb(), and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, attachment.assignedDocumentId), eq(imapIngestionAttachments.purgePending, true)));
       }
       continue;
     }
@@ -558,16 +563,7 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
         mediaType: attachment.mediaType,
         sizeBytes: attachment.sizeBytes,
         storageKey: attachment.storageKey,
-        envelope: {
-          envelopeVersion: attachment.envelopeVersion as 1,
-          algorithm: "aes-256-gcm",
-          contentIv: attachment.contentIv,
-          contentAuthTag: attachment.contentAuthTag,
-          wrappedDek: attachment.wrappedDek,
-          wrapIv: attachment.wrapIv,
-          wrapAuthTag: attachment.wrapAuthTag,
-          keyId: attachment.keyId,
-        },
+        envelope: envelopeOf(attachment),
       }, { recipientUserId: userId, receiptId });
       // A fresh const so the stream callback below closes over a binding
       // TypeScript can narrow to `Buffer` on its own — narrowing a `let`
@@ -623,14 +619,8 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
         attached.push(attachment.id);
         pending.push(attachment.id);
         failureCode ??= "staging_purge_failed";
-        // Only re-flag a purge that is still outstanding (#722). A
-        // concurrent caller may have purged the private copy and cleared the
-        // flag while this attempt was in flight, in which case this failure
-        // is of a delete with nothing left to delete: stamping purgePending
-        // and a failure code here would advertise work already done, and
-        // count an attempt against it.
-        await getDb().update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
-          .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, document.id), eq(imapIngestionAttachments.purgePending, true)));
+        // Only a purge still outstanding (#722): see flagStagingPurgeFailed.
+        await flagStagingPurgeFailed(getDb(), and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, document.id), eq(imapIngestionAttachments.purgePending, true)));
         continue;
       }
       attached.push(attachment.id);

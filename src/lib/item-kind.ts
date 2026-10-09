@@ -12,10 +12,7 @@
  * repeat only with a schedule that comes round. A new item is active; an
  * edited one keeps its status, which only item.status changes.
  */
-import type { HomeItem, ItemStatus, ScheduleKind } from "@/lib/domain";
-
-/** A repeat is "every N months", at most ten years (recurrenceMonths' range). */
-export const RECURRENCE_MAX = 120;
+import { RECURRENCE_MAX, type HomeItem, type ItemStatus, type ScheduleKind } from "@/lib/domain";
 
 export const itemKinds = ["service", "renewal", "inspection", "suggestion", "document"] as const;
 export type ItemKind = (typeof itemKinds)[number];

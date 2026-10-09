@@ -22,8 +22,8 @@ import { getDocumentConfig, keyEncryptionKeyFor, type DocumentConfig } from "@/s
 import {
   decryptMailInSecret,
   type MailInSecretContext,
-  type MailInSecretEnvelope,
 } from "./core/secret-crypto";
+import { envelopeOf } from "@/server/documents/crypto";
 import { imapAliasBaseFromAccount } from "./core/imap-recipient";
 import type { ImapIngestionConfig } from "./core/config";
 
@@ -106,16 +106,7 @@ function decryptSecretRow(row: MailInSecretRow, account: { host: string; user: s
     host: account.host,
     user: account.user,
   };
-  const envelope: MailInSecretEnvelope = {
-    envelopeVersion: row.envelopeVersion as 1,
-    algorithm: "aes-256-gcm",
-    keyId: row.keyId,
-    contentIv: row.contentIv,
-    contentAuthTag: row.contentAuthTag,
-    wrappedDek: row.wrappedDek,
-    wrapIv: row.wrapIv,
-    wrapAuthTag: row.wrapAuthTag,
-  };
+  const envelope = envelopeOf(row);
   return decryptMailInSecret(row.ciphertext, context, envelope, keyEncryptionKey);
 }
 

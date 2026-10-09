@@ -116,7 +116,8 @@ vi.mock("@/server/documents/validation", () => ({
   },
 }));
 
-vi.mock("@/server/documents/crypto", () => ({
+vi.mock("@/server/documents/crypto", async (importActual) => ({
+  envelopeOf: (await importActual<typeof import("@/server/documents/crypto")>()).envelopeOf,
   encryptDocument: () => ({
     ciphertext: Buffer.from("ciphertext"),
     envelope: {
@@ -138,8 +139,8 @@ vi.mock("@/server/documents/scanner", () => ({
   },
 }));
 
-vi.mock("@/server/documents/storage", () => ({
-  LocalDocumentStorage: class {
+vi.mock("@/server/documents/storage", () => {
+  class LocalDocumentStorage {
     async receive() {
       return { quarantinePath: "/tmp/q", sizeBytes: 5, contentSha256: "hash", leadingBytes: Buffer.from("%PDF") };
     }
@@ -156,8 +157,12 @@ vi.mock("@/server/documents/storage", () => ({
     async deleteCiphertext() {}
     async deleteStagingCiphertext() {}
     async discardQuarantine() {}
-  },
-}));
+  }
+  return {
+    LocalDocumentStorage,
+    openDocumentStorage: () => new LocalDocumentStorage(),
+  };
+});
 
 const { uploadItemDocument } = await import("./document-repository");
 
@@ -170,7 +175,10 @@ function fakeBody(): ReadableStream<Uint8Array> {
 }
 
 function seedUploadHappyPath() {
-  queue(mocks.selectQueues, "users", [{ itemId, administrator: true, membershipUserId: userId }]);
+  // requireHouseholdAndItemAccess: the household gate answers from the users
+  // table, then the item is looked up in that household.
+  queue(mocks.selectQueues, "users", [{ administrator: true, role: "owner" }]);
+  queue(mocks.selectQueues, "items", [{ id: itemId }]);
   queue(mocks.selectQueues, "documents", [{ total: 0 }]);
   queue(mocks.selectQueues, "documents", [{ total: 0 }]);
   queue(mocks.updateReturningQueues, "documents", [{ id: "doc-1" }]);

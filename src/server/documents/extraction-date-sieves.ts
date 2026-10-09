@@ -42,6 +42,7 @@
 // order" is the structure of a flattened table, which every table has, and
 // is as far as position goes.
 
+import { isCalendarDate } from "@/lib/calendar-date";
 import { addCalendarMonths } from "@/lib/next-due-date";
 import { CONTEXT_TERMINATION_TERMS, type ContextRoleAssignment } from "./context-roles";
 import {
@@ -90,6 +91,7 @@ export { STRENGTH_GUESS, STRENGTH_STATED, STRENGTH_WEAK };
 // ------------------------------------------------------------ date arithmetic
 
 function parseIso(value: string): { year: number; month: number; day: number } | undefined {
+  if (!isCalendarDate(value)) return undefined;
   const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
   if (!match) return undefined;
   return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };

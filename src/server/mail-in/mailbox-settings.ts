@@ -32,6 +32,7 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog, mailInMailbox, mailInSecrets, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
+import { envelopeOf } from "@/server/documents/crypto";
 import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { requireInstanceAdministrator } from "@/server/authorization";
 import {
@@ -285,16 +286,7 @@ async function rewrapSecretForNewHost(
   const documentConfig = getDocumentConfig();
   const keyEncryptionKey = keyEncryptionKeyFor(documentConfig, row.keyId);
   if (!keyEncryptionKey) throw new MailInCredentialLockedError(row.keyId);
-  const envelope = {
-    envelopeVersion: row.envelopeVersion as 1,
-    algorithm: "aes-256-gcm" as const,
-    keyId: row.keyId,
-    contentIv: row.contentIv,
-    contentAuthTag: row.contentAuthTag,
-    wrappedDek: row.wrappedDek,
-    wrapIv: row.wrapIv,
-    wrapAuthTag: row.wrapAuthTag,
-  };
+  const envelope = envelopeOf(row);
   const plaintext = decryptMailInSecret(
     row.ciphertext,
     { secretId: row.id, kind, host: oldAccount.host, user: oldAccount.user },

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   auditLog,
@@ -7,18 +7,15 @@ import {
   documentJobs,
   documentStagingObjects,
   documents,
-  households,
   items,
-  memberships,
-  users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
-import { log, operationalReasons, type OperationalReason } from "@/lib/logger";
-import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
+import { asOperationalReason, log } from "@/lib/logger";
+import { decryptDocument, encryptDocument, envelopeOf } from "@/server/documents/crypto";
 import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
-import { LocalDocumentStorage } from "@/server/documents/storage";
+import { openDocumentStorage } from "@/server/documents/storage";
 import {
   detectDocumentMediaType,
   normalizedDocumentFilename,
@@ -26,14 +23,10 @@ import {
   type DocumentStructureReason,
 } from "@/server/documents/validation";
 import { canAccessHouseholdDocuments, canManageDocumentDeletion } from "@/server/documents/authorization";
-import { retryableScannerFailureCode, scannerRecoveryDelayMs } from "@/server/documents/staging";
-import { validUuid } from "@/server/workspace-access";
-
-function operationalDocumentReason(value: string): OperationalReason {
-  return (operationalReasons as readonly string[]).includes(value)
-    ? value as OperationalReason
-    : "unexpected_failure";
-}
+import { scannerRecoveryDelayMs } from "@/server/documents/staging";
+import { classifyScan, documentScanCodes, type ScanClassification } from "@/server/documents/scan-outcome";
+import { validUuid } from "@/lib/uuid";
+import { findHouseholdAccess } from "@/server/workspace-access";
 
 /**
  * Lifecycles a user may see listed against an item.
@@ -109,35 +102,21 @@ export interface DocumentSummary {
 
 const unavailableDocumentConditions = ["deleted", "rejected"] as const;
 
-function documentStorage(): LocalDocumentStorage {
-  const config = getDocumentConfig();
-  return new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
-}
-
 async function requireHouseholdAndItemAccess(
   userId: string,
   householdId: string,
   itemId: string,
 ): Promise<void> {
-  const [access] = await getDb()
-    .select({
-      itemId: items.id,
-      administrator: users.isInstanceAdmin,
-      membershipUserId: memberships.userId,
-    })
-    .from(users)
-    .innerJoin(items, and(eq(items.id, itemId), eq(items.householdId, householdId)))
-    .innerJoin(households, eq(households.id, items.householdId))
-    .leftJoin(
-      memberships,
-      and(eq(memberships.userId, users.id), eq(memberships.householdId, householdId)),
-    )
-    .where(and(
-      eq(users.id, userId),
-      isNull(households.deletionRequestedAt),
-    ))
-    .limit(1);
-  if (!access || !canAccessHouseholdDocuments(access.administrator, access.membershipUserId)) {
+  // A malformed id fails the way an unknown one does, not as a driver error.
+  if (!validUuid(householdId) || !validUuid(itemId)) {
+    throw new AppError("item_not_found", "That item is not available", 404);
+  }
+  const access = await findHouseholdAccess(userId, householdId);
+  const [item] = access
+    ? await getDb().select({ id: items.id }).from(items)
+      .where(and(eq(items.id, itemId), eq(items.householdId, householdId))).limit(1)
+    : [];
+  if (!access || !item || !canAccessHouseholdDocuments(access.administrator, access.role ? userId : null)) {
     throw new AppError("item_not_found", "That item is not available", 404);
   }
 }
@@ -164,30 +143,20 @@ async function requireDocumentAccess(userId: string, documentId: string) {
       deleteAfter: documents.deleteAfter,
       availableAt: documents.availableAt,
       uploadedByUserId: documents.uploadedByUserId,
-      administrator: users.isInstanceAdmin,
-      membershipUserId: memberships.userId,
-      membershipRole: memberships.role,
     })
-    .from(users)
-    .innerJoin(documents, eq(documents.id, documentId))
-    .innerJoin(households, eq(households.id, documents.householdId))
-    .leftJoin(
-      memberships,
-      and(eq(memberships.userId, users.id), eq(memberships.householdId, documents.householdId)),
-    )
-    .where(and(
-      eq(users.id, userId),
-      isNull(households.deletionRequestedAt),
-    ))
+    .from(documents)
+    .where(eq(documents.id, documentId))
     .limit(1);
+  const access = record ? await findHouseholdAccess(userId, record.householdId) : undefined;
   if (
     !record
-    || !canAccessHouseholdDocuments(record.administrator, record.membershipUserId)
+    || !access
+    || !canAccessHouseholdDocuments(access.administrator, access.role ? userId : null)
     || unavailableDocumentConditions.includes(record.lifecycle as typeof unavailableDocumentConditions[number])
   ) {
     throw new AppError("document_not_found", "That document is not available", 404);
   }
-  return record;
+  return { ...record, administrator: access.administrator, membershipRole: access.role };
 }
 
 /**
@@ -390,7 +359,7 @@ export async function uploadItemDocument(input: {
   // The administrator's limit, read now so a change needs no restart (#1285).
   // Held for the whole upload, so every read below agrees with the receive.
   const maxBytes = await readEffectiveUploadLimit(config);
-  const storage = documentStorage();
+  const storage = openDocumentStorage(config);
   const documentId = input.documentId ?? randomUUID();
   const received = await storage.receive(input.body, documentId, maxBytes, input.declaredBytes);
   let storageKey: string | undefined;
@@ -472,12 +441,12 @@ export async function uploadItemDocument(input: {
     // durable metadata exists, as it always was. The one read here serves
     // both that check and the encrypt stage, and happens after the scan, so
     // no plaintext is held in memory across the scan's wait (A2-Q1).
-    let scan: Awaited<ReturnType<typeof scanFileWithClamAv>> | undefined;
+    let scan: ScanClassification<typeof documentScanCodes[keyof typeof documentScanCodes]> | undefined;
     let scanMs = 0;
     if (config.scanMode === "required") {
       log.info({ event: "document.scan", state: "starting", action: "check_scanner" });
       const scanStartedAt = Date.now();
-      scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
+      scan = classifyScan(await scanFileWithClamAv(received.quarantinePath, config.clamAv), documentScanCodes);
       scanMs = Math.max(0, Date.now() - scanStartedAt);
     }
     if (!scan || scan.status === "clean") {
@@ -531,19 +500,18 @@ export async function uploadItemDocument(input: {
         // with a failure" so an operator knows whether to check connectivity or
         // the scanner itself. Neither message discloses host, port or provider
         // text, per the bounded-diagnostics rule.
-        const retryableFailureCode = retryableScannerFailureCode(scan);
-        const failureCode = infected ? "malware_detected" : retryableFailureCode ?? "scanner_failed";
-        // `scan.reason` is a fixed enumeration from the scanner adapter, never
-        // provider text, so it is safe to record.
+        const failureCode = scan.code;
+        // A fixed enumeration from the scanner adapter, never provider text,
+        // so it is safe to record.
         log.warn({
           event: "document.scan",
           state: infected ? "exhausted" : "degraded",
-          reason: operationalDocumentReason(failureCode),
+          reason: asOperationalReason(failureCode),
           action: "check_scanner",
           impact: "document_upload_blocked",
           durationMs: scanMs,
         });
-        if (retryableFailureCode) {
+        if (scan.retryable) {
           const plaintext = await storage.readQuarantine(received.quarantinePath, maxBytes);
           try {
             // The next key while a rotation is in progress (#955).
@@ -606,7 +574,7 @@ export async function uploadItemDocument(input: {
             log.warn({
               event: "document.scan",
               state: "retrying",
-              reason: operationalDocumentReason(failureCode),
+              reason: asOperationalReason(failureCode),
               action: "retry",
               impact: "document_upload_blocked",
               durationMs: scanMs,
@@ -640,7 +608,7 @@ export async function uploadItemDocument(input: {
         log.warn({
           event: "document.lifecycle",
           state: "exhausted",
-          reason: operationalDocumentReason(failureCode),
+          reason: asOperationalReason(failureCode),
           action: "check_scanner",
           impact: "document_upload_blocked",
         });
@@ -769,7 +737,7 @@ export async function uploadItemDocument(input: {
         log.warn({
           event: "document.lifecycle",
           state: "exhausted",
-          reason: operationalDocumentReason(failureCode),
+          reason: asOperationalReason(failureCode),
           action: "inspect_admin_diagnostics",
           impact: "document_processing_blocked",
         });
@@ -818,20 +786,11 @@ export async function readDocumentDownload(
     // A stored document was accepted under whatever limit applied then, so it
     // is read against the hard ceiling: lowering the limit (#1285) must never
     // make an existing document unreadable.
-    ciphertext = await documentStorage().readCiphertext(crypto.storageKey, DOCUMENT_MAX_BYTES_CEILING + 64);
+    ciphertext = await openDocumentStorage().readCiphertext(crypto.storageKey, DOCUMENT_MAX_BYTES_CEILING + 64);
   } catch {
     throw new AppError("document_unavailable", "That document cannot currently be opened", 503);
   }
-  const envelope: DocumentCryptoEnvelope = {
-    envelopeVersion: crypto.envelopeVersion as 1,
-    algorithm: "aes-256-gcm",
-    keyId: crypto.keyId,
-    contentIv: crypto.contentIv,
-    contentAuthTag: crypto.contentAuthTag,
-    wrappedDek: crypto.wrappedDek,
-    wrapIv: crypto.wrapIv,
-    wrapAuthTag: crypto.wrapAuthTag,
-  };
+  const envelope = envelopeOf(crypto);
   let bytes: Buffer;
   try {
     bytes = decryptDocument(ciphertext, {
@@ -905,7 +864,7 @@ export async function restoreDocument(userId: string, documentId: string): Promi
     if (!crypto) throw new AppError("document_unavailable", "That document cannot currently be restored", 503);
     let ciphertextExists = false;
     try {
-      ciphertextExists = await documentStorage().ciphertextExists(crypto.storageKey);
+      ciphertextExists = await openDocumentStorage().ciphertextExists(crypto.storageKey);
     } catch {
       throw new AppError("document_unavailable", "That document cannot currently be restored", 503);
     }

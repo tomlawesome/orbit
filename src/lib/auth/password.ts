@@ -15,6 +15,9 @@
 import { randomBytes } from "node:crypto";
 import type { Algorithm, Options } from "@node-rs/argon2";
 import { verificationGate } from "@/lib/auth/verification-gate";
+import { MIN_PASSWORD_LENGTH, passwordLength } from "@/lib/password-length";
+
+export { MIN_PASSWORD_LENGTH, passwordLength };
 
 // The package's `Algorithm` is an ambient const enum, which this project's
 // `isolatedModules` forbids reading at runtime. 2 is `Algorithm.Argon2id` in
@@ -61,9 +64,6 @@ export const PASSWORD_POLICY = {
   algorithm: ARGON2ID,
 } as const satisfies Options;
 
-/** Same floor as `MIN_RECOVERY_PASSPHRASE_LENGTH`: one number to remember. */
-export const MIN_PASSWORD_LENGTH = 12;
-
 /** Bounds the Argon2 input. Counted in code points, like the floor. */
 export const MAX_PASSWORD_LENGTH = 256;
 
@@ -101,11 +101,6 @@ export interface PasswordVerification {
  */
 export function normalizePassword(password: string): string {
   return password.normalize("NFC");
-}
-
-/** Code points, not UTF-16 units: an emoji is one character to the person typing it. */
-export function passwordLength(password: string): number {
-  return [...normalizePassword(password)].length;
 }
 
 /**
