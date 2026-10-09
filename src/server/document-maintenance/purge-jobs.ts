@@ -11,8 +11,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentDrafts, documentJobs, documents } from "@/db/schema";
 import { log } from "@/lib/logger";
-import { getDocumentConfig } from "@/server/documents/config";
-import { LocalDocumentStorage, STORAGE_KEY_PATTERN } from "@/server/documents/storage";
+import { openDocumentStorage, STORAGE_KEY_PATTERN } from "@/server/documents/storage";
 import { processOwnedPurge, type OwnedPurgeState } from "@/server/documents/purge";
 import { JOB_CLAIM_UPDATE, operationalDocumentReason, type ClaimedDocumentJob } from "@/server/document-maintenance/claims";
 
@@ -53,8 +52,7 @@ export async function claimExpiredPurgeJobs(limit = 25): Promise<ClaimedDocument
 }
 
 export async function processPurgeJob(job: ClaimedDocumentJob): Promise<"completed" | "stale"> {
-  const config = getDocumentConfig();
-  const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+  const storage = openDocumentStorage();
   const outcome = await processOwnedPurge(job, {
     readOwnedPurge: async (claimedJob): Promise<OwnedPurgeState | undefined> => {
       return getDb().transaction(async (transaction) => {

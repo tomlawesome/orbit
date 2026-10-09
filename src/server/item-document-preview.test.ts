@@ -31,13 +31,17 @@ vi.mock("@/server/upload-limit", () => ({
 }));
 vi.mock("@/server/documents/scanner", () => ({ scanFileWithClamAv: mocks.scan }));
 vi.mock("@/server/documents/preview", () => ({ renderDocumentPagePreview: mocks.render }));
-vi.mock("@/server/documents/storage", () => ({
-  LocalDocumentStorage: class {
+vi.mock("@/server/documents/storage", () => {
+  class LocalDocumentStorage {
     receive = mocks.receive;
     readQuarantine = mocks.readQuarantine;
     discardQuarantine = mocks.discardQuarantine;
-  },
-}));
+  }
+  return {
+    LocalDocumentStorage,
+    openDocumentStorage: () => new LocalDocumentStorage(),
+  };
+});
 
 import { previewItemDocument } from "./item-document-preview";
 

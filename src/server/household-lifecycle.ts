@@ -16,7 +16,7 @@ import { AppError } from "@/lib/app-error";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
 import { requireUuid } from "@/server/workspace-access";
 import { getDocumentConfig } from "@/server/documents/config";
-import { LocalDocumentStorage } from "@/server/documents/storage";
+import { openDocumentStorage } from "@/server/documents/storage";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
 
 const RECOVERY_WINDOW_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -41,7 +41,7 @@ type DatabaseTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0]
 
 async function deleteHouseholdStorage(keys: HouseholdStorageKeys): Promise<boolean> {
   const config = getDocumentConfig();
-  const documentStorage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+  const documentStorage = openDocumentStorage(config);
   const archiveStorage = new PortableArchiveStorage(`${config.storageRoot}/portable-archives`);
   // Database access has already been removed. A failed local cleanup leaves
   // only encrypted orphan data, which reconciliation can safely remove later;

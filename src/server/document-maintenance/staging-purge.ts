@@ -10,8 +10,7 @@
 import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentJobs, documentStagingObjects, documents, reviewedIntakeOperations } from "@/db/schema";
-import { getDocumentConfig } from "@/server/documents/config";
-import { LocalDocumentStorage } from "@/server/documents/storage";
+import { openDocumentStorage } from "@/server/documents/storage";
 import type { ClaimedScanJob, ScanRecoveryRecord } from "@/server/document-maintenance/claims";
 
 export async function completeStagingPurge(
@@ -90,8 +89,7 @@ export async function markStagingPurgeFailure(documentId: string, storageKey: st
 
 /** Transitions terminal recovery to purge_pending under the live lease before touching ciphertext. */
 export async function purgeScannerStage(job: ClaimedScanJob, record: ScanRecoveryRecord, failureCode: string): Promise<boolean> {
-  const config = getDocumentConfig();
-  const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+  const storage = openDocumentStorage();
   const transitioned = await getDb().transaction(async (transaction) => {
     const now = new Date();
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`orbit:document:${job.documentId}`}, 0))`);
@@ -150,8 +148,7 @@ export async function purgeScannerStage(job: ClaimedScanJob, record: ScanRecover
 }
 
 export async function expireScannerRecoveryStages(): Promise<void> {
-  const config = getDocumentConfig();
-  const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+  const storage = openDocumentStorage();
   for (let count = 0; count < 25; count += 1) {
     const row = await getDb().transaction(async (transaction) => {
       const now = new Date();
@@ -218,8 +215,7 @@ export async function purgePendingScannerStages(): Promise<void> {
     documentId: documentStagingObjects.documentId,
     storageKey: documentStagingObjects.storageKey,
   }).from(documentStagingObjects).where(eq(documentStagingObjects.status, "purge_pending")).limit(25);
-  const config = getDocumentConfig();
-  const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+  const storage = openDocumentStorage();
   for (const row of rows) {
     try {
       await storage.deleteStagingCiphertext(row.storageKey);

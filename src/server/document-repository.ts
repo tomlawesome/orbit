@@ -18,7 +18,7 @@ import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@
 import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
-import { LocalDocumentStorage } from "@/server/documents/storage";
+import { openDocumentStorage } from "@/server/documents/storage";
 import {
   detectDocumentMediaType,
   normalizedDocumentFilename,
@@ -103,11 +103,6 @@ export interface DocumentSummary {
 }
 
 const unavailableDocumentConditions = ["deleted", "rejected"] as const;
-
-function documentStorage(): LocalDocumentStorage {
-  const config = getDocumentConfig();
-  return new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
-}
 
 async function requireHouseholdAndItemAccess(
   userId: string,
@@ -385,7 +380,7 @@ export async function uploadItemDocument(input: {
   // The administrator's limit, read now so a change needs no restart (#1285).
   // Held for the whole upload, so every read below agrees with the receive.
   const maxBytes = await readEffectiveUploadLimit(config);
-  const storage = documentStorage();
+  const storage = openDocumentStorage(config);
   const documentId = input.documentId ?? randomUUID();
   const received = await storage.receive(input.body, documentId, maxBytes, input.declaredBytes);
   let storageKey: string | undefined;
@@ -812,7 +807,7 @@ export async function readDocumentDownload(
     // A stored document was accepted under whatever limit applied then, so it
     // is read against the hard ceiling: lowering the limit (#1285) must never
     // make an existing document unreadable.
-    ciphertext = await documentStorage().readCiphertext(crypto.storageKey, DOCUMENT_MAX_BYTES_CEILING + 64);
+    ciphertext = await openDocumentStorage().readCiphertext(crypto.storageKey, DOCUMENT_MAX_BYTES_CEILING + 64);
   } catch {
     throw new AppError("document_unavailable", "That document cannot currently be opened", 503);
   }
@@ -899,7 +894,7 @@ export async function restoreDocument(userId: string, documentId: string): Promi
     if (!crypto) throw new AppError("document_unavailable", "That document cannot currently be restored", 503);
     let ciphertextExists = false;
     try {
-      ciphertextExists = await documentStorage().ciphertextExists(crypto.storageKey);
+      ciphertextExists = await openDocumentStorage().ciphertextExists(crypto.storageKey);
     } catch {
       throw new AppError("document_unavailable", "That document cannot currently be restored", 503);
     }

@@ -138,8 +138,8 @@ vi.mock("@/server/documents/scanner", () => ({
   },
 }));
 
-vi.mock("@/server/documents/storage", () => ({
-  LocalDocumentStorage: class {
+vi.mock("@/server/documents/storage", () => {
+  class LocalDocumentStorage {
     async receive() {
       return { quarantinePath: "/tmp/q", sizeBytes: 5, contentSha256: "hash", leadingBytes: Buffer.from("%PDF") };
     }
@@ -156,8 +156,12 @@ vi.mock("@/server/documents/storage", () => ({
     async deleteCiphertext() {}
     async deleteStagingCiphertext() {}
     async discardQuarantine() {}
-  },
-}));
+  }
+  return {
+    LocalDocumentStorage,
+    openDocumentStorage: () => new LocalDocumentStorage(),
+  };
+});
 
 const { uploadItemDocument } = await import("./document-repository");
 
