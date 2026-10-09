@@ -170,4 +170,9 @@
   .pocket :is(.pick:focus-visible,.ed:focus),.pocket .choosing .pick{box-shadow:none;
     background-position:left 0 bottom calc(var(--pad) - 1.5px);background-size:100% 1.5px}
   .pocket .pick::before{content:none}
+  /* keyboard focus keeps the app's standard ring (app.css's 2px accent
+     outline, 2px off): the 1.5px accent line above is half a pixel thicker
+     than at rest, which is not an indicator, and the 44px move off
+     box-shadow took away the one that was here */
+  .pocket :is(.pick,.ed):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 </style>
