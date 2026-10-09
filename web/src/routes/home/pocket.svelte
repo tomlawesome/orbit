@@ -394,6 +394,11 @@
      a time: the latest ask. */
   /** @type {string | null} */
   let asked = $state(null);
+  /* itemRow's parameter is typed by this default, not by JSDoc in the
+     snippet's parameter list, which crashes the production rolldown build
+     (scripts/check-rolldown-jsdoc-trap.mjs). */
+  /** @type {any} */
+  const NO_ROW = {};
   const listed = $derived(groups ? (groups.attention.length ? groups.attention : groups.later.slice(0, 1)) : []);
   const askedRow = $derived.by(() => {
     if (!asked || !view?.household || listed.some((row) => row.id === asked)) return null;
@@ -1122,7 +1127,7 @@
   <button class="msearch" onclick={openSearch}>explore your world</button>
   <div class="pk-below" class:pk-busy={busy}>
   <!-- One item's row: the manifest's, or the one asked for (`asked`). -->
-  {#snippet itemRow(/** @type {any} */ one)}
+  {#snippet itemRow(one = NO_ROW)}
     <!-- #1319 stage 2 (round 8): while the item is edited, its title is
          live in the row's head, as on the desk -->
     {#snippet liveTitle()}{#if modes.edit.draft}<b class="ed" contenteditable="plaintext-only" spellcheck="false" role="textbox" tabindex="0"
