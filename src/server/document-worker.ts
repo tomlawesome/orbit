@@ -16,7 +16,7 @@ import { purgeExpiredHouseholds } from "@/server/household-lifecycle";
 import { workerState } from "@/server/document-maintenance/worker-state";
 import { claimScannerRecoveryJobs, failScannerRecoveryJob, processScannerRecoveryJob } from "@/server/document-maintenance/scan-recovery";
 import { expireScannerRecoveryStages, purgePendingScannerStages } from "@/server/document-maintenance/staging-purge";
-import { claimExpiredPurgeJobs, failJob, processPurgeJob } from "@/server/document-maintenance/purge-jobs";
+import { claimExpiredPurgeJobs, failPurgeJob, processPurgeJob } from "@/server/document-maintenance/purge-jobs";
 import { reconcileDocumentStorage, rejectInterruptedDocuments } from "@/server/document-maintenance/storage-reconciliation";
 
 export { purgeClaimOutcome } from "@/server/document-maintenance/claims";
@@ -52,7 +52,7 @@ export async function runDocumentMaintenanceCycle(): Promise<void> {
       const outcome = await processPurgeJob(job);
       if (outcome === "completed") log.info({ event: "document.job", state: "ready", action: "none" });
     } catch (error) {
-      await failJob(job, error);
+      await failPurgeJob(job, error);
     }
   }
 }

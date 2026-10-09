@@ -735,6 +735,60 @@ describe("authenticated encrypted document lifecycle", () => {
     });
   });
 
+  it("never makes a document available on a scan outcome it does not recognise", async () => {
+    const fixture = await createIntegrationFixture("document-scan-unknown-outcome");
+    const documentId = randomUUID();
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "quarantined" } as never);
+    await withRequiredScanMode(async () => {
+      const { response } = await uploadWithFilename(fixture, "policy.pdf", documentId);
+      expect(response.status).toBe(503);
+      expect((await response.json() as { error: { code: string } }).error.code).toBe("document_scanner_failed");
+      const [stored] = await getDb().select({ lifecycle: documents.lifecycle, scanStatus: documents.scanStatus, failureCode: documents.failureCode })
+        .from(documents).where(eq(documents.id, documentId));
+      expect(stored).toEqual({ lifecycle: "rejected", scanStatus: "error", failureCode: "scanner_failed" });
+      expect(await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto).where(eq(documentCrypto.documentId, documentId))).toHaveLength(0);
+      expect(await getDb().select({ documentId: documentStagingObjects.documentId }).from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId))).toHaveLength(0);
+    });
+  });
+
+  it("keeps a staged upload unavailable while its recovery scan keeps meeting a protocol error or an unknown outcome", async () => {
+    const fixture = await createIntegrationFixture("document-scan-recovery-never-clean");
+    const documentId = randomUUID();
+    vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "error", reason: "protocol" });
+    await withRequiredScanMode(async () => {
+      expect((await uploadWithFilename(fixture, "policy.pdf", documentId)).response.status).toBe(202);
+      const makeDue = () => getDb().update(documentJobs).set({ nextAttemptAt: new Date(Date.now() - 1_000) })
+        .where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+      const state = async () => {
+        const [document] = await getDb().select({ lifecycle: documents.lifecycle, scanStatus: documents.scanStatus, failureCode: documents.failureCode })
+          .from(documents).where(eq(documents.id, documentId));
+        const [job] = await getDb().select({ status: documentJobs.status, lastError: documentJobs.lastError })
+          .from(documentJobs).where(and(eq(documentJobs.documentId, documentId), eq(documentJobs.kind, "scan")));
+        const crypto = await getDb().select({ id: documentCrypto.documentId }).from(documentCrypto).where(eq(documentCrypto.documentId, documentId));
+        return { document, job, crypto: crypto.length };
+      };
+
+      // A protocol error on the recovery scan is retried, never cleared.
+      await makeDue();
+      await runDocumentMaintenanceCycle();
+      expect(await state()).toEqual({
+        document: { lifecycle: "scanning", scanStatus: "error", failureCode: "scanner_protocol" },
+        job: { status: "retry", lastError: "scanner_protocol" },
+        crypto: 0,
+      });
+
+      // An outcome nobody recognises ends the recovery as a scanner failure.
+      vi.mocked(scanFileWithClamAv).mockResolvedValue({ status: "quarantined" } as never);
+      await makeDue();
+      await runDocumentMaintenanceCycle();
+      expect(await state()).toMatchObject({
+        document: { lifecycle: "rejected", scanStatus: "error", failureCode: "scanner_failed" },
+        crypto: 0,
+      });
+      expect(await getDb().select({ documentId: documentStagingObjects.documentId }).from(documentStagingObjects).where(eq(documentStagingObjects.documentId, documentId))).toHaveLength(0);
+    });
+  });
+
   it("replays a recovery response for the same identity and rejects content reuse", async () => {
     const fixture = await createIntegrationFixture("document-idempotency");
     const documentId = randomUUID();

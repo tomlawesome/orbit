@@ -45,6 +45,7 @@ import {
   imapProviderConnectionOptions,
   imapRecipientAlias,
   matchesImapRecipientAlias,
+  safeAttachmentFailure,
 } from "@/server/imap-ingestion";
 import { getNotificationWorkerConfig } from "@/server/notification-worker";
 import { failureReasonOf, findReviewedIntakeCandidateReason, reviewInboxState } from "@/server/imap-inbox";
@@ -466,6 +467,16 @@ describe("reviewInboxState — status/failure to UI classification mapping", () 
     expect(failureReasonOf(null)).toBe("unknown");
     expect(failureReasonOf(undefined)).toBe("unknown");
     expect(failureReasonOf("some_unmapped_code")).toBe("unknown");
+  });
+
+  it("keeps every scanner outcome a member can meet as 'scanner unavailable', not 'not kept' (engine-7)", () => {
+    for (const code of ["scanner_unavailable", "scanner_timeout", "scanner_protocol", "scanner_failed"]) {
+      expect(failureReasonOf(code)).toBe("scanner_off");
+      // The code the holding step throws must survive to the stored receipt,
+      // or the member is told the attachment was not kept instead.
+      expect(safeAttachmentFailure(new Error(code))).toBe(code);
+    }
+    expect(safeAttachmentFailure(new Error("some_unlisted_code"))).toBe("attachment_processing_failed");
   });
 
   it("carries the derived reason on reviewInboxState's return alongside message", () => {

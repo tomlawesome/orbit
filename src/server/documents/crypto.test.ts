@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   decryptDocument,
   encryptDocument,
+  envelopeOf,
   rewrapDocumentKey,
   type DocumentEncryptionContext,
 } from "./crypto";
@@ -49,5 +50,33 @@ describe("document envelope encryption", () => {
     expect(rewrapped.keyId).toBe("key-2");
     expect(decryptDocument(encrypted.ciphertext, context, rewrapped, nextKek)).toEqual(plaintext);
     expect(() => decryptDocument(encrypted.ciphertext, context, rewrapped, currentKek)).toThrow();
+  });
+});
+
+describe("envelopeOf (engine-21)", () => {
+  const kek = randomBytes(32);
+
+  it("takes the envelope columns of a stored row and nothing else", () => {
+    const encrypted = encryptDocument(plaintext, context, kek, "key-1");
+    const row = {
+      ...encrypted.envelope,
+      // Columns a real row carries beside its envelope must not leak into it.
+      documentId: context.documentId,
+      storageKey: "a".repeat(64),
+      ciphertext: encrypted.ciphertext,
+      algorithm: "not-the-algorithm",
+    };
+    expect(envelopeOf(row)).toEqual(encrypted.envelope);
+    expect(Object.keys(envelopeOf(row)).sort()).toEqual([
+      "algorithm", "contentAuthTag", "contentIv", "envelopeVersion", "keyId", "wrapAuthTag", "wrapIv", "wrappedDek",
+    ]);
+  });
+
+  it("keeps a stored version as the number it is, so decryption refuses one it does not know", () => {
+    const encrypted = encryptDocument(plaintext, context, kek, "key-1");
+    const future = envelopeOf({ ...encrypted.envelope, envelopeVersion: 2 });
+    expect(future.envelopeVersion).toBe(2);
+    expect(() => decryptDocument(encrypted.ciphertext, context, future, kek)).toThrow("Unsupported document encryption envelope");
+    expect(decryptDocument(encrypted.ciphertext, context, envelopeOf(encrypted.envelope), kek)).toEqual(plaintext);
   });
 });

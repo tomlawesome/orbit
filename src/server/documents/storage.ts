@@ -10,6 +10,7 @@ import {
 import { dirname, join } from "node:path";
 import { AppError } from "@/lib/app-error";
 import { validUuid } from "@/lib/uuid";
+import { getDocumentConfig, type DocumentConfig } from "@/server/documents/config";
 
 /** A storage key's own shape: 32 bytes of hex. Exported so any caller that
  * must validate a storage key outside this module (purge-jobs.ts's claim
@@ -267,4 +268,15 @@ export class LocalDocumentStorage {
   async deleteStagingCiphertext(storageKey: string): Promise<void> {
     await rm(this.stagingPath(storageKey), { force: true });
   }
+}
+
+/**
+ * The document store for this instance's configuration. The one place the
+ * roots are read from the config, so a caller does not restate the pairing
+ * and a test has one function to replace (#1349, engine-27).
+ */
+export function openDocumentStorage(
+  config: Pick<DocumentConfig, "storageRoot" | "quarantineRoot"> = getDocumentConfig(),
+): LocalDocumentStorage {
+  return new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
 }
