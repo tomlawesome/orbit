@@ -404,3 +404,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-keyboard.spec.ts:313 "arrive: the sign-in door opens by Tab and Enter alone" on desktop-chromium
 
 - 2026-10-09 · 79c68846 (#1319 stage 3b; this test unchanged on the branch) · local `scripts/test-e2e-local.sh --keep --project desktop-chromium`, whole suite, with the fidelity suite running alongside · `page.goto: net::ERR_ABORTED` on `/home` at line 328. Passed on a rerun of the file against the same stack. Traces: `~/projects/.backups/orbit/e2e-1319-stage3b-79c68846-desktop-chromium`. First sighting.
+
+## v19-home-drawer.spec.ts:212 "on the desk › the dial's documents chip opens the item's drawer at its real documents" (desktop-webkit)
+
+- 2026-10-09 · 52e9f358 · local `scripts/test-e2e-local.sh --spec tests/e2e/v19-home-drawer.spec.ts`, all projects · `.callout.show .chip` never appeared within 5s after `dispatchEvent("mouseenter")` on the dial body, desktop-webkit only (the other desk projects green). Green on an immediate rerun of the spec on desktop-webkit alone, same commit. First sighting.
