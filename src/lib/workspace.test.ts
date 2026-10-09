@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createTestWorkspace } from "./test-workspace";
 import { AppError } from "./errors";
-import { activeHousehold, createEmptyWorkspace, createHousehold, initialScheduleKind, parseWorkspaceCommand, reduceWorkspace, workspaceCommandSchema, workspaceItemSchema, type WorkspaceState } from "./workspace";
+import { activeHousehold, createEmptyWorkspace, createHousehold, initialScheduleKind, parseWorkspaceCommand, reduceWorkspace, workspaceCommandSchema, workspaceItemSchema, workspaceSchema, type WorkspaceState } from "./workspace";
 import { COST_MINOR_MAX, NOTES_MAX, RECURRENCE_MAX, REMINDER_DAYS_MAX, REMINDER_MAX, TITLE_MAX, defaultSections, type HomeItem } from "./domain";
 
 const defaultSectionsForTest = () => defaultSections.map((section) => ({ ...section }));
@@ -532,6 +532,27 @@ describe("household workspace", () => {
         expect(refused(setupWith({ timezone }))).toBe(false);
       },
     );
+
+    it("reads what is already stored: a zone, currency or activity date the write path would refuse still parses (#1333)", () => {
+      const stored = {
+        version: 1,
+        householdLanding: "active",
+        activeHouseholdId: "our-home",
+        households: [{
+          id: "our-home", name: "Home", timezone: "America/New York", currency: "ZZZ", memberCount: 1,
+          sections: defaultSectionsForTest().map((section) => ({ ...section, id: section.name })),
+          items: [{ id: "mot", sectionId: "Home", title: "MOT", currency: "XXX", status: "active" }],
+          activities: [{ id: "a-1", itemId: "mot", kind: "updated", occurredAt: "2026-07-01T10:00:00.000Z", effectiveDate: "2026-02-31" }],
+        }],
+      };
+      const parsed = workspaceSchema.parse(stored);
+      expect(parsed.households[0]).toMatchObject({ timezone: "America/New York", currency: "ZZZ" });
+      expect(parsed.households[0].items[0].currency).toBe("XXX");
+      expect(parsed.households[0].activities[0].effectiveDate).toBe("2026-02-31");
+      // ...while the same values are refused as a write.
+      expect(workspaceItemSchema.safeParse({ ...stored.households[0].items[0] }).success).toBe(false);
+      expect(refused(setupWith({ timezone: "America/New York" }))).toBe(true);
+    });
 
     it("builds the item bounds from the numbers domain.ts exports", () => {
       expect(refused(upsertWith({ title: "x".repeat(TITLE_MAX) }))).toBe(false);

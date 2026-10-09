@@ -70,8 +70,11 @@ describe("a calendar date is checked in one place (#1333)", () => {
 });
 
 describe("currency and time zone are checked in one place (#1333)", () => {
-  it("no schema or sanitiser sizes a currency with a bare length or a letter pattern", () => {
-    expect(where(/currency[^\n]*(length\(3\)|\[A-Z\]\{3\})/iu)).toEqual([]);
+  // The one tolerated exception is the read side: a stored row is parsed by shape only
+  // (validate on write, tolerate on read), in workspace.ts's `readRules` and nowhere else.
+  it("only the read rules size a currency with a bare length or a letter pattern", () => {
+    expect(where(/currency[^\n]*(length\(3\)|\[A-Z\]\{3\})/iu)).toEqual(["lib/workspace.ts"]);
+    expect(lines("lib/workspace.ts", /currency[^\n]*length\(3\)/iu)).toHaveLength(1);
     expect(where(/CURRENCY_CODE\s*=\s*\//u)).toEqual([]);
   });
 
@@ -79,8 +82,14 @@ describe("currency and time zone are checked in one place (#1333)", () => {
     expect(where(/supportedValuesOf/u)).toEqual(["lib/platform-lists.ts"]);
   });
 
-  it("no schema leaves a time zone as any string", () => {
-    expect(where(/timezone[^\n]*z\.string\(\)\.min\(1\)\.max\(80\)/u)).toEqual([]);
+  it("only the read rules leave a time zone as any string", () => {
+    expect(where(/timezone[^\n]*z\.string\(\)\.min\(1\)\.max\(80\)/u)).toEqual(["lib/workspace.ts"]);
+    expect(lines("lib/workspace.ts", /timezone[^\n]*z\.string\(\)\.min\(1\)\.max\(80\)/u)).toHaveLength(1);
+  });
+
+  it("every write path takes the strict rules: commands never name the read rules", () => {
+    expect(file("lib/workspace.ts").match(/\breadRules\b/gu)).toHaveLength(4);
+    expect(where(/\bstored(Item|Activity|Household)Schema\b/u).sort()).toEqual(["lib/workspace.ts", "server/workspace-repository.ts"]);
   });
 });
 
