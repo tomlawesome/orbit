@@ -367,13 +367,14 @@ async function recordImapReceipt(_config: ImapIngestionConfig, values: ImapRecei
   });
 }
 
-function safeAttachmentFailure(error: unknown): string {
+export function safeAttachmentFailure(error: unknown): string {
   const code = error instanceof Error ? error.message : "attachment_processing_failed";
   return new Set([
     "attachment_count_exceeded", "attachment_total_too_large", "document_too_large",
     "mime_part_count_exceeded", "mime_nesting_too_deep", "mime_structure_invalid",
     "mime_type_mismatch", "document_type_unsupported", "malware_detected", "scanner_disabled",
-    "scanner_unavailable", "message_too_large", "attachment_download_failed",
+    "scanner_unavailable", "scanner_timeout", "scanner_protocol", "scanner_failed",
+    "message_too_large", "attachment_download_failed",
     "staging_lease_lost", "staging_purge_failed",
   ]).has(code) ? code : "attachment_processing_failed";
 }

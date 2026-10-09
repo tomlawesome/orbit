@@ -13,7 +13,7 @@ import {
   users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
-import { log, operationalReasons, type OperationalReason } from "@/lib/logger";
+import { asOperationalReason, log } from "@/lib/logger";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
 import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
@@ -26,14 +26,9 @@ import {
   type DocumentStructureReason,
 } from "@/server/documents/validation";
 import { canAccessHouseholdDocuments, canManageDocumentDeletion } from "@/server/documents/authorization";
-import { retryableScannerFailureCode, scannerRecoveryDelayMs } from "@/server/documents/staging";
+import { scannerRecoveryDelayMs } from "@/server/documents/staging";
+import { classifyScan, documentScanCodes, type ScanClassification } from "@/server/documents/scan-outcome";
 import { validUuid } from "@/server/workspace-access";
-
-function operationalDocumentReason(value: string): OperationalReason {
-  return (operationalReasons as readonly string[]).includes(value)
-    ? value as OperationalReason
-    : "unexpected_failure";
-}
 
 /**
  * Lifecycles a user may see listed against an item.
@@ -472,12 +467,12 @@ export async function uploadItemDocument(input: {
     // durable metadata exists, as it always was. The one read here serves
     // both that check and the encrypt stage, and happens after the scan, so
     // no plaintext is held in memory across the scan's wait (A2-Q1).
-    let scan: Awaited<ReturnType<typeof scanFileWithClamAv>> | undefined;
+    let scan: ScanClassification<typeof documentScanCodes[keyof typeof documentScanCodes]> | undefined;
     let scanMs = 0;
     if (config.scanMode === "required") {
       log.info({ event: "document.scan", state: "starting", action: "check_scanner" });
       const scanStartedAt = Date.now();
-      scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
+      scan = classifyScan(await scanFileWithClamAv(received.quarantinePath, config.clamAv), documentScanCodes);
       scanMs = Math.max(0, Date.now() - scanStartedAt);
     }
     if (!scan || scan.status === "clean") {
@@ -531,19 +526,18 @@ export async function uploadItemDocument(input: {
         // with a failure" so an operator knows whether to check connectivity or
         // the scanner itself. Neither message discloses host, port or provider
         // text, per the bounded-diagnostics rule.
-        const retryableFailureCode = retryableScannerFailureCode(scan);
-        const failureCode = infected ? "malware_detected" : retryableFailureCode ?? "scanner_failed";
-        // `scan.reason` is a fixed enumeration from the scanner adapter, never
-        // provider text, so it is safe to record.
+        const failureCode = scan.code;
+        // A fixed enumeration from the scanner adapter, never provider text,
+        // so it is safe to record.
         log.warn({
           event: "document.scan",
           state: infected ? "exhausted" : "degraded",
-          reason: operationalDocumentReason(failureCode),
+          reason: asOperationalReason(failureCode),
           action: "check_scanner",
           impact: "document_upload_blocked",
           durationMs: scanMs,
         });
-        if (retryableFailureCode) {
+        if (scan.retryable) {
           const plaintext = await storage.readQuarantine(received.quarantinePath, maxBytes);
           try {
             // The next key while a rotation is in progress (#955).
@@ -606,7 +600,7 @@ export async function uploadItemDocument(input: {
             log.warn({
               event: "document.scan",
               state: "retrying",
-              reason: operationalDocumentReason(failureCode),
+              reason: asOperationalReason(failureCode),
               action: "retry",
               impact: "document_upload_blocked",
               durationMs: scanMs,
@@ -640,7 +634,7 @@ export async function uploadItemDocument(input: {
         log.warn({
           event: "document.lifecycle",
           state: "exhausted",
-          reason: operationalDocumentReason(failureCode),
+          reason: asOperationalReason(failureCode),
           action: "check_scanner",
           impact: "document_upload_blocked",
         });
@@ -769,7 +763,7 @@ export async function uploadItemDocument(input: {
         log.warn({
           event: "document.lifecycle",
           state: "exhausted",
-          reason: operationalDocumentReason(failureCode),
+          reason: asOperationalReason(failureCode),
           action: "inspect_admin_diagnostics",
           impact: "document_processing_blocked",
         });

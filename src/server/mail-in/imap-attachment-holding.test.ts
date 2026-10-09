@@ -165,10 +165,15 @@ describe("private IMAP attachment holding", () => {
   it.each([
     ["infected", { status: "infected", signature: "Eicar-Test-Signature" }, "malware_detected"],
     ["unreachable", { status: "error", reason: "unavailable" }, "scanner_unavailable"],
+    ["timed out", { status: "error", reason: "timeout" }, "scanner_timeout"],
+    ["a protocol error", { status: "error", reason: "protocol" }, "scanner_protocol"],
+    ["a scanner-reported error", { status: "error", reason: "scanner" }, "scanner_failed"],
+    ["an error with no reason", { status: "error" }, "scanner_failed"],
+    ["an unknown status", { status: "quarantined" }, "scanner_failed"],
   ] as const)("required mode: never opens a mailed attachment whose scan was %s (ADR-0033)", async (_label, outcome, message) => {
     root = await mkdtemp(join(tmpdir(), "orbit-imap-scan-stops-"));
     configure("required");
-    vi.mocked(scanFileWithClamAv).mockResolvedValue(outcome);
+    vi.mocked(scanFileWithClamAv).mockResolvedValue(outcome as never);
     await expect(scanAndHoldImapAttachment({
       bytes: syntheticPdf("scan stops"),
       filename: "scan-stops.pdf",

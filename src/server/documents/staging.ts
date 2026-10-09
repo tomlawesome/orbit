@@ -1,5 +1,3 @@
-import type { MalwareScanResult } from "@/server/documents/scanner";
-
 export const SCANNER_RECOVERY_MAX_ATTEMPTS = 5;
 export const SCANNER_RECOVERY_LEASE_MS = 10 * 60 * 1_000;
 
@@ -10,14 +8,6 @@ export const retryableScannerFailureCodes = [
 ] as const;
 
 export type RetryableScannerFailureCode = typeof retryableScannerFailureCodes[number];
-
-export function retryableScannerFailureCode(result: MalwareScanResult): RetryableScannerFailureCode | undefined {
-  if (result.status !== "error") return undefined;
-  if (result.reason === "unavailable") return "scanner_unavailable";
-  if (result.reason === "timeout") return "scanner_timeout";
-  if (result.reason === "protocol") return "scanner_protocol";
-  return undefined;
-}
 
 export function scannerRecoveryDelayMs(attempt: number): number {
   const boundedAttempt = Math.max(1, Math.min(attempt, SCANNER_RECOVERY_MAX_ATTEMPTS));
