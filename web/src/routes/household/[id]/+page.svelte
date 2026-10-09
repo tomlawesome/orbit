@@ -204,7 +204,7 @@
   /* The mockup's own lists. A household whose stored value is not among them
      keeps its own value at the head rather than being silently re-pointed at
      one that is — the select must never change what is stored by rendering. */
-  const ZONES = ["Europe/London", "Europe/Dublin", "Europe/Paris", "America/New York", "Australia/Sydney", "UTC"];
+  const ZONES = ["Europe/London", "Europe/Dublin", "Europe/Paris", "America/New_York", "Australia/Sydney", "UTC"];
   const CURRENCIES = ["GBP", "EUR", "USD", "CAD", "AUD", "NZD"];
   /** @param {string[]} list @param {string} current */
   const withCurrent = (list, current) => (list.includes(current) ? list : [current, ...list]);

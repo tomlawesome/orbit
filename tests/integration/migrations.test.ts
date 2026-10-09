@@ -192,6 +192,34 @@ describe("PostgreSQL migration evidence", () => {
     expect(noticeAudits.map((row) => row.entity_id)).toEqual([pending, alsoPending, claimed, cancelled].sort());
   });
 
+  it("repairs the time zone \"America/New York\" the desk household screen once stored, and nothing else (#1333)", async () => {
+    const database = await createMigrationTestDatabase("repair-new-york");
+    databases.push(database);
+    const throughTagDirectory = await createMigrationDirectoryThroughTag("drizzle", "0049_instance_upload_limit");
+    temporaryDirectories.push(throughTagDirectory);
+    await runMigrations(database.url, throughTagDirectory.path);
+
+    const zones: Record<string, string> = {
+      "bb000000-0000-4000-8000-000000000001": "America/New York",
+      "bb000000-0000-4000-8000-000000000002": "Europe/London",
+      "bb000000-0000-4000-8000-000000000003": "America/New_York",
+      "bb000000-0000-4000-8000-000000000004": "Not/AZone",
+      "bb000000-0000-4000-8000-000000000005": "america/new york",
+      "bb000000-0000-4000-8000-000000000006": "UTC",
+    };
+    for (const [id, zone] of Object.entries(zones)) {
+      await database.client.unsafe(`INSERT INTO "households" (id, name, timezone) VALUES ($1, $2, $3)`, [id, `Household ${id.slice(-1)}`, zone]);
+    }
+
+    await runMigrations(database.url, "drizzle");
+
+    const rows = await database.client.unsafe(`SELECT "id", "timezone" FROM "households" ORDER BY "id"`);
+    expect(Object.fromEntries(rows.map((row) => [row.id, row.timezone]))).toEqual({
+      ...zones,
+      "bb000000-0000-4000-8000-000000000001": "America/New_York",
+    });
+  });
+
   it("fails closed below the supported floor and on checksum drift", async () => {
     const database = await createMigrationTestDatabase("integrity");
     databases.push(database);

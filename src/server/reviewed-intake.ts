@@ -17,8 +17,19 @@ import {
   users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
-import { type HomeItem, type ScheduleKind } from "@/lib/domain";
+import { isCalendarDate } from "@/lib/calendar-date";
+import {
+  COST_MINOR_MAX,
+  PROVIDER_MAX,
+  RECURRENCE_MAX,
+  REFERENCE_MAX,
+  SUBTYPE_MAX,
+  TITLE_MAX,
+  type HomeItem,
+  type ScheduleKind,
+} from "@/lib/domain";
 import { itemKinds, itemOfIntent, type ItemIntent } from "@/lib/item-kind";
+import { isCurrencyCode } from "@/lib/platform-lists";
 import { costMinorOf, itemRefusal, Refusal } from "@/lib/refusals";
 import { workspaceItemSchema } from "@/lib/workspace";
 import type { AdjudicatedField } from "@/server/documents/adjudication";
@@ -44,10 +55,10 @@ type ProposalField = typeof proposalFields[number];
 const evidenceSource = z.enum(["filename", "document_text", "parser", "attachment"]);
 const evidenceConfidence = z.enum(["high", "medium", "low"]);
 const proposalTextMaximum: Record<string, number> = {
-  title: 100,
-  subtype: 80,
-  provider: 100,
-  reference: 80,
+  title: TITLE_MAX,
+  subtype: SUBTYPE_MAX,
+  provider: PROVIDER_MAX,
+  reference: REFERENCE_MAX,
   currency: 3,
   dueDate: 10,
   scheduleKind: 8,
@@ -100,16 +111,16 @@ function boundedProposalField(field: ProposalField, value: unknown): unknown {
     // and zero-width characters.
     const text = safeDocumentPlainText(value, proposalTextMaximum[field]);
     if (!text) return undefined;
-    if (field === "currency" && !/^[A-Z]{3}$/u.test(text)) return undefined;
-    if (field === "dueDate" && !/^\d{4}-\d{2}-\d{2}$/u.test(text)) return undefined;
+    if (field === "currency" && !isCurrencyCode(text)) return undefined;
+    if (field === "dueDate" && !isCalendarDate(text)) return undefined;
     // A3-Q1: the shared list (suggestions.ts, from src/lib/domain.ts)
     // includes "expiry"; a local copy missing it let an expiry document
     // reach review with its date but no schedule type.
     if (field === "scheduleKind" && !(scheduleKinds as readonly string[]).includes(text)) return undefined;
     return text;
   }
-  if (field === "costMinor" && typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 100_000_000) return value;
-  if (field === "recurrenceMonths" && typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= 120) return value;
+  if (field === "costMinor" && typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= COST_MINOR_MAX) return value;
+  if (field === "recurrenceMonths" && typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= RECURRENCE_MAX) return value;
   return undefined;
 }
 

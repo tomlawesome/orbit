@@ -6,6 +6,7 @@ import {
   reviewedIntakeApprovalSchema,
   sanitizeReviewDraftMetadata,
 } from "./reviewed-intake";
+import { COST_MINOR_MAX, RECURRENCE_MAX } from "@/lib/domain";
 
 describe("reviewed intake contract", () => {
   // #1151 A3-Q8: this schema places no bound on `item` -- it is a plain
@@ -205,3 +206,31 @@ describe("reviewed intake contract", () => {
     expect(() => reviewedIntakeApprovalSchema.parse({ ...base, operationId: "not-a-uuid" })).toThrow();
   });
 });
+
+describe("a proposal keeps only values the engine would store (#1333)", () => {
+  const kept = (proposal: Record<string, unknown>) => sanitizeReviewDraftMetadata({ proposal }).proposal;
+
+  it.each(["2026-02-31", "2026-13-45", "2027-02-29", "2026-04-31"])("drops %s as a due date", (dueDate) => {
+    expect(kept({ title: "Policy", dueDate })).toEqual({ title: "Policy" });
+  });
+
+  it("keeps a real due date, leap days included", () => {
+    expect(kept({ dueDate: "2028-02-29" })).toEqual({ dueDate: "2028-02-29" });
+  });
+
+  it.each(["ZZZ", "XXX", "gbp", "GB"])("drops %s as a currency", (currency) => {
+    expect(kept({ title: "Policy", currency })).toEqual({ title: "Policy" });
+  });
+
+  it("keeps a currency the platform lists", () => {
+    expect(kept({ currency: "EUR" })).toEqual({ currency: "EUR" });
+  });
+
+  it("takes its cost and repeat bounds from the item's own, at the edge and one past it", () => {
+    expect(kept({ costMinor: COST_MINOR_MAX })).toEqual({ costMinor: COST_MINOR_MAX });
+    expect(kept({ costMinor: COST_MINOR_MAX + 1 })).toEqual({});
+    expect(kept({ recurrenceMonths: RECURRENCE_MAX })).toEqual({ recurrenceMonths: RECURRENCE_MAX });
+    expect(kept({ recurrenceMonths: RECURRENCE_MAX + 1 })).toEqual({});
+  });
+});
+

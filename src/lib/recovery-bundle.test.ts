@@ -115,6 +115,14 @@ describe("passphrase validation (recovery-crypto.mjs #1, export-recovery-bundle.
     expect(() => requireValidPassphrase("x".repeat(11))).toThrow(RecoveryBundleRefusal);
   });
 
+  it("counts a passphrase's characters as a person does: NFC, one code point each (#1333)", () => {
+    // Twelve UTF-16 units, six characters each.
+    expect(isValidPassphrase("\u{1F44D}".repeat(6))).toBe(false);
+    expect(isValidPassphrase("e\u0301".repeat(6))).toBe(false);
+    expect(isValidPassphrase("\u{1F44D}".repeat(12))).toBe(true);
+    expect(isValidPassphrase("e\u0301".repeat(12))).toBe(true);
+  });
+
   it("requires the confirmation to match exactly (typo protection, #7)", () => {
     expect(passphrasesMatch("correct-horse-battery", "correct-horse-battery")).toBe(true);
     expect(passphrasesMatch("correct-horse-battery", "correct-horse-batteryy")).toBe(false);
