@@ -43,7 +43,7 @@
  * plays on the reader's own, undimmed sky.
  */
 import { drawDemoBody, ease, positionDemoBody } from "./demo-body.js";
-import { SELECTORS as ITEM, glide, itemBody, openItem } from "./08-the-item.js";
+import { SELECTORS as ITEM, glide, itemBody, openItem, readyHome } from "./08-the-item.js";
 
 /** Ratified beat: the demo body walks from 16 days out (just completed) to
  *  381 (next year), over a fixed 2200ms after a 200ms lead-in — the
@@ -121,6 +121,7 @@ export default {
     /* Played on from chapter 8 the drawer is open, veiled and lit; on a
        cold jump it is opened here, on the sky as the reader left it. */
     if (dry() || !doc.querySelector(S.done)) veil(false);
+    await readyHome(ctx);
     await openItem(ctx, itemBody(ctx));
     veil(true);
 
