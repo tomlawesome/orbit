@@ -2,18 +2,13 @@ import { createHash, randomUUID } from "node:crypto";
 import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
-import { LocalDocumentStorage } from "@/server/documents/storage";
+import { openDocumentStorage } from "@/server/documents/storage";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
 import { identifyImapAttachmentBytes, normalizeImapAttachmentName } from "./core/imap-attachment-validation";
 import { validateSupportedDocumentStructure, type SupportedDocumentMediaType } from "@/server/documents/validation";
 
 let purgeImplementationForTests: ((storageKey: string) => Promise<void>) | undefined;
-
-function storage() {
-  const config = getDocumentConfig();
-  return new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
-}
 
 export type HeldImapAttachment = {
   id: string;
@@ -66,12 +61,12 @@ async function holdBytes(
   // The next key while a rotation is in progress, the current key otherwise (#955).
   const wrap = wrappingKey(config);
   const encrypted = encryptDocument(input.bytes, stagingContext(id, recipientUserId, receiptId, input.mediaType, input.bytes.length), wrap.keyEncryptionKey, wrap.keyId);
-  const storageKey = storage().createStorageKey();
+  const storageKey = openDocumentStorage().createStorageKey();
   try {
     await onCiphertextAllocated?.({ id, storageKey });
-    await storage().writeCiphertext(storageKey, encrypted.ciphertext);
+    await openDocumentStorage().writeCiphertext(storageKey, encrypted.ciphertext);
   } catch (error) {
-    await storage().deleteCiphertext(storageKey).catch(() => undefined);
+    await openDocumentStorage().deleteCiphertext(storageKey).catch(() => undefined);
     throw error;
   } finally {
     encrypted.ciphertext.fill(0);
@@ -94,9 +89,9 @@ export async function scanAndHoldImapAttachment(input: {
   const maxBytes = await readEffectiveUploadLimit(config);
   const id = randomUUID();
   const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(input.bytes); controller.close(); } });
-  const received = await storage().receive(body, id, maxBytes, input.bytes.length);
+  const received = await openDocumentStorage().receive(body, id, maxBytes, input.bytes.length);
   try {
-    const bytes = await storage().readQuarantine(received.quarantinePath, maxBytes);
+    const bytes = await openDocumentStorage().readQuarantine(received.quarantinePath, maxBytes);
     try {
       // Size, magic bytes and declared type only: nothing opens the file yet.
       const identified = identifyImapAttachmentBytes(bytes, input.declaredMediaType, { maximumDocumentBytes: maxBytes, pdfOnly: input.mailboxIngestion === true });
@@ -117,7 +112,7 @@ export async function scanAndHoldImapAttachment(input: {
     } finally { bytes.fill(0); }
   } finally {
     received.leadingBytes.fill(0);
-    await storage().discardQuarantine(received.quarantinePath).catch(() => undefined);
+    await openDocumentStorage().discardQuarantine(received.quarantinePath).catch(() => undefined);
   }
 }
 
@@ -135,7 +130,7 @@ export async function readHeldImapAttachment(
   // assumed never to span one.
   const holdingKek = keyEncryptionKeyFor(config, attachment.envelope.keyId);
   if (!holdingKek) throw new Error("held attachment is wrapped under a key this instance does not hold");
-  const ciphertext = await storage().readCiphertext(attachment.storageKey, attachment.sizeBytes + 64);
+  const ciphertext = await openDocumentStorage().readCiphertext(attachment.storageKey, attachment.sizeBytes + 64);
   try {
     return decryptDocument(ciphertext, stagingContext(attachment.id, owner.recipientUserId, owner.receiptId, attachment.mediaType, attachment.sizeBytes), attachment.envelope, holdingKek);
   } finally {
@@ -146,7 +141,7 @@ export async function readHeldImapAttachment(
 /** Idempotently removes private holding ciphertext after durable transfer or discard. */
 export async function purgeHeldImapAttachment(storageKey: string): Promise<void> {
   if (purgeImplementationForTests) return purgeImplementationForTests(storageKey);
-  await storage().deleteCiphertext(storageKey);
+  await openDocumentStorage().deleteCiphertext(storageKey);
 }
 
 /** Test seam for deterministic purge-failure recovery coverage. */

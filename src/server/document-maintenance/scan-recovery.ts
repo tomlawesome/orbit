@@ -18,7 +18,7 @@ import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documents, reviewedIntakeOperations } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
-import { LocalDocumentStorage } from "@/server/documents/storage";
+import { openDocumentStorage } from "@/server/documents/storage";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
@@ -174,7 +174,7 @@ export async function failScannerRecoveryJob(job: ClaimedScanJob, failureCode: s
 
 export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<void> {
   const config = getDocumentConfig();
-  const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+  const storage = openDocumentStorage(config);
   const record = await readOwnedScanRecord(job);
   if (!record) {
     await clearScanJob(job, "cancelled", "staging_object_missing");

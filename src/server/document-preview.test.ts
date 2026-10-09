@@ -65,12 +65,16 @@ vi.mock("@/server/documents/crypto", () => ({
   decryptDocument: mocks.decryptDocument,
   encryptDocument: vi.fn(),
 }));
-vi.mock("@/server/documents/storage", () => ({
-  LocalDocumentStorage: class {
+vi.mock("@/server/documents/storage", () => {
+  class LocalDocumentStorage {
     readCiphertext = mocks.readCiphertext;
     ciphertextExists = vi.fn();
-  },
-}));
+  }
+  return {
+    LocalDocumentStorage,
+    openDocumentStorage: () => new LocalDocumentStorage(),
+  };
+});
 
 import { readDocumentPagePreview } from "./document-preview";
 

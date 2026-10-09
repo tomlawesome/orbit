@@ -48,13 +48,17 @@ vi.mock("@/server/documents/adjudication", async () => ({
   ...await vi.importActual<typeof import("@/server/documents/adjudication")>("@/server/documents/adjudication"),
   adjudicateProposal: mocks.adjudicate,
 }));
-vi.mock("@/server/documents/storage", () => ({
-  LocalDocumentStorage: class {
+vi.mock("@/server/documents/storage", () => {
+  class LocalDocumentStorage {
     receive = mocks.receive;
     readQuarantine = mocks.readQuarantine;
     discardQuarantine = mocks.discardQuarantine;
-  },
-}));
+  }
+  return {
+    LocalDocumentStorage,
+    openDocumentStorage: () => new LocalDocumentStorage(),
+  };
+});
 
 import { inspectItemDocument } from "./item-document-inspection";
 

@@ -64,12 +64,16 @@ vi.mock("@/server/documents/crypto", () => ({
   decryptDocument: mocks.decryptDocument,
   encryptDocument: mocks.encryptDocument,
 }));
-vi.mock("@/server/documents/storage", () => ({
-  LocalDocumentStorage: class {
+vi.mock("@/server/documents/storage", () => {
+  class LocalDocumentStorage {
     readCiphertext = mocks.readCiphertext;
     ciphertextExists = mocks.ciphertextExists;
-  },
-}));
+  }
+  return {
+    LocalDocumentStorage,
+    openDocumentStorage: () => new LocalDocumentStorage(),
+  };
+});
 vi.mock("@/server/documents/tika", () => ({ extractTextWithTika: mocks.extractTextWithTika }));
 vi.mock("@/server/documents/suggestions", async () => ({
   ...await vi.importActual<typeof import("@/server/documents/suggestions")>("@/server/documents/suggestions"),

@@ -249,12 +249,12 @@ vi.mock("@/server/documents/validation", async (importActual) => ({
   validateSupportedDocumentStructure: mocks.validateStructure,
 }));
 
-vi.mock("@/server/documents/storage", async (importActual) => ({
+vi.mock("@/server/documents/storage", async (importActual) => {
   // STORAGE_KEY_PATTERN is real (#1151 A2-Q4): purge-jobs.ts now imports it
   // from here instead of restating its own copy, so the mock must still
   // export it or that import throws before a single purge test can run.
-  ...await importActual<typeof import("@/server/documents/storage")>(),
-  LocalDocumentStorage: class {
+  const actual = await importActual<typeof import("@/server/documents/storage")>();
+  class LocalDocumentStorage {
     readStagingCiphertext = mocks.readStagingCiphertext;
     writeQuarantineBytes = mocks.writeQuarantineBytes;
     discardQuarantine = mocks.discardQuarantine;
@@ -266,8 +266,13 @@ vi.mock("@/server/documents/storage", async (importActual) => ({
     listCiphertextObjects = mocks.listCiphertextObjects;
     listStagingObjects = mocks.listStagingObjects;
     listQuarantineFiles = mocks.listQuarantineFiles;
-  },
-}));
+  }
+  return {
+    ...actual,
+    LocalDocumentStorage,
+    openDocumentStorage: () => new LocalDocumentStorage(),
+  };
+});
 
 vi.mock("@/server/portable-archive-repository", () => ({
   purgeExpiredPortableArchives: mocks.purgeExpiredPortableArchives,

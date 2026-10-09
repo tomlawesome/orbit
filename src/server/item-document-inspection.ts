@@ -7,7 +7,7 @@ import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { MODEL_INTERACTIVE_DEADLINE_MS } from "@/server/documents/model-extraction";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes, scanRefusal } from "@/server/documents/scan-outcome";
-import { LocalDocumentStorage } from "@/server/documents/storage";
+import { openDocumentStorage } from "@/server/documents/storage";
 import {
   proposalFromText,
   safeDocumentFilenameTitle,
@@ -142,7 +142,7 @@ export async function inspectItemDocument(input: {
   const config = getDocumentConfig();
   // The administrator's limit, read now so a change needs no restart (#1285).
   const maxBytes = await readEffectiveUploadLimit(config);
-  const storage = new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
+  const storage = openDocumentStorage(config);
   // Ephemeral opaque reference for this pre-attachment inspection only; never persisted.
   const operationId = randomUUID();
   const received = await storage.receive(input.body, operationId, maxBytes, input.declaredBytes);

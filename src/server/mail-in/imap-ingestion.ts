@@ -7,13 +7,12 @@ import { log } from "@/lib/logger";
 import { getNotificationWorkerConfig, verifySmtpProviderConnection, type NotificationWorkerConfig } from "@/server/notification-worker";
 import { purgeHeldImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
 import { adjudicateProposal } from "@/server/documents/adjudication";
-import { getDocumentConfig } from "@/server/documents/config";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { MODEL_MAILBOX_DEADLINE_MS } from "@/server/documents/model-extraction";
 import { proposalFromText } from "@/server/documents/suggestions";
 import { extractTextWithTika } from "@/server/documents/tika";
 import type { SupportedDocumentMediaType } from "@/server/documents/validation";
-import { LocalDocumentStorage } from "@/server/documents/storage";
+import { openDocumentStorage } from "@/server/documents/storage";
 import { reviewDraftMetadataFromProposal } from "@/server/reviewed-intake";
 import { requireReceiptMetadataWriter } from "@/server/metadata/fields";
 import { classifyImapBodyStructure, IMAP_ATTACHMENT_LIMITS, type ImapAttachmentCandidate } from "./core/imap-attachment-validation";
@@ -440,11 +439,6 @@ async function downloadImapPart(client: ImapFlow, uid: number, part: string, max
 
 type StagedObject = { id: string; storageKey: string };
 
-function heldStorage() {
-  const config = getDocumentConfig();
-  return new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
-}
-
 /** Re-establishes durable ownership for a ciphertext written after its worker
  * ledger was reconciled, then purges only that uncommitted attempt object. */
 async function recoverUncommittedStagingObject(messageId: string, leaseToken: string, object: StagedObject): Promise<boolean> {
@@ -641,7 +635,7 @@ export async function reconcileImapStagingObjects(limit = 100): Promise<void> {
       });
       continue;
     }
-    if (row.status === "committed" && attachment?.status === "stored" && !attachment.purgePending && await heldStorage().ciphertextExists(row.storageKey)) {
+    if (row.status === "committed" && attachment?.status === "stored" && !attachment.purgePending && await openDocumentStorage().ciphertextExists(row.storageKey)) {
       await getDb().transaction(async (transaction) => {
         const [parent] = await transaction.select({ status: imapIngestionMessages.status, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, lockedAt: imapIngestionMessages.attachmentProcessingLockedAt }).from(imapIngestionMessages)
           .where(eq(imapIngestionMessages.id, row.messageId)).for("update").limit(1);

@@ -10,7 +10,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return { ...actual, open: vi.fn(actual.open) };
 });
 
-import { LocalDocumentStorage } from "./storage";
+import { LocalDocumentStorage, openDocumentStorage } from "./storage";
 
 const temporaryRoots: string[] = [];
 
@@ -128,5 +128,17 @@ describe("local document storage", () => {
     expect((await storage.listStagingObjects()).map((entry) => entry.storageKey)).toEqual([key]);
     await storage.deleteStagingCiphertext(key);
     expect(await storage.stagingExists(key)).toBe(false);
+  });
+});
+
+describe("openDocumentStorage (engine-27)", () => {
+  it("roots the store and its quarantine where the configuration says", async () => {
+    const root = await mkdtemp(join(tmpdir(), "orbit-open-storage-"));
+    temporaryRoots.push(root);
+    const storage = openDocumentStorage({ storageRoot: join(root, "store"), quarantineRoot: join(root, "quarantine") });
+    expect(storage).toBeInstanceOf(LocalDocumentStorage);
+    await storage.initialize();
+    expect((await readdir(root)).sort()).toEqual(["quarantine", "store"]);
+    expect((await readdir(join(root, "store"))).sort()).toEqual(["objects", "staging"]);
   });
 });
