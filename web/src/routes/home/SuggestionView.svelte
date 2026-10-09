@@ -112,11 +112,11 @@
          the decisions' place, as save and cancel take the pills' in a filed
          item's drawer. -->
     <div class="actions" role="group" aria-label="Amending {row.title}">
-      <button class="yes" disabled={adding} onclick={acts.onaccept}>{adding ? "adding…" : "add to orbit"}</button>
+      <button class="yes" disabled={adding || acts.modes.edit.refused} onclick={acts.onaccept}>{adding ? "adding…" : "add to orbit"}</button>
       <button disabled={adding} onclick={acts.oncancel}>cancel</button>
     </div>
-    {#if acts.modes.edit.problem}
-      <div class="mail-problem" role="alert">{acts.modes.edit.problem}</div>
+    {#if acts.modes.edit.problem ?? acts.modes.edit.refusal}
+      <div class="mail-problem" role="alert">{acts.modes.edit.problem ?? acts.modes.edit.refusal}</div>
     {/if}
   {:else if decidable}
     <!-- #434: approval is the boundary between untrusted mail and the

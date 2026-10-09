@@ -217,16 +217,15 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
         data: {
           type: "item.upsert",
           householdId,
+          kind: "renewal",
           item: {
             id: itemId,
             sectionId,
             title: `${NAME_PREFIX}item ${randomUUID().slice(0, 8)}`,
             currency: "GBP",
             costMinor: 4500,
-            scheduleKind: "renewal",
             dueDate: new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10),
             recurrenceMonths: 12,
-            status: "active",
             version: 1,
             updatedAt: new Date().toISOString(),
           },

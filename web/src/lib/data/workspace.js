@@ -108,6 +108,8 @@
  * @property {ItemActivity[]} [activities]
  * @property {string[]} [readNotificationIds]
  * @property {string[]} [dismissedNotificationIds]
+ * @property {string} [today]  the household's calendar date where it lives, as
+ *   the engine reckons it for its rules (ADR-0034, #1325); YYYY-MM-DD
  */
 
 /**
@@ -564,6 +566,56 @@ export async function applyCommand(command, { retryCsrf = true } = {}) {
 }
 
 /**
+ * A dry run of a command (ADR-0034 decision 3, #1325): the engine runs the
+ * same parse and checks the real call runs and writes nothing. Null when it
+ * would be accepted; otherwise the engine's refusal, in the words the member
+ * reads (the browser never rewords it). The answer rides a 200 either way —
+ * `{}` or `{ refusal: { code, message } }` (the amendment of 2026-10-09) — so
+ * a browser never logs an expected "not yet" as a failed request. A dry run
+ * that cannot be heard (the network, the session, maintenance) refuses
+ * nothing: the real save says what went wrong.
+ *
+ * @param {object} command
+ * @param {{ retryCsrf?: boolean }} [options]
+ * @returns {Promise<string | null>}
+ */
+export async function checkCommand(command, { retryCsrf = true } = {}) {
+  try {
+    const { csrfToken } = await readSession();
+    const response = await fetch("/api/workspace/commands", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json", "x-csrf-token": csrfToken },
+      body: JSON.stringify({ ...command, dryRun: true }),
+    });
+    if (response.status === 403 && retryCsrf) {
+      await readSession({ refresh: true });
+      return checkCommand(command, { retryCsrf: false });
+    }
+    /** @type {{ refusal?: { code: string, message: string } }} */
+    const body = await json(response);
+    return body.refusal?.message ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * When an item is next due in a workspace the engine returned: after a
+ * completion, the next date the engine worked out from its period (#1324);
+ * null when the completion ended its schedule, or the item is not there.
+ *
+ * @param {Workspace} workspace
+ * @param {string} householdId
+ * @param {string} itemId
+ * @returns {?string}
+ */
+export function dueDateIn(workspace, householdId, itemId) {
+  const household = workspace.households.find((one) => one.id === householdId);
+  return household?.items.find((one) => one.id === itemId)?.dueDate ?? null;
+}
+
+/**
  * The household the session is currently pointed at, with its sections.
  *
  * @returns {Promise<Household>}
@@ -735,15 +787,21 @@ export async function createSystem(draft) {
 }
 
 /**
- * "Today" for chart arithmetic. The workspace fixture pins it to the date the
- * designs were drawn against so the fidelity gate is deterministic; the real
- * API carries no such field, so live data uses the real clock.
+ * "Today": the household's calendar date as the engine reckons it (the
+ * workspace read's `today`, in the household's own time zone, ADR-0034,
+ * #1325), so a calendar greys exactly the days the engine refuses. The
+ * workspace fixture pins it to the date the designs were drawn against so the
+ * fidelity gate is deterministic; with neither, the clock's UTC date.
  *
  * @param {?Workspace} [workspace]
+ * @param {?string} [householdId]  whose today; the active household's when omitted
  * @returns {string} a calendar date, YYYY-MM-DD
  */
-function todayOf(workspace) {
-  return workspace?.fixtureToday ?? new Date().toISOString().slice(0, 10);
+function todayOf(workspace, householdId) {
+  const households = workspace?.households ?? [];
+  const id = householdId ?? workspace?.activeHouseholdId;
+  const household = households.find((one) => one.id === id) ?? households[0];
+  return workspace?.fixtureToday ?? household?.today ?? new Date().toISOString().slice(0, 10);
 }
 
 /**
@@ -812,7 +870,7 @@ export async function readHome(fetchImpl) {
     readInbox(fetchImpl).catch(() => /** @type {Inbox} */ ({ receipts: [] })),
   ]);
   const primary = workspace.activeHouseholdId ?? workspace.households[0]?.id ?? null;
-  const today = todayOf(workspace);
+  const today = todayOf(workspace, primary);
   /* §11 (#453): no membership means the labelled sky — every visible
      household as a bearing and a name, nothing else. The dial, manifest and
      mail surfaces simply do not exist yet for this viewer. */
@@ -1533,7 +1591,7 @@ export async function readItem(id, workspace) {
     return {
       ...item,
       householdId: household.id,
-      today: todayOf(workspace),
+      today: todayOf(workspace, household.id),
       section: sections.get(item.sectionId) ?? null,
       documents: (body.documents ?? []).map(drawerDocumentOf),
     };
@@ -2469,7 +2527,7 @@ export async function readHouseholdScreen(householdId) {
     candidates: roster.candidates ?? [],
     joinRequests,
     invitations,
-    today: todayOf(workspace),
+    today: todayOf(workspace, householdId),
     /* Pinned "now" so "2d ago" on a waiting joiner holds still under the gate
        and stays live in production — readHome's rule. */
     now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),

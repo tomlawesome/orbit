@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   archiveCommand,
   completeCommand,
-  nextDateAfter,
   rescheduleCommand,
   snoozeCommand,
   statusCommand,
@@ -29,25 +28,14 @@ const ITEM = {
   version: 5,
 };
 
-describe("nextDateAfter", () => {
-  it("adds the orbital period in calendar months", () => {
-    expect(nextDateAfter("2026-08-15", 12)).toBe("2027-08-15");
-    expect(nextDateAfter("2026-08-15", 6)).toBe("2027-02-15");
-  });
-  it("clamps to the end of a shorter month instead of overflowing", () => {
-    expect(nextDateAfter("2026-01-31", 1)).toBe("2026-02-28");
-    expect(nextDateAfter("2027-12-31", 2)).toBe("2028-02-29");
-  });
-  it("answers null without a period", () => {
-    expect(nextDateAfter("2026-08-15", undefined)).toBe(null);
-  });
-});
+// The next due date after a completion is the engine's (ADR-0034, #1324):
+// the month-end clamp and leap years that nextDateAfter's tests pinned here
+// are pinned in src/lib/next-due-date.test.ts.
 
 describe("command builders", () => {
   it("complete threads version, dates and a kind-correct activity", () => {
     const command = completeCommand(ITEM, {
       completedDate: "2026-08-15",
-      nextDate: "2027-08-15",
       costMinor: 5485,
       notes: "passed first time",
     }, IDS);
@@ -57,39 +45,48 @@ describe("command builders", () => {
       itemId: "i-mot",
       expectedVersion: 5,
       completedDate: "2026-08-15",
-      nextDate: "2027-08-15",
       costMinor: 5485,
     });
     expect(command.activity).toMatchObject({
       id: "a-1",
       itemId: "i-mot",
-      kind: "service_completed",
       occurredAt: "2026-08-15T12:00:00.000Z",
       effectiveDate: "2026-08-15",
       previousDate: "2026-08-29",
-      nextDate: "2027-08-15",
     });
   });
 
-  it("a renewal completes with the renewal kind", () => {
+  it("complete never sends a next due date: the engine works it out (#1324)", () => {
+    const command = completeCommand(ITEM, /** @type {any} */ ({ completedDate: "2026-08-15", nextDate: "2027-08-15" }), IDS);
+    expect(command).not.toHaveProperty("nextDate");
+    expect(command.activity).not.toHaveProperty("nextDate");
+  });
+
+  it("complete names no activity kind: the engine records it from the schedule (#1325)", () => {
     const command = completeCommand({ ...ITEM, scheduleKind: "renewal" }, { completedDate: "2026-08-15" }, IDS);
-    expect(command.activity.kind).toBe("renewal_completed");
+    expect(command.activity).not.toHaveProperty("kind");
+  });
+
+  it("complete can carry the cost as typed, for the engine to read", () => {
+    expect(completeCommand(ITEM, { completedDate: "2026-08-15", cost: "£54.85" }, IDS)).toMatchObject({ cost: "£54.85" });
   });
 
   it("reschedule and snooze record where the date moved from", () => {
     const moved = rescheduleCommand(ITEM, "2026-09-12", IDS);
     expect(moved).toMatchObject({ type: "item.reschedule", dueDate: "2026-09-12", expectedVersion: 5 });
-    expect(moved.activity).toMatchObject({ kind: "rescheduled", previousDate: "2026-08-29", nextDate: "2026-09-12" });
+    expect(moved.activity).toMatchObject({ previousDate: "2026-08-29", nextDate: "2026-09-12" });
     const snoozed = snoozeCommand(ITEM, "2026-08-22", IDS);
     expect(snoozed).toMatchObject({ type: "item.snooze", snoozedUntil: "2026-08-22" });
-    expect(snoozed.activity.kind).toBe("snoozed");
+    expect(snoozed.activity).toMatchObject({ effectiveDate: "2026-08-22" });
   });
 
-  it("archive, cancel and restore carry their kinds", () => {
-    expect(archiveCommand(ITEM, IDS).activity.kind).toBe("archived");
+  it("no command names its activity's kind: the engine records what it did (#1325)", () => {
+    expect(archiveCommand(ITEM, IDS).activity).not.toHaveProperty("kind");
+    expect(rescheduleCommand(ITEM, "2026-09-12", IDS).activity).not.toHaveProperty("kind");
+    expect(snoozeCommand(ITEM, "2026-08-22", IDS).activity).not.toHaveProperty("kind");
     expect(statusCommand(ITEM, "cancelled", IDS)).toMatchObject({ type: "item.status", status: "cancelled" });
-    expect(statusCommand(ITEM, "cancelled", IDS).activity.kind).toBe("cancelled");
-    expect(statusCommand(ITEM, "active", IDS).activity.kind).toBe("restored");
+    expect(statusCommand(ITEM, "cancelled", IDS).activity).not.toHaveProperty("kind");
+    expect(statusCommand(ITEM, "active", IDS).activity).not.toHaveProperty("kind");
   });
 
   it("upsert sends the schema's item only — no view-model extras", () => {
@@ -101,7 +98,9 @@ describe("command builders", () => {
     expect(command.item.householdId).toBeUndefined();
     expect(command.item.section).toBeUndefined();
     expect(command.item.documents).toBeUndefined();
-    expect(command.activity.kind).toBe("updated");
+    expect(command.activity).not.toHaveProperty("kind");
+    // ADR-0034 (#1325): what the engine derives from the kind never travels.
+    for (const field of ["scheduleKind", "subtype", "status"]) expect(command.item).not.toHaveProperty(field);
   });
 
   it("a versionless item defaults expectedVersion to 1 like the shipped app", () => {

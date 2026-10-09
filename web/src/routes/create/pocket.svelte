@@ -14,7 +14,8 @@
   import { standOnKeyboard } from "$lib/pocket/sheet.js";
   import { wake } from "$lib/pocket/wake.js";
   import EntryForm from "./EntryForm.svelte";
-  import { blankEntry, createCommandOf, entryChanged, refusalOf } from "./entry.js";
+  import { dryRunner } from "$lib/data/dry-run.js";
+  import { blankEntry, createCommandOf, entryChanged } from "./entry.js";
 
   /**
    * NEW ENTRY ON A PHONE (#1120, proposal §2.5). Server-rendered beside the
@@ -203,7 +204,28 @@
     if (picked?.page) URL.revokeObjectURL(picked.page);
   });
 
-  const refusal = $derived(phase === "ready" ? refusalOf(entry) : null);
+  /* The engine's last word on the entry (ADR-0034, #1325): null when it can
+     be saved, its refusal otherwise, asked once when the form is ready and
+     again ~300 ms after each change. "" until the first answer: nothing to
+     say yet, and nothing to save. */
+  /** @type {string | null} */
+  let refusal = $state("");
+  /** The command the form would send now; null before a household is known. */
+  function commandNow() {
+    const household = households.find((one) => one.id === entry.householdId);
+    return household
+      ? createCommandOf($state.snapshot(entry), { householdId: household.id, currency: household.currency ?? "GBP", id: draftId })
+      : null;
+  }
+  const dryRun = dryRunner({ onanswer: (answer) => { refusal = answer; } });
+  let asked = false;
+  $effect(() => {
+    if (phase !== "ready") return;
+    JSON.stringify(entry); // every field is the question
+    if (asked) dryRun.ask(commandNow);
+    else { asked = true; dryRun.now(commandNow); }
+  });
+  onDestroy(() => dryRun.stop());
   const dirty = $derived(!saved && (entryChanged(entry, start) || attachment !== null));
 
   async function load() {
@@ -225,13 +247,14 @@
   $effect(() => { load(); });
 
   async function save() {
-    if (saving || saved || refusal || phase !== "ready") return;
+    if (saving || saved || refusal !== null || phase !== "ready") return;
     const household = households.find((one) => one.id === entry.householdId);
-    if (!household) return;
+    const command = commandNow();
+    if (!household || !command) return;
     saving = true;
     problem = null;
     try {
-      await applyCommand(createCommandOf(entry, { householdId: household.id, currency: household.currency ?? "GBP", id: draftId })).catch((error) => {
+      await applyCommand(command).catch((error) => {
         /* This draft id is new to the server, so "this item changed on another
            device" can only mean the earlier send landed and its answer was
            lost; refreshing would mint a new id and create the duplicate the
@@ -252,7 +275,7 @@
       /* Loud (#1058): the reason stays above the bar until the next attempt,
          the button comes back, and nothing typed is lost. No wake. */
       const words = saveProblem(/** @type {{ code?: string, message?: string }} */ (error));
-      problem = /^not saved/i.test(words) ? words : `not saved — ${words}`;
+      problem = /^not [a-z]+ —/i.test(words) ? words : `not saved — ${words}`;
     } finally {
       saving = false;
     }
@@ -353,7 +376,7 @@
       <div class="pk-bar-acts">
         <a class="p-pill pk-never" href={resolve("/home")}>never mind</a>
         <button type="submit" form="pocket-entry" class="p-pill filled pk-save"
-                disabled={phase !== "ready" || Boolean(refusal) || saving || saved}
+                disabled={phase !== "ready" || refusal !== null || saving || saved}
                 aria-describedby={refusal ? "pk-refusal" : undefined}>
           {saved ? "Added" : saving ? "Adding…" : "Add to orbit"}
         </button>

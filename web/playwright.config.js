@@ -14,6 +14,12 @@ export default defineConfig({
      `fidelity` stays at one, `pocket-measure` takes all four. */
   workers: 4,
   reporter: [["list"]],
+  /* Playwright empties its outputDir at the start of every run. The default,
+     test-results/, is the parent of test-results/fidelity/, where screens.spec.js
+     writes each failing screen's render, baseline and diff, so the second run
+     of `pnpm fidelity` (pocket-measure) deleted the first run's images before
+     CI could upload them (#1323). Its own folder keeps the two apart. */
+  outputDir: "./test-results/playwright",
   /*
    * Two projects, because this directory holds two different kinds of test
    * and they belong at different moments (#1048, owner 2026-09-18).

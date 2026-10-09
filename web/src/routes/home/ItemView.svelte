@@ -135,7 +135,8 @@
     <FootRow title={row.title} busy={acts.busy} {mode} {snoozing}
              onsnooze={acts.onsnooze} oncomplete={acts.oncomplete} onattach={acts.onattach}
              onretire={acts.onretire} oncopy={acts.oncopy} onedit={acts.onedit}
-             onsave={acts.onsave} onrecord={acts.onrecord} oncancel={acts.oncancel} />
+             onsave={acts.onsave} onrecord={acts.onrecord} oncancel={acts.oncancel}
+             held={acts.modes.edit.refused} />
     {#if acts.problem}<div class="ivproblem" role="alert">{acts.problem}</div>{/if}
   {/if}
 </div>

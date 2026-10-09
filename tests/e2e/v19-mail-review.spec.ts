@@ -86,8 +86,8 @@ async function seedHousehold(page: Page): Promise<{ householdId: string; itemId:
     await command({
       type: "item.upsert",
       householdId,
-      item: { id: itemId, sectionId: homeSection, title: "Reviewed intake landing", currency: "GBP", status: "active" },
-      activity: { id: crypto.randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+      item: { id: itemId, sectionId: homeSection, title: "Reviewed intake landing", currency: "GBP" },
+      activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
     });
     return { householdId, itemId };
   }, name);
@@ -118,6 +118,12 @@ function readyReceipt(householdId: string) {
       mediaType: "application/pdf", sizeBytes: 128, scanState: "clean",
     }],
   };
+}
+
+/** The cost an approval sent: as typed (`cost`, read by the engine, #1325) or in minor units. */
+function costSent(approval: Record<string, unknown>): unknown {
+  const item = approval.item as { cost?: string; costMinor?: number };
+  return item.cost ?? item.costMinor;
 }
 
 async function interceptMail(
@@ -278,7 +284,8 @@ test("amend then accept from the item view", async ({ page }) => {
       await name.fill("Home insurance, corrected");
       await form.locator('input[id$="-cost"]').fill("199.99");
       /* The sheet's form is create's, and create refuses to save without a
-         section (entry.js refusalOf); the relay proposes none. */
+         section (the engine's refusal, through its dry run); the relay
+         proposes none. */
       await form.getByRole("button", { name: "Home", exact: true }).click();
       await page.getByRole("button", { name: "add to orbit", exact: true }).click();
     } else {
@@ -296,9 +303,13 @@ test("amend then accept from the item view", async ({ page }) => {
     expect(approvals[0]).toMatchObject({
       source: { kind: "mailbox_draft", receiptId, draftVersion: 3 },
       action: "create_separate",
-      item: { title: "Home insurance, corrected", costMinor: 19999, currency: "GBP", dueDate: "2031-01-10", scheduleKind: "renewal", recurrenceMonths: 12 },
+      item: { title: "Home insurance, corrected", currency: "GBP", dueDate: "2031-01-10", scheduleKind: "renewal", recurrenceMonths: 12 },
       attachmentIds: [attachmentId],
     });
+    /* The phone's review sheet sends the cost as typed, for the engine to
+       read (ADR-0034, #1325); the desk's belt card, retiring with #1319,
+       still sends the amount. */
+    expect(costSent(approvals[0])).toBe(test.info().project.name.startsWith("mobile") ? "199.99" : 19999);
     // Acceptance lands on the created item.
     await expect(page).toHaveURL(new RegExp(`/item/${itemId}$`));
     await expect(page.getByRole("heading", { name: "Reviewed intake landing" })).toBeVisible();
@@ -364,10 +375,12 @@ test("amend then accept from home's drawer", async ({ page }) => {
       householdId,
       sectionId,
       action: "create_separate",
-      item: { title: "Home insurance, corrected", provider: "Reviewed Cover", costMinor: 19999, currency: "GBP",
+      item: { title: "Home insurance, corrected", provider: "Reviewed Cover", currency: "GBP",
         dueDate: "2031-01-10", scheduleKind: "renewal", recurrenceMonths: 12 },
       attachmentIds: [attachmentId],
     });
+    // The drawer's rows send the cost as typed, for the engine to read (ADR-0034, #1325).
+    expect(costSent(approvals[0])).toBe("199.99");
     // Nothing about it went to the belt.
     await expect(page).toHaveURL(/\/home/);
   } finally {

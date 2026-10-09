@@ -3,11 +3,13 @@ import { describe, expect, it } from "vitest";
 // Create and edit on a phone (#1120, design/v19/phone-vision/proposal.md §2.5)
 // and the owner's #1058 decisions it carries (#1069): the kind → schedule
 // mapping, the recurrence range, the section with no default, and the one
-// command both create and edit build from the same form.
+// command both create and edit build from the same form. Since #1325
+// (ADR-0034) the form sends intent: the mapping and the "not yet" refusals
+// are the engine's, pinned in src/lib/item-kind.test.ts and
+// src/lib/refusals.test.ts.
 import {
-  RECURRENCE_MAX, REMINDER_DEFAULT, blankEntry, createCommandOf, entryChanged, entryOf, entryOfProposal, fieldsOf,
-  kindOf, minorOf, recurrenceOfChoice, recurrenceWords, refusalOf, reviewItemOf, scheduleOf, stepRecurrence,
-  toggleReminder,
+  RECURRENCE_MAX, REMINDER_DEFAULT, blankEntry, createCommandOf, entryChanged, entryOf, entryOfProposal, intentOf,
+  kindOf, recurrenceOfChoice, recurrenceWords, reviewItemOf, stepRecurrence, toggleReminder,
 } from "../../web/src/routes/create/entry.js";
 import { upsertCommand } from "../../web/src/lib/data/commands.js";
 
@@ -20,16 +22,7 @@ const filled = (/** @type {Partial<import("../../web/src/routes/create/entry.js"
   ...over,
 });
 
-describe("kind → schedule (#1058)", () => {
-  it("maps each kind the way the owner decided", () => {
-    expect(scheduleOf("service")).toEqual({ scheduleKind: "service", subtype: "service" });
-    expect(scheduleOf("renewal")).toEqual({ scheduleKind: "renewal", subtype: "renewal" });
-    expect(scheduleOf("inspection")).toEqual({ scheduleKind: "service", subtype: "inspection" });
-    expect(scheduleOf("document")).toEqual({ scheduleKind: "expiry", subtype: "document" });
-    expect(scheduleOf("suggestion")).toEqual({ scheduleKind: undefined, subtype: "suggestion" });
-    expect(scheduleOf(null)).toEqual({ scheduleKind: undefined, subtype: undefined });
-  });
-
+describe("kind (#1058): which chip a stored item lights", () => {
   it("reads an existing item's kind back from its subtype, then its schedule", () => {
     expect(kindOf({ subtype: "inspection", scheduleKind: "service" })).toBe("inspection");
     expect(kindOf({ subtype: "boiler", scheduleKind: "renewal" })).toBe("renewal");
@@ -37,15 +30,10 @@ describe("kind → schedule (#1058)", () => {
     expect(kindOf({ subtype: null, scheduleKind: null })).toBeNull();
   });
 
-  it("an inspection comes round; a document happens once; a suggestion schedules nothing", () => {
-    const mot = fieldsOf(filled());
-    expect(mot).toMatchObject({ scheduleKind: "service", recurrenceMonths: 12, dueDate: "2027-03-01" });
-    const passport = fieldsOf(filled({ kind: "document", recurrence: 12 }));
-    expect(passport).toMatchObject({ scheduleKind: "expiry", recurrenceMonths: undefined });
-    const undated = fieldsOf(filled({ kind: "document", dueDate: "" }));
-    expect(undated).toMatchObject({ scheduleKind: undefined, dueDate: undefined });
-    const idea = fieldsOf(filled({ kind: "suggestion" }));
-    expect(idea).toMatchObject({ scheduleKind: undefined, dueDate: undefined, recurrenceMonths: undefined });
+  it("sends the kind chosen beside the item, never what it schedules", () => {
+    const command = createCommandOf(filled({ kind: "document" }), { householdId: "hh-1", currency: "GBP", id: "new-1" });
+    expect(command.kind).toBe("document");
+    for (const field of ["scheduleKind", "subtype", "status"]) expect(command.item).not.toHaveProperty(field);
   });
 });
 
@@ -64,8 +52,8 @@ describe("recurrence: once, or every 1 to 120 months (#1058)", () => {
     expect(recurrenceWords(6)).toBe("every 6 months");
   });
 
-  it("writes once as no recurrence at all", () => {
-    expect(fieldsOf(filled({ recurrence: 0 })).recurrenceMonths).toBeUndefined();
+  it("sends once as a repeat of 0, for the engine to read", () => {
+    expect(intentOf(filled({ recurrence: 0 })).recurrenceMonths).toBe(0);
   });
 
   it("the desk's own select reads the same range (#1069)", () => {
@@ -79,19 +67,11 @@ describe("recurrence: once, or every 1 to 120 months (#1058)", () => {
   });
 });
 
-describe("the refusal beside the save button", () => {
-  it("has no section by default, and will not save without one (#1058)", () => {
+describe("the section (#1058)", () => {
+  it("has no default; the engine says what is missing", () => {
     const entry = blankEntry({ name: "Boiler service", householdId: "hh-1" });
     expect(entry.sectionId).toBeNull();
-    expect(refusalOf(entry)).toBe("not yet — choose a section");
-  });
-
-  it("names the first thing missing, in order", () => {
-    expect(refusalOf(filled({ name: "  " }))).toBe("not yet — give it a name");
-    expect(refusalOf(filled({ cost: "eighty" }))).toBe("not yet — use a dot for pence, for example 12.50");
-    expect(refusalOf(filled({ dueDate: "" }))).toBe("not yet — a repeat needs a due date");
-    expect(refusalOf(filled({ dueDate: "", recurrence: 0 }))).toBeNull();
-    expect(refusalOf(filled())).toBeNull();
+    expect(intentOf(entry).sectionId).toBeNull();
   });
 });
 
@@ -101,29 +81,16 @@ describe("the entry's fields", () => {
     expect(entry).toMatchObject({ name: "Window cleaner", kind: null, sectionId: null, reminderDays: REMINDER_DEFAULT });
   });
 
-  it("reads money the way it is typed", () => {
-    expect(minorOf("")).toBeUndefined();
-    expect(minorOf("84")).toBe(8400);
-    expect(minorOf("£1,200.5")).toBe(120050);
-    expect(minorOf("12.345")).toBeNaN();
-  });
-
-  // #1151 W1-F1/W1-S4: a comma is only ever a thousands separator (this is a
-  // UK product), and only in a valid grouping position — never silently
-  // reinterpreted as a decimal point.
-  it("accepts a comma only as a thousands separator in a valid position", () => {
-    expect(minorOf("12,50")).toBeNaN();
-    expect(minorOf("1,250")).toBe(125000);
-    expect(minorOf("1,250.00")).toBe(125000);
-    expect(minorOf("12.50")).toBe(1250);
-    expect(minorOf("1,25")).toBeNaN();
-    expect(minorOf("1,2500")).toBeNaN();
-    expect(minorOf("")).toBeUndefined();
+  it("sends the cost as typed, for the engine to read", () => {
+    expect(intentOf(filled({ cost: " £1,200.5 " })).cost).toBe("£1,200.5");
+    expect(intentOf(filled({ cost: "" })).cost).toBeUndefined();
   });
 
   it("keeps reminders furthest-first and toggles one day at a time", () => {
     expect(toggleReminder([21, 7], 30)).toEqual([30, 21, 7]);
     expect(toggleReminder([30, 21, 7], 21)).toEqual([30, 7]);
+    // Too many is the engine's refusal, not a silent trim (#1325).
+    expect(toggleReminder([90, 60, 30, 21, 14, 7, 3, 1], 2)).toHaveLength(9);
   });
 
   it("builds one item.upsert for a new entry, with the household's currency", () => {
@@ -132,10 +99,10 @@ describe("the entry's fields", () => {
     expect(command).toMatchObject({
       type: "item.upsert",
       householdId: "hh-1",
+      kind: "inspection",
       item: {
-        id: "new-1", sectionId: "s-vehicles", title: "Car MOT", subtype: "inspection", scheduleKind: "service",
-        provider: "Kwik Fit", costMinor: 5485, currency: "GBP", dueDate: "2027-03-01", recurrenceMonths: 12,
-        reminderDays: [21, 7], status: "active",
+        id: "new-1", sectionId: "s-vehicles", title: "Car MOT", provider: "Kwik Fit", cost: "54.85",
+        currency: "GBP", dueDate: "2027-03-01", recurrenceMonths: 12, reminderDays: [21, 7],
       },
     });
     expect(command.item).not.toHaveProperty("assignee");
@@ -151,10 +118,12 @@ describe("the entry's fields", () => {
     const entry = entryOf(item);
     expect(entry).toMatchObject({ kind: "inspection", cost: "54.85", recurrence: 12, sectionId: "s-vehicles" });
     expect(entryChanged(entry, entryOf(item))).toBe(false);
-    const edits = fieldsOf({ ...entry, provider: "", recurrence: 24 }, { scheduleKind: item.scheduleKind });
+    const edits = { ...intentOf({ ...entry, provider: "", recurrence: 24 }), kind: entry.kind };
     const command = upsertCommand(/** @type {any} */ (item), edits, { uuid: () => "op", now: () => "2026-09-25T12:00:00.000Z" });
-    expect(command.item).toMatchObject({ title: "Car MOT", recurrenceMonths: 24, scheduleKind: "service", version: 5 });
+    expect(command).toMatchObject({ kind: "inspection", item: { title: "Car MOT", recurrenceMonths: 24, cost: "54.85", version: 5 } });
     expect(command.item).not.toHaveProperty("provider");
+    expect(command.item).not.toHaveProperty("costMinor");
+    expect(command.item).not.toHaveProperty("scheduleKind");
   });
 });
 
@@ -171,7 +140,6 @@ describe("review mode: amending what the relay read (#1120, §2.5, §2.6)", () =
       provider: "Harbour Mutual", dueDate: "2026-10-03", recurrence: 12, cost: "400.00",
       reminderDays: REMINDER_DEFAULT,
     });
-    expect(refusalOf(entry)).toBe("not yet — choose a section");
   });
 
   it("reads mail that proposed nothing as an empty form, not a guessed one", () => {
@@ -179,12 +147,12 @@ describe("review mode: amending what the relay read (#1120, §2.5, §2.6)", () =
     expect(entry).toMatchObject({ kind: null, name: "", recurrence: 0, cost: "", dueDate: "" });
   });
 
-  it("approves the amended values with the kind's subtype and the mail's currency", () => {
+  it("approves the amended values with the kind, the relay's reading and the mail's currency", () => {
     const entry = { ...entryOfProposal(proposal), sectionId: "s-home", provider: "Harbour Mutual plc", cost: "412" };
-    const item = reviewItemOf(entry, "GBP");
+    const item = reviewItemOf(entry, "GBP", proposal);
     expect(item).toMatchObject({
-      title: "Home insurance renewal", provider: "Harbour Mutual plc", costMinor: 41200, currency: "GBP",
-      dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12, subtype: "renewal",
+      title: "Home insurance renewal", provider: "Harbour Mutual plc", cost: "412", currency: "GBP",
+      dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12, kind: "renewal",
       reminderDays: [21, 7],
     });
     expect(item).not.toHaveProperty("sectionId");

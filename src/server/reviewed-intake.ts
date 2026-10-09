@@ -17,7 +17,9 @@ import {
   users,
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
-import { type HomeItem } from "@/lib/domain";
+import { type HomeItem, type ScheduleKind } from "@/lib/domain";
+import { itemKinds, itemOfIntent, type ItemIntent } from "@/lib/item-kind";
+import { costMinorOf, itemRefusal, Refusal } from "@/lib/refusals";
 import { workspaceItemSchema } from "@/lib/workspace";
 import type { AdjudicatedField } from "@/server/documents/adjudication";
 import { safeDocumentPlainText, scheduleKinds, type DocumentProposal } from "@/server/documents/suggestions";
@@ -209,15 +211,31 @@ export const clearedReviewDraftMetadata = {
   fieldEvidenceEnc: null,
 } as const;
 
+/**
+ * The item an approval files (ADR-0034, #1325): what the reviewer typed and
+ * chose, judged by the same "not yet" rules as any new item, with the kind
+ * mapped by the engine. The relay's own reading of the subtype and schedule
+ * is the basis -- kept unless the reviewer chose another kind, as an edit
+ * keeps a stored item's.
+ */
 function canonicalItem(input: ReviewedIntakeApproval, itemId: string): HomeItem {
-  return workspaceItemSchema.parse({
-    ...input.item,
+  const { kind, subtype, scheduleKind, status: _status, cost, ...intent } = input.item;
+  const chosen = itemKinds.find((one) => one === kind);
+  const refused = itemRefusal({ ...intent, cost, sectionId: input.sectionId }, chosen);
+  if (refused) throw new Refusal(refused);
+  const typedCost = typeof cost === "string" ? { costMinor: costMinorOf(cost) } : {};
+  return workspaceItemSchema.parse(itemOfIntent({
+    ...intent,
+    ...typedCost,
     id: itemId,
     sectionId: input.sectionId,
     version: 1,
-    status: "active",
     updatedAt: "1970-01-01T00:00:00.000Z",
-  });
+  } as ItemIntent, chosen, {
+    subtype: typeof subtype === "string" ? subtype : undefined,
+    scheduleKind: (scheduleKinds as readonly unknown[]).includes(scheduleKind) ? scheduleKind as ScheduleKind : undefined,
+    status: "active",
+  }));
 }
 
 function canonicalItemValues(input: ReviewedIntakeApproval): Record<string, unknown> {
@@ -359,16 +377,16 @@ async function createReviewedItem(userId: string, input: ReviewedIntakeApproval,
     if (!existingMatch) throw new AppError("reviewed_intake_conflict", "That approval identity is already in use", 409);
     return itemId;
   }
-  const item = reviewedItem(input, itemId);
+  const { subtype, scheduleKind, status, ...item } = reviewedItem(input, itemId);
   try {
     await applyWorkspaceCommand(userId, "reviewed-intake", {
       type: "item.upsert",
       householdId: input.householdId,
       item,
+      basis: { subtype, scheduleKind, status },
       activity: {
         id: input.operationId,
         itemId,
-        kind: "created",
         occurredAt: new Date().toISOString(),
       },
     });

@@ -56,7 +56,7 @@ export function fixturesRequested() {
  *
  * @param {(event: import("@sveltejs/kit").RequestEvent) => Promise<Response> | Response} handler
  * @param {{
- *   fixture?: (event: import("@sveltejs/kit").RequestEvent) => Response,
+ *   fixture?: (event: import("@sveltejs/kit").RequestEvent) => Response | Promise<Response>,
  *   errorResponse?: (error: unknown) => Response,
  * }} [options]
  * @returns {(event: import("@sveltejs/kit").RequestEvent) => Promise<Response>}
@@ -64,7 +64,7 @@ export function fixturesRequested() {
 export function api(handler, { fixture, errorResponse = appErrorResponse } = {}) {
   return async (event) => {
     try {
-      if (fixture && fixturesRequested()) return fixture(event);
+      if (fixture && fixturesRequested()) return await fixture(event);
       return await handler(event);
     } catch (error) {
       /* The envelope owns the status, the code and the no-store header. */
@@ -90,7 +90,7 @@ export function api(handler, { fixture, errorResponse = appErrorResponse } = {})
  *
  * @param {(event: import("@sveltejs/kit").RequestEvent, session: import("orbit/lib/auth/session").AuthenticatedSession) => Promise<Response> | Response} handler
  * @param {{
- *   fixture?: (event: import("@sveltejs/kit").RequestEvent) => Response,
+ *   fixture?: (event: import("@sveltejs/kit").RequestEvent) => Response | Promise<Response>,
  *   errorResponse?: (error: unknown) => Response,
  * }} [options]
  * @returns {(event: import("@sveltejs/kit").RequestEvent) => Promise<Response>}
@@ -110,7 +110,7 @@ export function write(handler, options) {
  *
  * @param {(event: import("@sveltejs/kit").RequestEvent, session: import("orbit/lib/auth/session").AuthenticatedSession) => Promise<Response> | Response} handler
  * @param {{
- *   fixture?: (event: import("@sveltejs/kit").RequestEvent) => Response,
+ *   fixture?: (event: import("@sveltejs/kit").RequestEvent) => Response | Promise<Response>,
  *   errorResponse?: (error: unknown) => Response,
  * }} [options]
  * @returns {(event: import("@sveltejs/kit").RequestEvent) => Promise<Response>}

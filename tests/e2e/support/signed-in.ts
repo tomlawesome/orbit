@@ -96,17 +96,16 @@ export async function seedHousehold(page: Page, prefix: string, options: { withI
     data: {
       type: "item.upsert",
       householdId,
+      kind: "service",
       item: {
         id: itemId,
         sectionId,
         title: itemTitle,
         currency: "GBP",
-        scheduleKind: "service",
         dueDate,
         recurrenceMonths: 12,
-        status: "active",
       },
-      activity: { id: randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+      activity: { id: randomUUID(), itemId, occurredAt: new Date().toISOString() },
     },
   });
   if (!itemCreated.ok()) throw new Error(`#1178: could not seed item for "${name}" (${itemCreated.status()})`);

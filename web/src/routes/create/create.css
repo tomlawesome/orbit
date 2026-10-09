@@ -114,7 +114,7 @@ body.doc .lanes{grid-template-columns:minmax(0,548px) minmax(0,404px);gap:28px}
    card itself, so there is no separate name box. Styled as the card's h2.
    It ships empty (#1251): a quiet placeholder at heading size and a resting
    underline say "type here" where a pre-filled default read as named, and
-   entry.js's refusalOf holds the save until a name is given. */
+   the engine's dry run holds the save until a name is given (ADR-0034). */
 .create-page .name-title{display:block;width:100%;background:none;border:0;padding:0;
   border-bottom:1px solid var(--line);
   font:600 22px var(--display);line-height:1.25;color:var(--ink)}
