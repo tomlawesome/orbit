@@ -5,7 +5,8 @@ import { getDb } from "@/db";
 import { auditLog, householdInvitations, households, memberships, sessions, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
-import { acquireActiveHouseholdLock, requireHouseholdAccess, requireUuid } from "@/server/workspace-access";
+import { requireUuid } from "@/lib/uuid";
+import { acquireActiveHouseholdLock, requireHouseholdAccess } from "@/server/workspace-access";
 import {
   openMetadataReader,
   requireMetadataWriter,

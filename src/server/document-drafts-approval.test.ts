@@ -94,7 +94,6 @@ vi.mock("@/db", async () => {
 
 vi.mock("@/server/workspace-access", () => ({
   acquireActiveHouseholdLock: vi.fn(async () => undefined),
-  validUuid: (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(value),
 }));
 
 vi.mock("@/server/metadata/fields", () => ({
@@ -115,12 +114,12 @@ vi.mock("@/server/documents/tika", () => ({ extractTextWithTika: vi.fn() }));
 
 const { approveDocumentDraft } = await import("./document-drafts");
 
-const userId = "11111111-1111-1111-1111-111111111111";
-const draftId = "22222222-2222-2222-2222-222222222222";
-const documentId = "33333333-3333-3333-3333-333333333333";
-const sectionId = "44444444-4444-4444-4444-444444444444";
-const itemId = "55555555-5555-5555-5555-555555555555";
-const householdId = "66666666-6666-6666-6666-666666666666";
+const userId = "11111111-1111-4111-8111-111111111111";
+const draftId = "22222222-2222-4222-8222-222222222222";
+const documentId = "33333333-3333-4333-8333-333333333333";
+const sectionId = "44444444-4444-4444-8444-444444444444";
+const itemId = "55555555-5555-4555-8555-555555555555";
+const householdId = "66666666-6666-4666-8666-666666666666";
 
 function seedHappyPath() {
   queue(mocks.selectQueues, "document_drafts", [{ id: draftId, documentId, status: "pending_review" }]);

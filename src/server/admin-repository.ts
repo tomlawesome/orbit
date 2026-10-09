@@ -1,18 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, isNotNull, isNull, sql } from "drizzle-orm";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog, externalIdentities, households, instanceAuthority, localCredentials, memberships, sections, sessions, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { ACCOUNT_LIFECYCLE_LOCK_KEY, ADMINISTRATOR_LOCK_KEY } from "@/lib/auth/authority-locks";
 import type { RecentAuthentication } from "@/lib/auth/recent-auth";
+import { requireUuid } from "@/lib/uuid";
 import { cloneSections } from "@/lib/workspace";
 import { identitiesAreUsable } from "@/server/local-credentials";
 import { openInstanceMetadataReader, type MetadataCipher, type MetadataFieldState } from "@/server/metadata/fields";
 import { requireInstanceAdministrator } from "@/server/authorization";
 import { sectionSlug } from "@/server/workspace-access";
-
-const uuidSchema = z.uuid();
 
 export interface InstanceUser {
   id: string;
@@ -176,9 +174,7 @@ export async function setInstanceAdministrator(
   targetUserId: string,
   administrator: boolean,
 ): Promise<InstanceUserList> {
-  if (!uuidSchema.safeParse(targetUserId).success) {
-    throw new AppError("invalid_identifier", "User is not a valid identifier", 422);
-  }
+  requireUuid(targetUserId, "User");
 
   await getDb().transaction(async (transaction) => {
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ADMINISTRATOR_LOCK_KEY}, 0))`);
@@ -250,9 +246,7 @@ export async function setInstanceUserDisabled(
   targetUserId: string,
   disabled: boolean,
 ): Promise<InstanceUserList> {
-  if (!uuidSchema.safeParse(targetUserId).success) {
-    throw new AppError("invalid_identifier", "User is not a valid identifier", 422);
-  }
+  requireUuid(targetUserId, "User");
 
   await getDb().transaction(async (transaction) => {
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ADMINISTRATOR_LOCK_KEY}, 0))`);
@@ -356,9 +350,7 @@ export async function transferPrimaryAdministrator(
   recentAuthentication: RecentAuthentication,
   targetUserId: string,
 ): Promise<InstanceUserList> {
-  if (!uuidSchema.safeParse(targetUserId).success) {
-    throw new AppError("invalid_identifier", "User is not a valid identifier", 422);
-  }
+  requireUuid(targetUserId, "User");
   if (recentAuthentication.userId !== actorUserId || recentAuthentication.intent !== "primary_transfer") {
     throw new AppError(
       "recent_authentication_required",
@@ -499,9 +491,7 @@ export async function createHouseholdForOwner(
       422,
     );
   }
-  if (!uuidSchema.safeParse(input.ownerId).success) {
-    throw new AppError("invalid_identifier", "User is not a valid identifier", 422);
-  }
+  requireUuid(input.ownerId, "User");
 
   const householdId = randomUUID();
   await getDb().transaction(async (transaction) => {

@@ -3,7 +3,7 @@ import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { renderDocumentPagePreview, type DocumentPagePreview } from "@/server/documents/preview";
-import { validUuid } from "@/server/workspace-access";
+import { validUuid } from "@/lib/uuid";
 import { readHeldImapAttachment } from "./imap-attachment-holding";
 import { privateMailboxUser } from "./imap-inbox";
 

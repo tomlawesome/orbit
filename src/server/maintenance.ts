@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 import type { CookieReader } from "@/lib/http";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { auditLog, instanceMaintenance, maintenanceUpdates, maintenanceWindows, users } from "@/db/schema";
 // Direct from the framework-free module, not the re-export: this module is
@@ -9,8 +8,7 @@ import { auditLog, instanceMaintenance, maintenanceUpdates, maintenanceWindows, 
 import { AppError, MaintenanceActiveError } from "@/lib/errors";
 import { readSession } from "@/lib/auth/session";
 import { getAuthConfig } from "@/lib/env";
-
-const uuidSchema = z.uuid();
+import { requireUuid } from "@/lib/uuid";
 
 /**
  * Application-level bounds on published text (#522, ADR-0013 decision 1). The
@@ -76,13 +74,6 @@ export interface MaintenanceState {
   openWindow: MaintenanceWindowRecord | null;
   /** Windows still `scheduled`, ordered `scheduled_start_at ASC, id ASC`. */
   scheduledWindows: MaintenanceWindowRecord[];
-}
-
-function requireUuid(value: string, label: string): string {
-  if (!uuidSchema.safeParse(value).success) {
-    throw new AppError("invalid_identifier", `${label} is not a valid identifier`, 422);
-  }
-  return value;
 }
 
 /** Trims and bounds published text; never logs or echoes the text itself. */
