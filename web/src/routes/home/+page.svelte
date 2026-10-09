@@ -1394,17 +1394,6 @@
   );
   const closest = $derived(bodies.find((b) => b.closest) ?? null);
   const firstOverdue = $derived(bodies.find((b) => b.overdue) ?? null);
-  /* #1005: a one-off is a dashed ring in its own band's colour -- an outline
-     with nothing inside it, because there is nothing coming round. Past its
-     date it wears the quiet ink tone: ended, not owed. */
-  /** @type {(b: any) => string} */
-  const expiryStroke = (b) =>
-    b.paint === "ended" ? "var(--ink-mid)"
-      : b.paint === "amber" ? "var(--warm)"
-        : b.paint === "sky" ? "var(--upcoming)"
-          : "var(--ok)";
-
-
   onMount(() => {
     const query = window.matchMedia(DESK);
     /** @type {(() => void) | null} */
@@ -1834,9 +1823,9 @@
   <div class="inner">
     <h2>Add to your orbit</h2>
     <div class="ctypes">
-      <button class="ctype"><span class="dot con"></span>renewal</button>
+      <button class="ctype"><span class="dot"></span>renewal</button>
       <button class="ctype"><span class="dot"></span>service</button>
-      <button class="ctype"><span class="dot ter"></span>inspection</button>
+      <button class="ctype"><span class="dot"></span>inspection</button>
       <button class="ctype"><span class="dot" style="background:none;border:1.6px solid currentColor"></span>something else</button>
     </div>
     <div class="crow">
@@ -1869,9 +1858,10 @@
     {#snippet bodyMark(b = EMPTY_BODY, cx = 0, cy = 0, r = 0)}
       {#if b.suggestion}
         <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--accent)" stroke-width="1.6"/>
-      {:else if b.kind === "expiry"}
-        <!-- #1005: no fill, no core, no highlight -- the ring IS the body. -->
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke={expiryStroke(b)} stroke-width="2" stroke-dasharray="2.6 2.2"/>
+      {:else if b.paint === "ended"}
+        <!-- #1005: a one-off past its date is ended, not owed -- the same plain
+             body in the quiet ink tone (#1322: no type marks, only paint). -->
+        <circle cx={cx} cy={cy} r={r} style="stroke:var(--bg);stroke-width:2;fill:var(--ink-mid)"/>
       {:else if b.paint === "ruby" || b.paint === "amber"}
         <circle cx={cx} cy={cy} r={r} style="stroke:var(--bg);stroke-width:2" fill="url(#p-{b.paint})"/>
       {:else if b.paint === "sky"}
@@ -1881,14 +1871,7 @@
       {:else}
         <circle cx={cx} cy={cy} r={r} fill="url(#p-jade)"/>
       {/if}
-      {#if !b.suggestion && b.kind === "inspection"}
-        <path d="M {cx} {cy - r} A {r} {r} 0 0 1 {cx} {cy + r} Z" fill="rgba(0,0,0,.42)"/>
-      {/if}
-      {#if !b.suggestion && b.kind === "renewal"}
-        <circle cx={cx} cy={cy} r={r * 0.57} style="fill:var(--bg)"/>
-        <circle cx={cx} cy={cy} r={r * 0.28} fill="url(#p-{b.paint})"/>
-      {/if}
-      {#if !b.suggestion && b.kind !== "expiry" && r >= 4}
+      {#if !b.suggestion && r >= 4}
         <circle cx={cx - 0.2 * r} cy={cy + 0.25 * r} r={0.33 * r} fill="rgba(255,255,255,.38)"/>
       {/if}
     {/snippet}
@@ -2221,10 +2204,6 @@
   <div class="keyrow"><span class="sw" style="background:var(--upcoming)"></span>upcoming</div>
   <div class="keyrow"><span class="sw" style="background:var(--ok)"></span>on track &mdash; wide orbit</div>
   <h2>Types</h2>
-  <div class="keyrow"><span class="sw" style="background:var(--ink-mid)"></span>routine service</div>
-  <div class="keyrow"><span class="sw" style="background:radial-gradient(circle,var(--ink-mid) 24%,var(--panel-raised) 34%,var(--ink-mid) 52%)"></span>renewal / contract</div>
-  <div class="keyrow"><span class="sw" style="background:none;border:2px dashed var(--ink-mid)"></span>expiry &mdash; ends, does not come round</div>
-  <div class="keyrow"><span class="sw" style="background:linear-gradient(90deg,var(--ink-mid) 50%,rgba(0,0,0,.55) 50%)"></span>inspection / certification</div>
   <div class="keyrow"><span class="sw" style="background:none;border:1.6px solid var(--accent)"></span>suggestion &mdash; not yet accepted</div>
   <h2>Physics</h2>
   <div class="keyrow">closer = sooner</div>

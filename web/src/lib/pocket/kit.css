@@ -111,9 +111,6 @@
 .p-body.ended{color:var(--ink-quiet)}
 .p-body.accent{color:var(--accent)}
 .p-body.failed{color:var(--degraded)}
-.p-body.ter{background:linear-gradient(90deg, currentColor 50%, rgba(0,0,0,.5) 50%)}
-.p-body.con{background:radial-gradient(circle, currentColor 24%, var(--panel-raised) 34%, currentColor 52%)}
-.p-body.exp{background:none;border:1.6px dashed currentColor}
 .p-body.sug{background:none;border:1.6px solid var(--accent)}
 .p-body.unlit{background:none;border:1px solid var(--line)}
 .p-body.breathing{animation:p-breathe 2.4s ease-in-out infinite}

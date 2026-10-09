@@ -208,7 +208,8 @@ const PAINTS = { overdue: "ruby", "due-soon": "amber", upcoming: "sky", ok: "jad
 /**
  * The body's kind in the chart key's vocabulary. An expiry (#1005) is read off
  * the schedule kind before the subtype, because a one-off ending is what the
- * body IS -- the crescent marks an inspection that comes round again.
+ * body IS. It is the item's field only: no body is drawn with a type face
+ * (#1322), so the kind never reaches the picture.
  *
  * @param {ChartItem} item
  * @returns {string}
@@ -235,9 +236,9 @@ export function bandOfKind(kind, days) {
 /**
  * The dial's bodies (#414/#451): the household's active items placed by the
  * law, plus any document suggestions as un-accepted accent bodies. Sorted by
- * lead time. Decorations follow the chart key: kind marks the body's face
- * (crescent = inspection, cored = renewal, dashed ring = expiry, plain =
- * service), a belt means
+ * lead time. Decorations follow the chart key: every filed item's body is
+ * drawn plain (#1322 -- the kind stays on the body as data, with no face of
+ * its own; only a suggestion keeps its hollow accent look), a belt means
  * documents, a trail rides with anything within 60 days of the sun, the ping
  * sits on overdue, and the comet flies from the closest approach.
  *
