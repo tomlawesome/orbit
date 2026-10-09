@@ -58,6 +58,11 @@ const failureReasonByCode: Record<string, FailureReason> = {
   malware_detected: "malware",
   scanner_disabled: "scanner_off",
   scanner_unavailable: "scanner_off",
+  // The other outcomes of a scan that did not pass (documents/scan-outcome.ts)
+  // read to a member the same way: the scanner is not working, try later.
+  scanner_timeout: "scanner_off",
+  scanner_protocol: "scanner_off",
+  scanner_failed: "scanner_off",
   attachment_download_failed: "not_kept",
   staging_lease_lost: "not_kept",
   attachment_processing_failed: "not_kept",

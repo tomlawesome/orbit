@@ -21,10 +21,10 @@ import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wra
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
+import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
 import { validateSupportedDocumentStructure, type SupportedDocumentMediaType } from "@/server/documents/validation";
 import {
   isScannerRecoveryExpired,
-  retryableScannerFailureCode,
   scannerRecoveryDelayMs,
   SCANNER_RECOVERY_MAX_ATTEMPTS,
 } from "@/server/documents/staging";
@@ -221,16 +221,15 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
       wrapAuthTag: record.wrapAuthTag,
     } as DocumentCryptoEnvelope, stagingKek);
     quarantinePath = await storage.writeQuarantineBytes(job.documentId, plaintext);
-    const scan = await scanFileWithClamAv(quarantinePath, config.clamAv);
+    const outcome = classifyScan(await scanFileWithClamAv(quarantinePath, config.clamAv), documentScanCodes);
     await storage.discardQuarantine(quarantinePath);
     quarantinePath = undefined;
-    if (scan.status !== "clean") {
-      const retryable = retryableScannerFailureCode(scan);
-      if (retryable) {
-        await failScannerRecoveryJob(job, retryable);
+    if (outcome.status !== "clean") {
+      if (outcome.retryable) {
+        await failScannerRecoveryJob(job, outcome.code);
         return;
       }
-      await purgeScannerStage(job, record, scan.status === "infected" ? "malware_detected" : "scanner_failed");
+      await purgeScannerStage(job, record, outcome.code);
       return;
     }
     // ADR-0033: a staged upload was held before anything opened it, so the

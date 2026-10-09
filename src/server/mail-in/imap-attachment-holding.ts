@@ -4,6 +4,7 @@ import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
+import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
 import { identifyImapAttachmentBytes, normalizeImapAttachmentName } from "./core/imap-attachment-validation";
 import { validateSupportedDocumentStructure, type SupportedDocumentMediaType } from "@/server/documents/validation";
 
@@ -104,8 +105,11 @@ export async function scanAndHoldImapAttachment(input: {
       const displayName = normalizeImapAttachmentName(input.filename ?? "email-attachment", mediaType);
       if (input.mailboxIngestion && config.scanMode !== "required") throw new Error("scanner_disabled");
       if (config.scanMode === "required") {
-        const scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
-        if (scan.status !== "clean") throw new Error(scan.status === "infected" ? "malware_detected" : "scanner_unavailable");
+        const outcome = classifyScan(await scanFileWithClamAv(received.quarantinePath, config.clamAv), documentScanCodes);
+        // The shared mapping, so a protocol error is recorded as one rather
+        // than folded into "unavailable" (engine-7). Anything but a clean scan
+        // stops here: nothing is opened or held.
+        if (outcome.status !== "clean") throw new Error(outcome.code);
       }
       // ADR-0033: the renderer opens it only once the scan has passed.
       if (!await validateSupportedDocumentStructure(bytes, mediaType)) throw new Error("mime_structure_invalid");

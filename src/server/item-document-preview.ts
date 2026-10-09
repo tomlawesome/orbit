@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { AppError } from "@/lib/app-error";
 import { log } from "@/lib/logger";
 import { getDocumentConfig } from "@/server/documents/config";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { renderDocumentPagePreview, type DocumentPagePreview } from "@/server/documents/preview";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
+import { classifyScan, documentScanCodes, scanRefusal } from "@/server/documents/scan-outcome";
 import { LocalDocumentStorage } from "@/server/documents/storage";
 import { detectDocumentMediaType } from "@/server/documents/validation";
 import { requireHouseholdAccess } from "@/server/workspace-access";
@@ -65,44 +65,19 @@ export async function previewItemDocument(input: {
       const scanStartedAt = Date.now();
       const scan = await scanFileWithClamAv(received.quarantinePath, config.clamAv);
       const scanMs = Math.max(0, Date.now() - scanStartedAt);
-      if (scan.status !== "clean") {
-        const infected = scan.status === "infected";
-        // `scan.reason` is a fixed enumeration from the scanner adapter, never
-        // provider text or the scanner's virus signature, so it is safe to record.
-        const scannerReason = infected
-          ? "malware_detected"
-          : scan.reason === "unavailable"
-            ? "scanner_unavailable"
-            : scan.reason === "timeout"
-              ? "scanner_timeout"
-              : scan.reason === "protocol"
-                ? "scanner_protocol"
-                : "scanner_failed";
+      const outcome = classifyScan(scan, documentScanCodes);
+      if (outcome.status !== "clean") {
         log.warn({
           event: "document.scan",
-          state: infected ? "exhausted" : "degraded",
-          reason: scannerReason,
+          state: outcome.status === "infected" ? "exhausted" : "degraded",
+          // A fixed enumeration, never provider text or the scanner's virus
+          // signature, so it is safe to record.
+          reason: outcome.logReason,
           action: "check_scanner",
           impact: "document_processing_blocked",
           durationMs: scanMs,
         });
-        if (infected) {
-          throw new AppError(
-            "document_malware_detected",
-            "Orbit rejected that document because malware was detected",
-            422,
-          );
-        }
-        // Attributed exactly as the inspection and upload paths attribute it,
-        // so all three scanner-dependent journeys report the same cause.
-        const unreachable = scan.reason === "unavailable" || scan.reason === "timeout";
-        throw new AppError(
-          unreachable ? "document_scanner_unreachable" : "document_scanner_failed",
-          unreachable
-            ? "Document inspection is not possible because the malware scanner cannot be reached. It stays blocked until the scanner is running."
-            : "Document inspection is not possible because the malware scanner reported a failure. It stays blocked until the scanner is healthy.",
-          503,
-        );
+        throw scanRefusal(outcome, "preview");
       }
       log.info({ event: "document.scan", state: "ready", action: "none", durationMs: scanMs });
       scanned = true;
