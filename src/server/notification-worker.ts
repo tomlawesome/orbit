@@ -18,7 +18,7 @@ import {
   users,
 } from "@/db/schema";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
-import { log, operationalReasons, type OperationalReason } from "@/lib/logger";
+import { asOperationalReason, log, type OperationalReason } from "@/lib/logger";
 import {
   DEFAULT_ENABLED_CHANNELS,
   DEFAULT_FINAL_WARNING_DAYS,
@@ -113,9 +113,7 @@ export type NotificationFailureCategory = typeof notificationFailureCategories[n
 
 function operationalNotificationReason(category: NotificationFailureCategory): OperationalReason {
   if (category === "unknown") return "provider_error";
-  return (operationalReasons as readonly string[]).includes(category)
-    ? category as OperationalReason
-    : "unexpected_failure";
+  return asOperationalReason(category);
 }
 
 export interface NotificationWorkerHealth {
