@@ -484,7 +484,8 @@ test("item drawer: rescheduling, snooze and the way back work by keyboard", asyn
     await page.keyboard.press("Enter");
     await pickNextMonthByKeyboard(page, page.getByRole("dialog", { name: /due date/i }));
     /* save waits on the engine's dry run of the rows (edit-session.svelte.js
-       `refused`); a disabled button is out of the Tab order until then */
+       `refused`); until then the button is aria-disabled (still in the Tab
+       order, #1327) and Enter on it does nothing */
     const save = drawer.getByRole("group", { name: `Editing ${ITEM_TITLE}` }).getByRole("button", { name: "save" });
     await expect(save).toBeEnabled({ timeout: 10_000 }).catch(async () => {
       throw new Error(`item drawer: save stayed disabled; the drawer read: ${await drawer.innerText()}`);

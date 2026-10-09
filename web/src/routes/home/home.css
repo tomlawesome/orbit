@@ -333,7 +333,7 @@
   .suggestview .actions button{font-size:12.5px;border-radius:9px;padding:6px 13px;cursor:pointer;
                   border:1px solid var(--line);background:none;color:var(--ink-mid);font-family:var(--ui)}
   .suggestview .actions button.yes{border-color:var(--accent);color:var(--accent-text)}
-  .suggestview .actions button:disabled{opacity:.5;cursor:default}
+  .suggestview .actions button:disabled,.suggestview .actions button[aria-disabled="true"]{opacity:.5;cursor:default}
   /* #1319: cancel armed as "discard changes?" (discard-guard.js), as retire arms */
   .suggestview .actions button.armed{border-color:var(--overdue);color:var(--overdue-text)}
   /* The open suggestion row keeps its dashed pen, and hands it to the drawer. */

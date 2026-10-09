@@ -67,8 +67,8 @@
 {/each}
 {#if acts && amending}
   <div class="p-pills amend" role="group" aria-label="Amending {suggestion.title}">
-    <button type="button" class="p-pill filled" disabled={adding || acts.modes.edit.refused}
-            onclick={acts.onaccept}>{adding ? "adding…" : "add to orbit"}</button>
+    <button type="button" class="p-pill filled" disabled={adding} aria-disabled={acts.modes.edit.refused ? "true" : undefined}
+            onclick={() => { if (!acts.modes.edit.refused) acts.onaccept?.(); }}>{adding ? "adding…" : "add to orbit"}</button>
     <button type="button" class="p-pill" class:danger={acts.modes.discardArmed} class:armed={acts.modes.discardArmed}
             disabled={adding} onclick={acts.oncancel}>{acts.modes.discardArmed ? "discard changes?" : "cancel"}</button>
   </div>
@@ -79,6 +79,8 @@
 {#if problem}<p class="p-error" role="alert">{problem}</p>{/if}
 
 <style>
+  /* #1327: held by aria-disabled so it stays focusable; dimmed as `disabled` was */
+  .amend .p-pill[aria-disabled="true"]{opacity:.5;cursor:default}
   .p-kv{align-items:baseline}
   .p-kv span{flex:none}
   .p-kv b{min-width:0;text-align:right;overflow-wrap:anywhere}

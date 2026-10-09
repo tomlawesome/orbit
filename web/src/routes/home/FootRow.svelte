@@ -125,7 +125,8 @@
   {#if mode === "edit"}
     <div class="ivacts" class:p-pills={pocket} role="group" aria-label="Editing {title}">
       <button type="button" class:p-pill={pocket} class="act-accent" style="--act:var(--accent);--act-text:var(--accent-text)"
-              disabled={busy !== null || held} onclick={onsave}>{busy === "save" ? "saving…" : "save"}</button>
+              disabled={busy !== null} aria-disabled={held ? "true" : undefined}
+              onclick={() => { if (!held) onsave(); }}>{busy === "save" ? "saving…" : "save"}</button>
       <button type="button" class:p-pill={pocket} class="discard" class:danger={pocket && discarding} class:armed={discarding}
               style={discarding ? "--act:var(--overdue);--act-text:var(--overdue-text)" : undefined}
               disabled={busy !== null} onclick={oncancel}>{discarding ? "discard changes?" : "cancel"}</button>
@@ -204,7 +205,7 @@
     border-radius:999px;padding:6px 13px;cursor:pointer;line-height:1.55}
   .ivfootrow:not(.pocket) .ivacts button:hover{border-color:var(--act,var(--ink))}
   .ivfootrow:not(.pocket) .ivacts button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  .ivacts button:disabled{opacity:.5;cursor:default}
+  .ivacts button:disabled,.ivacts button[aria-disabled="true"]{opacity:.5;cursor:default}
   .ivacts button.armed{background:var(--act);color:var(--bg);border-color:var(--act)}
   .ivfootrow:not(.pocket) .ivacts button.lit{border-color:var(--act)}
   .ivacts .brk{display:none}
