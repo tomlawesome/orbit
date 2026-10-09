@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lt } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { auditLog, documentCrypto, documents, dueEvents, households, items, memberships, portableArchiveImports, portableArchives, reminderRules, sections, users } from "@/db/schema";
+import { auditLog, documentCrypto, documents, dueEvents, households, items, portableArchiveImports, portableArchives, reminderRules, sections, } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { log, operationalDetail } from "@/lib/logger";
 import { optionalText } from "@/lib/workspace";
@@ -15,7 +15,7 @@ import { normalizeComparableMetadata } from "@/server/metadata/crypto";
 import { MetadataCipher, openMetadataReader, requireMetadataWriter, type MetadataExecutor } from "@/server/metadata/fields";
 import { loadMetadataKey, metadataCryptoAvailable, MetadataKeyLockedError, receiptKeyScope } from "@/server/metadata/keys";
 import { MAX_ARCHIVE_BYTES, MAX_ARCHIVE_CIPHERTEXT_CHARACTERS } from "@/server/portable-archive-limits";
-import { acquireActiveHouseholdLock } from "@/server/workspace-access";
+import { acquireActiveHouseholdLock, requireHouseholdAccess } from "@/server/workspace-access";
 
 const ARCHIVE_TTL_MS = 24 * 60 * 60 * 1_000;
 
@@ -37,20 +37,6 @@ const importedArchiveSchema = z.object({ format: z.literal("orbit-portable-archi
 
 function storage(): PortableArchiveStorage {
   return new PortableArchiveStorage(`${getDocumentConfig().storageRoot}/portable-archives`);
-}
-
-async function requireHouseholdAccess(userId: string, householdId: string, ownerOnly = false) {
-  const [access] = await getDb().select({ id: households.id, administrator: users.isInstanceAdmin, membershipUserId: memberships.userId, role: memberships.role })
-    .from(households).innerJoin(users, eq(users.id, userId))
-    .leftJoin(memberships, and(eq(memberships.userId, users.id), eq(memberships.householdId, households.id)))
-    .where(and(eq(households.id, householdId), isNull(households.deletionRequestedAt))).limit(1);
-  if (!access || (!access.administrator && !access.membershipUserId)) {
-    throw new AppError("household_not_found", "That household is not available", 404);
-  }
-  if (ownerOnly && !access.administrator && access.role !== "owner") {
-    throw new AppError("owner_required", "Only a household owner can make this change", 403);
-  }
-  return access;
 }
 
 /**

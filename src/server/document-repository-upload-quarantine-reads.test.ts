@@ -170,7 +170,10 @@ function fakeBody(): ReadableStream<Uint8Array> {
 }
 
 function seedUploadHappyPath() {
-  queue(mocks.selectQueues, "users", [{ itemId, administrator: true, membershipUserId: userId }]);
+  // requireHouseholdAndItemAccess: the household gate answers from the users
+  // table, then the item is looked up in that household.
+  queue(mocks.selectQueues, "users", [{ administrator: true, role: "owner" }]);
+  queue(mocks.selectQueues, "items", [{ id: itemId }]);
   queue(mocks.selectQueues, "documents", [{ total: 0 }]);
   queue(mocks.selectQueues, "documents", [{ total: 0 }]);
   queue(mocks.updateReturningQueues, "documents", [{ id: "doc-1" }]);

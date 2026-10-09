@@ -94,6 +94,7 @@ vi.mock("@/db", async () => {
 
 vi.mock("@/server/workspace-access", () => ({
   acquireActiveHouseholdLock: vi.fn(async () => undefined),
+  findHouseholdAccess: vi.fn(async () => ({ administrator: false, role: "member" as const })),
 }));
 
 vi.mock("@/server/metadata/fields", () => ({
@@ -130,8 +131,6 @@ function seedHappyPath() {
     mediaType: "application/pdf",
     lifecycle: "available",
     scanStatus: "clean",
-    administrator: false,
-    member: userId,
   }]);
   queue(mocks.selectQueues, "sections", [{ id: sectionId }]);
   queue(mocks.selectQueues, "households", [{ currency: "GBP" }]);
