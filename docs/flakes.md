@@ -378,6 +378,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 ## sign-out-descent.spec.ts:175 "sign out from home's menu reaches the dusk (phone-narrow, world forced)" on mobile-webkit
 
 - 2026-10-08 · 687cb0f4 (door batch, !1044; the hatch's descent and this spec are new in it) · pipeline 2251 / smoke_webkit_mobile (job 33372) · `#1262: the menu is still open after sign-out started` at line 198, on the first attempt and the in-job retry. The menu lost its `open` class, but its layer kept `visibility: visible` past the 2 s check: the layer hides 300 ms after closing (Sheet.svelte), and the retry's screencast has no frame from 0.2 s to 2.1 s after the press, so the page drew nothing in that time. The forced world was on in this run ("flight world: on", "moon on the GPU" in the console); pipeline 2248's pass on the same code flew "on the canvas". Suspected, not established: drawing the forced world without a GPU stalls WebKit's rendering as the descent starts. First sighting.
+- 2026-10-09 · 1e0299ab (engine batch, !1050; no front-end change but one household page's time-zone list) · pipeline 2313 / smoke_webkit_mobile (job 33895) · the same `#1262: the menu is still open after sign-out started` at line 198, first attempt and in-job retry. The job was re-run as 33901. Second sighting.
 
 ## sign-out-descent.spec.ts:252 "sign out from another page's menu plays the descent (phone-narrow)" on desktop-webkit
 
