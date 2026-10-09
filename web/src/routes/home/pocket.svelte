@@ -1289,7 +1289,6 @@
          it: it takes the press, so the tap that puts the sheet away never
          lands on the page behind as well. Escape and close · esc are the
          keyboard's, so it needs no key handler of its own. -->
-    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
     <div class="pk-chscrim" aria-hidden="true" onclick={() => modes.closeChooser(false)}></div>
     <ChooserCard ask={chooserAsk} layout="sheet" onpick={pickChoice} onclose={() => modes.closeChooser(true)} />
   </div>
