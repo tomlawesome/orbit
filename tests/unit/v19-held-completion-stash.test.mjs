@@ -4,8 +4,8 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /*
- * #1151 W1-R5 (item/[[id]]/+page.svelte) and W1-S3 (home/pocket.svelte): a
- * completion held for the undo wake, then flushed on leave, used to be sent
+ * #1151 W1-R5 (the belt's item page, retired in #1319) and W1-S3
+ * (home/pocket.svelte): a completion held for the undo wake, then flushed on leave, used to be sent
  * with a bare `.catch(() => {})` — a request cut off by the page actually
  * unloading (as opposed to merely refused) vanished with nothing said, and
  * the item quietly stayed "not completed" with no trace it was ever tried.
@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
  * existing error pattern (item's `problem` banner; pocket's `wake(...,
  * { failure: true })` toast) rather than losing it silently.
  *
- * Neither file has an import surface a plain async-flow test can drive
+ * The pocket has no import surface a plain async-flow test can drive
  * without a browser — so, the way `v19-flight-mark-ride.test.mjs` pins a
  * `.svelte` fix, this pins the mechanism against the files' own text.
  */
@@ -26,34 +26,22 @@ import { describe, expect, it } from "vitest";
 const root = resolve(import.meta.dirname, "../..");
 const read = (p) => readFileSync(resolve(root, p), "utf8");
 
-const ITEM_PAGE = read("web/src/routes/item/[[id]]/+page.svelte");
 const HOME_POCKET = read("web/src/routes/home/pocket.svelte");
+const HELD_LIB = read("web/src/lib/data/held-completion.js");
 
 describe("#1151 W1-R5/W1-S3: a held completion is stashed before it is sent", () => {
   it("home/pocket.svelte holds no completion since #1319 stage 2: complete asks first, then records at once", () => {
     expect(HOME_POCKET).not.toMatch(/stashHeldCompletion|WAKE_HOLD_MS/u);
   });
 
-  it("item/[[id]]/+page.svelte: the leave-time flush is stashed first and cleared only on success", () => {
-    const source = ITEM_PAGE;
-    // a bare `.catch(() => {})` on the leave-time send is no longer the
-    // whole story: it is harmless now, because the stash set below
-    // already covers the failure case, and is cleared only once the send
-    // actually confirms.
-    expect(source).toMatch(/localStorage\.setItem\(HELD_COMPLETION_KEY/u);
-    expect(source).toMatch(/applyCommand\(job\.command\)\.then\((\(\) => )?clearHeldCompletionStash(\(job\.command\))?\)\.catch/u);
+  it("home/pocket.svelte: a leftover stash is retried and a version conflict counts as success", () => {
+    expect(HOME_POCKET).toMatch(/readHeldCompletionStash\(\)/u);
+    expect(HOME_POCKET).toMatch(/error\.code === "version_conflict"/u);
   });
 
-  for (const [name, source] of [["item/[[id]]/+page.svelte", ITEM_PAGE], ["home/pocket.svelte", HOME_POCKET]]) {
-    it(`${name}: a leftover stash is retried and a version conflict counts as success`, () => {
-      expect(source).toMatch(/readHeldCompletionStash\(\)/u);
-      expect(source).toMatch(/error\.code === "version_conflict"/u);
-    });
-  }
-
-  it("both screens stash under the same literal key", () => {
+  it("the pocket stashes under the same literal key as lib/data/held-completion.js", () => {
     const keyOf = (source) => source.match(/HELD_COMPLETION_KEY = "([^"]+)"/u)?.[1];
-    expect(keyOf(ITEM_PAGE)).toBe("orbit:pending-completion");
-    expect(keyOf(HOME_POCKET)).toBe(keyOf(ITEM_PAGE));
+    expect(keyOf(HELD_LIB)).toBe("orbit:pending-completion");
+    expect(keyOf(HOME_POCKET)).toBe(keyOf(HELD_LIB));
   });
 });

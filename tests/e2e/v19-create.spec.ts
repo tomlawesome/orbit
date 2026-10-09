@@ -67,7 +67,8 @@ test("the create form saves a real item into the orbit", async ({ page }) => {
     if (test.info().project.name.startsWith("mobile")) {
       /* #1120, proposal §2.5: a phone's create is the pocket's own form,
          where the section is a required choice (#1058: none is chosen for
-         you), and a save approaches the new item on its belt. */
+         you), and a save lands on home with the new item's drawer open
+         (#1319, owner-decisions §34: the belt it used to approach retired). */
       const form = page.getByRole("form", { name: "New entry" });
       await form.getByRole("textbox", { name: "name", exact: true }).fill("Gutter clearing proving");
       await form.getByRole("button", { name: "service" }).click();
@@ -75,9 +76,12 @@ test("the create form saves a real item into the orbit", async ({ page }) => {
       await form.getByLabel("due date").fill(dueDate);
       await page.getByRole("button", { name: "Add to orbit" }).click();
 
-      await expect(page).toHaveURL(/\/item\/[0-9a-f-]{36}$/);
-      await expect(page.getByRole("heading", { name: "Gutter clearing proving" })).toBeVisible();
-      await expect(page.locator(".item-card")).toContainText("T−20d");
+      await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/);
+      const itemId = new URL(page.url()).searchParams.get("item") as string;
+      const opened = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
+      await expect(opened).toHaveAttribute("data-open", "", { timeout: 20_000 });
+      await expect(opened).toContainText("Gutter clearing proving");
+      await expect(opened).toContainText("T−20d");
 
       // And the orbit lists it where it needs attention.
       await page.goto("/home");
@@ -96,9 +100,11 @@ test("the create form saves a real item into the orbit", async ({ page }) => {
       // Saved and returned to the orbit at the new item (#1246), where it
       // needs attention.
       await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/);
+      const itemId = new URL(page.url()).searchParams.get("item") as string;
       const row = page.locator(".item", { hasText: "Gutter clearing proving" });
       await expect(row).toBeVisible();
       await expect(row).toContainText("T−20d");
+      await expect(page.locator(`[id="${itemId}-view"]`)).toBeVisible({ timeout: 20_000 });
     }
   } finally {
     await households.sweep(page);
@@ -128,10 +134,10 @@ test("the create form will not save an entry nobody has named", async ({ page })
       await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
       await form.getByLabel("due date").fill(dueDate);
       const save = page.getByRole("button", { name: "Add to orbit" });
-      await expect(save).toBeDisabled();
+      await expect(save).toHaveAttribute("aria-disabled", "true");
       await expect(page.locator("#pk-refusal")).toHaveText("not yet — give it a name");
       await form.getByRole("textbox", { name: "name", exact: true }).fill("Gutter clearing proving");
-      await expect(save).toBeEnabled();
+      await expect(save).not.toHaveAttribute("aria-disabled", "true");
     } else {
       const name = page.locator("#f-name");
       await expect(name).toBeFocused();
@@ -141,10 +147,10 @@ test("the create form will not save an entry nobody has named", async ({ page })
       await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
       await page.locator("#f-date").fill(dueDate);
       const save = page.locator(".btn-primary");
-      await expect(save).toBeDisabled();
+      await expect(save).toHaveAttribute("aria-disabled", "true");
       await expect(page.locator("#save-note")).toHaveText("not yet — give it a name");
       await name.fill("Gutter clearing proving");
-      await expect(save).toBeEnabled();
+      await expect(save).not.toHaveAttribute("aria-disabled", "true");
     }
   } finally {
     await households.sweep(page);
@@ -156,7 +162,7 @@ const DOCUMENT = "chromium-synthetic.pdf";
 const DOCUMENT_BYTES = readFileSync(resolve(__dirname, "../support/fixtures", DOCUMENT));
 
 /** The pocket's form, filled and saved with a document picked (#1245, 11a). */
-async function savePocketEntryWithDocument(page: Page, name: string): Promise<void> {
+async function savePocketEntryWithDocument(page: Page, name: string, keyDate?: string): Promise<void> {
   await gotoCreate(page);
   const form = page.getByRole("form", { name: "New entry" });
   /* "add a document" opens this hidden picker; setting it is the same change. */
@@ -167,6 +173,8 @@ async function savePocketEntryWithDocument(page: Page, name: string): Promise<vo
   await form.getByRole("textbox", { name: "name", exact: true }).fill(name);
   await form.getByRole("button", { name: "document", exact: true }).click();
   await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
+  /* a document's key date is "expires on" (EntryForm.svelte) */
+  if (keyDate) await form.locator('input[id$="-due"]').fill(keyDate);
   await page.getByRole("button", { name: "Add to orbit" }).click();
 }
 
@@ -208,15 +216,20 @@ test("a document picked on the create form is attached to the saved item", async
     const name = "Boiler cover proving";
     const pocket = test.info().project.name.startsWith("mobile");
     await (pocket ? savePocketEntryWithDocument : saveDeskEntryWithDocument)(page, name);
-    // The pocket approaches the new item once the document is on it (§2.5).
-    if (pocket) await expect(page).toHaveURL(/\/item\/[0-9a-f-]{36}$/, { timeout: 30_000 });
+    // The pocket lands on home once the document is on it (§2.5; #1319).
+    if (pocket) await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: 30_000 });
     await expect.poll(() => itemIdOf(page, household.id, name), { timeout: 15_000 }).not.toBeNull();
     const itemId = (await itemIdOf(page, household.id, name)) as string;
-    /* #1281: this save has no key date, and the pocket seats it on its belt
-       all the same -- the address and the apex are the item just saved. */
+    /* #1281: this save has no key date, and the pocket opens its drawer on
+       home all the same (#1319: the drawer opens any item) -- the address
+       and the open row are the item just saved. The desk's undated landing
+       is "add to orbit lands an undated item on its row under the no-date
+       rule", below. */
     if (pocket) {
-      expect(new URL(page.url()).pathname).toBe(`/item/${itemId}`);
-      await expect(page.getByRole("heading", { name })).toBeVisible();
+      expect(new URL(page.url()).searchParams.get("item")).toBe(itemId);
+      const opened = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
+      await expect(opened).toHaveAttribute("data-open", "", { timeout: 20_000 });
+      await expect(opened).toContainText(name);
     }
     await expect.poll(async () => {
       const response = await page.request.get(`/api/households/${household.id}/items/${itemId}/documents`);
@@ -601,10 +614,11 @@ test("dragging a file over the drop zone shows it has registered", async ({ page
 
 /**
  * #1246: "Add to orbit" closes the form and lands on the main screen at the
- * saved item — never a "Saved" line on a form left open.
+ * saved item — never a "Saved" line on a form left open. #1319: on the
+ * phone too, which used to open the new item on the belt; both land on
+ * /home?item=<new id> with that item's drawer open.
  */
 test("add to orbit closes the form and lands on the saved item", async ({ page }) => {
-  test.skip(test.info().project.name.startsWith("mobile"), "the pocket's save opens the new item on its belt (#1120, §2.5)");
   test.setTimeout(90_000);
   await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");
@@ -618,12 +632,21 @@ test("add to orbit closes the form and lands on the saved item", async ({ page }
     /* A dated save lands on its row in the schedule; the undated one is
        proven by the next test (#1281). */
     const keyDate = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
-    await saveDeskEntryWithDocument(page, name, keyDate);
+    const pocket = test.info().project.name.startsWith("mobile");
+    await (pocket ? savePocketEntryWithDocument : saveDeskEntryWithDocument)(page, name, keyDate);
     await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: 30_000 });
     const itemId = new URL(page.url()).searchParams.get("item");
     expect(itemId).toBe(await itemIdOf(page, household.id, name));
-    await expect(page.locator("#save-note")).toHaveCount(0);
-    await expect(page.locator(".item", { hasText: name })).toBeVisible();
+    if (pocket) {
+      await expect(page.getByRole("form", { name: "New entry" })).toHaveCount(0);
+      const opened = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
+      await expect(opened).toHaveAttribute("data-open", "", { timeout: 20_000 });
+      await expect(opened).toContainText(name);
+    } else {
+      await expect(page.locator("#save-note")).toHaveCount(0);
+      await expect(page.locator(".item", { hasText: name })).toBeVisible();
+      await expect(page.locator(`[id="${itemId}-view"]`)).toBeVisible({ timeout: 20_000 });
+    }
   } finally {
     await households.sweep(page);
   }
@@ -636,7 +659,8 @@ test("add to orbit closes the form and lands on the saved item", async ({ page }
  * dial places by days to the sun, so it draws no body for it.
  */
 test("add to orbit lands an undated item on its row under the no-date rule", async ({ page }) => {
-  test.skip(test.info().project.name.startsWith("mobile"), "the pocket's save opens the new item on its belt (#1120, §2.5)");
+  test.skip(test.info().project.name.startsWith("mobile"),
+    "the no-date rule is the desk corridor's; the phone's undated save landing open is \"a document picked on the create form is attached to the saved item\"");
   test.setTimeout(90_000);
   await answerPushWithoutAService(page);
   await page.goto("/api/auth/login?returnTo=/home");

@@ -162,7 +162,9 @@ export class EditSession {
     const item = this.#item;
     const draft = this.draft;
     if (!item || !draft || this.busy) return false;
-    if (this.refusal !== null) return false;
+    /* Held until the engine answers, and while it refuses (#1327: the buttons
+       stay focusable, so an activation can arrive in either state). */
+    if (this.refused) return false;
     this.#dryRun.stop();
     this.busy = true;
     this.problem = null;

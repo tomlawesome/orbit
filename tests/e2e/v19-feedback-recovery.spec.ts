@@ -23,8 +23,8 @@ resetDatabaseBetweenSpecFiles();
  * actually has:
  *
  *   online-workspace policy  a save on /create that cannot reach Orbit
- *   IMAP review              a mail suggestion whose approval fails, from the
- *                            item view and from /inbox
+ *   IMAP review              a mail suggestion whose approval fails, from its
+ *                            home drawer and from /inbox
  *   signed-in lifecycle      a household deletion request that fails
  *
  * What did not come across: the old document journey's upload conflict,
@@ -49,7 +49,6 @@ resetDatabaseBetweenSpecFiles();
 
 const isPocket = () => test.info().project.name.startsWith("mobile");
 const isFirefox = () => test.info().project.use.defaultBrowserType === "firefox";
-const isWebkit = () => test.info().project.use.defaultBrowserType === "webkit";
 
 /** Focus on `selector` by keyboard: already there, or Tab onward to it. */
 async function reach(page: Page, selector: string, screen: string, cap = 60) {
@@ -152,15 +151,15 @@ const createOffline: Journey = {
       await page.unroute("**/api/workspace/commands", failCommands);
       await reach(page, save, "create, retry");
       await page.keyboard.press("Enter");
-      /* Saved: the desk closes onto the main screen at the saved item's own
-         address (#1246), the pocket approaches the item. */
-      await expect(page).toHaveURL(isPocket() ? /\/item\/[0-9a-f-]{36}$/ : /\/home\?item=[0-9a-f-]{36}$/, { timeout: 30_000 });
+      /* Saved: both close onto the main screen at the saved item's own
+         address (#1246; the pocket since #1319, when the belt it used to
+         approach retired). */
+      await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: 30_000 });
     };
   },
-  /* #1192: WebKit keeps focus on the pressed button while it is disabled
-     (pipeline 1989, mobile-webkit) -- the opposite of Chromium's #1178
-     defect, not a timing race like Firefox's. Nothing to expect-fail here. */
-  focusDefect: () => isWebkit() ? undefined : FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket create bar (.pk-save)" : "the desk create card (#card .btn-primary)"),
+  /* No focus defect to expect here any more (#1327): the save button is held
+     with aria-disabled, never `disabled`, so it keeps focus while the request
+     is out (#1178's own remedy). */
 };
 
 /* ── IMAP review ───────────────────────────────────────────────────────── */
@@ -218,28 +217,50 @@ async function interceptFailingMail(page: Page, household: Household) {
 
 const APPROVAL_FAILED = /could not complete the request/;
 
-const itemViewApproval: Journey = {
-  name: "a mail suggestion whose approval fails, in the item view",
+/* #1319 (owner-decisions §34): the belt's suggestion card retired; a
+   suggestion is decided in its home drawer, which its address opens. */
+const drawerApproval: Journey = {
+  name: "a mail suggestion whose approval fails, in its home drawer",
   words: APPROVAL_FAILED,
   fire: async (page, household) => {
     const mail = await interceptFailingMail(page, household);
-    await page.goto(`/item/${mail.receiptId}`);
-    /* Pocket: the suggestion card's ArmButton (Enter arms, Enter fires);
-       desk: the amend card's "accept into orbit". */
-    const act = isPocket() ? `button[aria-label="Add ${mail.title} to your orbit"]` : ".save-row .btn-primary";
+    /* Both ask twice, Enter arms and Enter fires: the pocket row's
+       ArmButton, the desk drawer's "Add to orbit" (SuggestionView). */
+    const act = isPocket()
+      ? `button[aria-label="Add ${mail.title} to your orbit"]`
+      : `[id="${mail.receiptId}-view"] .actions button.yes`;
     const press = async () => {
       await page.keyboard.press("Enter");
-      if (isPocket()) await page.keyboard.press("Enter");
+      await page.keyboard.press("Enter");
     };
+    if (isPocket()) {
+      /* The phone opens the suggestion's row by keyboard. Not by its
+         address: home's first view is read on the server, which this
+         file's page.route mock of the inbox never reaches, and the
+         pocket's address opens only what that first view holds. */
+      await page.goto("/home");
+      const face = `.pocket .pk-signals [data-row-key="${mail.receiptId}"] [data-row-face]`;
+      await expect(page.locator(face)).toBeVisible({ timeout: 30_000 });
+      await tabTo(page, { selector: face }, { screen: "home, signals" });
+      await page.keyboard.press("Enter");
+    } else {
+      await page.goto(`/home?item=${mail.receiptId}`);
+    }
     await expect(page.locator(act)).toBeEnabled({ timeout: 30_000 });
-    await tabTo(page, { selector: act }, { screen: "item, suggestion" });
+    await tabTo(page, { selector: act }, { screen: "home, suggestion drawer" });
     await press();
     await expect.poll(mail.approvals).toBe(1);
     return async () => {
-      await reach(page, act, "item, retry");
+      /* The failure stays where it is said: the phone's row stays open,
+         its words and its decisions with it. */
+      if (isPocket()) {
+        await expect(page.locator(`.pocket .pk-signals [data-row-key="${mail.receiptId}"]`)).toHaveAttribute("data-open", "");
+      }
+      await reach(page, act, "home drawer, retry");
       await press();
       await expect.poll(mail.approvals).toBe(2);
-      await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 });
+      /* Approved: the suggestion leaves home, its decisions with it. */
+      await expect(page.locator(act)).toHaveCount(0, { timeout: 30_000 });
     };
   },
   /* #1233: desktop WebKit kept focus on the amend card's button (pipeline
@@ -249,7 +270,9 @@ const itemViewApproval: Journey = {
      certainty either way, so on desktop-webkit this check is fixme, as the
      create card's document check is below; the phone and the other engines
      keep their marks. */
-  focusDefect: () => FOCUS_LOST_TO_DISABLED_BUTTON(isPocket() ? "the pocket suggestion card's Add to orbit" : "the desk amend card's accept into orbit"),
+  /* The phone's row puts focus on its own face when the act returns
+     (Row.svelte run), so focus is never dropped there. */
+  focusDefect: () => isPocket() ? undefined : FOCUS_LOST_TO_DISABLED_BUTTON("the desk suggestion drawer's Add to orbit"),
   focusFixme: () => test.info().project.name === "desktop-webkit" ? FOCUS_DEFECT_RACES_ON_DESKTOP_WEBKIT : undefined,
 };
 
@@ -350,7 +373,7 @@ const householdDeletion: Journey = {
         + "problems likewise) with no role=\"alert\", and the success line has no role=\"status\" either",
 };
 
-const JOURNEYS = [createOffline, itemViewApproval, inboxApproval, householdDeletion];
+const JOURNEYS = [createOffline, drawerApproval, inboxApproval, householdDeletion];
 
 for (const journey of JOURNEYS) {
   test(`${journey.name} is announced, and the act can be repeated by keyboard`, async ({ page }) => {

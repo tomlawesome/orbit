@@ -214,6 +214,12 @@ export function upsertCommand(item, edits, ids = DEFAULT_IDS) {
     delete clean.costMinor;
     if (cost !== undefined) clean.cost = cost;
   }
+  /* #1319: `item.version` on an upsert is the version this write becomes,
+     one past the version read (workspace-repository.ts, and the reducer
+     stores the item as sent). Sending the version read only ever passed for
+     a first edit (version 1, which the repository floors at 1), so every
+     edit after it was refused as "changed on another device". */
+  if (typeof item.version === "number") clean.version = item.version + 1;
   return {
     type: "item.upsert",
     householdId: item.householdId,

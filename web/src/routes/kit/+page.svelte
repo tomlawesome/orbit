@@ -96,10 +96,10 @@
   <section class="p-card flushcard" data-kit="rows" style:--i="3">
     <Row title="Boiler service with a long name that ellipses" meta="Home · £84" trail="T−16d" trailSub="29 Aug"
          trailTone="var(--warm-text)" onactivate={() => (callout = true)}>
-      {#snippet mark()}<span class="p-body soon ter"></span>{/snippet}
+      {#snippet mark()}<span class="p-body soon"></span>{/snippet}
     </Row>
     <Row title="Car insurance" meta="Car · £412" trail="T−41d" trailSub="23 Oct" href="/kit#rows">
-      {#snippet mark()}<span class="p-body ok con"></span>{/snippet}
+      {#snippet mark()}<span class="p-body ok"></span>{/snippet}
     </Row>
     <Row title="Energy bill, caught by your relay" meta="burns up in 12d · bill-sept.pdf">
       {#snippet mark()}<span class="p-body sug"></span>{/snippet}
@@ -140,7 +140,7 @@
   <h2 class="p-caps">Marks</h2>
   <section class="p-card marks" data-kit="marks">
     <span class="p-body over" title="overdue"></span>
-    <span class="p-body soon ter" title="inspection"></span>
+    <span class="p-body soon" title="inspection"></span>
     <span class="p-body up con" title="renewal"></span>
     <span class="p-body ended exp" title="expiry"></span>
     <span class="p-body sug" title="suggested"></span>

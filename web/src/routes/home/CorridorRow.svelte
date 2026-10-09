@@ -90,6 +90,8 @@
      the rest follows it in the row's own ink. */
   const meta = $derived(
     [
+      /* #1319: a retired item, or a one-off already done, says so first */
+      row.state,
       row.provider,
       row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null,
     ].filter(Boolean),
@@ -139,9 +141,7 @@
        kept so a modified click can still open it in its own tab — and
        a plain click expands the row here instead of leaving home. -->
   {#snippet face()}
-    <span class="planet" class:ter={row.kind === "inspection"} class:con={row.kind === "renewal"}
-          class:exp={row.kind === "expiry"}
-          style="color:var({BAND_VAR[row.band]})" aria-hidden="true"><i></i></span>
+    <span class="planet" style="color:var({BAND_VAR[row.band]})" aria-hidden="true"><i></i></span>
     <!-- #867: the section's own mark, beside the entry, 14px (12px svg,
          4px dot) — the manifest's own copy of the shared table (Mark.svelte,
          marks.js), not a redraw. -->

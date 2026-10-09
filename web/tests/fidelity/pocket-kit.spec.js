@@ -255,8 +255,11 @@ test("the hatch: the orb opens the account sheet; sign-out is one tap", async ({
   await orb.tap();
   const hatch = page.getByRole("dialog", { name: "Emma Lawson" });
   await expect(hatch).toBeVisible();
-  for (const name of ["Add an item", "Items", "Inbox", "Settings"])
+  for (const name of ["Add an item", "Inbox", "Settings"])
     await expect(hatch.getByRole("link", { name, exact: true })).toBeVisible();
+  /* #1319 stage 3b: the belt's "Items" front door went with the belt; an
+     item is managed in its drawer on home. */
+  await expect(hatch.getByRole("link", { name: "Items", exact: true })).toHaveCount(0);
   /* The fixtures instance has no session, so no admin. */
   await expect(hatch.getByRole("link", { name: "Administration" })).toHaveCount(0);
   await page.waitForTimeout(350);

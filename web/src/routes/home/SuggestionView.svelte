@@ -89,7 +89,7 @@
     {/if}
   {/if}
   {#if papers.length}
-    <h4>documents</h4>
+    <h2>documents</h2>
     <!-- #1319: the paper it came in opens the preview card beside the
          drawer, as a filed item's documents do; the card says itself when
          Orbit has no page for it. -->
@@ -112,8 +112,10 @@
          the decisions' place, as save and cancel take the pills' in a filed
          item's drawer. -->
     <div class="actions" role="group" aria-label="Amending {row.title}">
-      <button class="yes" disabled={adding || acts.modes.edit.refused} onclick={acts.onaccept}>{adding ? "adding…" : "add to orbit"}</button>
-      <button disabled={adding} onclick={acts.oncancel}>cancel</button>
+      <button class="yes" disabled={adding} aria-disabled={acts.modes.edit.refused ? "true" : undefined}
+              onclick={() => { if (!acts.modes.edit.refused) acts.onaccept?.(); }}>{adding ? "adding…" : "add to orbit"}</button>
+      <button disabled={adding} class:armed={acts.modes.discardArmed} onclick={acts.oncancel}
+              >{acts.modes.discardArmed ? "discard changes?" : "cancel"}</button>
     </div>
     {#if acts.modes.edit.problem ?? acts.modes.edit.refusal}
       <div class="mail-problem" role="alert">{acts.modes.edit.problem ?? acts.modes.edit.refusal}</div>

@@ -4,48 +4,50 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /*
- * #1151 W1-R10: an accepted (non-staged) document's preview is a bare
- * `<img src={doc.previewHref}>` with only onload/onerror — unlike the
- * staged path, which gets its own AbortController via loadStagedPage — so
- * a hung preview request left previewImgLoaded/Failed unset forever: the
- * reticle (desk) or "Orbit is drawing the page" line (pocket) spun with no
- * way to tell stuck from still loading.
+ * #1151 W1-R10: a preview whose page request hangs left the image neither
+ * loaded nor failed forever, so the reticle spun with no way to tell stuck
+ * from still loading.
  *
- * The fix starts a plain deadline timer for the non-staged path only
- * (openPreview), cleared the instant either <img> handler actually fires
- * (both now call the same previewLoaded/previewFailed pair) or the preview
- * closes/reopens.
+ * The belt that first carried this fix is gone (#1319); the drawer's
+ * PreviewCard (lib/reading/PreviewCard.svelte) carries the same behaviour:
+ * show() starts a deadline timer (LOAD_TIMEOUT_MS) for a paper that is
+ * available and names a preview, loaded()/failed() clear it, and
+ * stopLoading() (called by show() and hide()) clears it too, so a closed and
+ * reopened preview starts clean. A `.svelte` file is pinned against its own
+ * text, as v19-flight-mark-ride.test.mjs does.
  */
 
-const ITEM_PAGE = readFileSync(
-  resolve(import.meta.dirname, "../../web/src/routes/item/[[id]]/+page.svelte"),
+const CARD = readFileSync(
+  resolve(import.meta.dirname, "../../web/src/lib/reading/PreviewCard.svelte"),
   "utf8",
 );
 
-describe("#1151 W1-R10: a non-staged preview gets a load deadline", () => {
-  it("openPreview starts the deadline only for a non-staged doc with a page to draw", () => {
-    const fn = ITEM_PAGE.slice(ITEM_PAGE.indexOf("function openPreview(doc, side)"), ITEM_PAGE.indexOf("function closePreview"));
-    /* #1300: every drawable paper's page now comes through loadPreviewPage,
-       so "has a src" became "is available and names a preview" -- the line
-       before the deadline returns for every other paper. */
-    expect(fn).toMatch(/if \(documentPreviewStateOf\(doc\) !== "available" \|\| !doc\.previewHref\) return;\s*\n\s*if \(!doc\.staged\) \{\s*\n\s*previewLoadTimer = setTimeout\(\(\) => \{\s*\n\s*if \(token === previewToken\) previewFailed\(\);/u);
+/** @param {string} name */
+const bodyOf = (name) => {
+  const start = CARD.indexOf(`function ${name}(`);
+  expect(start, name).toBeGreaterThan(-1);
+  return CARD.slice(start, CARD.indexOf("\n  }\n", start));
+};
+
+describe("#1151 W1-R10: a preview gets a load deadline", () => {
+  it("show() starts the deadline only for a paper that is available and names a preview", () => {
+    const fn = bodyOf("show");
+    expect(fn).toMatch(/if \(!available \|\| !next\.previewHref\) return;\s*\n\s*loadTimer = setTimeout\(\(\) => \{ if \(mine === token\) failed\(\); \}, LOAD_TIMEOUT_MS\);/u);
+    expect(CARD).toMatch(/const LOAD_TIMEOUT_MS = \d/u);
   });
 
-  it("previewLoaded/previewFailed both clear the deadline timer", () => {
-    const loaded = ITEM_PAGE.slice(ITEM_PAGE.indexOf("function previewLoaded()"), ITEM_PAGE.indexOf("function previewFailed()"));
-    expect(loaded).toMatch(/clearTimeout\(previewLoadTimer\);/u);
-    const failed = ITEM_PAGE.slice(ITEM_PAGE.indexOf("function previewFailed()"), ITEM_PAGE.indexOf("function previewFailed()") + 150);
-    expect(failed).toMatch(/clearTimeout\(previewLoadTimer\);/u);
+  it("loaded() and failed() both clear the deadline timer", () => {
+    expect(bodyOf("loaded")).toMatch(/clearTimeout\(loadTimer\);/u);
+    expect(bodyOf("failed")).toMatch(/clearTimeout\(loadTimer\);/u);
   });
 
-  it("closePreview also clears it, so a closed-and-reopened preview starts clean", () => {
-    const start = ITEM_PAGE.indexOf("function closePreview()");
-    const fn = ITEM_PAGE.slice(start, ITEM_PAGE.indexOf("\n  function ", start + 1));
-    expect(fn).toMatch(/clearTimeout\(previewLoadTimer\);/u);
+  it("stopLoading() clears it, and both show() and hide() call it, so a reopened preview starts clean", () => {
+    expect(bodyOf("stopLoading")).toMatch(/clearTimeout\(loadTimer\);/u);
+    expect(bodyOf("show")).toMatch(/stopLoading\(\);/u);
+    expect(bodyOf("hide")).toMatch(/stopLoading\(\);/u);
   });
 
-  it("both <img> tags (desk reticle and pocket sheet) share the same two handlers", () => {
-    const matches = [...ITEM_PAGE.matchAll(/onload=\{previewLoaded\} onerror=\{previewFailed\}/gu)];
-    expect(matches.length).toBe(2);
+  it("the image shares the same two handlers", () => {
+    expect([...CARD.matchAll(/onload=\{loaded\} onerror=\{failed\}/gu)].length).toBe(1);
   });
 });

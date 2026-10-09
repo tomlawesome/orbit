@@ -543,7 +543,7 @@ const SCREENS = [
      */
     mockup: "/design/v19/relay-satellites.html",
     /*
-     * At rest, for the belt's reason: the sky streams and the craft drift on
+     * At rest, for the reason capture() gives: the sky streams and the craft drift on
      * a requestAnimationFrame clock that `animations: "disabled"` cannot
      * reach. The design's own reduced-motion state holds the clock at zero
      * on both sides, and both are photographed in it.
@@ -552,7 +552,7 @@ const SCREENS = [
     /*
      * The sheet keeps 102px under its stage for the demos rail it carries
      * along the bottom; the product has no rail, so the room is scaffolding
-     * too. Cut at load, the belt's way, so the card is centred in the same
+     * too. Cut at load (capture()'s `trim`), so the card is centred in the same
      * height on both sides. If the sheet ever drops the reservation the
      * replacement matches nothing and the comparison is unchanged.
      */
@@ -580,7 +580,7 @@ const SCREENS = [
      */
     mockup: "/design/v19/create-v3.html",
     /*
-     * At rest, for the belt's reason: the sky streams on a
+     * At rest, for the reason capture() gives: the sky streams on a
      * requestAnimationFrame clock that `animations: "disabled"` cannot reach.
      * The design's own reduced-motion state holds the clock at zero on both
      * sides, and both are photographed in it.
@@ -601,68 +601,39 @@ const SCREENS = [
   },
   {
     /*
-     * THE ITEM BELT (#458, §15) — and with it, the item screen. What used to
-     * stand here was an owned baseline for a view no mockup drew (#424): the
-     * item's card on a bare stage, guarded against itself. The owner ruled on
-     * 2026-08-16 that "this surface IS the item screen", so /item/<id> now
-     * renders design/v19/item-belt.html and has to earn its baseline against
-     * that sheet like every other ported screen. Back to PORTING.
+     * THE ITEM SCREEN IS HOME'S DRAWER (#1319, owner-decisions §34). The
+     * belt that stood here (#458, §15; ported against
+     * design/v19/item-belt.html) retired in stage 3b: `/item/<id>` answers
+     * with a 308 to `/home?item=<id>`, and the item is read, edited and
+     * managed in its drawer on home, the preview card beside it. So this
+     * screen is that arrival: the MOT's row open in place, the drawer's
+     * rows, notes, documents and foot row (design/v19/belt-purpose/round-3/
+     * f-preview-beside-tracked.html's `open` scene, with round 8's colour
+     * per section and type).
+     *
+     * OWNED from its first baseline, as home is: the round-3 and round-8
+     * sheets draw the drawer over home's old sun (home's own entry says
+     * why that sheet no longer ports), so comparing against them would
+     * measure the two suns, not the drawer. Re-cut 2026-10-08 for #1319:
+     * the belt's screen became the drawer's.
+     *
+     * In after dark, the app's default pack, the pack the belt-purpose
+     * sheets open in since round 8 (owner, 2026-10-08). At rest, for the
+     * reason the relay and create give: home's sky drifts on a clock
+     * `animations: "disabled"` cannot reach, and the design's own
+     * reduced-motion state holds it still.
      */
     name: "item",
-    /* Baseline re-cut 2026-09-28 with the owner's approval (#1169): the
-       belt's end-caps stand at the screen's middle since f5026445 (§26),
-       and the old baseline still drew them at the top. */
-    path: "/item/i-mot",
-    stage: "porting",
-    mockup: "/design/v19/item-belt.html",
-    /*
-     * REDUCED MOTION, deliberately, and only here.
-     *
-     * The belt's ambient bed drifts for ever — fifteen pixels a second, on a
-     * requestAnimationFrame loop that Playwright's `animations: "disabled"`
-     * does not touch, because that flag governs CSS and Web Animations and
-     * not a canvas being painted by hand. Measured on the sheet: two captures
-     * three seconds apart differ by 0.57%, six times the whole budget. There
-     * is no moment to compare, so comparing at all means asking for the one
-     * state in which the belt holds still — and that state is not a testing
-     * hack, it is a ratified design state the sheet spells out in full: "the
-     * band's drift holds still", the mark's breath never runs, the roll
-     * becomes an instant swap. Both sides are captured in it, so what the
-     * budget measures is the still both were drawn to hold.
-     */
+    path: "/home?item=i-mot",
+    stage: "owned",
+    pack: "afterdark",
     reducedMotion: "reduce",
-    /*
-     * THE SHEET'S DECLARED FURNITURE, REMOVED BEFORE IT LOADS.
-     *
-     * The mockup's manifest is fourteen items: the six that are fixture-true
-     * and eight the sheet marks `fill:1` and names, in its own header, as
-     * furniture — "drawn in the same household's flavour... purely so the
-     * band reads as a real manifest rather than a six-item sketch — they are
-     * mockup furniture, not fixture, and the build takes the real manifest.
-     * Nothing here depends on the eight existing."
-     *
-     * So they are cut out of the sheet's source on its way to the browser,
-     * which is the same act as masking the demos rail by name — excluding a
-     * known, declared difference so the budget measures real drift — except
-     * that it is stricter: nothing is blanked, and everything that remains,
-     * every rock and every grain of the seeded bed, has to match. It has to
-     * happen at LOAD and not in `settle`, because the ambient stream is sown
-     * once from its seed at first layout: splicing the furniture out
-     * afterwards and rebuilding sows the bed from a stream that has already
-     * run, which lands 0.51% away from the same manifest built cleanly. The
-     * regex takes whole `fill:1` object literals and nothing else; if the
-     * sheet ever stops carrying them it removes nothing and the comparison is
-     * unchanged.
-     */
-    mockupTrim: (/** @type {string} */ html) => html.replace(/[ \t]*\{ id:"[^"]+",[^{}]*fill:1,[^{}]*\},\r?\n/g, ""),
-    /* Settled once the band has its seats and the apex has its card — every
-       one of which arrives client-side, off the workspace seam. */
+    /* Settled once the galaxy has been placed (home's own condition) and the
+       MOT's drawer is open with its documents listed -- the papers arrive
+       client-side after the drawer does. */
     settle: () =>
-      document.querySelectorAll("#seats .seat").length > 0
-      && Boolean(document.querySelector(".item-card h2")),
-    /* The sheet's own scaffolding: the demos rail that centres each end of
-       the belt and switches packs, and the footer describing the proposal. */
-    mockupOnly: [".demos", "footer"],
+      document.querySelectorAll(".minisys").length > 0
+      && Boolean(document.querySelector('[id="i-mot-view"] [data-doc-row]')),
   },
   {
     name: "administration",
@@ -679,7 +650,7 @@ const SCREENS = [
      */
     mockup: "/design/v19/administration-iss.html",
     /*
-     * At rest, for the belt's reason: the sky streams and the station drifts
+     * At rest, for the reason capture() gives: the sky streams and the station drifts
      * on a requestAnimationFrame clock that `animations: "disabled"` cannot
      * reach. The design's own reduced-motion state holds the clock at zero
      * on both sides, and both are photographed in it.
@@ -775,7 +746,7 @@ const SCREENS = [
    * two skies, not drift in the film.
    *
    * Both are photographed in the design's reduced-motion state, for the
-   * belt's reason (above): home's sky drifts and its rotor turns on clocks
+   * reason capture() gives: home's sky drifts and its rotor turns on clocks
    * the film cannot pin, and the film takes seconds to reach a mark, so two
    * captures of the same mark otherwise land on different frames of the
    * drift — measured at 0.8%, eight times the budget. In that state the sky
@@ -948,12 +919,15 @@ async function capture(
   );
 
   /*
-   * A screen may ask to be judged at rest (the belt, #458): its band is a
-   * canvas painted on requestAnimationFrame, which `animations: "disabled"`
-   * cannot reach, so there is no moment to compare unless the design's own
-   * reduced-motion state — in which the drift holds still — is the one asked
-   * for. Applied to BOTH captures of that screen and to no other screen, so
-   * the rest of the family is still judged in the motion the design has.
+   * A screen may ask to be judged at rest (first the retired belt, #458): a
+   * sky painted on requestAnimationFrame drifts for ever, and
+   * `animations: "disabled"` governs CSS and Web Animations, not a canvas
+   * painted by hand, so there is no moment to compare (the belt's bed
+   * measured 0.57% apart three seconds on, six times the budget) unless the
+   * design's own reduced-motion state — in which the drift holds still — is
+   * the one asked for. Applied to BOTH captures of that screen and to no
+   * other screen, so the rest of the family is still judged in the motion
+   * the design has.
    */
   if (reducedMotion) await page.emulateMedia({ reducedMotion });
 

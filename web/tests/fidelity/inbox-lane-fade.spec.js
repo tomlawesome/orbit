@@ -16,7 +16,7 @@ const APP = process.env.FIDELITY_APP ?? "http://127.0.0.1:4173";
  * So the walk matters as much as the assertion: land on /home first, follow
  * a real in-app link to /inbox (client-side, not page.goto), and only then
  * read the lane's computed style. Here rather than in the e2e suite for the
- * same reason as pocket-create-reach.spec.js and belt-chrome-viewport.spec.js
+ * same reason as pocket-create-reach.spec.js and signed-out-viewport.spec.js
  * next door -- this harness already stands up the real app with fixtures and
  * needs no live instance.
  */

@@ -942,6 +942,57 @@ describe("#1083: the pocket dialect", () => {
       ctx.destroy();
     });
 
+    it("open() hands back its own undo, which puts back that one thing and leaves clear() nothing to do (#1319)", async () => {
+      const { face } = drawBodyAndRow();
+      const { ctx } = stage();
+      const shutRow = ctx.open(ctx.ctl({ sel: ".pk-body" }));
+      expect(ctx.hasOpenUndo()).toBe(true);
+      await shutRow();
+      expect(face.getAttribute("aria-expanded")).toBe("false");
+      expect(ctx.hasOpenUndo()).toBe(false);
+      /* spent: a second call, or a clear(), touches nothing */
+      face.setAttribute("aria-expanded", "true");
+      await shutRow();
+      ctx.clear();
+      expect(face.getAttribute("aria-expanded")).toBe("true");
+      ctx.destroy();
+    });
+
+    it("open() on a drawer's own control (a desk row, the pencil, a value) undoes it with the film's own Escape (#1319)", async () => {
+      document.body.innerHTML = '<a class="item" id="volvo"></a><button class="ivedit"></button>';
+      const seen = [];
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") seen.push(/** @type {{tourfilm?: boolean}} */ (event).tourfilm);
+      });
+      let clicks = 0;
+      document.querySelector(".ivedit").addEventListener("click", () => { clicks++; });
+      const { ctx } = stage();
+      const stopEditing = ctx.open(ctx.ctl({ sel: ".ivedit" }));
+      expect(clicks).toBe(1);
+      await stopEditing();
+      expect(seen).toEqual([true]);
+      ctx.destroy();
+    });
+
+    it("shut() puts back everything still open, newest first, and waits on each (#1319)", async () => {
+      document.body.innerHTML = `
+        <g class="pk-body"></g>
+        <div data-row><button data-row-face aria-expanded="false"></button></div>
+        <button class="ivedit"></button>`;
+      const order = [];
+      const face = document.querySelector("[data-row-face]");
+      document.querySelector(".pk-body").addEventListener("click", () => face.setAttribute("aria-expanded", "true"));
+      face.addEventListener("click", () => { order.push("row"); face.setAttribute("aria-expanded", "false"); });
+      document.addEventListener("keydown", (event) => { if (event.key === "Escape") order.push("escape"); });
+      const { ctx } = stage();
+      ctx.open(ctx.ctl({ sel: ".pk-body" }));
+      ctx.open(ctx.ctl({ sel: ".ivedit" }));
+      await ctx.shut();
+      expect(order).toEqual(["escape", "row"]);
+      expect(ctx.hasOpenUndo()).toBe(false);
+      ctx.destroy();
+    });
+
     it("close() marks its own Escape with tourfilm=true", async () => {
       document.body.innerHTML = '<div class="p-sheet-layer"><div class="p-sheet-panel"></div></div>';
       let seenTourfilm = null;
@@ -958,8 +1009,9 @@ describe("#1083: the pocket dialect", () => {
       const clock = createClock({ reducedMotion: () => false });
       const ctx = createFilmContext({ clock, doc: document, pocket: true });
       clock.dryStart();
-      ctx.open(ctx.ctl({ sel: ".pk-body" }));
+      await ctx.open(ctx.ctl({ sel: ".pk-body" }))();
       await ctx.close();
+      await ctx.shut();
       clock.dryEnd();
       expect(face.getAttribute("aria-expanded")).toBe("false");
       expect(pkBody).not.toBeNull();

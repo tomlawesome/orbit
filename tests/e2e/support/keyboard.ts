@@ -65,11 +65,53 @@ const AUDIT_SCRIPT = `
     return { key: parts.join(">"), label: el.tagName.toLowerCase() + ' "' + label + '"' };
   }
 
-  function focusVisible(el) {
-    var cs = getComputedStyle(el);
+  function ringed(node) {
+    var cs = getComputedStyle(node);
     var outlined = cs.outlineStyle !== "none" && cs.outlineWidth !== "0px";
     var shadowed = Boolean(cs.boxShadow) && cs.boxShadow !== "none";
     return outlined || shadowed;
+  }
+
+  /* #1319: a 44px hit target round a smaller drawn glyph (the drawer's
+     pencil and copy-link icons, FootRow.svelte's .ivicon) draws its ring on
+     the glyph inside it, from a :focus-visible rule on the target. That
+     counts only when a stylesheet rule naming :focus actually selects the
+     inner element and the element really wears a ring now; an inner
+     element's ring that is there at rest says nothing and is not counted.
+     A dial body is SVG (pocket.css's .pk-body:focus-visible .hit), whose
+     ring is a stroke, SVG's outline; it counts the same way. */
+  function focusRuleRingsInside(el) {
+    var inner = el.querySelectorAll("*");
+    if (!inner.length) return false;
+    var found = false;
+    function walk(rules) {
+      for (var i = 0; i < rules.length && !found; i += 1) {
+        var rule = rules[i];
+        if (rule.cssRules && !rule.selectorText) { walk(rule.cssRules); continue; }
+        if (!rule.selectorText || rule.selectorText.indexOf(":focus") < 0) continue;
+        var s = rule.style;
+        var stroked = Boolean(s.stroke && s.stroke !== "none");
+        var draws = stroked || (s.boxShadow && s.boxShadow !== "none") || (s.outlineStyle && s.outlineStyle !== "none")
+          || (s.outline && s.outline !== "none" && s.outline !== "0");
+        if (!draws) continue;
+        for (var j = 0; j < inner.length; j += 1) {
+          var hit = false;
+          try { hit = inner[j].matches(rule.selectorText); } catch (e) { hit = false; }
+          if (hit && (ringed(inner[j]) || (stroked && inner[j] instanceof SVGElement
+            && getComputedStyle(inner[j]).stroke !== "none"))) { found = true; break; }
+        }
+      }
+    }
+    for (var k = 0; k < document.styleSheets.length && !found; k += 1) {
+      var rules = null;
+      try { rules = document.styleSheets[k].cssRules; } catch (e) { rules = null; }
+      if (rules) walk(rules);
+    }
+    return found;
+  }
+
+  function focusVisible(el) {
+    return ringed(el) || focusRuleRingsInside(el);
   }
 
   window.__kb = {

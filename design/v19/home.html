@@ -383,9 +383,6 @@
         background:var(--panel);backdrop-filter:blur(8px)}
   .item:hover{background:var(--panel-raised);border-color:var(--line)}
   .dot{width:8px;height:8px;border-radius:50%;flex:none}
-  .dot.ter{background:linear-gradient(90deg,currentColor 50%,rgba(0,0,0,.5) 50%)!important;
-           background-color:currentColor!important}
-  .dot.con{background:radial-gradient(circle,currentColor 24%,var(--panel-raised) 34%,currentColor 52%)!important}
   .dot.sug{background:none!important;border:1.6px solid currentColor}
   .item .body{flex:1;min-width:0}
   .item .body b{display:block;font-size:14.5px;font-weight:520}
@@ -421,8 +418,6 @@
   .manifest .corridor .planet{position:absolute;left:-37px;width:13px;height:13px;display:grid;place-items:center}
   .manifest .corridor .planet i{display:block;width:9px;height:9px;border-radius:50%;background:currentColor;
                   box-shadow:0 0 0 2.5px var(--bg)}
-  .manifest .corridor .planet.ter i{background:linear-gradient(90deg,currentColor 50%,rgba(0,0,0,.5) 50%)}
-  .manifest .corridor .planet.con i{background:radial-gradient(circle,currentColor 24%,var(--panel-raised) 34%,currentColor 52%)}
   .manifest .corridor .planet.sug i{background:none;border:1.6px solid var(--accent)}
   .manifest .horizon{margin-top:34px;text-align:center;font:11px var(--mono);color:var(--ink-faint);letter-spacing:.08em}
   .suggest{border-style:dashed}
@@ -573,8 +568,6 @@
   .body-link.lit :is(circle,path){transform:scale(1.6)}
   .item.lit{border-color:var(--accent)}
   /* POL-5: constellations light on section hover */
-  .celestial polyline{transition:stroke-opacity .3s}
-  .constellation-lit .celestial polyline{stroke-opacity:.85}
   /* POL-6: chart callout — legible, quadrant-aware */
   .callout{position:fixed;z-index:8;pointer-events:none;opacity:0;transition:opacity .12s;
            background:var(--panel-raised);backdrop-filter:blur(12px);
@@ -757,7 +750,6 @@
     .palette .act,.callout .chip,.drawer-top.open .nstar span,.nstar:hover span){
     text-shadow:0 0 9px var(--bloom)}
   [data-theme=retrograde] :is(.dial,.minisys) [style*="--accent"],
-  [data-theme=retrograde] .celestial polyline,
   [data-theme=retrograde] .now-month{filter:drop-shadow(0 0 2.5px var(--bloom))}
   [data-theme=retrograde] :is(.inbox-orb.waiting,.suggest button.yes){
     box-shadow:0 0 12px -2px var(--bloom)}
@@ -1614,9 +1606,9 @@
   <div class="inner">
     <h4>Add to your orbit</h4>
     <div class="ctypes">
-      <button class="ctype"><span class="dot con"></span>renewal</button>
+      <button class="ctype"><span class="dot"></span>renewal</button>
       <button class="ctype"><span class="dot"></span>service</button>
-      <button class="ctype"><span class="dot ter"></span>inspection</button>
+      <button class="ctype"><span class="dot"></span>inspection</button>
       <button class="ctype"><span class="dot" style="background:none;border:1.6px solid currentColor"></span>something else</button>
     </div>
     <div class="crow">
@@ -1776,11 +1768,6 @@
         </g>
         <circle cx="190" cy="190" r="168" fill="none" stroke="var(--chart-line-soft)" stroke-width=".5"/>
       </g>
-      <g class="celestial">
-        <polyline points="175.7,140 215.2,127.6 257.1,152.8" fill="none"
-                  stroke="var(--accent)" stroke-opacity=".38" stroke-width="1"
-                  stroke-dasharray="1 5" stroke-linecap="round"/>
-      </g>
 
       <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
       <circle cx="190" cy="190" r="62" fill="none" stroke="var(--overdue)"
@@ -1838,7 +1825,7 @@
 
       <circle data-polish="POL-2" class="ping" cx="175.7" cy="140" r="8" fill="none" style="stroke:var(--overdue)"/>
       <a class="body-link" data-body="i-gutter" data-title="Gutter clearing" data-t="T+16d" data-cost="~£150" href="#i-gutter"><g class="breathe"><circle cx="175.7" cy="140" r="6.3" style="stroke:var(--bg);stroke-width:2" fill="url(#p-ruby)"/><circle cx="174.44" cy="141.575" r="2.079" fill="rgba(255,255,255,.38)"/></g></a>
-      <a class="body-link" data-body="i-mot" data-title="Car MOT — Volvo V60" data-t="T−16d" data-cost="£54.85" data-docs="2" href="#i-mot"><g id="b-mot" class="breathe"><circle cx="208.2" cy="126.7" r="5.2" style="stroke:var(--bg);stroke-width:2" fill="url(#p-amber)"/><path d="M 208.2 121.5 A 5.2 5.2 0 0 1 208.2 131.9 Z" fill="rgba(0,0,0,.42)"/><circle cx="207.16" cy="128" r="1.716" fill="rgba(255,255,255,.38)"/></g></a>
+      <a class="body-link" data-body="i-mot" data-title="Car MOT — Volvo V60" data-t="T−16d" data-cost="£54.85" data-docs="2" href="#i-mot"><g id="b-mot" class="breathe"><circle cx="208.2" cy="126.7" r="5.2" style="stroke:var(--bg);stroke-width:2" fill="url(#p-amber)"/><circle cx="207.16" cy="128" r="1.716" fill="rgba(255,255,255,.38)"/></g></a>
       <a class="body-link" data-body="i-boiler" data-title="Boiler service" data-t="T−22d" data-cost="~£120" href="#i-boiler"><g class="breathe"><circle cx="215.2" cy="127.6" r="6" style="stroke:var(--bg);stroke-width:2" fill="url(#p-amber)"/><circle cx="214" cy="129.1" r="1.98" fill="rgba(255,255,255,.38)"/></g></a>
       <a class="body-link" data-body="i-insurance" data-title="Home insurance renewal" data-t="T−51d" data-cost="~£400" href="#i-insurance"><g><circle cx="247.8" cy="143.2" r="8.5" style="fill:none;stroke:var(--accent);stroke-width:1.8"/><circle cx="247.8" cy="143.2" r="6" style="fill:var(--accent)" opacity=".12"/></g></a>
       <a class="body-link" data-body="i-chimney" data-title="Chimney sweep" data-t="T−61d" data-cost="~£90" href="#i-chimney"><g><circle cx="257.1" cy="152.8" r="5.7" style="stroke:var(--upcoming);stroke-opacity:.25;stroke-width:2.6" fill="url(#p-sky)"/><circle cx="255.96" cy="154.225" r="1.881" fill="rgba(255,255,255,.38)"/></g></a>
@@ -1888,7 +1875,7 @@
       </div>
       <div class="today"><span class="sunmark" aria-hidden="true"><i></i><b></b></span><span>TODAY · WED 13 AUG</span><div class="rule"></div></div>
       <div class="item" id="i-mot">
-        <span class="planet ter" style="color:var(--warm)"><i></i></span>
+        <span class="planet" style="color:var(--warm)"><i></i></span>
         <div class="body"><b>Car MOT — Volvo V60</b><span>Vehicles · orbital period 1 year · £54.85</span></div>
         <div class="t soon">T−16d<small>29 Aug</small></div>
       </div>
@@ -2008,10 +1995,6 @@
   <div class="keyrow"><span class="sw" style="background:var(--warm)"></span>due soon</div>
   <div class="keyrow"><span class="sw" style="background:var(--upcoming)"></span>upcoming</div>
   <div class="keyrow"><span class="sw" style="background:var(--ok)"></span>on track &mdash; wide orbit</div>
-  <h4>Types</h4>
-  <div class="keyrow"><span class="sw" style="background:var(--ink-mid)"></span>routine service</div>
-  <div class="keyrow"><span class="sw" style="background:radial-gradient(circle,var(--ink-mid) 24%,var(--panel-raised) 34%,var(--ink-mid) 52%)"></span>renewal / contract</div>
-  <div class="keyrow"><span class="sw" style="background:linear-gradient(90deg,var(--ink-mid) 50%,rgba(0,0,0,.55) 50%)"></span>inspection / certification</div>
   <div class="keyrow"><span class="sw" style="background:none;border:1.6px solid var(--accent)"></span>suggestion &mdash; not yet accepted</div>
   <h4>Physics</h4>
   <div class="keyrow">closer = sooner</div>

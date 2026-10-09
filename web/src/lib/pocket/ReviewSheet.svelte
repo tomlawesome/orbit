@@ -87,7 +87,7 @@
     {:else if refusal}<p class="rv-refusal" id="{uid}-refusal">{refusal}</p>{/if}
   {/if}
   {#snippet foot()}
-    <button type="submit" form="{uid}-form" class="p-pill filled rv-go" disabled={busy || refusal !== null}
+    <button type="submit" form="{uid}-form" class="p-pill filled rv-go" aria-disabled={busy || refusal !== null ? "true" : undefined}
             aria-describedby={refusal ? `${uid}-refusal` : undefined}>
       {busy ? "adding…" : "add to orbit"}
     </button>
@@ -96,5 +96,5 @@
 
 <style>
   .rv-refusal{margin:12px 0 0;font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-mid)}
-  .rv-go:disabled{opacity:.5;cursor:default;box-shadow:none}
+  .rv-go[aria-disabled="true"]{opacity:.5;cursor:default;box-shadow:none}
 </style>

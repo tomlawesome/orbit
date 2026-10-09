@@ -378,6 +378,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 ## sign-out-descent.spec.ts:175 "sign out from home's menu reaches the dusk (phone-narrow, world forced)" on mobile-webkit
 
 - 2026-10-08 · 687cb0f4 (door batch, !1044; the hatch's descent and this spec are new in it) · pipeline 2251 / smoke_webkit_mobile (job 33372) · `#1262: the menu is still open after sign-out started` at line 198, on the first attempt and the in-job retry. The menu lost its `open` class, but its layer kept `visibility: visible` past the 2 s check: the layer hides 300 ms after closing (Sheet.svelte), and the retry's screencast has no frame from 0.2 s to 2.1 s after the press, so the page drew nothing in that time. The forced world was on in this run ("flight world: on", "moon on the GPU" in the console); pipeline 2248's pass on the same code flew "on the canvas". Suspected, not established: drawing the forced world without a GPU stalls WebKit's rendering as the descent starts. First sighting.
+- 2026-10-09 · 1e0299ab (engine batch, !1050; no front-end change but one household page's time-zone list) · pipeline 2313 / smoke_webkit_mobile (job 33895) · the same `#1262: the menu is still open after sign-out started` at line 198, first attempt and in-job retry. The job was re-run as 33901. Second sighting.
 
 ## sign-out-descent.spec.ts:252 "sign out from another page's menu plays the descent (phone-narrow)" on desktop-webkit
 
@@ -396,3 +397,27 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## bootstrap-protection.spec.ts:387 "once the instance is claimed the code is spent, cookie or no cookie" — [unclaimed]
 
 - 2026-10-08 · 059878f1 (#1325, which touches no sign-in code) · local `scripts/test-e2e-local.sh --spec 'tests/e2e/v19-(home-drawer|create|item-actions|mail-review)\.spec\.ts'` · `expect(session.ok()).toBe(true)` at `tests/e2e/support/bootstrap.ts:112` (`claimInstanceAsAdministrator`): `/api/auth/session` was not OK straight after the claim's sign-in. Every project depends on `[unclaimed]`, so 141 tests did not run. The next run of the same command on the same commit passed it. Traces: `~/projects/.backups/orbit/e2e-orbit-e2e-local-ecd11949-2436667-20261008-222859`. First sighting.
+
+## v19-create.spec.ts:254 "picking a document shows its front page while the read runs alongside" on desktop-chromium
+
+- 2026-10-09 · 79c68846 (#1319 stage 3b; this test unchanged on the branch) · local `scripts/test-e2e-local.sh --keep --project desktop-chromium`, whole suite, with the fidelity suite running alongside on the same host · `#read-head` read "Page one" where the test expects "Reading your document": the read finished before the heading was looked at. Passed on a rerun of the file against the same stack. Traces: `~/projects/.backups/orbit/e2e-1319-stage3b-79c68846-desktop-chromium`. First sighting.
+
+## v19-keyboard.spec.ts:313 "arrive: the sign-in door opens by Tab and Enter alone" on desktop-chromium
+
+- 2026-10-09 · 79c68846 (#1319 stage 3b; this test unchanged on the branch) · local `scripts/test-e2e-local.sh --keep --project desktop-chromium`, whole suite, with the fidelity suite running alongside · `page.goto: net::ERR_ABORTED` on `/home` at line 328. Passed on a rerun of the file against the same stack. Traces: `~/projects/.backups/orbit/e2e-1319-stage3b-79c68846-desktop-chromium`. First sighting.
+
+## v19-home-drawer.spec.ts:212 "on the desk › the dial's documents chip opens the item's drawer at its real documents" (desktop-webkit)
+
+- 2026-10-09 · 52e9f358 · local `scripts/test-e2e-local.sh --spec tests/e2e/v19-home-drawer.spec.ts`, all projects · `.callout.show .chip` never appeared within 5s after `dispatchEvent("mouseenter")` on the dial body, desktop-webkit only (the other desk projects green). Green on an immediate rerun of the spec on desktop-webkit alone, same commit. First sighting.
+
+## belt-endcap-controls.spec.js:68 "an end-cap press is the arrow key's press at 1600x1000"
+
+- 2026-10-09 · dad77c25 (#1325 rebased onto dev; the tree differs from pipeline 2287's green 8170fecb only in design files, an ADR, this log and one e2e spec) · pipeline 2290 / fidelity (job 33718) · `ArrowRight did not come back`; the same test passed at 390x844 in the same run. 45/45 locally with `--repeat-each=5` on the same commit; job retried as 33765. First sighting.
+
+## pocket-measure.spec.js:544 "/home · row-retire-armed meets the pocket floors" — pocket-measure, 390x664
+
+- 2026-10-09 · abcb06f1 · pipeline 2301 / fidelity (job 33822) · `openRow`'s tap on Car MOT's face never opened its panel (`locator.waitFor` ran to the 60 s test timeout), after `go()` had already waited for `body[data-home-ready]`; 487 others passed. Locally in the pinned image on 6afb412e: 20 repeats alone, then every `/home · row-` state 15 times over 4 workers (420 runs), all green. First sighting.
+
+## tour-pocket-webkit.spec.js:539 "plays through chapter 3 at 360x780 under normal motion" — chapters skipped
+
+- 2026-10-09 · abcb06f1 · pipeline 2301 / fidelity_webkit (job 33823) · the film reached only chapters 1 and 2 (`done` false, chapters `[0, 1]`) in 3.4 min. Neither of the next commits (63354fb6, 6afb412e) touches chapters 1–3; on 6afb412e, locally in the pinned image, it passed. First sighting.

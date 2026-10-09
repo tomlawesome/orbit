@@ -15,23 +15,20 @@ resetDatabaseBetweenSpecFiles();
 /**
  * #1088: the document preview — owner-decisions.md §18. A document is never
  * the centred body; pressing a paper opens create-v3's reading card beside
- * the item card instead. This proves the shape end to end: a real upload
+ * the item card instead. #1319 (§34): the belt retired, and the paper is
+ * pressed in the item's home drawer; the card stands beside the drawer, or
+ * as the bottom sheet under 1200px (v19-home-drawer.spec.ts proves where). This proves the shape end to end: a real upload
  * through the real pipeline renders a real page (chromium-synthetic.pdf, the
  * same fixture v19-document-extraction uses — real font-encoded Chromium
  * output, not something a stub could echo back), Esc closes the card, and a
  * removed file shows its own honest line with no page at all.
  */
-/* This file runs with reduced motion, and must: a paper's mark breathes on an
-   infinite `belt-halobreath` alternate (belt.css:257, scale .9 -> 1.14), so the
-   seat's bounding box never settles and Playwright's actionability wait never
-   returns -- `locator.click` hangs until the test's own timeout kills it, and
-   the error then surfaces on whatever ran next, which is the cleanup. Nothing
-   about the product is wrong: a real pointer clicks a moving target fine.
-   Reduced motion is the belt's own first-class mode (`.belt-page *{animation:
-   none!important}`, belt.css:432) and stops every breath without changing what
-   the preview draws, so the assertions below are the same in either mode. The
-   one real difference is #1088's 900ms focus beat, which reduced motion makes
-   instant by design (+page.svelte's `reducedMotion() ? 0 : 900`). */
+/* This file runs with reduced motion. It was written for the belt, whose
+   paper marks breathed forever, so Playwright's actionability wait never
+   settled on them; the belt retired with #1319 and the papers are pressed
+   in home's drawer now. Reduced motion still makes the preview's 900ms focus
+   beat instant (PreviewCard.svelte), and changes nothing the preview draws,
+   so the assertions below are the same in either mode. */
 test.use({ reducedMotion: "reduce" });
 
 const HOUSEHOLD_PREFIX = "Preview Proving Ground";
@@ -127,6 +124,41 @@ async function shownText(locator: Locator): Promise<string> {
   });
 }
 
+/** #1319: an item's home drawer, opened by its address -- the desk's view
+ *  under its row, the phone's open row. */
+async function openDrawer(page: Page, itemId: string) {
+  await page.goto(`/home?item=${itemId}`);
+  if (test.info().project.name.startsWith("mobile")) {
+    const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
+    await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+    return row;
+  }
+  const drawer = page.locator(`[id="${itemId}-view"]`);
+  await expect(drawer).toBeVisible({ timeout: 20_000 });
+  return drawer;
+}
+
+/** The preview card a paper opens (lib/reading/PreviewCard.svelte): beside
+ *  the drawer on a wide desk, the bottom sheet under 1200px. Named for the
+ *  file, and its page once it has more than one -- never the reader, whose
+ *  name adds the item's. */
+const previewOf = (page: Page, filename: string) =>
+  page.getByRole("dialog", { name: new RegExp(`^${filename.replace(/[.]/g, "\\.")}(, page \\d+ of \\d+)?$`) });
+
+/** Opens the item's drawer and presses the paper in it; hands back the
+ *  drawer, the paper's row and the preview card. */
+async function openPaper(page: Page, itemId: string, filename: string) {
+  const drawer = await openDrawer(page, itemId);
+  const paper = drawer.getByRole("button", { name: `Open ${filename}` });
+  await expect(paper).toBeVisible({ timeout: 20_000 });
+  await paper.click();
+  const card = previewOf(page, filename);
+  await expect(card).toBeVisible();
+  return { drawer, paper, card };
+}
+
+/* #1319: the paper is pressed in the item's home drawer (it used to be on
+   the belt); the card is the same on the desk and the phone. */
 test("pressing a paper opens the preview, and Esc closes it", async ({ page }) => {
   test.setTimeout(60_000);
   await signInAsAdmin(page);
@@ -136,44 +168,21 @@ test("pressing a paper opens the preview, and Esc closes it", async ({ page }) =
     const doc = await uploadDocument(page, householdId, itemId, "preview-proving.pdf");
     expect(doc.lifecycle).toBe("available");
 
-    await page.goto(`/item/${itemId}`);
-    await expect(page.getByRole("heading", { name: "Preview proving item" })).toBeVisible();
-
-    const paper = page.getByRole("button", { name: /preview-proving\.pdf/ });
-    await expect(paper).toBeVisible();
-    await paper.click();
-
-    if (test.info().project.name.startsWith("mobile")) {
-      /* #1120, proposal §2.3/§18: on a phone the paper raises the preview
-         sheet, named for the document, with the page nearly edge to edge. */
-      const sheet = page.getByRole("dialog", { name: "preview-proving.pdf" });
-      await expect(sheet).toBeVisible();
-      // The real page, rendered by the real endpoint — not a placeholder.
-      await expect(sheet.locator(".bp-page")).toHaveClass(/shown/, { timeout: 20_000 });
-      await expect(sheet.getByRole("img", { name: "Page one of preview-proving.pdf" })).toBeVisible();
-      // #1300: the fixture is one page -- the pager says so, with no arrows.
-      await expect(sheet.locator(".pager .pgn")).toHaveText("one page");
-      await expect(sheet.getByRole("button", { name: /next|previous|page \d/i })).toHaveCount(0);
-      await expect(sheet.getByText(/\b\d+\s*(of|\/)\s*\d+\b/)).toHaveCount(0);
-
-      await page.keyboard.press("Escape");
-      await expect(sheet).toBeHidden({ timeout: 2_000 });
-      return;
-    }
-
-    const readcard = page.locator("#readcard");
-    await expect(readcard).toBeVisible();
+    const { drawer, card } = await openPaper(page, itemId, "preview-proving.pdf");
     // The real page, rendered by the real endpoint — not a placeholder.
-    await expect(readcard).toHaveClass(/snap/, { timeout: 20_000 });
-    await expect(readcard.locator(".sheet img")).toBeVisible();
+    await expect(card).toHaveClass(/snap/, { timeout: 20_000 });
+    await expect(card.getByRole("img", { name: "Page one of preview-proving.pdf" })).toBeVisible();
     // #1300: the fixture is one page -- the pager says so, with no arrows,
     // and no honest state's foot word.
-    await expect(readcard.locator(".pager .pgn")).toHaveText("one page");
-    await expect(readcard.getByRole("button", { name: /next page|previous page/i })).toHaveCount(0);
-    await expect(readcard.locator(".rcfoot")).toHaveCount(0);
+    await expect(card.locator(".pager .pgn")).toHaveText("one page");
+    await expect(card.getByRole("button", { name: /next page|previous page/i })).toHaveCount(0);
+    await expect(card.getByText(/\b\d+\s*(of|\/)\s*\d+\b/)).toHaveCount(0);
+    await expect(card.locator(".rcfoot")).toHaveCount(0);
 
     await page.keyboard.press("Escape");
-    await expect(page.locator("#readcard")).toHaveCount(0, { timeout: 2_000 });
+    await expect(card).toBeHidden({ timeout: 2_000 });
+    // The card goes; the drawer it came from stays.
+    await expect(drawer).toBeVisible();
   } finally {
     await households.sweep(page);
   }
@@ -181,17 +190,15 @@ test("pressing a paper opens the preview, and Esc closes it", async ({ page }) =
 
 /* §18: "The page is a button. Pressing it opens the reader" -- on the desk
    and on the phone alike (#1298: the desk's page was a plain picture, so
-   only the phone ever reached the reader). */
-test("pressing the page opens the reader over the belt, and Esc closes it", async ({ page }) => {
+   only the phone ever reached the reader). Over home now (#1319). */
+test("pressing the page opens the reader over home, and Esc closes it", async ({ page }) => {
   test.setTimeout(60_000);
   await signInAsAdmin(page);
   const { itemId, householdId } = await seedHouseholdWithItem(page);
 
   try {
     await uploadDocument(page, householdId, itemId, "reader-proving.pdf");
-    await page.goto(`/item/${itemId}`);
-    await expect(page.getByRole("heading", { name: "Preview proving item" })).toBeVisible();
-    await page.getByRole("button", { name: /reader-proving\.pdf/ }).first().click();
+    await openPaper(page, itemId, "reader-proving.pdf");
 
     const pageButton = page.getByRole("button", { name: "Read reader-proving.pdf" });
     await expect(pageButton).toBeEnabled({ timeout: 20_000 });
@@ -199,6 +206,7 @@ test("pressing the page opens the reader over the belt, and Esc closes it", asyn
 
     const reader = page.getByRole("dialog", { name: "reader-proving.pdf, Preview proving item" });
     await expect(reader).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/home\\?item=${itemId}`));
     await page.keyboard.press("Escape");
     await expect(reader).toBeHidden({ timeout: 2_000 });
   } finally {
@@ -209,8 +217,9 @@ test("pressing the page opens the reader over the belt, and Esc closes it", asyn
 /* #1301: a click off the page closes the reader and the preview card
    together, and the next paper pressed opens the preview card again -- not
    the reader. The reader's own controls and its page are not "off". Desk
-   only: on the phone the preview is a sheet that closes itself (#1072). */
-test("on the desk, a click off the reader returns to the belt, the reader's own controls do not, and the next press opens the preview first", async ({ page }) => {
+   only: on the phone the preview is a sheet that closes itself (#1072).
+   #1319: the drawer stays open under both. */
+test("on the desk, a click off the reader returns to the drawer, the reader's own controls do not, and the next press opens the preview first", async ({ page }) => {
   test.skip(test.info().project.name.startsWith("mobile"), "the pocket's preview is a sheet with its own close (#1072)");
   test.setTimeout(60_000);
   await signInAsAdmin(page);
@@ -218,13 +227,10 @@ test("on the desk, a click off the reader returns to the belt, the reader's own 
 
   try {
     await uploadDocument(page, householdId, itemId, "reader-closing.pdf");
-    await page.goto(`/item/${itemId}`);
-    await expect(page.getByRole("heading", { name: "Preview proving item" })).toBeVisible();
-    const paper = page.getByRole("button", { name: /reader-closing\.pdf/ }).first();
+    const { drawer, paper } = await openPaper(page, itemId, "reader-closing.pdf");
     const pageButton = page.getByRole("button", { name: "Read reader-closing.pdf" });
     const reader = page.getByRole("dialog", { name: "reader-closing.pdf, Preview proving item" });
 
-    await paper.click();
     await expect(pageButton).toBeEnabled({ timeout: 20_000 });
     await pageButton.click();
     await expect(reader).toBeVisible();
@@ -244,6 +250,7 @@ test("on the desk, a click off the reader returns to the belt, the reader's own 
     await page.mouse.click(stage.x + 4, stage.y + stage.height / 2);
     await expect(reader).toBeHidden({ timeout: 2_000 });
     await expect(pageButton).toBeHidden({ timeout: 2_000 });
+    await expect(drawer).toBeVisible();
 
     /* The same paper again: the preview card first, not the reader. */
     await paper.click();
@@ -268,30 +275,14 @@ test("a removed document shows its own line, honestly, and no page", async ({ pa
     const deleted = await page.request.delete(`/api/documents/${doc.id}`, { headers });
     if (!deleted.ok()) throw new Error(`delete failed: ${deleted.status()} ${await deleted.text()}`);
 
-    await page.goto(`/item/${itemId}`);
-    const paper = page.getByRole("button", { name: /removed-proving\.pdf/ });
-    await expect(paper).toBeVisible();
-    await paper.click();
-
-    if (test.info().project.name.startsWith("mobile")) {
-      /* #1120, §18 on a phone: the preview sheet holds the plate still and
-         says so, with `restore` as its one word. */
-      const sheet = page.getByRole("dialog", { name: "removed-proving.pdf" });
-      await expect(sheet).toBeVisible();
-      await expect(sheet.locator(".bp-line")).toHaveText("Removed");
-      // Never a fabricated page: no page and no image of one.
-      await expect(sheet.locator(".bp-page")).toHaveCount(0);
-      await expect(sheet.getByRole("img")).toHaveCount(0);
-      await expect(sheet.getByRole("button", { name: "restore" })).toBeVisible();
-      return;
-    }
-
-    const readcard = page.locator("#readcard");
-    await expect(readcard).toBeVisible();
-    await expect(readcard.locator(".focusline")).toHaveText("Removed");
-    // Never a fabricated page: the sheet does not exist at all here.
-    await expect(readcard.locator(".sheet")).toHaveCount(0);
-    await expect(readcard.getByRole("button", { name: "restore" })).toBeVisible();
+    /* #1319: the drawer lists it still, and its card holds still and says
+       so, with `restore` as its one word (desk and phone alike). */
+    const { card } = await openPaper(page, itemId, "removed-proving.pdf");
+    await expect(card.locator(".focusline")).toHaveText("Removed");
+    // Never a fabricated page: no page and no image of one.
+    await expect(card.locator(".sheet")).toHaveCount(0);
+    await expect(card.getByRole("img")).toHaveCount(0);
+    await expect(card.getByRole("button", { name: "Restore removed-proving.pdf" })).toBeVisible();
   } finally {
     await households.sweep(page);
   }
@@ -312,9 +303,7 @@ test("the reader turns a multi-page document to its last page and back, by arrow
 
   try {
     await uploadDocument(page, householdId, itemId, "pages-proving.pdf", syntheticPdfWithNumberedPages(3));
-    await page.goto(`/item/${itemId}`);
-    await expect(page.getByRole("heading", { name: "Preview proving item" })).toBeVisible();
-    await page.getByRole("button", { name: /pages-proving\.pdf/ }).first().click();
+    await openPaper(page, itemId, "pages-proving.pdf");
     const pageButton = page.getByRole("button", { name: "Read pages-proving.pdf" });
     await expect(pageButton).toBeEnabled({ timeout: 20_000 });
     await pageButton.click();
@@ -381,9 +370,7 @@ test("a one-page document's reader says \"one page\" and has no arrows", async (
 
   try {
     await uploadDocument(page, householdId, itemId, "one-page-proving.pdf");
-    await page.goto(`/item/${itemId}`);
-    await expect(page.getByRole("heading", { name: "Preview proving item" })).toBeVisible();
-    await page.getByRole("button", { name: /one-page-proving\.pdf/ }).first().click();
+    await openPaper(page, itemId, "one-page-proving.pdf");
     const pageButton = page.getByRole("button", { name: "Read one-page-proving.pdf" });
     await expect(pageButton).toBeEnabled({ timeout: 20_000 });
     await pageButton.click();
@@ -415,13 +402,11 @@ test("the preview's pager turns a multi-page document in place, and the reader o
 
   try {
     await uploadDocument(page, householdId, itemId, "pager-proving.pdf", syntheticPdfWithNumberedPages(3));
-    await page.goto(`/item/${itemId}`);
-    await expect(page.getByRole("heading", { name: "Preview proving item" })).toBeVisible();
-    await page.getByRole("button", { name: /pager-proving\.pdf/ }).first().click();
+    const { drawer } = await openPaper(page, itemId, "pager-proving.pdf");
     const pageButton = page.getByRole("button", { name: "Read pager-proving.pdf" });
     await expect(pageButton).toBeEnabled({ timeout: 20_000 });
 
-    const card = mobile ? page.getByRole("dialog", { name: "pager-proving.pdf" }) : page.locator("#readcard");
+    const card = previewOf(page, "pager-proving.pdf");
     const number = card.locator(".pager .pgn");
     const previous = card.getByRole("button", { name: "Previous page" });
     const next = card.getByRole("button", { name: "Next page" });
@@ -451,14 +436,15 @@ test("the preview's pager turns a multi-page document in place, and the reader o
     await onPage(2);
 
     if (!mobile) {
-      // The desk's keys turn the preview, never the belt under it.
+      // The desk's keys turn the preview, never home under it.
       await page.keyboard.press("End");
       await onPage(3);
       await page.keyboard.press("Home");
       await onPage(1);
       await page.keyboard.press("ArrowRight");
       await onPage(2);
-      await expect(page.getByRole("heading", { name: "Preview proving item" })).toBeVisible();
+      await expect(drawer).toBeVisible();
+      await expect(page).toHaveURL(new RegExp(`/home\\?item=${itemId}$`));
     }
 
     // The reader opens on the preview's page...
@@ -486,12 +472,10 @@ test("a one-page document's preview pager says \"one page\" and has no arrows", 
 
   try {
     await uploadDocument(page, householdId, itemId, "one-pager-proving.pdf");
-    await page.goto(`/item/${itemId}`);
-    await expect(page.getByRole("heading", { name: "Preview proving item" })).toBeVisible();
-    await page.getByRole("button", { name: /one-pager-proving\.pdf/ }).first().click();
+    await openPaper(page, itemId, "one-pager-proving.pdf");
     await expect(page.getByRole("button", { name: "Read one-pager-proving.pdf" })).toBeEnabled({ timeout: 20_000 });
 
-    const card = mobile ? page.getByRole("dialog", { name: "one-pager-proving.pdf" }) : page.locator("#readcard");
+    const card = previewOf(page, "one-pager-proving.pdf");
     await expect(card.locator(".pager .pgn")).toHaveText("one page");
     await expect(card.locator(".pager button")).toHaveCount(0);
     if (!mobile) {

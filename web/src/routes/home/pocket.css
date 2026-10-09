@@ -226,19 +226,6 @@ body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
 .pk-act.p-pill{color:var(--accent-text);border-color:var(--accent);min-height:var(--p-hit);padding-block:10px;
   text-align:left;justify-items:start}
 
-/* ---- the approach: the drawer lifts into the item (§1.9, #1119) -------
- * `open →` runs a view transition (pocket.svelte, onNavigate). The opened
- * manifest row's panel and the belt's card (item/[[id]]/belt.css, #1072)
- * carry the same name, so the one morphs into the other (review round
- * §2.1): the drawer rises to the card's seat and grows into it along the
- * sheet's own curve, the two faces crossfading on the way, while the dial
- * fades and the band draws. A second tap on a lit dial body (owner's
- * answer 6a) makes the same approach from the same open row. */
-.pocket .pk-list > .p-row[data-open] .p-row-open{view-transition-name:pocket-item}
-::view-transition-group(pocket-item){animation-duration:var(--p-rise);animation-timing-function:var(--p-ease)}
-::view-transition-old(pocket-item),::view-transition-new(pocket-item){
-  animation-duration:var(--p-rise);animation-timing-function:var(--p-ease)}
-
 @media (prefers-reduced-motion:reduce){
   .pocket .sky g,.pk-dot.breathing,.pocket .mdial.arrive{animation:none}
   .pocket .pk-ping{display:none}
@@ -251,11 +238,20 @@ body:has(#orbit-tour-film) .pocket .p-northstar{display:none}
    preview's own bottom sheet: fixed to the foot (ChooserCard.svelte leaves
    where it stands to the screen). */
 .pk-chseat{position:fixed;left:0;right:0;bottom:0;z-index:45}
+/* #1319: its scrim, clear, over the whole screen behind the card */
+.pk-chscrim{position:fixed;inset:0;z-index:-1}
 /* the section word on a manifest row, in its own colour (packs.css maps
    data-opt onto --opt-text); never on the dial */
 .pocket .p-row .opt{font-style:normal;color:var(--opt-text, inherit)}
 /* #1319 stage 2 (round 8): the title live in the row's head while its item
    is edited — a 1px accent line under it and the caret, in its own type */
 .pocket .p-row .ed{display:inline-block;max-width:100%;min-width:6ch;outline:none;caret-color:var(--accent);
-  box-shadow:0 1px 0 var(--accent);cursor:text;font:inherit;color:inherit;overflow-wrap:anywhere}
-.pocket .p-row .ed:focus{box-shadow:0 1.5px 0 var(--accent)}
+  cursor:text;font:inherit;color:inherit;overflow-wrap:anywhere;
+  /* the 44px floor (#1319): the box padded to a 44px target and the padding
+     taken back, so the line stays put; the accent line drawn at the words'
+     foot, not the padding's */
+  box-sizing:border-box;min-height:44px;padding:7px 0 16px;margin:-7px 0 -16px;
+  background:linear-gradient(var(--accent),var(--accent)) left 0 bottom 15px/100% 1px no-repeat}
+.pocket .p-row .ed:focus{background-position:left 0 bottom 14.5px;background-size:100% 1.5px}
+/* ...reaching down over the meta line, which lets a press through to it */
+.pocket .p-row .live .meta{pointer-events:none}

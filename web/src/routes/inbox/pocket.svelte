@@ -304,7 +304,7 @@
               <div class="pki-slot" style:--i={index} animate:flip={{ duration: 300 }}>
                 <!-- The date first and the file name last, so the guard
                      trims the name (round 3 §1, R5). -->
-                <Row title={entry.title ?? "a filed item"} href={resolve("/item/[[id]]", { id: entry.itemId })}
+                <Row title={entry.title ?? "a filed item"} href={resolve(`/home?item=${encodeURIComponent(entry.itemId)}`)}
                      meta="added {short(/** @type {string} */ (entry.filedAt))}{entry.sourceDocument ? ` · ${entry.sourceDocument}` : ""}">
                   {#snippet mark()}<span class="p-body {T_CLASS[entry.band] ?? 'ended'}"></span>{/snippet}
                 </Row>

@@ -28,15 +28,17 @@ finds items and documents.
 ### One item
 
 <p align="center">
-  <img src="assets/product-tour/item-detail.png" alt="One item open: its due date, how often it comes round, cost, provider, reminders, actions and notes, with its document beside it" width="100%" />
+  <img src="assets/product-tour/item-detail.png" alt="One item open in its drawer on home: its due date, section, type, how often it comes round, cost, provider and reminders, then its notes and documents, with snooze, complete, attach a document and retire beneath" width="100%" />
 </p>
 
-Open any body in the sky to see that item: when it is due, how often it comes
-round, what it costs, who provides it, its reference and its reminders. From
-here you can complete it, reschedule it, snooze it, edit it or retire it.
-Complete it and Orbit works out the next date for you. Documents attached to
-the item sit beside it, stored encrypted. The items before and after it in
-date order sit either side, so you can step through them.
+Open any body in the sky, or any row on home, and its drawer opens in place:
+when it is due, what section and type it is, how often it comes round, what
+it costs, who provides it, its reference and its reminders, then your notes
+and the documents attached to it, stored encrypted. Press a document and a
+preview stands beside the drawer; press the preview to read the whole thing.
+From the drawer you can snooze it, complete it, attach a document or retire
+it; the pencil edits it in place, picking dates from a calendar. Complete it
+and Orbit works out the next date for you.
 
 ### The inbox
 

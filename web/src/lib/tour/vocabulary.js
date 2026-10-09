@@ -295,12 +295,6 @@ export function createFilmContext({
   /** Every `waitForReal` that ran out (#1174 round 6), for the phone check.
    *  @type {{ selector: string, ms: number, route: string }[]} */
   const waitedOut = [];
-  /** Whether any body in the household carries a paper (#1174 round 6,
-   *  Fable's call). Read once from the sky by film.js before the film is
-   *  measured, and held for the run, so the dry run and the played film
-   *  take the same path through chapters 8 and 9. True until told. */
-  let papers = true;
-
   const dry = () => clock.dry();
   const still = () => clock.reduced();
 
@@ -572,11 +566,6 @@ export function createFilmContext({
   async function setScreen(route) {
     if (dry()) return;
     if (routeOf() === route) return;
-    /* #1174: "/item" is the item screen, whichever item it shows — a chapter
-       asking for it while the film already stands on /item/<id> (chapter 9
-       after the pocket's chapter 8) stays where it is rather than cutting to
-       the apex item under the reader. */
-    if (route === "/item" && routeOf().startsWith("/item/")) return;
     /* The fields the film typed over are about to leave with the screen,
        and the room a scroll made below the old one goes with it. */
     dropTyped();
@@ -1309,27 +1298,26 @@ export function createFilmContext({
   let readingOpen = false;
 
   /**
-   * Opens a paper's reading card FOR REAL (08-the-belt.js, #866/#1093) — the
-   * one place in this whole vocabulary that dispatches a genuine click,
-   * where every other word only ever animates one (`press`'s own doc: "the
-   * whole reason press() does not click").
+   * Opens a paper's preview card FOR REAL (08-the-item.js; #866/#1093, and
+   * #1319's drawer) — one of the two words in this vocabulary that dispatch
+   * a genuine click (`open`, below, is the other), where every other word
+   * only ever animates one (`press`'s own doc: "the whole reason press()
+   * does not click").
    *
    * That rule is about MUTATION, not about clicking as such: a swatch's
    * click runs `setSwatch` (localStorage and a server preference, why
    * 11-your-sky.js reimplements the visual instead — `wear`, above) and the
-   * reading card's own restore button runs `restoreDocument`, a real server
-   * write. A paper's click is neither: `openDoc` (belt.behaviour.js) sets a
-   * class on its own seat and the screen's own view state (`previewIdx`,
-   * `previewDoc`) — no `localStorage`, no address-bar change (that is
-   * `centre`'s, and a document's press never reaches `centre` — #1088's own
-   * rule), no server request. Nothing here persists, so dispatching it is
-   * the honest way to make the real card mount, the same as any reader's
-   * own press would. This word must only ever be handed a paper's own hit —
-   * never the card's own restore button or anything else inside it once the
-   * card is open.
+   * preview card's own restore and remove buttons are real server writes.
+   * A paper's click in home's drawer (`[data-doc-row]`) is neither: it sets
+   * the screen's own view state (`previewDoc` on the desk, `previewPaper`
+   * on the pocket) — no `localStorage`, no address-bar change, no server
+   * request. Nothing here persists, so dispatching it is the honest way to
+   * make the real card mount, the same as any reader's own press would.
+   * This word must only ever be handed a paper's own row — never the
+   * card's own buttons or anything else inside it once the card is open.
    *
-   * @param {Control} c one or more papers' own real hits; the first is
-   *   pressed, because the film never knows or cares which paper it is
+   * @param {Control} c one or more papers' own rows; the first is pressed,
+   *   because the film never knows or cares which paper it is
    */
   function read(c) {
     if (dry() || c.els.length === 0) return;
@@ -1339,11 +1327,11 @@ export function createFilmContext({
 
   /**
    * Closes whatever card `read()` opened, the same way a reader would:
-   * Escape, which the item screen's own `onKeydown` (`+page.svelte`) already
-   * closes the preview on. No selector is needed — the film never named
-   * which paper it opened, only that Escape closes whichever is open — and
-   * no new handle onto the belt is needed either, which keeps the tour/
-   * product boundary one-way exactly as it already is everywhere else.
+   * Escape, which the preview card's own key handler (PreviewCard.svelte)
+   * closes it on, ahead of home's own Escape, so the drawer stays open. No
+   * selector is needed — the film never named which paper it opened, only
+   * that Escape closes whichever is open — which keeps the tour/product
+   * boundary one-way exactly as it already is everywhere else.
    *
    * #1083: dispatched on `doc`, not `window` — a document-dispatched keydown
    * still bubbles to the window's own handler, and `doc` is also where the
@@ -1371,36 +1359,69 @@ export function createFilmContext({
    *  looks its own target up fresh when it runs rather than holding a
    *  reference, so a target the screen has already disposed of (a jump, a
    *  navigation) is simply not found and costs nothing to skip.
-   *  @type {(() => void)[]} */
+   *  @type {(() => unknown)[]} */
   let openUndo = [];
 
   /**
-   * Opens a pocket sheet or row FOR REAL, the same one genuine click
-   * `read()` already makes for a paper (see its own doc, above) — a
+   * Opens a sheet, a row or a drawer mode FOR REAL, the same one genuine
+   * click `read()` already makes for a paper (see its own doc, above) — a
    * generalisation on the same terms, not a second rule. Allowed targets,
    * recorded here so nobody mistakes this for a licence to click anything:
    * `#morb` (opens the account hatch, a kit Sheet), a dial body `.pk-body`
-   * (opens its manifest row in place). A paper's own hit is `read()`'s, not
+   * (opens its manifest row in place), and, in home's item drawer (#1319,
+   * 08-the-item.js): the desk's manifest row `a.item` (opens it in place,
+   * #424 — the row's own shallow `/home?item=<id>` entry, which Back or
+   * Escape takes away again), the drawer's pencil `.ivedit` (the rows go
+   * live: a draft, nothing sent until save, which the film never presses)
+   * and a live value's `.pick` (its chooser card or sheet). Each is view
+   * state only — nothing here writes. A paper's own row is `read()`'s, not
    * this word's.
    *
-   * Queues the undo `clear()` needs to leave no sheet up and no row open: a
-   * row's own toggle button (`[data-row-face][aria-expanded="true"]`) for a
-   * `.pk-body`, `close()` for anything else.
+   * Queues the undo `clear()` needs to leave no sheet up, no row open and
+   * no drawer editing: a row's own toggle button
+   * (`[data-row-face][aria-expanded="true"]`) for a `.pk-body`, `close()`
+   * for anything else — the film's own Escape, which home's own keys take
+   * in its order: the chooser, then the editing, then the open row.
+   *
+   * Returns that undo as a handle, so a chapter can put back the one thing
+   * it opened, when it means to, and `clear()` then owes it nothing.
    *
    * @param {Control} c
+   * @returns {() => Promise<void>}
    */
   function open(c) {
-    if (dry() || c.els.length === 0) return;
+    if (dry() || c.els.length === 0) return async () => {};
     const el = c.els[0];
     const isRow = el.classList?.contains("pk-body") ?? false;
     el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-    if (isRow) {
-      openUndo.push(() => {
+    /** @type {() => unknown} */
+    const undo = isRow
+      ? () => {
         const face = doc.querySelector('[data-row-face][aria-expanded="true"]');
         if (face) face.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-      });
-    } else {
-      openUndo.push(() => { void close(); });
+      }
+      : () => close();
+    openUndo.push(undo);
+    return async () => {
+      const at = openUndo.lastIndexOf(undo);
+      if (at < 0) return;
+      openUndo.splice(at, 1);
+      await undo();
+    };
+  }
+
+  /**
+   * Puts away everything `open()` opened and nothing has put back yet,
+   * newest first, waiting on each: `clear()`'s own undo, for a chapter that
+   * means to leave the page as it found it rather than a jump that has to
+   * (chapter 9 closing the drawer chapter 8 opened). Dry mode: no-op, zero
+   * time — the fold is motion, priced by the chapter itself.
+   */
+  async function shut() {
+    if (dry()) return;
+    while (openUndo.length > 0) {
+      const undo = /** @type {() => unknown} */ (openUndo.pop());
+      await undo();
     }
   }
 
@@ -1712,7 +1733,7 @@ export function createFilmContext({
        must leave no sheet up and no row open on the pocket either. Each
        undo looks its own target up fresh, so one already gone with the
        screen it belonged to is simply not found. */
-    for (const undo of openUndo.slice().reverse()) undo();
+    for (const undo of openUndo.slice().reverse()) void undo();
     openUndo = [];
     if (layer) {
       for (const stale of Array.from(layer.querySelectorAll(".tourfilm-ring,.tourfilm-callout,.tourfilm-typed"))) {
@@ -1793,6 +1814,7 @@ export function createFilmContext({
     read,
     unread,
     open,
+    shut,
     close,
     /** #1083 §4.6: whether the film itself currently owns an open sheet or
      *  row — the transport's own Escape handler reads this to tell "the film
@@ -1829,10 +1851,6 @@ export function createFilmContext({
     transcript: () => transcriptLines.slice(),
     /* #1174 round 6: the waits for the page that ran out */
     waitedOut: () => waitedOut.map((one) => ({ ...one })),
-    /* #1174 round 6: does any body carry a paper? (see `papers`, above) */
-    carriesPapers: () => papers,
-    /** @param {boolean} on */
-    setCarriesPapers: (on) => { papers = Boolean(on); },
     resetTranscript: () => { transcriptLines = []; },
   };
 }

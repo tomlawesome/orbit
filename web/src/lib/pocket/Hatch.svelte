@@ -122,7 +122,6 @@
     <Row title="Add an item" href={resolve("/create")} current={current === "create"}>
       {#snippet mark()}<span class="plus">+</span>{/snippet}
     </Row>
-    <Row title="Items" href={resolve("/item")} current={current === "item"}>{#snippet mark()}<span></span>{/snippet}</Row>
     <Row title="Inbox" href={resolve("/inbox")} current={current === "inbox"}
          trail={inboxCount ? String(inboxCount) : ""} trailName={inboxCount ? `${inboxCount} waiting` : ""}
          bead={Boolean(inboxCount)}>{#snippet mark()}<span></span>{/snippet}</Row>

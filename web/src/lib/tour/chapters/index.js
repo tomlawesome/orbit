@@ -12,7 +12,8 @@
  *
  * ORDER IS THE RATIFIED ORDER (design/v19/tour/round-5/README.md, "The
  * film"): Arrive, Add, Lands, Below the dial, Time runs, Paper by post,
- * Inbox, The belt, Done, Other households, Your sky, Yours.
+ * Inbox, The item (#1319: it replaced The belt), Done, Other households,
+ * Your sky, Yours.
  */
 import arrive from "./01-arrive.js";
 import add from "./02-add.js";
@@ -21,7 +22,7 @@ import belowTheDial from "./04-below-the-dial.js";
 import timeRuns from "./05-time-runs.js";
 import paperByPost from "./06-paper-by-post.js";
 import inbox from "./07-inbox.js";
-import theBelt from "./08-the-belt.js";
+import theItem from "./08-the-item.js";
 import done from "./09-done.js";
 import otherHouseholds from "./10-other-households.js";
 import yourSky from "./11-your-sky.js";
@@ -56,7 +57,7 @@ export const CHAPTERS = [
   timeRuns,
   paperByPost,
   inbox,
-  theBelt,
+  theItem,
   done,
   otherHouseholds,
   yourSky,

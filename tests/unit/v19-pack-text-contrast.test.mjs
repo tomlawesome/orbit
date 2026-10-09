@@ -193,11 +193,12 @@ describe("packs.css text-grade companions clear WCAG 2 AA on their pack's ground
  *             unmoved, on the packs that already passed). Measured on --bg,
  *             where those sites actually sit, and on --panel, composited
  *             over --bg the way html body{background:var(--bg)} + a
- *             translucent panel actually paints (belt.css, item.css) — a
+ *             translucent panel actually paints (item.css; belt.css retired in #1319) — a
  *             plain "over" blend, no gamma correction.
- *   --act     on /item/[[id]], .acts button and .btn-quiet (item.css, belt.css)
- *             use one inline custom property for text, border and fill at
- *             once (+page.svelte, Suggestion.svelte): color:var(--act,...).
+ *   --act     on the item screen (the belt page, retired in #1319), .acts
+ *             button and .btn-quiet (item.css, belt.css) used one inline
+ *             custom property for text, border and fill at once:
+ *             color:var(--act,...).
  *             The values bound to it for those buttons are --overdue,
  *             --accent, --ok and --upcoming raw (--warm is also bound there;
  *             its case is the row above). Raw, all of them failed on
@@ -215,7 +216,7 @@ describe("packs.css text-grade companions clear WCAG 2 AA on their pack's ground
 const ACT_BUTTON_VALUES = ["overdue", "accent", "ok", "upcoming"];
 
 /** rgba(...) --panel composited over the pack's own --bg — html body's real
- * painted background per belt.css / item.css. */
+ * painted background per item.css (and belt.css, retired). */
 function panelGround(pack) {
   return compositeOver(pack, "--panel", resolveColor(pack, "var(--bg)"));
 }

@@ -679,7 +679,7 @@
           <p class="sent-none">nothing sent yet · the first warning goes out <b>{view.reminders.firstWarning}</b>, by email and by browser alert if they are on</p>
         {:else}
           {#each sent as row (row.id)}
-            <a class="sent" href={resolve("/item/[[id]]", { id: row.itemId })} aria-label={sentLabel(row)}>
+            <a class="sent" href={resolve(`/home?item=${encodeURIComponent(row.itemId)}`)} aria-label={sentLabel(row)}>
               {#if row.channel === "email"}
                 <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><rect x="2" y="4" width="14" height="10" rx="2"/><path d="m2.5 5 6.5 5 6.5-5"/></svg>
               {:else}

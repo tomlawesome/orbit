@@ -74,7 +74,8 @@ for (const theme of THEMES) {
 
 /* The desk's own baselines, which route each phone screen answers to. */
 const DESK = /** @type {Record<string, string[]>} */ ({
-  home: ["home.png", "mobile.png"], item: ["item.png"], "item-i-mot": ["item.png"], create: ["create.png"],
+  /* item.png is the MOT's drawer on home since the belt retired (#1319) */
+  home: ["home.png", "mobile.png", "item.png"], create: ["create.png"],
   inbox: ["inbox.png"], "household-hh-lawson-1": ["household.png"], "household-hh-seaside-4551": ["household.png"],
   settings: ["settings.png"], "settings-mail": ["relay.png"], administration: ["administration.png"],
   door: ["newcomer-drawer.png", "newcomer-drawer-error.png", "newcomer.png"],
