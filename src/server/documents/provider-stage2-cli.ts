@@ -13,6 +13,7 @@
 //                                               # name, and the top three
 //                                               # scores (owner only on the
 //                                               # hold-out: the gate refuses it)
+import { percent } from "./eval-format";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
 import { EXTRACTION_HOLDOUT3_FULLPAGE } from "./extraction-holdout3-fullpage";
 import { classifyProvider } from "./extraction-scoring";
@@ -50,8 +51,8 @@ function main(): void {
     }
   }
 
-  const percent = of === 0 ? "0.0" : ((hits / of) * 100).toFixed(0);
-  console.log(`${prefix}provider by own stage 2: ${percent}% (${hits}/${of}) [provider ${hits}/${of}]`);
+  const accuracy = percent(hits, of, 0);
+  console.log(`${prefix}provider by own stage 2: ${accuracy} (${hits}/${of}) [provider ${hits}/${of}]`);
 }
 
 main();

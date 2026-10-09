@@ -62,7 +62,7 @@ here — this module stays free of display prose.
 | `no_document` | `no_supported_pdf`; `document_type_unsupported`, `mime_type_mismatch`, `mime_structure_invalid`, `mime_part_count_exceeded`, `mime_nesting_too_deep` |
 | `too_large` | `message_too_large`; `document_too_large`, `attachment_total_too_large`, `attachment_count_exceeded` |
 | `malware` | `malware_detected` |
-| `scanner_off` | `scanner_disabled`, `scanner_unavailable` |
+| `scanner_off` | `scanner_disabled`, `scanner_unavailable`, `scanner_timeout`, `scanner_protocol`, `scanner_failed` |
 | `not_kept` | `attachment_download_failed`, `staging_lease_lost`, `attachment_processing_failed`, `attachment_processing_exhausted`, `staging_purge_failed`, `discard_purge_failed`, `staging_purge_pending`, `staging_expiry_pending` |
 | `wrong_recipient` | `recipient_mismatch` |
 | `account_disabled` | `account_disabled` |

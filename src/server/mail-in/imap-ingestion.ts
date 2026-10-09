@@ -5,15 +5,14 @@ import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, imapRecipientAliases, users } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { getNotificationWorkerConfig, verifySmtpProviderConnection, type NotificationWorkerConfig } from "@/server/notification-worker";
-import { purgeHeldImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
+import { flagStagingPurgeFailed, purgeHeldImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
 import { adjudicateProposal } from "@/server/documents/adjudication";
-import { getDocumentConfig } from "@/server/documents/config";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { MODEL_MAILBOX_DEADLINE_MS } from "@/server/documents/model-extraction";
 import { proposalFromText } from "@/server/documents/suggestions";
 import { extractTextWithTika } from "@/server/documents/tika";
 import type { SupportedDocumentMediaType } from "@/server/documents/validation";
-import { LocalDocumentStorage } from "@/server/documents/storage";
+import { openDocumentStorage } from "@/server/documents/storage";
 import { reviewDraftMetadataFromProposal } from "@/server/reviewed-intake";
 import { requireReceiptMetadataWriter } from "@/server/metadata/fields";
 import { classifyImapBodyStructure, IMAP_ATTACHMENT_LIMITS, type ImapAttachmentCandidate } from "./core/imap-attachment-validation";
@@ -367,13 +366,14 @@ async function recordImapReceipt(_config: ImapIngestionConfig, values: ImapRecei
   });
 }
 
-function safeAttachmentFailure(error: unknown): string {
+export function safeAttachmentFailure(error: unknown): string {
   const code = error instanceof Error ? error.message : "attachment_processing_failed";
   return new Set([
     "attachment_count_exceeded", "attachment_total_too_large", "document_too_large",
     "mime_part_count_exceeded", "mime_nesting_too_deep", "mime_structure_invalid",
     "mime_type_mismatch", "document_type_unsupported", "malware_detected", "scanner_disabled",
-    "scanner_unavailable", "message_too_large", "attachment_download_failed",
+    "scanner_unavailable", "scanner_timeout", "scanner_protocol", "scanner_failed",
+    "message_too_large", "attachment_download_failed",
     "staging_lease_lost", "staging_purge_failed",
   ]).has(code) ? code : "attachment_processing_failed";
 }
@@ -438,11 +438,6 @@ async function downloadImapPart(client: ImapFlow, uid: number, part: string, max
 }
 
 type StagedObject = { id: string; storageKey: string };
-
-function heldStorage() {
-  const config = getDocumentConfig();
-  return new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
-}
 
 /** Re-establishes durable ownership for a ciphertext written after its worker
  * ledger was reconciled, then purges only that uncommitted attempt object. */
@@ -582,8 +577,7 @@ async function recordStagingPurgeFailure(messageId: string, leaseToken: string, 
     if (!active) return;
     await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeAttempts: sql`${imapIngestionStagingObjects.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
       .where(and(eq(imapIngestionStagingObjects.messageId, messageId), eq(imapIngestionStagingObjects.leaseToken, leaseToken), eq(imapIngestionStagingObjects.storageKey, object.storageKey)));
-    await transaction.update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
-      .where(and(eq(imapIngestionAttachments.messageId, messageId), eq(imapIngestionAttachments.id, object.id), eq(imapIngestionAttachments.storageKey, object.storageKey), eq(imapIngestionAttachments.status, "stored")));
+    await flagStagingPurgeFailed(transaction, and(eq(imapIngestionAttachments.messageId, messageId), eq(imapIngestionAttachments.id, object.id), eq(imapIngestionAttachments.storageKey, object.storageKey), eq(imapIngestionAttachments.status, "stored")));
   });
 }
 
@@ -640,7 +634,7 @@ export async function reconcileImapStagingObjects(limit = 100): Promise<void> {
       });
       continue;
     }
-    if (row.status === "committed" && attachment?.status === "stored" && !attachment.purgePending && await heldStorage().ciphertextExists(row.storageKey)) {
+    if (row.status === "committed" && attachment?.status === "stored" && !attachment.purgePending && await openDocumentStorage().ciphertextExists(row.storageKey)) {
       await getDb().transaction(async (transaction) => {
         const [parent] = await transaction.select({ status: imapIngestionMessages.status, leaseToken: imapIngestionMessages.attachmentProcessingLeaseToken, lockedAt: imapIngestionMessages.attachmentProcessingLockedAt }).from(imapIngestionMessages)
           .where(eq(imapIngestionMessages.id, row.messageId)).for("update").limit(1);
@@ -684,8 +678,7 @@ export async function reconcileImapStagingObjects(limit = 100): Promise<void> {
         await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeAttempts: sql`${imapIngestionStagingObjects.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
           .where(and(eq(imapIngestionStagingObjects.id, row.id), eq(imapIngestionStagingObjects.leaseToken, row.leaseToken)));
         if (attachment?.status === "stored") {
-          await transaction.update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
-            .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.storageKey, row.storageKey), eq(imapIngestionAttachments.status, "stored")));
+          await flagStagingPurgeFailed(transaction, and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.storageKey, row.storageKey), eq(imapIngestionAttachments.status, "stored")));
         }
       });
     }

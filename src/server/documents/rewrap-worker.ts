@@ -34,14 +34,18 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { auditLog, documentCrypto, documentJobs, mailInSecrets, metadataKeys } from "@/db/schema";
+import { auditLog, documentCrypto, mailInSecrets, metadataKeys } from "@/db/schema";
 import { log, operationalDetail } from "@/lib/logger";
-import { rewrapDocumentKey, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
+import { envelopeOf, rewrapDocumentKey } from "@/server/documents/crypto";
 import { rewrapMetadataKey, type MetadataKeyContext } from "@/server/metadata/crypto";
 import { rewrapMailInSecret } from "@/server/mail-in/core/secret-crypto";
-import { JOB_CLAIM_UPDATE, operationalDocumentReason } from "@/server/document-maintenance/claims";
-
-type Transaction = Parameters<Parameters<ReturnType<typeof getDb>["transaction"]>[0]>[0];
+import {
+  completeJob,
+  failJob,
+  holdsJobLease,
+  JOB_CLAIM_UPDATE,
+  jobFailureCode,
+} from "@/server/document-maintenance/claims";
 
 export interface RotationKeys {
   currentKek: Buffer;
@@ -128,22 +132,6 @@ interface DocumentCryptoRow {
   wrapAuthTag: string;
 }
 
-async function completeRewrapJob(transaction: Transaction, job: ClaimedRewrapJob): Promise<void> {
-  await transaction.update(documentJobs).set({
-    status: "completed",
-    completedAt: new Date(),
-    lockedAt: null,
-    leaseExpiresAt: null,
-    leaseToken: null,
-    lastError: null,
-    updatedAt: new Date(),
-  }).where(and(
-    eq(documentJobs.id, job.id),
-    eq(documentJobs.status, "processing"),
-    eq(documentJobs.leaseToken, job.leaseToken),
-  ));
-}
-
 /**
  * Processes one claimed `rewrap` job: unwraps the document's DEK under the
  * current KEK and rewraps it under the next one, inside the transaction that
@@ -176,23 +164,14 @@ export async function processRewrapJob(job: ClaimedRewrapJob, keys: RotationKeys
     // attempt already finished the row (a resurrected job from a later
     // rotation, or a race with another worker): nothing left to rewrap.
     if (!crypto || crypto.keyId === keys.nextKeyId) {
-      await completeRewrapJob(transaction, job);
+      await completeJob(transaction, holdsJobLease(job));
       return "completed";
     }
     if (crypto.keyId !== keys.currentKeyId) {
       throw new Error("document_crypto row is wrapped under neither the current nor the next key");
     }
 
-    const envelope: DocumentCryptoEnvelope = {
-      envelopeVersion: crypto.envelopeVersion as 1,
-      algorithm: "aes-256-gcm",
-      keyId: crypto.keyId,
-      contentIv: crypto.contentIv,
-      contentAuthTag: crypto.contentAuthTag,
-      wrappedDek: crypto.wrappedDek,
-      wrapIv: crypto.wrapIv,
-      wrapAuthTag: crypto.wrapAuthTag,
-    };
+    const envelope = envelopeOf(crypto);
     const rewrapped = rewrapDocumentKey(job.documentId, envelope, keys.currentKek, keys.nextKek, keys.nextKeyId);
     const updated = await transaction.update(documentCrypto).set({
       wrappedDek: rewrapped.wrappedDek,
@@ -206,43 +185,19 @@ export async function processRewrapJob(job: ClaimedRewrapJob, keys: RotationKeys
     )).returning({ documentId: documentCrypto.documentId });
     if (updated.length === 0) throw new Error("Rewrap lost document_crypto ownership");
 
-    await completeRewrapJob(transaction, job);
+    await completeJob(transaction, holdsJobLease(job));
     return "completed";
   });
 }
 
-/** As `document-maintenance/purge-jobs.ts`'s `failJob`, for `kind = 'rewrap'`. */
+/** As `document-maintenance/purge-jobs.ts`'s `failPurgeJob`, for `kind = 'rewrap'`. */
 export async function failRewrapJob(job: ClaimedRewrapJob, error: unknown): Promise<void> {
-  const [current] = await getDb().select({ attempts: documentJobs.attempts })
-    .from(documentJobs)
-    .where(and(
-      eq(documentJobs.id, job.id),
-      eq(documentJobs.status, "processing"),
-      eq(documentJobs.leaseToken, job.leaseToken),
-    ))
-    .limit(1);
-  if (!current) return;
-  const safeCode = error instanceof Error && /key|secret/i.test(error.message) ? "key_unavailable" : "rewrap_failed";
-  const exhausted = current.attempts >= REWRAP_MAX_ATTEMPTS;
-  log.warn({
-    event: "document.job",
-    state: exhausted ? "exhausted" : "retrying",
-    reason: operationalDocumentReason(safeCode),
-    action: exhausted ? "inspect_admin_diagnostics" : "retry_job",
-    impact: "document_processing_blocked",
+  await failJob({
+    db: getDb(),
+    owns: holdsJobLease(job),
+    code: jobFailureCode(error, "rewrap_failed"),
+    maxAttempts: REWRAP_MAX_ATTEMPTS,
   });
-  await getDb().update(documentJobs).set({
-    status: exhausted ? "failed" : "retry",
-    lockedAt: null,
-    leaseExpiresAt: null,
-    leaseToken: null,
-    lastError: safeCode,
-    updatedAt: new Date(),
-  }).where(and(
-    eq(documentJobs.id, job.id),
-    eq(documentJobs.status, "processing"),
-    eq(documentJobs.leaseToken, job.leaseToken),
-  ));
 }
 
 /**

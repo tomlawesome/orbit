@@ -5,7 +5,7 @@ import { getDb } from "@/db";
 import { documents, households, imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, items, memberships, metadataKeyOutages, sections, users } from "@/db/schema";
 import { clearMetadataDamageForColumn } from "@/server/metadata/damage-sightings";
 import { metadataCryptoAvailable } from "@/server/metadata/keys";
-import { purgeHeldImapAttachment } from "./imap-attachment-holding";
+import { flagStagingPurgeFailed, purgeHeldImapAttachment } from "./imap-attachment-holding";
 import { requestDocumentDeletion, requireDocumentDeletionAccess } from "@/server/document-repository";
 import { clearedReviewDraftMetadata, sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
@@ -485,8 +485,7 @@ export async function discardImapReviewItem(userId: string, receiptId: string): 
         const [current] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
           .where(and(eq(imapIngestionMessages.id, receipt.id), eq(imapIngestionMessages.status, "recoverable"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, cleanupToken))).for("update").limit(1);
         if (!current) return;
-        await transaction.update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: now })
-          .where(and(eq(imapIngestionAttachments.messageId, receipt.id), eq(imapIngestionAttachments.storageKey, storageKey), eq(imapIngestionAttachments.purgePending, true)));
+        await flagStagingPurgeFailed(transaction, and(eq(imapIngestionAttachments.messageId, receipt.id), eq(imapIngestionAttachments.storageKey, storageKey), eq(imapIngestionAttachments.purgePending, true)), now);
         await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeAttempts: sql`${imapIngestionStagingObjects.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: now })
           .where(and(eq(imapIngestionStagingObjects.messageId, receipt.id), eq(imapIngestionStagingObjects.storageKey, storageKey), eq(imapIngestionStagingObjects.status, "purge_pending")));
         await transaction.update(imapIngestionMessages).set({ status: "recoverable", failureCode: "discard_purge_failed", attachmentProcessingLockedAt: null, attachmentProcessingLeaseToken: null, updatedAt: now })
@@ -666,8 +665,7 @@ export async function purgeExpiredImapStaging(now = new Date(), limit = 25): Pro
           const [current] = await transaction.select({ id: imapIngestionMessages.id }).from(imapIngestionMessages)
             .where(and(eq(imapIngestionMessages.id, claim.id), eq(imapIngestionMessages.status, "recoverable"), eq(imapIngestionMessages.attachmentProcessingLeaseToken, claim.token))).for("update").limit(1);
           if (!current) return;
-          await transaction.update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: now })
-            .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.purgePending, true)));
+          await flagStagingPurgeFailed(transaction, and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.purgePending, true)), now);
           await transaction.update(imapIngestionStagingObjects).set({ purgeAttempts: sql`${imapIngestionStagingObjects.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: now })
             .where(and(eq(imapIngestionStagingObjects.messageId, claim.id), eq(imapIngestionStagingObjects.storageKey, attachment.storageKey), eq(imapIngestionStagingObjects.status, "purge_pending")));
         });

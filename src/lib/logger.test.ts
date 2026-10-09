@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   formatJsonRecord,
+  asOperationalReason,
   formatRecord,
   getLogFormat,
   getLogLevel,
@@ -383,5 +384,14 @@ describe("closed schema enforcement (#718)", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+});
+
+describe("asOperationalReason (engine-28)", () => {
+  it("passes a listed reason through and turns anything else into unexpected_failure", () => {
+    expect(asOperationalReason("scanner_protocol")).toBe("scanner_protocol");
+    expect(asOperationalReason("purge_failed")).toBe("purge_failed");
+    expect(asOperationalReason("a code nobody listed")).toBe("unexpected_failure");
+    expect(asOperationalReason("")).toBe("unexpected_failure");
   });
 });
