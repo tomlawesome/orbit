@@ -119,7 +119,10 @@ vi.mock("@/server/documents/storage", () => ({
   },
 }));
 
-vi.mock("@/server/workspace-access", () => ({
+// The real household gate runs against the fake database (its answer is the
+// `users` rows queued below); only the advisory-lock transaction step is stubbed.
+vi.mock("@/server/workspace-access", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/server/workspace-access")>(),
   acquireActiveHouseholdLock: vi.fn(async () => undefined),
 }));
 
@@ -170,7 +173,7 @@ function encrypted(payload: unknown) {
 }
 
 function seedHouseholdAccess() {
-  queue(mocks.selectQueues, "households", [{ id: householdId, administrator: true, membershipUserId: null, role: null }]);
+  queue(mocks.selectQueues, "users", [{ administrator: true, role: null }]);
 }
 
 beforeEach(() => {
@@ -195,7 +198,7 @@ beforeEach(() => {
 
 describe("portable archive export refusal (#1151 A2-F2)", () => {
   it("refuses to export while the metadata key is locked, rather than writing blank titles", async () => {
-    queue(mocks.selectQueues, "households", [{ id: householdId, administrator: true, membershipUserId: null, role: "owner" }]);
+    queue(mocks.selectQueues, "users", [{ administrator: true, role: "owner" }]);
     queue(mocks.selectQueues, "households", [{ id: householdId, name: "Home", timezone: "Europe/London", defaultCurrency: "GBP" }]);
     queue(mocks.selectQueues, "sections", []);
     queue(mocks.selectQueues, "items", []);
@@ -215,7 +218,7 @@ describe("portable archive export refusal (#1151 A2-F2)", () => {
   });
 
   it("refuses when no key row exists but a row still carries ciphertext", async () => {
-    queue(mocks.selectQueues, "households", [{ id: householdId, administrator: true, membershipUserId: null, role: "owner" }]);
+    queue(mocks.selectQueues, "users", [{ administrator: true, role: "owner" }]);
     queue(mocks.selectQueues, "households", [{ id: householdId, name: "Home", timezone: "Europe/London", defaultCurrency: "GBP" }]);
     queue(mocks.selectQueues, "sections", []);
     queue(mocks.selectQueues, "items", [{ id: "item-1", sectionId: "section-1", title: null, titleEnc: Buffer.from("enc"), provider: null, providerEnc: null, reference: null, referenceEnc: null, notes: null, notesEnc: null, costMinor: null, costMinorEnc: null }]);
@@ -228,7 +231,7 @@ describe("portable archive export refusal (#1151 A2-F2)", () => {
   });
 
   it("refuses when the household's key exists but will not unwrap", async () => {
-    queue(mocks.selectQueues, "households", [{ id: householdId, administrator: true, membershipUserId: null, role: "owner" }]);
+    queue(mocks.selectQueues, "users", [{ administrator: true, role: "owner" }]);
     queue(mocks.selectQueues, "households", [{ id: householdId, name: "Home", timezone: "Europe/London", defaultCurrency: "GBP" }]);
     queue(mocks.selectQueues, "sections", []);
     queue(mocks.selectQueues, "items", []);

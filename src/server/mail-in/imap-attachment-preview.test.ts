@@ -31,10 +31,6 @@ vi.mock("@/db", async () => {
   return { getDb: () => ({ select: () => selectBuilder() }) };
 });
 
-vi.mock("@/server/workspace-access", () => ({
-  validUuid: (value: string) => /^[0-9a-f-]{36}$/iu.test(value),
-}));
-
 vi.mock("@/server/mail-in/imap-inbox", () => ({
   privateMailboxUser: async (userId: string) => ({ id: userId, isInstanceAdmin: false }),
 }));
