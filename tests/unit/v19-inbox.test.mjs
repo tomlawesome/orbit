@@ -89,10 +89,9 @@ describe("approvalItemOf", () => {
     });
     expect(approvalItemOf({}, "EUR")).toEqual({ title: "Forwarded email", currency: "EUR" });
   });
-  it("never sends a schedule without a date, nor recurrence without a schedule", () => {
+  it("sends the relay's reading unjudged: a dateless schedule is the engine's to drop (#1325)", () => {
     const item = approvalItemOf({ title: "x", scheduleKind: "renewal", recurrenceMonths: 12 }, "GBP");
-    expect(item.scheduleKind).toBeUndefined();
-    expect(item.recurrenceMonths).toBeUndefined();
+    expect(item).toMatchObject({ scheduleKind: "renewal", recurrenceMonths: 12 });
   });
 });
 

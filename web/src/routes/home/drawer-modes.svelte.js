@@ -17,8 +17,6 @@
  */
 import { EditSession } from "$lib/editing/edit-session.svelte.js";
 import { chooserAskOf, draftOf } from "$lib/editing/item-draft.js";
-import { nextDateAfter } from "$lib/data/commands.js";
-import { COST_FORMAT_HINT, minorOf } from "../create/entry.js";
 
 /**
  * @typedef {import('$lib/data/commands.js').CommandItem} CommandItem
@@ -84,9 +82,10 @@ export class DrawerModes {
       return { key: "done", label: foot.label, heading: "completed on", today, choices: [],
         value: this.completing?.completedDate ?? today };
     }
-    const until = this.#item?.snoozedUntil;
+    /* The calendar opens on the item's current snooze; whether a day will
+       do is the engine's to say (#1325). */
     return { key: "snooze", label: foot.label, heading: "snooze until", today, choices: [],
-      value: until && until > today ? until : null };
+      value: this.#item?.snoozedUntil ?? null };
   }
 
   /** The pencil: the rows go live. @param {CommandItem} item */
@@ -163,19 +162,17 @@ export class DrawerModes {
   }
 
   /**
-   * The completion as completeCommand takes it, the next date computed as
-   * the belt computes it (nextDateAfter); or why it cannot be recorded yet.
-   * @returns {{ refusal: string } | { item: CommandItem, fields: { completedDate: string, nextDate?: string, costMinor?: number, notes?: string } }}
+   * The completion as completeCommand takes it -- what happened, as the rows
+   * hold it: the day, the cost as typed, the notes. Never the next date,
+   * which the engine works out (#1324); whether the day and the cost will do
+   * is the engine's to say too (ADR-0034, #1325), in its refusal.
+   * @returns {{ refusal: string } | { item: CommandItem, fields: { completedDate: string, cost?: string, notes?: string } }}
    */
   completion() {
     const draft = this.completing;
     const item = this.#item;
     if (!draft || !item) return { refusal: "not yet — nothing to record" };
-    const costMinor = minorOf(draft.cost);
-    if (costMinor !== undefined && Number.isNaN(costMinor)) return { refusal: `not yet — ${COST_FORMAT_HINT.toLowerCase()}` };
-    if (!draft.completedDate) return { refusal: "not yet — choose the day it was done" };
-    const nextDate = nextDateAfter(draft.completedDate, item.recurrenceMonths) ?? undefined;
-    return { item, fields: { completedDate: draft.completedDate, nextDate, costMinor, notes: draft.notes.trim() || undefined } };
+    return { item, fields: { completedDate: draft.completedDate, cost: draft.cost.trim() || undefined, notes: draft.notes.trim() || undefined } };
   }
 
   cancelComplete() {

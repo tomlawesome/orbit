@@ -136,17 +136,16 @@ async function seedHousehold(page: Page, options: { withItem?: boolean } = {}) {
       data: {
         type: "item.upsert",
         householdId,
+        kind: "service",
         item: {
           id: itemId,
           sectionId,
           title: "axe-sweep item",
           currency: "GBP",
-          scheduleKind: "service",
           dueDate,
           recurrenceMonths: 12,
-          status: "active",
         },
-        activity: { id: randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+        activity: { id: randomUUID(), itemId, occurredAt: new Date().toISOString() },
       },
     });
     if (!itemCreated.ok()) {

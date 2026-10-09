@@ -85,18 +85,17 @@ async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; hous
     await command({
       type: "item.upsert",
       householdId,
+      kind: "service",
       item: {
         id: itemId,
         sectionId,
         title,
         currency: "GBP",
-        scheduleKind: "service",
         dueDate,
         recurrenceMonths: 12,
         notes: note,
-        status: "active",
       },
-      activity: { id: crypto.randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+      activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
     });
     return { itemId, householdId, dueDate };
   }, { householdName: name, title: TITLE, note: NOTE });
@@ -155,6 +154,10 @@ test.describe("on the desk", () => {
     await page.goto("/home");
     const body = page.locator(`.body-link[data-body="${itemId}"]`);
     await expect(body).toHaveAttribute("data-docs", "1", { timeout: 20_000 });
+    /* The markup is drawn before home's listeners are bound (#1064): a
+       synthetic mouseenter sent in that gap is heard by nobody, and there is
+       no second one. Wait for the screen to be able to answer. */
+    await expect(page.locator("body[data-home-ready]")).toBeAttached();
     await body.dispatchEvent("mouseenter");
     const chip = page.locator(".callout.show .chip");
     await expect(chip).toHaveText("◆ 1 document");

@@ -15,8 +15,8 @@
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { WorkspaceError, applyCommand, approveReceipt, attachItemDocument, dismissReceipt, readHome, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut } from "$lib/data/workspace.js";
-  import { archiveCommand, completeCommand, nextDateAfter, snoozeCommand, upsertCommand } from "$lib/data/commands.js";
+  import { WorkspaceError, applyCommand, approveReceipt, dueDateIn, attachItemDocument, dismissReceipt, readHome, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut } from "$lib/data/workspace.js";
+  import { archiveCommand, completeCommand, snoozeCommand, upsertCommand } from "$lib/data/commands.js";
   import { createHeldCompletion } from "$lib/data/held-completion.js";
   import { createArm } from "$lib/pocket/arm.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
@@ -731,7 +731,8 @@
     const snooze = modes.pick(value);
     if (!snooze || !detail) return;
     const { item, until } = snooze;
-    if (until <= detail.today) { footProblem = "not yet — snooze to a day after today"; return; }
+    /* Whether the day will do is the engine's (#1325): its refusal lands
+       in footProblem, in its words. */
     runFoot("snooze", () => snoozeCommand(item, until), `${item.title} snoozed until ${longDate(until)}`);
   }
 
@@ -743,10 +744,10 @@
     }
   }
 
-  /* Complete records what the rows hold, as the belt's complete panel sent
-     it (item/[[id]]/+page.svelte): the date, the next date the belt
-     computes, the cost, the notes. Sent on `record`, not held for an undo:
-     the rows were the chance to change it. */
+  /* Complete records what the rows hold: the date, the cost, the notes.
+     The next due date is the engine's (#1324), read back from its reply.
+     Sent on `record`, not held for an undo: the rows were the chance to
+     change it. */
   async function recordCompletion() {
     const out = modes.completion();
     if ("refusal" in out) { modes.completeProblem = out.refusal; return; }
@@ -755,13 +756,13 @@
     footBusy = "complete";
     modes.completeProblem = null;
     try {
-      await applyCommand(completeCommand(item, fields));
+      const nextDate = dueDateIn(await applyCommand(completeCommand(item, fields)), item.householdId, item.id);
       modes.cancelComplete();
-      if (!fields.nextDate) collapseRow();
+      if (!nextDate) collapseRow();
       view = await readHome();
-      if (fields.nextDate) await rereadDetail();
-      wake(`Completed${fields.nextDate ? ` · next due ${shortDate(fields.nextDate)}` : ""} · ${item.title}`);
-      if (fields.nextDate) focusInDrawer('[aria-label^="Complete "]');
+      if (nextDate) await rereadDetail();
+      wake(`Completed${nextDate ? ` · next due ${shortDate(nextDate)}` : ""} · ${item.title}`);
+      if (nextDate) focusInDrawer('[aria-label^="Complete "]');
     } catch (error) {
       modes.completeProblem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again";
     } finally {
@@ -807,7 +808,7 @@
   /** @type {import('./drawer-acts.js').DrawerActs} */
   const drawerActs = $derived({
     busy: footBusy ?? (modes.edit.busy ? "save" : null),
-    problem: modes.edit.problem ?? modes.completeProblem ?? footProblem,
+    problem: modes.edit.problem ?? modes.edit.refusal ?? modes.completeProblem ?? footProblem,
     modes,
     sections: detailSections,
     onsnooze: (from) => {
@@ -1114,10 +1115,7 @@
     if (!raw || !view?.primary) return;
     try {
       const completedDate = asView(view).today;
-      await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId: view.primary }), {
-        completedDate,
-        nextDate: nextDateAfter(completedDate, raw.recurrenceMonths) ?? undefined,
-      }));
+      await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId: view.primary }), { completedDate }));
       stripOpen = false;
       view = await readHome();
     } catch (error) {

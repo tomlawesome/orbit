@@ -341,6 +341,11 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-07 · f6939a21 (create-form batch with ADR-0033 merged; nothing in it touches the save path this journey stages) · local targeted run, desktop-webkit, inside CI's Playwright image (#1235), no retries · `focus is not dropped to the page` at line 384: `focusedElement` was `body`. Same race on the other WebKit project; #1233 (v0.4) owns the fix. Second sighting.
 - 2026-10-07 · 68040844 (!1043; the repair-journeys fixture only) · pipeline 2236 / smoke (job 33177), desktop-chromium and mobile-chromium · the :373 focus check for /create, the item view and /inbox, and the :356 announcement check for /inbox and household deletion, each failed once and passed on the in-job retry. Third sighting, and now on Chromium too: filed as #1313.
 - 2026-10-08 · 687cb0f4 (door batch, !1044; nothing in it touches /create or its save) · pipeline 2251 / smoke_webkit (job 33371), desktop-webkit · `focus is not dropped to the page` at line 384, `focusedElement` was `body`, on the first attempt and on the in-job retry alike, so the job failed. Still #1313.
+- 2026-10-09 · 11e0e1c4 (#1325) · pipeline 2277 / smoke (job 33639), mobile-chromium · the :373 /create focus check failed its first attempt with "Expected to fail, but passed" (focus stayed on the pressed button) and met its expected failure on the retry, so Playwright counted it flaky. Chromium kept the focus this time: the race runs both ways. Not reproduced locally in four mobile-chromium runs, three of them under CPU load. Still #1313.
+
+## settings-notification-history.spec.ts:137 "a member sees their own last sent reminders, plainly, on both dialects" — desktop-firefox
+
+- 2026-10-09 · 11e0e1c4 (#1325; the spec's only change there is its seed payload) · pipeline 2277 / smoke_firefox (job 33640) · `getByRole('tabpanel', { name: 'sent to you lately' })` not visible in 5 s after the tab click; passed on the in-job retry. First sighting.
 
 ## v19-archive.spec.ts:262 "a wrong passphrase is refused, and nothing is read" on desktop-webkit (#1233)
 
@@ -387,3 +392,7 @@ second link (`…, T−20d · —`). The snapshot was taken before home finished
 drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 
 - 2026-10-08 · 9fc44ba2 · local, `scripts/test-e2e-local.sh --spec tests/e2e/v19-keyboard.spec.ts` (desktop-webkit) — first run failed with the two unlisted links; the re-run on the same code passed 24/24, and pipeline 2271's smoke_webkit passed it too.
+
+## bootstrap-protection.spec.ts:387 "once the instance is claimed the code is spent, cookie or no cookie" — [unclaimed]
+
+- 2026-10-08 · 059878f1 (#1325, which touches no sign-in code) · local `scripts/test-e2e-local.sh --spec 'tests/e2e/v19-(home-drawer|create|item-actions|mail-review)\.spec\.ts'` · `expect(session.ok()).toBe(true)` at `tests/e2e/support/bootstrap.ts:112` (`claimInstanceAsAdministrator`): `/api/auth/session` was not OK straight after the claim's sign-in. Every project depends on `[unclaimed]`, so 141 tests did not run. The next run of the same command on the same commit passed it. Traces: `~/projects/.backups/orbit/e2e-orbit-e2e-local-ecd11949-2436667-20261008-222859`. First sighting.

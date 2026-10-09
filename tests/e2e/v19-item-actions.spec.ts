@@ -72,17 +72,16 @@ async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; hous
     await command({
       type: "item.upsert",
       householdId,
+      kind: "service",
       item: {
         id: itemId,
         sectionId,
         title: "Boiler service proving",
         currency: "GBP",
-        scheduleKind: "service",
         dueDate,
         recurrenceMonths: 12,
-        status: "active",
       },
-      activity: { id: crypto.randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+      activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
     });
     return { itemId, householdId };
   }, name);
@@ -164,22 +163,24 @@ async function seedHouseholdWithTwoItems(
     await command({
       type: "item.upsert",
       householdId,
+      kind: "service",
       item: {
-        id: soonId, sectionId, title: soonTitle, currency: "GBP", scheduleKind: "service",
-        dueDate: soonDue, recurrenceMonths: 12, status: "active",
+        id: soonId, sectionId, title: soonTitle, currency: "GBP",
+        dueDate: soonDue, recurrenceMonths: 12,
       },
-      activity: { id: crypto.randomUUID(), itemId: soonId, kind: "created", occurredAt: new Date().toISOString() },
+      activity: { id: crypto.randomUUID(), itemId: soonId, occurredAt: new Date().toISOString() },
     });
     const laterId = crypto.randomUUID();
     const laterDue = new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10);
     await command({
       type: "item.upsert",
       householdId,
+      kind: "service",
       item: {
-        id: laterId, sectionId, title: "Later due proving", currency: "GBP", scheduleKind: "service",
-        dueDate: laterDue, recurrenceMonths: 12, status: "active",
+        id: laterId, sectionId, title: "Later due proving", currency: "GBP",
+        dueDate: laterDue, recurrenceMonths: 12,
       },
-      activity: { id: crypto.randomUUID(), itemId: laterId, kind: "created", occurredAt: new Date().toISOString() },
+      activity: { id: crypto.randomUUID(), itemId: laterId, occurredAt: new Date().toISOString() },
     });
     return { householdId, soonId, soonTitle, laterId };
   }, name);
@@ -261,7 +262,7 @@ test("a stale version is refused and the view says so", async ({ page }) => {
           itemId: item.id,
           expectedVersion: item.version,
           dueDate: "2027-03-03",
-          activity: { id: crypto.randomUUID(), itemId: item.id, kind: "rescheduled", occurredAt: new Date().toISOString(), nextDate: "2027-03-03" },
+          activity: { id: crypto.randomUUID(), itemId: item.id, occurredAt: new Date().toISOString(), nextDate: "2027-03-03" },
         }),
       });
       if (!response.ok) throw new Error(`rival reschedule failed: ${response.status}`);

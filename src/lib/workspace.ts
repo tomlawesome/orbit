@@ -9,6 +9,10 @@ import {
   type HouseholdSection,
   type ScheduleKind,
 } from "@/lib/domain";
+import { AppError } from "@/lib/errors";
+import { itemKinds, itemOfIntent, type ItemIntent, type ItemKind, type StoredItemFacts } from "@/lib/item-kind";
+import { nextDueDate } from "@/lib/next-due-date";
+import { completionRefusal, costMinorOf, itemRefusal, Refusal } from "@/lib/refusals";
 
 export const WORKSPACE_VERSION = 1;
 
@@ -49,7 +53,7 @@ export const itemMetadataStatusSchema = z.object({
 });
 export type ItemMetadataStatus = z.infer<typeof itemMetadataStatusSchema>;
 
-export const workspaceItemSchema = z.object({
+const workspaceItemShape = z.object({
   id: z.string().min(1).max(100),
   sectionId: z.string().min(1).max(100),
   /* Empty only for a damaged or locked title (ADR-0024 decision 5), which the
@@ -74,7 +78,9 @@ export const workspaceItemSchema = z.object({
   status: z.enum(itemStatuses),
   version: z.number().int().positive().optional(),
   updatedAt: z.iso.datetime().optional(),
-}).superRefine((item, context) => {
+});
+
+export const workspaceItemSchema = workspaceItemShape.superRefine((item, context) => {
   if (!item.title && !item.metadataStatus?.title) {
     context.addIssue({ code: "custom", path: ["title"], message: "Give this a name" });
   }
@@ -131,6 +137,10 @@ export const householdWorkspaceSchema = z.object({
   activities: z.array(itemActivitySchema).max(5_000).default([]),
   readNotificationIds: z.array(z.string().min(1).max(180)).max(2_000).default([]),
   dismissedNotificationIds: z.array(z.string().min(1).max(180)).max(2_000).default([]),
+  /** Read-only (ADR-0034, #1325): the household's calendar date where it
+   * lives, as the engine reckons it for its rules (household-date.ts), so a
+   * client's calendar greys exactly the days the engine refuses. */
+  today: calendarDate.optional(),
 });
 
 export const recoverableHouseholdSchema = z.object({
@@ -165,6 +175,8 @@ export const workspaceSchema = z.object({
 });
 
 export type ItemActivity = z.infer<typeof itemActivitySchema>;
+/** An activity as a client sends it where the engine names its kind (#1325). */
+export type ItemActivityIntent = Omit<ItemActivity, "kind">;
 export type HouseholdWorkspace = z.infer<typeof householdWorkspaceSchema>;
 export type WorkspaceState = z.infer<typeof workspaceSchema>;
 
@@ -181,22 +193,32 @@ export type WorkspaceCommand =
   | { type: "household.update"; householdId: string; name: string; timezone: string; currency: string }
   | { type: "household.activate"; householdId: string }
   | { type: "sections.replace"; householdId: string; sections: HouseholdSection[] }
-  | { type: "item.upsert"; householdId: string; item: HomeItem; activity?: ItemActivity }
-  | { type: "item.archive"; householdId: string; itemId: string; expectedVersion: number; activity: ItemActivity }
+  | {
+      type: "item.upsert";
+      householdId: string;
+      kind?: ItemKind;
+      item: ItemIntent;
+      activity?: ItemActivityIntent;
+      /** Engine-side callers only, never on the wire (the schema has no
+       * such field): what a new item starts from when the engine has
+       * already read it -- reviewed intake's relay reading. An edit's basis
+       * is always the stored item. */
+      basis?: StoredItemFacts;
+    }
+  | { type: "item.archive"; householdId: string; itemId: string; expectedVersion: number; activity: ItemActivityIntent }
   | {
       type: "item.complete";
       householdId: string;
       itemId: string;
       expectedVersion: number;
       completedDate: string;
-      nextDate?: string;
       costMinor?: number;
       notes?: string;
-      activity: ItemActivity;
+      activity: ItemActivityIntent;
     }
-  | { type: "item.reschedule"; householdId: string; itemId: string; expectedVersion: number; dueDate: string; activity: ItemActivity }
-  | { type: "item.snooze"; householdId: string; itemId: string; expectedVersion: number; snoozedUntil: string; activity: ItemActivity }
-  | { type: "item.status"; householdId: string; itemId: string; expectedVersion: number; status: "active" | "cancelled"; activity: ItemActivity }
+  | { type: "item.reschedule"; householdId: string; itemId: string; expectedVersion: number; dueDate: string; activity: ItemActivityIntent }
+  | { type: "item.snooze"; householdId: string; itemId: string; expectedVersion: number; snoozedUntil: string; activity: ItemActivityIntent }
+  | { type: "item.status"; householdId: string; itemId: string; expectedVersion: number; status: "active" | "cancelled"; activity: ItemActivityIntent }
   | { type: "notification.read"; householdId: string; notificationId: string }
   | { type: "notification.dismiss"; householdId: string; notificationId: string }
   | { type: "notification.read-all"; householdId: string; notificationIds: string[] };
@@ -237,6 +259,27 @@ export const householdCreateSchema = householdWorkspaceSchema
       ?? cloneSections().map((section) => ({ ...section, id: crypto.randomUUID() })),
   }));
 
+/**
+ * An item as a client sends it (ADR-0034, #1325): what the member typed and
+ * chose, beside the kind on the command. The schedule kind, subtype and
+ * status follow from the kind and the stored item (item-kind.ts), so a client
+ * never sends them; parseWorkspaceCommand refuses them. A repeat may be 0
+ * ("once"); the engine keeps it only where a schedule comes round.
+ */
+export const itemIntentSchema = workspaceItemShape
+  .omit({ scheduleKind: true, subtype: true, status: true, recurrenceMonths: true })
+  .extend({
+    recurrenceMonths: z.number().int().min(0).max(120).optional(),
+    scheduleKind: z.never().optional(),
+    subtype: z.never().optional(),
+    status: z.never().optional(),
+  });
+
+/** An item command's activity as a client sends it: the identity, the
+ * moment and the details, never the kind, which the engine names from what
+ * the command did (ADR-0034, #1325). */
+const activityIntentSchema = itemActivitySchema.extend({ kind: z.never().optional() });
+
 /** Runtime contract shared by the browser synchronizer and authenticated command API. */
 export const workspaceCommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("household.create"), household: householdCreateSchema }),
@@ -264,15 +307,16 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("item.upsert"),
     householdId: z.string().min(1).max(100),
-    item: workspaceItemSchema,
-    activity: itemActivitySchema.optional(),
+    kind: z.enum(itemKinds).optional(),
+    item: itemIntentSchema,
+    activity: activityIntentSchema.optional(),
   }),
   z.object({
     type: z.literal("item.archive"),
     householdId: z.string().min(1).max(100),
     itemId: z.string().min(1).max(100),
     expectedVersion: z.number().int().positive(),
-    activity: itemActivitySchema,
+    activity: activityIntentSchema,
   }),
   z.object({
     type: z.literal("item.complete"),
@@ -280,10 +324,12 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     itemId: z.string().min(1).max(100),
     expectedVersion: z.number().int().positive(),
     completedDate: calendarDate,
-    nextDate: calendarDate.optional(),
+    /* ADR-0034, #1324: the engine works the next date out from the item's
+       period; parseWorkspaceCommand refuses one sent by a client. */
+    nextDate: z.never().optional(),
     costMinor: z.number().int().min(0).max(100_000_000).optional(),
     notes: optionalText(1_000),
-    activity: itemActivitySchema,
+    activity: activityIntentSchema.extend({ nextDate: z.never().optional() }),
   }),
   z.object({
     type: z.literal("item.reschedule"),
@@ -291,7 +337,7 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     itemId: z.string().min(1).max(100),
     expectedVersion: z.number().int().positive(),
     dueDate: calendarDate,
-    activity: itemActivitySchema,
+    activity: activityIntentSchema,
   }),
   z.object({
     type: z.literal("item.snooze"),
@@ -299,7 +345,7 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     itemId: z.string().min(1).max(100),
     expectedVersion: z.number().int().positive(),
     snoozedUntil: calendarDate,
-    activity: itemActivitySchema,
+    activity: activityIntentSchema,
   }),
   z.object({
     type: z.literal("item.status"),
@@ -307,7 +353,7 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     itemId: z.string().min(1).max(100),
     expectedVersion: z.number().int().positive(),
     status: z.enum(["active", "cancelled"]),
-    activity: itemActivitySchema,
+    activity: activityIntentSchema,
   }),
   z.object({
     type: z.literal("notification.read"),
@@ -325,6 +371,84 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     notificationIds: z.array(z.string().min(1).max(180)).max(2_000),
   }),
 ]);
+
+/**
+ * Reads a command a client sent. A command carries intent, never derived
+ * state (ADR-0034): a completion carries what happened -- the day, the cost,
+ * the notes -- and never the next due date, which the engine works out from
+ * the item's period (#1324); an item carries what the member typed and the
+ * kind they chose, never its schedule kind, subtype or status (#1325).
+ * Derived state sent anyway is refused rather than quietly dropped, so a
+ * client that still computes it finds out.
+ *
+ * The member-facing rules run first, so a member reads why in their own words
+ * (refusals.ts) rather than a schema message. A cost may come as typed
+ * (`cost: "£1,250"`), which the engine reads into `costMinor`.
+ */
+export function parseWorkspaceCommand(input: unknown): WorkspaceCommand {
+  if (isRecord(input) && typeof input.type === "string" && input.type.startsWith("item.")
+    && isRecord(input.activity) && input.activity.kind !== undefined) {
+    throw new AppError(
+      "invalid_command",
+      `An ${input.type} command does not send its activity's kind; Orbit records what the command did`,
+      400,
+    );
+  }
+  if (isRecord(input) && input.type === "item.complete") {
+    const activity = isRecord(input.activity) ? input.activity : {};
+    if (input.nextDate !== undefined || activity.nextDate !== undefined) {
+      throw new AppError(
+        "invalid_command",
+        "A completion does not send the next due date; Orbit works it out from the item's period",
+        400,
+      );
+    }
+    const refused = completionRefusal(input);
+    if (refused) throw new Refusal(refused);
+    return workspaceCommandSchema.parse(withTypedCost(input, (costMinor) => ({
+      activity: isRecord(input.activity) && input.activity.costMinor === undefined
+        ? { ...input.activity, costMinor }
+        : input.activity,
+    })));
+  }
+  if (isRecord(input) && input.type === "item.upsert" && isRecord(input.item)) {
+    const derived = (["scheduleKind", "subtype", "status"] as const).filter((key) => (input.item as Record<string, unknown>)[key] !== undefined);
+    if (derived.length) {
+      throw new AppError(
+        "invalid_command",
+        `An item does not send its ${derived.join(", ")}; Orbit works them out from the kind`,
+        400,
+      );
+    }
+    const kind = itemKinds.find((one) => one === input.kind);
+    const refused = itemRefusal(input.item, kind);
+    if (refused) throw new Refusal(refused);
+    return workspaceCommandSchema.parse({ ...input, item: withTypedCost(input.item) });
+  }
+  return workspaceCommandSchema.parse(input);
+}
+
+/**
+ * The command or item with its typed `cost` read into `costMinor`; a client
+ * sends one or the other. `alongside` adds what else follows from the cost.
+ */
+function withTypedCost(
+  record: Record<string, unknown>,
+  alongside: (costMinor: number) => Record<string, unknown> = () => ({}),
+): Record<string, unknown> {
+  if (record.cost === undefined) return record;
+  if (record.costMinor !== undefined) {
+    throw new AppError("invalid_command", "Send the cost as typed or in minor units, not both", 400);
+  }
+  const { cost, ...rest } = record;
+  if (typeof cost !== "string") throw new AppError("invalid_command", "A typed cost is text", 400);
+  const costMinor = costMinorOf(cost);
+  return costMinor === undefined ? rest : { ...rest, costMinor, ...alongside(costMinor) };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 export function cloneSections(): HouseholdSection[] {
   return defaultSections.map((section) => ({ ...section }));
@@ -369,6 +493,29 @@ export function createEmptyWorkspace(sections = cloneSections()): WorkspaceState
       activities: [],
     }],
   });
+}
+
+/** The completion's activity as the engine records it: its kind is the
+ * schedule's (a renewal renewed, anything else serviced, #1325), and the
+ * next date is the one the engine worked out, never the client's (#1324). */
+export function completionActivity(
+  activity: ItemActivityIntent,
+  scheduleKind: ScheduleKind | undefined,
+  nextDate: string | undefined,
+): ItemActivity {
+  const { nextDate: _sent, ...rest } = activity as ItemActivity;
+  const kind = scheduleKind === "renewal" ? "renewal_completed" : "service_completed";
+  return nextDate ? { ...rest, kind, nextDate } : { ...rest, kind };
+}
+
+/** A status change's activity as the engine records it: restored or cancelled (#1325). */
+export function statusActivity(activity: ItemActivityIntent, status: "active" | "cancelled"): ItemActivity {
+  return { ...activity, kind: status === "active" ? "restored" : "cancelled" };
+}
+
+/** The activity of an item command whose kind follows from the command alone (#1325). */
+export function namedActivity(activity: ItemActivityIntent, kind: "created" | "updated" | "archived" | "rescheduled" | "snoozed"): ItemActivity {
+  return { ...activity, kind };
 }
 
 function appendActivity(household: HouseholdWorkspace, activity: ItemActivity | undefined): ItemActivity[] {
@@ -442,13 +589,14 @@ export function reduceWorkspace(state: WorkspaceState, command: WorkspaceCommand
       }));
     }
     case "item.upsert": {
-      const item = workspaceItemSchema.parse(command.item);
       return updateHousehold(state, command.householdId, (household) => {
-        const currentIndex = household.items.findIndex((entry) => entry.id === item.id);
+        const currentIndex = household.items.findIndex((entry) => entry.id === command.item.id);
+        const item = workspaceItemSchema.parse(itemOfIntent(command.item, command.kind, household.items[currentIndex] ?? command.basis));
+        const activity = command.activity && namedActivity(command.activity, currentIndex < 0 ? "created" : "updated");
         const items = currentIndex < 0
           ? [item, ...household.items]
           : household.items.map((entry, index) => index === currentIndex ? item : entry);
-        return { ...household, items, activities: appendActivity(household, command.activity) };
+        return { ...household, items, activities: appendActivity(household, activity) };
       });
     }
     case "item.archive": {
@@ -457,27 +605,31 @@ export function reduceWorkspace(state: WorkspaceState, command: WorkspaceCommand
         items: household.items.map((item) => item.id === command.itemId
           ? updateItem(item, { status: "archived" }, command.activity.occurredAt)
           : item),
-        activities: appendActivity(household, command.activity),
+        activities: appendActivity(household, namedActivity(command.activity, "archived")),
       }));
     }
     case "item.complete": {
-      return updateHousehold(state, command.householdId, (household) => ({
-        ...household,
-        items: household.items.map((item) => {
-          if (item.id !== command.itemId) return item;
-          const hasNextSchedule = Boolean(command.nextDate);
-          return updateItem(item, {
-            status: "active",
-            costMinor: command.costMinor ?? item.costMinor,
-            dueDate: command.nextDate,
-            scheduleKind: hasNextSchedule ? item.scheduleKind : undefined,
-            recurrenceMonths: hasNextSchedule ? item.recurrenceMonths : undefined,
-            reminderDays: hasNextSchedule ? item.reminderDays : undefined,
-            snoozedUntil: undefined,
-          }, command.activity.occurredAt);
-        }),
-        activities: appendActivity(household, command.activity),
-      }));
+      return updateHousehold(state, command.householdId, (household) => {
+        const completed = household.items.find((item) => item.id === command.itemId);
+        const nextDate = completed ? nextDueDate(completed, command.completedDate) : undefined;
+        return {
+          ...household,
+          items: household.items.map((item) => {
+            if (item.id !== command.itemId) return item;
+            const hasNextSchedule = Boolean(nextDate);
+            return updateItem(item, {
+              status: "active",
+              costMinor: command.costMinor ?? item.costMinor,
+              dueDate: nextDate,
+              scheduleKind: hasNextSchedule ? item.scheduleKind : undefined,
+              recurrenceMonths: hasNextSchedule ? item.recurrenceMonths : undefined,
+              reminderDays: hasNextSchedule ? item.reminderDays : undefined,
+              snoozedUntil: undefined,
+            }, command.activity.occurredAt);
+          }),
+          activities: appendActivity(household, completionActivity(command.activity, completed?.scheduleKind, nextDate)),
+        };
+      });
     }
     case "item.reschedule": {
       return updateHousehold(state, command.householdId, (household) => ({
@@ -490,7 +642,7 @@ export function reduceWorkspace(state: WorkspaceState, command: WorkspaceCommand
               snoozedUntil: undefined,
             }, command.activity.occurredAt)
           : item),
-        activities: appendActivity(household, command.activity),
+        activities: appendActivity(household, namedActivity(command.activity, "rescheduled")),
       }));
     }
     case "item.snooze": {
@@ -499,7 +651,7 @@ export function reduceWorkspace(state: WorkspaceState, command: WorkspaceCommand
         items: household.items.map((item) => item.id === command.itemId
           ? updateItem(item, { snoozedUntil: command.snoozedUntil }, command.activity.occurredAt)
           : item),
-        activities: appendActivity(household, command.activity),
+        activities: appendActivity(household, namedActivity(command.activity, "snoozed")),
       }));
     }
     case "item.status": {
@@ -508,7 +660,7 @@ export function reduceWorkspace(state: WorkspaceState, command: WorkspaceCommand
         items: household.items.map((item) => item.id === command.itemId
           ? updateItem(item, { status: command.status }, command.activity.occurredAt)
           : item),
-        activities: appendActivity(household, command.activity),
+        activities: appendActivity(household, statusActivity(command.activity, command.status)),
       }));
     }
     case "notification.read": {

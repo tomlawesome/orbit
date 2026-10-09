@@ -4,12 +4,12 @@
   import { goto, onNavigate } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { WorkspaceError, applyCommand, attachItemDocument, readItemDocuments, removeDocument, restoreDocument } from "$lib/data/workspace.js";
+  import { WorkspaceError, applyCommand, attachItemDocument, dueDateIn, readItemDocuments, removeDocument, restoreDocument } from "$lib/data/workspace.js";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import { sectionColourOf } from "$lib/option-colour.js";
   import { DrawerModes, pressKeepsChooser } from "./drawer-modes.svelte.js";
-  import { archiveCommand, completeCommand, nextDateAfter, snoozeCommand, upsertCommand } from "$lib/data/commands.js";
+  import { archiveCommand, completeCommand, snoozeCommand, upsertCommand } from "$lib/data/commands.js";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf } from "$lib/data/chart.js";
   import { money } from "$lib/format.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
@@ -358,10 +358,7 @@
     problem = null;
     const completedDate = view.today;
     try {
-      await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId: view.primary }), {
-        completedDate,
-        nextDate: nextDateAfter(completedDate, raw.recurrenceMonths) ?? undefined,
-      }));
+      await applyCommand(completeCommand(/** @type {any} */ ({ ...raw, householdId: view.primary }), { completedDate }));
       sheetOpen = false;
       wake(`${target.title} completed`);
       await onchanged?.();
@@ -687,7 +684,8 @@
     const snooze = modes.pick(value);
     if (!snooze || !view) return;
     const { item, until } = snooze;
-    if (until <= view.today) { rowProblem[item.id] = "not yet — snooze to a day after today"; return; }
+    /* Whether the day will do is the engine's (#1325): its refusal lands
+       in rowProblem, in its words. */
     runRowAct(item, "snooze", (one) => snoozeCommand(one, until), `${item.title} snoozed until ${short(until)}`);
   }
   /** @param {{ id: string, title: string }} one */
@@ -698,8 +696,8 @@
       focusInRow(one.id, ".ivedit");
     }
   }
-  /* Complete records what the rows hold, as the belt's complete panel sent
-     it: the date, the next date the belt computes, the cost and the notes. */
+  /* Complete records what the rows hold: the date, the cost and the notes.
+     The next due date is the engine's (#1324), read back from its reply. */
   /** @param {{ id: string, title: string }} one */
   async function recordRow(one) {
     const out = modes.completion();
@@ -709,9 +707,9 @@
     footBusy = { id: one.id, kind: "complete" };
     modes.completeProblem = null;
     try {
-      await applyCommand(completeCommand(item, fields));
+      const nextDate = dueDateIn(await applyCommand(completeCommand(item, fields)), item.householdId, item.id);
       modes.cancelComplete();
-      wake(`Completed${fields.nextDate ? ` · next due ${short(fields.nextDate)}` : ""} · ${one.title}`);
+      wake(`Completed${nextDate ? ` · next due ${short(nextDate)}` : ""} · ${one.title}`);
       await onchanged?.();
     } catch (error) {
       modes.completeProblem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again";
@@ -750,7 +748,7 @@
   /** @param {{ id: string, title: string }} one @returns {import('./drawer-acts.js').DrawerActs} */
   const drawerActsOf = (one) => ({
     busy: footBusy?.id === one.id ? footBusy.kind : modes.edit.busy && modes.edit.id === one.id ? "save" : null,
-    problem: modes.id === one.id ? modes.edit.problem ?? modes.completeProblem : null,
+    problem: modes.id === one.id ? modes.edit.problem ?? modes.edit.refusal ?? modes.completeProblem : null,
     modes,
     sections,
     onsnooze: (from) => {

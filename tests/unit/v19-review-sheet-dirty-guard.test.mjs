@@ -24,7 +24,7 @@ const REVIEW_SHEET = readFileSync(
 
 describe("#1151 W1-S2: ReviewSheet passes confirmDiscard through to the sheet", () => {
   it("imports entryChanged alongside the rest of entry.js's helpers", () => {
-    expect(REVIEW_SHEET).toMatch(/import \{ entryChanged, entryOfProposal, refusalOf, reviewItemOf \} from/u);
+    expect(REVIEW_SHEET).toMatch(/import \{ createCommandOf, entryChanged, entryOfProposal, reviewItemOf \} from/u);
   });
 
   it("snapshots a start value the same moment entry is rebuilt", () => {

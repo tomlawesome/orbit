@@ -123,11 +123,12 @@ test("add → swap → save → manifest shows it", async ({ page }) => {
       data: {
         type: "item.upsert",
         householdId: household.id,
+        kind: "service",
         item: {
           id: itemId, sectionId: rowId, title: "Allotment shed lock", currency: "GBP",
-          scheduleKind: "service", dueDate, recurrenceMonths: 12, status: "active",
+          dueDate, recurrenceMonths: 12,
         },
-        activity: { id: randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+        activity: { id: randomUUID(), itemId, occurredAt: new Date().toISOString() },
       },
     });
     expect(itemCreated.ok()).toBe(true);

@@ -1,8 +1,9 @@
 <script>
-  import { untrack } from "svelte";
+  import { onDestroy, untrack } from "svelte";
+  import { dryRunner } from "$lib/data/dry-run.js";
   import Sheet from "./Sheet.svelte";
   import EntryForm from "../../routes/create/EntryForm.svelte";
-  import { entryChanged, entryOfProposal, refusalOf, reviewItemOf } from "../../routes/create/entry.js";
+  import { createCommandOf, entryChanged, entryOfProposal, reviewItemOf } from "../../routes/create/entry.js";
   const uid = $props.id();
 
   /**
@@ -48,13 +49,31 @@
     });
   });
   const household = $derived(households.find((one) => one.id === entry?.householdId) ?? null);
-  const refusal = $derived(entry ? refusalOf(entry) : null);
   const dirty = () => Boolean(entry && start && entryChanged(entry, start));
 
+  /* The engine's last word on the amended entry (ADR-0034, #1325), asked as
+     the new item it would become: the same "not yet" rules the approval
+     meets. "" until the first answer; null when it can be added. */
+  /** @type {string | null} */
+  let refusal = $state("");
+  const standIn = crypto.randomUUID();
+  const commandNow = () => entry && household
+    ? createCommandOf($state.snapshot(entry), { householdId: household.id, currency: household.currency ?? "GBP", id: standIn })
+    : null;
+  const dryRun = dryRunner({ onanswer: (answer) => { refusal = answer; } });
+  let asked = false;
+  $effect(() => {
+    if (!open || !entry) { asked = false; refusal = ""; dryRun.stop(); return; }
+    JSON.stringify(entry); // every field is the question
+    if (asked) dryRun.ask(commandNow);
+    else { asked = true; dryRun.now(commandNow); }
+  });
+  onDestroy(() => dryRun.stop());
+
   async function save() {
-    if (!entry || refusal || busy) return;
+    if (!entry || refusal !== null || busy) return;
     const currency = proposal?.currency ?? household?.currency ?? "GBP";
-    if (await onsave(reviewItemOf(entry, currency), entry.sectionId)) open = false;
+    if (await onsave(reviewItemOf(entry, currency, proposal ?? {}), entry.sectionId)) open = false;
   }
 </script>
 
@@ -68,7 +87,7 @@
     {:else if refusal}<p class="rv-refusal" id="{uid}-refusal">{refusal}</p>{/if}
   {/if}
   {#snippet foot()}
-    <button type="submit" form="{uid}-form" class="p-pill filled rv-go" disabled={busy || Boolean(refusal)}
+    <button type="submit" form="{uid}-form" class="p-pill filled rv-go" disabled={busy || refusal !== null}
             aria-describedby={refusal ? `${uid}-refusal` : undefined}>
       {busy ? "adding…" : "add to orbit"}
     </button>

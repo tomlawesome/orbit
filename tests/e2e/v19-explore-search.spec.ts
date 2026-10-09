@@ -83,11 +83,12 @@ async function seedHouseholdWithTwoItems(page: Page): Promise<{
     await command({
       type: "item.upsert",
       householdId,
+      kind: "service",
       item: {
-        id: matchId, sectionId, title: matchTitle, currency: "GBP", scheduleKind: "service",
-        provider: "Kwik-Fit", dueDate: matchDue, recurrenceMonths: 12, status: "active",
+        id: matchId, sectionId, title: matchTitle, currency: "GBP",
+        provider: "Kwik-Fit", dueDate: matchDue, recurrenceMonths: 12,
       },
-      activity: { id: crypto.randomUUID(), itemId: matchId, kind: "created", occurredAt: new Date().toISOString() },
+      activity: { id: crypto.randomUUID(), itemId: matchId, occurredAt: new Date().toISOString() },
     });
     const otherId = crypto.randomUUID();
     const otherTitle = "Boiler service proving";
@@ -95,11 +96,12 @@ async function seedHouseholdWithTwoItems(page: Page): Promise<{
     await command({
       type: "item.upsert",
       householdId,
+      kind: "service",
       item: {
-        id: otherId, sectionId, title: otherTitle, currency: "GBP", scheduleKind: "service",
-        dueDate: otherDue, recurrenceMonths: 12, status: "active",
+        id: otherId, sectionId, title: otherTitle, currency: "GBP",
+        dueDate: otherDue, recurrenceMonths: 12,
       },
-      activity: { id: crypto.randomUUID(), itemId: otherId, kind: "created", occurredAt: new Date().toISOString() },
+      activity: { id: crypto.randomUUID(), itemId: otherId, occurredAt: new Date().toISOString() },
     });
     return { householdId, matchId, matchTitle, otherId, otherTitle };
   }, name);
@@ -144,11 +146,12 @@ async function seedHouseholdWithSoonItem(page: Page): Promise<{ householdId: str
     await command({
       type: "item.upsert",
       householdId,
+      kind: "service",
       item: {
-        id: itemId, sectionId, title, currency: "GBP", scheduleKind: "service",
-        dueDate, recurrenceMonths: 12, status: "active",
+        id: itemId, sectionId, title, currency: "GBP",
+        dueDate, recurrenceMonths: 12,
       },
-      activity: { id: crypto.randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+      activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
     });
     return { householdId, itemId, title };
   }, name);

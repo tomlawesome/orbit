@@ -157,17 +157,16 @@ async function seedHousehold(page: Page, options: { withItem?: boolean; secondSe
       data: {
         type: "item.upsert",
         householdId,
+        kind: "service",
         item: {
           id: itemId,
           sectionId,
           title: "Keyboard-reached boiler service",
           currency: "GBP",
-          scheduleKind: "service",
           dueDate,
           recurrenceMonths: 12,
-          status: "active",
         },
-        activity: { id: randomUUID(), itemId, kind: "created", occurredAt: new Date().toISOString() },
+        activity: { id: randomUUID(), itemId, occurredAt: new Date().toISOString() },
       },
     });
     if (!itemCreated.ok()) {
@@ -272,6 +271,10 @@ async function fillPocketCreateForm(page: Page, name: string) {
 
   await tabTo(page, { selector: `${POCKET_FORM} textarea[id$="-notes"]` }, { screen });
   await page.keyboard.type("added by the keyboard-only pass");
+  /* The engine's dry run (ADR-0034, #1325) answers ~300 ms after the last
+     keystroke and the save is held until it does; wait for the filled form
+     to be accepted so the screen is read settled. */
+  await expect(page.locator(".pk-save")).toBeEnabled();
 }
 
 /* ────────────────────────────────────────────────────────────────────────

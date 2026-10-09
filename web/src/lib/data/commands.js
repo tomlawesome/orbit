@@ -37,6 +37,15 @@
  * @property {string} [updatedAt]
  */
 
+/**
+ * What an edit sends for an item (ADR-0034, #1325): any of its typed fields,
+ * the cost as typed (`cost`, which the engine reads into `costMinor`), and
+ * the kind the member chose. Never the schedule kind, subtype or status.
+ * @typedef {Partial<Omit<CommandItem, "scheduleKind" | "subtype" | "status">> & {
+ *   kind?: string, cost?: string,
+ * }} ItemEdits
+ */
+
 /** @typedef {{ uuid: () => string, now: () => string }} IdSource */
 
 /** @type {IdSource} */
@@ -46,34 +55,18 @@ const DEFAULT_IDS = {
 };
 
 /**
- * The item's next orbit: the completion date plus its period in calendar
- * months, clamped to the end of a shorter month rather than overflowing into
- * the one after (31 Jan + 1 month is 28 Feb, not 3 Mar).
- * @param {string} completedDate
- * @param {?number} [recurrenceMonths]
- * @returns {?string}
- */
-export function nextDateAfter(completedDate, recurrenceMonths) {
-  if (!recurrenceMonths) return null;
-  const [year, month, day] = completedDate.split("-").map(Number);
-  const target = new Date(Date.UTC(year, month - 1 + recurrenceMonths, 1));
-  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
-  target.setUTCDate(Math.min(day, lastDay));
-  return target.toISOString().slice(0, 10);
-}
-
-/**
+ * The activity a command records: its identity, the moment and the details.
+ * Never its kind, which the engine names from what the command did (ADR-0034,
+ * #1325) and refuses if sent.
  * @param {CommandItem} item
- * @param {string} kind
  * @param {Partial<import('./workspace.js').ItemActivity>} details
  * @param {IdSource} ids
- * @returns {import('./workspace.js').ItemActivity}
+ * @returns {Omit<import('./workspace.js').ItemActivity, "kind">}
  */
-function activityOf(item, kind, details, ids) {
+function activityOf(item, details, ids) {
   return {
     id: ids.uuid(),
     itemId: item.id,
-    kind,
     occurredAt: ids.now(),
     ...details,
   };
@@ -92,23 +85,25 @@ function base(item) {
 }
 
 /**
+ * What happened: the day it was done, the cost (in minor units, or as typed
+ * for the engine to read), the notes. Never the next due date -- the engine
+ * works that out from the item's period and refuses one sent (ADR-0034,
+ * #1324); read it back with dueDateIn.
  * @param {CommandItem} item
- * @param {{ completedDate: string | undefined, nextDate?: string, costMinor?: number, notes?: string }} fields
+ * @param {{ completedDate: string | undefined, costMinor?: number, cost?: string, notes?: string }} fields
  * @param {IdSource} [ids]
  */
-export function completeCommand(item, { completedDate, nextDate, costMinor, notes }, ids = DEFAULT_IDS) {
-  const kind = item.scheduleKind === "renewal" ? "renewal_completed" : "service_completed";
+export function completeCommand(item, { completedDate, costMinor, cost, notes }, ids = DEFAULT_IDS) {
   return {
     type: "item.complete",
     ...base(item),
     completedDate,
-    ...(nextDate ? { nextDate } : {}),
     ...(costMinor !== undefined && costMinor !== null ? { costMinor } : {}),
+    ...(cost ? { cost } : {}),
     ...(notes ? { notes } : {}),
-    activity: activityOf(item, kind, {
+    activity: activityOf(item, {
       effectiveDate: completedDate,
       ...(item.dueDate ? { previousDate: item.dueDate } : {}),
-      ...(nextDate ? { nextDate } : {}),
       ...(costMinor !== undefined && costMinor !== null ? { costMinor } : {}),
       ...(notes ? { notes } : {}),
     }, ids),
@@ -125,7 +120,7 @@ export function rescheduleCommand(item, dueDate, ids = DEFAULT_IDS) {
     type: "item.reschedule",
     ...base(item),
     dueDate,
-    activity: activityOf(item, "rescheduled", {
+    activity: activityOf(item, {
       ...(item.dueDate ? { previousDate: item.dueDate } : {}),
       nextDate: dueDate,
     }, ids),
@@ -142,7 +137,7 @@ export function snoozeCommand(item, snoozedUntil, ids = DEFAULT_IDS) {
     type: "item.snooze",
     ...base(item),
     snoozedUntil,
-    activity: activityOf(item, "snoozed", { effectiveDate: snoozedUntil }, ids),
+    activity: activityOf(item, { effectiveDate: snoozedUntil }, ids),
   };
 }
 
@@ -154,11 +149,13 @@ export function archiveCommand(item, ids = DEFAULT_IDS) {
   return {
     type: "item.archive",
     ...base(item),
-    activity: activityOf(item, "archived", {}, ids),
+    activity: activityOf(item, {}, ids),
   };
 }
 
 /**
+ * A status change: the status asked for; the engine records whether that
+ * restored or cancelled the item (#1325).
  * @param {CommandItem} item
  * @param {string} status
  * @param {IdSource} [ids]
@@ -168,18 +165,20 @@ export function statusCommand(item, status, ids = DEFAULT_IDS) {
     type: "item.status",
     ...base(item),
     status,
-    activity: activityOf(item, status === "active" ? "restored" : "cancelled", {}, ids),
+    activity: activityOf(item, {}, ids),
   };
 }
 
 /**
- * The workspaceItemSchema fields — the view-model's joins must never travel.
+ * The fields an item's upsert carries — the view-model's joins must never
+ * travel, and neither may what the engine decides from the kind: the
+ * schedule kind, the subtype and the status (ADR-0034, #1325).
  * @type {(keyof CommandItem)[]}
  */
 const ITEM_FIELDS = [
-  "id", "sectionId", "title", "subtype", "provider", "reference", "costMinor",
-  "currency", "dueDate", "scheduleKind", "recurrenceMonths", "reminderDays",
-  "snoozedUntil", "notes", "status", "version", "updatedAt",
+  "id", "sectionId", "title", "provider", "reference", "costMinor",
+  "currency", "dueDate", "recurrenceMonths", "reminderDays",
+  "snoozedUntil", "notes", "version", "updatedAt",
 ];
 
 /**
@@ -197,20 +196,29 @@ function copyItemField(clean, merged, field) {
 }
 
 /**
+ * An item's edits as `item.upsert`: the item's own fields with the edits
+ * over them, the kind chosen beside them. A cost typed in the edits replaces
+ * the stored amount (empty clears it), for the engine to read.
  * @param {CommandItem} item
- * @param {Partial<CommandItem>} edits
+ * @param {ItemEdits} edits
  * @param {IdSource} [ids]
  */
 export function upsertCommand(item, edits, ids = DEFAULT_IDS) {
-  const merged = { ...item, ...edits };
-  const clean = /** @type {CommandItem} */ ({});
+  const { kind, cost, ...fields } = edits;
+  const merged = /** @type {CommandItem} */ ({ ...item, ...fields });
+  const clean = /** @type {Record<string, unknown>} */ ({});
   for (const field of ITEM_FIELDS) {
-    copyItemField(clean, merged, field);
+    copyItemField(/** @type {CommandItem} */ (clean), merged, field);
+  }
+  if ("cost" in edits) {
+    delete clean.costMinor;
+    if (cost !== undefined) clean.cost = cost;
   }
   return {
     type: "item.upsert",
     householdId: item.householdId,
+    ...(kind ? { kind } : {}),
     item: clean,
-    activity: activityOf(item, "updated", {}, ids),
+    activity: activityOf(item, {}, ids),
   };
 }

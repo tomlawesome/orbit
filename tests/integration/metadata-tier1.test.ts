@@ -66,7 +66,6 @@ async function writeItem(input: {
       sectionId: input.sectionId,
       title: input.title,
       currency: "GBP",
-      status: "active",
       reference: input.reference,
       notes: input.notes,
       version: existing?.version,
