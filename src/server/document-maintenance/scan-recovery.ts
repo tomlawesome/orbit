@@ -13,7 +13,7 @@
  * retryable outage reschedules the job, and every other outcome ends the
  * recovery terminally with the stage purged.
  */
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documents, reviewedIntakeOperations } from "@/db/schema";
 import { log } from "@/lib/logger";
@@ -30,7 +30,9 @@ import {
 } from "@/server/documents/staging";
 import {
   JOB_CLAIM_UPDATE,
-  operationalDocumentReason,
+  completeJob,
+  failJob,
+  holdsJobLease,
   type ClaimedScanJob,
   type ScanRecoveryRecord,
 } from "@/server/document-maintenance/claims";
@@ -122,53 +124,27 @@ async function readOwnedScanRecord(job: ClaimedScanJob): Promise<ScanRecoveryRec
   return { ...record, recoveryExpiresAt };
 }
 
-async function clearScanJob(job: ClaimedScanJob, status: "completed" | "cancelled", lastError: string | null = null): Promise<boolean> {
-  const changed = await getDb().update(documentJobs).set({
-    status,
-    completedAt: new Date(),
-    lockedAt: null,
-    leaseExpiresAt: null,
-    leaseToken: null,
-    lastError,
-    updatedAt: new Date(),
-  }).where(and(
-    eq(documentJobs.id, job.id),
+/** The job, its document, kind and generation, still processing under this lease. */
+function holdsScanJob(job: ClaimedScanJob): SQL {
+  return and(
+    holdsJobLease(job),
     eq(documentJobs.documentId, job.documentId),
     eq(documentJobs.kind, "scan"),
     eq(documentJobs.generation, job.generation),
-    eq(documentJobs.status, "processing"),
-    eq(documentJobs.leaseToken, job.leaseToken),
-  )).returning({ id: documentJobs.id });
-  return changed.length === 1;
+  ) as SQL;
+}
+
+async function clearScanJob(job: ClaimedScanJob, status: "completed" | "cancelled", lastError: string | null = null): Promise<boolean> {
+  return completeJob(getDb(), holdsScanJob(job), { status, lastError });
 }
 
 export async function failScannerRecoveryJob(job: ClaimedScanJob, failureCode: string): Promise<void> {
-  const [current] = await getDb().select({ attempts: documentJobs.attempts })
-    .from(documentJobs)
-    .where(and(eq(documentJobs.id, job.id), eq(documentJobs.status, "processing"), eq(documentJobs.leaseToken, job.leaseToken)))
-    .limit(1);
-  if (!current) return;
-  const exhausted = current.attempts >= SCANNER_RECOVERY_MAX_ATTEMPTS;
-  const nextAttemptAt = new Date(Date.now() + scannerRecoveryDelayMs(current.attempts + 1));
-  await getDb().update(documentJobs).set({
-    status: exhausted ? "failed" : "retry",
-    nextAttemptAt,
-    lockedAt: null,
-    leaseExpiresAt: null,
-    leaseToken: null,
-    lastError: failureCode,
-    updatedAt: new Date(),
-  }).where(and(
-    eq(documentJobs.id, job.id),
-    eq(documentJobs.status, "processing"),
-    eq(documentJobs.leaseToken, job.leaseToken),
-  ));
-  log.warn({
-    event: "document.job",
-    state: exhausted ? "exhausted" : "retrying",
-    reason: operationalDocumentReason(failureCode),
-    action: exhausted ? "inspect_admin_diagnostics" : "retry_job",
-    impact: "document_processing_blocked",
+  await failJob({
+    db: getDb(),
+    owns: holdsJobLease(job),
+    code: failureCode,
+    maxAttempts: SCANNER_RECOVERY_MAX_ATTEMPTS,
+    retryDelayMs: scannerRecoveryDelayMs,
   });
 }
 
@@ -273,8 +249,7 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
       await transaction.insert(documentCrypto).values({ documentId: job.documentId, storageKey: finalStorageKey!, ciphertextSize: encrypted.ciphertext.length, ...encrypted.envelope });
       await transaction.update(documentStagingObjects).set({ status: "purge_pending", purgeFailureCode: null, updatedAt: now })
         .where(and(eq(documentStagingObjects.documentId, job.documentId), eq(documentStagingObjects.storageKey, record.stagingStorageKey), eq(documentStagingObjects.status, "pending")));
-      await transaction.update(documentJobs).set({ status: "completed", completedAt: now, lockedAt: null, leaseExpiresAt: null, leaseToken: null, lastError: null, updatedAt: now })
-        .where(and(eq(documentJobs.id, job.id), eq(documentJobs.status, "processing"), eq(documentJobs.leaseToken, job.leaseToken)));
+      await completeJob(transaction, holdsJobLease(job), { now });
       const pendingOperations = await transaction.select({ id: reviewedIntakeOperations.id, actorUserId: reviewedIntakeOperations.actorUserId, resultId: reviewedIntakeOperations.resultId })
         .from(reviewedIntakeOperations).where(and(eq(reviewedIntakeOperations.documentId, job.documentId), inArray(reviewedIntakeOperations.status, ["pending_attachment", "recoverable"])));
       for (const operation of pendingOperations) {
