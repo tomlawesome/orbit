@@ -85,6 +85,10 @@ async function drag(page, el, dy) {
 /** @param {Page} page @param {string} path */
 async function go(page, path) {
   await page.goto(`${APP}${path}`, { waitUntil: "load" });
+  /* Home's markup arrives before its listeners: a tap in that gap is lost
+     (CI pipeline 2298, "/home · row-open" at 360x640). Wait for the moment
+     home says it can answer (#1064), as the e2e specs do. */
+  if (path.startsWith("/home")) await page.locator("body[data-home-ready]").waitFor({ state: "attached" });
   await settle(page);
 }
 
