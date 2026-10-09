@@ -24,7 +24,7 @@ import { workspaceItemSchema } from "@/lib/workspace";
 import type { AdjudicatedField } from "@/server/documents/adjudication";
 import { safeDocumentPlainText, scheduleKinds, type DocumentProposal } from "@/server/documents/suggestions";
 import { envelopeOf } from "@/server/documents/crypto";
-import { readHeldImapAttachment, purgeHeldImapAttachment } from "@/server/imap-attachment-holding";
+import { flagStagingPurgeFailed, readHeldImapAttachment, purgeHeldImapAttachment } from "@/server/imap-attachment-holding";
 import { isDocumentAvailable, uploadItemDocument } from "@/server/document-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
 import { applyWorkspaceCommand } from "@/server/workspace-repository";
@@ -436,8 +436,7 @@ async function purgeReceiptStaging(receiptId: string): Promise<void> {
         .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, attachment.status)));
     } catch {
       failed = true;
-      await getDb().update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
-        .where(eq(imapIngestionAttachments.id, attachment.id));
+      await flagStagingPurgeFailed(getDb(), eq(imapIngestionAttachments.id, attachment.id));
     }
   }
   if (failed) throw new AppError("staging_purge_failed", "The private staged file could not be purged; retry later", 503);
@@ -481,14 +480,8 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
       } catch {
         pending.push(attachment.id);
         failureCode ??= "staging_purge_failed";
-        // Only re-flag a purge that is still outstanding (#722). A
-        // concurrent caller may have purged the private copy and cleared the
-        // flag while this attempt was in flight, in which case this failure
-        // is of a delete with nothing left to delete: stamping purgePending
-        // and a failure code here would advertise work already done, and
-        // count an attempt against it.
-        await getDb().update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
-          .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, attachment.assignedDocumentId), eq(imapIngestionAttachments.purgePending, true)));
+        // Only a purge still outstanding (#722): see flagStagingPurgeFailed.
+        await flagStagingPurgeFailed(getDb(), and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, attachment.assignedDocumentId), eq(imapIngestionAttachments.purgePending, true)));
       }
       continue;
     }
@@ -615,14 +608,8 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
         attached.push(attachment.id);
         pending.push(attachment.id);
         failureCode ??= "staging_purge_failed";
-        // Only re-flag a purge that is still outstanding (#722). A
-        // concurrent caller may have purged the private copy and cleared the
-        // flag while this attempt was in flight, in which case this failure
-        // is of a delete with nothing left to delete: stamping purgePending
-        // and a failure code here would advertise work already done, and
-        // count an attempt against it.
-        await getDb().update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
-          .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, document.id), eq(imapIngestionAttachments.purgePending, true)));
+        // Only a purge still outstanding (#722): see flagStagingPurgeFailed.
+        await flagStagingPurgeFailed(getDb(), and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.status, "assigned"), eq(imapIngestionAttachments.assignedDocumentId, document.id), eq(imapIngestionAttachments.purgePending, true)));
         continue;
       }
       attached.push(attachment.id);
