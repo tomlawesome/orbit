@@ -13,7 +13,16 @@ import { auditLog, documentCrypto, documentDrafts, documentJobs, documents } fro
 import { log } from "@/lib/logger";
 import { openDocumentStorage, STORAGE_KEY_PATTERN } from "@/server/documents/storage";
 import { processOwnedPurge, type OwnedPurgeState } from "@/server/documents/purge";
-import { JOB_CLAIM_UPDATE, operationalDocumentReason, type ClaimedDocumentJob } from "@/server/document-maintenance/claims";
+import {
+  completeJob,
+  failJob,
+  holdsJobLease,
+  JOB_CLAIM_UPDATE,
+  jobFailureCode,
+  type ClaimedDocumentJob,
+} from "@/server/document-maintenance/claims";
+
+const PURGE_MAX_ATTEMPTS = 5;
 
 interface OwnedPurgeRecord {
   householdId: string;
@@ -153,22 +162,12 @@ export async function processPurgeJob(job: ClaimedDocumentJob): Promise<"complet
 
         await transaction.delete(documentDrafts).where(eq(documentDrafts.documentId, claimedJob.documentId));
 
-        const [completedJob] = await transaction.update(documentJobs).set({
-          status: "completed",
-          completedAt: now,
-          lockedAt: null,
-          leaseExpiresAt: null,
-          leaseToken: null,
-          lastError: null,
-          updatedAt: now,
-        }).where(and(
-          eq(documentJobs.id, claimedJob.id),
+        const completedJob = await completeJob(transaction, and(
+          holdsJobLease(claimedJob),
           eq(documentJobs.documentId, claimedJob.documentId),
           eq(documentJobs.kind, "purge"),
           eq(documentJobs.generation, claimedJob.generation),
-          eq(documentJobs.status, "processing"),
-          eq(documentJobs.leaseToken, claimedJob.leaseToken),
-        )).returning({ id: documentJobs.id });
+        ), { now });
         if (!completedJob) throw new Error("Purge finalization lost job ownership");
 
         await transaction.insert(auditLog).values({
@@ -209,54 +208,15 @@ async function completeStalePurgeClaim(job: ClaimedDocumentJob): Promise<void> {
       for update
     `);
     if (document?.lifecycle === "pending_deletion" && document.generation === job.generation) return;
-    await transaction.update(documentJobs).set({
-      status: "completed",
-      completedAt: new Date(),
-      lockedAt: null,
-      leaseExpiresAt: null,
-      leaseToken: null,
-      lastError: null,
-      updatedAt: new Date(),
-    }).where(and(
-      eq(documentJobs.id, job.id),
-      eq(documentJobs.status, "processing"),
-      eq(documentJobs.generation, job.generation),
-      eq(documentJobs.leaseToken, job.leaseToken),
-    ));
+    await completeJob(transaction, and(holdsJobLease(job), eq(documentJobs.generation, job.generation)));
   });
 }
 
-export async function failJob(job: ClaimedDocumentJob, error: unknown): Promise<void> {
-  const [current] = await getDb().select({ attempts: documentJobs.attempts })
-    .from(documentJobs)
-    .where(and(
-      eq(documentJobs.id, job.id),
-      eq(documentJobs.status, "processing"),
-      eq(documentJobs.leaseToken, job.leaseToken),
-    ))
-    .limit(1);
-  if (!current) return;
-  const safeCode = error instanceof Error && /key|secret/i.test(error.message)
-    ? "key_unavailable"
-    : "purge_failed";
-  const exhausted = current.attempts >= 5;
-  log.warn({
-    event: "document.job",
-    state: exhausted ? "exhausted" : "retrying",
-    reason: operationalDocumentReason(safeCode),
-    action: exhausted ? "inspect_admin_diagnostics" : "retry_job",
-    impact: "document_processing_blocked",
+export async function failPurgeJob(job: ClaimedDocumentJob, error: unknown): Promise<void> {
+  await failJob({
+    db: getDb(),
+    owns: holdsJobLease(job),
+    code: jobFailureCode(error, "purge_failed"),
+    maxAttempts: PURGE_MAX_ATTEMPTS,
   });
-  await getDb().update(documentJobs).set({
-    status: exhausted ? "failed" : "retry",
-    lockedAt: null,
-    leaseExpiresAt: null,
-    leaseToken: null,
-    lastError: safeCode,
-    updatedAt: new Date(),
-  }).where(and(
-    eq(documentJobs.id, job.id),
-    eq(documentJobs.status, "processing"),
-    eq(documentJobs.leaseToken, job.leaseToken),
-  ));
 }
