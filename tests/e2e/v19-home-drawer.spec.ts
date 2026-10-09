@@ -168,6 +168,40 @@ test.describe("the belt's old address", () => {
   });
 });
 
+/* #1319 (decision 2026-10-09): `/home?item=<id>` for an item in another of
+   the reader's households switches home to that household and opens the
+   drawer there, on the desk and on the phone. */
+test.describe("an item in another of the reader's households", () => {
+  test("its address switches home to that household and opens its drawer", async ({ page, isMobile }) => {
+    test.setTimeout(90_000);
+    await signIn(page);
+    const first = await seedHouseholdWithItem(page);
+    /* the second household.create makes the second the one home shows */
+    const second = await seedHouseholdWithItem(page);
+    const activeHousehold = () => page.evaluate(async () => {
+      const response = await fetch("/api/workspace", { credentials: "same-origin", cache: "no-store" });
+      return ((await response.json()) as { workspace: { activeHouseholdId: string | null } }).workspace.activeHouseholdId;
+    });
+    expect(await activeHousehold()).toBe(second.householdId);
+
+    await page.goto(`/home?item=${first.itemId}`);
+    if (isMobile) {
+      await expect(page.locator(`.pocket .pk-below [data-row-key="${first.itemId}"]`))
+        .toHaveAttribute("data-open", "", { timeout: 20_000 });
+      await expect(page.locator(`.pocket .pk-below [data-row-key="${second.itemId}"]`)).toHaveCount(0);
+    } else {
+      const drawer = page.locator(`[id="${first.itemId}-view"]`);
+      await expect(drawer).toBeVisible({ timeout: 20_000 });
+      await expect(drawer.getByText(NOTE)).toBeVisible();
+      /* the manifest is the first household's now: its row, not the second's */
+      await expect(page.locator(`[id="${first.itemId}"]`)).toBeVisible();
+      await expect(page.locator(`[id="${second.itemId}"]`)).toHaveCount(0);
+    }
+    expect(await activeHousehold()).toBe(first.householdId);
+    await expect(page).toHaveURL(new RegExp(`/home\\?item=${first.itemId}$`));
+  });
+});
+
 test.describe("on the desk", () => {
   test.skip(({ isMobile }) => isMobile, "the desk's drawer; the phone's is below");
 

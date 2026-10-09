@@ -15,7 +15,7 @@
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { WorkspaceError, applyCommand, approveReceipt, dueDateIn, attachItemDocument, dismissReceipt, readHome, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut } from "$lib/data/workspace.js";
+  import { WorkspaceError, applyCommand, approveReceipt, dueDateIn, attachItemDocument, dismissReceipt, householdElsewhereFor, readHome, readHomeIn, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut } from "$lib/data/workspace.js";
   import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
   import { createHeldCompletion } from "$lib/data/held-completion.js";
   import { createArm } from "$lib/pocket/arm.js";
@@ -1525,8 +1525,16 @@
        resolves into a closure and mounting follows it, after tick() has put
        the data-driven markup in the document for the behaviour to bind. */
     readHome().then(async (data) => {
+      /* #1319 (2026-10-09): an address naming an item in another of the
+         reader's households switches home to that household first, so the
+         drawer opens there, on the desk and the phone alike. Done here, on
+         arriving, and never in the server's load: a GET that switched the
+         household would let a preloaded link switch it. If the switch is
+         refused, home stays where it was and the address opens nothing. */
+      const away = householdElsewhereFor(data, page.url.searchParams.get("item"));
+      const read = away ? await readHomeIn(away).catch(() => data) : data;
       if (disposed) return;
-      view = data;
+      view = read;
       /* #1151 F8: a later successful read must clear an earlier failure's
          banner — it never did, so the page kept claiming it could not
          reach the home even once it plainly could again. */
