@@ -11,7 +11,7 @@ import { MIN_PASSWORD_LENGTH, passwordLength } from "@/lib/password-length";
 import { currencyCode } from "@/lib/platform-lists";
 import { optionalText } from "@/lib/workspace";
 import { getDocumentConfig } from "@/server/documents/config";
-import { LocalDocumentStorage } from "@/server/documents/storage";
+import { openDocumentStorage } from "@/server/documents/storage";
 import { readDocumentDownload, uploadItemDocument } from "@/server/document-repository";
 import { decryptPortableArchive, encryptPortableArchive, isEncryptedPortableArchive, type EncryptedPortableArchive } from "@/server/portable-archive";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
@@ -460,11 +460,6 @@ export async function previewPortableImport(userId: string, householdId: string,
  */
 const STALE_UNFINISHED_IMPORT_MS = 60 * 60 * 1_000;
 
-function documentStorage(): LocalDocumentStorage {
-  const config = getDocumentConfig();
-  return new LocalDocumentStorage(config.storageRoot, config.quarantineRoot);
-}
-
 /** Why a document restore failed, in words the admin can act on without a stack trace. */
 function documentFailureReason(error: unknown): string {
   if (error instanceof AppError && error.code === "document_malware_detected") return "malware was detected in that file";
@@ -532,7 +527,7 @@ export async function rollBackPortableImport(importId: string): Promise<void> {
 
   // Database access to these documents is already gone; a failed local
   // delete here leaves an orphan blob, never a row pointing at missing bytes.
-  const storage = documentStorage();
+  const storage = openDocumentStorage();
   const results = await Promise.allSettled(outcome.documentStorageKeys.map((storageKey) => storage.deleteCiphertext(storageKey)));
   const failed = results.filter((result) => result.status === "rejected");
   if (failed.length > 0) {

@@ -112,12 +112,9 @@ vi.mock("@/server/documents/config", () => ({
 }));
 
 vi.mock("@/server/documents/storage", () => ({
-  LocalDocumentStorage: class {
-    constructor(_storageRoot: string, _quarantineRoot: string) {}
-    deleteCiphertext(storageKey: string) {
-      return mocks.deleteCiphertext(storageKey);
-    }
-  },
+  openDocumentStorage: () => ({
+    deleteCiphertext: (storageKey: string) => mocks.deleteCiphertext(storageKey),
+  }),
 }));
 
 // The real household gate runs against the fake database (its answer is the
