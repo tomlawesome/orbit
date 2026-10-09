@@ -569,8 +569,11 @@ export async function applyCommand(command, { retryCsrf = true } = {}) {
  * A dry run of a command (ADR-0034 decision 3, #1325): the engine runs the
  * same parse and checks the real call runs and writes nothing. Null when it
  * would be accepted; otherwise the engine's refusal, in the words the member
- * reads (the browser never rewords it). A dry run that cannot be heard (the
- * network, the session) refuses nothing: the real save says what went wrong.
+ * reads (the browser never rewords it). The answer rides a 200 either way —
+ * `{}` or `{ refusal: { code, message } }` (the amendment of 2026-10-09) — so
+ * a browser never logs an expected "not yet" as a failed request. A dry run
+ * that cannot be heard (the network, the session, maintenance) refuses
+ * nothing: the real save says what went wrong.
  *
  * @param {object} command
  * @param {{ retryCsrf?: boolean }} [options]
@@ -589,12 +592,11 @@ export async function checkCommand(command, { retryCsrf = true } = {}) {
       await readSession({ refresh: true });
       return checkCommand(command, { retryCsrf: false });
     }
-    await json(response);
+    /** @type {{ refusal?: { code: string, message: string } }} */
+    const body = await json(response);
+    return body.refusal?.message ?? null;
+  } catch {
     return null;
-  } catch (error) {
-    return error instanceof WorkspaceError && error.status !== undefined && error.status < 500 && error.status !== 401
-      ? error.message
-      : null;
   }
 }
 
