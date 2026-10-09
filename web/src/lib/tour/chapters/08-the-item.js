@@ -99,8 +99,9 @@ export const SELECTORS = Object.freeze({
     acts: `${DESK_DRAWER} .ivacts[aria-label^="Actions for "]`,
     /** The pencil. */
     pencil: `${DESK_DRAWER} .ivedit`,
-    /** The rows, live. */
-    fields: `${DESK_DRAWER} [data-edit-rows]`,
+    /** The rows, live: each value row (the mockup's own `.kv`), since
+     *  EditRows' wrapper is `display: contents` and has no box to ring. */
+    fields: `${DESK_DRAWER} [data-edit-rows] > .kv`,
     /** The due value, live. */
     due: `${DESK_DRAWER} [data-edit-rows] .pick[aria-label^="due:"]`,
     /** Cancel, in the pills' place while editing (save is the accent one). */
@@ -128,7 +129,7 @@ export const SELECTORS = Object.freeze({
     docs: `${POCKET_DRAWER} [data-doc-row]`,
     acts: `${POCKET_DRAWER} .ivacts[aria-label^="Actions for "]`,
     pencil: `${POCKET_DRAWER} .ivedit`,
-    fields: `${POCKET_DRAWER} [data-edit-rows]`,
+    fields: `${POCKET_DRAWER} [data-edit-rows] > .p-kv`,
     due: `${POCKET_DRAWER} [data-edit-rows] .pick[aria-label^="due:"]`,
     cancel: `${POCKET_DRAWER} .ivacts[aria-label^="Editing "] button:not(.act-accent)`,
     preview: "[data-preview-card]",
@@ -347,7 +348,7 @@ export default {
     unlight(drawer);
     drawer = ctl({ sel: S.drawer, all: true, radius: 16, optional: true });
     light(drawer);
-    const fields = ctl({ sel: S.fields, radius: 12, pad: 2, optional: true });
+    const fields = ctl({ sel: S.fields, all: true, radius: 12, pad: 2, optional: true });
     light(fields);
     await mark("item-editing");
     await callout("Need to change something? Edit it right here.", at(fields, drawer, sun), pocket ? "bottom" : "left", {
@@ -362,7 +363,10 @@ export default {
     const closeCalendar = open(due);
     unlight(due);
     await w(T.sheet);
+    /* The calendar alone is lit while it is up: its line stands over the
+       drawer, and a lit drawer under it would be text the line covers. */
     const calendar = ctl({ sel: S.chooser, radius: 16, optional: true });
+    if (calendar.els.length > 0) unlight(drawer);
     light(calendar);
     await callout(
       pocket ? "Tap the date and pick a new one from the calendar." : "Click the date and pick a new one from the calendar.",
@@ -374,6 +378,10 @@ export default {
     unlight(calendar);
     await closeCalendar();
     await w(T.sheet);
+    if (calendar.els.length > 0) {
+      drawer = ctl({ sel: S.drawer, all: true, radius: 16, optional: true });
+      light(drawer);
+    }
 
     /* Cancel: the read view again, nothing written. */
     const cancel = ctl({ sel: S.cancel, radius: 16, pad: 2, optional: true });
