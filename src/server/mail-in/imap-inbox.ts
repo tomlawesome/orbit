@@ -9,7 +9,7 @@ import { purgeHeldImapAttachment } from "./imap-attachment-holding";
 import { requestDocumentDeletion, requireDocumentDeletionAccess } from "@/server/document-repository";
 import { clearedReviewDraftMetadata, sanitizeReviewDraftMetadata } from "@/server/reviewed-intake";
 import { openMetadataReader, openMetadataReaders, openReceiptMetadataReaders, requireReceiptMetadataWriter, type MetadataCipher, type MetadataExecutor, type MetadataFieldState } from "@/server/metadata/fields";
-import { validUuid } from "@/server/workspace-access";
+import { validUuid } from "@/lib/uuid";
 import {
   reviewInboxState,
   failureReasonOf,

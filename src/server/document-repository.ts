@@ -27,7 +27,7 @@ import {
 } from "@/server/documents/validation";
 import { canAccessHouseholdDocuments, canManageDocumentDeletion } from "@/server/documents/authorization";
 import { retryableScannerFailureCode, scannerRecoveryDelayMs } from "@/server/documents/staging";
-import { validUuid } from "@/server/workspace-access";
+import { validUuid } from "@/lib/uuid";
 
 function operationalDocumentReason(value: string): OperationalReason {
   return (operationalReasons as readonly string[]).includes(value)

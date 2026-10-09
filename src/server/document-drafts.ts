@@ -14,7 +14,8 @@ import { detectDocumentMediaType, validateSupportedDocumentStructure } from "@/s
 import { isDocumentContentReady, readDocumentDownload } from "@/server/document-repository";
 import { getDocumentConfig } from "@/server/documents/config";
 import { openMetadataReader, requireMetadataWriter } from "@/server/metadata/fields";
-import { acquireActiveHouseholdLock, validUuid } from "@/server/workspace-access";
+import { validUuid } from "@/lib/uuid";
+import { acquireActiveHouseholdLock } from "@/server/workspace-access";
 
 export { proposalFromText } from "@/server/documents/suggestions";
 

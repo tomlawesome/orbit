@@ -1,22 +1,12 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
-import { z } from "zod";
 import { getDb } from "@/db";
 import { households, memberships, users } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { householdOwnerLockKey } from "@/lib/auth/authority-locks";
+import { requireUuid } from "@/lib/uuid";
 
-const uuidSchema = z.uuid();
 type Database = ReturnType<typeof getDb>;
 type DatabaseTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
-
-export function validUuid(value: string): boolean {
-  return uuidSchema.safeParse(value).success;
-}
-
-export function requireUuid(value: string, field: string): string {
-  if (!validUuid(value)) throw new AppError("invalid_identifier", `${field} is not a valid identifier`, 422);
-  return value;
-}
 
 export function sectionSlug(name: string, id: string): string {
   const normalized = name.toLowerCase().normalize("NFKD").replace(/[^\w\s-]/g, "").trim().replace(/[\s_-]+/g, "-");
