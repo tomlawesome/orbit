@@ -26,6 +26,7 @@
 // every corpus (tuning, hold-out, private) is measured by the same rule;
 // it does not touch that file.
 
+import { percent, percentOfRatio } from "../eval-format";
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -264,8 +265,7 @@ export async function runPrivateEvaluation(
 }
 
 function formatField(label: string, tally: FieldTally): string {
-  const pct = tally.possible === 0 ? "n/a" : `${((tally.earned / tally.possible) * 100).toFixed(1)}%`;
-  return `  ${label}: ${pct} (${tally.earned}/${tally.possible})`;
+  return `  ${label}: ${percent(tally.earned, tally.possible)} (${tally.earned}/${tally.possible})`;
 }
 
 /** Renders only counts and percentages: no document text, matched value,
@@ -276,6 +276,6 @@ export function formatReport(report: PrivateEvalReport): string {
     formatField("dates    ", report.fields.dates),
     formatField("provider ", report.fields.provider),
     formatField("reference", report.fields.reference),
-    `  overall  : ${(report.overall.accuracy * 100).toFixed(1)}% (${report.overall.earned}/${report.overall.possible})`,
+    `  overall  : ${percentOfRatio(report.overall.accuracy)} (${report.overall.earned}/${report.overall.possible})`,
   ].join("\n");
 }

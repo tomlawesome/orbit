@@ -78,6 +78,7 @@
 // floor in `extraction-accuracy.test.ts` is re-recorded against the larger
 // point total rather than the extractor being let off the new fields.
 
+import { percentOfRatio } from "./eval-format";
 import type { CorpusDocument, SubtypeSpec } from "./extraction-corpus";
 import { DESCRIBER_WORDS } from "./extraction-provider-runs";
 import { selectedExtractionModel } from "./model-extraction";
@@ -648,24 +649,23 @@ export async function scoreCorpusRepeated(
   return summariseRuns(scored);
 }
 
-const percent = (value: number): string => `${(value * 100).toFixed(1)}%`;
 
 function formatFieldScores(fields: Record<FieldName, FieldScore>): string {
   return FIELD_NAMES.map(
-    (field) => `${field} ${percent(fields[field].accuracy)} (${fields[field].earned}/${fields[field].possible})`,
+    (field) => `${field} ${percentOfRatio(fields[field].accuracy)} (${fields[field].earned}/${fields[field].possible})`,
   ).join(", ");
 }
 
 export function formatRunScore(label: string, score: RunScore): string {
-  return `${label}: ${percent(score.accuracy)} (${score.earned}/${score.possible})` +
+  return `${label}: ${percentOfRatio(score.accuracy)} (${score.earned}/${score.possible})` +
     ` [${formatFieldScores(score.fields)}]` +
     (score.misses.length ? `\n  misses:\n  - ${score.misses.join("\n  - ")}` : "");
 }
 
 export function formatRepeatedScore(label: string, repeated: RepeatedScore): string {
   const { worst, runs, minimum, mean, maximum } = repeated;
-  return `${label}: minimum of ${runs.length} runs ${percent(minimum)} ` +
-    `(${worst.earned}/${worst.possible}); mean ${percent(mean)}, maximum ${percent(maximum)}` +
+  return `${label}: minimum of ${runs.length} runs ${percentOfRatio(minimum)} ` +
+    `(${worst.earned}/${worst.possible}); mean ${percentOfRatio(mean)}, maximum ${percentOfRatio(maximum)}` +
     ` [${formatFieldScores(worst.fields)}]` +
     (worst.misses.length ? `\n  misses in the worst run:\n  - ${worst.misses.join("\n  - ")}` : "");
 }
@@ -911,7 +911,7 @@ export function formatThreeWayScore(label: string, score: ThreeWayScore): string
   lines.push(
     `${label} (resolution accuracy): ${resolvedTowardHeuristic}/${blindCorrectDisagreements} blind-correct ` +
     "disagreements resolved toward the heuristic anyway" +
-    (rate === undefined ? " (no such disagreements)" : ` (${percent(rate)})`),
+    (rate === undefined ? " (no such disagreements)" : ` (${percentOfRatio(rate)})`),
   );
   return lines.join("\n");
 }

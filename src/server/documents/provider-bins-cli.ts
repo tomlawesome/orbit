@@ -20,6 +20,7 @@
 // Two rulers, because the two disagree: the scorer's `classifyProvider`, and
 // a looser one that counts a short form of the name a hit, which is what a
 // reader marking by hand does.
+import { percent } from "./eval-format";
 import { EXTRACTION_CORPUS } from "./extraction-corpus";
 import { EXTRACTION_HOLDOUT3_FULLPAGE } from "./extraction-holdout3-fullpage";
 import { DESCRIBER_WORDS, providerTaggedOrganisations, providerWordRuns, STOP_WORDS } from "./extraction-provider-runs";
@@ -187,12 +188,11 @@ for (const document of corpus) {
   count(seededStage2, seededRuns(keptNames, { words: TOP_WORDS, dropDescribers: true }).slice(0, 8), wanted, strict);
 }
 
-const percent = (part: number, whole: number): string =>
-  `${part}/${whole} (${whole === 0 ? "n/a" : ((part / whole) * 100).toFixed(1)}%)`;
+const fractionPercent = (part: number, whole: number): string => `${part}/${whole} (${percent(part, whole)})`;
 
 const report = (name: string, tally: Tally): void => {
-  console.log(`${name.padEnd(34)} top-1 ${percent(tally.top1, tally.pages).padEnd(16)} ` +
-    `top-2 ${percent(tally.top2, tally.pages).padEnd(16)} on list ${percent(tally.onList, tally.pages).padEnd(16)} ` +
+  console.log(`${name.padEnd(34)} top-1 ${fractionPercent(tally.top1, tally.pages).padEnd(16)} ` +
+    `top-2 ${fractionPercent(tally.top2, tally.pages).padEnd(16)} on list ${fractionPercent(tally.onList, tally.pages).padEnd(16)} ` +
     `mean entries ${(tally.entries / tally.pages).toFixed(1)}`);
 };
 
@@ -214,7 +214,7 @@ console.log(`\norganisations stage 1 found: ${organisationsFound}; a provider si
 // one row each, a result only in its own column). It is the shipped bins'
 // strict top-1 -- what the rules would answer with, not what a reader
 // marking by eye would accept.
-const scored = percent(gated.top1, gated.pages).replace(/^(\d+)\/(\d+) \((.*)\)$/u, "$3 ($1/$2)");
+const scored = fractionPercent(gated.top1, gated.pages).replace(/^(\d+)\/(\d+) \((.*)\)$/u, "$3 ($1/$2)");
 const prefix = onHoldout3 ? "hold-out 3: " : "";
 console.log(`\n${prefix}provider by top word run: ${scored} [provider ${scored}]`);
 
