@@ -75,9 +75,11 @@ test("review & amend opens create's form pre-filled, and approves the amended va
   await go.click();
   await expect.poll(() => seen.approvals.length).toBe(1);
   expect(seen.approvals[0].sectionId).toBe("s-dates");
+  /* The sheet sends the cost as typed and the item's kind, for the engine
+     to read and map (ADR-0034, #1325). */
   expect(seen.approvals[0].item).toMatchObject({
-    title: "Home insurance renewal", provider: "Harbour Mutual plc", costMinor: 40000, currency: "GBP",
-    dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12, subtype: "renewal", reminderDays: [21, 7],
+    title: "Home insurance renewal", provider: "Harbour Mutual plc", cost: "400.00", currency: "GBP",
+    dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12, kind: "renewal", reminderDays: [21, 7],
   });
   await expect(sheet).toBeHidden();
 });

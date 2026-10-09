@@ -200,7 +200,8 @@ test("review & amend edits the proposal in the rows, and add to orbit approves i
   expect(seen.approvals[0]).toMatchObject({
     action: "create_separate", attachmentIds: ["a-1"],
     source: { kind: "mailbox_draft", receiptId: "r-insurance", draftVersion: 3 },
-    item: { title: "Home insurance, corrected", provider: "Harbour Mutual", reference: "HM-7", costMinor: 19999,
+    /* The rows send the cost as typed, for the engine to read (ADR-0034, #1325). */
+    item: { title: "Home insurance, corrected", provider: "Harbour Mutual", reference: "HM-7", cost: "199.99",
       currency: "GBP", dueDate: "2026-10-03", scheduleKind: "renewal", recurrenceMonths: 12 },
   });
   /* Added: the drawer goes, and the wake says so. */
