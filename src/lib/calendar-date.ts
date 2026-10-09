@@ -29,3 +29,11 @@ export function isCalendarDate(value: unknown): value is string {
 export const CALENDAR_DATE_MESSAGE = "Use a real calendar day, written YYYY-MM-DD";
 
 export const calendarDate = z.string().refine(isCalendarDate, { message: CALENDAR_DATE_MESSAGE });
+
+/**
+ * A stored date as the read path takes it: the shape only. A row the engine
+ * accepted before it checked the day must still read (validate on write,
+ * tolerate on read, #1333); the Postgres `date` column already holds only real
+ * days, so this matters for what a JSON column carries.
+ */
+export const storedCalendarDate = z.string().regex(SHAPE);

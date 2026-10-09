@@ -84,7 +84,12 @@ intent and shows refusals.**
    suggestions) is built from them. A password or passphrase is counted one
    way, NFC code points (`src/lib/password-length.ts`), and its floor is held
    when one is made, never when one is opened. `tests/unit/engine-owns-every-rule.bounds.test.mjs`
-   fails if a second copy of any of these comes back.
+   fails if a second copy of any of these comes back. Validation is on write
+   only: the schemas that read stored rows (`storedHouseholdSchema`,
+   `storedItemSchema`, `storedActivitySchema`) take a time zone, currency or
+   date by shape, so a row the engine once accepted never stops reading. The
+   one stored value known to be a mistake, "America/New York", is repaired by
+   migration 0050.
 
 ## Consequences
 

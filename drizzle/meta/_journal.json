@@ -351,6 +351,13 @@
       "when": 1789257600000,
       "tag": "0049_instance_upload_limit",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1789344000000,
+      "tag": "0050_repair_new_york_time_zone",
+      "breakpoints": true
     }
   ]
 }
