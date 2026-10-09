@@ -366,6 +366,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 
 - 2026-10-06 · 2221237a (#1262, no change near this route) · local `scripts/test-backend.sh`, worktree `flight-door-port`, an e2e image build and other agents' headless browsers on the host (load 9-14) · timed out at the 5s default; green on an immediate rerun of the file alone. First sighting.
 - 2026-10-07 · 2a076315 (+ #1279's uncommitted phone create reading card, none of it near this fixture) · local `scripts/test-backend.sh`, worktree `fix-create-form`, other sessions using the host · timed out at the 5s default; it passed in the run before on the same code, and green on an immediate rerun of the file alone. Second sighting.
+- 2026-10-09 · 3d6d7c20 (#1349) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
 
 ## v19-archive.spec.ts:192 "write an archive, then bring it into a second household — a clash stays out" on desktop-webkit
 
@@ -425,3 +426,13 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## install-orchestrator.test.ts "runInstall: success > installs a pre-provisioned target unattended: assets from the image, secrets, migration, digest (#6, #42, #45, #53)"
 
 - 2026-10-09 · 40850119 (+ #1333's uncommitted validation work, none of it near install) · local `scripts/test-backend.sh`, worktree `1333`, with a PostgreSQL integration run going on the same shared host · failed after 7.3s (the only failure besides one test #1333 itself changed); the assertion text was not captured. Passed when the file was run alone straight after, and in a full `scripts/test-backend.sh` rerun on the same code. First sighting.
+- 2026-10-09 · 73481e5e (#1345) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
+- 2026-10-09 · 3d6d7c20 (#1349) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
+
+## v19-tour-chapter-add.test.mjs
+
+- 2026-10-09 · 73481e5e (#1345) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
+
+## notification-worker-health.test.ts
+
+- 2026-10-09 · 3d6d7c20 (#1349) · local scripts/test-backend.sh under parallel load · 5–7 s timeout; passed alone and on rerun
