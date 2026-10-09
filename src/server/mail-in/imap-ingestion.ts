@@ -5,7 +5,7 @@ import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, imapRecipientAliases, users } from "@/db/schema";
 import { log } from "@/lib/logger";
 import { getNotificationWorkerConfig, verifySmtpProviderConnection, type NotificationWorkerConfig } from "@/server/notification-worker";
-import { purgeHeldImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
+import { flagStagingPurgeFailed, purgeHeldImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
 import { adjudicateProposal } from "@/server/documents/adjudication";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { MODEL_MAILBOX_DEADLINE_MS } from "@/server/documents/model-extraction";
@@ -577,8 +577,7 @@ async function recordStagingPurgeFailure(messageId: string, leaseToken: string, 
     if (!active) return;
     await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeAttempts: sql`${imapIngestionStagingObjects.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
       .where(and(eq(imapIngestionStagingObjects.messageId, messageId), eq(imapIngestionStagingObjects.leaseToken, leaseToken), eq(imapIngestionStagingObjects.storageKey, object.storageKey)));
-    await transaction.update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
-      .where(and(eq(imapIngestionAttachments.messageId, messageId), eq(imapIngestionAttachments.id, object.id), eq(imapIngestionAttachments.storageKey, object.storageKey), eq(imapIngestionAttachments.status, "stored")));
+    await flagStagingPurgeFailed(transaction, and(eq(imapIngestionAttachments.messageId, messageId), eq(imapIngestionAttachments.id, object.id), eq(imapIngestionAttachments.storageKey, object.storageKey), eq(imapIngestionAttachments.status, "stored")));
   });
 }
 
@@ -679,8 +678,7 @@ export async function reconcileImapStagingObjects(limit = 100): Promise<void> {
         await transaction.update(imapIngestionStagingObjects).set({ status: "purge_pending", purgeAttempts: sql`${imapIngestionStagingObjects.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
           .where(and(eq(imapIngestionStagingObjects.id, row.id), eq(imapIngestionStagingObjects.leaseToken, row.leaseToken)));
         if (attachment?.status === "stored") {
-          await transaction.update(imapIngestionAttachments).set({ purgePending: true, purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`, purgeFailureCode: "staging_purge_failed", updatedAt: new Date() })
-            .where(and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.storageKey, row.storageKey), eq(imapIngestionAttachments.status, "stored")));
+          await flagStagingPurgeFailed(transaction, and(eq(imapIngestionAttachments.id, attachment.id), eq(imapIngestionAttachments.storageKey, row.storageKey), eq(imapIngestionAttachments.status, "stored")));
         }
       });
     }

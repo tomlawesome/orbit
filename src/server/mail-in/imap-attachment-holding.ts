@@ -1,4 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
+import { sql, type SQL } from "drizzle-orm";
+import type { getDb } from "@/db";
+import { imapIngestionAttachments } from "@/db/schema";
 import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { decryptDocument, encryptDocument, type CryptoEnvelope } from "@/server/documents/crypto";
@@ -7,6 +10,31 @@ import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
 import { identifyImapAttachmentBytes, normalizeImapAttachmentName } from "./core/imap-attachment-validation";
 import { validateSupportedDocumentStructure, type SupportedDocumentMediaType } from "@/server/documents/validation";
+
+/** A database or a transaction: anything that can run an UPDATE. */
+type DbWriter = Pick<ReturnType<typeof getDb>, "update">;
+
+/**
+ * Records that deleting a held attachment's private copy failed, and counts
+ * the attempt. The caller names the rows in `where` (#1349, engine-18): the
+ * predicates differ per caller on purpose, and each one must say what it
+ * means to be the same outstanding purge.
+ *
+ * Only re-flag a purge that is still outstanding (#722). A concurrent caller
+ * may have purged the private copy and cleared the flag while this attempt
+ * was in flight, in which case this failure is of a delete with nothing left
+ * to delete: stamping purgePending and a failure code here would advertise
+ * work already done, and count an attempt against it. A caller that does not
+ * already hold the row's lock says so in `where`, with `purgePending = true`.
+ */
+export async function flagStagingPurgeFailed(db: DbWriter, where: SQL | undefined, at = new Date()): Promise<void> {
+  await db.update(imapIngestionAttachments).set({
+    purgePending: true,
+    purgeAttempts: sql`${imapIngestionAttachments.purgeAttempts} + 1`,
+    purgeFailureCode: "staging_purge_failed",
+    updatedAt: at,
+  }).where(where);
+}
 
 let purgeImplementationForTests: ((storageKey: string) => Promise<void>) | undefined;
 
