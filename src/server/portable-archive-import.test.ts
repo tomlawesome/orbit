@@ -286,7 +286,7 @@ describe("portable archive import error (#1151 A2-F2)", () => {
 
 describe("portable archive export holds the passphrase floor (#1333)", () => {
   it("refuses a passphrase of twelve UTF-16 units but six characters, in words, before reading the household", async () => {
-    queue(mocks.selectQueues, "households", [{ id: householdId, administrator: true, membershipUserId: null, role: "owner" }]);
+    seedHouseholdAccess();
     await expect(createPortableArchive({ userId, householdId, passphrase: "\u{1F44D}".repeat(6), includeDocuments: false }))
       .rejects.toMatchObject({ code: "archive_passphrase_too_short", status: 422 });
   });
