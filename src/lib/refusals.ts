@@ -9,13 +9,9 @@
  * Developer-facing errors -- a malformed command, a schema bound -- keep their
  * own plain messages in workspace.ts; these are only the "not yet" ones.
  */
+import { REMINDER_DAYS_MAX, REMINDER_MAX } from "@/lib/domain";
 import { AppError } from "@/lib/errors";
 import { kindRecurs, type ItemKind } from "@/lib/item-kind";
-
-/** The model's own ceiling on reminders per item (workspaceItemSchema). */
-export const REMINDER_MAX = 8;
-/** The model's own ceiling on how far ahead a reminder may be. */
-export const REMINDER_DAYS_MAX = 365;
 
 /**
  * Orbit is a UK product, so a comma in a typed cost is only ever a thousands

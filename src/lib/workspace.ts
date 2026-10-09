@@ -1,5 +1,15 @@
 import { z } from "zod";
 import {
+  ACTIVITY_NOTES_MAX,
+  COST_MINOR_MAX,
+  NOTES_MAX,
+  PROVIDER_MAX,
+  RECURRENCE_MAX,
+  REFERENCE_MAX,
+  REMINDER_DAYS_MAX,
+  REMINDER_MAX,
+  SUBTYPE_MAX,
+  TITLE_MAX,
   defaultSections,
   itemStatuses,
   scheduleKinds,
@@ -9,15 +19,16 @@ import {
   type HouseholdSection,
   type ScheduleKind,
 } from "@/lib/domain";
+import { calendarDate } from "@/lib/calendar-date";
 import { AppError } from "@/lib/errors";
 import { itemKinds, itemOfIntent, type ItemIntent, type ItemKind, type StoredItemFacts } from "@/lib/item-kind";
 import { nextDueDate } from "@/lib/next-due-date";
+import { currencyCode, timeZoneName } from "@/lib/platform-lists";
 import { completionRefusal, costMinorOf, itemRefusal, Refusal } from "@/lib/refusals";
 
 export const WORKSPACE_VERSION = 1;
 
 export const optionalText = (maximum: number) => z.string().trim().max(maximum).optional();
-const calendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const activityKinds = [
   "created",
   "updated",
@@ -59,18 +70,18 @@ const workspaceItemShape = z.object({
   /* Empty only for a damaged or locked title (ADR-0024 decision 5), which the
      superRefine below is what allows: a write still has to carry a real one,
      and the read path is the only producer of the empty case. */
-  title: z.string().trim().max(100),
-  subtype: optionalText(80),
-  provider: optionalText(100),
-  reference: optionalText(80),
-  costMinor: z.number().int().min(0).max(100_000_000).optional(),
-  currency: z.string().length(3),
+  title: z.string().trim().max(TITLE_MAX),
+  subtype: optionalText(SUBTYPE_MAX),
+  provider: optionalText(PROVIDER_MAX),
+  reference: optionalText(REFERENCE_MAX),
+  costMinor: z.number().int().min(0).max(COST_MINOR_MAX).optional(),
+  currency: currencyCode,
   dueDate: calendarDate.optional(),
   scheduleKind: z.enum(scheduleKinds).optional(),
-  recurrenceMonths: z.number().int().min(1).max(120).optional(),
-  reminderDays: z.array(z.number().int().min(0).max(365)).max(8).optional(),
+  recurrenceMonths: z.number().int().min(1).max(RECURRENCE_MAX).optional(),
+  reminderDays: z.array(z.number().int().min(0).max(REMINDER_DAYS_MAX)).max(REMINDER_MAX).optional(),
   snoozedUntil: calendarDate.optional(),
-  notes: optionalText(2_000),
+  notes: optionalText(NOTES_MAX),
   /** Read-only; the write path ignores whatever a client sends here. */
   metadataStatus: itemMetadataStatusSchema.optional(),
   /** Read-only; count of the item's listable documents, added by the read path (#1091). */
@@ -110,8 +121,8 @@ export const itemActivitySchema = z.object({
   effectiveDate: calendarDate.optional(),
   previousDate: calendarDate.optional(),
   nextDate: calendarDate.optional(),
-  costMinor: z.number().int().min(0).max(100_000_000).optional(),
-  notes: optionalText(1_000),
+  costMinor: z.number().int().min(0).max(COST_MINOR_MAX).optional(),
+  notes: optionalText(ACTIVITY_NOTES_MAX),
 });
 
 export const workspaceSectionSchema = z.object({
@@ -125,8 +136,8 @@ export const workspaceSectionSchema = z.object({
 export const householdWorkspaceSchema = z.object({
   id: z.string().min(1).max(100),
   name: z.string().trim().min(1).max(60),
-  timezone: z.string().min(1).max(80),
-  currency: z.string().length(3),
+  timezone: timeZoneName,
+  currency: currencyCode,
   memberCount: z.number().int().positive(),
   canManage: z.boolean().default(false),
   onboardingComplete: z.boolean().default(true),
@@ -269,7 +280,10 @@ export const householdCreateSchema = householdWorkspaceSchema
 export const itemIntentSchema = workspaceItemShape
   .omit({ scheduleKind: true, subtype: true, status: true, recurrenceMonths: true })
   .extend({
-    recurrenceMonths: z.number().int().min(0).max(120).optional(),
+    /* 0 is the member clearing a repeat ("once"); the stored item's schema
+       starts at 1, and the engine keeps a repeat only where a schedule comes
+       round (item-kind.ts). */
+    recurrenceMonths: z.number().int().min(0).max(RECURRENCE_MAX).optional(),
     scheduleKind: z.never().optional(),
     subtype: z.never().optional(),
     status: z.never().optional(),
@@ -287,16 +301,16 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("household.setup"),
     householdId: z.string().min(1).max(100),
     name: z.string().trim().min(1).max(60),
-    timezone: z.string().min(1).max(80),
-    currency: z.string().length(3),
+    timezone: timeZoneName,
+    currency: currencyCode,
     sections: z.array(workspaceSectionSchema).min(1).max(12),
   }),
   z.object({
     type: z.literal("household.update"),
     householdId: z.string().min(1).max(100),
     name: z.string().trim().min(1).max(60),
-    timezone: z.string().min(1).max(80),
-    currency: z.string().length(3),
+    timezone: timeZoneName,
+    currency: currencyCode,
   }),
   z.object({ type: z.literal("household.activate"), householdId: z.string().min(1).max(100) }),
   z.object({
@@ -327,8 +341,8 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     /* ADR-0034, #1324: the engine works the next date out from the item's
        period; parseWorkspaceCommand refuses one sent by a client. */
     nextDate: z.never().optional(),
-    costMinor: z.number().int().min(0).max(100_000_000).optional(),
-    notes: optionalText(1_000),
+    costMinor: z.number().int().min(0).max(COST_MINOR_MAX).optional(),
+    notes: optionalText(ACTIVITY_NOTES_MAX),
     activity: activityIntentSchema.extend({ nextDate: z.never().optional() }),
   }),
   z.object({
