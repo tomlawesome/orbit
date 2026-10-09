@@ -80,7 +80,7 @@ test("review & amend opens create's form pre-filled, and approves the amended va
   await expect(sheet.getByRole("button", { name: "renewal", exact: true })).toHaveAttribute("aria-pressed", "true");
   /* The section has no default (#1058): nothing is sent until one is chosen. */
   const go = sheet.getByRole("button", { name: "add to orbit" });
-  await expect(go).toBeDisabled();
+  await expect(go).toHaveAttribute("aria-disabled", "true");
   await expect(sheet.getByText("not yet — choose a section")).toBeVisible();
   await sheet.getByRole("button", { name: "Dates & renewals" }).click();
   await sheet.getByRole("textbox", { name: "provider", exact: true }).fill("Harbour Mutual plc");

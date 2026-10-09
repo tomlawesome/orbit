@@ -134,10 +134,10 @@ test("the create form will not save an entry nobody has named", async ({ page })
       await form.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
       await form.getByLabel("due date").fill(dueDate);
       const save = page.getByRole("button", { name: "Add to orbit" });
-      await expect(save).toBeDisabled();
+      await expect(save).toHaveAttribute("aria-disabled", "true");
       await expect(page.locator("#pk-refusal")).toHaveText("not yet — give it a name");
       await form.getByRole("textbox", { name: "name", exact: true }).fill("Gutter clearing proving");
-      await expect(save).toBeEnabled();
+      await expect(save).not.toHaveAttribute("aria-disabled", "true");
     } else {
       const name = page.locator("#f-name");
       await expect(name).toBeFocused();
@@ -147,10 +147,10 @@ test("the create form will not save an entry nobody has named", async ({ page })
       await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
       await page.locator("#f-date").fill(dueDate);
       const save = page.locator(".btn-primary");
-      await expect(save).toBeDisabled();
+      await expect(save).toHaveAttribute("aria-disabled", "true");
       await expect(page.locator("#save-note")).toHaveText("not yet — give it a name");
       await name.fill("Gutter clearing proving");
-      await expect(save).toBeEnabled();
+      await expect(save).not.toHaveAttribute("aria-disabled", "true");
     }
   } finally {
     await households.sweep(page);

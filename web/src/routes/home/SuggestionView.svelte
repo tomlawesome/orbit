@@ -112,7 +112,8 @@
          the decisions' place, as save and cancel take the pills' in a filed
          item's drawer. -->
     <div class="actions" role="group" aria-label="Amending {row.title}">
-      <button class="yes" disabled={adding || acts.modes.edit.refused} onclick={acts.onaccept}>{adding ? "adding…" : "add to orbit"}</button>
+      <button class="yes" disabled={adding} aria-disabled={acts.modes.edit.refused ? "true" : undefined}
+              onclick={() => { if (!acts.modes.edit.refused) acts.onaccept?.(); }}>{adding ? "adding…" : "add to orbit"}</button>
       <button disabled={adding} class:armed={acts.modes.discardArmed} onclick={acts.oncancel}
               >{acts.modes.discardArmed ? "discard changes?" : "cancel"}</button>
     </div>

@@ -377,7 +377,7 @@
       <div class="pk-bar-acts">
         <a class="p-pill pk-never" href={resolve("/home")}>never mind</a>
         <button type="submit" form="pocket-entry" class="p-pill filled pk-save"
-                disabled={phase !== "ready" || refusal !== null || saving || saved}
+                aria-disabled={phase !== "ready" || refusal !== null || saving || saved ? "true" : undefined}
                 aria-describedby={refusal ? "pk-refusal" : undefined}>
           {saved ? "Added" : saving ? "Adding…" : "Add to orbit"}
         </button>
@@ -441,7 +441,7 @@
   .pk-bar-in{max-width:var(--p-column);margin:0 auto}
   .pk-bar-acts{display:flex;gap:var(--p-pill-gap)}
   .pk-save{flex:1}
-  .pk-save:disabled{opacity:.5;cursor:default;box-shadow:none}
+  .pk-save[aria-disabled="true"]{opacity:.5;cursor:default;box-shadow:none}
   .pk-refusal,.pk-problem{margin:0 0 8px;font:var(--p-type-meta)/1.4 var(--mono)}
   .pk-refusal{color:var(--ink-mid)}
   .pk-problem{color:var(--overdue-text);animation:p-errin 200ms var(--p-ease) both}

@@ -144,18 +144,25 @@ export function mountCreate() {
   }
 
   /** The engine's last word on the entry (ADR-0034): null when it can be
-      saved, its refusal otherwise. Disabled until the first answer, as the
+      saved, its refusal otherwise. Held until the first answer, as the
       section refusal (#1058b) held it before. */
   /** @type {string | null} */
   let refusal = "";
   /**
-   * #1058b/#1058e: the save button stays disabled while the engine refuses
-   * the entry, its reason beside it — quiet while it is only a refusal, loud
+   * #1058b/#1058e: the save button stays held (`aria-disabled`, #1327: it
+   * keeps its place in the tab order, and the submit handler ignores it)
+   * while the engine has not answered or refuses the entry, its reason
+   * beside it — quiet while it is only a refusal, loud
    * (see the `submit` handler's catch) once a save has actually failed.
    */
+  /** @param {boolean} held */
+  function holdSave(held) {
+    if (held) save.setAttribute("aria-disabled", "true");
+    else save.removeAttribute("aria-disabled");
+  }
   function showRefusal() {
     if (saving) return;
-    save.disabled = refusal !== null;
+    holdSave(refusal !== null);
     /* A sticky message from the last save attempt outranks the live refusal
        note until the next attempt clears it — typing does not erase it. */
     if (sticky) return;
@@ -546,7 +553,7 @@ export function mountCreate() {
 
     saving = true;
     sticky = null;
-    save.disabled = true;
+    holdSave(true);
     note.classList.remove("fail");
     note.removeAttribute("role");
     note.textContent = "";
@@ -611,7 +618,7 @@ export function mountCreate() {
      unchanged. */
   if (nameInput.value.trim().length >= 3) reveal();
 
-  /* The section refusal (#1058b) holds the button disabled from the start,
+  /* The section refusal (#1058b) holds the button from the start,
      same as the pocket's own form does the moment it is ready. */
   updateRefusal();
 
