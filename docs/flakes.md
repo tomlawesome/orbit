@@ -408,3 +408,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-home-drawer.spec.ts:212 "on the desk › the dial's documents chip opens the item's drawer at its real documents" (desktop-webkit)
 
 - 2026-10-09 · 52e9f358 · local `scripts/test-e2e-local.sh --spec tests/e2e/v19-home-drawer.spec.ts`, all projects · `.callout.show .chip` never appeared within 5s after `dispatchEvent("mouseenter")` on the dial body, desktop-webkit only (the other desk projects green). Green on an immediate rerun of the spec on desktop-webkit alone, same commit. First sighting.
+
+## belt-endcap-controls.spec.js:68 "an end-cap press is the arrow key's press at 1600x1000"
+
+- 2026-10-09 · dad77c25 (#1325 rebased onto dev; the tree differs from pipeline 2287's green 8170fecb only in design files, an ADR, this log and one e2e spec) · pipeline 2290 / fidelity (job 33718) · `ArrowRight did not come back`; the same test passed at 390x844 in the same run. 45/45 locally with `--repeat-each=5` on the same commit; job retried as 33765. First sighting.
