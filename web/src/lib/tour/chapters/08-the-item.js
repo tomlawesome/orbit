@@ -57,6 +57,13 @@
  *  line the preview card sticks at (round 1's mockup, `scrollToRow`). */
 const ROW_TOP = 84;
 
+/** Home's own read has landed (+page.svelte's `sync()`). Until then the
+ *  sky is the one the server drew, which can name bodies the browser's read
+ *  does not: walked in from another screen, the film once picked one in the
+ *  moment before the read replaced it, and waited for a drawer that never
+ *  opened. */
+const HOME_READY = "body[data-home-ready]";
+
 const DESK_DRAWER = ".desk .itemview";
 const POCKET_DRAWER = ".pocket .pk-below .p-row[data-open]";
 
@@ -140,6 +147,16 @@ export function rowOf(pocket, id) {
   return pocket
     ? `${SELECTORS.POCKET.row}[data-row-key=${quoted(id)}]`
     : `${SELECTORS.DESK.row}[id=${quoted(id)}]`;
+}
+
+/**
+ * Waits for home's own read (`HOME_READY`) before a body is chosen. A stall,
+ * like every `waitForReal`, and nothing in dry mode, so the chapter's length
+ * never depends on it.
+ * @param {import("../vocabulary.js").FilmContext} ctx
+ */
+export async function readyHome(ctx) {
+  await ctx.waitForReal(HOME_READY);
 }
 
 /**
@@ -252,6 +269,7 @@ export default {
     /* ---- beat 1: arrival — the body pressed, its row open ---- */
     await setScreen("/home");
     veil(false);
+    await readyHome(ctx);
     const pick = itemBody(ctx);
     const { body } = pick;
     const sun = ctl({ sel: S.sun, round: true, optional: true });
