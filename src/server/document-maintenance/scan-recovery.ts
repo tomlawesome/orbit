@@ -19,7 +19,7 @@ import { auditLog, documentCrypto, documentJobs, documentStagingObjects, documen
 import { log } from "@/lib/logger";
 import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { openDocumentStorage } from "@/server/documents/storage";
-import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
+import { decryptDocument, encryptDocument, envelopeOf } from "@/server/documents/crypto";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
 import { validateSupportedDocumentStructure, type SupportedDocumentMediaType } from "@/server/documents/validation";
@@ -210,16 +210,7 @@ export async function processScannerRecoveryJob(job: ClaimedScanJob): Promise<vo
       mediaType: record.mediaType,
       plaintextSize: record.sizeBytes,
       purpose: "scanner_recovery",
-    }, {
-      envelopeVersion: record.envelopeVersion,
-      algorithm: "aes-256-gcm",
-      keyId: record.keyId,
-      contentIv: record.contentIv,
-      contentAuthTag: record.contentAuthTag,
-      wrappedDek: record.wrappedDek,
-      wrapIv: record.wrapIv,
-      wrapAuthTag: record.wrapAuthTag,
-    } as DocumentCryptoEnvelope, stagingKek);
+    }, envelopeOf(record), stagingKek);
     quarantinePath = await storage.writeQuarantineBytes(job.documentId, plaintext);
     const outcome = classifyScan(await scanFileWithClamAv(quarantinePath, config.clamAv), documentScanCodes);
     await storage.discardQuarantine(quarantinePath);

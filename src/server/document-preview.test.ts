@@ -61,7 +61,8 @@ vi.mock("@/server/documents/config", async (importActual) => ({
   ...await importActual<typeof import("@/server/documents/config")>(),
   getDocumentConfig: mocks.config,
 }));
-vi.mock("@/server/documents/crypto", () => ({
+vi.mock("@/server/documents/crypto", async (importActual) => ({
+  envelopeOf: (await importActual<typeof import("@/server/documents/crypto")>()).envelopeOf,
   decryptDocument: mocks.decryptDocument,
   encryptDocument: vi.fn(),
 }));
