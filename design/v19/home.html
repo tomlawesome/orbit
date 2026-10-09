@@ -568,8 +568,6 @@
   .body-link.lit :is(circle,path){transform:scale(1.6)}
   .item.lit{border-color:var(--accent)}
   /* POL-5: constellations light on section hover */
-  .celestial polyline{transition:stroke-opacity .3s}
-  .constellation-lit .celestial polyline{stroke-opacity:.85}
   /* POL-6: chart callout — legible, quadrant-aware */
   .callout{position:fixed;z-index:8;pointer-events:none;opacity:0;transition:opacity .12s;
            background:var(--panel-raised);backdrop-filter:blur(12px);
@@ -752,7 +750,6 @@
     .palette .act,.callout .chip,.drawer-top.open .nstar span,.nstar:hover span){
     text-shadow:0 0 9px var(--bloom)}
   [data-theme=retrograde] :is(.dial,.minisys) [style*="--accent"],
-  [data-theme=retrograde] .celestial polyline,
   [data-theme=retrograde] .now-month{filter:drop-shadow(0 0 2.5px var(--bloom))}
   [data-theme=retrograde] :is(.inbox-orb.waiting,.suggest button.yes){
     box-shadow:0 0 12px -2px var(--bloom)}
@@ -1770,11 +1767,6 @@
           <line x1="14" y1="190" x2="34" y2="190"/><line x1="65.5" y1="65.5" x2="80" y2="80"/>
         </g>
         <circle cx="190" cy="190" r="168" fill="none" stroke="var(--chart-line-soft)" stroke-width=".5"/>
-      </g>
-      <g class="celestial">
-        <polyline points="175.7,140 215.2,127.6 257.1,152.8" fill="none"
-                  stroke="var(--accent)" stroke-opacity=".38" stroke-width="1"
-                  stroke-dasharray="1 5" stroke-linecap="round"/>
       </g>
 
       <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>

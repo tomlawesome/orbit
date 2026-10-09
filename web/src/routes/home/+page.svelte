@@ -1384,14 +1384,6 @@
   const trailed = $derived(
     bodies.filter((b) => (b.suggestion ? b.trail : b.trail && (b.overdue || b.paint === "amber"))),
   );
-  /* The dotted accent line strings the next three routine services together. */
-  const constellationPoints = $derived(
-    bodies
-      .filter((b) => !b.suggestion && b.kind === "service")
-      .slice(0, 3)
-      .map((b) => `${b.placement.x},${b.placement.y}`)
-      .join(" "),
-  );
   const closest = $derived(bodies.find((b) => b.closest) ?? null);
   const firstOverdue = $derived(bodies.find((b) => b.overdue) ?? null);
   onMount(() => {
@@ -1915,11 +1907,6 @@
           <line x1="14" y1="190" x2="34" y2="190"/><line x1="65.5" y1="65.5" x2="80" y2="80"/>
         </g>
         <circle cx="190" cy="190" r="168" fill="none" stroke="var(--chart-line-soft)" stroke-width=".5"/>
-      </g>
-      <g class="celestial">
-        <polyline points={constellationPoints} fill="none"
-                  stroke="var(--accent)" stroke-opacity=".38" stroke-width="1"
-                  stroke-dasharray="1 5" stroke-linecap="round"/>
       </g>
 
       <circle cx="190" cy="190" r="62" fill="url(#danger4)"/>
