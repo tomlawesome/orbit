@@ -340,7 +340,6 @@
        drawer reads through it; it takes the press, so the tap that puts the
        sheet away never lands on the page behind as well. Escape is the
        keyboard's, so it needs no key handler of its own. -->
-  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="pvscrim" data-preview-scrim aria-hidden="true"
        onclick={() => { release?.(); onclose({ refocus: Boolean(card?.contains(document.activeElement)), press: true }); }}></div>
 {/if}
