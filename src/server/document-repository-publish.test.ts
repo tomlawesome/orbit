@@ -121,7 +121,8 @@ vi.mock("@/server/documents/validation", () => ({
   classifyDocumentStructure: async () => "supported_structure",
 }));
 
-vi.mock("@/server/documents/crypto", () => ({
+vi.mock("@/server/documents/crypto", async (importActual) => ({
+  envelopeOf: (await importActual<typeof import("@/server/documents/crypto")>()).envelopeOf,
   encryptDocument: () => ({
     ciphertext: Buffer.from("ciphertext"),
     envelope: {

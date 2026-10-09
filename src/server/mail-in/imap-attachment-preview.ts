@@ -2,6 +2,7 @@ import { and, eq, gt } from "drizzle-orm";
 import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
+import { envelopeOf } from "@/server/documents/crypto";
 import { renderDocumentPagePreview, type DocumentPagePreview } from "@/server/documents/preview";
 import { validUuid } from "@/server/workspace-access";
 import { readHeldImapAttachment } from "./imap-attachment-holding";
@@ -77,16 +78,7 @@ export async function readHeldImapAttachmentPreview(
       mediaType: row.mediaType,
       sizeBytes: row.sizeBytes,
       storageKey: row.storageKey,
-      envelope: {
-        envelopeVersion: row.envelopeVersion as 1,
-        algorithm: "aes-256-gcm",
-        contentIv: row.contentIv,
-        contentAuthTag: row.contentAuthTag,
-        wrappedDek: row.wrappedDek,
-        wrapIv: row.wrapIv,
-        wrapAuthTag: row.wrapAuthTag,
-        keyId: row.keyId,
-      },
+      envelope: envelopeOf(row),
     }, { recipientUserId: userId, receiptId });
   } catch (error) {
     // A concurrent purge or discard can remove the ciphertext between the

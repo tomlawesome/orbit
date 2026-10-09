@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
-import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
+import { decryptDocument, encryptDocument, type CryptoEnvelope } from "@/server/documents/crypto";
 import { openDocumentStorage } from "@/server/documents/storage";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
 import { classifyScan, documentScanCodes } from "@/server/documents/scan-outcome";
@@ -20,7 +20,7 @@ export type HeldImapAttachment = {
   contentSha256: string;
   storageKey: string;
   ciphertextSize: number;
-  envelope: DocumentCryptoEnvelope;
+  envelope: CryptoEnvelope;
 };
 
 /** Encrypts already-scanned attachment bytes under a holding-only AAD context. */

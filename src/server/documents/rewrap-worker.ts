@@ -36,7 +36,7 @@ import { and, eq, ne, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { auditLog, documentCrypto, documentJobs, mailInSecrets, metadataKeys } from "@/db/schema";
 import { log, operationalDetail } from "@/lib/logger";
-import { rewrapDocumentKey, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
+import { envelopeOf, rewrapDocumentKey } from "@/server/documents/crypto";
 import { rewrapMetadataKey, type MetadataKeyContext } from "@/server/metadata/crypto";
 import { rewrapMailInSecret } from "@/server/mail-in/core/secret-crypto";
 import { JOB_CLAIM_UPDATE, operationalDocumentReason } from "@/server/document-maintenance/claims";
@@ -183,16 +183,7 @@ export async function processRewrapJob(job: ClaimedRewrapJob, keys: RotationKeys
       throw new Error("document_crypto row is wrapped under neither the current nor the next key");
     }
 
-    const envelope: DocumentCryptoEnvelope = {
-      envelopeVersion: crypto.envelopeVersion as 1,
-      algorithm: "aes-256-gcm",
-      keyId: crypto.keyId,
-      contentIv: crypto.contentIv,
-      contentAuthTag: crypto.contentAuthTag,
-      wrappedDek: crypto.wrappedDek,
-      wrapIv: crypto.wrapIv,
-      wrapAuthTag: crypto.wrapAuthTag,
-    };
+    const envelope = envelopeOf(crypto);
     const rewrapped = rewrapDocumentKey(job.documentId, envelope, keys.currentKek, keys.nextKek, keys.nextKeyId);
     const updated = await transaction.update(documentCrypto).set({
       wrappedDek: rewrapped.wrappedDek,

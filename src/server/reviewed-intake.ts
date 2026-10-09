@@ -23,6 +23,7 @@ import { costMinorOf, itemRefusal, Refusal } from "@/lib/refusals";
 import { workspaceItemSchema } from "@/lib/workspace";
 import type { AdjudicatedField } from "@/server/documents/adjudication";
 import { safeDocumentPlainText, scheduleKinds, type DocumentProposal } from "@/server/documents/suggestions";
+import { envelopeOf } from "@/server/documents/crypto";
 import { readHeldImapAttachment, purgeHeldImapAttachment } from "@/server/imap-attachment-holding";
 import { isDocumentAvailable, uploadItemDocument } from "@/server/document-repository";
 import { openMetadataReader } from "@/server/metadata/fields";
@@ -558,16 +559,7 @@ async function transferAttachments(userId: string, householdId: string, itemId: 
         mediaType: attachment.mediaType,
         sizeBytes: attachment.sizeBytes,
         storageKey: attachment.storageKey,
-        envelope: {
-          envelopeVersion: attachment.envelopeVersion as 1,
-          algorithm: "aes-256-gcm",
-          contentIv: attachment.contentIv,
-          contentAuthTag: attachment.contentAuthTag,
-          wrappedDek: attachment.wrappedDek,
-          wrapIv: attachment.wrapIv,
-          wrapAuthTag: attachment.wrapAuthTag,
-          keyId: attachment.keyId,
-        },
+        envelope: envelopeOf(attachment),
       }, { recipientUserId: userId, receiptId });
       // A fresh const so the stream callback below closes over a binding
       // TypeScript can narrow to `Buffer` on its own — narrowing a `let`

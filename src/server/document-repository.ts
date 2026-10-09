@@ -14,7 +14,7 @@ import {
 } from "@/db/schema";
 import { AppError } from "@/lib/app-error";
 import { asOperationalReason, log } from "@/lib/logger";
-import { decryptDocument, encryptDocument, type DocumentCryptoEnvelope } from "@/server/documents/crypto";
+import { decryptDocument, encryptDocument, envelopeOf } from "@/server/documents/crypto";
 import { DOCUMENT_MAX_BYTES_CEILING, getDocumentConfig, keyEncryptionKeyFor, wrappingKey } from "@/server/documents/config";
 import { readEffectiveUploadLimit } from "@/server/upload-limit";
 import { scanFileWithClamAv } from "@/server/documents/scanner";
@@ -811,16 +811,7 @@ export async function readDocumentDownload(
   } catch {
     throw new AppError("document_unavailable", "That document cannot currently be opened", 503);
   }
-  const envelope: DocumentCryptoEnvelope = {
-    envelopeVersion: crypto.envelopeVersion as 1,
-    algorithm: "aes-256-gcm",
-    keyId: crypto.keyId,
-    contentIv: crypto.contentIv,
-    contentAuthTag: crypto.contentAuthTag,
-    wrappedDek: crypto.wrappedDek,
-    wrapIv: crypto.wrapIv,
-    wrapAuthTag: crypto.wrapAuthTag,
-  };
+  const envelope = envelopeOf(crypto);
   let bytes: Buffer;
   try {
     bytes = decryptDocument(ciphertext, {

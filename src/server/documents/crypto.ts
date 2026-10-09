@@ -26,8 +26,15 @@ export interface DocumentEncryptionContext {
   purpose?: "document" | "scanner_recovery";
 }
 
-export interface DocumentCryptoEnvelope {
-  envelopeVersion: 1;
+/**
+ * The stored shape of one envelope: how a DEK was wrapped and how the content
+ * was sealed. Documents, held attachments, staging objects and the mail-in
+ * secrets all keep these eight columns, so they share the one type. The
+ * version is the number on the row, not a literal: decryption refuses any
+ * but the one it knows, so a stored version 2 is refused rather than read as 1.
+ */
+export interface CryptoEnvelope {
+  envelopeVersion: number;
   algorithm: "aes-256-gcm";
   keyId: string;
   contentIv: string;
@@ -37,9 +44,29 @@ export interface DocumentCryptoEnvelope {
   wrapAuthTag: string;
 }
 
+/**
+ * The envelope held in a database row. Copies the eight envelope columns by
+ * name, so extra columns on the row (the ciphertext, storage key, document
+ * id) never travel inside the envelope, and the algorithm is the one this
+ * module implements. The AAD builders stay separate on purpose: they differ
+ * per purpose for domain separation.
+ */
+export function envelopeOf(row: Omit<CryptoEnvelope, "algorithm">): CryptoEnvelope {
+  return {
+    envelopeVersion: row.envelopeVersion,
+    algorithm: ENVELOPE_ALGORITHM,
+    keyId: row.keyId,
+    contentIv: row.contentIv,
+    contentAuthTag: row.contentAuthTag,
+    wrappedDek: row.wrappedDek,
+    wrapIv: row.wrapIv,
+    wrapAuthTag: row.wrapAuthTag,
+  };
+}
+
 export interface EncryptedDocument {
   ciphertext: Buffer;
-  envelope: DocumentCryptoEnvelope;
+  envelope: CryptoEnvelope;
 }
 
 function requireKey(key: Buffer, name: string): void {
@@ -159,13 +186,13 @@ function wrapDocumentKey(
   keyEncryptionKey: Buffer,
   keyId: string,
   purpose: DocumentEncryptionContext["purpose"] = "document",
-): Pick<DocumentCryptoEnvelope, "wrappedDek" | "wrapIv" | "wrapAuthTag"> {
+): Pick<CryptoEnvelope, "wrappedDek" | "wrapIv" | "wrapAuthTag"> {
   return wrapKeyWithAad(documentKey, keyEncryptionKey, keyAdditionalData(documentId, keyId, purpose));
 }
 
 function unwrapDocumentKey(
   documentId: string,
-  envelope: DocumentCryptoEnvelope,
+  envelope: CryptoEnvelope,
   keyEncryptionKey: Buffer,
   purpose: DocumentEncryptionContext["purpose"] = "document",
 ): Buffer {
@@ -209,7 +236,7 @@ export function encryptDocument(
 export function decryptDocument(
   ciphertext: Buffer,
   context: DocumentEncryptionContext,
-  envelope: DocumentCryptoEnvelope,
+  envelope: CryptoEnvelope,
   keyEncryptionKey: Buffer,
 ): Buffer {
   const documentKey = unwrapDocumentKey(context.documentId, envelope, keyEncryptionKey, context.purpose);
@@ -225,11 +252,11 @@ export function decryptDocument(
 /** Rewraps a DEK without decrypting or rewriting document ciphertext. */
 export function rewrapDocumentKey(
   documentId: string,
-  envelope: DocumentCryptoEnvelope,
+  envelope: CryptoEnvelope,
   currentKeyEncryptionKey: Buffer,
   nextKeyEncryptionKey: Buffer,
   nextKeyId: string,
-): DocumentCryptoEnvelope {
+): CryptoEnvelope {
   const documentKey = unwrapDocumentKey(documentId, envelope, currentKeyEncryptionKey);
   try {
     return {
