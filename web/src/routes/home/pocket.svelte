@@ -4,7 +4,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { WorkspaceError, applyCommand, attachItemDocument, dueDateIn, readItemDocuments, removeDocument, restoreDocument } from "$lib/data/workspace.js";
+  import { WorkspaceError, applyCommand, attachItemDocument, dueDateIn, householdElsewhereFor, readItemDocuments, removeDocument, restoreDocument } from "$lib/data/workspace.js";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import { sectionColourOf } from "$lib/option-colour.js";
@@ -447,13 +447,16 @@
      retired belt's `/item/<id>`, which the server answers with it): its
      row opens, once, as soon as the manifest has drawn it -- drawn for it if
      the manifest does not list it (openRow). A suggestion's address opens
-     its row in the signals, where it is reviewed. An id home does not hold
+     its row in the signals, where it is reviewed. An item in another of
+     the reader's households waits: home switches to that household
+     (+page.svelte, #1319) and its row opens there. An id home does not hold
      at all opens nothing. */
   let addressed = false;
   $effect(() => {
     const id = page.url.searchParams.get("item");
     if (addressed || !id || !groups || !isPocket()) return;
     if (!holds(id) && !view?.suggestions.some((one) => one.id === id)) {
+      if (householdElsewhereFor(view, id)) return;
       addressed = true;
       return;
     }
