@@ -46,8 +46,9 @@ async function answerApproval(page, itemId = "i-new") {
     const body = route.request().postDataJSON();
     if (!body?.dryRun) return route.fallback();
     if (!body.item?.sectionId) {
-      return route.fulfill({ status: 422,
-        json: { error: { code: "item_section_missing", message: "not yet — choose a section" } } });
+      /* A dry run's refusal is a 200 verdict (ADR-0034, decision 3 amendment). */
+      return route.fulfill({
+        json: { refusal: { code: "item_section_missing", message: "not yet — choose a section" } } });
     }
     return route.fulfill({ json: {} });
   });
