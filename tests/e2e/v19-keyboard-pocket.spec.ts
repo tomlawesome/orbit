@@ -271,6 +271,10 @@ async function fillPocketCreateForm(page: Page, name: string) {
 
   await tabTo(page, { selector: `${POCKET_FORM} textarea[id$="-notes"]` }, { screen });
   await page.keyboard.type("added by the keyboard-only pass");
+  /* The engine's dry run (ADR-0034, #1325) answers ~300 ms after the last
+     keystroke and the save is held until it does; wait for the filled form
+     to be accepted so the screen is read settled. */
+  await expect(page.locator(".pk-save")).toBeEnabled();
 }
 
 /* ────────────────────────────────────────────────────────────────────────

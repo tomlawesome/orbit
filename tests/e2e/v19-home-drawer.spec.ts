@@ -154,6 +154,10 @@ test.describe("on the desk", () => {
     await page.goto("/home");
     const body = page.locator(`.body-link[data-body="${itemId}"]`);
     await expect(body).toHaveAttribute("data-docs", "1", { timeout: 20_000 });
+    /* The markup is drawn before home's listeners are bound (#1064): a
+       synthetic mouseenter sent in that gap is heard by nobody, and there is
+       no second one. Wait for the screen to be able to answer. */
+    await expect(page.locator("body[data-home-ready]")).toBeAttached();
     await body.dispatchEvent("mouseenter");
     const chip = page.locator(".callout.show .chip");
     await expect(chip).toHaveText("◆ 1 document");

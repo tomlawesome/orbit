@@ -503,4 +503,9 @@ export async function fillCreateForm(page: Page, name: string) {
   await page.keyboard.press("Tab"); // f-notes
   expect(await page.evaluate(() => document.activeElement?.id), "create: expected notes after the reminder").toBe("f-notes");
   await page.keyboard.type("added by the keyboard-only pass");
+  /* The engine's dry run (ADR-0034, #1325) answers ~300 ms after the last
+     keystroke and the save is held until it does. Wait for the filled form to
+     be accepted, so a caller that audits the screen reads it settled rather
+     than with the save still disabled and out of the tab order. */
+  await expect(page.locator("#card .btn-primary")).toBeEnabled();
 }
