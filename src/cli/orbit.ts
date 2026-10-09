@@ -337,7 +337,7 @@ function readStdinAnswer(missing: string): string {
   return line;
 }
 
-/** export-recovery-bundle.sh:37-45 (guarantees #6-7): passphrase, then its confirmation, entered twice with no retry loop in TTY mode (matching the Bash original's single-attempt fail-closed behavior exactly); machine mode gets the bounded-3-attempt retry protocol docs/engine-events.md now documents. */
+/** The original export-recovery-bundle.sh prompt (guarantees #6-7): passphrase, then its confirmation, entered twice with no retry loop in TTY mode (matching the Bash original's single-attempt fail-closed behavior exactly); machine mode gets the bounded-3-attempt retry protocol docs/engine-events.md now documents. */
 function collectRecoveryPassphraseWithConfirmation(): string {
   if (isMachinePromptMode()) return collectMachineRecoveryPassphrase(stdoutMachineDriver());
   if (isStdinLinePromptMode()) {
@@ -353,18 +353,18 @@ function collectRecoveryPassphraseWithConfirmation(): string {
   return passphrase;
 }
 
-/** import-recovery-bundle.sh:73-74: a single passphrase entry, no confirmation (only IMPORT_CONFIRMATION below is a typed phrase). */
+/** The original import-recovery-bundle.sh prompt: a single passphrase entry, no confirmation (only IMPORT_CONFIRMATION below is a typed phrase). */
 function collectImportPassphrase(): string {
   if (isMachinePromptMode()) return collectMachineRecoveryPassphraseNoConfirm(stdoutMachineDriver());
   const passphrase = isStdinLinePromptMode()
     ? readStdinAnswer("A recovery passphrase is required on standard input.")
     : readTtyMaskedLine("Recovery passphrase: ");
-  // import-recovery-bundle.sh:76: refused before any decryption is attempted.
+  // As the original import-recovery-bundle.sh did: refused before any decryption is attempted.
   if (!isValidPassphrase(passphrase)) fail("orbit: A recovery passphrase of at least 12 characters is required.");
   return passphrase;
 }
 
-/** import-recovery-bundle.sh:88-94 (guarantee #19): the literal "IMPORT RECOVERY" phrase, single attempt in TTY mode. */
+/** The original import-recovery-bundle.sh confirmation (guarantee #19): the literal "IMPORT RECOVERY" phrase, single attempt in TTY mode. */
 function collectImportConfirmation(bundlePath: string): boolean {
   if (isMachinePromptMode()) {
     try {

@@ -599,7 +599,7 @@ export interface RunImportRecoveryBundleOptions {
   importConfirmed: boolean | (() => boolean);
   /** Runs once confirmed, before anything is changed (the CLI's PostgreSQL client check). */
   beforeRestore?: () => void;
-  /** restore.sh guarantee #46, re-prompted by the inner restore.sh invocation (import-recovery-bundle.sh:105 passes neither `--yes` nor `ORBIT_NONINTERACTIVE_RESTORE`, so the inner script always re-confirms interactively) — a genuinely separate gate from `importConfirmed`, not a duplicate of it; see runRestore's `confirm` for why this is a callback, not a precomputed boolean. */
+  /** restore.sh guarantee #46, re-prompted by the inner restore.sh invocation (import-recovery-bundle.sh's `run_engine`, in its shared block, passes no `--yes`; it forwards `ORBIT_NONINTERACTIVE_RESTORE` only when the caller exported it, and one flag alone is never enough, so the inner script always re-confirms interactively) — a genuinely separate gate from `importConfirmed`, not a duplicate of it; see runRestore's `confirm` for why this is a callback, not a precomputed boolean. */
   confirmRestore: () => boolean;
   hooks?: RestoreDurabilityHooks;
   testHooks?: RestoreOrchestrationTestHooks;
