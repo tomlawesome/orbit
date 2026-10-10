@@ -2,9 +2,9 @@
  * Orbit's service worker (#763, #1329), built by SvelteKit and served at
  * /service-worker.js.
  *
- * It does three things: keep Orbit's own app shell so the installed app
- * opens as Orbit, show push notifications, and take a click on one to the
- * right place.
+ * It does four things: keep Orbit's own app shell so the installed app
+ * opens as Orbit, show Orbit's own offline page when there is no network,
+ * show push notifications, and take a click on one to the right place.
  *
  * The app shell is what SvelteKit lists for it: `build` (the compiled JS and
  * CSS) and `files` (everything in static/: icons, fonts, the manifest). That
@@ -13,8 +13,12 @@
  * upload. Every response Orbit serves is cookie-scoped to the signed-in
  * reader, so a worker that cached one could hand it to the wrong reader or
  * to a reader who has since signed out. Only the exact shell URLs are ever
- * answered from the cache; every other request, navigations included, is
- * left alone and goes straight to the network.
+ * answered from the cache; every other request goes straight to the network.
+ *
+ * Offline page: `/offline.html` is a static page with no household data, kept
+ * with the shell. A navigation goes to the network and its response is
+ * returned untouched and never stored; only if the network fetch rejects
+ * (no connection) is the cached offline page shown in its place.
  *
  * Updates: a new version installs in the background beside the old one and
  * takes over on the next launch. There is deliberately no skip-waiting and no
@@ -24,6 +28,7 @@ import { build, files, version } from "$service-worker";
 
 const CACHE_PREFIX = "orbit-shell-";
 const CACHE = `${CACHE_PREFIX}${version}`;
+const OFFLINE_PAGE = new URL("/offline.html", self.location.origin).href;
 
 /** Absolute URLs of the shell assets, so a request can be matched exactly. */
 const SHELL = new Set([...build, ...files].map((path) => new URL(path, self.location.origin).href));
@@ -46,12 +51,28 @@ self.addEventListener("activate", (event) => {
 });
 
 /**
- * Serve a precached shell asset cache-first. Anything else -- non-GET,
- * cross-origin, navigations, `/api/`, documents -- is not answered here.
+ * A navigation: the network's answer untouched, or, only when the fetch
+ * rejects, the precached offline page. Nothing is stored here.
+ */
+function navigate(request) {
+  return fetch(request).catch(async () => {
+    const cache = await caches.open(CACHE);
+    return (await cache.match(OFFLINE_PAGE)) || Response.error();
+  });
+}
+
+/**
+ * Serve a precached shell asset cache-first, and a navigation from the
+ * network with the offline page as its only fallback. Anything else --
+ * non-GET, cross-origin, `/api/`, documents -- is not answered here.
  */
 self.addEventListener("fetch", (event) => {
   const { request } = event;
-  if (request.method !== "GET" || request.mode === "navigate") return;
+  if (request.method !== "GET") return;
+  if (request.mode === "navigate") {
+    event.respondWith(navigate(request));
+    return;
+  }
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
   const key = url.origin + url.pathname;

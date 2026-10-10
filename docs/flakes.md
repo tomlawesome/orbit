@@ -447,3 +447,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-keyboard-pocket.spec.ts:411 "item page (pocket): actions and the back link work by keyboard" — mobile-webkit
 
 - 2026-10-09 · 1e0299ab (!1050) · pipeline 2313 / smoke_webkit_mobile (job 33924) · `Tab never reached the requested control within 60 presses`; after the reschedule save, focus went to `body` past the pills. Failed on both attempts. Passed in jobs 33895 and 33901 on the same commit, in 33925, and locally. The /item page is retired by #1319 (merged in 51d9a8ef), so this spec goes with it. First sighting.
+
+## desk-phone-small-drifts.test.mjs
+
+- 2026-10-10 · b929a182 (#1329) · local scripts/test-backend.sh under parallel load · 5 s timeout on the dynamic import in "burnsInOf, the phone's"; passed alone and on rerun
