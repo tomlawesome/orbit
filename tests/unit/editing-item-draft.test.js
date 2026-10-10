@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { costMinorOf } from "../../src/lib/refusals";
 
 // #1319 — editing in the drawer's own rows: what the rows hold (draftOf), how
 // a typed reminders row reads (remindersOf), what a save sends (editsOf) and
@@ -67,7 +68,16 @@ describe("draftOf", () => {
     expect(draftOf(item({ currency: "EUR" })).cost).toBe("€54.00");
     expect(draftOf(item({ currency: "USD" })).cost).toBe("$54.00");
     expect(draftOf(item({ currency: undefined })).cost).toBe("£54.00");
-    expect(draftOf(item({ currency: "JPY" })).cost).toBe("¥54.00");
+    expect(draftOf(item({ currency: "JPY" })).cost).toBe("54.00");
+  });
+
+  /* Review of 16f39028: the cost is typed back through costMinorOf, which
+     strips only £, $ and €. A prefilled sign it cannot strip (¥, ₹, kr, zł)
+     made an untouched cost refuse as "not a number" on an unrelated edit. */
+  it("prefills only a sign the cost check can read back", () => {
+    for (const currency of ["GBP", "EUR", "USD", "JPY", "INR", "SEK", "PLN", "CHF"]) {
+      expect(costMinorOf(draftOf(item({ currency })).cost), currency).toBe(5400);
+    }
   });
 
   it("holds an empty cost, and nulls, as empty rows", () => {
