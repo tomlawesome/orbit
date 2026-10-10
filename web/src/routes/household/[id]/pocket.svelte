@@ -142,7 +142,8 @@
       problem = `not saved — ${wordsOf(error)}`;
       /* Someone filed an entry in a section since this page loaded: show the
          true list rather than the one this editor expected (#1332). */
-      if (/** @type {{ code?: string }} */ (error)?.code === "section_has_items") {
+      const refusal = /** @type {{ code?: string, partial?: boolean }} */ (error);
+      if (refusal?.code === "section_has_items" || refusal?.partial) {
         await invalidateAll();
         await tick();
         reset();
