@@ -109,48 +109,62 @@ them):**
    half as `cosign.pub` at the repository root; the private key and password
    never enter chat or the repository. (Already done: the committed
    `cosign.pub` stays valid under this design.)
-2. On the `gitlab-runners` host, as root, put the key material where the
-   signing runner will mount it, owned by the runner's user (`gitlab-runner`,
-   uid 988):
+2. On the `gitlab-runners` host, as root, give signing its own Docker: a
+   separate user, `gitlab-signer`, running its own rootless Docker that no
+   other runner and no job can reach (#1373). Every other runner on the host
+   uses `gitlab-runner`'s Docker, and two of them hand that Docker to their
+   jobs, so key material that user can read is in reach of any job:
 
    ```sh
-   install -d -m 0700 -o gitlab-runner -g gitlab-runner /etc/orbit-signing
-   install -m 0600 -o gitlab-runner -g gitlab-runner /path/to/cosign.key /etc/orbit-signing/cosign.key
+   useradd -m -s /usr/sbin/nologin gitlab-signer   # Debian gives it a subuid range
+   grep gitlab-signer /etc/subuid /etc/subgid      # both must print a range
+   loginctl enable-linger gitlab-signer
+   ```
+
+   Put the key material where the signing runner will mount it, owned by
+   `gitlab-signer`:
+
+   ```sh
+   install -d -m 0700 -o gitlab-signer -g gitlab-signer /etc/orbit-signing
+   install -m 0600 -o gitlab-signer -g gitlab-signer /path/to/cosign.key /etc/orbit-signing/cosign.key
    ( umask 077 && IFS= read -r -s -p 'key password: ' p && \
      printf '%s' "$p" > /etc/orbit-signing/password ); echo
-   chown gitlab-runner:gitlab-runner /etc/orbit-signing/password
+   chown gitlab-signer:gitlab-signer /etc/orbit-signing/password
    ```
 
    The `read -s` keeps the password off the command line and out of shell
-   history. The runner's Docker is **rootless**, run by `gitlab-runner`: root
-   inside the job container is uid 988 on the host, so root-owned 0600 files
-   would be unreadable there (they read as `nobody`). Nothing else on the
+   history. The signing Docker is **rootless**, run by `gitlab-signer`: root
+   inside the job container is that user on the host, so root-owned 0600
+   files would be unreadable there (they read as `nobody`), and
+   `gitlab-runner`'s Docker cannot read these at all. Nothing else on the
    host needs to read them, and no other runner mounts the directory.
 
-   Rootless Docker also takes a snapshot of `/etc` when its daemon starts, so
-   a directory created under `/etc` afterwards is invisible to it: the job
-   sees an empty mount and fails with "no password file" although the file
-   is there. After creating the directory, restart that user's Docker once
-   (this kills any job then running on the host):
+   Then start that user's Docker. Rootless Docker takes a snapshot of `/etc`
+   when its daemon starts, so a directory created under `/etc` afterwards is
+   invisible to it (the job sees an empty mount and fails with "no password
+   file"): create the directory first, or restart the daemon after.
 
    ```sh
-   sudo -u gitlab-runner XDG_RUNTIME_DIR=/run/user/988 \
-     DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/988/bus \
-     systemctl --user restart docker
+   U=$(id -u gitlab-signer)
+   sudo -u gitlab-signer XDG_RUNTIME_DIR=/run/user/$U \
+     DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$U/bus \
+     dockerd-rootless-setuptool.sh install
    ```
 
    Later reboots need nothing: the directory exists before Docker starts.
-   (Both found on the first `preview` run, pipeline 791, 2026-09-09.)
+   (The snapshot was found on the first `preview` run, pipeline 791,
+   2026-09-09.)
 3. Register a second project runner on that host (the first is `orbit-build`),
    docker executor, tag `orbit-signing`, **protected** (Settings > CI/CD >
    Runners: "Protected" ticked, so it refuses jobs from unprotected refs),
    **locked to this project**, "run untagged jobs" off. In its
-   `config.toml` entry add the mount, and the rootless socket (without it
-   the executor looks for `/var/run/docker.sock`, which does not exist):
+   `config.toml` entry add the mount, and `gitlab-signer`'s rootless socket,
+   never `gitlab-runner`'s (without a `host` the executor looks for
+   `/var/run/docker.sock`, which does not exist):
 
    ```toml
    [runners.docker]
-     host = "unix:///run/user/988/docker.sock"
+     host = "unix:///run/user/<gitlab-signer's uid>/docker.sock"
      volumes = ["/etc/orbit-signing:/etc/orbit-signing:ro", "/cache"]
    ```
 
