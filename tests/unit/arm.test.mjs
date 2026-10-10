@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ARM_MS, createArm, disarmOnElsewhere } from "../../web/src/lib/arm.js";
@@ -29,8 +30,8 @@ describe("the arm helper's home", () => {
     expect(ARM_MS).toBe(4000);
   });
   it("is web/src/lib/arm.js, and pocket/arm.js is gone", () => {
-    expect(existsSync(new URL("../../web/src/lib/arm.js", import.meta.url))).toBe(true);
-    expect(existsSync(new URL("../../web/src/lib/pocket/arm.js", import.meta.url))).toBe(false);
+    expect(existsSync(resolve(import.meta.dirname, "../../web/src/lib/arm.js"))).toBe(true);
+    expect(existsSync(resolve(import.meta.dirname, "../../web/src/lib/pocket/arm.js"))).toBe(false);
   });
 });
 

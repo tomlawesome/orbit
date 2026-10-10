@@ -9,7 +9,6 @@ import { describe, expect, it } from "vitest";
  */
 
 const root = path.resolve(import.meta.dirname, "../..");
-const src = path.join(root, "web/src");
 
 const listed = (cmd, args) => {
   try {
