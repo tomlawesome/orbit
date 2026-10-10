@@ -4,14 +4,14 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { WorkspaceError, applyCommand, attachItemDocument, dueDateIn, householdElsewhereFor, readItemDocuments, removeDocument, restoreDocument } from "$lib/data/workspace.js";
+  import { applyCommand, attachItemDocument, dueDateIn, householdElsewhereFor, readItemDocuments, removeDocument, restoreDocument, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import { sectionColourOf } from "$lib/option-colour.js";
   import { DrawerModes, pressKeepsChooser } from "./drawer-modes.svelte.js";
   import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf, manifestRowOf } from "$lib/data/chart.js";
-  import { money } from "$lib/format.js";
+  import { dayMonth, initials as initialsOf, money, MONTHS, plural } from "$lib/format.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
   import Hatch from "$lib/pocket/Hatch.svelte";
   import NorthStar from "$lib/pocket/NorthStar.svelte";
@@ -119,14 +119,7 @@
           })
       : [],
   );
-  const initials = $derived(
-    (view?.user?.displayName ?? "")
-      .split(/\s+/)
-      .map((word) => word[0] ?? "")
-      .join("")
-      .slice(0, 2)
-      .toUpperCase(),
-  );
+  const initials = $derived(initialsOf(view?.user?.displayName));
   // #852: the same "household · role" line the desk account panel derives.
   const roleLine = $derived(
     view?.household
@@ -138,21 +131,17 @@
   const waiting = $derived((view?.suggestions ?? []).filter((s) => s.receiptId).length);
   const isAdmin = $derived(Boolean(page.data?.isAdmin));
 
-  const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
   const QUARTER_POS = [[190, 30], [352, 196], [190, 370], [28, 196]];
   const quarters = $derived(
     QUARTER_POS.map(([x, y], k) => ({
       x, y,
-      label: MONTHS[((view ? new Date(view.today + "T00:00:00Z").getUTCMonth() : 7) + k * 3) % 12],
+      label: MONTHS[((view ? new Date(view.today + "T00:00:00Z").getUTCMonth() : 7) + k * 3) % 12].toUpperCase(),
     })),
   );
   // BAND_VAR/tlabel: #1151 W1-Q10, shared with CorridorRow.svelte and
   // +page.svelte's own dial via bands.js, rather than a second, diverging
   // copy (bands.js's own tlabel is now the null-safe version this file's
   // old copy had, per #1151 W1-F3's unscheduled band).
-  /** @type {(iso: string) => string} */
-  const short = (iso) =>
-    new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
   // #1005: a renewal comes round, a one-off ends.
   /** @type {(s: { scheduleKind?: ?string }) => string} */
   const dateWord = (s) => (s.scheduleKind === "expiry" ? "ends" : "renews");
@@ -178,7 +167,7 @@
     return { x1, y1, x2, y2 };
   });
   /** @type {(row: { costMinor: number | null, currency: string, costIsEstimate: boolean }) => string | null} */
-  const cost = (row) => (row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null);
+  const cost = (row) => (row.costMinor === null ? null : money(row.costMinor, row.currency, row.costIsEstimate));
   /** @type {(s: import('$lib/data/workspace.js').ReceiptSuggestion) => number | null} */
   const burnsIn = (s) => (s.expiresAt && view ? daysUntil(s.expiresAt.slice(0, 10), view.today) : null);
 
@@ -186,7 +175,7 @@
   const mailSummary = $derived.by(() => {
     const reading = view?.mailReading?.length ?? 0;
     const failed = view?.mailFailures?.length ?? 0;
-    const unread = `${failed} message${failed === 1 ? "" : "s"} couldn't be read`;
+    const unread = `${plural(failed, "message")} couldn't be read`;
     if (reading && failed) return `reading ${reading} · ${failed} couldn't be read`;
     if (reading) return reading === 1 ? "reading a message" : `reading ${reading} messages`;
     return failed ? unread : "";
@@ -372,7 +361,7 @@
       wake(`${target.title} completed`);
       await onchanged?.();
     } catch (error) {
-      problem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again";
+      problem = wordsOf(error, "couldn't complete it — try again");
     } finally {
       busy = false;
     }
@@ -616,7 +605,7 @@
         onchanged?.();
         return;
       }
-      wake(/** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again", { failure: true });
+      wake(wordsOf(error, "couldn't complete it — try again"), { failure: true });
     });
   });
 
@@ -657,7 +646,7 @@
       wake(words);
       await onchanged?.();
     } catch (error) {
-      rowProblem[one.id] = /** @type {{ message?: string }} */ (error)?.message ?? `couldn't ${kind} it — try again`;
+      rowProblem[one.id] = wordsOf(error, `couldn't ${kind} it — try again`);
     } finally {
       footBusy = null;
     }
@@ -673,7 +662,7 @@
       wake(`${file.name} attached`);
       await Promise.all([rereadPapers(), onchanged?.()]);
     } catch (error) {
-      rowProblem[one.id] = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't attach it — try again";
+      rowProblem[one.id] = wordsOf(error, "couldn't attach it — try again");
     } finally {
       footBusy = null;
     }
@@ -732,7 +721,7 @@
     /* #1319: the pills are disabled while it is sent, which drops the focus
        the sheet handed back; put it back on the pill once they are live,
        inside the row, so the row's own Escape still closes it. */
-    runRowAct(item, "snooze", (one) => snoozeCommand(one, until), `${item.title} snoozed until ${short(until)}`)
+    runRowAct(item, "snooze", (one) => snoozeCommand(one, until), `${item.title} snoozed until ${dayMonth(until)}`)
       .then(() => { if (lit === item.id) focusInRow(item.id, '[aria-label^="Snooze "]'); });
   }
   /** @param {{ id: string, title: string }} one */
@@ -756,10 +745,10 @@
     try {
       const nextDate = dueDateIn(await applyCommand(completeCommand(item, fields)), item.householdId, item.id);
       modes.cancelComplete();
-      wake(`Completed${nextDate ? ` · next due ${short(nextDate)}` : ""} · ${one.title}`);
+      wake(`Completed${nextDate ? ` · next due ${dayMonth(nextDate)}` : ""} · ${one.title}`);
       await onchanged?.();
     } catch (error) {
-      modes.completeProblem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again";
+      modes.completeProblem = wordsOf(error, "couldn't complete it — try again");
     } finally {
       footBusy = null;
     }
@@ -1132,7 +1121,7 @@
        aria-label="title" data-ed="title" bind:textContent={modes.edit.draft.title}></b>{/if}{/snippet}
     <Row title={one.title} meta={[one.section, one.state, cost(one)].filter(Boolean).join(" · ")} key={one.id}
          heading={modes.edit.id === one.id ? liveTitle : undefined}
-         trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
+         trail={tlabel(one)} trailSub={one.dueDate ? dayMonth(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
          ontoggle={onRowToggle(one.id)}>
       <!-- round 8 (#1319): the section word in its own colour -->
       {#snippet metaline()}{#if one.section}<i class="opt" data-opt={sectionColourOf(sectionOf(one.id))}>{one.section}</i>{#if one.state || cost(one)}{SEP}{/if}{/if}{#if one.state}{one.state}{#if cost(one)}{SEP}{/if}{/if}{cost(one)}{/snippet}
@@ -1194,8 +1183,8 @@
           <Row title={s.title} key={s.id}
                heading={amending ? liveTitle : undefined}
                meta={burnsIn(s) !== null ? `burns up in ${burnsIn(s)}d` : ""}
-               trail={s.costMinor ? money(s.costMinor, s.currency, true) : ""}
-               trailSub={s.renewsOn ? `${dateWord(s)} ${short(s.renewsOn)}` : ""} trailTone="var(--accent-text)"
+               trail={s.costMinor !== null && s.costMinor !== undefined ? money(s.costMinor, s.currency, true) : ""}
+               trailSub={s.renewsOn ? `${dateWord(s)} ${dayMonth(s.renewsOn)}` : ""} trailTone="var(--accent-text)"
                acts={amending ? [] : suggestionActs(s)} ontoggle={onRowToggle(s.id)}>
             {#snippet mark()}<span class="pk-dot hollow"></span>{/snippet}
             {#snippet detail()}<SuggestionDrawer suggestion={s} problem={rowProblem[s.id] ?? null}
@@ -1235,7 +1224,7 @@
     {#if !results.query}
       {#each results.items as one (one.id)}
         <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
-             trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
+             trail={tlabel(one)} trailSub={one.dueDate ? dayMonth(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
              onactivate={() => openResult(one.id)}>
           {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
         </Row>
@@ -1251,7 +1240,7 @@
     {:else}
       {#each results.items as one (one.id)}
         <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
-             trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
+             trail={tlabel(one)} trailSub={one.dueDate ? dayMonth(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
              onactivate={() => openResult(one.id)}>
           {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
         </Row>
@@ -1284,7 +1273,7 @@
 <Hatch bind:open={hatchOpen} name={view?.user?.displayName ?? ""} {roleLine} {isAdmin}
        inboxCount={waiting || null} {onsignedout} onopened={onmenu} />
 
-<PreviewCard doc={previewPaper} itemTitle={previewPaper?.itemTitle ?? ""} onclose={closePaper}
+<PreviewCard doc={previewPaper} itemTitle={previewPaper?.itemTitle ?? ""} documentDays={view?.retention?.documentDays} onclose={closePaper}
              onremove={removePaper} onrestore={restorePaper} />
 
 <!-- #1319 stage 2 (round 8, `narrow-editing-*`): the chooser card as the

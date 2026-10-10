@@ -1,8 +1,10 @@
 <script>
+  import { dayMonth } from "$lib/format.js";
   import "./relay.css";
   import { onMount } from "svelte";
   import { mountSatellites } from "$lib/backdrops/satellites.js";
   import Chrome from "$lib/Chrome.svelte";
+  import { createArm } from "$lib/arm.js";
   import { rotateRelay } from "$lib/data/workspace.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { isPocket } from "$lib/pocket/media.js";
@@ -45,16 +47,12 @@
      ArmButton gives it (pocket.svelte). "pause ingest" beside it is
      reversible and stays a single tap. */
   let armedRotate = $state(false);
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let armTimer = null;
+  const rotateArm = createArm({ onchange: (next) => (armedRotate = Boolean(next)) });
   /** @type {string | null} */
   let problem = $state(null);
   const relay = $derived(rotated ?? data.relay);
   const failures = $derived(data.failures ?? []);
   const pocket = isPocket();
-  /** @type {(value: string | number | Date) => string} */
-  const shortDate = (value) =>
-    new Date(value).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
   /* §14 (#471): back to the opener; a deep link with no history goes home. */
   const dismissRelay = () => {
     if (history.length > 1) history.back();
@@ -83,31 +81,19 @@
       working = false;
     }
   };
-  /* #1151 S7: the same two-tap protocol as the household page's own
-     twoTap() (§14) — the first tap arms, the second fires, and an unfired
-     arm relaxes on its own after five seconds so nothing is left cocked on
-     the desk. It previously had neither: a stray tap stayed armed forever,
-     so a later, unrelated tap on this same button could fire the rotate
-     with no fresh confirmation. */
-  const disarmRotate = () => {
-    clearTimeout(armTimer ?? undefined);
-    armTimer = null;
-    armedRotate = false;
-  };
-  const tapRotate = () => {
-    if (armedRotate) {
-      disarmRotate();
-      act("rotate");
-      return;
-    }
-    clearTimeout(armTimer ?? undefined);
-    armedRotate = true;
-    armTimer = setTimeout(disarmRotate, 5000);
+  /* #1151 S7: the two-tap protocol (lib/arm.js) — the first tap arms, the
+     second fires, and an unfired arm relaxes after four seconds, on scroll,
+     on Escape and on a tap elsewhere, so nothing is left cocked on the desk.
+     It once had none of that: a stray tap stayed armed forever, so a later,
+     unrelated tap on this same button could fire the rotate with no fresh
+     confirmation. */
+  /** @param {MouseEvent & { currentTarget: HTMLElement }} event */
+  const tapRotate = (event) => {
+    if (rotateArm.tap(true, event.currentTarget)) act("rotate");
   };
   const toggleIngest = () => {
-    // Any other tap disarms a pending rotate, same as tapping a different
-    // key disarms the household page's twoTap().
-    disarmRotate();
+    // Any other tap disarms a pending rotate (arm.js: a press elsewhere).
+    rotateArm.disarm();
     act(relay.ingest === "paused" ? "resume" : "pause");
   };
 
@@ -136,8 +122,7 @@
 <!-- The shared chrome (#1010, owner 2026-09-16): the way back goes to the
      sky here too, not to /settings -- the owner chose one door for every
      sub-screen. The stage's light-dismiss stays as the other way out. -->
-<Chrome user={data.user} current="settings"
-        role={data.household ? `${data.household.name ?? ""} · ${data.household.canManage ? "owner" : "member"}` : ""} />
+<Chrome user={data.user} current="settings" household={data.household} />
 <!-- §14 (#471): clicking off the card returns to wherever the reader came
      from — the inbox, settings, or home as the deep-link fallback. -->
 <div class="stage" role={pocket ? undefined : "main"} onclick={(event) => { if (event.target === event.currentTarget) dismissRelay(); }}><div class="glass relay-card">
@@ -155,7 +140,7 @@
     <div class="failures">
       <h2>arrived, but could not be read</h2>
       {#each failures as failure (failure.id)}
-        <div class="kv"><span>{shortDate(failure.receivedAt)}</span><span>{reasonWords(failure.reason)} · {failure.message}</span></div>
+        <div class="kv"><span>{dayMonth(failure.receivedAt)}</span><span>{reasonWords(failure.reason)} · {failure.message}</span></div>
       {/each}
     </div>
   {/if}

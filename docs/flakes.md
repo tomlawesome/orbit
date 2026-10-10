@@ -138,6 +138,7 @@ skill).
 ## local-sign-in.test.ts "spends a real derivation whichever of the four cases it is"
 
 - 2026-09-19 · 9ccca49 (!950, none of it near sign-in) · pipeline 1278 / `integration` job 16683 · `expect(Math.max(...times)).toBeLessThan(Math.min(...times) * 6)` — the four attempts' elapsed times spread wider than 6×. Retried on the same commit as job 16708 and passed. The assertion measures wall-clock on a shared, loaded runner; its own comment (`tests/integration/local-sign-in.test.ts:283-285`) says a strict bound "would measure the runner rather than the code", and the host was writing at 80–160 MB/s under another tenant at the time.
+- 2026-10-10 · cd964294 (!1052; its only changes since 8b9bf878, whose `integration` job 34067 passed, are e2e specs and one unit test) · pipeline 2341 / `integration` job 34109 · the same assertion, now in the test named "answers an unknown address, a wrong password, a disabled account and a passwordless account alike" (`tests/integration/local-sign-in.test.ts:288`): 1310.7 ms against a 1244.3 ms bound (6× the fastest attempt). Retried as job 34121. Second sighting.
 
 ## v19-keyboard.spec.ts:568 "administration: the local-user controls are reachable and announced"
 
@@ -343,6 +344,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-08 · 687cb0f4 (door batch, !1044; nothing in it touches /create or its save) · pipeline 2251 / smoke_webkit (job 33371), desktop-webkit · `focus is not dropped to the page` at line 384, `focusedElement` was `body`, on the first attempt and on the in-job retry alike, so the job failed. Still #1313.
 - 2026-10-09 · 11e0e1c4 (#1325) · pipeline 2277 / smoke (job 33639), mobile-chromium · the :373 /create focus check failed its first attempt with "Expected to fail, but passed" (focus stayed on the pressed button) and met its expected failure on the retry, so Playwright counted it flaky. Chromium kept the focus this time: the race runs both ways. Not reproduced locally in four mobile-chromium runs, three of them under CPU load. Still #1313.
 - 2026-10-09 · 0ff6cbbf (engine batch, !1051; its only web change is the household page, nowhere near /create) · pipeline 2317 / smoke_webkit_mobile (job 33987), mobile-webkit · the :379 announcement check for /create timed out after 5 s waiting for `not saved|Failed to fetch|Load failed`; the in-job retry passed, so Playwright counted it flaky. Still #1313.
+- 2026-10-10 · a318e11b (#1342 batch) · pipeline 2382 / smoke (job 34366), desktop-chromium and mobile-chromium, and smoke_webkit (job 34368), desktop-webkit · the :379 announcement check and the :396 focus check for /create timed out waiting for the error words; each passed on the in-job retry. Not the new service worker: this file already keeps it out on WebKit, and a local run on the fixed branch passed on desktop-chromium, mobile-chromium, desktop-firefox and desktop-webkit. Still #1313.
 
 ## settings-notification-history.spec.ts:137 "a member sees their own last sent reminders, plainly, on both dialects" — desktop-firefox
 
@@ -353,6 +355,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 - 2026-10-06 · 4bb20449 (dev, !1035 merged) · local full suite, both WebKit projects, inside CI's Playwright image (#1235), local worker count · `page.waitForResponse: Timeout 30000ms exceeded` on the slow POST; the same test passed in a five-file targeted run minutes earlier and in a second full desktop-webkit run an hour later. Error context lost to a later run clearing `test-results/`.
 - 2026-10-08 · 24866e53 (door batch, !1044) · CI pipeline 2248 `smoke_firefox`, desktop-firefox · failed once, passed on retry: the same test on a second browser.
 - 2026-10-08 · 91df467a (door batch, !1044) · CI pipeline 2254 `smoke_webkit` · failed once, passed on retry.
+- 2026-10-10 · a318e11b (#1342 batch) · pipeline 2382 `smoke_firefox` (job 34367) · failed both attempts, and once in three local desktop-firefox runs after the worker fix. Cause found: the sign-in-again challenge opened on the busy screen, then moved to the form once GET /api/auth/methods answered, rebuilding its password field under Playwright's fill (the trace shows the field empty and the button disabled). Fixed with tests/unit/archive-challenge-opens-once.test.mjs; four local runs green after.
 
 ## v19-mail-collection.spec.ts:288 "a spoofed PDF travels the real pipe" on desktop-webkit, desktop-firefox
 
@@ -383,6 +386,7 @@ Both local sightings are on the exact commit CI passed, which is the flake defin
 
 - 2026-10-08 · 687cb0f4 (door batch, !1044; the hatch's descent and this spec are new in it) · pipeline 2251 / smoke_webkit_mobile (job 33372) · `#1262: the menu is still open after sign-out started` at line 198, on the first attempt and the in-job retry. The menu lost its `open` class, but its layer kept `visibility: visible` past the 2 s check: the layer hides 300 ms after closing (Sheet.svelte), and the retry's screencast has no frame from 0.2 s to 2.1 s after the press, so the page drew nothing in that time. The forced world was on in this run ("flight world: on", "moon on the GPU" in the console); pipeline 2248's pass on the same code flew "on the canvas". Suspected, not established: drawing the forced world without a GPU stalls WebKit's rendering as the descent starts. First sighting.
 - 2026-10-09 · 1e0299ab (engine batch, !1050; no front-end change but one household page's time-zone list) · pipeline 2313 / smoke_webkit_mobile (job 33895) · the same `#1262: the menu is still open after sign-out started` at line 198, first attempt and in-job retry. The job was re-run as 33901. Second sighting.
+- 2026-10-10 · a318e11b (v0.3 batch, !1054) · pipeline 2382 / smoke_webkit (job 34368), **desktop-webkit**, same world-forced test · the same `#1262: the menu is still open after sign-out started`, first attempt and in-job retry. Filed as #1367 after the third sighting; this is the first on desktop-webkit.
 
 ## sign-out-descent.spec.ts:252 "sign out from another page's menu plays the descent (phone-narrow)" on desktop-webkit
 
@@ -418,9 +422,10 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 
 - 2026-10-09 · dad77c25 (#1325 rebased onto dev; the tree differs from pipeline 2287's green 8170fecb only in design files, an ADR, this log and one e2e spec) · pipeline 2290 / fidelity (job 33718) · `ArrowRight did not come back`; the same test passed at 390x844 in the same run. 45/45 locally with `--repeat-each=5` on the same commit; job retried as 33765. First sighting.
 
-## pocket-measure.spec.js:544 "/home · row-retire-armed meets the pocket floors" — pocket-measure, 390x664
+## pocket-measure.spec.js:544 "/home · row-… meets the pocket floors" — `openRow`'s tap never opens the panel (row-retire-armed at 390x664, row-snooze at 360x640)
 
 - 2026-10-09 · abcb06f1 · pipeline 2301 / fidelity (job 33822) · `openRow`'s tap on Car MOT's face never opened its panel (`locator.waitFor` ran to the 60 s test timeout), after `go()` had already waited for `body[data-home-ready]`; 487 others passed. Locally in the pinned image on 6afb412e: 20 repeats alone, then every `/home · row-` state 15 times over 4 workers (420 runs), all green. First sighting.
+- 2026-10-10 · cd964294 (!1052; since 8b9bf878, whose fidelity job 34065 passed, only e2e specs and one unit test changed) · pipeline 2341 / fidelity (job 34107) · row-snooze at 360x640, the same wait at `pocket-states.js:61` for Car MOT's opened panel ran to the 60 s test timeout; 487 others passed. Retried as job 34122. Second sighting.
 
 ## tour-pocket-webkit.spec.js:539 "plays through chapter 3 at 360x780 under normal motion" — chapters skipped
 
@@ -445,3 +450,7 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## v19-keyboard-pocket.spec.ts:411 "item page (pocket): actions and the back link work by keyboard" — mobile-webkit
 
 - 2026-10-09 · 1e0299ab (!1050) · pipeline 2313 / smoke_webkit_mobile (job 33924) · `Tab never reached the requested control within 60 presses`; after the reschedule save, focus went to `body` past the pills. Failed on both attempts. Passed in jobs 33895 and 33901 on the same commit, in 33925, and locally. The /item page is retired by #1319 (merged in 51d9a8ef), so this spec goes with it. First sighting.
+
+## desk-phone-small-drifts.test.mjs
+
+- 2026-10-10 · b929a182 (#1329) · local scripts/test-backend.sh under parallel load · 5 s timeout on the dynamic import in "burnsInOf, the phone's"; passed alone and on rerun

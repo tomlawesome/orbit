@@ -95,18 +95,31 @@ describe("household workspace", () => {
     expect(activeHousehold(next).items).toEqual([]);
   });
 
-  it("moves items from removed sections into the first retained section", () => {
+  it("moves items from removed sections into the section the command names", () => {
     const initial = createTestWorkspace();
     const household = activeHousehold(initial);
     const retained = household.sections.filter((section) => section.id !== "vehicle");
+    const destination = retained[retained.length - 1].id;
+    expect(destination).not.toBe(retained[0].id);
     const next = reduceWorkspace(initial, {
       type: "sections.replace",
       householdId: household.id,
       sections: retained,
+      moveItemsTo: destination,
     });
 
     expect(activeHousehold(next).sections).toEqual(retained);
-    expect(activeHousehold(next).items.find((item) => item.id === "car-insurance")?.sectionId).toBe(retained[0].id);
+    expect(activeHousehold(next).items.find((item) => item.id === "car-insurance")?.sectionId).toBe(destination);
+  });
+
+  it("leaves everything as it was when a section that holds items is dropped with no destination, as the engine refuses to", () => {
+    const initial = createTestWorkspace();
+    const household = activeHousehold(initial);
+    const retained = household.sections.filter((section) => section.id !== "vehicle");
+    expect(reduceWorkspace(initial, { type: "sections.replace", householdId: household.id, sections: retained })).toEqual(initial);
+    expect(reduceWorkspace(initial, {
+      type: "sections.replace", householdId: household.id, sections: retained, moveItemsTo: "vehicle",
+    })).toEqual(initial);
   });
 
   it("upserts and archives an item without deleting its history", () => {

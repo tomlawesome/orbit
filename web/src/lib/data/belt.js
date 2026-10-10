@@ -22,7 +22,7 @@
 import { bandOfKind, daysUntil, kindOfItem } from "./chart.js";
 /* Relative, like chart.js's own imports: this module is pure and is exercised
    straight from node by the unit suite, which knows no SvelteKit aliases. */
-import { longDate, tminus } from "../format.js";
+import { dayMonth, longDate, sizeLabel, tminus } from "../format.js";
 import { stagedPreviewHref } from "../pocket/review.js";
 
 /**
@@ -39,39 +39,12 @@ export const BELT_BAND = {
   ended: "ended",
 };
 
-/* The band's captions carry the short date the manifest uses — "29 Aug" —
-   which format.js does not export because home spells it inline. Same
-   options, so the two agree. */
 /**
- * @param {string} iso
- * @returns {string}
- */
-export const shortDate = (iso) =>
-  new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", {
-    day: "2-digit", month: "short", timeZone: "UTC",
-  });
-
-/**
- * The document plate's own words: "12 June 2026" from a stored instant.
- * @param {string} iso
- * @returns {string}
- */
-const arrivedOn = (iso) =>
-  new Date(iso).toLocaleDateString("en-GB", {
-    day: "numeric", month: "long", year: "numeric", timeZone: "UTC",
-  });
-
-/**
- * workspace.js's document size vocabulary, so "240 KB" means one thing.
+ * format.js's size words, with a document that has no size on record said so.
  * @param {?number} [bytes]
  * @returns {string}
  */
-export const sizeLabel = (bytes) => {
-  if (bytes === null || bytes === undefined) return "unknown size";
-  return bytes >= 1024 * 1024
-    ? `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
-    : `${Math.round(bytes / 1024)} KB`;
-};
+const sizeWords = (bytes) => (bytes === null || bytes === undefined ? "unknown size" : sizeLabel(bytes));
 
 /**
  * "PDF (application/pdf)" — what the file is, in both registers.
@@ -131,8 +104,8 @@ export function documentRowOf(doc) {
   return {
     id: doc.id,
     name: doc.displayName,
-    size: sizeLabel(doc.sizeBytes),
-    added: doc.availableAt ? arrivedOn(doc.availableAt) : "unknown",
+    size: sizeWords(doc.sizeBytes),
+    added: doc.availableAt ? longDate(doc.availableAt) : "unknown",
     type,
     plate,
     clean: doc.scanStatus === "clean",
@@ -150,7 +123,7 @@ export function documentRowOf(doc) {
     lifecycle: doc.lifecycle ?? null,
     mediaType: doc.mediaType ?? null,
     ready: Boolean(doc.ready),
-    deleteAfter: doc.deleteAfter ? arrivedOn(doc.deleteAfter) : null,
+    deleteAfter: doc.deleteAfter ? longDate(doc.deleteAfter) : null,
   };
 }
 
@@ -293,7 +266,7 @@ export function beltManifestOf({ household, documentsByItem = {}, today, keepId 
         days: days ?? Number.MAX_SAFE_INTEGER,
         urg,
         t: item.dueDate ? tminus(item.dueDate, today) : "—",
-        when: item.dueDate ? whenOf(kind, days, shortDate(item.dueDate)) : "unscheduled",
+        when: item.dueDate ? whenOf(kind, days, dayMonth(item.dueDate)) : "unscheduled",
         longWhen: item.dueDate ? longDate(item.dueDate) : "unscheduled",
         cost: item.costMinor ?? null,
         /* costIsEstimate is not in WorkspaceItem's own typedef (workspace.js,
@@ -343,10 +316,10 @@ export const plateOfName = (name) => {
  * @returns {BeltDocumentRow[]}
  */
 function stagedDocsOf(suggestion) {
-  const arrived = suggestion.receivedAt ? arrivedOn(suggestion.receivedAt) : "unknown";
+  const arrived = suggestion.receivedAt ? longDate(suggestion.receivedAt) : "unknown";
   const named = suggestion.attachments?.map((a) => ({
     name: a.displayName ?? "forwarded document",
-    size: sizeLabel(a.sizeBytes),
+    size: sizeWords(a.sizeBytes),
     clean: a.scanState === "clean",
     attachmentId: a.id ?? null,
     mediaType: a.mediaType ?? null,
@@ -428,7 +401,7 @@ export function suggestionRowOf(suggestion, today) {
        T-label's own tone still comes from the bands everything else uses. */
     urg: BELT_BAND[bandOfKind(kind === "expiry" ? "expiry" : "renewal", days)],
     t: due ? tminus(due, today) : "—",
-    when: due ? whenOf(kind, days, shortDate(due)) : "undated",
+    when: due ? whenOf(kind, days, dayMonth(due)) : "undated",
     longWhen: due ? longDate(due) : "undated",
     cost: proposal.costMinor ?? suggestion.costMinor ?? null,
     costIsEstimate: true,

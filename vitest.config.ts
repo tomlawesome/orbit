@@ -36,6 +36,10 @@ const sharedAliases = {
   "$env/dynamic/private": fileURLToPath(
     new URL("./tests/support/env-dynamic-private.ts", import.meta.url),
   ),
+  // Another virtual module, for the service worker (#1329); see the stub.
+  "$service-worker": fileURLToPath(
+    new URL("./tests/support/service-worker-module.ts", import.meta.url),
+  ),
 };
 
 // Written as a typed constant rather than inline: `project` below is declared

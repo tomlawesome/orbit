@@ -1,28 +1,32 @@
 /**
- * ARM, THEN FIRE (#1120, proposal §1.8). A dangerous act's first tap arms it
- * ("tap again to remove") and does nothing else; the second tap fires. It
- * disarms by itself after 4s, on the reader's scroll, on any other tap, and
- * on Escape.
+ * ARM, THEN FIRE (#1120, proposal §1.8; one implementation and one timeout
+ * since #1342). A dangerous act's first tap arms it ("tap again to remove")
+ * and does nothing else; the second tap fires. It disarms by itself after 4s,
+ * on the reader's scroll, on any other tap, and on Escape (disarmOnElsewhere).
  *
- * The desk has written this inline five times (Chrome.svelte's sign-out, the
- * belt's archive/cancel, the inbox's approve/dismiss, settings' methods and
- * devices, the pocket's suggestion sheet), none of them timing out. This is
- * the one the pocket kit uses; the desk copies move over as their screens
- * get their phone layouts, rather than all at once here.
+ * Every screen, desk and phone, uses this; none keeps its own timer.
  */
 
 export const ARM_MS = 4000;
 
 /**
- * @param {{ ms?: number | (() => number | undefined), onchange?: (armed: boolean) => void }} [options]
+ * `armed` is the armed key: `true` for the unkeyed `tap()`, the key itself for
+ * `tap(key)` (one arm serving a list of buttons, `arm.armed === id`), `false`
+ * when idle.
+ * `onchange` hears that value; a caller that only ever taps unkeyed can type
+ * its parameter `boolean`, a keyed one `string | boolean`, so it is `any` here.
+ * @typedef {boolean | string | number} ArmValue
+ * @param {{ ms?: number | (() => number | undefined), onchange?: (armed: any) => void }} [options]
  *   `ms` may be a function, read at each arming, so a component can pass a
  *   prop that changes.
  */
 export function createArm({ ms = ARM_MS, onchange = () => {} } = {}) {
+  /** @type {ArmValue} */
   let armed = false;
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let timer;
-  /** @param {boolean} next */
+  let stopWatching = () => {};
+  /** @param {ArmValue} next */
   const set = (next) => {
     if (armed === next) return;
     armed = next;
@@ -30,20 +34,34 @@ export function createArm({ ms = ARM_MS, onchange = () => {} } = {}) {
   };
   const disarm = () => {
     clearTimeout(timer);
+    stopWatching();
+    stopWatching = () => {};
     set(false);
   };
   return {
     get armed() { return armed; },
-    /** The tap. True when this tap should fire the act. */
-    tap() {
-      if (!armed) {
-        set(true);
-        clearTimeout(timer);
-        timer = setTimeout(disarm, (typeof ms === "function" ? ms() : ms) ?? ARM_MS);
-        return false;
+    /**
+     * The tap. True when this tap should fire the act: the same key was already
+     * armed. A different key re-arms for it and restarts the hold.
+     *
+     * Pass the tapped `button` (an event's `currentTarget`) and the arm also
+     * disarms itself on scroll, Escape and a press outside that button
+     * (disarmOnElsewhere) for as long as it stays armed. A component that
+     * already calls disarmOnElsewhere itself, like ArmButton, omits it.
+     * @param {string | number | boolean} [key]
+     * @param {HTMLElement | null} [button]
+     */
+    tap(key = true, button = null) {
+      if (armed === key) {
+        disarm();
+        return true;
       }
-      disarm();
-      return true;
+      stopWatching();
+      set(key);
+      clearTimeout(timer);
+      timer = setTimeout(disarm, (typeof ms === "function" ? ms() : ms) ?? ARM_MS);
+      stopWatching = button ? disarmOnElsewhere(button, disarm) : () => {};
+      return false;
     },
     disarm,
   };

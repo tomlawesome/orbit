@@ -163,8 +163,8 @@ export function hurryFlight() {
  * is not the door: the flight's world is readied once the page has had a few
  * seconds and its painted animations have finished, so the chores (which
  * touch the GPU, and a compile on the page's own thread) never run under a
- * reveal that is still being drawn (#1299). The same wait as SignIn.svelte's
- * `drawnIn`, which that file keeps for the door.
+ * reveal that is still being drawn (#1299). The same wait as the door's (SignIn.svelte
+ * imports `drawnIn` from here).
  *
  * It is the door's own ask (gentle, no test frames): never under save-data
  * or reduced motion. Where the browser compiles on the page's own thread
@@ -183,7 +183,7 @@ const painted = (a) => {
     return props.some((k) => !COMPOSITED.has(k));
   } catch { return true; }
 };
-const drawnIn = () => {
+export const drawnIn = () => {
   try {
     const ends = document.getAnimations().filter((a) => Number.isFinite(a.effect?.getComputedTiming().endTime) && painted(a));
     return Promise.all(ends.map((a) => a.finished.catch(() => {})));

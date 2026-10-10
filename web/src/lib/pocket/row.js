@@ -4,8 +4,9 @@
  * A `danger` act arms on its first tap and fires on its second; `arms` does
  * the same for an act that is not red (the relay's `Add to orbit`). With
  * `href` the act is a way onward (`open →`) rather than something done here.
- * `tone` colours the pill the desk way, or `filled` for the one primary.
- * @typedef {{ label: string, name: string, onact?: () => unknown, href?: string, danger?: boolean, arms?: boolean, tone?: "ok" | "up" | "warm" | "accent" | "filled" }} RowAct
+ * `tone` colours the pill the desk way, or `filled` for the one primary;
+ * `danger` tone is the red pill that does not arm (it opens a choice).
+ * @typedef {{ label: string, name: string, onact?: () => unknown, href?: string, danger?: boolean, arms?: boolean, tone?: "ok" | "up" | "warm" | "accent" | "danger" | "filled" }} RowAct
  */
 
 /** The unfold's close, in ms: the panel stays in the page until it is shut. */

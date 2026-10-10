@@ -1,4 +1,4 @@
-import { createArm } from "$lib/pocket/arm.js";
+import { createArm } from "$lib/arm.js";
 
 /**
  * A LIGHT GUARD ON UNSAVED ROWS (#1319 stage 3b; the coordinator's ruling,

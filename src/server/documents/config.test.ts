@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { getDocumentConfig, keyEncryptionKeyFor } from "./config";
+import { readFileSync } from "node:fs";
+import { documentRetentionDays, getDocumentConfig, keyEncryptionKeyFor } from "./config";
 
 const key = "ab".repeat(32);
 const nextKey = "cd".repeat(32);
@@ -57,5 +58,30 @@ describe("document configuration", () => {
       const config = getDocumentConfig({ NODE_ENV: "test", DOCUMENT_KEK: key, DOCUMENT_KEK_NEXT: nextKey });
       expect(keyEncryptionKeyFor(config, "some-other-key-id")).toBeUndefined();
     });
+  });
+});
+
+/* #1336 review: the session route reports the document retention window to
+   every signed-in screen, so reading it must not need the document key. A
+   missing or mistyped DOCUMENT_KEK is the degraded path the administration
+   screen explains (document-health.ts); it must not take the session with it. */
+describe("documentRetentionDays", () => {
+  it("reads the window without the document key", () => {
+    expect(documentRetentionDays({ DOCUMENT_RETENTION_DAYS: "90" })).toBe(90);
+  });
+
+  it("defaults to 30 days as the full config does", () => {
+    expect(documentRetentionDays({})).toBe(30);
+  });
+
+  it("is null for a value the full config would refuse, rather than throwing", () => {
+    expect(documentRetentionDays({ DOCUMENT_RETENTION_DAYS: "0" })).toBeNull();
+    expect(documentRetentionDays({ DOCUMENT_RETENTION_DAYS: "nine" })).toBeNull();
+  });
+
+  it("is what the session route reads, not the whole document config", () => {
+    const route = readFileSync(new URL("../../../web/src/routes/api/auth/session/+server.js", import.meta.url), "utf8");
+    expect(route).not.toMatch(/getDocumentConfig/);
+    expect(route).toMatch(/documentRetentionDays\(\)/);
   });
 });

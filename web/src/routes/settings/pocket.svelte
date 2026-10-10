@@ -7,7 +7,7 @@
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
   import { applyTheme } from "$lib/theme-swatches.js";
-  import { agoLong } from "$lib/format.js";
+  import { agoLong, clockOf, dayMonth, localZone, plural } from "$lib/format.js";
   import { watchTour } from "$lib/tour/watch.js";
   import { alertsSupported, disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
   import {
@@ -164,7 +164,7 @@
      too, not just desk's copy of it. */
 
   /** @param {number} days */
-  const daysWord = (days) => (days === 0 ? "on the day" : `${days} day${days === 1 ? "" : "s"}`);
+  const daysWord = (days) => (days === 0 ? "on the day" : plural(days, "day"));
 
   /* SENT TO YOU LATELY (#1003, §20, proposal §2.8). `GET /api/settings/sent`
      read in onMount below; `null` is the "couldn't load" state the panel
@@ -176,11 +176,8 @@
 
   /** @param {string} iso */
   function when(iso) {
-    const date = new Date(iso);
-    const zone = fixtures ? "UTC" : undefined;
-    const day = date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: zone });
-    const time = date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: zone });
-    return `${day} ${time}`;
+    const zone = fixtures ? "UTC" : localZone();
+    return `${dayMonth(iso, zone)} ${clockOf(iso, zone)}`;
   }
   /** @param {SentRow} row */
   const sentMeta = (row) =>
@@ -584,7 +581,7 @@
         <div class="st-rows st-flush">
           {#each view.memberships as membership (membership.id)}
             <Row title={membership.name}
-                 meta={`${membership.memberCount ?? "?"} member${membership.memberCount === 1 ? "" : "s"} · ${membership.itemCount} item${membership.itemCount === 1 ? "" : "s"}`}
+                 meta={`${membership.memberCount === undefined || membership.memberCount === null ? "? members" : plural(membership.memberCount, "member")} · ${plural(membership.itemCount, "item")}`}
                  trail={membership.role} trailTone={membership.role === "owner" ? "var(--accent-text)" : ""}
                  href={resolve("/household/[id]", { id: membership.id })}>
               {#snippet mark()}
@@ -654,7 +651,7 @@
         {/if}
         {#if wantsNew}
           <label class="st-label" for="st-new">new password</label>
-          <input id="st-new" class="st-input" type="password" autocomplete="new-password" minlength="12"
+          <input id="st-new" class="st-input" type="password" autocomplete="new-password"
                  enterkeyhint="done" bind:value={newPassword}>
         {/if}
       </form>

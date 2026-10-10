@@ -1,4 +1,6 @@
 <script>
+  import { tick } from "svelte";
+  import { plural } from "$lib/format.js";
   import { goto, invalidateAll } from "$app/navigation";
   import { resolve } from "$app/paths";
   import Mark from "$lib/Mark.svelte";
@@ -11,7 +13,8 @@
   import { wake } from "$lib/pocket/wake.js";
   import { PEN_ORDER, inkOf, nextMark } from "$lib/marks.js";
   import { constellationPlanetsOf, hashId } from "$lib/data/chart.js";
-  import { MAX_SECTIONS, deletionNameMatches, entriesLabel } from "$lib/data/household.js";
+  import { MAX_SECTIONS, deletionNameMatches, entriesIn, entriesLabel, moveEntriesAway, whereHeadingOf } from "$lib/data/household.js";
+  import { destinationChoices } from "$lib/editing/item-draft.js";
   import {
     addMember,
     decideJoinRequest,
@@ -20,11 +23,13 @@
     sendInvitation,
     transferOwnership,
     withdrawInvitation,
+    wordsOf,
     writeHouseholdIdentity,
     writeSections,
   } from "$lib/data/workspace.js";
   import { zoneLabel } from "$lib/pick-lists.js";
   import PickSheet from "./PickSheet.svelte";
+  import { daysWords } from "$lib/data/engine-limits.js";
   import PocketArchive from "./PocketArchive.svelte";
   import { changesLabel, changesOf, chipBodyOf, commandsFor, moved } from "./edits.js";
   import { roomOf } from "./room.js";
@@ -68,7 +73,7 @@
      `v.subtitle` keeps "your system · you own it" and "in orbit"; the
      pocket cap is 40 characters, so the role stands alone. */
   const hhSub = $derived(
-    `${v.canManage ? "owner" : "member"} · ${v.memberCount} ${v.memberCount === 1 ? "member" : "members"} · ${entriesLabel(v.entries)}`,
+    `${v.canManage ? "owner" : "member"} · ${plural(v.memberCount, "member")} · ${entriesLabel(v.entries)}`,
   );
 
   /* round-3 §3.4: an invited meta drops the year -- the desk's own
@@ -101,6 +106,7 @@
   function reset() {
     identity = identityOf(household);
     rows = rowsOf(household);
+    moveSaid = "";
   }
   /* Whatever the server says replaces every local edit: a save reloads, and
      stale dirt on something it has since answered for would be a lie. */
@@ -133,7 +139,15 @@
       await invalidateAll();
       wake(`saved · ${changesLabel(count)}`);
     } catch (error) {
-      problem = `not saved — ${/** @type {{ message?: string }} */ (error)?.message ?? String(error)}`;
+      problem = `not saved — ${wordsOf(error)}`;
+      /* Someone filed an entry in a section since this page loaded: show the
+         true list rather than the one this editor expected (#1332). */
+      const refusal = /** @type {{ code?: string, partial?: boolean }} */ (error);
+      if (refusal?.code === "section_has_items" || refusal?.partial) {
+        await invalidateAll();
+        await tick();
+        reset();
+      }
     } finally {
       saving = false;
     }
@@ -158,7 +172,7 @@
       wake(said);
       await invalidateAll();
     } catch (error) {
-      membersProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      membersProblem = wordsOf(error);
       wake(membersProblem, { failure: true });
     }
   }
@@ -185,7 +199,7 @@
       wake(`you’ve left ${v.name} · it’s a label in your sky again`);
       await goto(resolve("/home"));
     } catch (error) {
-      membersProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      membersProblem = wordsOf(error);
     }
   }
 
@@ -260,7 +274,7 @@
         inviteOpen = false;
       }
     } catch (error) {
-      inviteProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      inviteProblem = wordsOf(error);
     } finally {
       inviting = false;
     }
@@ -272,7 +286,7 @@
    */
   const invitationActs = (row) => v.canManage ? [
     { label: "resend", name: `Resend the invitation to ${row.email}`, tone: /** @type {const} */ ("accent"),
-      onact: () => offer(row.email, "invitation sent again").catch((error) => wake(error?.message ?? String(error), { failure: true })) },
+      onact: () => offer(row.email, "invitation sent again").catch((error) => wake(wordsOf(error), { failure: true })) },
     { label: "withdraw", name: `Withdraw the invitation to ${row.email}`, danger: true,
       onact: () => act(() => withdrawInvitation(v.id, row.id), `the invitation to ${row.email} is withdrawn · its link no longer works`) },
   ] : [];
@@ -312,6 +326,40 @@
 
   /** @param {EditorRow} row */
   const sectionName = (row) => row.name.trim() || "this section";
+
+  /* "Where do these entries go?" (#1332): the remove act on a section that
+     holds entries opens a sheet of tiles instead of arming; the pick is the
+     second tap. Nothing is sent until the bar's save. */
+  /** @type {string | null} */
+  let placing = $state(null);
+  let placeOpen = $state(false);
+  const placingRow = $derived(rows.find((row) => row.id === placing) ?? null);
+  const placeHeading = $derived(placingRow ? whereHeadingOf(entriesIn(placingRow)) : "");
+  const placeChoices = $derived(placingRow ? destinationChoices(rows, placingRow.id) : []);
+  /** Focus a section's row once the page is back in reach. @param {string} id */
+  const focusRow = (id) =>
+    tick().then(() =>
+      /** @type {HTMLElement | null} */ (document.querySelector(`[data-hh=sections] [data-row-key="${id}"] [data-row-face]`))
+        ?.focus({ preventScroll: true }));
+  /** @param {EditorRow} row */
+  function askWhere(row) {
+    placing = row.id;
+    placeOpen = true;
+  }
+  /** @param {string} destinationId */
+  function place(destinationId) {
+    const row = placingRow;
+    placing = null;
+    if (!row) return;
+    moveSaid = moveEntriesAway(rows, row, destinationId);
+    focusRow(destinationId);
+  }
+  /* Closed without a pick: nothing removed, focus back on the row. */
+  function placeCancelled() {
+    const id = placing;
+    placing = null;
+    if (id) focusRow(id);
+  }
 
   /** @param {EditorRow} row */
   function flip(row) {
@@ -378,9 +426,11 @@
     { label: "edit", name: `Edit ${sectionName(row)}`, tone: /** @type {const} */ ("accent"), onact: () => editSection(row) },
     ...(index > 0 ? [{ label: "move up", name: `Move ${sectionName(row)} up`, onact: () => moveBy(index, -1) }] : []),
     ...(index < total - 1 ? [{ label: "move down", name: `Move ${sectionName(row)} down`, onact: () => moveBy(index, 1) }] : []),
-    /* The hidden-not-removed law: only an empty section can go. */
-    ...(row.removable ? [{ label: "remove", name: `Remove ${sectionName(row)}`, danger: true,
-      onact: () => { row.removed = true; } }] : []),
+    /* Every section can go bar the last kept one. An empty one arms; one with
+       entries opens the sheet that asks where they go (red, no arm). */
+    ...(total > 1 ? [{ label: "remove", name: `Remove ${sectionName(row)}`,
+      ...(row.removable ? { danger: true, onact: () => { row.removed = true; } }
+        : { tone: /** @type {const} */ ("danger"), onact: () => askWhere(row) }) }] : []),
   ];
 
   /* ── the danger line ──────────────────────────────────────────────────── */
@@ -398,9 +448,9 @@
       await requestHouseholdDeletion(v.id, typedName);
       saidDoom = true;
       doomOpen = false;
-      wake(`${v.name} is asked to be deleted · gone for good in 30 days`);
+      wake(`${v.name} is asked to be deleted · gone for good in ${daysWords(v.retention?.recoveryDays)}`);
     } catch (error) {
-      doomProblem = `not requested — ${/** @type {{ message?: string }} */ (error)?.message ?? String(error)}`;
+      doomProblem = `not requested — ${wordsOf(error)}`;
     }
   }
 
@@ -573,7 +623,7 @@
       <section class="p-card hh-flush hh-sections" style:--i="3" aria-labelledby="hh-sections-head" data-hh="sections">
         <div class="hh-seclist" use:mountReorder={{ onreorder: reorder }} data-row-group>
           {#each shown as row, index (row.id)}
-            <Row title={row.name || "unnamed section"} meta="{entriesLabel(row.count)} · {row.visible ? 'shown' : 'hidden'}"
+            <Row title={row.name || "unnamed section"} key={row.id} meta="{entriesLabel(entriesIn(row))} · {row.visible ? 'shown' : 'hidden'}"
                  acts={sectionActs(row, index, shown.length)} onmove={(direction) => moveBy(index, direction)}>
               {#snippet mark()}<span class="hh-secmark" class:off={!row.visible}><Mark icon={row.icon} accent={row.accent} size={20} /></span>{/snippet}
               {#snippet end()}
@@ -591,7 +641,7 @@
       </section>
 
       <div class="p-land" style:--i="4">
-        <PocketArchive householdId={v.id} householdName={v.name} entries={v.entries} sections={shown.length} />
+        <PocketArchive householdId={v.id} householdName={v.name} entries={v.entries} sections={shown.length} limits={v.limits} />
       </div>
 
       <section class="p-card danger hh-danger" style:--i="5" aria-labelledby="hh-danger-head" data-hh="danger">
@@ -602,7 +652,7 @@
           The danger line
         </h2>
         {#if saidDoom}
-          <p class="p-prose hh-doomsaid" role="status">requested · gone for good in 30 days</p>
+          <p class="p-prose hh-doomsaid" role="status">requested · gone for good in {daysWords(v.retention?.recoveryDays)}</p>
         {:else}
           <button class="p-pill danger wide" onclick={() => { typedName = ""; doomProblem = null; doomOpen = true; }}>delete this system</button>
         {/if}
@@ -670,6 +720,8 @@
   </Sheet>
 
   <PickSheet bind:open={pickOpen} kind={picking} value={identity[picking]} onchoose={(value) => (identity[picking] = value)} />
+  <PickSheet bind:open={placeOpen} kind="section" value={null} choices={placeChoices} heading={placeHeading}
+             onchoose={place} oncancel={placeCancelled} />
 
   <Sheet bind:open={editOpen} size="callout" title={editing?.id ? `Edit ${editing.name.trim() || "section"}` : "Add a section"}>
     {#if editing}
@@ -702,8 +754,8 @@
 
   <Sheet bind:open={doomOpen} size="callout" title="Delete {v.name}?">
     <p class="p-prose hh-sheet-say">
-      Everything in {v.name} — {v.entries} {v.entries === 1 ? "entry" : "entries"}, their documents, their history
-      and every reminder still queued — stops the moment you ask. You have <b class="hh-red">30 days</b> to change
+      Everything in {v.name} — {plural(v.entries, "entry", "entries")}, their documents, their history
+      and every reminder still queued — stops the moment you ask. You have <b class="hh-red">{daysWords(v.retention?.recoveryDays)}</b> to change
       your mind; after that it is gone for good.
     </p>
     <label class="hh-label" for="hh-delname">type the system’s name exactly</label>

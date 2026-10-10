@@ -5,7 +5,7 @@
   import FailedRow from "$lib/pocket/FailedRow.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
-  import { dismissReceipt, rotateRelay } from "$lib/data/workspace.js";
+  import { dismissReceipt, rotateRelay, wordsOf } from "$lib/data/workspace.js";
 
   /*
    * YOUR RELAY ON A PHONE (#1125, proposal §2.9). Beside the desk's card and
@@ -93,7 +93,7 @@
       await dismissReceipt(failure.id);
       removed.add(failure.id);
     } catch (error) {
-      wake(`not removed — ${/** @type {{ message?: string }} */ (error)?.message ?? String(error)}`, { failure: true });
+      wake(`not removed — ${wordsOf(error)}`, { failure: true });
     }
   }
 

@@ -516,13 +516,40 @@ async function runWorkspaceCommand(
     }
 
     if (command.type === "sections.replace") {
-      if (dryRun) return;
       const existing = await transaction.select({ id: sections.id }).from(sections).where(eq(sections.householdId, householdId));
       const existingIds = new Set(existing.map((section) => section.id));
-      const retainedSectionIds: string[] = [];
+      /* The id each listed section ends up with: the stored one, or for a new
+         section the id it brought (when that is a UUID) or a fresh one. */
+      const resolvedIds = new Map<string, string>();
+      for (const section of command.sections) {
+        resolvedIds.set(section.id, existingIds.has(section.id) || validUuid(section.id) ? section.id : randomUUID());
+      }
+      const retainedSectionIds = [...resolvedIds.values()];
+      const droppedSectionIds = existing.map((section) => section.id).filter((id) => !retainedSectionIds.includes(id));
+
+      /* #1332 (ADR-0034): before anything is written -- so a dry run says the
+         same -- a section that still holds items goes only with somewhere
+         named for them, and that somewhere is a section the list keeps. */
+      let destinationId: string | undefined;
+      if (command.moveItemsTo !== undefined) {
+        destinationId = resolvedIds.get(command.moveItemsTo);
+        if (!destinationId) {
+          throw new AppError("section_not_found", "Choose a section this household keeps to move the entries to", 422);
+        }
+      }
+      if (droppedSectionIds.length) {
+        const [held] = await transaction.select({ id: items.id }).from(items)
+          .where(and(eq(items.householdId, householdId), inArray(items.sectionId, droppedSectionIds)))
+          .limit(1);
+        if (held && !destinationId) {
+          throw new AppError("section_has_items", "A section with entries in it cannot be removed until you choose where they go", 422);
+        }
+      }
+      if (dryRun) return;
+
       for (const [position, section] of command.sections.entries()) {
-        if (existingIds.has(section.id)) {
-          retainedSectionIds.push(section.id);
+        const sectionId = resolvedIds.get(section.id)!;
+        if (existingIds.has(sectionId)) {
           await transaction.update(sections).set({
             name: section.name,
             icon: section.icon,
@@ -530,10 +557,8 @@ async function runWorkspaceCommand(
             position,
             visible: section.visible,
             updatedAt: new Date(),
-          }).where(and(eq(sections.id, section.id), eq(sections.householdId, householdId)));
+          }).where(and(eq(sections.id, sectionId), eq(sections.householdId, householdId)));
         } else {
-          const sectionId = validUuid(section.id) ? section.id : randomUUID();
-          retainedSectionIds.push(sectionId);
           await transaction.insert(sections).values({
             id: sectionId,
             householdId,
@@ -546,17 +571,20 @@ async function runWorkspaceCommand(
           });
         }
       }
-      const fallbackSectionId = retainedSectionIds[0];
-      await transaction.update(items)
-        .set({ sectionId: fallbackSectionId })
-        .where(and(
-          eq(items.householdId, householdId),
-          notInArray(items.sectionId, retainedSectionIds),
+      if (droppedSectionIds.length && destinationId) {
+        await transaction.update(items)
+          .set({ sectionId: destinationId })
+          .where(and(
+            eq(items.householdId, householdId),
+            inArray(items.sectionId, droppedSectionIds),
+          ));
+      }
+      if (droppedSectionIds.length) {
+        await transaction.delete(sections).where(and(
+          eq(sections.householdId, householdId),
+          inArray(sections.id, droppedSectionIds),
         ));
-      await transaction.delete(sections).where(and(
-        eq(sections.householdId, householdId),
-        notInArray(sections.id, retainedSectionIds),
-      ));
+      }
       return;
     }
 

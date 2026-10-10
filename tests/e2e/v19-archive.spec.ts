@@ -261,6 +261,33 @@ test("write an archive, then bring it into a second household — a clash stays 
   }
 });
 
+test("an armed desk button relaxes back after 4 s without a second tap (#1342)", async ({ page }) => {
+  test.setTimeout(60_000);
+  await signIn(page, "/home");
+  const source = await seedHousehold(page, ["Boiler service"]);
+  await ensureReaderCanAnswerTheChallenge(page);
+  const desk = await pageAfterStepUp(page);
+  try {
+    await desk.goto(`/household/${source.id}`);
+    await expect(desk.locator(".c-archive")).toBeVisible({ timeout: 30_000 });
+    await desk.getByRole("button", { name: "write an archive →" }).click();
+    await desk.getByLabel("a passphrase for the file").fill(PASSPHRASE);
+    await desk.getByLabel("the passphrase again").fill(PASSPHRASE);
+
+    const armed = desk.getByRole("button", { name: "tap again to write the archive" });
+    await desk.getByRole("button", { name: "write the archive" }).click(); // arm
+    await expect(armed).toBeVisible();
+    // Still armed shortly before 4 s ...
+    await desk.waitForTimeout(3_000);
+    await expect(armed).toBeVisible();
+    // ... and relaxed by 4 s (plus slack), 5 s being the old hold on this screen.
+    await expect(armed).toHaveCount(0, { timeout: 1_500 });
+    await expect(desk.getByRole("button", { name: "write the archive" })).toBeVisible();
+  } finally {
+    await cleanup(desk, source);
+  }
+});
+
 test("a wrong passphrase is refused, and nothing is read", async ({ page }) => {
   test.setTimeout(60_000);
   await signIn(page, "/home");

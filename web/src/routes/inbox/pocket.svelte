@@ -2,8 +2,8 @@
   import { flip } from "svelte/animate";
   import { SvelteMap } from "svelte/reactivity";
   import { resolve } from "$app/paths";
-  import { approveWithOperation, dismissReceipt, readInboxScreen } from "$lib/data/workspace.js";
-  import { ago, agoLong } from "$lib/format.js";
+  import { approveWithOperation, dismissReceipt, readInboxScreen, wordsOf } from "$lib/data/workspace.js";
+  import { ago, agoLong, dayMonth } from "$lib/format.js";
   import { receiptWords } from "$lib/data/metadata-status.js";
   import FailedRow from "$lib/pocket/FailedRow.svelte";
   import ReviewCard from "$lib/pocket/ReviewCard.svelte";
@@ -64,9 +64,6 @@
   }
 
   /* ---- words ----------------------------------------------------------- */
-  /** @param {string} iso */
-  const short = (iso) =>
-    new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
   /** @param {Receipt} receipt */
   const titleOf = (receipt) => reviewTitleOf(receipt);
   /** @param {Receipt} receipt */
@@ -106,7 +103,7 @@
       await reload();
       return true;
     } catch (error) {
-      problems.set(receipt.id, /** @type {{ message?: string }} */ (error)?.message ?? String(error));
+      problems.set(receipt.id, wordsOf(error));
       return false;
     } finally {
       busy = null;
@@ -125,7 +122,7 @@
       wake(`dismissed · ${titleOf(receipt)}`);
       await reload();
     } catch (error) {
-      problems.set(receipt.id, /** @type {{ message?: string }} */ (error)?.message ?? String(error));
+      problems.set(receipt.id, wordsOf(error));
     } finally {
       busy = null;
       busyAct = null;
@@ -139,7 +136,7 @@
       exits.set(failure.id, "burn");
       await reload();
     } catch (error) {
-      wake(`not removed — ${/** @type {{ message?: string }} */ (error)?.message ?? String(error)}`, { failure: true });
+      wake(`not removed — ${wordsOf(error)}`, { failure: true });
     }
   }
 
@@ -246,7 +243,7 @@
           </h2>
           {#each view.review as receipt, index (receipt.id)}
             <div class="pki-card" animate:flip={{ duration: 300 }} out:leave={{ id: receipt.id }}>
-              <ReviewCard title={titleOf(receipt)} caught={short(/** @type {string} */ (receipt.receivedAt))}
+              <ReviewCard title={titleOf(receipt)} caught={dayMonth(/** @type {string} */ (receipt.receivedAt))}
                           burnsIn={burnsIn(receipt)} readings={readingsOf(receipt)} papers={papersOf(receipt)}
                           unreadable={receiptWords(receipt.metadataStatus)} locked={reviewLockedOf(receipt)} {index}
                           busy={busy === receipt.id ? busyAct : null} problem={problems.get(receipt.id) ?? null}
@@ -303,7 +300,7 @@
                 <!-- The date first and the file name last, so the guard
                      trims the name (round 3 §1, R5). -->
                 <Row title={entry.title ?? "a filed item"} href={resolve(`/home?item=${encodeURIComponent(entry.itemId)}`)}
-                     meta="added {short(/** @type {string} */ (entry.filedAt))}{entry.sourceDocument ? ` · ${entry.sourceDocument}` : ""}">
+                     meta="added {dayMonth(/** @type {string} */ (entry.filedAt))}{entry.sourceDocument ? ` · ${entry.sourceDocument}` : ""}">
                   {#snippet mark()}<span class="p-body {T_CLASS[entry.band] ?? 'ended'}"></span>{/snippet}
                 </Row>
               </div>
@@ -317,7 +314,7 @@
       </section>
 
       {#if !emptyQueue}
-        <p class="p-foot pki-foot">unreviewed arrivals burn up after 45d</p>
+        <p class="p-foot pki-foot">unreviewed arrivals burn up after {view?.retention ? `${view.retention.receiptDays}d` : "a limited time"}</p>
       {/if}
     {/if}
   </main>
