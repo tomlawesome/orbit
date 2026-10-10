@@ -1,21 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import {
-    addMember,
-    commandContact,
-    commandUploadLimit,
-    commandMailbox,
-    createLocalUser,
-    createSystem,
-    hardDeleteHousehold,
-    readAdminScreen,
-    readSignInMethods,
-    restoreHousehold,
-    retryDocumentJob,
-    sendSetupLink,
-    startStepUp,
-    testMail,
-  } from "$lib/data/workspace.js";
+  import { addMember, commandContact, commandMailbox, commandUploadLimit, createLocalUser, createSystem, hardDeleteHousehold, readAdminScreen, readSignInMethods, restoreHousehold, retryDocumentJob, sendSetupLink, startStepUp, testMail, wordsOf } from "$lib/data/workspace.js";
   import { createArm } from "$lib/arm.js";
   import { deletionNameMatches } from "$lib/data/household.js";
   import { SETUP_LINK_FIXTURES } from "$lib/data/fixtures/admin.js";
@@ -23,12 +8,12 @@
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { mountStation } from "$lib/backdrops/station.js";
-  import { ago, dayMonth } from "$lib/format.js";
+  import { ago, dayMonth, initials, plural } from "$lib/format.js";
   import Chrome from "$lib/Chrome.svelte";
   import { isPocket } from "$lib/pocket/media.js";
   import Pocket from "./pocket.svelte";
   import {
-    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, initialsOf, lapses, megabytes,
+    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, lapses, megabytes,
     openFor, plainly, sendWords, setupWords, stamp, testVerdict,
   } from "./words.js";
   import "./administration.css";
@@ -72,11 +57,6 @@
   let backdropRoot = null;
   /* #1123: on a phone the pocket's column holds the page's one main landmark. */
   const pocket = isPocket();
-  /** @param {unknown} error */
-  const said = (error) => /** @type {{ message?: string }} */ (error)?.message ?? String(error);
-  /** @param {number} n @param {string} one @param {string} [many] */
-  const count = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
   /* §11 (#453): direct placement — it lands on the real route and refreshes
      the screen with the server's answer. Deciding join requests is NOT an
      admin-screen function (§15-2g). */
@@ -98,7 +78,7 @@
       placing = null;
       view = await readAdminScreen();
     } catch (error) {
-      problem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      problem = wordsOf(error);
     } finally {
       busy = null;
     }
@@ -192,7 +172,7 @@
       clockSaid[row.id] = { ok: true, text: `restored · ${row.name} is back exactly as it was` };
       view = await readAdminScreen();
     } catch (error) {
-      clockSaid[row.id] = { ok: false, text: `not restored — ${said(error)}` };
+      clockSaid[row.id] = { ok: false, text: `not restored — ${wordsOf(error)}` };
     }
   }
 
@@ -231,7 +211,7 @@
       doomGone = [...doomGone, { id: row.id, text: `deleted · ${row.name} is gone for good · its members keep their accounts` }];
       view = await readAdminScreen();
     } catch (error) {
-      doomProblem[row.id] = said(error);
+      doomProblem[row.id] = wordsOf(error);
     }
   }
 
@@ -523,7 +503,7 @@
     } catch (error) {
       /* The command itself refused — nothing changed server-side, so this
          really is "not done". */
-      mailboxProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      mailboxProblem = wordsOf(error);
       mailboxBusy = null;
       return;
     }
@@ -589,7 +569,7 @@
        against, so only the count travels, as the phone's own detail panel
        already shows it. */
     if (job.status === "failed") {
-      return `${JOB_REASONS[job.lastErrorCode ?? "unknown"] ?? JOB_REASONS.unknown} · ${count(job.attempts, "try", "tries")} · last tried ${ago(job.updatedAt, jobsClock)}`;
+      return `${JOB_REASONS[job.lastErrorCode ?? "unknown"] ?? JOB_REASONS.unknown} · ${plural(job.attempts, "try", "tries")} · last tried ${ago(job.updatedAt, jobsClock)}`;
     }
     if (job.status === "retry") return job.lastErrorCode ? JOB_REASONS[job.lastErrorCode] ?? JOB_REASONS.unknown : `last tried ${ago(job.updatedAt, jobsClock)}`;
     if (job.status === "pending") return retriedJobs[job.id] ? "attempt 1 · queued just now" : `queued ${ago(job.createdAt, jobsClock)}`;
@@ -605,7 +585,7 @@
       await retryDocumentJob(job.id, job.status);
       retriedJobs[job.id] = { status: "pending", at: new Date().toISOString() };
     } catch (error) {
-      jobsProblem = said(error);
+      jobsProblem = wordsOf(error);
     }
   }
 
@@ -630,7 +610,7 @@
       await testMail(which);
       view = await readAdminScreen();
     } catch (error) {
-      testProblem = said(error);
+      testProblem = wordsOf(error);
     } finally {
       testingWhich = null;
     }
@@ -659,7 +639,7 @@
     /** @type {{ href: string, text: string }[]} */
     const items = [];
     const failedJobs = jobs.filter((job) => job.status === "failed").length;
-    if (failedJobs) items.push({ href: "#jobs-card", text: `${count(failedJobs, "job")} failed` });
+    if (failedJobs) items.push({ href: "#jobs-card", text: `${plural(failedJobs, "job")} failed` });
     if (mailProbes.relay && testVerdict(mailProbes.relay.result).tone === "over") items.push({ href: "#mail-card", text: "relay failed" });
     if (mailProbes.mailbox && testVerdict(mailProbes.mailbox.result).tone === "over") items.push({ href: "#mail-card", text: "mailbox failed" });
     return items;
@@ -693,7 +673,7 @@
       view = await readAdminScreen();
       editingContact = false;
     } catch (error) {
-      contactProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      contactProblem = wordsOf(error);
     } finally {
       contactBusy = false;
     }
@@ -728,7 +708,7 @@
       view = await readAdminScreen();
       editingUploadLimit = false;
     } catch (error) {
-      uploadLimitProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      uploadLimitProblem = wordsOf(error);
     } finally {
       uploadLimitBusy = false;
     }
@@ -1003,7 +983,7 @@
 
         {#each view.users as person (person.id)}
           <div class="person">
-            <span class="avatar">{initialsOf(person.displayName)}</span>
+            <span class="avatar">{initials(person.displayName)}</span>
             <div class="who">
               <b>{person.displayName}{person.id === view.user?.id ? " · you" : ""}</b>
               <span>{[person.email, view.peopleMeta[person.id]].filter(Boolean).join(" · ")}</span>
@@ -1122,9 +1102,9 @@
             <div class="who">
               <b>{household.name}</b>
               <span>{[
-                `${household.memberCount} member${household.memberCount === 1 ? "" : "s"}`,
+                plural(household.memberCount ?? 0, "member"),
                 view.owners[household.id] ? `owner ${view.owners[household.id]}` : null,
-                `${(household.items ?? []).length} item${(household.items ?? []).length === 1 ? "" : "s"}`,
+                plural((household.items ?? []).length, "item"),
               ].filter(Boolean).join(" · ")}</span>
             </div>
           </div>
@@ -1154,7 +1134,7 @@
             <div class="who">
               <b>{doom.name}</b>
               <span>{rowExpired ? "past its window · removing"
-                : `on the clock · ${count(daysLeft(doom.deleteAfter), "day")} left · gone for good ${dayMonth(doom.deleteAfter)}`}</span>
+                : `on the clock · ${plural(daysLeft(doom.deleteAfter), "day")} left · gone for good ${dayMonth(doom.deleteAfter)}`}</span>
             </div>
             {#if !rowExpired}
               <div class="acts">
@@ -1169,7 +1149,7 @@
               </div>
               {#if doomConfirming[doom.id]}
                 <div class="confirm">
-                  <p class="stake">Deleting now skips the {count(daysLeft(doom.deleteAfter), "day")}. Nothing comes
+                  <p class="stake">Deleting now skips the {plural(daysLeft(doom.deleteAfter), "day")}. Nothing comes
                     back after this — not for you, not for anyone.</p>
                   <div class="field">
                     <label for="doomname-{doom.id}">type the system’s name exactly to wake the button</label>

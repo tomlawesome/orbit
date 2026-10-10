@@ -9,6 +9,7 @@
  * nothing rather than guessing.
  */
 import { bandOf, daysUntil } from "./chart.js";
+import { plural } from "$lib/format.js";
 
 /**
  * One row of the archive table, whichever origin it came from: a stored
@@ -64,7 +65,7 @@ export function archiveOf({ workspace, receipts = [], documentsByItem = {}, toda
       /** @type {{ displayName: string, sizeBytes?: number, scanState?: "clean" | "unknown" }[]} */
       (receipt.attachments ??
       (receipt.attachmentCount
-        ? [{ displayName: `${receipt.attachmentCount} forwarded document${receipt.attachmentCount === 1 ? "" : "s"}` }]
+        ? [{ displayName: plural(receipt.attachmentCount, "forwarded document") }]
         : []));
     for (const [index, attachment] of attachments.entries()) {
       rows.push({

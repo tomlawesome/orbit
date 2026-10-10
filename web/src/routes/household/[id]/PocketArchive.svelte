@@ -1,5 +1,5 @@
 <script>
-  import { clockOf, dayMonth, localZone } from "$lib/format.js";
+  import { clockOf, dayMonth, localZone, plural, sizeLabel } from "$lib/format.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
   import Row from "$lib/pocket/Row.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
@@ -9,9 +9,10 @@
     previewPortableArchive,
     readSignInMethods,
     startStepUp,
+    wordsOf,
     writePortableArchive,
   } from "$lib/data/workspace.js";
-  import { archiveFileProblem, passphraseFloor, passphraseLength, passphraseProblem, sizeLabel } from "./archive.js";
+  import { archiveFileProblem, passphraseFloor, passphraseLength, passphraseProblem } from "./archive.js";
 
   /*
    * THE ARCHIVE ON A PHONE (#1122, proposal §2.10 item 5; the card ratified
@@ -79,8 +80,6 @@
   /** The step-up intent the held act needs (#1132): one each way, so a proof for one cannot pay for the other. */
   let retryIntent = "archive_export";
 
-  /** @param {unknown} error */
-  const wordsOf = (error) => /** @type {{ message?: string }} */ (error)?.message ?? String(error);
   /** @param {unknown} error */
   const needsProof = (error) => /** @type {{ code?: string }} */ (error)?.code === "recent_authentication_required";
 
@@ -194,7 +193,7 @@
       brought = result.importedItems;
       inPhase = "done";
       passIn = "";
-      wake(`brought in ${brought} ${brought === 1 ? "entry" : "entries"}`);
+      wake(`brought in ${plural(brought, "entry", "entries")}`);
     }, (words) => {
       inProblem = `not brought in — ${words}`;
       inPhase = "preview";
@@ -265,7 +264,7 @@
     {:else if outPhase === "writing"}
       <div class="hh-progress" role="status">
         <span class="p-body accent breathing" aria-hidden="true"></span>
-        <span><b>writing the archive</b><small>encrypting {entries} {entries === 1 ? "entry" : "entries"} and their documents</small></span>
+        <span><b>writing the archive</b><small>encrypting {plural(entries, "entry", "entries")} and their documents</small></span>
         <i aria-hidden="true"></i>
       </div>
     {:else if written}
@@ -283,7 +282,7 @@
     <input class="sr-only" type="file" accept=".json,application/json" tabindex="-1" aria-hidden="true"
            bind:this={picker} onchange={chose}>
     {#if inPhase === "done"}
-      <p class="hh-done"><span class="p-body ok" aria-hidden="true"></span>brought in {brought} {brought === 1 ? "entry" : "entries"} from {preview?.householdName ?? "the archive"}</p>
+      <p class="hh-done"><span class="p-body ok" aria-hidden="true"></span>brought in {plural(brought, "entry", "entries")} from {preview?.householdName ?? "the archive"}</p>
       <button class="p-pill wide" onclick={startOver}>bring in another</button>
     {:else}
       {#if file}
@@ -318,7 +317,7 @@
           {/each}
         </div>
         {#if bringCount > 0}
-          <ArmButton label="bring in {bringCount} {bringCount === 1 ? 'entry' : 'entries'}" wide danger={false}
+          <ArmButton label="bring in {plural(bringCount, 'entry', 'entries')}" wide danger={false}
                      class="act-accent" armedLabel="tap again · it can't be undone as one act" onfire={bringIn} />
         {:else}
           <p class="hh-note">everything in this archive is already here</p>
@@ -327,7 +326,7 @@
       {:else if inPhase === "bringing"}
         <div class="hh-progress" role="status">
           <span class="p-body accent breathing" aria-hidden="true"></span>
-          <span><b>bringing it in</b><small>{bringCount} {bringCount === 1 ? "entry" : "entries"}</small></span>
+          <span><b>bringing it in</b><small>{plural(bringCount, "entry", "entries")}</small></span>
           <i aria-hidden="true"></i>
         </div>
       {/if}

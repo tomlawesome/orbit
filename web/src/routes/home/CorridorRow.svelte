@@ -90,7 +90,7 @@
       /* #1319: a retired item, or a one-off already done, says so first */
       row.state,
       row.provider,
-      row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null,
+      row.costMinor !== null && row.costMinor !== undefined ? money(row.costMinor, row.currency, row.costIsEstimate) : null,
     ].filter(Boolean),
   );
   /** Between the meta line's parts. */

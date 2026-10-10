@@ -1,3 +1,4 @@
+import { plural } from "$lib/format.js";
 /**
  * THE POCKET HOUSEHOLD'S UNSAVED EDITS (#1122, proposal §2.10, owner decision
  * 2b): what the rising save bar counts, and the list moves it collects.
@@ -58,7 +59,7 @@ export function commandsFor(changes) {
 }
 
 /** "1 change" / "3 changes". @param {number} count */
-export const changesLabel = (count) => `${count} ${count === 1 ? "change" : "changes"}`;
+export const changesLabel = (count) => plural(count, "change");
 
 /**
  * A copy of `rows` with the row at `from` moved to `to`; out-of-range moves

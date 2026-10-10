@@ -22,7 +22,7 @@
 import { bandOfKind, daysUntil, kindOfItem } from "./chart.js";
 /* Relative, like chart.js's own imports: this module is pure and is exercised
    straight from node by the unit suite, which knows no SvelteKit aliases. */
-import { dayMonth, longDate, tminus } from "../format.js";
+import { dayMonth, longDate, sizeLabel, tminus } from "../format.js";
 import { stagedPreviewHref } from "../pocket/review.js";
 
 /**
@@ -40,16 +40,11 @@ export const BELT_BAND = {
 };
 
 /**
- * workspace.js's document size vocabulary, so "240 KB" means one thing.
+ * format.js's size words, with a document that has no size on record said so.
  * @param {?number} [bytes]
  * @returns {string}
  */
-export const sizeLabel = (bytes) => {
-  if (bytes === null || bytes === undefined) return "unknown size";
-  return bytes >= 1024 * 1024
-    ? `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
-    : `${Math.round(bytes / 1024)} KB`;
-};
+const sizeWords = (bytes) => (bytes === null || bytes === undefined ? "unknown size" : sizeLabel(bytes));
 
 /**
  * "PDF (application/pdf)" — what the file is, in both registers.
@@ -109,7 +104,7 @@ export function documentRowOf(doc) {
   return {
     id: doc.id,
     name: doc.displayName,
-    size: sizeLabel(doc.sizeBytes),
+    size: sizeWords(doc.sizeBytes),
     added: doc.availableAt ? longDate(doc.availableAt) : "unknown",
     type,
     plate,
@@ -324,7 +319,7 @@ function stagedDocsOf(suggestion) {
   const arrived = suggestion.receivedAt ? longDate(suggestion.receivedAt) : "unknown";
   const named = suggestion.attachments?.map((a) => ({
     name: a.displayName ?? "forwarded document",
-    size: sizeLabel(a.sizeBytes),
+    size: sizeWords(a.sizeBytes),
     clean: a.scanState === "clean",
     attachmentId: a.id ?? null,
     mediaType: a.mediaType ?? null,

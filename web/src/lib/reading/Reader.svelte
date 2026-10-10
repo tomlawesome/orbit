@@ -1,4 +1,5 @@
 <script>
+  import { wordsOf } from "$lib/data/workspace.js";
   import { tick } from "svelte";
   import { pushState } from "$app/navigation";
   import { page } from "$app/state";
@@ -283,7 +284,7 @@
       await onremove();
       open = false;
     } catch (error) {
-      problem = /** @type {{ message?: string }} */ (error)?.message ?? "could not remove it — try again";
+      problem = wordsOf(error, "could not remove it — try again");
     } finally {
       removing = false;
     }

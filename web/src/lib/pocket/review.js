@@ -1,6 +1,6 @@
 import { daysUntil } from "$lib/data/chart.js";
 import { LOCKED, evidenceReadable, fieldState } from "$lib/data/metadata-status.js";
-import { dayMonth, dayMonthYear, money } from "$lib/format.js";
+import { dayMonth, dayMonthYear, money, plural, sizeLabel } from "$lib/format.js";
 
 /**
  * THE REVIEW CARD'S WORDS (round 3 §4, #1140): what ReviewCard.svelte and
@@ -101,9 +101,9 @@ export const papersOf = (mail) =>
   mail.attachments?.map((a) => ({
     id: a.id ?? null,
     name: a.displayName ?? "document",
-    meta: `${Math.round((a.sizeBytes ?? 0) / 1024)} KB`,
+    meta: sizeLabel(a.sizeBytes ?? 0),
     drawable: Boolean(a.id) && a.mediaType === "application/pdf",
     clean: a.scanState === "clean",
   })) ?? (mail.attachmentCount
-    ? [{ id: null, name: `${mail.attachmentCount} document${mail.attachmentCount === 1 ? "" : "s"}`, meta: "", drawable: false, clean: false }]
+    ? [{ id: null, name: plural(mail.attachmentCount, "document"), meta: "", drawable: false, clean: false }]
     : []);

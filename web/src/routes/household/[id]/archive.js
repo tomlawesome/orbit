@@ -2,6 +2,8 @@
  * The archive card's small rules (#1002, #1122), kept pure for the unit tests.
  */
 
+import { sizeLabel } from "$lib/format.js";
+
 /**
  * The archive card's numbers are the engine's, carried on the session
  * (#1336): the file ceiling, which exists only to avoid reading a huge file
@@ -58,15 +60,4 @@ export function archiveFileProblem(file, limits) {
     return `this file is larger than ${sizeLabel(limits.archiveFileBytes)}, the most an archive can be`;
   }
   return null;
-}
-
-/**
- * "84 KB" / "3.2 MB" / "171 MB".
- * @param {number} bytes
- */
-export function sizeLabel(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  const mb = bytes / (1024 * 1024);
-  return `${mb < 10 ? mb.toFixed(1).replace(/\.0$/, "") : Math.round(mb)} MB`;
 }

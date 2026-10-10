@@ -1,3 +1,4 @@
+import { plural } from "$lib/format.js";
 /**
  * THE DUE DATE'S MONTH CALENDAR (#1319; design/v19/belt-purpose/round-8/
  * m-colour-per-option.html, `editing-date`; rounds 4-8): the arithmetic the
@@ -58,8 +59,8 @@ export function spokenDate(iso) {
 export function relWords(iso, today) {
   const d = daysFrom(iso, today);
   if (d === 0) return "today";
-  if (d < 0) return `${-d} day${d === -1 ? "" : "s"} overdue`;
-  return `in ${d} day${d === 1 ? "" : "s"}`;
+  if (d < 0) return `${plural(-d, "day")} overdue`;
+  return `in ${plural(d, "day")}`;
 }
 
 /**

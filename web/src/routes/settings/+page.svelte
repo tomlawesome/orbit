@@ -18,7 +18,7 @@
   } from "$lib/data/workspace.js";
   import { SIGN_IN_METHODS_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { SENT_LATELY_FIXTURE } from "$lib/data/fixtures/settings.js";
-  import { agoLong, clockOf, dayMonth, localZone } from "$lib/format.js";
+  import { agoLong, clockOf, dayMonth, initials as initialsOf, localZone, plural } from "$lib/format.js";
   import { alertsSupported, disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
   import { watchTour } from "$lib/tour/watch.js";
   import { fillStarTiles } from "$lib/sky.js";
@@ -405,10 +405,7 @@
     }
   }
 
-  const initials = $derived(
-    (/** @type {Awaited<ReturnType<typeof readSettingsScreen>> | null} */ (view)?.user?.displayName ?? "")
-      .split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
-  );
+  const initials = $derived(initialsOf(/** @type {Awaited<ReturnType<typeof readSettingsScreen>> | null} */ (view)?.user?.displayName));
 
   onMount(async () => {
     fillStarTiles(
@@ -691,7 +688,7 @@
       <h2>Your relay</h2>
       <div class="kv"><span>address</span><b style="color:var(--accent-text)">{view.relay.address}</b></div>
       <div class="kv"><span>status</span><b class="on">{view.relay.status}</b></div>
-      <div class="kv"><span>waiting for review</span><a href={resolve("/inbox")}>{view.waiting} arrival{view.waiting === 1 ? "" : "s"} — open your inbox →</a></div>
+      <div class="kv"><span>waiting for review</span><a href={resolve("/inbox")}>{plural(view.waiting, "arrival")} — open your inbox →</a></div>
       <div class="kv"><span>rotate · pause · details</span><a href={resolve("/settings/mail")}>open the relay →</a></div>
     </div>
 
@@ -706,7 +703,7 @@
       {#each view.memberships as membership (membership.id)}
         <a class="memb" href={resolve("/household/[id]", { id: membership.id })}>
           <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="10" fill="none" style="stroke:var(--chart-line)"/><circle cx="13" cy="13" r="2.4" style="fill:var({membership.primary ? "--sun" : "--ink-mid"})"/></svg>
-          <b>{membership.name}</b><small>{membership.memberCount} member{membership.memberCount === 1 ? "" : "s"} · {membership.itemCount} item{membership.itemCount === 1 ? "" : "s"}</small><span class="role" class:owner={membership.role === "owner"}>{membership.role}</span>
+          <b>{membership.name}</b><small>{membership.memberCount === null ? "? members" : plural(membership.memberCount, "member")} · {plural(membership.itemCount, "item")}</small><span class="role" class:owner={membership.role === "owner"}>{membership.role}</span>
         </a>
       {/each}
     </div>

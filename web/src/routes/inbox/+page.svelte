@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { readInboxScreen, approveWithOperation, dismissReceipt } from "$lib/data/workspace.js";
+  import { approveWithOperation, dismissReceipt, readInboxScreen, wordsOf } from "$lib/data/workspace.js";
   import { ago, agoLong, dayMonth, dayMonthYear } from "$lib/format.js";
   import { daysWords } from "$lib/data/engine-limits.js";
   import { LOCKED, fieldState, receiptWords } from "$lib/data/metadata-status.js";
@@ -77,7 +77,7 @@
       }
       view = await readInboxScreen();
     } catch (error) {
-      problem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      problem = wordsOf(error);
       problemId = receipt.id;
     } finally {
       busy = null;

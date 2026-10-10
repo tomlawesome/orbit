@@ -1,4 +1,5 @@
 <script>
+  import { wordsOf } from "$lib/data/workspace.js";
   import { tick, untrack } from "svelte";
   import { resolve } from "$app/paths";
   import { documentPreviewStateOf } from "$lib/data/belt.js";
@@ -324,7 +325,7 @@
     try {
       await onrestore(target);
     } catch (error) {
-      if (mine === token) problem = /** @type {{ message?: string }} */ (error)?.message ?? "could not restore it — try again";
+      if (mine === token) problem = wordsOf(error, "could not restore it — try again");
     } finally {
       restoring = false;
     }

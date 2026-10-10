@@ -1,4 +1,5 @@
 <script>
+  import { plural } from "$lib/format.js";
   import { onMount, tick, untrack } from "svelte";
   import { invalidateAll } from "$app/navigation";
   import Chrome from "$lib/Chrome.svelte";
@@ -15,17 +16,7 @@
   import Pocket from "./pocket.svelte";
   import { daysWords } from "$lib/data/engine-limits.js";
   import DeskArchive from "./DeskArchive.svelte";
-  import {
-    addMember,
-    decideJoinRequest,
-    removeMember,
-    requestHouseholdDeletion,
-    sendInvitation,
-    transferOwnership,
-    withdrawInvitation,
-    writeHouseholdIdentity,
-    writeSections,
-  } from "$lib/data/workspace.js";
+  import { addMember, decideJoinRequest, removeMember, requestHouseholdDeletion, sendInvitation, transferOwnership, withdrawInvitation, wordsOf, writeHouseholdIdentity, writeSections } from "$lib/data/workspace.js";
   import { zoneLabel } from "$lib/pick-lists.js";
   import PickSheet from "./PickSheet.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
@@ -338,7 +329,7 @@
       savedTimers[field] = setTimeout(() => (saved[field] = false), 2600);
       await invalidateAll();
     } catch (error) {
-      identityProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      identityProblem = wordsOf(error);
     }
   }
 
@@ -453,7 +444,7 @@
       sectionsBaseline = sent;
       await invalidateAll();
     } catch (error) {
-      sectionsProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      sectionsProblem = wordsOf(error);
     }
   }
 
@@ -465,7 +456,7 @@
       await run();
       await invalidateAll();
     } catch (error) {
-      membersProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      membersProblem = wordsOf(error);
     }
   }
 
@@ -555,7 +546,7 @@
        compares the exact name and is the only authority. */
     requestHouseholdDeletion(v.id, typedName)
       .then(() => (saidDoom = true))
-      .catch((error) => (doomProblem = error?.message ?? String(error)));
+      .catch((error) => (doomProblem = wordsOf(error)));
   }
 
   /* The header ring, wearing this system's real due-state dots — the same
@@ -1267,7 +1258,7 @@
         {#if confirming}
           <div class="confirm">
             <p class="stake">
-              Everything in {v.name} — {v.entries} {v.entries === 1 ? "entry" : "entries"},
+              Everything in {v.name} — {plural(v.entries, "entry", "entries")},
               their documents, their history and every reminder still queued — stops the
               moment you ask. You have <b class="red">{daysWords(v.retention?.recoveryDays)}</b> to change your mind;
               after that it is gone for good.
