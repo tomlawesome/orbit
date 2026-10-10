@@ -45,6 +45,10 @@ describe("the browser carries no rules (ADR-0034, #1325)", () => {
     expect(where(/until\s*(<=|>)\s*(today|view\.today|detail\.today)\b/u)).toEqual([]);
   });
 
+  it("the locked-key refusal is worded by the engine, not the browser (#1335)", () => {
+    expect(where(/encrypted details are locked/u)).toEqual([]);
+  });
+
   it("no browser module words a refusal the engine words", () => {
     const words = [
       "give it a name", "choose a section", "a repeat needs a due date", "use a dot for pence",
