@@ -165,6 +165,8 @@
  * @property {string} csrfToken
  * @property {boolean} [authenticated]
  * @property {?SessionUser} [user]
+ * @property {import('./engine-limits.js').EngineLimits} [limits]       the engine's archive limits (#1336)
+ * @property {import('./engine-limits.js').EngineRetention} [retention] the engine's retention windows (#1336)
  */
 
 /**
@@ -648,6 +650,7 @@ import { adminFixture } from "./fixtures/admin.js";
 import { ago } from "$lib/format.js";
 import { bandOf, daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
 import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
+import { engineNumbersOf } from "./engine-limits.js";
 import { householdScreenOf, householdUpdateCommandOf, sectionsCommandOf } from "./household.js";
 import { documentRowOf } from "./belt.js";
 
@@ -877,6 +880,7 @@ function todayOf(workspace, householdId) {
  * @property {MailFailure[]} mailFailures
  * @property {Receipt[]} mailReading           arrived, not yet readable
  * @property {SessionUser | null} user
+ * @property {import('./engine-limits.js').EngineRetention | null} retention  the engine's retention windows (#1336)
  * @property {string} today                    YYYY-MM-DD
  * @property {string} now                      ISO instant, pinned under fixtures
  */
@@ -916,6 +920,7 @@ export async function readHome(fetchImpl) {
       mailFailures: [],
       mailReading: [],
       user: session?.user ?? null,
+      retention: engineNumbersOf(session).retention,
       today,
       now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
     };
@@ -934,6 +939,7 @@ export async function readHome(fetchImpl) {
       (receipt) => !receipt.canApprove && receipt.classification === "waiting",
     ),
     user: session?.user ?? null,
+    retention: engineNumbersOf(session).retention,
     today,
     /* Pinned "now" for elapsed-time lines (the pocket's signals): fixture
        noon under the gate, the clock in production. */
@@ -1016,6 +1022,7 @@ export async function readInboxScreen() {
     today,
     now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
     relay,
+    retention: engineNumbersOf(session).retention,
     lastCaught: caught,
     review: receipts.filter((receipt) => receipt.canApprove),
     reading: receipts.filter((receipt) => !receipt.canApprove && receipt.classification === "waiting"),
@@ -2580,7 +2587,7 @@ export async function readHouseholdScreen(householdId) {
      defaults (e.g. `members = []` reads as `never[]`), so this call is cast
      rather than fought from the caller's side — the fix belongs with that
      function's own JSDoc, out of scope here. */
-  return householdScreenOf(/** @type {any} */ ({
+  const screen = householdScreenOf(/** @type {any} */ ({
     workspace,
     householdId,
     user: session?.user ?? null,
@@ -2593,6 +2600,9 @@ export async function readHouseholdScreen(householdId) {
        and stays live in production — readHome's rule. */
     now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
   }));
+  /* The engine's archive limits and retention windows (#1336), for the
+     archive card and the deletion words. */
+  return screen && { ...screen, ...engineNumbersOf(session) };
 }
 
 /**

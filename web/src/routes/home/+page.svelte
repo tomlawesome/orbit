@@ -2146,7 +2146,7 @@
     {/if}
     <!-- #1319, round 3 (F): the preview's column beside the open drawer. -->
     <div class="pvtrack" bind:this={trackEl} style:--pv-y="{track.top}px" style:--pv-h="{track.height}px" style:--readw="{readw}px">
-      <PreviewCard doc={previewDoc} itemTitle={detail?.title ?? ""} onclose={closeDoc}
+      <PreviewCard doc={previewDoc} itemTitle={detail?.title ?? ""} documentDays={view?.retention?.documentDays} onclose={closeDoc}
                    onremove={removeDoc} onrestore={restoreDoc} />
       <!-- #1319 stage 2 (round 8): the chooser card, in the preview's seat;
            under 1200px it is the bottom sheet -->

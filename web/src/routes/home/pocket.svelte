@@ -1284,7 +1284,7 @@
 <Hatch bind:open={hatchOpen} name={view?.user?.displayName ?? ""} {roleLine} {isAdmin}
        inboxCount={waiting || null} {onsignedout} onopened={onmenu} />
 
-<PreviewCard doc={previewPaper} itemTitle={previewPaper?.itemTitle ?? ""} onclose={closePaper}
+<PreviewCard doc={previewPaper} itemTitle={previewPaper?.itemTitle ?? ""} documentDays={view?.retention?.documentDays} onclose={closePaper}
              onremove={removePaper} onrestore={restorePaper} />
 
 <!-- #1319 stage 2 (round 8, `narrow-editing-*`): the chooser card as the

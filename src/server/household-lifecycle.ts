@@ -18,8 +18,7 @@ import { requireUuid } from "@/lib/uuid";
 import { getDocumentConfig } from "@/server/documents/config";
 import { openDocumentStorage } from "@/server/documents/storage";
 import { PortableArchiveStorage } from "@/server/portable-archive-storage";
-
-const RECOVERY_WINDOW_MS = 30 * 24 * 60 * 60 * 1_000;
+import { RECOVERY_WINDOW_MS } from "@/server/retention-windows";
 
 interface HouseholdStorageKeys {
   documents: string[];

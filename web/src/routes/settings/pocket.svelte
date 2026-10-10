@@ -654,7 +654,7 @@
         {/if}
         {#if wantsNew}
           <label class="st-label" for="st-new">new password</label>
-          <input id="st-new" class="st-input" type="password" autocomplete="new-password" minlength="12"
+          <input id="st-new" class="st-input" type="password" autocomplete="new-password"
                  enterkeyhint="done" bind:value={newPassword}>
         {/if}
       </form>
