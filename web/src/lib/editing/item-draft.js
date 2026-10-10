@@ -67,8 +67,9 @@ export function remindersOf(text) {
 export function draftOf(item) {
   const entry = entryOf(item);
   const symbol = symbolOf(item.currency ?? "GBP");
-  /* A currency with no sign of its own is typed bare, as it always was. */
-  const sign = /^[A-Z]{3}$/.test(symbol) ? "" : symbol;
+  /* Only a sign costMinorOf can strip again is prefilled; any other currency
+     is typed bare, as it always was, so an untouched cost still reads back. */
+  const sign = ["£", "$", "€"].includes(symbol) ? symbol : "";
   return {
     title: entry.name,
     dueDate: entry.dueDate,
