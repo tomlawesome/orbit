@@ -46,7 +46,10 @@ describe("the browser carries no rules (ADR-0034, #1325)", () => {
   });
 
   it("the locked-key refusal is worded by the engine, not the browser (#1335)", () => {
-    expect(where(/encrypted details are locked/u)).toEqual([]);
+    // The refusal's own words. The locked panel and cost notices say
+    // "encrypted details are locked" too, and stay: they describe a state,
+    // not the engine refusing a save.
+    expect(where(/locked until the key is restored/u)).toEqual([]);
   });
 
   it("no browser module words a refusal the engine words", () => {

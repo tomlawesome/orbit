@@ -176,6 +176,14 @@ export function safeReturnPath(value: string | null): string {
   // so "/\evil.com" resolves to the external origin "https://evil.com/" once
   // joined with appUrl in the callback route. Backslashes have no legitimate use
   // in an application-relative path, so any occurrence is rejected outright.
-  if (!value || !value.startsWith("/") || value.startsWith("//") || /[\u0000-\u001f\\]/.test(value)) return "/";
+  // Control characters (below 0x20, and DEL at 0x7f) are rejected too, scanned
+  // explicitly rather than with a character-class range (AGENTS.md); it agrees
+  // with `isApplicationRelative` in web/src/lib/return-path.js.
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/";
+  for (const character of value) {
+    if (character === "\\") return "/";
+    const code = character.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) return "/";
+  }
   return value;
 }

@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
  * stops being wired the licence to overwrite goes with it.
  */
 import {
-  COST_LOCKED, DAMAGED, LOCKED, NOTES_WORDS, PANEL_LOCKED, REFERENCE_WORDS, SAVE_REFUSED,
+  COST_LOCKED, DAMAGED, LOCKED, NOTES_WORDS, PANEL_LOCKED, REFERENCE_WORDS,
   evidenceReadable, fieldState, itemLocked, receiptWords, saveProblem,
 } from "../../web/src/lib/data/metadata-status.js";
 
@@ -50,7 +50,7 @@ describe("the two states a member learns once", () => {
     // Neither state ever tells a member to despair about the other's data, and
     // no member-facing string names a key mechanic or a count.
     expect(NOTES_WORDS[LOCKED]).not.toContain("recover");
-    for (const words of [...Object.values(REFERENCE_WORDS), ...Object.values(NOTES_WORDS), PANEL_LOCKED, COST_LOCKED, SAVE_REFUSED]) {
+    for (const words of [...Object.values(REFERENCE_WORDS), ...Object.values(NOTES_WORDS), PANEL_LOCKED, COST_LOCKED]) {
       expect(words).not.toMatch(/KEK|DOCUMENT_KEK|key[- ]encryption/i);
     }
   });
@@ -87,10 +87,9 @@ describe("the two states a member learns once", () => {
     expect(receiptWords(null)).toBeNull();
   });
 
-  it("rewrites only the locked refusal, and keeps the server's words for everything else", () => {
-    expect(saveProblem({ code: "metadata_locked", message: "Encrypted details cannot be saved until the encryption key is available" }))
-      .toBe(SAVE_REFUSED);
-    expect(SAVE_REFUSED).toContain("The stored values are intact.");
+  it("shows the server's own words for every refusal, the locked one included (#1335)", () => {
+    const locked = "not saved \u2014 encrypted details are locked until the key is restored. The stored values are intact.";
+    expect(saveProblem({ code: "metadata_locked", message: locked })).toBe(locked);
     expect(saveProblem({ code: "version_conflict", message: "This item changed on another device; refresh and try again" }))
       .toBe("This item changed on another device; refresh and try again");
   });
