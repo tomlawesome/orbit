@@ -95,20 +95,27 @@
    * @param {(proof: string) => Promise<void>} act
    * @param {(words: string) => void} fail
    * @param {"archive_export" | "archive_import"} intent
+   * @param {() => void} hold steps the act back to the screen the challenge sits on
    */
-  async function guarded(act, fail, intent) {
+  async function guarded(act, fail, intent, hold) {
     try {
       await act("");
     } catch (error) {
       if (!needsProof(error)) { fail(wordsOf(error)); return; }
+      /* How this reader proves it is them is asked BEFORE the challenge
+         opens, and the act steps back to its screen in the same turn, so
+         the challenge is drawn once, in its final place. Opened first and
+         moved once the answer came, its field was rebuilt under a reader
+         already typing in it, and what they typed was lost (pipeline 2382). */
+      if (hasPassword === null) {
+        hasPassword = await readSignInMethods().then((methods) => methods.local.set, () => true);
+      }
       retry = act;
       retryIntent = intent;
       currentPassword = "";
       challengeProblem = null;
+      hold();
       challengeOpen = true;
-      if (hasPassword === null) {
-        hasPassword = await readSignInMethods().then((methods) => methods.local.set, () => true);
-      }
     }
   }
 
@@ -171,7 +178,7 @@
     }, (words) => {
       outProblem = `not written — ${words}`;
       outPhase = "form";
-    }, "archive_export").then(() => { if (outPhase === "writing" && challengeOpen) outPhase = "form"; });
+    }, "archive_export", () => { outPhase = "form"; });
   }
 
   /** @param {Event} event */
@@ -204,8 +211,7 @@
     }, (words) => {
       inProblem = words;
       inPhase = "chosen";
-    }, "archive_import");
-    if (inPhase === "looking") inPhase = "chosen";
+    }, "archive_import", () => { inPhase = "chosen"; });
   }
 
   const bringCount = $derived(preview ? preview.items - preview.conflicts.length : 0);
@@ -224,7 +230,7 @@
     }, (words) => {
       inProblem = `not brought in — ${words}`;
       inPhase = "preview";
-    }, "archive_import").then(() => { if (inPhase === "bringing") inPhase = "preview"; });
+    }, "archive_import", () => { inPhase = "preview"; });
   }
 
   function startOver() {
