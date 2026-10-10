@@ -53,7 +53,7 @@ async function signIn(page: Page) {
  *  with one item, due in 20 days so the phone's manifest lists it too. */
 async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; householdId: string; dueDate: string }> {
   const name = `${HOUSEHOLD_PREFIX} ${randomUUID().slice(0, 8)}`;
-  const seeded = await page.evaluate(async ({ householdName, title, note }) => {
+  const seeded = await page.evaluate(async ({ householdName, title, note, dueDate }) => {
     const sessionResponse = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
     const session = (await sessionResponse.json()) as { csrfToken: string };
     const command = async (payload: unknown) => {
@@ -82,7 +82,6 @@ async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; hous
       },
     });
     const itemId = crypto.randomUUID();
-    const dueDate = householdDateFromToday(20);
     await command({
       type: "item.upsert",
       householdId,
@@ -99,7 +98,7 @@ async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; hous
       activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
     });
     return { itemId, householdId, dueDate };
-  }, { householdName: name, title: TITLE, note: NOTE });
+  }, { householdName: name, title: TITLE, note: NOTE, dueDate: householdDateFromToday(20) });
   households.track({ id: seeded.householdId, name });
   return seeded;
 }
