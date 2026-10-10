@@ -61,7 +61,8 @@ test("the desk household picker is the chooser card, by keyboard (#1338)", async
     await expect(zone).toHaveAttribute("aria-expanded", "false");
     await expect(zone).toContainText("Europe/Dublin");
     await expect(zone).toBeFocused();
-    await expect(page.locator(".savebar .btn")).toBeEnabled();
+    // The field wears its own quiet save: touched, it is marked dirty (household.css "2c").
+    await expect(page.locator(".field.dirty").filter({ has: page.locator("#hhzone") })).toHaveCount(1);
 
     // 3. The currency: Escape closes with nothing changed, focus back on it.
     const currencyBefore = (await currency.innerText()).trim();
