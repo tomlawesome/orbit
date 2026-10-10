@@ -25,6 +25,7 @@
   } from "$lib/data/workspace.js";
   import { zoneLabel } from "$lib/pick-lists.js";
   import PickSheet from "./PickSheet.svelte";
+  import { daysWords } from "$lib/data/engine-limits.js";
   import PocketArchive from "./PocketArchive.svelte";
   import { changesLabel, changesOf, chipBodyOf, commandsFor, moved } from "./edits.js";
   import { roomOf } from "./room.js";
@@ -398,7 +399,7 @@
       await requestHouseholdDeletion(v.id, typedName);
       saidDoom = true;
       doomOpen = false;
-      wake(`${v.name} is asked to be deleted · gone for good in 30 days`);
+      wake(`${v.name} is asked to be deleted · gone for good in ${daysWords(v.retention?.recoveryDays)}`);
     } catch (error) {
       doomProblem = `not requested — ${/** @type {{ message?: string }} */ (error)?.message ?? String(error)}`;
     }
@@ -591,7 +592,7 @@
       </section>
 
       <div class="p-land" style:--i="4">
-        <PocketArchive householdId={v.id} householdName={v.name} entries={v.entries} sections={shown.length} />
+        <PocketArchive householdId={v.id} householdName={v.name} entries={v.entries} sections={shown.length} limits={v.limits} />
       </div>
 
       <section class="p-card danger hh-danger" style:--i="5" aria-labelledby="hh-danger-head" data-hh="danger">
@@ -602,7 +603,7 @@
           The danger line
         </h2>
         {#if saidDoom}
-          <p class="p-prose hh-doomsaid" role="status">requested · gone for good in 30 days</p>
+          <p class="p-prose hh-doomsaid" role="status">requested · gone for good in {daysWords(v.retention?.recoveryDays)}</p>
         {:else}
           <button class="p-pill danger wide" onclick={() => { typedName = ""; doomProblem = null; doomOpen = true; }}>delete this system</button>
         {/if}
@@ -703,7 +704,7 @@
   <Sheet bind:open={doomOpen} size="callout" title="Delete {v.name}?">
     <p class="p-prose hh-sheet-say">
       Everything in {v.name} — {v.entries} {v.entries === 1 ? "entry" : "entries"}, their documents, their history
-      and every reminder still queued — stops the moment you ask. You have <b class="hh-red">30 days</b> to change
+      and every reminder still queued — stops the moment you ask. You have <b class="hh-red">{daysWords(v.retention?.recoveryDays)}</b> to change
       your mind; after that it is gone for good.
     </p>
     <label class="hh-label" for="hh-delname">type the system’s name exactly</label>

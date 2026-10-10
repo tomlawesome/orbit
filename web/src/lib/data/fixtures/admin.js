@@ -9,6 +9,9 @@
  * not part of this screen at all — §15-2g put them in household management;
  * GET /api/join-requests stays live for that screen to consume.)
  */
+import { daysWords } from "../engine-limits.js";
+import { SESSION_FIXTURE } from "./workspace.js";
+
 export const ADMIN_USERS_FIXTURE = {
   users: [
     { id: "u-fixture", displayName: "Tom Lawson", email: "tom@lawson.example", isInstanceAdmin: true },
@@ -109,7 +112,7 @@ export const adminFixture = {
     ["collection domain", "in.lawson-home.orbit", null],
     ["ingest", "enabled · polling every 30s", "on"],
     ["address generation", "1 · current", "rotate every address"],
-    ["unreviewed arrivals", "burn up after 45 days", null],
+    ["unreviewed arrivals", `burn up after ${daysWords(SESSION_FIXTURE.retention.receiptDays)}`, null],
     ["outbound reminders", "configured", "on"],
   ]),
   services: /** @type {[string, string, string][]} */ ([

@@ -10,7 +10,7 @@
     startStepUp,
     writePortableArchive,
   } from "$lib/data/workspace.js";
-  import { ARCHIVE_MAX_BYTES, archiveFileProblem, PASSPHRASE_MIN, passphraseProblem, sizeLabel } from "./archive.js";
+  import { archiveFileProblem, passphraseFloor, passphraseLength, passphraseProblem, sizeLabel } from "./archive.js";
 
   /*
    * THE ARCHIVE ON A PHONE (#1122, proposal §2.10 item 5; the card ratified
@@ -34,8 +34,11 @@
    * callout answers that real refusal, it never invents one (#1151 W2-Q7).
    */
 
-  /** @type {{ householdId: string, householdName: string, entries: number, sections: number }} */
-  let { householdId, householdName, entries, sections } = $props();
+  /** @type {{ householdId: string, householdName: string, entries: number, sections: number, limits?: import("$lib/data/engine-limits.js").EngineLimits | null }} */
+  let { householdId, householdName, entries, sections, limits = null } = $props();
+
+  /* The engine's numbers (#1336): the passphrase floor the buttons wait for. */
+  const passphraseMin = $derived(passphraseFloor(limits));
 
   let tab = $state(/** @type {"out" | "in"} */ ("out"));
 
@@ -46,7 +49,7 @@
   let written = $state(/** @type {import('$lib/data/workspace.js').WrittenArchive | null} */ (null));
   /** @type {string | null} */
   let outProblem = $state(null);
-  const outRefusal = $derived(passphraseProblem(passOut, passAgain));
+  const outRefusal = $derived(passphraseProblem(passOut, passAgain, limits));
 
   /* ── bring one in ─────────────────────────────────────────────────────── */
   let inPhase = $state(/** @type {"rest" | "chosen" | "looking" | "preview" | "bringing" | "done"} */ ("rest"));
@@ -150,7 +153,7 @@
     const next = input.files?.[0] ?? null;
     input.value = "";
     if (!next) return;
-    inProblem = archiveFileProblem(next);
+    inProblem = archiveFileProblem(next, limits);
     preview = null;
     archive = null;
     file = next;
@@ -158,7 +161,7 @@
   }
 
   async function lookInside() {
-    if (!file || passIn.length < PASSPHRASE_MIN) return;
+    if (!file || passphraseLength(passIn) < passphraseMin) return;
     inProblem = null;
     inPhase = "looking";
     try {
@@ -291,7 +294,7 @@
       {/if}
       {#if inPhase === "rest"}
         <button class="p-pill act-accent wide" onclick={() => picker?.click()}>choose a file</button>
-        <p class="hh-note">an Orbit archive, up to {sizeLabel(ARCHIVE_MAX_BYTES)}</p>
+        <p class="hh-note">an Orbit archive{limits ? `, up to ${sizeLabel(limits.archiveFileBytes)}` : ""}</p>
       {:else if inPhase === "chosen" || inPhase === "looking"}
         <div class="hh-fields">
           <label class="hh-label" for="hh-pass-in">the file's passphrase</label>
@@ -300,7 +303,7 @@
         </div>
         <div class="hh-pair">
           <button class="p-pill" onclick={startOver}>another file</button>
-          <button class="p-pill filled" disabled={passIn.length < PASSPHRASE_MIN || inPhase === "looking"} onclick={lookInside}>
+          <button class="p-pill filled" disabled={passphraseLength(passIn) < passphraseMin || inPhase === "looking"} onclick={lookInside}>
             {inPhase === "looking" ? "looking…" : "look inside"}</button>
         </div>
       {:else if preview}

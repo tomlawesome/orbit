@@ -13,6 +13,7 @@
   import { consumeDoor } from "./door.js";
   import { isPocket } from "$lib/pocket/media.js";
   import Pocket from "./pocket.svelte";
+  import { daysWords } from "$lib/data/engine-limits.js";
   import DeskArchive from "./DeskArchive.svelte";
   import {
     addMember,
@@ -1234,7 +1235,7 @@
          ordinary cards and the danger line, spanning both columns
          (household.css's .card.c-archive). -->
     {#if v.canManage}
-      <DeskArchive householdId={v.id} householdName={v.name} entries={v.entries} sections={shown.length} />
+      <DeskArchive householdId={v.id} householdName={v.name} entries={v.entries} sections={shown.length} limits={v.limits} />
     {/if}
 
     <!-- ── THE DANGER ZONE ─────────────────────────────────────────────────
@@ -1268,7 +1269,7 @@
             <p class="stake">
               Everything in {v.name} — {v.entries} {v.entries === 1 ? "entry" : "entries"},
               their documents, their history and every reminder still queued — stops the
-              moment you ask. You have <b class="red">30 days</b> to change your mind;
+              moment you ask. You have <b class="red">{daysWords(v.retention?.recoveryDays)}</b> to change your mind;
               after that it is gone for good.
             </p>
             <div class="field">
@@ -1279,7 +1280,7 @@
         {/if}
         {#if saidDoom}
           <p class="said show">
-            requested · {v.name} stops now, and is gone for good in 30 days ·
+            requested · {v.name} stops now, and is gone for good in {daysWords(v.retention?.recoveryDays)} ·
             an instance admin can turn this back until then
           </p>
         {/if}

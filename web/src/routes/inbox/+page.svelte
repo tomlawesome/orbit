@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { readInboxScreen, approveWithOperation, dismissReceipt } from "$lib/data/workspace.js";
   import { ago, agoLong } from "$lib/format.js";
+  import { daysWords } from "$lib/data/engine-limits.js";
   import { LOCKED, fieldState, receiptWords } from "$lib/data/metadata-status.js";
   import { papersOf, readingsOf } from "$lib/pocket/review.js";
   import { reasonWords } from "$lib/pocket/words.js";
@@ -259,7 +260,7 @@
     {/if}
 
     {#if !emptyQueue}
-      <div class="retention">unreviewed arrivals burn up after 45 days · originals stay in your mailbox — Orbit only ever reads copies</div>
+      <div class="retention">unreviewed arrivals burn up after {daysWords(view.retention?.receiptDays)} · originals stay in your mailbox — Orbit only ever reads copies</div>
     {:else}
       <div class="quietnote">
         <div class="dish" aria-hidden="true"><span></span><span></span><span></span><i></i></div>

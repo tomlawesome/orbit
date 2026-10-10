@@ -317,7 +317,7 @@
       </section>
 
       {#if !emptyQueue}
-        <p class="p-foot pki-foot">unreviewed arrivals burn up after 45d</p>
+        <p class="p-foot pki-foot">unreviewed arrivals burn up after {view?.retention ? `${view.retention.receiptDays}d` : "a limited time"}</p>
       {/if}
     {/if}
   </main>
