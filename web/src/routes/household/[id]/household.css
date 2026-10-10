@@ -164,9 +164,11 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .field select{appearance:none;-webkit-appearance:none;padding-right:30px}
 /* #1338: the time zone and currency open the shared list sheet (a filter and
    the favourites first) instead of a native select; the button wears the
-   select's own face so the card looks as it did. */
+   select's own face so the card looks as it did. Its 17px line is the
+   select's: at line-height normal the button stood 1px shorter, enough to
+   fail the household fidelity gate (pipeline 2327). */
 .household-page .field .pickbtn{display:block;width:100%;box-sizing:border-box;text-align:left;background:var(--panel);
-       border:1px solid var(--line);border-radius:9px;color:var(--ink);font:13.5px var(--ui);padding:9px 30px 9px 12px;
+       border:1px solid var(--line);border-radius:9px;color:var(--ink);font:13.5px/17px var(--ui);padding:9px 30px 9px 12px;
        cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .household-page .field .pickbtn:hover,.household-page .field .pickbtn:focus-visible{border-color:var(--accent)}
 .household-page .field .pickbtn:disabled{opacity:.62;cursor:default}
