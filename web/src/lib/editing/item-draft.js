@@ -85,6 +85,26 @@ export function draftOf(item) {
 }
 
 /**
+ * The tiles of "where do these entries go?" (#1332): every kept section but
+ * the one going, shown and hidden alike (hidden ones say so), and a section
+ * added in this edit once it has a name (it says "new"). Same colour rule as
+ * `sectionChoices`; the order is the editor's.
+ * @param {{ id: string, name: string, icon?: string, visible?: boolean, fresh?: boolean, removed?: boolean }[]} rows
+ * @param {string} going  the section being removed
+ * @returns {Choice[]}
+ */
+export function destinationChoices(rows, going) {
+  return rows
+    .filter((one) => one.id !== going && !one.removed && one.name.trim())
+    .map((one) => ({
+      value: one.id,
+      words: one.name.trim(),
+      colour: sectionColourOf(one),
+      ...(one.fresh ? { note: "new" } : one.visible === false ? { note: "hidden" } : {}),
+    }));
+}
+
+/**
  * The section tiles: the household's visible sections, and the item's own
  * even if hidden, each in its colour.
  * @param {{ id: string, name: string, icon?: string, visible?: boolean }[]} sections

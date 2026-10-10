@@ -1,4 +1,5 @@
 <script>
+  import { tick } from "svelte";
   import { plural } from "$lib/format.js";
   import { goto, invalidateAll } from "$app/navigation";
   import { resolve } from "$app/paths";
@@ -12,7 +13,8 @@
   import { wake } from "$lib/pocket/wake.js";
   import { PEN_ORDER, inkOf, nextMark } from "$lib/marks.js";
   import { constellationPlanetsOf, hashId } from "$lib/data/chart.js";
-  import { MAX_SECTIONS, deletionNameMatches, entriesLabel } from "$lib/data/household.js";
+  import { MAX_SECTIONS, deletionNameMatches, entriesIn, entriesLabel, moveEntriesAway, whereHeadingOf } from "$lib/data/household.js";
+  import { destinationChoices } from "$lib/editing/item-draft.js";
   import {
     addMember,
     decideJoinRequest,
@@ -104,6 +106,7 @@
   function reset() {
     identity = identityOf(household);
     rows = rowsOf(household);
+    moveSaid = "";
   }
   /* Whatever the server says replaces every local edit: a save reloads, and
      stale dirt on something it has since answered for would be a lie. */
@@ -137,6 +140,13 @@
       wake(`saved · ${changesLabel(count)}`);
     } catch (error) {
       problem = `not saved — ${wordsOf(error)}`;
+      /* Someone filed an entry in a section since this page loaded: show the
+         true list rather than the one this editor expected (#1332). */
+      if (/** @type {{ code?: string }} */ (error)?.code === "section_has_items") {
+        await invalidateAll();
+        await tick();
+        reset();
+      }
     } finally {
       saving = false;
     }
@@ -316,6 +326,40 @@
   /** @param {EditorRow} row */
   const sectionName = (row) => row.name.trim() || "this section";
 
+  /* "Where do these entries go?" (#1332): the remove act on a section that
+     holds entries opens a sheet of tiles instead of arming; the pick is the
+     second tap. Nothing is sent until the bar's save. */
+  /** @type {string | null} */
+  let placing = $state(null);
+  let placeOpen = $state(false);
+  const placingRow = $derived(rows.find((row) => row.id === placing) ?? null);
+  const placeHeading = $derived(placingRow ? whereHeadingOf(entriesIn(placingRow)) : "");
+  const placeChoices = $derived(placingRow ? destinationChoices(rows, placingRow.id) : []);
+  /** Focus a section's row once the page is back in reach. @param {string} id */
+  const focusRow = (id) =>
+    tick().then(() =>
+      /** @type {HTMLElement | null} */ (document.querySelector(`[data-hh=sections] [data-row-key="${id}"] [data-row-face]`))
+        ?.focus({ preventScroll: true }));
+  /** @param {EditorRow} row */
+  function askWhere(row) {
+    placing = row.id;
+    placeOpen = true;
+  }
+  /** @param {string} destinationId */
+  function place(destinationId) {
+    const row = placingRow;
+    placing = null;
+    if (!row) return;
+    moveSaid = moveEntriesAway(rows, row, destinationId);
+    focusRow(destinationId);
+  }
+  /* Closed without a pick: nothing removed, focus back on the row. */
+  function placeCancelled() {
+    const id = placing;
+    placing = null;
+    if (id) focusRow(id);
+  }
+
   /** @param {EditorRow} row */
   function flip(row) {
     row.visible = !row.visible;
@@ -381,9 +425,11 @@
     { label: "edit", name: `Edit ${sectionName(row)}`, tone: /** @type {const} */ ("accent"), onact: () => editSection(row) },
     ...(index > 0 ? [{ label: "move up", name: `Move ${sectionName(row)} up`, onact: () => moveBy(index, -1) }] : []),
     ...(index < total - 1 ? [{ label: "move down", name: `Move ${sectionName(row)} down`, onact: () => moveBy(index, 1) }] : []),
-    /* The hidden-not-removed law: only an empty section can go. */
-    ...(row.removable ? [{ label: "remove", name: `Remove ${sectionName(row)}`, danger: true,
-      onact: () => { row.removed = true; } }] : []),
+    /* Every section can go bar the last kept one. An empty one arms; one with
+       entries opens the sheet that asks where they go (red, no arm). */
+    ...(total > 1 ? [{ label: "remove", name: `Remove ${sectionName(row)}`,
+      ...(row.removable ? { danger: true, onact: () => { row.removed = true; } }
+        : { tone: /** @type {const} */ ("danger"), onact: () => askWhere(row) }) }] : []),
   ];
 
   /* ── the danger line ──────────────────────────────────────────────────── */
@@ -576,7 +622,7 @@
       <section class="p-card hh-flush hh-sections" style:--i="3" aria-labelledby="hh-sections-head" data-hh="sections">
         <div class="hh-seclist" use:mountReorder={{ onreorder: reorder }} data-row-group>
           {#each shown as row, index (row.id)}
-            <Row title={row.name || "unnamed section"} meta="{entriesLabel(row.count)} · {row.visible ? 'shown' : 'hidden'}"
+            <Row title={row.name || "unnamed section"} key={row.id} meta="{entriesLabel(entriesIn(row))} · {row.visible ? 'shown' : 'hidden'}"
                  acts={sectionActs(row, index, shown.length)} onmove={(direction) => moveBy(index, direction)}>
               {#snippet mark()}<span class="hh-secmark" class:off={!row.visible}><Mark icon={row.icon} accent={row.accent} size={20} /></span>{/snippet}
               {#snippet end()}
@@ -673,6 +719,8 @@
   </Sheet>
 
   <PickSheet bind:open={pickOpen} kind={picking} value={identity[picking]} onchoose={(value) => (identity[picking] = value)} />
+  <PickSheet bind:open={placeOpen} kind="section" value={null} choices={placeChoices} heading={placeHeading}
+             onchoose={place} oncancel={placeCancelled} />
 
   <Sheet bind:open={editOpen} size="callout" title={editing?.id ? `Edit ${editing.name.trim() || "section"}` : "Add a section"}>
     {#if editing}

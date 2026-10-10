@@ -370,8 +370,10 @@
  * @property {boolean} shipped
  * @property {boolean} visible
  * @property {number} count        entries sitting in this section
- * @property {boolean} [removable] emptiness is the only thing that earns a ×
+ * @property {number} [incoming]   entries a not-yet-saved removal sends here
+ * @property {boolean} [removable] goes without asking: nothing in it, nothing coming
  * @property {boolean} [removed]   struck out in the editor, not yet saved
+ * @property {string} [moveTo]     where a struck-out section's entries go
  */
 
 /**
@@ -666,7 +668,7 @@ import { ago, dayMonth, sizeLabel } from "$lib/format.js";
 import { bandOf, daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
 import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
 import { engineNumbersOf } from "./engine-limits.js";
-import { householdScreenOf, householdUpdateCommandOf, sectionsCommandOf } from "./household.js";
+import { householdScreenOf, householdUpdateCommandOf, sectionCommandsOf } from "./household.js";
 import { documentRowOf } from "./belt.js";
 
 /**
@@ -2622,17 +2624,21 @@ export async function writeHouseholdIdentity(householdId, identity) {
  * The sections editor, saved whole — `sections.replace` replaces the list.
  *
  * Whether a dropped section may go is the engine's rule (ADR-0034, #1332): it
- * refuses a removal while the section holds entries, in its own words, and
- * this sends the list as it stands so those words reach the screen. The
- * editor offers no × on a section with entries; the engine is what holds the
- * line when a stale screen or another member's new entry got there first.
+ * refuses a removal while the section holds entries unless told where they
+ * go, in its own words, and this sends what the editor asked so those words
+ * reach the screen when a stale screen or another member's new entry got
+ * there first. One command per section dropped with entries (each carrying
+ * `moveItemsTo`), in removal order, as `sectionCommandsOf` decides.
  *
  * @param {string} householdId
- * @param {SectionRow[]} rows  the editor's rows, in sectionRowsOf's shape
+ * @param {SectionRow[]} rows  every editor row, struck-out ones included
  * @returns {Promise<Workspace>}
  */
 export async function writeSections(householdId, rows) {
-  return applyCommand(sectionsCommandOf(householdId, rows.filter((row) => !row.removed)));
+  /** @type {Workspace | undefined} */
+  let workspace;
+  for (const command of sectionCommandsOf(householdId, rows)) workspace = await applyCommand(command);
+  return /** @type {Workspace} */ (workspace);
 }
 
 /**

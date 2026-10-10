@@ -52,6 +52,10 @@ describe("the browser carries no rules (ADR-0034, #1325)", () => {
     expect(where(/locked until the key is restored/u)).toEqual([]);
   });
 
+  // #1332: the browser decides only what to ASK (a section holding entries
+  // opens "where do these entries go?", and the pick travels as moveItemsTo);
+  // whether the removal is allowed stays the engine's, which refuses
+  // section_has_items without it. The browser words no such refusal.
   it("whether a section may be removed is the engine's call (#1332): the browser's own check is gone", () => {
     expect(where(/section_in_use/u)).toEqual([]);
     expect(where(/can be hidden, never removed["']/u)).toEqual([]);
