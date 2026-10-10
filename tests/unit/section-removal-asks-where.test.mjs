@@ -113,6 +113,25 @@ describe("sectionCommandsOf: what a save sends for the sections list", () => {
     expect(commands.filter((command) => "moveItemsTo" in command).map((command) => command.moveItemsTo)).toEqual(["s-c"]);
   });
 
+  /* Review of f42ab0ca: an empty drop sent inside a held drop's command rides
+     its moveItemsTo, so an entry someone filed in the "empty" section since
+     the screen loaded would move there unasked. The empty drops go first, in a
+     command of their own with no moveItemsTo, so the engine refuses
+     (section_has_items) if one is not empty after all. */
+  it("sends the unasked empty drops first, alone, with nowhere named for entries", () => {
+    const rows = [
+      row("s-a", "A", { count: 2, removable: false, removed: true, moveTo: "s-c" }),
+      row("s-b", "B", { removed: true }),
+      row("s-c", "C"),
+    ];
+    const commands = sectionCommandsOf("hh-1", rows);
+    expect(commands).toHaveLength(2);
+    expect("moveItemsTo" in commands[0] && commands[0].moveItemsTo !== undefined).toBe(false);
+    expect(ids(commands[0])).toEqual(["s-a", "s-c"]);
+    expect(ids(commands[1])).toEqual(["s-c"]);
+    expect(commands[1].moveItemsTo).toBe("s-c");
+  });
+
   it("never drops a chosen destination unasked", () => {
     // B is going to receive A's entries, so B is no longer a section that goes
     // without asking. If B is struck out with no destination of its own, it
@@ -243,3 +262,22 @@ describe("the words of the where-do-these-entries-go chooser (#1332)", () => {
     expect(/layout=["{]*["']?beside/.test(desk), `desk must match ${/layout=["{]*["']?beside/}`).toBe(true);
   });
 });
+
+/* Review of f42ab0ca: with several held drops the save is several commands.
+   If a later one is refused for any reason, the earlier ones have already
+   saved, so the editor must reload to the true list, not only on
+   section_has_items. */
+describe("a save that stops part-way shows the true list (#1332)", () => {
+  const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
+  it("writeSections marks a refusal that came after earlier commands saved", () => {
+    const source = read("web/src/lib/data/workspace.js");
+    const body = source.slice(source.indexOf("export async function writeSections"));
+    expect(body.slice(0, body.indexOf("\n}\n"))).toMatch(/\.partial\s*=\s*true/);
+  });
+  it("desk and phone reload on a part-way refusal", () => {
+    for (const path of ["web/src/routes/household/[id]/+page.svelte", "web/src/routes/household/[id]/pocket.svelte"]) {
+      expect(read(path), path).toMatch(/\.partial\b/);
+    }
+  });
+});
+
