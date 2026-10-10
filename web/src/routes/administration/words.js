@@ -3,21 +3,21 @@
  * rows say the same thing (#1123). Moved verbatim from +page.svelte.
  */
 
+import { dayMonth, dayMonthYear } from "$lib/format.js";
+
 /** @param {string} name */
 export const initialsOf = (name) =>
   name.split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase();
 
 /** The lapse date as a reader reads it, in UTC so the gate photographs one date. @param {string} iso */
-export const lapses = (iso) =>
-  new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+export const lapses = (iso) => dayMonthYear(iso);
 
 /**
  * A date on the pocket, day and month only (round 3 §3.9, §8): the
  * setup-link line is `setup link sent · lapses 3 Oct`, the mailbox rows
  * `verified · 12 Aug` and `1 Aug · Tom Lawson`. @param {?string} iso
  */
-export const shortDay = (iso) =>
-  iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }) : "never";
+export const shortDay = (iso) => (iso ? dayMonth(iso) : "never");
 export const lapsesShort = shortDay;
 
 /**

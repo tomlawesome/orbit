@@ -18,7 +18,7 @@
   } from "$lib/data/workspace.js";
   import { SIGN_IN_METHODS_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { SENT_LATELY_FIXTURE } from "$lib/data/fixtures/settings.js";
-  import { agoLong } from "$lib/format.js";
+  import { agoLong, clockOf, dayMonth, localZone } from "$lib/format.js";
   import { alertsSupported, disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
   import { watchTour } from "$lib/tour/watch.js";
   import { fillStarTiles } from "$lib/sky.js";
@@ -177,11 +177,8 @@
 
   /** @param {string} iso */
   function whenSent(iso) {
-    const date = new Date(iso);
-    const zone = data?.fixtures ? "UTC" : undefined;
-    const day = date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: zone });
-    const time = date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: zone });
-    return `${day} · ${time}`;
+    const zone = data?.fixtures ? "UTC" : localZone();
+    return `${dayMonth(iso, zone)} · ${clockOf(iso, zone)}`;
   }
 
   /** @param {import('$lib/data/fixtures/settings.js').SentRow} row */

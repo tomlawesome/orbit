@@ -23,7 +23,7 @@
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { mountStation } from "$lib/backdrops/station.js";
-  import { ago } from "$lib/format.js";
+  import { ago, dayMonth } from "$lib/format.js";
   import Chrome from "$lib/Chrome.svelte";
   import { isPocket } from "$lib/pocket/media.js";
   import Pocket from "./pocket.svelte";
@@ -180,8 +180,6 @@
   const daysLeft = (iso) => Math.max(0, Math.ceil(
     (Date.parse(iso) - Date.parse(view?.now ?? new Date().toISOString())) / 86_400_000,
   ));
-  /** @param {string} iso */
-  const goneOn = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "long", timeZone: "UTC" });
   /** @param {{ deleteAfter: string }} row */
   const expired = (row) => Date.parse(row.deleteAfter) <= Date.parse(view?.now ?? new Date().toISOString());
 
@@ -1156,7 +1154,7 @@
             <div class="who">
               <b>{doom.name}</b>
               <span>{rowExpired ? "past its window · removing"
-                : `on the clock · ${count(daysLeft(doom.deleteAfter), "day")} left · gone for good ${goneOn(doom.deleteAfter)}`}</span>
+                : `on the clock · ${count(daysLeft(doom.deleteAfter), "day")} left · gone for good ${dayMonth(doom.deleteAfter)}`}</span>
             </div>
             {#if !rowExpired}
               <div class="acts">

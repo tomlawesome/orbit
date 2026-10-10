@@ -21,7 +21,7 @@
   import { createHeldCompletion } from "$lib/data/held-completion.js";
   import { createArm } from "$lib/arm.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
-  import { ago, agoLong, longDate, money } from "$lib/format.js";
+  import { ago, agoLong, dayMonth, money, MONTHS, weekdayOf } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
   import { readSearchDocuments, searchPocket } from "./pocket-search.js";
@@ -36,7 +36,6 @@
   import { WIDE_QUERY, cardWidthOf, pairOf, trackOf } from "./preview-pair.js";
   import { isPocket } from "$lib/pocket/media.js";
   import { WAKE_HOLD_MS, wake } from "$lib/pocket/wake.js";
-  import { shortDate } from "$lib/data/belt.js";
   import NorthStarMark from "$lib/NorthStarMark.svelte";
   import { watchTour } from "$lib/tour/watch.js";
   import "./home.css";
@@ -740,7 +739,7 @@
     /* #1319: every pill is disabled while the snooze is sent, which drops
        the focus the calendar handed back to the snooze pill; put it back
        once the pills are live again, as complete does. */
-    runFoot("snooze", () => snoozeCommand(item, until), `${item.title} snoozed until ${longDate(until)}`)
+    runFoot("snooze", () => snoozeCommand(item, until), `${item.title} snoozed until ${dayMonth(until)}`)
       .then(() => { if (expanded === item.id) focusInDrawer('[aria-label^="Snooze "]'); });
   }
 
@@ -769,7 +768,7 @@
       if (!nextDate) collapseRow();
       view = await readHome();
       if (nextDate) await rereadDetail();
-      wake(`Completed${nextDate ? ` · next due ${shortDate(nextDate)}` : ""} · ${item.title}`);
+      wake(`Completed${nextDate ? ` · next due ${dayMonth(nextDate)}` : ""} · ${item.title}`);
       if (nextDate) focusInDrawer('[aria-label^="Complete "]');
     } catch (error) {
       modes.completeProblem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again";
@@ -1245,8 +1244,7 @@
   const stripMonthTicks = $derived(stripOpen ? monthTicks(stripToday) : []);
   /** @param {number} days */
   const stripDateOf = (days) =>
-    new Date(Date.parse(`${stripToday}T00:00:00Z`) + days * 86400000)
-      .toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+    dayMonth(new Date(Date.parse(`${stripToday}T00:00:00Z`) + days * 86400000).toISOString());
 
   const stripMarks = $derived.by(() => {
     if (!stripOpen) return [];
@@ -1310,9 +1308,7 @@
 
   const todayLine = $derived(
     view
-      ? new Date(asView(view).today + "T00:00:00Z")
-          .toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short", timeZone: "UTC" })
-          .replace(",", "").toUpperCase()
+      ? `${weekdayOf(asView(view).today)} ${dayMonth(asView(view).today)}`.toUpperCase()
       : "",
   );
   /* the inbox orb's truth: arrivals awaiting the two-tap */
@@ -1347,11 +1343,10 @@
     [190, 31], [271, 53], [330, 112], [352, 194], [330, 274], [271, 333],
     [190, 355], [109, 333], [50, 274], [28, 194], [50, 112], [109, 53],
   ];
-  const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
   const monthLabels = $derived(
     MONTH_POS.map(([x, y], k) => ({
       x, y,
-      label: MONTHS[((view ? new Date(view.today + "T00:00:00Z").getUTCMonth() : 7) + k) % 12],
+      label: MONTHS[((view ? new Date(view.today + "T00:00:00Z").getUTCMonth() : 7) + k) % 12].toUpperCase(),
     })),
   );
 

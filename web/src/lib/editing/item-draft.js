@@ -10,7 +10,7 @@
  * dry run as the rows change (EditSession).
  */
 import { entryOf, intentOf, REMINDER_DEFAULT } from "../../routes/create/entry.js";
-import { every, shortDate } from "$lib/format.js";
+import { dayMonthYear, every } from "$lib/format.js";
 import { addMonths } from "./calendar.js";
 import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
 
@@ -131,7 +131,7 @@ export function periodChoices(current, due) {
       colour: null,
       figure: n ? String(years ? n / 12 : n) : "once",
       unit: n ? (years ? (n === 12 ? "year" : "years") : (n === 1 ? "month" : "months")) : "",
-      note: n ? (due ? `then ${shortDate(addMonths(due, n))}` : "") : "once",
+      note: n ? (due ? `then ${dayMonthYear(addMonths(due, n))}` : "") : "once",
     };
   });
 }

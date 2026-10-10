@@ -1,6 +1,6 @@
 import { daysUntil } from "$lib/data/chart.js";
 import { LOCKED, evidenceReadable, fieldState } from "$lib/data/metadata-status.js";
-import { money } from "$lib/format.js";
+import { dayMonth, dayMonthYear, money } from "$lib/format.js";
 
 /**
  * THE REVIEW CARD'S WORDS (round 3 §4, #1140): what ReviewCard.svelte and
@@ -25,12 +25,7 @@ import { money } from "$lib/format.js";
  */
 
 /** `11 Aug`. @param {string | null | undefined} iso */
-export const caughtOf = (iso) =>
-  iso ? new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" }) : "";
-
-/** @param {string} iso */
-const fullDate = (iso) =>
-  new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+export const caughtOf = (iso) => (iso ? dayMonth(iso) : "");
 
 /** @param {Reviewable} mail */
 export const reviewTitleOf = (mail) => mail.proposal?.title ?? mail.title ?? "Forwarded email";
@@ -60,7 +55,7 @@ export function readingsOf(mail) {
   if (p.provider) out.push({ label: "provider", value: p.provider, sure: sure("provider"), field: "provider" });
   if (p.reference) out.push({ label: "reference", value: p.reference, sure: sure("reference"), field: "reference" });
   if (p.dueDate) out.push({
-    label: p.scheduleKind === "expiry" ? "ends" : "renews", value: fullDate(p.dueDate), sure: sure("dueDate"), field: "dueDate",
+    label: p.scheduleKind === "expiry" ? "ends" : "renews", value: dayMonthYear(p.dueDate), sure: sure("dueDate"), field: "dueDate",
   });
   if (p.costMinor) out.push({
     label: "cost", value: money(p.costMinor, p.currency ?? "GBP", true), sure: sure("costMinor"), field: "cost",

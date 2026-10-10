@@ -647,7 +647,7 @@ export async function activeHousehold() {
  * fixture to fetch changes no caller's shape later.
  */
 import { adminFixture } from "./fixtures/admin.js";
-import { ago } from "$lib/format.js";
+import { ago, dayMonth } from "$lib/format.js";
 import { bandOf, daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
 import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
 import { engineNumbersOf } from "./engine-limits.js";
@@ -1587,15 +1587,6 @@ export async function readAbout() {
   return body.about;
 }
 
-/**
- * Named apart from format.js's and belt.js's own `shortDate` (#1151 W2-Q5):
- * those take a bare date and append T00:00:00Z themselves; this one takes a
- * document's full `availableAt` instant as it already arrives from the API.
- * @param {string} iso  a full ISO instant, not a bare date
- */
-const shortAddedDate = (iso) =>
-  new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
-
 /** @param {number} bytes */
 const sizeLabel = (bytes) =>
   bytes >= 1024 * 1024
@@ -1626,7 +1617,7 @@ const stateWordOf = (doc) => {
 export function drawerDocumentOf(doc) {
   return {
     ...documentRowOf(doc),
-    meta: [`added ${shortAddedDate(doc.availableAt)}`, sizeLabel(doc.sizeBytes), stateWordOf(doc)]
+    meta: [`added ${dayMonth(doc.availableAt)}`, sizeLabel(doc.sizeBytes), stateWordOf(doc)]
       .filter(Boolean).join(" · "),
   };
 }
@@ -1719,7 +1710,7 @@ export async function readItemDocuments(householdId, itemId) {
     name: doc.displayName,
     meta: [
       sizeLabel(doc.sizeBytes),
-      `added ${shortAddedDate(doc.availableAt)}`,
+      `added ${dayMonth(doc.availableAt)}`,
       stateWordOf(doc),
     ].filter(Boolean).join(" · "),
   }));

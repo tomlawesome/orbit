@@ -1,7 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { readInboxScreen, approveWithOperation, dismissReceipt } from "$lib/data/workspace.js";
-  import { ago, agoLong } from "$lib/format.js";
+  import { ago, agoLong, dayMonth, dayMonthYear } from "$lib/format.js";
   import { daysWords } from "$lib/data/engine-limits.js";
   import { LOCKED, fieldState, receiptWords } from "$lib/data/metadata-status.js";
   import { papersOf, readingsOf } from "$lib/pocket/review.js";
@@ -84,16 +84,10 @@
     }
   }
 
-  /** @param {string} iso */
-  const short = (iso) =>
-    new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
-  /** @param {string} iso */
-  const fullDate = (iso) =>
-    new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
   /* Filed dates carry their year only once it stops being obvious. */
   /** @param {string} iso */
   const filedDate = (iso) =>
-    iso.slice(0, 4) === need().today.slice(0, 4) ? short(iso) : fullDate(iso);
+    iso.slice(0, 4) === need().today.slice(0, 4) ? dayMonth(iso) : dayMonthYear(iso);
   /* The filed dot follows the chart key — the item's urgency band, today. */
   /** @param {import('$lib/data/workspace.js').Receipt} receipt */
   const burnsIn = (receipt) => daysUntil(/** @type {string} */ (receipt.expiresAt).slice(0, 10), need().today);
@@ -175,7 +169,7 @@
             <div class="head">
               <span class="dot" aria-hidden="true"></span>
               <b>{receipt.proposal?.title ?? "Forwarded email"}</b>
-              <small>caught {short(/** @type {string} */ (receipt.receivedAt))} · <span class="exp">burns up in {burnsIn(receipt)}d</span></small>
+              <small>caught {dayMonth(/** @type {string} */ (receipt.receivedAt))} · <span class="exp">burns up in {burnsIn(receipt)}d</span></small>
             </div>
             <div class="fields">
               {#each readingsOf(receipt) as reading (reading.field)}
@@ -243,7 +237,7 @@
           <div class="failed">
             <i aria-hidden="true"></i>
             <div class="body">
-              <b>A message from {short(failure.receivedAt)}</b>
+              <b>A message from {dayMonth(failure.receivedAt)}</b>
               <span>{unreadable(failure) ?? `${reasonWords(failure.reason)} · ${failure.message}`}</span>
             </div>
             {#if failure.canDiscard}

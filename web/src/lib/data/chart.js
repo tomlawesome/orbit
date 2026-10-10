@@ -17,6 +17,7 @@
  */
 
 import { BAND_VAR } from "$lib/data/bands.js";
+import { dayMonth, monthOnly, MONTHS } from "$lib/format.js";
 
 /**
  * The minimal shapes this transform reads off a workspace — loose and
@@ -304,8 +305,6 @@ export function dialBodiesOf(household, { suggestions = [], today }) {
   return bodies;
 }
 
-const MONTH_WORDS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
 /**
  * What an item's row says about where it stands, when it is not simply
  * waiting for its date (#1319; the coordinator's ruling, 2026-10-08: the
@@ -331,7 +330,7 @@ export function itemStateOf(item, activities = []) {
       /** @type {NonNullable<ChartHousehold["activities"]>[number] | null} */ (null));
   if (!last || !/completed$/u.test(last.kind)) return null;
   const day = (last.effectiveDate ?? last.occurredAt).slice(0, 10);
-  return { word: `done ${Number(day.slice(8, 10))} ${MONTH_WORDS[Number(day.slice(5, 7)) - 1]}`, restorable: false };
+  return { word: `done ${dayMonth(day)}`, restorable: false };
 }
 
 /**
@@ -478,7 +477,6 @@ export function labelledSkyOf(visibleHouseholds) {
   return galaxy;
 }
 
-const MONTH_LABELS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
 /**
  * The approach corridor (#461): every active item across every household,
@@ -599,7 +597,7 @@ export function corridorOf(workspace, today, options = {}) {
     if (key === currentKey) continue;
     const last = months[months.length - 1];
     if (last?.key === key) last.rows.push(row);
-    else months.push({ key, label: MONTH_LABELS[Number(key.slice(5)) - 1], rows: [row] });
+    else months.push({ key, label: MONTHS[Number(key.slice(5)) - 1].toUpperCase(), rows: [row] });
   }
   /* Every row here passed the `row.dueDate` truthy check the filter reads,
      but TS's `.filter()` type doesn't narrow on a plain truthy predicate —
@@ -617,8 +615,7 @@ export function corridorOf(workspace, today, options = {}) {
     monthsSpanned,
     /* the long name of the horizon month, for the closing line */
     horizon: dated.length
-      ? new Date(dated[dated.length - 1].dueDate + "T00:00:00Z")
-          .toLocaleDateString("en-GB", { month: "long", timeZone: "UTC" })
+      ? monthOnly(dated[dated.length - 1].dueDate)
       : null,
   };
 }

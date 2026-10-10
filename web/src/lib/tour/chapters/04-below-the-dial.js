@@ -46,6 +46,8 @@
  * the manifest is full, thin, or empty.
  */
 
+import { dayMonth, tminusOf } from "../../format.js";
+
 /**
  * Every element this chapter names, in one place, so
  * tests/unit/v19-tour-chapter-below-the-dial.test.mjs can pin them against
@@ -107,16 +109,10 @@ export const EXAMPLE = Object.freeze({
   row: ".pocket .pk-below .tourfilm-example-row",
 });
 
-/** @param {number} days */
-function countdown(days) {
-  return days < 0 ? `T+${-days}d` : `T−${days}d`;
-}
-
 /** The date `days` from today, as home's rows print one (pocket.svelte's
  *  `short`). @param {number} days */
 function shortDate(days) {
-  return new Date(Date.now() + days * 86_400_000)
-    .toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
+  return dayMonth(new Date(Date.now() + days * 86_400_000).toISOString());
 }
 
 /**
@@ -157,7 +153,7 @@ function stageExample(doc, column) {
     const meta = el("span", "font:var(--p-type-meta)/1.4 var(--mono);color:var(--ink-quiet);white-space:nowrap;overflow:hidden;text-overflow:ellipsis");
     meta.append(el("span", "color:var(--accent-text)", "example"), ` · ${one.cost}`);
     text.append(meta);
-    const trail = el("span", `flex:none;text-align:right;font:500 var(--p-type-meta)/1.3 var(--mono);color:var(${one.tone})`, countdown(one.days));
+    const trail = el("span", `flex:none;text-align:right;font:500 var(--p-type-meta)/1.3 var(--mono);color:var(${one.tone})`, tminusOf(one.days));
     trail.append(el("small", "display:block;font-size:var(--p-type-meta);color:var(--ink-quiet);font-weight:400", shortDate(one.days)));
     face.append(mark, text, trail);
     row.append(face);

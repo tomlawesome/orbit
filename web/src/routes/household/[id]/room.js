@@ -88,6 +88,7 @@
  */
 
 import { dialPlacement } from "$lib/data/chart.js";
+import { MONTHS } from "$lib/format.js";
 
 /* ── THE SHAPES (#624) ──────────────────────────────────────────────────────
  *
@@ -522,7 +523,8 @@ function axisCandidates(ideal, pairs, low, high) {
 const nearestEdge = (sun, width, height) =>
   Math.min(sun[0], width - sun[0], sun[1], height - sun[1]);
 
-const MONTHS = ["AUG", "SEP", "OCT", "NOV", "DEC", "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL"];
+/* The ring starts at August, the design's own today. */
+const RING_MONTHS = [...MONTHS.slice(7), ...MONTHS.slice(0, 7)].map((name) => name.toUpperCase());
 
 /**
  * The calendar band's twelve ticks and names, exactly as home.html builds them
@@ -535,7 +537,7 @@ const MONTHS = ["AUG", "SEP", "OCT", "NOV", "DEC", "JAN", "FEB", "MAR", "APR", "
  * @returns {Month[]}
  */
 function monthsOf(sun, scale) {
-  return MONTHS.map((label, index) => {
+  return RING_MONTHS.map((label, index) => {
     const angle = ((index * 30 - 90) * Math.PI) / 180;
     const ca = Math.cos(angle), sa = Math.sin(angle);
     return {

@@ -12,7 +12,7 @@
  */
 
 import { bandOf, bodySize, daysUntil, dialPlacement } from "$lib/data/chart.js";
-import { ago, shortDate, tminus } from "$lib/format.js";
+import { ago, dayMonthYear, tminus } from "$lib/format.js";
 import { SHIPPED_SECTION_IDS } from "$lib/marks.js";
 
 /**
@@ -173,7 +173,7 @@ export function invitationRowsOf(invitations, now) {
     /* A date, not a countdown: "expires 18 Sep 2026" is what an owner can act
        on, and T−14d is not. Short-form month, as the ratified mockup draws it
        — the row's second line is chrome under the address, not a sentence. */
-    expires: shortDate(invitation.expiresAt.slice(0, 10)),
+    expires: dayMonthYear(invitation.expiresAt.slice(0, 10)),
   }));
 }
 

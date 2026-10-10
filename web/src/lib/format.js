@@ -13,35 +13,134 @@ export const DESIGN_TODAY = "2026-08-13";
 export const day = (iso) => Math.round(Date.parse(iso + "T00:00:00Z") / 86400000);
 
 /**
+ * The same label from a count of days already worked out. Null-safe: an
+ * unscheduled row's `days` is null, which would otherwise print "T−nulld".
+ * @param {number | null | undefined} days
+ * @returns {string}
+ */
+export const tminusOf = (days) =>
+  days === null || days === undefined ? "" : days < 0 ? `T+${-days}d` : `T−${days}d`;
+
+/**
  * @param {string} due
  * @param {string} [today]
  * @returns {string}
  */
-export const tminus = (due, today = DESIGN_TODAY) => {
-  const days = day(due) - day(today);
-  return days < 0 ? `T+${-days}d` : `T−${days}d`;
+export const tminus = (due, today = DESIGN_TODAY) => tminusOf(day(due) - day(today));
+
+/**
+ * The twelve months, short, in order: one table for every screen that names a
+ * month (#1340). Hand-built rather than read from `Intl`, whose short September
+ * is "Sept" in some builds and "Sep" in others.
+ */
+export const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/* Dates (#1339). One vocabulary, a two-digit day everywhere ("05 Oct",
+   "05 Oct 2026"). Each variant takes a bare date ("2026-10-05"), which names
+   a calendar day and is never moved by any zone, or an instant plus the
+   household zone (an IANA name; UTC when left out). */
+const BARE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** @type {Map<string, Intl.DateTimeFormat>} */
+const formatters = new Map();
+
+/**
+ * @param {string} key
+ * @param {Intl.DateTimeFormatOptions} options
+ */
+const formatter = (key, options) => {
+  let one = formatters.get(key);
+  if (!one) formatters.set(key, (one = new Intl.DateTimeFormat("en-GB", options)));
+  return one;
 };
 
 /**
- * @param {string} iso
- * @returns {string}
+ * @param {string} value  a bare date or an instant
+ * @param {string} [zone]
+ * @returns {{ at: Date, zone: string }}
  */
-export const longDate = (iso) =>
-  new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", {
-    day: "numeric", month: "long", year: "numeric", timeZone: "UTC",
-  });
+const momentOf = (value, zone = "UTC") =>
+  BARE_DATE.test(value)
+    ? { at: new Date(value + "T00:00:00Z"), zone: "UTC" }
+    : { at: new Date(value), zone };
 
-/* The same date at chrome scale: "18 Sep 2026". For a line that sits under
-   something else and is read after it, where the month spelled out would be
-   the longest word on the row (#481's held seat). */
 /**
- * @param {string} iso
+ * @param {string} value
+ * @param {string | undefined} zone
+ * @param {Intl.DateTimeFormatOptions} options
  * @returns {string}
  */
-export const shortDate = (iso) =>
-  new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", {
-    day: "numeric", month: "short", year: "numeric", timeZone: "UTC",
-  });
+const render = (value, zone, options) => {
+  const moment = momentOf(value, zone);
+  if (Number.isNaN(moment.at.getTime())) return "";
+  const settings = { ...options, timeZone: moment.zone };
+  return formatter(JSON.stringify(settings), settings).format(moment.at);
+};
+
+/**
+ * The browser's own zone, for a screen that reads an instant in the viewer's
+ * clock rather than the household's.
+ * @returns {string}
+ */
+export const localZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+/**
+ * "05 Oct": day and short month.
+ * @param {string} value  a bare date or an instant
+ * @param {string} [zone]  an IANA zone, for an instant
+ * @returns {string}
+ */
+export const dayMonth = (value, zone) => {
+  const parts = render(value, zone, { day: "2-digit", month: "2-digit" }).split("/");
+  return parts.length === 2 ? `${parts[0]} ${MONTHS[Number(parts[1]) - 1]}` : "";
+};
+
+/**
+ * "05 Oct 2026": for a line that sits under something else and is read after
+ * it, where the month spelled out would be the longest word on the row (#481's
+ * held seat).
+ * @param {string} value
+ * @param {string} [zone]
+ * @returns {string}
+ */
+export const dayMonthYear = (value, zone) => {
+  const parts = render(value, zone, { day: "2-digit", month: "2-digit", year: "numeric" }).split("/");
+  return parts.length === 3 ? `${parts[0]} ${MONTHS[Number(parts[1]) - 1]} ${parts[2]}` : "";
+};
+
+/**
+ * "05 October 2026": the month spelled out.
+ * @param {string} value
+ * @param {string} [zone]
+ * @returns {string}
+ */
+export const longDate = (value, zone) =>
+  render(value, zone, { day: "2-digit", month: "long", year: "numeric" });
+
+/**
+ * "October": the month's long name alone.
+ * @param {string} value
+ * @param {string} [zone]
+ * @returns {string}
+ */
+export const monthOnly = (value, zone) => render(value, zone, { month: "long" });
+
+/**
+ * "Thu": the weekday, short.
+ * @param {string} value
+ * @param {string} [zone]
+ * @returns {string}
+ */
+export const weekdayOf = (value, zone) => render(value, zone, { weekday: "short" });
+
+/**
+ * "15:30": the time of day, twenty-four hour, in the zone given.
+ * @param {string} value  an instant
+ * @param {string} [zone]
+ * @returns {string}
+ */
+export const clockOf = (value, zone) =>
+  render(value, zone, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 
 /**
  * @param {number | null | undefined} minor
