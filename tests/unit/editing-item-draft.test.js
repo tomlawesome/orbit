@@ -160,9 +160,9 @@ describe("periodChoices", () => {
 
   // #1337: the date a period would next come round to is the engine's (the
   // dry run of item.complete); the cells no longer add months in the browser.
-  it("says \"once\" under the one-off and works out no date of its own under the rest", () => {
+  it("says \"once\" under the one-off and \"from when it's done\" under the rest, working out no date of its own", () => {
     const notes = periodChoices(12, due).map((c) => c.note);
-    expect(notes).toEqual(["once", "", "", "", "", ""]);
+    expect(notes).toEqual(["once", ...Array(5).fill("from when it's done")]);
   });
 
   it("gives the same notes whatever the due date, since none is worked out here", () => {
@@ -173,7 +173,7 @@ describe("periodChoices", () => {
     const choices = periodChoices(2, due);
     expect(choices.map((c) => c.value)).toEqual(["0", "1", "2", "3", "6", "12", "24"]);
     expect(choices[2]).toMatchObject({
-      value: "2", words: "every 2 months", figure: "2", unit: "months", note: "", colour: null,
+      value: "2", words: "every 2 months", figure: "2", unit: "months", note: "from when it's done", colour: null,
     });
     expect(periodChoices(18, due).map((c) => c.value)).toEqual(["0", "1", "3", "6", "12", "18", "24"]);
   });

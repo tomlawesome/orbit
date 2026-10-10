@@ -585,20 +585,21 @@ export async function applyCommand(command, { retryCsrf = true } = {}) {
 }
 
 /**
- * A dry run of a command (ADR-0034 decision 3, #1325): the engine runs the
- * same parse and checks the real call runs and writes nothing. Null when it
- * would be accepted; otherwise the engine's refusal, in the words the member
- * reads (the browser never rewords it). The answer rides a 200 either way —
- * `{}` or `{ refusal: { code, message } }` (the amendment of 2026-10-09) — so
- * a browser never logs an expected "not yet" as a failed request. A dry run
- * that cannot be heard (the network, the session, maintenance) refuses
- * nothing: the real save says what went wrong.
+ * A dry run of a command (ADR-0034 decision 3, #1325), read whole: the engine
+ * runs the same parse and checks the real call runs and writes nothing, and
+ * answers 200 either way -- `{}`, `{ refusal: { code, message } }`, or for a
+ * completion that would go through `{ preview: { nextDate } }` (#1337) -- so a
+ * browser never logs an expected "not yet" as a failed request. `refusal` is
+ * the engine's words, which the browser never rewords; `preview` is what the
+ * command would do, when the engine says. Null when the dry run cannot be
+ * heard (the network, the session, maintenance): nothing is known, and the
+ * real save says what went wrong.
  *
  * @param {object} command
  * @param {{ retryCsrf?: boolean }} [options]
- * @returns {Promise<string | null>}
+ * @returns {Promise<{ refusal: string | null, preview: { nextDate: string } | null } | null>}
  */
-export async function checkCommand(command, { retryCsrf = true } = {}) {
+export async function askCommand(command, { retryCsrf = true } = {}) {
   try {
     const { csrfToken } = await readSession();
     const response = await fetch("/api/workspace/commands", {
@@ -609,14 +610,30 @@ export async function checkCommand(command, { retryCsrf = true } = {}) {
     });
     if (response.status === 403 && retryCsrf) {
       await readSession({ refresh: true });
-      return checkCommand(command, { retryCsrf: false });
+      return askCommand(command, { retryCsrf: false });
     }
-    /** @type {{ refusal?: { code: string, message: string } }} */
+    /** @type {{ refusal?: { code: string, message: string }, preview?: { nextDate?: string } }} */
     const body = await json(response);
-    return body.refusal?.message ?? null;
+    const nextDate = body.preview?.nextDate;
+    return {
+      refusal: body.refusal?.message ?? null,
+      preview: nextDate ? { nextDate } : null,
+    };
   } catch {
     return null;
   }
+}
+
+/**
+ * Whether a command would be accepted: null when it would, otherwise the
+ * engine's refusal in the words the member reads (askCommand's `refusal`).
+ * A dry run that cannot be heard refuses nothing.
+ *
+ * @param {object} command
+ * @returns {Promise<string | null>}
+ */
+export async function checkCommand(command) {
+  return (await askCommand(command))?.refusal ?? null;
 }
 
 /**

@@ -133,7 +133,7 @@
     <!-- #1319 (owner-decisions §34): the foot row holds every act the belt
          had; `manage this item →` is gone, the drawer is the item now. -->
     <FootRow title={row.title} busy={acts.busy} {mode} {snoozing} onrestore={acts.onrestore}
-             discarding={acts.modes.discardArmed} standing={row.restorable ? "ended" : row.state ? "done" : null}
+             discarding={acts.modes.discardArmed} then={acts.modes.preview} standing={row.restorable ? "ended" : row.state ? "done" : null}
              onsnooze={acts.onsnooze} oncomplete={acts.oncomplete} onattach={acts.onattach}
              onretire={acts.onretire} oncopy={acts.oncopy} onedit={acts.onedit}
              onsave={acts.onsave} onrecord={acts.onrecord} oncancel={acts.oncancel}

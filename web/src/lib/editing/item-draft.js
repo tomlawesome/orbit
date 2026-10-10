@@ -150,7 +150,7 @@ export function periodChoices(current) {
       colour: null,
       figure: n ? String(years ? n / 12 : n) : "once",
       unit: n ? (years ? (n === 12 ? "year" : "years") : (n === 1 ? "month" : "months")) : "",
-      note: n ? "" : "once",
+      note: n ? "from when it's done" : "once",
     };
   });
 }

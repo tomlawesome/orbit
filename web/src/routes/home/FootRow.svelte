@@ -1,5 +1,7 @@
 <script>
   import { createArm } from "$lib/arm.js";
+  import { dayMonthYear } from "$lib/format.js";
+  const uid = $props.id();
 
   /**
    * THE DRAWER'S FOOT ROW (#1319; owner-decisions §34; design/v19/
@@ -40,6 +42,12 @@
    * changes?" (`discarding`), and a second press discards
    * (discard-guard.js).
    *
+   * THEN (#1337; owner answer 7a, 2026-10-10): while completing, "then 10 Oct
+   * 2027" on its own line under record and cancel -- the date the engine says
+   * the item will next be due, from the completed-on date. Plain text, empty
+   * while waiting or when there is none, and a polite status the record
+   * button is described by.
+   *
    * ATTACH opens the file picker; the file goes up through the per-item
    * documents route (workspace.js attachItemDocument) and its scan.
    *
@@ -52,6 +60,7 @@
    *   held?: boolean,
    *   standing?: "ended" | "done" | null,
    *   discarding?: boolean,
+   *   then?: string | null,
    *   onrestore?: () => unknown,
    *   onsnooze: (from: HTMLElement) => unknown,
    *   oncomplete: (from: HTMLElement) => unknown,
@@ -67,8 +76,11 @@
   /** @type {Props} */
   let {
     title, pocket = false, busy = null, mode = "read", snoozing = false, held = false,
-    standing = null, discarding = false, onrestore = undefined, onsnooze, oncomplete, onattach, onretire, oncopy, onedit, onsave, onrecord, oncancel,
+    standing = null, discarding = false, then = null, onrestore = undefined, onsnooze, oncomplete, onattach, onretire, oncopy, onedit, onsave, onrecord, oncancel,
   } = $props();
+
+  const thenId = `then-${uid}`;
+  const thenWords = $derived(then ? dayMonthYear(then) : "");
 
   let armed = $state(false);
   let copiedShown = $state(false);
@@ -134,10 +146,12 @@
   {:else if mode === "complete"}
     <div class="ivacts" class:p-pills={pocket} role="group" aria-label="Completing {title}">
       <button type="button" class:p-pill={pocket} class="act-ok" style="--act:var(--ok);--act-text:var(--ok-text)"
-              disabled={busy !== null} onclick={onrecord}>{busy === "complete" ? "recording…" : "record"}</button>
+              disabled={busy !== null} aria-describedby={thenWords ? thenId : undefined}
+              onclick={onrecord}>{busy === "complete" ? "recording…" : "record"}</button>
       <button type="button" class:p-pill={pocket} class="discard" class:danger={pocket && discarding} class:armed={discarding}
               style={discarding ? "--act:var(--overdue);--act-text:var(--overdue-text)" : undefined}
               disabled={busy !== null} onclick={oncancel}>{discarding ? "discard changes?" : "cancel"}</button>
+      <span class="then" id={thenId} role="status" aria-live="polite" aria-atomic="true">{#if thenWords}then <b>{thenWords}</b>{/if}</span>
     </div>
   {:else if standing === "ended"}
     <div class="ivacts" class:p-pills={pocket} role="group" aria-label="Actions for {title}">
@@ -209,6 +223,9 @@
   .ivacts button.armed{background:var(--act);color:var(--bg);border-color:var(--act)}
   .ivfootrow:not(.pocket) .ivacts button.lit{border-color:var(--act)}
   .ivacts .brk{display:none}
+  /* the completion's "then <date>": its own line, plain text (#1337) */
+  .ivacts .then{flex-basis:100%;text-align:center;min-height:1.6em;font:11.5px/1.6 var(--mono);color:var(--ink-mid)}
+  .ivacts .then b{font-weight:500;color:var(--ink)}
 
   /* THE TWO ICONS: 32px round glass in the muted ink, accent on hover and
      focus, a 44px target; inline strokes, 16px glyphs */
@@ -245,5 +262,6 @@
   /* the pocket's own scale: the kit's pills, its gap */
   .ivfootrow.pocket{margin-top:16px}
   .ivfootrow.pocket .ivacts{gap:var(--p-pill-gap, 8px)}
+  .ivfootrow.pocket .ivacts .then{font:var(--p-type-meta)/1.4 var(--mono)}
   @media (prefers-reduced-motion: reduce){ .copied,.ivicon i{transition:none} }
 </style>

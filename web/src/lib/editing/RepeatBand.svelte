@@ -48,7 +48,7 @@
   }
 
   /** @param {import('./item-draft.js').Choice} choice */
-  const spoken = (choice) => (choice.note && choice.note !== "once" ? `${choice.words}, ${choice.note}` : choice.words);
+  const spoken = (choice) => choice.words;
 </script>
 
 <div class="band" role="radiogroup" aria-label={label} bind:this={group}>

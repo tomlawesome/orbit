@@ -13,14 +13,17 @@ import { checkCommand } from "./workspace.js";
 export const DRY_RUN_DELAY_MS = 300;
 
 /**
+ * @template [A=string | null]
  * @param {{
- *   onanswer: (refusal: string | null) => void,
- *   check?: (command: object) => Promise<string | null>,
+ *   onanswer: (answer: A) => void,
+ *   check?: (command: object) => Promise<A>,
  *   delay?: number,
- * }} options  `onanswer` hears each current answer: null when the engine
- *   would accept the command, its refusal's words when not
+ * }} options  `onanswer` hears each current answer of `check`: by default
+ *   null when the engine would accept the command, its refusal's words when
+ *   not; a `check` that reads the dry run whole (askCommand, #1337) hands on
+ *   its object
  */
-export function dryRunner({ onanswer, check = checkCommand, delay = DRY_RUN_DELAY_MS }) {
+export function dryRunner({ onanswer, check = /** @type {any} */ (checkCommand), delay = DRY_RUN_DELAY_MS }) {
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let timer;
   let asked = 0;
