@@ -16,9 +16,18 @@
  * answered from the cache; every other request goes straight to the network.
  *
  * Offline page: `/offline.html` is a static page with no household data, kept
- * with the shell. A navigation goes to the network and its response is
+ * with the shell. A page navigation goes to the network and its response is
  * returned untouched and never stored; only if the network fetch rejects
  * (no connection) is the cached offline page shown in its place.
+ *
+ * Never intercepted, network up or down (the standard app-shell rules:
+ * web.dev "Create an offline fallback page", Workbox's NavigationRoute
+ * denylist): any non-GET request, any cross-origin request, and anything
+ * under `/api/` -- navigations included, so the hand-over to the identity
+ * provider, its callback, step-up, sign-out and downloads stay the browser's
+ * own, redirects and all. A worker that answers a request, even by passing
+ * `fetch(request)` straight through, hands a redirect back as an opaque one
+ * and puts itself between the page and the server (pipeline 2382).
  *
  * Updates: a new version installs in the background beside the old one and
  * takes over on the next launch. There is deliberately no skip-waiting and no
@@ -62,19 +71,28 @@ function navigate(request) {
 }
 
 /**
- * Serve a precached shell asset cache-first, and a navigation from the
+ * Whether the worker must leave a request to the browser: anything not a
+ * same-origin GET, and everything under /api/.
+ * @param {Request} request
+ * @param {URL} url
+ */
+function leftToTheBrowser(request, url) {
+  return request.method !== "GET" || url.origin !== self.location.origin || url.pathname.startsWith("/api/");
+}
+
+/**
+ * Serve a precached shell asset cache-first, and a page navigation from the
  * network with the offline page as its only fallback. Anything else --
  * non-GET, cross-origin, `/api/`, documents -- is not answered here.
  */
 self.addEventListener("fetch", (event) => {
   const { request } = event;
-  if (request.method !== "GET") return;
+  const url = new URL(request.url);
+  if (leftToTheBrowser(request, url)) return;
   if (request.mode === "navigate") {
     event.respondWith(navigate(request));
     return;
   }
-  const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;
   const key = url.origin + url.pathname;
   if (!SHELL.has(key)) return;
   event.respondWith(

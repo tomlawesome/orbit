@@ -29,6 +29,19 @@ resetDatabaseBetweenSpecFiles();
 
 const households = householdRegister();
 
+/* #1329: what this file asserts is the server's own first answer to `/`.
+   Orbit's worker now answers page navigations (network first, the offline
+   page only when the fetch fails), and Firefox does not report a redirect
+   that came back through a worker's answer: `redirectedFrom()` is null and
+   the 303 is invisible, though the reader still lands on /home and never
+   sees the door (checked by hand, pipeline 2382). Chromium still reports it,
+   so only Firefox keeps the worker out here, to watch the server directly. */
+test.use({
+  serviceWorkers: async ({}, use, testInfo) => {
+    await use(testInfo.project.use.defaultBrowserType === "firefox" ? "block" : "allow");
+  },
+});
+
 test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async ({ browser }) => {
