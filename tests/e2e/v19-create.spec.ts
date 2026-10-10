@@ -7,6 +7,7 @@ import { gotoCreate } from "./support/keyboard";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -63,7 +64,7 @@ test("the create form saves a real item into the orbit", async ({ page }) => {
     /* #856: waits for the mount that attaches the listeners, not just for
        `load` — `fill()` and the chip click below both need them. */
     await gotoCreate(page);
-    const dueDate = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+    const dueDate = householdDateFromToday(20);
     if (test.info().project.name.startsWith("mobile")) {
       /* #1120, proposal §2.5: a phone's create is the pocket's own form,
          where the section is a required choice (#1058: none is chosen for
@@ -127,7 +128,7 @@ test("the create form will not save an entry nobody has named", async ({ page })
 
   try {
     await gotoCreate(page);
-    const dueDate = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+    const dueDate = householdDateFromToday(20);
     if (test.info().project.name.startsWith("mobile")) {
       const form = page.getByRole("form", { name: "New entry" });
       await form.getByRole("button", { name: "service" }).click();
@@ -631,7 +632,7 @@ test("add to orbit closes the form and lands on the saved item", async ({ page }
     const name = "Home insurance proving";
     /* A dated save lands on its row in the schedule; the undated one is
        proven by the next test (#1281). */
-    const keyDate = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+    const keyDate = householdDateFromToday(20);
     const pocket = test.info().project.name.startsWith("mobile");
     await (pocket ? savePocketEntryWithDocument : saveDeskEntryWithDocument)(page, name, keyDate);
     await expect(page).toHaveURL(/\/home\?item=[0-9a-f-]{36}$/, { timeout: 30_000 });

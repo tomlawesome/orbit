@@ -7,6 +7,7 @@ import { settleArrival } from "./support/arrival";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
+import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
@@ -81,7 +82,7 @@ async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; hous
       },
     });
     const itemId = crypto.randomUUID();
-    const dueDate = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+    const dueDate = householdDateFromToday(20);
     await command({
       type: "item.upsert",
       householdId,

@@ -7,6 +7,7 @@ import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: this file's own copy of the seed-restore discipline every spec
    under tests/e2e/ follows -- see support/database.ts for why. */
@@ -123,7 +124,7 @@ async function seedHouseholdAndItem(page: Page, name: string, itemTitle: string)
       kind: "service",
       item: {
         id: itemId, sectionId, title: itemTitle, currency: "GBP",
-        dueDate: new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10),
+        dueDate: householdDateFromToday(20),
       },
       activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
     });

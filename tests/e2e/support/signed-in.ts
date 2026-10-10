@@ -6,6 +6,7 @@ import { homeIsLive } from "./keyboard";
 import { ensureWorkerAdministrator, workerAccount } from "./worker-identity";
 import { settleArrival } from "./arrival";
 import { answerPushWithoutAService } from "./webkit-push";
+import { householdDateFromToday } from "./household-dates";
 
 /**
  * #1178: the signed-in fixtures v19-axe-sweep.spec.ts grew (#496), lifted
@@ -90,7 +91,7 @@ export async function seedHousehold(page: Page, prefix: string, options: { withI
 
   const itemId = randomUUID();
   const itemTitle = `${prefix} item`;
-  const dueDate = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+  const dueDate = householdDateFromToday(20);
   const itemCreated = await page.request.post("/api/workspace/commands", {
     headers,
     data: {
