@@ -10,11 +10,11 @@ import {
   entriesLabel,
   householdScreenOf,
   householdUpdateCommandOf,
-  initialsOf,
   invitationRowsOf,
   sectionRowsOf,
   sectionsCommandOf,
 } from "../../web/src/lib/data/household.js";
+import { initials as initialsOf } from "../../web/src/lib/format.js";
 import { WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
 import { MEMBERS_FIXTURE } from "../../web/src/lib/data/fixtures/household.js";
 

@@ -5,8 +5,9 @@ import { describe, expect, it } from "vitest";
 // collects, home's chip carried onto the page, and the archive card's rules.
 import { changesLabel, changesOf, chipBodyOf, commandsFor, moved } from "../../web/src/routes/household/[id]/edits.js";
 import {
-  archiveFileProblem, passphraseProblem, sizeLabel,
+  archiveFileProblem, passphraseProblem,
 } from "../../web/src/routes/household/[id]/archive.js";
+import { sizeLabel } from "../../web/src/lib/format.js";
 
 const identity = { name: "Lawson Home", timezone: "Europe/London", currency: "GBP" };
 const sections = [
@@ -115,7 +116,7 @@ describe("the archive card", () => {
 
   it("refuses an empty or oversized file before reading it", () => {
     expect(archiveFileProblem({ size: 0 }, LIMITS)).toMatch(/empty/);
-    expect(archiveFileProblem({ size: LIMITS.archiveFileBytes + 1 }, LIMITS)).toMatch(/larger than 171 MB/);
+    expect(archiveFileProblem({ size: LIMITS.archiveFileBytes + 1 }, LIMITS)).toMatch(/larger than 170.7 MB/);
     expect(archiveFileProblem({ size: 130_000_000 }, LIMITS)).toBeNull();
     expect(archiveFileProblem({ size: 2048 }, LIMITS)).toBeNull();
     // No ceiling from the engine: only the empty check is the card's own.
@@ -126,6 +127,6 @@ describe("the archive card", () => {
     expect(sizeLabel(33)).toBe("33 B");
     expect(sizeLabel(84 * 1024)).toBe("84 KB");
     expect(sizeLabel(3.2 * 1024 * 1024)).toBe("3.2 MB");
-    expect(sizeLabel(38 * 1024 * 1024)).toBe("38 MB");
+    expect(sizeLabel(38 * 1024 * 1024)).toBe("38.0 MB");
   });
 });
