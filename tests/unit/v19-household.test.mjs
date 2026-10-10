@@ -12,7 +12,7 @@ import {
   householdUpdateCommandOf,
   invitationRowsOf,
   sectionRowsOf,
-  sectionsCommandOf,
+  sectionCommandsOf,
 } from "../../web/src/lib/data/household.js";
 import { initials as initialsOf } from "../../web/src/lib/format.js";
 import { WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
@@ -116,7 +116,7 @@ describe("the sections editor", () => {
   // behind.
   it("sends the whole list in the engine's field names", () => {
     const rows = sectionRowsOf(lawson());
-    expect(sectionsCommandOf("hh-lawson-1", rows)).toEqual({
+    expect(sectionCommandsOf("hh-lawson-1", rows)).toEqual([{
       type: "sections.replace",
       householdId: "hh-lawson-1",
       sections: [
@@ -126,7 +126,7 @@ describe("the sections editor", () => {
         { id: "s-services", name: "Services", icon: "service", accent: "plum", visible: true },
         { id: "s-dates", name: "Dates & renewals", icon: "calendar", accent: "coral", visible: true },
       ],
-    });
+    }]);
   });
 
   it("never sends more sections than the schema accepts", () => {
