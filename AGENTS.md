@@ -9,7 +9,8 @@ docs; this file keeps project rules and one-line traps.
 Architecture and security decisions are recorded in ADRs; the governance
 decision is [ADR-0011](docs/adr/0011-operator-experience-as-product.md).
 
-**One project, not siblings** ([ADR-0036](docs/adr/0036-the-orbit-family-is-one-project.md)).
+**One project, not siblings** ([ADR-0036](docs/adr/0036-the-orbit-family-is-one-project.md);
+recorded as an exception in `~/.config/agents/EXCEPTIONS.md`).
 Orbit, `ai/orbit-base-image`, `ai/orbit-launcher` (project 50) and
 `ai/orbit-site` (project 57) are one project in four repositories. When one
 needs something from another, or something there is not working, act on it
@@ -17,11 +18,6 @@ without asking: file the issue, tell that session. Anything describing Orbit to
 the public (a feature claim, an install step, a screenshot) belongs on the site,
 so check it when Orbit's behaviour changes. The launcher and site point here for
 this rule.
-
-A change to the contract between `install.sh` and the launcher lands in one
-order: here on `dev` first, the launcher bumps its Orbit pin to that commit, the
-launcher releases, then `scripts/bump-launcher-pin.sh` here
-(`docs/releasing.md`, "The launcher and signed release manifest").
 
 Non-commercial data and dependencies are acceptable here
 ([ADR-0037](docs/adr/0037-non-commercial-data-and-dependencies-acceptable.md)).
