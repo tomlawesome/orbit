@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 // #1319 — the due date's month calendar: pure date arithmetic on YYYY-MM-DD
 // strings read in UTC, Monday-first, always six rows of seven.
 import {
-  addDays, addMonths, bandOf, daysFrom, dowOf, isoOf, monthGrid, relWords, restingDay, spokenDate, stepDay,
+  addDays, addMonths, dowOf, isoOf, monthGrid, relWords, restingDay, spokenDate, stepDay,
 } from "../../web/src/lib/editing/calendar.js";
+import { bandOf, daysBetween } from "../../web/src/lib/format.js";
 
 const TODAY = "2026-10-08"; // a Thursday
 
@@ -29,9 +30,9 @@ describe("day arithmetic", () => {
   });
 
   it("counts days from today, negative once passed", () => {
-    expect(daysFrom(TODAY, TODAY)).toBe(0);
-    expect(daysFrom("2026-10-24", TODAY)).toBe(16);
-    expect(daysFrom("2026-10-07", TODAY)).toBe(-1);
+    expect(daysBetween(TODAY, TODAY)).toBe(0);
+    expect(daysBetween(TODAY, "2026-10-24")).toBe(16);
+    expect(daysBetween(TODAY, "2026-10-07")).toBe(-1);
   });
 
   it("says a day aloud", () => {
@@ -73,12 +74,12 @@ describe("relWords and bandOf", () => {
   });
 
   it("bands a day at its boundaries: overdue, to 30 days, to 90, later", () => {
-    const at = (days) => bandOf(addDays(TODAY, days), TODAY);
-    expect(at(-1)).toBe("over");
-    expect(at(0)).toBe("soon");
-    expect(at(30)).toBe("soon");
-    expect(at(31)).toBe("up");
-    expect(at(90)).toBe("up");
+    const at = (days) => bandOf(daysBetween(TODAY, addDays(TODAY, days)));
+    expect(at(-1)).toBe("overdue");
+    expect(at(0)).toBe("due-soon");
+    expect(at(30)).toBe("due-soon");
+    expect(at(31)).toBe("upcoming");
+    expect(at(90)).toBe("upcoming");
     expect(at(91)).toBe("ok");
   });
 });

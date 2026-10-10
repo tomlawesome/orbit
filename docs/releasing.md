@@ -38,11 +38,16 @@ To ship a stable release:
 2. Deploy that preview by its digest and do release acceptance: the
    charter's list ([v1 charter](v1-charter.md#release-acceptance), item 4),
    checked off on the release's acceptance issue.
-3. Merge `preview` into `main`.
-4. On GitLab, start a pipeline on `main` with `PREVIEW_DIGEST` set to the
+3. Update [the roadmap](roadmap.md) for the release: set each row's status
+   and evidence to what the accepted code does, mark kept promises
+   `delivered`, and add a row for any promise found anywhere new. A promise
+   that will not be kept is marked `dropped` and removed from where it was
+   made.
+4. Merge `preview` into `main`.
+5. On GitLab, start a pipeline on `main` with `PREVIEW_DIGEST` set to the
    accepted digest, and run the manual `promote_stable` job. It tags the image
    `vX.Y.Z` and `latest` and creates the `vX.Y.Z` tag.
-5. Straight away, run the **Countersign a stable release** workflow on GitHub
+6. Straight away, run the **Countersign a stable release** workflow on GitHub
    with that tag. This adds the owner's second signature.
 
 The rest of this document says what each step checks and why.

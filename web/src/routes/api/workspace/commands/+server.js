@@ -22,8 +22,11 @@ const NO_STORE = { "cache-control": "no-store" };
  * (src/lib/refusals.ts). The browser sends one at every pause as the member
  * types, so it shows the engine's rules rather than a copy of them, and a
  * browser never logs an expected "not yet" as a failed request (the amendment
- * of 2026-10-09). Only a dry run that could not be heard — maintenance, no
- * session, a stale CSRF token, a fault — answers with a status.
+ * of 2026-10-09). A dry run of `item.complete` that would go through also
+ * answers `{ preview: { nextDate } }`, the date the real completion would then
+ * store (#1337); no preview when the completion ends the schedule. Only a
+ * dry run that could not be heard — maintenance, no session, a stale CSRF
+ * token, a fault — answers with a status.
  *
  * Fixture mode answers before the maintenance, session and CSRF checks, which
  * all need a database the fidelity gate does not have (as the pre-attachment
@@ -37,7 +40,7 @@ export const POST = write(async (event, session) => {
   if (dryRunOf(body)) {
     return verdict(async () => {
       const command = parseWorkspaceCommand(withoutDryRun(body));
-      await checkWorkspaceCommand(session.user.id, session.id, command);
+      return checkWorkspaceCommand(session.user.id, session.id, command);
     });
   }
   const command = parseWorkspaceCommand(body);
@@ -59,13 +62,14 @@ export const POST = write(async (event, session) => {
  * `appErrorResponse` would say with a 4xx, the dry run says with a 200. A
  * fault (5xx) is not an answer and still fails the call as it would the save.
  *
- * @param {() => Promise<void>} check  the parse and checks the save would run
+ * @param {() => Promise<{ nextDate: string } | undefined | void>} check  the parse and checks the save would run,
+ *   and the preview of the result where the command has one
  * @returns {Promise<Response>}
  */
 async function verdict(check) {
   try {
-    await check();
-    return json({}, { headers: NO_STORE });
+    const preview = await check();
+    return json(preview ? { preview } : {}, { headers: NO_STORE });
   } catch (error) {
     const real = appErrorResponse(error);
     if (real.status >= 500) return real;

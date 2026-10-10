@@ -66,6 +66,17 @@ intent and shows refusals.**
    every pause while a member types, it has every browser log each expected
    "not yet" as a failed request, so the console stops being a signal and the
    fidelity gate's "no console errors" check cannot hold.
+
+   *Amended 2026-10-09 (#1337):* the answer to a dry run may also carry the
+   result the real call would store: a dry run of `item.complete` that would
+   go through answers `200 {"preview": {"nextDate"}}`, the next due date the
+   engine would then set, counted from the completion date as the real
+   completion counts it (none when the completion ends the schedule). The
+   browser shows that date and never adds months itself, so after a late
+   completion the preview and the stored date cannot differ. The same
+   validate-as-a-query pattern: a form preflight returning the normalised
+   result. The engine always sends `household.today`; the browser has no
+   fallback of its own for it.
 4. **Refusals are worded once, in the engine**, in the member's words the
    front end uses now ("not yet — give it a name"). The API returns the
    words with the code; the browser never rewrites them.
