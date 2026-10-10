@@ -15,11 +15,24 @@
  *               2026-10-08: "pick a date should not be removed")
  * and at most one chooser card open for any of them.
  *
+ * THE COMPLETION'S PREVIEW (#1337): while the rows complete an item, the
+ * engine is asked what the completed-on date alone would make the next date
+ * (a dry run of item.complete, askCommand): at once when completing opens,
+ * and about 300 ms after the date changes. `preview` is that date, or null:
+ * cleared the moment the date changes so an old answer never shows, and
+ * empty while waiting, when the engine refuses the date, when it cannot be
+ * reached, and for a one-off. Cost and notes cannot change it, so they are
+ * not sent.
+ *
  * Rows holding changes are guarded (#1319 stage 3b; the coordinator's
  * ruling, 2026-10-08): `cancel()` -- the cancel pill, Escape, and anything
  * that would close the row or drawer -- arms "discard changes?" first and
  * discards on a second press inside the hold (discard-guard.js).
  */
+import { untrack } from "svelte";
+import { completeCommand } from "$lib/data/commands.js";
+import { dryRunner } from "$lib/data/dry-run.js";
+import { askCommand } from "$lib/data/workspace.js";
 import { EditSession } from "$lib/editing/edit-session.svelte.js";
 import { chooserAskOf, draftOf } from "$lib/editing/item-draft.js";
 import { createDiscardGuard, rowsChanged } from "./discard-guard.js";
@@ -43,6 +56,8 @@ export class DrawerModes {
   completeProblem = $state(null);
   /** The snooze or completion calendar, when it is the one open. @type {FootChoosing | null} */
   foot = $state.raw(null);
+  /** The next date the engine would give the completion as the rows hold it (ISO), or null. @type {string | null} */
+  preview = $state(null);
   /** Whether the cancel pill reads "discard changes?" (discard-guard.js). */
   discardArmed = $state(false);
   /** The item snoozing or completing. @type {CommandItem | null} */
@@ -52,6 +67,12 @@ export class DrawerModes {
   #guard = createDiscardGuard({ onchange: (armed) => { this.discardArmed = armed; } });
   /** @type {() => void} */
   #onchoose;
+  /** The item the preview last opened on. @type {string | null} */
+  #previewFor = null;
+  #previewRun = dryRunner({
+    check: askCommand,
+    onanswer: (answer) => { this.preview = answer?.preview?.nextDate ?? null; },
+  });
 
   /**
    * @param {{
@@ -63,6 +84,24 @@ export class DrawerModes {
   constructor({ save, onchoose = () => {} }) {
     this.#onchoose = onchoose;
     this.edit = new EditSession({ save, onchoose });
+    /* The preview follows the completion: closed, it stops and clears; a new
+       item asks now; a new date clears at once and asks after the pause. */
+    $effect(() => {
+      const id = this.completing?.id;
+      const date = this.completing?.completedDate;
+      this.preview = null;
+      if (!id || !date) { this.#previewFor = null; this.#previewRun.stop(); return; }
+      const build = () => untrack(() => this.#previewCommand());
+      if (this.#previewFor === id) this.#previewRun.ask(build);
+      else { this.#previewFor = id; this.#previewRun.now(build); }
+    });
+  }
+
+  /** The question for the preview: the completion with its date alone. */
+  #previewCommand() {
+    const item = this.#item;
+    const date = this.completing?.completedDate;
+    return item && date ? completeCommand(item, { completedDate: date }) : null;
   }
 
   /** The item the drawer is editing, completing or snoozing, by id. */
@@ -219,6 +258,7 @@ export class DrawerModes {
     if (this.foot?.key === "done") this.foot = null;
     this.completing = null;
     this.completeProblem = null;
+    this.preview = null;
   }
 
   /**
