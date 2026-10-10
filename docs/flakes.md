@@ -454,3 +454,11 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 ## desk-phone-small-drifts.test.mjs
 
 - 2026-10-10 · b929a182 (#1329) · local scripts/test-backend.sh under parallel load · 5 s timeout on the dynamic import in "burnsInOf, the phone's"; passed alone and on rerun
+
+## v19-home-drawer.spec.ts:340 "on the desk › the pencil edits the drawer's own rows; Escape takes the chooser, then the edit" — desktop-chromium, desktop-firefox
+
+- 2026-10-10 · d80cf61b (!1054) · pipeline 2392 / smoke (job 34442) and smoke_firefox (job 34443) · first attempt hit the 60 s test timeout on both browsers; each passed on the in-job retry (16.7 s and 27.4 s, against 6 s locally). Both jobs were then cut off by the 30-minute job limit, so the run shows no assertion text. The same test passed first time on pipeline 2382, and the service-worker and archive changes since do not touch saving an item (non-GET was already left to the browser). Local runs on the kept stack passed on desktop-chromium and desktop-firefox.
+
+## v19-screen-reader.spec.ts:347 "/administration" — mobile-chromium
+
+- 2026-10-10 · d80cf61b (!1054) · pipeline 2392 / smoke (job 34442) · failed after 15.8 s on the first attempt; the job was cut off by the 30-minute limit before the retry or any error text. Passed locally on mobile-chromium, and 1.1 s on pipeline 2382.
