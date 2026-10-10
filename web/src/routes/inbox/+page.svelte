@@ -9,6 +9,7 @@
   import { BAND_VAR } from "$lib/data/bands.js";
   import { fillStarTiles } from "$lib/sky.js";
   import Chrome from "$lib/Chrome.svelte";
+  import { createArm } from "$lib/arm.js";
   import { resolve } from "$app/paths";
   import { SvelteMap } from "svelte/reactivity";
   import Pocket from "./pocket.svelte";
@@ -32,8 +33,15 @@
      the check. */
   const need = () => /** @type {NonNullable<typeof view>} */ (view);
 
-  /** @type {{ id: string | null, act: "approve" | "dismiss" | null }} */
-  let armed = $state({ id: null, act: null });
+  /* One arm for every receipt's two buttons (lib/arm.js), keyed "<id>:<act>":
+     4 s, scroll, Escape and a tap elsewhere put it down again. */
+  /** @type {string | boolean} */
+  let armed = $state(false);
+  const arm = createArm({ onchange: (next) => (armed = next) });
+  /** @param {{ id: string }} receipt @param {"approve" | "dismiss"} act */
+  const isArmed = (receipt, act) => armed === `${receipt.id}:${act}`;
+  /** The receipt whose last act failed, so its problem line stays up. */
+  let problemId = $state(/** @type {string | null} */ (null));
   /** @type {string | null} */
   let busy = $state(null);
   /** @type {string | null} */
@@ -45,13 +53,11 @@
    * receipt or a failed-to-process entry alike, both of which call in.
    * @param {{ id: string }} receipt
    * @param {"approve" | "dismiss"} act
+   * @param {HTMLElement | null} button
    */
-  async function tap(receipt, act) {
+  async function tap(receipt, act, button) {
     problem = null;
-    if (armed.id !== receipt.id || armed.act !== act) {
-      armed = { id: receipt.id, act };
-      return;
-    }
+    if (!arm.tap(`${receipt.id}:${act}`, button)) return;
     busy = receipt.id;
     try {
       if (act === "approve") {
@@ -62,15 +68,16 @@
         const result = await approveWithOperation(suggestion, operationIds, need().primary);
         if ("partial" in result) {
           problem = result.message;
+          problemId = receipt.id;
           return;
         }
       } else {
         await dismissReceipt(receipt.id);
       }
-      armed = { id: null, act: null };
       view = await readInboxScreen();
     } catch (error) {
       problem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      problemId = receipt.id;
     } finally {
       busy = null;
     }
@@ -192,18 +199,18 @@
               <div class="twotap" style="margin-top:10px">{unreadable(receipt)}</div>
             {/if}
             <div class="actions">
-              <button class="yes" disabled={busy === receipt.id || locked(receipt)} onclick={() => tap(receipt, "approve")}>
-                {armed.id === receipt.id && armed.act === "approve" ? "tap again to approve" : "Add to orbit"}
+              <button class="yes" disabled={busy === receipt.id || locked(receipt)} onclick={(event) => tap(receipt, "approve", event.currentTarget)}>
+                {isArmed(receipt, "approve") ? "tap again to approve" : "Add to orbit"}
               </button>
-              <button disabled={busy === receipt.id} onclick={() => tap(receipt, "dismiss")}>
-                {armed.id === receipt.id && armed.act === "dismiss" ? "tap again to dismiss" : "Dismiss"}
+              <button disabled={busy === receipt.id} onclick={(event) => tap(receipt, "dismiss", event.currentTarget)}>
+                {isArmed(receipt, "dismiss") ? "tap again to dismiss" : "Dismiss"}
               </button>
               <span class="twotap">— both ask twice</span>
               {#if !locked(receipt)}
                 <a href={resolve(`/home?item=${encodeURIComponent(receipt.id)}`)}>review &amp; amend →</a>
               {/if}
             </div>
-            {#if problem && armed.id === receipt.id}
+            {#if problem && problemId === receipt.id}
               <div class="mail-problem">{problem}</div>
             {/if}
           </div>
@@ -239,8 +246,8 @@
               <span>{unreadable(failure) ?? `${reasonWords(failure.reason)} · ${failure.message}`}</span>
             </div>
             {#if failure.canDiscard}
-              <button disabled={busy === failure.id} onclick={() => tap(failure, "dismiss")}>
-                {armed.id === failure.id && armed.act === "dismiss" ? "tap again to remove" : "remove"}
+              <button disabled={busy === failure.id} onclick={(event) => tap(failure, "dismiss", event.currentTarget)}>
+                {isArmed(failure, "dismiss") ? "tap again to remove" : "remove"}
               </button>
             {/if}
           </div>

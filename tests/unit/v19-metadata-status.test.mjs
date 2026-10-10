@@ -154,7 +154,7 @@ describe("the mail-in review surfaces", () => {
     expect(INBOX).toContain("{#if !locked(receipt)}");
     expect(INBOX).toContain("disabled={busy === receipt.id || locked(receipt)}");
     // Dismiss is untouched, so a receipt is never trapped.
-    expect(INBOX).toContain('<button disabled={busy === receipt.id} onclick={() => tap(receipt, "dismiss")}>');
+    expect(INBOX).toContain('<button disabled={busy === receipt.id} onclick={(event) => tap(receipt, "dismiss", event.currentTarget)}>');
   });
 
   it("leaves a damaged message every action, because re-forwarding is a real repair", () => {

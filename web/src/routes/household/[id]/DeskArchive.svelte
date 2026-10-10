@@ -1,5 +1,6 @@
 <script>
   import { onMount } from "svelte";
+  import { createArm } from "$lib/arm.js";
   import {
     importPortableArchive,
     previewPortableArchive,
@@ -72,26 +73,16 @@
   /** @type {HTMLInputElement | undefined} */
   let picker = $state();
 
-  /* ── two-tap, the desk's own protocol (+page.svelte, administration.svelte):
-     an arm, then a fire, 5s to change your mind. Kept local like every other
-     card's copy of it — this route has no shared arm-button component. */
-  let armed = $state(/** @type {string | null} */ (null));
-  /** @type {ReturnType<typeof setTimeout> | undefined} */
-  let armTimer;
+  /* ── two-tap (lib/arm.js): an arm, then a fire, 4s to change your mind ── */
+  let armed = $state(/** @type {string | boolean} */ (false));
+  const arm = createArm({ onchange: (next) => (armed = next) });
   /**
    * @param {string} key
    * @param {() => void} fire
+   * @param {HTMLElement | null} button
    */
-  function twoTap(key, fire) {
-    if (armed === key) {
-      clearTimeout(armTimer);
-      armed = null;
-      fire();
-      return;
-    }
-    clearTimeout(armTimer);
-    armed = key;
-    armTimer = setTimeout(() => (armed = null), 5000);
+  function twoTap(key, fire, button) {
+    if (arm.tap(key, button)) fire();
   }
 
   /* ── the recent-authentication challenge (#1132) ──────────────────────── */
@@ -347,7 +338,7 @@
           {#if outRefusal && (passOut || passAgain)}<p class="refuse">{outRefusal}</p>{/if}
           <div class="act">
             <button class="ghost" class:armed={armed === "arch-out"} disabled={Boolean(outRefusal)}
-                    onclick={() => twoTap("arch-out", writeArchiveNow)}>
+                    onclick={(event) => twoTap("arch-out", writeArchiveNow, event.currentTarget)}>
               {armed === "arch-out" ? "tap again to write the archive" : "write the archive"}</button>
             <button class="ghost" type="button"
                     onclick={() => { outPhase = "rest"; passOut = ""; passAgain = ""; outProblem = null; }}>cancel</button>
@@ -419,7 +410,7 @@
             {#if bringCount > 0}
               <div class="act">
                 <button class="ghost" class:armed={armed === "arch-in"}
-                        onclick={() => twoTap("arch-in", bringInNow)}>
+                        onclick={(event) => twoTap("arch-in", bringInNow, event.currentTarget)}>
                   {armed === "arch-in"
                     ? `tap again to bring in ${bringCount} ${bringCount === 1 ? "entry" : "entries"}`
                     : `bring in ${bringCount} ${bringCount === 1 ? "entry" : "entries"}`}</button>

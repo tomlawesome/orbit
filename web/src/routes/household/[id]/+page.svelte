@@ -3,6 +3,7 @@
   import { invalidateAll } from "$app/navigation";
   import Chrome from "$lib/Chrome.svelte";
   import Mark from "$lib/Mark.svelte";
+  import { createArm } from "$lib/arm.js";
   import { fillStarTiles } from "$lib/sky.js";
   import { PEN_ORDER, inkOf, nextMark } from "$lib/marks.js";
   import { constellationPlanetsOf } from "$lib/data/chart.js";
@@ -274,27 +275,19 @@
   const shown = $derived(rows.filter((row) => !row.removed));
   const nameOk = $derived(deletionNameMatches(typedName, v.name));
 
-  /* ── the two-tap protocol (§14) ─────────────────────────────────────────
+  /* ── the two-tap protocol (§14, lib/arm.js) ─────────────────────────────
      The first tap arms, the second fires, and an unfired arm relaxes on its
-     own after five seconds so nothing is left cocked on the desk. */
-  /** @type {string | null} */
-  let armed = $state(null);
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let armTimer = null;
+     own after four seconds, on scroll, on Escape and on a tap elsewhere. */
+  /** @type {string | boolean} */
+  let armed = $state(false);
+  const arm = createArm({ onchange: (next) => (armed = next) });
   /**
    * @param {string} key
    * @param {() => void} fire
+   * @param {HTMLElement | null} button
    */
-  function twoTap(key, fire) {
-    if (armed === key) {
-      clearTimeout(armTimer ?? undefined);
-      armed = null;
-      fire();
-      return;
-    }
-    clearTimeout(armTimer ?? undefined);
-    armed = key;
-    armTimer = setTimeout(() => (armed = null), 5000);
+  function twoTap(key, fire, button) {
+    if (arm.tap(key, button)) fire();
   }
 
   /* ── the system (2c) ──────────────────────────────────────────────────── */
@@ -1081,11 +1074,11 @@
               <button class="ghost" onclick={ownerLeave}>leave this system</button>
             {:else if v.canManage && person.role !== "owner"}
               <button class="ghost" class:armed={armed === `drop:${person.id}`}
-                      onclick={() => twoTap(`drop:${person.id}`, () => dropMember(person))}>
+                      onclick={(event) => twoTap(`drop:${person.id}`, () => dropMember(person), event.currentTarget)}>
                 {armed === `drop:${person.id}` ? "tap again to remove" : "remove"}</button>
             {:else if person.you}
               <button class="ghost" class:armed={armed === "leave"}
-                      onclick={() => twoTap("leave", leave)}>
+                      onclick={(event) => twoTap("leave", leave, event.currentTarget)}>
                 {armed === "leave" ? "tap again to leave" : "leave this system"}</button>
             {/if}
           </div>
@@ -1171,7 +1164,7 @@
               </span>
               <button class="ghost" onclick={() => resend(invitation)}>resend</button>
               <button class="ghost" class:armed={armed === `inv:${invitation.id}`}
-                      onclick={() => twoTap(`inv:${invitation.id}`, () => withdraw(invitation))}>
+                      onclick={(event) => twoTap(`inv:${invitation.id}`, () => withdraw(invitation), event.currentTarget)}>
                 {armed === `inv:${invitation.id}` ? "tap again to withdraw" : "withdraw"}</button>
             </div>
           {/each}
@@ -1197,7 +1190,7 @@
             <span class="n">STEP TWO — CONFIRM</span>
             <div class="row">
               <button class="ghost" class:armed={armed === "handover"} disabled={!heir}
-                      onclick={() => twoTap("handover", handOver)}>
+                      onclick={(event) => twoTap("handover", handOver, event.currentTarget)}>
                 {armed === "handover"
                   ? "tap again to hand over"
                   : heir
@@ -1263,7 +1256,7 @@
             <button class="dangerbtn" onclick={openConfirm}>request deletion →</button>
           {:else}
             <button class="dangerbtn" class:armed={armed === "doom"} disabled={!nameOk || saidDoom}
-                    onclick={() => twoTap("doom", requestDeletion)}>
+                    onclick={(event) => twoTap("doom", requestDeletion, event.currentTarget)}>
               {armed === "doom" ? "tap again to schedule deletion" : "request deletion"}</button>
           {/if}
         </div>

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ARM_MS, createArm, disarmOnElsewhere } from "$lib/pocket/arm.js";
+import { ARM_MS, createArm, disarmOnElsewhere } from "$lib/arm.js";
 import { inertPage, tabbables, trapTab } from "$lib/pocket/focus.js";
 import {
   chromeHidden, dragAxis, reorderTarget, sheetRelease,

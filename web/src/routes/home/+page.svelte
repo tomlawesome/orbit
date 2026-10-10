@@ -19,7 +19,7 @@
   import { WorkspaceError, applyCommand, approveWithOperation, dueDateIn, attachItemDocument, dismissReceipt, householdElsewhereFor, readHome, readHomeIn, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut } from "$lib/data/workspace.js";
   import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
   import { createHeldCompletion } from "$lib/data/held-completion.js";
-  import { createArm } from "$lib/pocket/arm.js";
+  import { createArm } from "$lib/arm.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
   import { ago, agoLong, longDate, money } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
@@ -1106,8 +1106,7 @@
 
   /* #1162: the two note-line acts BUILD.md left inert. "complete" fires the
      same completeCommand the item page and the pocket's own quick-complete
-     use, arm-then-fire (`$lib/pocket/arm.js`, the shared helper arm.js's own
-     header says the desk should reach for rather than a sixth inline copy).
+     use, arm-then-fire (`$lib/arm.js`, the one shared helper).
      "add" carries the typed name to /create exactly as the pocket's search
      already does (#1120). Both show together at rest; a typed query with
      real matches shows neither (BUILD.md §1). */

@@ -9,7 +9,7 @@
   import { compileFlightNow, compileStopsPage, readyFlight, hurryFlight } from "./warm.js";
   import { earthSettled, isFirstVisit, startFirstLight } from "./first-light.js";
   import {
-    APPROVAL_BACKSTOP_MS, CLAIM, DOOR, LOCAL, STARTING, STARTING_BACKSTOP_MS,
+    APPROVAL_BACKSTOP_MS, CLAIM, DOOR, LOCAL, STARTING, STARTING_BACKSTOP_MS, STARTING_POLL_MS,
     applyStartingBackstop, availabilityOf, cardMessageFor, claimFromHash, doorMessageFor,
     doorModeOf, nextDoorState, phaseOf, readinessOf,
   } from "./door-state.js";
@@ -638,7 +638,7 @@
         if (disposed) return;
         const resolved = applyStartingBackstop(next.state, backstopAt, Date.now());
         if (resolved === STARTING) {
-          pollTimer = setTimeout(poll, 4000);
+          pollTimer = setTimeout(poll, STARTING_POLL_MS);
           return;
         }
         if (resolved === DOOR) {
@@ -649,7 +649,7 @@
           readyWhenDrawn();
         } else showState(resolved, next.contactAddress);
       };
-      pollTimer = setTimeout(poll, 4000);
+      pollTimer = setTimeout(poll, STARTING_POLL_MS);
     }
     run();
 
