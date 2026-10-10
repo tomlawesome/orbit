@@ -12,8 +12,11 @@
  *   · `licenceUrl` is given for every entry under a licence; for NASA it is
  *     NASA's own guidelines for using its imagery.
  *
- * `files` are the shipped copies, under web/static. They came from orbit-site
- * (assets/img, commit c189d38), whose tools made them from these sources.
+ * `files` are the shipped copies, as paths from web/static. They came from
+ * orbit-site, whose tools made them from these sources: the gold world and
+ * the Milky Way are Orbit's own copies in web/static/flight; the door's and
+ * the flight's pictures are the shared door's (#1371), reached as
+ * ../src/lib/door/img/, where its import copies them.
  *
  * Fonts (#1256) are the three faces web/scripts/collect-font-licences.mjs
  * bundles, and link the full OFL text that script writes at build time, as
@@ -31,7 +34,7 @@
  * @property {string} [licenceUrl]
  * @property {string} sourceUrl
  * @property {string} [changes] what was changed, where the licence asks for it
- * @property {string[]} files the shipped copies, under web/static
+ * @property {string[]} files the shipped copies, as paths from web/static
  */
 
 /**
@@ -67,9 +70,11 @@ export const CREDITS = [
     licenceUrl: "https://www.nasa.gov/nasa-brand-center/images-and-media/",
     sourceUrl: "https://earthobservatory.nasa.gov/features/NightLights",
     files: [
-      "flight/door/dawn.webp", "flight/door/dawn-pre.webp",
-      "flight/world/earth-lights.webp", "flight/world/europe-lights.webp",
-      "flight/world/earth-day.webp", "flight/world/earth-clouds.webp",
+      "../src/lib/door/img/dawn/dawn.webp", "../src/lib/door/img/dawn/dawn-pre.webp",
+      "../src/lib/door/img/flight/earth-lights.webp", "../src/lib/door/img/flight/europe-lights.webp",
+      "../src/lib/door/img/flight/earth-day.webp", "../src/lib/door/img/flight/earth-clouds.webp",
+      "../src/lib/door/img/dawn/lights-near.webp", "../src/lib/door/img/dawn/land-near.webp",
+      "../src/lib/door/img/dawn/clouds-near.webp",
     ],
   },
   {
@@ -88,7 +93,7 @@ export const CREDITS = [
     licence: "Public domain (NASA imagery is not copyrighted)",
     licenceUrl: "https://www.nasa.gov/nasa-brand-center/images-and-media/",
     sourceUrl: "https://svs.gsfc.nasa.gov/4720",
-    files: ["flight/world/moon.webp"],
+    files: ["../src/lib/door/img/flight/moon.webp"],
   },
   {
     name: "The Milky Way behind the flight, from \"Deep Star Maps 2020\"",
