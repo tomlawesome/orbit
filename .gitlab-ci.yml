@@ -61,9 +61,10 @@ workflow:
       when: never
     # A scheduled pipeline is the Renovate lane, the sidecar-pin-freshness
     # lane, the install-bootstrap lane, the base-image-repin lane, the
-    # tidy-freshness lane, or nothing (#801 step 6, #820, #724, #708, #1023).
-    # `renovate`, `sidecar_pin_freshness`, `install_bootstrap`,
-    # `base_image_repin` and `tidy_freshness` are the only jobs that opt
+    # tidy-freshness lane, the door-import lane, or nothing (#801 step 6,
+    # #820, #724, #708, #1023, #1371). `renovate`, `sidecar_pin_freshness`,
+    # `install_bootstrap`, `base_image_repin`, `tidy_freshness` and
+    # `door_import` are the only jobs that opt
     # in, so a schedule that forgot its variable would produce a pipeline
     # with no jobs, which GitLab rejects with a message that names neither
     # the schedule nor the variable. Refusing it here says why.
@@ -72,6 +73,7 @@ workflow:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $INSTALL_BOOTSTRAP == "true"
     - if: $CI_PIPELINE_SOURCE == "schedule" && $BASE_IMAGE_REPIN == "true"
     - if: $CI_PIPELINE_SOURCE == "schedule" && $TIDY_FRESHNESS == "true"
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $DOOR_IMPORT == "true"
     - if: $CI_PIPELINE_SOURCE == "schedule"
       when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -997,6 +999,9 @@ fast:
     - *reach_helpers
     - orbit_lane_admits fast || exit 0
     - *reuse_gate
+    # The door copy is only ever changed by the import (#1371): offline, two
+    # paths and one hash, so it runs before the install and fails in a second.
+    - bash scripts/ci/check-door-unchanged.sh
     - pnpm install --frozen-lockfile
     # Everything from here runs unprivileged, because two of these tests assert
     # a permission refusal that root does not receive. See .drop_to_node.
@@ -3847,6 +3852,62 @@ base_image_repin:
       bash scripts/ci/repin-base-image.sh --red
       echo "base_image_repin: real run — compares the artifact digest to the pin"
       bash scripts/ci/repin-base-image.sh
+
+# Imports orbit-site's shared door folder and proposes the update (#1371;
+# ai/orbit-site ADR-0001).
+#
+# Orbit's door (the gate, the lockup, the dawn and dusk flights) is built once,
+# in ai/orbit-site's assets/door/, and vendored here rather than hand-ported a
+# second time and left to drift. This job is the vendoring: a vendored upstream
+# copy with a pinned record and automated update merge requests, the same
+# shape as `base_image_repin`. `scripts/ci/import-door.sh` reads the current
+# `main` of ai/orbit-site, copies assets/door/ byte for byte into
+# web/src/lib/door/, writes web/src/lib/door.upstream.json (project, ref, full
+# commit, path, and a sha256 over the sorted paths and contents), and, only
+# when that tree differs from the recorded one, pushes
+# chore/door-import-<short sha>, opens a merge request into `dev` naming the
+# upstream commit, then closes the older open door-import merge requests and
+# deletes their branches. Nothing here merges itself, and an unchanged door
+# opens nothing. `fast` runs scripts/ci/check-door-unchanged.sh, which fails
+# when the copy no longer matches the record, so the copy is never edited here.
+#
+# Schedule-gated like `base_image_repin`: create a schedule on `dev` with the
+# variable DOOR_IMPORT=true, under the same user as the other schedules. No
+# self-test first: the script's own tests (scripts/ci/import-door.test.mjs)
+# drive it against a local repository and a fake GitLab, and a rehearsal of
+# its push or merge-request calls against the real project is not wanted.
+#
+# Two credential sources, narrowed as far as they go, the same split as
+# `base_image_repin`:
+#
+#   Reading ai/orbit-site needs no stored credential. This job's own
+#   CI_JOB_TOKEN does it, provided ai/orbit-site's CI/CD job token allowlist
+#   (Settings > CI/CD > Job token permissions) names ai/orbit and the
+#   schedule's user can read that project.
+#
+#   Pushing the branch and opening and closing merge requests needs one
+#   CI/CD variable the owner creates under Settings > CI/CD > Variables,
+#   masked AND protected (#1084), so no merge-request pipeline can read it:
+#
+#   DOOR_IMPORT_TOKEN   A project access token on ai/orbit ONLY -- never
+#                       ai/orbit-site, never a group token -- with the `api`
+#                       scope and the Developer role. It must never hold
+#                       registry push credentials. Never printed; read by
+#                       scripts/ci/import-door.sh, which fails clearly if it
+#                       is unset. Where it can reach is the subject of the
+#                       independent review #1371 requires before merge.
+door_import:
+  stage: maintenance
+  image:
+    name: $NODE_IMAGE
+    pull_policy: if-not-present
+  # One shallow fetch, a few hundred small copies and a handful of API calls.
+  timeout: 15m
+  interruptible: false
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $DOOR_IMPORT == "true"
+  script:
+    - bash scripts/ci/import-door.sh
 
 # The runner host's nightly Docker tidy, made visible (#1023).
 #
