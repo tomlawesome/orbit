@@ -170,8 +170,8 @@ const PRERENDERED = ["/about"];
 const abs = (path) => new URL(path, ORIGIN).href;
 
 /** A Request whose `mode` is "navigate", which the Request constructor will not allow. */
-function navigation(path) {
-  const request = new Request(abs(path));
+function navigation(path, init) {
+  const request = new Request(new URL(path, ORIGIN).href, init);
   Object.defineProperty(request, "mode", { value: "navigate" });
   return request;
 }
@@ -606,5 +606,72 @@ describe("service worker fetch: nothing private is cached or served from cache",
     await w.dispatchFetch(new Request("https://cdn.elsewhere.example/lib.js"));
 
     expect(w.puts.slice(before)).toEqual([]);
+  });
+});
+
+/*
+ * What the worker must never intercept (#1329, after pipeline 2382). A
+ * request the worker answers -- even with `fetch(request)` passed straight
+ * through -- is no longer the browser's own: a redirect comes back as an
+ * opaque one the page cannot see, and the browser's network events see the
+ * worker's answer instead of the server's (three e2e specs went red that way:
+ * the hand-over to /api/auth/login, the 303 at /, the archive challenge).
+ * The standard app-shell rules (web.dev "Create an offline fallback page";
+ * Workbox's NavigationRoute denylist): leave every non-GET request, every
+ * cross-origin request and everything under /api/ -- sign-in, sign-out, the
+ * provider's callback, downloads -- to the browser, network up or down. Only
+ * page navigations get the offline fallback.
+ */
+describe("service worker fetch: what it never intercepts", () => {
+  async function ready() {
+    const w = await loadWorker();
+    networkWithOfflinePage(w);
+    await w.install();
+    await w.activate();
+    w.network.mockClear();
+    return w;
+  }
+
+  const NEVER = [
+    ["the hand-over to the identity provider", () => navigation("/api/auth/login?returnTo=%2Fhome")],
+    ["the provider's callback", () => navigation("/api/auth/callback?code=abc&state=def")],
+    ["the step-up return", () => navigation("/api/auth/step-up/callback?code=abc&state=def")],
+    ["sign-out", () => navigation("/api/auth/logout")],
+    ["a document download opened as a page", () => navigation("/api/households/1/documents/2/download")],
+    ["an API read", () => new Request(abs("/api/auth/session"))],
+    ["a form posted as a navigation", () => navigation("/login", { method: "POST", body: "a=1" })],
+    ["an API write", () => new Request(abs("/api/households/1/portable-archives"), { method: "POST", body: "{}" })],
+    ["a navigation to another origin", () => navigation("https://idp.example/authorize?client_id=orbit")],
+    ["a cross-origin GET", () => new Request("https://cdn.elsewhere.example/lib.js")],
+  ];
+
+  for (const [label, make] of NEVER) {
+    it(`leaves ${label} to the browser`, async () => {
+      const w = await ready();
+
+      const { handled } = await w.dispatchFetch(make());
+
+      expect(handled).toBe(false);
+      expect(w.network).not.toHaveBeenCalled();
+    });
+
+    it(`leaves ${label} to the browser with no network either`, async () => {
+      const w = await ready();
+      goOffline(w);
+
+      const { handled } = await w.dispatchFetch(make());
+
+      expect(handled).toBe(false);
+    });
+  }
+
+  it("hands a page navigation's redirect back as the very response the network gave", async () => {
+    const w = await ready();
+    const redirect = new Response(null, { status: 303, headers: { location: "/home", "cache-control": "no-store" } });
+    w.network.mockImplementation(async () => redirect);
+
+    const response = await w.respond(navigation("/"));
+
+    expect(response).toBe(redirect);
   });
 });
