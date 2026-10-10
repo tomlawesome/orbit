@@ -179,9 +179,7 @@ dependencies outside the approved SPDX licence policy block integration.
 A push starts a pipeline only on `dev`, `preview`, `main` and `hotfix/*`. A
 working branch is tested by its merge request; one with no merge request has no
 pipeline until it gets one. `~/.local/bin/gl-pipeline-run ai/orbit <ref>` starts
-a pipeline on any branch. The assistants' safety hook refuses cancelling a
-pipeline and playing a manual job, on top of the refusals the
-gitlab-first-migration skill lists. `dev`, `preview` and `main` all take push
+a pipeline on any branch. `dev`, `preview` and `main` all take push
 "No one", merge "Maintainers".
 
 Two runners serve the project, both on the host `gitlab-runners` (32 cores,

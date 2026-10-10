@@ -25,7 +25,7 @@ Non-commercial data and dependencies are acceptable here
 ## Where the work lives
 
 **`ai/orbit` on `gitlab.tomlawson.io`, project 49, is the source of truth**:
-issues, milestones, merge requests and the CI that merges wait on. GitHub is a
+issues, milestones, merge requests and the CI that merges wait on. GitHub is an
 owner-managed push mirror (CodeQL, secret scanning, a second CI opinion); a red GitHub run
 never blocks a GitLab merge, and its frozen issues are stale. Issue and MR
 numbers are GitLab's. Operators pull from GHCR; GitLab publishes there
@@ -34,14 +34,14 @@ numbers are GitLab's. Operators pull from GHCR; GitLab publishes there
 - Credentials, the `glab` and `git push` incantations: the github-credentials
   skill. Host lookups fail now and then, so retry two or three times before
   treating one failure as an answer.
-- **Check the pipeline's trigger user after a push.** If the `git` command lacks
-  the same env prefix as the `glab` calls, the push goes out as Codex, the api
+- **Check the pipeline's trigger user after a push.** If the credential helper
+  does not carry the skill's env prefix, the push goes out as Codex, the api
   still answers Claude, and only `glab api projects/49/pipelines/<id>` (`.user`)
   shows it.
 - `glab issue create` has no `-F`: pass the body with `-d "$(cat file)"`. Notes:
   `glab api -X POST projects/49/issues/<iid>/notes -f body=…`.
 - What a pipeline runs, the `ci: acceptance` and `ci: rerun` labels, reuse,
-  runners and Renovate: `docs/quality-strategy.md` ("Who starts a pipeline")
+  runners and Renovate: `docs/quality-strategy.md` ("Who starts a pipeline, and where it runs")
   and [ADR-0028](docs/adr/0028-ci-reuse-keyed-on-tested-artefact.md). Release
   status is the milestone and `docs/releasing.md`.
 - A Renovate-flagged stale pin on `main` is not work: `main` is expected to be
@@ -56,7 +56,8 @@ numbers are GitLab's. Operators pull from GHCR; GitLab publishes there
   for each, and a browser test on a desktop and a mobile project (owner,
   2026-10-07; #1059, #1298, #1243).
 - The demo stack (`compose/docker-compose.demo.yml`) is disposable test data:
-  if it will not start, rebuild from current `dev` rather than repair it.
+  if it will not start, rebuild it from current `dev` and current versions of
+  what it depends on, rather than repair it.
 - The owner cannot open files on this VM. Anything to review is hosted and
   handed over as a clickable link; sign-off is on running code, not a
   screenshot (`scripts/dev/test-bed.sh` header has the how).

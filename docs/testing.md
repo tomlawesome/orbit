@@ -309,7 +309,7 @@ Each script's own header holds its full usage.
 
 | Script | What it does |
 | --- | --- |
-| `scripts/test-all.sh` | Backend suite, then e2e (`ORBIT_SKIP_E2E` skips e2e). |
+| `scripts/test-all.sh` | `test-backend.sh`, then `test-frontend.sh` (Playwright against a running instance; `ORBIT_SKIP_E2E=true` skips it). |
 | `scripts/test-backend.sh` | Static analysis and the fast Vitest suite. |
 | `scripts/test-frontend.sh` | Playwright against a running instance. |
 | `pnpm --filter orbit-web fidelity` | The v19 visual gate: stands up the adapter-node build and the mockup host, compares 17 screens against the committed baselines. In CI it runs pinned to the Playwright image the baselines were proven against; run it locally the same way if a diff disagrees. |
