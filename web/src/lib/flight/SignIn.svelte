@@ -1,13 +1,14 @@
 <script>
   import { onMount } from "svelte";
   import Grain from "$lib/Grain.svelte";
+  import { image } from "$lib/door-host.js";
   import Dawn from "./Dawn.svelte";
   import Claim from "./Claim.svelte";
   import Identity from "./Identity.svelte";
   import Waiting from "./Waiting.svelte";
   import { clearLaunch, markLaunch } from "./arrival.js";
   import { compileFlightNow, compileStopsPage, drawnIn, readyFlight, hurryFlight } from "./warm.js";
-  import { earthSettled, isFirstVisit, startFirstLight } from "./first-light.js";
+  import { COMPILE_CAP_MS, isFirstVisit, within } from "./door-seen.js";
   import {
     APPROVAL_BACKSTOP_MS, CLAIM, DOOR, LOCAL, STARTING, STARTING_BACKSTOP_MS, STARTING_POLL_MS,
     applyStartingBackstop, availabilityOf, cardMessageFor, claimFromHash, doorMessageFor,
@@ -73,6 +74,8 @@
   } = $props();
 
   let leaving = false;
+  /** @type {import('./Dawn.svelte').default | null} */
+  let dawnView = $state(null);
 
   const reduced = () =>
     typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -482,30 +485,19 @@
     /** @param {number} ms @param {() => void} fn */
     const after = (ms, fn) => timers.push(setTimeout(fn, ms));
     /* first light: the dawn breaks once on load (CON-9, POL-13), as
-       orbit-site's door does it (first-light.js, #1253): `lit` waits for the
-       fonts and the Earth's first picture and, on a first visit, for at least
-       one lap of the ring's running light (`body.loading`, flight.css), which
-       is on while the door waits and comes off in the same frame that `lit`
-       starts the ring's drawing */
-    const world = document.querySelector("#dawn .world");
-    const runner = document.querySelector("#dawn .lockup .runner");
+       orbit-site's door does it, by the shared door's own `dawn.light()`
+       (#1371): `lit` waits for the fonts and the Earth's first picture and,
+       on a first visit, for at least one lap of the ring's running light
+       (`body.loading`), which is on while the door waits and comes off in
+       the same frame that `lit` starts the ring's drawing.
+       #1299: where shaders compile on the page's own thread (Firefox,
+       Safari) the ring runs on, at least a lap, while the flight's world is
+       compiled behind it (capped here, as the folder asks of its host): a
+       pause better spent there than on the drawn door or on the descent. */
     const behindRing = compileStopsPage();
-    const stopFirstLight = startFirstLight({
-      critical: Promise.all([document.fonts?.ready, earthSettled(world)]),
-      runner,
-      /* #1299: where shaders compile on the page's own thread (Firefox,
-         Safari) the ring runs on, at least a lap, while the flight's world is
-         compiled behind it: a pause better spent there than on the drawn
-         door or on the descent (orbit-site's `waitCompiled`) */
-      minLaps: isFirstVisit(localStorage) || behindRing ? 1 : 0,
-      compile: behindRing ? compileFlightNow : null,
-      loading: () => document.body.classList.add("loading"),
-      animated: () => !!runner && getComputedStyle(runner).animationName !== "none",
-      light: () => {
-        document.body.classList.remove("loading");
-        document.body.classList.add("lit");
-      },
-    });
+    /** @type {any} the folder's JSDoc types `after` by its default, () => null */
+    const afterRingUp = () => (behindRing ? within(compileFlightNow(), COMPILE_CAP_MS) : null);
+    dawnView?.light({ firstVisit: isFirstVisit(localStorage), wait: behindRing, after: afterRingUp });
 
     let disposed = false;
     /** @type {ReturnType<typeof setTimeout> | undefined} */
@@ -641,7 +633,6 @@
       approvalStopped = true;
       clearTimeout(approvalTimer);
       clearTimeout(pollTimer);
-      stopFirstLight();
       timers.forEach(clearTimeout);
       document.body.classList.remove("loading", "lit", "switched", "returning", "returned");
       /* Same rule as showCard: never take down a card somebody else put up. */
@@ -666,15 +657,15 @@
   <title>{title}</title>
   <!-- the door's Earth comes with the page, the sunrise picture just after it
        (orbit-site's index.html:26-27) -->
-  <link rel="preload" as="image" href="/flight/door/dawn-pre.webp" fetchpriority="high" />
-  <link rel="preload" as="image" href="/flight/door/dawn.webp" fetchpriority="low" />
+  <link rel="preload" as="image" href={image("dawn/dawn-pre.webp")} fetchpriority="high" />
+  <link rel="preload" as="image" href={image("dawn/dawn.webp")} fetchpriority="low" />
 </svelte:head>
 
 <!-- The mockup's own page ground (#04060e), carried as a layer rather than as
      a rule on <body>: a stylesheet that reached the document would follow the
      reader onto every other screen once its chunk had loaded. -->
 <div class="signin-stage" aria-hidden="true"></div>
-<Dawn shown={dawnShown} {statePrimary} {stateSub}>
+<Dawn bind:this={dawnView} shown={dawnShown} {statePrimary} {stateSub}>
   <!-- `Sign in`, the ratified word (08-14), and the word the sunset's own
        pill was reworded to match. The sheet's longer
        "Continue with your identity provider" belonged to the v18 chrome

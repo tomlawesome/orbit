@@ -73,10 +73,10 @@
      and 15px type (--p-hit, --p-type-button), the label centred, and the
      site's horizontal proportion (2.3em) kept. Dawn's pill and the goodbye's
      "Sign back in" alike. */
-  #dawn .gate,#dusk .gate-wrap a{display:inline-flex;align-items:center;justify-content:center;
+  #dawn .gate,.dusk-host #dusk .gate-wrap a{display:inline-flex;align-items:center;justify-content:center;
         min-height:44px;font-size:15px;padding-block:0;padding-inline:2.3em}
   /* `incomplete` keeps the pill, so its words stand under the taller one */
-  body[data-state="incomplete"] #dawn .state{margin-top:calc(var(--R) * .03 + 44px + 18px)}
+  body[data-state="incomplete"] #dawn .state{margin-top:18px}
 
   /* `local login` stands under the gate, inside `.gate-wrap` (flight.css):
      at a 44px hit, 13px mono. */
@@ -92,23 +92,11 @@
         font-size:var(--p-type-meta);line-height:1.7;letter-spacing:.03em;
         text-shadow:0 1px 5px rgba(4,6,14,.9)}
 
-  /* THE GOODBYE (§2.18, §5.1): the ring holds the farewell where it held the
-     word, and the second line and `Sign back in` stand in ONE COLUMN under
-     the ring, on the axis: the line 26px under the ring, the pill 24px under
-     the line (two lines of 13px/1.7, 44.2px, is what the line takes at 360
-     and 390 wide). The ring stands exactly where the door's does: the line is
-     out of flow and the pill is moved by `top`, not by a margin. Its box is
-     the wrapper's top, which is .03R under the glyph, so the ring's centre is
-     .53R above it and the ring's foot .17R above it. */
-  #dusk .lockup .name{visibility:hidden}
-  #dusk .farewell{top:0;margin-top:0;width:min(calc(100vw - 2 * var(--p-gutter)),376px)}
-  #dusk .farewell .said{position:absolute;left:50%;top:calc(var(--R) * -.53);
-        transform:translate(-50%,-50%);width:calc(var(--R) * .6);
-        font:600 min(22px,calc(var(--R) * .078))/1.2 var(--display);letter-spacing:.005em;background:linear-gradient(180deg,#fdfbf7 12%,#f2e7d3 60%,#dcbd80 100%);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 0 11px rgba(255,206,140,.2))}
-  #dusk .farewell .sub{position:absolute;left:0;right:0;top:calc(26px - var(--R) * .17);margin:0;
-        font-size:var(--p-type-meta);line-height:1.7;letter-spacing:.04em;color:#9aa0b8;
-        text-shadow:0 1px 5px rgba(4,6,14,.9)}
-  #dusk .gate-wrap a{position:relative;top:calc(26px + 2 * 13px * 1.7 + 24px - var(--R) * .17)}
+  /* THE GOODBYE (§2.18, §5.1): the ring held the farewell where it held the
+     word, with the second line and `Sign back in` in one column under it.
+     #1371: not built on the shared dusk, whose farewell stands outside its
+     lockup (duskMarkup), so the phone's goodbye is the folder's own until
+     the owner decides it (#1371). */
 
   /* ══ A CARD ON THE DOOR (claim, sign in, first administrator, waiting,
      setup, approve) ══════════════════════════════════════════════════════
