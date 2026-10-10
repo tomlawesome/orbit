@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -55,6 +56,49 @@ describe("e2e files seed no date from the UTC calendar", () => {
       `These lines seed a date from the UTC calendar. Use ` +
         `householdDateFromToday(days) from support/household-dates.ts, which ` +
         `counts from the household's own date. See #1369.`,
+    ).toEqual([]);
+  });
+});
+
+/**
+ * #1369, pipeline 2332: `householdDateFromToday` is a Node import. A function
+ * handed to `page.evaluate` runs in the browser, where the import does not
+ * exist, so a call inside one throws "_householdDates is not defined". The
+ * date is worked out in the spec and passed in as an argument instead.
+ */
+const BROWSER_CALLS = new Set(["evaluate", "evaluateHandle", "evaluateAll", "addInitScript", "waitForFunction", "$eval", "$$eval"]);
+
+function callsInsideTheBrowser(path) {
+  const source = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true);
+  const found = [];
+  const visit = (node, inBrowser) => {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && BROWSER_CALLS.has(node.expression.name.text)) {
+      visit(node.expression, inBrowser);
+      node.arguments.forEach((argument) =>
+        visit(argument, inBrowser || ts.isArrowFunction(argument) || ts.isFunctionExpression(argument)),
+      );
+      return;
+    }
+    if (inBrowser && ts.isIdentifier(node) && node.text === "householdDateFromToday") {
+      found.push(source.getLineAndCharacterOfPosition(node.getStart()).line + 1);
+    }
+    ts.forEachChild(node, (child) => visit(child, inBrowser));
+  };
+  visit(source, false);
+  return found;
+}
+
+describe("householdDateFromToday runs in the spec, never in the browser", () => {
+  it("is not called inside a function handed to the page", () => {
+    const offenders = tsFiles(e2eDirectory).flatMap((path) =>
+      callsInsideTheBrowser(path).map((line) => `${path.slice(e2eDirectory.length)}:${line}`),
+    );
+
+    expect(
+      offenders,
+      `These calls run in the browser, where householdDateFromToday does not ` +
+        `exist. Work the date out in the spec and pass it to page.evaluate as ` +
+        `an argument. See #1369.`,
     ).toEqual([]);
   });
 });
