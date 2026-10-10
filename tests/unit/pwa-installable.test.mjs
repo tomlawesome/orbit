@@ -18,6 +18,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * (the shape of tests/unit/service-worker.test.mjs) stub `self`, `caches`,
  * `fetch` and SvelteKit's virtual `$service-worker` module, import the worker
  * fresh, and drive the listeners it registered.
+ *
+ * Offline fallback page (standard pattern): a navigation goes to the network
+ * first and its response is returned untouched; only when the network fetch
+ * rejects does the worker answer with the precached static `offline.html`.
+ * A navigation is never answered from cache while the network works, and no
+ * navigation response is ever stored.
  */
 
 const ROOT = resolve(import.meta.dirname, "../..");
@@ -72,6 +78,55 @@ describe("web app manifest", () => {
   });
 });
 
+/* ------------------------------------------------------------- offline page */
+
+describe("offline fallback page", () => {
+  const path = resolve(STATIC, "offline.html");
+  const html = () => readFileSync(path, "utf8");
+
+  it("is a static file in web/static, so $service-worker lists it in `files`", () => {
+    expect(existsSync(path)).toBe(true);
+  });
+
+  it("names Orbit and says it needs a connection and will carry on when it is back", () => {
+    const text = html();
+    expect(text).toMatch(/Orbit/);
+    expect(text).toMatch(/connection/i);
+    expect(text).toMatch(/household/i);
+  });
+
+  it("has a try again control that reloads", () => {
+    const text = html();
+    expect(text).toMatch(/try again/i);
+    expect(text).toMatch(/<button\b|<a\b/i);
+    expect(text).toMatch(/location\s*\.\s*reload\s*\(|location\s*\.\s*href\s*=|<a\b[^>]*href=["']\/?["']/i);
+  });
+
+  it("uses Orbit's star-chart ground colour and shows Orbit's icon", () => {
+    const text = html();
+    expect(text.toLowerCase()).toContain("#060b1c");
+    const icon = text.match(/(?:src|href)=["'](\/icon[^"']*\.(?:png|svg))["']/i);
+    expect(icon, "a reference to one of Orbit's icons").toBeTruthy();
+    expect(existsSync(resolve(STATIC, `.${icon[1]}`)), `${icon[1]} exists in web/static`).toBe(true);
+  });
+
+  it("carries no household data and makes no /api/ request", () => {
+    const text = html();
+    expect(text).not.toMatch(/\/api\//);
+    expect(text).not.toMatch(/\bfetch\s*\(|XMLHttpRequest|sendBeacon|EventSource|WebSocket/);
+  });
+
+  it("works with no other request: no external script, stylesheet, font or URL", () => {
+    const text = html();
+    expect(text).not.toMatch(/<script\b[^>]*\bsrc=/i);
+    expect(text).not.toMatch(/<link\b[^>]*rel=["']?stylesheet/i);
+    expect(text).not.toMatch(/@import/i);
+    expect(text).not.toMatch(/https?:\/\//i);
+    expect(text).not.toMatch(/(?:src|href)=["']\/\//i);
+    expect(text).toMatch(/<style\b/i); // styles are inline
+  });
+});
+
 /* ------------------------------------------------------------- worker source */
 
 /** The worker source with comments removed, so prose cannot satisfy or trip a check. */
@@ -108,7 +163,8 @@ describe("service worker source", () => {
 /* ---------------------------------------------------------- worker behaviour */
 
 const BUILD = ["/_app/immutable/entry/start.abc123.js", "/_app/immutable/assets/0.def456.css"];
-const FILES = ["/icon-192.png", "/icon-512.png", "/fonts/body.woff2"];
+const OFFLINE_PAGE = "/offline.html";
+const FILES = ["/icon-192.png", "/icon-512.png", "/fonts/body.woff2", OFFLINE_PAGE];
 const PRERENDERED = ["/about"];
 
 const abs = (path) => new URL(path, ORIGIN).href;
@@ -240,7 +296,22 @@ async function loadWorker({ version = "v-test-1", store = new Map(), puts = [] }
     return { handled: answer !== null, body };
   }
 
+  /** Dispatches a fetch event and resolves to the raw Response, or null when declined. */
+  async function respond(request) {
+    let answer = null;
+    const event = {
+      request,
+      respondWith: (p) => {
+        answer = Promise.resolve(p);
+      },
+      waitUntil: () => {},
+    };
+    for (const handler of listeners.fetch || []) handler(event);
+    return answer ? await answer : null;
+  }
+
   return {
+    respond,
     install: () => lifecycle("install"),
     activate: () => lifecycle("activate"),
     dispatchFetch,
@@ -252,6 +323,19 @@ async function loadWorker({ version = "v-test-1", store = new Map(), puts = [] }
     puts,
   };
 }
+
+/** Makes the install-time copy of the offline page recognisable. */
+const OFFLINE_BODY = "<!doctype html><title>Orbit offline page</title>";
+function networkWithOfflinePage(w) {
+  w.network.mockImplementation(async (req) => {
+    const url = typeof req === "string" ? new URL(req, ORIGIN).href : req.url;
+    return new Response(url === abs(OFFLINE_PAGE) ? OFFLINE_BODY : `network:${url}`);
+  });
+}
+const goOffline = (w) =>
+  w.network.mockImplementation(async () => {
+    throw new TypeError("Failed to fetch");
+  });
 
 /** Every URL written to any cache so far. */
 const cachedUrls = (puts) => new Set(puts.map((p) => p.url));
@@ -340,6 +424,119 @@ describe("service worker fetch: the app shell", () => {
   });
 });
 
+describe("service worker fetch: offline fallback page for navigations", () => {
+  async function ready() {
+    const w = await loadWorker();
+    networkWithOfflinePage(w);
+    await w.install();
+    await w.activate();
+    return w;
+  }
+
+  it("precaches the offline page at install", async () => {
+    const w = await ready();
+
+    expect(cachedUrls(w.puts).has(abs(OFFLINE_PAGE))).toBe(true);
+  });
+
+  for (const path of ["/", "/home", "/tasks?member=2"]) {
+    it(`answers a navigation to ${path} with the cached offline page when the network fetch rejects`, async () => {
+      const w = await ready();
+      goOffline(w);
+
+      const { handled, body } = await w.dispatchFetch(navigation(path));
+
+      expect(handled).toBe(true);
+      expect(body).toBe(OFFLINE_BODY);
+    });
+  }
+
+  it("tries the network first for a navigation and returns its response untouched", async () => {
+    const w = await ready();
+    const request = navigation("/home");
+    w.network.mockClear();
+    w.network.mockImplementation(async () => new Response("live page", { status: 503, statusText: "Busy" }));
+
+    const response = await w.respond(request);
+
+    expect(response).not.toBeNull();
+    expect(w.network).toHaveBeenCalled();
+    expect(response.status).toBe(503);
+    expect(await response.text()).toBe("live page");
+  });
+
+  it("answers a navigation from the network, never the offline page, while the network works", async () => {
+    const w = await ready();
+    const request = navigation("/home");
+
+    const { handled, body } = await w.dispatchFetch(request);
+
+    expect(handled).toBe(true);
+    expect(body).toBe(`network:${request.url}`);
+  });
+
+  it("never answers a navigation from cache while the network works, even if a copy exists", async () => {
+    const w = await ready();
+    for (const name of w.store.keys()) {
+      w.store.get(name).set(abs("/home"), { body: "STALE", status: 200 });
+      w.store.get(name).set(abs("/"), { body: "STALE", status: 200 });
+    }
+
+    for (const path of ["/home", "/"]) {
+      const request = navigation(path);
+      const { handled, body } = await w.dispatchFetch(request);
+      expect(handled, path).toBe(true);
+      expect(body, path).toBe(`network:${request.url}`);
+    }
+  });
+
+  it("stores no navigation response, with the network up or down", async () => {
+    const w = await ready();
+    const before = w.puts.length;
+
+    await w.dispatchFetch(navigation("/home"));
+    goOffline(w);
+    await w.dispatchFetch(navigation("/home"));
+    await w.dispatchFetch(navigation("/"));
+
+    expect(w.puts.slice(before)).toEqual([]);
+  });
+
+  it("does not answer a non-navigation request with the offline page when the network fails", async () => {
+    const w = await ready();
+    goOffline(w);
+
+    for (const path of ["/api/households/1/tasks", "/api/session", "/documents/passport.pdf"]) {
+      let result = null;
+      try {
+        result = await w.dispatchFetch(new Request(abs(path)));
+      } catch {
+        // a rejected response is the browser's own network error: fine
+      }
+      if (result?.body != null) expect(result.body, path).not.toBe(OFFLINE_BODY);
+    }
+  });
+
+  it("still serves a precached shell asset cache-first with no network", async () => {
+    const w = await ready();
+    goOffline(w);
+
+    const { handled, body } = await w.dispatchFetch(new Request(abs(BUILD[0])));
+
+    expect(handled).toBe(true);
+    expect(body).toBe(`network:${abs(BUILD[0])}`);
+  });
+
+  it("still does not skipWaiting or claim clients", async () => {
+    const w = await ready();
+    goOffline(w);
+    await w.dispatchFetch(navigation("/home"));
+
+    expect(w.skipWaiting).not.toHaveBeenCalled();
+    expect(w.claim).not.toHaveBeenCalled();
+  });
+});
+
 describe("service worker fetch: nothing private is cached or served from cache", () => {
   /** Plants a private-looking entry for `url` in every cache the worker made. */
   async function poison(w, url) {
@@ -366,6 +563,8 @@ describe("service worker fetch: nothing private is cached or served from cache",
 
       const { handled, body } = await w.dispatchFetch(request);
 
+      // a navigation is answered by the network (or, if that fails, the offline
+      // page), never from a cache: what the network returns is what the page gets
       if (handled) expect(body).toBe(`network:${request.url}`);
       expect(body === null || !body.includes("PRIVATE")).toBe(true);
     });
