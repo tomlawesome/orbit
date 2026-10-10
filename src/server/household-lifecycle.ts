@@ -141,6 +141,13 @@ async function acquireHouseholdLifecycleLock(transaction: DatabaseTransaction, h
   );
 }
 
+/* #1332: "normalise, then compare" (ADR-0034). The browser lights the button
+   on a trimmed match, so the engine reads a typed name the same way: leading
+   and trailing spaces dropped, runs of whitespace inside collapsed to one. */
+function tidyName(text: string): string {
+  return text.trim().replace(/\s+/gu, " ");
+}
+
 /** Schedules a reversible household deletion after a typed name confirmation. */
 export async function requestHouseholdDeletion(userId: string, householdId: string, confirmation: string) {
   const validHouseholdId = requireUuid(householdId, "Household");
@@ -150,7 +157,7 @@ export async function requestHouseholdDeletion(userId: string, householdId: stri
     if (record.deletionRequestedAt) {
       throw new AppError("household_deletion_pending", "This household is already scheduled for deletion", 409);
     }
-    if (confirmation !== record.name) {
+    if (tidyName(confirmation) !== tidyName(record.name)) {
       throw new AppError("household_confirmation_failed", "Type the household name exactly to schedule deletion", 422);
     }
 
@@ -239,7 +246,7 @@ export async function hardDeleteHousehold(userId: string, householdId: string, c
   const storageKeys = await getDb().transaction(async (transaction): Promise<HouseholdStorageKeys> => {
     await acquireHouseholdLifecycleLock(transaction, validHouseholdId);
     const record = requireHardDeleteAuthority(await readHouseholdLifecycleRecord(transaction, userId, validHouseholdId));
-    if (!record.deletionRequestedAt || confirmation !== record.name) {
+    if (!record.deletionRequestedAt || tidyName(confirmation) !== tidyName(record.name)) {
       throw new AppError("household_hard_delete_confirmation_failed", "Type the household name exactly to permanently delete it", 422);
     }
 

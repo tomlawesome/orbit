@@ -52,6 +52,11 @@ describe("the browser carries no rules (ADR-0034, #1325)", () => {
     expect(where(/locked until the key is restored/u)).toEqual([]);
   });
 
+  it("whether a section may be removed is the engine's call (#1332): the browser's own check is gone", () => {
+    expect(where(/section_in_use/u)).toEqual([]);
+    expect(where(/can be hidden, never removed["']/u)).toEqual([]);
+  });
+
   it("no browser module words a refusal the engine words", () => {
     const words = [
       "give it a name", "choose a section", "a repeat needs a due date", "use a dot for pence",

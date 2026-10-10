@@ -2611,22 +2611,17 @@ export async function writeHouseholdIdentity(householdId, identity) {
 /**
  * The sections editor, saved whole — `sections.replace` replaces the list.
  *
- * The hidden-not-removed law is enforced HERE as well as in the interface,
- * because it is a data law and not a style: dropping a section that still
- * holds entries would have the engine re-file them under whichever section
- * happens to be first, which is a silent edit nobody asked for.
+ * Whether a dropped section may go is the engine's rule (ADR-0034, #1332): it
+ * refuses a removal while the section holds entries, in its own words, and
+ * this sends the list as it stands so those words reach the screen. The
+ * editor offers no × on a section with entries; the engine is what holds the
+ * line when a stale screen or another member's new entry got there first.
  *
  * @param {string} householdId
  * @param {SectionRow[]} rows  the editor's rows, in sectionRowsOf's shape
  * @returns {Promise<Workspace>}
  */
 export async function writeSections(householdId, rows) {
-  const dropped = rows.filter((row) => row.count > 0 && row.removed);
-  if (dropped.length) {
-    throw new WorkspaceError("A section holding entries can be hidden, never removed", {
-      code: "section_in_use",
-    });
-  }
   return applyCommand(sectionsCommandOf(householdId, rows.filter((row) => !row.removed)));
 }
 
