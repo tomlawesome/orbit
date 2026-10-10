@@ -14,15 +14,28 @@ export type TextSize = (typeof textSizes)[number];
  */
 export type UrgencyPalette = "classic" | "themed";
 
-/** The v19 theme packs this schema validates (issue #325), replacing the old
- *  five-colourway x display-mode matrix. Token values for each pack live in
- *  web/src/lib/packs.css. Atlas was here until #865 removed it along with
- *  its tokens; this list is intentionally its own (smaller) thing from the
- *  full front-end roster in web/src/lib/theme.js — the front end is not yet
- *  wired to write through this schema (see the INTERIM note in
- *  web/src/app.html), so widening it to match is separate work. */
-export const themePacks = ["starchart", "afterdark", "dawn"] as const;
+/** THE THEME ROSTER, owned here (#1331): every pack the product offers, each
+ *  with its dark/light flag. Token values for each pack live in
+ *  web/src/lib/packs.css; the browser keeps a table of the same five in
+ *  web/src/lib/theme.js (titles, colours, tour and sun choices), and
+ *  tests/unit/theme-roster-parity.test.mjs fails if the two disagree. Atlas
+ *  was here until #865 removed it along with its tokens. */
+const themePackFlags = {
+  starchart: { dark: true },
+  afterdark: { dark: true },
+  clouds: { dark: false },
+  dawn: { dark: false },
+  retrograde: { dark: true },
+} as const;
+
+export const themePacks = ["starchart", "afterdark", "clouds", "dawn", "retrograde"] as const;
 export type ThemePack = (typeof themePacks)[number];
+
+/** True for a dark pack, false for a light one (or an id that is no pack).
+ *  The stored `themeMode` column is derived from this, never chosen. */
+export function themePackIsDark(id: string): boolean {
+  return (themePacks as readonly string[]).includes(id) && themePackFlags[id as ThemePack].dark;
+}
 
 /** After dark is the default everywhere (owner, 2026-09-06, #865): a stored
  *  preference or session value naming a theme outside `themePacks` — a
@@ -32,7 +45,9 @@ export const DEFAULT_THEME_PACK: ThemePack = "afterdark";
 export const themePackInfo: Record<ThemePack, { name: string; description: string; swatches: readonly [string, string, string] }> = {
   starchart: { name: "Star-chart", description: "Deep indigo sky, warm gold wayfinding", swatches: ["#060b1c", "#d8b45a", "#4ade80"] },
   afterdark: { name: "After Dark", description: "Near-black, cool electric blue", swatches: ["#05070d", "#7dd3fc", "#4ade80"] },
+  clouds: { name: "Clouds", description: "Cool white of a cloud crest, clear sky blue", swatches: ["#eef2f9", "#1f7ac2", "#178a4c"] },
   dawn: { name: "Dawn", description: "Cool paper white, clear sky blue", swatches: ["#eef1f6", "#1f7ac2", "#178a4c"] },
+  retrograde: { name: "Retrograde", description: "Eighties night, hot magenta and cyan", swatches: ["#080a14", "#ff4fd8", "#3ef2a0"] },
 };
 
 /**

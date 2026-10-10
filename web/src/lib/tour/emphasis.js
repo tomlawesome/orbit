@@ -27,14 +27,14 @@
  * packs.css holds exactly these five; a sixth would have to name its mode
  * here and add its override there, together.
  */
-import { DEFAULT_THEME } from "../theme.js";
+import { DEFAULT_THEME, THEME_TABLE } from "../theme.js";
 
-/** The packs whose skies are dark enough to dim. */
-export const DIMMING_PACKS = ["starchart", "afterdark", "retrograde"];
+/** The packs whose skies are dark enough to dim (the table's "dim" rows). */
+export const DIMMING_PACKS = THEME_TABLE.filter((row) => row.emphasis === "dim").map((row) => row.id);
 
-/** The daylight packs, which push the target forward instead. Atlas was here
- *  until #865 removed it from the roster entirely. */
-export const FORWARD_PACKS = ["dawn", "clouds"];
+/** The daylight packs, which push the target forward instead (the table's
+ *  "forward" rows). Atlas was here until #865 removed it from the roster. */
+export const FORWARD_PACKS = THEME_TABLE.filter((row) => row.emphasis === "forward").map((row) => row.id);
 
 /**
  * @param {string | null | undefined} pack

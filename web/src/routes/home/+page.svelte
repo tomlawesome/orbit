@@ -9,6 +9,7 @@
   import { readyFlightAtLeisure } from "$lib/flight/warm.js";
   import Sun from "$lib/sun/Sun.svelte";
   import { SUN_R } from "$lib/sun/furnace.js";
+  import { swatchStyle } from "$lib/theme-swatches.js";
   import { othersOf } from "$lib/flight/engine.js";
   import Dawn from "$lib/flight/Dawn.svelte";
   import { consumeLaunch } from "$lib/flight/arrival.js";
@@ -1777,18 +1778,20 @@
   </nav>
   <div class="swatches" role="group" aria-label="Theme">
     <span>THEME</span>
-    <button style="background:#070d1f" title="star-chart" aria-pressed="true"></button>
-    <button style="background:#05070d" title="after dark" aria-pressed="false"></button>
-    <!-- THE v1.3.0 ROSTER, FINAL (§15, owner): five packs, five swatches.
-         CLOUDS joins as its own selectable pack, carrying the lighter end of
+    <!-- THE v1.3.0 ROSTER, FINAL (§15, owner): five packs, five swatches. The
+         titles stay written out because the tour's selectors match on them
+         (chapter 11); every colour is read from theme.js's table (#1331)
+         through theme-swatches.js, so there is no second copy of a ground to
+         drift. CLOUDS is its own selectable pack, carrying the lighter end of
          the range; dawn's dot follows its ground onto the temperature story.
          Atlas, hanami, porcelain, miami and solarium are on the records shelf —
          their packs still exist in packs.css and still render if forced, but
          they are no longer offered. -->
-    <button style="background:#eef2f9" title="clouds" aria-pressed="false"></button>
-    <button style="background:#d2d3d4" title="dawn" aria-pressed="false"></button>
-    <button style="background:#080a14;box-shadow:inset 0 0 0 1px #ff4fd8" title="retrograde"
-            aria-pressed="false"></button>
+    <button style={swatchStyle("star-chart")} title="star-chart" aria-pressed="true"></button>
+    <button style={swatchStyle("after dark")} title="after dark" aria-pressed="false"></button>
+    <button style={swatchStyle("clouds")} title="clouds" aria-pressed="false"></button>
+    <button style={swatchStyle("dawn")} title="dawn" aria-pressed="false"></button>
+    <button style={swatchStyle("retrograde")} title="retrograde" aria-pressed="false"></button>
   </div>
   <!-- "Watch the tour" (#1189), beside the theme as in every account menu.
        The card closes the way home.behaviour.js's closeOverlays closes it,

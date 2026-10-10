@@ -24,8 +24,33 @@
  * file imports the other, a test parses both and asserts they agree.
  */
 
-/** The v1.3.0 roster (§15, owner), in the order every swatch list shows it. */
-export const THEME_PACKS = ["starchart", "afterdark", "clouds", "dawn", "retrograde"];
+/**
+ * The v1.3.0 roster (§15, owner), in the order every swatch list shows it, one
+ * row per pack (#1331). Everything the browser keeps per pack that is not
+ * paint lives here, so the readers (the swatch lists, settings' offer, the
+ * tour's emphasis, the sun, the home desk) import this rather than naming
+ * packs themselves:
+ *
+ *   title     the name a swatch carries (tour selectors match on `title=`)
+ *   ground    the pack's background colour, as a swatch dot shows it
+ *   dark      true for a dark sky; must agree with the engine's
+ *             `themePackIsDark` (src/lib/preferences.ts, the owner of the
+ *             roster), pinned by tests/unit/theme-roster-parity.test.mjs
+ *   emphasis  how the tour marks a stop: "dim" the rest, or push "forward"
+ *   sun       which of the three furnace suns the pack wears
+ *
+ * @type {ReadonlyArray<{ id: string, title: string, ground: string, dark: boolean, emphasis: "dim" | "forward", sun: "starchart" | "dawn" | "retrograde" }>}
+ */
+export const THEME_TABLE = [
+  { id: "starchart", title: "star-chart", ground: "#060b1c", dark: true, emphasis: "dim", sun: "starchart" },
+  { id: "afterdark", title: "after dark", ground: "#05070d", dark: true, emphasis: "dim", sun: "starchart" },
+  { id: "clouds", title: "clouds", ground: "#eef2f9", dark: false, emphasis: "forward", sun: "dawn" },
+  { id: "dawn", title: "dawn", ground: "#d2d3d4", dark: false, emphasis: "forward", sun: "dawn" },
+  { id: "retrograde", title: "retrograde", ground: "#080a14", dark: true, emphasis: "dim", sun: "retrograde" },
+];
+
+/** The pack ids, in table order. */
+export const THEME_PACKS = THEME_TABLE.map((row) => row.id);
 
 export const DEFAULT_THEME = "afterdark";
 

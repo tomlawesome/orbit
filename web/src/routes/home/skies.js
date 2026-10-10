@@ -5,7 +5,7 @@
  *
  *   THE GALACTIC PLANE   after dark's default sky, from
  *                        design/v19/afterdark-plane.html.
- *   THE TERMINATOR       what "dawn" means now, from
+ *   THE TERMINATOR       what dawn means now, from
  *                        design/v19/dawn-terminator.html (post-visibility-fix).
  *   THE CLOUD SEA        clouds' sky, from design/v19/dawn-cloudsea.html.
  *
@@ -45,6 +45,7 @@
  */
 
 import { seededRng, streamFactory } from "$lib/sky.js";
+import { THEME_PACKS } from "$lib/theme.js";
 
 /**
  * @typedef {() => boolean} StillFn
@@ -950,7 +951,7 @@ export function mountSkies({ seed: pinnedSeed = null, pinClock = false, onCamera
   let teardown = null;
 
   function sync() {
-    const pack = doc.dataset.theme || "starchart";
+    const pack = doc.dataset.theme || THEME_PACKS[0];
     if (pack === current) return;
     teardown?.();
     teardown = null;
