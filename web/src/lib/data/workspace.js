@@ -664,8 +664,8 @@ export async function activeHousehold() {
  * fixture to fetch changes no caller's shape later.
  */
 import { adminFixture } from "./fixtures/admin.js";
-import { ago, dayMonth, sizeLabel } from "$lib/format.js";
-import { bandOf, daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
+import { ago, bandOf, dayMonth, sizeLabel } from "$lib/format.js";
+import { daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
 import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
 import { engineNumbersOf } from "./engine-limits.js";
 import { householdScreenOf, householdUpdateCommandOf, sectionCommandsOf } from "./household.js";
@@ -842,7 +842,11 @@ export async function createSystem(draft) {
  * workspace read's `today`, in the household's own time zone, ADR-0034,
  * #1325), so a calendar greys exactly the days the engine refuses. The
  * workspace fixture pins it to the date the designs were drawn against so the
- * fidelity gate is deterministic; with neither, the clock's UTC date.
+ * fidelity gate is deterministic. The browser has no clock fallback (#1337):
+ * a household that came without one is the engine's fault, so it throws in
+ * development; elsewhere (and with no household at all) the answer is "", and
+ * every date count against it (daysUntil) is null, so the screen shows
+ * nothing rather than a UTC date that may be a day off.
  *
  * @param {?Workspace} [workspace]
  * @param {?string} [householdId]  whose today; the active household's when omitted
@@ -852,7 +856,12 @@ function todayOf(workspace, householdId) {
   const households = workspace?.households ?? [];
   const id = householdId ?? workspace?.activeHouseholdId;
   const household = households.find((one) => one.id === id) ?? households[0];
-  return workspace?.fixtureToday ?? household?.today ?? new Date().toISOString().slice(0, 10);
+  const today = workspace?.fixtureToday ?? household?.today;
+  if (today) return today;
+  if (household && import.meta.env.DEV) {
+    throw new Error(`The workspace sent household ${household.id} without its "today" (the engine always sends it, #1337)`);
+  }
+  return "";
 }
 
 /**
