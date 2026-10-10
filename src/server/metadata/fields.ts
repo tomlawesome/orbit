@@ -275,7 +275,7 @@ export async function openReceiptMetadataWriter(
  * the same thing read as two different faults.
  */
 export function metadataLockedError(): AppError {
-  return new AppError("metadata_locked", "Encrypted details cannot be saved until the encryption key is available", 503);
+  return new AppError("metadata_locked", "not saved \u2014 encrypted details are locked until the key is restored. The stored values are intact.", 503);
 }
 
 /** `openMetadataWriter`, with a locked instance surfaced as a refused write. */

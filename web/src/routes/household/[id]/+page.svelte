@@ -6,6 +6,7 @@
   import { fillStarTiles } from "$lib/sky.js";
   import { PEN_ORDER, inkOf, nextMark } from "$lib/marks.js";
   import { constellationPlanetsOf } from "$lib/data/chart.js";
+  import { BAND_VAR } from "$lib/data/bands.js";
   import { MAX_SECTIONS, deletionNameMatches, entriesLabel } from "$lib/data/household.js";
   import { FIELD, berthsOf, liftOf, roomOf, skyMap, toField } from "./room.js";
   import { consumeDoor } from "./door.js";
@@ -23,6 +24,10 @@
     writeHouseholdIdentity,
     writeSections,
   } from "$lib/data/workspace.js";
+  import { zoneLabel } from "$lib/pick-lists.js";
+  import PickSheet from "./PickSheet.svelte";
+  import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import { WIDE_QUERY } from "../../home/preview-pair.js";
   import "./household.css";
 
   /**
@@ -201,13 +206,70 @@
     });
   });
 
-  /* The mockup's own lists. A household whose stored value is not among them
-     keeps its own value at the head rather than being silently re-pointed at
-     one that is — the select must never change what is stored by rendering. */
-  const ZONES = ["Europe/London", "Europe/Dublin", "Europe/Paris", "America/New_York", "Australia/Sydney", "UTC"];
-  const CURRENCIES = ["GBP", "EUR", "USD", "CAD", "AUD", "NZD"];
-  /** @param {string[]} list @param {string} current */
-  const withCurrent = (list, current) => (list.includes(current) ? list : [current, ...list]);
+  /* The time zone and the currency are picked from the shared pick-lists
+     (#1338): the full lists with the favourites first and a filter. On a
+     wide screen (1200px, as home's chooser) pressing the value stands the
+     chooser card under it; narrower, the phone's bottom sheet opens. A
+     household whose stored value is not among them keeps its own value at
+     the head of the list rather than being silently re-pointed — picking
+     never changes what is stored by rendering. */
+  /** @type {"timezone" | "currency"} */
+  let picking = $state("timezone");
+  /** the bottom sheet (narrow) */
+  let pickOpen = $state(false);
+  /** the chooser card standing under a field (wide), or none */
+  /** @type {"timezone" | "currency" | null} */
+  let cardFor = $state(null);
+  let wide = $state(false);
+  $effect(() => {
+    const media = matchMedia(WIDE_QUERY);
+    const set = () => { wide = media.matches; };
+    set();
+    media.addEventListener("change", set);
+    return () => media.removeEventListener("change", set);
+  });
+  /** @param {"timezone" | "currency"} field */
+  function pick(field) {
+    picking = field;
+    if (!wide) { pickOpen = true; return; }
+    if (cardFor === field) closeCard(true);
+    else cardFor = field;
+  }
+  /** Put the card away; focus goes back to the pressed value unless a press elsewhere took it.
+   *  @param {boolean} refocus */
+  function closeCard(refocus) {
+    const field = cardFor;
+    cardFor = null;
+    if (refocus && field) tick().then(() => document.getElementById(field === "timezone" ? "hhzone" : "hhcur")?.focus({ preventScroll: true }));
+  }
+  /** @param {string} value */
+  function choose(value) {
+    form[picking] = value;
+    touch(picking);
+    if (cardFor) closeCard(true);
+  }
+  /** What the card is asked: the field's stored value. @param {"timezone" | "currency"} field */
+  const askOf = (field) => ({
+    key: field,
+    label: field === "timezone" ? "time zone" : "currency",
+    heading: field === "timezone" ? "time zone" : "currency",
+    value: form[field],
+    choices: [],
+    today: "",
+  });
+  /* A press off the card (and off the value that opened it, whose own press
+     toggles it) puts it away, as home's chooser does. */
+  $effect(() => {
+    if (!cardFor) return;
+    /** @param {PointerEvent} event */
+    const onPress = (event) => {
+      const target = /** @type {Element | null} */ (event.target instanceof Element ? event.target : null);
+      if (target?.closest("[data-chooser-card], .pickbtn")) return;
+      closeCard(false);
+    };
+    window.addEventListener("pointerdown", onPress, true);
+    return () => window.removeEventListener("pointerdown", onPress, true);
+  });
 
   const shown = $derived(rows.filter((row) => !row.removed));
   const nameOk = $derived(deletionNameMatches(typedName, v.name));
@@ -538,13 +600,16 @@
      scale a body is a region of sky you are standing near, not a disc. The
      alphas keep the key's own order — ruby loudest, jade quietest — because
      that order is the information. */
-  /** @type {Record<string, [string, string]>} */
-  const PAINT = {
-    overdue: ["--overdue", "hh-ruby"],
-    "due-soon": ["--warm", "hh-amber"],
-    upcoming: ["--upcoming", "hh-sky"],
-    ok: ["--ok", "hh-jade"],
-    unscheduled: ["--ok", "hh-jade"],
+  /** @type {Record<string, string>} */
+  const GLOW = {
+    overdue: "hh-ruby",
+    "due-soon": "hh-amber",
+    upcoming: "hh-sky",
+    ok: "hh-jade",
+    // No date, or finished: neither fine nor urgent, so neutral ink like the
+    // dot (lib/data/bands.js), quieter than jade (#1341).
+    unscheduled: "hh-quiet",
+    ended: "hh-quiet",
   };
 
   /** @type {HTMLDivElement | null} */
@@ -744,6 +809,9 @@
      holds the page's one main landmark (this route renders only in the
      browser, so the dialect is known here). -->
 <Pocket household={v} />
+{#if v.canManage}
+  <PickSheet bind:open={pickOpen} kind={picking} value={form[picking]} onchoose={choose} />
+{/if}
 
 <div class="household-page" class:member={!v.canManage} bind:this={stage} role={pocket ? undefined : "main"}>
 <!-- your own system, drawn from the inside (§15 H2). Behind the dust, not in
@@ -757,6 +825,7 @@
       <radialGradient id="hh-amber"><stop offset="0" style="stop-color:var(--warm)" stop-opacity=".20"/><stop offset=".55" style="stop-color:var(--warm)" stop-opacity=".07"/><stop offset="1" style="stop-color:var(--warm)" stop-opacity="0"/></radialGradient>
       <radialGradient id="hh-sky"><stop offset="0" style="stop-color:var(--upcoming)" stop-opacity=".18"/><stop offset=".55" style="stop-color:var(--upcoming)" stop-opacity=".06"/><stop offset="1" style="stop-color:var(--upcoming)" stop-opacity="0"/></radialGradient>
       <radialGradient id="hh-jade"><stop offset="0" style="stop-color:var(--ok)" stop-opacity=".15"/><stop offset=".55" style="stop-color:var(--ok)" stop-opacity=".05"/><stop offset="1" style="stop-color:var(--ok)" stop-opacity="0"/></radialGradient>
+      <radialGradient id="hh-quiet"><stop offset="0" style="stop-color:var(--ink-mid)" stop-opacity=".12"/><stop offset=".55" style="stop-color:var(--ink-mid)" stop-opacity=".04"/><stop offset="1" style="stop-color:var(--ink-mid)" stop-opacity="0"/></radialGradient>
       <radialGradient id="hh-sun"><stop offset="0" style="stop-color:var(--sun)" stop-opacity=".10"/><stop offset=".4" style="stop-color:var(--sun)" stop-opacity=".032"/><stop offset="1" style="stop-color:var(--sun)" stop-opacity="0"/></radialGradient>
     </defs>
     {#if room}
@@ -803,14 +872,14 @@
         </g>
         <g class="bodies">
           {#each room.stars as star (star.id)}
-            <circle cx={star.cx} cy={star.cy} r={star.r} fill="url(#{PAINT[/** @type {string} */ (star.band)][1]})"/>
+            <circle cx={star.cx} cy={star.cy} r={star.r} fill="url(#{GLOW[/** @type {string} */ (star.band)]})"/>
             {#if star.band === "overdue"}
               <!-- the chart key's overdue ping, on any body that has earned it -->
               <circle cx={star.cx} cy={star.cy} r={(star.r * 1.27).toFixed(1)} fill="none"
                       style="stroke:var(--overdue)" stroke-opacity=".20" stroke-width="1.3"/>
             {/if}
             <circle cx={star.cx} cy={star.cy} r={Math.max(2.1, star.r * 0.115).toFixed(2)}
-                    style="fill:var({PAINT[/** @type {string} */ (star.band)][0]})" opacity=".55"/>
+                    style="fill:var({BAND_VAR[/** @type {string} */ (star.band)]})" opacity=".55"/>
           {/each}
         </g>
         <!-- the whisper labels: what each star is and how far off it is, in the
@@ -873,7 +942,7 @@
          last-known values, never as whatever this editor is holding for
          them, so a save here can never carry an unconfirmed sibling field
          along with it (#1151 W2-S2; saveField builds that payload). -->
-    <div class="card c-system">
+    <div class="card c-system" class:lifted={cardFor}>
       <div class="cardhead"><h2>The system</h2></div>
       <div class="field" class:dirty={dirty.name}>
         <div class="lab">
@@ -895,10 +964,13 @@
                 {saved.timezone ? "saved ✓" : "save"}</button>
             {/if}
           </div>
-          <select id="hhzone" disabled={!v.canManage}
-                  bind:value={form.timezone} onchange={() => touch("timezone")}>
-            {#each withCurrent(ZONES, v.timezone) as zone (zone)}<option>{zone}</option>{/each}
-          </select>
+          <button id="hhzone" type="button" class="pickbtn" disabled={!v.canManage}
+                  aria-haspopup="dialog" aria-expanded={cardFor === "timezone"} onclick={() => pick("timezone")}>{zoneLabel(form.timezone)}</button>
+          {#if cardFor === "timezone"}
+            <div class="pickseat" data-chooser-card>
+              <ChooserCard ask={askOf("timezone")} layout="beside" onpick={choose} onclose={() => closeCard(true)} />
+            </div>
+          {/if}
         </div>
         <div class="field selwrap" class:dirty={dirty.currency}>
           <div class="lab">
@@ -908,10 +980,13 @@
                 {saved.currency ? "saved ✓" : "save"}</button>
             {/if}
           </div>
-          <select id="hhcur" disabled={!v.canManage}
-                  bind:value={form.currency} onchange={() => touch("currency")}>
-            {#each withCurrent(CURRENCIES, v.currency) as code (code)}<option>{code}</option>{/each}
-          </select>
+          <button id="hhcur" type="button" class="pickbtn" disabled={!v.canManage}
+                  aria-haspopup="dialog" aria-expanded={cardFor === "currency"} onclick={() => pick("currency")}>{form.currency}</button>
+          {#if cardFor === "currency"}
+            <div class="pickseat atright" data-chooser-card>
+              <ChooserCard ask={askOf("currency")} layout="beside" onpick={choose} onclose={() => closeCard(true)} />
+            </div>
+          {/if}
         </div>
       </div>
       <!-- round 2 (#481): the notes that stood here are gone. Three save

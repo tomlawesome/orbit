@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { householdDateFromToday } from "./household-dates";
 
 /**
  * #849: keyboard-audit machinery shared between the desktop walk
@@ -529,7 +530,7 @@ export async function fillCreateForm(page: Page, name: string) {
      order the OS/browser locale uses (this Chromium reads DD-MM-YYYY, not
      the MM-DD-YYYY assumed by an earlier draft), making a typed sequence a
      locale bug in the test, not a thing this file should assert about. */
-  const dueDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+  const dueDate = householdDateFromToday(30);
   await page.locator("#f-date").fill(dueDate);
   await expect(page.locator("#f-date")).toHaveValue(dueDate);
 

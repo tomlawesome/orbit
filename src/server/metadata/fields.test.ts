@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { MetadataKeyLockedError } from "@/server/metadata/keys";
-import { MetadataCipher } from "@/server/metadata/fields";
+import { MetadataCipher, metadataLockedError } from "@/server/metadata/fields";
 
 const rowId = "55555555-5555-4555-8555-555555555555";
 const householdId = "66666666-6666-4666-8666-666666666666";
@@ -194,5 +194,15 @@ describe("Tier 2 blind indexes (ADR-0024 decision 2, #963)", () => {
     // Nor into another column of the same row.
     expect(metadata.text("items.provider", rowId, { encrypted, plaintext: null }))
       .toEqual({ value: null, state: "metadata_integrity_failed" });
+  });
+});
+
+describe("the refusal when the key is locked (ADR-0034 decision 4, #1335)", () => {
+  it("carries the engine's own words, so the browser need not word it", () => {
+    const error = metadataLockedError();
+    expect(error.code).toBe("metadata_locked");
+    expect(error.status).toBe(503);
+    expect(error.message)
+      .toBe("not saved \u2014 encrypted details are locked until the key is restored. The stored values are intact.");
   });
 });

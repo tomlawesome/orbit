@@ -22,7 +22,9 @@ resetDatabaseBetweenSpecFiles();
    cannot type an import of it. tests/unit/v19-theme-roster.test.mjs holds the
    module to the same two literals this reads. */
 const THEME_SOURCE = readFileSync(resolve(__dirname, "../../web/src/lib/theme.js"), "utf8");
-const THEME_PACKS: string[] = JSON.parse(/export const THEME_PACKS = (\[[^\]]*\]);/.exec(THEME_SOURCE)?.[1] ?? "[]");
+/* #1331: THEME_PACKS is derived from THEME_TABLE, so the ids are its rows' `id:` fields, in table order. */
+const THEME_TABLE_SOURCE = /export const THEME_TABLE = \[([\s\S]*?)\n\];/.exec(THEME_SOURCE)?.[1] ?? "";
+const THEME_PACKS: string[] = [...THEME_TABLE_SOURCE.matchAll(/\bid: "([\w-]+)"/g)].map((match) => match[1]);
 const DEFAULT_THEME = /export const DEFAULT_THEME = "([\w-]+)";/.exec(THEME_SOURCE)?.[1];
 if (THEME_PACKS.length < 2 || !DEFAULT_THEME) throw new Error("#1178: could not read the theme roster from web/src/lib/theme.js");
 

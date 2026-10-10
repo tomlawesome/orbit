@@ -213,7 +213,7 @@ export function amendedOf(item, edits) {
 
 /**
  * @typedef {{
- *   key: "due" | "snooze" | "done" | "section" | "type" | "months",
+ *   key: "due" | "snooze" | "done" | "section" | "type" | "months" | "timezone" | "currency",
  *   label: string,
  *   heading: string,
  *   value: string | null,

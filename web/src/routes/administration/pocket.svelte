@@ -12,6 +12,7 @@
   import { ago } from "$lib/format.js";
   import { SETUP_LINK_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { constellationPlanetsOf } from "$lib/data/chart.js";
+  import { BAND_VAR } from "$lib/data/bands.js";
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import {
     JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, ingestShort, initialsOf, lapsesShort,
@@ -605,8 +606,17 @@
   /* ── operations (#1000) ───────────────────────────────────────────────── */
   /** @type {Record<string, string>} */
   const BODY = { ok: "ok", warm: "soon", overdue: "over", "ink-quiet": "ended" };
+  /* The band's token from BAND_VAR, in its text-safe variant (--ok-text,
+     --warm-text, --overdue-text exist in every pack, packs.css). */
+  /** @param {string} band */
+  const bandText = (band) => `var(${BAND_VAR[band]}-text)`;
   /** @type {Record<string, string>} */
-  const INK = { ok: "var(--ok-text)", warm: "var(--warm-text)", overdue: "var(--overdue-text)", "ink-quiet": "var(--ink-quiet)" };
+  const INK = {
+    ok: bandText("ok"),
+    warm: bandText("due-soon"),
+    overdue: bandText("overdue"),
+    "ink-quiet": "var(--ink-quiet)",
+  };
   /** "healthy · 40s ago" → the word on the trail, the rest as the meta. @param {string} detail */
   const split = (detail) => {
     const [word, ...rest] = detail.split(" · ");

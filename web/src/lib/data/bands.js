@@ -1,4 +1,6 @@
 /*
+ * The one band-to-token step (#1341): every screen that paints an urgency
+ * band takes its colour token from BAND_VAR, and its class from T_CLASS.
  * Per-band lookups the corridor rows and the dial both need (#624/#782):
  * plain data and a pure formatter, kept in one module so CorridorRow.svelte
  * and +page.svelte's own dial markup share one typed copy instead of two.

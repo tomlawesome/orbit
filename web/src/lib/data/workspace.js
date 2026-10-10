@@ -731,6 +731,37 @@ export async function approveReceipt(suggestion, fallbackHouseholdId, operationI
   return body; // { outcome: "approved" | "partial_success", itemId }
 }
 
+/** The one sentence for a receipt that is recorded but whose documents failed. */
+const PARTIAL_APPROVAL_MESSAGE = "The item is recorded, but its documents need another try — try once more to finish.";
+
+/**
+ * Approve a mail receipt's suggestion under its per-receipt operation id —
+ * the one call every screen makes. The id is made on the first try and kept
+ * in `operationIds` (keyed by receiptId; the map stays the screen's own) so a
+ * retry sends the same one; it is dropped once the item is fully approved.
+ * `partial_success` (the item is recorded, its documents failed) answers
+ * `{ partial: true, message }`, the id kept; callers branch on that shape,
+ * never on the words. A plain refusal throws, as approveReceipt does.
+ *
+ * @param {ReceiptSuggestion} suggestion
+ * @param {Map<string, string>} operationIds  the screen's ids, by receiptId
+ * @param {?string} fallbackHouseholdId
+ * @param {?ItemProposal} [amendedItem]
+ * @param {?string} [sectionId]
+ * @returns {Promise<{ ok: true } | { partial: true, message: string }>}
+ */
+export async function approveWithOperation(suggestion, operationIds, fallbackHouseholdId, amendedItem = null, sectionId = null) {
+  let operationId = operationIds.get(suggestion.receiptId);
+  if (!operationId) {
+    operationId = crypto.randomUUID();
+    operationIds.set(suggestion.receiptId, operationId);
+  }
+  const result = await approveReceipt(suggestion, fallbackHouseholdId, operationId, amendedItem, sectionId);
+  if (result.outcome === "partial_success") return { partial: true, message: PARTIAL_APPROVAL_MESSAGE };
+  operationIds.delete(suggestion.receiptId);
+  return { ok: true };
+}
+
 /**
  * Discard a mail-in receipt; its staged files are purged server-side.
  *

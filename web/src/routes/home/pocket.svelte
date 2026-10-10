@@ -29,7 +29,7 @@
   import { markDoor } from "../household/[id]/door.js";
   import { HIT_R, spacedBodies } from "./pocket-dial.js";
   import { readSearchDocuments, searchPocket } from "./pocket-search.js";
-  import { BAND_VAR, tlabel } from "./bands.js";
+  import { BAND_VAR, tlabel } from "$lib/data/bands.js";
   import ItemDrawer from "./ItemDrawer.svelte";
   import SuggestionDrawer from "./SuggestionDrawer.svelte";
 
@@ -66,7 +66,7 @@
    *   onapprove?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
    *   ondismiss?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion) => Promise<string | null>,
    *   onamend?: (suggestion: import('$lib/data/workspace.js').ReceiptSuggestion,
-   *     item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null) => Promise<string | null>,
+   *     item: import('$lib/data/workspace.js').ItemProposal, sectionId: string | null) => Promise<string | { partial: true, message: string } | null>,
    *   onchanged?: () => Promise<unknown>,
    *   onsignedout?: (redirectTo: string | null) => unknown,
    *   onmenu?: () => unknown,
@@ -308,9 +308,7 @@
     if (!suggestion || !onamend) throw new Error("not added — this suggestion has gone");
     const { item: amended, sectionId } = amendedOf(item, edits);
     const problem = await onamend(suggestion, amended, sectionId);
-    if (problem?.startsWith("The item is recorded")) {
-      throw new Error("not finished — the item is recorded, but its documents need another try: add it again");
-    }
+    if (problem && typeof problem === "object") throw new Error(problem.message);
     if (problem) throw new Error(`not added — ${problem}`);
   }
   async function addAmended() {

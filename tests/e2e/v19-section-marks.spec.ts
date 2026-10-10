@@ -5,6 +5,7 @@ import { cleanupHousehold, sessionHeaders } from "./support/households";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -117,7 +118,7 @@ test("add → swap → save → manifest shows it", async ({ page }) => {
     // An entry in the new section, so the manifest has something to show.
     const headers = { ...(await sessionHeaders(page)), "content-type": "application/json" };
     const itemId = randomUUID();
-    const dueDate = new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10);
+    const dueDate = householdDateFromToday(10);
     const itemCreated = await page.request.post("/api/workspace/commands", {
       headers,
       data: {

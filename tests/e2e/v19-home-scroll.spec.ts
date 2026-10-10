@@ -5,6 +5,7 @@ import { gotoCreate, settled } from "./support/keyboard";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { householdDateFromToday } from "./support/household-dates";
 
 resetDatabaseBetweenSpecFiles();
 
@@ -63,7 +64,7 @@ async function addItem(page: Page, name: string) {
   await page.locator("#f-name").fill(name);
   await page.locator('#types button[data-type="service"]').click();
   await page.getByRole("group", { name: /^section/ }).getByRole("button", { name: "Home" }).click();
-  await page.locator("#f-date").fill(new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10));
+  await page.locator("#f-date").fill(householdDateFromToday(20));
   await page.locator(".btn-primary").click();
   await expect(page).toHaveURL(/\/home(\?item=[^&]+)?$/);
   await expect(page.locator(".item", { hasText: name })).toBeVisible();

@@ -7,6 +7,7 @@ import { gotoCreate } from "./support/keyboard";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -226,7 +227,7 @@ test.describe("#496 screen-reader walkthrough of the core journeys", () => {
             title: itemTitle,
             currency: "GBP",
             costMinor: 4500,
-            dueDate: new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10),
+            dueDate: householdDateFromToday(20),
             recurrenceMonths: 12,
             version: 1,
             updatedAt: new Date().toISOString(),

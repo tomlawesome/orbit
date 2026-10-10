@@ -4,6 +4,7 @@ import { settleArrival } from "./support/arrival";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -59,7 +60,7 @@ test("names the household link and every rendered body, and hides the decorative
   const itemId = randomUUID();
   const householdName = `Dial Accessibility ${suffix}`;
   const itemTitle = `Dial proving item ${suffix}`;
-  const dueDate = new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10);
+  const dueDate = householdDateFromToday(20);
 
   try {
     const create = await page.request.post("/api/workspace/commands", {

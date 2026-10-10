@@ -559,6 +559,39 @@
     {
       "kind": "vulnerability",
       "scope": "image",
+      "id": "CVE-2026-78667",
+      "package": "stdlib",
+      "installedVersion": "v1.24.6",
+      "owner": "Orbit maintainers",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-78669",
+      "package": "stdlib",
+      "installedVersion": "v1.24.6",
+      "owner": "Orbit maintainers",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-97031",
+      "package": "stdlib",
+      "installedVersion": "v1.24.6",
+      "owner": "Orbit maintainers",
+      "rationale": "Go standard library compiled into /usr/local/bin/gosu in postgres:18-alpine; clears only when upstream rebuilds gosu on a newer Go. gosu 1.19 (2025-09-23, Go 1.24.6) is still its newest release, and the 18-alpine tag has not moved since 2026-09-21 (#1366).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
       "id": "CVE-2026-25679",
       "package": "stdlib",
       "installedVersion": "v1.26.0",
@@ -801,6 +834,50 @@
     {
       "kind": "vulnerability",
       "scope": "image",
+      "id": "CVE-2026-78667",
+      "package": "stdlib",
+      "installedVersion": "v1.26.0",
+      "owner": "Orbit maintainers",
+      "rationale": "Compiled into /usr/bin/ollama; ollama's go.mod still names Go 1.26.0 at 0.40.2 (2026-10-08), the newest release, so no release yet carries the fix (#1366).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-78669",
+      "package": "stdlib",
+      "installedVersion": "v1.26.0",
+      "owner": "Orbit maintainers",
+      "rationale": "Compiled into /usr/bin/ollama; ollama's go.mod still names Go 1.26.0 at 0.40.2 (2026-10-08), the newest release, so no release yet carries the fix (#1366).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-97031",
+      "package": "stdlib",
+      "installedVersion": "v1.26.0",
+      "owner": "Orbit maintainers",
+      "rationale": "Compiled into /usr/bin/ollama; ollama's go.mod still names Go 1.26.0 at 0.40.2 (2026-10-08), the newest release, so no release yet carries the fix (#1366).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-78669",
+      "package": "golang.org/x/net",
+      "installedVersion": "v0.46.0",
+      "owner": "Orbit maintainers",
+      "rationale": "golang.org/x/net compiled into /usr/bin/ollama; 0.40.2 (2026-10-08), the newest release, still pins v0.46.0, so no release yet carries the fix (#1366).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
       "id": "CVE-2026-73566",
       "package": "tar",
       "installedVersion": "7.5.19",
@@ -916,6 +993,39 @@
       "installedVersion": "3.5.7-1~deb13u2",
       "owner": "Orbit maintainers",
       "rationale": "In clamav/clamav:1.5.4-debian; upstream's 2026-10-01 republish kept this package version and 1.5.4 is the latest release. Owner granted, 2026-10-01.",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-78667",
+      "package": "stdlib",
+      "installedVersion": "v1.26.7",
+      "owner": "Orbit maintainers",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; clears only when the image is rebuilt on a newer pebble. 4.1.0-full is still the newest release tag (#1366).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-78669",
+      "package": "stdlib",
+      "installedVersion": "v1.26.7",
+      "owner": "Orbit maintainers",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; clears only when the image is rebuilt on a newer pebble. 4.1.0-full is still the newest release tag (#1366).",
+      "expiresOn": "2026-11-04",
+      "trackingIssue": 794
+    },
+    {
+      "kind": "vulnerability",
+      "scope": "image",
+      "id": "CVE-2026-97031",
+      "package": "stdlib",
+      "installedVersion": "v1.26.7",
+      "owner": "Orbit maintainers",
+      "rationale": "Go standard library compiled into /usr/bin/pebble in apache/tika:4.1.0-full; clears only when the image is rebuilt on a newer pebble. 4.1.0-full is still the newest release tag (#1366).",
       "expiresOn": "2026-11-04",
       "trackingIssue": 794
     }
