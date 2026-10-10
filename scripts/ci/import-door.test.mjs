@@ -1,11 +1,13 @@
 /**
  * scripts/ci/import-door.sh and scripts/ci/check-door-unchanged.sh (#1371,
- * items 2-6 of the specification), driven end to end with no network: the
- * fake orbit-site is a local git repository, the fake GitLab is a small HTTP
- * server in this process, and the remote Orbit pushes to is a local bare
- * repository. Same shape as scripts/ci/repin-base-image.test.mjs (scratch
- * repository carrying a copy of the scripts, bare repository for the push),
- * run under Vitest.
+ * items 2-6 of the specification, item 5 as revised by decision 12a: the
+ * token is write_repository only, so there is no API), driven end to end
+ * with no network: the fake orbit-site is a local git repository, the remote
+ * Orbit pushes to is a local bare repository that records the push options it
+ * receives, and a small HTTP server stands in for GitLab only to prove the
+ * job never calls it. Same shape as scripts/ci/repin-base-image.test.mjs
+ * (scratch repository carrying a copy of the scripts, bare repository for the
+ * push), run under Vitest.
  *
  * Written from the issue's specification alone, before the scripts existed.
  * The specification fixes WHAT happens, not how a test reaches it, so the
@@ -14,10 +16,11 @@
  * variables and the real project name apply):
  *
  *   DOOR_IMPORT_UPSTREAM_URL  where to clone orbit-site from (a local path here)
- *   DOOR_IMPORT_PUSH_URL      where to push the branch (a local bare repository)
+ *   DOOR_IMPORT_PUSH_URL      where to ls-remote and push the branch (a local bare repository)
  *   DOOR_IMPORT_TOKEN         the project token (a fake value)
+ *   CI_COMMIT_BRANCH          the branch the job runs on; the job runs only on `dev`
  *   CI_API_V4_URL, CI_SERVER_URL, CI_PROJECT_ID, CI_PROJECT_PATH
- *                             the predefined CI variables, pointed at the fake GitLab
+ *                             the predefined CI variables; the API they name must never be called
  *
  * The scripts find the repository root from their own location (two levels
  * up from scripts/ci/), as repin-base-image.sh does, so the suite copies
@@ -25,9 +28,12 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import {
+  chmodSync,
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   unlinkSync,
@@ -69,9 +75,10 @@ const gitEnv = {
   GIT_COMMITTER_EMAIL: "test@example.invalid",
 };
 
-function git(cwd, args, { buffer = false } = {}) {
+function git(cwd, args, { buffer = false, input } = {}) {
   const result = spawnSync("git", args, {
     cwd,
+    input,
     encoding: buffer ? "buffer" : "utf8",
     env: { PATH: process.env.PATH, HOME: tmpdir(), ...gitEnv },
   });
@@ -166,7 +173,7 @@ const OLD_STALE_FILE = "web/src/lib/door/only-in-old-copy.js";
  * scripts/ci, copied), an older copy of the door that has a file upstream no
  * longer has, and a host module the import must leave alone.
  */
-function deployOrbit() {
+function deployOrbit({ extraFiles = {} } = {}) {
   const dir = scratchDir("orbit-door-orbit-");
   mkdirSync(join(dir, "scripts"), { recursive: true });
   cpSync(ciDir, join(dir, "scripts", "ci"), {
@@ -178,6 +185,7 @@ function deployOrbit() {
     [OLD_STALE_FILE]: "// gone upstream\n",
     "web/src/lib/door-host.js": "// Orbit's own host module\n",
     "README.md": "orbit\n",
+    ...extraFiles,
   });
   git(dir, ["init", "--quiet", "--initial-branch=dev"]);
   git(dir, ["config", "user.email", "test@example.invalid"]);
@@ -187,100 +195,68 @@ function deployOrbit() {
   return dir;
 }
 
+/**
+ * A bare repository standing in for Orbit's GitLab. It advertises push
+ * options and records the ones every push carries (one block per push, in
+ * `push-options.log`), the way GitLab's `merge_request.*` options arrive.
+ */
 function deployBare(fromRepo) {
   const dir = scratchDir("orbit-door-bare-");
   git(dir, ["init", "--quiet", "--bare", "--initial-branch=dev"]);
+  git(dir, ["config", "receive.advertisePushOptions", "true"]);
+  /* the seed goes in before the hook, so the log holds only what the job pushes */
   if (fromRepo) git(fromRepo, ["push", "--quiet", dir, "dev"]);
+  const log = join(dir, "push-options.log");
+  const hook = join(dir, "hooks", "pre-receive");
+  writeFileSync(
+    hook,
+    `#!/bin/sh
+{
+  echo "--push"
+  i=0
+  while [ "$i" -lt "\${GIT_PUSH_OPTION_COUNT:-0}" ]; do
+    eval "echo \\"\\$GIT_PUSH_OPTION_$i\\""
+    i=$((i + 1))
+  done
+} >> '${log}'
+`,
+  );
+  chmodSync(hook, 0o755);
   return dir;
+}
+
+/** Every push the bare repository has received since the seed, each as its list of push options. */
+function pushesTo(bare) {
+  const log = join(bare, "push-options.log");
+  if (!existsSync(log)) return [];
+  return readFileSync(log, "utf8")
+    .split("--push\n")
+    .slice(1)
+    .map((block) => block.split("\n").filter(Boolean));
 }
 
 function remoteBranches(bare) {
   return git(bare, ["for-each-ref", "--format=%(refname:short)", "refs/heads/"]).split("\n").filter(Boolean);
 }
 
-/* --------------------------------------------------------------- fake GitLab */
+/* ---------------------------------------------------------------- GitLab tripwire */
 
 /**
- * A fake GitLab API: merge requests listed, created, closed; branches deleted
- * (from the bare repository, so a script that deletes branches by `git push
- * --delete` instead ends in the same state). `requests` records every call in
- * order. Open merge requests it is seeded with are filtered by the script
- * itself: the list endpoint returns every open one.
+ * The token has write_repository only, so the job makes no API call at all.
+ * This server stands where the API would be, records every request it gets
+ * (headers included, to see whether one carried the token) and answers 404 to
+ * each. A passing run leaves `requests` empty.
  */
-async function startGitLab({ bare, seed = [] }) {
-  const mrs = seed.map((mr, i) => ({ iid: 100 + i, state: "opened", target_branch: "dev", ...mr }));
+async function startGitLab() {
   const requests = [];
-  let nextIid = 500;
-
   const server = createServer((req, res) => {
-    const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
-    req.on("end", () => {
-      const url = new URL(req.url, "http://fake.invalid");
-      const raw = Buffer.concat(chunks).toString("utf8");
-      let body = {};
-      if (raw) {
-        try {
-          body = JSON.parse(raw);
-        } catch {
-          body = Object.fromEntries(new URLSearchParams(raw));
-        }
-      }
-      for (const [k, v] of url.searchParams) body[k] ??= v;
-      const path = decodeURIComponent(url.pathname).replace(/^\/api\/v4/u, "");
-      requests.push({ method: req.method, path, body });
-
-      const send = (status, payload = {}) => {
-        res.writeHead(status, { "content-type": "application/json" });
-        res.end(JSON.stringify(payload));
-      };
-
-      let m;
-      if (req.method === "GET" && /\/merge_requests$/u.test(path)) {
-        const wanted = body.state ?? "opened";
-        return send(200, mrs.filter((mr) => wanted === "all" || mr.state === wanted));
-      }
-      if (req.method === "POST" && /\/merge_requests$/u.test(path)) {
-        const mr = {
-          iid: nextIid++,
-          state: "opened",
-          source_branch: body.source_branch,
-          target_branch: body.target_branch,
-          title: body.title ?? "",
-          description: body.description ?? "",
-          web_url: `http://fake.invalid/mr/${nextIid}`,
-        };
-        mrs.push(mr);
-        return send(201, mr);
-      }
-      if ((m = path.match(/\/merge_requests\/(\d+)$/u)) && req.method === "PUT") {
-        const mr = mrs.find((candidate) => candidate.iid === Number(m[1]));
-        if (!mr) return send(404, { message: "404 Not Found" });
-        if (body.state_event === "close") mr.state = "closed";
-        return send(200, mr);
-      }
-      if ((m = path.match(/\/merge_requests\/(\d+)\/notes$/u))) return send(201, {});
-      if ((m = path.match(/\/repository\/branches\/(.+)$/u)) && req.method === "DELETE") {
-        try {
-          git(bare, ["branch", "-D", m[1]]);
-        } catch {
-          return send(404, { message: "404 Branch Not Found" });
-        }
-        res.writeHead(204);
-        return res.end();
-      }
-      return send(404, { message: `fake GitLab: nothing at ${req.method} ${path}` });
-    });
+    requests.push({ method: req.method, url: req.url, headers: req.headers });
+    res.writeHead(404, { "content-type": "application/json" });
+    res.end("{}");
   });
-
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const url = `http://127.0.0.1:${server.address().port}`;
-  const handle = {
-    url,
-    mrs,
-    requests,
-    close: () => new Promise((resolve) => server.close(resolve)),
-  };
+  const handle = { url, requests, close: () => new Promise((resolve) => server.close(resolve)) };
   servers.push(handle);
   return handle;
 }
@@ -306,7 +282,7 @@ function run(cmd, args, { cwd, env }) {
 }
 
 /** Runs the real import script from the scratch Orbit checkout. */
-function runImport({ orbit, upstream, bare, api }) {
+function runImport({ orbit, upstream, bare, api, branch = "dev" }) {
   return run("bash", [join(orbit, "scripts", "ci", "import-door.sh")], {
     cwd: orbit,
     env: {
@@ -316,6 +292,7 @@ function runImport({ orbit, upstream, bare, api }) {
       DOOR_IMPORT_UPSTREAM_URL: upstream,
       DOOR_IMPORT_PUSH_URL: bare,
       DOOR_IMPORT_TOKEN: FAKE_TOKEN,
+      CI_COMMIT_BRANCH: branch,
       CI_SERVER_URL: api.url,
       CI_API_V4_URL: `${api.url}/api/v4`,
       CI_PROJECT_ID: "49",
@@ -334,12 +311,11 @@ function runCheck(orbit) {
   });
 }
 
-/** A world: upstream, Orbit, bare remote and fake GitLab, ready to import. */
-async function deployWorld({ upstream = deployUpstream(), seedMrs = [], seedBranches = [] } = {}) {
-  const orbit = deployOrbit();
+/** A world: upstream, Orbit, bare remote and GitLab tripwire, ready to import. */
+async function deployWorld({ upstream = deployUpstream(), orbitFiles = {} } = {}) {
+  const orbit = deployOrbit({ extraFiles: orbitFiles });
   const bare = deployBare(orbit);
-  for (const name of seedBranches) git(orbit, ["push", "--quiet", bare, `dev:refs/heads/${name}`]);
-  const api = await startGitLab({ bare, seed: seedMrs });
+  const api = await startGitLab();
   return { upstream, orbit, bare, api };
 }
 
@@ -502,21 +478,21 @@ describe("import-door.sh writes door.upstream.json (item 3)", () => {
 });
 
 describe("import-door.sh when nothing changed (item 4)", () => {
-  it("exits 0 and opens no branch and no merge request when the copy already matches upstream", async () => {
+  it("exits 0 and pushes no branch and opens no merge request when the copy already matches upstream", async () => {
     const first = await deployWorld();
     expect((await runImport(first)).status).toBe(0);
 
-    // The merge request was merged: dev now holds the copy. Run again against a fresh remote and fake GitLab.
+    // The merge request was merged: dev now holds the copy. Run again against a fresh remote.
     const orbit = mergedOrbit(first);
     const bare = deployBare(orbit);
-    const api = await startGitLab({ bare });
+    const api = await startGitLab();
     const result = await runImport({ orbit, upstream: first.upstream, bare, api });
 
     expect(result.status, ok(result)).toBe(0);
     expect(importedBranch(bare)).toEqual([]);
     expect(remoteBranches(bare)).toEqual(["dev"]);
-    expect(api.requests.filter((r) => r.method !== "GET")).toEqual([]);
-    expect(api.mrs).toEqual([]);
+    expect(pushesTo(bare)).toEqual([]);
+    expect(api.requests).toEqual([]);
   });
 
   it("an upstream commit that leaves assets/door/ as it was changes nothing: same tree, no branch, no merge request", async () => {
@@ -530,16 +506,16 @@ describe("import-door.sh when nothing changed (item 4)", () => {
 
     const orbit = mergedOrbit(first);
     const bare = deployBare(orbit);
-    const api = await startGitLab({ bare });
+    const api = await startGitLab();
     const result = await runImport({ orbit, upstream: first.upstream, bare, api });
 
     expect(result.status, ok(result)).toBe(0);
     expect(importedBranch(bare)).toEqual([]);
-    expect(api.requests.filter((r) => r.method !== "GET")).toEqual([]);
+    expect(pushesTo(bare)).toEqual([]);
   });
 });
 
-describe("import-door.sh when the door changed (item 5)", () => {
+describe("import-door.sh when the door changed (item 5, as revised by decision 12a)", () => {
   it("pushes chore/door-import-<short sha> of the upstream commit", async () => {
     const world = await deployWorld();
     const result = await runImport(world);
@@ -551,64 +527,59 @@ describe("import-door.sh when the door changed (item 5)", () => {
     expect(upstreamCommit(world.upstream).startsWith(short)).toBe(true);
   });
 
-  it("opens a merge request into dev from that branch, naming the upstream commit", async () => {
+  it("the push carries merge_request.create, merge_request.target=dev and a merge_request.title naming the upstream commit", async () => {
     const world = await deployWorld();
     const result = await runImport(world);
     expect(result.status, ok(result)).toBe(0);
+    onlyImportBranch(world);
 
+    const pushes = pushesTo(world.bare);
+    expect(pushes).toHaveLength(1);
+    const options = pushes[0];
+    expect(options).toContain("merge_request.create");
+    expect(options).toContain("merge_request.target=dev");
+    const title = options.find((o) => o.startsWith("merge_request.title="));
+    expect(title, `push options: ${options.join(" | ")}`).toBeTruthy();
+    expect(title).toContain(upstreamCommit(world.upstream).slice(0, 7));
+  });
+
+  it("makes no API request at all, and none carries the token", async () => {
+    const world = await deployWorld();
+    const result = await runImport(world);
+    expect(result.status, ok(result)).toBe(0);
+    onlyImportBranch(world);
+
+    expect(world.api.requests).toEqual([]);
+    expect(JSON.stringify(world.api.requests)).not.toContain(FAKE_TOKEN);
+  });
+
+  it("exits 0 and pushes nothing when that branch is already on Orbit, opening nothing", async () => {
+    const world = await deployWorld();
+    expect((await runImport(world)).status).toBe(0);
     const branch = onlyImportBranch(world);
-    const created = world.api.requests.filter((r) => r.method === "POST" && /\/merge_requests$/u.test(r.path));
-    expect(created).toHaveLength(1);
-    expect(created[0].path).toMatch(/\/projects\/49\/merge_requests$/u);
-    expect(created[0].body.source_branch).toBe(branch);
-    expect(created[0].body.target_branch).toBe("dev");
+    const tip = git(world.bare, ["rev-parse", branch]).trim();
+    expect(pushesTo(world.bare)).toHaveLength(1);
 
-    const sha = upstreamCommit(world.upstream);
-    const text = `${created[0].body.title ?? ""}\n${created[0].body.description ?? ""}`;
-    expect(text).toContain(sha.slice(0, 7));
+    // The same upstream commit imported again from a fresh checkout of dev, against the same remote.
+    const orbit = deployOrbit();
+    const result = await runImport({ ...world, orbit });
+
+    expect(result.status, ok(result)).toBe(0);
+    expect(pushesTo(world.bare)).toHaveLength(1);
+    expect(importedBranch(world.bare)).toEqual([branch]);
+    expect(git(world.bare, ["rev-parse", branch]).trim()).toBe(tip);
+    expect(world.api.requests).toEqual([]);
   });
 
-  it("closes older open door-import merge requests and deletes their branches, leaving other merge requests alone", async () => {
-    const world = await deployWorld({
-      seedBranches: ["chore/door-import-aaaaaaa", "chore/door-import-bbbbbbb", "feature/other-work"],
-      seedMrs: [
-        { source_branch: "chore/door-import-aaaaaaa", title: "Import the door aaaaaaa" },
-        { source_branch: "chore/door-import-bbbbbbb", title: "Import the door bbbbbbb" },
-        { source_branch: "feature/other-work", title: "Something else" },
-      ],
-    });
+  it("does not touch older door-import branches that are already on Orbit", async () => {
+    const world = await deployWorld();
+    git(world.orbit, ["push", "--quiet", world.bare, "dev:refs/heads/chore/door-import-aaaaaaa"]);
     const result = await runImport(world);
     expect(result.status, ok(result)).toBe(0);
 
-    const byBranch = Object.fromEntries(world.api.mrs.map((mr) => [mr.source_branch, mr]));
-    expect(byBranch["chore/door-import-aaaaaaa"].state).toBe("closed");
-    expect(byBranch["chore/door-import-bbbbbbb"].state).toBe("closed");
-    expect(byBranch["feature/other-work"].state).toBe("opened");
-
-    const branches = remoteBranches(world.bare);
-    expect(branches).not.toContain("chore/door-import-aaaaaaa");
-    expect(branches).not.toContain("chore/door-import-bbbbbbb");
-    expect(branches).toContain("feature/other-work");
-
-    // The new one is the only door-import branch left, and its merge request is open.
-    const fresh = onlyImportBranch(world);
-    expect(byBranch[fresh].state).toBe("opened");
-    expect(byBranch[fresh].target_branch).toBe("dev");
-  });
-
-  it("opens the new merge request before it closes the older ones", async () => {
-    const world = await deployWorld({
-      seedBranches: ["chore/door-import-aaaaaaa"],
-      seedMrs: [{ source_branch: "chore/door-import-aaaaaaa" }],
-    });
-    const result = await runImport(world);
-    expect(result.status, ok(result)).toBe(0);
-
-    const order = world.api.requests
-      .filter((r) => (r.method === "POST" && /\/merge_requests$/u.test(r.path)) || (r.method === "PUT" && /\/merge_requests\/\d+$/u.test(r.path)))
-      .map((r) => r.method);
-    expect(order[0]).toBe("POST");
-    expect(order).toContain("PUT");
+    expect(remoteBranches(world.bare)).toContain("chore/door-import-aaaaaaa");
+    expect(importedBranch(world.bare)).toHaveLength(2);
+    expect(world.api.requests).toEqual([]);
   });
 
   it("the pushed branch carries the new copy, the new record and the deletions together", async () => {
@@ -623,6 +594,75 @@ describe("import-door.sh when the door changed (item 5)", () => {
     expect(pushedFile(world.bare, branch, "web/src/lib/door/index.js").toString("utf8")).toContain("// v2");
     expect(Object.keys(pushedDoor(world.bare, branch))).not.toContain("stale-soon.js");
   });
+});
+
+describe("import-door.sh refuses what the credential review ruled out (kept in the build)", () => {
+  /** An upstream whose assets/door/ holds a directory entry literally named "..", written without git's path checks. */
+  function deployUpstreamWithDotDot() {
+    const dir = scratchDir("orbit-door-upstream-dotdot-");
+    git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    const blob = (text) => git(dir, ["hash-object", "-w", "--stdin"], { input: text }).trim();
+    const tree = (entries) => {
+      const raw = Buffer.concat(
+        entries.map(({ mode, name, sha }) => Buffer.concat([Buffer.from(`${mode} ${name}\0`), Buffer.from(sha, "hex")])),
+      );
+      return git(dir, ["hash-object", "-t", "tree", "-w", "--literally", "--stdin"], { input: raw }).trim();
+    };
+    const inner = tree([{ mode: "100644", name: "pwned.txt", sha: blob("written outside the copy\n") }]);
+    const door = tree([
+      { mode: "40000", name: "..", sha: inner },
+      { mode: "100644", name: "index.js", sha: blob("export {};\n") },
+    ]);
+    const assets = tree([{ mode: "40000", name: "door", sha: door }]);
+    const root = tree([{ mode: "40000", name: "assets", sha: assets }]);
+    const commit = git(dir, ["commit-tree", root, "-m", "a door with a .. part"]).trim();
+    git(dir, ["update-ref", "refs/heads/main", commit]);
+    return dir;
+  }
+
+  const findFiles = (dir, name, found = []) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === ".git") continue;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) findFiles(full, name, found);
+      else if (entry.name === name) found.push(full);
+    }
+    return found;
+  };
+
+  it("refuses an upstream path with a .. part: exits non-zero, writes nothing outside the copy, pushes nothing", async () => {
+    const world = await deployWorld({ upstream: deployUpstreamWithDotDot() });
+    const result = await runImport(world);
+
+    expect(result.status, ok(result)).not.toBe(0);
+    expect(findFiles(world.orbit, "pwned.txt")).toEqual([]);
+    expect(existsSync(join(world.orbit, "web", "src", "lib", "pwned.txt"))).toBe(false);
+    expect(importedBranch(world.bare)).toEqual([]);
+    expect(pushesTo(world.bare)).toEqual([]);
+  });
+
+  it("fails the job, naming the path, when a copied path is matched by .gitignore", async () => {
+    const upstream = deployUpstream({ ...doorFiles, "img/dawn/held-back.cache": "ignored by Orbit\n" });
+    const world = await deployWorld({ upstream, orbitFiles: { ".gitignore": "*.cache\n" } });
+    const result = await runImport(world);
+
+    expect(result.status, ok(result)).not.toBe(0);
+    expect(result.stdout + result.stderr).toContain("held-back.cache");
+    expect(importedBranch(world.bare)).toEqual([]);
+    expect(pushesTo(world.bare)).toEqual([]);
+  });
+
+  for (const branch of ["feature/other-work", "main", ""]) {
+    it(`refuses to run when CI_COMMIT_BRANCH is ${JSON.stringify(branch)}, not dev`, async () => {
+      const world = await deployWorld();
+      const result = await runImport({ ...world, branch });
+
+      expect(result.status, ok(result)).not.toBe(0);
+      expect(importedBranch(world.bare)).toEqual([]);
+      expect(pushesTo(world.bare)).toEqual([]);
+      expect(world.api.requests).toEqual([]);
+    });
+  }
 });
 
 describe("check-door-unchanged.sh (item 6)", () => {
@@ -702,5 +742,101 @@ describe("check-door-unchanged.sh (item 6)", () => {
     writeFileSync(file, original);
     const result = await runCheck(orbit);
     expect(result.status, ok(result)).toBe(0);
+  });
+});
+
+/* ------------------------------------------- hardening from the credential review (#1371) */
+
+/**
+ * The import with the environment a CI job on `dev` has, plus overrides
+ * (a value of undefined removes the variable). Its own runner rather than
+ * runImport, so these tests say exactly which variables they depend on.
+ */
+function runImportWith({ orbit, upstream, bare, api }, overrides = {}) {
+  const env = {
+    PATH: process.env.PATH,
+    HOME: scratchDir("orbit-door-home-"),
+    ...gitEnv,
+    DOOR_IMPORT_UPSTREAM_URL: upstream,
+    DOOR_IMPORT_PUSH_URL: bare,
+    DOOR_IMPORT_TOKEN: FAKE_TOKEN,
+    CI_SERVER_URL: api.url,
+    CI_API_V4_URL: `${api.url}/api/v4`,
+    CI_PROJECT_ID: "49",
+    CI_PROJECT_PATH: "ai/orbit",
+    CI_SERVER_HOST: "gitlab.example.invalid",
+    CI_COMMIT_BRANCH: "dev",
+    NO_PROXY: "127.0.0.1",
+    ...overrides,
+  };
+  for (const [key, value] of Object.entries(env)) if (value === undefined) delete env[key];
+  return run("bash", [join(orbit, "scripts", "ci", "import-door.sh")], { cwd: orbit, env });
+}
+
+/** git with stdin, for building trees git itself would never let `git add` build. */
+function gitWithInput(cwd, args, input) {
+  const result = spawnSync("git", args, {
+    cwd,
+    input,
+    encoding: "utf8",
+    env: { PATH: process.env.PATH, HOME: tmpdir(), ...gitEnv },
+  });
+  if (result.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
+  return result.stdout.trim();
+}
+
+/** An upstream whose assets/door/ holds a path through a `..` component: assets/door/../pwned. */
+function deployUpstreamWithDotDotPath() {
+  const dir = deployUpstream();
+  const pwned = gitWithInput(dir, ["hash-object", "-w", "--stdin"], "pwned\n");
+  const index = git(dir, ["rev-parse", "main:assets/door/index.js"]).trim();
+  const escape = gitWithInput(dir, ["mktree"], `100644 blob ${pwned}\tpwned\n`);
+  const door = gitWithInput(dir, ["mktree"], `100644 blob ${index}\tindex.js\n040000 tree ${escape}\t..\n`);
+  const assets = gitWithInput(dir, ["mktree"], `040000 tree ${door}\tdoor\n`);
+  const root = gitWithInput(dir, ["mktree"], `040000 tree ${assets}\tassets\n`);
+  const commit = gitWithInput(dir, ["commit-tree", root, "-p", "main", "-m", "a path that climbs out"], "");
+  git(dir, ["update-ref", "refs/heads/main", commit]);
+  return dir;
+}
+
+describe("import-door.sh refuses to run anywhere but dev (hardening)", () => {
+  it("exits non-zero, says why and pushes nothing on another branch", async () => {
+    const world = await deployWorld();
+    const result = await runImportWith(world, { CI_COMMIT_BRANCH: "feature/other-work" });
+    expect(result.status, ok(result)).not.toBe(0);
+    expect(result.stdout + result.stderr).toMatch(/dev/u);
+    expect(remoteBranches(world.bare)).toEqual(["dev"]);
+    expect(world.api.requests.filter((r) => r.method !== "GET")).toEqual([]);
+  });
+
+  it("exits non-zero when CI_COMMIT_BRANCH is not set at all", async () => {
+    const world = await deployWorld();
+    const result = await runImportWith(world, { CI_COMMIT_BRANCH: undefined });
+    expect(result.status, ok(result)).not.toBe(0);
+    expect(remoteBranches(world.bare)).toEqual(["dev"]);
+  });
+});
+
+describe("import-door.sh does not trust upstream's paths (hardening)", () => {
+  it("refuses a tree with a `..` component and pushes nothing", async () => {
+    const world = await deployWorld({ upstream: deployUpstreamWithDotDotPath() });
+    const result = await runImportWith(world);
+    expect(result.status, ok(result)).not.toBe(0);
+    expect(importedBranch(world.bare)).toEqual([]);
+    expect(remoteBranches(world.bare)).toEqual(["dev"]);
+  });
+});
+
+describe("import-door.sh does not leave git-ignored files out silently (hardening)", () => {
+  it("fails, naming the ignored file, and pushes nothing", async () => {
+    const world = await deployWorld();
+    writeFileSync(join(world.orbit, ".gitignore"), "*.webp\n");
+    git(world.orbit, ["add", ".gitignore"]);
+    git(world.orbit, ["commit", "--quiet", "-m", "ignore pictures"]);
+
+    const result = await runImportWith(world);
+    expect(result.status, ok(result)).not.toBe(0);
+    expect(result.stdout + result.stderr).toContain("web/src/lib/door/img/dawn/dawn.webp");
+    expect(importedBranch(world.bare)).toEqual([]);
   });
 });
