@@ -122,8 +122,7 @@
 <!-- The shared chrome (#1010, owner 2026-09-16): the way back goes to the
      sky here too, not to /settings -- the owner chose one door for every
      sub-screen. The stage's light-dismiss stays as the other way out. -->
-<Chrome user={data.user} current="settings"
-        role={data.household ? `${data.household.name ?? ""} · ${data.household.canManage ? "owner" : "member"}` : ""} />
+<Chrome user={data.user} current="settings" household={data.household} />
 <!-- §14 (#471): clicking off the card returns to wherever the reader came
      from — the inbox, settings, or home as the deep-link fallback. -->
 <div class="stage" role={pocket ? undefined : "main"} onclick={(event) => { if (event.target === event.currentTarget) dismissRelay(); }}><div class="glass relay-card">
