@@ -393,21 +393,6 @@ so an older release can only be installed by asking for it by name, never
 served silently in place of a newer one. See `docs/installer-guarantees.md`
 for the full list of what is and is not checked.
 
-**Changing the contract between `install.sh` and the launcher.** Orbit pins
-the launcher (`launcher/pin.json`), and the launcher pins the Orbit commit its
-live test installs with (ai/orbit-launcher#193). A change to that contract
-therefore always lands in one order, so no session has to work it out again
-(owner, 2026-10-05, after the #1225 / launcher v0.4.0 ordering knot):
-
-1. The contract change lands in Orbit on `dev`.
-2. The launcher bumps its Orbit pin to that commit.
-3. The launcher releases.
-4. Orbit runs `scripts/bump-launcher-pin.sh` to take the new launcher tag.
-
-Nothing else changes in this repository. Orbit, the launcher and the website are
-one project in three repositories (ADR-0036), so each step is acted on without
-asking first.
-
 ### Version tags in GHCR start at v0.3.0
 
 `ghcr.io/tomlawesome/orbit` has no `v1.1.0` or `v1.2.0` tag, and never had one

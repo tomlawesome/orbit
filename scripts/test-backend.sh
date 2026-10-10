@@ -57,6 +57,9 @@ node --test scripts/ci/repin-base-image.test.mjs
 # entry for this file too.
 node --test scripts/bump-launcher-pin.test.mjs
 
+# Same reason (#1374): uses node:test, with a stub docker on PATH.
+node --test scripts/corpus/stages-rerun.test.mjs
+
 # Static analysis covers the full-stack boundary; Vitest exercises all fast
 # server, authentication, database, domain, and reducer tests without Docker.
 #
