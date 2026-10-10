@@ -3,7 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "orbit/db";
 import { notificationDeliveries, userPreferences } from "orbit/db/schema";
-import { themePreferenceSchema } from "orbit/lib/preferences";
+import { themePackIsDark, themePreferenceSchema } from "orbit/lib/preferences";
 
 import { write } from "$lib/server/api.js";
 
@@ -12,13 +12,13 @@ import { write } from "$lib/server/api.js";
 // rather than user-chosen. urgency_palette is likewise inert: status tokens
 // are flat per pack, so there's nothing left for "classic" vs "themed" to
 // select. Both columns are kept only for storage compatibility; neither is
-// part of the client-facing ThemePreference.
-const DARK_PACKS = new Set(["starchart", "afterdark"]);
+// part of the client-facing ThemePreference. Which packs are dark is the
+// engine's roster to say (themePackIsDark, #1331), not a list kept here.
 
 /** Theme, text size and notification-channel preferences (#735 port). */
 export const PUT = write(async (event, session) => {
   const preference = themePreferenceSchema.parse(await event.request.json());
-  const themeMode = DARK_PACKS.has(preference.theme) ? "dark" : "light";
+  const themeMode = themePackIsDark(preference.theme) ? "dark" : "light";
   await getDb().transaction(async (transaction) => {
     await transaction.insert(userPreferences).values({
       userId: session.user.id,

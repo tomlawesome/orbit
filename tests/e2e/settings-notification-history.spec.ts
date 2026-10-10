@@ -7,6 +7,7 @@ import { claimInstanceAsAdministrator } from "./support/bootstrap";
 import { workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: this file's own copy of the seed-restore discipline every spec
    under tests/e2e/ follows -- see support/database.ts for why. */
@@ -97,7 +98,7 @@ async function seedHouseholdAndItem(page: Page, name: string, itemTitle: string)
   const householdId = randomUUID();
   const sectionId = randomUUID();
   const itemId = randomUUID();
-  const { userId } = await page.evaluate(async ({ householdId, sectionId, itemId, householdName, itemTitle }) => {
+  const { userId } = await page.evaluate(async ({ householdId, sectionId, itemId, householdName, itemTitle, dueDate }) => {
     const session = (await (await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" })).json()) as { user: { id: string }, csrfToken: string };
     const command = async (body: Record<string, unknown>) => {
       const response = await fetch("/api/workspace/commands", {
@@ -123,12 +124,12 @@ async function seedHouseholdAndItem(page: Page, name: string, itemTitle: string)
       kind: "service",
       item: {
         id: itemId, sectionId, title: itemTitle, currency: "GBP",
-        dueDate: new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10),
+        dueDate,
       },
       activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
     });
     return { userId: session.user.id };
-  }, { householdId, sectionId, itemId, householdName: name, itemTitle });
+  }, { householdId, sectionId, itemId, householdName: name, itemTitle, dueDate: householdDateFromToday(20) });
   return { householdId, itemId, userId };
 }
 

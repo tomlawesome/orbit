@@ -16,7 +16,7 @@
   import { money } from "$lib/format.js";
   import { sectionColourOf } from "$lib/option-colour.js";
   import Mark from "$lib/Mark.svelte";
-  import { BAND_VAR, T_CLASS, tlabel } from "./bands.js";
+  import { BAND_VAR, T_CLASS, tlabel } from "$lib/data/bands.js";
   import ItemView from "./ItemView.svelte";
   import SuggestionView from "./SuggestionView.svelte";
 

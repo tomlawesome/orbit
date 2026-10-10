@@ -5,6 +5,7 @@ import { settleArrival } from "./support/arrival";
 import { ensureWorkerAdministrator, workerAccount } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -87,9 +88,9 @@ async function seedHousehold(page: Page) {
   const overdueItem = `${NAME_PREFIX}overdue tv licence`;
   const soonItem = `${NAME_PREFIX}gutter service`;
   const laterItem = `${NAME_PREFIX}boiler certificate`;
-  const overdueDue = new Date(Date.now() - 5 * 86_400_000).toISOString().slice(0, 10);
-  const soonDue = new Date(Date.now() + 20 * 86_400_000).toISOString().slice(0, 10);
-  const laterDue = new Date(Date.now() + 70 * 86_400_000).toISOString().slice(0, 10);
+  const overdueDue = householdDateFromToday(-5);
+  const soonDue = householdDateFromToday(20);
+  const laterDue = householdDateFromToday(70);
   const soonItemId = randomUUID();
   for (const [title, dueDate, kind, id] of [
     [overdueItem, overdueDue, "renewal", randomUUID()],

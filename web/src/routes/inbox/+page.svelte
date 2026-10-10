@@ -1,11 +1,12 @@
 <script>
   import { onMount } from "svelte";
-  import { readInboxScreen, approveReceipt, dismissReceipt } from "$lib/data/workspace.js";
+  import { readInboxScreen, approveWithOperation, dismissReceipt } from "$lib/data/workspace.js";
   import { ago, agoLong } from "$lib/format.js";
   import { LOCKED, fieldState, receiptWords } from "$lib/data/metadata-status.js";
   import { papersOf, readingsOf } from "$lib/pocket/review.js";
   import { reasonWords } from "$lib/pocket/words.js";
   import { daysUntil } from "$lib/data/chart.js";
+  import { BAND_VAR } from "$lib/data/bands.js";
   import { fillStarTiles } from "$lib/sky.js";
   import Chrome from "$lib/Chrome.svelte";
   import { resolve } from "$app/paths";
@@ -55,16 +56,14 @@
     try {
       if (act === "approve") {
         const found = need().suggestions.find((one) => one.receiptId === receipt.id);
-        if (!operationIds.has(receipt.id)) operationIds.set(receipt.id, crypto.randomUUID());
         /* The review lane's own receipts are exactly receiptSuggestionsOf's
            input, so a receipt armed to approve is always found here. */
         const suggestion = /** @type {import('$lib/data/workspace.js').ReceiptSuggestion} */ (found);
-        const result = await approveReceipt(suggestion, need().primary, operationIds.get(receipt.id));
-        if (result.outcome === "partial_success") {
-          problem = "The item is recorded, but its documents need another try — tap again to finish.";
+        const result = await approveWithOperation(suggestion, operationIds, need().primary);
+        if ("partial" in result) {
+          problem = result.message;
           return;
         }
-        operationIds.delete(receipt.id);
       } else {
         await dismissReceipt(receipt.id);
       }
@@ -88,8 +87,6 @@
   const filedDate = (iso) =>
     iso.slice(0, 4) === need().today.slice(0, 4) ? short(iso) : fullDate(iso);
   /* The filed dot follows the chart key — the item's urgency band, today. */
-  /** @type {Record<string, string>} */
-  const TONES = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok", unscheduled: "--ink-faint" };
   /** @param {import('$lib/data/workspace.js').Receipt} receipt */
   const burnsIn = (receipt) => daysUntil(/** @type {string} */ (receipt.expiresAt).slice(0, 10), need().today);
   /* "Still reading" only ever holds receipts that have already arrived. */
@@ -148,7 +145,7 @@
         <h2>Filed{view.filed.length ? ` · ${view.filed.length}` : ""}</h2>
         {#each view.filed as entry (entry.itemId)}
           <a class="item" href={resolve(`/home?item=${encodeURIComponent(entry.itemId)}`)}>
-            <span class="dot" style="background:var({TONES[entry.band]})" aria-hidden="true"></span>
+            <span class="dot" style="background:var({BAND_VAR[entry.band]})" aria-hidden="true"></span>
             <div class="flex"><b>{entry.title}</b><span>from {entry.sourceDocument} · added {filedDate(/** @type {string} */ (entry.filedAt))}</span></div>
           </a>
         {/each}

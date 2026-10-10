@@ -9,13 +9,14 @@
   import { readyFlightAtLeisure } from "$lib/flight/warm.js";
   import Sun from "$lib/sun/Sun.svelte";
   import { SUN_R } from "$lib/sun/furnace.js";
+  import { swatchStyle } from "$lib/theme-swatches.js";
   import { othersOf } from "$lib/flight/engine.js";
   import Dawn from "$lib/flight/Dawn.svelte";
   import { consumeLaunch } from "$lib/flight/arrival.js";
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { WorkspaceError, applyCommand, approveReceipt, dueDateIn, attachItemDocument, dismissReceipt, householdElsewhereFor, readHome, readHomeIn, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut } from "$lib/data/workspace.js";
+  import { WorkspaceError, applyCommand, approveWithOperation, dueDateIn, attachItemDocument, dismissReceipt, householdElsewhereFor, readHome, readHomeIn, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut } from "$lib/data/workspace.js";
   import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
   import { createHeldCompletion } from "$lib/data/held-completion.js";
   import { createArm } from "$lib/pocket/arm.js";
@@ -25,7 +26,7 @@
   import Pocket from "./pocket.svelte";
   import { readSearchDocuments, searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
-  import { tlabel } from "./bands.js";
+  import { tlabel } from "$lib/data/bands.js";
   import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
   import CorridorRow from "./CorridorRow.svelte";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
@@ -950,9 +951,7 @@
     if (!suggestion) throw new Error("not added — this suggestion has gone");
     const { item: amended, sectionId } = amendedOf(item, edits);
     const problem = await amendReceipt(suggestion, amended, sectionId);
-    if (problem?.startsWith("The item is recorded")) {
-      throw new Error("not finished — the item is recorded, but its documents need another try: add it again");
-    }
+    if (problem && typeof problem === "object") throw new Error(problem.message);
     if (problem) throw new Error(`not added — ${problem}`);
   }
   async function addAmended() {
@@ -978,15 +977,13 @@
     busyReceipt = suggestion.id;
     try {
       if (act === "approve") {
-        if (!operationIds.has(suggestion.receiptId)) operationIds.set(suggestion.receiptId, crypto.randomUUID());
-        const result = await approveReceipt(suggestion, asView(view).primary, operationIds.get(suggestion.receiptId));
-        if (result.outcome === "partial_success") {
+        const result = await approveWithOperation(suggestion, operationIds, asView(view).primary);
+        if ("partial" in result) {
           /* The item exists but its documents didn't make it: the SAME
              operation id retries the SAME body — never a second item. */
-          mailProblem = "The item is recorded, but its documents need another try — tap again to finish.";
+          mailProblem = result.message;
           return;
         }
-        operationIds.delete(suggestion.receiptId);
       } else {
         await dismissReceipt(suggestion.receiptId);
       }
@@ -1007,18 +1004,14 @@
    * @param {import('$lib/data/workspace.js').ReceiptSuggestion} suggestion
    * @param {import('$lib/data/workspace.js').ItemProposal} item
    * @param {string | null} sectionId
-   * @returns {Promise<string | null>}
+   * @returns {Promise<string | { partial: true, message: string } | null>}
    */
   async function amendReceipt(suggestion, item, sectionId) {
     if (!suggestion.receiptId) return "not added — try again";
     busyReceipt = suggestion.id;
     try {
-      if (!operationIds.has(suggestion.receiptId)) operationIds.set(suggestion.receiptId, crypto.randomUUID());
-      const result = await approveReceipt(suggestion, asView(view).primary, operationIds.get(suggestion.receiptId), item, sectionId);
-      if (result.outcome === "partial_success") {
-        return "The item is recorded, but its documents need another try — add it again to finish.";
-      }
-      operationIds.delete(suggestion.receiptId);
+      const result = await approveWithOperation(suggestion, operationIds, asView(view).primary, item, sectionId);
+      if ("partial" in result) return result;
       view = await readHome();
       return null;
     } catch (error) {
@@ -1777,18 +1770,20 @@
   </nav>
   <div class="swatches" role="group" aria-label="Theme">
     <span>THEME</span>
-    <button style="background:#070d1f" title="star-chart" aria-pressed="true"></button>
-    <button style="background:#05070d" title="after dark" aria-pressed="false"></button>
-    <!-- THE v1.3.0 ROSTER, FINAL (§15, owner): five packs, five swatches.
-         CLOUDS joins as its own selectable pack, carrying the lighter end of
+    <!-- THE v1.3.0 ROSTER, FINAL (§15, owner): five packs, five swatches. The
+         titles stay written out because the tour's selectors match on them
+         (chapter 11); every colour is read from theme.js's table (#1331)
+         through theme-swatches.js, so there is no second copy of a ground to
+         drift. CLOUDS is its own selectable pack, carrying the lighter end of
          the range; dawn's dot follows its ground onto the temperature story.
          Atlas, hanami, porcelain, miami and solarium are on the records shelf —
          their packs still exist in packs.css and still render if forced, but
          they are no longer offered. -->
-    <button style="background:#eef2f9" title="clouds" aria-pressed="false"></button>
-    <button style="background:#d2d3d4" title="dawn" aria-pressed="false"></button>
-    <button style="background:#080a14;box-shadow:inset 0 0 0 1px #ff4fd8" title="retrograde"
-            aria-pressed="false"></button>
+    <button style={swatchStyle("star-chart")} title="star-chart" aria-pressed="true"></button>
+    <button style={swatchStyle("after dark")} title="after dark" aria-pressed="false"></button>
+    <button style={swatchStyle("clouds")} title="clouds" aria-pressed="false"></button>
+    <button style={swatchStyle("dawn")} title="dawn" aria-pressed="false"></button>
+    <button style={swatchStyle("retrograde")} title="retrograde" aria-pressed="false"></button>
   </div>
   <!-- "Watch the tour" (#1189), beside the theme as in every account menu.
        The card closes the way home.behaviour.js's closeOverlays closes it,

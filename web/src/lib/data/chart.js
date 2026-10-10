@@ -16,6 +16,8 @@
  * sessions, days, or devices. Product cap is five households.
  */
 
+import { BAND_VAR } from "$lib/data/bands.js";
+
 /**
  * The minimal shapes this transform reads off a workspace — loose and
  * additive on purpose, since the real objects (workspace.js's own
@@ -162,12 +164,12 @@ export function constellationPosOf(householdId) {
   ];
 }
 
+/* The band's token comes from BAND_VAR (#1341); only `overdue` differs. A
+   distant planet's overdue is the planet's own warmth, not the band's alarm. */
+/** @type {Record<string, string>} */
 const PLANET_TONES = {
+  ...BAND_VAR,
   overdue: "--warm",
-  "due-soon": "--warm",
-  upcoming: "--upcoming",
-  ok: "--ok",
-  unscheduled: "--ok",
 };
 
 /**

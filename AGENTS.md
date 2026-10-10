@@ -357,7 +357,7 @@ backslash" collapses into a range running from space to backslash, matching
 most ordinary characters — so a path sanitiser rejects every real path, or the
 reverse, and no test notices unless it covers the boundary. Scan the string
 explicitly instead, as `isApplicationRelative` in
-`web/src/routes/login/+page.svelte` does, and give it cases for the empty
+`web/src/lib/return-path.js` does, and give it cases for the empty
 string, a protocol-relative `//` and a backslash.
 
 **Another stack's database volume no longer blocks an install run —
