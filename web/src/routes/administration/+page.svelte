@@ -641,7 +641,11 @@
     const failedJobs = jobs.filter((job) => job.status === "failed").length;
     if (failedJobs) items.push({ href: "#jobs-card", text: `${plural(failedJobs, "job")} failed` });
     if (mailProbes.relay && testVerdict(mailProbes.relay.result).tone === "over") items.push({ href: "#mail-card", text: "relay failed" });
-    if (mailProbes.mailbox && testVerdict(mailProbes.mailbox.result).tone === "over") items.push({ href: "#mail-card", text: "mailbox failed" });
+    /* no probe yet: the mailbox's own last verdict, as the phone says it */
+    const mailboxFailed = mailProbes.mailbox
+      ? testVerdict(mailProbes.mailbox.result).tone === "over"
+      : view?.mailbox?.verificationState === "failed";
+    if (mailboxFailed) items.push({ href: "#mail-card", text: "mailbox failed" });
     return items;
   });
 
@@ -665,7 +669,7 @@
   /** @param {{ action: "set", address: string } | { action: "clear" }} partial */
   async function contactAction(partial) {
     const current = need().contact;
-    if (!current) return;
+    if (!current || contactBusy) return;
     contactBusy = true;
     contactProblem = null;
     try {
@@ -790,8 +794,7 @@
 <div class="station-backdrop" bind:this={backdropRoot} aria-hidden="true"></div>
 <div class="vignette" aria-hidden="true"></div>
 
-<Chrome user={view?.user} current="administration"
-        role={view ? `${view.household?.name ?? ""} · ${view.household?.canManage ? "owner" : "member"}` : ""} />
+<Chrome user={view?.user} current="administration" household={view?.household} />
 
 <!-- #1123, proposal §2.12: administration on a phone, chosen by CSS. It
      shares this page's state and acts (the step-up challenge, the re-read),

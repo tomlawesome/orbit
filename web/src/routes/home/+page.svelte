@@ -931,7 +931,8 @@
       mailProblem = "This account has no household yet";
       return;
     }
-    const sections = asView(view).households.find((one) => one.id === householdId)?.sections ?? [];
+    const sections = asView(view).households.find((one) => one.id === householdId)?.sections
+      ?? asView(view).household?.sections ?? [];
     const sectionId = (sections.find((one) => one.visible !== false) ?? sections[0])?.id ?? null;
     mailProblem = null;
     armed = { id: null, act: null };

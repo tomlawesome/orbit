@@ -23,11 +23,15 @@
      and goes there (§15-2k). */
   let {
     user = null,
-    role = "",
+    household = null,
     current = "",
     back = "/home",
     backLabel = "← YOUR SKY",
   } = $props();
+
+  /* The "household · role" line, built here once for the account card and the
+     hatch. A household with no name has no line: never " · member". */
+  const line = $derived(household?.name ? `${household.name} · ${household.canManage ? "owner" : "member"}` : "");
 
   /* §14: due-next and documents retired — the manifest is the corridor.
      #1319 (§34): the belt retired too, and with it the "Items" front door
@@ -165,7 +169,7 @@
 <button class="orb" aria-expanded={open} aria-controls="account" title="Menu"
         onclick={() => { open = !open; if (open) void wake(); }}>{initials}</button>
 <div class="account" class:open id="account" role="region" aria-label="Account and menu">
-  <div class="who"><b>{user?.displayName ?? ""}</b><span>{role}</span></div>
+  <div class="who"><b>{user?.displayName ?? ""}</b><span>{line}</span></div>
   <nav>
     {#each NAV as [key, label, href] (key)}
       <a href={href === "/inbox" ? resolve("/inbox")
@@ -195,7 +199,7 @@
     {/snippet}
   </TopChrome>
 </div>
-<Hatch bind:open={hatchOpen} name={user?.displayName ?? ""} roleLine={role} {current} {isAdmin}
+<Hatch bind:open={hatchOpen} name={user?.displayName ?? ""} roleLine={line} {current} {isAdmin}
        onopened={wake} onsignedout={descend} />
 {#if LeaveView}
   <!-- no household name to hand on a page that is not home's: the void's name line is empty -->

@@ -83,8 +83,7 @@
 </div>
 <div class="vignette" aria-hidden="true"></div>
 
-<Chrome user={chrome?.user} current="about"
-        role={chrome?.household ? `${chrome.household.name ?? ""} · ${chrome.household.canManage ? "owner" : "member"}` : ""} />
+<Chrome user={chrome?.user} current="about" household={chrome?.household} />
 
 <div class="page" role="main">
   <header class="screen">

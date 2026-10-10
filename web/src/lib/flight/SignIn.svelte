@@ -6,7 +6,7 @@
   import Identity from "./Identity.svelte";
   import Waiting from "./Waiting.svelte";
   import { clearLaunch, markLaunch } from "./arrival.js";
-  import { compileFlightNow, compileStopsPage, readyFlight, hurryFlight } from "./warm.js";
+  import { compileFlightNow, compileStopsPage, drawnIn, readyFlight, hurryFlight } from "./warm.js";
   import { earthSettled, isFirstVisit, startFirstLight } from "./first-light.js";
   import {
     APPROVAL_BACKSTOP_MS, CLAIM, DOOR, LOCAL, STARTING, STARTING_BACKSTOP_MS, STARTING_POLL_MS,
@@ -521,23 +521,6 @@
      * painted is drawn on this thread (orbit-site's main.js, `drawn`).
      */
     let readying = false;
-    const COMPOSITED = new Set(["transform", "opacity", "offset", "easing", "composite", "computedOffset"]);
-    /** @param {Animation} a */
-    const painted = (a) => {
-      try {
-        const t = /** @type {KeyframeEffect} */ (a.effect).target;
-        if (t instanceof SVGElement && !(t instanceof SVGSVGElement)) return true;
-        const tp = /** @type {any} */ (a).transitionProperty;
-        const props = tp ? [tp] : /** @type {KeyframeEffect} */ (a.effect).getKeyframes().flatMap(Object.keys);
-        return props.some((k) => !COMPOSITED.has(k));
-      } catch { return true; }
-    };
-    const drawnIn = () => {
-      try {
-        const ends = document.getAnimations().filter((a) => Number.isFinite(a.effect?.getComputedTiming().endTime) && painted(a));
-        return Promise.all(ends.map((a) => a.finished.catch(() => {})));
-      } catch { return Promise.resolve([]); }
-    };
     function readyWhenDrawn() {
       if (readying) return;
       readying = true;

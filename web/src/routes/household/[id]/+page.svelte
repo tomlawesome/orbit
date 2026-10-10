@@ -897,8 +897,7 @@
      is to SETTINGS — unless you came in by the sun at the centre of the dial
      (ce86c7e), in which case it is your sky. door.js decides; absence of a
      marker is the helm, which is every deep link and every bookmark. -->
-<Chrome user={v.user} current="settings" back={door.href} backLabel={door.label}
-        role={`${v.name} · ${v.canManage ? "owner" : "member"}`} />
+<Chrome user={v.user} current="settings" back={door.href} backLabel={door.label} household={{ name: v.name, canManage: v.canManage }} />
 
 <div class="page">
   <header class="screen">

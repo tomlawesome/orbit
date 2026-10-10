@@ -173,11 +173,17 @@
   /** @type {string | null} */
   let stepUpNotice = $state(null);
 
+  /* Read, not consumed: the desk card and the phone card are both on the page (CSS
+     picks which shows), so whichever mounted first and took the flag would
+     leave the visible one with no notice. Both read it in their onMount and
+     the flag is cleared a tick later, once both have. */
   onMount(() => {
     let returning = null;
     try { returning = sessionStorage.getItem(STEPUP_RETURN_FLAG); } catch { /* unreadable: treat as not returning */ }
     if (!returning) return;
-    try { sessionStorage.removeItem(STEPUP_RETURN_FLAG); } catch { /* already gone, or unreadable */ }
+    setTimeout(() => {
+      try { sessionStorage.removeItem(STEPUP_RETURN_FLAG); } catch { /* already gone, or unreadable */ }
+    }, 0);
     stepUpNotice = "back from signing in again · choose the file once more to carry on";
   });
 

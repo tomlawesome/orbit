@@ -1,4 +1,5 @@
 <script>
+  import { onMount } from "svelte";
   import { clockOf, dayMonth, localZone, plural, sizeLabel } from "$lib/format.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
   import Row from "$lib/pocket/Row.svelte";
@@ -41,6 +42,11 @@
 
   /* The engine's numbers (#1336): the passphrase floor the buttons wait for. */
   const passphraseMin = $derived(passphraseFloor(limits));
+
+  /* Set just before the step-up redirect, read on the way back in (the
+     desk's DeskArchive.svelte keeps the same flag, same key). sessionStorage,
+     not a query param: the identity provider owns `returnTo`. */
+  const STEPUP_RETURN_FLAG = "orbit-archive-stepup-return";
 
   let tab = $state(/** @type {"out" | "in"} */ ("out"));
 
@@ -124,11 +130,32 @@
   async function toProvider() {
     challengeProblem = null;
     try {
+      /* The redirect leaves the page, so the chosen file and passphrase
+         cannot come back; this flag only says why the reader is here. */
+      try { sessionStorage.setItem(STEPUP_RETURN_FLAG, "1"); } catch { /* storage refused: the redirect still happens, just without the notice on return */ }
       await startStepUp({ intent: retryIntent, returnTo: location.pathname });
     } catch (error) {
+      try { sessionStorage.removeItem(STEPUP_RETURN_FLAG); } catch { /* nothing to clear */ }
       challengeProblem = wordsOf(error);
     }
   }
+
+  /** @type {string | null} */
+  let stepUpNotice = $state(null);
+
+  /* Read, not consumed: the desk card and the phone card are both on the page (CSS
+     picks which shows), so whichever mounted first and took the flag would
+     leave the visible one with no notice. Both read it in their onMount and
+     the flag is cleared a tick later, once both have. */
+  onMount(() => {
+    let returning = null;
+    try { returning = sessionStorage.getItem(STEPUP_RETURN_FLAG); } catch { /* unreadable: treat as not returning */ }
+    if (!returning) return;
+    setTimeout(() => {
+      try { sessionStorage.removeItem(STEPUP_RETURN_FLAG); } catch { /* already gone, or unreadable */ }
+    }, 0);
+    stepUpNotice = "back from signing in again · choose the file once more to carry on";
+  });
 
   /* ── acts ─────────────────────────────────────────────────────────────── */
   function writeArchive() {
@@ -233,6 +260,8 @@
               tabindex={tab === "in" ? 0 : -1} onclick={() => (tab = "in")} onkeydown={tabKey}>bring one in</button>
     </div>
   </div>
+
+  {#if stepUpNotice}<p class="hh-note">{stepUpNotice}</p>{/if}
 
   <div role="tabpanel" id="hh-panel-out" aria-labelledby="hh-tab-out" hidden={tab !== "out"}>
     <div class="hh-manifest">

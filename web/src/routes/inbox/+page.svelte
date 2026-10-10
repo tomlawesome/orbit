@@ -5,8 +5,8 @@
   import { daysWords } from "$lib/data/engine-limits.js";
   import { LOCKED, fieldState, receiptWords } from "$lib/data/metadata-status.js";
   import { papersOf, readingsOf } from "$lib/pocket/review.js";
+  import { burnsInOf } from "$lib/pocket/review.js";
   import { reasonWords } from "$lib/pocket/words.js";
-  import { daysUntil } from "$lib/data/chart.js";
   import { BAND_VAR } from "$lib/data/bands.js";
   import { fillStarTiles } from "$lib/sky.js";
   import Chrome from "$lib/Chrome.svelte";
@@ -90,7 +90,7 @@
     iso.slice(0, 4) === need().today.slice(0, 4) ? dayMonth(iso) : dayMonthYear(iso);
   /* The filed dot follows the chart key — the item's urgency band, today. */
   /** @param {import('$lib/data/workspace.js').Receipt} receipt */
-  const burnsIn = (receipt) => daysUntil(/** @type {string} */ (receipt.expiresAt).slice(0, 10), need().today);
+  const burnsIn = (receipt) => burnsInOf(receipt, need().today);
   /* "Still reading" only ever holds receipts that have already arrived. */
   /** @param {import('$lib/data/workspace.js').Receipt} receipt */
   const readAgo = (receipt) => agoLong(/** @type {string} */ (receipt.receivedAt), need().now);
@@ -127,8 +127,7 @@
 </div>
 <div class="vignette" aria-hidden="true"></div>
 
-<Chrome user={view?.user} current="inbox"
-        role={view ? `${view.household?.name ?? ""} · ${view.household?.canManage ? "owner" : "member"}` : ""} />
+<Chrome user={view?.user} current="inbox" household={view?.household} />
 
 <!-- #1120, proposal §2.6: the pocket's own inbox, chosen by CSS. -->
 <Pocket bind:view />
@@ -169,7 +168,7 @@
             <div class="head">
               <span class="dot" aria-hidden="true"></span>
               <b>{receipt.proposal?.title ?? "Forwarded email"}</b>
-              <small>caught {dayMonth(/** @type {string} */ (receipt.receivedAt))} · <span class="exp">burns up in {burnsIn(receipt)}d</span></small>
+              <small>caught {dayMonth(/** @type {string} */ (receipt.receivedAt))}{#if burnsIn(receipt) !== null} · <span class="exp">burns up in {burnsIn(receipt)}d</span>{/if}</small>
             </div>
             <div class="fields">
               {#each readingsOf(receipt) as reading (reading.field)}

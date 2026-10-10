@@ -73,8 +73,10 @@
   /** @type {string | null} */
   let reminderProblem = $state(null);
 
+  let emailSaving = $state(false);
   async function toggleEmailReminders() {
-    if (!view) return;
+    if (!view || emailSaving) return;
+    emailSaving = true;
     const previous = emailReminders;
     /* Optimistic: a toggle that waits for a round trip reads as a dead
        control. The revert below is what makes that honest. */
@@ -92,6 +94,8 @@
     } catch {
       emailReminders = previous;
       reminderProblem = "not saved — Orbit could not reach your reminder settings";
+    } finally {
+      emailSaving = false;
     }
   }
 
@@ -299,7 +303,7 @@
       if (action === "password_set" || action === "password_change") {
         const outcome = await writeLocalPassword({ password: newPassword, ...challenge });
         methodOutcome = outcome.changed
-          ? "password changed — every other device was signed out"
+          ? "password changed · every other device was signed out"
           : "password set";
       } else if (action === "password_remove") {
         await removeLocalPassword(challenge);
@@ -485,8 +489,7 @@
 </div>
 <div class="vignette" aria-hidden="true"></div>
 
-<Chrome user={view?.user} current="settings"
-        role={view ? `${view.household?.name ?? ""} · ${view.household?.canManage ? "owner" : "member"}` : ""} />
+<Chrome user={view?.user} current="settings" household={view?.household} />
 
 <div class="page" role="main">
   <header class="screen">
@@ -646,7 +649,7 @@
       </div>
 
       <div role="tabpanel" id="rem-panel-reminders" aria-labelledby="rem-tab-reminders" hidden={tab !== "reminders"}>
-        <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed={emailReminders} aria-label="Email reminders" onclick={toggleEmailReminders}><i></i></button></div>
+        <div class="kv"><span>email reminders</span><button class="toggle" aria-pressed={emailReminders} aria-busy={emailSaving} aria-label="Email reminders" onclick={toggleEmailReminders}><i></i></button></div>
         <div class="kv"><span>browser alerts · this device</span><button class="toggle" aria-pressed={browserAlerts} aria-label="Browser alerts on this device" disabled={alertsBusy || !alertsAvailable} onclick={toggleBrowserAlerts}><i></i></button></div>
         <!-- #1151 W2-S4: this used to show only on the "sent" tab, downstream
              of the switches that actually cause it rather than beside them. -->
