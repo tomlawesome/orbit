@@ -432,8 +432,11 @@ self_fetch_release_manifest() {
   if [[ "$channel" =~ $version_pin_pattern ]]; then
     local manifest_version
     manifest_version="$(grep -F '"version":' "$manifest_json" | sed -n 's/.*: *"\([^"]*\)".*/\1/p' | head -n1)"
-    [[ "v${manifest_version}" == "$channel" ]] ||
-      fail "Asked for ${channel} but the signed release manifest is for v${manifest_version}; refusing."
+    # The manifest records the image label, `vX.Y.Z` since #1228; older ones
+    # carried the bare `X.Y.Z`. Either form names the same release (#1378).
+    manifest_version="v${manifest_version#v}"
+    [[ "$manifest_version" == "$channel" ]] ||
+      fail "Asked for ${channel} but the signed release manifest is for ${manifest_version}; refusing."
   fi
 
   # Set the global directly rather than printing it for a caller to capture
