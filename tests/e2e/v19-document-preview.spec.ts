@@ -45,7 +45,7 @@ async function signInAsAdmin(page: Page) {
 
 async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; householdId: string }> {
   const name = `${HOUSEHOLD_PREFIX} ${randomUUID().slice(0, 8)}`;
-  const seeded = await page.evaluate(async (householdName) => {
+  const seeded = await page.evaluate(async ({ householdName, dueDate }) => {
     const sessionResponse = await fetch("/api/auth/session", { credentials: "same-origin", cache: "no-store" });
     const session = (await sessionResponse.json()) as { csrfToken: string };
     const command = async (payload: unknown) => {
@@ -74,7 +74,6 @@ async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; hous
       },
     });
     const itemId = crypto.randomUUID();
-    const dueDate = householdDateFromToday(20);
     await command({
       type: "item.upsert",
       householdId,
@@ -90,7 +89,7 @@ async function seedHouseholdWithItem(page: Page): Promise<{ itemId: string; hous
       activity: { id: crypto.randomUUID(), itemId, occurredAt: new Date().toISOString() },
     });
     return { itemId, householdId };
-  }, name);
+  }, { householdName: name, dueDate: householdDateFromToday(20) });
   households.track({ id: seeded.householdId, name });
   return seeded;
 }
