@@ -162,6 +162,14 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .field input:focus,.household-page .field select:focus{border-color:var(--accent)}
 .household-page .field input:disabled,.household-page .field select:disabled{opacity:.62;cursor:default}
 .household-page .field select{appearance:none;-webkit-appearance:none;padding-right:30px}
+/* #1338: the time zone and currency open the shared list sheet (a filter and
+   the favourites first) instead of a native select; the button wears the
+   select's own face so the card looks as it did. */
+.household-page .field .pickbtn{display:block;width:100%;box-sizing:border-box;text-align:left;background:var(--panel);
+       border:1px solid var(--line);border-radius:9px;color:var(--ink);font:13.5px var(--ui);padding:9px 30px 9px 12px;
+       cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.household-page .field .pickbtn:hover,.household-page .field .pickbtn:focus-visible{border-color:var(--accent)}
+.household-page .field .pickbtn:disabled{opacity:.62;cursor:default}
 /* 2c: each field wears its own quiet save. It sits on the label line, in
    pen-grey until the field is touched, then in accent; it answers with a
    tick and goes quiet again. No save bar, no "remember to press this". */
@@ -182,7 +190,8 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 /* round 2 (#481): a member's identity card prints values, not greyed
    controls — the shape says read-only, so no caption has to. */
 .household-page.member .c-system .field input:disabled,
-.household-page.member .c-system .field select:disabled{
+.household-page.member .c-system .field select:disabled,
+.household-page.member .c-system .field .pickbtn:disabled{
   background:none;border-color:transparent;opacity:1;color:var(--ink);padding:9px 0}
 .household-page.member .c-system .selwrap::after{display:none}
 

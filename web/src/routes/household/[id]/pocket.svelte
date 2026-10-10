@@ -23,6 +23,8 @@
     writeHouseholdIdentity,
     writeSections,
   } from "$lib/data/workspace.js";
+  import { zoneLabel } from "$lib/pick-lists.js";
+  import PickSheet from "./PickSheet.svelte";
   import PocketArchive from "./PocketArchive.svelte";
   import { changesLabel, changesOf, chipBodyOf, commandsFor, moved } from "./edits.js";
   import { roomOf } from "./room.js";
@@ -286,39 +288,13 @@
   }
 
   /* ── the system's time zone and currency: a list sheet with a filter ─── */
-  /** @type {"timezone" | "currency" | null} */
-  let picking = $state(null);
+  /** @type {"timezone" | "currency"} */
+  let picking = $state("timezone");
   let pickOpen = $state(false);
-  let pickQuery = $state("");
-  const ZONES = ["Europe/London", "Europe/Dublin", "Europe/Paris", "America/New_York", "Australia/Sydney", "UTC"];
-  const CURRENCIES = ["GBP", "EUR", "USD", "CAD", "AUD", "NZD"];
-  /** @param {"timeZone" | "currency"} key @param {string[]} fallback */
-  const supported = (key, fallback) => {
-    try { return Intl.supportedValuesOf?.(key) ?? fallback; } catch { return fallback; }
-  };
-  /** @type {Intl.DisplayNames | null} */
-  let currencyNames = null;
-  try { currencyNames = new Intl.DisplayNames(["en-GB"], { type: "currency" }); } catch { currencyNames = null; }
-  /** @param {string} value */
-  const pickLabel = (value) => picking === "currency" ? `${value} · ${currencyNames?.of(value) ?? value}` : value.replaceAll("_", " ");
-  const options = $derived.by(() => {
-    if (!picking) return [];
-    const list = picking === "timezone" ? supported("timeZone", ZONES) : supported("currency", CURRENCIES);
-    const current = identity[picking];
-    const all = list.includes(current) ? list : [current, ...list];
-    const query = pickQuery.trim().toLowerCase();
-    return query ? all.filter((value) => pickLabel(value).toLowerCase().includes(query)) : all;
-  });
   /** @param {"timezone" | "currency"} field */
   function pick(field) {
     picking = field;
-    pickQuery = "";
     pickOpen = true;
-  }
-  /** @param {string} value */
-  function choose(value) {
-    if (picking) identity[picking] = value;
-    pickOpen = false;
   }
 
   /* ── sections (owner only) ────────────────────────────────────────────── */
@@ -578,7 +554,7 @@
         <label class="hh-label" for="hh-name">name</label>
         <input id="hh-name" class="hh-input" maxlength="60" autocomplete="off" enterkeyhint="done" bind:value={identity.name}>
         <div class="hh-flushrows">
-          <Row title="time zone" trail={identity.timezone.replaceAll("_", " ")} onactivate={() => pick("timezone")}>
+          <Row title="time zone" trail={zoneLabel(identity.timezone)} onactivate={() => pick("timezone")}>
             {#snippet mark()}<span class="hh-kmark">◷</span>{/snippet}
           </Row>
           <Row title="currency" trail={identity.currency} onactivate={() => pick("currency")}>
@@ -693,19 +669,7 @@
     {/snippet}
   </Sheet>
 
-  <Sheet bind:open={pickOpen} size="list" title={picking === "currency" ? "Currency" : "Time zone"}>
-    <input class="hh-input hh-filter" type="search" enterkeyhint="search"
-           aria-label={picking === "currency" ? "Find a currency" : "Find a time zone"}
-           placeholder={picking === "currency" ? "find a currency" : "find a city or region"} bind:value={pickQuery}>
-    <div class="hh-options" role="listbox" aria-label={picking === "currency" ? "Currencies" : "Time zones"}>
-      {#each options as value (value)}
-        <button class="hh-option" role="option" aria-selected={picking ? identity[picking] === value : false}
-                onclick={() => choose(value)}>{pickLabel(value)}</button>
-      {:else}
-        <p class="p-empty hh-inset">nothing matches “{pickQuery.trim()}”</p>
-      {/each}
-    </div>
-  </Sheet>
+  <PickSheet bind:open={pickOpen} kind={picking} value={identity[picking]} onchoose={(value) => (identity[picking] = value)} />
 
   <Sheet bind:open={editOpen} size="callout" title={editing?.id ? `Edit ${editing.name.trim() || "section"}` : "Add a section"}>
     {#if editing}
@@ -883,12 +847,6 @@
   /* Sheets' insides. */
   .hh-sheet-say{color:var(--ink-mid);margin:4px 0 16px}
   .hh-filter{margin:4px 0 8px}
-  .hh-options{display:flex;flex-direction:column}
-  .hh-option{appearance:none;min-height:var(--p-row-min);padding:0 4px;border:0;border-bottom:1px solid var(--line-soft);
-    background:none;text-align:left;font:var(--p-type-body)/1.3 var(--ui);color:var(--ink);cursor:pointer}
-  .hh-option[aria-selected=true]{color:var(--accent-text);font-weight:600}
-  .hh-option:active{background:var(--panel-raised)}
-  .hh-option:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
   .p-pill:disabled{opacity:.45;cursor:default;box-shadow:none}
 
   /* THE SAVE BAR (2b): off the foot and unseen at rest; rises 300ms. The
