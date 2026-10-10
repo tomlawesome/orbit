@@ -1183,7 +1183,7 @@
           <Row title={s.title} key={s.id}
                heading={amending ? liveTitle : undefined}
                meta={burnsIn(s) !== null ? `burns up in ${burnsIn(s)}d` : ""}
-               trail={s.costMinor ? money(s.costMinor, s.currency, true) : ""}
+               trail={s.costMinor !== null && s.costMinor !== undefined ? money(s.costMinor, s.currency, true) : ""}
                trailSub={s.renewsOn ? `${dateWord(s)} ${dayMonth(s.renewsOn)}` : ""} trailTone="var(--accent-text)"
                acts={amending ? [] : suggestionActs(s)} ontoggle={onRowToggle(s.id)}>
             {#snippet mark()}<span class="pk-dot hollow"></span>{/snippet}
