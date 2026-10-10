@@ -813,14 +813,6 @@
   <PickSheet bind:open={pickOpen} kind={picking} value={form[picking]} onchoose={choose} />
 {/if}
 
-{#snippet seat(/** @type {"timezone" | "currency"} */ field)}
-  {#if cardFor === field}
-    <div class="pickseat" class:atright={field === "currency"} data-chooser-card>
-      <ChooserCard ask={askOf(field)} layout="beside" onpick={choose} onclose={() => closeCard(true)} />
-    </div>
-  {/if}
-{/snippet}
-
 <div class="household-page" class:member={!v.canManage} bind:this={stage} role={pocket ? undefined : "main"}>
 <!-- your own system, drawn from the inside (§15 H2). Behind the dust, not in
      front of it: your system is the structure you are standing in, and the dust
@@ -974,7 +966,11 @@
           </div>
           <button id="hhzone" type="button" class="pickbtn" disabled={!v.canManage}
                   aria-haspopup="dialog" aria-expanded={cardFor === "timezone"} onclick={() => pick("timezone")}>{zoneLabel(form.timezone)}</button>
-          {@render seat("timezone")}
+          {#if cardFor === "timezone"}
+            <div class="pickseat" data-chooser-card>
+              <ChooserCard ask={askOf("timezone")} layout="beside" onpick={choose} onclose={() => closeCard(true)} />
+            </div>
+          {/if}
         </div>
         <div class="field selwrap" class:dirty={dirty.currency}>
           <div class="lab">
@@ -986,7 +982,11 @@
           </div>
           <button id="hhcur" type="button" class="pickbtn" disabled={!v.canManage}
                   aria-haspopup="dialog" aria-expanded={cardFor === "currency"} onclick={() => pick("currency")}>{form.currency}</button>
-          {@render seat("currency")}
+          {#if cardFor === "currency"}
+            <div class="pickseat atright" data-chooser-card>
+              <ChooserCard ask={askOf("currency")} layout="beside" onpick={choose} onclose={() => closeCard(true)} />
+            </div>
+          {/if}
         </div>
       </div>
       <!-- round 2 (#481): the notes that stood here are gone. Three save
