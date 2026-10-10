@@ -50,8 +50,8 @@ export function entriesLabel(count) {
  * The sections editor's rows: the household's own list, each carrying how many
  * entries sit in it. The count is what makes the hidden-not-removed law
  * enforceable in the interface — a section holding entries has no × at all,
- * because sections.replace would re-file its items under the first surviving
- * section and the reader never asked for that.
+ * because the engine refuses to remove a section that still holds entries
+ * unless told where they go (#1332), and the interface does not yet ask.
  *
  * `shipped` (#867) says whether the row's mark is a button: it is decided
  * by the section's id (marks.js's `SHIPPED_SECTION_IDS`), never by what the

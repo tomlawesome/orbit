@@ -91,6 +91,17 @@ intent and shows refusals.**
    one stored value known to be a mistake, "America/New York", is repaired by
    migration 0050.
 
+8. **Two household rules the browser knew and the engine missed** (#1332,
+   #1328 macro M1). The typed deletion confirmation is normalised before it
+   is compared (trim, collapse inner whitespace -- the standard "normalise,
+   then compare" step), in both the scheduling and the permanent-delete
+   checks; the browser's trim only lights the button. `sections.replace`
+   refuses (`section_has_items`, 422) to drop a section that still holds
+   items unless the command names a kept section in `moveItemsTo`, and moves
+   the items there when it does; a destination the household does not keep
+   is `section_not_found`. The dry run refuses the same way. The silent
+   re-file to the first section is gone.
+
 ## Consequences
 
 - Every refusal costs a round trip. Same origin, one process, debounced: a
