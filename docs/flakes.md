@@ -138,6 +138,7 @@ skill).
 ## local-sign-in.test.ts "spends a real derivation whichever of the four cases it is"
 
 - 2026-09-19 · 9ccca49 (!950, none of it near sign-in) · pipeline 1278 / `integration` job 16683 · `expect(Math.max(...times)).toBeLessThan(Math.min(...times) * 6)` — the four attempts' elapsed times spread wider than 6×. Retried on the same commit as job 16708 and passed. The assertion measures wall-clock on a shared, loaded runner; its own comment (`tests/integration/local-sign-in.test.ts:283-285`) says a strict bound "would measure the runner rather than the code", and the host was writing at 80–160 MB/s under another tenant at the time.
+- 2026-10-10 · cd964294 (!1052; its only changes since 8b9bf878, whose `integration` job 34067 passed, are e2e specs and one unit test) · pipeline 2341 / `integration` job 34109 · the same assertion, now in the test named "answers an unknown address, a wrong password, a disabled account and a passwordless account alike" (`tests/integration/local-sign-in.test.ts:288`): 1310.7 ms against a 1244.3 ms bound (6× the fastest attempt). Retried as job 34121. Second sighting.
 
 ## v19-keyboard.spec.ts:568 "administration: the local-user controls are reachable and announced"
 
