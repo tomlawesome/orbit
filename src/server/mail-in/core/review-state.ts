@@ -160,7 +160,7 @@ export function reviewAttachmentDisplayName(
  * Promoted to `normalizeComparableMetadata` (ADR-0024 decision 2), so the
  * blind index and every in-application comparison agree on one canonical form.
  * The implementation moved for a second reason: the range it used to spell out
- * by hand is exactly the regular-expression trap AGENTS.md warns about, and
+ * by hand is exactly the regular-expression trap docs/testing.md ("Local traps") warns about, and
  * the shared version scans for control characters explicitly instead.
  */
 const comparableText = normalizeComparableMetadata;

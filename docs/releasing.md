@@ -20,7 +20,14 @@ GitLab (`gitlab.tomlawson.io`, `ai/orbit`) is where Orbit is built, tested and
 merged. GitHub (`tomlawesome/orbit`) is a one-way push mirror: it carries the
 same history and tags, and GHCR (`ghcr.io/tomlawesome/orbit`) is the public
 image source. Nothing about stable promotion happens on GitHub; it only
-receives what GitLab already decided (#821).
+receives what GitLab already decided (#821). The path of an image: `record_image`
+pushes the tested image to `registry.tomlawson.io` and records its digest,
+`sign_evidence` attests it from the dedicated signing runner, `publish_channel`
+adds the channel tag (#661, ADR-0020), and `.github/workflows/publish-from-gitlab.yml`
+copies that digest to GHCR when the mirror delivers the `preview` push. Nothing
+built on GitHub reaches a registry. The mirror itself (GitLab Settings >
+Repository > Mirroring) is owner-managed, and a red GitHub run never blocks a
+GitLab merge.
 
 ## What you do, in short
 

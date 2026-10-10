@@ -10,8 +10,8 @@ import { PTY_TEST_TIMEOUT_MS, ptyWatchdog } from "../../scripts/pty-deadline.mjs
 // #1210 D3: `orbit configure --init` and `--set-oidc-secret` prompt on the
 // operator's terminal themselves (configure.sh passes one through with
 // `docker run -t`). Driven under a real pty with `script`; stdin stays open
-// for the child's whole life (AGENTS.md, "Never drive a pty test by closing
-// its own stdin"), and every answer waits for its prompt.
+// for the child's whole life (docs/testing.md "Local traps": "Never drive a pty test by
+// closing its own stdin"), and every answer waits for its prompt.
 
 vi.setConfig({ testTimeout: PTY_TEST_TIMEOUT_MS });
 

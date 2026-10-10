@@ -6,7 +6,7 @@
 # user, or redistributed. Regenerating the corpus needs them; running Orbit
 # does not.
 #
-# Only ten fonts are installed on this host (see AGENTS.md), and real
+# Only ten fonts are installed on this host (see scripts/corpus/README.md, "Fonts"), and real
 # household paper is not printed in ten faces. Every provider uses its own,
 # and the typeface decides the PDF's character map -- which is where
 # extraction faults like the \& escape in #982 actually come from.

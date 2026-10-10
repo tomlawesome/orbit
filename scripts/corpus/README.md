@@ -131,10 +131,23 @@ served to a user, or is redistributed.
 
 Two traps, both of which have already cost a rebuild:
 
-- **Only ten fonts are installed on this host** (see the root `AGENTS.md`).
-  Anything else falls back silently. Six documents were once built to look
-  deliberately unlike each other and rendered in a single face because every
-  one asked for Helvetica or Times New Roman.
+- **Only ten fonts are installed on this host**, and anything else falls back
+  with no warning:
+
+  ```
+  Bitstream Charter   Courier 10 Pitch   Liberation Serif
+  Liberation Sans     Liberation Mono    FreeSerif
+  FreeSans            FreeMono           Loma
+  WenQuanYi Zen Hei
+  ```
+
+  Ask for Helvetica, Arial, Georgia or Times New Roman and you get a
+  substitute, and nothing tells you. Rendering anything to PDF or an image (a
+  mockup, a test document, a screenshot) uses these. Six documents were once
+  built in parallel to look deliberately unlike each other, every one named a
+  font from the uninstalled list, and all six rendered in the same face: the
+  variety was requested but never existed (#981, 2026-09-11). Check with
+  `fc-list : family` rather than assuming a common font is present.
 - **Google ships variable fonts as `Name[wght].ttf`.** Brackets do not resolve
   in a CSS `url()`, so the fetch script drops the axis tag from the filename.
 

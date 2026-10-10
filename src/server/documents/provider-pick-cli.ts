@@ -28,7 +28,7 @@
 // a hold-out document's name is as much not ours to read as its text.
 //
 // Asks the model, so it must run in a container on
-// `orbit_orbit-document-processing` (AGENTS.md, "stages-rerun" pattern).
+// `orbit_orbit-document-processing` (docs/extraction-method.md; scripts/corpus/stages-rerun.sh).
 import { percent } from "./eval-format";
 import {
   assertChooserReachable,

@@ -245,4 +245,5 @@ untouched: publication still binds to the pushed digest.
    evidence: a red acceptance job, the fix rerunning only it, a `src/`
    change rerunning all six.
 5. **Docs** -- `docs/quality-strategy.md` and the pipelines section of
-   `AGENTS.md`.
+   `AGENTS.md` (since #1374 that section is a pointer to
+   `docs/quality-strategy.md`).
