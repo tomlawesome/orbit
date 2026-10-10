@@ -26,6 +26,8 @@
  * @property {VisibleHousehold[]} [visibleHouseholds]
  */
 
+import { CURRENCY_FAVOURITES, ZONE_FAVOURITES, zoneLabel } from "../pick-lists.js";
+
 /** The reader is signed out, or we have not asked yet: the door is the door. */
 export const DOOR = "door";
 /** Asked, not answered. The dawn is up and the login chrome is held back, so
@@ -137,25 +139,19 @@ function normaliseName(name) {
 
 /**
  * The three questions, and only the three (§15, "first-run asks three things
- * only"). The lists are design/v19/first-run.html's own, in its own order,
- * because the card is ported pixel for pixel and a select's first option is
- * what the frame shows.
+ * only"). The card offers the six favourites of the shared pick-lists
+ * (`$lib/pick-lists.js`, #1338), in their order, because the card is ported
+ * pixel for pixel and a select's first option is what the frame shows. The
+ * full lists live on the household screen, where the card says every one of
+ * these answers moves to.
  *
  * `label` is what the sheet prints; `value` is what a server can act on. They
- * differ in exactly one place — the sheet writes "America/New York" where the
- * zone database writes "America/New_York" — and the reader is shown the
- * sheet's word.
+ * differ in exactly one place — an underscore in a zone reads as a space
+ * (New York is shown with a space where the zone database has an underscore).
  */
-export const TIME_ZONES = [
-  { value: "Europe/London", label: "Europe/London" },
-  { value: "Europe/Dublin", label: "Europe/Dublin" },
-  { value: "Europe/Paris", label: "Europe/Paris" },
-  { value: "America/New_York", label: "America/New York" },
-  { value: "Australia/Sydney", label: "Australia/Sydney" },
-  { value: "UTC", label: "UTC" },
-];
+export const TIME_ZONES = ZONE_FAVOURITES.map((value) => ({ value, label: zoneLabel(value) }));
 
-export const CURRENCIES = ["GBP", "EUR", "USD", "CAD", "AUD", "NZD"];
+export const CURRENCIES = CURRENCY_FAVOURITES;
 
 /** The name the field will take, bounded the way the server bounds it. */
 export const NAME_LIMIT = 60;

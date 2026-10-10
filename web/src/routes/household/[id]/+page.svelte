@@ -24,6 +24,8 @@
     writeHouseholdIdentity,
     writeSections,
   } from "$lib/data/workspace.js";
+  import { zoneLabel } from "$lib/pick-lists.js";
+  import PickSheet from "./PickSheet.svelte";
   import "./household.css";
 
   /**
@@ -202,13 +204,24 @@
     });
   });
 
-  /* The mockup's own lists. A household whose stored value is not among them
-     keeps its own value at the head rather than being silently re-pointed at
-     one that is — the select must never change what is stored by rendering. */
-  const ZONES = ["Europe/London", "Europe/Dublin", "Europe/Paris", "America/New_York", "Australia/Sydney", "UTC"];
-  const CURRENCIES = ["GBP", "EUR", "USD", "CAD", "AUD", "NZD"];
-  /** @param {string[]} list @param {string} current */
-  const withCurrent = (list, current) => (list.includes(current) ? list : [current, ...list]);
+  /* The time zone and the currency are picked from the shared pick-lists
+     (#1338): the full lists with the favourites first and a filter, the same
+     sheet the phone opens. A household whose stored value is not among them
+     keeps its own value at the head of the sheet rather than being silently
+     re-pointed — picking never changes what is stored by rendering. */
+  /** @type {"timezone" | "currency"} */
+  let picking = $state("timezone");
+  let pickOpen = $state(false);
+  /** @param {"timezone" | "currency"} field */
+  function pick(field) {
+    picking = field;
+    pickOpen = true;
+  }
+  /** @param {string} value */
+  function choose(value) {
+    form[picking] = value;
+    touch(picking);
+  }
 
   const shown = $derived(rows.filter((row) => !row.removed));
   const nameOk = $derived(deletionNameMatches(typedName, v.name));
@@ -748,6 +761,9 @@
      holds the page's one main landmark (this route renders only in the
      browser, so the dialect is known here). -->
 <Pocket household={v} />
+{#if v.canManage}
+  <PickSheet bind:open={pickOpen} kind={picking} value={form[picking]} onchoose={choose} />
+{/if}
 
 <div class="household-page" class:member={!v.canManage} bind:this={stage} role={pocket ? undefined : "main"}>
 <!-- your own system, drawn from the inside (§15 H2). Behind the dust, not in
@@ -900,10 +916,8 @@
                 {saved.timezone ? "saved ✓" : "save"}</button>
             {/if}
           </div>
-          <select id="hhzone" disabled={!v.canManage}
-                  bind:value={form.timezone} onchange={() => touch("timezone")}>
-            {#each withCurrent(ZONES, v.timezone) as zone (zone)}<option>{zone}</option>{/each}
-          </select>
+          <button id="hhzone" type="button" class="pickbtn" disabled={!v.canManage}
+                  aria-haspopup="dialog" onclick={() => pick("timezone")}>{zoneLabel(form.timezone)}</button>
         </div>
         <div class="field selwrap" class:dirty={dirty.currency}>
           <div class="lab">
@@ -913,10 +927,8 @@
                 {saved.currency ? "saved ✓" : "save"}</button>
             {/if}
           </div>
-          <select id="hhcur" disabled={!v.canManage}
-                  bind:value={form.currency} onchange={() => touch("currency")}>
-            {#each withCurrent(CURRENCIES, v.currency) as code (code)}<option>{code}</option>{/each}
-          </select>
+          <button id="hhcur" type="button" class="pickbtn" disabled={!v.canManage}
+                  aria-haspopup="dialog" onclick={() => pick("currency")}>{form.currency}</button>
         </div>
       </div>
       <!-- round 2 (#481): the notes that stood here are gone. Three save
