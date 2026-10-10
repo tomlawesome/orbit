@@ -1,4 +1,4 @@
-# ADR-0036: The Orbit family is one project in three repositories; act across them without asking
+# ADR-0036: The Orbit family is one project in four repositories; act across them without asking
 
 **Status:** Accepted (owner rulings 2026-08-30, 2026-10-03 and 2026-10-10)
 **Date:** 2026-10-10
@@ -62,7 +62,8 @@ siblings.** Specifically:
 - Cross-repository issues and notes between these four need no owner round
   trip.
 - A change that spans them still lands in the order its contract needs; the
-  install-script and launcher order is in `docs/releasing.md`.
+  install-script and launcher order is to be written down once
+  ai/orbit-launcher#193 ships (#1226).
 - Any further repository joining the family is an owner ruling and an
   amendment here.
 

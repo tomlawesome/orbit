@@ -754,7 +754,7 @@ else
     shared_node_modules=1
   fi
   if [[ "$shared_node_modules" != 1 || ! -f "$main_installed_lock" ]]; then
-    fail "refusing: this worktree has no usable dependencies to run against -- node_modules is either missing or is not the main checkout's shared install -- and installing them here would rewire the main checkout instead (docs/testing.md "Local traps", worktree install, #784/#876). Run this script from the main Orbit checkout."
+    fail "refusing: this worktree has no usable dependencies to run against -- node_modules is either missing or is not the main checkout's shared install -- and installing them here would rewire the main checkout instead (docs/testing.md, Local traps, worktree install, #784/#876). Run this script from the main Orbit checkout."
   fi
   # Compare the PROJECT document, not the whole file. Since pnpm 12 (#882)
   # pnpm-lock.yaml is two YAML documents: first the packageManagerDependencies
@@ -769,7 +769,7 @@ else
     awk '/^---$/ { doc = ""; next } { doc = doc $0 "\n" } END { printf "%s", doc }' "$1"
   }
   if ! cmp -s <(project_lock_document "$worktree_lock") "$main_installed_lock"; then
-    fail "refusing: this branch's pnpm-lock.yaml differs from what pnpm actually installed in the main checkout (node_modules/.pnpm/lock.yaml) -- this branch changes dependencies, so they must be installed from the main checkout, not from a worktree (docs/testing.md "Local traps", worktree install, #784/#876)."
+    fail "refusing: this branch's pnpm-lock.yaml differs from what pnpm actually installed in the main checkout (node_modules/.pnpm/lock.yaml) -- this branch changes dependencies, so they must be installed from the main checkout, not from a worktree (docs/testing.md, Local traps, worktree install, #784/#876)."
   fi
   log "worktree dependencies already match the main checkout's installed lockfile; skipping pnpm install (#876)"
 fi

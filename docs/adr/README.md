@@ -51,5 +51,5 @@ changing implementation status.
 - [ADR-0033: Uploaded PDFs and images are kept safe the way established document systems do it, not by a checker of our own](0033-document-safety-standard-patterns.md) (Accepted)
 - [ADR-0034: The engine owns every rule; the browser sends intent and shows refusals](0034-engine-owns-every-rule.md) (Accepted)
 - [ADR-0035: The engine serves its own API; the web app is a client of it, sign-in included](0035-engine-serves-its-own-api.md) (Accepted)
-- [ADR-0036: The Orbit family is one project in three repositories; act across them without asking](0036-the-orbit-family-is-one-project.md) (Accepted)
+- [ADR-0036: The Orbit family is one project in four repositories; act across them without asking](0036-the-orbit-family-is-one-project.md) (Accepted)
 - [ADR-0037: Non-commercial data and dependencies are acceptable in Orbit](0037-non-commercial-data-and-dependencies-acceptable.md) (Accepted)
