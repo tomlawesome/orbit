@@ -9,7 +9,7 @@
   import { PEN_ORDER, inkOf, nextMark } from "$lib/marks.js";
   import { constellationPlanetsOf } from "$lib/data/chart.js";
   import { BAND_VAR } from "$lib/data/bands.js";
-  import { MAX_SECTIONS, deletionNameMatches, entriesLabel } from "$lib/data/household.js";
+  import { MAX_SECTIONS, deletionNameMatches, entriesIn, entriesLabel, moveEntriesAway, whereHeadingOf } from "$lib/data/household.js";
   import { FIELD, berthsOf, liftOf, roomOf, skyMap, toField } from "./room.js";
   import { consumeDoor } from "./door.js";
   import { isPocket } from "$lib/pocket/media.js";
@@ -19,6 +19,7 @@
   import { addMember, decideJoinRequest, removeMember, requestHouseholdDeletion, sendInvitation, transferOwnership, withdrawInvitation, wordsOf, writeHouseholdIdentity, writeSections } from "$lib/data/workspace.js";
   import { zoneLabel } from "$lib/pick-lists.js";
   import PickSheet from "./PickSheet.svelte";
+  import { destinationChoices } from "$lib/editing/item-draft.js";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import { WIDE_QUERY } from "../../home/preview-pair.js";
   import "./household.css";
@@ -223,6 +224,7 @@
   });
   /** @param {"timezone" | "currency"} field */
   function pick(field) {
+    placing = null;
     picking = field;
     if (!wide) { pickOpen = true; return; }
     if (cardFor === field) closeCard(true);
@@ -265,6 +267,60 @@
   });
 
   const shown = $derived(rows.filter((row) => !row.removed));
+
+  /* "Where do these entries go?" (#1332): removing a section that still holds
+     entries asks for a destination instead of removing. The chooser card
+     stands under the row on a wide screen; narrower, the bottom sheet opens
+     (PickSheet, kind "section"). Nothing is sent until the list is saved. */
+  /** the section whose entries are being placed, or none */
+  /** @type {string | null} */
+  let placing = $state(null);
+  /** the bottom sheet (narrow) */
+  let placeOpen = $state(false);
+  /** what the status line says about the last removal */
+  let sectionSaid = $state("");
+  const placingRow = $derived(rows.find((row) => row.id === placing) ?? null);
+  const placeHeading = $derived(placingRow ? whereHeadingOf(entriesIn(placingRow)) : "");
+  const placeChoices = $derived(placingRow ? destinationChoices(rows, placingRow.id) : []);
+  /** What the card is asked: nothing chosen yet, every other kept section. */
+  const placeAsk = $derived({
+    key: /** @type {const} */ ("section"),
+    label: "sections",
+    heading: placeHeading,
+    value: null,
+    choices: placeChoices,
+    today: "",
+  });
+  /** Put the card away; focus goes back to the × unless a press elsewhere took it.
+   *  @param {boolean} refocus */
+  function closePlace(refocus) {
+    const id = placing;
+    placing = null;
+    placeOpen = false;
+    if (refocus && id) tick().then(() => document.getElementById(`drop-${id}`)?.focus({ preventScroll: true }));
+  }
+  /** @param {string} destinationId */
+  function place(destinationId) {
+    const row = placingRow;
+    if (!row) return;
+    sectionSaid = moveEntriesAway(rows, row, destinationId);
+    placing = null;
+    placeOpen = false;
+    tick().then(() => document.getElementById(`secname-${destinationId}`)?.focus({ preventScroll: true }));
+  }
+  /* A press off the card (and off the × that opened it, whose own press
+     toggles it) puts it away, as the time-zone card does. */
+  $effect(() => {
+    if (!placing || placeOpen) return;
+    /** @param {PointerEvent} event */
+    const onPress = (event) => {
+      const target = /** @type {Element | null} */ (event.target instanceof Element ? event.target : null);
+      if (target?.closest("[data-chooser-card], .drop")) return;
+      closePlace(false);
+    };
+    window.addEventListener("pointerdown", onPress, true);
+    return () => window.removeEventListener("pointerdown", onPress, true);
+  });
   const nameOk = $derived(deletionNameMatches(typedName, v.name));
 
   /* ── the two-tap protocol (§14, lib/arm.js) ─────────────────────────────
@@ -339,12 +395,20 @@
     row.visible = !row.visible;
   }
 
-  /* The hidden-not-removed law: only an empty section carries a × at all, so
-     this can never be reached for one holding entries. */
+  /* Every section can go, bar the last kept one (nowhere to send its
+     entries). One that goes without asking (empty, nothing coming) is struck
+     out at once; one holding entries asks where they go (#1332). */
   /** @param {EditorRow} row */
   function dropSection(row) {
-    if (!row.removable) return;
-    row.removed = true;
+    if (shown.length < 2) return;
+    if (row.removable) {
+      row.removed = true;
+      return;
+    }
+    if (placing === row.id && wide) { closePlace(true); return; }
+    cardFor = null;
+    placing = row.id;
+    if (!wide) placeOpen = true;
   }
 
   function addSection() {
@@ -431,6 +495,7 @@
   async function saveSections() {
     sectionsProblem = null;
     saidSections = false;
+    sectionSaid = "";
     try {
       /* Taken before the send: a section added while the save is in flight
          was not sent, so it must not be marked saved. */
@@ -445,6 +510,14 @@
       await invalidateAll();
     } catch (error) {
       sectionsProblem = wordsOf(error);
+      /* Someone filed an entry in a section since this page loaded: say so,
+         then show the true list rather than the one this editor expected. */
+      if (/** @type {{ code?: string }} */ (error)?.code === "section_has_items") {
+        await invalidateAll();
+        await tick();
+        rows = data.household.sections.map(editorRowOf);
+        sectionsBaseline = sectionsSnapshot(rows);
+      }
     }
   }
 
@@ -796,6 +869,8 @@
 <Pocket household={v} />
 {#if v.canManage}
   <PickSheet bind:open={pickOpen} kind={picking} value={form[picking]} onchoose={choose} />
+  <PickSheet bind:open={placeOpen} kind="section" value={null} choices={placeChoices} heading={placeHeading}
+             onchoose={place} oncancel={() => (placing = null)} />
 {/if}
 
 <div class="household-page" class:member={!v.canManage} bind:this={stage} role={pocket ? undefined : "main"}>
@@ -985,14 +1060,14 @@
          absent. They meet sections where sections mean something, printed
          beside entries in the manifest. -->
     {#if v.canManage}
-      <div class="card c-sections">
+      <div class="card c-sections" class:lifted={placing && wide}>
         <div class="cardhead">
           <h2>Sections</h2><span class="count">{shown.length} of {MAX_SECTIONS}</span>
         </div>
 
         <div>
           {#each shown as row (row.id)}
-            <div class="sec" class:off={!row.visible} class:empty={row.removable}>
+            <div class="sec" class:off={!row.visible}>
               {#if row.shipped}
                 <!-- a shipped section's glyph never changes meaning — not a button -->
                 <Mark icon={row.icon} accent={row.accent} aria-hidden="true" />
@@ -1003,14 +1078,21 @@
                       aria-label="Mark for {row.name || 'this section'} — choose another"
                       onclick={() => toggleTray(row)} />
               {/if}
-              <input maxlength="30" aria-label="Section name" placeholder={row.fresh ? "name it" : null}
+              <input id="secname-{row.id}" maxlength="30" aria-label="Section name" placeholder={row.fresh ? "name it" : null}
                      bind:value={row.name}>
-              <span class="used">{entriesLabel(row.count)}</span>
+              <span class="used">{entriesLabel(entriesIn(row))}</span>
               <button class="toggle" aria-pressed={row.visible} aria-label="{row.name} on the chart"
                       onclick={() => flipSection(row)}><i></i></button>
               <span class="state">{row.visible ? "shown" : "hidden"}</span>
-              <button class="drop" title="remove" aria-label="Remove section"
+              <button class="drop" class:gone={shown.length < 2} id="drop-{row.id}" title="remove"
+                      aria-label="Remove {row.name.trim() || 'this section'}"
+                      aria-haspopup={row.removable ? undefined : "dialog"} aria-expanded={row.removable ? undefined : placing === row.id}
                       onclick={() => dropSection(row)}>×</button>
+              {#if placing === row.id && wide}
+                <div class="pickseat atright" data-chooser-card>
+                  <ChooserCard ask={placeAsk} layout="beside" onpick={place} onclose={() => closePlace(true)} />
+                </div>
+              {/if}
             </div>
             {#if !row.shipped && row.open}
               <!-- the worn figure plus every asterism this household has not
@@ -1036,6 +1118,7 @@
         {#if saidSections}
           <p class="said show">saved</p>
         {/if}
+        <p class="moved" class:show={sectionSaid} role="status">{sectionSaid}</p>
         {#if sectionsProblem}<p class="problem">not saved — {sectionsProblem}</p>{/if}
         <!-- round 2 (#481): one button under one list says the list saves
              whole, and the × that only exists on empty rows says "hidden,

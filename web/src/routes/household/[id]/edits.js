@@ -15,7 +15,7 @@ import { plural } from "$lib/format.js";
 
 /**
  * @typedef {{ name: string, timezone: string, currency: string }} Identity
- * @typedef {{ id: string, name: string, icon: string, visible: boolean, removed?: boolean, fresh?: boolean }} EditRow
+ * @typedef {{ id: string, name: string, icon: string, visible: boolean, removed?: boolean, moveTo?: string, fresh?: boolean }} EditRow
  */
 
 /**

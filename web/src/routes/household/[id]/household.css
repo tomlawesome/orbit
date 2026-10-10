@@ -220,6 +220,9 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .note b{color:var(--ink-mid);font-weight:400}
 .household-page .said{display:none;margin-top:12px;font:11px var(--mono);color:var(--ok-text);line-height:1.8}
 .household-page .said.show{display:block}
+/* #1332: the status line under the sections list, said once a section is removed */
+.household-page .moved{margin:0;font:11px var(--mono);color:var(--ok-text);line-height:1.8}
+.household-page .moved.show{margin-top:12px}
 /* a line that exists only at the moment it applies (#481 round 2): the screen
    does not print a rule everybody has to read, it answers the person the rule
    stops, while it is stopping them. */
@@ -234,7 +237,7 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 
 /* sections: one editable list, saved whole. OWNER-ONLY (2b) — a plain
    member never sees this card at all, not even read-only. */
-.household-page .sec{display:flex;align-items:center;gap:12px;padding:7px 2px;
+.household-page .sec{position:relative;display:flex;align-items:center;gap:12px;padding:7px 2px;
      border-bottom:1px solid var(--line-soft)}
 
 /* 2b — the section mark: a chart-pen glyph (drawn in the same ink as every
@@ -273,8 +276,9 @@ html body{margin:0;overflow-y:auto;overflow-x:hidden;background:var(--bg);color:
 .household-page .sec.off{opacity:.55}
 .household-page .sec.off .state{color:var(--ink-quiet)}
 .household-page .sec .drop{font:12px var(--mono);color:var(--ink-quiet);background:none;border:0;
-           cursor:pointer;padding:0 2px;flex:none;visibility:hidden}
-.household-page .sec.empty .drop{visibility:visible}
+           cursor:pointer;padding:0 2px;flex:none}
+/* the last kept section has nowhere to send its entries: no ×, its place held */
+.household-page .sec .drop.gone{visibility:hidden}
 .household-page .sec .drop:hover{color:var(--overdue-text)}
 /* the switch that tells the truth: filled when on, hollow when off */
 .household-page .toggle{width:34px;height:19px;border-radius:99px;border:1px solid var(--line);
