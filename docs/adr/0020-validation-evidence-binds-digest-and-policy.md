@@ -107,6 +107,11 @@ rejected.
 
 6. **cosign is pinned** (version + SHA-256) in one place,
    `scripts/ci/ensure-cosign.sh`, used by attestor and verifiers alike.
+   Amended 2026-10-10 (#1368): the attestor no longer downloads it. It runs
+   on `$ORBIT_SIGNING_IMAGE`, which bakes in the same version and SHA-256
+   (ai/orbit-base-image `Dockerfile.signing`), and `ensure-cosign.sh`
+   refuses to sign with any other version. So the pin is still decided here,
+   but a bump means rebuilding and re-pinning that image too.
 
 ## Consequences
 
