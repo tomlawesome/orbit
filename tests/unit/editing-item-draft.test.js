@@ -158,25 +158,22 @@ describe("periodChoices", () => {
     expect(choices.every((c) => c.colour === null)).toBe(true);
   });
 
-  it("reads each foot line as the date it would next come round to", () => {
+  // #1337: the date a period would next come round to is the engine's (the
+  // dry run of item.complete); the cells no longer add months in the browser.
+  it("says \"once\" under the one-off and works out no date of its own under the rest", () => {
     const notes = periodChoices(12, due).map((c) => c.note);
-    expect(notes).toEqual(["once", "then 08 Nov 2026", "then 08 Jan 2027", "then 08 Apr 2027", "then 08 Oct 2027", "then 08 Oct 2028"]);
-  });
-
-  it("gives no date to come round to without a due date", () => {
-    const notes = periodChoices(12, null).map((c) => c.note);
     expect(notes).toEqual(["once", "", "", "", "", ""]);
   });
 
-  it("holds an end-of-month due date to the shorter month", () => {
-    expect(periodChoices(1, "2026-01-31")[1].note).toBe("then 28 Feb 2026");
+  it("gives the same notes whatever the due date, since none is worked out here", () => {
+    expect(periodChoices(1, "2026-01-31").map((c) => c.note)).toEqual(periodChoices(1, null).map((c) => c.note));
   });
 
   it("slots a non-standard period into its place, so keeping it stays a choice", () => {
     const choices = periodChoices(2, due);
     expect(choices.map((c) => c.value)).toEqual(["0", "1", "2", "3", "6", "12", "24"]);
     expect(choices[2]).toMatchObject({
-      value: "2", words: "every 2 months", figure: "2", unit: "months", note: "then 08 Dec 2026", colour: null,
+      value: "2", words: "every 2 months", figure: "2", unit: "months", note: "", colour: null,
     });
     expect(periodChoices(18, due).map((c) => c.value)).toEqual(["0", "1", "3", "6", "12", "18", "24"]);
   });

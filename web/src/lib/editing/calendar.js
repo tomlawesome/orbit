@@ -1,4 +1,4 @@
-import { plural } from "$lib/format.js";
+import { daysBetween, plural } from "$lib/format.js";
 /**
  * THE DUE DATE'S MONTH CALENDAR (#1319; design/v19/belt-purpose/round-8/
  * m-colour-per-option.html, `editing-date`; rounds 4-8): the arithmetic the
@@ -32,8 +32,8 @@ export function addDays(iso, days) {
 /**
  * `n` calendar months on, the day held to the end of a shorter month
  * (31 Jan + 1 is 28 Feb): for what a screen shows -- the calendar's month
- * paging, a chooser's "then <date>" preview. The next due date a completion
- * sets is the engine's (src/lib/next-due-date.ts, #1324), never this.
+ * paging only (#1337). The next due date a completion sets, and the preview
+ * of it, are the engine's (src/lib/next-due-date.ts, #1324), never this.
  * @param {string} iso @param {number} n
  */
 export function addMonths(iso, n) {
@@ -46,9 +46,6 @@ export function addMonths(iso, n) {
 /** Monday is 0. @param {string} iso */
 export const dowOf = (iso) => (dayOf(iso).getUTCDay() + 6) % 7;
 
-/** Days from `today` to `iso`: negative when it has passed. @param {string} iso @param {string} today */
-export const daysFrom = (iso, today) => Math.round((dayOf(iso).getTime() - dayOf(today).getTime()) / DAY_MS);
-
 /** "Monday 29 August 2026", what a day's cell says aloud. @param {string} iso */
 export function spokenDate(iso) {
   const d = dayOf(iso);
@@ -57,21 +54,10 @@ export function spokenDate(iso) {
 
 /** "in 16 days", "today", "3 days overdue". @param {string} iso @param {string} today */
 export function relWords(iso, today) {
-  const d = daysFrom(iso, today);
+  const d = daysBetween(today, iso);
   if (d === 0) return "today";
   if (d < 0) return `${plural(-d, "day")} overdue`;
   return `in ${plural(d, "day")}`;
-}
-
-/**
- * The corridor's band a day would ride in, for the foot line's T-minus
- * colour (the mockup's bandOf): overdue, inside 30 days, inside 90, later.
- * @param {string} iso @param {string} today
- * @returns {"over" | "soon" | "up" | "ok"}
- */
-export function bandOf(iso, today) {
-  const d = daysFrom(iso, today);
-  return d < 0 ? "over" : d <= 30 ? "soon" : d <= 90 ? "up" : "ok";
 }
 
 /**

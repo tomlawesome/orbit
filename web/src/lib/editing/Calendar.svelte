@@ -1,7 +1,7 @@
 <script>
   import { tick, untrack } from "svelte";
-  import { longDate, tminus } from "$lib/format.js";
-  import { DOW, DOW_LONG, MONTHS_LONG, bandOf, isoOf, monthGrid, relWords, restingDay, spokenDate, stepDay } from "./calendar.js";
+  import { bandOf, daysBetween, longDate, tminus } from "$lib/format.js";
+  import { DOW, DOW_LONG, MONTHS_LONG, isoOf, monthGrid, relWords, restingDay, spokenDate, stepDay } from "./calendar.js";
 
   /**
    * THE CHOOSER'S MONTH CALENDAR (#1319; round 8's `editing-date`, rounds
@@ -113,7 +113,7 @@
   </div>
   <div class="foot">
     <span class="when"><b>{longDate(shown)}</b></span>
-    <span class="rel {bandOf(shown, today)}">{tminus(shown, today)} · {relWords(shown, today)}</span>
+    <span class="rel {bandOf(daysBetween(today, shown))}">{tminus(shown, today)} · {relWords(shown, today)}</span>
     {#if away}
       <button type="button" class="today-btn" onclick={toToday}>today</button>
     {/if}
@@ -150,9 +150,9 @@
   .foot b{font-weight:500;color:var(--ink)}
   .when{min-width:0}
   .rel{flex:none;margin-left:auto}
-  .rel.over{color:var(--overdue-text)}
-  .rel.soon{color:var(--warm-text)}
-  .rel.up{color:var(--upcoming-text)}
+  .rel.overdue{color:var(--overdue-text)}
+  .rel.due-soon{color:var(--warm-text)}
+  .rel.upcoming{color:var(--upcoming-text)}
   .rel.ok{color:var(--ok-text)}
   .today-btn{flex:none;height:30px;padding:0 10px;margin-right:-10px;border:0;border-radius:999px;background:none;cursor:pointer;
              font:var(--p-type-caps) var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-mid)}

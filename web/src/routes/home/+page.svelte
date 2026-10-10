@@ -28,6 +28,7 @@
   import { SvelteMap } from "svelte/reactivity";
   import { tlabel } from "$lib/data/bands.js";
   import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
+  import { addDays } from "$lib/editing/calendar.js";
   import CorridorRow from "./CorridorRow.svelte";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
@@ -1240,12 +1241,12 @@
   /* ---- the strip's own layout: the dial's bodies, never recomputed, plus
      the pure geometry in strip-layout.js (BUILD.md §3/§4). ---- */
   const bodiesById = $derived(new Map(bodies.map((b) => [b.id, b])));
-  const stripToday = $derived(view ? asView(view).today : new Date().toISOString().slice(0, 10));
+  const stripToday = $derived(view ? asView(view).today : "");
   const stripTodayX = $derived(xOfDays(0));
-  const stripMonthTicks = $derived(stripOpen ? monthTicks(stripToday) : []);
+  const stripMonthTicks = $derived(stripOpen && stripToday ? monthTicks(stripToday) : []);
   /** @param {number} days */
   const stripDateOf = (days) =>
-    dayMonth(new Date(Date.parse(`${stripToday}T00:00:00Z`) + days * 86400000).toISOString());
+    stripToday ? dayMonth(addDays(stripToday, days)) : "";
 
   const stripMarks = $derived.by(() => {
     if (!stripOpen) return [];
@@ -1320,7 +1321,7 @@
   const suggestions = $derived(view ? asView(view).suggestions : undefined);
   /* #1145: the suggestion drawer counts the days to burn-up from the
      workspace's own today (pinned under fixtures), as the phone's does. */
-  const today = $derived(view ? asView(view).today : new Date().toISOString().slice(0, 10));
+  const today = $derived(view ? asView(view).today : "");
   /* #763: how many are overdue right now — the OS badge and the tab title
      both read this, never the server, so both hold whatever this browser's
      own chart just worked out. */
