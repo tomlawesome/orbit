@@ -156,6 +156,17 @@ variables:
   # PLAYWRIGHT_IMAGE means rebuilding there first and re-pinning here.
   # Not ORBIT_CI_IMAGE, which is the tag `build_image` builds under.
   ORBIT_ACCEPTANCE_IMAGE: registry.tomlawson.io/ai/orbit-base-image/ci@sha256:19409de802ca170bc69b02e3cfc0c46850819cfb71407799455174957255b117
+  # sign_evidence's image (#1368): the Docker CLI plus bash, curl, node and
+  # the pinned cosign, built and scanned by ai/orbit-base-image's
+  # `build_signing`/`scan_signing`/`publish_signing` from its
+  # Dockerfile.signing, so the one job with the signing key mounted installs
+  # and downloads nothing. Its cosign must be exactly COSIGN_VERSION in
+  # scripts/ci/ensure-cosign.sh, which refuses any other on the signing path:
+  # a cosign bump here means rebuilding there and re-pinning this. Pin the
+  # digest from that pipeline's published-signing-digest.txt artifact.
+  # First publish: ai/orbit-base-image pipeline 2406, job publish_signing
+  # 34555 (cosign v3.1.3, docker 29.9.0 CLI), 2026-10-10.
+  ORBIT_SIGNING_IMAGE: registry.tomlawson.io/ai/orbit-base-image/signing@sha256:da750e179fd15e6955d28d54215838589b512ef1905c7fc866b39d87c3332550
   # build_launcher's job image (ADR-0031 #3): matches launcher/pin.json's
   # go.mod exactly (go 1.27.1) at the pin this repository currently carries.
   # A pin bump to a launcher release built against a different Go version
@@ -3264,12 +3275,16 @@ record_image:
 # possible surface: the pinned cosign binary and this repository's scripts,
 # not the image build or the test suites.
 #
+# Installs nothing and downloads nothing (#1368): the key is on disk from the
+# job's first line, so every tool comes baked into $ORBIT_SIGNING_IMAGE
+# instead, and ensure-cosign.sh refuses rather than fetch a cosign the image
+# lacks. scripts/sign-evidence-image.test.mjs holds all three.
+#
 # No .dind and no daemon: `docker login` writes the registry credential
-# without one, and cosign talks to the registry over HTTPS itself. The image
-# is the same digest-pinned docker:29-cli the .dind jobs use.
+# without one, and cosign talks to the registry over HTTPS itself.
 sign_evidence:
   stage: publish
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/library/docker:29.6.2-cli@sha256:be132a9f282288de4afaf63379dff75711fda0147c6b72a9df44e51841402144
+  image: $ORBIT_SIGNING_IMAGE
   timeout: 10m
   # Same reasoning as record_image: a cancelled signing run leaves a pushed
   # digest with no evidence and nothing to show why.
@@ -3287,10 +3302,6 @@ sign_evidence:
     - job: record_image
       artifacts: true
   script:
-    - *apk_retry
-    # bash for the scripts, curl for ensure-cosign's pinned download, node
-    # to read the digest out of the transport record.
-    - apk_add bash curl nodejs
     - |
       set -eu
       digest="$(node -e '
