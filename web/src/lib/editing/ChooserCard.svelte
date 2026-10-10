@@ -2,6 +2,7 @@
   import Calendar from "./Calendar.svelte";
   import Tiles from "./Tiles.svelte";
   import RepeatBand from "./RepeatBand.svelte";
+  import PickList from "./PickList.svelte";
 
   /**
    * THE CHOOSER CARD (#1319; owner-decisions §34; design/v19/belt-purpose/
@@ -23,11 +24,13 @@
    * The body is the value's own chooser:
    *   · "due", "snooze", "done": the month calendar (Calendar.svelte);
    *   · "section", "type": the tiles, each in its colour (Tiles.svelte);
-   *   · "months": the period band stood up (RepeatBand.svelte).
+   *   · "months": the period band stood up (RepeatBand.svelte);
+   *   · "timezone", "currency": a filter over the household's pick-list
+   *     (PickList.svelte, #1338; the `ask`'s value is the stored one).
    *
-   * A day, tile or cell pressed (or Enter/Space on it) hands its value to
-   * `onpick`: a `YYYY-MM-DD` date, a section id, a type, or the period's
-   * months as a string. Esc, anywhere while the card stands, calls
+   * A day, tile, cell or list row pressed (or Enter/Space on it) hands its
+   * value to `onpick`: a `YYYY-MM-DD` date, a section id, a type, the
+   * period's months as a string, or a zone or currency code. Esc, anywhere while the card stands, calls
    * `onclose` before anything else hears it, so an open chooser takes Esc
    * before the edit does (the mockup's rule); the screen puts focus back on
    * the pressed value (EditSession.closeChooser). Focus lands on the chosen
@@ -51,7 +54,11 @@
   const CALENDAR = ["due", "snooze", "done"];
   /** What the body is for; a new one repaints it and moves focus into it. */
   const asked = $derived(`${ask.key}:${ask.value ?? ""}`);
-  const kind = $derived(CALENDAR.includes(ask.key) ? "calendar" : ask.key === "months" ? "band" : "tiles");
+  const kind = $derived(
+    CALENDAR.includes(ask.key) ? "calendar"
+      : ask.key === "months" ? "band"
+      : ask.key === "timezone" || ask.key === "currency" ? "list"
+      : "tiles");
 
   /** @type {HTMLDivElement | undefined} */
   let body = $state();
@@ -91,6 +98,8 @@
         <Calendar value={ask.value} today={ask.today} {onpick} />
       {:else if kind === "band"}
         <RepeatBand choices={ask.choices} value={ask.value} label={ask.label} {onpick} />
+      {:else if kind === "list" && (ask.key === "timezone" || ask.key === "currency")}
+        <PickList kind={ask.key} value={ask.value ?? ""} {onpick} />
       {:else}
         <Tiles choices={ask.choices} value={ask.value} label={ask.label} cols={ask.key === "type" ? 3 : 2} {onpick} />
       {/if}
@@ -115,6 +124,9 @@
   .close:hover{color:var(--ink)}
   .close:focus-visible{outline:none;color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--accent)}
   .kb{color:var(--ink-faint)}
+  /* a pick-list is long: the card keeps to a screenful and the list scrolls */
+  .body :global(.pick-options){max-height:min(46vh,360px);overflow-y:auto}
+  .sheet .body :global(.pick-options){max-height:none}
 
   /* under 1200px: the phone's bottom sheet (CON-10) — full width, 18px
      shoulders, the grab, no sides or foot; the screen fixes it to the foot */
