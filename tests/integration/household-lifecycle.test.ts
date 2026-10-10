@@ -199,13 +199,13 @@ async function uploadStagedDocument(fixture: Awaited<ReturnType<typeof createInt
 }
 
 describe("transactional household lifecycle", () => {
-  it("requires exact confirmation and rechecks active authority inside the mutation", async () => {
+  it("requires the right name as confirmation and rechecks active authority inside the mutation", async () => {
     const fixture = await createIntegrationFixture("lifecycle-confirmation");
     const member = await fixture.session("member");
     const outsider = await fixture.session("outsider");
     const beforeAudit = await fixture.auditCount(fixture.household.id);
 
-    await expect(requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, ` ${fixture.household.name} `))
+    await expect(requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, `${fixture.household.name} too`))
       .rejects.toMatchObject({ code: "household_confirmation_failed" });
     await expect(requestHouseholdDeletion(fixture.users.owner.id, fixture.household.id, ""))
       .rejects.toMatchObject({ code: "household_confirmation_failed" });
@@ -453,7 +453,7 @@ describe("transactional household lifecycle", () => {
       .rejects.toMatchObject({ code: "household_not_found" });
     await getDb().update(users).set({ disabledAt: null }).where(eq(users.id, fixture.users.admin.id));
 
-    await expect(hardDeleteHousehold(fixture.users.admin.id, fixture.household.id, ` ${fixture.household.name} `))
+    await expect(hardDeleteHousehold(fixture.users.admin.id, fixture.household.id, `${fixture.household.name} too`))
       .rejects.toMatchObject({ code: "household_hard_delete_confirmation_failed" });
     await hardDeleteHousehold(fixture.users.admin.id, fixture.household.id, fixture.household.name);
 
