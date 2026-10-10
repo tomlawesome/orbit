@@ -3,7 +3,7 @@ import { json } from "@sveltejs/kit";
 import { authErrorResponse } from "orbit/lib/auth/http";
 import { csrfTokenForSession, readSession } from "orbit/lib/auth/session";
 import { getAuthConfig } from "orbit/lib/env";
-import { getDocumentConfig } from "orbit/server/documents/config";
+import { documentRetentionDays } from "orbit/server/documents/config";
 import { listVisibleHouseholds } from "orbit/server/join-requests";
 import { readAndClearInvitedLandingCookie } from "orbit/server/invitations/cookie";
 import {
@@ -67,7 +67,7 @@ export const GET = api(
           passphraseMax: ARCHIVE_PASSPHRASE_MAX,
         },
         retention: {
-          documentDays: getDocumentConfig().retentionDays,
+          documentDays: documentRetentionDays(),
           recoveryDays: wholeDays(RECOVERY_WINDOW_MS),
           receiptDays: wholeDays(RECEIPT_RETENTION_MS),
         },

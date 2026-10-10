@@ -93,6 +93,17 @@ export function deriveDocumentKeyId(keyEncryptionKey: Buffer): string {
 let cachedDocumentConfig: DocumentConfig | undefined;
 
 /**
+ * The document retention window alone, read without the document key (#1336).
+ * The session route reports it to every signed-in screen, and a missing or
+ * mistyped DOCUMENT_KEK is a degraded state the administration screen
+ * explains, so this never throws: a value the full config would refuse is null.
+ */
+export function documentRetentionDays(environment: NodeJS.ProcessEnv = process.env): number | null {
+  const parsed = documentEnvironmentSchema.shape.DOCUMENT_RETENTION_DAYS.safeParse(environment.DOCUMENT_RETENTION_DAYS);
+  return parsed.success ? parsed.data : null;
+}
+
+/**
  * Loads document configuration lazily so builds and non-document routes do not
  * require the document key. The raw key never leaves this server-only module.
  */
