@@ -419,9 +419,10 @@ drawing, the same shape as the item-page failure fixed in 34ae6e3d.
 
 - 2026-10-09 · dad77c25 (#1325 rebased onto dev; the tree differs from pipeline 2287's green 8170fecb only in design files, an ADR, this log and one e2e spec) · pipeline 2290 / fidelity (job 33718) · `ArrowRight did not come back`; the same test passed at 390x844 in the same run. 45/45 locally with `--repeat-each=5` on the same commit; job retried as 33765. First sighting.
 
-## pocket-measure.spec.js:544 "/home · row-retire-armed meets the pocket floors" — pocket-measure, 390x664
+## pocket-measure.spec.js:544 "/home · row-… meets the pocket floors" — `openRow`'s tap never opens the panel (row-retire-armed at 390x664, row-snooze at 360x640)
 
 - 2026-10-09 · abcb06f1 · pipeline 2301 / fidelity (job 33822) · `openRow`'s tap on Car MOT's face never opened its panel (`locator.waitFor` ran to the 60 s test timeout), after `go()` had already waited for `body[data-home-ready]`; 487 others passed. Locally in the pinned image on 6afb412e: 20 repeats alone, then every `/home · row-` state 15 times over 4 workers (420 runs), all green. First sighting.
+- 2026-10-10 · cd964294 (!1052; since 8b9bf878, whose fidelity job 34065 passed, only e2e specs and one unit test changed) · pipeline 2341 / fidelity (job 34107) · row-snooze at 360x640, the same wait at `pocket-states.js:61` for Car MOT's opened panel ran to the 60 s test timeout; 487 others passed. Retried as job 34122. Second sighting.
 
 ## tour-pocket-webkit.spec.js:539 "plays through chapter 3 at 360x780 under normal motion" — chapters skipped
 
