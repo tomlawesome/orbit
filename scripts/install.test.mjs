@@ -1085,6 +1085,113 @@ describe("install.sh release manifest (ADR-0031 #7)", () => {
     expect(result.calls).not.toContain("docker pull");
   });
 
+  // #1378: the manifest comes from the real scripts/ci/write-release-manifest.sh
+  // (run in a scratch copy of its tree, as scripts/ci/write-release-manifest.test.mjs
+  // does), never hand-built, so the installer and its producer cannot drift on
+  // what "version" holds. Signed with a throwaway key like selfFetch's.
+  function realWriterManifest(label) {
+    const work = mkdtempSync(join(tmpdir(), "orbit-install-realwriter-"));
+    const scriptDir = join(work, "scripts", "ci");
+    mkdirSync(scriptDir, { recursive: true });
+    for (const [from, to] of [
+      ["ci/write-release-manifest.sh", join(scriptDir, "write-release-manifest.sh")],
+      ["ci/channel-name.sh", join(scriptDir, "channel-name.sh")],
+      ["release-metadata-patterns.sh", join(work, "scripts", "release-metadata-patterns.sh")],
+    ]) {
+      copyFileSync(fileURLToPath(new URL(from, import.meta.url)), to);
+    }
+    const inputs = {};
+    for (const name of ["amd64.tar.gz", "arm64.tar.gz", "install.sh", "get-orbit.sh"]) {
+      inputs[name] = join(work, name);
+      writeFileSync(inputs[name], `${name} fixture bytes`);
+    }
+    execFileSync("bash", [join(scriptDir, "write-release-manifest.sh"), imageRepository, `sha256:${digest}`], {
+      env: {
+        PATH: process.env.PATH,
+        CI_COMMIT_SHA: revision,
+        CI_COMMIT_BRANCH: "preview",
+        ORBIT_VERSION: label,
+        ORBIT_LAUNCHER_TAG: "v1.0.0",
+        ORBIT_LAUNCHER_COMMIT: revision,
+        ORBIT_LAUNCHER_AMD64_ARCHIVE: inputs["amd64.tar.gz"],
+        ORBIT_LAUNCHER_ARM64_ARCHIVE: inputs["arm64.tar.gz"],
+        ORBIT_INSTALL_SCRIPT: inputs["install.sh"],
+        ORBIT_GET_ORBIT_SCRIPT: inputs["get-orbit.sh"],
+      },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    return join(work, ".orbit-supply-chain", "orbit-release-manifest.json");
+  }
+
+  function selfFetchRealWriter(label, route, extra = {}) {
+    const dir = mkdtempSync(join(tmpdir(), "orbit-install-selffetch-real-"));
+    const { privatePem, publicPem } = generateKeyPair(dir);
+    const assetsDir = join(dir, ...route);
+    mkdirSync(assetsDir, { recursive: true });
+    const manifestPath = join(assetsDir, "orbit-release-manifest.json");
+    copyFileSync(realWriterManifest(label), manifestPath);
+    writeFileSync(
+      join(assetsDir, "orbit-release-manifest.json.sig"),
+      execFileSync("openssl", ["dgst", "-sha256", "-sign", privatePem, manifestPath]).toString("base64"),
+    );
+    return {
+      ORBIT_RELEASE_MANIFEST: "",
+      ORBIT_INSTALL_TEST_MANIFEST_BASE_URL: `file://${dir}`,
+      ORBIT_INSTALL_TEST_PUBLIC_KEY_FILE: publicPem,
+      ORBIT_INSTALL_TEST_ALLOW_KEY_OVERRIDE: "1",
+      ...extra,
+    };
+  }
+
+  it("accepts a version-pinned install whose signed manifest, from the real writer, is for that version (#1378)", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+    const result = runInstall(
+      targetDir,
+      selfFetchRealWriter("v0.3.0", ["releases", "download", "v0.3.0"], { ORBIT_CHANNEL: "v0.3.0", FAKE_DOCKER_VERSION: "v0.3.0" }),
+      ["--plain"],
+    );
+    expect(result.stderr).not.toContain("Asked for");
+    expect(result.status).toBe(0);
+    expect(result.engineRuns[0].image).toBe(resolvedReference);
+  });
+
+  it("refuses a version-pinned install whose real-writer manifest is for another version, naming both (#1378)", () => {
+    const result = runInstall(
+      makeTarget(),
+      selfFetchRealWriter("v0.3.1", ["releases", "download", "v0.3.0"], { ORBIT_CHANNEL: "v0.3.0", FAKE_DOCKER_VERSION: "v0.3.0" }),
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("v0.3.0");
+    expect(result.stderr).toContain("v0.3.1");
+    expect(result.stderr).not.toContain("vv0.3");
+    expect(result.calls).not.toContain("docker pull");
+  });
+
+  it("does not apply the pinned-version check on the stable channel, with a real-writer manifest (#1378)", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+    const result = runInstall(
+      targetDir,
+      selfFetchRealWriter("v0.3.0", ["releases", "latest", "download"], { ORBIT_CHANNEL: "latest", FAKE_DOCKER_VERSION: "v0.3.0" }),
+      ["--plain"],
+    );
+    expect(result.stderr).not.toContain("Asked for");
+    expect(result.status).toBe(0);
+  });
+
+  it("does not apply the pinned-version check on the preview channel, with a handed-over real-writer manifest (#1378)", () => {
+    const targetDir = makeTarget();
+    makePreprovisionedDeployment(targetDir);
+    const result = runInstall(
+      targetDir,
+      { ORBIT_CHANNEL: "preview", ORBIT_RELEASE_MANIFEST: realWriterManifest("v0.3.0"), FAKE_DOCKER_VERSION: "v0.3.0" },
+      ["--plain"],
+    );
+    expect(result.stderr).not.toContain("Asked for");
+    expect(result.status).toBe(0);
+  });
+
   it("refuses ORBIT_CHANNEL=preview without a handed-over manifest, fetching nothing (#1107)", () => {
     const result = runInstall(makeTarget(), { ORBIT_CHANNEL: "preview", ORBIT_RELEASE_MANIFEST: "" });
     expect(result.status).toBe(1);

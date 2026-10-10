@@ -643,7 +643,7 @@ if [[ -n "${CI_API_V4_URL:-}" ]]; then
   identity_header="$(new_secret_file)"
   printf 'PRIVATE-TOKEN: %s\n' "$BASE_REPIN_TOKEN" > "$identity_header"
   identity="$(
-    curl --silent --location --max-time 30 --header @"$identity_header" \
+    curl --silent --max-time 30 --header @"$identity_header" \
       "${CI_API_V4_URL%/}/user" 2>/dev/null |
       node -e 'let i="";process.stdin.on("data",c=>i+=c).on("end",()=>{try{const u=JSON.parse(i);process.stdout.write(`${u.username ?? "?"} (id ${u.id ?? "?"})`)}catch{process.stdout.write("unreadable -- the API refused this token")}})' 2>/dev/null || true
   )"
@@ -708,7 +708,7 @@ fi
 header_file="$(new_secret_file)"
 body_file="$(new_secret_file)"
 printf 'PRIVATE-TOKEN: %s\n' "$BASE_REPIN_TOKEN" > "$header_file"
-api_call() { curl --silent --show-error --fail --location --max-time 60 --header @"$header_file" "$@"; }
+api_call() { curl --silent --show-error --fail --max-time 60 --header @"$header_file" "$@"; }
 api="${CI_API_V4_URL%/}/projects/${CI_PROJECT_ID}"
 
 json_field() {
