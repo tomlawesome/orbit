@@ -2637,7 +2637,18 @@ export async function writeHouseholdIdentity(householdId, identity) {
 export async function writeSections(householdId, rows) {
   /** @type {Workspace | undefined} */
   let workspace;
-  for (const command of sectionCommandsOf(householdId, rows)) workspace = await applyCommand(command);
+  let saved = 0;
+  for (const command of sectionCommandsOf(householdId, rows)) {
+    try {
+      workspace = await applyCommand(command);
+      saved += 1;
+    } catch (error) {
+      /* Earlier commands of this save have already landed (#1332): the caller
+         reloads to the true list rather than keep the editor's. */
+      if (saved && error && typeof error === "object") /** @type {{ partial?: boolean }} */ (error).partial = true;
+      throw error;
+    }
+  }
   return /** @type {Workspace} */ (workspace);
 }
 

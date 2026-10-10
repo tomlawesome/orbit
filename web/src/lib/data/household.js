@@ -149,9 +149,19 @@ export function sectionCommandsOf(householdId, rows) {
     const at = waiting.findIndex((row) => !waiting.some((other) => other !== row && other.moveTo === row.id));
     order.push(...waiting.splice(at === -1 ? 0 : at, 1));
   }
-  const gone = new Set(asked);
   /** @type {ReturnType<typeof sectionCommandsOf>} */
   const commands = [];
+  /* The drops that go unasked are sent first, in a command of their own with
+     no moveItemsTo: if one gained an entry since the screen loaded, the engine
+     refuses (section_has_items) rather than moving it somewhere unasked. */
+  if (asked.size && held.length) {
+    commands.push({
+      type: "sections.replace",
+      householdId,
+      sections: rows.filter((one) => !asked.has(one.id) && (!one.removed || held.includes(one))).map(sent),
+    });
+  }
+  const gone = new Set(asked);
   for (const row of order) {
     gone.add(row.id);
     commands.push({
