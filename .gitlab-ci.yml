@@ -164,10 +164,9 @@ variables:
   # scripts/ci/ensure-cosign.sh, which refuses any other on the signing path:
   # a cosign bump here means rebuilding there and re-pinning this. Pin the
   # digest from that pipeline's published-signing-digest.txt artifact.
-  # PLACEHOLDER: all zeros until the first publish. Nothing has been
-  # published yet, and a pull of this digest fails, so sign_evidence fails
-  # closed until the real digest replaces it.
-  ORBIT_SIGNING_IMAGE: registry.tomlawson.io/ai/orbit-base-image/signing@sha256:0000000000000000000000000000000000000000000000000000000000000000
+  # First publish: ai/orbit-base-image pipeline 2406, job publish_signing
+  # 34555 (cosign v3.1.3, docker 29.9.0 CLI), 2026-10-10.
+  ORBIT_SIGNING_IMAGE: registry.tomlawson.io/ai/orbit-base-image/signing@sha256:da750e179fd15e6955d28d54215838589b512ef1905c7fc866b39d87c3332550
   # build_launcher's job image (ADR-0031 #3): matches launcher/pin.json's
   # go.mod exactly (go 1.27.1) at the pin this repository currently carries.
   # A pin bump to a launcher release built against a different Go version
