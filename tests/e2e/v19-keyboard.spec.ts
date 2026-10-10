@@ -31,6 +31,7 @@ import {
 } from "./support/keyboard";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: back to the stack's own seed before this file's setup runs, so the
    lists these specs walk carry nothing an earlier spec left behind. */
@@ -168,7 +169,7 @@ async function seedHousehold(page: Page, options: { withItem?: boolean } = {}) {
   let itemId: string | undefined;
   if (options.withItem) {
     itemId = randomUUID();
-    const dueDate = new Date(Date.now() + 20 * 86400000).toISOString().slice(0, 10);
+    const dueDate = householdDateFromToday(20);
     const itemCreated = await page.request.post("/api/workspace/commands", {
       headers,
       data: {

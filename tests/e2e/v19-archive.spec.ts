@@ -9,6 +9,7 @@ import { ensureLocalPassword } from "./support/local-credentials";
 import { ensureWorkerAdministrator, workerAccount, workerFixturePassword } from "./support/worker-identity";
 import { resetDatabaseBetweenSpecFiles } from "./support/database";
 import { answerPushWithoutAService } from "./support/webkit-push";
+import { householdDateFromToday } from "./support/household-dates";
 
 /* #1077: back to the stack's own seed before this file's setup runs. */
 resetDatabaseBetweenSpecFiles();
@@ -165,7 +166,7 @@ async function seedHousehold(page: Page, itemTitles: string[]) {
   });
   if (!created.ok()) throw new Error(`#1002: could not seed household "${name}" (${created.status()})`);
 
-  const dueDate = new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10);
+  const dueDate = householdDateFromToday(10);
   for (const title of itemTitles) {
     const itemId = randomUUID();
     const itemCreated = await page.request.post("/api/workspace/commands", {
