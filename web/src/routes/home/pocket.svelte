@@ -29,7 +29,7 @@
   import { markDoor } from "../household/[id]/door.js";
   import { HIT_R, spacedBodies } from "./pocket-dial.js";
   import { readSearchDocuments, searchPocket } from "./pocket-search.js";
-  import { BAND_VAR, tlabel } from "./bands.js";
+  import { BAND_VAR, tlabel } from "$lib/data/bands.js";
   import ItemDrawer from "./ItemDrawer.svelte";
   import SuggestionDrawer from "./SuggestionDrawer.svelte";
 
