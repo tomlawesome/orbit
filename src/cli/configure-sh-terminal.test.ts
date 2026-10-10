@@ -16,8 +16,8 @@ import { PTY_TEST_TIMEOUT_MS, ptyWatchdog } from "../../scripts/pty-deadline.mjs
 // and the engine asks on it. The real configure.sh runs under a pty with
 // stdin replaced by /dev/null; scripts/engine-docker-shim.mjs answers its
 // `docker run` with this checkout's CLI. stdin of the pty driver stays open
-// for the child's whole life (AGENTS.md, "Never drive a pty test by closing
-// its own stdin"), and every answer waits for its prompt.
+// for the child's whole life (docs/testing.md "Local traps": "Never drive a pty test by
+// closing its own stdin"), and every answer waits for its prompt.
 
 vi.setConfig({ testTimeout: PTY_TEST_TIMEOUT_MS });
 

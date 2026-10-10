@@ -48,7 +48,7 @@
 # working-tree image and its registry tag stay, like repair-journeys' own.
 # It refuses to start while any Orbit stack holds the fixed container names,
 # and install.sh refuses while any volume ending orbit-db-data exists
-# (AGENTS.md, "Traps when running things locally"). Environment values aimed
+# (docs/testing.md, "Local traps"). Environment values aimed
 # at another deployment (ORBIT_ENV_FILE, ORBIT_SECRETS_DIR, ORBIT_BACKUP_DIR,
 # ORBIT_BIND_ADDRESS, ORBIT_PORT, COMPOSE_FILE, COMPOSE_PROJECT_NAME) are
 # ignored. ORBIT_BACKUP_DRILL_IMAGE=<ref> skips the build. CI keeps the

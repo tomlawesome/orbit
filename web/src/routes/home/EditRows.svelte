@@ -149,7 +149,8 @@
   /* round 8: the section and type words wear their own colour, lit or not */
   .opt{color:var(--opt-text, inherit)}
 
-  /* THE POCKET'S 44px FLOOR (#1319, AGENTS.md's tap floor): every live value
+  /* THE POCKET'S 44px FLOOR (#1319; the token is --p-hit in
+     web/src/lib/pocket/tokens.css, gated by pocket-measure.spec.js): every live value
      is itself a 44px target, not just its ::before. Each one pads its own box
      to 44px and takes the padding back in negative margins, so the words sit
      where round 8's `narrow-editing-*` draws them; the rows open to a 44px

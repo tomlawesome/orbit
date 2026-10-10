@@ -257,8 +257,8 @@ your real deployment's containers and data. `docker-compose.yml`'s
 `name: orbit` and `.env-orbit`'s `COMPOSE_PROJECT_NAME` both default to the
 same project name a real deployment uses, from any checkout, so a bare
 `--env-file .env-orbit` command with no `-p` reuses that deployment's
-containers and named volumes instead of creating its own. AGENTS.md documents
-this trap and issue #536 hit it for real. The `--keep` output prints the
+containers and named volumes instead of creating its own. [Local traps](#local-traps)
+documents this one, and issue #536 hit it for real. The `--keep` output prints the
 exact teardown line to use:
 
 ```sh
@@ -301,3 +301,183 @@ and the [quality strategy](quality-strategy.md) defines test and CI
 evidence. GitHub milestones and issues own delivery status. Product directions
 outside the stable contract remain in the
 [feature register](feature-register.md).
+
+## Local harnesses
+
+Check this list before building a test rig or handing a check to the owner.
+Each script's own header holds its full usage.
+
+| Script | What it does |
+| --- | --- |
+| `scripts/test-all.sh` | `test-backend.sh`, then `test-frontend.sh` (Playwright against a running instance; `ORBIT_SKIP_E2E=true` skips it). |
+| `scripts/test-backend.sh` | Static analysis and the fast Vitest suite. |
+| `scripts/test-frontend.sh` | Playwright against a running instance. |
+| `pnpm --filter orbit-web fidelity` | The v19 visual gate: stands up the adapter-node build and the mockup host, compares 17 screens against the committed baselines. In CI it runs pinned to the Playwright image the baselines were proven against; run it locally the same way if a diff disagrees. |
+| `scripts/test-integration.mjs` | Integration suite against a real database. |
+| `scripts/test-e2e-local.sh` | Local stack with disposable OIDC and GreenMail sidecars, then Playwright. `--profile local-only` swaps them for an Orbit with no identity provider and runs the short list in `tests/e2e/local-only-specs.txt`, which is what CI's `smoke_local_only` runs too (#916). `--reuse PROJECT` skips the build and `compose up` and runs Playwright against a stack a prior `--keep` run left up, identified by Compose's project/service labels and health-checked first; it never tears that stack down (#947). `--ci-cap` adds the cpu/memory overlay CI's acceptance stack runs under, so a local timing measurement transfers; off by default because an uncapped stack is the faster loop (#1080). **WebKit runs on this host only inside the CI Playwright image** (`mcr.microsoft.com/playwright:v1.63.0-noble`, already pulled): the host lacks WebKit's system packages, and that is not a reason to leave the check to a pipeline. The script does this itself for any run that includes a WebKit project (#1235); `--project desktop-webkit --spec <file>` with `--reuse` runs one file in WebKit alone. A change to a WebKit-affected e2e test is run locally on both WebKit projects before it is pushed; the pipeline is the second check, not the first (owner, 2026-10-06). |
+| `scripts/test-install-acceptance.sh` | Real fresh install to a healthy `/api/health`, asserting `docs/installer-guarantees.md`; OIDC discovery is a fixture, so no provider credentials are needed. |
+| `scripts/test-install-bootstrap.sh` | The direct bootstrap path (not a supported install entry since ADR-0031's 2026-10-04 amendment; `get-orbit.sh` is): fetches `install.sh` over the network from a branch, pipes it to bash, and proves the channel tag resolved to the digest the registry serves right now. Real network and registry; only OIDC discovery is redirected, to the `tests/oidc` sidecar. Non-interactive path only; `--red` proves the digest assertion fires. Runs two ways (#724): weekly, via the `install_bootstrap` job in `.gitlab-ci.yml` (maintenance stage, `INSTALL_BOOTSTRAP=true`), `--red` then the green run in that one job; and green-only, via `verify_bootstrap` in `.github/workflows/publish-from-gitlab.yml`, right after that workflow's `publish` job moves GHCR's `preview` tag, the publication path that can actually invalidate what the harness asserts. |
+| `scripts/test-backup-restore.sh` | Backup and restore acceptance drill. Locally run it with `--own-stack`: it builds the working tree, installs a throwaway deployment (Compose project `orbit-backup-drill`) and removes it on every exit (#1273). Needs a host with no Orbit stack and no `*orbit-db-data` volume. Without the flag it borrows the deployment `.env-orbit` names and never removes it, which is CI's path (#1241). |
+| `scripts/test-repair-journeys.sh` | Live repair journeys: installs a real stack, breaks it, and proves `repair.sh` recovers it (`--list` shows which journeys are live and which are still absent). |
+| `scripts/test-malware-scanner.sh` | ClamAV detection. |
+| `scripts/test-secret-scan.sh` | Proves the `gitleaks` CI job's full-history scan fires: plants a synthetic secret in a throwaway `mktemp -d` git repo (never committed to Orbit) and asserts detection and redaction. |
+| `scripts/test-tika-processor.mjs` | Tika document extraction. |
+| `scripts/installer-simulation.sh` | Installer command centre UI, no Docker. |
+| `scripts/install-test-browser.sh` | One-time headless browser download. |
+| `scripts/preview-lane-preflight.sh` | Preview-lane preflight checks. |
+| `scripts/validate-compose-config.sh` | Compose configuration validation. |
+| `scripts/ci/*.sh` | The container validation sequence, one script per workflow step, so GitHub Actions and the GitLab pipeline run the same checks rather than two paraphrases of them (#801). Inputs are environment variables; `$GITHUB_OUTPUT` and `$GITHUB_ENV` are written only when set. |
+| `scripts/acceptance-mailbox.mjs` | Mailbox acceptance record for a digest. |
+| `scripts/sidecar-pins.mjs` | Sidecar pin freshness: `check` reports drift between compose and policy, a moved tag, and stale packages inside a current pin (`--offline` is the drift axis alone, `--red` proves it fires); `sync` re-pins both places after a Renovate bump. |
+| `scripts/check-rolldown-jsdoc-trap.mjs` | Flags a JSDoc comment inside a `{#snippet}` parameter list, or inside a multi-line comma-separated parameter/argument list, before it reaches rolldown's own opaque parse crash on the production build (#782). `pnpm --filter orbit-web repro:782` drives the real crash against throwaway fixtures in `web/tests/rolldown-repro/` (slow, not wired into the fast suite). |
+| `scripts/ci/prove-content-id.sh` | ADR-0028 section 6's proof (#1060 slice 2): three image builds showing that the same tree on two commits gives one image content ID and that a changed `src/` file gives another. By hand or as a manual job, never in an ordinary pipeline, because it builds the image three times. |
+| `scripts/ci/repin-base-image.sh` | Base image freshness (#708): compares the Dockerfile pin to ai/orbit-base-image's published-digest.txt artifact and, on a mismatch, re-pins every location and opens a merge request; `--red` proves the comparison fires, `--dry-run` stops before any commit, push or merge-request call. Its header holds the job-token and Renovate arrangement. |
+| `scripts/cleanup-stacks.sh` | Lists every `orbit*` Compose project on the host, marked running or stale (containers, volumes, networks, stopped and profile ones included, and networks left with no container). `--remove` tears down only stale projects and skips any with a running container, since other sessions share the host; `--project NAME --remove` removes that one even if running, `--remove --all` removes running ones too. Also removes unused `orbit-local`, `orbit-vapid-bootstrap` and `orbit-acceptance-local` images over a day old (not with `--project`). Keeps `orbit-ollama` and its model volume unless `--include-ollama`. Containers Compose did not create are listed, never removed (#1241). |
+| `scripts/dev/test-bed.sh` | The demo and owner-review bed (#1241); see its header. |
+| `scripts/corpus/stages-rerun.sh '<command>'` | Runs one command inside a Node container on the document-processing network, for eval runs that ask the model. See [Extraction method](extraction-method.md). |
+
+## Local traps
+
+Known ways to lose an afternoon, or worse. `AGENTS.md` carries each as one line;
+the reasoning is here.
+
+### A stack a script started is torn down by the same script
+
+Stale containers are a defect, not housekeeping. Run
+`bash scripts/cleanup-stacks.sh` at session end and before an acceptance run.
+Plain `--remove` clears stale stacks and skips running ones (another session
+may own them); a running stack you started yourself goes with
+`--project NAME --remove` (#1241).
+
+### `pnpm db:generate` refuses to run, on purpose
+
+`drizzle/meta/` holds snapshots only up to 0004, so `drizzle-kit generate`
+would diff against a stale snapshot and silently emit a migration that
+recreates almost the whole schema. `scripts/db-generate-refused.mjs` is the
+guard; the hand-written procedure is under "Hand-writing a migration" above.
+See #535.
+
+### Compose commands attach to whatever project `.env-orbit` names
+
+`docker compose --env-file .env-orbit ...` with no `-p` silently adopts that
+project (and its named volumes) from any checkout or worktree, and the fixed
+`container_name` pins in `docker-compose.yml` then stop a second stack
+coexisting instead of failing loudly. Source
+`scripts/compose-isolation-preflight.sh` before an `up` you assemble by hand,
+and see the isolated-stack recipe under "Quality checks" above. Fixed in the
+acceptance-stack entry point by #536; still your job for a one-off manual
+command.
+
+### Never drive a pty test by closing its own stdin
+
+`spawnSync({ input })` closes stdin as soon as the string is written, which
+under `script` closes the pty master and makes the next read return EOF
+instead of blocking. A widget that tells a timeout from a read error then takes
+the wrong branch, and the test either races or silently never exercises what it
+claims. Keep stdin open for the life of the child, as `runPty` in
+`scripts/installer-simulation.test.mjs` and `runPtyInterrupted` in
+`scripts/installer-ui.test.mjs` both do. Diagnosed twice: #510/#512, then #552.
+
+### A pty driver's deadline belongs to `scripts/pty-deadline.mjs`
+
+A child killed for running out of time has no exit status, so a driver that
+hands the result to an exit-code assertion fails with `expected null to be 130`
+and names the wrong fault: the child never exited at all. Take the deadline and
+the failure from that module rather than writing another timer. A `spawn`-based
+driver must reject rather than resolve, and its tests declare
+`PTY_TEST_TIMEOUT_MS` so Vitest's 5s default does not speak first. See #595.
+
+### A Compose `file:` secret is a bind mount of an inode, not of a path
+
+Edit the file in place and every running container sees it at once; *replace*
+it (`mktemp` + `mv`, `tar -x`, `rsync`) and each container keeps reading the
+old file for as long as it keeps running. A plain `docker restart` re-resolves
+the mount. Repair's rotation lands the new password by rename precisely so a
+half-written secret is impossible, which left the database container reading a
+spent copy and made repair diagnose its own successful rotation as failed.
+Postgres itself never notices, because it reads that file once at initdb and
+authenticates from its own catalogue afterwards. See #629.
+
+### `scripts/test-backup-restore.sh` seeds its own state with SQL
+
+Nothing else drives it. A dropped column passes every unit and integration
+check and fails only the compose smoke test, so grep it before changing a
+schema.
+
+### Do not run `pnpm install` from a worktree
+
+An install run from inside a worktree used to rewire the main checkout; this is
+closed (#784, #858). `scripts/guard-worktree-install.mjs`, wired as pnpm's
+`preinstall`, refuses `pnpm install` from a worktree whose `node_modules`
+resolves outside itself; a worktree with its own `node_modules` installs safely
+through pnpm's shared content-addressable store. `test-e2e-local.sh`'s two pnpm
+calls no longer reach through the trap either. If it ever recurs,
+`find node_modules web/node_modules -type l -lname '*worktrees*'` must be empty
+in the main checkout; repair with `CI=true pnpm install` from the main checkout
+root (it breaks other sessions' builds while it runs, so agree a window first).
+
+### The web type check says SKIPPED in most worktrees, and that is correct
+
+(#1029.) `web/node_modules/orbit` usually links to the main checkout, so
+`orbit/server/*` would be read from whatever branch *that* has out: a wrong
+answer either way, and a passing one is the dangerous half. Run it in the main
+checkout or let CI answer; it is not a fault to fix.
+
+### A red compose smoke job can be hiding the next failure
+
+Its steps run in one job and it stops at the first, so fixing that step reveals
+what was behind it rather than turning the job green. The favicon 404 hid nine
+e2e failures all of 2026-09-03. Read the whole job before reporting what a
+branch needs.
+
+### Never hand-write a control-character range in a regular expression
+
+The escapes are what break. Lose them and the intended "control characters or
+backslash" collapses into a range running from space to backslash, matching most
+ordinary characters: a path sanitiser then rejects every real path, or the
+reverse, and no test notices unless it covers the boundary. Scan the string
+explicitly instead, as `isApplicationRelative` in `web/src/lib/return-path.js`
+does, and give it cases for the empty string, a protocol-relative `//` and a
+backslash.
+
+### A leftover volume of the same Compose project blocks an install
+
+Another stack's database volume no longer does (#1239, #1261): a fresh install
+is blocked only by the volume it would itself attach to, and an update whose
+project name is known skips a volume labelled with another project that is not
+provably its own. Two volumes that could both be this deployment's still refuse,
+so a leftover volume of the *same* Compose project does too.
+`scripts/cleanup-stacks.sh` lists them.
+
+### A lockfile diff adding an `@pnpm/exe` block means the host pnpm is older than the pin
+
+(#884, #901, #1185.) An older pnpm reads `packageManager` and hands over to the
+pinned version, but first writes `@pnpm/exe` into `pnpm-lock.yaml`, even with
+`--frozen-lockfile`. A correct 12.x lockfile has no such block. The owner
+upgraded `/usr/local/bin/pnpm` to the pin (12.4.1) on 2026-10-07, after which
+`CI=true pnpm install --frozen-lockfile` leaves `git status` clean. If the block
+reappears, the pin has moved ahead of the host: discard the lockfile diff, run
+`node --test scripts/lockfile-no-pnpm-exe.test.mjs` before committing a lockfile
+change, and ask the owner to upgrade the host pnpm (`sudo npm install -g
+pnpm@<pin>`). CI activates the pin through corepack, so it never sees this.
+
+### Only ten fonts exist on this host, and the rest fail silently
+
+See "Fonts" in [the corpus README](../scripts/corpus/README.md#fonts) for the
+list and the reason. Check with `fc-list : family` rather than assuming a
+common font is present.
+
+### Scratch work goes in `tmp/`
+
+`tmp/` is gitignored scratch for prototypes and the experiment-log render. The
+gates deliberately skip it (`tsconfig.json`, `eslint.config.mjs`,
+`vitest.config.ts`; guarded by `scripts/scratch-dir-ignored.test.mjs`), because
+a prototype there is expected to rot and must not break the suite for the next
+session (#995). Nothing in `tmp/` is built, shipped or imported.
+
+### The 44px tap floor
+
+Every tappable thing on the phone layout is at least 44x44px. The size is the
+token `--p-hit` in `web/src/lib/pocket/tokens.css`; the gate is
+`web/tests/fidelity/pocket-measure.spec.js` (`MIN_HIT`, #1120), which runs in
+the `fidelity` job (see [the quality strategy](quality-strategy.md)).

@@ -65,8 +65,8 @@ export default defineConfig([
   ".claude/worktrees/**",
   // web/ build artefacts: gitignored output, not source (#419)
   "web/build/**", "web/.svelte-kit/**", "web/.preview/**", "web/test-results/**", "coverage/**", "drizzle/**", "dist/**",
-  // Scratch prototypes (#995). AGENTS.md and the extraction handoffs send
-  // agents here to prototype, and tmp/ is gitignored, so the files are both
+  // Scratch prototypes (#995). docs/extraction-method.md and the extraction
+  // handoffs send agents here to prototype, and tmp/ is gitignored, so the files are both
   // expected to exist and expected to rot — they import modules that have
   // since been refactored. Checking them meant that following the
   // instructions broke the fast suite for the next session, which then read

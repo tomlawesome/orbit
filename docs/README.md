@@ -62,8 +62,8 @@ has the friendly introduction; these pages are the detail behind it.
 
 ## Testing and development
 
-- [Testing Orbit](testing.md): the test commands, and setting up a local
-  development stack.
+- [Testing Orbit](testing.md): the test commands, setting up a local
+  development stack, the local harnesses and the local traps.
 - [Quality strategy](quality-strategy.md): the test layers, CI lanes and the
   definition of done.
 - [Engineering baseline](engineering-baseline.md): the dated evidence of what
@@ -72,3 +72,6 @@ has the friendly introduction; these pages are the detail behind it.
   status lines.
 - [Private local evaluation](private-eval.md): scoring extraction against
   your own documents, entirely on your machine.
+- [Extraction method](extraction-method.md): how extraction work is done and
+  measured, and the rulings behind it.
+- [Implementation plan](implementation-plan.md): the phased roadmap.
