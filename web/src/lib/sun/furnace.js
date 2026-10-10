@@ -18,6 +18,7 @@
  * `body.dispersing`), which neither of the first two notices (#1299).
  */
 import { gpu } from "$lib/flight/fitness.js";
+import { THEME_TABLE } from "$lib/theme.js";
 
 /* The disc's radius in dial units (the 380-unit dial). Today's size; the
    owner has not ruled on the sample's 9.5 (round-2 README, "For the owner
@@ -36,12 +37,11 @@ export const FURNACE = {
   dawn: { light: 1, expo: 1.0, limb: "#a8420c", mid: "#e18a34", core: "#f3b060", rim: "#7e2c0a", c0: "#000000", c1: "#000000", c2: "#000000", haze: "#eda253" },
   retrograde: { light: 0, expo: 1.05, limb: "#c81e96", mid: "#ff4fd8", core: "#fff0fb", rim: "#4fe3ff", c0: "#ffd9f5", c1: "#ff4fd8", c2: "#6a3cff", haze: "#000000" },
 };
-/* After dark and clouds follow star chart and dawn respectively
-   (home-sun round-1 README, carried into round 2) */
-/** @type {Record<string, keyof typeof FURNACE>} */
-const SUN_OF_PACK = { starchart: "starchart", afterdark: "starchart", clouds: "dawn", dawn: "dawn", retrograde: "retrograde" };
+/* Which sun each pack wears is the `sun` column of theme.js's THEME_TABLE:
+   after dark and clouds follow star chart and dawn respectively (home-sun
+   round-1 README, carried into round 2) */
 /** which sun a theme pack wears @param {string | undefined | null} theme */
-export const sunOf = (theme) => SUN_OF_PACK[theme ?? ""] ?? "starchart";
+export const sunOf = (theme) => THEME_TABLE.find((row) => row.id === theme)?.sun ?? "starchart";
 
 /** @param {string} h */
 const lin = (h) => [1, 3, 5].map((i) => { const c = parseInt(h.slice(i, i + 2), 16) / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
