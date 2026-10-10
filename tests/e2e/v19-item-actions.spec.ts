@@ -214,7 +214,7 @@ test("a stale version is refused and the drawer says so", async ({ page }) => {
 
     // Refreshed, as the refusal asks, the drawer reads the truth.
     const reread = await openDrawer(page, itemId);
-    await expect(reread).toContainText("3 March 2027");
+    await expect(reread).toContainText("03 March 2027");
   } finally {
     await households.sweep(page);
   }

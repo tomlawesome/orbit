@@ -6,7 +6,8 @@ import { describe, expect, it } from "vitest";
 // there is fine — only test files are excluded. The belt page and its ring
 // geometry (band.js) retired in #1319; lib/data/belt.js stays, home's item
 // drawer reads it.
-import { beltManifestOf, documentPreviewStateOf, sizeLabel } from "../../web/src/lib/data/belt.js";
+import { beltManifestOf, documentPreviewStateOf } from "../../web/src/lib/data/belt.js";
+import { sizeLabel } from "../../web/src/lib/format.js";
 import { DOCUMENTS_FIXTURE, WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
 
 const TODAY = WORKSPACE_FIXTURE.fixtureToday; // 2026-08-13, the date every mockup was drawn against
@@ -42,7 +43,7 @@ describe("the belt's manifest", () => {
     // chart.js's bands, translated to the card and rim classes — not forked.
     expect(MANIFEST.map((row) => row.urg)).toEqual(["over", "soon", "soon", "up", "ok", "ok"]);
     expect(MANIFEST.map((row) => `${row.t} · ${row.when}`)).toEqual([
-      "T+16d · 28 Jul", "T−16d · 29 Aug", "T−22d · 04 Sept",
+      "T+16d · 28 Jul", "T−16d · 29 Aug", "T−22d · 04 Sep",
       "T−61d · 13 Oct", "T−122d · 13 Dec", "T−161d · 21 Jan",
     ]);
   });
@@ -121,7 +122,7 @@ describe("the suggestion's seat", () => {
     expect(seat.title).toBe("Home insurance renewal");
     expect(seat.days).toBe(51);
     expect(`${seat.t} · ${seat.when}`).toBe("T−51d · 03 Oct");
-    expect(seat.longWhen).toBe("3 October 2026");
+    expect(seat.longWhen).toBe("03 October 2026");
     expect(seat.status).toBe("suggested");
     expect(seat.section).toBeNull();
     expect(seat.cost).toBe(40000);

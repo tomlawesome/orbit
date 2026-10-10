@@ -92,7 +92,7 @@ describe("readItem: the desk drawer's papers open the preview", () => {
     expect((item?.documents ?? []).map((doc) => doc.meta)).toEqual([
       "added 12 Jun · 88 KB",
       "added 13 Aug · 240 KB · scanning",
-      "added 1 May · 1 MB · removed",
+      "added 01 May · 1.0 MB · removed",
       "added 12 Jun · 12 KB",
     ]);
   });
@@ -114,7 +114,7 @@ describe("readItemDocuments: the phone drawer's papers open the preview", () => 
     expect(papers.map((paper) => paper.meta)).toEqual([
       "88 KB · added 12 Jun",
       "240 KB · added 13 Aug · scanning",
-      "1 MB · added 1 May · removed",
+      "1.0 MB · added 01 May · removed",
       "12 KB · added 12 Jun",
     ]);
   });
