@@ -383,7 +383,12 @@ test.describe("on the desk", () => {
 
     /* and edited again: the second save lands too (#1319: an upsert sends
        the version it becomes, so a second edit is not refused as "changed on
-       another device") */
+       another device"). The first edit closes only once its save and the
+       reread both return, and a press on the pencil mid-edit does nothing,
+       so wait for it to close before pressing again: on a slow runner the
+       press was lost and the edit closed under the typing. */
+    await expect(pencil).toHaveAttribute("aria-pressed", "false", { timeout: 10_000 });
+    await expect(editing).toHaveCount(0);
     await pencil.click();
     await drawer.getByRole("textbox", { name: "provider" }).click();
     await page.keyboard.press("End");
