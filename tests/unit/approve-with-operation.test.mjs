@@ -27,6 +27,13 @@ beforeEach(() => {
     if (String(url).includes("/api/auth/session")) {
       return new Response(JSON.stringify({ user: { id: "u1" }, csrfToken: "token" }), { status: 200, headers: { "content-type": "application/json" } });
     }
+    // Approving reads the receipt's review first (and files an unassigned
+    // receipt under the household with a PUT); only the approval itself
+    // takes a queued answer.
+    if (String(url).includes("/api/imap-inbox/")) {
+      const review = { receipt: { draftVersion: 1 }, sections: [{ id: "s1", name: "Home" }], attachments: [] };
+      return new Response(JSON.stringify(init?.method === "PUT" ? {} : review), { status: 200, headers: { "content-type": "application/json" } });
+    }
     const next = approveAnswers.shift();
     if (!next) throw new Error(`no answer queued for ${url}`);
     approvalBodies.push(JSON.parse(String(init.body)));

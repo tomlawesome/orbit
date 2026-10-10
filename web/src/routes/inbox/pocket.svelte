@@ -2,7 +2,7 @@
   import { flip } from "svelte/animate";
   import { SvelteMap } from "svelte/reactivity";
   import { resolve } from "$app/paths";
-  import { approveReceipt, dismissReceipt, readInboxScreen } from "$lib/data/workspace.js";
+  import { approveWithOperation, dismissReceipt, readInboxScreen } from "$lib/data/workspace.js";
   import { ago, agoLong } from "$lib/format.js";
   import { receiptWords } from "$lib/data/metadata-status.js";
   import FailedRow from "$lib/pocket/FailedRow.svelte";
@@ -54,7 +54,7 @@
   let busyAct = $state(null);
   /** Per receipt: the red line under its pills (§1.13), until the next try. */
   const problems = new SvelteMap();
-  /** One operation id per receipt across retries (approveReceipt's contract). */
+  /** One operation id per receipt across retries (approveWithOperation's contract). */
   const operationIds = new SvelteMap();
   /** How each departing card leaves: "filed" into the orbit, or "burn". */
   const exits = new SvelteMap();
@@ -96,13 +96,11 @@
          so one armed to approve is always found. */
       const suggestion = /** @type {import('$lib/data/workspace.js').ReceiptSuggestion} */ (
         need().suggestions.find((one) => one.receiptId === receipt.id));
-      if (!operationIds.has(receipt.id)) operationIds.set(receipt.id, crypto.randomUUID());
-      const result = await approveReceipt(suggestion, need().primary, operationIds.get(receipt.id), amended, sectionId);
-      if (result.outcome === "partial_success") {
-        problems.set(receipt.id, "The item is recorded, but its documents need another try: add it again to finish.");
+      const result = await approveWithOperation(suggestion, operationIds, need().primary, amended, sectionId);
+      if ("partial" in result) {
+        problems.set(receipt.id, result.message);
         return false;
       }
-      operationIds.delete(receipt.id);
       exits.set(receipt.id, "filed");
       wake(`added to your orbit · ${amended?.title ?? titleOf(receipt)}`);
       await reload();

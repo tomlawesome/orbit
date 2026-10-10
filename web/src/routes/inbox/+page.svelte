@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { readInboxScreen, approveReceipt, dismissReceipt } from "$lib/data/workspace.js";
+  import { readInboxScreen, approveWithOperation, dismissReceipt } from "$lib/data/workspace.js";
   import { ago, agoLong } from "$lib/format.js";
   import { LOCKED, fieldState, receiptWords } from "$lib/data/metadata-status.js";
   import { papersOf, readingsOf } from "$lib/pocket/review.js";
@@ -55,16 +55,14 @@
     try {
       if (act === "approve") {
         const found = need().suggestions.find((one) => one.receiptId === receipt.id);
-        if (!operationIds.has(receipt.id)) operationIds.set(receipt.id, crypto.randomUUID());
         /* The review lane's own receipts are exactly receiptSuggestionsOf's
            input, so a receipt armed to approve is always found here. */
         const suggestion = /** @type {import('$lib/data/workspace.js').ReceiptSuggestion} */ (found);
-        const result = await approveReceipt(suggestion, need().primary, operationIds.get(receipt.id));
-        if (result.outcome === "partial_success") {
-          problem = "The item is recorded, but its documents need another try — tap again to finish.";
+        const result = await approveWithOperation(suggestion, operationIds, need().primary);
+        if ("partial" in result) {
+          problem = result.message;
           return;
         }
-        operationIds.delete(receipt.id);
       } else {
         await dismissReceipt(receipt.id);
       }

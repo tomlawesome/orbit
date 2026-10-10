@@ -16,7 +16,7 @@
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { WorkspaceError, applyCommand, approveReceipt, dueDateIn, attachItemDocument, dismissReceipt, householdElsewhereFor, readHome, readHomeIn, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut } from "$lib/data/workspace.js";
+  import { WorkspaceError, applyCommand, approveWithOperation, dueDateIn, attachItemDocument, dismissReceipt, householdElsewhereFor, readHome, readHomeIn, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut } from "$lib/data/workspace.js";
   import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
   import { createHeldCompletion } from "$lib/data/held-completion.js";
   import { createArm } from "$lib/pocket/arm.js";
@@ -951,9 +951,7 @@
     if (!suggestion) throw new Error("not added — this suggestion has gone");
     const { item: amended, sectionId } = amendedOf(item, edits);
     const problem = await amendReceipt(suggestion, amended, sectionId);
-    if (problem?.startsWith("The item is recorded")) {
-      throw new Error("not finished — the item is recorded, but its documents need another try: add it again");
-    }
+    if (problem && typeof problem === "object") throw new Error(problem.message);
     if (problem) throw new Error(`not added — ${problem}`);
   }
   async function addAmended() {
@@ -979,15 +977,13 @@
     busyReceipt = suggestion.id;
     try {
       if (act === "approve") {
-        if (!operationIds.has(suggestion.receiptId)) operationIds.set(suggestion.receiptId, crypto.randomUUID());
-        const result = await approveReceipt(suggestion, asView(view).primary, operationIds.get(suggestion.receiptId));
-        if (result.outcome === "partial_success") {
+        const result = await approveWithOperation(suggestion, operationIds, asView(view).primary);
+        if ("partial" in result) {
           /* The item exists but its documents didn't make it: the SAME
              operation id retries the SAME body — never a second item. */
-          mailProblem = "The item is recorded, but its documents need another try — tap again to finish.";
+          mailProblem = result.message;
           return;
         }
-        operationIds.delete(suggestion.receiptId);
       } else {
         await dismissReceipt(suggestion.receiptId);
       }
@@ -1008,18 +1004,14 @@
    * @param {import('$lib/data/workspace.js').ReceiptSuggestion} suggestion
    * @param {import('$lib/data/workspace.js').ItemProposal} item
    * @param {string | null} sectionId
-   * @returns {Promise<string | null>}
+   * @returns {Promise<string | { partial: true, message: string } | null>}
    */
   async function amendReceipt(suggestion, item, sectionId) {
     if (!suggestion.receiptId) return "not added — try again";
     busyReceipt = suggestion.id;
     try {
-      if (!operationIds.has(suggestion.receiptId)) operationIds.set(suggestion.receiptId, crypto.randomUUID());
-      const result = await approveReceipt(suggestion, asView(view).primary, operationIds.get(suggestion.receiptId), item, sectionId);
-      if (result.outcome === "partial_success") {
-        return "The item is recorded, but its documents need another try — add it again to finish.";
-      }
-      operationIds.delete(suggestion.receiptId);
+      const result = await approveWithOperation(suggestion, operationIds, asView(view).primary, item, sectionId);
+      if ("partial" in result) return result;
       view = await readHome();
       return null;
     } catch (error) {
