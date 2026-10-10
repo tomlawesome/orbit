@@ -545,7 +545,10 @@
     "due-soon": "hh-amber",
     upcoming: "hh-sky",
     ok: "hh-jade",
-    unscheduled: "hh-jade",
+    // No date, or finished: neither fine nor urgent, so neutral ink like the
+    // dot (lib/data/bands.js), quieter than jade (#1341).
+    unscheduled: "hh-quiet",
+    ended: "hh-quiet",
   };
 
   /** @type {HTMLDivElement | null} */
@@ -758,6 +761,7 @@
       <radialGradient id="hh-amber"><stop offset="0" style="stop-color:var(--warm)" stop-opacity=".20"/><stop offset=".55" style="stop-color:var(--warm)" stop-opacity=".07"/><stop offset="1" style="stop-color:var(--warm)" stop-opacity="0"/></radialGradient>
       <radialGradient id="hh-sky"><stop offset="0" style="stop-color:var(--upcoming)" stop-opacity=".18"/><stop offset=".55" style="stop-color:var(--upcoming)" stop-opacity=".06"/><stop offset="1" style="stop-color:var(--upcoming)" stop-opacity="0"/></radialGradient>
       <radialGradient id="hh-jade"><stop offset="0" style="stop-color:var(--ok)" stop-opacity=".15"/><stop offset=".55" style="stop-color:var(--ok)" stop-opacity=".05"/><stop offset="1" style="stop-color:var(--ok)" stop-opacity="0"/></radialGradient>
+      <radialGradient id="hh-quiet"><stop offset="0" style="stop-color:var(--ink-mid)" stop-opacity=".12"/><stop offset=".55" style="stop-color:var(--ink-mid)" stop-opacity=".04"/><stop offset="1" style="stop-color:var(--ink-mid)" stop-opacity="0"/></radialGradient>
       <radialGradient id="hh-sun"><stop offset="0" style="stop-color:var(--sun)" stop-opacity=".10"/><stop offset=".4" style="stop-color:var(--sun)" stop-opacity=".032"/><stop offset="1" style="stop-color:var(--sun)" stop-opacity="0"/></radialGradient>
     </defs>
     {#if room}
