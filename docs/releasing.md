@@ -162,6 +162,15 @@ Until this setup exists, `sign_evidence` either finds no runner (no
 `orbit-signing` runner registered) or stops, naming the missing file in
 `/etc/orbit-signing`, and nothing publishes.
 
+`sign_evidence` installs and downloads nothing while the key is mounted
+(#1368). Its tools, cosign included, come baked into `$ORBIT_SIGNING_IMAGE`,
+which ai/orbit-base-image's `publish_signing` builds and scans; pin the
+digest from that job's `published-signing-digest.txt`. If the image's cosign
+is not exactly the version `scripts/ci/ensure-cosign.sh` pins, the job stops
+naming both versions rather than fetching one, so a cosign bump here means
+rebuilding that image and re-pinning. Until the first publish the pin is an
+all-zero placeholder and the job fails to pull its image.
+
 **Key rotation:** generate a new pair, replace the two files on the runner
 host, commit the new `cosign.pub`. Attestations made under the old key stop
 verifying, so any digest not yet published must go through validation again
