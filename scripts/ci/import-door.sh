@@ -22,15 +22,19 @@
 #      upstream that leaves assets/door/ alone therefore changes nothing here.
 #   3. Otherwise replaces web/src/lib/door/ with the new copy (files gone
 #      upstream are deleted), rewrites web/src/lib/door.upstream.json
-#      ({ project, ref, commit, path, tree }), commits both, pushes branch
-#      chore/door-import-<short sha> and opens a merge request into `dev`
-#      naming the upstream commit.
-#   4. Only after the new merge request exists, closes every older open
-#      door-import merge request and deletes its branch, so there is never a
-#      moment with none open and never more than one at rest.
+#      ({ project, ref, commit, path, tree }) and commits both.
+#   4. If branch chore/door-import-<short sha> already exists on Orbit (asked
+#      with `git ls-remote`), a merge request for this upstream commit was
+#      already proposed: exit 0, open nothing. Otherwise it pushes that branch
+#      with GitLab push options that open the merge request into `dev`, titled
+#      with the upstream commit.
 #
-# A failure to read upstream, push or call the API exits 2 and fails the job.
-# Finding the door changed is not a failure: it is the merge request.
+# It never lists, closes or comments on merge requests, and never deletes a
+# branch: older import merge requests and branches are closed by hand (owner
+# decision 12a on #1371). It makes no API call at all.
+#
+# A failure to read upstream or to push exits 2 and fails the job. Finding the
+# door changed is not a failure: it is the merge request.
 #
 # Credentials, narrowed as far as they go (same split as repin-base-image.sh):
 #
@@ -40,13 +44,12 @@
 #   and the user the schedule runs as can read that project. It is only sent
 #   when the upstream URL is https; it is never sent to anywhere else.
 #
-#   Pushing the branch and opening and closing merge requests cannot use
-#   CI_JOB_TOKEN (read-only Merge Requests API access), so that half needs
-#   DOOR_IMPORT_TOKEN: a project access token on ai/orbit ONLY (`api` scope,
-#   Developer role), masked and protected. See the door_import job in
-#   .gitlab-ci.yml. Neither token is ever printed or placed in argv: each is
-#   written to a mode-600 file with a builtin and read by curl (`--header
-#   @file`) or git (a credential-store file) from there.
+#   Reading Orbit's branch list and pushing the branch need DOOR_IMPORT_TOKEN:
+#   a project access token on ai/orbit ONLY, role Developer, scope
+#   `write_repository` alone (no `api`), with an expiry date. See the
+#   door_import job in .gitlab-ci.yml. Neither token is ever printed or placed
+#   in argv: each is written to a mode-600 file with a builtin and read by git
+#   (a credential-store file) from there.
 #
 # Usage:
 #   scripts/ci/import-door.sh
@@ -57,20 +60,19 @@
 # Inputs (environment):
 #   DOOR_IMPORT_TOKEN         Required. The project access token above.
 #   CI_JOB_TOKEN              GitLab predefined; reads ai/orbit-site.
-#   CI_API_V4_URL             GitLab predefined; the API base URL.
-#   CI_PROJECT_ID             GitLab predefined; this project's numeric id.
 #   CI_PROJECT_PATH           GitLab predefined; e.g. ai/orbit.
 #   CI_SERVER_URL             GitLab predefined; the push URL is built from it
 #                             and CI_PROJECT_PATH.
 #   CI_SERVER_HOST            GitLab predefined; the host the push credential
 #                             is for. Defaults to CI_SERVER_URL's host.
-#   CI_PIPELINE_URL           GitLab predefined; recorded in the merge request.
+#   CI_COMMIT_BRANCH          GitLab predefined; must equal the target branch.
 #   DOOR_IMPORT_UPSTREAM_URL  Testing seam: where to fetch orbit-site from.
 #                             Defaults to
 #                             https://gitlab.tomlawson.io/ai/orbit-site.git.
 #   DOOR_IMPORT_PUSH_URL      Testing seam: where to push the branch. Defaults
 #                             to $CI_SERVER_URL/$CI_PROJECT_PATH.git.
-#   DOOR_IMPORT_TARGET_BRANCH The merge request's target. Defaults to `dev`.
+#   DOOR_IMPORT_TARGET_BRANCH The merge request's target, and the only branch
+#                             this runs on. Defaults to `dev`.
 set -Eeuo pipefail
 # Forced off regardless of how this script is invoked (a stray `bash -x`, an
 # inherited `SHELLOPTS`): xtrace prints each command after expansion and would
@@ -130,17 +132,19 @@ new_scratch_dir() {
   printf '%s' "$d"
 }
 
-json_field() {
-  node -e 'let input = ""; process.stdin.on("data", (chunk) => { input += chunk; }).on("end", () => { const value = new Function("input", process.argv[2])(input); process.stdout.write(String(value ?? "")); });' -- "$1" "$2"
-}
-
 : "${DOOR_IMPORT_TOKEN:?DOOR_IMPORT_TOKEN is not set. See the door_import job in .gitlab-ci.yml for the exact grant this needs.}"
-: "${CI_API_V4_URL:?CI_API_V4_URL is not set; this must run inside a GitLab CI job}"
-: "${CI_PROJECT_ID:?CI_PROJECT_ID is not set; this must run inside a GitLab CI job}"
 : "${CI_PROJECT_PATH:?CI_PROJECT_PATH is not set; this must run inside a GitLab CI job}"
 : "${CI_SERVER_URL:?CI_SERVER_URL is not set; this must run inside a GitLab CI job}"
 server_host="${CI_SERVER_HOST:-${CI_SERVER_URL#*://}}"
 server_host="${server_host%%/*}"
+
+# Runs on the target branch only. The token is pushed with and the commit is
+# made on top of whatever this checkout holds, so a pipeline on any other ref
+# (a run by hand, a schedule pointed at a feature branch) would import on top
+# of work that is not what the merge request is going to merge into.
+if [[ "${CI_COMMIT_BRANCH:-}" != "$target_branch" ]]; then
+  fail "refusing to run on '${CI_COMMIT_BRANCH:-<no branch>}': the door import runs only on ${target_branch} (CI_COMMIT_BRANCH). Point the schedule at ${target_branch}."
+fi
 
 # --- Read upstream -----------------------------------------------------------
 #
@@ -158,7 +162,9 @@ isolated_git() {
 }
 
 fetch_url="$upstream_url"
-fetch_config=(-c credential.helper=)
+# fsckObjects refuses a malformed upstream tree (a `..` or `.git` entry, a bad
+# object) at fetch time instead of trusting it.
+fetch_config=(-c credential.helper= -c transfer.fsckObjects=true)
 if [[ "$upstream_url" == https://* && -n "${CI_JOB_TOKEN:-}" ]]; then
   # The user name goes in the URL (it is not a secret) so git asks the store
   # for exactly this entry; the token stays in the file.
@@ -187,7 +193,18 @@ while IFS= read -r -d '' entry; do
   if [[ "$type" != "blob" || ( "$mode" != "100644" && "$mode" != "100755" ) ]]; then
     fail "${upstream_path}/${path#"${upstream_path}/"} is a ${type} (mode ${mode}); the door folder may hold plain files only."
   fi
+  [[ "$path" == "${upstream_path}/"* ]] || fail "upstream path '${path}' is outside ${upstream_path}/"
   rel="${path#"${upstream_path}/"}"
+  # A path component that is empty, `.` or `..` would write outside the scratch
+  # copy (into this checkout's .git/hooks, say, which runs at the commit below
+  # with the token in the environment); `.git` would plant a nested repository.
+  # git itself will not create such a tree, but upstream is not trusted to have
+  # used git to build it.
+  case "/${rel,,}/" in
+    */../* | */./* | *//* | */.git/*)
+      fail "refusing upstream path '${path}': a component of it is empty, '.', '..' or '.git'."
+      ;;
+  esac
   mkdir -p "$work_dir/new-door/$(dirname "$rel")"
   isolated_git -C "$work_dir/upstream" cat-file blob "$object" > "$work_dir/new-door/$rel"
   file_count=$((file_count + 1))
@@ -217,14 +234,36 @@ current_tree=""
 if [[ -d "$copy_dir" ]]; then
   current_tree="$(door_tree_hash "$copy_dir" 2> /dev/null || true)"
 fi
+branch_name="${branch_prefix}${short_sha}"
 if [[ "$recorded_tree" == "$new_tree" && "$current_tree" == "$new_tree" ]]; then
   log "the door is unchanged upstream (tree ${new_tree}); no branch, no merge request."
   exit 0
 fi
 
+# --- Has this commit been proposed already? ---------------------------------
+#
+# The token never goes in a URL, where it would sit in this process's argv for
+# the life of the git command; git reads it from a mode-600 credential-store
+# file instead, from a scratch repository with no config of its own and a HOME
+# nothing else has written to, exactly as repin-base-image.sh does (#1081).
+credential_file="$(new_secret_file)"
+printf 'https://oauth2:%s@%s\n' "$DOOR_IMPORT_TOKEN" "$server_host" > "$credential_file"
+push_url="${DOOR_IMPORT_PUSH_URL:-${CI_SERVER_URL%/}/${CI_PROJECT_PATH}.git}"
+push_home="$(new_scratch_dir)"
+push_git() {
+  GIT_TERMINAL_PROMPT=0 HOME="$push_home" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+    git -c credential.helper= -c "credential.helper=store --file=${credential_file}" "$@"
+}
+
+existing_branch="$(push_git ls-remote --heads "$push_url" "refs/heads/${branch_name}")" ||
+  fail "could not list the branches of ${CI_PROJECT_PATH}. Check DOOR_IMPORT_TOKEN's scope (write_repository) and role (Developer)."
+if [[ -n "$existing_branch" ]]; then
+  log "${branch_name} already exists on ${CI_PROJECT_PATH}: this upstream commit was proposed already; opening nothing."
+  exit 0
+fi
+
 # --- Commit, push, and open the merge request --------------------------------
 
-branch_name="${branch_prefix}${short_sha}"
 log "the door changed; proposing ${branch_name}"
 
 git -C "$repo_dir" config user.email "door-import@ci.local"
@@ -240,6 +279,18 @@ node -e '
 ' "$record_file" "$upstream_project" "$upstream_ref" "$upstream_commit" "$upstream_path" "$new_tree"
 
 git -C "$repo_dir" add -A -- "$copy_rel" "$record_rel"
+# `git add` skips, without a word, anything .gitignore matches. A copy that is
+# not all committed would leave door.upstream.json's tree hash out of step with
+# what the merge request carries, and `fast` would fail on it for ever.
+left_out="$(
+  comm -z -23 \
+    <(cd "$repo_dir" && find "$copy_rel" "$record_rel" -type f -print0 | LC_ALL=C sort -z) \
+    <(git -C "$repo_dir" ls-files -z -- "$copy_rel" "$record_rel" | LC_ALL=C sort -z) |
+    tr '\0' '\n'
+)"
+if [[ -n "$left_out" ]]; then
+  fail "these imported files are ignored by git (see .gitignore) and would be left out of the commit: $(printf '%s' "$left_out" | tr '\n' ' ')"
+fi
 if git -C "$repo_dir" diff --cached --quiet; then
   log "nothing differs in git after the copy (a path is ignored?); no branch, no merge request."
   exit 0
@@ -252,18 +303,11 @@ ${record_rel}. The copy is never edited here; scripts/ci/check-door-unchanged.sh
 fails if it is.
 
 Opened automatically by the door_import schedule (#1371). Nothing here
-merges itself."
+merges itself.
 
-# The token never goes in the push URL, where it would sit in this process's
-# argv for the life of the push; git reads it from a mode-600 credential-store
-# file instead, from a scratch repository with no config of its own and a HOME
-# nothing else has written to, exactly as repin-base-image.sh does (#1081).
-credential_file="$(new_secret_file)"
-printf 'https://oauth2:%s@%s\n' "$DOOR_IMPORT_TOKEN" "$server_host" > "$credential_file"
-push_url="${DOOR_IMPORT_PUSH_URL:-${CI_SERVER_URL%/}/${CI_PROJECT_PATH}.git}"
+Cut: risk -- a vendored copy of another project's code is a dependency change and belongs on its own."
 
 push_repo="$(new_scratch_dir)"
-push_home="$(new_scratch_dir)"
 git init -q "$push_repo"
 # The CI checkout is a shallow clone, and a push out of one is a "shallow
 # update" the receiving side refuses by default (repin pipeline 1553).
@@ -272,83 +316,15 @@ git -C "$push_repo" config receive.shallowUpdate true
 # of it, so git's ownership check never runs against the checkout (repin
 # pipeline 1547).
 git -C "$repo_dir" push -q "$push_repo" "refs/heads/${branch_name}:refs/heads/${branch_name}"
-GIT_TERMINAL_PROMPT=0 HOME="$push_home" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
-git -C "$push_repo" \
-  -c credential.helper= \
-  -c "credential.helper=store --file=${credential_file}" \
-  push -q --force "$push_url" "refs/heads/${branch_name}:refs/heads/${branch_name}" \
-  || fail "the push of ${branch_name} was refused or failed (exit $?). Check DOOR_IMPORT_TOKEN's scope and role on ai/orbit."
-log "pushed ${branch_name}"
-
-header_file="$(new_secret_file)"
-body_file="$(new_secret_file)"
-printf 'PRIVATE-TOKEN: %s\n' "$DOOR_IMPORT_TOKEN" > "$header_file"
-api_call() { curl --silent --show-error --fail --location --max-time 60 --header @"$header_file" "$@"; }
-api="${CI_API_V4_URL%/}/projects/${CI_PROJECT_ID}"
-
-# Every open door-import merge request as "iid<TAB>source branch" lines. Read
-# before the new one is created, so the new one can never be in the list.
-open_imports="$(
-  api_call -G --data-urlencode "state=opened" --data-urlencode "per_page=100" "${api}/merge_requests" |
-    json_field '' "
-      return JSON.parse(input)
-        .filter((mr) => typeof mr.source_branch === 'string' && mr.source_branch.startsWith('${branch_prefix}'))
-        .map((mr) => mr.iid + '\\t' + mr.source_branch)
-        .join('\\n');
-    "
-)" || fail "could not list open merge requests"
-
-existing_iid=""
-while IFS=$'\t' read -r iid source_branch; do
-  [[ "$source_branch" == "$branch_name" ]] && existing_iid="$iid"
-done <<< "$open_imports"
-
-if [[ -n "$existing_iid" ]]; then
-  log "merge request !${existing_iid} is already open from ${branch_name}; the push above updated it."
-  new_iid="$existing_iid"
-else
-  {
-    printf 'Reported by the `door_import` GitLab job.\n'
-    printf 'Run: %s\n\n' "${CI_PIPELINE_URL:-<unknown>}"
-    printf 'Imports orbit-site'"'"'s shared door folder, `%s/`, from `%s` at\n' "$upstream_path" "$upstream_ref"
-    printf '`%s` into `%s/`, byte for byte, and records it in\n' "$upstream_commit" "$copy_rel"
-    printf '`%s` (tree `%s`). Files gone upstream are deleted.\n\n' "$record_rel" "$new_tree"
-    printf 'The copy is never edited here: `scripts/ci/check-door-unchanged.sh` fails if it is. Changes\n'
-    printf 'to the door are made in ai/orbit-site (ADR-0001 there) and arrive through this import.\n\n'
-    printf 'Nothing here merges itself. The normal required checks still gate this merge request.\n\n'
-    printf 'Cut: risk -- a vendored copy of another project'"'"'s code is a dependency change and belongs on its own.\n'
-  } > "$body_file"
-  new_iid="$(
-    api_call -X POST \
-      --data-urlencode "source_branch=${branch_name}" \
-      --data-urlencode "target_branch=${target_branch}" \
-      --data-urlencode "title=Import the door from ${upstream_project} ${short_sha}" \
-      --data-urlencode "description@${body_file}" \
-      --data-urlencode "labels=dependencies" \
-      --data-urlencode "remove_source_branch=true" \
-      "${api}/merge_requests" |
-      json_field '' 'return JSON.parse(input).iid ?? "";'
-  )"
-  [[ -n "$new_iid" ]] || fail "merge request creation did not return an iid"
-  log "opened merge request !${new_iid}"
-fi
-
-# --- Supersede the older door-import merge requests --------------------------
-#
-# After the new one exists, never before. A failure to tidy one old merge
-# request is logged and does not fail the run: the new proposal is already
-# open, and the next run tries again.
-while IFS=$'\t' read -r iid source_branch; do
-  [[ -n "$iid" && "$source_branch" != "$branch_name" ]] || continue
-  encoded_branch="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$source_branch")"
-  api_call -X POST --data-urlencode "body=Superseded by !${new_iid} (${branch_name})." "${api}/merge_requests/${iid}/notes" > /dev/null ||
-    log "could not comment on !${iid}; continuing"
-  if api_call -X PUT --data-urlencode "state_event=close" "${api}/merge_requests/${iid}" > /dev/null; then
-    log "closed superseded merge request !${iid}"
-  else
-    log "could not close !${iid}; continuing"
-    continue
-  fi
-  api_call -X DELETE "${api}/repository/branches/${encoded_branch}" > /dev/null ||
-    log "could not delete branch ${source_branch}; continuing"
-done <<< "$open_imports"
+# The push options ask GitLab to open the merge request itself, so this needs
+# no API call and no `api` scope. No --force: the branch was just seen not to
+# exist, and an existing one is never overwritten.
+push_git -C "$push_repo" push -q \
+  -o merge_request.create \
+  -o "merge_request.target=${target_branch}" \
+  -o "merge_request.title=Import the door from ${upstream_project} ${short_sha}" \
+  -o "merge_request.label=dependencies" \
+  -o merge_request.remove_source_branch \
+  "$push_url" "refs/heads/${branch_name}:refs/heads/${branch_name}" ||
+  fail "the push of ${branch_name} was refused or failed. Check DOOR_IMPORT_TOKEN's scope (write_repository) and role (Developer) on ${CI_PROJECT_PATH}."
+log "pushed ${branch_name}; GitLab opens the merge request into ${target_branch} from the push options."
