@@ -234,13 +234,6 @@ page's URL at failure, which this one has to infer.
 
 - 2026-09-27 · 68c86337 (the `dev` merge of !995) · pipeline 1734 / smoke (job 25072) · failed after 20.5s. Passed in pipeline 1740 on d97cb335 (!997), whose diff touches only mail-in failure reasons and cannot reach the signed-out screens. First sighting; an issue on the third.
 
-## fidelity: `item matches its approved appearance` — over budget under load (#1163)
-
-- 2026-09-27 · 68c86337 (the `dev` merge of !995) · pipeline 1734 / fidelity (job 25068) · 1730 pixels differ (0.1081%) against the 0.1% budget. Passed in pipeline 1740 on d97cb335 (!997), which does not touch the item screen. Matches the known load sensitivity: the same screen measured 0.1056% and 0.115% with other runs on the host and 0.04% on a quiet one. First sighting in CI; an issue on the third.
-- 2026-09-27 · 667f28d8 (the M14 desk batch, which does not touch the item screen) · local fidelity gate in the pinned Playwright image, alongside the pocket-measure run and other agents' builds · 1689 pixels differ (0.1056%). Rerun alone in the same image: 645 pixels (0.0403%), passed. Second sighting.
-- 2026-09-27 · 7bf02998 (`feature/1161-unrolled-search`, desk home only) · local fidelity gate in the pinned Playwright image, beside pocket-measure · 1689 pixels (0.1056%); rerun alone: 678 pixels (0.0424%), passed. Third sighting: filed as #1163.
-- 2026-09-27 · 1ec4047a (!999; its shared-code changes are `/auth/error` states and a settings data call, neither on the item screen) · pipeline 1773 / fidelity (job 25919) · 1820 pixels (0.1138%). Job retried.
-
 ## fidelity: pocket-home-drawers.spec.js:73 "the dial arrives on a forward arrival, never on Back" (#1164)
 
 - 2026-09-27 · 667f28d8 (the M14 desk batch; its only home change is the desk's `+page.svelte` search wiring, not the pocket dial) · local fidelity gate in the pinned Playwright image on a loaded host · after Back to /home, `expect(dial).not.toHaveClass(/arrive/)` found no dial element within the timeout. Rerun alone in the same image straight after: passed in 4.8s. First sighting.
