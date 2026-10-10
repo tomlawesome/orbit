@@ -2,8 +2,8 @@
 # Shared preflight (#536): stops a disposable test or acceptance Compose run
 # from silently attaching to a project that is already running.
 #
-# AGENTS.md's "Compose commands attach to whatever project .env-orbit names"
-# trap is exactly this: `docker compose --env-file .env-orbit ...` with no
+# The docs/testing.md "Local traps" entry "Compose commands attach to whatever
+# project .env-orbit names" is exactly this: `docker compose --env-file .env-orbit ...` with no
 # explicit `-p` adopts whichever project Compose resolves -- the environment
 # variable, else the value in that file, else docker-compose.yml's own
 # top-level `name: orbit`, else the current directory's name -- and therefore

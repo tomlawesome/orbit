@@ -33,7 +33,7 @@
  *
  * One consequence to expect locally: a local pnpm command writes an
  * `@pnpm/exe` block into pnpm-lock.yaml (the pnpm 11 -> 12.3.4 handoff, #901,
- * see AGENTS.md), and `git checkout -- pnpm-lock.yaml` takes it back out
+ * see docs/testing.md "Local traps"), and `git checkout -- pnpm-lock.yaml` takes it back out
  * again, so the lockfile's content usually differs between a build and the
  * next run. That is a real difference by the rule above, and the next run
  * rebuilds -- exactly what it did before this existed, so nothing is lost. CI

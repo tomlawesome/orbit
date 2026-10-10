@@ -1,560 +1,170 @@
 # Orbit agent instructions
 
-These repository instructions apply to every automated agent working on Orbit,
-alongside the global agent instructions.
+These instructions apply to every automated agent working on Orbit, alongside
+the global agent instructions. Procedure lives in scripts, reasoning in ADRs and
+docs; this file keeps project rules and one-line traps.
 
 ## Working model
 
-Architecture and security decisions are recorded in ADRs; the durable
-governance decision is
-[ADR-0011](docs/adr/0011-operator-experience-as-product.md).
+Architecture and security decisions are recorded in ADRs; the governance
+decision is [ADR-0011](docs/adr/0011-operator-experience-as-product.md).
 
-`ai/orbit-base-image` (GitLab) is part of this project, not a sibling: standing
-authorisation to raise issues and make changes there (owner, 2026-08-30).
+**One project, not siblings** ([ADR-0036](docs/adr/0036-the-orbit-family-is-one-project.md)).
+Orbit, `ai/orbit-base-image`, `ai/orbit-launcher` (project 50) and
+`ai/orbit-site` (project 57) are one project in four repositories. When one
+needs something from another, or something there is not working, act on it
+without asking: file the issue, tell that session. Anything describing Orbit to
+the public (a feature claim, an install step, a screenshot) belongs on the site,
+so check it when Orbit's behaviour changes. The launcher and site point here for
+this rule.
 
-`ai/orbit-launcher` (GitLab, project 50) is part of this project too, not a
-sibling (owner, 2026-10-03). When one needs something from the other, or
-something there is not working as intended, act on it -- file the issue,
-tell the launcher session -- without asking first. Asking costs the owner a
-round trip on a question with only one answer.
+A change to the contract between `install.sh` and the launcher lands in one
+order: here on `dev` first, the launcher bumps its Orbit pin to that commit, the
+launcher releases, then `scripts/bump-launcher-pin.sh` here
+(`docs/releasing.md`, "The launcher and signed release manifest").
 
-`ai/orbit-site` (GitLab, project 57; GitHub Pages serves its mirror) is
-Orbit's public website, and part of this project too, not a sibling: Orbit,
-orbit-launcher and orbit-site are one project, split into three repositories
-for development reasons (owner, 2026-10-10). When one needs something from
-the other, act on it as with the launcher -- file the issue, tell the site
-session -- without asking first. Anything that describes Orbit to the public
--- a feature claim, an install step, a screenshot -- belongs there, so check
-it when Orbit's behaviour changes. The door is designed there and Orbit
-pulls it in (#1371; orbit-site ADR-0001).
+Non-commercial data and dependencies are acceptable here
+([ADR-0037](docs/adr/0037-non-commercial-data-and-dependencies-acceptable.md)).
 
 ## Where the work lives
 
-Orbit moved to the owner's own GitLab on 2026-09-04 (#801). **`ai/orbit` on
-`gitlab.tomlawson.io`, project id 49, is the source of truth**: issues,
-merge requests and the CI that merges wait on. GitHub is a push mirror
-(GitLab Settings → Repository → Mirroring, owner-managed) kept for CodeQL,
-secret scanning and a second CI opinion; a red GitHub run never blocks a
-GitLab merge. GHCR stays where operators pull from: `record_image` pushes
-the tested image to `registry.tomlawson.io` and records its digest,
-`sign_evidence` attests it from the dedicated signing runner,
-`publish_channel` adds the channel tag (#661, ADR-0020), and
-`.github/workflows/publish-from-gitlab.yml` copies that digest to GHCR when
-the mirror delivers the `preview` push -- nothing built on GitHub reaches a
-registry. Issue and MR numbers are GitLab's and do not match the GitHub ones.
+**`ai/orbit` on `gitlab.tomlawson.io`, project 49, is the source of truth**:
+issues, milestones, merge requests and the CI that merges wait on. GitHub is a
+owner-managed push mirror (CodeQL, secret scanning, a second CI opinion); a red GitHub run
+never blocks a GitLab merge, and its frozen issues are stale. Issue and MR
+numbers are GitLab's. Operators pull from GHCR; GitLab publishes there
+(`docs/releasing.md`).
 
-Every `glab` call needs the same three settings, because the default `glab`
-config points at gitlab.com and `GITLAB_TOKEN` in the environment overrides
-the stored credential:
+- Credentials, the `glab` and `git push` incantations: the github-credentials
+  skill. Host lookups fail now and then, so retry two or three times before
+  treating one failure as an answer.
+- **Check the pipeline's trigger user after a push.** If the `git` command lacks
+  the same env prefix as the `glab` calls, the push goes out as Codex, the api
+  still answers Claude, and only `glab api projects/49/pipelines/<id>` (`.user`)
+  shows it.
+- `glab issue create` has no `-F`: pass the body with `-d "$(cat file)"`. Notes:
+  `glab api -X POST projects/49/issues/<iid>/notes -f body=…`.
+- What a pipeline runs, the `ci: acceptance` and `ci: rerun` labels, reuse,
+  runners and Renovate: `docs/quality-strategy.md` ("Who starts a pipeline")
+  and [ADR-0028](docs/adr/0028-ci-reuse-keyed-on-tested-artefact.md). Release
+  status is the milestone and `docs/releasing.md`.
+- A Renovate-flagged stale pin on `main` is not work: `main` is expected to be
+  far behind. Check `dev`.
 
-    env -u GITLAB_TOKEN GLAB_CONFIG_DIR=/home/codex/.config/glab-claude \
-      GITLAB_HOST=gitlab.tomlawson.io glab <command>
+## Delivery rules
 
-Codex uses its own `GLAB_CONFIG_DIR`; see the github-credentials skill. Host
-lookups fail now and then, so wrap calls in two or three tries rather than
-treating one failure as an answer. Pushing needs the credential helper
-explicitly, because git does not read `glab`'s config -- and needs the same
-env prefix on the `git` command itself:
+- Run fast checks before container and browser checks; those suites cost
+  minutes each and the fast suite catches most of what they would.
+- Build every feature and fix for both the desk and the phone (pocket) layouts,
+  or say in the issue why one is left out. Before closing, check both: the code
+  for each, and a browser test on a desktop and a mobile project (owner,
+  2026-10-07; #1059, #1298, #1243).
+- The demo stack (`compose/docker-compose.demo.yml`) is disposable test data:
+  if it will not start, rebuild from current `dev` rather than repair it.
+- The owner cannot open files on this VM. Anything to review is hosted and
+  handed over as a clickable link; sign-off is on running code, not a
+  screenshot (`scripts/dev/test-bed.sh` header has the how).
+- Mockups and review screenshots use the app's default theme (after dark).
+- An internal test harness (labelling, evaluation page, debug view) is not
+  product UX: build it the ordinary way, no top-model design call.
 
-    env -u GITLAB_TOKEN GLAB_CONFIG_DIR=/home/codex/.config/glab-claude \
-      GITLAB_HOST=gitlab.tomlawson.io \
-      git -c credential.helper= -c 'credential.helper=!glab auth git-credential' \
-      push gitlab <branch>
+## Extraction rules
 
-The prefix is on `git`, not on the surrounding shell, because git spawns
-`glab auth git-credential` as a subprocess: it reads the environment *git* was
-given, not the one your `glab` calls used. Prefix the glab calls alone and the
-helper falls back to the default glab config, which on this host is Codex.
+Read #992 and [docs/extraction-method.md](docs/extraction-method.md) before
+touching `src/server/documents/extraction-*`.
 
-Nothing fails when that happens. The push succeeds, the commits keep their real
-author, and `glab api user` still answers Claude -- because it tests the api
-path, not the push path. The only trace is the *pipeline's trigger user*, which
-is not the merge request's author. Five branches went out as Codex on
-2026-09-07 before the owner spotted it. To check a push you have just made:
-
-    env -u GITLAB_TOKEN GLAB_CONFIG_DIR=/home/codex/.config/glab-claude \
-      GITLAB_HOST=gitlab.tomlawson.io glab api projects/49/pipelines/<id> \
-      | python3 -c "import json,sys; print(json.load(sys.stdin)['user']['username'])"
-
-`glab issue create` has no `-F`: pass a body with `-d "$(cat file)"`. Notes go
-through `glab api -X POST projects/49/issues/<iid>/notes -f body=…`.
-
-Pipelines: every pipeline pays for the risk its own diff carries. `classify`
-decides, and a merge request is no exception (#883) -- the image build and the
-whole acceptance stage run only when the diff can reach them. Two events run
-everything regardless: a push to `dev`, `preview`, `main` or `hotfix/*`, and
-the merge request into `main` that gates promotion. Two narrow lanes go
-further and name their own job list (#889): a change touching only
-`.gitleaksignore` or the licence allow-list, and one touching only the
-pipeline's own definition. `docs/quality-strategy.md` has the lists. To force
-the full gate on a merge request instead, label it `ci: acceptance` (#572);
-a branch pipeline leaves the acceptance jobs manual, so playing one there
-does the same. `~/.local/bin/gl-pipeline-run ai/orbit <ref>` starts one. Cancelling a
-pipeline and playing a manual job are refused by the safety hook here, on top
-of the refusals the gitlab-first-migration skill lists.
-`dev`, `preview` and `main` all take push "No one", merge "Maintainers".
-
-A job whose composite key already passed elsewhere stands on that run
-instead of repeating it (ADR-0028; `docs/quality-strategy.md`'s "Standing on
-an earlier run" has the mechanism, `scripts/ci/job-inputs.json` and
-`scripts/ci/reuse-lookup.mjs` the detail). Label the merge request
-`ci: rerun`, or start the pipeline with `ORBIT_REUSE=off`, to force
-everything to run regardless.
-
-Two runners serve this project, both on the host `gitlab-runners` (32 cores,
-48 GB): the shared group runner, and runner 8, a privileged project runner
-owned by `ai/orbit` and tagged `orbit-build`, that everything needing a
-Docker daemon reaches through `.privileged_runner` (#811). Its `/builds`
-persists between jobs, so a job that must start clean says so (#813, and the
-data-root wipe in `.docker_in_job`).
-
-Three facts about that host live in its `config.toml` and root cron, not here.
-`dns` is 9.9.9.9 (owner, 2026-09-05), superseding `.dind_service`'s 2026-09-04
-note. `pull_policy = ["if-not-present"]` covers a job's own image but not a
-service's, which needs its own line in `.gitlab-ci.yml`. And
-`/usr/local/sbin/runner-docker-tidy.sh` prunes containers, volumes, untagged
-images and the builder cache (3 GB reserve) at 02:15 nightly, logging to
-`/var/log/runner-docker-tidy.log`; pinned job images survive it (owner, 2026-09-08).
-
-A push starts a pipeline only on `dev`, `preview`, `main` and `hotfix/*`; a
-working branch is tested by its merge request, so open the MR straight after
-the first push (#829). `gl-pipeline-run` still starts one on any branch.
-
-Renovate replaces Dependabot on this host: `renovate.json` at the repo root,
-the `renovate` job in `.gitlab-ci.yml`, and pipeline schedule 5 (`Renovate`,
-Mondays 05:00 London, ref `dev`, variable `RENOVATE=true`). It runs nowhere
-else and covers GitHub Actions too; `.github/dependabot.yml` is gone. It
-deliberately excludes the Orbit base image (`renovate.json`'s
-`matchPackageNames` entry says why); `base_image_repin` below owns that one.
-
-The `base_image_repin` job (#708) detects the pinned Orbit base image being
-behind and opens a merge request re-pinning it, sourced from
-`ai/orbit-base-image`'s own `publish` job artifact rather than an
-independently resolved tag. It needs its own schedule (variable
-`BASE_IMAGE_REPIN=true`). It never rebuilds anything, never pushes to
-`dev`/`preview`/`main`, and never merges; it pushes
-`chore/base-image-repin` and opens or refreshes one merge request from it.
-
-Reading that artifact needs no stored credential (investigated on #708,
-2026-09-06 -- a group-wide `ai` token was the first cut and was narrowed
-once cross-project job-token access turned out to cover artifact downloads):
-the job's own `CI_JOB_TOKEN` does it, because `ai/orbit-base-image`'s CI/CD
-job token allowlist (Settings > CI/CD > Job token permissions > **CI/CD job
-token allowlist** > Add) names `ai/orbit`, and the user the schedule runs as
-already has at least Reporter access to `ai/orbit-base-image` -- job-token
-cross-project reads need both the allowlist entry and that membership.
-Create the schedule under the same user as `renovate` and
-`sidecar_pin_freshness` (currently `Claude`, already Maintainer on
-`ai/orbit-base-image`) and the membership half needs nothing further.
-Pushing the branch and opening the merge request still needs a stored
-token, since `CI_JOB_TOKEN`'s Merge Requests API access is read-only:
-`BASE_REPIN_TOKEN`, a project access token on `ai/orbit` ONLY (`api` scope,
-Developer role) -- see the job's comment in `.gitlab-ci.yml` for why a
-group token or a second project token were not adopted.
-
-## Delivery workflow
-
-- Run fast checks before container and browser checks: this project's
-  container and browser suites cost minutes each, and the fast suite catches
-  most of what they would.
-- v0.3.0 is the current release, and it comes before everything else (owner,
-  2026-09-27). What is left: M14's open issues, then the release steps --
-  #1151 (audit, a Fable session), #1152 (`dev` to `preview`), #1153
-  (acceptance), #1154 (signed-release trial) -- then #885 (promote to
-  `main`). Each promotion merge still needs the owner's go-ahead.
-- Every feature and every fix is built for both the desk and the phone
-  (pocket) layouts, or the issue says why one is left out. Before closing an
-  issue, check both: the code for each layout, and a browser test on a
-  desktop and a mobile project. Halves kept going missing -- the reader was
-  built for the phone only (#1059, #1298), the quick-add drop box for
-  neither (#1243) (owner, 2026-10-07).
-- `main` stays at the retracted v1.2.0 until v0.3.0 ships, and is expected
-  to be far behind. A Renovate-flagged stale pin on `main` is not work: check
-  `dev` first; if `dev` is already fixed it clears when v0.3.0 ships.
+- Every field gets its own copy of every stage (sieve, tagging, chooser);
+  duplication is expected, not a defect.
+- Scanning rules state a fact about household paper in general; a rule naming
+  one page's heading word or layout is a tune and stays out.
+- The unseen hold-out documents are locked by `~/agent-hooks/holdout-gate.py`:
+  never read them or run an eval with `--misses` or `--answers`; score them and
+  read the score line. A hold-out author writes `ORBIT_HOLDOUT_AUTHOR=1` in the
+  command text itself (an exported variable is not seen by the hook), and has
+  then spent the right to tune on that set.
+- Collected documents stay out of the repository; counts and score lines travel.
+- Runs that ask the model go inside a container on
+  `orbit_orbit-document-processing`: `scripts/corpus/stages-rerun.sh '<command>'`
+  (from the host `orbit-ollama` does not resolve and the run scores 0%).
+- Every scored eval run is logged in `docs/experiments/extraction.json` the same
+  session (`node scripts/experiment-log.mjs record …`).
 
 ## Harnesses that already exist
 
-Check the list before building a test rig or handing a check to the owner.
+Check [docs/testing.md](docs/testing.md#local-harnesses) before building a test
+rig or handing a check to the owner. It lists each script; the rules that matter:
 
-- `scripts/test-all.sh` — backend suite then e2e (`ORBIT_SKIP_E2E` skips e2e)
-- `scripts/test-backend.sh` — static analysis and the fast Vitest suite
-- `scripts/test-frontend.sh` — Playwright against a running instance
-- `pnpm --filter orbit-web fidelity` — the v19 visual gate: stands up the
-  adapter-node build and the mockup host, compares 17 screens against the
-  committed baselines. In CI it runs pinned to the Playwright image the
-  baselines were proven against; run it locally the same way if a diff
-  disagrees
-- `scripts/test-integration.mjs` — integration suite against a real database
-- `scripts/test-e2e-local.sh` — local stack with disposable OIDC and GreenMail
-  sidecars, then Playwright. `--profile local-only` swaps them for an Orbit
-  with no identity provider at all and runs the short list in
-  `tests/e2e/local-only-specs.txt`, which is what CI's `smoke_local_only`
-  runs too (#916). `--reuse PROJECT` skips the build and `compose up` and
-  runs Playwright straight against a stack a prior `--keep` run left up,
-  identified by Compose's project/service labels and health-checked before
-  anything runs; it never tears that stack down (#947). `--ci-cap` adds the
-  cpu/memory overlay CI's acceptance stack always runs under, so a local
-  timing measurement transfers; off by default because an uncapped stack is
-  the faster iteration loop (#1080). **WebKit runs on this host only inside
-  the CI Playwright image** (`mcr.microsoft.com/playwright:v1.63.0-noble`,
-  already pulled): the host lacks WebKit's system packages, and that is not
-  a reason to leave the check to a pipeline. The script does this itself
-  for any run that includes a WebKit project (#1235); `--project
-  desktop-webkit --spec <file>` with `--reuse` runs one file in WebKit
-  alone. A change to a WebKit-affected e2e test is run
-  locally on both WebKit projects before it is pushed; the pipeline is the
-  second check, not the first (owner, 2026-10-06).
-- `scripts/test-install-acceptance.sh` — real fresh install to a healthy
-  `/api/health`, asserting `docs/installer-guarantees.md`; OIDC discovery is a
-  fixture, so no provider credentials are needed
-- `scripts/test-install-bootstrap.sh` — the direct bootstrap path (not a
-  supported install entry since ADR-0031's 2026-10-04 amendment;
-  `get-orbit.sh` is): fetches
-  `install.sh` over the network from a branch, pipes it to bash, and proves the
-  channel tag resolved to the digest the registry serves right now. Real
-  network and registry; only OIDC discovery is redirected, to the `tests/oidc`
-  sidecar. Non-interactive path only; `--red` proves the digest assertion
-  fires. Runs two ways (#724): weekly, via the `install_bootstrap` job in
-  `.gitlab-ci.yml` (maintenance stage, `INSTALL_BOOTSTRAP=true`) — `--red`
-  then the green run, both in that one job; and green-only, via
-  `verify_bootstrap` in `.github/workflows/publish-from-gitlab.yml`, right
-  after that workflow's `publish` job moves GHCR's `preview` tag — the
-  publication path that can actually invalidate what the harness asserts
-- `scripts/test-backup-restore.sh` — backup and restore acceptance drill.
-  Locally run it with `--own-stack`: it builds the working tree, installs a
-  throwaway deployment (Compose project `orbit-backup-drill`) and removes it
-  on every exit (#1273). Needs a host with no Orbit stack and no
-  `*orbit-db-data` volume. Without the flag it borrows the deployment
-  `.env-orbit` names and never removes it — CI's path (#1241)
-- `scripts/test-repair-journeys.sh` — live repair journeys: installs a real
-  stack, breaks it, and proves `repair.sh` recovers it (`--list` shows which
-  journeys are live and which are still absent)
-- `scripts/test-malware-scanner.sh` — ClamAV detection
-- `scripts/test-secret-scan.sh` — proves the `gitleaks` CI job's full-history
-  scan actually fires: plants a synthetic secret in a throwaway `mktemp -d`
-  git repo (never committed to Orbit) and asserts detection and redaction
-- `scripts/test-tika-processor.mjs` — Tika document extraction
-- `scripts/installer-simulation.sh` — installer command centre UI, no Docker
-- `scripts/install-test-browser.sh` — one-time headless browser download
-- `scripts/preview-lane-preflight.sh` — preview-lane preflight checks
-- `scripts/validate-compose-config.sh` — Compose configuration validation
-- `scripts/ci/*.sh` — the container validation sequence, one script per
-  workflow step, so GitHub Actions and the GitLab pipeline run the same checks
-  rather than two paraphrases of them (#801). Inputs are environment
-  variables; `$GITHUB_OUTPUT` and `$GITHUB_ENV` are written only when set
-- `scripts/acceptance-mailbox.mjs` — mailbox acceptance record for a digest
-- `scripts/sidecar-pins.mjs` — sidecar pin freshness: `check` reports drift
-  between compose and policy, a moved tag, and stale packages inside a current
-  pin (`--offline` is the drift axis alone, `--red` proves it fires); `sync`
-  re-pins both places after a Renovate bump
-- `scripts/check-rolldown-jsdoc-trap.mjs` — flags a JSDoc comment inside a
-  `{#snippet}` parameter list, or inside a multi-line comma-separated
-  parameter/argument list, before it reaches rolldown's own opaque parse
-  crash on the production build (#782); `pnpm --filter orbit-web
-  repro:782` drives the real crash against throwaway fixtures in
-  `web/tests/rolldown-repro/` (slow, not wired into the fast suite)
-- `scripts/ci/prove-content-id.sh` — ADR-0028 section 6's proof (#1060 slice
-  2): three image builds showing that the same tree on two commits gives one
-  image content ID and that a changed `src/` file gives another. By hand or as
-  a manual job, never in an ordinary pipeline — it builds the image three times
-- `scripts/ci/repin-base-image.sh` — base image freshness (#708): compares
-  the Dockerfile pin to ai/orbit-base-image's published-digest.txt artifact
-  and, on a mismatch, re-pins every location and opens a merge request;
-  `--red` proves the comparison fires, `--dry-run` stops before any commit,
-  push or merge-request call
-- `scripts/cleanup-stacks.sh` — lists every `orbit*` Compose project on the
-  host, marked running or stale (containers, volumes, networks, stopped and
-  profile ones included, and networks left with no container). `--remove`
-  tears down only stale projects and skips any with a running container, since
-  other sessions share the host; `--project NAME --remove` removes that one
-  even if running, `--remove --all` removes running ones too. Also removes unused
-  `orbit-local`, `orbit-vapid-bootstrap` and `orbit-acceptance-local` images
-  over a day old (not with `--project`). Keeps `orbit-ollama` and its model volume unless
-  `--include-ollama`. Containers
-  Compose did not create are listed, never removed (#1241)
+- Suites: `scripts/test-all.sh` (backend then e2e; `ORBIT_SKIP_E2E` skips e2e),
+  `test-backend.sh` (static analysis and the fast suite), `test-frontend.sh`
+  (Playwright against a running instance), `test-integration.mjs` (real
+  database), `pnpm --filter orbit-web fidelity` (the visual gate).
+- Stacks: `test-e2e-local.sh` (disposable local stack, then Playwright;
+  `--keep` and `--reuse PROJECT` re-run one spec cheaply),
+  `test-install-acceptance.sh` (fresh install to healthy),
+  `test-install-bootstrap.sh`, `test-repair-journeys.sh`,
+  `test-backup-restore.sh` (`--own-stack` locally), `dev/test-bed.sh` (demo and
+  owner-review bed), `cleanup-stacks.sh` (lists and removes `orbit*` projects).
+- Pins: `sidecar-pins.mjs` (`check`, `sync`), `ci/repin-base-image.sh`,
+  `bump-launcher-pin.sh`.
+- WebKit runs on this host only inside the CI Playwright image;
+  `test-e2e-local.sh` does that itself. Run a WebKit-affected e2e change on both
+  WebKit projects locally before pushing (owner, 2026-10-06).
+- `scripts/ci/prove-content-id.sh` runs by hand or as a manual job only; it
+  builds the image three times.
 
-## Traps when running things locally
+## Local traps
 
-Twelve known ways to lose an afternoon, or worse.
+Reasoning for each is in [docs/testing.md](docs/testing.md#local-traps).
 
-**A stack a script started is torn down by the same script; stale containers
-are a defect, not housekeeping.** Run `bash scripts/cleanup-stacks.sh` at
-session end and before an acceptance run. Plain `--remove` clears stale stacks
-and skips running ones (another session may own them); a running stack you
-started yourself goes with `--project NAME --remove` (#1241).
-
-**`pnpm db:generate` refuses to run, on purpose.** `drizzle/meta/` holds
-snapshots only up to 0004, so `drizzle-kit generate` would diff against a
-stale snapshot and silently emit a migration that recreates almost the whole
-schema. `scripts/db-generate-refused.mjs` is the guard; the hand-written
-procedure is in `docs/testing.md`, "Hand-writing a migration". See #535.
-
-**Compose commands attach to whatever project `.env-orbit` names.**
-`docker compose --env-file .env-orbit ...` with no `-p` silently adopts that
-project (and its named volumes) from any checkout or worktree, and the fixed
-`container_name` pins in `docker-compose.yml` then stop a second stack
-coexisting instead of failing loudly. Source
-`scripts/compose-isolation-preflight.sh` before an `up` you assemble by hand,
-and see the isolated-stack recipe in README.md's "Quality checks" section.
-Fixed in the acceptance-stack entry point by #536; still your job for a
-one-off manual command.
-
-**Never drive a pty test by closing its own stdin.** `spawnSync({ input })`
-closes stdin as soon as the string is written, which under `script` closes the
-pty master and makes the next read return EOF instead of blocking — so a widget
-that tells a timeout from a read error takes the wrong branch, and the test
-either races or silently never exercises what it claims. Keep stdin open for
-the life of the child, as `runPty` in `scripts/installer-simulation.test.mjs`
-and `runPtyInterrupted` in `scripts/installer-ui.test.mjs` both now do. This
-has been diagnosed twice: #510/#512, then again in #552.
-
-**A pty driver's deadline belongs to `scripts/pty-deadline.mjs`.** A child
-killed for running out of time has no exit status, so a driver that hands the
-result to an exit-code assertion fails with `expected null to be 130` and names
-the wrong fault — the child never exited at all. Take the deadline and the
-failure from that module rather than writing another timer; a `spawn`-based
-driver must reject rather than resolve, and its tests declare
-`PTY_TEST_TIMEOUT_MS` so Vitest's 5s default does not speak first. See #595.
-
-**A Compose `file:` secret is a bind mount of an inode, not of a path.** Edit
-the file in place and every running container sees it at once; *replace* it --
-`mktemp` + `mv`, `tar -x`, `rsync` -- and each container keeps reading the old
-file for as long as it keeps running. A plain `docker restart` re-resolves the
-mount. This is not academic: repair's rotation lands the new password by rename
-precisely so a half-written secret is impossible, which left the database
-container reading a spent copy and made repair diagnose its own successful
-rotation as failed. Postgres itself never notices, because it reads that file
-once at initdb and authenticates from its own catalogue afterwards. See #629.
-
-**`scripts/test-backup-restore.sh` seeds its own state with SQL and nothing
-else drives it.** A dropped column passes every unit and integration check and
-fails only the compose smoke test — grep it before changing a schema.
-
-**An install run from inside a worktree used to rewire the main checkout —
-closed (#784, #858).** `scripts/guard-worktree-install.mjs`, wired as pnpm's
-`preinstall`, refuses `pnpm install` from a worktree whose `node_modules`
-resolves outside itself; a worktree with its own `node_modules` installs
-safely through pnpm's shared content-addressable store. `test-e2e-local.sh`'s
-two pnpm calls no longer reach through the trap either. If it ever
-reoccurs: `find node_modules web/node_modules -type l -lname '*worktrees*'`
-must be empty in the main checkout; repair with `CI=true pnpm install` from
-the main checkout root (breaks other sessions' builds while it runs — agree a
-window first).
-
-**The web type check says SKIPPED in most worktrees, and that is correct
-(#1029).** `web/node_modules/orbit` usually links to the main checkout, so
-`orbit/server/*` would be read from whatever branch *that* has out — a wrong
-answer either way, and a passing one is the dangerous half. Run it in the main
-checkout or let CI answer; it is not a fault to fix.
-
-**A red compose smoke job can be hiding the next failure.** Its steps run in
-one job and it stops at the first, so fixing that step reveals what was behind
-it rather than turning the job green — the favicon 404 hid nine e2e failures
-all of 2026-09-03. Read the whole job before reporting what a branch needs.
-
-**Never hand-write a control-character range in a regular expression.** The
-escapes are what break. Lose them and the intended "control characters or
-backslash" collapses into a range running from space to backslash, matching
-most ordinary characters — so a path sanitiser rejects every real path, or the
-reverse, and no test notices unless it covers the boundary. Scan the string
-explicitly instead, as `isApplicationRelative` in
-`web/src/lib/return-path.js` does, and give it cases for the empty
-string, a protocol-relative `//` and a backslash.
-
-**Another stack's database volume no longer blocks an install run —
-closed (#1239, #1261).** A fresh install is blocked only by the volume it
-would itself attach to, and an update whose project name is known skips a
-volume labelled with another project that is not provably its own. Two
-volumes that could both be this deployment's still refuse, so a leftover
-volume of the *same* Compose project does too: `scripts/cleanup-stacks.sh`
-lists them.
-
-**A lockfile diff adding an `@pnpm/exe` block means the host's pnpm is
-older than the pin (#884, #901, #1185).** An older pnpm reads `packageManager`
-and hands over to the pinned version, but first writes `@pnpm/exe` into
-`pnpm-lock.yaml`, even with `--frozen-lockfile`. A correct 12.x lockfile has
-no such block. The owner upgraded `/usr/local/bin/pnpm` to the pin (12.4.1)
-on 2026-10-07, after which `CI=true pnpm install --frozen-lockfile` leaves
-`git status` clean. If the block reappears, the pin has moved ahead of the
-host: discard the lockfile diff, run `node --test
-scripts/lockfile-no-pnpm-exe.test.mjs` before committing a lockfile change,
-and ask the owner to upgrade the host pnpm (`sudo npm install -g
-pnpm@<pin>`). CI activates the pin through corepack, so it never sees this.
-
-## Only ten fonts exist on this host, and the rest fail silently
-
-Rendering anything to PDF or an image — a mockup, a test document, a
-screenshot — uses the host's fonts. Only these are installed:
-
-    Bitstream Charter   Courier 10 Pitch   Liberation Serif
-    Liberation Sans     Liberation Mono    FreeSerif
-    FreeSans            FreeMono           Loma
-    WenQuanYi Zen Hei
-
-Anything else falls back with no warning. Ask for Helvetica, Arial, Georgia
-or Times New Roman and you get a substitute, and nothing tells you.
-
-This is not cosmetic. Six extraction-corpus documents were built in parallel
-to look deliberately unlike each other, every one specified a font from that
-uninstalled list, and all six rendered in the same face — the variety was
-requested but never existed (#981, 2026-09-11). Check with `fc-list : family`
-rather than assuming a common font is present.
-
-## The demo stack is disposable
-
-The demo deployment (`compose/docker-compose.demo.yml`) carries only test data, so
-nothing in it is worth preserving. Do not spend time or tokens keeping an old
-demo image or its database alive: if it will not start, rebuild it from current
-`dev` and current versions of everything it depends on, rather than repairing
-it.
-
-## Anything the owner must look at is hosted, never a file path
-
-The owner cannot open files on this VM. A mockup is served from an
-`nginx:alpine` container with a published port (the standing pattern —
-`docker run -d --name orbit-<issue>-review -p <port>:80 -v <dir>:/usr/share/nginx/html:ro nginx:alpine`),
-and a built screen is the demo bed:
-`bash scripts/dev/test-bed.sh up --image <digest> --host <lan address>` (or
-`up --build` for this checkout), then `down` when finished -- it removes
-everything the bed made, test data included, and keeps `orbit-ollama` and its
-model volume unless `down --include-ollama`. `scripts/deploy-container.sh` is
-the real-install path and is not used for the bed. Run `backup.sh` and the
-other operator scripts against it as `test-bed.sh run -- bash scripts/backup.sh`
-(it supplies the image and host the scripts lack). Hand over clickable
-`https://<DEMO_HOST>:3443/<route>` links plus the one-time self-signed cert
-warning on `:3443` and `:4443`. A screenshot or fidelity baseline is
-supporting evidence, not the review: sign-off is on the running code
-(owner, 2026-09-05, #474).
-
-Mockups open in the app's default theme, after dark (`DEFAULT_THEME` in
-`web/src/lib/theme.js`), never star chart, and review screenshots use it too:
-the owner reviews what households first see (owner, 2026-10-08).
-
-## An issue naming `src/app/` may describe a deleted surface
-
-The v19 rebuild (#411) replaces `src/app/` with `web/` and carries nothing
-over, so check the files an issue names against `web/` before picking it up.
-Where they have no equivalent there, close it as superseded by #411 rather
-than fix a surface that will not ship (#566, #300, 2026-09-01).
+- A stack a script started is torn down by that script; stale containers are a
+  defect, not housekeeping. Run `bash scripts/cleanup-stacks.sh` at session end
+  and before acceptance. Plain `--remove` skips running stacks (another session
+  may own them); your own running stack goes with `--project NAME --remove`.
+- `pnpm db:generate` is blocked on purpose: `drizzle/meta/` snapshots stop at
+  0004, so it would emit a migration recreating the whole schema. The
+  hand-written procedure is in `docs/testing.md`.
+- `docker compose --env-file .env-orbit` without `-p` silently adopts that
+  deployment's project and volumes, from any checkout. Source
+  `scripts/compose-isolation-preflight.sh` before an `up` you assemble by hand.
+- Never drive a pty test by closing its stdin: the pty master closes, reads
+  return EOF, and the test proves nothing. Keep stdin open for the child's life.
+- pty deadlines come from `scripts/pty-deadline.mjs`, not a new timer; tests set
+  `PTY_TEST_TIMEOUT_MS` so Vitest's 5s default does not speak first.
+- A Compose `file:` secret is an inode bind mount: edit in place and containers
+  see it; replace it (`mv`, `tar -x`, `rsync`) and running containers keep the
+  old copy until restarted.
+- `test-backup-restore.sh` seeds its own state with SQL and nothing else drives
+  it: a dropped column fails only the compose smoke test. Grep it before any
+  schema change.
+- No `pnpm install` from a worktree: it can rewire the main checkout. If it
+  recurs, `find node_modules web/node_modules -type l -lname '*worktrees*'` must
+  be empty in the main checkout; repair with `CI=true pnpm install` there, after
+  agreeing a window (it breaks other sessions' builds meanwhile).
+- The web type check says SKIPPED in most worktrees, and that is correct (it
+  would read another branch's `orbit/server/*`); run it in the main checkout.
+- A red compose smoke job can hide the next failure, because it stops at the
+  first bad step. Read the whole job before saying what a branch needs.
+- Never hand-write a control-character range in a regex: lose an escape and it
+  matches most ordinary characters. Scan explicitly, as `isApplicationRelative`
+  in `web/src/lib/return-path.js` does, and test empty, `//` and backslash.
+- A leftover volume of the same Compose project blocks an install;
+  `scripts/cleanup-stacks.sh` lists them.
+- A lockfile diff adding an `@pnpm/exe` block means the host pnpm is older than
+  the pin: discard the diff, run `node --test scripts/lockfile-no-pnpm-exe.test.mjs`
+  before committing a lockfile change, and ask the owner to upgrade the host
+  pnpm.
+- Only ten fonts exist on this host and anything else falls back silently;
+  check `fc-list : family` (list in `scripts/corpus/README.md`).
+- `tmp/` is gitignored scratch for prototypes; the gates skip it. Nothing there
+  is built or shipped.
+- Every tappable thing on the phone layout is at least 44x44px (`--p-hit`,
+  gated by `web/tests/fidelity/pocket-measure.spec.js`).
 
 ## Sources of truth
 
-- `docs/v1-charter.md`: supported product and release contract.
-- `docs/architecture.md` and `docs/adr/`: current architecture and durable
-  decisions.
-- `docs/implementation-plan.md`: the phased roadmap.
-- Issues, milestones and labels live on GitLab (`ai/orbit`, project 49), and
-  that issue list is the delivery-status surface (owner, 2026-09-04). The
-  [GitHub roadmap board](https://github.com/users/tomlawesome/projects/4) is
-  retired: it and the GitHub issues are frozen at the 2026-09-04 import, so a
-  status read from either is stale. The board's per-issue Status, Priority and
-  Risk fields have no GitLab equivalent and nothing replaces them (owner,
-  2026-09-04, #814): the milestone says what is scheduled and open/closed
-  says what is done.
-- Document extraction: read #992 (extraction lessons, running record) before
-  touching `src/server/documents/extraction-*`; add an entry there when a
-  session learns something the next would otherwise relearn. Every scored
-  run (`eval:stages`, `eval:holdout`, `eval:extraction`) is an experiment
-  and goes in `docs/experiments/extraction.json` the same session, with a
-  plain-English "what we did" (owner, 2026-09-12: "we can only improve if
-  we keep track"): `node scripts/experiment-log.mjs record …` parses the
-  score line and renders the page. Runs that ask the model must be run
-  inside a container on `orbit_orbit-document-processing` (the
-  `stages-rerun` pattern: `docker run --network … -v $PWD:/app -w /app
-  --entrypoint sh node:22 -c '…'`); from the host `orbit-ollama` does not
-  resolve, every answer is blank and the run scores 0% in seconds. The
-  owner reads the log at port 8090 on the design host (container
-  `orbit-experiments`, nginx over `tmp/experiment-log/`); re-render after
-  recording.
-- How extraction work is tested (owner, 2026-09-12), which is not a ruling on
-  what the pipeline ends up doing: heuristics only, no model, one field at a
-  time. What the full pipeline does is decided later, once the fields have
-  been measured this way. The page's front table is the blind whole-page model
-  against the heuristics on the twelve unseen pages; a run joins it with
-  `"headline": true` in the register.
-- **Every field gets its own copy of every stage** (owner, 2026-09-12): its
-  own sieve, its own tagging, its own chooser, in its own files. Not one
-  shared stage 1 with per-field choosers on top — provider's sieve is
-  provider's, and making it greedier must not change a single candidate
-  subtype sees. Copy rather than import: a shared helper cannot be tuned for
-  one field without moving the other, which is the whole point of separating
-  them. Duplication is expected and is not a defect to clean up.
-
-  Whether anything can be merged back is decided at the end, from the
-  numbers, once every field has been tuned on its own. Until then, a change
-  that helps one field and is not measured on the others does not go into
-  anything the others read. #996 is the first of these.
-- **An internal test harness is not product UX** (owner, 2026-09-15:
-  *"This is a basic functional ui so it goes to you. We don't need fable
-  for test harnesses."*). The global rule routing UI and architecture calls
-  to the top model covers what a household sees, not tooling the owner and
-  the agents use -- a labelling harness, an evaluation page, a debug view.
-  Build those in the ordinary way; #1025 was filed to Fable in error.
-- **Collected documents stay out of the repository** (owner, 2026-09-15:
-  *"None of our treatments from any source need to be committed, any that
-  carry license terms saying they do shouldn't be used."*). Specimen and
-  real documents gathered for measuring the extractor live outside git --
-  `~/projects/.scratch/uk-specimens/` for the collected British specimens,
-  the owner's own machine for their paperwork -- and are used locally
-  only. A source whose licence would oblige us to publish or redistribute
-  anything is not used at all, whatever else it offers. Counts, score
-  lines and licence records are what travel.
-- **Non-commercial data and dependencies are acceptable** (owner,
-  2026-09-15: *"Non commercial is usable here. I am happy to ditch the
-  possibility of an orbit commercial license."*). Orbit will not be offered
-  commercially, so a CC BY-NC or CC BY-NC-SA dataset or model may be used.
-  The rest of the dependencies-and-data skill still applies: record the
-  exact licence, and share-alike still binds anything the project
-  redistributes, which AGPL-3.0-or-later makes likelier than it sounds.
-- **Document-scanning rules are kept for what they say about paper, not
-  for the pages they fix** (owner, 2026-09-13: *"what I wanted were generic
-  rule improvements, not tunes"*). This is about the extraction rules in
-  `src/server/documents/extraction-*` — the sieves, tagging and choosers
-  that read a scanned household document — not about project rules in
-  general. A scanning rule states a fact about household paper in general
-  ("a total the page dates is history"; "the number carried on every sheet
-  is the item's own") and the commit and experiment note say that fact. A
-  scanning rule that names a heading word, a phrase or a layout seen on one
-  page is a tune: it needs a class of paper it is true of, or it stays out.
-  Hold-outs
-  are a check, not the judge — keeping a rule by its hold-out score alone
-  is selecting on the hold-out, and twelve pages make one page eight points
-  of a field. The judge is the owner's own documents through
-  `scripts/extract-bundle/`: rebuild after a batch of rules and compare
-  right / in top three / wrong counts with the previous run (#1007).
-- **The unseen documents are locked, not just off limits** (owner,
-  2026-09-12: *"You need to be locked out from the unseen documents."*).
-  `~/agent-hooks/holdout-gate.py` refuses to read a hold-out document, its
-  ground truth or its generated module, and refuses to RUN an eval carrying
-  `--misses` or `--answers` — the flags that print each page's expected value beside
-  what was extracted. Staging, counting, moving, building and writing about
-  those files is all still allowed; reading them out is not. Score them and
-  read the score line.
-
-  Asking permission cannot help: the hook screens the command, not the
-  intent. Authoring a hold-out is the one exempt role, and it is declared
-  rather than inferred — write `ORBIT_HOLDOUT_AUTHOR=1` into the command
-  itself, which says "I am writing these and will never tune against them".
-  A session that writes it has spent its right to tune on that set.
-
-  It must be in the command text. The hook runs as its own process, so a
-  variable exported around the command is not set when the hook reads its
-  environment — the first version checked only the environment and so locked
-  the author out along with everyone else. Declaring it in the command is
-  better anyway: the exemption shows up in the transcript on the line that
-  used it. Only Bash can carry it, so a hold-out author reads with `cat` and
-  writes with a heredoc; Read, Write and Edit stay shut on those paths.
-
-  The first hold-out was lost on 2026-09-12 without a single file being
-  opened: an eval printed the answers, they were read, and the next change
-  was designed knowing them (#996, #997). That is why the flags are gated and
-  not only the files. `~/agent-hooks/holdout-gate_test.py` proves both halves
-  fire, and that neither blocks ordinary work.
-
-- `docs/engineering-baseline.md`: evidence-backed capability and gap audit.
-- `docs/quality-strategy.md`: test, CI, and definition-of-done policy.
-- `docs/feature-register.md`: detailed product direction and constraints, not
-  live delivery status.
-- `docs/releasing.md`: release procedure and operator acceptance.
-- `SECURITY.md`: supported-version and private vulnerability-reporting
-  contract.
+[docs/README.md](docs/README.md) indexes the docs. The product contract is
+`docs/v1-charter.md`; architecture is `docs/architecture.md` and `docs/adr/`;
+the test and CI policy is `docs/quality-strategy.md`. GitLab issues, milestones
+and labels are the delivery-status surface (owner, 2026-09-04): the milestone says
+what is scheduled, open or closed says what is done. `SECURITY.md`
+is the vulnerability-reporting contract.

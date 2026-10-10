@@ -5,6 +5,19 @@
 # shipped to anyone (scripts/dev/ is not in the Dockerfile's script list);
 # scripts/deploy-container.sh is the real-install path and is not used here.
 #
+# Anything the owner must look at is hosted, never a file path: the owner cannot
+# open files on this VM. A built screen is shown from this bed; a mockup is
+# served from an nginx container with a published port:
+#   docker run -d --name orbit-<issue>-review -p <port>:80 \
+#     -v <dir>:/usr/share/nginx/html:ro nginx:alpine
+# Hand over clickable https://<DEMO_HOST>:3443/<route> links, plus the one-time
+# self-signed certificate warning on :3443 and :4443. A screenshot or fidelity
+# baseline is supporting evidence, not the review: sign-off is on the running
+# code (owner, 2026-09-05, #474). Mockups and review screenshots open in the
+# app's default theme (DEFAULT_THEME in web/src/lib/theme.js: after dark, never
+# star chart), because the owner reviews what households first see (owner,
+# 2026-10-08).
+#
 #   bash scripts/dev/test-bed.sh up --image REF --host ADDR   REF is a registry digest (...@sha256:<64 hex>)
 #   bash scripts/dev/test-bed.sh up --build --host ADDR       build this checkout first (scripts/build-container.sh)
 #   bash scripts/dev/test-bed.sh restart [--host ADDR]        stop, then start the whole bed again

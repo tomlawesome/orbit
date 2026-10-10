@@ -290,7 +290,7 @@ install_deployment() {
 
   # Confirm the isolation claim rather than trusting it: the wrong project
   # label would attach this run to somebody else's stack, and the teardown
-  # below removes volumes (AGENTS.md, compose trap). The name is set on the
+  # below removes volumes (docs/testing.md, "Local traps": compose). The name is set on the
   # install above; this proves install.sh honoured it.
   # The container name is the fixed pin from docker-compose.yml, not a
   # project-prefixed one, which is also why refuse_foreign_stack runs first.

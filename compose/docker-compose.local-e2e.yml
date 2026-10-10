@@ -2,7 +2,7 @@
 # never part of a real deployment's file set.
 #
 # docker-compose.yml pins container_name on orbit-app/orbit-db/orbit-clamav
-# (AGENTS.md "Traps when running things locally"), so a disposable run and a
+# (docs/testing.md, "Local traps"), so a disposable run and a
 # real deployment on the same host cannot coexist under those fixed names no
 # matter what Compose project name the disposable run uses. This overlay
 # renames them to the disposable project's own name so the two can coexist.

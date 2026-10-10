@@ -27,9 +27,22 @@
 # because the user this schedule runs as already has at least Reporter
 # access to ai/orbit-base-image -- job-token cross-project access is
 # project-to-project (the allowlist) AND user-scoped (the triggering user's
-# own membership and permissions), both are required. See AGENTS.md for the
-# exact setting and why the existing schedules' owner already satisfies the
-# membership half.
+# own membership and permissions), both are required.
+#
+# The exact setting: ai/orbit-base-image > Settings > CI/CD > Job token
+# permissions > "CI/CD job token allowlist" > Add `ai/orbit`. Create this job's
+# schedule (variable BASE_IMAGE_REPIN=true) under the same user as the
+# `renovate` and `sidecar_pin_freshness` schedules (currently `Claude`, already
+# Maintainer on ai/orbit-base-image) and the membership half needs nothing
+# further. A group-wide `ai` token was the first cut of this job and was
+# narrowed once cross-project job-token access turned out to cover artifact
+# downloads (investigated on #708, 2026-09-06).
+#
+# Pushing the branch and opening the merge request does still need a stored
+# token, because CI_JOB_TOKEN's Merge Requests API access is read-only:
+# BASE_REPIN_TOKEN, a project access token on ai/orbit ONLY (`api` scope,
+# Developer role). See the variable's comment in .gitlab-ci.yml for why a group
+# token or a second project token were not adopted.
 #
 # Two axes, sourced this way:
 #
@@ -344,7 +357,7 @@ else
   # expires it when the job ends. It authenticates here because
   # ai/orbit-base-image's CI/CD job token allowlist names ai/orbit, and the
   # user this pipeline runs as already has at least Reporter access there --
-  # job-token cross-project access needs both. See AGENTS.md.
+  # job-token cross-project access needs both (see the header).
   : "${CI_JOB_TOKEN:?CI_JOB_TOKEN is not set; this must run inside a GitLab CI job}"
   : "${CI_API_V4_URL:?CI_API_V4_URL is not set; this must run inside a GitLab CI job}"
   artifact_url="${CI_API_V4_URL%/}/projects/${base_image_project}/jobs/artifacts/${base_image_ref}/raw/published-digest.txt?job=${base_image_job}"
@@ -587,8 +600,8 @@ git -C "$repo_dir" commit -m "$commit_message"
 # credential-store file plays the same role for git that the header files
 # above and below play for curl: git reads the secret from a file, and the
 # command it execs never contains it. `-c credential.helper=` first clears
-# any helper already configured (same defensive shape as AGENTS.md's
-# documented push pattern) so only the one named here is consulted.
+# any helper already configured (the same defensive shape as the push pattern
+# in the github-credentials skill) so only the one named here is consulted.
 # Defensive, and NOT the cause of #1081 -- recording that plainly because the
 # commit that added this said it was, and was wrong.
 #

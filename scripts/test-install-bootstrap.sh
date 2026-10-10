@@ -86,8 +86,8 @@ free_port() {
 
 workdir="$(mktemp -d /tmp/orbit-bootstrap.XXXXXX)"
 # This run names its own Compose project, so everything it creates carries a
-# name no other deployment on this host can own. See AGENTS.md on Compose
-# project collisions.
+# name no other deployment on this host can own. See docs/testing.md "Local traps"
+# on Compose project collisions.
 #
 # It used to take that name from the target directory, which install.sh fell
 # back to when nothing better was offered. Since #999 nothing better means

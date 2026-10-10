@@ -196,8 +196,8 @@ export function decryptMetadataValue(stored: string, dataKey: Buffer, context: M
  *
  * Control characters are scanned explicitly rather than matched by a
  * hand-written regular-expression range: losing an escape in such a range
- * silently widens it to ordinary characters (AGENTS.md, "Traps when running
- * things locally").
+ * silently widens it to ordinary characters (docs/testing.md, "Local
+ * traps").
  */
 export function normalizeComparableMetadata(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
