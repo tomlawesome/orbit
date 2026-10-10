@@ -166,6 +166,7 @@ export function constellationPosOf(householdId) {
 
 /* The band's token comes from BAND_VAR (#1341); only `overdue` differs. A
    distant planet's overdue is the planet's own warmth, not the band's alarm. */
+/** @type {Record<string, string>} */
 const PLANET_TONES = {
   ...BAND_VAR,
   overdue: "--warm",
