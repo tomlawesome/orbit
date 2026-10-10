@@ -130,7 +130,7 @@
 #   docker exec <project>-db sh -c \
 #     'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select name from households"'
 #
-# AGENTS.md "Traps when running things locally" applies here directly: this
+# docs/testing.md "Local traps" applies here directly: this
 # script always passes an explicit Compose `-p` project name (below, per-run
 # rather than fixed since #875) so it can never attach to whatever project a
 # real deployment's .env-orbit happens to name, it checks that name against
@@ -140,7 +140,7 @@
 # second stack under those names regardless of project;
 # compose/docker-compose.local-e2e.yml renames them to `${COMPOSE_PROJECT_NAME}-*`
 # for this script only, so a per-run project name also gives per-run
-# container names. Never runs `pnpm db:generate` (also an AGENTS.md trap) and
+# container names. Never runs `pnpm db:generate` (also a docs/testing.md "Local traps" entry) and
 # never writes to .env-orbit or an existing file under .orbit-secrets/ --
 # scripts/configure.sh and the secret generation below only fill in what is
 # missing.
@@ -150,7 +150,7 @@
 # main checkout's, and its web/node_modules is a real directory of per-
 # package symlinks into the main checkout's web/node_modules -- so a
 # worktree that has been set up this way shares the main checkout's install
-# rather than owning one (AGENTS.md's worktree-install trap, #784, diagnosed
+# rather than owning one (docs/testing.md's "Local traps" worktree-install entry, #784, diagnosed
 # twice). An install run with a worktree as the working directory writes
 # through that symlink and rewires the main checkout -- invisibly, until the
 # worktree is later removed and the main checkout's own build breaks. Three
@@ -428,10 +428,10 @@ cleanup() {
   if [[ "$created_anything" == 0 ]]; then
     return 0
   fi
-  # AGENTS.md's standing Compose trap ("Compose commands attach to whatever
-  # project .env-orbit names") is exactly the failure #875 hit, so confirm
+  # The standing Compose trap in docs/testing.md ("Compose commands attach to
+  # whatever project .env-orbit names") is exactly the failure #875 hit, so confirm
   # this run's own db container still carries the label "$project_name"
-  # before running `down --volumes` against it -- the same check AGENTS.md
+  # before running `down --volumes` against it -- the same check docs/testing.md
   # asks for before trusting Compose isolation. A container that does not
   # exist (nothing ever came up) is fine to "tear down" (a no-op below);
   # one that exists under a different project's label means this run's
@@ -489,7 +489,7 @@ docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 plugin is requ
 docker info >/dev/null 2>&1 || fail "Docker daemon is not reachable."
 [[ -f .env-orbit.example && -f docker-compose.yml ]] || fail "run from the Orbit repository root."
 
-# #876 / AGENTS.md worktree-install trap (#784): a git worktree's git-dir
+# #876 / docs/testing.md "Local traps" worktree-install entry (#784): a git worktree's git-dir
 # sits under the main checkout's, so the two differ from --git-common-dir
 # only in a worktree. Used by the dependency step below -- see the header
 # comment for the three cases.
@@ -754,7 +754,7 @@ else
     shared_node_modules=1
   fi
   if [[ "$shared_node_modules" != 1 || ! -f "$main_installed_lock" ]]; then
-    fail "refusing: this worktree has no usable dependencies to run against -- node_modules is either missing or is not the main checkout's shared install -- and installing them here would rewire the main checkout instead (AGENTS.md worktree-install trap, #784/#876). Run this script from the main Orbit checkout."
+    fail "refusing: this worktree has no usable dependencies to run against -- node_modules is either missing or is not the main checkout's shared install -- and installing them here would rewire the main checkout instead (docs/testing.md "Local traps", worktree install, #784/#876). Run this script from the main Orbit checkout."
   fi
   # Compare the PROJECT document, not the whole file. Since pnpm 12 (#882)
   # pnpm-lock.yaml is two YAML documents: first the packageManagerDependencies
@@ -769,7 +769,7 @@ else
     awk '/^---$/ { doc = ""; next } { doc = doc $0 "\n" } END { printf "%s", doc }' "$1"
   }
   if ! cmp -s <(project_lock_document "$worktree_lock") "$main_installed_lock"; then
-    fail "refusing: this branch's pnpm-lock.yaml differs from what pnpm actually installed in the main checkout (node_modules/.pnpm/lock.yaml) -- this branch changes dependencies, so they must be installed from the main checkout, not from a worktree (AGENTS.md worktree-install trap, #784/#876)."
+    fail "refusing: this branch's pnpm-lock.yaml differs from what pnpm actually installed in the main checkout (node_modules/.pnpm/lock.yaml) -- this branch changes dependencies, so they must be installed from the main checkout, not from a worktree (docs/testing.md "Local traps", worktree install, #784/#876)."
   fi
   log "worktree dependencies already match the main checkout's installed lockfile; skipping pnpm install (#876)"
 fi
@@ -859,8 +859,8 @@ reuse_env=()
 # tour's example body is never written down, which only the database can
 # answer. Every other `compose` call in this script passes an explicit `-p`;
 # the suite has no way to know that name, and without it its `docker compose`
-# would adopt whatever project .env-orbit happens to name (AGENTS.md, "Compose
-# commands attach to whatever project .env-orbit names") -- a different stack,
+# would adopt whatever project .env-orbit happens to name (docs/testing.md, "Local traps":
+# "Compose commands attach to whatever project .env-orbit names") -- a different stack,
 # or none. CI needs no equivalent: it runs compose without `-p`, so the
 # environment there already agrees with .env-orbit.
 # node_modules/@playwright/test/cli.js directly, not `pnpm exec playwright`:

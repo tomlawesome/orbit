@@ -100,7 +100,7 @@ const test: TestUserConfig = {
           "tests/e2e/**",
           "tests/integration/**",
           // Scratch prototypes (#995), for the same reason tsconfig excludes
-          // and eslint ignores them: AGENTS.md sends agents to tmp/ to
+          // and eslint ignores them: docs/extraction-method.md sends agents to tmp/ to
           // prototype, the directory is gitignored, and a *.test.ts left
           // there is collected and run like any other — failing the suite
           // over work that was never meant to ship. Guarded by

@@ -401,7 +401,7 @@ function runInstallOnTerminal(targetDir, envOverrides = {}, interactions = [], a
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
       watchdog.touch();
-      // stdin stays open for the life of the child (AGENTS.md, pty traps).
+      // stdin stays open for the life of the child (docs/testing.md, "Local traps": pty tests).
       let interaction = interactions[interactionIndex];
       while (interaction && stdout.includes(interaction.after)) {
         child.stdin.write(interaction.input);

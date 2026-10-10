@@ -174,6 +174,45 @@ Pull requests also receive a read-only dependency-diff review. Newly
 introduced high or critical vulnerabilities in any dependency scope and
 dependencies outside the approved SPDX licence policy block integration.
 
+### Who starts a pipeline, and where it runs
+
+A push starts a pipeline only on `dev`, `preview`, `main` and `hotfix/*`. A
+working branch is tested by its merge request; one with no merge request has no
+pipeline until it gets one. `~/.local/bin/gl-pipeline-run ai/orbit <ref>` starts
+a pipeline on any branch. The assistants' safety hook refuses cancelling a
+pipeline and playing a manual job, on top of the refusals the
+gitlab-first-migration skill lists. `dev`, `preview` and `main` all take push
+"No one", merge "Maintainers".
+
+Two runners serve the project, both on the host `gitlab-runners` (32 cores,
+48 GB): the shared group runner, and runner 8, a privileged project runner owned
+by `ai/orbit` and tagged `orbit-build`, which every job needing a Docker daemon
+reaches through `.privileged_runner` (#811). Its `/builds` persists between
+jobs, so a job that must start clean says so (#813, and the data-root wipe in
+`.docker_in_job`). Three facts about that host live in its `config.toml` and
+root cron, not in the repository:
+
+- `dns` is 9.9.9.9 (owner, 2026-09-05), superseding `.dind_service`'s
+  2026-09-04 note.
+- `pull_policy = ["if-not-present"]` covers a job's own image but not a
+  service's, which needs its own `pull_policy` line in `.gitlab-ci.yml`.
+- `/usr/local/sbin/runner-docker-tidy.sh` prunes containers, volumes, untagged
+  images and the builder cache (3 GB reserve) nightly, logging to
+  `/var/log/runner-docker-tidy.log`; pinned job images survive it (owner,
+  2026-09-08). It was set to 02:15; a later flake entry says 03:15, so read the
+  cron entry for the real time.
+
+Renovate replaces Dependabot on this host: `renovate.json` at the repo root, the
+`renovate` job in `.gitlab-ci.yml`, and pipeline schedule 5 (`Renovate`,
+Mondays 05:00 London, ref `dev`, variable `RENOVATE=true`). It runs nowhere else
+and covers GitHub Actions too; `.github/dependabot.yml` is gone. It deliberately
+excludes the Orbit base image (`renovate.json`'s `matchPackageNames` entry says
+why); the `base_image_repin` job (#708) owns that one: it needs its own schedule
+(variable `BASE_IMAGE_REPIN=true`), never rebuilds anything, never pushes to
+`dev`/`preview`/`main` and never merges; it pushes `chore/base-image-repin` and
+opens or refreshes one merge request. The header of
+`scripts/ci/repin-base-image.sh` holds how it is authorised.
+
 ### Risk-proportional pull-request lanes
 
 Every pull request runs lint, type checking and the complete unit suite. A
@@ -228,6 +267,9 @@ sometimes a change deserves the whole gate before it merges. The label
 launcher install compatibility included — and says so in its log, so a full
 run on a small diff is never a mystery. Remove the label and the next pipeline
 is classified again.
+
+A branch pipeline leaves the acceptance jobs manual, so playing one there asks
+for the same thing.
 
 `scripts/ci/` sits in the CI lane by the owner's decision on #889. Several of
 those scripts are the acceptance stage's own checks, so a change confined to

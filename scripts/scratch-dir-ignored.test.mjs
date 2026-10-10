@@ -1,7 +1,8 @@
 /**
  * `tmp/` is ignored by every gate that would otherwise read it (#995).
  *
- * AGENTS.md and the extraction handoffs send agents to `tmp/` to prototype,
+ * docs/extraction-method.md and the extraction handoffs send agents to `tmp/`
+ * to prototype,
  * and it is gitignored, so the files there are both expected to exist and
  * expected to rot: they import modules that have since been refactored. While
  * the gates read them, doing what the instructions say broke the fast suite

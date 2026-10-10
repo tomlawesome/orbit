@@ -20,7 +20,14 @@ GitLab (`gitlab.tomlawson.io`, `ai/orbit`) is where Orbit is built, tested and
 merged. GitHub (`tomlawesome/orbit`) is a one-way push mirror: it carries the
 same history and tags, and GHCR (`ghcr.io/tomlawesome/orbit`) is the public
 image source. Nothing about stable promotion happens on GitHub; it only
-receives what GitLab already decided (#821).
+receives what GitLab already decided (#821). The path of an image: `record_image`
+pushes the tested image to `registry.tomlawson.io` and records its digest,
+`sign_evidence` attests it from the dedicated signing runner, `publish_channel`
+adds the channel tag (#661, ADR-0020), and `.github/workflows/publish-from-gitlab.yml`
+copies that digest to GHCR when the mirror delivers the `preview` push. Nothing
+built on GitHub reaches a registry. The mirror itself (GitLab Settings >
+Repository > Mirroring) is owner-managed, and a red GitHub run never blocks a
+GitLab merge.
 
 ## What you do, in short
 
@@ -385,6 +392,21 @@ script refuses a manifest whose own `version` field does not match the pin,
 so an older release can only be installed by asking for it by name, never
 served silently in place of a newer one. See `docs/installer-guarantees.md`
 for the full list of what is and is not checked.
+
+**Changing the contract between `install.sh` and the launcher.** Orbit pins
+the launcher (`launcher/pin.json`), and the launcher pins the Orbit commit its
+live test installs with (ai/orbit-launcher#193). A change to that contract
+therefore always lands in one order, so no session has to work it out again
+(owner, 2026-10-05, after the #1225 / launcher v0.4.0 ordering knot):
+
+1. The contract change lands in Orbit on `dev`.
+2. The launcher bumps its Orbit pin to that commit.
+3. The launcher releases.
+4. Orbit runs `scripts/bump-launcher-pin.sh` to take the new launcher tag.
+
+Nothing else changes in this repository. Orbit, the launcher and the website are
+one project in three repositories (ADR-0036), so each step is acted on without
+asking first.
 
 ### Version tags in GHCR start at v0.3.0
 

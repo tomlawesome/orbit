@@ -9,7 +9,7 @@ command -v node >/dev/null 2>&1 || {
   exit 1
 }
 [[ -f node_modules/@playwright/test/cli.js ]] || {
-  printf 'Orbit browser setup: node_modules/@playwright/test/cli.js is missing -- install dependencies first (from the main checkout; see AGENTS.md worktree-install trap, #784).\n' >&2
+  printf 'Orbit browser setup: node_modules/@playwright/test/cli.js is missing -- install dependencies first (from the main checkout; see docs/testing.md "Local traps", worktree install, #784).\n' >&2
   exit 1
 }
 
