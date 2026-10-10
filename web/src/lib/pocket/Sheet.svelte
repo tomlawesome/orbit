@@ -1,7 +1,7 @@
 <script>
   import { beforeNavigate, goto, pushState } from "$app/navigation";
   import { page } from "$app/state";
-  import { createArm } from "./arm.js";
+  import { createArm } from "$lib/arm.js";
   import { sheetRelease } from "./gesture.js";
   import { portal } from "./portal.js";
   import { holdSheet, standOnKeyboard } from "./sheet.js";

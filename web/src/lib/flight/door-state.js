@@ -299,6 +299,8 @@ export function cardMessageFor(code) {
  * fallback, not the mechanism.
  */
 export const STARTING_BACKSTOP_MS = 120_000;
+/** How often the STARTING card asks the instance whether it has woken. Not an arming hold (#1342). */
+export const STARTING_POLL_MS = 4_000;
 /** How long the waiting card keeps asking after an approval mail goes out:
     the server's own SIGN_IN_APPROVAL_TTL_MS (src/server/sign-in-approvals.ts),
     kept equal by hand. Shorter and a legitimate late click on the emailed

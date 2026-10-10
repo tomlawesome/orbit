@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import { mountSatellites } from "$lib/backdrops/satellites.js";
   import Chrome from "$lib/Chrome.svelte";
+  import { createArm } from "$lib/arm.js";
   import { rotateRelay } from "$lib/data/workspace.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { isPocket } from "$lib/pocket/media.js";
@@ -45,8 +46,7 @@
      ArmButton gives it (pocket.svelte). "pause ingest" beside it is
      reversible and stays a single tap. */
   let armedRotate = $state(false);
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let armTimer = null;
+  const rotateArm = createArm({ onchange: (next) => (armedRotate = Boolean(next)) });
   /** @type {string | null} */
   let problem = $state(null);
   const relay = $derived(rotated ?? data.relay);
@@ -83,31 +83,19 @@
       working = false;
     }
   };
-  /* #1151 S7: the same two-tap protocol as the household page's own
-     twoTap() (§14) — the first tap arms, the second fires, and an unfired
-     arm relaxes on its own after five seconds so nothing is left cocked on
-     the desk. It previously had neither: a stray tap stayed armed forever,
-     so a later, unrelated tap on this same button could fire the rotate
-     with no fresh confirmation. */
-  const disarmRotate = () => {
-    clearTimeout(armTimer ?? undefined);
-    armTimer = null;
-    armedRotate = false;
-  };
-  const tapRotate = () => {
-    if (armedRotate) {
-      disarmRotate();
-      act("rotate");
-      return;
-    }
-    clearTimeout(armTimer ?? undefined);
-    armedRotate = true;
-    armTimer = setTimeout(disarmRotate, 5000);
+  /* #1151 S7: the two-tap protocol (lib/arm.js) — the first tap arms, the
+     second fires, and an unfired arm relaxes after four seconds, on scroll,
+     on Escape and on a tap elsewhere, so nothing is left cocked on the desk.
+     It once had none of that: a stray tap stayed armed forever, so a later,
+     unrelated tap on this same button could fire the rotate with no fresh
+     confirmation. */
+  /** @param {MouseEvent & { currentTarget: HTMLElement }} event */
+  const tapRotate = (event) => {
+    if (rotateArm.tap(true, event.currentTarget)) act("rotate");
   };
   const toggleIngest = () => {
-    // Any other tap disarms a pending rotate, same as tapping a different
-    // key disarms the household page's twoTap().
-    disarmRotate();
+    // Any other tap disarms a pending rotate (arm.js: a press elsewhere).
+    rotateArm.disarm();
     act(relay.ingest === "paused" ? "resume" : "pause");
   };
 

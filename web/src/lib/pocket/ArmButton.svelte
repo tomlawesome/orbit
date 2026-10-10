@@ -1,5 +1,5 @@
 <script>
-  import { createArm, disarmOnElsewhere } from "./arm.js";
+  import { createArm, disarmOnElsewhere } from "$lib/arm.js";
 
   /**
    * A dangerous act's pill (#1120, proposal §1.8): the first tap arms it and

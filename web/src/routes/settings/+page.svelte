@@ -24,6 +24,7 @@
   import { fillStarTiles } from "$lib/sky.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
   import Chrome from "$lib/Chrome.svelte";
+  import { createArm } from "$lib/arm.js";
   import SignInChallenge from "./SignInChallenge.svelte";
   import { PACKS, intentOf, issuerHost, methodWords, on } from "./helm.js";
   import Pocket from "./pocket.svelte";
@@ -332,8 +333,12 @@
   let sessions = $state([]);
   /** @type {string | null} */
   let sessionsProblem = $state(null);
-  /** @type {Record<string, boolean>} */
-  let armedRevoke = $state({});
+  /* One arm for the sessions list and "sign out of every device" (lib/arm.js):
+     keyed "session:<id>" and "everywhere"; 4 s, scroll, Escape and a tap
+     elsewhere put it down again. */
+  /** @type {string | boolean} */
+  let signOutArmed = $state(false);
+  const signOutArm = createArm({ onchange: (next) => (signOutArmed = next) });
   /** @type {Record<string, string>} */
   let revokeProblem = $state({});
 
@@ -345,13 +350,11 @@
    * other device just drops its row.
    *
    * @param {Awaited<ReturnType<typeof readSessions>>[number]} row
+   * @param {HTMLElement | null} button
    */
-  async function tapRevokeSession(row) {
+  async function tapRevokeSession(row, button) {
     revokeProblem = { ...revokeProblem, [row.id]: "" };
-    if (!armedRevoke[row.id]) {
-      armedRevoke = { ...armedRevoke, [row.id]: true };
-      return;
-    }
+    if (!signOutArm.tap(`session:${row.id}`, button)) return;
     try {
       await revokeSession(row.id);
       if (row.current) {
@@ -359,9 +362,7 @@
         return;
       }
       sessions = sessions.filter((session) => session.id !== row.id);
-      armedRevoke = { ...armedRevoke, [row.id]: false };
     } catch {
-      armedRevoke = { ...armedRevoke, [row.id]: false };
       revokeProblem = { ...revokeProblem, [row.id]: "still signed in — try again" };
     }
   }
@@ -373,21 +374,17 @@
    * success there is no page left to return to: the cookie is dead and the
    * sign-in is the only honest destination.
    */
-  let armedSignOut = $state(false);
   /** @type {string | null} */
   let signOutProblem = $state(null);
 
-  async function tapSignOutEverywhere() {
+  /** @param {HTMLElement | null} button */
+  async function tapSignOutEverywhere(button) {
     signOutProblem = null;
-    if (!armedSignOut) {
-      armedSignOut = true;
-      return;
-    }
+    if (!signOutArm.tap("everywhere", button)) return;
     try {
       await signOutEverywhere();
       location.assign("/login");
     } catch {
-      armedSignOut = false;
       signOutProblem = "still signed in — try again";
     }
   }
@@ -728,8 +725,8 @@
               <b>{row.device}</b>
               <span>{row.current ? "this device" : row.lastSeenAt ? `last seen ${agoLong(row.lastSeenAt, new Date().toISOString())}` : "never used"}</span>
             </div>
-            <button onclick={() => tapRevokeSession(row)} aria-label={`sign out of ${row.device}`}>
-              {armedRevoke[row.id]
+            <button onclick={(event) => tapRevokeSession(row, event.currentTarget)} aria-label={`sign out of ${row.device}`}>
+              {signOutArmed === `session:${row.id}`
                 ? `tap again to sign out${row.current ? " here" : ""}`
                 : row.current ? "sign out here" : "sign out"}
             </button>
@@ -738,7 +735,7 @@
         {/each}
       </ul>
       {#if sessionsProblem}<div class="note">{sessionsProblem}</div>{/if}
-      <button onclick={tapSignOutEverywhere}>{armedSignOut ? "tap again to sign out everywhere" : "sign out of every device →"}</button>{#if signOutProblem}<div class="note">{signOutProblem}</div>{/if}
+      <button onclick={(event) => tapSignOutEverywhere(event.currentTarget)}>{signOutArmed === "everywhere" ? "tap again to sign out everywhere" : "sign out of every device →"}</button>{#if signOutProblem}<div class="note">{signOutProblem}</div>{/if}
     </div>
   {/if}
 </div>

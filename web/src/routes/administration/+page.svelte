@@ -16,6 +16,7 @@
     startStepUp,
     testMail,
   } from "$lib/data/workspace.js";
+  import { createArm } from "$lib/arm.js";
   import { deletionNameMatches } from "$lib/data/household.js";
   import { SETUP_LINK_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { constellationPlanetsOf, galaxyOf } from "$lib/data/chart.js";
@@ -214,25 +215,15 @@
   /** @param {{ id: string, name: string }} row */
   const doomNameOk = (row) => deletionNameMatches(doomTypedName[row.id] ?? "", row.name);
 
-  /* The two-tap protocol (household page's own danger line): the first tap
-     arms the button and does nothing else; the second fires. An unfired arm
-     relaxes on its own after 4 seconds, exactly as the mockup's own script
-     does. */
-  /** @type {string | null} */
-  let doomArmed = $state(null);
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let doomArmTimer = null;
-  /** @param {{ id: string, name: string }} row */
-  function twoTapDoom(row) {
-    if (doomArmed === row.id) {
-      clearTimeout(doomArmTimer ?? undefined);
-      doomArmed = null;
-      fireDoom(row);
-      return;
-    }
-    clearTimeout(doomArmTimer ?? undefined);
-    doomArmed = row.id;
-    doomArmTimer = setTimeout(() => (doomArmed = null), 4_000);
+  /* The two-tap protocol (lib/arm.js): the first tap arms the button and does
+     nothing else; the second fires. An unfired arm relaxes after 4 seconds,
+     on scroll, on Escape and on a tap elsewhere. */
+  /** @type {string | boolean} */
+  let doomArmed = $state(false);
+  const doomArm = createArm({ onchange: (next) => (doomArmed = next) });
+  /** @param {{ id: string, name: string }} row @param {HTMLElement | null} button */
+  function twoTapDoom(row, button) {
+    if (doomArm.tap(row.id, button)) fireDoom(row);
   }
   /** @param {{ id: string, name: string }} row */
   async function fireDoom(row) {
@@ -483,23 +474,13 @@
      "remove credential" fired on one click here while the phone already
      armed it first; "rotate every address" gets the same protocol from the
      start rather than shipping unarmed and needing its own fix later.
-     Local to this card, like the household and archive cards' own copies
-     of the same protocol — armed relaxes on its own after 5s. */
-  /** @type {string | null} */
-  let mailboxArmed = $state(null);
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let mailboxArmTimer = null;
-  /** @param {string} key @param {() => void} fire */
-  function twoTapMailbox(key, fire) {
-    if (mailboxArmed === key) {
-      clearTimeout(mailboxArmTimer ?? undefined);
-      mailboxArmed = null;
-      fire();
-      return;
-    }
-    clearTimeout(mailboxArmTimer ?? undefined);
-    mailboxArmed = key;
-    mailboxArmTimer = setTimeout(() => (mailboxArmed = null), 5_000);
+     One arm for the card's acts, keyed by act (lib/arm.js). */
+  /** @type {string | boolean} */
+  let mailboxArmed = $state(false);
+  const mailboxArm = createArm({ onchange: (next) => (mailboxArmed = next) });
+  /** @param {string} key @param {() => void} fire @param {HTMLElement | null} button */
+  function twoTapMailbox(key, fire, button) {
+    if (mailboxArm.tap(key, button)) fire();
   }
   /** @type {{ host: string, port: number, accountUser: string, mailbox: string, tlsServerName: string, providerProfile: string, trustedRecipientHeader: string, pollSeconds: number }} */
   let draft = $state({
@@ -1184,7 +1165,7 @@
                   <button class="dangerbtn" onclick={() => openDoomConfirm(doom)}>delete now →</button>
                 {:else}
                   <button class="dangerbtn" class:armed={doomArmed === doom.id} disabled={!doomNameOk(doom)}
-                          onclick={() => twoTapDoom(doom)}>
+                          onclick={(event) => twoTapDoom(doom, event.currentTarget)}>
                     {doomArmed === doom.id ? "tap again to delete for good" : "delete now"}</button>
                 {/if}
               </div>
@@ -1379,8 +1360,9 @@
                      remove-credential ArmButton — this used to fire on one
                      unconfirmed click. -->
                 <button class="dangerbtn" class:armed={mailboxArmed === "remove"} disabled={mailboxBusy !== null}
-                        onclick={() => twoTapMailbox("remove",
-                          () => mailboxAction("remove", { action: "remove", expectedVersion: mailbox.version }))}>
+                        onclick={(event) => twoTapMailbox("remove",
+                          () => mailboxAction("remove", { action: "remove", expectedVersion: mailbox.version }),
+                          event.currentTarget)}>
                   {mailboxArmed === "remove" ? "tap again to remove the credential" : "remove credential"}</button>
               </div>
             {/if}
@@ -1394,7 +1376,7 @@
                 event.preventDefault();
                 twoTapMailbox("alias", () => mailboxAction("alias", {
                   action: "rotate_alias_key", expectedVersion: mailbox.version, graceDays: aliasGraceDays,
-                }));
+                }), event.submitter);
               }}>
                 <p class="mailboxnote">Every member gets a new relay address. Mail sent to an old one still arrives until its
                   grace period runs out.</p>
@@ -1403,7 +1385,7 @@
                 <div class="placerow mailboxrow">
                   <button type="submit" class="dangerbtn" class:armed={mailboxArmed === "alias"} disabled={mailboxBusy !== null}>
                     {mailboxArmed === "alias" ? "tap again to rotate every address" : "rotate every address"}</button>
-                  <button type="button" onclick={() => { aliasRotating = false; mailboxArmed = null; }}>cancel</button>
+                  <button type="button" onclick={() => { aliasRotating = false; mailboxArm.disarm(); }}>cancel</button>
                 </div>
               </form>
             {/if}
