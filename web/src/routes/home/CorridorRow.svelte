@@ -75,7 +75,7 @@
     [
       `Found in ${row.sourceDocument}`,
       row.dueDate ? `${dateWord} ${short(row.dueDate)}` : null,
-      row.costMinor ? money(row.costMinor, row.currency, true) : null,
+      row.costMinor !== null && row.costMinor !== undefined ? money(row.costMinor, row.currency, true) : null,
     ].filter(Boolean),
   );
   /* `CorridorRow` (lib/data/chart.js) never carries `recurrenceMonths` --
