@@ -1,8 +1,8 @@
 /*
  * READYING THE FLIGHT BEFORE IT IS ASKED FOR (#1253).
  *
- * The flight's world (voyage.js) costs a shader compile and a few pictures
- * put on the GPU. That work is queued as chores (chores.js) and never begins
+ * The flight's world costs a shader compile and a few pictures put on the
+ * GPU. That work is queued as the shared door's chores and never begins
  * until the page says so:
  *
  *   · the door (SignIn.svelte) asks once its card is showing and its first
@@ -15,7 +15,10 @@
  *     KHR_parallel_shader_compile: Firefox, Safari) would freeze the door
  *     for the length of the compile, so there the compile is done behind
  *     first light's running ring, as orbit-site does (`compileFlightNow`,
- *     held by `startFirstLight`, at most 9 s; #1299), never on the drawn door;
+ *     held by the shared door's `dawn.light()`, at most 9 s; #1299), never
+ *     on the drawn door. Only where the door has a journey on it (the
+ *     arrival's climb): the bare door has no world to make, and fetches its
+ *     pictures alone (below);
  *   · home asks, hurried, when the sign-out is armed (its first tap), so the
  *     descent has its world by the time the second tap has revoked the
  *     session; and long before that, unhurried, a few seconds after it has
@@ -33,14 +36,22 @@
  * context, made as a chore of its own. Refused (a performance caveat, a
  * software renderer), the flight is drawn on its own canvas and nothing more
  * is asked of the GPU on this page, nor are the world's pictures fetched.
- * The door never draws the world's test frames either (`prove: false`):
- * those wait for the flight itself.
+ *
+ * THE WORLD IS THE SHARED DOOR'S NOW (#1371): it belongs to the page's
+ * journey (the folder's `door.journey()`, made by Flight.svelte, which hands
+ * it over with `useJourney`), and this module only decides WHEN to call its
+ * `warm()` (#1371 note 33895). A page with no journey on it (the door) fetches
+ * the world's pictures, for the landing's flight to find in the browser's
+ * cache; a journey mounted later is made then, if a call has already said
+ * it may be.
+ *
+ * #1371: waits for ai/orbit-site#2 -- the folder takes over `gpu()`, the
+ * world's test frames (`journey.warm({ prove })`) and the unhurried warming
+ * (`journey.later()`); fitness.js and this split then go. Until then `prove`
+ * is accepted and has no effect: the folder's warm() runs no test frames.
  */
-import { chore, fetchOnce, hurryChores, openChores } from "./chores.js";
-import { fetchVoyage, voyageOnce } from "./voyage.js";
+import { chore, fetchOnce, hurryChores, openChores, image, flightPictures } from "$lib/door-host.js";
 import { gpu } from "./fitness.js";
-
-const EARTH = "/flight/door/dawn.webp";
 
 const reduced = () =>
   typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -48,17 +59,46 @@ const reduced = () =>
 /** the page's GPU verdict, asked for once (the first call's chore)
  * @type {Promise<import("./fitness.js").Gpu | null> | null} */
 let asked = null;
-/** the world's making, once a call that may make it has queued it
+/** @typedef {{ warm: () => Promise<unknown>, compiled: () => Promise<unknown> }} Journey */
+/** the page's journey, while one is mounted
+ * @type {Journey | null} */
+let journey = null;
+/** whether a call has said the world may be made (a journey mounted later is made at once) */
+let allowed = false;
+/** the journey's world being made, once a call that may make it has queued it
  * @type {Promise<unknown> | null} */
 let making = null;
-/** the page's world, once the chore that makes it has run
- * @type {{ made: Promise<unknown>, warm: (how?: { prove?: boolean }) => Promise<unknown> } | null} */
-let readied = null;
-/** whether the world's test frames have been asked for */
-let proving = false;
 /** set when the world's shaders are made (or it was never going to be) */
 let compiledSignal = () => {};
 const compiledSoon = new Promise((resolve) => { compiledSignal = () => resolve(undefined); });
+
+/** the journey's world made (its shaders set compiling), as a chore of its own so even that waits for the page's say-so */
+function make() {
+  if (!journey) return null;
+  if (!making) {
+    const j = journey;
+    /* wrapped, so this chore ends here: the warm-up queues chores of its own,
+       and a chore that waited on them would never let them run */
+    making = chore(() => ({ warming: j.warm() }), 60, "flight").then(({ warming }) => {
+      j.compiled().then(compiledSignal, compiledSignal);
+      return warming;
+    });
+  }
+  return making;
+}
+
+/**
+ * The page's journey, from Flight.svelte as it mounts. A call that has
+ * already said the world may be made has it made now.
+ * @param {Journey} j
+ * @returns {() => void} the journey let go, as Flight.svelte unmounts
+ */
+export function useJourney(j) {
+  journey = j;
+  making = null;
+  if (allowed) make();
+  return () => { if (journey === j) { journey = null; making = null; } };
+}
 
 /**
  * @param {{ hurry?: boolean, gentle?: boolean, prove?: boolean, compile?: boolean }} [how]
@@ -66,16 +106,14 @@ const compiledSoon = new Promise((resolve) => { compiledSignal = () => resolve(u
  *   stop the page (the door), and never under save-data. compile: with
  *   gentle, make the world even where the browser compiles on the page's own
  *   thread (Firefox, Safari), for a caller that has chosen a quiet moment for
- *   the pause (#1299). prove: false leaves the world's test frames for the
- *   flight (the door); a later call that proves still gets them run (#1222),
- *   so the arrival can have them done before its answers are back.
+ *   the pause (#1299). prove: waits for ai/orbit-site#2 (above).
  *
  * Every call is judged by its own options, whoever asked first: a gentle ask
  * that was refused a world on a browser that compiles on the page's thread
  * leaves the way open for a later ask that may make it (the flight's own),
  * and a world already made or queued is never made twice (#1299).
  */
-export function readyFlight({ hurry = false, gentle = false, prove = true, compile = false } = {}) {
+export function readyFlight({ hurry = false, gentle = false, compile = false } = {}) {
   if (reduced() || typeof document === "undefined") return Promise.resolve();
   /* a reader who has asked the browser to save data is not warmed for (orbit-site
      main.js:70). Only the speculative asks (`gentle`: the door's, and home's on
@@ -83,9 +121,9 @@ export function readyFlight({ hurry = false, gentle = false, prove = true, compi
      needs, and `asked` is left unset so that call is not shut out. */
   if (gentle && /** @type {any} */ (navigator).connection?.saveData) return Promise.resolve();
   if (!asked) {
-    fetchOnce(EARTH).catch(() => {});
+    fetchOnce(image("dawn/dawn.webp")).catch(() => {});
     asked = chore(() => gpu(), 60, "flight").then((g) => {
-      if (g) fetchVoyage();
+      if (g) for (const url of flightPictures()) fetchOnce(url).catch(() => {});
       else compiledSignal();
       return g;
     });
@@ -93,30 +131,8 @@ export function readyFlight({ hurry = false, gentle = false, prove = true, compi
   }
   const result = asked.then((g) => {
     if (!g || (gentle && !g.parallel && !compile)) return null;
-    if (!making) {
-      /* the world made (its shaders set compiling) as a chore of its own, so
-         even that waits for the page's say-so */
-      if (prove) proving = true;
-      making = chore(() => {
-        /* wrapped, so this chore ends here: the warm-up queues chores of its
-           own, and a chore that waited on them would never let them run */
-        const world = voyageOnce();
-        readied = world;
-        if (world) world.made.then(compiledSignal, compiledSignal); else compiledSignal();
-        return { warming: world ? world.warm({ prove }) : null };
-      }, 60, "flight").then(({ warming }) => warming);
-      return making;
-    }
-    /* an earlier call that did not prove (the door's) left the test frames
-       undone: run them now that someone wants them. `warm` remembers its own
-       answer, so this is once. */
-    if (prove && !proving) {
-      proving = true;
-      return making.then(() => (readied
-        ? chore(() => ({ done: readied?.warm({ prove: true }) }), 60, "flight").then(({ done }) => done)
-        : null));
-    }
-    return making;
+    allowed = true;
+    return make();
   }).then(() => {}, () => {});
   if (hurry) hurryChores("flight"); else openChores();
   return result;
