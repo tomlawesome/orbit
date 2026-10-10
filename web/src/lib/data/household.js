@@ -12,30 +12,8 @@
  */
 
 import { bandOf, bodySize, daysUntil, dialPlacement } from "$lib/data/chart.js";
-import { ago, dayMonthYear, tminus } from "$lib/format.js";
+import { ago, dayMonthYear, initials, plural, tminus } from "$lib/format.js";
 import { SHIPPED_SECTION_IDS } from "$lib/marks.js";
-
-/**
- * Two letters from a chosen display name — never from an email address, which
- * this screen's routes deliberately never disclose.
- * @param {?string} [name]
- * @returns {string}
- */
-export function initialsOf(name) {
-  return (name ?? "")
-    .split(/\s+/)
-    .map((part) => part[0] ?? "")
-    .join("")
-    .slice(0, 2)
-    .toUpperCase() || "·";
-}
-
-/**
- * @param {number} count
- * @param {string} word
- * @returns {string}
- */
-const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 /**
  * "3 entries" / "1 entry" — the count printed beside a section in the editor.
@@ -43,7 +21,7 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
  * @returns {string}
  */
 export function entriesLabel(count) {
-  return `${count} ${count === 1 ? "entry" : "entries"}`;
+  return plural(count, "entry", "entries");
 }
 
 /**
@@ -315,7 +293,7 @@ export function householdScreenOf({
   const roster = members.map((member) => ({
     id: member.id,
     name: member.displayName,
-    initials: initialsOf(member.displayName),
+    initials: initials(member.displayName),
     role: member.role,
     you: Boolean(user?.id) && member.id === /** @type {import('./workspace.js').SessionUser} */ (user).id,
   }));
@@ -355,7 +333,7 @@ export function householdScreenOf({
       ? candidates.map((candidate) => ({
           id: candidate.id,
           name: candidate.displayName,
-          initials: initialsOf(candidate.displayName),
+          initials: initials(candidate.displayName),
         }))
       : [],
     /* §15-2g: joiners are answered HERE and nowhere else. The route answers
@@ -368,7 +346,7 @@ export function householdScreenOf({
             id: request.id,
             userId: request.userId,
             name: request.displayName,
-            initials: initialsOf(request.displayName),
+            initials: initials(request.displayName),
             /* "2d ago". `now` is passed in, never read from the clock, so the
                gate holds still and production stays live. */
             waited: now ? ago(request.createdAt, now) : null,
@@ -390,7 +368,7 @@ export function householdScreenOf({
        offered "leave this system" for a system they were never in. */
     you: roster.find((member) => member.you) ?? null,
     subtitle: canManage
-      ? `your system · you own it · ${plural(memberCount, "member")} · ${entries} ${entries === 1 ? "entry" : "entries"} in orbit`
-      : `a system you’re in · ${owner ? `${owner.name} owns it` : "its owner"} · ${plural(memberCount, "member")} · ${entries} ${entries === 1 ? "entry" : "entries"} in orbit`,
+      ? `your system · you own it · ${plural(memberCount, "member")} · ${plural(entries, "entry", "entries")} in orbit`
+      : `a system you’re in · ${owner ? `${owner.name} owns it` : "its owner"} · ${plural(memberCount, "member")} · ${plural(entries, "entry", "entries")} in orbit`,
   };
 }

@@ -414,6 +414,21 @@ export class WorkspaceError extends Error {
 }
 
 /**
+ * What a failure says, for a screen to print: the error's own message (a
+ * WorkspaceError carries the server's words), a thrown string as it is, or
+ * the screen's own sentence when there is nothing to say (#1340).
+ * @param {unknown} error
+ * @param {string} [fallback]
+ * @returns {string}
+ */
+export function wordsOf(error, fallback = "Something went wrong.") {
+  const message = /** @type {{ message?: unknown } | null | undefined} */ (error)?.message;
+  if (typeof message === "string" && message !== "") return message;
+  if (typeof error === "string" && error !== "") return error;
+  return fallback;
+}
+
+/**
  * The decoded body, or a WorkspaceError carrying the server's own words.
  *
  * Generic because every route answers a different shape, and this module is
@@ -647,7 +662,7 @@ export async function activeHousehold() {
  * fixture to fetch changes no caller's shape later.
  */
 import { adminFixture } from "./fixtures/admin.js";
-import { ago, dayMonth } from "$lib/format.js";
+import { ago, dayMonth, sizeLabel } from "$lib/format.js";
 import { bandOf, daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
 import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
 import { engineNumbersOf } from "./engine-limits.js";
@@ -1586,12 +1601,6 @@ export async function readAbout() {
   const body = await json(await fetch("/api/about", { credentials: "same-origin" }));
   return body.about;
 }
-
-/** @param {number} bytes */
-const sizeLabel = (bytes) =>
-  bytes >= 1024 * 1024
-    ? `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
-    : `${Math.round(bytes / 1024)} KB`;
 
 /**
  * The word a paper's row adds when it cannot simply be read (#1319): the

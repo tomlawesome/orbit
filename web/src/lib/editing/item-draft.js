@@ -10,7 +10,7 @@
  * dry run as the rows change (EditSession).
  */
 import { entryOf, intentOf, REMINDER_DEFAULT } from "../../routes/create/entry.js";
-import { dayMonthYear, every } from "$lib/format.js";
+import { dayMonthYear, every, symbolOf } from "$lib/format.js";
 import { addMonths } from "./calendar.js";
 import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
 
@@ -32,14 +32,10 @@ import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
  */
 
 /** The orbital periods the band offers, once at the top to 2 years at the foot (round 7). */
-export const PERIODS = /** @type {const} */ ([
-  [0, "does not repeat"], [1, "every month"], [3, "every 3 months"],
-  [6, "every 6 months"], [12, "every year"], [24, "every 2 years"],
-]);
+export const PERIODS = /** @type {[number, string][]} */ (
+  [0, 1, 3, 6, 12, 24].map((n) => [n, n ? every(n) : "does not repeat"]));
 /** The three types round 8 colours, in its order. */
 export const TYPES = ["service", "renewal", "inspection"];
-
-const SYMBOLS = /** @type {Record<string, string>} */ ({ GBP: "£", EUR: "€", USD: "$" });
 
 /** An orbital period in the band's words. @param {number} months */
 export function periodWords(months) {
@@ -70,7 +66,9 @@ export function remindersOf(text) {
  */
 export function draftOf(item) {
   const entry = entryOf(item);
-  const sign = SYMBOLS[item.currency ?? "GBP"] ?? "";
+  const symbol = symbolOf(item.currency ?? "GBP");
+  /* A currency with no sign of its own is typed bare, as it always was. */
+  const sign = /^[A-Z]{3}$/.test(symbol) ? "" : symbol;
   return {
     title: entry.name,
     dueDate: entry.dueDate,

@@ -1,4 +1,5 @@
 <script>
+  import { plural } from "$lib/format.js";
   import { goto, invalidateAll } from "$app/navigation";
   import { resolve } from "$app/paths";
   import Mark from "$lib/Mark.svelte";
@@ -20,6 +21,7 @@
     sendInvitation,
     transferOwnership,
     withdrawInvitation,
+    wordsOf,
     writeHouseholdIdentity,
     writeSections,
   } from "$lib/data/workspace.js";
@@ -69,7 +71,7 @@
      `v.subtitle` keeps "your system · you own it" and "in orbit"; the
      pocket cap is 40 characters, so the role stands alone. */
   const hhSub = $derived(
-    `${v.canManage ? "owner" : "member"} · ${v.memberCount} ${v.memberCount === 1 ? "member" : "members"} · ${entriesLabel(v.entries)}`,
+    `${v.canManage ? "owner" : "member"} · ${plural(v.memberCount, "member")} · ${entriesLabel(v.entries)}`,
   );
 
   /* round-3 §3.4: an invited meta drops the year -- the desk's own
@@ -134,7 +136,7 @@
       await invalidateAll();
       wake(`saved · ${changesLabel(count)}`);
     } catch (error) {
-      problem = `not saved — ${/** @type {{ message?: string }} */ (error)?.message ?? String(error)}`;
+      problem = `not saved — ${wordsOf(error)}`;
     } finally {
       saving = false;
     }
@@ -159,7 +161,7 @@
       wake(said);
       await invalidateAll();
     } catch (error) {
-      membersProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      membersProblem = wordsOf(error);
       wake(membersProblem, { failure: true });
     }
   }
@@ -186,7 +188,7 @@
       wake(`you’ve left ${v.name} · it’s a label in your sky again`);
       await goto(resolve("/home"));
     } catch (error) {
-      membersProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      membersProblem = wordsOf(error);
     }
   }
 
@@ -261,7 +263,7 @@
         inviteOpen = false;
       }
     } catch (error) {
-      inviteProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      inviteProblem = wordsOf(error);
     } finally {
       inviting = false;
     }
@@ -273,7 +275,7 @@
    */
   const invitationActs = (row) => v.canManage ? [
     { label: "resend", name: `Resend the invitation to ${row.email}`, tone: /** @type {const} */ ("accent"),
-      onact: () => offer(row.email, "invitation sent again").catch((error) => wake(error?.message ?? String(error), { failure: true })) },
+      onact: () => offer(row.email, "invitation sent again").catch((error) => wake(wordsOf(error), { failure: true })) },
     { label: "withdraw", name: `Withdraw the invitation to ${row.email}`, danger: true,
       onact: () => act(() => withdrawInvitation(v.id, row.id), `the invitation to ${row.email} is withdrawn · its link no longer works`) },
   ] : [];
@@ -401,7 +403,7 @@
       doomOpen = false;
       wake(`${v.name} is asked to be deleted · gone for good in ${daysWords(v.retention?.recoveryDays)}`);
     } catch (error) {
-      doomProblem = `not requested — ${/** @type {{ message?: string }} */ (error)?.message ?? String(error)}`;
+      doomProblem = `not requested — ${wordsOf(error)}`;
     }
   }
 
@@ -703,7 +705,7 @@
 
   <Sheet bind:open={doomOpen} size="callout" title="Delete {v.name}?">
     <p class="p-prose hh-sheet-say">
-      Everything in {v.name} — {v.entries} {v.entries === 1 ? "entry" : "entries"}, their documents, their history
+      Everything in {v.name} — {plural(v.entries, "entry", "entries")}, their documents, their history
       and every reminder still queued — stops the moment you ask. You have <b class="hh-red">{daysWords(v.retention?.recoveryDays)}</b> to change
       your mind; after that it is gone for good.
     </p>

@@ -10,6 +10,7 @@ import { takeHeldDocument } from "$lib/data/held-document.js";
 import { wireDropFeedback } from "./drop-feedback.js";
 import { dryRunner } from "$lib/data/dry-run.js";
 import { createCommandOf, kindHasDate, kindRecurs, recurrenceOfChoice } from "./entry.js";
+import { sizeLabel } from "$lib/format.js";
 
 /**
  * The new-entry form's behaviour, carried across from design/v19/create-v3.html
@@ -270,7 +271,6 @@ export function mountCreate() {
       a retry after a lost answer re-sends the same id with the same bytes,
       so the documents route hands back the copy it already holds. */
   let attachmentId = "";
-  const sizeLabel = (/** @type {File} */ file) => `${Math.max(1, Math.round(file.size / 1024))} KB`;
   function takeFile(/** @type {File | null | undefined} */ file) {
     if (!file) return;
     attachmentId = crypto.randomUUID();
@@ -279,7 +279,7 @@ export function mountCreate() {
     reveal();
     document.body.classList.add("doc");
     if (heldName) heldName.textContent = file.name;
-    if (heldSize) heldSize.textContent = sizeLabel(file);
+    if (heldSize) heldSize.textContent = sizeLabel(file.size);
     if (!nameInput.value.trim()) {
       nameInput.value = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ");
     }
@@ -356,7 +356,7 @@ export function mountCreate() {
     capline.textContent = CAP_READING;
     honest.textContent = "";
     rcFile.textContent = `◆ ${file.name}`;
-    rcSize.textContent = sizeLabel(file);
+    rcSize.textContent = sizeLabel(file.size);
     rcScan.hidden = true;
   }
 

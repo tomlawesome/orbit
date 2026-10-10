@@ -16,12 +16,12 @@
   /* The sun is one of the household screen's two doors, and that screen owns
      the marker both doors speak through (§15, owner 2026-08-17). */
   import { markDoor } from "../household/[id]/door.js";
-  import { WorkspaceError, applyCommand, approveWithOperation, dueDateIn, attachItemDocument, dismissReceipt, householdElsewhereFor, readHome, readHomeIn, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut } from "$lib/data/workspace.js";
+  import { applyCommand, approveWithOperation, attachItemDocument, dismissReceipt, dueDateIn, householdElsewhereFor, readHome, readHomeIn, readItem, readItemDocuments, removeDocument, requestToJoin, restoreDocument, signOut, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
   import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
   import { createHeldCompletion } from "$lib/data/held-completion.js";
   import { createArm } from "$lib/arm.js";
   import { corridorOf, dialBodiesOf, manifestGroupsOf } from "$lib/data/chart.js";
-  import { ago, agoLong, dayMonth, money, MONTHS, weekdayOf } from "$lib/format.js";
+  import { ago, agoLong, dayMonth, initials as initialsOf, money, MONTHS, plural, weekdayOf } from "$lib/format.js";
   import { showUrgentCount } from "$lib/urgent-badge.js";
   import Pocket from "./pocket.svelte";
   import { readSearchDocuments, searchPocket } from "./pocket-search.js";
@@ -252,7 +252,7 @@
       redirectTo = await signOut();
     } catch (error) {
       signingOut = false;
-      signOutProblem = /** @type {any} */ (error)?.message ?? "still signed in — try again";
+      signOutProblem = wordsOf(error, "still signed in — try again");
       return;
     }
     /* #1262: the menu goes as the descent begins, never left open over it
@@ -300,7 +300,7 @@
       await tick();
       resync();
     } catch (error) {
-      askProblem = /** @type {any} */ (error)?.message ?? String(error);
+      askProblem = wordsOf(error);
     } finally {
       askBusy = false;
     }
@@ -393,7 +393,7 @@
         document.getElementById(id)?.scrollIntoView({ block: "center", behavior: "auto" });
       })
       .catch((error) => {
-        if (detailFor === id) detailProblem = /** @type {any} */ (error)?.message ?? String(error);
+        if (detailFor === id) detailProblem = wordsOf(error);
       })
       .finally(() => {
         if (detailFor === id) detailBusy = false;
@@ -409,7 +409,7 @@
       const found = await readItem(id);
       if (detailFor === id && found) detail = found;
     } catch (error) {
-      if (detailFor === id) detailProblem = /** @type {any} */ (error)?.message ?? String(error);
+      if (detailFor === id) detailProblem = wordsOf(error);
     }
   }
 
@@ -635,7 +635,7 @@
     holdMs: WAKE_HOLD_MS,
     onsent: () => rereadAll().catch(() => {}),
     onfailed: (error) => {
-      wake(/** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again", { failure: true });
+      wake(wordsOf(error, "couldn't complete it — try again"), { failure: true });
     },
   });
   beforeNavigate(() => { held.flush(); });
@@ -669,7 +669,7 @@
       if (!leave) await rereadDetail();
       wake(words);
     } catch (error) {
-      footProblem = /** @type {{ message?: string }} */ (error)?.message ?? `couldn't ${kind} it — try again`;
+      footProblem = wordsOf(error, `couldn't ${kind} it — try again`);
     } finally {
       footBusy = null;
     }
@@ -771,7 +771,7 @@
       wake(`Completed${nextDate ? ` · next due ${dayMonth(nextDate)}` : ""} · ${item.title}`);
       if (nextDate) focusInDrawer('[aria-label^="Complete "]');
     } catch (error) {
-      modes.completeProblem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again";
+      modes.completeProblem = wordsOf(error, "couldn't complete it — try again");
     } finally {
       footBusy = null;
     }
@@ -858,7 +858,7 @@
         await rereadAll();
         wake(`${file.name} attached to ${item.title}`);
       } catch (error) {
-        footProblem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't attach it — try again";
+        footProblem = wordsOf(error, "couldn't attach it — try again");
       } finally {
         footBusy = null;
       }
@@ -989,7 +989,7 @@
       armed = { id: null, act: null };
       view = await readHome();
     } catch (error) {
-      mailProblem = /** @type {any} */ (error)?.message ?? String(error);
+      mailProblem = wordsOf(error);
     } finally {
       busyReceipt = null;
     }
@@ -1014,7 +1014,7 @@
       view = await readHome();
       return null;
     } catch (error) {
-      return /** @type {any} */ (error)?.message ?? String(error);
+      return wordsOf(error);
     } finally {
       busyReceipt = null;
     }
@@ -1111,7 +1111,7 @@
      real matches shows neither (BUILD.md §1). */
   let completeArmed = $state(false);
   const completeArm = createArm({ onchange: (next) => { completeArmed = next; } });
-  let stripProblem = $state(null);
+  let stripProblem = $state(/** @type {string | null} */ (null));
 
   const stripActs = $derived(stripActsOf({
     searchQuery, nothing: searchResults.nothing, query: searchResults.query,
@@ -1130,7 +1130,7 @@
       stripOpen = false;
       view = await readHome();
     } catch (error) {
-      stripProblem = /** @type {any} */ (error)?.message ?? "couldn't complete it — try again";
+      stripProblem = wordsOf(error, "couldn't complete it — try again");
     }
   }
 
@@ -1327,14 +1327,7 @@
   $effect(() => {
     showUrgentCount(overdueCount);
   });
-  const initials = $derived(
-    (view ? (asView(view).user?.displayName ?? "") : "")
-      .split(/\s+/)
-      .map((word) => word[0] ?? "")
-      .join("")
-      .slice(0, 2)
-      .toUpperCase(),
-  );
+  const initials = $derived(initialsOf(view ? asView(view).user?.displayName : null));
 
   /* The month ring: positions are the design's own (hand-nudged a few px off
      the pure circle, kept verbatim); the TEXT walks with the real date, the
@@ -1530,7 +1523,7 @@
          — no listeners, no error, just a screen that looked alive and
          answered nothing. */
       if (disposed) return;
-      homeLoadProblem = /** @type {any} */ (error)?.message ?? String(error);
+      homeLoadProblem = wordsOf(error);
     });
     return () => {
       disposed = true;
@@ -1572,7 +1565,7 @@
             // here must clear a banner an earlier failure left behind.
             homeLoadProblem = null;
           } catch (error) {
-            homeLoadProblem = /** @type {any} */ (error)?.message ?? String(error);
+            homeLoadProblem = wordsOf(error);
           }
         }} />
 
@@ -1982,7 +1975,7 @@
           <a class="body-link" data-body={b.id} data-title={b.title} data-t={tlabel(b)}
              data-cost={money(b.costMinor, b.currency, b.costIsEstimate)}
              data-docs={b.documentCount > 0 ? b.documentCount : undefined} href="#{b.id}"
-             aria-label={`${b.title}, ${tlabel(b)} · ${money(b.costMinor, b.currency, b.costIsEstimate)}${b.documentCount > 0 ? `, ${b.documentCount} document${b.documentCount === 1 ? "" : "s"}` : ""}`}><g
+             aria-label={`${b.title}, ${tlabel(b)} · ${money(b.costMinor, b.currency, b.costIsEstimate)}${b.documentCount > 0 ? `, ${plural(b.documentCount, "document")}` : ""}`}><g
              id={b.closest ? "b-closest" : undefined}
              class={b.overdue || b.paint === "amber" ? "breathe" : undefined}>
             {@render bodyMark(b, b.placement.x, b.placement.y, b.size)}
@@ -2061,7 +2054,7 @@
               <span>{searchResults.items.length} in your orbit</span>
               {#if searchResults.documents.length}
                 <span class="sep">·</span>
-                <span>{searchResults.documents.length} document{searchResults.documents.length === 1 ? "" : "s"}</span>
+                <span>{plural(searchResults.documents.length, "document")}</span>
               {/if}
               <span class="sep">·</span>
               <span class="hint">←→ step · ↵ open</span>

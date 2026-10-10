@@ -15,6 +15,8 @@
  *   · no assignee: nothing in the model carries one (#1058).
  */
 
+import { every } from "$lib/format.js";
+
 /** The five kinds, in the desk's order, with the desk's glyphs. */
 export const KINDS = /** @type {const} */ ([
   { id: "service", glyph: "●", word: "service" },
@@ -68,10 +70,7 @@ export function stepRecurrence(months, delta) {
 
 /** The stepper's value, in words. */
 export function recurrenceWords(/** @type {number} */ months) {
-  if (!months) return "once";
-  if (months === 1) return "every month";
-  if (months === 12) return "every 12 months";
-  return `every ${months} months`;
+  return months ? every(months) : "once";
 }
 
 /**

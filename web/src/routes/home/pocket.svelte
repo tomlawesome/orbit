@@ -4,14 +4,14 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { WorkspaceError, applyCommand, attachItemDocument, dueDateIn, householdElsewhereFor, readItemDocuments, removeDocument, restoreDocument } from "$lib/data/workspace.js";
+  import { applyCommand, attachItemDocument, dueDateIn, householdElsewhereFor, readItemDocuments, removeDocument, restoreDocument, wordsOf, WorkspaceError } from "$lib/data/workspace.js";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";
   import ChooserCard from "$lib/editing/ChooserCard.svelte";
   import { sectionColourOf } from "$lib/option-colour.js";
   import { DrawerModes, pressKeepsChooser } from "./drawer-modes.svelte.js";
   import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf, manifestRowOf } from "$lib/data/chart.js";
-  import { dayMonth, money, MONTHS } from "$lib/format.js";
+  import { dayMonth, initials as initialsOf, money, MONTHS, plural } from "$lib/format.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
   import Hatch from "$lib/pocket/Hatch.svelte";
   import NorthStar from "$lib/pocket/NorthStar.svelte";
@@ -119,14 +119,7 @@
           })
       : [],
   );
-  const initials = $derived(
-    (view?.user?.displayName ?? "")
-      .split(/\s+/)
-      .map((word) => word[0] ?? "")
-      .join("")
-      .slice(0, 2)
-      .toUpperCase(),
-  );
+  const initials = $derived(initialsOf(view?.user?.displayName));
   // #852: the same "household · role" line the desk account panel derives.
   const roleLine = $derived(
     view?.household
@@ -174,7 +167,7 @@
     return { x1, y1, x2, y2 };
   });
   /** @type {(row: { costMinor: number | null, currency: string, costIsEstimate: boolean }) => string | null} */
-  const cost = (row) => (row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null);
+  const cost = (row) => (row.costMinor === null ? null : money(row.costMinor, row.currency, row.costIsEstimate));
   /** @type {(s: import('$lib/data/workspace.js').ReceiptSuggestion) => number | null} */
   const burnsIn = (s) => (s.expiresAt && view ? daysUntil(s.expiresAt.slice(0, 10), view.today) : null);
 
@@ -182,7 +175,7 @@
   const mailSummary = $derived.by(() => {
     const reading = view?.mailReading?.length ?? 0;
     const failed = view?.mailFailures?.length ?? 0;
-    const unread = `${failed} message${failed === 1 ? "" : "s"} couldn't be read`;
+    const unread = `${plural(failed, "message")} couldn't be read`;
     if (reading && failed) return `reading ${reading} · ${failed} couldn't be read`;
     if (reading) return reading === 1 ? "reading a message" : `reading ${reading} messages`;
     return failed ? unread : "";
@@ -368,7 +361,7 @@
       wake(`${target.title} completed`);
       await onchanged?.();
     } catch (error) {
-      problem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again";
+      problem = wordsOf(error, "couldn't complete it — try again");
     } finally {
       busy = false;
     }
@@ -612,7 +605,7 @@
         onchanged?.();
         return;
       }
-      wake(/** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again", { failure: true });
+      wake(wordsOf(error, "couldn't complete it — try again"), { failure: true });
     });
   });
 
@@ -653,7 +646,7 @@
       wake(words);
       await onchanged?.();
     } catch (error) {
-      rowProblem[one.id] = /** @type {{ message?: string }} */ (error)?.message ?? `couldn't ${kind} it — try again`;
+      rowProblem[one.id] = wordsOf(error, `couldn't ${kind} it — try again`);
     } finally {
       footBusy = null;
     }
@@ -669,7 +662,7 @@
       wake(`${file.name} attached`);
       await Promise.all([rereadPapers(), onchanged?.()]);
     } catch (error) {
-      rowProblem[one.id] = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't attach it — try again";
+      rowProblem[one.id] = wordsOf(error, "couldn't attach it — try again");
     } finally {
       footBusy = null;
     }
@@ -755,7 +748,7 @@
       wake(`Completed${nextDate ? ` · next due ${dayMonth(nextDate)}` : ""} · ${one.title}`);
       await onchanged?.();
     } catch (error) {
-      modes.completeProblem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again";
+      modes.completeProblem = wordsOf(error, "couldn't complete it — try again");
     } finally {
       footBusy = null;
     }

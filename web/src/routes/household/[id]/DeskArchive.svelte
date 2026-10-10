@@ -1,5 +1,5 @@
 <script>
-  import { clockOf, dayMonth, localZone } from "$lib/format.js";
+  import { clockOf, dayMonth, localZone, plural, sizeLabel } from "$lib/format.js";
   import { onMount } from "svelte";
   import { createArm } from "$lib/arm.js";
   import {
@@ -7,9 +7,10 @@
     previewPortableArchive,
     readSignInMethods,
     startStepUp,
+    wordsOf,
     writePortableArchive,
   } from "$lib/data/workspace.js";
-  import { archiveFileProblem, passphraseFloor, passphraseLength, passphraseProblem, sizeLabel } from "./archive.js";
+  import { archiveFileProblem, passphraseFloor, passphraseLength, passphraseProblem } from "./archive.js";
 
   /*
    * THE ARCHIVE ON THE DESK (#1002). The phone's own build is #1122's
@@ -104,8 +105,6 @@
       show the challenge under whichever act is actually holding it. */
   let retryIntent = $state(/** @type {"archive_export" | "archive_import"} */ ("archive_export"));
 
-  /** @param {unknown} error */
-  const wordsOf = (error) => /** @type {{ message?: string }} */ (error)?.message ?? String(error);
   /** @param {unknown} error */
   const needsProof = (error) => /** @type {{ code?: string }} */ (error)?.code === "recent_authentication_required";
 
@@ -352,7 +351,7 @@
         {#if challengeOpen && retryIntent === "archive_export"}{@render challenge()}{/if}
       {:else if outPhase === "writing"}
         <p class="moment" role="status">
-          writing the archive · encrypting {entries} {entries === 1 ? "entry" : "entries"} and their documents</p>
+          writing the archive · encrypting {plural(entries, "entry", "entries")} and their documents</p>
         {#if challengeOpen}{@render challenge()}{/if}
       {:else if written}
         <p class="said show">written · orbit-archive.json · ready until {readyUntil} ·
@@ -370,7 +369,7 @@
       <input class="sr-only" type="file" accept=".json,application/json" tabindex="-1" aria-hidden="true"
              bind:this={picker} onchange={chose}>
       {#if inPhase === "done"}
-        <p class="said show">brought in {brought} {brought === 1 ? "entry" : "entries"} from {preview?.householdName ?? "the archive"}</p>
+        <p class="said show">brought in {plural(brought, "entry", "entries")} from {preview?.householdName ?? "the archive"}</p>
         <div class="act"><button class="ghost" onclick={startOver}>bring in another</button></div>
       {:else}
         <p>An archive from another Orbit — or an older one of this — merges into <b>{householdName}</b>. Entries
@@ -416,8 +415,8 @@
                 <button class="ghost" class:armed={armed === "arch-in"}
                         onclick={(event) => twoTap("arch-in", bringInNow, event.currentTarget)}>
                   {armed === "arch-in"
-                    ? `tap again to bring in ${bringCount} ${bringCount === 1 ? "entry" : "entries"}`
-                    : `bring in ${bringCount} ${bringCount === 1 ? "entry" : "entries"}`}</button>
+                    ? `tap again to bring in ${plural(bringCount, "entry", "entries")}`
+                    : `bring in ${plural(bringCount, "entry", "entries")}`}</button>
               </div>
               <p class="moment warn">this can’t be undone as one act — each entry would have to go separately</p>
             {:else}
@@ -427,7 +426,7 @@
           </div>
           {#if challengeOpen && retryIntent === "archive_import"}{@render challenge()}{/if}
         {:else if inPhase === "bringing"}
-          <p class="moment" role="status">bringing it in · {bringCount} {bringCount === 1 ? "entry" : "entries"}</p>
+          <p class="moment" role="status">bringing it in · {plural(bringCount, "entry", "entries")}</p>
           {#if challengeOpen}{@render challenge()}{/if}
         {/if}
         {#if inProblem}<p class="refuse">{inProblem}</p>{/if}

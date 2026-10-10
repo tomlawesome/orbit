@@ -15,6 +15,8 @@
  * prevent, and it is what the unit suite pins.
  */
 
+import { wordsOf } from "./workspace.js";
+
 /** The marker the API sends for a value that failed its integrity check. */
 export const DAMAGED = "metadata_integrity_failed";
 /** The marker the API sends when the instance holds no usable encryption key. */
@@ -113,5 +115,5 @@ export function receiptWords(status) {
  * @returns {string}
  */
 export function saveProblem(error) {
-  return error?.message ?? String(error);
+  return wordsOf(error);
 }

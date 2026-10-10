@@ -155,11 +155,63 @@ export const money = (minor, currency, estimate = false) => {
 };
 
 /**
+ * A recurrence in words: "every month", "every 3 months", "every year",
+ * "every 2 years" (owner, 2026-10-09: a 12-month repeat reads "every year").
  * @param {number} months
  * @returns {string}
  */
-export const every = (months) =>
-  months === 12 ? "every year" : months === 1 ? "every month" : `every ${months} months`;
+export const every = (months) => {
+  if (months === 12) return "every year";
+  if (months === 24) return "every 2 years";
+  return months === 1 ? "every month" : `every ${months} months`;
+};
+
+/**
+ * A count with its noun: "1 task", "2 tasks". A noun that does not just add
+ * an "s" gives its plural: plural(2, "try", "tries").
+ * @param {number} n
+ * @param {string} word
+ * @param {string} [many]
+ * @returns {string}
+ */
+export const plural = (n, word, many = `${word}s`) => `${n} ${n === 1 ? word : many}`;
+
+/**
+ * A file's size: under 1 KB "N B", under 1 MB a whole number of KB, from 1 MB
+ * up MB with one decimal.
+ * @param {number} bytes
+ * @returns {string}
+ */
+export const sizeLabel = (bytes) => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+/**
+ * The letters in a person's avatar: the first letter of the first two words,
+ * upper case, or "·" when there is no name to read.
+ * @param {string | null | undefined} name
+ * @returns {string}
+ */
+export const initials = (name) => {
+  const letters = (name ?? "").trim().split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase();
+  return letters || "·";
+};
+
+/**
+ * A currency's sign as the browser writes it: "£", "€", "$".
+ * @param {string} currency  an ISO 4217 code
+ * @returns {string}
+ */
+export const symbolOf = (currency) => {
+  try {
+    return new Intl.NumberFormat("en-GB", { style: "currency", currency, currencyDisplay: "narrowSymbol" })
+      .formatToParts(0).find((part) => part.type === "currency")?.value ?? currency;
+  } catch {
+    return currency;
+  }
+};
 
 /* Elapsed time in the relay's two registers: "4m ago" for chrome lines,
    "4 minutes ago" for sentences. `now` is passed in, never read from the
@@ -178,20 +230,23 @@ export const ago = (iso, now) => {
 };
 
 /**
+ * How long, in the sentence register: "4 minutes", "3 days". `now` is passed
+ * in, like `ago`'s.
  * @param {string} iso
  * @param {string} now
  * @returns {string}
  */
-export const agoLong = (iso, now) => {
+export const elapsed = (iso, now) => {
   const minutes = Math.max(0, Math.round((Date.parse(now) - Date.parse(iso)) / 60000));
-  /**
-   * @param {number} n
-   * @param {string} word
-   * @returns {string}
-   */
-  const unit = (n, word) => `${n} ${word}${n === 1 ? "" : "s"} ago`;
-  if (minutes < 60) return unit(minutes, "minute");
+  if (minutes < 60) return plural(minutes, "minute");
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return unit(hours, "hour");
-  return unit(Math.round(hours / 24), "day");
+  if (hours < 24) return plural(hours, "hour");
+  return plural(Math.round(hours / 24), "day");
 };
+
+/**
+ * @param {string} iso
+ * @param {string} now
+ * @returns {string}
+ */
+export const agoLong = (iso, now) => `${elapsed(iso, now)} ago`;

@@ -2,7 +2,7 @@
   import { flip } from "svelte/animate";
   import { SvelteMap } from "svelte/reactivity";
   import { resolve } from "$app/paths";
-  import { approveWithOperation, dismissReceipt, readInboxScreen } from "$lib/data/workspace.js";
+  import { approveWithOperation, dismissReceipt, readInboxScreen, wordsOf } from "$lib/data/workspace.js";
   import { ago, agoLong, dayMonth } from "$lib/format.js";
   import { receiptWords } from "$lib/data/metadata-status.js";
   import FailedRow from "$lib/pocket/FailedRow.svelte";
@@ -103,7 +103,7 @@
       await reload();
       return true;
     } catch (error) {
-      problems.set(receipt.id, /** @type {{ message?: string }} */ (error)?.message ?? String(error));
+      problems.set(receipt.id, wordsOf(error));
       return false;
     } finally {
       busy = null;
@@ -122,7 +122,7 @@
       wake(`dismissed · ${titleOf(receipt)}`);
       await reload();
     } catch (error) {
-      problems.set(receipt.id, /** @type {{ message?: string }} */ (error)?.message ?? String(error));
+      problems.set(receipt.id, wordsOf(error));
     } finally {
       busy = null;
       busyAct = null;
@@ -136,7 +136,7 @@
       exits.set(failure.id, "burn");
       await reload();
     } catch (error) {
-      wake(`not removed — ${/** @type {{ message?: string }} */ (error)?.message ?? String(error)}`, { failure: true });
+      wake(`not removed — ${wordsOf(error)}`, { failure: true });
     }
   }
 
