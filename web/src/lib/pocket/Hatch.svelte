@@ -1,6 +1,7 @@
 <script>
+  import { initials as initialsOf } from "$lib/format.js";
   import { resolve } from "$app/paths";
-  import { signOut } from "$lib/data/workspace.js";
+  import { signOut, wordsOf } from "$lib/data/workspace.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
   import { SWATCHES, applyTheme } from "$lib/theme-swatches.js";
   import { watchTour } from "$lib/tour/watch.js";
@@ -51,9 +52,7 @@
     onopened = undefined,
   } = $props();
 
-  const initials = $derived(
-    name.split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
-  );
+  const initials = $derived(initialsOf(name));
 
   let active = $state(DEFAULT_THEME);
   $effect(() => {
@@ -92,7 +91,7 @@
       redirectTo = await signOut();
     } catch (error) {
       signingOut = false;
-      problem = /** @type {{ message?: string }} */ (error)?.message ?? "still signed in — try again";
+      problem = wordsOf(error, "still signed in — try again");
       return;
     }
     /* #1262: the menu goes as the sign-out goes ahead, never left over the flight */

@@ -1,33 +1,19 @@
 <script>
   import { onMount } from "svelte";
-  import {
-    addMember,
-    commandContact,
-    commandUploadLimit,
-    commandMailbox,
-    createLocalUser,
-    createSystem,
-    hardDeleteHousehold,
-    readAdminScreen,
-    readSignInMethods,
-    restoreHousehold,
-    retryDocumentJob,
-    sendSetupLink,
-    startStepUp,
-    testMail,
-  } from "$lib/data/workspace.js";
+  import { addMember, commandContact, commandMailbox, commandUploadLimit, createLocalUser, createSystem, hardDeleteHousehold, readAdminScreen, readSignInMethods, restoreHousehold, retryDocumentJob, sendSetupLink, startStepUp, testMail, wordsOf } from "$lib/data/workspace.js";
+  import { createArm } from "$lib/arm.js";
   import { deletionNameMatches } from "$lib/data/household.js";
   import { SETUP_LINK_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { constellationPlanetsOf, galaxyOf } from "$lib/data/chart.js";
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import { rollSeed, seedFromWorkspace } from "$lib/sky.js";
   import { mountStation } from "$lib/backdrops/station.js";
-  import { ago } from "$lib/format.js";
+  import { ago, dayMonth, initials, plural } from "$lib/format.js";
   import Chrome from "$lib/Chrome.svelte";
   import { isPocket } from "$lib/pocket/media.js";
   import Pocket from "./pocket.svelte";
   import {
-    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, initialsOf, lapses, megabytes,
+    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, lapses, megabytes,
     openFor, plainly, sendWords, setupWords, stamp, testVerdict,
   } from "./words.js";
   import "./administration.css";
@@ -71,11 +57,6 @@
   let backdropRoot = null;
   /* #1123: on a phone the pocket's column holds the page's one main landmark. */
   const pocket = isPocket();
-  /** @param {unknown} error */
-  const said = (error) => /** @type {{ message?: string }} */ (error)?.message ?? String(error);
-  /** @param {number} n @param {string} one @param {string} [many] */
-  const count = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
   /* §11 (#453): direct placement — it lands on the real route and refreshes
      the screen with the server's answer. Deciding join requests is NOT an
      admin-screen function (§15-2g). */
@@ -97,7 +78,7 @@
       placing = null;
       view = await readAdminScreen();
     } catch (error) {
-      problem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      problem = wordsOf(error);
     } finally {
       busy = null;
     }
@@ -179,8 +160,6 @@
   const daysLeft = (iso) => Math.max(0, Math.ceil(
     (Date.parse(iso) - Date.parse(view?.now ?? new Date().toISOString())) / 86_400_000,
   ));
-  /** @param {string} iso */
-  const goneOn = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "long", timeZone: "UTC" });
   /** @param {{ deleteAfter: string }} row */
   const expired = (row) => Date.parse(row.deleteAfter) <= Date.parse(view?.now ?? new Date().toISOString());
 
@@ -193,7 +172,7 @@
       clockSaid[row.id] = { ok: true, text: `restored · ${row.name} is back exactly as it was` };
       view = await readAdminScreen();
     } catch (error) {
-      clockSaid[row.id] = { ok: false, text: `not restored — ${said(error)}` };
+      clockSaid[row.id] = { ok: false, text: `not restored — ${wordsOf(error)}` };
     }
   }
 
@@ -214,25 +193,15 @@
   /** @param {{ id: string, name: string }} row */
   const doomNameOk = (row) => deletionNameMatches(doomTypedName[row.id] ?? "", row.name);
 
-  /* The two-tap protocol (household page's own danger line): the first tap
-     arms the button and does nothing else; the second fires. An unfired arm
-     relaxes on its own after 4 seconds, exactly as the mockup's own script
-     does. */
-  /** @type {string | null} */
-  let doomArmed = $state(null);
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let doomArmTimer = null;
-  /** @param {{ id: string, name: string }} row */
-  function twoTapDoom(row) {
-    if (doomArmed === row.id) {
-      clearTimeout(doomArmTimer ?? undefined);
-      doomArmed = null;
-      fireDoom(row);
-      return;
-    }
-    clearTimeout(doomArmTimer ?? undefined);
-    doomArmed = row.id;
-    doomArmTimer = setTimeout(() => (doomArmed = null), 4_000);
+  /* The two-tap protocol (lib/arm.js): the first tap arms the button and does
+     nothing else; the second fires. An unfired arm relaxes after 4 seconds,
+     on scroll, on Escape and on a tap elsewhere. */
+  /** @type {string | boolean} */
+  let doomArmed = $state(false);
+  const doomArm = createArm({ onchange: (next) => (doomArmed = next) });
+  /** @param {{ id: string, name: string }} row @param {HTMLElement | null} button */
+  function twoTapDoom(row, button) {
+    if (doomArm.tap(row.id, button)) fireDoom(row);
   }
   /** @param {{ id: string, name: string }} row */
   async function fireDoom(row) {
@@ -242,7 +211,7 @@
       doomGone = [...doomGone, { id: row.id, text: `deleted · ${row.name} is gone for good · its members keep their accounts` }];
       view = await readAdminScreen();
     } catch (error) {
-      doomProblem[row.id] = said(error);
+      doomProblem[row.id] = wordsOf(error);
     }
   }
 
@@ -483,23 +452,13 @@
      "remove credential" fired on one click here while the phone already
      armed it first; "rotate every address" gets the same protocol from the
      start rather than shipping unarmed and needing its own fix later.
-     Local to this card, like the household and archive cards' own copies
-     of the same protocol — armed relaxes on its own after 5s. */
-  /** @type {string | null} */
-  let mailboxArmed = $state(null);
-  /** @type {ReturnType<typeof setTimeout> | null} */
-  let mailboxArmTimer = null;
-  /** @param {string} key @param {() => void} fire */
-  function twoTapMailbox(key, fire) {
-    if (mailboxArmed === key) {
-      clearTimeout(mailboxArmTimer ?? undefined);
-      mailboxArmed = null;
-      fire();
-      return;
-    }
-    clearTimeout(mailboxArmTimer ?? undefined);
-    mailboxArmed = key;
-    mailboxArmTimer = setTimeout(() => (mailboxArmed = null), 5_000);
+     One arm for the card's acts, keyed by act (lib/arm.js). */
+  /** @type {string | boolean} */
+  let mailboxArmed = $state(false);
+  const mailboxArm = createArm({ onchange: (next) => (mailboxArmed = next) });
+  /** @param {string} key @param {() => void} fire @param {HTMLElement | null} button */
+  function twoTapMailbox(key, fire, button) {
+    if (mailboxArm.tap(key, button)) fire();
   }
   /** @type {{ host: string, port: number, accountUser: string, mailbox: string, tlsServerName: string, providerProfile: string, trustedRecipientHeader: string, pollSeconds: number }} */
   let draft = $state({
@@ -544,7 +503,7 @@
     } catch (error) {
       /* The command itself refused — nothing changed server-side, so this
          really is "not done". */
-      mailboxProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      mailboxProblem = wordsOf(error);
       mailboxBusy = null;
       return;
     }
@@ -610,7 +569,7 @@
        against, so only the count travels, as the phone's own detail panel
        already shows it. */
     if (job.status === "failed") {
-      return `${JOB_REASONS[job.lastErrorCode ?? "unknown"] ?? JOB_REASONS.unknown} · ${count(job.attempts, "try", "tries")} · last tried ${ago(job.updatedAt, jobsClock)}`;
+      return `${JOB_REASONS[job.lastErrorCode ?? "unknown"] ?? JOB_REASONS.unknown} · ${plural(job.attempts, "try", "tries")} · last tried ${ago(job.updatedAt, jobsClock)}`;
     }
     if (job.status === "retry") return job.lastErrorCode ? JOB_REASONS[job.lastErrorCode] ?? JOB_REASONS.unknown : `last tried ${ago(job.updatedAt, jobsClock)}`;
     if (job.status === "pending") return retriedJobs[job.id] ? "attempt 1 · queued just now" : `queued ${ago(job.createdAt, jobsClock)}`;
@@ -626,7 +585,7 @@
       await retryDocumentJob(job.id, job.status);
       retriedJobs[job.id] = { status: "pending", at: new Date().toISOString() };
     } catch (error) {
-      jobsProblem = said(error);
+      jobsProblem = wordsOf(error);
     }
   }
 
@@ -651,7 +610,7 @@
       await testMail(which);
       view = await readAdminScreen();
     } catch (error) {
-      testProblem = said(error);
+      testProblem = wordsOf(error);
     } finally {
       testingWhich = null;
     }
@@ -680,9 +639,13 @@
     /** @type {{ href: string, text: string }[]} */
     const items = [];
     const failedJobs = jobs.filter((job) => job.status === "failed").length;
-    if (failedJobs) items.push({ href: "#jobs-card", text: `${count(failedJobs, "job")} failed` });
+    if (failedJobs) items.push({ href: "#jobs-card", text: `${plural(failedJobs, "job")} failed` });
     if (mailProbes.relay && testVerdict(mailProbes.relay.result).tone === "over") items.push({ href: "#mail-card", text: "relay failed" });
-    if (mailProbes.mailbox && testVerdict(mailProbes.mailbox.result).tone === "over") items.push({ href: "#mail-card", text: "mailbox failed" });
+    /* no probe yet: the mailbox's own last verdict, as the phone says it */
+    const mailboxFailed = mailProbes.mailbox
+      ? testVerdict(mailProbes.mailbox.result).tone === "over"
+      : view?.mailbox?.verificationState === "failed";
+    if (mailboxFailed) items.push({ href: "#mail-card", text: "mailbox failed" });
     return items;
   });
 
@@ -706,7 +669,7 @@
   /** @param {{ action: "set", address: string } | { action: "clear" }} partial */
   async function contactAction(partial) {
     const current = need().contact;
-    if (!current) return;
+    if (!current || contactBusy) return;
     contactBusy = true;
     contactProblem = null;
     try {
@@ -714,7 +677,7 @@
       view = await readAdminScreen();
       editingContact = false;
     } catch (error) {
-      contactProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      contactProblem = wordsOf(error);
     } finally {
       contactBusy = false;
     }
@@ -749,7 +712,7 @@
       view = await readAdminScreen();
       editingUploadLimit = false;
     } catch (error) {
-      uploadLimitProblem = /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+      uploadLimitProblem = wordsOf(error);
     } finally {
       uploadLimitBusy = false;
     }
@@ -831,8 +794,7 @@
 <div class="station-backdrop" bind:this={backdropRoot} aria-hidden="true"></div>
 <div class="vignette" aria-hidden="true"></div>
 
-<Chrome user={view?.user} current="administration"
-        role={view ? `${view.household?.name ?? ""} · ${view.household?.canManage ? "owner" : "member"}` : ""} />
+<Chrome user={view?.user} current="administration" household={view?.household} />
 
 <!-- #1123, proposal §2.12: administration on a phone, chosen by CSS. It
      shares this page's state and acts (the step-up challenge, the re-read),
@@ -1024,7 +986,7 @@
 
         {#each view.users as person (person.id)}
           <div class="person">
-            <span class="avatar">{initialsOf(person.displayName)}</span>
+            <span class="avatar">{initials(person.displayName)}</span>
             <div class="who">
               <b>{person.displayName}{person.id === view.user?.id ? " · you" : ""}</b>
               <span>{[person.email, view.peopleMeta[person.id]].filter(Boolean).join(" · ")}</span>
@@ -1143,9 +1105,9 @@
             <div class="who">
               <b>{household.name}</b>
               <span>{[
-                `${household.memberCount} member${household.memberCount === 1 ? "" : "s"}`,
+                plural(household.memberCount ?? 0, "member"),
                 view.owners[household.id] ? `owner ${view.owners[household.id]}` : null,
-                `${(household.items ?? []).length} item${(household.items ?? []).length === 1 ? "" : "s"}`,
+                plural((household.items ?? []).length, "item"),
               ].filter(Boolean).join(" · ")}</span>
             </div>
           </div>
@@ -1175,7 +1137,7 @@
             <div class="who">
               <b>{doom.name}</b>
               <span>{rowExpired ? "past its window · removing"
-                : `on the clock · ${count(daysLeft(doom.deleteAfter), "day")} left · gone for good ${goneOn(doom.deleteAfter)}`}</span>
+                : `on the clock · ${plural(daysLeft(doom.deleteAfter), "day")} left · gone for good ${dayMonth(doom.deleteAfter)}`}</span>
             </div>
             {#if !rowExpired}
               <div class="acts">
@@ -1184,13 +1146,13 @@
                   <button class="dangerbtn" onclick={() => openDoomConfirm(doom)}>delete now →</button>
                 {:else}
                   <button class="dangerbtn" class:armed={doomArmed === doom.id} disabled={!doomNameOk(doom)}
-                          onclick={() => twoTapDoom(doom)}>
+                          onclick={(event) => twoTapDoom(doom, event.currentTarget)}>
                     {doomArmed === doom.id ? "tap again to delete for good" : "delete now"}</button>
                 {/if}
               </div>
               {#if doomConfirming[doom.id]}
                 <div class="confirm">
-                  <p class="stake">Deleting now skips the {count(daysLeft(doom.deleteAfter), "day")}. Nothing comes
+                  <p class="stake">Deleting now skips the {plural(daysLeft(doom.deleteAfter), "day")}. Nothing comes
                     back after this — not for you, not for anyone.</p>
                   <div class="field">
                     <label for="doomname-{doom.id}">type the system’s name exactly to wake the button</label>
@@ -1379,8 +1341,9 @@
                      remove-credential ArmButton — this used to fire on one
                      unconfirmed click. -->
                 <button class="dangerbtn" class:armed={mailboxArmed === "remove"} disabled={mailboxBusy !== null}
-                        onclick={() => twoTapMailbox("remove",
-                          () => mailboxAction("remove", { action: "remove", expectedVersion: mailbox.version }))}>
+                        onclick={(event) => twoTapMailbox("remove",
+                          () => mailboxAction("remove", { action: "remove", expectedVersion: mailbox.version }),
+                          event.currentTarget)}>
                   {mailboxArmed === "remove" ? "tap again to remove the credential" : "remove credential"}</button>
               </div>
             {/if}
@@ -1394,7 +1357,7 @@
                 event.preventDefault();
                 twoTapMailbox("alias", () => mailboxAction("alias", {
                   action: "rotate_alias_key", expectedVersion: mailbox.version, graceDays: aliasGraceDays,
-                }));
+                }), event.submitter);
               }}>
                 <p class="mailboxnote">Every member gets a new relay address. Mail sent to an old one still arrives until its
                   grace period runs out.</p>
@@ -1403,7 +1366,7 @@
                 <div class="placerow mailboxrow">
                   <button type="submit" class="dangerbtn" class:armed={mailboxArmed === "alias"} disabled={mailboxBusy !== null}>
                     {mailboxArmed === "alias" ? "tap again to rotate every address" : "rotate every address"}</button>
-                  <button type="button" onclick={() => { aliasRotating = false; mailboxArmed = null; }}>cancel</button>
+                  <button type="button" onclick={() => { aliasRotating = false; mailboxArm.disarm(); }}>cancel</button>
                 </div>
               </form>
             {/if}

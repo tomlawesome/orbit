@@ -3,11 +3,12 @@ import { z } from "zod";
 
 import { requireRecentAuthentication } from "orbit/lib/auth/recent-auth";
 import { createPortableArchive, requirePortableArchiveAccess } from "orbit/server/portable-archive-repository";
+import { ARCHIVE_PASSPHRASE_MAX, ARCHIVE_PASSPHRASE_MIN } from "orbit/server/portable-archive-limits";
 
 import { write } from "$lib/server/api.js";
 
 const requestSchema = z.object({
-  passphrase: z.string().min(12).max(256),
+  passphrase: z.string().min(ARCHIVE_PASSPHRASE_MIN).max(ARCHIVE_PASSPHRASE_MAX),
   includeDocuments: z.boolean().default(false),
   /**
    * The caller's own current password (ADR-0023 §5), when they have one;

@@ -4,6 +4,7 @@ import { and, asc, eq, gt, inArray, isNull, lte, lt, or, sql } from "drizzle-orm
 import { getDb } from "@/db";
 import { imapIngestionAttachments, imapIngestionMessages, imapIngestionStagingObjects, imapRecipientAliases, users } from "@/db/schema";
 import { log } from "@/lib/logger";
+import { RECEIPT_RETENTION_MS } from "@/server/retention-windows";
 import { getNotificationWorkerConfig, verifySmtpProviderConnection, type NotificationWorkerConfig } from "@/server/notification-worker";
 import { flagStagingPurgeFailed, purgeHeldImapAttachment, scanAndHoldImapAttachment } from "./imap-attachment-holding";
 import { adjudicateProposal } from "@/server/documents/adjudication";
@@ -58,12 +59,8 @@ export type { ImapIngestionConfig };
 
 export type ImapPreflightStatus = "not_configured" | "disabled" | "verification_pending" | "available" | "provider_unavailable" | "unsafe_input" | "credential_locked" | "retrying" | "exhausted" | "retention_backlog";
 
-/**
- * How long a mail-in receipt (and its held suggestion) waits for review
- * before expiring. Owner decision, 2026-08-15 (#434): 45 days, up from 30 —
- * a forwarded document should survive a long holiday.
- */
-export const RECEIPT_RETENTION_MS = 45 * 86_400_000;
+// Defined in retention-windows.ts so the session payload can state it (#1336).
+export { RECEIPT_RETENTION_MS };
 
 /* The one header part runImapIngestionCycle asks the IMAP server for. The
    key must be a bare IMAP atom (no spaces, parentheses or quotes), or

@@ -21,6 +21,11 @@ export const SESSION_FIXTURE = {
   authenticated: true,
   csrfToken: "fixture-csrf-token",
   user: { id: "u-fixture", displayName: "Tom Lawson", email: "tom@lawson.example" },
+  /* The engine's own numbers as the session payload carries them (#1336), at
+     their values today: the archive file ceiling is the longest ciphertext
+     plus its envelope. */
+  limits: { archiveFileBytes: 179_022_508, passphraseMin: 12, passphraseMax: 256 },
+  retention: { documentDays: 30, recoveryDays: 30, receiptDays: 45 },
 };
 
 /**

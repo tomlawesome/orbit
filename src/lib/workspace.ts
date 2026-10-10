@@ -236,7 +236,7 @@ export type WorkspaceCommand =
     }
   | { type: "household.update"; householdId: string; name: string; timezone: string; currency: string }
   | { type: "household.activate"; householdId: string }
-  | { type: "sections.replace"; householdId: string; sections: HouseholdSection[] }
+  | { type: "sections.replace"; householdId: string; sections: HouseholdSection[]; moveItemsTo?: string }
   | {
       type: "item.upsert";
       householdId: string;
@@ -350,6 +350,9 @@ export const workspaceCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("sections.replace"),
     householdId: z.string().min(1).max(100),
     sections: z.array(workspaceSectionSchema).min(1).max(12),
+    /* #1332: where the entries of every section this list drops go. Needed
+       only when a dropped section still holds entries. */
+    moveItemsTo: z.string().min(1).max(100).optional(),
   }),
   z.object({
     type: z.literal("item.upsert"),
@@ -625,15 +628,24 @@ export function reduceWorkspace(state: WorkspaceState, command: WorkspaceCommand
       return { ...state, activeHouseholdId: command.householdId };
     }
     case "sections.replace": {
+      /* The same rule as the engine's (#1332): a section that still holds
+         items cannot go unless the command names a kept section for them.
+         The pure reducer cannot refuse aloud, so a command the engine would
+         refuse leaves the state as it was. */
       const retainedSectionIds = new Set(command.sections.map((section) => section.id));
-      const fallbackSectionId = command.sections[0].id;
-      return updateHousehold(state, command.householdId, (household) => ({
-        ...household,
-        sections: command.sections,
-        items: household.items.map((item) => retainedSectionIds.has(item.sectionId)
-          ? item
-          : { ...item, sectionId: fallbackSectionId }),
-      }));
+      const target = command.moveItemsTo;
+      return updateHousehold(state, command.householdId, (household) => {
+        const stranded = household.items.some((item) => !retainedSectionIds.has(item.sectionId));
+        if (target !== undefined && !retainedSectionIds.has(target)) return household;
+        if (stranded && target === undefined) return household;
+        return {
+          ...household,
+          sections: command.sections,
+          items: household.items.map((item) => retainedSectionIds.has(item.sectionId)
+            ? item
+            : { ...item, sectionId: target as string }),
+        };
+      });
     }
     case "item.upsert": {
       return updateHousehold(state, command.householdId, (household) => {

@@ -13,7 +13,7 @@
    * ItemView.svelte gives: a snippet's parameter has nowhere to carry its
    * type that both the type checker and the production bundler accept.
    */
-  import { every, longDate, money } from "$lib/format.js";
+  import { every, longDate, money, tminusOf } from "$lib/format.js";
   import { DAMAGED, LOCKED, NOTES_WORDS, REFERENCE_WORDS, fieldState, itemLocked } from "$lib/data/metadata-status.js";
   import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
   import { T_CLASS } from "$lib/data/bands.js";
@@ -41,7 +41,7 @@
     acts = undefined,
   } = $props();
 
-  const tlabel = $derived(one.days === null ? "" : one.days < 0 ? `T+${-one.days}d` : `T−${one.days}d`);
+  const tlabel = $derived(tminusOf(one.days));
   const referenceState = $derived(fieldState(raw?.metadataStatus, "reference"));
   const notesState = $derived(fieldState(raw?.metadataStatus, "notes"));
 

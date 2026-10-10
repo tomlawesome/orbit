@@ -4,18 +4,15 @@
   import Row from "$lib/pocket/Row.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import { wake } from "$lib/pocket/wake.js";
-  import {
-    addMember, commandContact, commandMailbox, commandUploadLimit, createLocalUser, createSystem, hardDeleteHousehold,
-    restoreHousehold, retryDocumentJob, sendSetupLink, setUserDisabled, testMail,
-  } from "$lib/data/workspace.js";
+  import { addMember, commandContact, commandMailbox, commandUploadLimit, createLocalUser, createSystem, hardDeleteHousehold, restoreHousehold, retryDocumentJob, sendSetupLink, setUserDisabled, testMail, wordsOf } from "$lib/data/workspace.js";
   import { deletionNameMatches } from "$lib/data/household.js";
-  import { ago } from "$lib/format.js";
+  import { ago, dayMonth, initials, plural } from "$lib/format.js";
   import { SETUP_LINK_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { constellationPlanetsOf } from "$lib/data/chart.js";
   import { BAND_VAR } from "$lib/data/bands.js";
   import { NAME_LIMIT } from "$lib/arrival/stage.js";
   import {
-    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, ingestShort, initialsOf, lapsesShort,
+    JOB_KINDS, JOB_REASONS, JOB_STATES, SETUP_LINK_DAYS, ingestShort, lapsesShort,
     megabytes, openFor, plainly, sendWords, setupWords, shortDay, stamp, testVerdict, versionLine,
   } from "./words.js";
 
@@ -53,11 +50,6 @@
   /** @type {{ view: AdminView | null, fixtures: boolean, actorHasPassword: boolean, provenIntent: string, resumedResendPersonId: string | null, draft: Draft, challenge: Challenge, reread: () => Promise<void>, spent: () => void }} */
   let { view, fixtures, actorHasPassword, provenIntent, resumedResendPersonId, draft = $bindable(), challenge, reread, spent } = $props();
 
-  /** @param {unknown} error */
-  const said = (error) => /** @type {{ message?: string }} */ (error)?.message ?? String(error);
-  /** @param {number} n @param {string} one @param {string} [many] */
-  const count = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
   const people = $derived(view?.users ?? []);
   const systems = $derived(view?.households ?? []);
   const meId = $derived(view?.user?.id ?? null);
@@ -80,7 +72,7 @@
     }
     if ((view.metadata?.damagedValues ?? 0) > 0) {
       list.push({ id: "damaged", title: "Damaged encrypted details",
-        say: `${count(view.metadata?.damagedValues ?? 0, "value")} failed the integrity check and can’t be recovered.` });
+        say: `${plural(view.metadata?.damagedValues ?? 0, "value")} failed the integrity check and can’t be recovered.` });
     }
     if (view.recoveryBundle && !view.recoveryBundle.exported) {
       list.push({ id: "bundle", title: "No recovery bundle exported",
@@ -103,7 +95,7 @@
     }
     if (failing.length > 2) list.push({ id: "ad-operations", word: `${failing.length - 2} more failing` });
     const failedJobs = jobs.filter((job) => job.status === "failed").length;
-    if (failedJobs) list.unshift({ id: "ad-documents", word: `${count(failedJobs, "job")} failed` });
+    if (failedJobs) list.unshift({ id: "ad-documents", word: `${plural(failedJobs, "job")} failed` });
     /* #1151 A1-Q6: carried over from `tests` (#1071's throwaway,
        reload-forgetting local copy), removed when A1-Q6 moved this screen
        onto the server-backed `mailProbes` the desk layout already reads —
@@ -256,7 +248,7 @@
       wake(`${person.displayName} is in ${system.name}`);
       await reread();
     } catch (error) {
-      peopleProblem = said(error);
+      peopleProblem = wordsOf(error);
       wake(peopleProblem, { failure: true });
     }
   }
@@ -288,7 +280,7 @@
       else wake(`${person.displayName} can sign in again`);
       await reread();
     } catch (error) {
-      peopleProblem = said(error);
+      peopleProblem = wordsOf(error);
       wake(peopleProblem, { failure: true });
     }
   }
@@ -350,14 +342,12 @@
   /* Round 3 §3.9: members and items at rest; the owner is the panel's. */
   /** @param {System} system */
   const systemMeta = (system) =>
-    `${count(system.memberCount ?? 0, "member")} · ${count((system.items ?? []).length, "item")}`;
+    `${plural(system.memberCount ?? 0, "member")} · ${plural((system.items ?? []).length, "item")}`;
 
   /* A system on the clock (§2.11, §19 "56 b the row", "57 admin only"). */
   const recoverable = $derived(view?.recoverable ?? []);
   /** @param {string} iso */
   const daysLeft = (iso) => Math.max(0, Math.ceil((Date.parse(iso) - Date.parse(view?.now ?? new Date().toISOString())) / 86_400_000));
-  /** @param {string} iso */
-  const goneOn = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
   /** @param {{ deleteAfter: string }} row */
   const expired = (row) => Date.parse(row.deleteAfter) <= Date.parse(view?.now ?? new Date().toISOString());
   /** What was said on a row after its act, keyed by the system's id. @type {Record<string, { ok: boolean, text: string }>} */
@@ -369,7 +359,7 @@
       clockSaid[row.id] = { ok: true, text: `restored · ${row.name} is back exactly as it was` };
       await reread();
     } catch (error) {
-      clockSaid[row.id] = { ok: false, text: `not restored — ${said(error)}` };
+      clockSaid[row.id] = { ok: false, text: `not restored — ${wordsOf(error)}` };
     }
   }
   /** @typedef {{ id: string, name: string, deleteAfter: string }} OnTheClock */
@@ -389,7 +379,7 @@
       gone = [...gone, { id: row.id, text: `deleted · ${row.name} is gone for good · its members keep their accounts` }];
       await reread();
     } catch (error) {
-      doomProblem = `not deleted — ${said(error)}`;
+      doomProblem = `not deleted — ${wordsOf(error)}`;
     }
   }
   /** Rows replaced by their said-line after a hard delete. @type {{ id: string, text: string }[]} */
@@ -423,7 +413,7 @@
       wake(partial.action === "clear" ? "the public contact is cleared" : `the public contact is ${partial.address}`);
       await reread();
     } catch (error) {
-      contactProblem = said(error);
+      contactProblem = wordsOf(error);
     } finally {
       contactBusy = false;
     }
@@ -454,7 +444,7 @@
       wake(`the upload size limit is ${megabytes(uploadLimit.maxBytes)}`);
       await reread();
     } catch (error) {
-      uploadLimitProblem = said(error);
+      uploadLimitProblem = wordsOf(error);
     } finally {
       uploadLimitBusy = false;
     }
@@ -508,7 +498,7 @@
       if (!answer.outcome || answer.outcome === "verified") { editOpen = false; rotateOpen = false; }
       mailPassword = "";
     } catch (error) {
-      mailProblem = said(error);
+      mailProblem = wordsOf(error);
     } finally {
       mailBusy = null;
     }
@@ -536,7 +526,7 @@
       await testMail(which);
       await reread();
     } catch (error) {
-      testProblem = said(error);
+      testProblem = wordsOf(error);
     } finally {
       testing = null;
     }
@@ -599,7 +589,7 @@
       retried[job.id] = { status: "pending", at: new Date().toISOString() };
       wake(`${JOB_KINDS[job.kind] ?? job.kind} is queued to try again`);
     } catch (error) {
-      jobsProblem = said(error);
+      jobsProblem = wordsOf(error);
     }
   }
 
@@ -672,7 +662,7 @@
       </svg>
       <div class="ad-named">
         <h1 class="p-title">Administration</h1>
-        <p class="ad-sub">{view ? `${count(people.length, "person", "people")} · ${count(systems.length, "system")}` : ""}</p>
+        <p class="ad-sub">{view ? `${plural(people.length, "person", "people")} · ${plural(systems.length, "system")}` : ""}</p>
       </div>
     </header>
 
@@ -741,7 +731,7 @@
                trail={person.isInstanceAdmin ? "admin" : "user"}
                trailTone={person.isInstanceAdmin ? "var(--accent-text)" : ""} acts={personActs(person)}
                detail={standing ? personDetail : undefined}>
-            {#snippet mark()}<span class="p-avatar" class:owner={person.isInstanceAdmin} class:ad-off={person.disabledAt}>{initialsOf(person.displayName)}</span>{/snippet}
+            {#snippet mark()}<span class="p-avatar" class:owner={person.isInstanceAdmin} class:ad-off={person.disabledAt}>{initials(person.displayName)}</span>{/snippet}
           </Row>
         {/each}
         {#if people.length <= 1}<p class="p-empty ad-inset">only you so far</p>{/if}
@@ -782,10 +772,10 @@
         {#each recoverable.filter((row) => !gone.some((line) => line.id === row.id)) as row (row.id)}
           <!-- Round 3 §3.9: the state and the days at rest; the date sits in
                the panel beside `delete now`. -->
-          {#snippet clockDetail()}<div class="p-kv"><span>gone for good</span><b>{goneOn(row.deleteAfter)}</b></div>{/snippet}
+          {#snippet clockDetail()}<div class="p-kv"><span>gone for good</span><b>{dayMonth(row.deleteAfter)}</b></div>{/snippet}
           <Row title={row.name} metaFace="ui"
                meta={expired(row) ? "past its window · removing"
-                 : `deleted · ${count(daysLeft(row.deleteAfter), "day")} left`}
+                 : `deleted · ${plural(daysLeft(row.deleteAfter), "day")} left`}
                acts={expired(row) ? [] : clockActs(row)} detail={expired(row) ? undefined : clockDetail}>
             {#snippet mark()}
               <svg class="ad-ring ad-clockring" width="30" height="30" viewBox="0 0 34 34" aria-hidden="true">
@@ -1016,7 +1006,7 @@
       <div class="ad-stepper" role="group" aria-labelledby="ad-inv-days">
         <button type="button" class="p-pill" aria-label="One day fewer" disabled={Number(draft.expiresInDays) <= SETUP_LINK_DAYS.min}
                 onclick={() => (draft.expiresInDays = stepped(draft.expiresInDays, -1))}>−</button>
-        <output aria-live="polite">{count(Number(draft.expiresInDays), "day")}</output>
+        <output aria-live="polite">{plural(Number(draft.expiresInDays), "day")}</output>
         <button type="button" class="p-pill" aria-label="One day more" disabled={Number(draft.expiresInDays) >= SETUP_LINK_DAYS.max}
                 onclick={() => (draft.expiresInDays = stepped(draft.expiresInDays, 1))}>+</button>
       </div>
@@ -1042,7 +1032,7 @@
         <div class="ad-stepper" role="group" aria-labelledby="ad-re-days">
           <button type="button" class="p-pill" aria-label="One day fewer" disabled={resendDays <= SETUP_LINK_DAYS.min}
                   onclick={() => (resendDays = stepped(resendDays, -1))}>−</button>
-          <output aria-live="polite">{count(resendDays, "day")}</output>
+          <output aria-live="polite">{plural(resendDays, "day")}</output>
           <button type="button" class="p-pill" aria-label="One day more" disabled={resendDays >= SETUP_LINK_DAYS.max}
                   onclick={() => (resendDays = stepped(resendDays, 1))}>+</button>
         </div>
@@ -1090,7 +1080,7 @@
         <Row title="{person.displayName}{person.id === meId ? ' · you' : ''}" meta={person.email ?? ""}
              trail="owner" trailTone="var(--accent-text)" trailName="make it, owned by {person.displayName}"
              onactivate={() => createSystemFor(person)}>
-          {#snippet mark()}<span class="p-avatar">{initialsOf(person.displayName)}</span>{/snippet}
+          {#snippet mark()}<span class="p-avatar">{initials(person.displayName)}</span>{/snippet}
         </Row>
       {/each}
     </div>
@@ -1188,7 +1178,7 @@
 
   <Sheet bind:open={doomOpen} size="callout" title="Delete {doomed?.name ?? 'it'} now?">
     {#if doomed}
-      <p class="p-prose ad-sheet-say">Deleting now skips the {count(daysLeft(doomed.deleteAfter), "day")}. Nothing comes back
+      <p class="p-prose ad-sheet-say">Deleting now skips the {plural(daysLeft(doomed.deleteAfter), "day")}. Nothing comes back
         after this — not for you, not for anyone.</p>
       <label class="ad-label" for="ad-doom-name">type the system’s name exactly to wake the button</label>
       <input id="ad-doom-name" class="ad-input" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done"
@@ -1212,13 +1202,13 @@
     <p class="ad-label" id="ad-grace">old addresses keep working for</p>
     <div class="ad-stepper" role="group" aria-labelledby="ad-grace">
       <button type="button" class="p-pill" aria-label="Seven days fewer" disabled={graceDays <= 0} onclick={() => graceStep(-7)}>−</button>
-      <output aria-live="polite">{count(graceDays, "day")}</output>
+      <output aria-live="polite">{plural(graceDays, "day")}</output>
       <button type="button" class="p-pill" aria-label="Seven days more" disabled={graceDays >= 90} onclick={() => graceStep(7)}>+</button>
     </div>
     {#if mailProblem}<p class="p-error" role="alert">{mailProblem}</p>{/if}
     {#snippet foot()}
       <ArmButton label="rotate every address" armedLabel="tap again to rotate every address"
-                 onfire={() => { if (view?.mailbox) mailAction("alias", { action: "rotate_alias_key", expectedVersion: view.mailbox.version, graceDays }).then(() => { if (!mailProblem) { aliasOpen = false; wake("every address is new · the old ones keep working for " + count(graceDays, "day")); } }); }} />
+                 onfire={() => { if (view?.mailbox) mailAction("alias", { action: "rotate_alias_key", expectedVersion: view.mailbox.version, graceDays }).then(() => { if (!mailProblem) { aliasOpen = false; wake("every address is new · the old ones keep working for " + plural(graceDays, "day")); } }); }} />
     {/snippet}
   </Sheet>
 

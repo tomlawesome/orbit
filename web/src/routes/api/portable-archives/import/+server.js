@@ -3,13 +3,14 @@ import { z } from "zod";
 
 import { requireRecentAuthentication } from "orbit/lib/auth/recent-auth";
 import { importPortableArchive, requirePortableArchiveAccess } from "orbit/server/portable-archive-repository";
+import { ARCHIVE_PASSPHRASE_MAX, ARCHIVE_PASSPHRASE_MIN } from "orbit/server/portable-archive-limits";
 
 import { write } from "$lib/server/api.js";
 
 const bodySchema = z.object({
   householdId: z.uuid(),
   archive: z.unknown(),
-  passphrase: z.string().min(12).max(256),
+  passphrase: z.string().min(ARCHIVE_PASSPHRASE_MIN).max(ARCHIVE_PASSPHRASE_MAX),
   conflictItemIds: z.array(z.uuid()).max(10_000),
   /** The recent-authentication password, as the export route takes it. */
   currentPassword: z.string().optional(),

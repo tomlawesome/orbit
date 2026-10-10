@@ -1,18 +1,107 @@
 /**
- * Orbit's service worker (#763), built by SvelteKit and served at
+ * Orbit's service worker (#763, #1329), built by SvelteKit and served at
  * /service-worker.js.
  *
- * Deliberately no `fetch` handler and no caching of any kind — that is the
- * security position, not an oversight. Every response Orbit serves is
- * same-origin and cookie-scoped to the signed-in reader; a worker that never
- * intercepts a request can never hand a cached, authenticated response to
- * the wrong reader or to a reader who has since signed out. PWA
- * installability comes from manifest.webmanifest alone and needs nothing
- * here to support it.
+ * It does four things: keep Orbit's own app shell so the installed app
+ * opens as Orbit, show Orbit's own offline page when there is no network,
+ * show push notifications, and take a click on one to the right place.
  *
- * The two handlers below are the whole of this worker's job: show a push
- * notification, and take a click on one to the right place.
+ * The app shell is what SvelteKit lists for it: `build` (the compiled JS and
+ * CSS) and `files` (everything in static/: icons, fonts, the manifest). That
+ * is code and pictures, the same for every reader. Nothing a member owns is
+ * ever stored here (ADR-0006): no `/api/` response, no document, no page, no
+ * upload. Every response Orbit serves is cookie-scoped to the signed-in
+ * reader, so a worker that cached one could hand it to the wrong reader or
+ * to a reader who has since signed out. Only the exact shell URLs are ever
+ * answered from the cache; every other request goes straight to the network.
+ *
+ * Offline page: `/offline.html` is a static page with no household data, kept
+ * with the shell. A page navigation goes to the network and its response is
+ * returned untouched and never stored; only if the network fetch rejects
+ * (no connection) is the cached offline page shown in its place.
+ *
+ * Never intercepted, network up or down (the standard app-shell rules:
+ * web.dev "Create an offline fallback page", Workbox's NavigationRoute
+ * denylist): any non-GET request, any cross-origin request, and anything
+ * under `/api/` -- navigations included, so the hand-over to the identity
+ * provider, its callback, step-up, sign-out and downloads stay the browser's
+ * own, redirects and all. A worker that answers a request, even by passing
+ * `fetch(request)` straight through, hands a redirect back as an opaque one
+ * and puts itself between the page and the server (pipeline 2382).
+ *
+ * Updates: a new version installs in the background beside the old one and
+ * takes over on the next launch. There is deliberately no skip-waiting and no
+ * clients claim, so an open window never runs a mix of old and new code.
  */
+import { build, files, version } from "$service-worker";
+
+const CACHE_PREFIX = "orbit-shell-";
+const CACHE = `${CACHE_PREFIX}${version}`;
+const OFFLINE_PAGE = new URL("/offline.html", self.location.origin).href;
+
+/** Absolute URLs of the shell assets, so a request can be matched exactly. */
+const SHELL = new Set([...build, ...files].map((path) => new URL(path, self.location.origin).href));
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll([...build, ...files])));
+});
+
+/** Drop the shell caches of other versions. */
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then((names) =>
+        Promise.all(
+          names.filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE).map((name) => caches.delete(name)),
+        ),
+      ),
+  );
+});
+
+/**
+ * A navigation: the network's answer untouched, or, only when the fetch
+ * rejects, the precached offline page. Nothing is stored here.
+ */
+function navigate(request) {
+  return fetch(request).catch(async () => {
+    const cache = await caches.open(CACHE);
+    return (await cache.match(OFFLINE_PAGE)) || Response.error();
+  });
+}
+
+/**
+ * Whether the worker must leave a request to the browser: anything not a
+ * same-origin GET, and everything under /api/.
+ * @param {Request} request
+ * @param {URL} url
+ */
+function leftToTheBrowser(request, url) {
+  return request.method !== "GET" || url.origin !== self.location.origin || url.pathname.startsWith("/api/");
+}
+
+/**
+ * Serve a precached shell asset cache-first, and a page navigation from the
+ * network with the offline page as its only fallback. Anything else --
+ * non-GET, cross-origin, `/api/`, documents -- is not answered here.
+ */
+self.addEventListener("fetch", (event) => {
+  const { request } = event;
+  const url = new URL(request.url);
+  if (leftToTheBrowser(request, url)) return;
+  if (request.mode === "navigate") {
+    event.respondWith(navigate(request));
+    return;
+  }
+  const key = url.origin + url.pathname;
+  if (!SHELL.has(key)) return;
+  event.respondWith(
+    caches
+      .open(CACHE)
+      .then((cache) => cache.match(key))
+      .then((hit) => hit || fetch(request)),
+  );
+});
 
 /**
  * A push message arrived. Delivery is best-effort and the payload crosses a

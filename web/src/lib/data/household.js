@@ -12,30 +12,8 @@
  */
 
 import { bandOf, bodySize, daysUntil, dialPlacement } from "$lib/data/chart.js";
-import { ago, shortDate, tminus } from "$lib/format.js";
+import { ago, dayMonthYear, initials, plural, tminus } from "$lib/format.js";
 import { SHIPPED_SECTION_IDS } from "$lib/marks.js";
-
-/**
- * Two letters from a chosen display name — never from an email address, which
- * this screen's routes deliberately never disclose.
- * @param {?string} [name]
- * @returns {string}
- */
-export function initialsOf(name) {
-  return (name ?? "")
-    .split(/\s+/)
-    .map((part) => part[0] ?? "")
-    .join("")
-    .slice(0, 2)
-    .toUpperCase() || "·";
-}
-
-/**
- * @param {number} count
- * @param {string} word
- * @returns {string}
- */
-const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 /**
  * "3 entries" / "1 entry" — the count printed beside a section in the editor.
@@ -43,15 +21,15 @@ const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
  * @returns {string}
  */
 export function entriesLabel(count) {
-  return `${count} ${count === 1 ? "entry" : "entries"}`;
+  return plural(count, "entry", "entries");
 }
 
 /**
  * The sections editor's rows: the household's own list, each carrying how many
  * entries sit in it. The count is what makes the hidden-not-removed law
- * enforceable in the interface — a section holding entries has no × at all,
- * because sections.replace would re-file its items under the first surviving
- * section and the reader never asked for that.
+ * enforceable in the interface — a section holding entries is not removed
+ * quietly: the engine refuses to remove one unless told where its entries go
+ * (#1332), so the interface asks where, at the moment of removal.
  *
  * `shipped` (#867) says whether the row's mark is a button: it is decided
  * by the section's id (marks.js's `SHIPPED_SECTION_IDS`), never by what the
@@ -77,10 +55,52 @@ export function sectionRowsOf(household) {
          requires the flag, so only a degraded payload can reach this. */
       visible: section.visible !== false,
       count,
-      /* The law, not a style: emptiness is the ONLY thing that earns a ×. */
+      /* Entries moved here by a removal not yet saved; the editor raises it
+         as it records each pick, so a destination is itself asked when it is
+         removed (#1332). Nothing arrives from the server already incoming. */
+      incoming: 0,
+      /* The law, not a style: `removable` means "goes without asking". An
+         empty section does; one holding entries (or about to hold some) is
+         asked where they go. */
       removable: count === 0,
     };
   });
+}
+
+/**
+ * How many entries a section holds or is about to hold: its own, plus those
+ * a removal not yet saved sends here.
+ * @param {{ count?: number, incoming?: number }} row
+ * @returns {number}
+ */
+export const entriesIn = (row) => (row.count ?? 0) + (row.incoming ?? 0);
+
+/**
+ * The chooser's heading (#1332): "where 3 entries go", "where 1 entry goes".
+ * @param {number} count
+ * @returns {string}
+ */
+export const whereHeadingOf = (count) => (count === 1 ? "where 1 entry goes" : `where ${count} entries go`);
+
+/**
+ * Strike a section out and record where its entries go: the row is marked
+ * removed with its destination, and the destination's count rises locally so
+ * the landing is seen. Nothing is sent until the list is saved. Returns the
+ * status line that says so (role=status).
+ * @param {import('./workspace.js').SectionRow[]} rows  the editor's rows (live, mutated)
+ * @param {import('./workspace.js').SectionRow} row  the section going
+ * @param {string} destinationId
+ * @returns {string}
+ */
+export function moveEntriesAway(rows, row, destinationId) {
+  const destination = rows.find((one) => one.id === destinationId);
+  if (!destination) return "";
+  const moving = entriesIn(row);
+  row.removed = true;
+  row.moveTo = destinationId;
+  destination.incoming = (destination.incoming ?? 0) + moving;
+  destination.removable = false;
+  return `${row.name.trim() || "Section"} removed · ${plural(moving, "entry", "entries")} ${moving === 1 ? "moves" : "move"} to ${destination.name.trim()} when you save`;
 }
 
 /** The most sections the engine's schema will accept in one replace. */
@@ -91,22 +111,70 @@ export const MAX_SECTIONS = 12;
  * replaces the list. Rows are mapped back to the engine's own field names and
  * nothing else travels: the entry counts and the removable flag are the
  * interface's arithmetic, not the household's state.
+ *
+ * Delete and reassign (#1332): a row struck out while it held entries carries
+ * `moveTo`, the section its entries go to, and travels as its own command with
+ * `moveItemsTo`. Sections that go without asking (empty) leave in whichever
+ * command comes last. Several held drops are several commands in removal
+ * order, each list shrinking; a drop whose entries land in another held drop
+ * goes first, so a chain (A to B, then B on to C) resolves in order.
  * @param {string} householdId
- * @param {import('./workspace.js').SectionRow[]} rows
- * @returns {{ type: string, householdId: string, sections: { id: string, name: string, icon: string, accent: string, visible: boolean }[] }}
+ * @param {import('./workspace.js').SectionRow[]} rows  every editor row, struck-out ones included
+ * @returns {{ type: string, householdId: string, sections: { id: string, name: string, icon: string, accent: string, visible: boolean }[], moveItemsTo?: string }[]}
  */
-export function sectionsCommandOf(householdId, rows) {
-  return {
-    type: "sections.replace",
-    householdId,
-    sections: rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      icon: row.icon,
-      accent: row.accent,
-      visible: row.visible,
-    })),
-  };
+export function sectionCommandsOf(householdId, rows) {
+  const sent = (/** @type {import('./workspace.js').SectionRow} */ row) => ({
+    id: row.id,
+    name: row.name,
+    icon: row.icon,
+    accent: row.accent,
+    visible: row.visible,
+  });
+  /** @type {import('./workspace.js').SectionRow[]} */
+  const held = [];
+  /** @type {Set<string>} */
+  const asked = new Set();
+  for (const row of rows) {
+    if (!row.removed) continue;
+    if (row.moveTo) held.push(row);
+    else if ((row.count ?? 0) > 0 || (row.incoming ?? 0) > 0) {
+      /* Never drop a section holding entries unasked, whatever the screen did. */
+      throw new Error(`Choose where the entries in ${row.name || "that section"} go before removing it`);
+    } else asked.add(row.id);
+  }
+  /* A drop whose section receives another drop's entries must wait for it. */
+  const order = [];
+  const waiting = [...held];
+  while (waiting.length) {
+    const at = waiting.findIndex((row) => !waiting.some((other) => other !== row && other.moveTo === row.id));
+    order.push(...waiting.splice(at === -1 ? 0 : at, 1));
+  }
+  /** @type {ReturnType<typeof sectionCommandsOf>} */
+  const commands = [];
+  /* The drops that go unasked are sent first, in a command of their own with
+     no moveItemsTo: if one gained an entry since the screen loaded, the engine
+     refuses (section_has_items) rather than moving it somewhere unasked. */
+  if (asked.size && held.length) {
+    commands.push({
+      type: "sections.replace",
+      householdId,
+      sections: rows.filter((one) => !asked.has(one.id) && (!one.removed || held.includes(one))).map(sent),
+    });
+  }
+  const gone = new Set(asked);
+  for (const row of order) {
+    gone.add(row.id);
+    commands.push({
+      type: "sections.replace",
+      householdId,
+      sections: rows.filter((one) => !gone.has(one.id) && (!one.removed || held.includes(one))).map(sent),
+      moveItemsTo: row.moveTo,
+    });
+  }
+  if (!commands.length) {
+    commands.push({ type: "sections.replace", householdId, sections: rows.filter((one) => !one.removed).map(sent) });
+  }
+  return commands;
 }
 
 /**
@@ -173,7 +241,7 @@ export function invitationRowsOf(invitations, now) {
     /* A date, not a countdown: "expires 18 Sep 2026" is what an owner can act
        on, and T−14d is not. Short-form month, as the ratified mockup draws it
        — the row's second line is chrome under the address, not a sentence. */
-    expires: shortDate(invitation.expiresAt.slice(0, 10)),
+    expires: dayMonthYear(invitation.expiresAt.slice(0, 10)),
   }));
 }
 
@@ -315,7 +383,7 @@ export function householdScreenOf({
   const roster = members.map((member) => ({
     id: member.id,
     name: member.displayName,
-    initials: initialsOf(member.displayName),
+    initials: initials(member.displayName),
     role: member.role,
     you: Boolean(user?.id) && member.id === /** @type {import('./workspace.js').SessionUser} */ (user).id,
   }));
@@ -355,7 +423,7 @@ export function householdScreenOf({
       ? candidates.map((candidate) => ({
           id: candidate.id,
           name: candidate.displayName,
-          initials: initialsOf(candidate.displayName),
+          initials: initials(candidate.displayName),
         }))
       : [],
     /* §15-2g: joiners are answered HERE and nowhere else. The route answers
@@ -368,7 +436,7 @@ export function householdScreenOf({
             id: request.id,
             userId: request.userId,
             name: request.displayName,
-            initials: initialsOf(request.displayName),
+            initials: initials(request.displayName),
             /* "2d ago". `now` is passed in, never read from the clock, so the
                gate holds still and production stays live. */
             waited: now ? ago(request.createdAt, now) : null,
@@ -390,7 +458,7 @@ export function householdScreenOf({
        offered "leave this system" for a system they were never in. */
     you: roster.find((member) => member.you) ?? null,
     subtitle: canManage
-      ? `your system · you own it · ${plural(memberCount, "member")} · ${entries} ${entries === 1 ? "entry" : "entries"} in orbit`
-      : `a system you’re in · ${owner ? `${owner.name} owns it` : "its owner"} · ${plural(memberCount, "member")} · ${entries} ${entries === 1 ? "entry" : "entries"} in orbit`,
+      ? `your system · you own it · ${plural(memberCount, "member")} · ${plural(entries, "entry", "entries")} in orbit`
+      : `a system you’re in · ${owner ? `${owner.name} owns it` : "its owner"} · ${plural(memberCount, "member")} · ${plural(entries, "entry", "entries")} in orbit`,
   };
 }

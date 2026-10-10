@@ -3,21 +3,19 @@
  * rows say the same thing (#1123). Moved verbatim from +page.svelte.
  */
 
-/** @param {string} name */
-export const initialsOf = (name) =>
-  name.split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase();
+import { wordsOf } from "$lib/data/workspace.js";
+
+import { dayMonth, dayMonthYear, elapsed } from "$lib/format.js";
 
 /** The lapse date as a reader reads it, in UTC so the gate photographs one date. @param {string} iso */
-export const lapses = (iso) =>
-  new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+export const lapses = (iso) => dayMonthYear(iso);
 
 /**
  * A date on the pocket, day and month only (round 3 §3.9, §8): the
  * setup-link line is `setup link sent · lapses 3 Oct`, the mailbox rows
  * `verified · 12 Aug` and `1 Aug · Tom Lawson`. @param {?string} iso
  */
-export const shortDay = (iso) =>
-  iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }) : "never";
+export const shortDay = (iso) => (iso ? dayMonth(iso) : "never");
 export const lapsesShort = shortDay;
 
 /**
@@ -57,7 +55,7 @@ export function setupWords(error) {
   if (code === "provider_handover_unreadable") {
     return "not started — Orbit could not hand you to your identity provider";
   }
-  return /** @type {{ message?: string }} */ (error)?.message ?? String(error);
+  return wordsOf(error);
 }
 
 /**
@@ -81,14 +79,7 @@ export const stamp = (iso) => (iso ? new Date(iso).toLocaleString("en-GB", { tim
  * chrome shorthand and appends "ago".
  * @param {string} iso
  */
-export const openFor = (iso) => {
-  const minutes = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"}`;
-  const days = Math.round(hours / 24);
-  return `${days} day${days === 1 ? "" : "s"}`;
-};
+export const openFor = (iso) => elapsed(iso, new Date().toISOString());
 
 /** The setup link's lifetime, in days, as the server bounds it (ADR-0023 §3). */
 export const SETUP_LINK_DAYS = { min: 1, max: 14, fallback: 7 };

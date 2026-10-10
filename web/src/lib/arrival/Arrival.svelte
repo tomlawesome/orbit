@@ -6,7 +6,7 @@
   import Flight from "$lib/flight/Flight.svelte";
   import { consumeLaunch, markLaunch } from "$lib/flight/arrival.js";
   import { readyFlight } from "$lib/flight/warm.js";
-  import { applyCommand, readWorkspace, requestToJoin } from "$lib/data/workspace.js";
+  import { applyCommand, readWorkspace, requestToJoin, wordsOf } from "$lib/data/workspace.js";
   import { labelledSkyOf } from "$lib/data/chart.js";
   import { ARRIVAL_FIXTURES } from "$lib/data/fixtures/arrival.js";
   import Newcomer from "./Newcomer.svelte";
@@ -368,7 +368,7 @@
       busy = false;
       /* One warm line, in the server's own words. Nothing was created, and the
          answers are visibly still in the fields, so neither is said. */
-      reject(wanted, /** @type {{ message?: string }} */ (error)?.message ?? "could not be created", null);
+      reject(wanted, wordsOf(error, "could not be created"), null);
       return;
     }
     location.assign("/home");

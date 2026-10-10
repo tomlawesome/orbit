@@ -1,8 +1,9 @@
 <script>
+  import { initials as initialsOf } from "$lib/format.js";
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
   import { tick } from "svelte";
-  import { signOut } from "$lib/data/workspace.js";
+  import { signOut, wordsOf } from "$lib/data/workspace.js";
   import { DEFAULT_THEME } from "$lib/theme.js";
   import { SWATCHES, applyTheme } from "$lib/theme-swatches.js";
   import Hatch from "$lib/pocket/Hatch.svelte";
@@ -22,11 +23,15 @@
      and goes there (§15-2k). */
   let {
     user = null,
-    role = "",
+    household = null,
     current = "",
     back = "/home",
     backLabel = "← YOUR SKY",
   } = $props();
+
+  /* The "household · role" line, built here once for the account card and the
+     hatch. A household with no name has no line: never " · member". */
+  const line = $derived(household?.name ? `${household.name} · ${household.canManage ? "owner" : "member"}` : "");
 
   /* §14: due-next and documents retired — the manifest is the corridor.
      #1319 (§34): the belt retired too, and with it the "Items" front door
@@ -144,7 +149,7 @@
       redirectTo = await signOut();
     } catch (error) {
       signingOut = false;
-      signOutProblem = /** @type {{ message?: string }} */ (error)?.message ?? "still signed in — try again";
+      signOutProblem = wordsOf(error, "still signed in — try again");
       return;
     }
     /* #1262: the menu closes as the sign-out goes ahead, never left standing
@@ -153,24 +158,7 @@
     await descend(redirectTo);
   }
 
-  /*
-   * No `part` annotation here (#1133): a bare JSDoc comment directly before
-   * an arrow function's own parameter -- anywhere outside the
-   * `/** @type {T} *\/ (expr)` cast idiom used above for `error` -- makes the
-   * Svelte compiler re-emit the parameter wrapped in an extra, invalid pair
-   * of parens (`((part))`). `vite build` bundles through rolldown, which
-   * tolerates it and prints clean code, but `vite dev`'s SSR module runner
-   * hands the raw text straight to V8, which doesn't: every load of a page
-   * that reaches this component 500'd under `pnpm --filter orbit-web dev`
-   * with "SyntaxError: Invalid destructuring assignment target", never in
-   * the production build. The type goes on the name instead, in that cast
-   * idiom: `user` carries no declared type, so without it `part` is an
-   * implicit `any` and the type check (#624) fails.
-   */
-  const initials = $derived(
-    /** @type {string} */ (user?.displayName ?? "")
-      .split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase() || "·",
-  );
+  const initials = $derived(initialsOf(user?.displayName));
 </script>
 
 <!-- `back` only ever holds "/settings" or the "/home" default (the two
@@ -181,7 +169,7 @@
 <button class="orb" aria-expanded={open} aria-controls="account" title="Menu"
         onclick={() => { open = !open; if (open) void wake(); }}>{initials}</button>
 <div class="account" class:open id="account" role="region" aria-label="Account and menu">
-  <div class="who"><b>{user?.displayName ?? ""}</b><span>{role}</span></div>
+  <div class="who"><b>{user?.displayName ?? ""}</b><span>{line}</span></div>
   <nav>
     {#each NAV as [key, label, href] (key)}
       <a href={href === "/inbox" ? resolve("/inbox")
@@ -211,7 +199,7 @@
     {/snippet}
   </TopChrome>
 </div>
-<Hatch bind:open={hatchOpen} name={user?.displayName ?? ""} roleLine={role} {current} {isAdmin}
+<Hatch bind:open={hatchOpen} name={user?.displayName ?? ""} roleLine={line} {current} {isAdmin}
        onopened={wake} onsignedout={descend} />
 {#if LeaveView}
   <!-- no household name to hand on a page that is not home's: the void's name line is empty -->

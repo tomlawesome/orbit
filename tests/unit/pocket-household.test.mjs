@@ -5,8 +5,9 @@ import { describe, expect, it } from "vitest";
 // collects, home's chip carried onto the page, and the archive card's rules.
 import { changesLabel, changesOf, chipBodyOf, commandsFor, moved } from "../../web/src/routes/household/[id]/edits.js";
 import {
-  ARCHIVE_MAX_BYTES, archiveFileProblem, passphraseProblem, sizeLabel,
+  archiveFileProblem, passphraseProblem,
 } from "../../web/src/routes/household/[id]/archive.js";
+import { sizeLabel } from "../../web/src/lib/format.js";
 
 const identity = { name: "Lawson Home", timezone: "Europe/London", currency: "GBP" };
 const sections = [
@@ -91,24 +92,41 @@ describe("home's chip, carried onto the page", () => {
   });
 });
 
+// The engine's numbers as the session carries them (#1336); the card holds none.
+const LIMITS = { archiveFileBytes: 179_022_508, passphraseMin: 12, passphraseMax: 256 };
+
 describe("the archive card", () => {
-  it("asks for 12 characters and the same passphrase twice", () => {
-    expect(passphraseProblem("short", "short")).toMatch(/at least 12/);
-    expect(passphraseProblem("correct horse battery", "correct horse")).toMatch(/not the same/);
-    expect(passphraseProblem("x".repeat(257), "x".repeat(257))).toMatch(/at most 256/);
-    expect(passphraseProblem("correct horse battery", "correct horse battery")).toBeNull();
+  it("asks for the engine's passphrase length and the same passphrase twice", () => {
+    expect(passphraseProblem("short", "short", LIMITS)).toMatch(/at least 12/);
+    expect(passphraseProblem("correct horse battery", "correct horse", LIMITS)).toMatch(/not the same/);
+    expect(passphraseProblem("x".repeat(257), "x".repeat(257), LIMITS)).toMatch(/at most 256/);
+    expect(passphraseProblem("correct horse battery", "correct horse battery", LIMITS)).toBeNull();
+    expect(passphraseProblem("short", "short", { ...LIMITS, passphraseMin: 20 })).toMatch(/at least 20/);
+  });
+
+  it("counts the floor in code points, as the engine does", () => {
+    // Six emoji are twelve UTF-16 units but six characters.
+    expect(passphraseProblem("😀".repeat(6), "😀".repeat(6), LIMITS)).toMatch(/at least 12/);
+    expect(passphraseProblem("😀".repeat(12), "😀".repeat(12), LIMITS)).toBeNull();
+  });
+
+  it("refuses a passphrase while the engine's bounds are unknown", () => {
+    expect(passphraseProblem("correct horse battery", "correct horse battery", null)).toMatch(/reload/);
   });
 
   it("refuses an empty or oversized file before reading it", () => {
-    expect(archiveFileProblem({ size: 0 })).toMatch(/empty/);
-    expect(archiveFileProblem({ size: ARCHIVE_MAX_BYTES + 1 })).toMatch(/larger than 128 MB/);
-    expect(archiveFileProblem({ size: 2048 })).toBeNull();
+    expect(archiveFileProblem({ size: 0 }, LIMITS)).toMatch(/empty/);
+    expect(archiveFileProblem({ size: LIMITS.archiveFileBytes + 1 }, LIMITS)).toMatch(/larger than 170.7 MB/);
+    expect(archiveFileProblem({ size: 130_000_000 }, LIMITS)).toBeNull();
+    expect(archiveFileProblem({ size: 2048 }, LIMITS)).toBeNull();
+    // No ceiling from the engine: only the empty check is the card's own.
+    expect(archiveFileProblem({ size: 2048 }, null)).toBeNull();
   });
 
   it("prints sizes the way a person reads them", () => {
     expect(sizeLabel(33)).toBe("33 B");
     expect(sizeLabel(84 * 1024)).toBe("84 KB");
     expect(sizeLabel(3.2 * 1024 * 1024)).toBe("3.2 MB");
-    expect(sizeLabel(38 * 1024 * 1024)).toBe("38 MB");
+    expect(sizeLabel(38 * 1024 * 1024)).toBe("38.0 MB");
   });
 });

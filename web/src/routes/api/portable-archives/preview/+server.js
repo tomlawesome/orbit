@@ -2,13 +2,14 @@ import { json } from "@sveltejs/kit";
 import { z } from "zod";
 
 import { previewPortableImport } from "orbit/server/portable-archive-repository";
+import { ARCHIVE_PASSPHRASE_MAX, ARCHIVE_PASSPHRASE_MIN } from "orbit/server/portable-archive-limits";
 
 import { write } from "$lib/server/api.js";
 
 const bodySchema = z.object({
   householdId: z.uuid(),
   archive: z.unknown(),
-  passphrase: z.string().min(12).max(256),
+  passphrase: z.string().min(ARCHIVE_PASSPHRASE_MIN).max(ARCHIVE_PASSPHRASE_MAX),
 });
 
 /**

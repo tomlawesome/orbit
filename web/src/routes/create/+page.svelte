@@ -109,8 +109,7 @@
 <!-- The shared chrome (#1010, owner 2026-09-16): the way back to the sky and
      the account menu, as on every sub-screen. The stage's own light-dismiss
      below is the other way out and stays. -->
-<Chrome user={chrome?.user} current=""
-        role={chrome?.household ? `${chrome.household.name ?? ""} · ${chrome.household.canManage ? "owner" : "member"}` : ""} />
+<Chrome user={chrome?.user} current="" household={chrome?.household} />
 
 <!-- #1120, proposal §2.5: the pocket's own create, chosen by CSS. -->
 <Pocket />

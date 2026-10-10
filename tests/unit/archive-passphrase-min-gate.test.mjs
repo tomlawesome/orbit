@@ -10,6 +10,13 @@ import { describe, expect, it } from "vitest";
  * one rule, one constant should be named twice, not the number spelled out
  * four times.
  *
+ * #1336 moved the floor itself out of the browser: archive.js no longer
+ * exports PASSPHRASE_MIN, the engine's number arrives on the session as
+ * limits.passphraseMin, and passphraseFloor() (archive.js) turns it into the
+ * gate every button waits on (shut while the number is unknown). What this
+ * file protects is unchanged: every gate reads one named floor, none spells
+ * a number.
+ *
  * Static scan rather than a render: the gate is a bare literal in the
  * source, so reading the two files is a direct, truthful check of the thing
  * the row names, the same reproduce-by-scanning shape as
@@ -27,19 +34,20 @@ function read(relativePath) {
 }
 
 describe("the passphrase-length gate (#1151 W2-Q8)", () => {
-  it("imports PASSPHRASE_MIN from archive.js in both desk and pocket archives", () => {
+  it("imports passphraseFloor from archive.js in both desk and pocket archives", () => {
     for (const path of FILES) {
       const src = read(path);
-      expect(src, `${path} should import PASSPHRASE_MIN from ./archive.js`)
-        .toMatch(/import\s*\{[^}]*\bPASSPHRASE_MIN\b[^}]*\}\s*from\s*"\.\/archive\.js"/);
+      expect(src, `${path} should import passphraseFloor from ./archive.js`)
+        .toMatch(/import\s*\{[^}]*\bpassphraseFloor\b[^}]*\}\s*from\s*"\.\/archive\.js"/);
     }
   });
 
-  it("never gates passIn's length on a bare 12 -- every gate reads PASSPHRASE_MIN", () => {
+  it("never gates passIn's length on a bare number -- every gate reads the engine's floor", () => {
     for (const path of FILES) {
       const src = read(path);
-      expect(src, `${path} still has a bare-12 passphrase gate`).not.toMatch(/passIn\.length\s*<\s*12\b/);
-      expect(src, `${path} should gate on PASSPHRASE_MIN instead`).toMatch(/passIn\.length\s*<\s*PASSPHRASE_MIN\b/);
+      expect(src, `${path} still has a bare-number passphrase gate`).not.toMatch(/passIn\.length\s*<\s*\d|passphraseLength\(passIn\)\s*<\s*\d/);
+      expect(src, `${path} should gate on passphraseMin instead`).toMatch(/passphraseLength\(passIn\)\s*<\s*passphraseMin\b/);
+      expect(src, `${path} should derive passphraseMin from passphraseFloor(limits)`).toMatch(/passphraseMin\s*=\s*\$derived\(passphraseFloor\(limits\)\)/);
     }
   });
 });

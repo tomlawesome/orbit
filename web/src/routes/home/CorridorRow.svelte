@@ -13,7 +13,7 @@
    * original snippet rendered `{@render itemview(row)}` from inside itself.
    */
   import { resolve } from "$app/paths";
-  import { money } from "$lib/format.js";
+  import { dayMonth, money } from "$lib/format.js";
   import { sectionColourOf } from "$lib/option-colour.js";
   import Mark from "$lib/Mark.svelte";
   import { BAND_VAR, T_CLASS, tlabel } from "$lib/data/bands.js";
@@ -64,10 +64,7 @@
   const asSuggestion = (s) => /** @type {ReceiptSuggestion} */ (s);
 
   /** @param {string | null} iso */
-  const short = (iso) =>
-    iso
-      ? new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" })
-      : "";
+  const short = (iso) => (iso ? dayMonth(iso) : "");
 
   /* #1005: a renewal comes round, a one-off ends -- and once its date is past
      it has ended. The suggestion's own schedule kind is what says which. */
@@ -78,7 +75,7 @@
     [
       `Found in ${row.sourceDocument}`,
       row.dueDate ? `${dateWord} ${short(row.dueDate)}` : null,
-      row.costMinor ? money(row.costMinor, row.currency, true) : null,
+      row.costMinor !== null && row.costMinor !== undefined ? money(row.costMinor, row.currency, true) : null,
     ].filter(Boolean),
   );
   /* `CorridorRow` (lib/data/chart.js) never carries `recurrenceMonths` --
@@ -93,7 +90,7 @@
       /* #1319: a retired item, or a one-off already done, says so first */
       row.state,
       row.provider,
-      row.costMinor ? money(row.costMinor, row.currency, row.costIsEstimate) : null,
+      row.costMinor !== null && row.costMinor !== undefined ? money(row.costMinor, row.currency, row.costIsEstimate) : null,
     ].filter(Boolean),
   );
   /** Between the meta line's parts. */

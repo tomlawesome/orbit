@@ -1,5 +1,5 @@
 <script>
-  import { createArm } from "$lib/pocket/arm.js";
+  import { createArm } from "$lib/arm.js";
 
   /**
    * THE DRAWER'S FOOT ROW (#1319; owner-decisions §34; design/v19/

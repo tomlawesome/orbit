@@ -6,6 +6,8 @@
  * and +page.svelte's own dial markup share one typed copy instead of two.
  */
 
+import { tminusOf } from "$lib/format.js";
+
 /* `ended` is the expiry's own band (#1005): a one-off past its date is not
    overdue, so it wears the quiet ink tone rather than the alarm colour.
    `unscheduled` (#1151 W1-F3) is chart.js's bandOfKind(…, null) answer for
@@ -23,4 +25,4 @@ export const T_CLASS = { overdue: "over", "due-soon": "soon", upcoming: "up", ok
    version — an unscheduled row's `days` is null, and `null < 0` is false,
    which would otherwise print the literal "T−nulld". */
 /** @param {{ days: number | null }} b */
-export const tlabel = (b) => (b.days === null ? "" : b.days < 0 ? `T+${-b.days}d` : `T−${b.days}d`);
+export const tlabel = (b) => tminusOf(b.days);

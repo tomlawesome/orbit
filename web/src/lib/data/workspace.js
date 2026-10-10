@@ -165,6 +165,8 @@
  * @property {string} csrfToken
  * @property {boolean} [authenticated]
  * @property {?SessionUser} [user]
+ * @property {import('./engine-limits.js').EngineLimits} [limits]       the engine's archive limits (#1336)
+ * @property {import('./engine-limits.js').EngineRetention} [retention] the engine's retention windows (#1336)
  */
 
 /**
@@ -368,8 +370,10 @@
  * @property {boolean} shipped
  * @property {boolean} visible
  * @property {number} count        entries sitting in this section
- * @property {boolean} [removable] emptiness is the only thing that earns a ×
+ * @property {number} [incoming]   entries a not-yet-saved removal sends here
+ * @property {boolean} [removable] goes without asking: nothing in it, nothing coming
  * @property {boolean} [removed]   struck out in the editor, not yet saved
+ * @property {string} [moveTo]     where a struck-out section's entries go
  */
 
 /**
@@ -409,6 +413,21 @@ export class WorkspaceError extends Error {
     this.status = status;
     this.code = code;
   }
+}
+
+/**
+ * What a failure says, for a screen to print: the error's own message (a
+ * WorkspaceError carries the server's words), a thrown string as it is, or
+ * the screen's own sentence when there is nothing to say (#1340).
+ * @param {unknown} error
+ * @param {string} [fallback]
+ * @returns {string}
+ */
+export function wordsOf(error, fallback = "Something went wrong.") {
+  const message = /** @type {{ message?: unknown } | null | undefined} */ (error)?.message;
+  if (typeof message === "string" && message !== "") return message;
+  if (typeof error === "string" && error !== "") return error;
+  return fallback;
 }
 
 /**
@@ -645,10 +664,11 @@ export async function activeHousehold() {
  * fixture to fetch changes no caller's shape later.
  */
 import { adminFixture } from "./fixtures/admin.js";
-import { ago } from "$lib/format.js";
+import { ago, dayMonth, sizeLabel } from "$lib/format.js";
 import { bandOf, daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
 import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
-import { householdScreenOf, householdUpdateCommandOf, sectionsCommandOf } from "./household.js";
+import { engineNumbersOf } from "./engine-limits.js";
+import { householdScreenOf, householdUpdateCommandOf, sectionCommandsOf } from "./household.js";
 import { documentRowOf } from "./belt.js";
 
 /**
@@ -877,6 +897,7 @@ function todayOf(workspace, householdId) {
  * @property {MailFailure[]} mailFailures
  * @property {Receipt[]} mailReading           arrived, not yet readable
  * @property {SessionUser | null} user
+ * @property {import('./engine-limits.js').EngineRetention | null} retention  the engine's retention windows (#1336)
  * @property {string} today                    YYYY-MM-DD
  * @property {string} now                      ISO instant, pinned under fixtures
  */
@@ -916,6 +937,7 @@ export async function readHome(fetchImpl) {
       mailFailures: [],
       mailReading: [],
       user: session?.user ?? null,
+      retention: engineNumbersOf(session).retention,
       today,
       now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
     };
@@ -934,6 +956,7 @@ export async function readHome(fetchImpl) {
       (receipt) => !receipt.canApprove && receipt.classification === "waiting",
     ),
     user: session?.user ?? null,
+    retention: engineNumbersOf(session).retention,
     today,
     /* Pinned "now" for elapsed-time lines (the pocket's signals): fixture
        noon under the gate, the clock in production. */
@@ -1016,6 +1039,7 @@ export async function readInboxScreen() {
     today,
     now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
     relay,
+    retention: engineNumbersOf(session).retention,
     lastCaught: caught,
     review: receipts.filter((receipt) => receipt.canApprove),
     reading: receipts.filter((receipt) => !receipt.canApprove && receipt.classification === "waiting"),
@@ -1581,21 +1605,6 @@ export async function readAbout() {
 }
 
 /**
- * Named apart from format.js's and belt.js's own `shortDate` (#1151 W2-Q5):
- * those take a bare date and append T00:00:00Z themselves; this one takes a
- * document's full `availableAt` instant as it already arrives from the API.
- * @param {string} iso  a full ISO instant, not a bare date
- */
-const shortAddedDate = (iso) =>
-  new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
-
-/** @param {number} bytes */
-const sizeLabel = (bytes) =>
-  bytes >= 1024 * 1024
-    ? `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
-    : `${Math.round(bytes / 1024)} KB`;
-
-/**
  * The word a paper's row adds when it cannot simply be read (#1319): the
  * preview card's own honest states (belt.js documentPreviewStateOf), said
  * in the drawer's meta so the row tells you before you press it.
@@ -1619,7 +1628,7 @@ const stateWordOf = (doc) => {
 export function drawerDocumentOf(doc) {
   return {
     ...documentRowOf(doc),
-    meta: [`added ${shortAddedDate(doc.availableAt)}`, sizeLabel(doc.sizeBytes), stateWordOf(doc)]
+    meta: [`added ${dayMonth(doc.availableAt)}`, sizeLabel(doc.sizeBytes), stateWordOf(doc)]
       .filter(Boolean).join(" · "),
   };
 }
@@ -1712,7 +1721,7 @@ export async function readItemDocuments(householdId, itemId) {
     name: doc.displayName,
     meta: [
       sizeLabel(doc.sizeBytes),
-      `added ${shortAddedDate(doc.availableAt)}`,
+      `added ${dayMonth(doc.availableAt)}`,
       stateWordOf(doc),
     ].filter(Boolean).join(" · "),
   }));
@@ -2580,7 +2589,7 @@ export async function readHouseholdScreen(householdId) {
      defaults (e.g. `members = []` reads as `never[]`), so this call is cast
      rather than fought from the caller's side — the fix belongs with that
      function's own JSDoc, out of scope here. */
-  return householdScreenOf(/** @type {any} */ ({
+  const screen = householdScreenOf(/** @type {any} */ ({
     workspace,
     householdId,
     user: session?.user ?? null,
@@ -2593,6 +2602,9 @@ export async function readHouseholdScreen(householdId) {
        and stays live in production — readHome's rule. */
     now: workspace.fixtureToday ? `${workspace.fixtureToday}T12:00:00Z` : new Date().toISOString(),
   }));
+  /* The engine's archive limits and retention windows (#1336), for the
+     archive card and the deletion words. */
+  return screen && { ...screen, ...engineNumbersOf(session) };
 }
 
 /**
@@ -2611,23 +2623,33 @@ export async function writeHouseholdIdentity(householdId, identity) {
 /**
  * The sections editor, saved whole — `sections.replace` replaces the list.
  *
- * The hidden-not-removed law is enforced HERE as well as in the interface,
- * because it is a data law and not a style: dropping a section that still
- * holds entries would have the engine re-file them under whichever section
- * happens to be first, which is a silent edit nobody asked for.
+ * Whether a dropped section may go is the engine's rule (ADR-0034, #1332): it
+ * refuses a removal while the section holds entries unless told where they
+ * go, in its own words, and this sends what the editor asked so those words
+ * reach the screen when a stale screen or another member's new entry got
+ * there first. One command per section dropped with entries (each carrying
+ * `moveItemsTo`), in removal order, as `sectionCommandsOf` decides.
  *
  * @param {string} householdId
- * @param {SectionRow[]} rows  the editor's rows, in sectionRowsOf's shape
+ * @param {SectionRow[]} rows  every editor row, struck-out ones included
  * @returns {Promise<Workspace>}
  */
 export async function writeSections(householdId, rows) {
-  const dropped = rows.filter((row) => row.count > 0 && row.removed);
-  if (dropped.length) {
-    throw new WorkspaceError("A section holding entries can be hidden, never removed", {
-      code: "section_in_use",
-    });
+  /** @type {Workspace | undefined} */
+  let workspace;
+  let saved = 0;
+  for (const command of sectionCommandsOf(householdId, rows)) {
+    try {
+      workspace = await applyCommand(command);
+      saved += 1;
+    } catch (error) {
+      /* Earlier commands of this save have already landed (#1332): the caller
+         reloads to the true list rather than keep the editor's. */
+      if (saved && error && typeof error === "object") /** @type {{ partial?: boolean }} */ (error).partial = true;
+      throw error;
+    }
   }
-  return applyCommand(sectionsCommandOf(householdId, rows.filter((row) => !row.removed)));
+  return /** @type {Workspace} */ (workspace);
 }
 
 /**

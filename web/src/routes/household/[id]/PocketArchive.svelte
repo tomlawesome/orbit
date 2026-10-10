@@ -1,4 +1,6 @@
 <script>
+  import { onMount } from "svelte";
+  import { clockOf, dayMonth, localZone, plural, sizeLabel } from "$lib/format.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
   import Row from "$lib/pocket/Row.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
@@ -8,9 +10,10 @@
     previewPortableArchive,
     readSignInMethods,
     startStepUp,
+    wordsOf,
     writePortableArchive,
   } from "$lib/data/workspace.js";
-  import { ARCHIVE_MAX_BYTES, archiveFileProblem, PASSPHRASE_MIN, passphraseProblem, sizeLabel } from "./archive.js";
+  import { archiveFileProblem, passphraseFloor, passphraseLength, passphraseProblem } from "./archive.js";
 
   /*
    * THE ARCHIVE ON A PHONE (#1122, proposal §2.10 item 5; the card ratified
@@ -34,8 +37,16 @@
    * callout answers that real refusal, it never invents one (#1151 W2-Q7).
    */
 
-  /** @type {{ householdId: string, householdName: string, entries: number, sections: number }} */
-  let { householdId, householdName, entries, sections } = $props();
+  /** @type {{ householdId: string, householdName: string, entries: number, sections: number, limits?: import("$lib/data/engine-limits.js").EngineLimits | null }} */
+  let { householdId, householdName, entries, sections, limits = null } = $props();
+
+  /* The engine's numbers (#1336): the passphrase floor the buttons wait for. */
+  const passphraseMin = $derived(passphraseFloor(limits));
+
+  /* Set just before the step-up redirect, read on the way back in (the
+     desk's DeskArchive.svelte keeps the same flag, same key). sessionStorage,
+     not a query param: the identity provider owns `returnTo`. */
+  const STEPUP_RETURN_FLAG = "orbit-archive-stepup-return";
 
   let tab = $state(/** @type {"out" | "in"} */ ("out"));
 
@@ -46,7 +57,7 @@
   let written = $state(/** @type {import('$lib/data/workspace.js').WrittenArchive | null} */ (null));
   /** @type {string | null} */
   let outProblem = $state(null);
-  const outRefusal = $derived(passphraseProblem(passOut, passAgain));
+  const outRefusal = $derived(passphraseProblem(passOut, passAgain, limits));
 
   /* ── bring one in ─────────────────────────────────────────────────────── */
   let inPhase = $state(/** @type {"rest" | "chosen" | "looking" | "preview" | "bringing" | "done"} */ ("rest"));
@@ -76,8 +87,6 @@
   let retryIntent = "archive_export";
 
   /** @param {unknown} error */
-  const wordsOf = (error) => /** @type {{ message?: string }} */ (error)?.message ?? String(error);
-  /** @param {unknown} error */
   const needsProof = (error) => /** @type {{ code?: string }} */ (error)?.code === "recent_authentication_required";
 
   /**
@@ -86,20 +95,27 @@
    * @param {(proof: string) => Promise<void>} act
    * @param {(words: string) => void} fail
    * @param {"archive_export" | "archive_import"} intent
+   * @param {() => void} hold steps the act back to the screen the challenge sits on
    */
-  async function guarded(act, fail, intent) {
+  async function guarded(act, fail, intent, hold) {
     try {
       await act("");
     } catch (error) {
       if (!needsProof(error)) { fail(wordsOf(error)); return; }
+      /* How this reader proves it is them is asked BEFORE the challenge
+         opens, and the act steps back to its screen in the same turn, so
+         the challenge is drawn once, in its final place. Opened first and
+         moved once the answer came, its field was rebuilt under a reader
+         already typing in it, and what they typed was lost (pipeline 2382). */
+      if (hasPassword === null) {
+        hasPassword = await readSignInMethods().then((methods) => methods.local.set, () => true);
+      }
       retry = act;
       retryIntent = intent;
       currentPassword = "";
       challengeProblem = null;
+      hold();
       challengeOpen = true;
-      if (hasPassword === null) {
-        hasPassword = await readSignInMethods().then((methods) => methods.local.set, () => true);
-      }
     }
   }
 
@@ -121,11 +137,32 @@
   async function toProvider() {
     challengeProblem = null;
     try {
+      /* The redirect leaves the page, so the chosen file and passphrase
+         cannot come back; this flag only says why the reader is here. */
+      try { sessionStorage.setItem(STEPUP_RETURN_FLAG, "1"); } catch { /* storage refused: the redirect still happens, just without the notice on return */ }
       await startStepUp({ intent: retryIntent, returnTo: location.pathname });
     } catch (error) {
+      try { sessionStorage.removeItem(STEPUP_RETURN_FLAG); } catch { /* nothing to clear */ }
       challengeProblem = wordsOf(error);
     }
   }
+
+  /** @type {string | null} */
+  let stepUpNotice = $state(null);
+
+  /* Read, not consumed: the desk card and the phone card are both on the page (CSS
+     picks which shows), so whichever mounted first and took the flag would
+     leave the visible one with no notice. Both read it in their onMount and
+     the flag is cleared a tick later, once both have. */
+  onMount(() => {
+    let returning = null;
+    try { returning = sessionStorage.getItem(STEPUP_RETURN_FLAG); } catch { /* unreadable: treat as not returning */ }
+    if (!returning) return;
+    setTimeout(() => {
+      try { sessionStorage.removeItem(STEPUP_RETURN_FLAG); } catch { /* already gone, or unreadable */ }
+    }, 0);
+    stepUpNotice = "back from signing in again · choose the file once more to carry on";
+  });
 
   /* ── acts ─────────────────────────────────────────────────────────────── */
   function writeArchive() {
@@ -141,7 +178,7 @@
     }, (words) => {
       outProblem = `not written — ${words}`;
       outPhase = "form";
-    }, "archive_export").then(() => { if (outPhase === "writing" && challengeOpen) outPhase = "form"; });
+    }, "archive_export", () => { outPhase = "form"; });
   }
 
   /** @param {Event} event */
@@ -150,7 +187,7 @@
     const next = input.files?.[0] ?? null;
     input.value = "";
     if (!next) return;
-    inProblem = archiveFileProblem(next);
+    inProblem = archiveFileProblem(next, limits);
     preview = null;
     archive = null;
     file = next;
@@ -158,7 +195,7 @@
   }
 
   async function lookInside() {
-    if (!file || passIn.length < PASSPHRASE_MIN) return;
+    if (!file || passphraseLength(passIn) < passphraseMin) return;
     inProblem = null;
     inPhase = "looking";
     try {
@@ -174,8 +211,7 @@
     }, (words) => {
       inProblem = words;
       inPhase = "chosen";
-    }, "archive_import");
-    if (inPhase === "looking") inPhase = "chosen";
+    }, "archive_import", () => { inPhase = "chosen"; });
   }
 
   const bringCount = $derived(preview ? preview.items - preview.conflicts.length : 0);
@@ -190,11 +226,11 @@
       brought = result.importedItems;
       inPhase = "done";
       passIn = "";
-      wake(`brought in ${brought} ${brought === 1 ? "entry" : "entries"}`);
+      wake(`brought in ${plural(brought, "entry", "entries")}`);
     }, (words) => {
       inProblem = `not brought in — ${words}`;
       inPhase = "preview";
-    }, "archive_import").then(() => { if (inPhase === "bringing") inPhase = "preview"; });
+    }, "archive_import", () => { inPhase = "preview"; });
   }
 
   function startOver() {
@@ -216,7 +252,7 @@
   }
 
   const readyUntil = $derived(written
-    ? new Date(written.expiresAt).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+    ? `${dayMonth(written.expiresAt, localZone())}, ${clockOf(written.expiresAt, localZone())}`
     : "");
 </script>
 
@@ -230,6 +266,8 @@
               tabindex={tab === "in" ? 0 : -1} onclick={() => (tab = "in")} onkeydown={tabKey}>bring one in</button>
     </div>
   </div>
+
+  {#if stepUpNotice}<p class="hh-note">{stepUpNotice}</p>{/if}
 
   <div role="tabpanel" id="hh-panel-out" aria-labelledby="hh-tab-out" hidden={tab !== "out"}>
     <div class="hh-manifest">
@@ -261,7 +299,7 @@
     {:else if outPhase === "writing"}
       <div class="hh-progress" role="status">
         <span class="p-body accent breathing" aria-hidden="true"></span>
-        <span><b>writing the archive</b><small>encrypting {entries} {entries === 1 ? "entry" : "entries"} and their documents</small></span>
+        <span><b>writing the archive</b><small>encrypting {plural(entries, "entry", "entries")} and their documents</small></span>
         <i aria-hidden="true"></i>
       </div>
     {:else if written}
@@ -279,7 +317,7 @@
     <input class="sr-only" type="file" accept=".json,application/json" tabindex="-1" aria-hidden="true"
            bind:this={picker} onchange={chose}>
     {#if inPhase === "done"}
-      <p class="hh-done"><span class="p-body ok" aria-hidden="true"></span>brought in {brought} {brought === 1 ? "entry" : "entries"} from {preview?.householdName ?? "the archive"}</p>
+      <p class="hh-done"><span class="p-body ok" aria-hidden="true"></span>brought in {plural(brought, "entry", "entries")} from {preview?.householdName ?? "the archive"}</p>
       <button class="p-pill wide" onclick={startOver}>bring in another</button>
     {:else}
       {#if file}
@@ -291,7 +329,7 @@
       {/if}
       {#if inPhase === "rest"}
         <button class="p-pill act-accent wide" onclick={() => picker?.click()}>choose a file</button>
-        <p class="hh-note">an Orbit archive, up to {sizeLabel(ARCHIVE_MAX_BYTES)}</p>
+        <p class="hh-note">an Orbit archive{limits ? `, up to ${sizeLabel(limits.archiveFileBytes)}` : ""}</p>
       {:else if inPhase === "chosen" || inPhase === "looking"}
         <div class="hh-fields">
           <label class="hh-label" for="hh-pass-in">the file's passphrase</label>
@@ -300,7 +338,7 @@
         </div>
         <div class="hh-pair">
           <button class="p-pill" onclick={startOver}>another file</button>
-          <button class="p-pill filled" disabled={passIn.length < PASSPHRASE_MIN || inPhase === "looking"} onclick={lookInside}>
+          <button class="p-pill filled" disabled={passphraseLength(passIn) < passphraseMin || inPhase === "looking"} onclick={lookInside}>
             {inPhase === "looking" ? "looking…" : "look inside"}</button>
         </div>
       {:else if preview}
@@ -314,7 +352,7 @@
           {/each}
         </div>
         {#if bringCount > 0}
-          <ArmButton label="bring in {bringCount} {bringCount === 1 ? 'entry' : 'entries'}" wide danger={false}
+          <ArmButton label="bring in {plural(bringCount, 'entry', 'entries')}" wide danger={false}
                      class="act-accent" armedLabel="tap again · it can't be undone as one act" onfire={bringIn} />
         {:else}
           <p class="hh-note">everything in this archive is already here</p>
@@ -323,7 +361,7 @@
       {:else if inPhase === "bringing"}
         <div class="hh-progress" role="status">
           <span class="p-body accent breathing" aria-hidden="true"></span>
-          <span><b>bringing it in</b><small>{bringCount} {bringCount === 1 ? "entry" : "entries"}</small></span>
+          <span><b>bringing it in</b><small>{plural(bringCount, "entry", "entries")}</small></span>
           <i aria-hidden="true"></i>
         </div>
       {/if}

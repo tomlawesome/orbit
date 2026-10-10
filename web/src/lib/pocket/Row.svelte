@@ -165,7 +165,7 @@
     else if (event.key === "ArrowDown") { event.preventDefault(); onmove(1); }
   }
   /** @param {import("./row.js").RowAct} act */
-  const tone = (act) => (act.tone === "filled" ? "filled" : act.tone ? `act-${act.tone}` : "");
+  const tone = (act) => (act.tone === "filled" || act.tone === "danger" ? act.tone : act.tone ? `act-${act.tone}` : "");
   const tag = $derived(href ? "a" : opens || onactivate ? "button" : "div");
   /* An email address alone: the meta line's one exception (R5). */
   const EMAIL = /^[^\s@]+@[^\s@]+$/;

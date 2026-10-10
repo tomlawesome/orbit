@@ -10,7 +10,7 @@
  * dry run as the rows change (EditSession).
  */
 import { entryOf, intentOf, REMINDER_DEFAULT } from "../../routes/create/entry.js";
-import { every, shortDate } from "$lib/format.js";
+import { dayMonthYear, every, symbolOf } from "$lib/format.js";
 import { addMonths } from "./calendar.js";
 import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
 
@@ -32,14 +32,10 @@ import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
  */
 
 /** The orbital periods the band offers, once at the top to 2 years at the foot (round 7). */
-export const PERIODS = /** @type {const} */ ([
-  [0, "does not repeat"], [1, "every month"], [3, "every 3 months"],
-  [6, "every 6 months"], [12, "every year"], [24, "every 2 years"],
-]);
+export const PERIODS = /** @type {[number, string][]} */ (
+  [0, 1, 3, 6, 12, 24].map((n) => [n, n ? every(n) : "does not repeat"]));
 /** The three types round 8 colours, in its order. */
 export const TYPES = ["service", "renewal", "inspection"];
-
-const SYMBOLS = /** @type {Record<string, string>} */ ({ GBP: "£", EUR: "€", USD: "$" });
 
 /** An orbital period in the band's words. @param {number} months */
 export function periodWords(months) {
@@ -70,7 +66,10 @@ export function remindersOf(text) {
  */
 export function draftOf(item) {
   const entry = entryOf(item);
-  const sign = SYMBOLS[item.currency ?? "GBP"] ?? "";
+  const symbol = symbolOf(item.currency ?? "GBP");
+  /* Only a sign costMinorOf can strip again is prefilled; any other currency
+     is typed bare, as it always was, so an untouched cost still reads back. */
+  const sign = ["£", "$", "€"].includes(symbol) ? symbol : "";
   return {
     title: entry.name,
     dueDate: entry.dueDate,
@@ -83,6 +82,26 @@ export function draftOf(item) {
     reminders: remindersWords(entry.reminderDays),
     notes: entry.notes,
   };
+}
+
+/**
+ * The tiles of "where do these entries go?" (#1332): every kept section but
+ * the one going, shown and hidden alike (hidden ones say so), and a section
+ * added in this edit once it has a name (it says "new"). Same colour rule as
+ * `sectionChoices`; the order is the editor's.
+ * @param {{ id: string, name: string, icon?: string, visible?: boolean, fresh?: boolean, removed?: boolean }[]} rows
+ * @param {string} going  the section being removed
+ * @returns {Choice[]}
+ */
+export function destinationChoices(rows, going) {
+  return rows
+    .filter((one) => one.id !== going && !one.removed && one.name.trim())
+    .map((one) => ({
+      value: one.id,
+      words: one.name.trim(),
+      colour: sectionColourOf(one),
+      ...(one.fresh ? { note: "new" } : one.visible === false ? { note: "hidden" } : {}),
+    }));
 }
 
 /**
@@ -131,7 +150,7 @@ export function periodChoices(current, due) {
       colour: null,
       figure: n ? String(years ? n / 12 : n) : "once",
       unit: n ? (years ? (n === 12 ? "year" : "years") : (n === 1 ? "month" : "months")) : "",
-      note: n ? (due ? `then ${shortDate(addMonths(due, n))}` : "") : "once",
+      note: n ? (due ? `then ${dayMonthYear(addMonths(due, n))}` : "") : "once",
     };
   });
 }

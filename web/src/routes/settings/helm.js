@@ -1,4 +1,7 @@
+
+import { wordsOf } from "$lib/data/workspace.js";
 import { THEME_TABLE } from "$lib/theme.js";
+import { dayMonthYear } from "$lib/format.js";
 
 /*
  * What settings' desk cards and its phone layout (pocket.svelte, #1125) both
@@ -56,8 +59,7 @@ export function issuerHost(issuer) {
 
 /** A date a reader can read, in UTC so the gate photographs the same one. */
 /** @param {?string} iso */
-export const on = (iso) =>
-  iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : "";
+export const on = (iso) => (iso ? dayMonthYear(iso) : "");
 
 /** The step-up intent each armed action is bound to (ADR-0023 §5). */
 /** @param {string} action */
@@ -70,12 +72,12 @@ export function methodWords(error) {
   const code = /** @type {{ code?: string, message?: string }} */ (error)?.code;
   if (code === "recent_authentication_required") return "that isn't your current password — nothing was changed";
   if (code === "too_many_attempts") return "too many attempts at once; try again shortly";
-  if (code === "password_rejected") return /** @type {{ message?: string }} */ (error)?.message ?? "that password was refused";
+  if (code === "password_rejected") return wordsOf(error, "that password was refused");
   if (code === "link_last_method") return "keep at least one way to sign in: add another method before removing this one";
   if (code === "link_exists") return "that provider account already belongs to an Orbit account";
   if (code === "step_up_failed") return "your identity provider did not re-authenticate you, so nothing was changed";
   if (code === "provider_handover_unreadable") {
     return "not started — Orbit could not hand you to your identity provider";
   }
-  return /** @type {{ message?: string }} */ (error)?.message ?? "not changed — Orbit could not reach your sign-in methods";
+  return wordsOf(error, "not changed — Orbit could not reach your sign-in methods");
 }

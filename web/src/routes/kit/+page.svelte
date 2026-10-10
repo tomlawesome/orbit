@@ -56,7 +56,7 @@
 <svelte:head><title>Orbit · pocket kit</title></svelte:head>
 
 <Sky />
-<Chrome {user} role="Lawson Home · owner" current="" />
+<Chrome {user} household={{ name: "Lawson Home", canManage: true }} current="" />
 
 
 <main class="kit">

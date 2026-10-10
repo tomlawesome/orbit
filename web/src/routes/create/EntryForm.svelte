@@ -1,4 +1,5 @@
 <script>
+  import { sizeLabel, symbolOf } from "$lib/format.js";
   import Mark from "$lib/Mark.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
   import StagedPage from "$lib/pocket/StagedPage.svelte";
@@ -88,10 +89,7 @@
   const household = $derived(households.find((one) => one.id === entry.householdId) ?? households[0] ?? null);
   const sections = $derived((household?.sections ?? []).filter((one) => one.visible || one.id === entry.sectionId));
   const currency = $derived(household?.currency ?? "GBP");
-  const symbol = $derived(
-    new Intl.NumberFormat("en-GB", { style: "currency", currency }).formatToParts(0)
-      .find((part) => part.type === "currency")?.value ?? currency,
-  );
+  const symbol = $derived(symbolOf(currency));
 
   /** @param {string} id */
   function pickHousehold(id) {
@@ -140,9 +138,6 @@
   /** The paper row's separator, as an expression: a block's leading space
       is trimmed, which ran "17 KB· refused" together. */
   const SEP = " · ";
-  /** @type {(bytes: number) => string} */
-  const size = (bytes) =>
-    bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 </script>
 
 <div class="pc-form">
@@ -190,7 +185,7 @@
         <div class="pc-paper pc-paper-row">
           <span class="p-paper pc-doc-mark" aria-hidden="true">◆</span>
           <span class="pc-paper-words"><b>{picked.name}</b>
-            <span>{size(picked.size)}{#if picked.scanned}{SEP}<span class="clean">scanned clean</span>{/if}{#if picked.refused}{SEP}<span class="refusedword">refused</span>{/if}</span></span>
+            <span>{sizeLabel(picked.size)}{#if picked.scanned}{SEP}<span class="clean">scanned clean</span>{/if}{#if picked.refused}{SEP}<span class="refusedword">refused</span>{/if}</span></span>
         </div>
 
         {#if picked.page}

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { costMinorOf } from "../../src/lib/refusals";
 
 // #1319 — editing in the drawer's own rows: what the rows hold (draftOf), how
 // a typed reminders row reads (remindersOf), what a save sends (editsOf) and
@@ -68,6 +69,15 @@ describe("draftOf", () => {
     expect(draftOf(item({ currency: "USD" })).cost).toBe("$54.00");
     expect(draftOf(item({ currency: undefined })).cost).toBe("£54.00");
     expect(draftOf(item({ currency: "JPY" })).cost).toBe("54.00");
+  });
+
+  /* Review of 16f39028: the cost is typed back through costMinorOf, which
+     strips only £, $ and €. A prefilled sign it cannot strip (¥, ₹, kr, zł)
+     made an untouched cost refuse as "not a number" on an unrelated edit. */
+  it("prefills only a sign the cost check can read back", () => {
+    for (const currency of ["GBP", "EUR", "USD", "JPY", "INR", "SEK", "PLN", "CHF"]) {
+      expect(costMinorOf(draftOf(item({ currency })).cost), currency).toBe(5400);
+    }
   });
 
   it("holds an empty cost, and nulls, as empty rows", () => {
@@ -150,7 +160,7 @@ describe("periodChoices", () => {
 
   it("reads each foot line as the date it would next come round to", () => {
     const notes = periodChoices(12, due).map((c) => c.note);
-    expect(notes).toEqual(["once", "then 8 Nov 2026", "then 8 Jan 2027", "then 8 Apr 2027", "then 8 Oct 2027", "then 8 Oct 2028"]);
+    expect(notes).toEqual(["once", "then 08 Nov 2026", "then 08 Jan 2027", "then 08 Apr 2027", "then 08 Oct 2027", "then 08 Oct 2028"]);
   });
 
   it("gives no date to come round to without a due date", () => {
@@ -166,7 +176,7 @@ describe("periodChoices", () => {
     const choices = periodChoices(2, due);
     expect(choices.map((c) => c.value)).toEqual(["0", "1", "2", "3", "6", "12", "24"]);
     expect(choices[2]).toMatchObject({
-      value: "2", words: "every 2 months", figure: "2", unit: "months", note: "then 8 Dec 2026", colour: null,
+      value: "2", words: "every 2 months", figure: "2", unit: "months", note: "then 08 Dec 2026", colour: null,
     });
     expect(periodChoices(18, due).map((c) => c.value)).toEqual(["0", "1", "3", "6", "12", "18", "24"]);
   });

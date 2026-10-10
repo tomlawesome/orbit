@@ -147,7 +147,7 @@ describe("the belt's words", () => {
     expect(row.months).toBe(null);
 
     const [ahead] = beltManifestOf({ household: householdOf([itemOf()]), today: TODAY });
-    expect(ahead.when).toBe("ends 02 Sept");
+    expect(ahead.when).toBe("ends 02 Sep");
     expect(ahead.urg).toBe("soon");
   });
 });

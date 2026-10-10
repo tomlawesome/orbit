@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ARM_MS } from "../../web/src/lib/pocket/arm.js";
+import { ARM_MS } from "../../web/src/lib/arm.js";
 import { createDiscardGuard, rowsChanged } from "../../web/src/routes/home/discard-guard.js";
 
 /*

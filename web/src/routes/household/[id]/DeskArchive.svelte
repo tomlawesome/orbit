@@ -1,13 +1,16 @@
 <script>
+  import { clockOf, dayMonth, localZone, plural, sizeLabel } from "$lib/format.js";
   import { onMount } from "svelte";
+  import { createArm } from "$lib/arm.js";
   import {
     importPortableArchive,
     previewPortableArchive,
     readSignInMethods,
     startStepUp,
+    wordsOf,
     writePortableArchive,
   } from "$lib/data/workspace.js";
-  import { ARCHIVE_MAX_BYTES, archiveFileProblem, PASSPHRASE_MIN, passphraseProblem, sizeLabel } from "./archive.js";
+  import { archiveFileProblem, passphraseFloor, passphraseLength, passphraseProblem } from "./archive.js";
 
   /*
    * THE ARCHIVE ON THE DESK (#1002). The phone's own build is #1122's
@@ -44,8 +47,11 @@
      read. */
   const STEPUP_RETURN_FLAG = "orbit-archive-stepup-return";
 
-  /** @type {{ householdId: string, householdName: string, entries: number, sections: number }} */
-  let { householdId, householdName, entries, sections } = $props();
+  /** @type {{ householdId: string, householdName: string, entries: number, sections: number, limits?: import("$lib/data/engine-limits.js").EngineLimits | null }} */
+  let { householdId, householdName, entries, sections, limits = null } = $props();
+
+  /* The engine's numbers (#1336): the passphrase floor the buttons wait for. */
+  const passphraseMin = $derived(passphraseFloor(limits));
 
   let tab = $state(/** @type {"out" | "in"} */ ("out"));
 
@@ -56,7 +62,7 @@
   let written = $state(/** @type {import('$lib/data/workspace.js').WrittenArchive | null} */ (null));
   /** @type {string | null} */
   let outProblem = $state(null);
-  const outRefusal = $derived(passphraseProblem(passOut, passAgain));
+  const outRefusal = $derived(passphraseProblem(passOut, passAgain, limits));
 
   /* ── bring one in ─────────────────────────────────────────────────────── */
   let inPhase = $state(/** @type {"rest" | "chosen" | "looking" | "preview" | "bringing" | "done"} */ ("rest"));
@@ -72,26 +78,16 @@
   /** @type {HTMLInputElement | undefined} */
   let picker = $state();
 
-  /* ── two-tap, the desk's own protocol (+page.svelte, administration.svelte):
-     an arm, then a fire, 5s to change your mind. Kept local like every other
-     card's copy of it — this route has no shared arm-button component. */
-  let armed = $state(/** @type {string | null} */ (null));
-  /** @type {ReturnType<typeof setTimeout> | undefined} */
-  let armTimer;
+  /* ── two-tap (lib/arm.js): an arm, then a fire, 4s to change your mind ── */
+  let armed = $state(/** @type {string | boolean} */ (false));
+  const arm = createArm({ onchange: (next) => (armed = next) });
   /**
    * @param {string} key
    * @param {() => void} fire
+   * @param {HTMLElement | null} button
    */
-  function twoTap(key, fire) {
-    if (armed === key) {
-      clearTimeout(armTimer);
-      armed = null;
-      fire();
-      return;
-    }
-    clearTimeout(armTimer);
-    armed = key;
-    armTimer = setTimeout(() => (armed = null), 5000);
+  function twoTap(key, fire, button) {
+    if (arm.tap(key, button)) fire();
   }
 
   /* ── the recent-authentication challenge (#1132) ──────────────────────── */
@@ -110,8 +106,6 @@
   let retryIntent = $state(/** @type {"archive_export" | "archive_import"} */ ("archive_export"));
 
   /** @param {unknown} error */
-  const wordsOf = (error) => /** @type {{ message?: string }} */ (error)?.message ?? String(error);
-  /** @param {unknown} error */
   const needsProof = (error) => /** @type {{ code?: string }} */ (error)?.code === "recent_authentication_required";
 
   /**
@@ -120,20 +114,27 @@
    * @param {(proof: string) => Promise<void>} act
    * @param {(words: string) => void} fail
    * @param {"archive_export" | "archive_import"} intent
+   * @param {() => void} hold steps the act back to the screen the challenge sits on
    */
-  async function guarded(act, fail, intent) {
+  async function guarded(act, fail, intent, hold) {
     try {
       await act("");
     } catch (error) {
       if (!needsProof(error)) { fail(wordsOf(error)); return; }
+      /* How this reader proves it is them is asked BEFORE the challenge
+         opens, and the act steps back to its screen in the same turn, so
+         the challenge is drawn once, in its final place. Opened first and
+         moved once the answer came, its field was rebuilt under a reader
+         already typing in it, and what they typed was lost (pipeline 2382). */
+      if (hasPassword === null) {
+        hasPassword = await readSignInMethods().then((methods) => methods.local.set, () => true);
+      }
       retry = act;
       retryIntent = intent;
       currentPassword = "";
       challengeProblem = null;
+      hold();
       challengeOpen = true;
-      if (hasPassword === null) {
-        hasPassword = await readSignInMethods().then((methods) => methods.local.set, () => true);
-      }
     }
   }
 
@@ -179,11 +180,17 @@
   /** @type {string | null} */
   let stepUpNotice = $state(null);
 
+  /* Read, not consumed: the desk card and the phone card are both on the page (CSS
+     picks which shows), so whichever mounted first and took the flag would
+     leave the visible one with no notice. Both read it in their onMount and
+     the flag is cleared a tick later, once both have. */
   onMount(() => {
     let returning = null;
     try { returning = sessionStorage.getItem(STEPUP_RETURN_FLAG); } catch { /* unreadable: treat as not returning */ }
     if (!returning) return;
-    try { sessionStorage.removeItem(STEPUP_RETURN_FLAG); } catch { /* already gone, or unreadable */ }
+    setTimeout(() => {
+      try { sessionStorage.removeItem(STEPUP_RETURN_FLAG); } catch { /* already gone, or unreadable */ }
+    }, 0);
     stepUpNotice = "back from signing in again · choose the file once more to carry on";
   });
 
@@ -200,7 +207,7 @@
     }, (words) => {
       outProblem = `not written — ${words}`;
       outPhase = "form";
-    }, "archive_export").then(() => { if (outPhase === "writing" && challengeOpen) outPhase = "form"; });
+    }, "archive_export", () => { outPhase = "form"; });
   }
 
   /** @param {Event} event */
@@ -209,7 +216,7 @@
     const next = input.files?.[0] ?? null;
     input.value = "";
     if (!next) return;
-    inProblem = archiveFileProblem(next);
+    inProblem = archiveFileProblem(next, limits);
     preview = null;
     archive = null;
     file = next;
@@ -217,7 +224,7 @@
   }
 
   async function lookInside() {
-    if (!file || passIn.length < PASSPHRASE_MIN) return;
+    if (!file || passphraseLength(passIn) < passphraseMin) return;
     inProblem = null;
     inPhase = "looking";
     try {
@@ -233,8 +240,7 @@
     }, (words) => {
       inProblem = words;
       inPhase = "chosen";
-    }, "archive_import");
-    if (inPhase === "looking") inPhase = "chosen";
+    }, "archive_import", () => { inPhase = "chosen"; });
   }
 
   const bringCount = $derived(preview ? preview.items - preview.conflicts.length : 0);
@@ -252,7 +258,7 @@
     }, (words) => {
       inProblem = `not brought in — ${words}`;
       inPhase = "preview";
-    }, "archive_import").then(() => { if (inPhase === "bringing") inPhase = "preview"; });
+    }, "archive_import", () => { inPhase = "preview"; });
   }
 
   function startOver() {
@@ -274,7 +280,7 @@
   }
 
   const readyUntil = $derived(written
-    ? new Date(written.expiresAt).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+    ? `${dayMonth(written.expiresAt, localZone())}, ${clockOf(written.expiresAt, localZone())}`
     : "");
 </script>
 
@@ -347,7 +353,7 @@
           {#if outRefusal && (passOut || passAgain)}<p class="refuse">{outRefusal}</p>{/if}
           <div class="act">
             <button class="ghost" class:armed={armed === "arch-out"} disabled={Boolean(outRefusal)}
-                    onclick={() => twoTap("arch-out", writeArchiveNow)}>
+                    onclick={(event) => twoTap("arch-out", writeArchiveNow, event.currentTarget)}>
               {armed === "arch-out" ? "tap again to write the archive" : "write the archive"}</button>
             <button class="ghost" type="button"
                     onclick={() => { outPhase = "rest"; passOut = ""; passAgain = ""; outProblem = null; }}>cancel</button>
@@ -357,7 +363,7 @@
         {#if challengeOpen && retryIntent === "archive_export"}{@render challenge()}{/if}
       {:else if outPhase === "writing"}
         <p class="moment" role="status">
-          writing the archive · encrypting {entries} {entries === 1 ? "entry" : "entries"} and their documents</p>
+          writing the archive · encrypting {plural(entries, "entry", "entries")} and their documents</p>
         {#if challengeOpen}{@render challenge()}{/if}
       {:else if written}
         <p class="said show">written · orbit-archive.json · ready until {readyUntil} ·
@@ -375,7 +381,7 @@
       <input class="sr-only" type="file" accept=".json,application/json" tabindex="-1" aria-hidden="true"
              bind:this={picker} onchange={chose}>
       {#if inPhase === "done"}
-        <p class="said show">brought in {brought} {brought === 1 ? "entry" : "entries"} from {preview?.householdName ?? "the archive"}</p>
+        <p class="said show">brought in {plural(brought, "entry", "entries")} from {preview?.householdName ?? "the archive"}</p>
         <div class="act"><button class="ghost" onclick={startOver}>bring in another</button></div>
       {:else}
         <p>An archive from another Orbit — or an older one of this — merges into <b>{householdName}</b>. Entries
@@ -385,7 +391,7 @@
         {/if}
         {#if inPhase === "rest"}
           <div class="act"><button class="ghost" onclick={() => picker?.click()}>bring in an archive →</button></div>
-          <p class="note top">an Orbit archive, up to {sizeLabel(ARCHIVE_MAX_BYTES)}</p>
+          <p class="note top">an Orbit archive{limits ? `, up to ${sizeLabel(limits.archiveFileBytes)}` : ""}</p>
         {:else if inPhase === "chosen" || inPhase === "looking"}
           <div class="step open">
             <div class="field">
@@ -395,7 +401,7 @@
             </div>
             <div class="act">
               <button class="ghost" onclick={startOver}>another file</button>
-              <button class="ghost" disabled={passIn.length < PASSPHRASE_MIN || inPhase === "looking"} onclick={lookInside}>
+              <button class="ghost" disabled={passphraseLength(passIn) < passphraseMin || inPhase === "looking"} onclick={lookInside}>
                 {inPhase === "looking" ? "looking…" : "look inside"}</button>
             </div>
           </div>
@@ -419,10 +425,10 @@
             {#if bringCount > 0}
               <div class="act">
                 <button class="ghost" class:armed={armed === "arch-in"}
-                        onclick={() => twoTap("arch-in", bringInNow)}>
+                        onclick={(event) => twoTap("arch-in", bringInNow, event.currentTarget)}>
                   {armed === "arch-in"
-                    ? `tap again to bring in ${bringCount} ${bringCount === 1 ? "entry" : "entries"}`
-                    : `bring in ${bringCount} ${bringCount === 1 ? "entry" : "entries"}`}</button>
+                    ? `tap again to bring in ${plural(bringCount, "entry", "entries")}`
+                    : `bring in ${plural(bringCount, "entry", "entries")}`}</button>
               </div>
               <p class="moment warn">this can’t be undone as one act — each entry would have to go separately</p>
             {:else}
@@ -432,7 +438,7 @@
           </div>
           {#if challengeOpen && retryIntent === "archive_import"}{@render challenge()}{/if}
         {:else if inPhase === "bringing"}
-          <p class="moment" role="status">bringing it in · {bringCount} {bringCount === 1 ? "entry" : "entries"}</p>
+          <p class="moment" role="status">bringing it in · {plural(bringCount, "entry", "entries")}</p>
           {#if challengeOpen}{@render challenge()}{/if}
         {/if}
         {#if inProblem}<p class="refuse">{inProblem}</p>{/if}

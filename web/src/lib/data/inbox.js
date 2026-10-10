@@ -1,3 +1,4 @@
+import { plural } from "$lib/format.js";
 /**
  * Mail-in receipts, shaped for the screens (#434). Pure mappings only — the
  * fetch/approve protocol lives in the seam (workspace.js).
@@ -33,7 +34,7 @@ export function receiptSuggestionsOf(receipts = []) {
       currency: receipt.proposal?.currency ?? "GBP",
       sourceDocument:
         (receipt.attachmentCount ?? 0) > 0
-          ? `${receipt.attachmentCount} forwarded document${receipt.attachmentCount === 1 ? "" : "s"}`
+          ? plural(receipt.attachmentCount ?? 0, "forwarded document")
           : "forwarded email",
       fieldEvidence: receipt.fieldEvidence ?? {},
       /* The papers by name where the list names them (fixtures today, #467

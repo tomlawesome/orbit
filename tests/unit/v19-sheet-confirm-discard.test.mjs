@@ -34,7 +34,7 @@ const SHEET = readFileSync(
 
 describe("#1151 W1-S2: Sheet.svelte arms a dismiss instead of firing it blind", () => {
   it("reads confirmDiscard right before dismissing, via the kit's own arm pattern", () => {
-    expect(SHEET).toMatch(/import \{ createArm \} from "\.\/arm\.js";/u);
+    expect(SHEET).toMatch(/import \{ createArm \} from "\$lib\/arm\.js";/u);
     const dismiss = SHEET.slice(SHEET.indexOf("function dismiss()"), SHEET.indexOf("function dismiss()") + 200);
     expect(dismiss).toMatch(/confirmDiscard\?\.\(\)\s*&&\s*!dismissArm\.tap\(\)/u);
   });

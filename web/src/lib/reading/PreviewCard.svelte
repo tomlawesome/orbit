@@ -1,7 +1,9 @@
 <script>
+  import { wordsOf } from "$lib/data/workspace.js";
   import { tick, untrack } from "svelte";
   import { resolve } from "$app/paths";
   import { documentPreviewStateOf } from "$lib/data/belt.js";
+  import { daysWords } from "$lib/data/engine-limits.js";
   import { loadStagedPage, previewPageHref } from "$lib/data/staged-page.js";
   import { pageKeyTarget } from "$lib/data/page-turn.js";
   import Pager from "./Pager.svelte";
@@ -44,13 +46,14 @@
    * @typedef {{
    *   doc: PreviewDoc | null,
    *   itemTitle: string,
+   *   documentDays?: number | null,
    *   onclose: (how: { refocus: boolean, press: boolean }) => void,
    *   onremove: (doc: PreviewDoc) => Promise<unknown>,
    *   onrestore: (doc: PreviewDoc) => Promise<unknown>,
    * }} Props
    */
   /** @type {Props} */
-  let { doc, itemTitle, onclose, onremove, onrestore } = $props();
+  let { doc, itemTitle, documentDays = null, onclose, onremove, onrestore } = $props();
 
   const WIDE = "(min-width: 1200px)";
   const SHEET_MS = 300;
@@ -322,7 +325,7 @@
     try {
       await onrestore(target);
     } catch (error) {
-      if (mine === token) problem = /** @type {{ message?: string }} */ (error)?.message ?? "could not restore it — try again";
+      if (mine === token) problem = wordsOf(error, "could not restore it — try again");
     } finally {
       restoring = false;
     }
@@ -384,7 +387,7 @@
         <div class="focus">
           <div class="plate removed" aria-hidden="true">being removed</div>
           <div class="focusline">Removed</div>
-          <div class="why">orbit keeps it {shown.deleteAfter ? `until ${shown.deleteAfter}` : "for 30 days"}, then it is gone for good<br>restore puts it back exactly as it was</div>
+          <div class="why">orbit keeps it {shown.deleteAfter ? `until ${shown.deleteAfter}` : `for ${daysWords(documentDays)}`}, then it is gone for good<br>restore puts it back exactly as it was</div>
         </div>
       {:else if st === "refused"}
         <div class="focus">
