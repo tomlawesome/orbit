@@ -18,14 +18,15 @@ something there is not working as intended, act on it -- file the issue,
 tell the launcher session -- without asking first. Asking costs the owner a
 round trip on a question with only one answer.
 
-`orbit-site` (GitHub `tomlawesome/orbit-site`) is Orbit's public-facing
-website, built by another agent and largely complete (owner, 2026-10-03). It
-lives on GitHub only for now, to use cloud credit that works nowhere else,
-and will move to GitLab later. It is a sibling project, read-only from here:
-report what one needs from the other rather than changing it (owner,
-2026-09-30). Anything that describes Orbit to the public -- a feature claim,
-an install step, a screenshot -- belongs there, so check it when Orbit's
-behaviour changes.
+`ai/orbit-site` (GitLab, project 57; GitHub Pages serves its mirror) is
+Orbit's public website, and part of this project too, not a sibling: Orbit,
+orbit-launcher and orbit-site are one project, split into three repositories
+for development reasons (owner, 2026-10-10). When one needs something from
+the other, act on it as with the launcher -- file the issue, tell the site
+session -- without asking first. Anything that describes Orbit to the public
+-- a feature claim, an install step, a screenshot -- belongs there, so check
+it when Orbit's behaviour changes. The door is designed there and Orbit
+pulls it in (#1371; orbit-site ADR-0001).
 
 ## Where the work lives
 
