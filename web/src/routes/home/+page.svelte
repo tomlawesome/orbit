@@ -10,7 +10,7 @@
   import Sun from "$lib/sun/Sun.svelte";
   import { SUN_R } from "$lib/sun/furnace.js";
   import { swatchStyle } from "$lib/theme-swatches.js";
-  import { othersOf } from "$lib/flight/engine.js";
+  import { othersOf } from "$lib/flight/homes.js";
   import Dawn from "$lib/flight/Dawn.svelte";
   import { consumeLaunch } from "$lib/flight/arrival.js";
   /* The sun is one of the household screen's two doors, and that screen owns
