@@ -211,7 +211,7 @@ test("the manifest row approves in two taps, idempotently under partial success"
     // The second tap fires; the first answer is partial, so the drawer says so.
     await drawer.getByRole("button", { name: "tap again to approve" }).click();
     await expect.poll(() => approvals.length).toBe(1);
-    await expect(drawer.locator(".mail-problem")).toContainText("another try");
+    await expect(drawer.locator(".mail-problem")).toContainText("The item is recorded, but its documents need another try — try once more to finish.");
 
     // The retry carries the SAME operation id and the SAME body: one item, ever.
     await drawer.getByRole("button", { name: "tap again to approve" }).click();
