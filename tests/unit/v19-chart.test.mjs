@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 // excludes from COLLECTION (#425: web's own suites are Playwright); importing
 // a module from there is fine — only test files are excluded.
 import {
-  bandOf,
   bodySize,
   constellationPosOf,
   daysUntil,
@@ -14,6 +13,7 @@ import {
   galaxyOf,
   manifestGroupsOf,
 } from "../../web/src/lib/data/chart.js";
+import { bandOf } from "../../web/src/lib/format.js";
 import { WORKSPACE_FIXTURE } from "../../web/src/lib/data/fixtures/workspace.js";
 
 const TODAY = "2026-08-13"; // DESIGN_TODAY: the date every mockup was drawn against

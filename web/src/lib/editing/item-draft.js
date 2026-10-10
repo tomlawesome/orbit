@@ -10,8 +10,7 @@
  * dry run as the rows change (EditSession).
  */
 import { entryOf, intentOf, REMINDER_DEFAULT } from "../../routes/create/entry.js";
-import { dayMonthYear, every, symbolOf } from "$lib/format.js";
-import { addMonths } from "./calendar.js";
+import { every, symbolOf } from "$lib/format.js";
 import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
 
 /**
@@ -132,12 +131,13 @@ export function typeChoices(current) {
 /**
  * The band's cells: the six periods, and the item's own when it is none of
  * them (every 2 months), in its place, so keeping it stays a choice. Each
- * reads its figure beside its unit, and its foot line the date it would
- * next come round to after `due`.
- * @param {number} current @param {string | null} due
+ * reads its figure beside its unit. The date an item would next come round
+ * to is the engine's to say (the dry run of item.complete, ADR-0034, #1337),
+ * never added up here, so a cell has no "then <date>" foot line of its own.
+ * @param {number} current
  * @returns {Choice[]}
  */
-export function periodChoices(current, due) {
+export function periodChoices(current) {
   /** @type {number[]} */
   const months = PERIODS.map(([n]) => n);
   if (current && !months.includes(current)) months.push(current);
@@ -150,7 +150,7 @@ export function periodChoices(current, due) {
       colour: null,
       figure: n ? String(years ? n / 12 : n) : "once",
       unit: n ? (years ? (n === 12 ? "year" : "years") : (n === 1 ? "month" : "months")) : "",
-      note: n ? (due ? `then ${dayMonthYear(addMonths(due, n))}` : "") : "once",
+      note: n ? "from when it's done" : "once",
     };
   });
 }
@@ -256,5 +256,5 @@ export function chooserAskOf(choosing, draft, sections, today) {
   if (key === "due") return { ...base, heading: "due date", value: draft.dueDate || null, choices: [] };
   if (key === "section") return { ...base, value: draft.sectionId, choices: sectionChoices(sections, draft.sectionId) };
   if (key === "type") return { ...base, value: draft.kind, choices: typeChoices(draft.kind) };
-  return { ...base, value: String(draft.recurrence), choices: periodChoices(draft.recurrence, draft.dueDate || null) };
+  return { ...base, value: String(draft.recurrence), choices: periodChoices(draft.recurrence) };
 }

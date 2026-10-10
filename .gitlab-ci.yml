@@ -979,7 +979,9 @@ classify:
 fast:
   stage: fast
   extends: .node
-  timeout: 10m
+  # Passing runs took 434-590s against the old 10m, so any load on the
+  # shared runner timed it out (#1377). Cutting its run time is still open.
+  timeout: 15m
   rules:
     - *not_scheduled
     - when: on_success

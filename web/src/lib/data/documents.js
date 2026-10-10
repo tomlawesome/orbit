@@ -8,8 +8,8 @@
  * the API (asked for alongside filenames in #467), so attached rows say
  * nothing rather than guessing.
  */
-import { bandOf, daysUntil } from "./chart.js";
-import { plural } from "$lib/format.js";
+import { daysUntil } from "./chart.js";
+import { bandOf, plural } from "$lib/format.js";
 
 /**
  * One row of the archive table, whichever origin it came from: a stored

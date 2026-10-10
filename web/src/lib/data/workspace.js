@@ -585,20 +585,21 @@ export async function applyCommand(command, { retryCsrf = true } = {}) {
 }
 
 /**
- * A dry run of a command (ADR-0034 decision 3, #1325): the engine runs the
- * same parse and checks the real call runs and writes nothing. Null when it
- * would be accepted; otherwise the engine's refusal, in the words the member
- * reads (the browser never rewords it). The answer rides a 200 either way —
- * `{}` or `{ refusal: { code, message } }` (the amendment of 2026-10-09) — so
- * a browser never logs an expected "not yet" as a failed request. A dry run
- * that cannot be heard (the network, the session, maintenance) refuses
- * nothing: the real save says what went wrong.
+ * A dry run of a command (ADR-0034 decision 3, #1325), read whole: the engine
+ * runs the same parse and checks the real call runs and writes nothing, and
+ * answers 200 either way -- `{}`, `{ refusal: { code, message } }`, or for a
+ * completion that would go through `{ preview: { nextDate } }` (#1337) -- so a
+ * browser never logs an expected "not yet" as a failed request. `refusal` is
+ * the engine's words, which the browser never rewords; `preview` is what the
+ * command would do, when the engine says. Null when the dry run cannot be
+ * heard (the network, the session, maintenance): nothing is known, and the
+ * real save says what went wrong.
  *
  * @param {object} command
  * @param {{ retryCsrf?: boolean }} [options]
- * @returns {Promise<string | null>}
+ * @returns {Promise<{ refusal: string | null, preview: { nextDate: string } | null } | null>}
  */
-export async function checkCommand(command, { retryCsrf = true } = {}) {
+export async function askCommand(command, { retryCsrf = true } = {}) {
   try {
     const { csrfToken } = await readSession();
     const response = await fetch("/api/workspace/commands", {
@@ -609,14 +610,30 @@ export async function checkCommand(command, { retryCsrf = true } = {}) {
     });
     if (response.status === 403 && retryCsrf) {
       await readSession({ refresh: true });
-      return checkCommand(command, { retryCsrf: false });
+      return askCommand(command, { retryCsrf: false });
     }
-    /** @type {{ refusal?: { code: string, message: string } }} */
+    /** @type {{ refusal?: { code: string, message: string }, preview?: { nextDate?: string } }} */
     const body = await json(response);
-    return body.refusal?.message ?? null;
+    const nextDate = body.preview?.nextDate;
+    return {
+      refusal: body.refusal?.message ?? null,
+      preview: nextDate ? { nextDate } : null,
+    };
   } catch {
     return null;
   }
+}
+
+/**
+ * Whether a command would be accepted: null when it would, otherwise the
+ * engine's refusal in the words the member reads (askCommand's `refusal`).
+ * A dry run that cannot be heard refuses nothing.
+ *
+ * @param {object} command
+ * @returns {Promise<string | null>}
+ */
+export async function checkCommand(command) {
+  return (await askCommand(command))?.refusal ?? null;
 }
 
 /**
@@ -664,8 +681,8 @@ export async function activeHousehold() {
  * fixture to fetch changes no caller's shape later.
  */
 import { adminFixture } from "./fixtures/admin.js";
-import { ago, dayMonth, sizeLabel } from "$lib/format.js";
-import { bandOf, daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
+import { ago, bandOf, dayMonth, sizeLabel } from "$lib/format.js";
+import { daysUntil, galaxyOf, labelledSkyOf } from "./chart.js";
 import { approvalItemOf, receiptFailuresOf, receiptSuggestionsOf } from "./inbox.js";
 import { engineNumbersOf } from "./engine-limits.js";
 import { householdScreenOf, householdUpdateCommandOf, sectionCommandsOf } from "./household.js";
@@ -842,7 +859,11 @@ export async function createSystem(draft) {
  * workspace read's `today`, in the household's own time zone, ADR-0034,
  * #1325), so a calendar greys exactly the days the engine refuses. The
  * workspace fixture pins it to the date the designs were drawn against so the
- * fidelity gate is deterministic; with neither, the clock's UTC date.
+ * fidelity gate is deterministic. The browser has no clock fallback (#1337):
+ * a household that came without one is the engine's fault, so it throws in
+ * development; elsewhere (and with no household at all) the answer is "", and
+ * every date count against it (daysUntil) is null, so the screen shows
+ * nothing rather than a UTC date that may be a day off.
  *
  * @param {?Workspace} [workspace]
  * @param {?string} [householdId]  whose today; the active household's when omitted
@@ -852,7 +873,12 @@ function todayOf(workspace, householdId) {
   const households = workspace?.households ?? [];
   const id = householdId ?? workspace?.activeHouseholdId;
   const household = households.find((one) => one.id === id) ?? households[0];
-  return workspace?.fixtureToday ?? household?.today ?? new Date().toISOString().slice(0, 10);
+  const today = workspace?.fixtureToday ?? household?.today;
+  if (today) return today;
+  if (household && import.meta.env.DEV) {
+    throw new Error(`The workspace sent household ${household.id} without its "today" (the engine always sends it, #1337)`);
+  }
+  return "";
 }
 
 /**

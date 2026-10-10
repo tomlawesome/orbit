@@ -331,16 +331,31 @@ function itemDates(scheduleKind: ScheduleKind | undefined, dueDate: string | und
 }
 
 /**
+ * What a dry run can tell besides "yes" (ADR-0034 decision 3, amended for
+ * #1337): the result the real call would store, normalised. A completion
+ * answers the next date it would set; nothing is previewed for a command
+ * that ends the schedule, or for any other command.
+ */
+export interface CommandPreview {
+  nextDate: string;
+}
+
+/**
  * The dry run (ADR-0034 decision 3, #1325): the same command through the same
  * access check and the same pre-write checks as the real call, stopping at
- * the first write. Resolves when the command would be accepted; throws the
- * refusal the real call would throw. Writes nothing.
+ * the first write. Resolves when the command would be accepted, with the
+ * preview of its result where it has one (#1337); throws the refusal the real
+ * call would throw. Writes nothing.
  *
  * What only the write itself can find is left to the real call: a version
  * that moves between this check and the save, and a database constraint.
  */
-export async function checkWorkspaceCommand(userId: string, sessionId: string, command: WorkspaceCommand): Promise<void> {
-  await runWorkspaceCommand(userId, sessionId, command, true);
+export async function checkWorkspaceCommand(
+  userId: string,
+  sessionId: string,
+  command: WorkspaceCommand,
+): Promise<CommandPreview | undefined> {
+  return runWorkspaceCommand(userId, sessionId, command, true);
 }
 
 /** Applies one validated, authorized command atomically, then returns canonical state. */
@@ -365,7 +380,7 @@ async function runWorkspaceCommand(
   sessionId: string,
   command: WorkspaceCommand,
   dryRun: boolean,
-): Promise<void> {
+): Promise<CommandPreview | undefined> {
   if (command.type === "household.create") {
     const householdId = requireUuid(command.household.id, "Household");
     await getDb().transaction(async (transaction) => {
@@ -433,6 +448,7 @@ async function runWorkspaceCommand(
       || command.type === "household.update",
   );
   const householdId = command.householdId;
+  let preview: CommandPreview | undefined;
 
   await getDb().transaction(async (transaction) => {
     await acquireActiveHouseholdLock(transaction, householdId);
@@ -794,7 +810,6 @@ async function runWorkspaceCommand(
       if (!currentEvent) {
         throw new AppError("version_conflict", "This item has no active scheduled event", 409);
       }
-      if (dryRun) return;
       /* ADR-0034, #1324: the next date is the engine's, from the stored
          period and the day it was done -- the same rule the reducer applies.
          An expiry is the one-off kind (#1005), and an item with no period
@@ -803,6 +818,12 @@ async function runWorkspaceCommand(
         { scheduleKind: currentEvent.kind, recurrenceMonths: current.recurrenceMonths },
         command.completedDate,
       );
+      if (dryRun) {
+        /* #1337: the dry run answers the date the real call would store, from
+           the same call above, so a preview cannot differ from the save. */
+        if (nextDate) preview = { nextDate };
+        return;
+      }
       let nextEventId: string | undefined;
       if (nextDate) {
         nextEventId = randomUUID();
@@ -896,6 +917,7 @@ async function runWorkspaceCommand(
     }
 
   });
+  return preview;
 }
 
 export interface HouseholdMember {

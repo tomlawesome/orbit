@@ -11,8 +11,8 @@
  * filling the hole with a plausible value.
  */
 
-import { bandOf, bodySize, daysUntil, dialPlacement } from "$lib/data/chart.js";
-import { ago, dayMonthYear, initials, plural, tminus } from "$lib/format.js";
+import { bodySize, daysUntil, dialPlacement } from "$lib/data/chart.js";
+import { ago, bandOf, dayMonthYear, initials, plural, tminus } from "$lib/format.js";
 import { SHIPPED_SECTION_IDS } from "$lib/marks.js";
 
 /**

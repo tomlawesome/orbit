@@ -11,13 +11,14 @@ means the tuning set:
 
 | directory   | documents | what it is for |
 | ----------- | --------- | -------------- |
-| `sources/`  | the tuning set (48) | read it, tune against it, argue with it |
+| `sources/`  | the tuning set (60) | read it, tune against it, argue with it |
 | `holdout3/` | an unseen set (12) | scored, never read, never tuned against |
 | `holdout4/` | an unseen set (12) | scored, never read, never tuned against |
 
 Hold-outs 1 and 2 are retired: both were spent (#996, and the shape of its
 misses read during tuning, #998) and rolled into `sources/` on 2026-09-12,
-which is why the tuning set is 48 rather than 24. `holdout3/` and `holdout4/`
+which made the tuning set 48 rather than 24; twelve long, noisy household
+documents joined it on 2026-09-13 (#1007), making 60. `holdout3/` and `holdout4/`
 are the two unseen sets left; a further one follows this file's shape and
 `generate.mjs`'s directory-derived naming.
 
@@ -176,7 +177,7 @@ but enough to change stage 1 with.
 
 Rather than write a fourth set immediately, both retired hold-outs were
 rolled into `sources/` on 2026-09-12 (#998): their 24 documents joined the
-original 24 to make the 48-document tuning set this file now describes, and
+original 24 to make a 48-document tuning set (60 since #1007's twelve), and
 `holdout3/` took over as the only unseen set. Nothing about a document
 changed in the move -- same HTML, same ground truth, same fonts -- only its
 directory and, for the two generated modules it came from
@@ -188,7 +189,7 @@ no longer exist.
 `holdout3/` is twelve documents written after the extractor was tuned, by
 someone who had not read `sources/` or either retired hold-out. It is the
 only measurement the project has of whether the extractor generalises rather
-than fits the 48 pages it was built against, and that is true only while
+than fits the 60 pages it was built against, and that is true only while
 nobody working on the extractor has seen the pages.
 
 Twelve documents, real Tika output: about 19,200 characters in total, 97

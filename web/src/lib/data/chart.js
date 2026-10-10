@@ -17,7 +17,7 @@
  */
 
 import { BAND_VAR } from "$lib/data/bands.js";
-import { dayMonth, monthOnly, MONTHS } from "$lib/format.js";
+import { bandOf, daysBetween, dayMonth, monthOnly, MONTHS } from "$lib/format.js";
 
 /**
  * The minimal shapes this transform reads off a workspace — loose and
@@ -105,20 +105,8 @@ export function hashId(text) {
  * @returns {?number}
  */
 export function daysUntil(dueDate, today) {
-  if (!dueDate) return null;
-  return Math.round((Date.parse(dueDate) - Date.parse(today)) / 86400000);
-}
-
-/**
- * The chart key's urgency bands: overdue / due soon / upcoming / wide orbit.
- * @param {?number} [days]
- */
-export function bandOf(days) {
-  if (days === null || days === undefined) return "unscheduled";
-  if (days < 0) return "overdue";
-  if (days <= 30) return "due-soon";
-  if (days <= 90) return "upcoming";
-  return "ok";
+  if (!dueDate || !today) return null;
+  return daysBetween(today, dueDate);
 }
 
 /**

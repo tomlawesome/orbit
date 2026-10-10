@@ -13,6 +13,33 @@ export const DESIGN_TODAY = "2026-08-13";
 export const day = (iso) => Math.round(Date.parse(iso + "T00:00:00Z") / 86400000);
 
 /**
+ * Whole calendar days from one bare date to another: positive when `to` is
+ * later, negative when earlier, zero for the same day (#1337). The one count
+ * of days between two dates in the browser: bare dates are read as UTC
+ * midnights, so a clock change never makes a 23-hour day.
+ * @param {string} from
+ * @param {string} to
+ * @returns {number}
+ */
+export const daysBetween = (from, to) => day(to) - day(from);
+
+/**
+ * The urgency band a count of days away falls in: overdue, due soon (30
+ * days), upcoming (90), later; `unscheduled` for no count (#1337: the one
+ * `bandOf`, chart.js's vocabulary, which the corridor, the dial and the
+ * calendar's foot line all use).
+ * @param {?number} [days]
+ * @returns {"unscheduled" | "overdue" | "due-soon" | "upcoming" | "ok"}
+ */
+export function bandOf(days) {
+  if (days === null || days === undefined) return "unscheduled";
+  if (days < 0) return "overdue";
+  if (days <= 30) return "due-soon";
+  if (days <= 90) return "upcoming";
+  return "ok";
+}
+
+/**
  * The same label from a count of days already worked out. Null-safe: an
  * unscheduled row's `days` is null, which would otherwise print "T−nulld".
  * @param {number | null | undefined} days
@@ -26,7 +53,7 @@ export const tminusOf = (days) =>
  * @param {string} [today]
  * @returns {string}
  */
-export const tminus = (due, today = DESIGN_TODAY) => tminusOf(day(due) - day(today));
+export const tminus = (due, today = DESIGN_TODAY) => tminusOf(daysBetween(today, due));
 
 /**
  * The twelve months, short, in order: one table for every screen that names a
