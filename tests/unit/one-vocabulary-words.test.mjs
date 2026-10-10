@@ -171,4 +171,14 @@ describe("source tripwires (#1340)", () => {
       .map(rel);
     expect(offenders).toEqual([]);
   });
+
+  /* #1340 done-when: `costMinor === 0` renders the same on every row. A
+     truthy test hides a free (0) cost that the item rows show as "£0.00". */
+  it("no row hides a zero cost behind a truthy costMinor test", () => {
+    const re = /\bcostMinor\s*\?(?![?:.])/;
+    const offenders = sourceFiles()
+      .filter((path) => re.test(readFileSync(path, "utf8")))
+      .map(rel);
+    expect(offenders).toEqual([]);
+  });
 });
