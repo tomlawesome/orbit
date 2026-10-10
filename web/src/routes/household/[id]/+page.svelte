@@ -26,6 +26,8 @@
   } from "$lib/data/workspace.js";
   import { zoneLabel } from "$lib/pick-lists.js";
   import PickSheet from "./PickSheet.svelte";
+  import ChooserCard from "$lib/editing/ChooserCard.svelte";
+  import { WIDE_QUERY } from "../../home/preview-pair.js";
   import "./household.css";
 
   /**
@@ -205,23 +207,69 @@
   });
 
   /* The time zone and the currency are picked from the shared pick-lists
-     (#1338): the full lists with the favourites first and a filter, the same
-     sheet the phone opens. A household whose stored value is not among them
-     keeps its own value at the head of the sheet rather than being silently
-     re-pointed — picking never changes what is stored by rendering. */
+     (#1338): the full lists with the favourites first and a filter. On a
+     wide screen (1200px, as home's chooser) pressing the value stands the
+     chooser card under it; narrower, the phone's bottom sheet opens. A
+     household whose stored value is not among them keeps its own value at
+     the head of the list rather than being silently re-pointed — picking
+     never changes what is stored by rendering. */
   /** @type {"timezone" | "currency"} */
   let picking = $state("timezone");
+  /** the bottom sheet (narrow) */
   let pickOpen = $state(false);
+  /** the chooser card standing under a field (wide), or none */
+  /** @type {"timezone" | "currency" | null} */
+  let cardFor = $state(null);
+  let wide = $state(false);
+  $effect(() => {
+    const media = matchMedia(WIDE_QUERY);
+    const set = () => { wide = media.matches; };
+    set();
+    media.addEventListener("change", set);
+    return () => media.removeEventListener("change", set);
+  });
   /** @param {"timezone" | "currency"} field */
   function pick(field) {
     picking = field;
-    pickOpen = true;
+    if (!wide) { pickOpen = true; return; }
+    if (cardFor === field) closeCard(true);
+    else cardFor = field;
+  }
+  /** Put the card away; focus goes back to the pressed value unless a press elsewhere took it.
+   *  @param {boolean} refocus */
+  function closeCard(refocus) {
+    const field = cardFor;
+    cardFor = null;
+    if (refocus && field) tick().then(() => document.getElementById(field === "timezone" ? "hhzone" : "hhcur")?.focus({ preventScroll: true }));
   }
   /** @param {string} value */
   function choose(value) {
     form[picking] = value;
     touch(picking);
+    if (cardFor) closeCard(true);
   }
+  /** What the card is asked: the field's stored value. @param {"timezone" | "currency"} field */
+  const askOf = (field) => ({
+    key: field,
+    label: field === "timezone" ? "time zone" : "currency",
+    heading: field === "timezone" ? "time zone" : "currency",
+    value: form[field],
+    choices: [],
+    today: "",
+  });
+  /* A press off the card (and off the value that opened it, whose own press
+     toggles it) puts it away, as home's chooser does. */
+  $effect(() => {
+    if (!cardFor) return;
+    /** @param {PointerEvent} event */
+    const onPress = (event) => {
+      const target = /** @type {Element | null} */ (event.target instanceof Element ? event.target : null);
+      if (target?.closest("[data-chooser-card], .pickbtn")) return;
+      closeCard(false);
+    };
+    window.addEventListener("pointerdown", onPress, true);
+    return () => window.removeEventListener("pointerdown", onPress, true);
+  });
 
   const shown = $derived(rows.filter((row) => !row.removed));
   const nameOk = $derived(deletionNameMatches(typedName, v.name));
@@ -765,6 +813,14 @@
   <PickSheet bind:open={pickOpen} kind={picking} value={form[picking]} onchoose={choose} />
 {/if}
 
+{#snippet seat(/** @type {"timezone" | "currency"} */ field)}
+  {#if cardFor === field}
+    <div class="pickseat" class:atright={field === "currency"} data-chooser-card>
+      <ChooserCard ask={askOf(field)} layout="beside" onpick={choose} onclose={() => closeCard(true)} />
+    </div>
+  {/if}
+{/snippet}
+
 <div class="household-page" class:member={!v.canManage} bind:this={stage} role={pocket ? undefined : "main"}>
 <!-- your own system, drawn from the inside (§15 H2). Behind the dust, not in
      front of it: your system is the structure you are standing in, and the dust
@@ -894,7 +950,7 @@
          last-known values, never as whatever this editor is holding for
          them, so a save here can never carry an unconfirmed sibling field
          along with it (#1151 W2-S2; saveField builds that payload). -->
-    <div class="card c-system">
+    <div class="card c-system" class:lifted={cardFor}>
       <div class="cardhead"><h2>The system</h2></div>
       <div class="field" class:dirty={dirty.name}>
         <div class="lab">
@@ -917,7 +973,8 @@
             {/if}
           </div>
           <button id="hhzone" type="button" class="pickbtn" disabled={!v.canManage}
-                  aria-haspopup="dialog" onclick={() => pick("timezone")}>{zoneLabel(form.timezone)}</button>
+                  aria-haspopup="dialog" aria-expanded={cardFor === "timezone"} onclick={() => pick("timezone")}>{zoneLabel(form.timezone)}</button>
+          {@render seat("timezone")}
         </div>
         <div class="field selwrap" class:dirty={dirty.currency}>
           <div class="lab">
@@ -928,7 +985,8 @@
             {/if}
           </div>
           <button id="hhcur" type="button" class="pickbtn" disabled={!v.canManage}
-                  aria-haspopup="dialog" onclick={() => pick("currency")}>{form.currency}</button>
+                  aria-haspopup="dialog" aria-expanded={cardFor === "currency"} onclick={() => pick("currency")}>{form.currency}</button>
+          {@render seat("currency")}
         </div>
       </div>
       <!-- round 2 (#481): the notes that stood here are gone. Three save
