@@ -26,7 +26,7 @@
   import Pocket from "./pocket.svelte";
   import { readSearchDocuments, searchPocket } from "./pocket-search.js";
   import { SvelteMap } from "svelte/reactivity";
-  import { tlabel } from "./bands.js";
+  import { tlabel } from "$lib/data/bands.js";
   import { AXIS_X0, AXIS_X1, AXIS_Y, assignTiers, leaderPathOf, monthTicks, stripActsOf, TIER_RUN_Y, textWidth, UNSCHEDULED_X, xOfDays } from "./strip-layout.js";
   import CorridorRow from "./CorridorRow.svelte";
   import PreviewCard from "$lib/reading/PreviewCard.svelte";

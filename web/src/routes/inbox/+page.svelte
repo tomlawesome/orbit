@@ -6,6 +6,7 @@
   import { papersOf, readingsOf } from "$lib/pocket/review.js";
   import { reasonWords } from "$lib/pocket/words.js";
   import { daysUntil } from "$lib/data/chart.js";
+  import { BAND_VAR } from "$lib/data/bands.js";
   import { fillStarTiles } from "$lib/sky.js";
   import Chrome from "$lib/Chrome.svelte";
   import { resolve } from "$app/paths";
@@ -86,8 +87,6 @@
   const filedDate = (iso) =>
     iso.slice(0, 4) === need().today.slice(0, 4) ? short(iso) : fullDate(iso);
   /* The filed dot follows the chart key — the item's urgency band, today. */
-  /** @type {Record<string, string>} */
-  const TONES = { overdue: "--overdue", "due-soon": "--warm", upcoming: "--upcoming", ok: "--ok", unscheduled: "--ink-faint" };
   /** @param {import('$lib/data/workspace.js').Receipt} receipt */
   const burnsIn = (receipt) => daysUntil(/** @type {string} */ (receipt.expiresAt).slice(0, 10), need().today);
   /* "Still reading" only ever holds receipts that have already arrived. */
@@ -146,7 +145,7 @@
         <h2>Filed{view.filed.length ? ` · ${view.filed.length}` : ""}</h2>
         {#each view.filed as entry (entry.itemId)}
           <a class="item" href={resolve(`/home?item=${encodeURIComponent(entry.itemId)}`)}>
-            <span class="dot" style="background:var({TONES[entry.band]})" aria-hidden="true"></span>
+            <span class="dot" style="background:var({BAND_VAR[entry.band]})" aria-hidden="true"></span>
             <div class="flex"><b>{entry.title}</b><span>from {entry.sourceDocument} · added {filedDate(/** @type {string} */ (entry.filedAt))}</span></div>
           </a>
         {/each}

@@ -24,7 +24,7 @@ const INBOX_POCKET = readFileSync(
 
 describe("#1151 W1-Q10: inbox/pocket.svelte shares bands.js's T_CLASS", () => {
   it("imports T_CLASS from home/bands.js", () => {
-    expect(INBOX_POCKET).toMatch(/import \{ T_CLASS \} from "\.\.\/home\/bands\.js";/u);
+    expect(INBOX_POCKET).toMatch(/import \{ T_CLASS \} from "\$lib\/data\/bands\.js";/u);
   });
 
   it("no longer declares its own BANDS table", () => {

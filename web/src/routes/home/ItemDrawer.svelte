@@ -16,6 +16,7 @@
   import { every, longDate, money } from "$lib/format.js";
   import { DAMAGED, LOCKED, NOTES_WORDS, REFERENCE_WORDS, fieldState, itemLocked } from "$lib/data/metadata-status.js";
   import { sectionColourOf, typeColourOf } from "$lib/option-colour.js";
+  import { T_CLASS } from "$lib/data/bands.js";
   import FootRow from "./FootRow.svelte";
   import EditRows from "./EditRows.svelte";
 
@@ -40,8 +41,6 @@
     acts = undefined,
   } = $props();
 
-  /** @type {Record<string, string>} */
-  const TONE = { overdue: "over", "due-soon": "soon", upcoming: "up", ok: "ok", ended: "ended" };
   const tlabel = $derived(one.days === null ? "" : one.days < 0 ? `T+${-one.days}d` : `T−${one.days}d`);
   const referenceState = $derived(fieldState(raw?.metadataStatus, "reference"));
   const notesState = $derived(fieldState(raw?.metadataStatus, "notes"));
@@ -61,7 +60,7 @@
             costLocked={itemLocked(raw?.metadataStatus)} />
 {:else}
 <div class="p-kv"><span>due</span>
-  <b class={TONE[one.band] ?? ""}>{one.dueDate ? `${tlabel} · ${longDate(one.dueDate)}` : "unscheduled"}</b></div>
+  <b class={T_CLASS[one.band] ?? ""}>{one.dueDate ? `${tlabel} · ${longDate(one.dueDate)}` : "unscheduled"}</b></div>
 {#if raw?.snoozedUntil}<div class="p-kv"><span>snoozed until</span><b>{longDate(raw.snoozedUntil)}</b></div>{/if}
 {#if one.section}<div class="p-kv"><span>section</span><b class="opt" data-opt={sectionOpt}>{one.section}</b></div>{/if}
 {#if raw?.subtype}<div class="p-kv"><span>type</span><b class="opt" data-opt={typeColourOf(raw.subtype)}>{raw.subtype}</b></div>{/if}

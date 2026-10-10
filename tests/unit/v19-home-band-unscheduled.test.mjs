@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { BAND_VAR, T_CLASS } from "../../web/src/routes/home/bands.js";
+import { BAND_VAR, T_CLASS } from "../../web/src/lib/data/bands.js";
 
 /*
  * #1151 W1-F3: an active item with no due date gets band "unscheduled" from
@@ -35,7 +35,7 @@ describe("#1151 W1-Q10: pocket.svelte imports BAND_VAR/tlabel rather than keepin
   );
 
   it("imports both from bands.js", () => {
-    expect(POCKET).toMatch(/import \{ BAND_VAR, tlabel \} from "\.\/bands\.js";/u);
+    expect(POCKET).toMatch(/import \{ BAND_VAR, tlabel \} from "\$lib\/data\/bands\.js";/u);
   });
 
   it("no longer declares a local copy of either", () => {

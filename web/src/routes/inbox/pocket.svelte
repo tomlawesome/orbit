@@ -16,7 +16,7 @@
   import StagedPage from "$lib/pocket/StagedPage.svelte";
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
-  import { T_CLASS } from "../home/bands.js";
+  import { T_CLASS } from "$lib/data/bands.js";
 
   /**
    * THE INBOX ON A PHONE (#1120, proposal §2.6). Server-rendered beside the

@@ -6,6 +6,7 @@
   import { fillStarTiles } from "$lib/sky.js";
   import { PEN_ORDER, inkOf, nextMark } from "$lib/marks.js";
   import { constellationPlanetsOf } from "$lib/data/chart.js";
+  import { BAND_VAR } from "$lib/data/bands.js";
   import { MAX_SECTIONS, deletionNameMatches, entriesLabel } from "$lib/data/household.js";
   import { FIELD, berthsOf, liftOf, roomOf, skyMap, toField } from "./room.js";
   import { consumeDoor } from "./door.js";
@@ -538,13 +539,13 @@
      scale a body is a region of sky you are standing near, not a disc. The
      alphas keep the key's own order — ruby loudest, jade quietest — because
      that order is the information. */
-  /** @type {Record<string, [string, string]>} */
-  const PAINT = {
-    overdue: ["--overdue", "hh-ruby"],
-    "due-soon": ["--warm", "hh-amber"],
-    upcoming: ["--upcoming", "hh-sky"],
-    ok: ["--ok", "hh-jade"],
-    unscheduled: ["--ok", "hh-jade"],
+  /** @type {Record<string, string>} */
+  const GLOW = {
+    overdue: "hh-ruby",
+    "due-soon": "hh-amber",
+    upcoming: "hh-sky",
+    ok: "hh-jade",
+    unscheduled: "hh-jade",
   };
 
   /** @type {HTMLDivElement | null} */
@@ -803,14 +804,14 @@
         </g>
         <g class="bodies">
           {#each room.stars as star (star.id)}
-            <circle cx={star.cx} cy={star.cy} r={star.r} fill="url(#{PAINT[/** @type {string} */ (star.band)][1]})"/>
+            <circle cx={star.cx} cy={star.cy} r={star.r} fill="url(#{GLOW[/** @type {string} */ (star.band)]})"/>
             {#if star.band === "overdue"}
               <!-- the chart key's overdue ping, on any body that has earned it -->
               <circle cx={star.cx} cy={star.cy} r={(star.r * 1.27).toFixed(1)} fill="none"
                       style="stroke:var(--overdue)" stroke-opacity=".20" stroke-width="1.3"/>
             {/if}
             <circle cx={star.cx} cy={star.cy} r={Math.max(2.1, star.r * 0.115).toFixed(2)}
-                    style="fill:var({PAINT[/** @type {string} */ (star.band)][0]})" opacity=".55"/>
+                    style="fill:var({BAND_VAR[/** @type {string} */ (star.band)]})" opacity=".55"/>
           {/each}
         </g>
         <!-- the whisper labels: what each star is and how far off it is, in the
