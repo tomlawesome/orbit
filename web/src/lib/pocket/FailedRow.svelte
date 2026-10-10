@@ -1,4 +1,5 @@
 <script>
+  import { dayMonth } from "$lib/format.js";
   import { receiptWords } from "$lib/data/metadata-status.js";
   import Row from "./Row.svelte";
   import { reasonWords } from "./words.js";
@@ -19,8 +20,7 @@
   /** @type {Props} */
   let { failure, onremove = undefined } = $props();
 
-  const day = $derived(
-    new Date(failure.receivedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" }));
+  const day = $derived(dayMonth(failure.receivedAt));
   /* What Orbit cannot read about it (#941) outranks the reason (#1143). */
   const meta = $derived(receiptWords(failure.metadataStatus) ?? reasonWords(failure.reason));
   const words = $derived(failure.message ?? "");

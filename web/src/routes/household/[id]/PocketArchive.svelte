@@ -1,4 +1,5 @@
 <script>
+  import { clockOf, dayMonth, localZone } from "$lib/format.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
   import Row from "$lib/pocket/Row.svelte";
   import Sheet from "$lib/pocket/Sheet.svelte";
@@ -219,7 +220,7 @@
   }
 
   const readyUntil = $derived(written
-    ? new Date(written.expiresAt).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+    ? `${dayMonth(written.expiresAt, localZone())}, ${clockOf(written.expiresAt, localZone())}`
     : "");
 </script>
 

@@ -1,4 +1,5 @@
 <script>
+  import { dayMonth } from "$lib/format.js";
   import "./relay.css";
   import { onMount } from "svelte";
   import { mountSatellites } from "$lib/backdrops/satellites.js";
@@ -52,9 +53,6 @@
   const relay = $derived(rotated ?? data.relay);
   const failures = $derived(data.failures ?? []);
   const pocket = isPocket();
-  /** @type {(value: string | number | Date) => string} */
-  const shortDate = (value) =>
-    new Date(value).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
   /* §14 (#471): back to the opener; a deep link with no history goes home. */
   const dismissRelay = () => {
     if (history.length > 1) history.back();
@@ -143,7 +141,7 @@
     <div class="failures">
       <h2>arrived, but could not be read</h2>
       {#each failures as failure (failure.id)}
-        <div class="kv"><span>{shortDate(failure.receivedAt)}</span><span>{reasonWords(failure.reason)} · {failure.message}</span></div>
+        <div class="kv"><span>{dayMonth(failure.receivedAt)}</span><span>{reasonWords(failure.reason)} · {failure.message}</span></div>
       {/each}
     </div>
   {/if}

@@ -9,7 +9,7 @@
     restoreHousehold, retryDocumentJob, sendSetupLink, setUserDisabled, testMail,
   } from "$lib/data/workspace.js";
   import { deletionNameMatches } from "$lib/data/household.js";
-  import { ago } from "$lib/format.js";
+  import { ago, dayMonth } from "$lib/format.js";
   import { SETUP_LINK_FIXTURES } from "$lib/data/fixtures/admin.js";
   import { constellationPlanetsOf } from "$lib/data/chart.js";
   import { BAND_VAR } from "$lib/data/bands.js";
@@ -356,8 +356,6 @@
   const recoverable = $derived(view?.recoverable ?? []);
   /** @param {string} iso */
   const daysLeft = (iso) => Math.max(0, Math.ceil((Date.parse(iso) - Date.parse(view?.now ?? new Date().toISOString())) / 86_400_000));
-  /** @param {string} iso */
-  const goneOn = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
   /** @param {{ deleteAfter: string }} row */
   const expired = (row) => Date.parse(row.deleteAfter) <= Date.parse(view?.now ?? new Date().toISOString());
   /** What was said on a row after its act, keyed by the system's id. @type {Record<string, { ok: boolean, text: string }>} */
@@ -782,7 +780,7 @@
         {#each recoverable.filter((row) => !gone.some((line) => line.id === row.id)) as row (row.id)}
           <!-- Round 3 §3.9: the state and the days at rest; the date sits in
                the panel beside `delete now`. -->
-          {#snippet clockDetail()}<div class="p-kv"><span>gone for good</span><b>{goneOn(row.deleteAfter)}</b></div>{/snippet}
+          {#snippet clockDetail()}<div class="p-kv"><span>gone for good</span><b>{dayMonth(row.deleteAfter)}</b></div>{/snippet}
           <Row title={row.name} metaFace="ui"
                meta={expired(row) ? "past its window · removing"
                  : `deleted · ${count(daysLeft(row.deleteAfter), "day")} left`}

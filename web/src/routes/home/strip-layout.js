@@ -9,6 +9,8 @@
  * x≈106.8. Every value here is the build brief's own number.
  */
 
+import { MONTHS } from "$lib/format.js";
+
 const X0 = 30;
 const AXIS_SPAN = 760;
 const DAY_MIN = -40;
@@ -36,7 +38,6 @@ export function xOfDays(days) {
   return X0 + (clamped - DAY_MIN) * PXD;
 }
 
-const MONTH_NAMES = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
 /**
  * One tick per 1st-of-month from tomorrow through +356 days, computed from
@@ -52,7 +53,7 @@ export function monthTicks(today) {
   for (let guard = 0; guard < 14; guard++) {
     const days = Math.round((cursor.getTime() - start.getTime()) / 86400000);
     if (days > DAY_MAX) break;
-    ticks.push({ name: MONTH_NAMES[cursor.getUTCMonth()], days, x: xOfDays(days) });
+    ticks.push({ name: MONTHS[cursor.getUTCMonth()].toUpperCase(), days, x: xOfDays(days) });
     cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
   }
   return ticks;

@@ -7,7 +7,7 @@
   import Sky from "$lib/pocket/Sky.svelte";
   import { wake } from "$lib/pocket/wake.js";
   import { applyTheme } from "$lib/theme-swatches.js";
-  import { agoLong } from "$lib/format.js";
+  import { agoLong, clockOf, dayMonth, localZone } from "$lib/format.js";
   import { watchTour } from "$lib/tour/watch.js";
   import { alertsSupported, disableAlerts, enableAlerts, syncAlerts } from "$lib/push/alerts.js";
   import {
@@ -176,11 +176,8 @@
 
   /** @param {string} iso */
   function when(iso) {
-    const date = new Date(iso);
-    const zone = fixtures ? "UTC" : undefined;
-    const day = date.toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: zone });
-    const time = date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: zone });
-    return `${day} ${time}`;
+    const zone = fixtures ? "UTC" : localZone();
+    return `${dayMonth(iso, zone)} ${clockOf(iso, zone)}`;
   }
   /** @param {SentRow} row */
   const sentMeta = (row) =>

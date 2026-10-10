@@ -1,4 +1,5 @@
 import { THEME_TABLE } from "$lib/theme.js";
+import { dayMonthYear } from "$lib/format.js";
 
 /*
  * What settings' desk cards and its phone layout (pocket.svelte, #1125) both
@@ -56,8 +57,7 @@ export function issuerHost(issuer) {
 
 /** A date a reader can read, in UTC so the gate photographs the same one. */
 /** @param {?string} iso */
-export const on = (iso) =>
-  iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }) : "";
+export const on = (iso) => (iso ? dayMonthYear(iso) : "");
 
 /** The step-up intent each armed action is bound to (ADR-0023 §5). */
 /** @param {string} action */

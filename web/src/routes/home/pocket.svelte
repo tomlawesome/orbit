@@ -11,7 +11,7 @@
   import { DrawerModes, pressKeepsChooser } from "./drawer-modes.svelte.js";
   import { archiveCommand, completeCommand, snoozeCommand, statusCommand, upsertCommand } from "$lib/data/commands.js";
   import { dialBodiesOf, daysUntil, hashId, manifestGroupsOf, manifestRowOf } from "$lib/data/chart.js";
-  import { money } from "$lib/format.js";
+  import { dayMonth, money, MONTHS } from "$lib/format.js";
   import ArmButton from "$lib/pocket/ArmButton.svelte";
   import Hatch from "$lib/pocket/Hatch.svelte";
   import NorthStar from "$lib/pocket/NorthStar.svelte";
@@ -138,21 +138,17 @@
   const waiting = $derived((view?.suggestions ?? []).filter((s) => s.receiptId).length);
   const isAdmin = $derived(Boolean(page.data?.isAdmin));
 
-  const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
   const QUARTER_POS = [[190, 30], [352, 196], [190, 370], [28, 196]];
   const quarters = $derived(
     QUARTER_POS.map(([x, y], k) => ({
       x, y,
-      label: MONTHS[((view ? new Date(view.today + "T00:00:00Z").getUTCMonth() : 7) + k * 3) % 12],
+      label: MONTHS[((view ? new Date(view.today + "T00:00:00Z").getUTCMonth() : 7) + k * 3) % 12].toUpperCase(),
     })),
   );
   // BAND_VAR/tlabel: #1151 W1-Q10, shared with CorridorRow.svelte and
   // +page.svelte's own dial via bands.js, rather than a second, diverging
   // copy (bands.js's own tlabel is now the null-safe version this file's
   // old copy had, per #1151 W1-F3's unscheduled band).
-  /** @type {(iso: string) => string} */
-  const short = (iso) =>
-    new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
   // #1005: a renewal comes round, a one-off ends.
   /** @type {(s: { scheduleKind?: ?string }) => string} */
   const dateWord = (s) => (s.scheduleKind === "expiry" ? "ends" : "renews");
@@ -732,7 +728,7 @@
     /* #1319: the pills are disabled while it is sent, which drops the focus
        the sheet handed back; put it back on the pill once they are live,
        inside the row, so the row's own Escape still closes it. */
-    runRowAct(item, "snooze", (one) => snoozeCommand(one, until), `${item.title} snoozed until ${short(until)}`)
+    runRowAct(item, "snooze", (one) => snoozeCommand(one, until), `${item.title} snoozed until ${dayMonth(until)}`)
       .then(() => { if (lit === item.id) focusInRow(item.id, '[aria-label^="Snooze "]'); });
   }
   /** @param {{ id: string, title: string }} one */
@@ -756,7 +752,7 @@
     try {
       const nextDate = dueDateIn(await applyCommand(completeCommand(item, fields)), item.householdId, item.id);
       modes.cancelComplete();
-      wake(`Completed${nextDate ? ` · next due ${short(nextDate)}` : ""} · ${one.title}`);
+      wake(`Completed${nextDate ? ` · next due ${dayMonth(nextDate)}` : ""} · ${one.title}`);
       await onchanged?.();
     } catch (error) {
       modes.completeProblem = /** @type {{ message?: string }} */ (error)?.message ?? "couldn't complete it — try again";
@@ -1132,7 +1128,7 @@
        aria-label="title" data-ed="title" bind:textContent={modes.edit.draft.title}></b>{/if}{/snippet}
     <Row title={one.title} meta={[one.section, one.state, cost(one)].filter(Boolean).join(" · ")} key={one.id}
          heading={modes.edit.id === one.id ? liveTitle : undefined}
-         trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
+         trail={tlabel(one)} trailSub={one.dueDate ? dayMonth(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
          ontoggle={onRowToggle(one.id)}>
       <!-- round 8 (#1319): the section word in its own colour -->
       {#snippet metaline()}{#if one.section}<i class="opt" data-opt={sectionColourOf(sectionOf(one.id))}>{one.section}</i>{#if one.state || cost(one)}{SEP}{/if}{/if}{#if one.state}{one.state}{#if cost(one)}{SEP}{/if}{/if}{cost(one)}{/snippet}
@@ -1195,7 +1191,7 @@
                heading={amending ? liveTitle : undefined}
                meta={burnsIn(s) !== null ? `burns up in ${burnsIn(s)}d` : ""}
                trail={s.costMinor ? money(s.costMinor, s.currency, true) : ""}
-               trailSub={s.renewsOn ? `${dateWord(s)} ${short(s.renewsOn)}` : ""} trailTone="var(--accent-text)"
+               trailSub={s.renewsOn ? `${dateWord(s)} ${dayMonth(s.renewsOn)}` : ""} trailTone="var(--accent-text)"
                acts={amending ? [] : suggestionActs(s)} ontoggle={onRowToggle(s.id)}>
             {#snippet mark()}<span class="pk-dot hollow"></span>{/snippet}
             {#snippet detail()}<SuggestionDrawer suggestion={s} problem={rowProblem[s.id] ?? null}
@@ -1235,7 +1231,7 @@
     {#if !results.query}
       {#each results.items as one (one.id)}
         <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
-             trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
+             trail={tlabel(one)} trailSub={one.dueDate ? dayMonth(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
              onactivate={() => openResult(one.id)}>
           {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
         </Row>
@@ -1251,7 +1247,7 @@
     {:else}
       {#each results.items as one (one.id)}
         <Row title={one.title} meta={[one.section, cost(one)].filter(Boolean).join(" · ")}
-             trail={tlabel(one)} trailSub={one.dueDate ? short(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
+             trail={tlabel(one)} trailSub={one.dueDate ? dayMonth(one.dueDate) : ""} trailTone="var({BAND_VAR[one.band]})"
              onactivate={() => openResult(one.id)}>
           {#snippet mark()}<span class="pk-dot" style:background="var({BAND_VAR[one.band]})"></span>{/snippet}
         </Row>
