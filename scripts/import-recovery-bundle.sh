@@ -137,7 +137,10 @@ engine_host_identity() {
   # Read whole, then matched: `docker info | grep -q` under pipefail could
   # report a SIGPIPE'd docker as "not rootless", the dangerous answer here.
   local security_options
-  security_options="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null || true)"
+  # Fail closed: a guessed "not rootless" hands the files to a uid the
+  # operator cannot reach.
+  security_options="$(docker info --format '{{.SecurityOptions}}' 2>/dev/null)" ||
+    fail "Could not tell whether Docker is rootless, so refusing to guess who should own the deployment files. Check that 'docker info' works, then rerun."
   if [[ "$security_options" == *rootless* ]]; then
     host_uid=0
     host_gid=0
