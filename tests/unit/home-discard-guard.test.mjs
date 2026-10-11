@@ -81,6 +81,18 @@ describe("the drawer's modes and both screens go through it", () => {
     );
   });
 
+  /* #1316 W1-S2 (owner, 2026-10-11, option a): the pencil over a completion
+     holding changes asks the guard first; it no longer drops the typing. */
+  it("startEdit asks the guard when a completion is open, before it ends the completion", () => {
+    /* the method's own body, so a later method cannot satisfy the pattern */
+    const body = /startEdit\(item\) \{([\s\S]*?)\n  \}\n/u.exec(modes)?.[1] ?? "";
+    expect(body).not.toBe("");
+    expect(body).toMatch(/this\.completing[\s\S]*?this\.#guard\.ask\(this\.changed\)[\s\S]*?return;/u);
+    expect(body.indexOf("#guard.ask(")).toBeGreaterThan(-1);
+    expect(body.indexOf("#guard.ask(")).toBeLessThan(body.indexOf("this.cancelComplete()"));
+    expect(body.indexOf("#guard.ask(")).toBeLessThan(body.indexOf("this.edit.start("));
+  });
+
   it("the desk asks before closing the drawer or switching rows, and on the cancel pill", () => {
     expect(desk).toMatch(/function collapseRow\(\) \{[\s\S]*?modes\.cancel\(\)/u);
     expect(desk).toMatch(/function onRowClick[\s\S]*?modes\.cancel\(\)/u);

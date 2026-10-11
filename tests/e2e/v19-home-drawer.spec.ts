@@ -676,6 +676,50 @@ test.describe("on the desk", () => {
     await expect(notes).toHaveText(typed);
   });
 
+  /* #1316 W1-S2 (owner, 2026-10-11, option a): the pencil over a completion
+     that holds changes goes through the discard guard. The first press keeps
+     the completion rows with the typed note and cost and arms the cancel pill
+     as "discard changes?"; a second press inside the hold opens the edit rows.
+     It used to open the edit rows at once and the typing was gone. */
+  test("the pencil over a completion holding a note and a cost asks first; a second press opens the edit rows", async ({ page }) => {
+    test.setTimeout(60_000);
+    await signIn(page);
+    const { itemId } = await seedHouseholdWithItem(page);
+
+    await page.goto(`/home?item=${itemId}`);
+    const drawer = page.locator(`[id="${itemId}-view"]`);
+    await expect(drawer).toBeVisible({ timeout: 20_000 });
+    await drawer.getByRole("group", { name: `Actions for ${TITLE}` })
+      .getByRole("button", { name: `Complete ${TITLE}` }).click();
+    const completing = drawer.getByRole("group", { name: `Completing ${TITLE}` });
+    await expect(completing.getByRole("button")).toHaveText(["record", "cancel"]);
+    const notes = drawer.getByRole("textbox", { name: "notes" });
+    const cost = drawer.getByRole("textbox", { name: "cost" });
+    await expect(notes).toHaveText(NOTE);
+    await notes.click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" Bring the log book.");
+    const typedNote = `${NOTE} Bring the log book.`;
+    await expect(notes).toHaveText(typedNote);
+    await cost.click();
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.type("42.50");
+    await expect(cost).toHaveText("42.50");
+
+    const editing = drawer.getByRole("group", { name: `Editing ${TITLE}` });
+    await drawer.getByRole("button", { name: "Edit this item" }).click();
+    await expect(completing.getByRole("button", { name: "discard changes?" })).toBeVisible();
+    await expect(completing).toBeVisible();
+    await expect(editing).toHaveCount(0);
+    await expect(notes).toHaveText(typedNote);
+    await expect(cost).toHaveText("42.50");
+
+    await drawer.getByRole("button", { name: "Edit this item" }).click();
+    await expect(editing).toBeVisible();
+    await expect(completing).toHaveCount(0);
+    await expect(drawer.getByRole("textbox", { name: "title" })).toBeVisible();
+  });
+
   /* #1316 W1-R3: undo is a promise; when the server refuses it the reader is
      told in the wake, not left with a silent nothing. The paper stays
      removed (the drawer may still list it, saying "removed"). */
@@ -870,6 +914,46 @@ test.describe("on the phone", () => {
     await expect(row.getByRole("alert")).toBeVisible({ timeout: 10_000 });
     await expect(completing).toBeVisible();
     await expect(notes).toHaveText(typed);
+  });
+
+  /* #1316 W1-S2: the same on the phone's sheet. */
+  test("the pencil over a completion holding a note and a cost asks first; a second press opens the edit rows", async ({ page }) => {
+    test.setTimeout(60_000);
+    await signIn(page);
+    const { itemId } = await seedHouseholdWithItem(page);
+
+    await page.goto(`/home?item=${itemId}`);
+    const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
+    await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+    await row.getByRole("group", { name: `Actions for ${TITLE}` })
+      .getByRole("button", { name: `Complete ${TITLE}` }).tap();
+    const completing = row.getByRole("group", { name: `Completing ${TITLE}` });
+    await expect(completing.getByRole("button")).toHaveText(["record", "cancel"]);
+    const notes = row.getByRole("textbox", { name: "notes" });
+    const cost = row.getByRole("textbox", { name: "cost" });
+    await expect(notes).toHaveText(NOTE);
+    await notes.tap();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" Bring the log book.");
+    const typedNote = `${NOTE} Bring the log book.`;
+    await expect(notes).toHaveText(typedNote);
+    await cost.tap();
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.type("42.50");
+    await expect(cost).toHaveText("42.50");
+
+    const editing = row.getByRole("group", { name: `Editing ${TITLE}` });
+    await row.getByRole("button", { name: "Edit this item" }).tap();
+    await expect(completing.getByRole("button", { name: "discard changes?" })).toBeVisible();
+    await expect(completing).toBeVisible();
+    await expect(editing).toHaveCount(0);
+    await expect(notes).toHaveText(typedNote);
+    await expect(cost).toHaveText("42.50");
+
+    await row.getByRole("button", { name: "Edit this item" }).tap();
+    await expect(editing).toBeVisible();
+    await expect(completing).toHaveCount(0);
+    await expect(row.getByRole("textbox", { name: "title" })).toBeVisible();
   });
 
   /* #1316 W1-R3 / W1-R9: the same on the phone's sheet. */

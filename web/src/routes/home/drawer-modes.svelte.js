@@ -146,6 +146,9 @@ export class DrawerModes {
 
   /** The pencil: the rows go live. @param {CommandItem} item */
   startEdit(item) {
+    /* A completion holding changes is not thrown away by one press, as
+       cancel() rules: the first press arms "discard changes?". */
+    if (this.completing && !this.#guard.ask(this.changed)) return;
     this.cancelComplete();
     this.foot = null;
     this.edit.start(item);
