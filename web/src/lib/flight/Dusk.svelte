@@ -30,7 +30,12 @@
    * #1253) becomes that page's last screen only at the farewell, when the
    * page's own landmark and heading have withdrawn: until then it is no landmark
    * and its heading is hidden, and at the farewell (`landmark`) it carries
-   * both, the dusk itself never redrawn.
+   * both, the dusk itself never redrawn. There the landmark is the folder's
+   * `#dusk` surface itself, as it was before the import, not the wrapper: the
+   * wrapper is an empty box left in the page's flow (on a phone, under
+   * settings' long column), so a landmark on it would send a reader to a
+   * blank spot instead of the goodbye, and would stand for a piece of the
+   * page left over the dusk (sign-out-descent.spec.ts, #1253).
    */
   let {
     /* the way back in, as markup: the caller's own link */
@@ -71,8 +76,12 @@
   });
 
   $effect(() => {
+    if (page) return;
     const heading = host?.querySelector("h1.sr-only");
-    if (heading && !page) /** @type {HTMLElement} */ (heading).hidden = !landmark;
+    if (heading) /** @type {HTMLElement} */ (heading).hidden = !landmark;
+    const surface = host?.querySelector("#dusk");
+    if (landmark) surface?.setAttribute("role", "main");
+    else surface?.removeAttribute("role");
   });
 </script>
 
@@ -83,5 +92,5 @@
   <main class="dusk-host" bind:this={host}>{@html duskMarkup({ image, gate, farewell: { said: SAID, sub: SUB }, asDawn: true, foot: '<h1 class="sr-only">Orbit — signed out</h1>' })}</main>
 {:else}
   <!-- eslint-disable-next-line svelte/no-at-html-tags -- the shared door's own markup (markup.js, pure strings), with Orbit's slots: fixed markup and text escaped here (#1371) -->
-  <div class="dusk-host" role={landmark ? "main" : undefined} bind:this={host}>{@html markup}</div>
+  <div class="dusk-host" bind:this={host}>{@html markup}</div>
 {/if}
