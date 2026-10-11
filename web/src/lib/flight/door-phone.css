@@ -23,9 +23,12 @@
    quiet line 13px mono with a 44px hit, pills 44px and 15px, nothing under
    12px and 12px only for the tracked caps labels.
 
-   Everything below the first block is inside the pocket's own query
-   (web/src/lib/pocket/media.js), so the desk is untouched: its fidelity
-   baselines are the proof.
+   Everything below the first block is inside the folder's phone query,
+   `(max-width: 599.98px), (max-height: 479.98px)` (owner, 3c: the same rule
+   as the shared door's door.css, so the door and the goodbye switch together
+   with the folder's own). It is not the pocket's (web/src/lib/pocket/media.js,
+   900 by 600): between the two a tablet gets the desk door on a pocket page.
+   The desk is untouched: its fidelity baselines are the proof.
    ══════════════════════════════════════════════════════════════════════════ */
 
 /* ── ON THE DESK ────────────────────────────────────────────────────────────
@@ -39,7 +42,7 @@
 :where(.ringcard) .bigring .ringword,
 :where(.ringcard) .bigring .pocketstroke{display:none}
 
-@media (max-width: 900px), (max-height: 600px){
+@media (max-width: 599.98px), (max-height: 479.98px){
   /* THE CARD'S STATIONS (review round §2.7). A card's ring has its top edge
      placed so its centre sits at a share of the visible height (dvh, so the
      browser's own bars are already taken off), held between 28px and 200px
@@ -273,8 +276,8 @@
   body.typing .ringcard #formlayer .card .act{margin-top:14px}
 }
 
-@media (max-width: 900px) and (prefers-reduced-motion: reduce),
-       (max-height: 600px) and (prefers-reduced-motion: reduce){
+@media (max-width: 599.98px) and (prefers-reduced-motion: reduce),
+       (max-height: 479.98px) and (prefers-reduced-motion: reduce){
   .ringcard .bigring,.ringcard .bigring *,.ringcard #formlayer,.ringcard #formlayer .card .ask{
         transition:none!important}
 }

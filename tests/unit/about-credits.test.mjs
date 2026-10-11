@@ -78,21 +78,38 @@ describe("creditsView (#1256)", () => {
     }
   });
 
-  it("keeps the Milky Way's change note and ESA's permission exactly as credits.js gives them", () => {
-    const galaxy = view().groups[0].entries?.find((entry) => entry.name.startsWith("The Milky Way"));
-    const source = CREDITS.find((credit) => credit.name.startsWith("The Milky Way"));
-    expect(galaxy?.changes).toBe(source?.changes);
-    expect(galaxy?.licence[0].text).toMatch(/commercial use of this picture needs ESA's permission/);
-    expect(view().groups[0].entries?.filter((entry) => entry.changes)).toHaveLength(1);
+  /*
+   * Orbit ships no Creative Commons picture now (#1371 item 18: the Milky Way,
+   * its only one, went with galaxy-2k.webp), but the rules for one stay Orbit's
+   * and are kept: a work's change note and its licence's own terms pass through
+   * unchanged, and its title is in the name the page shows (CC 3.0 section
+   * 4(c)). Pinned on a stand-in work, so the rules are not left to the next
+   * Creative Commons picture to find out.
+   */
+  const COMMONS_WORK = {
+    name: "A stand-in work, from \"Deep Star Maps 2020\"",
+    source: "NASA's Deep Star Maps 2020, from Gaia DR2 data",
+    author: "NASA/Goddard Space Flight Center Scientific Visualization Studio; Gaia DR2: ESA/Gaia/DPAC",
+    licence: "CC BY-NC 3.0 IGO (commercial use of this picture needs ESA's permission)",
+    licenceUrl: "https://creativecommons.org/licenses/by-nc/3.0/igo/",
+    sourceUrl: "https://svs.gsfc.nasa.gov/4851",
+    changes: "Reduced in size and brought down from HDR (tone-mapped)",
+    files: ["flight/world/stand-in.webp"],
+  };
+  const withCommons = () => creditsView({ pictures: [...CREDITS, COMMONS_WORK], fonts: FONTS, sidecars: SIDECARS, libraries: LIBRARIES });
+
+  it("keeps a Creative Commons work's change note and its licence's own terms exactly as credits.js gives them", () => {
+    const entry = withCommons().groups[0].entries?.find((one) => one.name.startsWith("A stand-in work"));
+    expect(entry?.changes).toBe(COMMONS_WORK.changes);
+    expect(entry?.licence[0].text).toMatch(/commercial use of this picture needs ESA's permission/);
+    expect(withCommons().groups[0].entries?.filter((one) => one.changes)).toHaveLength(CREDITS.filter((credit) => credit.changes).length + 1);
   });
 
   it("names each Creative Commons work by its title in the name the page shows (CC 3.0 section 4(c))", () => {
-    const cc = CREDITS.filter((credit) => /^CC /.test(credit.licence));
-    expect(cc.length).toBeGreaterThan(0);
-    const galaxy = view().groups[0].entries?.find((entry) => entry.name.startsWith("The Milky Way"));
-    expect(galaxy?.name).toContain("Deep Star Maps 2020");
+    const cc = [...CREDITS, COMMONS_WORK].filter((credit) => /^CC /.test(credit.licence));
+    expect(cc).toContain(COMMONS_WORK);
     for (const credit of cc) {
-      const entry = view().groups[0].entries?.find((one) => one.id === `credit-${slug(credit.name)}`);
+      const entry = withCommons().groups[0].entries?.find((one) => one.id === `credit-${slug(credit.name)}`);
       expect(entry?.name, credit.name).toMatch(/"[^"]+"/);
     }
   });
