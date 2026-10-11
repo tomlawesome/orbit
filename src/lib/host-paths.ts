@@ -20,14 +20,18 @@ function escapeRegExp(text: string): string {
  * Replaces each mount path in `text` with the host path its variable names.
  * Only a whole path component matches (`/orbit-deploy/x`, `/orbit-deploy.`),
  * never a longer name that merely starts the same; a variable that is unset
- * or not absolute leaves its mount as it is.
+ * or not absolute leaves its mount as it is. All mounts are replaced in one
+ * pass over the original text, so a host path that itself contains a mount
+ * name (`/srv/orbit-backups`) is never rewritten a second time.
  */
 export function displayHostPaths(text: string, env: NodeJS.ProcessEnv = process.env): string {
-  let result = text;
+  const hostPaths = new Map<string, string>();
   for (const [mount, variable] of HOST_PATH_MOUNTS) {
     const hostPath = env[variable];
-    if (!hostPath || !hostPath.startsWith("/")) continue;
-    result = result.replace(new RegExp(`${escapeRegExp(mount)}(?=/|\\s|$|[).,;:])`, "g"), () => hostPath);
+    if (hostPath && hostPath.startsWith("/")) hostPaths.set(mount, hostPath);
   }
-  return result;
+  if (hostPaths.size === 0) return text;
+  const alternatives = [...hostPaths.keys()].sort((a, b) => b.length - a.length).map(escapeRegExp);
+  const pattern = new RegExp(`(?:${alternatives.join("|")})(?=/|\\s|$|[).,;:])`, "g");
+  return text.replace(pattern, (mount) => hostPaths.get(mount) ?? mount);
 }
