@@ -300,6 +300,69 @@ test("picking a document shows its front page while the read runs alongside", as
 });
 
 /**
+ * #1316 W1-F3: a second document dropped on the desk's form is a new read, so
+ * what the first one suggested must not outlive it. The inspection answer is
+ * fixed per file name, so the marks do not depend on a document processor.
+ */
+async function answerInspectionPerFile(page: Page, answers: Record<string, object>): Promise<void> {
+  await page.route("**/item-document-inspection", (route) => {
+    const sent = decodeURIComponent(route.request().headers()["x-orbit-filename"] ?? "");
+    const body = answers[sent] ?? { extracted: false, suggestions: [], attachmentDisposition: "attachable" };
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+  });
+}
+
+const readOf = (provider?: string) => ({
+  extracted: true,
+  attachmentDisposition: "attachable",
+  suggestions: provider ? [{ field: "provider", value: provider, source: "document_text", confidence: "medium" }] : [],
+});
+
+test.describe("the desk's create form reads a second picked document", () => {
+  /* #1196: the inspection answer is a `page.route` mock, which a service worker
+     on WebKit would bypass; kept out as the phone's reading tests do. */
+  test.use({
+    serviceWorkers: async ({}, use, testInfo) => {
+      await use(testInfo.project.use.defaultBrowserType === "webkit" ? "block" : "allow");
+    },
+  });
+
+  for (const [title, second, expected] of [
+    ["a second document replaces the provider the first one suggested", "British Gas", "British Gas"],
+    ["a second document that suggests nothing leaves the provider empty and unmarked", undefined, ""],
+  ] as const) {
+    test(`the desk's create form: ${title}`, async ({ page }) => {
+      test.skip(test.info().project.name.startsWith("mobile"), "the pocket clears its suggestions on a second pick already");
+      test.setTimeout(90_000);
+      await signInWithHousehold(page);
+
+      try {
+        await answerInspectionPerFile(page, { "invoice-a.pdf": readOf("Aviva"), "invoice-b.pdf": readOf(second) });
+        await gotoCreate(page);
+        const picker = page.locator('#card input[type="file"]');
+        const provider = page.locator("#f-provider");
+        const field = page.locator("#field-provider");
+
+        await picker.setInputFiles({ name: "invoice-a.pdf", mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+        await expect(provider).toHaveValue("Aviva", { timeout: 20_000 });
+        await expect(field).toHaveClass(/\bsugg\b/);
+
+        await picker.setInputFiles({ name: "invoice-b.pdf", mimeType: "application/pdf", buffer: DOCUMENT_BYTES });
+        await expect(page.locator("#rc-file")).toContainText("invoice-b.pdf");
+        // The second read settles on its own before anything is asserted of it.
+        await expect(page.locator("#readcard")).not.toHaveAttribute("data-reading", "true", { timeout: 45_000 });
+        await expect(provider).toHaveValue(expected);
+        await expect(provider).not.toHaveValue("Aviva");
+        if (second) await expect(field).toHaveClass(/\bsugg\b/);
+        else await expect(field).not.toHaveClass(/\bsugg\b/);
+      } finally {
+        await households.sweep(page);
+      }
+    });
+  }
+});
+
+/**
  * #1243: the quick add in the north star's drawer is a real way in for a
  * document. Its box opens the file picker when clicked and takes a file
  * dropped on it; either way the full form opens with the file already in its

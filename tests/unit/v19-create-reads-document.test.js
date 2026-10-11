@@ -235,6 +235,15 @@ describe("#1245: the desk form reads the document the moment it is picked", () =
     expect(behaviour).toMatch(/readPickedDocument\(householdId, file, \{ signal: controller\.signal, onScanned \}\)/u);
   });
 
+  it("[1316 W1-F3] a second pick clears the first read's suggestions before the lane resets, as the pocket's does", () => {
+    const body = behaviour.slice(behaviour.indexOf("async function readDocument"));
+    const cleared = body.indexOf("clearSuggestions()");
+    const reset = body.indexOf("resetLane(file)");
+    expect(reset).toBeGreaterThan(-1);
+    expect(cleared).toBeGreaterThan(-1);
+    expect(cleared).toBeLessThan(reset);
+  });
+
   it("offers 'not this one', which drops the file and what it suggested", () => {
     expect(page).toMatch(/id="rc-drop"[^>]*>not this one</u);
     expect(behaviour).toMatch(/on\(dropFile, "click"/u);

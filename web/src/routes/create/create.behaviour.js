@@ -423,6 +423,10 @@ export function mountCreate() {
     const controller = new AbortController();
     reading = controller;
     const current = () => reading === controller && attachment === file;
+    /* A swapped file takes the first file's suggestions with it, as the
+       pocket's readDocument does: carrying only fills empty fields, so stale
+       ones would otherwise be saved against the new file. */
+    clearSuggestions();
     resetLane(file);
     const householdId = (household ?? await activeHousehold()).id;
     if (!current()) return;
