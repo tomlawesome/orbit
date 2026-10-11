@@ -54,6 +54,19 @@ const REMOVED_KEYS: readonly string[] = [
   "IMAP_ALIAS_PREVIOUS_EXPIRY",
 ];
 
+// Strict UTF-8 decode: undefined on any malformed byte sequence. A lossy
+// decode would turn a stray byte into U+FFFD, and rewriting the file from that
+// string would change a value the operator never touched.
+const strictUtf8Decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
+export function decodeUtf8Strict(buffer: Uint8Array): string | undefined {
+  try {
+    return strictUtf8Decoder.decode(buffer);
+  } catch {
+    return undefined;
+  }
+}
+
 function isControlFree(value: string): boolean {
   for (const char of value) {
     const code = char.codePointAt(0) ?? 0;

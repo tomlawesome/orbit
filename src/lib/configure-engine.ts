@@ -28,6 +28,7 @@ import {
 import { acquireDeployLock as acquireSharedDeployLock } from "./deploy-lock";
 import { HostOwnershipError, applyHostOwnership } from "./host-ownership";
 import { preflightEnvironmentFile } from "./configuration-migration";
+import { decodeUtf8Strict } from "./env-orbit-file";
 import { ensureVapidKeys } from "./vapid-keys";
 
 // The write side of scripts/configure.sh, ported to the TypeScript engine
@@ -352,12 +353,15 @@ function updateManagedKeysLocked(deployDir: string, pairs: ReadonlyArray<readonl
   const order = pairs.map(([key]) => key);
   const pending = new Map<string, string>(pairs);
 
-  let raw: string;
+  let bytes: Buffer;
   try {
-    raw = readFileSync(envPath, "utf8");
+    bytes = readFileSync(envPath);
   } catch {
     refuse(`Could not read ${ENVIRONMENT_FILE_NAME} for an atomic update.`, "environment-file-invalid");
   }
+  // A lossy decode would rewrite a value the operator never changed.
+  const raw = decodeUtf8Strict(bytes);
+  if (raw === undefined) refuse(`Refusing to update ${ENVIRONMENT_FILE_NAME} because it is not valid UTF-8.`, "environment-file-invalid");
 
   let finalNewline = true;
   if (raw.length > 0) {
@@ -571,12 +575,14 @@ export function ensureSecretFile(deployDir: string, relativePath: string, isFres
 /** environment_key_is_nonempty (configure.sh:774-784): a raw, unvalidated last-assignment-wins scan, deliberately not the full parseEnvOrbitContent parser. */
 function rawEnvironmentKeyValue(deployDir: string, key: string): string | undefined {
   const envPath = join(deployDir, ENVIRONMENT_FILE_NAME);
-  let raw: string;
+  let bytes: Buffer;
   try {
-    raw = readFileSync(envPath, "utf8");
+    bytes = readFileSync(envPath);
   } catch {
     return undefined;
   }
+  const raw = decodeUtf8Strict(bytes);
+  if (raw === undefined) refuse(`Refusing to use ${ENVIRONMENT_FILE_NAME} because it is not valid UTF-8.`, "environment-file-invalid");
   let value: string | undefined;
   let found = false;
   for (const line of raw.split("\n")) {

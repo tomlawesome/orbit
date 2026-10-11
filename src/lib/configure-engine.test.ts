@@ -163,6 +163,26 @@ describe("updateManagedKeys", () => {
     expect(readEnv()).toBe("APP_URL=https://new.example.com\nOTHER=1\n");
   });
 
+  it("#1316 O1-S1: refuses an .env-orbit that is not valid UTF-8 and leaves its bytes unchanged", () => {
+    const original = Buffer.concat([
+      Buffer.from("APP_URL=https://old.example.com\nSMTP_PASSWORD=caf", "utf8"),
+      Buffer.from([0xe9]),
+      Buffer.from("-secret\n", "utf8"),
+    ]);
+    writeFileSync(envPath(), original, { mode: 0o600 });
+    let refusal: unknown;
+    try {
+      updateManagedKeys(deployDir, [["APP_URL", "https://new.example.com"]]);
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toBeInstanceOf(ConfigureEngineRefusal);
+    expect((refusal as ConfigureEngineRefusal).code).toBe("environment-file-invalid");
+    const after = readFileSync(envPath());
+    expect(after.equals(original)).toBe(true);
+    expect(after.includes(Buffer.from([0xef, 0xbf, 0xbd]))).toBe(false);
+  });
+
   it("guarantee #7: appends a key with no existing assignment, in call order", () => {
     writeFileSync(envPath(), "OTHER=1\n", { mode: 0o600 });
     updateManagedKeys(deployDir, [

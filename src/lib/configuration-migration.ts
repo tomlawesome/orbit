@@ -15,7 +15,7 @@ import {
 import { basename, dirname, join, resolve } from "node:path";
 
 import { acquireDeployLock } from "./deploy-lock";
-import { ENV_ORBIT_SCHEMA_VERSION, parseEnvOrbitContent, type EnvOrbitFailureCode } from "./env-orbit-file";
+import { ENV_ORBIT_SCHEMA_VERSION, decodeUtf8Strict, parseEnvOrbitContent, type EnvOrbitFailureCode } from "./env-orbit-file";
 import { applyHostOwnership } from "./host-ownership";
 
 // The .env-orbit configuration contract's preflight and migration: the
@@ -106,7 +106,10 @@ function readConfiguration(file: string): ParseOutcome {
   } finally {
     closeSync(descriptor);
   }
-  const content = raw.toString("utf8");
+  // Never decode lossily: the file is rebuilt from this string, so a replaced
+  // byte would silently change a value on disk.
+  const content = decodeUtf8Strict(raw);
+  if (content === undefined) return { ok: false, result: failure("configuration_syntax", "not_utf8 configuration\n") };
   const parsed = parseEnvOrbitContent(content, { refuseSecretConflicts: true });
   if (!parsed.ok) {
     const stdout =

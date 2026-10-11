@@ -1,10 +1,11 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
   classifyMigrationResult,
+  installMigrateCommand,
   runConfigurationMigration,
   runConfigurationPreflight,
   type ConfigurationMigrationTarget,
@@ -71,6 +72,43 @@ describe("runConfigurationMigration (#29)", () => {
       ok: false,
       message: "Configuration migration failed; restoring the previous deployment.",
     });
+  });
+});
+
+// #1316 O1-S1 (owner decision 2026-10-11, option a): a .env-orbit that is not
+// valid UTF-8 is refused, never rewritten. Decoding it as UTF-8 silently turns
+// the stray byte into U+FFFD (EF BF BD) and corrupts the operator's value.
+describe("migration of an .env-orbit that is not valid UTF-8 (#1316 O1-S1)", () => {
+  // Legacy file, valid except for one lone 0xE9 (Latin-1 e-acute) in a password.
+  function latin1Deployment(): { dir: string; original: Buffer } {
+    const original = Buffer.concat([
+      Buffer.from(`ORBIT_IMAGE=${IMAGE}\nSMTP_PASSWORD=caf`, "utf8"),
+      Buffer.from([0xe9]),
+      Buffer.from("-secret\n", "utf8"),
+    ]);
+    const dir = mkdtempSync(join(tmpdir(), "orbit-migration-utf8-"));
+    dirs.push(dir);
+    writeFileSync(join(dir, ".env-orbit"), original, { mode: 0o600 });
+    return { dir, original };
+  }
+
+  it("fails the install-transaction migration with a message naming UTF-8 and leaves the file's bytes unchanged", () => {
+    const { dir, original } = latin1Deployment();
+    const result = installMigrateCommand(targetFor(dir));
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).not.toMatch(/^Orbit configuration: migrated/);
+    const outcome = runConfigurationMigration(targetFor(dir));
+    expect(outcome.ok).toBe(false);
+    expect(`${result.stderr}\n${result.stdout}\n${outcome.message}`).toMatch(/utf-?8/i);
+    const after = readFileSync(join(dir, ".env-orbit"));
+    expect(after.equals(original)).toBe(true);
+    expect(after.includes(Buffer.from([0xef, 0xbf, 0xbd]))).toBe(false);
+  });
+
+  it("leaves no rollback or scratch file beside the refused file", () => {
+    const { dir } = latin1Deployment();
+    expect(runConfigurationMigration(targetFor(dir)).ok).toBe(false);
+    expect(readdirSync(dir)).toEqual([".env-orbit"]);
   });
 });
 
