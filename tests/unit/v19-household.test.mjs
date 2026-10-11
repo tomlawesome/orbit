@@ -79,12 +79,12 @@ describe("the sections editor", () => {
     expect(entriesLabel(3)).toBe("3 entries");
   });
 
-  it("treats an archived entry as no longer sitting in its section", () => {
+  it("counts an archived entry as still sitting in its section", () => {
     const household = {
       sections: [{ id: "s-a", name: "A", icon: "home", accent: "sage", visible: true }],
       items: [{ id: "i-1", sectionId: "s-a", status: "archived" }],
     };
-    expect(sectionRowsOf(household)[0]).toMatchObject({ count: 0, removable: true });
+    expect(sectionRowsOf(household)[0]).toMatchObject({ count: 1, removable: false });
   });
 
   it("shows a section whose payload never said otherwise", () => {
