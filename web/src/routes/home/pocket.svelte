@@ -677,7 +677,10 @@
     try {
       await attachItemDocument(householdId, one.id, file, attachIdFor(one.id, file));
       wake(`${file.name} attached`);
-      await Promise.all([rereadPapers(), onchanged?.()]);
+      // In this order: the papers are read from the refreshed view, which
+      // lists the item as now carrying one (a first paper was left out).
+      await onchanged?.();
+      await rereadPapers();
     } catch (error) {
       rowProblem[one.id] = wordsOf(error, "couldn't attach it — try again");
     } finally {

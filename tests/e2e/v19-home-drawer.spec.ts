@@ -655,6 +655,36 @@ test.describe("on the phone", () => {
     await expect(row.getByRole("button", { name: "Open archived-proving.pdf" })).toBeVisible();
   });
 
+  /* #1316 W1-R7: attaching to an item that had no papers left the drawer's
+     list empty until the row was reopened. The open row shows the new paper
+     (and its Documents heading) as soon as the wake says it is attached. */
+  test("attaching a document to an item with none shows the Documents heading and the paper without reopening the row", async ({ page }) => {
+    test.setTimeout(90_000);
+    await signIn(page);
+    const { itemId } = await seedHouseholdWithItem(page);
+
+    await page.goto(`/home?item=${itemId}`);
+    const row = page.locator(`.pocket .pk-below [data-row-key="${itemId}"]`);
+    await expect(row).toHaveAttribute("data-open", "", { timeout: 20_000 });
+    /* the item starts with no papers: nothing to list, no heading */
+    await expect(row.getByRole("heading", { name: /^documents$/i })).toHaveCount(0);
+    await expect(row.getByRole("button", { name: /^Open .*\.pdf$/ })).toHaveCount(0);
+
+    await row.locator('input[type="file"]').setInputFiles({
+      name: "attached-late.pdf",
+      mimeType: "application/pdf",
+      buffer: readFileSync(FIXTURE_PATH),
+    });
+
+    await expect(page.getByRole("status").filter({ hasText: "attached-late.pdf attached" }))
+      .toHaveText("attached-late.pdf attached", { timeout: 20_000 });
+    /* the row has stayed open throughout: no close, no reopen */
+    await expect(row).toHaveAttribute("data-open", "");
+    await expect(row.getByRole("heading", { name: /^documents$/i })).toBeVisible({ timeout: 10_000 });
+    await expect(row.getByRole("button", { name: "Open attached-late.pdf" })).toBeVisible({ timeout: 10_000 });
+    await expect(row).toHaveAttribute("data-open", "");
+  });
+
   /* #1316 W1-R6, on the phone's rows. */
   test("Escape twice during a save in flight keeps the rows; a refused save reads under them", async ({ page }) => {
     test.setTimeout(60_000);
