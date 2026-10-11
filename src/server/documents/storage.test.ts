@@ -10,6 +10,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return { ...actual, open: vi.fn(actual.open) };
 });
 
+import { AppError } from "../../lib/errors";
 import { LocalDocumentStorage, openDocumentStorage } from "./storage";
 
 const temporaryRoots: string[] = [];
@@ -99,6 +100,45 @@ describe("local document storage", () => {
     const entries = await readdir(join(root, "quarantine"));
     expect(entries.filter((entry) => entry.startsWith(`${documentId}.`))).toHaveLength(0);
   });
+
+  // #1316: the quarantine is a small tmpfs. When it fills, the raw ENOSPC used
+  // to reach the caller as a bare Error (an unexplained 500). It must surface
+  // as an AppError telling the user the upload space is busy and to retry.
+  it.each(["opening the quarantine file", "writing a chunk to it"])(
+    "turns a full quarantine (ENOSPC while %s) into a try-again-shortly AppError, not a raw error",
+    async (stage) => {
+      const { root, storage } = await createStorage();
+      const documentId = randomUUID();
+      const full = Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+      if (stage === "opening the quarantine file") {
+        vi.mocked(open).mockRejectedValueOnce(full);
+      } else {
+        const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+        vi.mocked(open).mockImplementationOnce(async (...args) => {
+          const real = await actual.open(...(args as Parameters<typeof actual.open>));
+          vi.spyOn(real, "write").mockRejectedValueOnce(full);
+          return real;
+        });
+      }
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(8));
+          controller.close();
+        },
+      });
+
+      const failure = await storage.receive(body, documentId, 1_024).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(failure).toBeInstanceOf(AppError);
+      expect((failure as AppError).message).toMatch(/busy/i);
+      expect((failure as AppError).message).toMatch(/try again/i);
+      expect((failure as AppError).code).not.toBe("ENOSPC");
+      const entries = await readdir(join(root, "quarantine")).catch(() => [] as string[]);
+      expect(entries.filter((entry) => entry.startsWith(`${documentId}.`))).toHaveLength(0);
+    },
+  );
 
   it("writes opaque ciphertext atomically and rejects invalid storage keys", async () => {
     const { storage } = await createStorage();
